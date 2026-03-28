@@ -74,6 +74,7 @@ pub fn open_image(path: impl AsRef<Path>) -> Result<Box<dyn ImageFile>, ImodErro
             // Try MRC for unknown formats too (IMOD convention)
             Ok(Box::new(crate::mrc_backend::MrcImageFile::open(path)?))
         }
+        ImageFormat::Tiff => Ok(Box::new(crate::tiff_backend::TiffImageFile::open(path)?)),
         _ => Err(ImodError::InvalidData(format!(
             "unsupported image format: {:?}",
             format

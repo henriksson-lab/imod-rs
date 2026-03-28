@@ -1,0 +1,14 @@
+[package]
+name = "excise"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "excise"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+clap.workspace = true

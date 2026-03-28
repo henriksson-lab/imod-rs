@@ -1,0 +1,13 @@
+[package]
+name = "model2point"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "model2point"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+clap.workspace = true

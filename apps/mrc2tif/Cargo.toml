@@ -1,0 +1,14 @@
+[package]
+name = "mrc2tif"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "mrc2tif"
+path = "src/main.rs"
+
+[dependencies]
+imod-mrc.workspace = true
+imod-math.workspace = true
+tiff = "0.9"
+clap = { version = "4", features = ["derive"] }

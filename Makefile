@@ -2,7 +2,7 @@ studio:
 	cargo run --bin imod-studio
 
 test_viewer:
-	cargo run --bin imod-viewer -- IMOD/Etomo/unitTestData/headerTest.st      
+	cargo run --release --bin imod-viewer -- testdata/tutorialData/BBa.st   # IMOD/Etomo/unitTestData/headerTest.st      
 
 test_st:
 	cargo run --bin mrcinfo -- IMOD/Etomo/unitTestData/headerTest.st
@@ -12,3 +12,7 @@ loc:
 
 gitaddall:
 	git add crates apps
+
+get_test_data:
+	wget https://bio3d.colorado.edu/imod/files/tutorialData-1K.tar.gz --no-check-certificate
+

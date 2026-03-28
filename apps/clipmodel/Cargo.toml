@@ -1,0 +1,13 @@
+[package]
+name = "clipmodel"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "clipmodel"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+clap.workspace = true

@@ -1,6 +1,8 @@
+use imod_core::Point3f;
 use imod_math::min_max_mean;
-use imod_model::{read_model, ImodModel};
+use imod_model::{read_model, write_model, ImodContour, ImodModel, ImodObject};
 use imod_mrc::MrcReader;
+use rfd::FileDialog;
 use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::env;
@@ -19,7 +21,9 @@ struct ViewerState {
     current_data: Vec<f32>,
     // Model overlay
     model: Option<ImodModel>,
+    model_path: Option<String>,
     show_model: bool,
+    current_object: usize,
     // View mode: 0=ZAP, 1=Slicer, 2=XYZ
     view_mode: i32,
     slicer_angle_x: f32,
@@ -38,7 +42,9 @@ impl ViewerState {
             white: 255.0,
             current_data: Vec::new(),
             model: None,
+            model_path: None,
             show_model: true,
+            current_object: 0,
             view_mode: 0,
             slicer_angle_x: 0.0,
             slicer_angle_y: 0.0,
@@ -57,13 +63,19 @@ impl ViewerState {
         self.current_z = 0;
         self.volume = None;
         self.reader = Some(reader);
-        self.load_slice(0)?;
+        // Try to load first slice; if the file has no image data (header-only), show blank
+        if let Err(_) = self.load_slice(0) {
+            self.current_data = vec![0.0; self.nx * self.ny];
+            eprintln!("Warning: could not read image data (header-only file?)");
+        }
         Ok(())
     }
 
     fn load_model(&mut self, path: &str) -> Result<(), String> {
         let model = read_model(path).map_err(|e| e.to_string())?;
         self.model = Some(model);
+        self.model_path = Some(path.to_string());
+        self.current_object = 0;
         Ok(())
     }
 
@@ -361,6 +373,94 @@ impl ViewerState {
             }).collect()
         }
     }
+
+    /// Ensure a model exists for editing; create an empty one if needed.
+    fn ensure_model(&mut self) {
+        if self.model.is_none() {
+            let mut m = ImodModel::default();
+            m.xmax = self.nx as i32;
+            m.ymax = self.ny as i32;
+            m.zmax = self.nz as i32;
+            // Create one default object with one empty contour
+            let mut obj = ImodObject::default();
+            obj.name = "Object 1".into();
+            obj.contours.push(ImodContour::default());
+            m.objects.push(obj);
+            self.model = Some(m);
+            self.current_object = 0;
+        }
+    }
+
+    /// Add a point to the current object's current contour (matching current Z).
+    fn add_point(&mut self, x: f32, y: f32) {
+        self.ensure_model();
+        let z = self.current_z as f32;
+        let model = self.model.as_mut().unwrap();
+        let obj = &mut model.objects[self.current_object];
+
+        // Find or create a contour for this Z slice
+        let cont_idx = obj.contours.iter().position(|c| {
+            c.points.first().map_or(false, |p| (p.z - z).abs() < 0.5)
+        });
+        let cont_idx = match cont_idx {
+            Some(i) => i,
+            None => {
+                // If only contour is empty, use it; otherwise create new
+                if obj.contours.len() == 1 && obj.contours[0].points.is_empty() {
+                    0
+                } else {
+                    obj.contours.push(ImodContour::default());
+                    obj.contours.len() - 1
+                }
+            }
+        };
+        obj.contours[cont_idx].points.push(Point3f { x, y, z });
+    }
+
+    /// Delete the nearest point within `radius` pixels of (x, y) on current Z.
+    fn delete_nearest_point(&mut self, x: f32, y: f32, radius: f32) -> bool {
+        let z = self.current_z as f32;
+        let model = match self.model.as_mut() {
+            Some(m) => m,
+            None => return false,
+        };
+
+        let mut best_dist = radius * radius;
+        let mut best: Option<(usize, usize, usize)> = None; // (obj, cont, pt)
+
+        for (oi, obj) in model.objects.iter().enumerate() {
+            for (ci, cont) in obj.contours.iter().enumerate() {
+                for (pi, pt) in cont.points.iter().enumerate() {
+                    if (pt.z - z).abs() > 0.6 { continue; }
+                    let d = (pt.x - x).powi(2) + (pt.y - y).powi(2);
+                    if d < best_dist {
+                        best_dist = d;
+                        best = Some((oi, ci, pi));
+                    }
+                }
+            }
+        }
+
+        if let Some((oi, ci, pi)) = best {
+            model.objects[oi].contours[ci].points.remove(pi);
+            // Remove empty contours
+            if model.objects[oi].contours[ci].points.is_empty() && model.objects[oi].contours.len() > 1 {
+                model.objects[oi].contours.remove(ci);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Save the model to file.
+    fn save_model(&self) -> Result<(), String> {
+        let model = self.model.as_ref().ok_or("No model to save")?;
+        let path = self.model_path.as_deref().unwrap_or("output.mod");
+        write_model(path, model).map_err(|e| e.to_string())?;
+        eprintln!("Model saved to {}", path);
+        Ok(())
+    }
 }
 
 fn update_window(w: &MainWindow, s: &ViewerState) {
@@ -478,13 +578,127 @@ fn main() {
 
     window.on_zoom_changed(|_| {});
 
-    window.on_open_file(|| {
-        eprintln!("Pass image file as command-line argument.");
-    });
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_open_file(move || {
+            let file = FileDialog::new()
+                .add_filter("MRC files", &["mrc", "st", "ali", "rec", "map"])
+                .add_filter("All files", &["*"])
+                .pick_file();
+            if let Some(path) = file {
+                let path_str = path.to_string_lossy().to_string();
+                let mut s = state.borrow_mut();
+                if let Err(e) = s.open_file(&path_str) {
+                    eprintln!("Error opening {}: {}", path_str, e);
+                } else if let Some(w) = ww.upgrade() {
+                    w.set_filename(path_str.into());
+                    w.set_max_z((s.nz.saturating_sub(1)) as i32);
+                    w.set_nx(s.nx as i32);
+                    w.set_ny(s.ny as i32);
+                    w.set_black_level(s.black);
+                    w.set_white_level(s.white);
+                    update_window(&w, &s);
+                }
+            }
+        });
+    }
 
-    window.on_open_model(|| {
-        eprintln!("Pass model file (.mod) as command-line argument.");
-    });
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_open_model(move || {
+            let file = FileDialog::new()
+                .add_filter("Model files", &["mod", "fid"])
+                .add_filter("All files", &["*"])
+                .pick_file();
+            if let Some(path) = file {
+                let path_str = path.to_string_lossy().to_string();
+                let mut s = state.borrow_mut();
+                if let Err(e) = s.load_model(&path_str) {
+                    eprintln!("Error loading model {}: {}", path_str, e);
+                } else if let Some(w) = ww.upgrade() {
+                    update_window(&w, &s);
+                }
+            }
+        });
+    }
+
+    // Mouse left-click: add point in add mode, or delete in delete mode
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_mouse_clicked(move |x, y| {
+            if let Some(w) = ww.upgrade() {
+                let edit_mode = w.get_edit_mode();
+                let mut s = state.borrow_mut();
+                match edit_mode {
+                    1 => {
+                        // Add points mode
+                        s.add_point(x, y);
+                        w.set_slice_image(s.render_image());
+                        update_window(&w, &s);
+                        w.set_edit_status(format!("Added point at ({:.0}, {:.0})", x, y).into());
+                    }
+                    3 => {
+                        // Delete points mode
+                        if s.delete_nearest_point(x, y, 10.0) {
+                            w.set_slice_image(s.render_image());
+                            update_window(&w, &s);
+                            w.set_edit_status("Deleted point".into());
+                        } else {
+                            w.set_edit_status("No point nearby".into());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    // Mouse right-click: delete nearest point (in any edit mode except view)
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_mouse_right_clicked(move |x, y| {
+            if let Some(w) = ww.upgrade() {
+                let edit_mode = w.get_edit_mode();
+                if edit_mode != 0 {
+                    let mut s = state.borrow_mut();
+                    if s.delete_nearest_point(x, y, 10.0) {
+                        w.set_slice_image(s.render_image());
+                        update_window(&w, &s);
+                        w.set_edit_status("Deleted point".into());
+                    } else {
+                        w.set_edit_status("No point nearby".into());
+                    }
+                }
+            }
+        });
+    }
+
+    // Save model
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_save_model(move || {
+            let s = state.borrow();
+            match s.save_model() {
+                Ok(()) => {
+                    if let Some(w) = ww.upgrade() {
+                        let path = s.model_path.as_deref().unwrap_or("output.mod");
+                        w.set_edit_status(format!("Saved to {}", path).into());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error saving model: {}", e);
+                    if let Some(w) = ww.upgrade() {
+                        w.set_edit_status(format!("Save error: {}", e).into());
+                    }
+                }
+            }
+        });
+    }
 
     window.run().unwrap();
 }

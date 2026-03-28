@@ -119,109 +119,109 @@ cargo build --release
 
 ```sh
 # Image viewer — open an MRC stack, optionally with a model overlay
-cargo run --bin imod-viewer -- dataset.mrc
-cargo run --bin imod-viewer -- dataset.st model.mod
+cargo run --release --bin imod-viewer -- dataset.mrc
+cargo run --release --bin imod-viewer -- dataset.st model.mod
 
 # Workflow manager — tomographic reconstruction pipeline
-cargo run --bin imod-studio
+cargo run --release --bin imod-studio
 ```
 
 ### Image Utilities
 
 ```sh
 # Print MRC header info
-cargo run --bin mrcinfo -- dataset.st
+cargo run --release --bin mrcinfo -- dataset.st
 
 # Convert to byte mode (auto-scaled from header min/max)
-cargo run --bin mrcbyte -- input.mrc output_byte.mrc
+cargo run --release --bin mrcbyte -- input.mrc output_byte.mrc
 
 # Convert with contrast scaling (mean +/- 3 sigma)
-cargo run --bin mrcbyte -- input.mrc output.mrc -c 3
+cargo run --release --bin mrcbyte -- input.mrc output.mrc -c 3
 
 # Bin a stack by factor 2
-cargo run --bin newstack -- -i input.st -o binned.st -b 2
+cargo run --release --bin newstack -- -i input.st -o binned.st -b 2
 
 # Extract sections 0-10
-cargo run --bin newstack -- -i input.st -o subset.st -S 0-10
+cargo run --release --bin newstack -- -i input.st -o subset.st -S 0-10
 
 # Apply transforms from an .xf file
-cargo run --bin newstack -- -i input.st -o aligned.st -x transforms.xf
+cargo run --release --bin newstack -- -i input.st -o aligned.st -x transforms.xf
 
 # Print per-section statistics
-cargo run --bin clip -- stats input.mrc
+cargo run --release --bin clip -- stats input.mrc
 
 # Fourier low-pass filter
-cargo run --bin mtffilter -- -i input.mrc -o filtered.mrc -l 0.4
+cargo run --release --bin mtffilter -- -i input.mrc -o filtered.mrc -l 0.4
 ```
 
 ### Volume Operations
 
 ```sh
 # Bin a volume (2x in XY, 2x in Z)
-cargo run --bin binvol -- input.rec output.rec -b 2
+cargo run --release --bin binvol -- input.rec output.rec -b 2
 
 # Extract a subvolume
-cargo run --bin trimvol -- input.rec output.rec -x 100 -y 100 --nx 256 --ny 256
+cargo run --release --bin trimvol -- input.rec output.rec -x 100 -y 100 --nx 256 --ny 256
 
 # Rotate volume for XZ viewing (swap Y and Z)
-cargo run --bin trimvol -- input.rec output.rec -r
+cargo run --release --bin trimvol -- input.rec output.rec -r
 
 # Rotate volume around Z axis
-cargo run --bin rotatevol -- input.rec rotated.rec -a 45
+cargo run --release --bin rotatevol -- input.rec rotated.rec -a 45
 ```
 
 ### Reconstruction Pipeline
 
 ```sh
 # 1. Cross-correlation alignment
-cargo run --bin tiltxcorr -- -i dataset.st -o dataset.prexf
+cargo run --release --bin tiltxcorr -- -i dataset.st -o dataset.prexf
 
 # 2. Apply coarse alignment
-cargo run --bin newstack -- -i dataset.st -o dataset.preali -x dataset.prexf
+cargo run --release --bin newstack -- -i dataset.st -o dataset.preali -x dataset.prexf
 
 # 3. Track fiducial beads
-cargo run --bin beadtrack -- -i dataset.preali -s dataset.seed -o dataset.fid -t dataset.rawtlt -d 10
+cargo run --release --bin beadtrack -- -i dataset.preali -s dataset.seed -o dataset.fid -t dataset.rawtlt -d 10
 
 # 4. Solve alignment from fiducials
-cargo run --bin tiltalign -- -m dataset.fid -t dataset.rawtlt -o dataset.xf
+cargo run --release --bin tiltalign -- -m dataset.fid -t dataset.rawtlt -o dataset.xf
 
 # 5. Create final aligned stack
-cargo run --bin newstack -- -i dataset.st -o dataset.ali -x dataset.xf
+cargo run --release --bin newstack -- -i dataset.st -o dataset.ali -x dataset.xf
 
 # 6. Reconstruct by back-projection
-cargo run --bin tilt -- -i dataset.ali -o dataset.rec -t dataset.tlt -z 200
+cargo run --release --bin tilt -- -i dataset.ali -o dataset.rec -t dataset.tlt -z 200
 
 # 7. Erase gold beads from reconstruction
-cargo run --bin eraser -- -i dataset.rec -o dataset_erased.rec -m beads.mod -r 5
+cargo run --release --bin eraser -- -i dataset.rec -o dataset_erased.rec -m beads.mod -r 5
 ```
 
 ### Model Utilities
 
 ```sh
 # Print model information
-cargo run --bin imodinfo -- model.mod
+cargo run --release --bin imodinfo -- model.mod
 
 # Transform model points (translate, rotate, scale)
-cargo run --bin imodtrans -- model.mod output.mod --tx 10 --ty 20 --rz 45
+cargo run --release --bin imodtrans -- model.mod output.mod --tx 10 --ty 20 --rz 45
 
 # Create model from point list
-cargo run --bin point2model -- points.txt -o model.mod
+cargo run --release --bin point2model -- points.txt -o model.mod
 
 # Merge multiple models
-cargo run --bin imodjoin -- model1.mod model2.mod -o combined.mod
+cargo run --release --bin imodjoin -- model1.mod model2.mod -o combined.mod
 
 # Mesh contours
-cargo run --bin imodmesh -- model.mod -o meshed.mod
+cargo run --release --bin imodmesh -- model.mod -o meshed.mod
 ```
 
 ### Transform Utilities
 
 ```sh
 # Invert transforms
-cargo run --bin xfinverse -- -i input.xf -o inverted.xf
+cargo run --release --bin xfinverse -- -i input.xf -o inverted.xf
 
 # Compose two transform files
-cargo run --bin xfproduct -- -1 first.xf -2 second.xf -o product.xf
+cargo run --release --bin xfproduct -- -1 first.xf -2 second.xf -o product.xf
 ```
 
 ## License

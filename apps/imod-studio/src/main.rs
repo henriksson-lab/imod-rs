@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use rfd::FileDialog;
 use slint::SharedString;
 
 use imod_core::MrcMode;
@@ -336,11 +337,24 @@ fn main() {
         let state = state.clone();
         let ww = window.as_weak();
         window.on_open_dataset(move || {
-            let mut s = state.borrow_mut();
-            s.base = "dataset".into();
-            if let Some(w) = ww.upgrade() {
-                w.set_dataset_name("dataset".into());
-                append_log(&w, "Dataset: dataset (place .st file as dataset.st)");
+            let file = FileDialog::new()
+                .add_filter("Tilt series", &["st"])
+                .add_filter("All files", &["*"])
+                .pick_file();
+            if let Some(path) = file {
+                let mut s = state.borrow_mut();
+                // Derive directory and base name from the chosen .st file
+                if let Some(parent) = path.parent() {
+                    s.dir = parent.to_path_buf();
+                }
+                let stem = path.file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "dataset".into());
+                s.base = stem.clone();
+                if let Some(w) = ww.upgrade() {
+                    w.set_dataset_name(SharedString::from(&stem));
+                    append_log(&w, &format!("Dataset: {} ({})", stem, path.display()));
+                }
             }
         });
     }
