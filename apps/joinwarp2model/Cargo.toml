@@ -1,0 +1,16 @@
+[package]
+name = "joinwarp2model"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "joinwarp2model"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-mrc.workspace = true
+imod-warp.workspace = true
+imod-math.workspace = true
+clap.workspace = true

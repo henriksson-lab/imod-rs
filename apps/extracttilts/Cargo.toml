@@ -1,0 +1,13 @@
+[package]
+name = "extracttilts"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "extracttilts"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+clap.workspace = true

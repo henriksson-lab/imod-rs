@@ -1,0 +1,13 @@
+[package]
+name = "rec2imod"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rec2imod"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+clap.workspace = true

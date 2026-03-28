@@ -1,0 +1,11 @@
+[package]
+name = "numericdiff"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "numericdiff"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

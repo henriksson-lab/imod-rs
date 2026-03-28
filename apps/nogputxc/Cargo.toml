@@ -1,0 +1,12 @@
+[package]
+name = "nogputxc"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "nogputxc"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+clap.workspace = true

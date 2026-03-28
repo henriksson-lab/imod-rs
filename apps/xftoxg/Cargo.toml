@@ -1,0 +1,13 @@
+[package]
+name = "xftoxg"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "xftoxg"
+path = "src/main.rs"
+
+[dependencies]
+imod-transforms.workspace = true
+imod-math.workspace = true
+clap.workspace = true

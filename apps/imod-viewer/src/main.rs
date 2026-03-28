@@ -1,3 +1,5 @@
+mod render3d;
+
 use imod_core::Point3f;
 use imod_math::min_max_mean;
 use imod_model::{read_model, write_model, ImodContour, ImodModel, ImodObject};
@@ -7,6 +9,8 @@ use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
+
+use render3d::Renderer3D;
 
 slint::include_modules!();
 
@@ -24,12 +28,16 @@ struct ViewerState {
     model_path: Option<String>,
     show_model: bool,
     current_object: usize,
-    // View mode: 0=ZAP, 1=Slicer, 2=XYZ
+    // View mode: 0=ZAP, 1=Slicer, 2=XYZ, 3=Model 3D
     view_mode: i32,
     slicer_angle_x: f32,
     slicer_angle_y: f32,
     // Volume cache for slicer/XYZ (loaded on demand)
     volume: Option<Vec<Vec<f32>>>,
+    // 3D model renderer
+    renderer3d: Renderer3D,
+    // Mouse drag tracking for 3D rotation
+    drag_last: Option<(f32, f32)>,
 }
 
 impl ViewerState {
@@ -49,6 +57,8 @@ impl ViewerState {
             slicer_angle_x: 0.0,
             slicer_angle_y: 0.0,
             volume: None,
+            renderer3d: Renderer3D::new(800, 600),
+            drag_last: None,
         }
     }
 
@@ -106,11 +116,30 @@ impl ViewerState {
         Ok(())
     }
 
-    fn render_image(&self) -> Image {
+    fn render_image(&mut self) -> Image {
         match self.view_mode {
             1 => self.render_slicer(),
             2 => self.render_xyz(),
+            3 => self.render_model3d(),
             _ => self.render_zap(),
+        }
+    }
+
+    fn render_model3d(&mut self) -> Image {
+        // Use image dimensions or a default size
+        let w = if self.nx > 0 { self.nx } else { 800 };
+        let h = if self.ny > 0 { self.ny } else { 600 };
+        self.renderer3d.resize(w, h);
+        match &self.model {
+            Some(m) => {
+                let m = m.clone();
+                self.renderer3d.render_model(&m)
+            }
+            None => {
+                // Render empty scene
+                let empty = ImodModel::default();
+                self.renderer3d.render_model(&empty)
+            }
         }
     }
 
@@ -463,7 +492,7 @@ impl ViewerState {
     }
 }
 
-fn update_window(w: &MainWindow, s: &ViewerState) {
+fn update_window(w: &MainWindow, s: &mut ViewerState) {
     w.set_info_text(s.info_string().into());
     w.set_slice_image(s.render_image());
     w.set_model_info(s.model_info_string().into());
@@ -499,7 +528,7 @@ fn main() {
                 }
             }
         }
-        update_window(&window, &s);
+        update_window(&window, &mut s);
     }
 
     // Z changed
@@ -510,7 +539,7 @@ fn main() {
             let mut s = state.borrow_mut();
             if (z as usize) < s.nz {
                 let _ = s.load_slice(z as usize);
-                if let Some(w) = ww.upgrade() { update_window(&w, &s); }
+                if let Some(w) = ww.upgrade() { update_window(&w, &mut s); }
             }
         });
     }
@@ -532,9 +561,24 @@ fn main() {
         let state = state.clone();
         let ww = window.as_weak();
         window.on_mouse_moved(move |x, y| {
-            let s = state.borrow();
-            if let Some(w) = ww.upgrade() {
-                w.set_pixel_value_text(s.pixel_value_at(x, y).into());
+            let mut s = state.borrow_mut();
+            if s.view_mode == 3 {
+                // In 3D mode, track mouse drag for rotation
+                if let Some((lx, ly)) = s.drag_last {
+                    let dx = x - lx;
+                    let dy = y - ly;
+                    if dx.abs() > 0.1 || dy.abs() > 0.1 {
+                        s.renderer3d.rotate(dx, dy);
+                        if let Some(w) = ww.upgrade() {
+                            w.set_slice_image(s.render_image());
+                        }
+                    }
+                }
+                s.drag_last = Some((x, y));
+            } else {
+                if let Some(w) = ww.upgrade() {
+                    w.set_pixel_value_text(s.pixel_value_at(x, y).into());
+                }
             }
         });
     }
@@ -557,10 +601,20 @@ fn main() {
         window.on_view_mode_changed(move |mode| {
             let mut s = state.borrow_mut();
             s.view_mode = mode;
+            s.drag_last = None;
             if mode == 1 || mode == 2 {
                 let _ = s.ensure_volume_loaded();
             }
             if let Some(w) = ww.upgrade() { w.set_slice_image(s.render_image()); }
+        });
+    }
+
+    // Mouse released (reset drag state for 3D)
+    {
+        let state = state.clone();
+        window.on_mouse_released(move || {
+            let mut s = state.borrow_mut();
+            s.drag_last = None;
         });
     }
 
@@ -576,7 +630,19 @@ fn main() {
         });
     }
 
-    window.on_zoom_changed(|_| {});
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_zoom_changed(move |z| {
+            let mut s = state.borrow_mut();
+            if s.view_mode == 3 {
+                s.renderer3d.set_zoom(z);
+                if let Some(w) = ww.upgrade() {
+                    w.set_slice_image(s.render_image());
+                }
+            }
+        });
+    }
 
     {
         let state = state.clone();
@@ -598,7 +664,7 @@ fn main() {
                     w.set_ny(s.ny as i32);
                     w.set_black_level(s.black);
                     w.set_white_level(s.white);
-                    update_window(&w, &s);
+                    update_window(&w, &mut s);
                 }
             }
         });
@@ -618,7 +684,7 @@ fn main() {
                 if let Err(e) = s.load_model(&path_str) {
                     eprintln!("Error loading model {}: {}", path_str, e);
                 } else if let Some(w) = ww.upgrade() {
-                    update_window(&w, &s);
+                    update_window(&w, &mut s);
                 }
             }
         });
@@ -637,14 +703,14 @@ fn main() {
                         // Add points mode
                         s.add_point(x, y);
                         w.set_slice_image(s.render_image());
-                        update_window(&w, &s);
+                        update_window(&w, &mut s);
                         w.set_edit_status(format!("Added point at ({:.0}, {:.0})", x, y).into());
                     }
                     3 => {
                         // Delete points mode
                         if s.delete_nearest_point(x, y, 10.0) {
                             w.set_slice_image(s.render_image());
-                            update_window(&w, &s);
+                            update_window(&w, &mut s);
                             w.set_edit_status("Deleted point".into());
                         } else {
                             w.set_edit_status("No point nearby".into());
@@ -667,7 +733,7 @@ fn main() {
                     let mut s = state.borrow_mut();
                     if s.delete_nearest_point(x, y, 10.0) {
                         w.set_slice_image(s.render_image());
-                        update_window(&w, &s);
+                        update_window(&w, &mut s);
                         w.set_edit_status("Deleted point".into());
                     } else {
                         w.set_edit_status("No point nearby".into());

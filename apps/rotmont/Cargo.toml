@@ -1,0 +1,13 @@
+[package]
+name = "rotmont"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rotmont"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+clap = { version = "4", features = ["derive"] }

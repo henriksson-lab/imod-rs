@@ -1,0 +1,12 @@
+[package]
+name = "checkxforms"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "checkxforms"
+path = "src/main.rs"
+
+[dependencies]
+imod-transforms.workspace = true
+clap.workspace = true

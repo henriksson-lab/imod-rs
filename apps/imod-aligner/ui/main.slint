@@ -1,0 +1,225 @@
+import { VerticalBox, HorizontalBox, Slider, Button, GroupBox, CheckBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "IMOD Aligner (Midas)";
+    preferred-width: 1000px;
+    preferred-height: 700px;
+
+    in property <image> ref-image;
+    in property <image> cur-image;
+    in property <string> info-text: "";
+    in property <string> filename: "No file";
+    in property <int> max-z: 0;
+    in property <int> nx: 0;
+    in property <int> ny: 0;
+
+    in-out property <int> current-z: 0;
+    in-out property <int> ref-z: 0;
+    in-out property <float> black-level: 0.0;
+    in-out property <float> white-level: 255.0;
+    in-out property <float> zoom: 1.0;
+    in-out property <float> dx: 0.0;
+    in-out property <float> dy: 0.0;
+    in-out property <float> rotation: 0.0;
+    in-out property <float> magnification: 1.0;
+    in-out property <bool> overlay-mode: true;
+
+    callback open-file();
+    callback z-changed(int);
+    callback ref-z-changed(int);
+    callback contrast-changed(float, float);
+    callback transform-changed(float, float, float, float);
+    callback apply-transform();
+    callback save-transforms();
+    callback auto-align();
+    callback reset-transform();
+
+    VerticalBox {
+        // Toolbar
+        HorizontalBox {
+            height: 40px;
+            padding: 4px;
+            spacing: 6px;
+
+            Button { text: "Open..."; clicked => { root.open-file(); } }
+            Button { text: "Save Xf"; clicked => { root.save-transforms(); } }
+            Button { text: "Auto Align"; clicked => { root.auto-align(); } }
+            Button { text: "Reset"; clicked => { root.reset-transform(); } }
+
+            Rectangle { width: 1px; background: #444; }
+
+            CheckBox {
+                text: "Overlay";
+                checked: root.overlay-mode;
+                toggled => { root.overlay-mode = self.checked; }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: root.filename;
+                vertical-alignment: center;
+                color: #aaa;
+            }
+        }
+
+        HorizontalBox {
+            // Image display area
+            Rectangle {
+                background: #1a1a1a;
+                clip: true;
+                horizontal-stretch: 3;
+
+                // Reference image (green channel)
+                if root.overlay-mode: Image {
+                    source: root.ref-image;
+                    width: self.source.width * 1px * root.zoom;
+                    height: self.source.height * 1px * root.zoom;
+                    image-rendering: pixelated;
+                    opacity: 0.5;
+                }
+
+                // Current image (magenta channel, offset by dx/dy)
+                Image {
+                    source: root.cur-image;
+                    x: root.dx * root.zoom * 1px;
+                    y: root.dy * root.zoom * 1px;
+                    width: self.source.width * 1px * root.zoom;
+                    height: self.source.height * 1px * root.zoom;
+                    image-rendering: pixelated;
+                    opacity: root.overlay-mode ? 0.5 : 1.0;
+                }
+
+                TouchArea {
+                    scroll-event(ev) => {
+                        if (ev.delta-y > 0) {
+                            root.zoom = Math.min(root.zoom * 1.1, 20.0);
+                        } else {
+                            root.zoom = Math.max(root.zoom / 1.1, 0.05);
+                        }
+                        return accept;
+                    }
+                }
+            }
+
+            // Controls panel
+            VerticalBox {
+                width: 240px;
+                padding: 8px;
+                spacing: 6px;
+
+                GroupBox {
+                    title: "Sections";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "Current:"; vertical-alignment: center; width: 70px; }
+                            Slider {
+                                minimum: 0; maximum: root.max-z;
+                                value: root.current-z;
+                                changed(v) => { root.current-z = Math.round(v); root.z-changed(Math.round(v)); }
+                            }
+                            Text { text: root.current-z; vertical-alignment: center; min-width: 30px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Reference:"; vertical-alignment: center; width: 70px; }
+                            Slider {
+                                minimum: 0; maximum: root.max-z;
+                                value: root.ref-z;
+                                changed(v) => { root.ref-z = Math.round(v); root.ref-z-changed(Math.round(v)); }
+                            }
+                            Text { text: root.ref-z; vertical-alignment: center; min-width: 30px; }
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: "Transform";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "Shift X:"; vertical-alignment: center; width: 70px; }
+                            Slider {
+                                minimum: -200; maximum: 200;
+                                value: root.dx;
+                                changed(v) => {
+                                    root.dx = v;
+                                    root.transform-changed(root.dx, root.dy, root.rotation, root.magnification);
+                                }
+                            }
+                            Text { text: Math.round(root.dx); vertical-alignment: center; min-width: 30px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Shift Y:"; vertical-alignment: center; width: 70px; }
+                            Slider {
+                                minimum: -200; maximum: 200;
+                                value: root.dy;
+                                changed(v) => {
+                                    root.dy = v;
+                                    root.transform-changed(root.dx, root.dy, root.rotation, root.magnification);
+                                }
+                            }
+                            Text { text: Math.round(root.dy); vertical-alignment: center; min-width: 30px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Rotation:"; vertical-alignment: center; width: 70px; }
+                            Slider {
+                                minimum: -10; maximum: 10;
+                                value: root.rotation;
+                                changed(v) => {
+                                    root.rotation = v;
+                                    root.transform-changed(root.dx, root.dy, root.rotation, root.magnification);
+                                }
+                            }
+                            Text { text: Math.round(root.rotation * 10) / 10; vertical-alignment: center; min-width: 40px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Mag:"; vertical-alignment: center; width: 70px; }
+                            Slider {
+                                minimum: 0.9; maximum: 1.1;
+                                value: root.magnification;
+                                changed(v) => {
+                                    root.magnification = v;
+                                    root.transform-changed(root.dx, root.dy, root.rotation, root.magnification);
+                                }
+                            }
+                            Text { text: Math.round(root.magnification * 1000) / 1000; vertical-alignment: center; min-width: 40px; }
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: "Contrast";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "Black:"; vertical-alignment: center; width: 50px; }
+                            Slider {
+                                minimum: -1000; maximum: 65535;
+                                value: root.black-level;
+                                changed(v) => { root.black-level = v; root.contrast-changed(root.black-level, root.white-level); }
+                            }
+                        }
+                        HorizontalBox {
+                            Text { text: "White:"; vertical-alignment: center; width: 50px; }
+                            Slider {
+                                minimum: -1000; maximum: 65535;
+                                value: root.white-level;
+                                changed(v) => { root.white-level = v; root.contrast-changed(root.black-level, root.white-level); }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.info-text;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    color: #aaa;
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}

@@ -1,0 +1,11 @@
+[package]
+name = "extposition"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "extposition"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

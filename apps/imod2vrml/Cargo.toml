@@ -1,0 +1,13 @@
+[package]
+name = "imod2vrml"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "imod2vrml"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+clap.workspace = true

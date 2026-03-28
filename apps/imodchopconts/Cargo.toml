@@ -1,0 +1,14 @@
+[package]
+name = "imodchopconts"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "imodchopconts"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-math.workspace = true
+clap.workspace = true

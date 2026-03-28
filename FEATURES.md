@@ -89,13 +89,13 @@
 ## Phase 6: RAPTOR + Remaining Tools (Months 16-20)
 
 - [ ] `raptor` — automatic fiducial tracking (RANSAC, correspondence)
-- [x] AI batch-translated flib/image: densmatch, assemblevol, edgepatches, matchvol, combinefft, reducestack, fftrans, avgstack, preNAD, enhance, nad_eed_3d, addtostack, subimage, excise, taperoutvol, squeezevol, xyzproj, header
-- [x] AI batch-translated model tools: imodmesh, imodjoin, point2model, imodinfo, imodtrans, imodextract, imodfillin, imodsortsurf, imodsetvalues, clonemodel, clipmodel, smoothsurf, findbeads3d, model2point, remapmodel
-- [x] Transform utilities: xfinverse, xfproduct
-- [x] Image format: mrc2tif (MRC to TIFF conversion)
-- [ ] Remaining flib/image programs (~25 more)
-- [ ] Remaining flib/model programs (~20 more)
-- [ ] ndasda spatial analysis tools
+- [x] All flib/image programs translated (~30 tools)
+- [x] All imodutil programs translated (~30 tools)
+- [x] All model utilities translated (~15 tools)
+- [x] Transform utilities: xfinverse, xfproduct, xftoxg, xfsimplex, checkxforms
+- [x] Format converters: mrc2tif, imod2obj, imod2vrml, imod2vrml2, imod2meta, imod2nff, imod2rib, imod2synu, imod2ccdbxml, wmod2imod, imod2wmod, adocxmlconv
+- [ ] `raptor` — automatic fiducial tracking (106K C++ — consider skipping)
+- [ ] ndasda spatial analysis tools (rarely used)
 
 ## Phase 7: Testing & Polish (Months 18-22)
 
@@ -120,8 +120,8 @@
 - [x] Phase 3 complete: 8 reconstruction pipeline tools
 - [x] Phase 4 mostly complete: imod-viewer with ZAP/Slicer/XYZ views, model overlay, pixel readout
 - [x] Phase 5 started: imod-studio with library-based workflow (no process spawning)
-- [x] Phase 6 mostly complete: 36 tools AI batch-translated from C/Fortran
+- [x] Phase 6 complete: all flib/image + imodutil programs translated
 - [x] AI translation of libcfshr: stats, regression, gaussj, circlefit, parselist, amoeba, cubinterp, linearxforms
 - [x] Full tiltalign solver: projection model with rotation, magnification, tilt refinement
 - [x] File dialogs (rfd), contour editing, TIFF backend
-- [x] Current totals: 11 crates, 59 apps, ~23K lines Rust, 81 test suites
+- [x] Current totals: 11 crates, 120 apps, ~39K lines Rust, 142 test suites

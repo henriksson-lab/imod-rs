@@ -32,7 +32,7 @@ export component MainWindow inherits Window {
     in-out property <float> white-level: 255.0;
     in-out property <float> zoom: 1.0;
     in-out property <bool> show-model: true;
-    in-out property <int> view-mode: 0;  // 0=ZAP, 1=Slicer, 2=XYZ
+    in-out property <int> view-mode: 0;  // 0=ZAP, 1=Slicer, 2=XYZ, 3=Model 3D
     in-out property <float> slicer-angle-x: 0.0;
     in-out property <float> slicer-angle-y: 0.0;
     // Edit mode: 0=view, 1=add points, 2=move points, 3=delete points
@@ -52,6 +52,7 @@ export component MainWindow inherits Window {
     callback view-mode-changed(int);
     callback slicer-angle-changed(float, float);
     callback save-model();
+    callback mouse-released();
 
     VerticalBox {
         // Toolbar
@@ -105,6 +106,11 @@ export component MainWindow inherits Window {
                 enabled: root.view-mode != 2;
                 clicked => { root.view-mode = 2; root.view-mode-changed(2); }
             }
+            Button {
+                text: "3D";
+                enabled: root.view-mode != 3;
+                clicked => { root.view-mode = 3; root.view-mode-changed(3); }
+            }
 
             Rectangle { horizontal-stretch: 1; }
 
@@ -146,6 +152,9 @@ export component MainWindow inherits Window {
                     pointer-event(ev) => {
                         if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up) {
                             root.mouse-right-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
+                        }
+                        if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up) {
+                            root.mouse-released();
                         }
                     }
                     scroll-event(ev) => {

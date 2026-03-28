@@ -1,0 +1,13 @@
+[package]
+name = "maxjoinsize"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "maxjoinsize"
+path = "src/main.rs"
+
+[dependencies]
+imod-mrc.workspace = true
+imod-transforms.workspace = true
+clap = { version = "4", features = ["derive"] }

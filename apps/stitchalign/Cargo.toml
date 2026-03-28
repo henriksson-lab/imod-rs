@@ -1,0 +1,15 @@
+[package]
+name = "stitchalign"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "stitchalign"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+imod-transforms.workspace = true
+clap = { version = "4", features = ["derive"] }

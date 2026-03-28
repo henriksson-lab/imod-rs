@@ -1,0 +1,11 @@
+[package]
+name = "goodframe"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "goodframe"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

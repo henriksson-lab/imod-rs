@@ -1,0 +1,14 @@
+[package]
+name = "imod2nff"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "imod2nff"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-mesh.workspace = true
+clap.workspace = true

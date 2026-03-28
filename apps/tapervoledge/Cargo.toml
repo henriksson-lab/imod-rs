@@ -1,0 +1,15 @@
+[package]
+name = "tapervoledge"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "tapervoledge"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-fft.workspace = true
+imod-slice.workspace = true
+clap = { version = "4", features = ["derive"] }

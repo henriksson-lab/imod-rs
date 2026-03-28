@@ -1,0 +1,21 @@
+[package]
+name = "imod-ctfplot"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "imod-ctfplot"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+imod-fft.workspace = true
+imod-transforms.workspace = true
+slint = "1"
+rfd = "0.15"
+rustfft = "6"
+
+[build-dependencies]
+slint-build = "1"

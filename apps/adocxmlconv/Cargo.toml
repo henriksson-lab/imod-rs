@@ -1,0 +1,13 @@
+[package]
+name = "adocxmlconv"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "adocxmlconv"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-autodoc.workspace = true
+clap.workspace = true

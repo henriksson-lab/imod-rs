@@ -1,0 +1,168 @@
+import { VerticalBox, HorizontalBox, Slider, Button, GroupBox, LineEdit } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "IMOD CTF Plotter";
+    preferred-width: 900px;
+    preferred-height: 650px;
+
+    in property <image> power-spectrum;
+    in property <image> ctf-curve;
+    in property <string> info-text: "";
+    in property <string> filename: "No file";
+    in property <int> max-z: 0;
+
+    in-out property <int> current-z: 0;
+    in-out property <float> voltage: 300.0;
+    in-out property <float> cs: 2.7;
+    in-out property <float> defocus: 3.0;
+    in-out property <float> pixel-size: 1.0;
+    in-out property <float> amplitude-contrast: 0.07;
+    in-out property <float> zoom: 1.0;
+
+    callback open-file();
+    callback z-changed(int);
+    callback params-changed();
+    callback fit-defocus();
+    callback save-defocus();
+
+    VerticalBox {
+        HorizontalBox {
+            height: 40px;
+            padding: 4px;
+            spacing: 6px;
+
+            Button { text: "Open..."; clicked => { root.open-file(); } }
+            Button { text: "Fit Defocus"; clicked => { root.fit-defocus(); } }
+            Button { text: "Save"; clicked => { root.save-defocus(); } }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text { text: root.filename; vertical-alignment: center; color: #aaa; }
+        }
+
+        HorizontalBox {
+            // Power spectrum display
+            VerticalBox {
+                horizontal-stretch: 2;
+                Rectangle {
+                    background: #111;
+                    clip: true;
+
+                    Image {
+                        source: root.power-spectrum;
+                        width: self.source.width * 1px * root.zoom;
+                        height: self.source.height * 1px * root.zoom;
+                        image-rendering: pixelated;
+                    }
+
+                    TouchArea {
+                        scroll-event(ev) => {
+                            if (ev.delta-y > 0) { root.zoom = Math.min(root.zoom * 1.1, 10.0); }
+                            else { root.zoom = Math.max(root.zoom / 1.1, 0.1); }
+                            return accept;
+                        }
+                    }
+                }
+
+                // 1D radial average plot
+                Rectangle {
+                    height: 150px;
+                    background: #1a1a1a;
+                    Image {
+                        source: root.ctf-curve;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+                }
+            }
+
+            // Parameters panel
+            VerticalBox {
+                width: 240px;
+                padding: 8px;
+                spacing: 6px;
+
+                GroupBox {
+                    title: "Section";
+                    HorizontalBox {
+                        Text { text: "Z:"; vertical-alignment: center; }
+                        Slider {
+                            minimum: 0; maximum: root.max-z;
+                            value: root.current-z;
+                            changed(v) => { root.current-z = Math.round(v); root.z-changed(Math.round(v)); }
+                        }
+                        Text { text: root.current-z + "/" + root.max-z; vertical-alignment: center; min-width: 50px; }
+                    }
+                }
+
+                GroupBox {
+                    title: "Microscope";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "Voltage (kV):"; vertical-alignment: center; width: 100px; }
+                            Slider {
+                                minimum: 80; maximum: 400;
+                                value: root.voltage;
+                                changed(v) => { root.voltage = v; root.params-changed(); }
+                            }
+                            Text { text: Math.round(root.voltage); vertical-alignment: center; min-width: 35px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Cs (mm):"; vertical-alignment: center; width: 100px; }
+                            Slider {
+                                minimum: 0; maximum: 5;
+                                value: root.cs;
+                                changed(v) => { root.cs = v; root.params-changed(); }
+                            }
+                            Text { text: Math.round(root.cs * 10) / 10; vertical-alignment: center; min-width: 35px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Amp contrast:"; vertical-alignment: center; width: 100px; }
+                            Slider {
+                                minimum: 0; maximum: 0.3;
+                                value: root.amplitude-contrast;
+                                changed(v) => { root.amplitude-contrast = v; root.params-changed(); }
+                            }
+                            Text { text: Math.round(root.amplitude-contrast * 100) / 100; vertical-alignment: center; min-width: 35px; }
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: "Defocus";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "Defocus (um):"; vertical-alignment: center; width: 100px; }
+                            Slider {
+                                minimum: 0.5; maximum: 15;
+                                value: root.defocus;
+                                changed(v) => { root.defocus = v; root.params-changed(); }
+                            }
+                            Text { text: Math.round(root.defocus * 100) / 100; vertical-alignment: center; min-width: 45px; }
+                        }
+                        HorizontalBox {
+                            Text { text: "Pixel (A):"; vertical-alignment: center; width: 100px; }
+                            Slider {
+                                minimum: 0.5; maximum: 20;
+                                value: root.pixel-size;
+                                changed(v) => { root.pixel-size = v; root.params-changed(); }
+                            }
+                            Text { text: Math.round(root.pixel-size * 100) / 100; vertical-alignment: center; min-width: 45px; }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.info-text;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    color: #ccc;
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "flattenwarp"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "flattenwarp"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-math.workspace = true
+imod-warp.workspace = true
+imod-transforms.workspace = true
+clap.workspace = true

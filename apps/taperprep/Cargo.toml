@@ -1,0 +1,13 @@
+[package]
+name = "taperprep"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "taperprep"
+path = "src/main.rs"
+
+[dependencies]
+imod-mrc.workspace = true
+imod-fft.workspace = true
+clap = { version = "4", features = ["derive"] }

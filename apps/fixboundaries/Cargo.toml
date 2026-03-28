@@ -1,0 +1,12 @@
+[package]
+name = "fixboundaries"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "fixboundaries"
+path = "src/main.rs"
+
+[dependencies]
+imod-mrc.workspace = true
+clap = { version = "4", features = ["derive"] }
