@@ -1,0 +1,10 @@
+[package]
+name = "imod-transforms"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

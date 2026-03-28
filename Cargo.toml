@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/imod-core",
+    "crates/imod-mrc",
+    "crates/imod-autodoc",
+    "crates/imod-math",
+    "crates/imod-transforms",
+    "crates/imod-fft",
+    "crates/imod-model",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-2.0-or-later"
+
+[workspace.dependencies]
+imod-core = { path = "crates/imod-core" }
+imod-mrc = { path = "crates/imod-mrc" }
+imod-autodoc = { path = "crates/imod-autodoc" }
+imod-math = { path = "crates/imod-math" }
+imod-transforms = { path = "crates/imod-transforms" }
+imod-fft = { path = "crates/imod-fft" }
+imod-model = { path = "crates/imod-model" }
+rustfft = "6"
+thiserror = "2"
+binrw = "0.14"

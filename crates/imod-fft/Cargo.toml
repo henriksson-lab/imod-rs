@@ -1,0 +1,7 @@
+[package]
+name = "imod-fft"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rustfft = "6"
