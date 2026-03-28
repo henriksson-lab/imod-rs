@@ -40,6 +40,7 @@ impl Slice {
         self.nx * self.ny
     }
 
+    /// Returns `true` if the slice contains no pixels.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }

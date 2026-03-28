@@ -2,18 +2,28 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum MrcMode {
+    /// 8-bit unsigned integer (mode 0).
     Byte = 0,
+    /// 16-bit signed integer (mode 1).
     Short = 1,
+    /// 32-bit IEEE float (mode 2).
     Float = 2,
+    /// Complex pair of 16-bit signed integers (mode 3).
     ComplexShort = 3,
+    /// Complex pair of 32-bit floats (mode 4).
     ComplexFloat = 4,
+    /// 16-bit unsigned integer (mode 6).
     UShort = 6,
+    /// 16-bit IEEE half-precision float (mode 12).
     HalfFloat = 12,
+    /// 3-channel 8-bit RGB (mode 16).
     Rgb = 16,
+    /// 4-bit unsigned integer, two pixels per byte (mode 101).
     FourBit = 101,
 }
 
 impl MrcMode {
+    /// Convert an `i32` mode value from the MRC header to the corresponding enum variant.
     pub fn from_i32(value: i32) -> Option<Self> {
         match value {
             0 => Some(Self::Byte),
@@ -57,14 +67,20 @@ impl MrcMode {
 /// Extended header types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtHeaderType {
+    /// No extended header present (all-zero bytes).
     None,
+    /// SerialEM extended header format.
     Seri,
+    /// Agard-style extended header format.
     Agar,
+    /// FEI/ThermoFisher extended header format (FEI1 or FEI2).
     Fei,
+    /// Unrecognised extended header type.
     Unknown,
 }
 
 impl ExtHeaderType {
+    /// Parse the 4-byte extended header type field from the MRC header.
     pub fn from_bytes(bytes: &[u8; 4]) -> Self {
         match bytes {
             b"SERI" => Self::Seri,
@@ -75,6 +91,7 @@ impl ExtHeaderType {
         }
     }
 
+    /// Encode this variant back to the 4-byte on-disk representation.
     pub fn to_bytes(&self) -> [u8; 4] {
         match self {
             Self::None => [0; 4],
@@ -89,18 +106,28 @@ impl ExtHeaderType {
 /// IMOD units for pixel size
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelUnit {
+    /// No unit / raw pixel coordinates.
     Pixel,
+    /// Meters.
     Meter,
+    /// Centimeters.
     Cm,
+    /// Millimeters.
     Mm,
+    /// Micrometers.
     Um,
+    /// Nanometers.
     Nm,
+    /// Angstroms (0.1 nm).
     Angstrom,
+    /// Picometers.
     Pm,
+    /// Kilometers.
     Kilo,
 }
 
 impl PixelUnit {
+    /// Convert the integer unit code stored in the MRC header to a `PixelUnit`.
     pub fn from_i32(value: i32) -> Self {
         match value {
             0 => Self::Pixel,

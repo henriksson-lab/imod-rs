@@ -12,6 +12,7 @@ pub fn write_model(path: impl AsRef<Path>, model: &ImodModel) -> Result<(), Imod
     write_model_to(&mut w, model)
 }
 
+/// Write an IMOD model to any writer that implements `Write`.
 pub fn write_model_to<W: Write>(w: &mut W, model: &ImodModel) -> Result<(), ImodError> {
     // File ID
     write_u32(w, chunk_id::IMOD)?;

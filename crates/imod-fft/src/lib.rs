@@ -1,3 +1,9 @@
+//! FFT (Fast Fourier Transform) operations for 1D and 2D image processing.
+//!
+//! Built on top of the [`rustfft`] crate, this module provides real-to-complex
+//! and complex-to-real transforms in 1-D and 2-D, plus convenience functions
+//! for computing power spectra and cross-correlations.
+
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 

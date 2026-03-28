@@ -16,6 +16,7 @@ pub fn read_model(path: impl AsRef<Path>) -> Result<ImodModel, ImodError> {
     read_model_from(&mut cursor)
 }
 
+/// Read an IMOD model from any reader that implements `Read + Seek`.
 pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError> {
     // Read file ID: "IMOD" + "V1.2"
     let file_id = read_u32(r)?;

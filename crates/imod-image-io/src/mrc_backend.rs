@@ -13,6 +13,7 @@ pub struct MrcImageFile {
 }
 
 impl MrcImageFile {
+    /// Open an MRC file and prepare it for slice-by-slice reading.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ImodError> {
         let reader = MrcReader::open(path)?;
         let h = reader.header();
