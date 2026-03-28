@@ -1,0 +1,252 @@
+// IMOD Studio - Tomography Workflow Manager
+// Etomo replacement built with Slint
+
+import { Button, ScrollView } from "std-widgets.slint";
+
+struct StepInfo {
+    name: string,
+    index: int,
+    completed: bool,
+    running: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "IMOD Studio";
+    preferred-width: 1100px;
+    preferred-height: 750px;
+
+    // Properties bound from Rust
+    in-out property <string> dataset-name: "(no dataset)";
+    in-out property <int> axis-type: 0;  // 0 = single, 1 = dual
+    in-out property <int> current-step: 0;
+    in-out property <string> log-text: "";
+    in-out property <string> step-status: "";
+    in-out property <bool> step-running: false;
+
+    // Callbacks to Rust
+    callback run-step(int);
+    callback open-dataset();
+    callback axis-changed(int);
+
+    VerticalLayout {
+        // ---- Top toolbar ----
+        Rectangle {
+            height: 48px;
+            background: #2c3e50;
+
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "IMOD Studio";
+                    color: white;
+                    font-size: 18px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { width: 24px; }
+
+                Button {
+                    text: "Open Dataset...";
+                    clicked => { root.open-dataset(); }
+                }
+
+                Text {
+                    text: "Dataset:";
+                    color: #bdc3c7;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.dataset-name;
+                    color: white;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { width: 24px; }
+
+                Text {
+                    text: "Axis:";
+                    color: #bdc3c7;
+                    vertical-alignment: center;
+                }
+                axis-single := Button {
+                    text: "Single";
+                    enabled: root.axis-type != 0;
+                    clicked => {
+                        root.axis-type = 0;
+                        root.axis-changed(0);
+                    }
+                }
+                axis-dual := Button {
+                    text: "Dual";
+                    enabled: root.axis-type != 1;
+                    clicked => {
+                        root.axis-type = 1;
+                        root.axis-changed(1);
+                    }
+                }
+            }
+        }
+
+        // ---- Main content: sidebar + right panel ----
+        HorizontalLayout {
+            // ---- Left sidebar: step list ----
+            Rectangle {
+                width: 240px;
+                background: #ecf0f1;
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    alignment: start;
+
+                    Text {
+                        text: "Workflow Steps";
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #2c3e50;
+                        horizontal-alignment: center;
+                    }
+
+                    Rectangle { height: 8px; }
+
+                    for step-data in [
+                        { name: "Setup",             idx: 0 },
+                        { name: "Pre-processing",    idx: 1 },
+                        { name: "Coarse Alignment",  idx: 2 },
+                        { name: "Bead Tracking",     idx: 3 },
+                        { name: "Fine Alignment",    idx: 4 },
+                        { name: "Positioning",       idx: 5 },
+                        { name: "Final Alignment",   idx: 6 },
+                        { name: "Reconstruction",    idx: 7 },
+                        { name: "Post-processing",   idx: 8 },
+                    ] : Rectangle {
+                        height: 36px;
+                        border-radius: 4px;
+                        background: root.current-step == step-data.idx ? #3498db : transparent;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            alignment: start;
+
+                            Text {
+                                text: "\{step-data.idx + 1}. \{step-data.name}";
+                                color: root.current-step == step-data.idx ? white : #2c3e50;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        TouchArea {
+                            clicked => {
+                                root.current-step = step-data.idx;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- Right panel: step controls ----
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                // Step title
+                Text {
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #2c3e50;
+                    text: root.current-step == 0 ? "Setup" :
+                          root.current-step == 1 ? "Pre-processing" :
+                          root.current-step == 2 ? "Coarse Alignment" :
+                          root.current-step == 3 ? "Bead Tracking" :
+                          root.current-step == 4 ? "Fine Alignment" :
+                          root.current-step == 5 ? "Positioning" :
+                          root.current-step == 6 ? "Final Alignment" :
+                          root.current-step == 7 ? "Reconstruction" :
+                          root.current-step == 8 ? "Post-processing" :
+                          "Unknown";
+                }
+
+                // Status line
+                Text {
+                    text: root.step-status;
+                    color: root.step-running ? #e67e22 : #27ae60;
+                    font-size: 13px;
+                }
+
+                // Step description / placeholder
+                Rectangle {
+                    border-color: #bdc3c7;
+                    border-width: 1px;
+                    border-radius: 6px;
+                    background: #fafafa;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
+
+                        Text {
+                            text: "Step-specific parameters will appear here.";
+                            color: #7f8c8d;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // Action buttons
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        text: root.step-running ? "Running..." : "Run Step";
+                        enabled: !root.step-running;
+                        clicked => {
+                            root.run-step(root.current-step);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Bottom: log output area ----
+        Rectangle {
+            height: 200px;
+            background: #1e1e1e;
+
+            VerticalLayout {
+                padding: 4px;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    height: 24px;
+
+                    Text {
+                        text: "Log Output";
+                        color: #bdc3c7;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+
+                ScrollView {
+                    Text {
+                        text: root.log-text;
+                        color: #2ecc71;
+                        font-size: 12px;
+                        font-family: "monospace";
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}

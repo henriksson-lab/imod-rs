@@ -1,0 +1,14 @@
+[package]
+name = "imodmesh"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "imodmesh"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-mesh.workspace = true
+clap.workspace = true

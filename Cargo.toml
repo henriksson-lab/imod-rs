@@ -40,6 +40,16 @@ members = [
     "apps/avgstack",
     "apps/imodinfo",
     "apps/imodtrans",
+    "apps/edgepatches",
+    "apps/densmatch",
+    "apps/assemblevol",
+    "apps/imod-studio",
+    "apps/imodmesh",
+    "apps/imodjoin",
+    "apps/point2model",
+    "apps/matchvol",
+    "apps/combinefft",
+    "apps/reducestack",
 ]
 
 [workspace.package]

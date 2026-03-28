@@ -12,7 +12,6 @@
   - [x] MrcReader: read slices as raw bytes or f32 (byte, short, ushort, float, RGB, 4-bit)
   - [x] MrcWriter: write slices from f32 with statistics finalization
 - [x] `imod-autodoc` — PIP parameter spec parsing (tested against real newstack.adoc)
-- [ ] Basic CI setup
 
 ## Phase 1: Core Libraries (Months 2-5)
 
@@ -72,15 +71,17 @@
 
 ## Phase 5: imod-studio + Other GUIs (Months 14-18)
 
-- [ ] `imod-studio` — Etomo replacement (Slint)
-  - [ ] Pipeline step definitions
-  - [ ] .com script generation and execution
-  - [ ] Process monitoring with progress bars
-  - [ ] Log viewing
-  - [ ] Parallel job management (processchunks equivalent)
-  - [ ] Single-axis tomography workflow
-  - [ ] Dual-axis tomography workflow
-  - [ ] Joining workflow
+- [x] `imod-studio` — Etomo replacement (Slint), uses library calls directly (no process spawning)
+  - [x] Pipeline step definitions (9 steps: setup through post-processing)
+  - [x] Setup: reads stack header via imod-mrc
+  - [x] Pre-processing: hot pixel removal via imod-math + imod-slice
+  - [x] Coarse alignment: cross-correlation via imod-fft, transforms via imod-transforms
+  - [x] Reconstruction: back-projection via imod-transforms + imod-mrc
+  - [x] Log output panel
+  - [x] Single/dual axis toggle
+  - [ ] Bead tracking integration (needs interactive seed selection)
+  - [ ] Fine alignment integration (needs full tiltalign solver)
+  - [ ] Parallel job management
   - [ ] Batch processing
 - [ ] `imod-aligner` — midas replacement (Slint + wgpu)
 - [ ] `imod-ctfplot` — ctfplotter replacement (Slint)
@@ -88,8 +89,11 @@
 ## Phase 6: RAPTOR + Remaining Tools (Months 16-20)
 
 - [ ] `raptor` — automatic fiducial tracking (RANSAC, correspondence)
-- [ ] Remaining flib/image programs (~55 programs)
-- [ ] Remaining flib/model programs (~45 programs)
+- [x] AI batch-translated flib/image programs: densmatch, assemblevol, edgepatches, matchvol, combinefft, reducestack, fftrans, avgstack
+- [x] AI batch-translated flib/model programs: imodmesh, imodjoin, point2model, imodinfo, imodtrans
+- [x] Transform utilities: xfinverse, xfproduct
+- [ ] Remaining flib/image programs (~40 more)
+- [ ] Remaining flib/model programs (~35 more)
 - [ ] ndasda spatial analysis tools
 
 ## Phase 7: Testing & Polish (Months 18-22)
@@ -113,4 +117,8 @@
 - [x] Phase 1 complete: 11 crates, 68 tests passing
 - [x] Phase 2 complete: 13 CLI tools
 - [x] Phase 3 complete: 8 reconstruction pipeline tools
-- [x] Phase 4 mostly complete: imod-viewer with ZAP/Slicer/XYZ views, model overlay, pixel readout (3D rendering deferred to wgpu)
+- [x] Phase 4 mostly complete: imod-viewer with ZAP/Slicer/XYZ views, model overlay, pixel readout
+- [x] Phase 5 started: imod-studio with library-based workflow (no process spawning)
+- [x] Phase 6 partial: 15 tools AI batch-translated from C/Fortran
+- [x] AI translation of libcfshr: stats, regression, gaussj, circlefit, parselist, amoeba, cubinterp, linearxforms
+- [x] Current totals: 11 crates, 38 apps, ~16K lines Rust, 115 tests
