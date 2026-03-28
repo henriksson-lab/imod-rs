@@ -32,7 +32,8 @@ export component MainWindow inherits Window {
     in-out property <float> white-level: 255.0;
     in-out property <float> zoom: 1.0;
     in-out property <bool> show-model: true;
-    in-out property <int> view-mode: 0;  // 0=ZAP, 1=Slicer, 2=XYZ, 3=Model 3D
+    in-out property <int> view-mode: 0;  // 0=ZAP, 1=Slicer, 2=XYZ, 3=Model 3D, 4=Iso
+    in-out property <float> iso-threshold: 128.0;
     in-out property <float> slicer-angle-x: 0.0;
     in-out property <float> slicer-angle-y: 0.0;
     // Edit mode: 0=view, 1=add points, 2=move points, 3=delete points
@@ -51,6 +52,7 @@ export component MainWindow inherits Window {
     callback toggle-model(bool);
     callback view-mode-changed(int);
     callback slicer-angle-changed(float, float);
+    callback iso-threshold-changed(float);
     callback save-model();
     callback mouse-released();
 
@@ -110,6 +112,11 @@ export component MainWindow inherits Window {
                 text: "3D";
                 enabled: root.view-mode != 3;
                 clicked => { root.view-mode = 3; root.view-mode-changed(3); }
+            }
+            Button {
+                text: "Iso";
+                enabled: root.view-mode != 4;
+                clicked => { root.view-mode = 4; root.view-mode-changed(4); }
             }
 
             Rectangle { horizontal-stretch: 1; }
@@ -202,6 +209,33 @@ export component MainWindow inherits Window {
                                 text: obj.name + " (" + obj.num-contours + ")";
                                 font-size: 10px;
                                 vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // Isosurface threshold (only when iso mode)
+                if root.view-mode == 4: GroupBox {
+                    title: "Isosurface";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "Threshold:"; vertical-alignment: center; width: 65px; font-size: 11px; }
+                            Text {
+                                text: Math.round(root.iso-threshold);
+                                vertical-alignment: center;
+                                width: 40px;
+                                font-size: 11px;
+                                color: #ccc;
+                            }
+                        }
+                        Slider {
+                            minimum: 0;
+                            maximum: root.white-level;
+                            value: root.iso-threshold;
+                            changed(v) => {
+                                root.iso-threshold = v;
+                                root.iso-threshold-changed(v);
                             }
                         }
                     }

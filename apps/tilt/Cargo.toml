@@ -14,3 +14,6 @@ imod-math.workspace = true
 imod-transforms = { path = "../../crates/imod-transforms" }
 clap = { version = "4", features = ["derive"] }
 rayon = "1"
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }

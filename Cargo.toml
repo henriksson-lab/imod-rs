@@ -134,6 +134,9 @@ members = [
     "apps/stitchvars",
     "apps/imod-aligner",
     "apps/imod-ctfplot",
+    "apps/nda",
+    "apps/sda",
+    "apps/mtk",
 ]
 
 [workspace.package]

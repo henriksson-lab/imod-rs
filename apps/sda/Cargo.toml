@@ -1,0 +1,15 @@
+[package]
+name = "sda"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "sda"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-math.workspace = true
+clap.workspace = true
+rand = "0.9"

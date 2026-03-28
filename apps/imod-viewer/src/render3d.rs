@@ -3,6 +3,7 @@
 //! Renders meshes with flat shading and contours as 3D lines into an RGBA
 //! pixel buffer, using a Z-buffer for hidden-surface removal.
 
+use imod_mesh::IsosurfaceMesh;
 use imod_model::ImodModel;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
@@ -61,6 +62,62 @@ impl Renderer3D {
 
     pub fn set_zoom(&mut self, zoom: f32) {
         self.zoom = zoom.max(0.01);
+    }
+
+    /// Render an isosurface mesh and return a Slint Image.
+    ///
+    /// Uses per-vertex normals for smooth Lambertian shading rather than
+    /// the flat per-triangle shading used by [`render_model`].
+    pub fn render_isosurface(&mut self, mesh: &IsosurfaceMesh) -> Image {
+        // Compute bounds from the mesh vertices.
+        if !mesh.vertices.is_empty() {
+            let mut min = [f32::MAX; 3];
+            let mut max = [f32::MIN; 3];
+            for v in &mesh.vertices {
+                for i in 0..3 {
+                    min[i] = min[i].min(v[i]);
+                    max[i] = max[i].max(v[i]);
+                }
+            }
+            for i in 0..3 {
+                self.center[i] = (min[i] + max[i]) * 0.5;
+            }
+            let dx = max[0] - min[0];
+            let dy = max[1] - min[1];
+            let dz = max[2] - min[2];
+            self.radius = (dx * dx + dy * dy + dz * dz).sqrt() * 0.5;
+            if self.radius < 1e-6 {
+                self.radius = 1.0;
+            }
+        }
+
+        self.clear();
+
+        // Rasterize each triangle with per-vertex normals (Gouraud-style shading).
+        let base_r: u8 = 100;
+        let base_g: u8 = 180;
+        let base_b: u8 = 220;
+
+        for tri in mesh.indices.chunks(3) {
+            if tri.len() < 3 { break; }
+            let i0 = tri[0] as usize;
+            let i1 = tri[1] as usize;
+            let i2 = tri[2] as usize;
+            if i0 >= mesh.vertices.len() || i1 >= mesh.vertices.len() || i2 >= mesh.vertices.len() {
+                continue;
+            }
+            let v0 = mesh.vertices[i0];
+            let v1 = mesh.vertices[i1];
+            let v2 = mesh.vertices[i2];
+            let n0 = mesh.normals[i0];
+            let n1 = mesh.normals[i1];
+            let n2 = mesh.normals[i2];
+            self.draw_triangle_smooth(v0, v1, v2, n0, n1, n2, base_r, base_g, base_b);
+        }
+
+        let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(self.width as u32, self.height as u32);
+        buf.make_mut_bytes().copy_from_slice(&self.pixels);
+        Image::from_rgba8(buf)
     }
 
     /// Render the model and return a Slint Image.
@@ -220,6 +277,110 @@ impl Renderer3D {
 
         // Rasterize using scanline
         self.fill_triangle_scanline(sx0, sy0, d0, sx1, sy1, d1, sx2, sy2, d2, sr, sg, sb);
+    }
+
+    /// Draw a triangle with per-vertex normals for smooth (Gouraud) shading.
+    fn draw_triangle_smooth(
+        &mut self,
+        v0: [f32; 3], v1: [f32; 3], v2: [f32; 3],
+        n0: [f32; 3], n1: [f32; 3], n2: [f32; 3],
+        r: u8, g: u8, b: u8,
+    ) {
+        // Compute per-vertex shade by rotating normal into screen space and
+        // taking dot product with the view direction (0, 0, 1).
+        let shade = |n: [f32; 3]| -> f32 {
+            let ay = self.rot_y.to_radians();
+            let (sy, cy) = ay.sin_cos();
+            let _nx1 = n[0] * cy + n[2] * sy;
+            let nz1 = -n[0] * sy + n[2] * cy;
+            let ny1 = n[1];
+            let ax = self.rot_x.to_radians();
+            let (sx, cx) = ax.sin_cos();
+            let nz2 = ny1 * sx + nz1 * cx;
+            let ndotl = nz2.abs(); // two-sided
+            0.25 + 0.75 * ndotl
+        };
+
+        let s0 = shade(n0);
+        let s1 = shade(n1);
+        let s2 = shade(n2);
+
+        // Project vertices.
+        let (sx0, sy0, d0) = self.project(v0);
+        let (sx1, sy1, d1) = self.project(v1);
+        let (sx2, sy2, d2) = self.project(v2);
+
+        // Rasterize with per-vertex shade interpolation.
+        self.fill_triangle_scanline_smooth(
+            sx0, sy0, d0, s0,
+            sx1, sy1, d1, s1,
+            sx2, sy2, d2, s2,
+            r, g, b,
+        );
+    }
+
+    fn fill_triangle_scanline_smooth(
+        &mut self,
+        x0: f32, y0: f32, z0: f32, s0: f32,
+        x1: f32, y1: f32, z1: f32, s1: f32,
+        x2: f32, y2: f32, z2: f32, s2: f32,
+        r: u8, g: u8, b: u8,
+    ) {
+        // Sort by y.
+        let mut pts = [(x0, y0, z0, s0), (x1, y1, z1, s1), (x2, y2, z2, s2)];
+        if pts[0].1 > pts[1].1 { pts.swap(0, 1); }
+        if pts[0].1 > pts[2].1 { pts.swap(0, 2); }
+        if pts[1].1 > pts[2].1 { pts.swap(1, 2); }
+
+        let (ax, ay, az, a_s) = pts[0];
+        let (bx, by, bz, b_s) = pts[1];
+        let (cx, cy, cz, c_s) = pts[2];
+
+        let total_h = cy - ay;
+        if total_h < 0.5 { return; }
+
+        let y_start = ay.ceil().max(0.0) as i32;
+        let y_end = cy.floor().min(self.height as f32 - 1.0) as i32;
+
+        for y in y_start..=y_end {
+            let yf = y as f32 + 0.5;
+            let t_ac = (yf - ay) / total_h;
+            let x_ac = ax + (cx - ax) * t_ac;
+            let z_ac = az + (cz - az) * t_ac;
+            let s_ac = a_s + (c_s - a_s) * t_ac;
+
+            let (x_short, z_short, s_short) = if yf < by {
+                let h = by - ay;
+                if h < 0.5 { continue; }
+                let t = (yf - ay) / h;
+                (ax + (bx - ax) * t, az + (bz - az) * t, a_s + (b_s - a_s) * t)
+            } else {
+                let h = cy - by;
+                if h < 0.5 { continue; }
+                let t = (yf - by) / h;
+                (bx + (cx - bx) * t, bz + (cz - bz) * t, b_s + (c_s - b_s) * t)
+            };
+
+            let (lx, lz, ls, rx, rz, rs) = if x_ac < x_short {
+                (x_ac, z_ac, s_ac, x_short, z_short, s_short)
+            } else {
+                (x_short, z_short, s_short, x_ac, z_ac, s_ac)
+            };
+
+            let xi_start = lx.ceil().max(0.0) as i32;
+            let xi_end = rx.floor().min(self.width as f32 - 1.0) as i32;
+            let span = rx - lx;
+
+            for xi in xi_start..=xi_end {
+                let t = if span > 0.5 { (xi as f32 + 0.5 - lx) / span } else { 0.5 };
+                let depth = lz + (rz - lz) * t;
+                let shade = ls + (rs - ls) * t;
+                let sr = (r as f32 * shade).min(255.0) as u8;
+                let sg = (g as f32 * shade).min(255.0) as u8;
+                let sb = (b as f32 * shade).min(255.0) as u8;
+                self.set_pixel_z(xi, y, depth, sr, sg, sb);
+            }
+        }
     }
 
     fn fill_triangle_scanline(

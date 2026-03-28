@@ -2,6 +2,7 @@ mod render3d;
 
 use imod_core::Point3f;
 use imod_math::min_max_mean;
+use imod_mesh::{marching_cubes, IsosurfaceMesh};
 use imod_model::{read_model, write_model, ImodContour, ImodModel, ImodObject};
 use imod_mrc::MrcReader;
 use rfd::FileDialog;
@@ -38,6 +39,9 @@ struct ViewerState {
     renderer3d: Renderer3D,
     // Mouse drag tracking for 3D rotation
     drag_last: Option<(f32, f32)>,
+    // Isosurface
+    iso_threshold: f32,
+    iso_mesh: Option<IsosurfaceMesh>,
 }
 
 impl ViewerState {
@@ -59,6 +63,8 @@ impl ViewerState {
             volume: None,
             renderer3d: Renderer3D::new(800, 600),
             drag_last: None,
+            iso_threshold: 128.0,
+            iso_mesh: None,
         }
     }
 
@@ -121,7 +127,43 @@ impl ViewerState {
             1 => self.render_slicer(),
             2 => self.render_xyz(),
             3 => self.render_model3d(),
+            4 => self.render_isosurface_view(),
             _ => self.render_zap(),
+        }
+    }
+
+    /// Extract and render an isosurface from the loaded volume.
+    fn extract_isosurface(&mut self) {
+        if self.volume.is_none() {
+            return;
+        }
+        let vol = self.volume.as_ref().unwrap();
+        // Flatten Vec<Vec<f32>> into a single contiguous Vec<f32>.
+        let flat: Vec<f32> = vol.iter().flat_map(|s| s.iter().copied()).collect();
+        let mesh = marching_cubes(&flat, self.nx, self.ny, self.nz, self.iso_threshold);
+        self.iso_mesh = Some(mesh);
+    }
+
+    fn render_isosurface_view(&mut self) -> Image {
+        let w = if self.nx > 0 { self.nx } else { 800 };
+        let h = if self.ny > 0 { self.ny } else { 600 };
+        self.renderer3d.resize(w, h);
+
+        if self.iso_mesh.is_none() {
+            self.extract_isosurface();
+        }
+
+        match &self.iso_mesh {
+            Some(mesh) => self.renderer3d.render_isosurface(mesh),
+            None => {
+                // No volume / empty mesh -- render dark background.
+                let empty = IsosurfaceMesh {
+                    vertices: Vec::new(),
+                    normals: Vec::new(),
+                    indices: Vec::new(),
+                };
+                self.renderer3d.render_isosurface(&empty)
+            }
         }
     }
 
@@ -562,8 +604,8 @@ fn main() {
         let ww = window.as_weak();
         window.on_mouse_moved(move |x, y| {
             let mut s = state.borrow_mut();
-            if s.view_mode == 3 {
-                // In 3D mode, track mouse drag for rotation
+            if s.view_mode == 3 || s.view_mode == 4 {
+                // In 3D / Iso mode, track mouse drag for rotation
                 if let Some((lx, ly)) = s.drag_last {
                     let dx = x - lx;
                     let dy = y - ly;
@@ -602,8 +644,12 @@ fn main() {
             let mut s = state.borrow_mut();
             s.view_mode = mode;
             s.drag_last = None;
-            if mode == 1 || mode == 2 {
+            if mode == 1 || mode == 2 || mode == 4 {
                 let _ = s.ensure_volume_loaded();
+            }
+            if mode == 4 {
+                s.iso_mesh = None; // force re-extraction
+                s.extract_isosurface();
             }
             if let Some(w) = ww.upgrade() { w.set_slice_image(s.render_image()); }
         });
@@ -630,12 +676,25 @@ fn main() {
         });
     }
 
+    // Iso threshold changed
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_iso_threshold_changed(move |thr| {
+            let mut s = state.borrow_mut();
+            s.iso_threshold = thr;
+            s.iso_mesh = None; // invalidate cache
+            s.extract_isosurface();
+            if let Some(w) = ww.upgrade() { w.set_slice_image(s.render_image()); }
+        });
+    }
+
     {
         let state = state.clone();
         let ww = window.as_weak();
         window.on_zoom_changed(move |z| {
             let mut s = state.borrow_mut();
-            if s.view_mode == 3 {
+            if s.view_mode == 3 || s.view_mode == 4 {
                 s.renderer3d.set_zoom(z);
                 if let Some(w) = ww.upgrade() {
                     w.set_slice_image(s.render_image());

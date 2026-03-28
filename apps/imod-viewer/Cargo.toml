@@ -12,6 +12,7 @@ imod-core.workspace = true
 imod-mrc.workspace = true
 imod-math.workspace = true
 imod-model.workspace = true
+imod-mesh.workspace = true
 imod-slice = { path = "../../crates/imod-slice" }
 slint = "1"
 rfd = "0.15"
