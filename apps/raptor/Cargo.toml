@@ -1,0 +1,19 @@
+[package]
+name = "raptor"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "raptor"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-model.workspace = true
+imod-math.workspace = true
+imod-fft.workspace = true
+imod-transforms.workspace = true
+imod-slice = { path = "../../crates/imod-slice" }
+clap.workspace = true
+rayon.workspace = true

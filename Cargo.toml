@@ -137,6 +137,7 @@ members = [
     "apps/nda",
     "apps/sda",
     "apps/mtk",
+    "apps/raptor",
 ]
 
 [workspace.package]
