@@ -14,4 +14,5 @@ imod-math.workspace = true
 imod-fft.workspace = true
 imod-transforms = { path = "../../crates/imod-transforms" }
 imod-slice = { path = "../../crates/imod-slice" }
+rustfft = "6"
 clap = { version = "4", features = ["derive"] }

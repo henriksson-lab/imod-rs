@@ -1,15 +1,17 @@
 use clap::Parser;
 use imod_core::MrcMode;
-use imod_fft::cross_correlate_2d;
+use imod_fft::{cross_correlate_2d, fft_r2c_2d, fft_c2r_2d};
 use imod_math::min_max_mean;
 use imod_mrc::{MrcHeader, MrcReader, MrcWriter};
 use imod_slice::Slice;
 use imod_transforms::{write_xf_file, LinearTransform};
+use rustfft::num_complex::Complex;
 
 /// Align movie frames by cross-correlation and produce a summed image.
 ///
 /// Reads a stack of movie frames, aligns each frame to a running reference
 /// using FFT cross-correlation, applies the shifts, and sums the aligned frames.
+/// Supports gain reference correction, dose weighting, and output of aligned stacks.
 #[derive(Parser)]
 #[command(name = "alignframes", about = "Align and sum movie frames")]
 struct Args {
@@ -44,6 +46,19 @@ struct Args {
     /// Group N frames for better SNR during alignment
     #[arg(short = 'g', long, default_value_t = 1)]
     group: usize,
+
+    /// Gain reference MRC file. Each frame is divided by this before alignment.
+    #[arg(long)]
+    gain: Option<String>,
+
+    /// Dose per frame in electrons/A^2. Applies exposure-dependent frequency
+    /// weighting: weight = exp(-dose * frequency^2 / 2).
+    #[arg(long)]
+    dose_per_frame: Option<f32>,
+
+    /// Output the aligned (but not summed) frames as an MRC stack.
+    #[arg(long)]
+    output_aligned_stack: Option<String>,
 }
 
 fn main() {
@@ -66,10 +81,45 @@ fn main() {
     eprintln!("alignframes: {} x {} x {} frames, using {}-{} ({} frames)",
         nx, ny, nz, first, last, n_frames);
 
+    // --- Load gain reference ---
+    let gain_ref: Option<Vec<f32>> = args.gain.as_ref().map(|gain_path| {
+        eprintln!("alignframes: loading gain reference from {}", gain_path);
+        let mut gain_reader = MrcReader::open(gain_path).unwrap_or_else(|e| {
+            eprintln!("Error opening gain reference {}: {}", gain_path, e);
+            std::process::exit(1);
+        });
+        let gh = gain_reader.header().clone();
+        if gh.nx as usize != nx || gh.ny as usize != ny {
+            eprintln!(
+                "Error: gain reference size {}x{} does not match frame size {}x{}",
+                gh.nx, gh.ny, nx, ny
+            );
+            std::process::exit(1);
+        }
+        gain_reader.read_slice_f32(0).unwrap()
+    });
+
     // Read all frames
     let mut frames: Vec<Vec<f32>> = Vec::with_capacity(n_frames);
     for z in first..=last {
-        frames.push(reader.read_slice_f32(z).unwrap());
+        let mut frame = reader.read_slice_f32(z).unwrap();
+
+        // Apply gain correction: divide each pixel by the gain reference
+        if let Some(ref gain) = gain_ref {
+            for i in 0..frame.len() {
+                if gain[i] != 0.0 {
+                    frame[i] /= gain[i];
+                } else {
+                    frame[i] = 0.0;
+                }
+            }
+        }
+
+        frames.push(frame);
+    }
+
+    if gain_ref.is_some() {
+        eprintln!("alignframes: gain correction applied to {} frames", n_frames);
     }
 
     // FFT size (power of 2)
@@ -126,21 +176,73 @@ fn main() {
         eprintln!("  iter {}: max shift = {:.2} px", iter + 1, max_shift);
     }
 
-    // Apply shifts at full resolution and sum
-    let mut sum = vec![0.0f32; nx * ny];
-    for (fi, frame) in frames.iter().enumerate() {
-        let (dx, dy) = shifts[fi];
-        let s = Slice::from_data(nx, ny, frame.clone());
-        for y in 0..ny {
-            for x in 0..nx {
-                let sx = x as f32 - dx;
-                let sy = y as f32 - dy;
-                sum[y * nx + x] += s.interpolate_bilinear(sx, sy, 0.0);
+    // --- Output aligned (but not summed) stack ---
+    if let Some(ref aligned_path) = args.output_aligned_stack {
+        eprintln!("alignframes: writing aligned stack to {}", aligned_path);
+        let mut aligned_header = MrcHeader::new(nx as i32, ny as i32, n_frames as i32, MrcMode::Float);
+        aligned_header.xlen = h.xlen;
+        aligned_header.ylen = h.ylen;
+        aligned_header.zlen = h.zlen;
+        aligned_header.mx = nx as i32;
+        aligned_header.my = ny as i32;
+        aligned_header.mz = n_frames as i32;
+        aligned_header.add_label("alignframes: aligned stack");
+
+        let mut aligned_writer = MrcWriter::create(aligned_path, aligned_header).unwrap();
+        let mut amin = f32::MAX;
+        let mut amax = f32::MIN;
+        let mut asum = 0.0f64;
+
+        for (fi, frame) in frames.iter().enumerate() {
+            let (dx, dy) = shifts[fi];
+            let s = Slice::from_data(nx, ny, frame.clone());
+            let mut aligned_frame = vec![0.0f32; nx * ny];
+            for y in 0..ny {
+                for x in 0..nx {
+                    let sx = x as f32 - dx;
+                    let sy = y as f32 - dy;
+                    aligned_frame[y * nx + x] = s.interpolate_bilinear(sx, sy, 0.0);
+                }
+            }
+
+            let (fmin, fmax, fmean) = min_max_mean(&aligned_frame);
+            if fmin < amin { amin = fmin; }
+            if fmax > amax { amax = fmax; }
+            asum += fmean as f64 * (nx * ny) as f64;
+
+            aligned_writer.write_slice_f32(&aligned_frame).unwrap();
+        }
+
+        let amean = (asum / (nx * ny * n_frames) as f64) as f32;
+        aligned_writer.finish(amin, amax, amean).unwrap();
+        eprintln!("alignframes: wrote {} aligned frames to {}", n_frames, aligned_path);
+    }
+
+    // --- Apply shifts at full resolution and sum, with optional dose weighting ---
+    let sum = if let Some(dose_per_frame) = args.dose_per_frame {
+        eprintln!(
+            "alignframes: applying dose weighting ({} e/A^2 per frame)",
+            dose_per_frame
+        );
+        dose_weighted_sum(&frames, &shifts, nx, ny, dose_per_frame)
+    } else {
+        // Simple unweighted sum
+        let mut sum = vec![0.0f32; nx * ny];
+        for (fi, frame) in frames.iter().enumerate() {
+            let (dx, dy) = shifts[fi];
+            let s = Slice::from_data(nx, ny, frame.clone());
+            for y in 0..ny {
+                for x in 0..nx {
+                    let sx = x as f32 - dx;
+                    let sy = y as f32 - dy;
+                    sum[y * nx + x] += s.interpolate_bilinear(sx, sy, 0.0);
+                }
             }
         }
-    }
-    let inv_n = 1.0 / n_frames as f32;
-    for v in &mut sum { *v *= inv_n; }
+        let inv_n = 1.0 / n_frames as f32;
+        for v in &mut sum { *v *= inv_n; }
+        sum
+    };
 
     // Write output
     let (gmin, gmax, gmean) = min_max_mean(&sum);
@@ -167,6 +269,88 @@ fn main() {
     }
 
     eprintln!("alignframes: wrote aligned sum to {}", args.output);
+}
+
+/// Produce a dose-weighted sum of aligned frames.
+///
+/// Each frame is shifted, FFT'd, multiplied by an exposure-dependent weight,
+/// then all are summed in Fourier space and transformed back.
+/// Weight for frame k = exp(-cumulative_dose_k * frequency^2 / 2).
+fn dose_weighted_sum(
+    frames: &[Vec<f32>],
+    shifts: &[(f32, f32)],
+    nx: usize,
+    ny: usize,
+    dose_per_frame: f32,
+) -> Vec<f32> {
+    let fft_nx = next_pow2(nx);
+    let fft_ny = next_pow2(ny);
+    let nxc = fft_nx / 2 + 1;
+
+    let mut sum_freq: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); nxc * fft_ny];
+    let mut weight_sum: Vec<f32> = vec![0.0; nxc * fft_ny];
+
+    for (fi, frame) in frames.iter().enumerate() {
+        let (dx, dy) = shifts[fi];
+        let cumulative_dose = dose_per_frame * (fi + 1) as f32;
+
+        // Shift the frame
+        let s = Slice::from_data(nx, ny, frame.clone());
+        let mut shifted = vec![0.0f32; nx * ny];
+        for y in 0..ny {
+            for x in 0..nx {
+                let sx = x as f32 - dx;
+                let sy = y as f32 - dy;
+                shifted[y * nx + x] = s.interpolate_bilinear(sx, sy, 0.0);
+            }
+        }
+
+        // Pad and FFT
+        let padded = pad_image(&shifted, nx, ny, fft_nx, fft_ny);
+        let freq = fft_r2c_2d(&padded, fft_nx, fft_ny);
+
+        // Apply dose weighting and accumulate
+        for fy in 0..fft_ny {
+            let fy_norm = if fy <= fft_ny / 2 {
+                fy as f32 / fft_ny as f32
+            } else {
+                (fft_ny - fy) as f32 / fft_ny as f32
+            };
+            for fx in 0..nxc {
+                let fx_norm = fx as f32 / fft_nx as f32;
+                let freq_sq = fx_norm * fx_norm + fy_norm * fy_norm;
+
+                // Dose weight: exp(-cumulative_dose * freq^2 / 2)
+                let w = (-cumulative_dose * freq_sq / 2.0).exp();
+
+                let idx = fy * nxc + fx;
+                sum_freq[idx] += freq[idx] * w;
+                weight_sum[idx] += w;
+            }
+        }
+    }
+
+    // Normalize by total weight at each frequency
+    for i in 0..sum_freq.len() {
+        if weight_sum[i] > 0.0 {
+            sum_freq[i] /= weight_sum[i];
+        }
+    }
+
+    // Inverse FFT
+    let result_padded = fft_c2r_2d(&sum_freq, fft_nx, fft_ny);
+
+    // Extract original size
+    let ox = (fft_nx - nx) / 2;
+    let oy = (fft_ny - ny) / 2;
+    let mut result = vec![0.0f32; nx * ny];
+    for y in 0..ny {
+        for x in 0..nx {
+            result[y * nx + x] = result_padded[(y + oy) * fft_nx + (x + ox)];
+        }
+    }
+
+    result
 }
 
 fn pad_image(data: &[f32], nx: usize, ny: usize, fft_nx: usize, fft_ny: usize) -> Vec<f32> {

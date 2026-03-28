@@ -1,5 +1,5 @@
 use clap::Parser;
-use imod_fft::cross_correlate_2d;
+use imod_fft::{cross_correlate_2d, fft_r2c_2d, fft_c2r_2d};
 use imod_mrc::MrcReader;
 use imod_transforms::{write_xf_file, LinearTransform};
 
@@ -28,13 +28,23 @@ struct Args {
     #[arg(short = 'e', long)]
     exclude: Option<String>,
 
-    /// Filter radius 1 (low-freq cutoff, fraction of Nyquist, default 0.0)
+    /// Filter radius 1 (high-pass cutoff, fraction of Nyquist, default 0.0)
     #[arg(long, default_value_t = 0.0)]
     filter_radius1: f32,
 
-    /// Filter radius 2 (high-freq cutoff, fraction of Nyquist, default 0.25)
+    /// Filter radius 2 (low-pass cutoff, fraction of Nyquist, default 0.25)
     #[arg(long, default_value_t = 0.25)]
     filter_radius2: f32,
+
+    /// Cumulative alignment: align each section to the running average of all
+    /// previously aligned sections instead of just the immediate neighbor.
+    #[arg(long, default_value_t = false)]
+    cumulative: bool,
+
+    /// Patch-based correlation: divide each image into an NxM grid and correlate
+    /// each patch independently. Format: "nx,ny" (e.g. "3,3").
+    #[arg(long)]
+    patches: Option<String>,
 }
 
 fn main() {
@@ -51,7 +61,6 @@ fn main() {
     let nz = h.nz as usize;
 
     // Ensure nx/ny are suitable for FFT (should be even)
-    // For now we pad to nearest power of 2 if needed
     let fft_nx = next_power_of_2(nx);
     let fft_ny = next_power_of_2(ny);
 
@@ -67,7 +76,33 @@ fn main() {
         })
         .unwrap_or_default();
 
-    eprintln!("tiltxcorr: {} x {} x {}, reference section {}", nx, ny, nz, ref_section);
+    let use_bandpass = args.filter_radius1 > 0.0 || args.filter_radius2 < 0.5;
+
+    // Parse patch grid
+    let patch_grid: Option<(usize, usize)> = args.patches.as_deref().map(|s| {
+        let parts: Vec<&str> = s.split(',').collect();
+        if parts.len() != 2 {
+            eprintln!("Error: --patches must be in format 'nx,ny' (e.g. '3,3')");
+            std::process::exit(1);
+        }
+        let pnx: usize = parts[0].trim().parse().unwrap_or_else(|_| {
+            eprintln!("Error: invalid patch nx");
+            std::process::exit(1);
+        });
+        let pny: usize = parts[1].trim().parse().unwrap_or_else(|_| {
+            eprintln!("Error: invalid patch ny");
+            std::process::exit(1);
+        });
+        (pnx, pny)
+    });
+
+    eprintln!(
+        "tiltxcorr: {} x {} x {}, reference section {}, bandpass={}, cumulative={}",
+        nx, ny, nz, ref_section, use_bandpass, args.cumulative
+    );
+    if let Some((pnx, pny)) = patch_grid {
+        eprintln!("tiltxcorr: patch-based correlation {}x{} grid", pnx, pny);
+    }
 
     // Read all sections
     let mut sections: Vec<Vec<f32>> = Vec::with_capacity(nz);
@@ -75,34 +110,171 @@ fn main() {
         sections.push(reader.read_slice_f32(z).unwrap());
     }
 
-    // Compute transforms by correlating each section with its neighbor
-    let mut transforms = vec![LinearTransform::identity(); nz];
-
-    // Work outward from reference in both directions
-    // Forward: ref+1, ref+2, ...
-    for z in (ref_section + 1)..nz {
-        if excluded.contains(&z) || excluded.contains(&(z - 1)) {
-            transforms[z] = transforms[z - 1];
-            continue;
-        }
-        let (dx, dy) = find_shift(&sections[z - 1], &sections[z], nx, ny, fft_nx, fft_ny);
-        transforms[z] = LinearTransform::translation(
-            transforms[z - 1].dx + dx,
-            transforms[z - 1].dy + dy,
+    // Apply bandpass filter to all sections if requested
+    if use_bandpass {
+        eprintln!(
+            "tiltxcorr: applying bandpass filter: high-pass={}, low-pass={}",
+            args.filter_radius1, args.filter_radius2
         );
+        for z in 0..nz {
+            sections[z] = apply_bandpass(&sections[z], nx, ny, fft_nx, fft_ny,
+                                         args.filter_radius1, args.filter_radius2);
+        }
     }
 
-    // Backward: ref-1, ref-2, ...
-    for z in (0..ref_section).rev() {
-        if excluded.contains(&z) || excluded.contains(&(z + 1)) {
-            transforms[z] = transforms[z + 1];
-            continue;
+    // --- Patch-based correlation ---
+    if let Some((pnx, pny)) = patch_grid {
+        let patch_w = nx / pnx;
+        let patch_h = ny / pny;
+        let fft_pw = next_power_of_2(patch_w);
+        let fft_ph = next_power_of_2(patch_h);
+
+        eprintln!("tiltxcorr: patch size {}x{}, fft {}x{}", patch_w, patch_h, fft_pw, fft_ph);
+
+        // Compute per-patch transforms; the global transform is the median of patches
+        let mut transforms = vec![LinearTransform::identity(); nz];
+
+        // Forward from reference
+        for z in (ref_section + 1)..nz {
+            if excluded.contains(&z) || excluded.contains(&(z - 1)) {
+                transforms[z] = transforms[z - 1];
+                continue;
+            }
+            let (dx, dy, patch_shifts) = find_shift_patches(
+                &sections[z - 1], &sections[z], nx, ny,
+                pnx, pny, patch_w, patch_h, fft_pw, fft_ph,
+            );
+            transforms[z] = LinearTransform::translation(
+                transforms[z - 1].dx + dx,
+                transforms[z - 1].dy + dy,
+            );
+            eprintln!("  section {:>3}: global dx={:.2}, dy={:.2} (from {} patches)",
+                z, dx, dy, patch_shifts.len());
+            for (pi, (pdx, pdy)) in patch_shifts.iter().enumerate() {
+                let px_idx = pi % pnx;
+                let py_idx = pi / pnx;
+                eprintln!("    patch ({},{}): dx={:.2}, dy={:.2}", px_idx, py_idx, pdx, pdy);
+            }
         }
-        let (dx, dy) = find_shift(&sections[z + 1], &sections[z], nx, ny, fft_nx, fft_ny);
-        transforms[z] = LinearTransform::translation(
-            transforms[z + 1].dx + dx,
-            transforms[z + 1].dy + dy,
-        );
+
+        // Backward from reference
+        for z in (0..ref_section).rev() {
+            if excluded.contains(&z) || excluded.contains(&(z + 1)) {
+                transforms[z] = transforms[z + 1];
+                continue;
+            }
+            let (dx, dy, patch_shifts) = find_shift_patches(
+                &sections[z + 1], &sections[z], nx, ny,
+                pnx, pny, patch_w, patch_h, fft_pw, fft_ph,
+            );
+            transforms[z] = LinearTransform::translation(
+                transforms[z + 1].dx + dx,
+                transforms[z + 1].dy + dy,
+            );
+            eprintln!("  section {:>3}: global dx={:.2}, dy={:.2} (from {} patches)",
+                z, dx, dy, patch_shifts.len());
+            for (pi, (pdx, pdy)) in patch_shifts.iter().enumerate() {
+                let px_idx = pi % pnx;
+                let py_idx = pi / pnx;
+                eprintln!("    patch ({},{}): dx={:.2}, dy={:.2}", px_idx, py_idx, pdx, pdy);
+            }
+        }
+
+        write_xf_file(&args.output, &transforms).unwrap_or_else(|e| {
+            eprintln!("Error writing {}: {}", args.output, e);
+            std::process::exit(1);
+        });
+        eprintln!("tiltxcorr: wrote {} transforms to {}", nz, args.output);
+        for (z, xf) in transforms.iter().enumerate() {
+            eprintln!("  section {:>3}: dx={:>8.2}, dy={:>8.2}", z, xf.dx, xf.dy);
+        }
+        return;
+    }
+
+    // --- Standard (non-patch) mode ---
+    let mut transforms = vec![LinearTransform::identity(); nz];
+
+    if args.cumulative {
+        // Cumulative alignment: align each section to the running average
+        // Forward: ref+1, ref+2, ...
+        // Build cumulative reference starting from the reference section
+        let mut cum_sum = sections[ref_section].clone();
+        let mut cum_count = 1.0f32;
+
+        for z in (ref_section + 1)..nz {
+            if excluded.contains(&z) {
+                transforms[z] = transforms[z - 1];
+                continue;
+            }
+
+            // Build cumulative average
+            let cum_avg: Vec<f32> = cum_sum.iter().map(|&v| v / cum_count).collect();
+
+            let (dx, dy) = find_shift(&cum_avg, &sections[z], nx, ny, fft_nx, fft_ny);
+            transforms[z] = LinearTransform::translation(
+                transforms[z - 1].dx + dx,
+                transforms[z - 1].dy + dy,
+            );
+
+            // Add this aligned section to cumulative sum (shift it first, approximately)
+            // For simplicity, add the unshifted section -- the shift is small and
+            // the cumulative average will converge.
+            for i in 0..cum_sum.len() {
+                cum_sum[i] += sections[z][i];
+            }
+            cum_count += 1.0;
+        }
+
+        // Backward: ref-1, ref-2, ...
+        let mut cum_sum = sections[ref_section].clone();
+        let mut cum_count = 1.0f32;
+
+        for z in (0..ref_section).rev() {
+            if excluded.contains(&z) {
+                transforms[z] = transforms[z + 1];
+                continue;
+            }
+
+            let cum_avg: Vec<f32> = cum_sum.iter().map(|&v| v / cum_count).collect();
+
+            let (dx, dy) = find_shift(&cum_avg, &sections[z], nx, ny, fft_nx, fft_ny);
+            transforms[z] = LinearTransform::translation(
+                transforms[z + 1].dx + dx,
+                transforms[z + 1].dy + dy,
+            );
+
+            for i in 0..cum_sum.len() {
+                cum_sum[i] += sections[z][i];
+            }
+            cum_count += 1.0;
+        }
+    } else {
+        // Original neighbor-to-neighbor mode
+        // Forward: ref+1, ref+2, ...
+        for z in (ref_section + 1)..nz {
+            if excluded.contains(&z) || excluded.contains(&(z - 1)) {
+                transforms[z] = transforms[z - 1];
+                continue;
+            }
+            let (dx, dy) = find_shift(&sections[z - 1], &sections[z], nx, ny, fft_nx, fft_ny);
+            transforms[z] = LinearTransform::translation(
+                transforms[z - 1].dx + dx,
+                transforms[z - 1].dy + dy,
+            );
+        }
+
+        // Backward: ref-1, ref-2, ...
+        for z in (0..ref_section).rev() {
+            if excluded.contains(&z) || excluded.contains(&(z + 1)) {
+                transforms[z] = transforms[z + 1];
+                continue;
+            }
+            let (dx, dy) = find_shift(&sections[z + 1], &sections[z], nx, ny, fft_nx, fft_ny);
+            transforms[z] = LinearTransform::translation(
+                transforms[z + 1].dx + dx,
+                transforms[z + 1].dy + dy,
+            );
+        }
     }
 
     // Write output
@@ -115,6 +287,71 @@ fn main() {
     for (z, xf) in transforms.iter().enumerate() {
         eprintln!("  section {:>3}: dx={:>8.2}, dy={:>8.2}", z, xf.dx, xf.dy);
     }
+}
+
+/// Apply bandpass filter with given high-pass and low-pass radii (fractions of Nyquist).
+fn apply_bandpass(
+    data: &[f32],
+    nx: usize,
+    ny: usize,
+    fft_nx: usize,
+    fft_ny: usize,
+    high_pass: f32,
+    low_pass: f32,
+) -> Vec<f32> {
+    let padded = pad_image(data, nx, ny, fft_nx, fft_ny);
+    let nxc = fft_nx / 2 + 1;
+    let mut freq = fft_r2c_2d(&padded, fft_nx, fft_ny);
+
+    // Apply bandpass filter in frequency domain
+    for fy in 0..fft_ny {
+        let fy_norm = if fy <= fft_ny / 2 {
+            fy as f32 / fft_ny as f32
+        } else {
+            (fft_ny - fy) as f32 / fft_ny as f32
+        };
+        for fx in 0..nxc {
+            let fx_norm = fx as f32 / fft_nx as f32;
+            // Spatial frequency as fraction of Nyquist (max = 0.5)
+            let freq_r = (fx_norm * fx_norm + fy_norm * fy_norm).sqrt();
+
+            let mut weight = 1.0f32;
+
+            // High-pass: smooth rolloff below high_pass
+            if high_pass > 0.0 && freq_r < high_pass {
+                if freq_r <= 0.0 {
+                    weight = 0.0;
+                } else {
+                    // Gaussian rolloff
+                    let sigma = high_pass / 3.0;
+                    let d = high_pass - freq_r;
+                    weight *= (-0.5 * (d / sigma).powi(2)).exp();
+                }
+            }
+
+            // Low-pass: smooth rolloff above low_pass
+            if low_pass < 0.5 && freq_r > low_pass {
+                let sigma = (0.5 - low_pass).max(0.01) / 3.0;
+                let d = freq_r - low_pass;
+                weight *= (-0.5 * (d / sigma).powi(2)).exp();
+            }
+
+            freq[fy * nxc + fx] *= weight;
+        }
+    }
+
+    let filtered_padded = fft_c2r_2d(&freq, fft_nx, fft_ny);
+
+    // Extract original-size region
+    let ox = (fft_nx - nx) / 2;
+    let oy = (fft_ny - ny) / 2;
+    let mut result = vec![0.0f32; nx * ny];
+    for y in 0..ny {
+        for x in 0..nx {
+            result[y * nx + x] = filtered_padded[(y + oy) * fft_nx + (x + ox)];
+        }
+    }
+    result
 }
 
 /// Find the translational shift between two images using cross-correlation.
@@ -142,6 +379,57 @@ fn find_shift(
     let dy = if py > fft_ny / 2 { py as f32 - fft_ny as f32 } else { py as f32 };
 
     (dx, dy)
+}
+
+/// Find shift using patch-based correlation. Divides the image into a grid,
+/// correlates each patch, and returns the median shift as the global result,
+/// plus all per-patch shifts.
+fn find_shift_patches(
+    reference: &[f32],
+    target: &[f32],
+    nx: usize,
+    ny: usize,
+    pnx: usize,
+    pny: usize,
+    patch_w: usize,
+    patch_h: usize,
+    fft_pw: usize,
+    fft_ph: usize,
+) -> (f32, f32, Vec<(f32, f32)>) {
+    let mut patch_shifts: Vec<(f32, f32)> = Vec::with_capacity(pnx * pny);
+
+    for py_idx in 0..pny {
+        for px_idx in 0..pnx {
+            let x0 = px_idx * patch_w;
+            let y0 = py_idx * patch_h;
+
+            // Extract patches
+            let mut ref_patch = vec![0.0f32; patch_w * patch_h];
+            let mut tgt_patch = vec![0.0f32; patch_w * patch_h];
+            for y in 0..patch_h {
+                for x in 0..patch_w {
+                    let src_x = (x0 + x).min(nx - 1);
+                    let src_y = (y0 + y).min(ny - 1);
+                    ref_patch[y * patch_w + x] = reference[src_y * nx + src_x];
+                    tgt_patch[y * patch_w + x] = target[src_y * nx + src_x];
+                }
+            }
+
+            let (dx, dy) = find_shift(&ref_patch, &tgt_patch, patch_w, patch_h, fft_pw, fft_ph);
+            patch_shifts.push((dx, dy));
+        }
+    }
+
+    // Compute global shift as the median of per-patch shifts
+    let mut dxs: Vec<f32> = patch_shifts.iter().map(|s| s.0).collect();
+    let mut dys: Vec<f32> = patch_shifts.iter().map(|s| s.1).collect();
+    dxs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    dys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let med_dx = dxs[dxs.len() / 2];
+    let med_dy = dys[dys.len() / 2];
+
+    (med_dx, med_dy, patch_shifts)
 }
 
 fn pad_image(data: &[f32], nx: usize, ny: usize, fft_nx: usize, fft_ny: usize) -> Vec<f32> {

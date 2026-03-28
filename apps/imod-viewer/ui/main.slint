@@ -40,6 +40,10 @@ export component MainWindow inherits Window {
     in-out property <int> edit-mode: 0;
     in property <string> edit-status: "View";
 
+    // Undo/redo availability (for potential UI indicators)
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+
     // Callbacks
     callback open-file();
     callback open-model();
@@ -55,284 +59,396 @@ export component MainWindow inherits Window {
     callback iso-threshold-changed(float);
     callback save-model();
     callback mouse-released();
+    callback undo();
+    callback redo();
+    callback key-pressed(string);
 
-    VerticalBox {
-        // Toolbar
-        HorizontalBox {
-            height: 40px;
-            padding: 4px;
-            spacing: 6px;
+    forward-focus: key-handler;
 
-            Button { text: "Open Image..."; clicked => { root.open-file(); } }
-            Button { text: "Open Model..."; clicked => { root.open-model(); } }
-            Button { text: "Save Model"; clicked => { root.save-model(); } }
-
-            Rectangle { width: 1px; background: #444; }
-
-            Button {
-                text: "View";
-                enabled: root.edit-mode != 0;
-                clicked => { root.edit-mode = 0; }
+    key-handler := FocusScope {
+        key-pressed(ev) => {
+            if (ev.text == Key.PageUp) {
+                root.key-pressed("PageUp");
+                return accept;
             }
-            Button {
-                text: "Add Pts";
-                enabled: root.edit-mode != 1;
-                clicked => { root.edit-mode = 1; }
+            if (ev.text == Key.PageDown) {
+                root.key-pressed("PageDown");
+                return accept;
             }
-            Button {
-                text: "Del Pts";
-                enabled: root.edit-mode != 3;
-                clicked => { root.edit-mode = 3; }
+            if (ev.text == "+" || ev.text == "=") {
+                root.key-pressed("ZoomIn");
+                return accept;
             }
-            Text {
-                text: root.edit-status;
-                vertical-alignment: center;
-                color: #ff8;
-                font-size: 11px;
+            if (ev.text == "-") {
+                root.key-pressed("ZoomOut");
+                return accept;
             }
-
-            Rectangle { width: 1px; background: #444; }
-
-            Button {
-                text: "ZAP";
-                enabled: root.view-mode != 0;
-                clicked => { root.view-mode = 0; root.view-mode-changed(0); }
+            if (ev.text == "1") {
+                root.view-mode = 0;
+                root.view-mode-changed(0);
+                return accept;
             }
-            Button {
-                text: "Slicer";
-                enabled: root.view-mode != 1;
-                clicked => { root.view-mode = 1; root.view-mode-changed(1); }
+            if (ev.text == "2") {
+                root.view-mode = 1;
+                root.view-mode-changed(1);
+                return accept;
             }
-            Button {
-                text: "XYZ";
-                enabled: root.view-mode != 2;
-                clicked => { root.view-mode = 2; root.view-mode-changed(2); }
+            if (ev.text == "3") {
+                root.view-mode = 2;
+                root.view-mode-changed(2);
+                return accept;
             }
-            Button {
-                text: "3D";
-                enabled: root.view-mode != 3;
-                clicked => { root.view-mode = 3; root.view-mode-changed(3); }
+            if (ev.text == "4") {
+                root.view-mode = 3;
+                root.view-mode-changed(3);
+                return accept;
             }
-            Button {
-                text: "Iso";
-                enabled: root.view-mode != 4;
-                clicked => { root.view-mode = 4; root.view-mode-changed(4); }
+            if (ev.text == "5") {
+                root.view-mode = 4;
+                root.view-mode-changed(4);
+                return accept;
             }
-
-            Rectangle { horizontal-stretch: 1; }
-
-            CheckBox {
-                text: "Model";
-                checked: root.show-model;
-                toggled => { root.toggle-model(self.checked); }
+            // Ctrl+Z = undo
+            if (ev.modifiers.control && (ev.text == "z" || ev.text == "Z") && !ev.modifiers.shift) {
+                root.undo();
+                return accept;
             }
-
-            Text {
-                text: root.filename;
-                vertical-alignment: center;
-                color: #aaa;
+            // Ctrl+Y = redo
+            if (ev.modifiers.control && (ev.text == "y" || ev.text == "Y")) {
+                root.redo();
+                return accept;
             }
+            // Ctrl+S = save
+            if (ev.modifiers.control && (ev.text == "s" || ev.text == "S")) {
+                root.save-model();
+                return accept;
+            }
+            // M = toggle model overlay
+            if (ev.text == "m" || ev.text == "M") {
+                if (!ev.modifiers.control) {
+                    root.show-model = !root.show-model;
+                    root.toggle-model(root.show-model);
+                    return accept;
+                }
+            }
+            // A = add points mode
+            if (ev.text == "a" || ev.text == "A") {
+                if (!ev.modifiers.control) {
+                    root.edit-mode = 1;
+                    root.key-pressed("AddMode");
+                    return accept;
+                }
+            }
+            // D = delete points mode
+            if (ev.text == "d" || ev.text == "D") {
+                if (!ev.modifiers.control) {
+                    root.edit-mode = 3;
+                    root.key-pressed("DeleteMode");
+                    return accept;
+                }
+            }
+            // V = view mode
+            if (ev.text == "v" || ev.text == "V") {
+                if (!ev.modifiers.control) {
+                    root.edit-mode = 0;
+                    root.key-pressed("ViewMode");
+                    return accept;
+                }
+            }
+            return reject;
         }
 
-        HorizontalBox {
-            // Main image area
-            Rectangle {
-                background: #1a1a1a;
-                clip: true;
-                horizontal-stretch: 3;
-
-                img := Image {
-                    source: root.slice-image;
-                    width: self.source.width * 1px * root.zoom;
-                    height: self.source.height * 1px * root.zoom;
-                    image-rendering: pixelated;
-                }
-
-                // Mouse tracking area
-                ta := TouchArea {
-                    moved => {
-                        root.mouse-moved(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
-                    }
-                    clicked => {
-                        root.mouse-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
-                    }
-                    pointer-event(ev) => {
-                        if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up) {
-                            root.mouse-right-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
-                        }
-                        if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up) {
-                            root.mouse-released();
-                        }
-                    }
-                    scroll-event(ev) => {
-                        if (ev.delta-y > 0) {
-                            root.zoom = Math.min(root.zoom * 1.1, 20.0);
-                        } else {
-                            root.zoom = Math.max(root.zoom / 1.1, 0.05);
-                        }
-                        root.zoom-changed(root.zoom);
-                        return accept;
-                    }
-                }
-            }
-
-            // Side panel
-            VerticalBox {
-                width: 220px;
+        VerticalBox {
+            // Toolbar
+            HorizontalBox {
+                height: 40px;
                 padding: 4px;
-                spacing: 4px;
+                spacing: 6px;
 
-                GroupBox {
-                    title: "Info";
-                    VerticalBox {
-                        spacing: 2px;
-                        Text { text: root.info-text; wrap: word-wrap; font-size: 11px; }
-                        Text { text: root.pixel-value-text; font-size: 11px; color: #ccc; }
+                Button { text: "Open Image..."; clicked => { root.open-file(); } }
+                Button { text: "Open Model..."; clicked => { root.open-model(); } }
+                Button { text: "Save Model"; clicked => { root.save-model(); } }
+
+                Rectangle { width: 1px; background: #444; }
+
+                Button {
+                    text: "Undo";
+                    enabled: root.can-undo;
+                    clicked => { root.undo(); }
+                }
+                Button {
+                    text: "Redo";
+                    enabled: root.can-redo;
+                    clicked => { root.redo(); }
+                }
+
+                Rectangle { width: 1px; background: #444; }
+
+                Button {
+                    text: "View";
+                    enabled: root.edit-mode != 0;
+                    clicked => { root.edit-mode = 0; }
+                }
+                Button {
+                    text: "Add Pts";
+                    enabled: root.edit-mode != 1;
+                    clicked => { root.edit-mode = 1; }
+                }
+                Button {
+                    text: "Del Pts";
+                    enabled: root.edit-mode != 3;
+                    clicked => { root.edit-mode = 3; }
+                }
+                Text {
+                    text: root.edit-status;
+                    vertical-alignment: center;
+                    color: #ff8;
+                    font-size: 11px;
+                }
+
+                Rectangle { width: 1px; background: #444; }
+
+                Button {
+                    text: "ZAP";
+                    enabled: root.view-mode != 0;
+                    clicked => { root.view-mode = 0; root.view-mode-changed(0); }
+                }
+                Button {
+                    text: "Slicer";
+                    enabled: root.view-mode != 1;
+                    clicked => { root.view-mode = 1; root.view-mode-changed(1); }
+                }
+                Button {
+                    text: "XYZ";
+                    enabled: root.view-mode != 2;
+                    clicked => { root.view-mode = 2; root.view-mode-changed(2); }
+                }
+                Button {
+                    text: "3D";
+                    enabled: root.view-mode != 3;
+                    clicked => { root.view-mode = 3; root.view-mode-changed(3); }
+                }
+                Button {
+                    text: "Iso";
+                    enabled: root.view-mode != 4;
+                    clicked => { root.view-mode = 4; root.view-mode-changed(4); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                CheckBox {
+                    text: "Model";
+                    checked: root.show-model;
+                    toggled => { root.toggle-model(self.checked); }
+                }
+
+                Text {
+                    text: root.filename;
+                    vertical-alignment: center;
+                    color: #aaa;
+                }
+            }
+
+            HorizontalBox {
+                // Main image area
+                Rectangle {
+                    background: #1a1a1a;
+                    clip: true;
+                    horizontal-stretch: 3;
+
+                    img := Image {
+                        source: root.slice-image;
+                        width: self.source.width * 1px * root.zoom;
+                        height: self.source.height * 1px * root.zoom;
+                        image-rendering: pixelated;
+                    }
+
+                    // Mouse tracking area
+                    ta := TouchArea {
+                        moved => {
+                            root.mouse-moved(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
+                        }
+                        clicked => {
+                            root.mouse-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
+                        }
+                        pointer-event(ev) => {
+                            if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up) {
+                                root.mouse-right-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
+                            }
+                            if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up) {
+                                root.mouse-released();
+                            }
+                        }
+                        scroll-event(ev) => {
+                            if (ev.delta-y > 0) {
+                                root.zoom = Math.min(root.zoom * 1.1, 20.0);
+                            } else {
+                                root.zoom = Math.max(root.zoom / 1.1, 0.05);
+                            }
+                            root.zoom-changed(root.zoom);
+                            return accept;
+                        }
                     }
                 }
 
-                GroupBox {
-                    title: "Model";
-                    VerticalBox {
-                        spacing: 2px;
-                        Text { text: root.model-info; font-size: 11px; }
-                        for obj[idx] in root.model-objects: HorizontalBox {
+                // Side panel
+                VerticalBox {
+                    width: 220px;
+                    padding: 4px;
+                    spacing: 4px;
+
+                    GroupBox {
+                        title: "Info";
+                        VerticalBox {
+                            spacing: 2px;
+                            Text { text: root.info-text; wrap: word-wrap; font-size: 11px; }
+                            Text { text: root.pixel-value-text; font-size: 11px; color: #ccc; }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Model";
+                        VerticalBox {
+                            spacing: 2px;
+                            Text { text: root.model-info; font-size: 11px; }
+                            for obj[idx] in root.model-objects: HorizontalBox {
+                                spacing: 4px;
+                                height: 20px;
+                                Rectangle {
+                                    width: 12px;
+                                    height: 12px;
+                                    background: obj.color;
+                                    border-radius: 2px;
+                                }
+                                Text {
+                                    text: obj.name + " (" + obj.num-contours + ")";
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Isosurface threshold (only when iso mode)
+                    if root.view-mode == 4: GroupBox {
+                        title: "Isosurface";
+                        VerticalBox {
                             spacing: 4px;
-                            height: 20px;
-                            Rectangle {
-                                width: 12px;
-                                height: 12px;
-                                background: obj.color;
-                                border-radius: 2px;
-                            }
-                            Text {
-                                text: obj.name + " (" + obj.num-contours + ")";
-                                font-size: 10px;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                }
-
-                // Isosurface threshold (only when iso mode)
-                if root.view-mode == 4: GroupBox {
-                    title: "Isosurface";
-                    VerticalBox {
-                        spacing: 4px;
-                        HorizontalBox {
-                            Text { text: "Threshold:"; vertical-alignment: center; width: 65px; font-size: 11px; }
-                            Text {
-                                text: Math.round(root.iso-threshold);
-                                vertical-alignment: center;
-                                width: 40px;
-                                font-size: 11px;
-                                color: #ccc;
-                            }
-                        }
-                        Slider {
-                            minimum: 0;
-                            maximum: root.white-level;
-                            value: root.iso-threshold;
-                            changed(v) => {
-                                root.iso-threshold = v;
-                                root.iso-threshold-changed(v);
-                            }
-                        }
-                    }
-                }
-
-                // Slicer angles (only when slicer mode)
-                if root.view-mode == 1: GroupBox {
-                    title: "Slicer Angles";
-                    VerticalBox {
-                        spacing: 4px;
-                        HorizontalBox {
-                            Text { text: "X:"; vertical-alignment: center; width: 20px; }
-                            Slider {
-                                minimum: -90;
-                                maximum: 90;
-                                value: root.slicer-angle-x;
-                                changed(v) => {
-                                    root.slicer-angle-x = v;
-                                    root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
+                            HorizontalBox {
+                                Text { text: "Threshold:"; vertical-alignment: center; width: 65px; font-size: 11px; }
+                                Text {
+                                    text: Math.round(root.iso-threshold);
+                                    vertical-alignment: center;
+                                    width: 40px;
+                                    font-size: 11px;
+                                    color: #ccc;
                                 }
                             }
-                        }
-                        HorizontalBox {
-                            Text { text: "Y:"; vertical-alignment: center; width: 20px; }
                             Slider {
-                                minimum: -90;
-                                maximum: 90;
-                                value: root.slicer-angle-y;
+                                minimum: 0;
+                                maximum: root.white-level;
+                                value: root.iso-threshold;
                                 changed(v) => {
-                                    root.slicer-angle-y = v;
-                                    root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
+                                    root.iso-threshold = v;
+                                    root.iso-threshold-changed(v);
                                 }
                             }
                         }
                     }
+
+                    // Slicer angles (only when slicer mode)
+                    if root.view-mode == 1: GroupBox {
+                        title: "Slicer Angles";
+                        VerticalBox {
+                            spacing: 4px;
+                            HorizontalBox {
+                                Text { text: "X:"; vertical-alignment: center; width: 20px; }
+                                Slider {
+                                    minimum: -90;
+                                    maximum: 90;
+                                    value: root.slicer-angle-x;
+                                    changed(v) => {
+                                        root.slicer-angle-x = v;
+                                        root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
+                                    }
+                                }
+                            }
+                            HorizontalBox {
+                                Text { text: "Y:"; vertical-alignment: center; width: 20px; }
+                                Slider {
+                                    minimum: -90;
+                                    maximum: 90;
+                                    value: root.slicer-angle-y;
+                                    changed(v) => {
+                                        root.slicer-angle-y = v;
+                                        root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            // Bottom controls
+            HorizontalBox {
+                height: 36px;
+                padding: 4px;
+                spacing: 6px;
+
+                Text { text: "Z:"; vertical-alignment: center; }
+
+                Slider {
+                    minimum: 0;
+                    maximum: root.max-z;
+                    value: root.current-z;
+                    changed(val) => {
+                        root.current-z = Math.round(val);
+                        root.z-changed(Math.round(val));
+                    }
+                    horizontal-stretch: 2;
                 }
 
-                Rectangle { vertical-stretch: 1; }
-            }
-        }
-
-        // Bottom controls
-        HorizontalBox {
-            height: 36px;
-            padding: 4px;
-            spacing: 6px;
-
-            Text { text: "Z:"; vertical-alignment: center; }
-
-            Slider {
-                minimum: 0;
-                maximum: root.max-z;
-                value: root.current-z;
-                changed(val) => {
-                    root.current-z = Math.round(val);
-                    root.z-changed(Math.round(val));
+                Text {
+                    text: root.current-z + "/" + root.max-z;
+                    vertical-alignment: center;
+                    min-width: 60px;
                 }
-                horizontal-stretch: 2;
-            }
 
-            Text {
-                text: root.current-z + "/" + root.max-z;
-                vertical-alignment: center;
-                min-width: 60px;
-            }
+                Rectangle { width: 1px; background: #444; }
 
-            Rectangle { width: 1px; background: #444; }
-
-            Text { text: "B:"; vertical-alignment: center; }
-            Slider {
-                minimum: -1000;
-                maximum: 65535;
-                value: root.black-level;
-                changed(val) => {
-                    root.black-level = val;
-                    root.contrast-changed(root.black-level, root.white-level);
+                Text { text: "B:"; vertical-alignment: center; }
+                Slider {
+                    minimum: -1000;
+                    maximum: 65535;
+                    value: root.black-level;
+                    changed(val) => {
+                        root.black-level = val;
+                        root.contrast-changed(root.black-level, root.white-level);
+                    }
+                    horizontal-stretch: 1;
                 }
-                horizontal-stretch: 1;
-            }
 
-            Text { text: "W:"; vertical-alignment: center; }
-            Slider {
-                minimum: -1000;
-                maximum: 65535;
-                value: root.white-level;
-                changed(val) => {
-                    root.white-level = val;
-                    root.contrast-changed(root.black-level, root.white-level);
+                Text { text: "W:"; vertical-alignment: center; }
+                Slider {
+                    minimum: -1000;
+                    maximum: 65535;
+                    value: root.white-level;
+                    changed(val) => {
+                        root.white-level = val;
+                        root.contrast-changed(root.black-level, root.white-level);
+                    }
+                    horizontal-stretch: 1;
                 }
-                horizontal-stretch: 1;
-            }
 
-            Text {
-                text: Math.round(root.zoom * 100) + "%";
-                vertical-alignment: center;
-                min-width: 40px;
-                color: #aaa;
+                Text {
+                    text: Math.round(root.zoom * 100) + "%";
+                    vertical-alignment: center;
+                    min-width: 40px;
+                    color: #aaa;
+                }
             }
         }
     }

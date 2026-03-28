@@ -11,5 +11,6 @@ path = "src/main.rs"
 imod-core.workspace = true
 imod-mrc.workspace = true
 imod-math.workspace = true
+imod-fft.workspace = true
 imod-slice = { path = "../../crates/imod-slice" }
 clap = { version = "4", features = ["derive"] }
