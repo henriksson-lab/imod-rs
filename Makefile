@@ -10,6 +10,12 @@ test_st:
 loc:
 	find crates ui apps -name '*.rs' | xargs wc -l
 
+
+loc_orig:
+	find IMOD -name '*.c' | xargs wc -l
+	find IMOD -name '*.cpp' | xargs wc -l
+	find IMOD -name '*.h' | xargs wc -l
+
 gitaddall:
 	git add crates apps
 
