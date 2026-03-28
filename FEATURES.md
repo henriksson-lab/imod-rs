@@ -54,15 +54,18 @@
 
 ## Phase 4: imod-viewer — 3dmod Replacement (Months 10-16)
 
-- [ ] Image display engine (ZAP window) — 2D slice viewing, zoom, pan, contrast
-- [ ] Model overlay rendering (contours, points, spheres)
-- [ ] Slicer (arbitrary plane through volume)
-- [ ] XYZ multi-axis view
-- [ ] Model view (3D rendering with lighting, depth cue)
-- [ ] Isosurface rendering
+- [x] Image display engine (ZAP window) — Slint UI, slice viewing, Z navigation, contrast (black/white), scroll-zoom
+- [x] Model overlay rendering — contour lines (Bresenham), point crosses, per-object colors, toggle on/off
+- [x] Slicer — arbitrary oblique plane through volume, X/Y angle sliders, trilinear interpolation
+- [x] XYZ multi-axis view — simultaneous XY, XZ, YZ planes in one image
+- [x] Object/contour management panel — sidebar listing objects with colors and contour counts
+- [x] Pixel value readout — mouse position tracking with coordinate and value display
+- [x] Volume caching — full volume loaded on demand for slicer/XYZ modes
+- [x] View mode switching — toolbar buttons for ZAP/Slicer/XYZ
+- [x] Command-line model loading — pass .mod/.fid files alongside image
+- [ ] Model view (3D rendering with lighting, depth cue) — requires wgpu
+- [ ] Isosurface rendering — requires wgpu
 - [ ] Contour editing tools
-- [ ] Object/contour management panels
-- [ ] Image caching and pyramid support
 - [ ] Bead fixing interface
 - [ ] Preferences system
 - [ ] Plugin loading (`libloading` + Rust trait objects)
@@ -110,3 +113,4 @@
 - [x] Phase 1 complete: 11 crates, 68 tests passing
 - [x] Phase 2 complete: 13 CLI tools
 - [x] Phase 3 complete: 8 reconstruction pipeline tools
+- [x] Phase 4 mostly complete: imod-viewer with ZAP/Slicer/XYZ views, model overlay, pixel readout (3D rendering deferred to wgpu)

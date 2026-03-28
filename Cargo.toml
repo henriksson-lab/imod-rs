@@ -33,6 +33,9 @@ members = [
     "apps/warpvol",
     "apps/corrsearch3d",
     "apps/solvematch",
+    "apps/imod-viewer",
+    "apps/xfinverse",
+    "apps/xfproduct",
 ]
 
 [workspace.package]

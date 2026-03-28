@@ -1,0 +1,12 @@
+[package]
+name = "xfinverse"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "xfinverse"
+path = "src/main.rs"
+
+[dependencies]
+imod-transforms = { path = "../../crates/imod-transforms" }
+clap = { version = "4", features = ["derive"] }

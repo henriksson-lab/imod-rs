@@ -1,0 +1,257 @@
+import { VerticalBox, HorizontalBox, Slider, Button, GroupBox, TabWidget, CheckBox, SpinBox } from "std-widgets.slint";
+
+// A single model object entry for the list
+export struct ModelObjectEntry {
+    name: string,
+    color: color,
+    visible: bool,
+    num-contours: int,
+}
+
+export component MainWindow inherits Window {
+    title: "IMOD Viewer";
+    preferred-width: 1100px;
+    preferred-height: 750px;
+
+    // Image properties
+    in property <string> filename: "No file loaded";
+    in property <string> info-text: "";
+    in property <image> slice-image;
+    in property <int> max-z: 0;
+    in property <int> nx: 0;
+    in property <int> ny: 0;
+    in property <string> pixel-value-text: "";
+    in property <string> model-info: "No model";
+
+    // Model objects list
+    in property <[ModelObjectEntry]> model-objects: [];
+
+    // Mutable state
+    in-out property <int> current-z: 0;
+    in-out property <float> black-level: 0.0;
+    in-out property <float> white-level: 255.0;
+    in-out property <float> zoom: 1.0;
+    in-out property <bool> show-model: true;
+    in-out property <int> view-mode: 0;  // 0=ZAP, 1=Slicer, 2=XYZ
+    in-out property <float> slicer-angle-x: 0.0;
+    in-out property <float> slicer-angle-y: 0.0;
+
+    // Callbacks
+    callback open-file();
+    callback open-model();
+    callback z-changed(int);
+    callback contrast-changed(float, float);
+    callback zoom-changed(float);
+    callback mouse-moved(float, float);
+    callback toggle-model(bool);
+    callback view-mode-changed(int);
+    callback slicer-angle-changed(float, float);
+
+    VerticalBox {
+        // Toolbar
+        HorizontalBox {
+            height: 40px;
+            padding: 4px;
+            spacing: 6px;
+
+            Button { text: "Open Image..."; clicked => { root.open-file(); } }
+            Button { text: "Open Model..."; clicked => { root.open-model(); } }
+
+            Rectangle { width: 1px; background: #444; }
+
+            Button {
+                text: "ZAP";
+                enabled: root.view-mode != 0;
+                clicked => { root.view-mode = 0; root.view-mode-changed(0); }
+            }
+            Button {
+                text: "Slicer";
+                enabled: root.view-mode != 1;
+                clicked => { root.view-mode = 1; root.view-mode-changed(1); }
+            }
+            Button {
+                text: "XYZ";
+                enabled: root.view-mode != 2;
+                clicked => { root.view-mode = 2; root.view-mode-changed(2); }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            CheckBox {
+                text: "Model";
+                checked: root.show-model;
+                toggled => { root.toggle-model(self.checked); }
+            }
+
+            Text {
+                text: root.filename;
+                vertical-alignment: center;
+                color: #aaa;
+            }
+        }
+
+        HorizontalBox {
+            // Main image area
+            Rectangle {
+                background: #1a1a1a;
+                clip: true;
+                horizontal-stretch: 3;
+
+                img := Image {
+                    source: root.slice-image;
+                    width: self.source.width * 1px * root.zoom;
+                    height: self.source.height * 1px * root.zoom;
+                    image-rendering: pixelated;
+                }
+
+                // Mouse tracking area
+                ta := TouchArea {
+                    moved => {
+                        root.mouse-moved(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
+                    }
+                    scroll-event(ev) => {
+                        if (ev.delta-y > 0) {
+                            root.zoom = Math.min(root.zoom * 1.1, 20.0);
+                        } else {
+                            root.zoom = Math.max(root.zoom / 1.1, 0.05);
+                        }
+                        root.zoom-changed(root.zoom);
+                        return accept;
+                    }
+                }
+            }
+
+            // Side panel
+            VerticalBox {
+                width: 220px;
+                padding: 4px;
+                spacing: 4px;
+
+                GroupBox {
+                    title: "Info";
+                    VerticalBox {
+                        spacing: 2px;
+                        Text { text: root.info-text; wrap: word-wrap; font-size: 11px; }
+                        Text { text: root.pixel-value-text; font-size: 11px; color: #ccc; }
+                    }
+                }
+
+                GroupBox {
+                    title: "Model";
+                    VerticalBox {
+                        spacing: 2px;
+                        Text { text: root.model-info; font-size: 11px; }
+                        for obj[idx] in root.model-objects: HorizontalBox {
+                            spacing: 4px;
+                            height: 20px;
+                            Rectangle {
+                                width: 12px;
+                                height: 12px;
+                                background: obj.color;
+                                border-radius: 2px;
+                            }
+                            Text {
+                                text: obj.name + " (" + obj.num-contours + ")";
+                                font-size: 10px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // Slicer angles (only when slicer mode)
+                if root.view-mode == 1: GroupBox {
+                    title: "Slicer Angles";
+                    VerticalBox {
+                        spacing: 4px;
+                        HorizontalBox {
+                            Text { text: "X:"; vertical-alignment: center; width: 20px; }
+                            Slider {
+                                minimum: -90;
+                                maximum: 90;
+                                value: root.slicer-angle-x;
+                                changed(v) => {
+                                    root.slicer-angle-x = v;
+                                    root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
+                                }
+                            }
+                        }
+                        HorizontalBox {
+                            Text { text: "Y:"; vertical-alignment: center; width: 20px; }
+                            Slider {
+                                minimum: -90;
+                                maximum: 90;
+                                value: root.slicer-angle-y;
+                                changed(v) => {
+                                    root.slicer-angle-y = v;
+                                    root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+
+        // Bottom controls
+        HorizontalBox {
+            height: 36px;
+            padding: 4px;
+            spacing: 6px;
+
+            Text { text: "Z:"; vertical-alignment: center; }
+
+            Slider {
+                minimum: 0;
+                maximum: root.max-z;
+                value: root.current-z;
+                changed(val) => {
+                    root.current-z = Math.round(val);
+                    root.z-changed(Math.round(val));
+                }
+                horizontal-stretch: 2;
+            }
+
+            Text {
+                text: root.current-z + "/" + root.max-z;
+                vertical-alignment: center;
+                min-width: 60px;
+            }
+
+            Rectangle { width: 1px; background: #444; }
+
+            Text { text: "B:"; vertical-alignment: center; }
+            Slider {
+                minimum: -1000;
+                maximum: 65535;
+                value: root.black-level;
+                changed(val) => {
+                    root.black-level = val;
+                    root.contrast-changed(root.black-level, root.white-level);
+                }
+                horizontal-stretch: 1;
+            }
+
+            Text { text: "W:"; vertical-alignment: center; }
+            Slider {
+                minimum: -1000;
+                maximum: 65535;
+                value: root.white-level;
+                changed(val) => {
+                    root.white-level = val;
+                    root.contrast-changed(root.black-level, root.white-level);
+                }
+                horizontal-stretch: 1;
+            }
+
+            Text {
+                text: Math.round(root.zoom * 100) + "%";
+                vertical-alignment: center;
+                min-width: 40px;
+                color: #aaa;
+            }
+        }
+    }
+}

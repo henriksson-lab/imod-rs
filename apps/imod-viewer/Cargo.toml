@@ -1,0 +1,19 @@
+[package]
+name = "imod-viewer"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "imod-viewer"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+imod-model.workspace = true
+imod-slice = { path = "../../crates/imod-slice" }
+slint = "1"
+
+[build-dependencies]
+slint-build = "1"
