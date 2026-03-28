@@ -36,6 +36,10 @@ members = [
     "apps/imod-viewer",
     "apps/xfinverse",
     "apps/xfproduct",
+    "apps/fftrans",
+    "apps/avgstack",
+    "apps/imodinfo",
+    "apps/imodtrans",
 ]
 
 [workspace.package]
