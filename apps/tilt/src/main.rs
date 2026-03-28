@@ -101,6 +101,22 @@ struct Args {
     /// Fill mode for out-of-bounds projection samples: "mean", "zero", or "edge"
     #[arg(long, default_value = "mean")]
     fill_mode: String,
+
+    /// Interpolation mode for cosine stretching: "linear" or "cubic"
+    #[arg(long, default_value = "linear")]
+    cosine_interp: String,
+
+    /// Maximum tilt angle (degrees) for cosine stretching; views above this are not stretched
+    #[arg(long, default_value_t = 80.0)]
+    max_cosine_tilt: f32,
+
+    /// Use Hamming window instead of Gaussian rolloff in the radial filter
+    #[arg(long)]
+    hamming: bool,
+
+    /// Apply N additional SIRT-like low-pass smoothing passes to the WBP result (0 = disabled)
+    #[arg(long, default_value_t = 0)]
+    fake_sirt: usize,
 }
 
 /// Fill mode for out-of-bounds projection samples.
@@ -313,7 +329,8 @@ fn load_per_view_file(path: &str) -> io::Result<Vec<f32>> {
 /// Each row is FFT'd, multiplied by a ramp filter with Gaussian rolloff, then inverse FFT'd.
 /// If `exact_filter_size` is Some(N), the radial filter table uses exactly N points
 /// instead of deriving the number of points from the FFT size.
-fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize, cutoff: f32, falloff: f32, exact_filter_size: Option<usize>) {
+/// If `use_hamming` is true, use a Hamming window instead of Gaussian rolloff.
+fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize, cutoff: f32, falloff: f32, exact_filter_size: Option<usize>, use_hamming: bool) {
     let total_rows = nz * in_ny;
     assert_eq!(proj_data.len(), total_rows * in_nx);
 
@@ -330,11 +347,21 @@ fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize
 
         // Number of points for the radial filter table
         let filter_nxc = exact_filter_size.unwrap_or(n / 2 + 1);
-        // Apply ramp filter with Gaussian rolloff to both halves of the spectrum
+        // Apply ramp filter with rolloff to both halves of the spectrum
         for i in 0..n {
             let freq_bin = if i <= n / 2 { i } else { n - i };
             let w = (freq_bin as f32) / (filter_nxc as f32);
-            let weight = if w <= cutoff {
+            let weight = if use_hamming {
+                // Hamming window: w(f) = ramp * (0.54 + 0.46 * cos(pi * f / cutoff))
+                let hamming = if cutoff > 1e-12 && w <= cutoff {
+                    0.54 + 0.46 * (PI * w / cutoff).cos()
+                } else if w > cutoff {
+                    0.0
+                } else {
+                    1.0
+                };
+                w * hamming
+            } else if w <= cutoff {
                 w
             } else {
                 let d = w - cutoff;
@@ -378,11 +405,52 @@ fn sample_row_with_fill(row: &[f32], proj_x: f32, row_len: usize, fill_mode: Fil
     }
 }
 
+/// Cubic (Catmull-Rom) interpolation of 4 samples at fractional position t in [0,1].
+/// p0, p1, p2, p3 are consecutive samples; the result interpolates between p1 and p2.
+#[inline]
+fn cubic_interp_1d(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    // Catmull-Rom spline coefficients
+    let a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+    let b = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+    let c = -0.5 * p0 + 0.5 * p2;
+    let d = p1;
+    a * t3 + b * t2 + c * t + d
+}
+
+/// Sample a row using cubic interpolation at fractional position src_x.
+/// Falls back to 0.0 for out-of-bounds.
+#[inline]
+fn sample_row_cubic(row: &[f32], src_x: f32, len: usize) -> f32 {
+    let sx0 = src_x.floor() as isize;
+    let frac = src_x - sx0 as f32;
+    // Need indices sx0-1, sx0, sx0+1, sx0+2 all in bounds
+    if sx0 >= 1 && sx0 + 2 < len as isize {
+        let i = sx0 as usize;
+        cubic_interp_1d(row[i - 1], row[i], row[i + 1], row[i + 2], frac)
+    } else if sx0 >= 0 && sx0 + 1 < len as isize {
+        // Fall back to linear at edges
+        let frac = src_x - sx0 as f32;
+        row[sx0 as usize] * (1.0 - frac) + row[sx0 as usize + 1] * frac
+    } else if sx0 >= 0 && sx0 < len as isize {
+        row[sx0 as usize]
+    } else {
+        0.0
+    }
+}
+
 /// Apply cosine stretching to each projection: stretch each row by 1/cos(tilt_angle).
-fn apply_cosine_stretch(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize, tilt_angles: &[f32]) {
+/// `use_cubic`: if true, use cubic (Catmull-Rom) interpolation instead of linear.
+/// `max_tilt`: skip cosine stretching for views with |tilt| above this threshold (degrees).
+fn apply_cosine_stretch(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize, tilt_angles: &[f32], use_cubic: bool, max_tilt: f32) {
     let center = in_nx as f32 / 2.0;
 
     for p in 0..nz {
+        let angle_abs = tilt_angles[p].abs();
+        if angle_abs > max_tilt {
+            continue; // skip views above max cosine tilt threshold
+        }
         let rad = tilt_angles[p] * PI / 180.0;
         let cos_t = rad.cos();
         if cos_t.abs() < 1e-6 {
@@ -401,16 +469,70 @@ fn apply_cosine_stretch(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: u
             for ox in 0..in_nx {
                 let dx = ox as f32 - center;
                 let src_x = dx * stretch + center;
-                let sx0 = src_x.floor() as isize;
-                if sx0 >= 0 && sx0 + 1 < in_nx as isize {
-                    let frac = src_x - sx0 as f32;
-                    out_row[ox] = orig_row[sx0 as usize] * (1.0 - frac) + orig_row[sx0 as usize + 1] * frac;
-                } else if sx0 >= 0 && sx0 < in_nx as isize {
-                    out_row[ox] = orig_row[sx0 as usize];
+                if use_cubic {
+                    out_row[ox] = sample_row_cubic(&orig_row, src_x, in_nx);
                 } else {
-                    out_row[ox] = 0.0;
+                    let sx0 = src_x.floor() as isize;
+                    if sx0 >= 0 && sx0 + 1 < in_nx as isize {
+                        let frac = src_x - sx0 as f32;
+                        out_row[ox] = orig_row[sx0 as usize] * (1.0 - frac) + orig_row[sx0 as usize + 1] * frac;
+                    } else if sx0 >= 0 && sx0 < in_nx as isize {
+                        out_row[ox] = orig_row[sx0 as usize];
+                    } else {
+                        out_row[ox] = 0.0;
+                    }
                 }
             }
+        }
+    }
+}
+
+/// Apply a simple 3D box-blur low-pass filter to a volume represented as Y-slices.
+/// Each slice is [out_nz * out_nx] stored Z-major. This performs one iteration of
+/// 3x3x3 averaging (separable box filter) for SIRT-like smoothing.
+fn lowpass_3d_volume(volume: &mut Vec<Vec<f32>>, out_nx: usize, out_nz: usize) {
+    let out_ny = volume.len();
+    if out_ny == 0 {
+        return;
+    }
+
+    // We apply the filter in-place using a copy-on-read approach.
+    // First blur along X within each slice, then along Z, then along Y.
+
+    // Pass 1: blur along X (within each row of each slice)
+    for iy in 0..out_ny {
+        let mut tmp = volume[iy].clone();
+        for oz in 0..out_nz {
+            let row_off = oz * out_nx;
+            for ox in 0..out_nx {
+                let x0 = if ox > 0 { ox - 1 } else { 0 };
+                let x2 = if ox + 1 < out_nx { ox + 1 } else { out_nx - 1 };
+                tmp[row_off + ox] = (volume[iy][row_off + x0] + volume[iy][row_off + ox] + volume[iy][row_off + x2]) / 3.0;
+            }
+        }
+        volume[iy] = tmp;
+    }
+
+    // Pass 2: blur along Z (within each slice, across rows)
+    for iy in 0..out_ny {
+        let mut tmp = volume[iy].clone();
+        for oz in 0..out_nz {
+            let z0 = if oz > 0 { oz - 1 } else { 0 };
+            let z2 = if oz + 1 < out_nz { oz + 1 } else { out_nz - 1 };
+            for ox in 0..out_nx {
+                tmp[oz * out_nx + ox] = (volume[iy][z0 * out_nx + ox] + volume[iy][oz * out_nx + ox] + volume[iy][z2 * out_nx + ox]) / 3.0;
+            }
+        }
+        volume[iy] = tmp;
+    }
+
+    // Pass 3: blur along Y (across slices)
+    let prev: Vec<Vec<f32>> = volume.clone();
+    for iy in 0..out_ny {
+        let y0 = if iy > 0 { iy - 1 } else { 0 };
+        let y2 = if iy + 1 < out_ny { iy + 1 } else { out_ny - 1 };
+        for idx in 0..volume[iy].len() {
+            volume[iy][idx] = (prev[y0][idx] + prev[iy][idx] + prev[y2][idx]) / 3.0;
         }
     }
 }
@@ -507,16 +629,27 @@ fn main() {
         None
     };
 
+    // Parse cosine interpolation mode
+    let use_cubic_cosine = args.cosine_interp.to_lowercase() == "cubic";
+    let max_cosine_tilt = args.max_cosine_tilt;
+    let use_hamming = args.hamming;
+    let fake_sirt_passes = args.fake_sirt;
+
     // Apply R-weighting (radial filter) to projections
     if !args.no_weight {
-        eprintln!("tilt: applying R-weighting (cutoff={}, falloff={})", radial_cutoff, radial_falloff);
-        apply_rweighting(&mut proj_data, in_nx, in_ny, nz, radial_cutoff, radial_falloff, args.exact_filter_size);
+        if use_hamming {
+            eprintln!("tilt: applying R-weighting with Hamming window (cutoff={})", radial_cutoff);
+        } else {
+            eprintln!("tilt: applying R-weighting (cutoff={}, falloff={})", radial_cutoff, radial_falloff);
+        }
+        apply_rweighting(&mut proj_data, in_nx, in_ny, nz, radial_cutoff, radial_falloff, args.exact_filter_size, use_hamming);
     }
 
     // Apply cosine stretching
     if !args.no_cosine_stretch {
-        eprintln!("tilt: applying cosine stretch");
-        apply_cosine_stretch(&mut proj_data, in_nx, in_ny, nz, &tilt_angles);
+        eprintln!("tilt: applying cosine stretch (interp={}, max_tilt={:.1})",
+            if use_cubic_cosine { "cubic" } else { "linear" }, max_cosine_tilt);
+        apply_cosine_stretch(&mut proj_data, in_nx, in_ny, nz, &tilt_angles, use_cubic_cosine, max_cosine_tilt);
     }
 
     // Load optional local alignment
@@ -803,7 +936,7 @@ fn main() {
 
             // R-weight the difference
             if !args.no_weight {
-                apply_rweighting(&mut reproj, in_nx, in_ny, nz, radial_cutoff, radial_falloff, args.exact_filter_size);
+                apply_rweighting(&mut reproj, in_nx, in_ny, nz, radial_cutoff, radial_falloff, args.exact_filter_size, use_hamming);
             }
 
             // Backproject the difference
@@ -819,6 +952,15 @@ fn main() {
             eprintln!("  SIRT iteration {}/{}", iter + 1, sirt_iters);
         }
 
+        // Apply fake-SIRT low-pass smoothing if requested
+        if fake_sirt_passes > 0 {
+            eprintln!("tilt: applying {} fake-SIRT low-pass smoothing passes", fake_sirt_passes);
+            for pass in 0..fake_sirt_passes {
+                lowpass_3d_volume(&mut volume, out_nx, out_nz);
+                eprintln!("  fake-SIRT pass {}/{}", pass + 1, fake_sirt_passes);
+            }
+        }
+
         // Write out the volume
         for slice in &mut volume {
             // Apply output transform: (val * densweight) * outscale + outadd
@@ -830,6 +972,32 @@ fn main() {
             if smax > gmax { gmax = smax; }
             gsum += smean as f64 * (out_nx * out_nz) as f64;
             writer.write_slice_f32(slice).unwrap();
+        }
+    } else if fake_sirt_passes > 0 {
+        // CPU path with fake-SIRT: must collect full volume first
+        eprintln!("tilt: WBP reconstruction (collecting volume for fake-SIRT)...");
+        let mut volume = backproject_all(&proj_data);
+
+        eprintln!("tilt: applying {} fake-SIRT low-pass smoothing passes", fake_sirt_passes);
+        for pass in 0..fake_sirt_passes {
+            lowpass_3d_volume(&mut volume, out_nx, out_nz);
+            eprintln!("  fake-SIRT pass {}/{}", pass + 1, fake_sirt_passes);
+        }
+
+        // Write out the volume
+        for slice in &mut volume {
+            for v in slice.iter_mut() {
+                *v = (*v * densweight) * outscale + outadd;
+            }
+            let (smin, smax, smean) = min_max_mean(slice);
+            if smin < gmin { gmin = smin; }
+            if smax > gmax { gmax = smax; }
+            gsum += smean as f64 * (out_nx * out_nz) as f64;
+            writer.write_slice_f32(slice).unwrap();
+            rows_done += 1;
+            if rows_done % chunk_size == 0 || rows_done == out_ny {
+                eprintln!("  {}/{} rows written", rows_done, out_ny);
+            }
         }
     } else {
         // CPU path: parallel WBP reconstruction with rayon

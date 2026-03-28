@@ -17,6 +17,8 @@ pub struct SectionMetadata {
     pub magnification: Option<f32>,
     /// Pixel size in Angstroms (if available from ext header).
     pub pixel_size: Option<f32>,
+    /// Exposure time in seconds (if available).
+    pub exposure_time: Option<f32>,
 }
 
 /// Parse SERI-type extended header data into per-section metadata.
@@ -64,6 +66,7 @@ pub fn parse_seri_extended_header(
             y_stage: Some(y_stage),
             magnification: Some(magnification),
             pixel_size: None,
+            exposure_time: None,
         });
     }
     Ok(sections)
@@ -79,7 +82,11 @@ pub fn parse_seri_extended_header(
 ///   offset  32: f64 dose
 ///   offset  40: f64 magnification
 ///   offset  48: f64 pixel_size (meters, converted to Angstroms)
-///   offset 56-127: reserved / additional FEI metadata
+///   offset  56: f64 reserved
+///   offset  64: f64 reserved
+///   offset  72: f64 reserved
+///   offset  80: f64 exposure_time (seconds)
+///   offset 88-127: reserved / additional FEI metadata
 pub fn parse_fei_extended_header(
     ext_data: &[u8],
     nz: usize,
@@ -122,6 +129,8 @@ pub fn parse_fei_extended_header(
         let magnification = read_f64(40) as f32;
         // FEI stores pixel size in meters; convert to Angstroms
         let pixel_size = (read_f64(48) * 1e10) as f32;
+        // Exposure time in seconds (offset 80)
+        let exposure_time = read_f64(80) as f32;
 
         sections.push(SectionMetadata {
             tilt_angle: Some(tilt_angle),
@@ -132,6 +141,11 @@ pub fn parse_fei_extended_header(
             magnification: Some(magnification),
             pixel_size: if pixel_size > 0.0 {
                 Some(pixel_size)
+            } else {
+                None
+            },
+            exposure_time: if exposure_time > 0.0 {
+                Some(exposure_time)
             } else {
                 None
             },

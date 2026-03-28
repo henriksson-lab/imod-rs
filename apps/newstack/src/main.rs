@@ -1,9 +1,11 @@
 use clap::Parser;
 use imod_core::MrcMode;
+use imod_fft::{fft_r2c_2d, fft_c2r_2d};
 use imod_math::{min_max_mean, min_max_mean_sd};
 use imod_mrc::{MrcHeader, MrcReader, MrcWriter};
 use imod_slice::Slice;
 use imod_transforms::{read_xf_file, LinearTransform};
+use rustfft::num_complex::Complex;
 use std::f32::consts::PI;
 use std::io::Read as IoRead;
 
@@ -95,6 +97,112 @@ struct Args {
     /// (0-based pixel coordinates, applied before binning).
     #[arg(long = "subarea")]
     subarea: Option<String>,
+
+    /// Reduce image size by the given factor using Fourier-space cropping.
+    /// The image is FFT'd, the central region is kept, and the result is
+    /// inverse FFT'd. Produces cleaner downsampling than real-space binning.
+    #[arg(long = "fourier-reduce")]
+    fourier_reduce: Option<f32>,
+
+    /// Apply a sub-pixel shift in Fourier space: "dx,dy" in pixels.
+    /// Multiplies each Fourier coefficient by exp(-2*pi*i*(dx*fx + dy*fy)).
+    #[arg(long = "phase-shift")]
+    phase_shift: Option<String>,
+
+    /// Transpose (swap X and Y dimensions) of each output section.
+    #[arg(long = "transpose", default_value_t = false)]
+    transpose: bool,
+
+    /// Magnification gradient file: a text file with "x y mag" per line defining
+    /// position-dependent magnification. During interpolation, each pixel is
+    /// scaled by the local magnification factor looked up from this field.
+    #[arg(long = "gradient")]
+    gradient: Option<String>,
+}
+
+/// A magnification gradient field loaded from a text file.
+/// Each line contains "x y mag" defining local magnification at that position.
+/// Magnification is interpolated bilinearly between defined points.
+struct MagGradient {
+    points: Vec<(f32, f32, f32)>, // (x, y, mag)
+}
+
+impl MagGradient {
+    fn load(path: &str) -> Self {
+        let contents = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("Error reading gradient file {}: {}", path, e);
+            std::process::exit(1);
+        });
+        let mut points = Vec::new();
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let x: f32 = parts[0].parse().unwrap_or(0.0);
+                let y: f32 = parts[1].parse().unwrap_or(0.0);
+                let mag: f32 = parts[2].parse().unwrap_or(1.0);
+                points.push((x, y, mag));
+            }
+        }
+        if points.is_empty() {
+            eprintln!("Warning: gradient file {} contains no valid entries", path);
+        }
+        eprintln!("newstack: loaded magnification gradient with {} points", points.len());
+        MagGradient { points }
+    }
+
+    /// Look up the local magnification at pixel (px, py) using inverse-distance
+    /// weighted interpolation of the gradient control points.
+    fn lookup(&self, px: f32, py: f32) -> f32 {
+        if self.points.is_empty() {
+            return 1.0;
+        }
+        if self.points.len() == 1 {
+            return self.points[0].2;
+        }
+        let mut wsum = 0.0f32;
+        let mut vsum = 0.0f32;
+        for &(gx, gy, mag) in &self.points {
+            let dx = px - gx;
+            let dy = py - gy;
+            let dist2 = dx * dx + dy * dy;
+            if dist2 < 1e-6 {
+                return mag; // Exactly on a control point
+            }
+            let w = 1.0 / dist2;
+            wsum += w;
+            vsum += w * mag;
+        }
+        vsum / wsum
+    }
+}
+
+/// Apply magnification gradient to image data: for each output pixel, compute
+/// the local magnification and sample the source image accordingly.
+fn apply_mag_gradient(
+    data: &[f32],
+    nx: usize,
+    ny: usize,
+    gradient: &MagGradient,
+    fill: f32,
+) -> Vec<f32> {
+    let cx = nx as f32 / 2.0;
+    let cy = ny as f32 / 2.0;
+    let mut out = vec![fill; nx * ny];
+    for y in 0..ny {
+        for x in 0..nx {
+            let mag = gradient.lookup(x as f32, y as f32);
+            // Scale position relative to image center by 1/mag
+            let inv_mag = 1.0 / mag;
+            let sx = (x as f32 - cx) * inv_mag + cx;
+            let sy = (y as f32 - cy) * inv_mag + cy;
+            out[y * nx + x] = sample_bicubic(data, nx, ny, sx, sy, fill);
+        }
+    }
+    out
 }
 
 fn parse_section_list(s: &str, max_z: usize) -> Vec<usize> {
@@ -331,6 +439,77 @@ fn apply_separable_filter(data: &[f32], nx: usize, ny: usize, kernel: &[f32]) ->
     }
 
     result
+}
+
+/// Reduce image dimensions by cropping in Fourier space.
+/// FFT the image, keep the central (reduced) region, IFFT back.
+/// factor > 1 means the output is smaller by that factor.
+fn fourier_reduce(data: &[f32], nx: usize, ny: usize, factor: f32) -> (Vec<f32>, usize, usize) {
+    let out_nx = (nx as f32 / factor).round() as usize;
+    let out_ny = (ny as f32 / factor).round() as usize;
+    // Ensure even dimensions for FFT
+    let out_nx = out_nx & !1;
+    let out_ny = out_ny & !1;
+    if out_nx < 2 || out_ny < 2 {
+        return (data.to_vec(), nx, ny);
+    }
+
+    let nxc_in = nx / 2 + 1;
+    let nxc_out = out_nx / 2 + 1;
+    let freq = fft_r2c_2d(data, nx, ny);
+
+    // Crop: keep low frequencies. Input layout is nxc_in columns x ny rows.
+    // For Y: keep rows 0..out_ny/2 (positive freqs) and ny-out_ny/2..ny (negative freqs)
+    // For X: keep columns 0..nxc_out
+    let mut cropped = vec![Complex::new(0.0f32, 0.0); nxc_out * out_ny];
+    let half_ny_out = out_ny / 2;
+    for oy in 0..out_ny {
+        let iy = if oy < half_ny_out { oy } else { ny - out_ny + oy };
+        for ox in 0..nxc_out {
+            cropped[oy * nxc_out + ox] = freq[iy * nxc_in + ox];
+        }
+    }
+
+    // Scale to preserve mean intensity: cropped FFT values need to be scaled
+    // by (out_nx * out_ny) / (nx * ny) because IFFT normalization differs.
+    let scale = (out_nx * out_ny) as f32 / (nx * ny) as f32;
+    for c in &mut cropped {
+        *c *= scale;
+    }
+
+    let result = fft_c2r_2d(&cropped, out_nx, out_ny);
+    (result, out_nx, out_ny)
+}
+
+/// Apply a sub-pixel phase shift in Fourier space.
+/// Multiplies each coefficient by exp(-2*pi*i*(dx*fx + dy*fy)).
+fn apply_phase_shift(data: &[f32], nx: usize, ny: usize, dx: f32, dy: f32) -> Vec<f32> {
+    let nxc = nx / 2 + 1;
+    let mut freq = fft_r2c_2d(data, nx, ny);
+
+    for fy_idx in 0..ny {
+        let fy = if fy_idx <= ny / 2 { fy_idx as f32 } else { fy_idx as f32 - ny as f32 };
+        let freq_y = fy / ny as f32;
+        for fx_idx in 0..nxc {
+            let freq_x = fx_idx as f32 / nx as f32;
+            let phase = -2.0 * PI * (dx * freq_x + dy * freq_y);
+            let shift = Complex::new(phase.cos(), phase.sin());
+            freq[fy_idx * nxc + fx_idx] *= shift;
+        }
+    }
+
+    fft_c2r_2d(&freq, nx, ny)
+}
+
+/// Transpose image data: swap X and Y dimensions.
+fn apply_transpose(data: &[f32], nx: usize, ny: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; nx * ny];
+    for y in 0..ny {
+        for x in 0..nx {
+            out[x * ny + y] = data[y * nx + x];
+        }
+    }
+    out
 }
 
 /// Output range limits for a given MRC mode.
@@ -766,7 +945,25 @@ fn main() {
         None => (in_nx, in_ny),
     };
 
-    // Determine output dimensions accounting for expand/shrink and binning
+    // Parse phase shift if provided
+    let phase_shift_xy: Option<(f32, f32)> = args.phase_shift.as_ref().map(|s| {
+        let parts: Vec<&str> = s.split(',').collect();
+        if parts.len() != 2 {
+            eprintln!("Error: --phase-shift requires dx,dy (two comma-separated values)");
+            std::process::exit(1);
+        }
+        let dx: f32 = parts[0].trim().parse().unwrap_or_else(|_| {
+            eprintln!("Error: invalid phase-shift dx '{}'", parts[0]);
+            std::process::exit(1);
+        });
+        let dy: f32 = parts[1].trim().parse().unwrap_or_else(|_| {
+            eprintln!("Error: invalid phase-shift dy '{}'", parts[1]);
+            std::process::exit(1);
+        });
+        (dx, dy)
+    });
+
+    // Determine output dimensions accounting for expand/shrink, fourier-reduce, transpose, and binning
     let (out_nx, out_ny) = {
         let mut nx = work_nx as f32;
         let mut ny = work_ny as f32;
@@ -778,7 +975,19 @@ fn main() {
             nx /= factor;
             ny /= factor;
         }
-        ((nx.round() as usize) / args.bin, (ny.round() as usize) / args.bin)
+        if let Some(factor) = args.fourier_reduce {
+            nx = (nx / factor).round();
+            ny = (ny / factor).round();
+            // Ensure even for FFT
+            nx = (nx as usize & !1) as f32;
+            ny = (ny as usize & !1) as f32;
+        }
+        let mut onx = (nx.round() as usize) / args.bin;
+        let mut ony = (ny.round() as usize) / args.bin;
+        if args.transpose {
+            std::mem::swap(&mut onx, &mut ony);
+        }
+        (onx, ony)
     };
 
     // Determine effective float mode
@@ -811,6 +1020,11 @@ fn main() {
     // Load distortion field if provided
     let distortion: Option<DistortionField> = args.distort.as_ref().map(|path| {
         DistortionField::load(path)
+    });
+
+    // Load magnification gradient if provided
+    let mag_gradient: Option<MagGradient> = args.gradient.as_ref().map(|path| {
+        MagGradient::load(path)
     });
 
     // Determine antialias setting
@@ -923,6 +1137,11 @@ fn main() {
             // Apply distortion correction
             if let Some(ref dist_field) = distortion {
                 data = apply_distortion(&data, in_nx, in_ny, dist_field, args.fill);
+            }
+
+            // Apply magnification gradient
+            if let Some(ref gradient) = mag_gradient {
+                data = apply_mag_gradient(&data, in_nx, in_ny, gradient, args.fill);
             }
 
             // Apply transform
@@ -1082,6 +1301,11 @@ fn main() {
             data = apply_distortion(&data, in_nx, in_ny, dist_field, args.fill);
         }
 
+        // Apply magnification gradient if provided
+        if let Some(ref gradient) = mag_gradient {
+            data = apply_mag_gradient(&data, in_nx, in_ny, gradient, args.fill);
+        }
+
         // Apply transform if provided
         if let Some(ref xforms) = transforms {
             let xf_idx = out_z.min(xforms.len() - 1);
@@ -1133,6 +1357,19 @@ fn main() {
             cur_ny = sny;
         }
 
+        // Apply Fourier-space reduction (cleaner than real-space binning)
+        if let Some(factor) = args.fourier_reduce {
+            let (reduced, rnx, rny) = fourier_reduce(&data, cur_nx, cur_ny, factor);
+            data = reduced;
+            cur_nx = rnx;
+            cur_ny = rny;
+        }
+
+        // Apply sub-pixel phase shift in Fourier space
+        if let Some((dx, dy)) = phase_shift_xy {
+            data = apply_phase_shift(&data, cur_nx, cur_ny, dx, dy);
+        }
+
         // Antialias filtering before binning
         if let Some(ref kernel) = aa_kernel {
             data = apply_separable_filter(&data, cur_nx, cur_ny, kernel);
@@ -1143,6 +1380,14 @@ fn main() {
             let src_slice = Slice::from_data(cur_nx, cur_ny, data);
             let binned = imod_slice::bin(&src_slice, args.bin);
             data = binned.data;
+            cur_nx /= args.bin;
+            cur_ny /= args.bin;
+        }
+
+        // Transpose: swap X and Y
+        if args.transpose {
+            data = apply_transpose(&data, cur_nx, cur_ny);
+            std::mem::swap(&mut cur_nx, &mut cur_ny);
         }
 
         // Apply scaling / float modes

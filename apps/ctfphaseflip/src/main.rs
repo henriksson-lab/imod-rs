@@ -64,6 +64,17 @@ struct Args {
     /// The actual strip_width is clamped to this maximum.
     #[arg(long = "max-strip-width")]
     max_strip_width: Option<usize>,
+
+    /// Amplitude contrast fraction (w). The full CTF is:
+    /// CTF = -sin(chi)*sqrt(1-w^2) + cos(chi)*w
+    /// Typical values: 0.07 for cryo, 0.1-0.15 for negative stain.
+    #[arg(long = "amplitude-contrast", default_value_t = 0.07)]
+    amplitude_contrast: f32,
+
+    /// Minimum spatial frequency (in 1/Angstrom) below which CTF correction
+    /// is not applied. Frequencies below this cutoff are left unchanged (CTF=1).
+    #[arg(long = "cuton-freq", default_value_t = 0.0)]
+    cuton_freq: f32,
 }
 
 /// Per-view defocus information, potentially with astigmatism.
@@ -75,12 +86,13 @@ struct ViewDefocus {
 }
 
 /// Parse a defocus file. Each line: "view defocus1 [defocus2 astig_angle]"
-/// defocus values in nm.
-fn read_defocus_file(path: &str) -> Result<Vec<ViewDefocus>, String> {
+/// defocus values in nm. Returns (entries, view_indices).
+fn read_defocus_file(path: &str) -> Result<(Vec<ViewDefocus>, Vec<usize>), String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Cannot read defocus file {}: {}", path, e))?;
 
     let mut entries = Vec::new();
+    let mut view_indices = Vec::new();
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -94,7 +106,7 @@ fn read_defocus_file(path: &str) -> Result<Vec<ViewDefocus>, String> {
                 line
             ));
         }
-        let _view: usize = fields[0].parse().map_err(|_| {
+        let view: usize = fields[0].parse().map_err(|_| {
             format!("Defocus file line {}: invalid view number '{}'", line_num + 1, fields[0])
         })?;
         let def1: f32 = fields[1].parse().map_err(|_| {
@@ -121,13 +133,55 @@ fn read_defocus_file(path: &str) -> Result<Vec<ViewDefocus>, String> {
             (def1, 0.0)
         };
 
+        view_indices.push(view);
         entries.push(ViewDefocus {
             defocus1: def1,
             defocus2: def2,
             astig_angle: astig_ang,
         });
     }
-    Ok(entries)
+    Ok((entries, view_indices))
+}
+
+/// Interpolate defocus values for views that are missing from the defocus file.
+/// Given a sparse set of per-view defocus entries, linearly interpolate
+/// defocus1, defocus2, and astig_angle for intermediate views.
+/// `entries` are the parsed defocus values (in file order, one per listed view).
+/// `view_indices` are the view numbers from the file. `n_views` is the total.
+fn interpolate_defocus(entries: &[ViewDefocus], view_indices: &[usize], n_views: usize) -> Vec<ViewDefocus> {
+    if entries.is_empty() || n_views == 0 {
+        return Vec::new();
+    }
+    let mut result = vec![ViewDefocus { defocus1: 0.0, defocus2: 0.0, astig_angle: 0.0 }; n_views];
+    // Mark which views have data
+    let mut has_data = vec![false; n_views];
+    for (&vi, entry) in view_indices.iter().zip(entries.iter()) {
+        if vi < n_views {
+            result[vi] = entry.clone();
+            has_data[vi] = true;
+        }
+    }
+    // Interpolate gaps
+    for v in 0..n_views {
+        if has_data[v] { continue; }
+        // Find nearest defined view before and after
+        let before = (0..v).rev().find(|&i| has_data[i]);
+        let after = ((v + 1)..n_views).find(|&i| has_data[i]);
+        match (before, after) {
+            (Some(b), Some(a)) => {
+                let t = (v - b) as f32 / (a - b) as f32;
+                result[v] = ViewDefocus {
+                    defocus1: result[b].defocus1 + t * (result[a].defocus1 - result[b].defocus1),
+                    defocus2: result[b].defocus2 + t * (result[a].defocus2 - result[b].defocus2),
+                    astig_angle: result[b].astig_angle + t * (result[a].astig_angle - result[b].astig_angle),
+                };
+            }
+            (Some(b), None) => { result[v] = result[b].clone(); }
+            (None, Some(a)) => { result[v] = result[a].clone(); }
+            (None, None) => {} // should not happen
+        }
+    }
+    result
 }
 
 /// Compute effective defocus at a given angle from the astigmatism axis.
@@ -150,8 +204,8 @@ fn main() {
         std::process::exit(1);
     });
 
-    // Load per-view defocus if provided
-    let view_defocus: Option<Vec<ViewDefocus>> = args.defocus_file.as_ref().map(|path| {
+    // Load per-view defocus if provided, with interpolation for missing views
+    let view_defocus_raw: Option<(Vec<ViewDefocus>, Vec<usize>)> = args.defocus_file.as_ref().map(|path| {
         read_defocus_file(path).unwrap_or_else(|e| {
             eprintln!("Error: {}", e);
             std::process::exit(1);
@@ -169,6 +223,17 @@ fn main() {
     let nz = h.nz as usize;
     let pixel_a = args.pixel_size.unwrap_or(h.pixel_size_x());
 
+    // Interpolate defocus for all views (fills gaps between specified views)
+    let view_defocus: Option<Vec<ViewDefocus>> = view_defocus_raw.map(|(entries, indices)| {
+        if entries.len() < nz {
+            eprintln!(
+                "ctfphaseflip: defocus file has {} entries for {} views, interpolating missing values",
+                entries.len(), nz
+            );
+        }
+        interpolate_defocus(&entries, &indices, nz)
+    });
+
     if tilt_angles.len() < nz {
         eprintln!(
             "Warning: tilt file has {} angles but stack has {} sections",
@@ -180,6 +245,8 @@ fn main() {
     // Electron wavelength in Angstroms
     let wavelength = electron_wavelength(args.voltage);
     let cs_a = args.cs as f64 * 1e7; // mm -> Angstroms
+    let amp_contrast = args.amplitude_contrast as f64;
+    let cuton_freq = args.cuton_freq as f64;
 
     // Default defocus in Angstroms (when no defocus file)
     let _default_defocus_a = args.defocus as f64 * 10.0; // nm -> Angstroms
@@ -422,11 +489,13 @@ fn main() {
                 }
             }
 
-            // Apply CTF phase flip in 2D using zero-crossing detection.
-            // Instead of flipping wherever sin(CTF) < 0, we find actual zero
-            // crossings of the CTF function and count which "zone" each frequency
-            // falls in. The CTF zeros occur where ctf_phase = n*PI, i.e. the
-            // zone index is floor(ctf_phase / PI). Odd zones get phase-flipped.
+            // Apply CTF phase flip in 2D with amplitude contrast support.
+            // The full CTF is: CTF(s) = -sin(chi)*sqrt(1-w^2) + cos(chi)*w
+            // where chi is the phase aberration and w is the amplitude contrast.
+            // We flip the sign of Fourier coefficients wherever CTF < 0.
+            // Frequencies below cuton_freq are left unchanged.
+            let w = amp_contrast;
+            let w_phase = (1.0 - w * w).sqrt();
             for fy_idx in 0..sh {
                 let freq_y = if fy_idx <= sh / 2 {
                     fy_idx as f64
@@ -444,6 +513,12 @@ fn main() {
                     let sx = freq_x / (sw as f64 * pixel_a as f64);
 
                     let s2 = sx * sx + sy * sy;
+                    let s = s2.sqrt();
+
+                    // Skip correction below cuton frequency
+                    if s < cuton_freq {
+                        continue;
+                    }
 
                     // Compute effective defocus for this frequency direction
                     let def_for_ctf = if has_astigmatism {
@@ -459,14 +534,15 @@ fn main() {
                     };
 
                     // CTF phase: chi(s) = pi * lambda * s^2 * (defocus - 0.5 * Cs * lambda^2 * s^2)
-                    let ctf_phase = PI as f64 * wavelength * s2
+                    let chi = std::f64::consts::PI * wavelength * s2
                         * (def_for_ctf - 0.5 * cs_a * wavelength * wavelength * s2);
 
-                    // Zero crossings occur at ctf_phase = n*PI.
-                    // The zone index tells us how many zero crossings we have passed.
-                    // In odd zones, the CTF has flipped sign, so we flip the phase.
-                    let zone = (ctf_phase.abs() / std::f64::consts::PI).floor() as i64;
-                    if zone % 2 != 0 {
+                    // Full CTF with amplitude contrast:
+                    // CTF = -sin(chi)*sqrt(1-w^2) + cos(chi)*w
+                    let ctf = -chi.sin() * w_phase + chi.cos() * w;
+
+                    // Phase-flip: negate Fourier coefficient where CTF < 0
+                    if ctf < 0.0 {
                         strip_data[fy_idx * sw + fx_idx] =
                             -strip_data[fy_idx * sw + fx_idx];
                     }

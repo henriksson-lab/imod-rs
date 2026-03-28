@@ -51,6 +51,32 @@ impl MrcReader {
             header
         };
 
+        // Handle old-style MRC headers (pre-2014): if cmap != "MAP " and
+        // nversion == 0, the origin fields have a different layout.
+        // Old style: bytes 196-207 are [wave1(2), wave2(2), wave3(2), wave4(2),
+        //   wave5(2), zorg(f32), xorg(f32), yorg(f32)] instead of the
+        // MRC2000 layout where xorg/yorg/zorg are at offsets 196-207.
+        // In the old layout, the xorg/yorg/zorg fields in the struct actually
+        // contain: xorg = old_zorg, yorg = old_xorg, zorg = old_yorg (shifted).
+        // We detect old-style and rearrange the origin fields.
+        let header = if header.is_old_style() {
+            let mut h = header;
+            // In old-style headers, the origin was stored after wave fields:
+            // the binrw struct reads xorg/yorg/zorg sequentially, but the old
+            // layout has the real origins shifted. Swap to correct positions.
+            // Old layout at byte 196: zorg_old, xorg_old, yorg_old
+            // Our struct read them as: xorg=zorg_old, yorg=xorg_old, zorg=yorg_old
+            let old_xorg = h.yorg;
+            let old_yorg = h.zorg;
+            let old_zorg = h.xorg;
+            h.xorg = old_xorg;
+            h.yorg = old_yorg;
+            h.zorg = old_zorg;
+            h
+        } else {
+            header
+        };
+
         // Read extended header if present
         let ext_size = header.next.max(0) as usize;
         let mut ext_header = vec![0u8; ext_size];

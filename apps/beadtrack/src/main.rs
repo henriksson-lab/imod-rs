@@ -74,6 +74,17 @@ struct Args {
     /// zone is rejected.
     #[arg(long = "exclude-zones")]
     exclude_zones: Option<String>,
+
+    /// Apply a 2D cosine taper to the template edges to reduce boundary
+    /// artifacts at high tilt angles.
+    #[arg(long = "taper-template", default_value_t = false)]
+    taper_template: bool,
+
+    /// Adjust the correlation threshold per-bead based on the median of its
+    /// correlation history. Beads with consistently lower correlation get a
+    /// proportionally lower acceptance threshold.
+    #[arg(long = "adapt-threshold", default_value_t = false)]
+    adapt_threshold: bool,
 }
 
 /// Result of tracking a bead at a single view.
@@ -176,6 +187,45 @@ fn refine_peak_subpixel(cc: &[f32], nx: usize, ny: usize, px: usize, py: usize) 
     (rx, ry)
 }
 
+/// Apply a 2D cosine taper window to a square template, smoothly ramping
+/// edge pixels toward zero. This reduces ringing artifacts from sharp
+/// template boundaries, especially visible at high tilt angles.
+fn apply_cosine_taper(template: &mut [f32], size: usize) {
+    let half = size as f32 / 2.0;
+    for y in 0..size {
+        let wy = {
+            let dy = (y as f32 - half + 0.5).abs() / half;
+            if dy >= 1.0 { 0.0 } else { 0.5 * (1.0 + (std::f32::consts::PI * dy).cos()) }
+        };
+        for x in 0..size {
+            let dx = (x as f32 - half + 0.5).abs() / half;
+            let wx = if dx >= 1.0 { 0.0 } else { 0.5 * (1.0 + (std::f32::consts::PI * dx).cos()) };
+            template[y * size + x] *= wx * wy;
+        }
+    }
+}
+
+/// Compute the adaptive correlation threshold for a bead based on the median
+/// of its correlation values. Returns a threshold that is `base_threshold`
+/// scaled by the ratio of the bead's median correlation to a reference
+/// value (0.5). Beads with consistently lower correlation get a lower
+/// effective threshold, preventing premature rejection.
+fn adaptive_threshold(results: &[Option<TrackResult>], base_threshold: f32) -> f32 {
+    let mut corrs: Vec<f32> = results.iter()
+        .filter_map(|r| r.map(|tr| tr.correlation))
+        .collect();
+    if corrs.is_empty() {
+        return base_threshold;
+    }
+    corrs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = corrs[corrs.len() / 2];
+    // Scale threshold: if median is high (>0.5), keep base; if low, reduce proportionally.
+    // Clamp the scaling factor to [0.3, 1.0] to avoid pathological extremes.
+    let reference = 0.5f32;
+    let scale = (median / reference).clamp(0.3, 1.0);
+    base_threshold * scale
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -259,6 +309,9 @@ fn main() {
 
         // Extract template from seed view
         let mut template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
+        if args.taper_template {
+            apply_cosine_taper(&mut template, box_size);
+        }
 
         // --- Phase 1: Bidirectional tracking with adaptive template update ---
         // Track forward from seed
@@ -279,6 +332,7 @@ fn main() {
                 views_since_update += 1;
                 if args.template_update > 0 && views_since_update >= args.template_update {
                     template = extract_box(&sections[v], nx, ny, tr.x, tr.y, box_size);
+                    if args.taper_template { apply_cosine_taper(&mut template, box_size); }
                     views_since_update = 0;
                 }
             } else {
@@ -288,6 +342,7 @@ fn main() {
 
         // Reset template for backward tracking
         template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
+        if args.taper_template { apply_cosine_taper(&mut template, box_size); }
 
         // Track backward from seed
         cur_x = seed_x;
@@ -307,6 +362,7 @@ fn main() {
                 views_since_update += 1;
                 if args.template_update > 0 && views_since_update >= args.template_update {
                     template = extract_box(&sections[v], nx, ny, tr.x, tr.y, box_size);
+                    if args.taper_template { apply_cosine_taper(&mut template, box_size); }
                     views_since_update = 0;
                 }
             } else {
@@ -316,6 +372,7 @@ fn main() {
 
         // Reset template back to seed for gap filling and re-tracking
         template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
+        if args.taper_template { apply_cosine_taper(&mut template, box_size); }
 
         // --- Phase 2: Gap filling ---
         fill_gaps(
@@ -350,12 +407,20 @@ fn main() {
         // --- Phase 6: Correlation quality scoring ---
         let (mean_corr, min_corr, tracked_count) = correlation_stats(&results);
 
-        if mean_corr < args.min_correlation {
+        let effective_threshold = if args.adapt_threshold {
+            adaptive_threshold(&results, args.min_correlation)
+        } else {
+            args.min_correlation
+        };
+
+        if mean_corr < effective_threshold {
             rejected_count += 1;
             if bi < 5 || bi == bead_seeds.len() - 1 {
                 eprintln!(
-                    "  bead {}: REJECTED mean_corr={:.3} < {:.2} (tracked {}/{} views)",
-                    bi + 1, mean_corr, args.min_correlation, tracked_count, nz
+                    "  bead {}: REJECTED mean_corr={:.3} < {:.2}{} (tracked {}/{} views)",
+                    bi + 1, mean_corr, effective_threshold,
+                    if args.adapt_threshold { " (adaptive)" } else { "" },
+                    tracked_count, nz
                 );
             }
             continue;

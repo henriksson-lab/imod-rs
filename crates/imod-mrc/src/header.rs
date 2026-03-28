@@ -138,6 +138,14 @@ impl MrcHeader {
         self.imod_stamp == Self::IMOD_STAMP
     }
 
+    /// Whether this is an old-style (pre-2014) MRC header.
+    ///
+    /// Old-style headers lack the "MAP " signature at bytes 208-211 and have
+    /// nversion == 0. These files use a different origin field layout.
+    pub fn is_old_style(&self) -> bool {
+        self.nversion == 0 && &self.cmap != b"MAP "
+    }
+
     /// Pixel size in X (Angstroms per pixel).
     pub fn pixel_size_x(&self) -> f32 {
         if self.mx > 0 { self.xlen / self.mx as f32 } else { 1.0 }

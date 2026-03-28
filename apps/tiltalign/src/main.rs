@@ -118,6 +118,18 @@ struct Args {
     /// Perform leave-one-out cross-validation to estimate true alignment quality
     #[arg(long)]
     leave_out: bool,
+
+    /// Drop the observation with the highest residual after each iteration until RMS stops improving
+    #[arg(long)]
+    drop_worst: bool,
+
+    /// Convergence mode: "auto" (delta < 1e-6), "strict" (< 1e-8), "relaxed" (< 1e-4), "iterations" (always run max)
+    #[arg(long, default_value = "auto")]
+    convergence: String,
+
+    /// Exclude patches within N pixels of the image edge from local alignment output
+    #[arg(long, default_value_t = 0)]
+    skip_edge_patches: usize,
 }
 
 /// A fiducial track: observed (x, y) position at each view, or None if not visible.
@@ -1152,7 +1164,7 @@ fn main() {
     };
 
     // Center the observations
-    let tracks: Vec<Track> = tracks
+    let tracks: Vec<Track> = tracks  // made mutable later if --drop-worst
         .into_iter()
         .map(|track| {
             track
@@ -1200,6 +1212,20 @@ fn main() {
     }
 
     let kfactor = args.kfactor as f64;
+
+    // Parse convergence mode
+    let convergence_threshold: Option<f64> = match args.convergence.to_lowercase().as_str() {
+        "strict" => Some(1e-8),
+        "relaxed" => Some(1e-4),
+        "iterations" => None, // always run max iterations
+        "auto" | _ => Some(1e-6),
+    };
+    eprintln!("tiltalign: convergence mode = {} (threshold = {})",
+        args.convergence,
+        convergence_threshold.map_or("none (max iterations)".to_string(), |t| format!("{:.0e}", t)));
+
+    // Mutable tracks for --drop-worst support
+    let mut tracks = tracks;
 
     // Iterative refinement
     let mut prev_rms = f64::MAX;
@@ -1262,11 +1288,42 @@ fn main() {
             );
         }
 
+        // --drop-worst: find and remove the observation with the highest residual
+        if args.drop_worst && iter > 0 {
+            let mut worst_bi = 0usize;
+            let mut worst_vi = 0usize;
+            let mut worst_sq = 0.0f64;
+            for (bi, track) in tracks.iter().enumerate() {
+                for vi in 0..n_views {
+                    if let Some((obs_x, obs_y)) = track[vi] {
+                        let (pred_x, pred_y) = project(&beads[bi], &params[vi]);
+                        let dx = obs_x - pred_x;
+                        let dy = obs_y - pred_y;
+                        let sq = dx * dx + dy * dy;
+                        if sq > worst_sq {
+                            worst_sq = sq;
+                            worst_bi = bi;
+                            worst_vi = vi;
+                        }
+                    }
+                }
+            }
+            if worst_sq > 0.0 && rms < prev_rms {
+                eprintln!("  drop-worst: removing observation bead={} view={} (residual={:.4})",
+                    worst_bi, worst_vi, worst_sq.sqrt());
+                tracks[worst_bi][worst_vi] = None;
+            } else if rms >= prev_rms {
+                eprintln!("  drop-worst: RMS not improving, stopping removal");
+            }
+        }
+
         // Check convergence
         let change = (prev_rms - rms).abs();
-        if iter > 2 && change < 1e-6 {
-            eprintln!("  converged (delta RMS = {:.2e})", change);
-            break;
+        if let Some(threshold) = convergence_threshold {
+            if iter > 2 && change < threshold {
+                eprintln!("  converged (delta RMS = {:.2e}, threshold = {:.0e})", change, threshold);
+                break;
+            }
         }
         prev_rms = rms;
     }
@@ -1313,6 +1370,36 @@ fn main() {
             cx,
             cy,
         );
+
+        // Filter out edge patches if --skip-edge-patches is set
+        let edge_margin = args.skip_edge_patches as f64;
+        let img_w = if args.image_nx > 0 { args.image_nx as f64 } else { cx * 2.0 };
+        let img_h = if args.image_ny > 0 { args.image_ny as f64 } else { cy * 2.0 };
+        let local_corrections: Vec<_> = if edge_margin > 0.0 {
+            let ps = args.local_patch_size as f64;
+            let step = ps * (1.0 - args.local_overlap as f64);
+            // Compute approximate image-space position for each patch
+            // The patch grid starts at min bead position; we use (px, py) grid indices
+            // and the step size to estimate the patch center position in image coordinates
+            let before = local_corrections.len();
+            let filtered: Vec<_> = local_corrections.into_iter().filter(|&(_, px, py, _, _)| {
+                // Approximate patch center in image coords (uncentered)
+                // We don't have the exact min_x/min_y here, so we use the patch index
+                // as a proxy: patches near index 0 or max index are at the edge
+                let patch_x = px as f64 * step + ps / 2.0;
+                let patch_y = py as f64 * step + ps / 2.0;
+                // Check if patch center is within edge_margin of image boundary
+                patch_x >= edge_margin && patch_x <= img_w - edge_margin
+                    && patch_y >= edge_margin && patch_y <= img_h - edge_margin
+            }).collect();
+            let removed = before - filtered.len();
+            if removed > 0 {
+                eprintln!("tiltalign: skip-edge-patches removed {} corrections within {} px of edge", removed, edge_margin);
+            }
+            filtered
+        } else {
+            local_corrections
+        };
 
         let mut file = std::fs::File::create(local_path).unwrap();
         use std::io::Write as _;

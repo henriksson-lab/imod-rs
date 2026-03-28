@@ -42,6 +42,8 @@ pub enum ImageFormat {
     Tiff,
     Jpeg,
     Hdf5,
+    /// Electron Event Representation format (ThermoFisher/EER).
+    Eer,
     Unknown,
 }
 
@@ -60,6 +62,7 @@ impl ImageFormat {
             Some("tif") | Some("tiff") => Self::Tiff,
             Some("jpg") | Some("jpeg") => Self::Jpeg,
             Some("hdf") | Some("h5") | Some("hdf5") => Self::Hdf5,
+            Some("eer") => Self::Eer,
             _ => Self::Unknown,
         }
     }
