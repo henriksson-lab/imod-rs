@@ -66,6 +66,26 @@ struct Args {
     /// Reference view index (0-based) for fixing rotation and magnification
     #[arg(long)]
     ref_view: Option<usize>,
+
+    /// Enable robust fitting with Tukey bisquare weighting
+    #[arg(long, default_value_t = true)]
+    robust: bool,
+
+    /// Tukey bisquare constant (k-factor for MAD scaling)
+    #[arg(long, default_value_t = 4.685)]
+    kfactor: f32,
+
+    /// Number of surfaces to fit (1 = single plane, 2 = two surfaces for thick specimens)
+    #[arg(long, default_value_t = 1)]
+    surfaces: i32,
+
+    /// Group size for rotation solving (1 = per-view, N = one value per N consecutive views)
+    #[arg(long, default_value_t = 1)]
+    rotation_group: usize,
+
+    /// Group size for magnification solving (1 = per-view, N = one value per N consecutive views)
+    #[arg(long, default_value_t = 1)]
+    mag_group: usize,
 }
 
 /// A fiducial track: observed (x, y) position at each view, or None if not visible.
@@ -119,7 +139,81 @@ fn project(bead: &Bead3D, vp: &ViewParams) -> (f64, f64) {
     (proj_x, proj_y)
 }
 
-/// Estimate 3D bead positions from current alignment parameters via least-squares.
+/// Compute per-observation robust weights using Tukey bisquare function.
+///
+/// For each observation (bead, view), compute the residual distance, then apply
+/// the bisquare weight: w = (1 - (r / (k * MADN))^2)^2 if |r| < k*MADN, else 0.
+/// Returns a 2D weight array indexed as weights[bead_idx][view_idx], and reports
+/// the number of down-weighted and fully rejected points.
+fn compute_robust_weights(
+    tracks: &[Track],
+    beads: &[Bead3D],
+    params: &[ViewParams],
+    n_views: usize,
+    kfactor: f64,
+) -> (Vec<Vec<f64>>, usize, usize) {
+    let n_beads = tracks.len();
+
+    // Collect all residual distances
+    let mut all_residuals: Vec<f32> = Vec::new();
+    for (bi, track) in tracks.iter().enumerate() {
+        for vi in 0..n_views {
+            if let Some((obs_x, obs_y)) = track[vi] {
+                let (pred_x, pred_y) = project(&beads[bi], &params[vi]);
+                let dx = obs_x - pred_x;
+                let dy = obs_y - pred_y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                all_residuals.push(dist as f32);
+            }
+        }
+    }
+
+    if all_residuals.is_empty() {
+        return (vec![vec![1.0; n_views]; n_beads], 0, 0);
+    }
+
+    // Compute median and MADN (median absolute deviation, normalized)
+    let (med, _sorted) = imod_math::median(&all_residuals);
+    let (madn_val, _) = imod_math::madn(&all_residuals, med);
+
+    // Cutoff threshold
+    let threshold = kfactor * madn_val as f64;
+
+    let mut weights = vec![vec![0.0f64; n_views]; n_beads];
+    let mut n_downweighted = 0usize;
+    let mut n_rejected = 0usize;
+
+    for (bi, track) in tracks.iter().enumerate() {
+        for vi in 0..n_views {
+            if track[vi].is_some() {
+                let (pred_x, pred_y) = project(&beads[bi], &params[vi]);
+                let (obs_x, obs_y) = track[vi].unwrap();
+                let dx = obs_x - pred_x;
+                let dy = obs_y - pred_y;
+                let r = (dx * dx + dy * dy).sqrt();
+
+                if threshold < 1e-10 {
+                    // Degenerate case: all residuals are essentially zero
+                    weights[bi][vi] = 1.0;
+                } else if r < threshold {
+                    let u = r / threshold;
+                    let w = (1.0 - u * u) * (1.0 - u * u);
+                    weights[bi][vi] = w;
+                    if w < 0.9 {
+                        n_downweighted += 1;
+                    }
+                } else {
+                    weights[bi][vi] = 0.0;
+                    n_rejected += 1;
+                }
+            }
+        }
+    }
+
+    (weights, n_downweighted, n_rejected)
+}
+
+/// Estimate 3D bead positions from current alignment parameters via weighted least-squares.
 ///
 /// For each bead, we solve a linear system derived from the projection equations.
 /// The projection for view v gives two equations:
@@ -131,21 +225,28 @@ fn project(bead: &Bead3D, vp: &ViewParams) -> (f64, f64) {
 ///   (obs_y_v - dy_v)/mag_v = sin_rot_v * cos_tilt_v * X + cos_rot_v * Y + sin_rot_v * sin_tilt_v * Z
 ///
 /// This is a linear system A * [X, Y, Z]^T = b, solved via normal equations.
+/// When weights are provided, each observation pair is scaled by the weight.
 fn estimate_beads(
     tracks: &[Track],
     params: &[ViewParams],
     n_views: usize,
+    weights: Option<&Vec<Vec<f64>>>,
 ) -> Vec<Bead3D> {
     let n_beads = tracks.len();
     let mut beads = Vec::with_capacity(n_beads);
 
-    for track in tracks {
-        // Build normal equations: A^T A x = A^T b, where A is (2*n_obs x 3), b is (2*n_obs)
+    for (bi, track) in tracks.iter().enumerate() {
+        // Build normal equations: A^T W A x = A^T W b
         let mut ata = [0.0f64; 9]; // 3x3 row-major
         let mut atb = [0.0f64; 3];
 
         for vi in 0..n_views {
             if let Some((obs_x, obs_y)) = track[vi] {
+                let w = weights.map_or(1.0, |wts| wts[bi][vi]);
+                if w < 1e-12 {
+                    continue;
+                }
+
                 let vp = &params[vi];
                 let cos_tilt = vp.tilt.cos();
                 let sin_tilt = vp.tilt.sin();
@@ -167,21 +268,21 @@ fn estimate_beads(
                 let ay1 = cos_rot;
                 let ay2 = sin_rot * sin_tilt;
 
-                // Accumulate A^T A
-                ata[0] += ax0 * ax0 + ay0 * ay0;
-                ata[1] += ax0 * ax1 + ay0 * ay1;
-                ata[2] += ax0 * ax2 + ay0 * ay2;
-                ata[3] += ax1 * ax0 + ay1 * ay0;
-                ata[4] += ax1 * ax1 + ay1 * ay1;
-                ata[5] += ax1 * ax2 + ay1 * ay2;
-                ata[6] += ax2 * ax0 + ay2 * ay0;
-                ata[7] += ax2 * ax1 + ay2 * ay1;
-                ata[8] += ax2 * ax2 + ay2 * ay2;
+                // Accumulate A^T W A
+                ata[0] += w * (ax0 * ax0 + ay0 * ay0);
+                ata[1] += w * (ax0 * ax1 + ay0 * ay1);
+                ata[2] += w * (ax0 * ax2 + ay0 * ay2);
+                ata[3] += w * (ax1 * ax0 + ay1 * ay0);
+                ata[4] += w * (ax1 * ax1 + ay1 * ay1);
+                ata[5] += w * (ax1 * ax2 + ay1 * ay2);
+                ata[6] += w * (ax2 * ax0 + ay2 * ay0);
+                ata[7] += w * (ax2 * ax1 + ay2 * ay1);
+                ata[8] += w * (ax2 * ax2 + ay2 * ay2);
 
-                // Accumulate A^T b
-                atb[0] += ax0 * rx + ay0 * ry;
-                atb[1] += ax1 * rx + ay1 * ry;
-                atb[2] += ax2 * rx + ay2 * ry;
+                // Accumulate A^T W b
+                atb[0] += w * (ax0 * rx + ay0 * ry);
+                atb[1] += w * (ax1 * rx + ay1 * ry);
+                atb[2] += w * (ax2 * rx + ay2 * ry);
             }
         }
 
@@ -228,11 +329,124 @@ fn solve_3x3(a: &[f64; 9], b: &[f64; 3]) -> Bead3D {
     Bead3D { x, y, z }
 }
 
+/// Fit a plane to bead Z coordinates as a function of (X, Y).
+///
+/// Fits: Z = a + b*X + c*Y using weighted least-squares.
+/// Returns (offset, slope_x, slope_y) and applies the correction to beads in place.
+/// For surfaces == 2, splits beads above/below median Z and fits two planes.
+fn fit_surface(beads: &mut [Bead3D], surfaces: i32) -> Vec<(f64, f64, f64)> {
+    if beads.is_empty() {
+        return vec![(0.0, 0.0, 0.0)];
+    }
+
+    if surfaces <= 1 {
+        // Single surface fit
+        let result = fit_single_surface(beads, None);
+        // Subtract the fitted plane from bead Z values
+        for bead in beads.iter_mut() {
+            bead.z -= result.0 + result.1 * bead.x + result.2 * bead.y;
+        }
+        vec![result]
+    } else {
+        // Two-surface fit: split beads by median Z
+        let mut zvals: Vec<f64> = beads.iter().map(|b| b.z).collect();
+        zvals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median_z = if zvals.len() % 2 == 0 {
+            (zvals[zvals.len() / 2 - 1] + zvals[zvals.len() / 2]) / 2.0
+        } else {
+            zvals[zvals.len() / 2]
+        };
+
+        // Assign beads to surfaces
+        let above: Vec<bool> = beads.iter().map(|b| b.z >= median_z).collect();
+
+        let result_low = fit_single_surface(beads, Some((&above, false)));
+        let result_high = fit_single_surface(beads, Some((&above, true)));
+
+        // Subtract the appropriate plane from each bead
+        for (i, bead) in beads.iter_mut().enumerate() {
+            let (off, sx, sy) = if above[i] { result_high } else { result_low };
+            bead.z -= off + sx * bead.x + sy * bead.y;
+        }
+
+        vec![result_low, result_high]
+    }
+}
+
+/// Fit a single plane Z = a + b*X + c*Y to beads.
+/// If `subset` is Some((flags, target)), only fit beads where flags[i] == target.
+fn fit_single_surface(
+    beads: &[Bead3D],
+    subset: Option<(&[bool], bool)>,
+) -> (f64, f64, f64) {
+    // Build normal equations for: Z = a + b*X + c*Y
+    // Design matrix row: [1, X, Y], target: Z
+    let mut ata = [0.0f64; 9];
+    let mut atb = [0.0f64; 3];
+    let mut count = 0;
+
+    for (i, bead) in beads.iter().enumerate() {
+        if let Some((flags, target)) = subset {
+            if flags[i] != target {
+                continue;
+            }
+        }
+        let row = [1.0, bead.x, bead.y];
+        for p in 0..3 {
+            for q in 0..3 {
+                ata[p * 3 + q] += row[p] * row[q];
+            }
+            atb[p] += row[p] * bead.z;
+        }
+        count += 1;
+    }
+
+    if count < 3 {
+        // Not enough points for a plane fit, just return mean Z offset
+        let mean_z = if count > 0 {
+            beads.iter()
+                .enumerate()
+                .filter(|(i, _)| subset.map_or(true, |(f, t)| f[*i] == t))
+                .map(|(_, b)| b.z)
+                .sum::<f64>() / count as f64
+        } else {
+            0.0
+        };
+        return (mean_z, 0.0, 0.0);
+    }
+
+    // Solve via gaussj
+    let mut a_flat: Vec<f32> = ata.iter().map(|&v| v as f32).collect();
+    let mut b_flat: Vec<f32> = atb.iter().map(|&v| v as f32).collect();
+
+    if imod_math::gaussj::gaussj(&mut a_flat, 3, 3, &mut b_flat, 1, 1).is_ok() {
+        (b_flat[0] as f64, b_flat[1] as f64, b_flat[2] as f64)
+    } else {
+        // Fallback: just use mean Z
+        let mean_z = beads.iter()
+            .enumerate()
+            .filter(|(i, _)| subset.map_or(true, |(f, t)| f[*i] == t))
+            .map(|(_, b)| b.z)
+            .sum::<f64>() / count as f64;
+        (mean_z, 0.0, 0.0)
+    }
+}
+
+/// Return the group index for a given view, given the group size.
+/// Views are grouped into consecutive blocks of `group_size`.
+fn view_group(vi: usize, group_size: usize) -> usize {
+    if group_size <= 1 { vi } else { vi / group_size }
+}
+
 /// Update per-view alignment parameters by minimizing projection residuals.
 ///
 /// For each view, given fixed 3D bead positions, we solve for the alignment
 /// parameters that minimize sum of squared residuals. Translation is always
 /// solved. Rotation, magnification, and tilt are solved when enabled.
+///
+/// When group sizes > 1, rotation/magnification are solved per group of
+/// consecutive views instead of per view. Weights from robust fitting
+/// are applied when provided.
 ///
 /// The approach uses linearization around current parameter values:
 /// for small perturbations (d_rot, d_mag, d_tilt, d_dx, d_dy), the projected
@@ -247,9 +461,37 @@ fn update_view_params(
     solve_mag: bool,
     solve_tilt: bool,
     ref_view: usize,
+    weights: Option<&Vec<Vec<f64>>>,
+    rotation_group: usize,
+    mag_group: usize,
 ) {
+    // When group solving is active, we first solve grouped parameters,
+    // then solve per-view translations (and tilt if enabled).
+    // For simplicity, we solve each view individually but apply group constraints
+    // by averaging the group delta and applying it uniformly.
+
+    let rot_n_groups = if rotation_group > 1 {
+        (n_views + rotation_group - 1) / rotation_group
+    } else {
+        n_views
+    };
+    let mag_n_groups = if mag_group > 1 {
+        (n_views + mag_group - 1) / mag_group
+    } else {
+        n_views
+    };
+
+    // Accumulate group deltas for rotation and magnification
+    let mut rot_group_delta = vec![0.0f64; rot_n_groups];
+    let mut rot_group_count = vec![0usize; rot_n_groups];
+    let mut mag_group_delta = vec![0.0f64; mag_n_groups];
+    let mut mag_group_count = vec![0usize; mag_n_groups];
+
+    // First pass: solve per-view and collect group deltas
+    let mut per_view_deltas: Vec<Option<Vec<f64>>> = vec![None; n_views];
+
     for vi in 0..n_views {
-        // Count observations in this view
+        // Collect observations in this view
         let obs: Vec<(usize, f64, f64)> = tracks
             .iter()
             .enumerate()
@@ -278,35 +520,22 @@ fn update_view_params(
         let cos_rot = vp.rotation.cos();
         let sin_rot = vp.rotation.sin();
 
-        // Build normal equations: J^T J delta = J^T r
-        // where J is the Jacobian of residuals w.r.t. parameters
-        // and r is the residual vector
+        // Build normal equations: J^T W J delta = J^T W r
         let mut jtj = vec![0.0f64; n_unknowns * n_unknowns];
         let mut jtr = vec![0.0f64; n_unknowns];
 
         for &(bi, obs_x, obs_y) in &obs {
+            let w = weights.map_or(1.0, |wts| wts[bi][vi]);
+            if w < 1e-12 {
+                continue;
+            }
+
             let bead = &beads[bi];
             let (pred_x, pred_y) = project(bead, vp);
             let res_x = obs_x - pred_x;
             let res_y = obs_y - pred_y;
 
-            // Jacobian row for this observation (2 rows: x and y)
-            // Derivatives of proj_x and proj_y w.r.t. each parameter:
-            // xp = bead.x * cos_tilt + bead.z * sin_tilt
-            // proj_x = mag * (cos_rot * xp - sin_rot * Y) + dx
-            // proj_y = mag * (sin_rot * xp + cos_rot * Y) + dy
-
             let xp = bead.x * cos_tilt + bead.z * sin_tilt;
-
-            // d(proj_x)/d(dx) = 1, d(proj_y)/d(dx) = 0
-            // d(proj_x)/d(dy) = 0, d(proj_y)/d(dy) = 1
-            // d(proj_x)/d(rot) = mag * (-sin_rot * xp - cos_rot * Y)
-            // d(proj_y)/d(rot) = mag * (cos_rot * xp - sin_rot * Y)
-            // d(proj_x)/d(mag) = cos_rot * xp - sin_rot * Y
-            // d(proj_y)/d(mag) = sin_rot * xp + cos_rot * Y
-            // d(proj_x)/d(tilt) = mag * cos_rot * (-bead.x * sin_tilt + bead.z * cos_tilt)
-            // d(proj_y)/d(tilt) = mag * sin_rot * (-bead.x * sin_tilt + bead.z * cos_tilt)
-
             let dxp_dtilt = -bead.x * sin_tilt + bead.z * cos_tilt;
 
             // Build Jacobian columns
@@ -333,12 +562,12 @@ fn update_view_params(
                 jy.push(vp.mag * sin_rot * dxp_dtilt);
             }
 
-            // Accumulate J^T J and J^T r
+            // Accumulate J^T W J and J^T W r
             for p in 0..n_unknowns {
                 for q in 0..n_unknowns {
-                    jtj[p * n_unknowns + q] += jx[p] * jx[q] + jy[p] * jy[q];
+                    jtj[p * n_unknowns + q] += w * (jx[p] * jx[q] + jy[p] * jy[q]);
                 }
-                jtr[p] += jx[p] * res_x + jy[p] * res_y;
+                jtr[p] += w * (jx[p] * res_x + jy[p] * res_y);
             }
         }
 
@@ -349,24 +578,77 @@ fn update_view_params(
 
         if imod_math::gaussj::gaussj(&mut a_flat, n, n, &mut b_flat, 1, 1).is_ok() {
             let delta: Vec<f64> = b_flat.iter().map(|&v| v as f64).collect();
+            per_view_deltas[vi] = Some(delta);
+        }
+    }
 
-            let vp = &mut params[vi];
-            vp.dx += delta[0];
-            vp.dy += delta[1];
+    // Apply deltas, handling group constraints
+    for vi in 0..n_views {
+        if let Some(ref delta) = per_view_deltas[vi] {
+            let solve_rot_here = solve_rotation && vi != ref_view;
+            let solve_mag_here = solve_mag && vi != ref_view;
+
+            // Translations always applied per-view
+            params[vi].dx += delta[0];
+            params[vi].dy += delta[1];
 
             let mut idx = 2;
             if solve_rot_here {
-                vp.rotation += delta[idx];
+                if rotation_group > 1 {
+                    let gi = view_group(vi, rotation_group);
+                    rot_group_delta[gi] += delta[idx];
+                    rot_group_count[gi] += 1;
+                } else {
+                    params[vi].rotation += delta[idx];
+                }
                 idx += 1;
             }
             if solve_mag_here {
-                vp.mag += delta[idx];
-                // Clamp magnification to reasonable range
-                vp.mag = vp.mag.clamp(0.5, 2.0);
+                if mag_group > 1 {
+                    let gi = view_group(vi, mag_group);
+                    mag_group_delta[gi] += delta[idx];
+                    mag_group_count[gi] += 1;
+                } else {
+                    params[vi].mag += delta[idx];
+                    params[vi].mag = params[vi].mag.clamp(0.5, 2.0);
+                }
                 idx += 1;
             }
-            if solve_tilt_here {
-                vp.tilt += delta[idx];
+            if solve_tilt {
+                params[vi].tilt += delta[idx];
+            }
+        }
+    }
+
+    // Apply grouped rotation deltas
+    if rotation_group > 1 && solve_rotation {
+        for gi in 0..rot_n_groups {
+            if rot_group_count[gi] > 0 {
+                let avg_delta = rot_group_delta[gi] / rot_group_count[gi] as f64;
+                let start = gi * rotation_group;
+                let end = ((gi + 1) * rotation_group).min(n_views);
+                for vi in start..end {
+                    if vi != ref_view {
+                        params[vi].rotation += avg_delta;
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply grouped magnification deltas
+    if mag_group > 1 && solve_mag {
+        for gi in 0..mag_n_groups {
+            if mag_group_count[gi] > 0 {
+                let avg_delta = mag_group_delta[gi] / mag_group_count[gi] as f64;
+                let start = gi * mag_group;
+                let end = ((gi + 1) * mag_group).min(n_views);
+                for vi in start..end {
+                    if vi != ref_view {
+                        params[vi].mag += avg_delta;
+                        params[vi].mag = params[vi].mag.clamp(0.5, 2.0);
+                    }
+                }
             }
         }
     }
@@ -531,12 +813,54 @@ fn main() {
         if args.solve_mag { " + magnification" } else { "" },
         if args.solve_tilt { " + tilt" } else { "" },
     );
+    if args.robust {
+        eprintln!(
+            "tiltalign: robust fitting enabled (k = {:.3})",
+            args.kfactor
+        );
+    }
+    if args.rotation_group > 1 {
+        eprintln!(
+            "tiltalign: rotation group size = {} ({} groups)",
+            args.rotation_group,
+            (n_views + args.rotation_group - 1) / args.rotation_group
+        );
+    }
+    if args.mag_group > 1 {
+        eprintln!(
+            "tiltalign: magnification group size = {} ({} groups)",
+            args.mag_group,
+            (n_views + args.mag_group - 1) / args.mag_group
+        );
+    }
+    if args.surfaces > 1 {
+        eprintln!("tiltalign: fitting {} surfaces", args.surfaces);
+    }
+
+    let kfactor = args.kfactor as f64;
 
     // Iterative refinement
     let mut prev_rms = f64::MAX;
+    let mut robust_weights: Option<Vec<Vec<f64>>> = None;
+
     for iter in 0..args.iterations {
         // Step 1: Estimate 3D bead positions from current alignment parameters
-        let beads = estimate_beads(&tracks, &params, n_views);
+        let mut beads = estimate_beads(&tracks, &params, n_views, robust_weights.as_ref());
+
+        // Step 1b: Surface fitting - remove systematic Z variation
+        if args.surfaces >= 1 && iter > 0 {
+            let surfaces = fit_surface(&mut beads, args.surfaces);
+            if iter == 1 {
+                for (si, (off, sx, sy)) in surfaces.iter().enumerate() {
+                    let angle_x = sx.atan().to_degrees();
+                    let angle_y = sy.atan().to_degrees();
+                    eprintln!(
+                        "  surface {}: offset = {:.2}, slope_x = {:.4} ({:.2} deg), slope_y = {:.4} ({:.2} deg)",
+                        si + 1, off, sx, angle_x, sy, angle_y
+                    );
+                }
+            }
+        }
 
         // Step 2: Update alignment parameters to minimize residuals
         update_view_params(
@@ -548,17 +872,31 @@ fn main() {
             args.solve_mag,
             args.solve_tilt,
             ref_view,
+            robust_weights.as_ref(),
+            args.rotation_group,
+            args.mag_group,
         );
 
         // Compute residuals with updated parameters and updated beads
-        let beads = estimate_beads(&tracks, &params, n_views);
+        let beads = estimate_beads(&tracks, &params, n_views, robust_weights.as_ref());
         let (rms, _view_rms, _view_count) = compute_residuals(&tracks, &beads, &params, n_views);
 
-        eprintln!(
-            "  iter {:3}: RMS residual = {:.4} pixels",
-            iter + 1,
-            rms
-        );
+        // Step 3: Compute robust weights for next iteration (after first 2 iters to stabilize)
+        if args.robust && iter >= 2 {
+            let (weights, n_down, n_rej) =
+                compute_robust_weights(&tracks, &beads, &params, n_views, kfactor);
+            eprintln!(
+                "  iter {:3}: RMS = {:.4} px, robust: {} down-weighted, {} rejected",
+                iter + 1, rms, n_down, n_rej
+            );
+            robust_weights = Some(weights);
+        } else {
+            eprintln!(
+                "  iter {:3}: RMS residual = {:.4} pixels",
+                iter + 1,
+                rms
+            );
+        }
 
         // Check convergence
         let change = (prev_rms - rms).abs();
@@ -569,8 +907,20 @@ fn main() {
         prev_rms = rms;
     }
 
-    // Final residual report
-    let beads = estimate_beads(&tracks, &params, n_views);
+    // Final bead estimation and surface report
+    let mut beads = estimate_beads(&tracks, &params, n_views, robust_weights.as_ref());
+    if args.surfaces >= 1 {
+        let surfaces = fit_surface(&mut beads, args.surfaces);
+        eprintln!("\nFinal surface fit:");
+        for (si, (off, sx, sy)) in surfaces.iter().enumerate() {
+            let angle_x = sx.atan().to_degrees();
+            let angle_y = sy.atan().to_degrees();
+            eprintln!(
+                "  surface {}: offset = {:.2}, angle_x = {:.2} deg, angle_y = {:.2} deg",
+                si + 1, off, angle_x, angle_y
+            );
+        }
+    }
     let (rms, view_rms, view_count) = compute_residuals(&tracks, &beads, &params, n_views);
 
     eprintln!("\nFinal RMS residual: {:.4} pixels", rms);
