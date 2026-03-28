@@ -1,0 +1,12 @@
+[package]
+name = "imod-warp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+imod-core.workspace = true
+imod-transforms = { path = "../imod-transforms" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

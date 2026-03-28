@@ -7,7 +7,7 @@
 - [x] `imod-mrc` — MRC file format read/write with `binrw`
   - [x] MRC header parsing (1024-byte header, all modes)
   - [x] Extended header type detection (FEI, SerialEM, Agard)
-  - [ ] Byte-swapped file reading
+  - [x] Byte-swapped file reading (auto-detect big-endian)
   - [x] Round-trip tests (header, byte mode, float mode)
   - [x] MrcReader: read slices as raw bytes or f32 (byte, short, ushort, float, RGB, 4-bit)
   - [x] MrcWriter: write slices from f32 with statistics finalization
@@ -19,24 +19,27 @@
 - [x] `imod-math` — mean, SD, min/max, robust stats (median/MADN), sampling, linear regression
 - [x] `imod-transforms` — LinearTransform (multiply, invert, apply, rotate, scale), .xf/.xg I/O, .tlt I/O
 - [x] `imod-fft` — 1D/2D FFT (real↔complex), power spectrum, cross-correlation (via rustfft)
-- [ ] `imod-slice` — slice/image processing, pixel operations, filtering
-- [ ] `imod-image-io` — multi-format I/O trait (MRC, TIFF, JPEG, HDF5, EER)
+- [x] `imod-slice` — Slice type, bilinear interp, scale/clamp/threshold/invert, add/subtract/multiply, convolve, sobel, blur, median, bin, subregion
+- [x] `imod-image-io` — ImageFile trait, MRC backend, format detection (.mrc/.st/.ali/.rec/.tif/.hdf)
 - [x] `imod-model` — IMOD model read/write (chunk-based binary: IMOD/OBJT/CONT/MESH/IEOF)
-- [ ] `imod-warp` — warping, Delaunay triangulation, natural neighbor interpolation
-- [ ] `imod-mesh` — mesh generation from contour data
+- [x] `imod-warp` — Bowyer-Watson Delaunay triangulation, warp file read/write, point-in-triangle search
+- [x] `imod-mesh` — contour skinning (triangle strip between Z sections), Douglas-Peucker simplification
 
 ## Phase 2: Command-Line Tools (Months 5-9)
 
-- [ ] `newstack` — stack operations
-- [ ] `clip` — image processing operations
-- [ ] `mrcbyte` / `mrcinfo` / `mrc2tif` — basic MRC utilities
-- [ ] `tiltxcorr` — cross-correlation alignment
-- [ ] `ccderaser` — artifact removal
-- [ ] `ctfphaseflip` — CTF correction
-- [ ] `alignframes` — movie frame alignment
-- [ ] `binvol` / `rotatevol` / `trimvol` — volume operations
-- [ ] `mtffilter` — MTF filtering
-- [ ] `eraser` — gold bead eraser
+- [x] `newstack` — section selection, binning, transform application, mode conversion, scaling
+- [x] `clip` — stats, flip, multiply, add, resize, median filter, gradient (Sobel)
+- [x] `mrcinfo` — header display (dimensions, mode, pixel size, labels, IMOD stamp)
+- [x] `mrcbyte` — convert to byte mode with auto/manual/contrast scaling
+- [x] `tiltxcorr` — cross-correlation alignment of tilt series (FFT-based, reference section, exclusion)
+- [x] `ccderaser` — automatic X-ray/hot pixel detection and replacement
+- [x] `ctfphaseflip` — CTF phase-flip correction (strip-based, tilt-dependent defocus, relativistic wavelength)
+- [x] `alignframes` — iterative frame alignment by cross-correlation, aligned sum output, optional .xf output
+- [x] `binvol` — 3D volume binning (independent XY and Z factors)
+- [x] `trimvol` — subvolume extraction, Y/Z rotation, float-to-byte
+- [x] `rotatevol` — Z-axis rotation with bilinear interpolation
+- [x] `mtffilter` — Fourier-space low-pass/high-pass filtering with Gaussian falloff
+- [x] `eraser` — gold bead eraser using IMOD model positions, ring interpolation
 
 ## Phase 3: Reconstruction Pipeline (Months 8-13)
 
@@ -101,5 +104,6 @@
 - [x] Analyzed codebase: ~969K lines (Java 346K, C++ 320K, C 127K, Headers 98K, Fortran 69K+, Python 6K, Shell 4K)
 - [x] Created rewrite plan with workspace structure, phased migration, and key decisions
 - [x] Saved README.md with project overview
-- [x] Phase 0 complete: workspace with 3 crates, 13 tests passing
-- [x] Phase 1 in progress: 7 crates total, 42 tests passing
+- [x] Phase 0 complete: 3 crates, 13 tests
+- [x] Phase 1 complete: 11 crates, 68 tests passing
+- [x] Phase 2 complete: 13 CLI tools built and working

@@ -1,0 +1,13 @@
+[package]
+name = "imod-image-io"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-slice = { path = "../imod-slice" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

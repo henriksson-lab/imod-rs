@@ -8,6 +8,23 @@ members = [
     "crates/imod-transforms",
     "crates/imod-fft",
     "crates/imod-model",
+    "crates/imod-slice",
+    "crates/imod-image-io",
+    "crates/imod-warp",
+    "crates/imod-mesh",
+    "apps/mrcinfo",
+    "apps/mrcbyte",
+    "apps/newstack",
+    "apps/clip",
+    "apps/binvol",
+    "apps/trimvol",
+    "apps/rotatevol",
+    "apps/tiltxcorr",
+    "apps/ccderaser",
+    "apps/mtffilter",
+    "apps/eraser",
+    "apps/ctfphaseflip",
+    "apps/alignframes",
 ]
 
 [workspace.package]
@@ -23,6 +40,11 @@ imod-math = { path = "crates/imod-math" }
 imod-transforms = { path = "crates/imod-transforms" }
 imod-fft = { path = "crates/imod-fft" }
 imod-model = { path = "crates/imod-model" }
+imod-slice = { path = "crates/imod-slice" }
+imod-image-io = { path = "crates/imod-image-io" }
+imod-warp = { path = "crates/imod-warp" }
+imod-mesh = { path = "crates/imod-mesh" }
 rustfft = "6"
 thiserror = "2"
 binrw = "0.14"
+clap = { version = "4", features = ["derive"] }

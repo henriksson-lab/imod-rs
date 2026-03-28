@@ -1,0 +1,7 @@
+[package]
+name = "imod-mesh"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+imod-core.workspace = true
