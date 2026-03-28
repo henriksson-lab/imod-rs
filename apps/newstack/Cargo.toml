@@ -1,0 +1,16 @@
+[package]
+name = "newstack"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "newstack"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+imod-transforms = { path = "../../crates/imod-transforms" }
+imod-slice = { path = "../../crates/imod-slice" }
+clap = { version = "4", features = ["derive"] }

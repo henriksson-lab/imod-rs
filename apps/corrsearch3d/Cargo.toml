@@ -1,0 +1,16 @@
+[package]
+name = "corrsearch3d"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "corrsearch3d"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+imod-fft.workspace = true
+imod-model.workspace = true
+clap = { version = "4", features = ["derive"] }

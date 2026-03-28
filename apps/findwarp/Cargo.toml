@@ -1,0 +1,14 @@
+[package]
+name = "findwarp"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "findwarp"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-model.workspace = true
+imod-math.workspace = true
+clap = { version = "4", features = ["derive"] }

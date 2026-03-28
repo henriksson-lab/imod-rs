@@ -1,0 +1,14 @@
+[package]
+name = "rotatevol"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rotatevol"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+clap = { version = "4", features = ["derive"] }

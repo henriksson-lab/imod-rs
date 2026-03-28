@@ -1,0 +1,16 @@
+[package]
+name = "clip"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "clip"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+imod-math.workspace = true
+imod-slice = { path = "../../crates/imod-slice" }
+imod-fft.workspace = true
+clap = { version = "4", features = ["derive"] }

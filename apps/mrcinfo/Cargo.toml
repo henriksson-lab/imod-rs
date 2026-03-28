@@ -1,0 +1,13 @@
+[package]
+name = "mrcinfo"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "mrcinfo"
+path = "src/main.rs"
+
+[dependencies]
+imod-core.workspace = true
+imod-mrc.workspace = true
+clap = { version = "4", features = ["derive"] }
