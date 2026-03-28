@@ -1,6 +1,7 @@
 use clap::Parser;
 use imod_core::Point3f;
 use imod_fft::cross_correlate_2d;
+use imod_math::polynomial_fit;
 use imod_model::{write_model, ImodContour, ImodModel, ImodObject};
 use imod_mrc::MrcReader;
 use imod_transforms::read_tilt_file;
@@ -49,6 +50,24 @@ struct Args {
     /// Minimum mean correlation to keep a bead
     #[arg(long, default_value_t = 0.1)]
     min_correlation: f32,
+
+    /// Polynomial order for smooth trajectory fitting (applied after tracking
+    /// and gap filling). X and Y positions are fit separately as functions of
+    /// view index. Set to 0 to disable trajectory smoothing.
+    #[arg(long = "trajectory-order", default_value_t = 2)]
+    trajectory_order: usize,
+
+    /// Re-extract the bead template every N views from the current tracked
+    /// position, adapting to changes in bead appearance at different tilt angles.
+    /// Set to 0 to always use the seed template.
+    #[arg(long = "template-update", default_value_t = 10)]
+    template_update: usize,
+
+    /// Maximum elongation factor (ratio of correlation peak width in X vs Y).
+    /// Beads with elongation above this threshold are flagged as potentially
+    /// incorrect and excluded from the output.
+    #[arg(long = "max-elongation", default_value_t = 3.0)]
+    max_elongation: f32,
 }
 
 /// Result of tracking a bead at a single view.
@@ -57,6 +76,9 @@ struct TrackResult {
     x: f32,
     y: f32,
     correlation: f32,
+    /// Elongation factor: ratio of correlation peak width in X vs Y.
+    /// Values near 1.0 indicate a round peak; high values suggest tracking error.
+    elongation: f32,
 }
 
 fn main() {
@@ -128,15 +150,16 @@ fn main() {
 
     for (bi, &(seed_x, seed_y, seed_view)) in bead_seeds.iter().enumerate() {
         let mut results: Vec<Option<TrackResult>> = vec![None; nz];
-        results[seed_view] = Some(TrackResult { x: seed_x, y: seed_y, correlation: 1.0 });
+        results[seed_view] = Some(TrackResult { x: seed_x, y: seed_y, correlation: 1.0, elongation: 1.0 });
 
         // Extract template from seed view
-        let template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
+        let mut template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
 
-        // --- Phase 1: Bidirectional tracking ---
+        // --- Phase 1: Bidirectional tracking with adaptive template update ---
         // Track forward from seed
         let mut cur_x = seed_x;
         let mut cur_y = seed_y;
+        let mut views_since_update = 0usize;
         for v in (seed_view + 1)..nz {
             let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
             if let Some(tr) = track_bead_tilt(
@@ -146,14 +169,25 @@ fn main() {
                 results[v] = Some(tr);
                 cur_x = tr.x;
                 cur_y = tr.y;
+
+                // Adaptive template update
+                views_since_update += 1;
+                if args.template_update > 0 && views_since_update >= args.template_update {
+                    template = extract_box(&sections[v], nx, ny, tr.x, tr.y, box_size);
+                    views_since_update = 0;
+                }
             } else {
                 break;
             }
         }
 
+        // Reset template for backward tracking
+        template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
+
         // Track backward from seed
         cur_x = seed_x;
         cur_y = seed_y;
+        views_since_update = 0;
         for v in (0..seed_view).rev() {
             let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
             if let Some(tr) = track_bead_tilt(
@@ -163,10 +197,20 @@ fn main() {
                 results[v] = Some(tr);
                 cur_x = tr.x;
                 cur_y = tr.y;
+
+                // Adaptive template update
+                views_since_update += 1;
+                if args.template_update > 0 && views_since_update >= args.template_update {
+                    template = extract_box(&sections[v], nx, ny, tr.x, tr.y, box_size);
+                    views_since_update = 0;
+                }
             } else {
                 break;
             }
         }
+
+        // Reset template back to seed for gap filling and re-tracking
+        template = extract_box(&sections[seed_view], nx, ny, seed_x, seed_y, box_size);
 
         // --- Phase 2: Gap filling ---
         fill_gaps(
@@ -180,7 +224,25 @@ fn main() {
             box_size, &tilt_angles, args.max_residual,
         );
 
-        // --- Phase 4: Correlation quality scoring ---
+        // --- Phase 4: Smooth trajectory fitting ---
+        if args.trajectory_order > 0 {
+            smooth_trajectory(&mut results, args.trajectory_order);
+        }
+
+        // --- Phase 5: Elongation filtering ---
+        let mean_elongation = elongation_stats(&results);
+        if mean_elongation > args.max_elongation {
+            rejected_count += 1;
+            if bi < 5 || bi == bead_seeds.len() - 1 {
+                eprintln!(
+                    "  bead {}: REJECTED mean_elongation={:.2} > {:.1}",
+                    bi + 1, mean_elongation, args.max_elongation
+                );
+            }
+            continue;
+        }
+
+        // --- Phase 6: Correlation quality scoring ---
         let (mean_corr, min_corr, tracked_count) = correlation_stats(&results);
 
         if mean_corr < args.min_correlation {
@@ -355,6 +417,30 @@ fn track_bead_tilt(
 
     let norm_corr = (max_val - cc_min) / cc_range;
 
+    // Compute elongation: measure the half-width of the correlation peak in X and Y
+    // at half-maximum level, then take the ratio.
+    let half_max = (max_val + cc_min) / 2.0;
+    let mut width_x = 1.0f32;
+    let mut width_y = 1.0f32;
+
+    // Measure width in X direction
+    for dx_step in 1..(fft_size / 2) {
+        let px = (mx + dx_step) % fft_size;
+        if cc[my * fft_size + px] < half_max {
+            width_x = dx_step as f32;
+            break;
+        }
+    }
+    // Measure width in Y direction
+    for dy_step in 1..(fft_size / 2) {
+        let py = (my + dy_step) % fft_size;
+        if cc[py * fft_size + mx] < half_max {
+            width_y = dy_step as f32;
+            break;
+        }
+    }
+    let elongation = if width_y > 0.0 { (width_x / width_y).max(width_y / width_x) } else { 1.0 };
+
     // Convert peak to shift. The shift in X needs to be scaled back by x_stretch
     // because the search box was stretched.
     let dx_raw = if mx > fft_size / 2 { mx as f32 - fft_size as f32 } else { mx as f32 };
@@ -369,7 +455,7 @@ fn track_bead_tilt(
         return None;
     }
 
-    Some(TrackResult { x: new_x, y: new_y, correlation: norm_corr })
+    Some(TrackResult { x: new_x, y: new_y, correlation: norm_corr, elongation })
 }
 
 /// Stretch a template along X and pad it into an fft_size buffer.
@@ -648,6 +734,72 @@ fn correlation_stats(results: &[Option<TrackResult>]) -> (f32, f32, usize) {
     } else {
         (sum / count as f32, min, count)
     }
+}
+
+/// Fit a smooth polynomial trajectory through all tracked positions and replace
+/// the X/Y coordinates with the fitted values. Uses imod_math::polynomial_fit
+/// for X and Y independently as functions of view index.
+fn smooth_trajectory(results: &mut Vec<Option<TrackResult>>, order: usize) {
+    // Collect tracked positions
+    let mut views: Vec<f32> = Vec::new();
+    let mut xs: Vec<f32> = Vec::new();
+    let mut ys: Vec<f32> = Vec::new();
+    for (v, res) in results.iter().enumerate() {
+        if let Some(tr) = res {
+            views.push(v as f32);
+            xs.push(tr.x);
+            ys.push(tr.y);
+        }
+    }
+
+    let n = views.len();
+    if n <= order {
+        return; // Not enough points to fit
+    }
+
+    // Fit polynomial to X coordinates
+    let fit_x = match polynomial_fit(&views, &xs, n, order) {
+        Ok(fit) => fit,
+        Err(_) => return, // Fall back to no smoothing on error
+    };
+
+    // Fit polynomial to Y coordinates
+    let fit_y = match polynomial_fit(&views, &ys, n, order) {
+        Ok(fit) => fit,
+        Err(_) => return,
+    };
+
+    // Evaluate the fitted polynomial at each tracked view and replace coordinates
+    for (v, res) in results.iter_mut().enumerate() {
+        if let Some(tr) = res {
+            let vf = v as f32;
+            // Evaluate: intercept + slopes[0]*x + slopes[1]*x^2 + ...
+            let mut fitted_x = fit_x.intercept;
+            let mut fitted_y = fit_y.intercept;
+            for (k, (&sx, &sy)) in fit_x.slopes.iter().zip(fit_y.slopes.iter()).enumerate() {
+                let power = (k + 1) as i32;
+                let vp = vf.powi(power);
+                fitted_x += sx * vp;
+                fitted_y += sy * vp;
+            }
+            tr.x = fitted_x;
+            tr.y = fitted_y;
+        }
+    }
+}
+
+/// Compute the mean elongation factor across all tracked views.
+/// Returns 1.0 if no views are tracked.
+fn elongation_stats(results: &[Option<TrackResult>]) -> f32 {
+    let mut sum = 0.0f32;
+    let mut count = 0usize;
+    for res in results {
+        if let Some(tr) = res {
+            sum += tr.elongation;
+            count += 1;
+        }
+    }
+    if count == 0 { 1.0 } else { sum / count as f32 }
 }
 
 fn next_pow2(n: usize) -> usize {

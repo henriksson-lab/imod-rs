@@ -86,6 +86,30 @@ struct Args {
     /// Group size for magnification solving (1 = per-view, N = one value per N consecutive views)
     #[arg(long, default_value_t = 1)]
     mag_group: usize,
+
+    /// Solve for beam tilt correction (systematic shift proportional to defocus * tilt)
+    #[arg(long)]
+    solve_beam_tilt: bool,
+
+    /// Scale factor for beam tilt correction
+    #[arg(long, default_value_t = 1.0)]
+    beam_tilt_scale: f32,
+
+    /// Output file for local alignment corrections
+    #[arg(long)]
+    output_local: Option<String>,
+
+    /// Patch size in pixels for local alignment grid
+    #[arg(long, default_value_t = 500)]
+    local_patch_size: usize,
+
+    /// Overlap fraction between adjacent local patches (0.0 to 0.9)
+    #[arg(long, default_value_t = 0.5)]
+    local_overlap: f32,
+
+    /// Perform leave-one-out cross-validation to estimate true alignment quality
+    #[arg(long)]
+    leave_out: bool,
 }
 
 /// A fiducial track: observed (x, y) position at each view, or None if not visible.
@@ -701,6 +725,274 @@ fn compute_residuals(
     (rms, view_rms, view_count)
 }
 
+/// Search for the beam tilt angle that minimizes residuals.
+///
+/// Beam tilt causes a systematic image shift proportional to sin(tilt_angle),
+/// modeling the defocus-dependent deflection. For each candidate beam tilt angle,
+/// we apply dx_beam = beam_tilt_rad * sin(tilt_v) * scale_factor to the
+/// projected x positions and pick the angle giving the lowest RMS.
+fn solve_beam_tilt(
+    tracks: &[Track],
+    beads: &[Bead3D],
+    params: &[ViewParams],
+    n_views: usize,
+    scale_factor: f64,
+) -> (f64, f64) {
+    let mut best_bt = 0.0f64;
+    let mut best_rms = f64::MAX;
+
+    // Search -2 to +2 degrees in 0.1 degree steps
+    let steps = 41; // -20..=20 in units of 0.1 deg
+    for step in 0..steps {
+        let bt_deg = -2.0 + step as f64 * 0.1;
+        let bt_rad = bt_deg.to_radians();
+
+        let mut sum_sq = 0.0f64;
+        let mut count = 0usize;
+
+        for (bi, track) in tracks.iter().enumerate() {
+            for vi in 0..n_views {
+                if let Some((obs_x, obs_y)) = track[vi] {
+                    let (pred_x, pred_y) = project(&beads[bi], &params[vi]);
+                    // Beam tilt correction: shifts x proportional to sin(tilt)
+                    let dx_beam = bt_rad * params[vi].tilt.sin() * scale_factor;
+                    let dx = obs_x - (pred_x + dx_beam);
+                    let dy = obs_y - pred_y;
+                    sum_sq += dx * dx + dy * dy;
+                    count += 1;
+                }
+            }
+        }
+
+        if count > 0 {
+            let rms = (sum_sq / count as f64).sqrt();
+            if rms < best_rms {
+                best_rms = rms;
+                best_bt = bt_deg;
+            }
+        }
+    }
+
+    // Refine around the best with finer 0.01 degree steps
+    let coarse_best = best_bt;
+    for step in -10..=10 {
+        let bt_deg = coarse_best + step as f64 * 0.01;
+        let bt_rad = bt_deg.to_radians();
+
+        let mut sum_sq = 0.0f64;
+        let mut count = 0usize;
+
+        for (bi, track) in tracks.iter().enumerate() {
+            for vi in 0..n_views {
+                if let Some((obs_x, obs_y)) = track[vi] {
+                    let (pred_x, pred_y) = project(&beads[bi], &params[vi]);
+                    let dx_beam = bt_rad * params[vi].tilt.sin() * scale_factor;
+                    let dx = obs_x - (pred_x + dx_beam);
+                    let dy = obs_y - pred_y;
+                    sum_sq += dx * dx + dy * dy;
+                    count += 1;
+                }
+            }
+        }
+
+        if count > 0 {
+            let rms = (sum_sq / count as f64).sqrt();
+            if rms < best_rms {
+                best_rms = rms;
+                best_bt = bt_deg;
+            }
+        }
+    }
+
+    (best_bt, best_rms)
+}
+
+/// Compute local alignment corrections on a grid of patches.
+///
+/// After global alignment, divides the image area into overlapping patches.
+/// For each patch, finds nearby beads and solves for a local translation offset
+/// (dx, dy) that minimizes residuals for those beads. This captures local
+/// warping/distortion that the global rigid alignment cannot model.
+fn compute_local_alignment(
+    tracks: &[Track],
+    beads: &[Bead3D],
+    params: &[ViewParams],
+    n_views: usize,
+    patch_size: usize,
+    overlap: f32,
+    cx: f64,
+    cy: f64,
+) -> Vec<(usize, usize, usize, f64, f64)> {
+    // Determine the bounding box of bead positions in image coords (uncentered)
+    let mut min_x = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut min_y = f64::MAX;
+    let mut max_y = f64::MIN;
+
+    for bead in beads.iter() {
+        let bx = bead.x + cx;
+        let by = bead.y + cy;
+        if bx < min_x { min_x = bx; }
+        if bx > max_x { max_x = bx; }
+        if by < min_y { min_y = by; }
+        if by > max_y { max_y = by; }
+    }
+
+    let ps = patch_size as f64;
+    let step = ps * (1.0 - overlap as f64);
+    if step < 1.0 {
+        return Vec::new();
+    }
+
+    // Build patch grid
+    let n_patches_x = ((max_x - min_x) / step).ceil() as usize + 1;
+    let n_patches_y = ((max_y - min_y) / step).ceil() as usize + 1;
+
+    let mut results = Vec::new();
+
+    for py in 0..n_patches_y {
+        for px in 0..n_patches_x {
+            let patch_cx = min_x + px as f64 * step + ps / 2.0;
+            let patch_cy = min_y + py as f64 * step + ps / 2.0;
+            let half = ps / 2.0;
+
+            // For each view, find beads within this patch and solve for local shift
+            for vi in 0..n_views {
+                let mut sum_dx = 0.0f64;
+                let mut sum_dy = 0.0f64;
+                let mut count = 0usize;
+
+                for (bi, track) in tracks.iter().enumerate() {
+                    if let Some((obs_x, obs_y)) = track[vi] {
+                        // Check if the bead's projected position falls within this patch
+                        // Use the observed position (in centered coords), convert to image coords
+                        let img_x = obs_x + cx;
+                        let img_y = obs_y + cy;
+
+                        if (img_x - patch_cx).abs() <= half && (img_y - patch_cy).abs() <= half {
+                            let (pred_x, pred_y) = project(&beads[bi], &params[vi]);
+                            sum_dx += obs_x - pred_x;
+                            sum_dy += obs_y - pred_y;
+                            count += 1;
+                        }
+                    }
+                }
+
+                if count >= 2 {
+                    let local_dx = sum_dx / count as f64;
+                    let local_dy = sum_dy / count as f64;
+                    results.push((vi, px, py, local_dx, local_dy));
+                }
+            }
+        }
+    }
+
+    results
+}
+
+/// Perform leave-one-out cross-validation.
+///
+/// For each bead, re-solve the alignment without that bead, then predict
+/// the left-out bead's position and compare to the actual observation.
+/// Returns the leave-one-out RMS and per-bead RMS values.
+fn leave_one_out_validation(
+    tracks: &[Track],
+    params_orig: &[ViewParams],
+    n_views: usize,
+    iterations: usize,
+    solve_rotation: bool,
+    solve_mag: bool,
+    solve_tilt: bool,
+    ref_view: usize,
+    kfactor: f64,
+    robust: bool,
+    rotation_group: usize,
+    mag_group: usize,
+    surfaces: i32,
+) -> (f64, Vec<f64>) {
+    let n_beads = tracks.len();
+    let mut per_bead_rms = Vec::with_capacity(n_beads);
+    let mut total_sum_sq = 0.0f64;
+    let mut total_count = 0usize;
+
+    for leave_out_bi in 0..n_beads {
+        // Build tracks without the left-out bead
+        let reduced_tracks: Vec<Track> = tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != leave_out_bi)
+            .map(|(_, t)| t.clone())
+            .collect();
+
+        // Re-solve alignment from scratch with the reduced set
+        let mut params: Vec<ViewParams> = params_orig.to_vec();
+        let mut robust_weights: Option<Vec<Vec<f64>>> = None;
+
+        for iter in 0..iterations {
+            let mut beads = estimate_beads(&reduced_tracks, &params, n_views, robust_weights.as_ref());
+            if surfaces >= 1 && iter > 0 {
+                fit_surface(&mut beads, surfaces);
+            }
+            update_view_params(
+                &reduced_tracks,
+                &beads,
+                &mut params,
+                n_views,
+                solve_rotation,
+                solve_mag,
+                solve_tilt,
+                ref_view,
+                robust_weights.as_ref(),
+                rotation_group,
+                mag_group,
+            );
+
+            if robust && iter >= 2 {
+                let beads = estimate_beads(&reduced_tracks, &params, n_views, robust_weights.as_ref());
+                let (weights, _, _) =
+                    compute_robust_weights(&reduced_tracks, &beads, &params, n_views, kfactor);
+                robust_weights = Some(weights);
+            }
+        }
+
+        // Now estimate the left-out bead's 3D position using the solved alignment
+        // by treating it as a single-bead estimation
+        let left_out_tracks = vec![tracks[leave_out_bi].clone()];
+        let left_out_beads = estimate_beads(&left_out_tracks, &params, n_views, None);
+
+        // Compute residual for the left-out bead
+        let mut bead_sum_sq = 0.0f64;
+        let mut bead_count = 0usize;
+
+        for vi in 0..n_views {
+            if let Some((obs_x, obs_y)) = tracks[leave_out_bi][vi] {
+                let (pred_x, pred_y) = project(&left_out_beads[0], &params[vi]);
+                let dx = obs_x - pred_x;
+                let dy = obs_y - pred_y;
+                bead_sum_sq += dx * dx + dy * dy;
+                bead_count += 1;
+            }
+        }
+
+        let bead_rms = if bead_count > 0 {
+            (bead_sum_sq / bead_count as f64).sqrt()
+        } else {
+            0.0
+        };
+        per_bead_rms.push(bead_rms);
+        total_sum_sq += bead_sum_sq;
+        total_count += bead_count;
+    }
+
+    let loo_rms = if total_count > 0 {
+        (total_sum_sq / total_count as f64).sqrt()
+    } else {
+        0.0
+    };
+
+    (loo_rms, per_bead_rms)
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -922,6 +1214,92 @@ fn main() {
         }
     }
     let (rms, view_rms, view_count) = compute_residuals(&tracks, &beads, &params, n_views);
+
+    // Beam tilt correction
+    if args.solve_beam_tilt {
+        let scale = args.beam_tilt_scale as f64;
+        let (bt_angle, bt_rms) = solve_beam_tilt(&tracks, &beads, &params, n_views, scale);
+        eprintln!("\nBeam tilt search (scale = {:.2}):", scale);
+        eprintln!("  Best beam tilt angle: {:.3} degrees", bt_angle);
+        eprintln!("  RMS with beam tilt correction: {:.4} pixels (was {:.4})", bt_rms, rms);
+        if bt_rms < rms {
+            eprintln!("  Beam tilt correction reduces RMS by {:.4} pixels", rms - bt_rms);
+        } else {
+            eprintln!("  No improvement from beam tilt correction");
+        }
+    }
+
+    // Local alignment output
+    if let Some(ref local_path) = args.output_local {
+        let local_corrections = compute_local_alignment(
+            &tracks,
+            &beads,
+            &params,
+            n_views,
+            args.local_patch_size,
+            args.local_overlap,
+            cx,
+            cy,
+        );
+
+        let mut file = std::fs::File::create(local_path).unwrap();
+        use std::io::Write as _;
+        writeln!(file, "# Local alignment corrections: view patch_x patch_y dx dy").unwrap();
+        for &(vi, px, py, dx, dy) in &local_corrections {
+            writeln!(file, "{} {} {} {:.4} {:.4}", vi, px, py, dx, dy).unwrap();
+        }
+        eprintln!(
+            "\ntiltalign: wrote {} local corrections ({} patches) to {}",
+            local_corrections.len(),
+            {
+                let mut unique_patches = std::collections::HashSet::new();
+                for &(_, px, py, _, _) in &local_corrections {
+                    unique_patches.insert((px, py));
+                }
+                unique_patches.len()
+            },
+            local_path
+        );
+    }
+
+    // Leave-one-out cross-validation
+    if args.leave_out {
+        eprintln!("\nPerforming leave-one-out cross-validation ({} beads)...", n_beads);
+        // Use fewer iterations for LOO to keep runtime manageable
+        let loo_iters = args.iterations.min(10);
+        let (loo_rms, per_bead_rms) = leave_one_out_validation(
+            &tracks,
+            &params,
+            n_views,
+            loo_iters,
+            args.solve_rotation,
+            args.solve_mag,
+            args.solve_tilt,
+            ref_view,
+            kfactor,
+            args.robust,
+            args.rotation_group,
+            args.mag_group,
+            args.surfaces,
+        );
+        eprintln!("  Leave-one-out RMS: {:.4} pixels (regular RMS: {:.4})", loo_rms, rms);
+        eprintln!("  Ratio LOO/regular: {:.2}x", if rms > 1e-10 { loo_rms / rms } else { 0.0 });
+        eprintln!("\n  Per-bead leave-one-out residuals:");
+        eprintln!("  {:>5}  {:>10}", "Bead", "LOO RMS");
+        let mut flagged = Vec::new();
+        for (bi, &brms) in per_bead_rms.iter().enumerate() {
+            eprintln!("  {:5}  {:10.4}", bi + 1, brms);
+            if brms > loo_rms * 2.0 {
+                flagged.push(bi + 1);
+            }
+        }
+        if !flagged.is_empty() {
+            eprintln!(
+                "\n  Problematic beads (LOO RMS > 2x mean): {:?}",
+                flagged
+            );
+        }
+    }
 
     eprintln!("\nFinal RMS residual: {:.4} pixels", rms);
     eprintln!("\nPer-view residuals:");
