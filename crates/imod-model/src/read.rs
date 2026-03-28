@@ -82,6 +82,7 @@ pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError
         ref_image: None,
         slicer_angles: Vec::new(),
         store: Vec::new(),
+        clips: None,
     };
 
     // Read chunks until IEOF
@@ -133,6 +134,11 @@ pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError
                 if let Some(ref mut obj) = current_obj {
                     obj.clips = Some(clip);
                 }
+            }
+            chunk_id::MCLP => {
+                let size = read_i32(r)?;
+                let clip = read_clip(r, size)?;
+                model.clips = Some(clip);
             }
             chunk_id::VIEW => {
                 let size = read_i32(r)?;

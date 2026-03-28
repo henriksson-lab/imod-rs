@@ -47,6 +47,8 @@ pub struct ImodModel {
     pub ref_image: Option<IrefImage>,
     pub slicer_angles: Vec<SlicerAngle>,
     pub store: Vec<u8>,
+    /// Model-level clipping planes (MCLP chunk).
+    pub clips: Option<IclipPlanes>,
 }
 
 impl Default for ImodModel {
@@ -70,6 +72,7 @@ impl Default for ImodModel {
             ref_image: None,
             slicer_angles: Vec::new(),
             store: Vec::new(),
+            clips: None,
         }
     }
 }

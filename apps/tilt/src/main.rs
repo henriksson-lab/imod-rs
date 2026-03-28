@@ -77,6 +77,38 @@ struct Args {
     /// Per-view Z scaling factor file (one factor per view)
     #[arg(long)]
     zfactor_file: Option<String>,
+
+    /// Apply log10 transform to projection pixel values before reconstruction
+    #[arg(long)]
+    log: bool,
+
+    /// Density weight factor applied to output voxels (default 1.0)
+    #[arg(long, default_value_t = 1.0)]
+    densweight: f32,
+
+    /// Output scale factor applied after density weighting (default 1.0)
+    #[arg(long, default_value_t = 1.0)]
+    outscale: f32,
+
+    /// Output additive offset applied after scaling (default 0.0)
+    #[arg(long, default_value_t = 0.0)]
+    outadd: f32,
+
+    /// Use exactly N points for the radial filter table instead of deriving from FFT size
+    #[arg(long)]
+    exact_filter_size: Option<usize>,
+
+    /// Fill mode for out-of-bounds projection samples: "mean", "zero", or "edge"
+    #[arg(long, default_value = "mean")]
+    fill_mode: String,
+}
+
+/// Fill mode for out-of-bounds projection samples.
+#[derive(Clone, Copy, PartialEq)]
+enum FillMode {
+    Mean,
+    Zero,
+    Edge,
 }
 
 /// Precomputed per-projection constants to avoid recomputing in the inner loop.
@@ -279,7 +311,9 @@ fn load_per_view_file(path: &str) -> io::Result<Vec<f32>> {
 
 /// Apply radial (r-) weighting to projection data in-place.
 /// Each row is FFT'd, multiplied by a ramp filter with Gaussian rolloff, then inverse FFT'd.
-fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize, cutoff: f32, falloff: f32) {
+/// If `exact_filter_size` is Some(N), the radial filter table uses exactly N points
+/// instead of deriving the number of points from the FFT size.
+fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize, cutoff: f32, falloff: f32, exact_filter_size: Option<usize>) {
     let total_rows = nz * in_ny;
     assert_eq!(proj_data.len(), total_rows * in_nx);
 
@@ -294,11 +328,12 @@ fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize
 
         fft_fwd.process(&mut buffer);
 
-        let nxc = n / 2 + 1;
+        // Number of points for the radial filter table
+        let filter_nxc = exact_filter_size.unwrap_or(n / 2 + 1);
         // Apply ramp filter with Gaussian rolloff to both halves of the spectrum
         for i in 0..n {
             let freq_bin = if i <= n / 2 { i } else { n - i };
-            let w = (freq_bin as f32) / (nxc as f32);
+            let w = (freq_bin as f32) / (filter_nxc as f32);
             let weight = if w <= cutoff {
                 w
             } else {
@@ -316,6 +351,31 @@ fn apply_rweighting(proj_data: &mut [f32], in_nx: usize, in_ny: usize, nz: usize
             *v = buffer[i].re * inv_n;
         }
     });
+}
+
+/// Sample a projection row at fractional position proj_x, with fill mode for out-of-bounds.
+/// Returns the interpolated value. `row` is the projection row data of length `row_len`.
+#[inline]
+fn sample_row_with_fill(row: &[f32], proj_x: f32, row_len: usize, fill_mode: FillMode, proj_mean: f32) -> f32 {
+    let px0 = proj_x.floor() as isize;
+    if px0 >= 0 && px0 + 1 < row_len as isize {
+        let frac = proj_x - px0 as f32;
+        row[px0 as usize] * (1.0 - frac) + row[px0 as usize + 1] * frac
+    } else {
+        match fill_mode {
+            FillMode::Zero => 0.0,
+            FillMode::Mean => proj_mean,
+            FillMode::Edge => {
+                if px0 < 0 {
+                    row[0]
+                } else if row_len > 0 {
+                    row[row_len - 1]
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
 }
 
 /// Apply cosine stretching to each projection: stretch each row by 1/cos(tilt_angle).
@@ -404,11 +464,41 @@ fn main() {
     let sirt_iters = args.sirt;
     let sirt_relax = args.sirt_relax;
 
+    // Parse fill mode
+    let fill_mode = match args.fill_mode.to_lowercase().as_str() {
+        "zero" => FillMode::Zero,
+        "edge" => FillMode::Edge,
+        "mean" | _ => FillMode::Mean,
+    };
+
+    // Output transform parameters
+    let densweight = args.densweight;
+    let outscale = args.outscale;
+    let outadd = args.outadd;
+
     // Read all projections into a flat buffer for cache-friendly access
     let mut proj_data: Vec<f32> = Vec::with_capacity(nz * in_nx * in_ny);
     for z in 0..nz {
         proj_data.extend_from_slice(&reader.read_slice_f32(z).unwrap());
     }
+
+    // Apply log10 transform to projections if requested
+    if args.log {
+        eprintln!("tilt: applying log10 transform to projections");
+        for v in proj_data.iter_mut() {
+            *v = v.max(0.001).log10();
+        }
+    }
+
+    // Compute per-projection means for fill_mode="mean"
+    let proj_means: Vec<f32> = (0..nz)
+        .map(|p| {
+            let offset = p * in_nx * in_ny;
+            let slice = &proj_data[offset..offset + in_nx * in_ny];
+            let (_, _, mean) = min_max_mean(slice);
+            mean
+        })
+        .collect();
 
     // Keep unfiltered copy for SIRT forward projection
     let proj_data_orig = if sirt_iters > 0 {
@@ -420,7 +510,7 @@ fn main() {
     // Apply R-weighting (radial filter) to projections
     if !args.no_weight {
         eprintln!("tilt: applying R-weighting (cutoff={}, falloff={})", radial_cutoff, radial_falloff);
-        apply_rweighting(&mut proj_data, in_nx, in_ny, nz, radial_cutoff, radial_falloff);
+        apply_rweighting(&mut proj_data, in_nx, in_ny, nz, radial_cutoff, radial_falloff, args.exact_filter_size);
     }
 
     // Apply cosine stretching
@@ -576,28 +666,22 @@ fn main() {
                             // Bilinear sampling from projection
                             let sy0 = sample_y.floor() as isize;
                             let sy_frac = sample_y - sy0 as f32;
+                            let pm = proj_means[pi];
 
-                            let px0 = proj_x.floor() as isize;
-                            if px0 >= 0 && px0 + 1 < in_nx as isize {
-                                let frac = proj_x - px0 as f32;
-                                let px0u = px0 as usize;
-
-                                // If we need Y interpolation (xtilt or local dy shifts row)
-                                if sy0 >= 0 && sy0 + 1 < in_ny as isize && (proj_y_offset.abs() > 1e-6 || local_align.is_some()) {
-                                    let row0_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
-                                    let row1_offset = pi * in_nx * in_ny + (sy0 as usize + 1) * in_nx;
-                                    let v0 = bp_proj[row0_offset + px0u] * (1.0 - frac)
-                                        + bp_proj[row0_offset + px0u + 1] * frac;
-                                    let v1 = bp_proj[row1_offset + px0u] * (1.0 - frac)
-                                        + bp_proj[row1_offset + px0u + 1] * frac;
-                                    let v = v0 * (1.0 - sy_frac) + v1 * sy_frac;
-                                    slice[slice_row + ox] += v;
-                                } else if sy0 >= 0 && sy0 < in_ny as isize {
-                                    let row_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
-                                    let v = bp_proj[row_offset + px0u] * (1.0 - frac)
-                                        + bp_proj[row_offset + px0u + 1] * frac;
-                                    slice[slice_row + ox] += v;
-                                }
+                            if sy0 >= 0 && sy0 + 1 < in_ny as isize && (proj_y_offset.abs() > 1e-6 || local_align.is_some()) {
+                                let row0_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
+                                let row1_offset = pi * in_nx * in_ny + (sy0 as usize + 1) * in_nx;
+                                let row0 = &bp_proj[row0_offset..row0_offset + in_nx];
+                                let row1 = &bp_proj[row1_offset..row1_offset + in_nx];
+                                let v0 = sample_row_with_fill(row0, proj_x, in_nx, fill_mode, pm);
+                                let v1 = sample_row_with_fill(row1, proj_x, in_nx, fill_mode, pm);
+                                let v = v0 * (1.0 - sy_frac) + v1 * sy_frac;
+                                slice[slice_row + ox] += v;
+                            } else if sy0 >= 0 && sy0 < in_ny as isize {
+                                let row_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
+                                let row = &bp_proj[row_offset..row_offset + in_nx];
+                                let v = sample_row_with_fill(row, proj_x, in_nx, fill_mode, pm);
+                                slice[slice_row + ox] += v;
                             }
                         }
                     }
@@ -681,7 +765,12 @@ fn main() {
     if let Some(ref session) = gpu_session {
         // GPU path: dispatch one row at a time (no SIRT support on GPU)
         for iy in 0..out_ny {
-            let slice = session.reconstruct_row(iy);
+            let mut slice = session.reconstruct_row(iy);
+
+            // Apply output transform: (val * densweight) * outscale + outadd
+            for v in slice.iter_mut() {
+                *v = (*v * densweight) * outscale + outadd;
+            }
 
             let (smin, smax, smean) = min_max_mean(&slice);
             if smin < gmin { gmin = smin; }
@@ -714,7 +803,7 @@ fn main() {
 
             // R-weight the difference
             if !args.no_weight {
-                apply_rweighting(&mut reproj, in_nx, in_ny, nz, radial_cutoff, radial_falloff);
+                apply_rweighting(&mut reproj, in_nx, in_ny, nz, radial_cutoff, radial_falloff, args.exact_filter_size);
             }
 
             // Backproject the difference
@@ -731,7 +820,11 @@ fn main() {
         }
 
         // Write out the volume
-        for slice in &volume {
+        for slice in &mut volume {
+            // Apply output transform: (val * densweight) * outscale + outadd
+            for v in slice.iter_mut() {
+                *v = (*v * densweight) * outscale + outadd;
+            }
             let (smin, smax, smean) = min_max_mean(slice);
             if smin < gmin { gmin = smin; }
             if smax > gmax { gmax = smax; }
@@ -785,27 +878,22 @@ fn main() {
 
                                 let sy0 = sample_y.floor() as isize;
                                 let sy_frac = sample_y - sy0 as f32;
+                                let pm = proj_means[pi];
 
-                                let px0 = proj_x.floor() as isize;
-                                if px0 >= 0 && px0 + 1 < in_nx as isize {
-                                    let frac = proj_x - px0 as f32;
-                                    let px0u = px0 as usize;
-
-                                    if sy0 >= 0 && sy0 + 1 < in_ny as isize && (proj_y_offset.abs() > 1e-6 || local_align.is_some()) {
-                                        let row0_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
-                                        let row1_offset = pi * in_nx * in_ny + (sy0 as usize + 1) * in_nx;
-                                        let v0 = proj_data[row0_offset + px0u] * (1.0 - frac)
-                                            + proj_data[row0_offset + px0u + 1] * frac;
-                                        let v1 = proj_data[row1_offset + px0u] * (1.0 - frac)
-                                            + proj_data[row1_offset + px0u + 1] * frac;
-                                        let v = v0 * (1.0 - sy_frac) + v1 * sy_frac;
-                                        slice[slice_row + ox] += v;
-                                    } else if sy0 >= 0 && sy0 < in_ny as isize {
-                                        let row_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
-                                        let v = proj_data[row_offset + px0u] * (1.0 - frac)
-                                            + proj_data[row_offset + px0u + 1] * frac;
-                                        slice[slice_row + ox] += v;
-                                    }
+                                if sy0 >= 0 && sy0 + 1 < in_ny as isize && (proj_y_offset.abs() > 1e-6 || local_align.is_some()) {
+                                    let row0_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
+                                    let row1_offset = pi * in_nx * in_ny + (sy0 as usize + 1) * in_nx;
+                                    let row0 = &proj_data[row0_offset..row0_offset + in_nx];
+                                    let row1 = &proj_data[row1_offset..row1_offset + in_nx];
+                                    let v0 = sample_row_with_fill(row0, proj_x, in_nx, fill_mode, pm);
+                                    let v1 = sample_row_with_fill(row1, proj_x, in_nx, fill_mode, pm);
+                                    let v = v0 * (1.0 - sy_frac) + v1 * sy_frac;
+                                    slice[slice_row + ox] += v;
+                                } else if sy0 >= 0 && sy0 < in_ny as isize {
+                                    let row_offset = pi * in_nx * in_ny + sy0 as usize * in_nx;
+                                    let row = &proj_data[row_offset..row_offset + in_nx];
+                                    let v = sample_row_with_fill(row, proj_x, in_nx, fill_mode, pm);
+                                    slice[slice_row + ox] += v;
                                 }
                             }
                         }
@@ -819,11 +907,13 @@ fn main() {
                 .collect();
 
             for slice in &slices {
-                let (smin, smax, smean) = min_max_mean(slice);
+                // Apply output transform: (val * densweight) * outscale + outadd
+                let transformed: Vec<f32> = slice.iter().map(|&v| (v * densweight) * outscale + outadd).collect();
+                let (smin, smax, smean) = min_max_mean(&transformed);
                 if smin < gmin { gmin = smin; }
                 if smax > gmax { gmax = smax; }
                 gsum += smean as f64 * (out_nx * out_nz) as f64;
-                writer.write_slice_f32(slice).unwrap();
+                writer.write_slice_f32(&transformed).unwrap();
             }
 
             rows_done += chunk_end - chunk_start;

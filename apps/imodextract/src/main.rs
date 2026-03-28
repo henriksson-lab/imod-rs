@@ -137,6 +137,7 @@ fn main() {
         ref_image: model.ref_image.clone(),
         slicer_angles: model.slicer_angles.clone(),
         store: model.store.clone(),
+        clips: model.clips.clone(),
     };
 
     for &idx in &keep_indices {

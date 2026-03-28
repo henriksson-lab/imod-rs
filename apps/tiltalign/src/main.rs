@@ -87,6 +87,14 @@ struct Args {
     #[arg(long, default_value_t = 1)]
     mag_group: usize,
 
+    /// Comma-separated list of view indices where rotation is held fixed (in addition to ref_view)
+    #[arg(long)]
+    fixed_rotation_views: Option<String>,
+
+    /// Group size for tilt angle solving (1 = per-view, N = one value per N consecutive views)
+    #[arg(long, default_value_t = 1)]
+    tilt_group: usize,
+
     /// Solve for beam tilt correction (systematic shift proportional to defocus * tilt)
     #[arg(long)]
     solve_beam_tilt: bool,
@@ -488,6 +496,8 @@ fn update_view_params(
     weights: Option<&Vec<Vec<f64>>>,
     rotation_group: usize,
     mag_group: usize,
+    fixed_rotation_views: &std::collections::HashSet<usize>,
+    tilt_group: usize,
 ) {
     // When group solving is active, we first solve grouped parameters,
     // then solve per-view translations (and tilt if enabled).
@@ -527,9 +537,12 @@ fn update_view_params(
         }
 
         // Determine which parameters to solve for this view
-        // Reference view has rotation=0 and mag=1 fixed
-        let solve_rot_here = solve_rotation && vi != ref_view;
+        // Reference view has rotation=0 and mag=1 fixed; fixed_rotation_views also hold rotation fixed
+        let solve_rot_here = solve_rotation && vi != ref_view && !fixed_rotation_views.contains(&vi);
         let solve_mag_here = solve_mag && vi != ref_view;
+        // Tilt is solved independently from magnification -- the Jacobian columns are
+        // orthogonal: tilt uses dxp_dtilt = -X*sin(tilt)+Z*cos(tilt), while mag uses
+        // (cos_rot*xp - sin_rot*Y) which depends on xp, not dxp_dtilt.  No coupling fix needed.
         let solve_tilt_here = solve_tilt;
 
         // Number of unknowns: always dx, dy; optionally d_rot, d_mag, d_tilt
@@ -606,10 +619,19 @@ fn update_view_params(
         }
     }
 
+    // Tilt grouping accumulators
+    let tilt_n_groups = if tilt_group > 1 {
+        (n_views + tilt_group - 1) / tilt_group
+    } else {
+        n_views
+    };
+    let mut tilt_group_delta = vec![0.0f64; tilt_n_groups];
+    let mut tilt_group_count = vec![0usize; tilt_n_groups];
+
     // Apply deltas, handling group constraints
     for vi in 0..n_views {
         if let Some(ref delta) = per_view_deltas[vi] {
-            let solve_rot_here = solve_rotation && vi != ref_view;
+            let solve_rot_here = solve_rotation && vi != ref_view && !fixed_rotation_views.contains(&vi);
             let solve_mag_here = solve_mag && vi != ref_view;
 
             // Translations always applied per-view
@@ -639,7 +661,13 @@ fn update_view_params(
                 idx += 1;
             }
             if solve_tilt {
-                params[vi].tilt += delta[idx];
+                if tilt_group > 1 {
+                    let gi = view_group(vi, tilt_group);
+                    tilt_group_delta[gi] += delta[idx];
+                    tilt_group_count[gi] += 1;
+                } else {
+                    params[vi].tilt += delta[idx];
+                }
             }
         }
     }
@@ -672,6 +700,20 @@ fn update_view_params(
                         params[vi].mag += avg_delta;
                         params[vi].mag = params[vi].mag.clamp(0.5, 2.0);
                     }
+                }
+            }
+        }
+    }
+
+    // Apply grouped tilt deltas
+    if tilt_group > 1 && solve_tilt {
+        for gi in 0..tilt_n_groups {
+            if tilt_group_count[gi] > 0 {
+                let avg_delta = tilt_group_delta[gi] / tilt_group_count[gi] as f64;
+                let start = gi * tilt_group;
+                let end = ((gi + 1) * tilt_group).min(n_views);
+                for vi in start..end {
+                    params[vi].tilt += avg_delta;
                 }
             }
         }
@@ -909,6 +951,8 @@ fn leave_one_out_validation(
     rotation_group: usize,
     mag_group: usize,
     surfaces: i32,
+    fixed_rotation_views: &std::collections::HashSet<usize>,
+    tilt_group: usize,
 ) -> (f64, Vec<f64>) {
     let n_beads = tracks.len();
     let mut per_bead_rms = Vec::with_capacity(n_beads);
@@ -945,6 +989,8 @@ fn leave_one_out_validation(
                 robust_weights.as_ref(),
                 rotation_group,
                 mag_group,
+                fixed_rotation_views,
+                tilt_group,
             );
 
             if robust && iter >= 2 {
@@ -991,6 +1037,13 @@ fn leave_one_out_validation(
     };
 
     (loo_rms, per_bead_rms)
+}
+
+/// Parse a comma-separated list of view indices into a HashSet.
+fn parse_fixed_views(s: &str) -> std::collections::HashSet<usize> {
+    s.split(',')
+        .filter_map(|tok| tok.trim().parse::<usize>().ok())
+        .collect()
 }
 
 fn main() {
@@ -1051,7 +1104,17 @@ fn main() {
             .map(|(i, _)| i)
             .unwrap_or(n_views / 2)
     });
+    // Parse fixed rotation views
+    let fixed_rotation_views: std::collections::HashSet<usize> = args
+        .fixed_rotation_views
+        .as_deref()
+        .map(parse_fixed_views)
+        .unwrap_or_default();
+
     eprintln!("tiltalign: reference view = {} (tilt = {:.1} deg)", ref_view, tilt_angles[ref_view]);
+    if !fixed_rotation_views.is_empty() {
+        eprintln!("tiltalign: fixed rotation views: {:?}", fixed_rotation_views);
+    }
 
     // Initialize per-view parameters
     let mut params: Vec<ViewParams> = tilt_angles
@@ -1125,6 +1188,13 @@ fn main() {
             (n_views + args.mag_group - 1) / args.mag_group
         );
     }
+    if args.tilt_group > 1 {
+        eprintln!(
+            "tiltalign: tilt group size = {} ({} groups)",
+            args.tilt_group,
+            (n_views + args.tilt_group - 1) / args.tilt_group
+        );
+    }
     if args.surfaces > 1 {
         eprintln!("tiltalign: fitting {} surfaces", args.surfaces);
     }
@@ -1167,6 +1237,8 @@ fn main() {
             robust_weights.as_ref(),
             args.rotation_group,
             args.mag_group,
+            &fixed_rotation_views,
+            args.tilt_group,
         );
 
         // Compute residuals with updated parameters and updated beads
@@ -1281,6 +1353,8 @@ fn main() {
             args.rotation_group,
             args.mag_group,
             args.surfaces,
+            &fixed_rotation_views,
+            args.tilt_group,
         );
         eprintln!("  Leave-one-out RMS: {:.4} pixels (regular RMS: {:.4})", loo_rms, rms);
         eprintln!("  Ratio LOO/regular: {:.2}x", if rms > 1e-10 { loo_rms / rms } else { 0.0 });

@@ -58,6 +58,12 @@ struct Args {
     /// Rotation angle of the tilt axis in degrees (from Y axis, counterclockwise positive)
     #[arg(long = "tilt-axis-angle", default_value_t = 0.0)]
     tilt_axis_angle: f32,
+
+    /// Maximum strip width in pixels. When not specified, auto-computed from
+    /// pixel size and defocus to prevent aliasing: max_width = pixel_size / (wavelength * defocus_range_per_pixel).
+    /// The actual strip_width is clamped to this maximum.
+    #[arg(long = "max-strip-width")]
+    max_strip_width: Option<usize>,
 }
 
 /// Per-view defocus information, potentially with astigmatism.
@@ -180,9 +186,40 @@ fn main() {
 
     let tilt_axis_rad = (args.tilt_axis_angle as f64) * PI as f64 / 180.0;
 
+    // Compute effective strip width, clamping to max_strip_width if given,
+    // or auto-computing a safe maximum from defocus and pixel size.
+    let strip_width = {
+        let max_w = if let Some(mw) = args.max_strip_width {
+            mw
+        } else {
+            // Auto-compute: max safe strip width based on defocus gradient.
+            // The defocus changes across the strip due to tilt. The maximum
+            // frequency that can be corrected without aliasing is limited by
+            // defocus variation within the strip.
+            // max_width = pixel_size / (wavelength * |defocus_range_per_pixel|)
+            // defocus_range_per_pixel ~ max(|defocus|) * sin(max_tilt) / image_width
+            let max_defocus_a = if let Some(ref vd) = view_defocus {
+                vd.iter()
+                    .map(|v| v.defocus1.abs().max(v.defocus2.abs()) as f64 * 10.0)
+                    .fold(0.0f64, f64::max)
+            } else {
+                (args.defocus.abs() as f64) * 10.0
+            };
+            if max_defocus_a > 1.0 && wavelength > 0.0 {
+                let defocus_range_per_pixel = max_defocus_a / (nx as f64);
+                let max_safe = (pixel_a as f64) / (wavelength * defocus_range_per_pixel);
+                let max_safe = max_safe.max(16.0) as usize;
+                max_safe
+            } else {
+                args.strip_width // no meaningful limit
+            }
+        };
+        args.strip_width.min(max_w)
+    };
+
     eprintln!(
         "ctfphaseflip: voltage={:.0}kV, Cs={:.1}mm, pixel={:.2}A, strips={}px, tilt_axis={:.1}deg",
-        args.voltage, args.cs, pixel_a, args.strip_width, args.tilt_axis_angle
+        args.voltage, args.cs, pixel_a, strip_width, args.tilt_axis_angle
     );
     if view_defocus.is_some() {
         eprintln!("ctfphaseflip: using per-view defocus file with astigmatism support");
@@ -271,7 +308,7 @@ fn main() {
             }
         }
 
-        let strip_w = args.strip_width as f64;
+        let strip_w = strip_width as f64;
         let n_strips = ((max_perp - min_perp) / strip_w).ceil() as usize;
 
         // For 2D strip processing, we need to extract rectangular strips
@@ -385,7 +422,11 @@ fn main() {
                 }
             }
 
-            // Apply CTF phase flip in 2D
+            // Apply CTF phase flip in 2D using zero-crossing detection.
+            // Instead of flipping wherever sin(CTF) < 0, we find actual zero
+            // crossings of the CTF function and count which "zone" each frequency
+            // falls in. The CTF zeros occur where ctf_phase = n*PI, i.e. the
+            // zone index is floor(ctf_phase / PI). Odd zones get phase-flipped.
             for fy_idx in 0..sh {
                 let freq_y = if fy_idx <= sh / 2 {
                     fy_idx as f64
@@ -417,11 +458,15 @@ fn main() {
                         strip_base_defocus
                     };
 
+                    // CTF phase: chi(s) = pi * lambda * s^2 * (defocus - 0.5 * Cs * lambda^2 * s^2)
                     let ctf_phase = PI as f64 * wavelength * s2
                         * (def_for_ctf - 0.5 * cs_a * wavelength * wavelength * s2);
 
-                    // Flip phase where CTF is negative
-                    if ctf_phase.sin() < 0.0 {
+                    // Zero crossings occur at ctf_phase = n*PI.
+                    // The zone index tells us how many zero crossings we have passed.
+                    // In odd zones, the CTF has flipped sign, so we flip the phase.
+                    let zone = (ctf_phase.abs() / std::f64::consts::PI).floor() as i64;
+                    if zone % 2 != 0 {
                         strip_data[fy_idx * sw + fx_idx] =
                             -strip_data[fy_idx * sw + fx_idx];
                     }

@@ -80,6 +80,21 @@ pub fn write_model_to<W: Write>(w: &mut W, model: &ImodModel) -> Result<(), Imod
         write_slicer_angle(w, slan)?;
     }
 
+    // Write MCLP (model-level clipping planes)
+    if let Some(ref clip) = model.clips {
+        let num_planes = clip.count.max(1) as usize;
+        let size = 4 + (num_planes as i32) * 24;
+        write_u32(w, chunk_id::MCLP)?;
+        write_i32(w, size)?;
+        w.write_all(&[clip.count, clip.flags, clip.trans, clip.plane])?;
+        for n in &clip.normals {
+            write_point3f(w, n)?;
+        }
+        for p in &clip.points {
+            write_point3f(w, p)?;
+        }
+    }
+
     // Write model store
     if !model.store.is_empty() {
         write_u32(w, chunk_id::MOST)?;

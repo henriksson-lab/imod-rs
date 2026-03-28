@@ -75,6 +75,26 @@ struct Args {
     /// correction is applied to each pixel before interpolation.
     #[arg(long = "distort")]
     distort: Option<String>,
+
+    /// Rotate each section by the given angle in degrees (applied after transform,
+    /// before binning) using bicubic interpolation.
+    #[arg(long = "rotate")]
+    rotate: Option<f32>,
+
+    /// Expand (magnify) each section by the given factor using bicubic interpolation.
+    /// Output dimensions are multiplied by this factor.
+    #[arg(long = "expand")]
+    expand: Option<f32>,
+
+    /// Shrink (reduce) each section by the given factor using Lanczos-2 interpolation.
+    /// Output dimensions are divided by this factor.
+    #[arg(long = "shrink")]
+    shrink: Option<f32>,
+
+    /// Extract a rectangular sub-region from each section: x0,y0,width,height
+    /// (0-based pixel coordinates, applied before binning).
+    #[arg(long = "subarea")]
+    subarea: Option<String>,
 }
 
 fn parse_section_list(s: &str, max_z: usize) -> Vec<usize> {
@@ -108,6 +128,153 @@ fn lanczos2(x: f32) -> f32 {
     let sinc_x = px.sin() / px;
     let sinc_x2 = (px / 2.0).sin() / (px / 2.0);
     sinc_x * sinc_x2
+}
+
+/// Cubic interpolation kernel value for 4 samples and fractional position t in [0,1].
+fn cubic_interp(v0: f32, v1: f32, v2: f32, v3: f32, t: f32) -> f32 {
+    let a = -0.5 * v0 + 1.5 * v1 - 1.5 * v2 + 0.5 * v3;
+    let b = v0 - 2.5 * v1 + 2.0 * v2 - 0.5 * v3;
+    let c = -0.5 * v0 + 0.5 * v2;
+    let d = v1;
+    a * t * t * t + b * t * t + c * t + d
+}
+
+/// Sample a 2D image at (sx, sy) using separable bicubic (4x4) interpolation.
+/// Clamps to image boundaries; returns `fill` if completely out of range.
+fn sample_bicubic(data: &[f32], nx: usize, ny: usize, sx: f32, sy: f32, fill: f32) -> f32 {
+    let ix = sx.floor() as isize;
+    let iy = sy.floor() as isize;
+    let fx = sx - sx.floor();
+    let fy = sy - sy.floor();
+
+    // Need samples at ix-1..ix+2, iy-1..iy+2
+    if ix + 2 < 0 || ix - 1 >= nx as isize || iy + 2 < 0 || iy - 1 >= ny as isize {
+        return fill;
+    }
+
+    let get = |x: isize, y: isize| -> f32 {
+        let cx = x.clamp(0, nx as isize - 1) as usize;
+        let cy = y.clamp(0, ny as isize - 1) as usize;
+        data[cy * nx + cx]
+    };
+
+    // Interpolate 4 rows horizontally, then interpolate vertically
+    let mut col_vals = [0.0f32; 4];
+    for j in 0..4 {
+        let row_y = iy - 1 + j as isize;
+        let r0 = get(ix - 1, row_y);
+        let r1 = get(ix, row_y);
+        let r2 = get(ix + 1, row_y);
+        let r3 = get(ix + 2, row_y);
+        col_vals[j] = cubic_interp(r0, r1, r2, r3, fx);
+    }
+    cubic_interp(col_vals[0], col_vals[1], col_vals[2], col_vals[3], fy)
+}
+
+/// Rotate image data by `angle` degrees around its center using bicubic interpolation.
+fn apply_rotation(data: &[f32], nx: usize, ny: usize, angle_deg: f32, fill: f32) -> Vec<f32> {
+    let rad = -angle_deg * PI / 180.0; // negative: rotate output coords back to source
+    let cos_a = rad.cos();
+    let sin_a = rad.sin();
+    let cx = nx as f32 / 2.0;
+    let cy = ny as f32 / 2.0;
+
+    let mut out = vec![fill; nx * ny];
+    for y in 0..ny {
+        for x in 0..nx {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let sx = cos_a * dx + sin_a * dy + cx;
+            let sy = -sin_a * dx + cos_a * dy + cy;
+            out[y * nx + x] = sample_bicubic(data, nx, ny, sx, sy, fill);
+        }
+    }
+    out
+}
+
+/// Expand (magnify) image using bicubic interpolation. Returns new data and (out_nx, out_ny).
+fn apply_expand(data: &[f32], nx: usize, ny: usize, factor: f32, fill: f32) -> (Vec<f32>, usize, usize) {
+    let out_nx = (nx as f32 * factor).round() as usize;
+    let out_ny = (ny as f32 * factor).round() as usize;
+    let mut out = vec![fill; out_nx * out_ny];
+    let inv = 1.0 / factor;
+    for y in 0..out_ny {
+        for x in 0..out_nx {
+            let sx = x as f32 * inv;
+            let sy = y as f32 * inv;
+            out[y * out_nx + x] = sample_bicubic(data, nx, ny, sx, sy, fill);
+        }
+    }
+    (out, out_nx, out_ny)
+}
+
+/// Shrink (reduce) image using Lanczos-2 interpolation. Returns new data and (out_nx, out_ny).
+fn apply_shrink(data: &[f32], nx: usize, ny: usize, factor: f32, fill: f32) -> (Vec<f32>, usize, usize) {
+    let out_nx = (nx as f32 / factor).round() as usize;
+    let out_ny = (ny as f32 / factor).round() as usize;
+    let mut out = vec![fill; out_nx * out_ny];
+    let radius = (2.0 * factor).ceil() as isize; // Lanczos-2 support scaled by factor
+    for y in 0..out_ny {
+        for x in 0..out_nx {
+            let sx = (x as f32 + 0.5) * factor - 0.5;
+            let sy = (y as f32 + 0.5) * factor - 0.5;
+            let ix = sx.floor() as isize;
+            let iy = sy.floor() as isize;
+            let mut sum = 0.0f32;
+            let mut wsum = 0.0f32;
+            for jj in -radius..=radius {
+                let yy = iy + jj;
+                if yy < 0 || yy >= ny as isize {
+                    continue;
+                }
+                let wy = lanczos2((sy - yy as f32) / factor);
+                for ii in -radius..=radius {
+                    let xx = ix + ii;
+                    if xx < 0 || xx >= nx as isize {
+                        continue;
+                    }
+                    let wx = lanczos2((sx - xx as f32) / factor);
+                    let w = wx * wy;
+                    sum += data[yy as usize * nx + xx as usize] * w;
+                    wsum += w;
+                }
+            }
+            out[y * out_nx + x] = if wsum > 1e-10 { sum / wsum } else { fill };
+        }
+    }
+    (out, out_nx, out_ny)
+}
+
+/// Parse subarea string "x0,y0,width,height" into (x0, y0, w, h).
+fn parse_subarea(s: &str) -> (usize, usize, usize, usize) {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 4 {
+        eprintln!("Error: --subarea requires x0,y0,width,height (4 comma-separated values)");
+        std::process::exit(1);
+    }
+    let vals: Vec<usize> = parts
+        .iter()
+        .map(|p| p.trim().parse::<usize>().unwrap_or_else(|_| {
+            eprintln!("Error: invalid subarea value '{}'", p);
+            std::process::exit(1);
+        }))
+        .collect();
+    (vals[0], vals[1], vals[2], vals[3])
+}
+
+/// Extract a rectangular sub-region from image data.
+fn extract_subarea(data: &[f32], nx: usize, _ny: usize, x0: usize, y0: usize, w: usize, h: usize, fill: f32) -> Vec<f32> {
+    let mut out = vec![fill; w * h];
+    for y in 0..h {
+        let src_y = y0 + y;
+        for x in 0..w {
+            let src_x = x0 + x;
+            if src_x < nx && src_y * nx + src_x < data.len() {
+                out[y * w + x] = data[src_y * nx + src_x];
+            }
+        }
+    }
+    out
 }
 
 /// Build a 1D Lanczos-2 low-pass filter kernel for the given bin factor.
@@ -580,9 +747,39 @@ fn main() {
         })
     });
 
-    // Determine output dimensions
-    let out_nx = in_nx / args.bin;
-    let out_ny = in_ny / args.bin;
+    // Parse subarea if provided
+    let subarea: Option<(usize, usize, usize, usize)> = args.subarea.as_ref().map(|s| {
+        let (x0, y0, w, h) = parse_subarea(s);
+        if x0 + w > in_nx || y0 + h > in_ny {
+            eprintln!(
+                "Error: subarea {}+{} x {}+{} exceeds input dimensions {}x{}",
+                x0, w, y0, h, in_nx, in_ny
+            );
+            std::process::exit(1);
+        }
+        (x0, y0, w, h)
+    });
+
+    // Determine working dimensions after subarea extraction
+    let (work_nx, work_ny) = match subarea {
+        Some((_, _, w, h)) => (w, h),
+        None => (in_nx, in_ny),
+    };
+
+    // Determine output dimensions accounting for expand/shrink and binning
+    let (out_nx, out_ny) = {
+        let mut nx = work_nx as f32;
+        let mut ny = work_ny as f32;
+        if let Some(factor) = args.expand {
+            nx *= factor;
+            ny *= factor;
+        }
+        if let Some(factor) = args.shrink {
+            nx /= factor;
+            ny /= factor;
+        }
+        ((nx.round() as usize) / args.bin, (ny.round() as usize) / args.bin)
+    };
 
     // Determine effective float mode
     // --float_densities (legacy -F) is equivalent to --float 0
@@ -906,14 +1103,44 @@ fn main() {
             apply_taper(&mut data, in_nx, in_ny, args.taper, args.fill);
         }
 
+        // Apply rotation (after transform, before subarea/scaling/binning)
+        if let Some(angle) = args.rotate {
+            data = apply_rotation(&data, in_nx, in_ny, angle, args.fill);
+        }
+
+        // Extract subarea
+        let mut cur_nx = in_nx;
+        let mut cur_ny = in_ny;
+        if let Some((x0, y0, w, h)) = subarea {
+            data = extract_subarea(&data, cur_nx, cur_ny, x0, y0, w, h, args.fill);
+            cur_nx = w;
+            cur_ny = h;
+        }
+
+        // Apply expand (bicubic)
+        if let Some(factor) = args.expand {
+            let (expanded, enx, eny) = apply_expand(&data, cur_nx, cur_ny, factor, args.fill);
+            data = expanded;
+            cur_nx = enx;
+            cur_ny = eny;
+        }
+
+        // Apply shrink (Lanczos-2)
+        if let Some(factor) = args.shrink {
+            let (shrunk, snx, sny) = apply_shrink(&data, cur_nx, cur_ny, factor, args.fill);
+            data = shrunk;
+            cur_nx = snx;
+            cur_ny = sny;
+        }
+
         // Antialias filtering before binning
         if let Some(ref kernel) = aa_kernel {
-            data = apply_separable_filter(&data, in_nx, in_ny, kernel);
+            data = apply_separable_filter(&data, cur_nx, cur_ny, kernel);
         }
 
         // Bin
         if args.bin > 1 {
-            let src_slice = Slice::from_data(in_nx, in_ny, data);
+            let src_slice = Slice::from_data(cur_nx, cur_ny, data);
             let binned = imod_slice::bin(&src_slice, args.bin);
             data = binned.data;
         }

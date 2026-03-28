@@ -8,12 +8,16 @@ use imod_mrc::MrcReader;
 use rfd::FileDialog;
 use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::env;
 use std::rc::Rc;
 
 use render3d::Renderer3D;
 
 slint::include_modules!();
+
+/// Maximum number of undo states to keep.
+const MAX_UNDO_HISTORY: usize = 50;
 
 struct ViewerState {
     reader: Option<MrcReader>,
@@ -42,6 +46,9 @@ struct ViewerState {
     // Isosurface
     iso_threshold: f32,
     iso_mesh: Option<IsosurfaceMesh>,
+    // Undo/redo stacks: store cloned model states
+    undo_stack: VecDeque<ImodModel>,
+    redo_stack: Vec<ImodModel>,
 }
 
 impl ViewerState {
@@ -65,7 +72,58 @@ impl ViewerState {
             drag_last: None,
             iso_threshold: 128.0,
             iso_mesh: None,
+            undo_stack: VecDeque::new(),
+            redo_stack: Vec::new(),
         }
+    }
+
+    /// Push the current model state onto the undo stack before making a change.
+    /// Clears the redo stack since we are branching from this point.
+    fn push_undo(&mut self) {
+        if let Some(ref model) = self.model {
+            if self.undo_stack.len() >= MAX_UNDO_HISTORY {
+                self.undo_stack.pop_front();
+            }
+            self.undo_stack.push_back(model.clone());
+            self.redo_stack.clear();
+        }
+    }
+
+    /// Undo: pop the last state from the undo stack, push current to redo, restore.
+    fn undo(&mut self) -> bool {
+        if let Some(prev) = self.undo_stack.pop_back() {
+            if let Some(ref current) = self.model {
+                self.redo_stack.push(current.clone());
+            }
+            self.model = Some(prev);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo: pop from redo stack, push current to undo, restore.
+    fn redo(&mut self) -> bool {
+        if let Some(next) = self.redo_stack.pop() {
+            if let Some(ref current) = self.model {
+                if self.undo_stack.len() >= MAX_UNDO_HISTORY {
+                    self.undo_stack.pop_front();
+                }
+                self.undo_stack.push_back(current.clone());
+            }
+            self.model = Some(next);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
     }
 
     fn open_file(&mut self, path: &str) -> Result<(), String> {
@@ -92,6 +150,9 @@ impl ViewerState {
         self.model = Some(model);
         self.model_path = Some(path.to_string());
         self.current_object = 0;
+        // Clear undo/redo when loading a new model
+        self.undo_stack.clear();
+        self.redo_stack.clear();
         Ok(())
     }
 
@@ -464,6 +525,7 @@ impl ViewerState {
 
     /// Add a point to the current object's current contour (matching current Z).
     fn add_point(&mut self, x: f32, y: f32) {
+        self.push_undo();
         self.ensure_model();
         let z = self.current_z as f32;
         let model = self.model.as_mut().unwrap();
@@ -491,7 +553,7 @@ impl ViewerState {
     /// Delete the nearest point within `radius` pixels of (x, y) on current Z.
     fn delete_nearest_point(&mut self, x: f32, y: f32, radius: f32) -> bool {
         let z = self.current_z as f32;
-        let model = match self.model.as_mut() {
+        let model = match self.model.as_ref() {
             Some(m) => m,
             None => return false,
         };
@@ -513,6 +575,8 @@ impl ViewerState {
         }
 
         if let Some((oi, ci, pi)) = best {
+            self.push_undo();
+            let model = self.model.as_mut().unwrap();
             model.objects[oi].contours[ci].points.remove(pi);
             // Remove empty contours
             if model.objects[oi].contours[ci].points.is_empty() && model.objects[oi].contours.len() > 1 {
@@ -541,6 +605,8 @@ fn update_window(w: &MainWindow, s: &mut ViewerState) {
     let objs = s.model_objects_list();
     let model: Rc<VecModel<ModelObjectEntry>> = Rc::new(VecModel::from(objs));
     w.set_model_objects(ModelRc::from(model));
+    w.set_can_undo(s.can_undo());
+    w.set_can_redo(s.can_redo());
 }
 
 fn main() {
@@ -821,6 +887,109 @@ fn main() {
                         w.set_edit_status(format!("Save error: {}", e).into());
                     }
                 }
+            }
+        });
+    }
+
+    // Undo
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_undo(move || {
+            let mut s = state.borrow_mut();
+            if s.undo() {
+                if let Some(w) = ww.upgrade() {
+                    update_window(&w, &mut s);
+                    w.set_edit_status("Undo".into());
+                }
+            } else {
+                if let Some(w) = ww.upgrade() {
+                    w.set_edit_status("Nothing to undo".into());
+                }
+            }
+        });
+    }
+
+    // Redo
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_redo(move || {
+            let mut s = state.borrow_mut();
+            if s.redo() {
+                if let Some(w) = ww.upgrade() {
+                    update_window(&w, &mut s);
+                    w.set_edit_status("Redo".into());
+                }
+            } else {
+                if let Some(w) = ww.upgrade() {
+                    w.set_edit_status("Nothing to redo".into());
+                }
+            }
+        });
+    }
+
+    // Key pressed handler (for actions that need Rust-side logic)
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_key_pressed(move |key| {
+            let key_str = key.as_str();
+            match key_str {
+                "PageUp" => {
+                    let mut s = state.borrow_mut();
+                    if s.current_z > 0 {
+                        let new_z = s.current_z - 1;
+                        let _ = s.load_slice(new_z);
+                        if let Some(w) = ww.upgrade() {
+                            w.set_current_z(new_z as i32);
+                            update_window(&w, &mut s);
+                        }
+                    }
+                }
+                "PageDown" => {
+                    let mut s = state.borrow_mut();
+                    if s.current_z + 1 < s.nz {
+                        let new_z = s.current_z + 1;
+                        let _ = s.load_slice(new_z);
+                        if let Some(w) = ww.upgrade() {
+                            w.set_current_z(new_z as i32);
+                            update_window(&w, &mut s);
+                        }
+                    }
+                }
+                "ZoomIn" => {
+                    if let Some(w) = ww.upgrade() {
+                        let z = w.get_zoom();
+                        let new_z = (z * 1.2).min(20.0);
+                        w.set_zoom(new_z);
+                        w.invoke_zoom_changed(new_z);
+                    }
+                }
+                "ZoomOut" => {
+                    if let Some(w) = ww.upgrade() {
+                        let z = w.get_zoom();
+                        let new_z = (z / 1.2).max(0.05);
+                        w.set_zoom(new_z);
+                        w.invoke_zoom_changed(new_z);
+                    }
+                }
+                "AddMode" => {
+                    if let Some(w) = ww.upgrade() {
+                        w.set_edit_status("Add points mode".into());
+                    }
+                }
+                "DeleteMode" => {
+                    if let Some(w) = ww.upgrade() {
+                        w.set_edit_status("Delete points mode".into());
+                    }
+                }
+                "ViewMode" => {
+                    if let Some(w) = ww.upgrade() {
+                        w.set_edit_status("View mode".into());
+                    }
+                }
+                _ => {}
             }
         });
     }

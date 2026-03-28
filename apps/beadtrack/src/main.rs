@@ -68,6 +68,12 @@ struct Args {
     /// incorrect and excluded from the output.
     #[arg(long = "max-elongation", default_value_t = 3.0)]
     max_elongation: f32,
+
+    /// Path to a text file defining rectangular exclusion zones (one per line:
+    /// x0 y0 x1 y1). Any detected correlation peak falling within an excluded
+    /// zone is rejected.
+    #[arg(long = "exclude-zones")]
+    exclude_zones: Option<String>,
 }
 
 /// Result of tracking a bead at a single view.
@@ -79,6 +85,95 @@ struct TrackResult {
     /// Elongation factor: ratio of correlation peak width in X vs Y.
     /// Values near 1.0 indicate a round peak; high values suggest tracking error.
     elongation: f32,
+}
+
+/// Rectangular exclusion zone in image coordinates.
+#[derive(Clone, Copy, Debug)]
+struct ExcludeRect {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+impl ExcludeRect {
+    fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1
+    }
+}
+
+/// Read exclusion zones from a text file (one rectangle per line: x0 y0 x1 y1).
+fn read_exclude_zones(path: &str) -> Vec<ExcludeRect> {
+    let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("Warning: cannot read exclude zones file '{}': {}", path, e);
+        String::new()
+    });
+    let mut zones = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let vals: Vec<f32> = line.split_whitespace()
+            .filter_map(|t| t.parse::<f32>().ok())
+            .collect();
+        if vals.len() >= 4 {
+            zones.push(ExcludeRect {
+                x0: vals[0].min(vals[2]),
+                y0: vals[1].min(vals[3]),
+                x1: vals[0].max(vals[2]),
+                y1: vals[1].max(vals[3]),
+            });
+        }
+    }
+    zones
+}
+
+/// Refine a cross-correlation peak to sub-pixel accuracy by fitting a parabola
+/// to the 3x3 neighborhood around the integer peak (px, py).
+///
+/// For the X direction, fits f(x) = a*x^2 + b*x + c through x=-1,0,+1
+/// using the three values cc[py][px-1], cc[py][px], cc[py][px+1].
+/// The sub-pixel offset is -b/(2a). Same for Y.
+///
+/// Returns the refined (x, y) position as floating-point indices into the CC map.
+fn refine_peak_subpixel(cc: &[f32], nx: usize, ny: usize, px: usize, py: usize) -> (f32, f32) {
+    let mut rx = px as f32;
+    let mut ry = py as f32;
+
+    // Refine in X if we have neighbors on both sides (with wrapping for FFT output)
+    if nx >= 3 {
+        let xm = if px == 0 { nx - 1 } else { px - 1 };
+        let xp = if px == nx - 1 { 0 } else { px + 1 };
+        let vm = cc[py * nx + xm];
+        let v0 = cc[py * nx + px];
+        let vp = cc[py * nx + xp];
+        let denom = vm - 2.0 * v0 + vp; // 2a
+        if denom.abs() > 1e-10 {
+            let offset = -0.5 * (vp - vm) / denom; // -b/(2a)
+            if offset.abs() <= 1.0 {
+                rx = px as f32 + offset;
+            }
+        }
+    }
+
+    // Refine in Y
+    if ny >= 3 {
+        let ym = if py == 0 { ny - 1 } else { py - 1 };
+        let yp = if py == ny - 1 { 0 } else { py + 1 };
+        let vm = cc[ym * nx + px];
+        let v0 = cc[py * nx + px];
+        let vp = cc[yp * nx + px];
+        let denom = vm - 2.0 * v0 + vp;
+        if denom.abs() > 1e-10 {
+            let offset = -0.5 * (vp - vm) / denom;
+            if offset.abs() <= 1.0 {
+                ry = py as f32 + offset;
+            }
+        }
+    }
+
+    (rx, ry)
 }
 
 fn main() {
@@ -127,10 +222,20 @@ fn main() {
         }
     }
 
+    // Load exclusion zones if specified
+    let exclude_zones: Vec<ExcludeRect> = args
+        .exclude_zones
+        .as_deref()
+        .map(read_exclude_zones)
+        .unwrap_or_default();
+
     eprintln!(
         "beadtrack: {} seed beads, {} views, box={}px, search={}px",
         bead_seeds.len(), nz, box_size, search_r
     );
+    if !exclude_zones.is_empty() {
+        eprintln!("  {} exclusion zones loaded", exclude_zones.len());
+    }
     eprintln!(
         "  max_residual={:.1}, max_gap={}, min_correlation={:.2}",
         args.max_residual, args.max_gap, args.min_correlation
@@ -164,7 +269,7 @@ fn main() {
             let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
             if let Some(tr) = track_bead_tilt(
                 &template, &sections[v], nx, ny, cur_x, cur_y,
-                box_size, search_size, tilt_angle,
+                box_size, search_size, tilt_angle, &exclude_zones,
             ) {
                 results[v] = Some(tr);
                 cur_x = tr.x;
@@ -192,7 +297,7 @@ fn main() {
             let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
             if let Some(tr) = track_bead_tilt(
                 &template, &sections[v], nx, ny, cur_x, cur_y,
-                box_size, search_size, tilt_angle,
+                box_size, search_size, tilt_angle, &exclude_zones,
             ) {
                 results[v] = Some(tr);
                 cur_x = tr.x;
@@ -215,13 +320,13 @@ fn main() {
         // --- Phase 2: Gap filling ---
         fill_gaps(
             &mut results, &template, &sections, nx, ny,
-            box_size, &tilt_angles, args.max_gap,
+            box_size, &tilt_angles, args.max_gap, &exclude_zones,
         );
 
         // --- Phase 3: Residual rejection and re-tracking ---
         reject_and_retrack(
             &mut results, &template, &sections, nx, ny,
-            box_size, &tilt_angles, args.max_residual,
+            box_size, &tilt_angles, args.max_residual, &exclude_zones,
         );
 
         // --- Phase 4: Smooth trajectory fitting ---
@@ -383,6 +488,7 @@ fn track_bead_tilt(
     box_size: usize,
     fft_size: usize,
     tilt_angle_deg: f32,
+    exclude_zones: &[ExcludeRect],
 ) -> Option<TrackResult> {
     let tilt_rad = tilt_angle_deg.to_radians();
     let cos_tilt = tilt_rad.cos().abs().max(0.1); // clamp to avoid extreme stretch
@@ -441,10 +547,14 @@ fn track_bead_tilt(
     }
     let elongation = if width_y > 0.0 { (width_x / width_y).max(width_y / width_x) } else { 1.0 };
 
+    // Sub-pixel refinement: fit parabola to 3x3 neighborhood around integer peak
+    let (refined_mx, refined_my) = refine_peak_subpixel(&cc, fft_size, fft_size, mx, my);
+
     // Convert peak to shift. The shift in X needs to be scaled back by x_stretch
     // because the search box was stretched.
-    let dx_raw = if mx > fft_size / 2 { mx as f32 - fft_size as f32 } else { mx as f32 };
-    let dy = if my > fft_size / 2 { my as f32 - fft_size as f32 } else { my as f32 };
+    let half = fft_size as f32 / 2.0;
+    let dx_raw = if refined_mx > half { refined_mx - fft_size as f32 } else { refined_mx };
+    let dy = if refined_my > half { refined_my - fft_size as f32 } else { refined_my };
     let dx = dx_raw * x_stretch;
 
     let new_x = pred_x + dx;
@@ -453,6 +563,13 @@ fn track_bead_tilt(
     // Reject if out of bounds
     if new_x < 0.0 || new_x >= nx as f32 || new_y < 0.0 || new_y >= ny as f32 {
         return None;
+    }
+
+    // Reject if peak falls within an exclusion zone
+    for zone in exclude_zones {
+        if zone.contains(new_x, new_y) {
+            return None;
+        }
     }
 
     Some(TrackResult { x: new_x, y: new_y, correlation: norm_corr, elongation })
@@ -517,6 +634,7 @@ fn fill_gaps(
     box_size: usize,
     tilt_angles: &[f32],
     max_gap: usize,
+    exclude_zones: &[ExcludeRect],
 ) {
     let nz = results.len();
     // Small search for gap filling: half the normal search radius
@@ -557,7 +675,7 @@ fn fill_gaps(
                 let tilt_angle = tilt_angles.get(g).copied().unwrap_or(0.0);
                 if let Some(tr) = track_bead_tilt(
                     template, &sections[g], nx, ny, ix, iy,
-                    box_size, gap_fft_size, tilt_angle,
+                    box_size, gap_fft_size, tilt_angle, exclude_zones,
                 ) {
                     results[g] = Some(tr);
                 }
@@ -600,6 +718,7 @@ fn reject_and_retrack(
     box_size: usize,
     tilt_angles: &[f32],
     max_residual: f32,
+    exclude_zones: &[ExcludeRect],
 ) {
     let nz = results.len();
 
@@ -640,7 +759,7 @@ fn reject_and_retrack(
                 let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
                 results[v] = track_bead_tilt(
                     template, &sections[v], nx, ny, pred_x, pred_y,
-                    box_size, retrack_fft_size, tilt_angle,
+                    box_size, retrack_fft_size, tilt_angle, exclude_zones,
                 );
             }
         }
