@@ -383,6 +383,9 @@ fn main() {
                 trans: obj.trans,
                 contours: new_contours,
                 meshes: Vec::new(),
+            imat: None,
+            clips: None,
+            store: Vec::new(),
             };
             println!(
                 "Adding {} new contours to new object {}",

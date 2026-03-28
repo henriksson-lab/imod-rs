@@ -58,6 +58,35 @@ pub fn write_model_to<W: Write>(w: &mut W, model: &ImodModel) -> Result<(), Imod
         write_object(w, obj)?;
     }
 
+    // Write MINX (ref image)
+    if let Some(ref ref_image) = model.ref_image {
+        write_u32(w, chunk_id::IMNX)?;
+        write_i32(w, 72)?;
+        write_point3f(w, &ref_image.oscale)?;
+        write_point3f(w, &ref_image.otrans)?;
+        write_point3f(w, &ref_image.orot)?;
+        write_point3f(w, &ref_image.cscale)?;
+        write_point3f(w, &ref_image.ctrans)?;
+        write_point3f(w, &ref_image.crot)?;
+    }
+
+    // Write views
+    for view in &model.views {
+        write_view(w, view)?;
+    }
+
+    // Write slicer angles
+    for slan in &model.slicer_angles {
+        write_slicer_angle(w, slan)?;
+    }
+
+    // Write model store
+    if !model.store.is_empty() {
+        write_u32(w, chunk_id::MOST)?;
+        write_i32(w, model.store.len() as i32)?;
+        w.write_all(&model.store)?;
+    }
+
     // IEOF
     write_u32(w, chunk_id::IEOF)?;
     w.flush()?;
@@ -109,6 +138,38 @@ fn write_object<W: Write>(w: &mut W, obj: &ImodObject) -> Result<(), ImodError> 
         write_mesh(w, mesh)?;
     }
 
+    // Write IMAT
+    if let Some(ref imat) = obj.imat {
+        write_u32(w, chunk_id::IMAT)?;
+        write_i32(w, 16)?;
+        w.write_all(&[imat.ambient, imat.diffuse, imat.specular, imat.shininess])?;
+        w.write_all(&[imat.fillred, imat.fillgreen, imat.fillblue, imat.quality])?;
+        write_u32(w, imat.mat2)?;
+        w.write_all(&[imat.valblack, imat.valwhite, imat.matflags2, imat.mesh_thickness])?;
+    }
+
+    // Write CLIP
+    if let Some(ref clip) = obj.clips {
+        let num_planes = clip.count.max(1) as usize;
+        let size = 4 + (num_planes as i32) * 24;
+        write_u32(w, chunk_id::CLIP)?;
+        write_i32(w, size)?;
+        w.write_all(&[clip.count, clip.flags, clip.trans, clip.plane])?;
+        for n in &clip.normals {
+            write_point3f(w, n)?;
+        }
+        for p in &clip.points {
+            write_point3f(w, p)?;
+        }
+    }
+
+    // Write object store
+    if !obj.store.is_empty() {
+        write_u32(w, chunk_id::OBST)?;
+        write_i32(w, obj.store.len() as i32)?;
+        w.write_all(&obj.store)?;
+    }
+
     Ok(())
 }
 
@@ -146,6 +207,49 @@ fn write_mesh<W: Write>(w: &mut W, mesh: &ImodMesh) -> Result<(), ImodError> {
         write_i32(w, idx)?;
     }
 
+    Ok(())
+}
+
+fn write_point3f<W: Write>(w: &mut W, p: &imod_core::Point3f) -> Result<(), ImodError> {
+    write_f32(w, p.x)?;
+    write_f32(w, p.y)?;
+    write_f32(w, p.z)?;
+    Ok(())
+}
+
+fn write_view<W: Write>(w: &mut W, view: &ImodView) -> Result<(), ImodError> {
+    write_u32(w, chunk_id::VIEW)?;
+    write_i32(w, 92)?;
+    write_f32(w, view.fovy)?;
+    write_f32(w, view.rad)?;
+    write_f32(w, view.aspect)?;
+    write_f32(w, view.cnear)?;
+    write_f32(w, view.cfar)?;
+    write_point3f(w, &view.rot)?;
+    write_point3f(w, &view.trans)?;
+    write_point3f(w, &view.scale)?;
+    write_u32(w, view.world)?;
+    let mut label_bytes = [0u8; 32];
+    let lbl = view.label.as_bytes();
+    let len = lbl.len().min(31);
+    label_bytes[..len].copy_from_slice(&lbl[..len]);
+    w.write_all(&label_bytes)?;
+    Ok(())
+}
+
+fn write_slicer_angle<W: Write>(w: &mut W, slan: &SlicerAngle) -> Result<(), ImodError> {
+    write_u32(w, chunk_id::SLAN)?;
+    write_i32(w, 60)?;
+    write_i32(w, slan.time)?;
+    write_f32(w, slan.angles[0])?;
+    write_f32(w, slan.angles[1])?;
+    write_f32(w, slan.angles[2])?;
+    write_point3f(w, &slan.center)?;
+    let mut label_bytes = [0u8; 32];
+    let lbl = slan.label.as_bytes();
+    let len = lbl.len().min(31);
+    label_bytes[..len].copy_from_slice(&lbl[..len]);
+    w.write_all(&label_bytes)?;
     Ok(())
 }
 

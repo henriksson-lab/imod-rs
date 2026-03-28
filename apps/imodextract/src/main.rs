@@ -133,6 +133,10 @@ fn main() {
         pixel_size: model.pixel_size,
         units: model.units,
         objects: Vec::with_capacity(keep_indices.len()),
+        views: model.views.clone(),
+        ref_image: model.ref_image.clone(),
+        slicer_angles: model.slicer_angles.clone(),
+        store: model.store.clone(),
     };
 
     for &idx in &keep_indices {

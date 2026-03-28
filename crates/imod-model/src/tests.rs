@@ -160,6 +160,67 @@ fn empty_model() {
 }
 
 #[test]
+fn roundtrip_imat_and_iref() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("imat_iref.mod");
+
+    let imat = ImatData {
+        ambient: 80,
+        diffuse: 200,
+        specular: 100,
+        shininess: 50,
+        fillred: 10,
+        fillgreen: 20,
+        fillblue: 30,
+        quality: 2,
+        mat2: 0x0000_1234,
+        valblack: 5,
+        valwhite: 250,
+        matflags2: 1,
+        mesh_thickness: 3,
+    };
+
+    let ref_image = IrefImage {
+        oscale: Point3f { x: 1.0, y: 2.0, z: 3.0 },
+        otrans: Point3f { x: 4.0, y: 5.0, z: 6.0 },
+        orot: Point3f { x: 7.0, y: 8.0, z: 9.0 },
+        cscale: Point3f { x: 10.0, y: 11.0, z: 12.0 },
+        ctrans: Point3f { x: 13.0, y: 14.0, z: 15.0 },
+        crot: Point3f { x: 16.0, y: 17.0, z: 18.0 },
+    };
+
+    let model = ImodModel {
+        name: "imat test".into(),
+        xmax: 256,
+        ymax: 256,
+        zmax: 64,
+        ref_image: Some(ref_image.clone()),
+        objects: vec![ImodObject {
+            name: "mat obj".into(),
+            imat: Some(imat.clone()),
+            contours: vec![ImodContour {
+                points: vec![Point3f { x: 1.0, y: 2.0, z: 3.0 }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    write_model(&path, &model).unwrap();
+    let read_back = read_model(&path).unwrap();
+
+    // Check IMAT round-trip
+    let obj = &read_back.objects[0];
+    let read_imat = obj.imat.as_ref().expect("imat should be present");
+    assert_eq!(*read_imat, imat);
+
+    // Check IMNX round-trip
+    let read_ref = read_back.ref_image.as_ref().expect("ref_image should be present");
+    assert_eq!(*read_ref, ref_image);
+}
+
+#[test]
 fn chunk_ids_are_correct() {
     assert_eq!(&chunk_id::IMOD.to_be_bytes(), b"IMOD");
     assert_eq!(&chunk_id::OBJT.to_be_bytes(), b"OBJT");

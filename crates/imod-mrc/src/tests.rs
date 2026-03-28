@@ -179,3 +179,124 @@ fn read_big_endian_short_file() {
         assert!((a - *b as f32).abs() < 1e-6);
     }
 }
+
+#[test]
+fn roundtrip_complex_float_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_complex.mrc");
+
+    let nx = 8;
+    let ny = 4;
+    let nz = 1;
+    let npix = (nx * ny) as usize;
+    let header = MrcHeader::new(nx, ny, nz, MrcMode::ComplexFloat);
+
+    let complex_data: Vec<(f32, f32)> = (0..npix)
+        .map(|i| (i as f32 * 0.5, -(i as f32) * 0.3))
+        .collect();
+
+    let mut writer = MrcWriter::create(&path, header).unwrap();
+    writer.write_slice_complex(&complex_data).unwrap();
+    writer.finish(-10.0, 10.0, 0.0).unwrap();
+
+    // Read back as complex pairs
+    let mut reader = MrcReader::open(&path).unwrap();
+    let read_complex = reader.read_slice_complex(0).unwrap();
+    assert_eq!(read_complex.len(), npix);
+    for (a, b) in read_complex.iter().zip(complex_data.iter()) {
+        assert!((a.0 - b.0).abs() < 1e-6, "re mismatch: {} vs {}", a.0, b.0);
+        assert!((a.1 - b.1).abs() < 1e-6, "im mismatch: {} vs {}", a.1, b.1);
+    }
+
+    // Read back as magnitude via read_slice_f32
+    let mut reader = MrcReader::open(&path).unwrap();
+    let magnitudes = reader.read_slice_f32(0).unwrap();
+    assert_eq!(magnitudes.len(), npix);
+    for (i, &mag) in magnitudes.iter().enumerate() {
+        let (re, im) = complex_data[i];
+        let expected = (re * re + im * im).sqrt();
+        assert!(
+            (mag - expected).abs() < 1e-5,
+            "magnitude mismatch at {i}: {mag} vs {expected}"
+        );
+    }
+}
+
+#[test]
+fn subarea_reading() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_subarea.mrc");
+
+    let nx = 16;
+    let ny = 12;
+    let nz = 1;
+    let header = MrcHeader::new(nx, ny, nz, MrcMode::Float);
+
+    let data: Vec<f32> = (0..(nx * ny) as usize)
+        .map(|i| i as f32)
+        .collect();
+
+    let mut writer = MrcWriter::create(&path, header).unwrap();
+    writer.write_slice_f32(&data).unwrap();
+    writer.finish(0.0, (nx * ny - 1) as f32, 0.0).unwrap();
+
+    let mut reader = MrcReader::open(&path).unwrap();
+
+    // Read a 4x3 subarea starting at (2, 3)
+    let sub = reader.read_subarea_f32(0, 2, 3, 4, 3).unwrap();
+    assert_eq!(sub.len(), 4 * 3);
+
+    // Verify values: pixel at (x, y) in full image = y * nx + x
+    let nx = nx as usize;
+    for row in 0..3usize {
+        for col in 0..4usize {
+            let expected = ((3 + row) * nx + (2 + col)) as f32;
+            let actual = sub[row * 4 + col];
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "subarea mismatch at ({col},{row}): {actual} vs {expected}"
+            );
+        }
+    }
+
+    // Out-of-bounds should error
+    assert!(reader.read_subarea_f32(0, 14, 0, 4, 1).is_err());
+    assert!(reader.read_subarea_f32(0, 0, 10, 1, 4).is_err());
+}
+
+#[test]
+fn y_slice_reading() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_yslice.mrc");
+
+    let nx = 8;
+    let ny = 6;
+    let nz = 3;
+    let header = MrcHeader::new(nx, ny, nz, MrcMode::Float);
+
+    let mut writer = MrcWriter::create(&path, header).unwrap();
+    for z in 0..nz as usize {
+        let data: Vec<f32> = (0..(nx * ny) as usize)
+            .map(|i| (z * 1000 + i) as f32)
+            .collect();
+        writer.write_slice_f32(&data).unwrap();
+    }
+    writer.finish(0.0, 2047.0, 0.0).unwrap();
+
+    let mut reader = MrcReader::open(&path).unwrap();
+    let y = 2;
+    let yslice = reader.read_y_slice_f32(y).unwrap();
+    assert_eq!(yslice.len(), nx as usize * nz as usize);
+
+    let nx = nx as usize;
+    for z in 0..nz as usize {
+        for x in 0..nx {
+            let expected = (z * 1000 + y * nx + x) as f32;
+            let actual = yslice[z * nx + x];
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "y-slice mismatch at z={z},x={x}: {actual} vs {expected}"
+            );
+        }
+    }
+}

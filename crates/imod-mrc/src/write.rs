@@ -103,6 +103,40 @@ impl MrcWriter {
         }
     }
 
+    /// Write a slice from complex (re, im) pairs, converting to the file's native complex mode.
+    ///
+    /// Supports modes 3 (ComplexShort) and 4 (ComplexFloat).
+    pub fn write_slice_complex(&mut self, data: &[(f32, f32)]) -> Result<(), ImodError> {
+        let mode = self.header.data_mode().ok_or(ImodError::UnsupportedMode(self.header.mode))?;
+        let nx = self.header.nx as usize;
+        let ny = self.header.ny as usize;
+        let npix = nx * ny;
+
+        if data.len() != npix {
+            return Err(ImodError::InvalidData("complex data length mismatch".into()));
+        }
+
+        match mode {
+            imod_core::MrcMode::ComplexShort => {
+                let mut buf = Vec::with_capacity(npix * 4);
+                for &(re, im) in data {
+                    buf.extend_from_slice(&(re as i16).to_le_bytes());
+                    buf.extend_from_slice(&(im as i16).to_le_bytes());
+                }
+                self.write_slice_raw(&buf)
+            }
+            imod_core::MrcMode::ComplexFloat => {
+                let mut buf = Vec::with_capacity(npix * 8);
+                for &(re, im) in data {
+                    buf.extend_from_slice(&re.to_le_bytes());
+                    buf.extend_from_slice(&im.to_le_bytes());
+                }
+                self.write_slice_raw(&buf)
+            }
+            _ => Err(ImodError::UnsupportedMode(self.header.mode)),
+        }
+    }
+
     /// Finalize the file: update header statistics and rewrite the header.
     pub fn finish(mut self, amin: f32, amax: f32, amean: f32) -> Result<(), ImodError> {
         self.header.amin = amin;

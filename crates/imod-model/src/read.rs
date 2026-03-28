@@ -78,6 +78,10 @@ pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError
         pixel_size,
         units,
         objects: Vec::with_capacity(objsize as usize),
+        views: Vec::new(),
+        ref_image: None,
+        slicer_angles: Vec::new(),
+        store: Vec::new(),
     };
 
     // Read chunks until IEOF
@@ -107,6 +111,85 @@ pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError
                 let mesh = read_mesh(r)?;
                 if let Some(ref mut obj) = current_obj {
                     obj.meshes.push(mesh);
+                }
+            }
+            chunk_id::IMAT => {
+                let size = read_i32(r)?;
+                if size >= 16 {
+                    let imat = read_imat(r)?;
+                    if let Some(ref mut obj) = current_obj {
+                        obj.imat = Some(imat);
+                    }
+                    // Skip any extra bytes beyond 16
+                    if size > 16 {
+                        let mut skip = vec![0u8; (size - 16) as usize];
+                        r.read_exact(&mut skip)?;
+                    }
+                }
+            }
+            chunk_id::CLIP => {
+                let size = read_i32(r)?;
+                let clip = read_clip(r, size)?;
+                if let Some(ref mut obj) = current_obj {
+                    obj.clips = Some(clip);
+                }
+            }
+            chunk_id::VIEW => {
+                let size = read_i32(r)?;
+                let view = read_view(r, size)?;
+                model.views.push(view);
+            }
+            chunk_id::IMNX => {
+                let size = read_i32(r)?;
+                if size >= 72 {
+                    let ref_image = read_iref_image(r)?;
+                    model.ref_image = Some(ref_image);
+                    if size > 72 {
+                        let mut skip = vec![0u8; (size - 72) as usize];
+                        r.read_exact(&mut skip)?;
+                    }
+                } else if size > 0 {
+                    let mut skip = vec![0u8; size as usize];
+                    r.read_exact(&mut skip)?;
+                }
+            }
+            chunk_id::SLAN => {
+                let size = read_i32(r)?;
+                let slan = read_slicer_angle(r, size)?;
+                model.slicer_angles.push(slan);
+            }
+            chunk_id::SIZE => {
+                let size = read_i32(r)?;
+                // SIZE chunk contains per-point sizes for the current contour
+                if size > 0 {
+                    let mut skip = vec![0u8; size as usize];
+                    r.read_exact(&mut skip)?;
+                }
+            }
+            chunk_id::MOST => {
+                let size = read_i32(r)?;
+                if size > 0 {
+                    let mut data = vec![0u8; size as usize];
+                    r.read_exact(&mut data)?;
+                    model.store = data;
+                }
+            }
+            chunk_id::OBST => {
+                let size = read_i32(r)?;
+                if size > 0 {
+                    let mut data = vec![0u8; size as usize];
+                    r.read_exact(&mut data)?;
+                    if let Some(ref mut obj) = current_obj {
+                        obj.store = data;
+                    }
+                }
+            }
+            chunk_id::COST | chunk_id::MEST => {
+                // Contour store / mesh store: read and skip for now
+                let size = read_i32(r)?;
+                if size > 0 {
+                    let mut skip = vec![0u8; size as usize];
+                    r.read_exact(&mut skip)?;
                 }
             }
             chunk_id::IEOF => {
@@ -177,6 +260,9 @@ fn read_object_header<R: Read>(r: &mut R) -> Result<ImodObject, ImodError> {
         trans,
         contours: Vec::with_capacity(contsize as usize),
         meshes: Vec::new(),
+        imat: None,
+        clips: None,
+        store: Vec::new(),
     })
 }
 
@@ -230,6 +316,115 @@ fn read_mesh<R: Read>(r: &mut R) -> Result<ImodMesh, ImodError> {
         time,
         surf,
     })
+}
+
+fn read_point3f<R: Read>(r: &mut R) -> Result<Point3f, ImodError> {
+    let x = read_f32(r)?;
+    let y = read_f32(r)?;
+    let z = read_f32(r)?;
+    Ok(Point3f { x, y, z })
+}
+
+fn read_imat<R: Read>(r: &mut R) -> Result<ImatData, ImodError> {
+    let ambient = read_u8(r)?;
+    let diffuse = read_u8(r)?;
+    let specular = read_u8(r)?;
+    let shininess = read_u8(r)?;
+    let fillred = read_u8(r)?;
+    let fillgreen = read_u8(r)?;
+    let fillblue = read_u8(r)?;
+    let quality = read_u8(r)?;
+    let mat2 = read_u32(r)?;
+    let valblack = read_u8(r)?;
+    let valwhite = read_u8(r)?;
+    let matflags2 = read_u8(r)?;
+    let mesh_thickness = read_u8(r)?;
+    Ok(ImatData {
+        ambient, diffuse, specular, shininess,
+        fillred, fillgreen, fillblue, quality,
+        mat2, valblack, valwhite, matflags2, mesh_thickness,
+    })
+}
+
+fn read_clip<R: Read>(r: &mut R, size: i32) -> Result<IclipPlanes, ImodError> {
+    let count = read_u8(r)?;
+    let flags = read_u8(r)?;
+    let trans = read_u8(r)?;
+    let plane = read_u8(r)?;
+    // Each plane has a normal (Point3f) and a point (Point3f) = 24 bytes
+    // Remaining bytes after 4-byte header: size - 4
+    let num_planes = count.max(1) as usize;
+    let mut normals = Vec::with_capacity(num_planes);
+    let mut points = Vec::with_capacity(num_planes);
+    for _ in 0..num_planes {
+        normals.push(read_point3f(r)?);
+    }
+    for _ in 0..num_planes {
+        points.push(read_point3f(r)?);
+    }
+    // Skip any remaining data
+    let read_bytes = 4 + (num_planes as i32) * 24;
+    if size > read_bytes {
+        let mut skip = vec![0u8; (size - read_bytes) as usize];
+        r.read_exact(&mut skip)?;
+    }
+    Ok(IclipPlanes { count, flags, trans, plane, normals, points })
+}
+
+fn read_view<R: Read>(r: &mut R, size: i32) -> Result<ImodView, ImodError> {
+    // VIEW chunk: fovy(4) + rad(4) + aspect(4) + cnear(4) + cfar(4) +
+    // rot(12) + trans(12) + scale(12) + world(4) + label(32) = 92 bytes minimum
+    let fovy = read_f32(r)?;
+    let rad = read_f32(r)?;
+    let aspect = read_f32(r)?;
+    let cnear = read_f32(r)?;
+    let cfar = read_f32(r)?;
+    let rot = read_point3f(r)?;
+    let trans = read_point3f(r)?;
+    let scale = read_point3f(r)?;
+    let world = read_u32(r)?;
+    let mut label_bytes = [0u8; 32];
+    r.read_exact(&mut label_bytes)?;
+    let label = String::from_utf8_lossy(&label_bytes)
+        .trim_end_matches('\0')
+        .to_string();
+    // Skip remaining bytes
+    let read_bytes = 92;
+    if size > read_bytes {
+        let mut skip = vec![0u8; (size - read_bytes) as usize];
+        r.read_exact(&mut skip)?;
+    }
+    Ok(ImodView { fovy, rad, aspect, cnear, cfar, rot, trans, scale, world, label })
+}
+
+fn read_iref_image<R: Read>(r: &mut R) -> Result<IrefImage, ImodError> {
+    let oscale = read_point3f(r)?;
+    let otrans = read_point3f(r)?;
+    let orot = read_point3f(r)?;
+    let cscale = read_point3f(r)?;
+    let ctrans = read_point3f(r)?;
+    let crot = read_point3f(r)?;
+    Ok(IrefImage { oscale, otrans, orot, cscale, ctrans, crot })
+}
+
+fn read_slicer_angle<R: Read>(r: &mut R, size: i32) -> Result<SlicerAngle, ImodError> {
+    // SLAN: time(4) + angles(12) + center(12) + label(32) = 60 bytes
+    let time = read_i32(r)?;
+    let a0 = read_f32(r)?;
+    let a1 = read_f32(r)?;
+    let a2 = read_f32(r)?;
+    let center = read_point3f(r)?;
+    let mut label_bytes = [0u8; 32];
+    r.read_exact(&mut label_bytes)?;
+    let label = String::from_utf8_lossy(&label_bytes)
+        .trim_end_matches('\0')
+        .to_string();
+    let read_bytes = 60;
+    if size > read_bytes {
+        let mut skip = vec![0u8; (size - read_bytes) as usize];
+        r.read_exact(&mut skip)?;
+    }
+    Ok(SlicerAngle { time, angles: [a0, a1, a2], center, label })
 }
 
 // Big-endian reading helpers
