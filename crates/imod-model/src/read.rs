@@ -83,6 +83,7 @@ pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError
         slicer_angles: Vec::new(),
         store: Vec::new(),
         clips: None,
+        unknown_chunks: Vec::new(),
     };
 
     // Read chunks until IEOF
@@ -204,13 +205,15 @@ pub fn read_model_from<R: Read + Seek>(r: &mut R) -> Result<ImodModel, ImodError
                 }
                 break;
             }
-            _ => {
-                // Unknown chunk: read size and skip
+            other => {
+                // Unknown/unrecognised chunk (includes niche types like SYNA,
+                // GRAF, etc.): read size + raw bytes and preserve for round-trip.
                 let size = read_i32(r)?;
+                let mut data = vec![0u8; size.max(0) as usize];
                 if size > 0 {
-                    let mut skip = vec![0u8; size as usize];
-                    r.read_exact(&mut skip)?;
+                    r.read_exact(&mut data)?;
                 }
+                model.unknown_chunks.push((other, data));
             }
         }
     }

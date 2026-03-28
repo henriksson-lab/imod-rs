@@ -5,6 +5,7 @@ use imod_math::{min_max_mean, min_max_mean_sd};
 use imod_mrc::{MrcHeader, MrcReader, MrcWriter};
 use imod_slice::Slice;
 use imod_transforms::{read_xf_file, LinearTransform};
+use imod_warp::{WarpFile, WarpTransform, Point2d, triangulate};
 use rustfft::num_complex::Complex;
 use std::f32::consts::PI;
 use std::io::Read as IoRead;
@@ -118,6 +119,12 @@ struct Args {
     /// scaled by the local magnification factor looked up from this field.
     #[arg(long = "gradient")]
     gradient: Option<String>,
+
+    /// Warp transform file (.warp): contains per-section control-point-based
+    /// local transforms. For each output pixel, the displacement (dx,dy) is
+    /// interpolated from the control points and applied during resampling.
+    #[arg(long = "warp")]
+    warp: Option<String>,
 }
 
 /// A magnification gradient field loaded from a text file.
@@ -200,6 +207,116 @@ fn apply_mag_gradient(
             let sx = (x as f32 - cx) * inv_mag + cx;
             let sy = (y as f32 - cy) * inv_mag + cy;
             out[y * nx + x] = sample_bicubic(data, nx, ny, sx, sy, fill);
+        }
+    }
+    out
+}
+
+/// Apply a warp transform to image data. The warp provides control points with
+/// local (dx, dy) displacements. We triangulate the control points and, for each
+/// output pixel, find the enclosing triangle, interpolate the displacement using
+/// barycentric coordinates, and sample the source at (x - dx, y - dy).
+fn apply_warp(
+    data: &[f32],
+    nx: usize,
+    ny: usize,
+    warp_sec: &WarpTransform,
+    fill: f32,
+) -> Vec<f32> {
+    let n = warp_sec.control_x.len();
+    if n < 3 {
+        // Too few control points: fall back to nearest-point displacement
+        let src = Slice::from_data(nx, ny, data.to_vec());
+        let mut out = vec![fill; nx * ny];
+        for y in 0..ny {
+            for x in 0..nx {
+                let (dx, dy) = if n == 0 {
+                    (0.0, 0.0)
+                } else {
+                    // Use inverse-distance weighting for < 3 points
+                    let mut wsum = 0.0f32;
+                    let mut dxs = 0.0f32;
+                    let mut dys = 0.0f32;
+                    for i in 0..n {
+                        let ddx = x as f32 - warp_sec.control_x[i];
+                        let ddy = y as f32 - warp_sec.control_y[i];
+                        let d2 = ddx * ddx + ddy * ddy;
+                        if d2 < 1e-6 {
+                            dxs = warp_sec.transforms[i].dx;
+                            dys = warp_sec.transforms[i].dy;
+                            wsum = 1.0;
+                            break;
+                        }
+                        let w = 1.0 / d2;
+                        wsum += w;
+                        dxs += w * warp_sec.transforms[i].dx;
+                        dys += w * warp_sec.transforms[i].dy;
+                    }
+                    (dxs / wsum, dys / wsum)
+                };
+                let sx = x as f32 - dx;
+                let sy = y as f32 - dy;
+                out[y * nx + x] = src.interpolate_bilinear(sx, sy, fill);
+            }
+        }
+        return out;
+    }
+
+    // Build Delaunay triangulation of the control points
+    let pts: Vec<Point2d> = (0..n)
+        .map(|i| Point2d {
+            x: warp_sec.control_x[i] as f64,
+            y: warp_sec.control_y[i] as f64,
+        })
+        .collect();
+    let tri = triangulate(&pts);
+
+    let src = Slice::from_data(nx, ny, data.to_vec());
+    let mut out = vec![fill; nx * ny];
+
+    for y in 0..ny {
+        for x in 0..nx {
+            let px = x as f64;
+            let py = y as f64;
+
+            let (dx, dy) = if let Some(ti) = tri.find_containing_triangle(px, py) {
+                // Barycentric interpolation of displacement within triangle
+                let t = &tri.triangles[ti];
+                let (a, b, c) = (&tri.points[t.a], &tri.points[t.b], &tri.points[t.c]);
+                let denom = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+                if denom.abs() < 1e-12 {
+                    (0.0f32, 0.0f32)
+                } else {
+                    let w1 = ((b.y - c.y) * (px - c.x) + (c.x - b.x) * (py - c.y)) / denom;
+                    let w2 = ((c.y - a.y) * (px - c.x) + (a.x - c.x) * (py - c.y)) / denom;
+                    let w3 = 1.0 - w1 - w2;
+                    let ddx = (w1 * warp_sec.transforms[t.a].dx as f64
+                        + w2 * warp_sec.transforms[t.b].dx as f64
+                        + w3 * warp_sec.transforms[t.c].dx as f64) as f32;
+                    let ddy = (w1 * warp_sec.transforms[t.a].dy as f64
+                        + w2 * warp_sec.transforms[t.b].dy as f64
+                        + w3 * warp_sec.transforms[t.c].dy as f64) as f32;
+                    (ddx, ddy)
+                }
+            } else {
+                // Outside convex hull: use nearest control point
+                let mut best_d2 = f64::MAX;
+                let mut best_i = 0;
+                for i in 0..n {
+                    let ddx = px - pts[i].x;
+                    let ddy = py - pts[i].y;
+                    let d2 = ddx * ddx + ddy * ddy;
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                        best_i = i;
+                    }
+                }
+                (warp_sec.transforms[best_i].dx, warp_sec.transforms[best_i].dy)
+            };
+
+            let sx = x as f32 - dx;
+            let sy = y as f32 - dy;
+            out[y * nx + x] = src.interpolate_bilinear(sx, sy, fill);
         }
     }
     out
@@ -1027,6 +1144,14 @@ fn main() {
         MagGradient::load(path)
     });
 
+    // Load warp file if provided
+    let warp_file: Option<WarpFile> = args.warp.as_ref().map(|path| {
+        WarpFile::from_file(path).unwrap_or_else(|e| {
+            eprintln!("Error reading warp file {}: {}", path, e);
+            std::process::exit(1);
+        })
+    });
+
     // Determine antialias setting
     let use_antialias = args.antialias.unwrap_or(args.bin > 1);
 
@@ -1142,6 +1267,14 @@ fn main() {
             // Apply magnification gradient
             if let Some(ref gradient) = mag_gradient {
                 data = apply_mag_gradient(&data, in_nx, in_ny, gradient, args.fill);
+            }
+
+            // Apply warp transform
+            if let Some(ref wf) = warp_file {
+                let z_idx = src.z as i32;
+                if let Some(wsec) = wf.sections.iter().find(|s| s.z == z_idx) {
+                    data = apply_warp(&data, in_nx, in_ny, wsec, args.fill);
+                }
             }
 
             // Apply transform
@@ -1304,6 +1437,14 @@ fn main() {
         // Apply magnification gradient if provided
         if let Some(ref gradient) = mag_gradient {
             data = apply_mag_gradient(&data, in_nx, in_ny, gradient, args.fill);
+        }
+
+        // Apply warp transform if provided
+        if let Some(ref wf) = warp_file {
+            let z_idx = src.z as i32;
+            if let Some(wsec) = wf.sections.iter().find(|s| s.z == z_idx) {
+                data = apply_warp(&data, in_nx, in_ny, wsec, args.fill);
+            }
         }
 
         // Apply transform if provided

@@ -102,6 +102,14 @@ pub fn write_model_to<W: Write>(w: &mut W, model: &ImodModel) -> Result<(), Imod
         w.write_all(&model.store)?;
     }
 
+    // Write back any unknown/unrecognised chunks (SYNA, GRAF, etc.)
+    // preserved from the original file for lossless round-trip.
+    for (chunk_id, data) in &model.unknown_chunks {
+        write_u32(w, *chunk_id)?;
+        write_i32(w, data.len() as i32)?;
+        w.write_all(data)?;
+    }
+
     // IEOF
     write_u32(w, chunk_id::IEOF)?;
     w.flush()?;

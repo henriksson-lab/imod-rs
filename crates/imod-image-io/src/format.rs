@@ -78,6 +78,16 @@ pub fn open_image(path: impl AsRef<Path>) -> Result<Box<dyn ImageFile>, ImodErro
             Ok(Box::new(crate::mrc_backend::MrcImageFile::open(path)?))
         }
         ImageFormat::Tiff => Ok(Box::new(crate::tiff_backend::TiffImageFile::open(path)?)),
+        ImageFormat::Hdf5 => Err(ImodError::InvalidData(
+            "HDF5 format detected but not yet supported. \
+             Convert to MRC with h5totiff or similar."
+                .to_string(),
+        )),
+        ImageFormat::Eer => Err(ImodError::InvalidData(
+            "EER format detected but not yet supported. \
+             Convert with relion_convert_to_tiff or similar."
+                .to_string(),
+        )),
         _ => Err(ImodError::InvalidData(format!(
             "unsupported image format: {:?}",
             format

@@ -138,6 +138,7 @@ fn main() {
         slicer_angles: model.slicer_angles.clone(),
         store: model.store.clone(),
         clips: model.clips.clone(),
+        unknown_chunks: model.unknown_chunks.clone(),
     };
 
     for &idx in &keep_indices {

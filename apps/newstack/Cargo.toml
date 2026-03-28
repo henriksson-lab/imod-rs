@@ -16,3 +16,4 @@ imod-slice = { path = "../../crates/imod-slice" }
 imod-fft.workspace = true
 rustfft = "6"
 clap = { version = "4", features = ["derive"] }
+imod-warp.workspace = true

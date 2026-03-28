@@ -7,6 +7,8 @@ use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use std::f32::consts::PI;
 
+mod gpu;
+
 /// Correct CTF (contrast transfer function) by phase-flipping strips of a
 /// tilt series. Each image is divided into strips perpendicular to the tilt
 /// axis; the defocus for each strip is computed from the tilt geometry, and
@@ -75,6 +77,17 @@ struct Args {
     /// is not applied. Frequencies below this cutoff are left unchanged (CTF=1).
     #[arg(long = "cuton-freq", default_value_t = 0.0)]
     cuton_freq: f32,
+
+    /// Use GPU (wgpu compute shaders) for CTF correction. Falls back to CPU
+    /// if no suitable GPU adapter is found.
+    #[arg(long = "gpu", default_value_t = false)]
+    gpu: bool,
+
+    /// Phase plate constant phase shift in degrees. When non-zero, this
+    /// constant phase is added to the CTF aberration phase before computing
+    /// the correction. Typical values: 90 degrees for a Volta phase plate.
+    #[arg(long = "plate-phase", default_value_t = 0.0)]
+    plate_phase: f32,
 }
 
 /// Per-view defocus information, potentially with astigmatism.
@@ -252,6 +265,7 @@ fn main() {
     let _default_defocus_a = args.defocus as f64 * 10.0; // nm -> Angstroms
 
     let tilt_axis_rad = (args.tilt_axis_angle as f64) * PI as f64 / 180.0;
+    let plate_phase_rad = (args.plate_phase as f64) * PI as f64 / 180.0;
 
     // Compute effective strip width, clamping to max_strip_width if given,
     // or auto-computing a safe maximum from defocus and pixel size.
@@ -284,10 +298,29 @@ fn main() {
         args.strip_width.min(max_w)
     };
 
+    // Try to initialise GPU session if requested
+    let gpu_session = if args.gpu {
+        match gpu::GpuCtfSession::new() {
+            Some(session) => {
+                eprintln!("ctfphaseflip: GPU acceleration enabled");
+                Some(session)
+            }
+            None => {
+                eprintln!("ctfphaseflip: GPU init failed, falling back to CPU");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     eprintln!(
         "ctfphaseflip: voltage={:.0}kV, Cs={:.1}mm, pixel={:.2}A, strips={}px, tilt_axis={:.1}deg",
         args.voltage, args.cs, pixel_a, strip_width, args.tilt_axis_angle
     );
+    if args.plate_phase.abs() > 1e-6 {
+        eprintln!("ctfphaseflip: phase plate correction={:.1}deg", args.plate_phase);
+    }
     if view_defocus.is_some() {
         eprintln!("ctfphaseflip: using per-view defocus file with astigmatism support");
     } else {
@@ -494,57 +527,107 @@ fn main() {
             // where chi is the phase aberration and w is the amplitude contrast.
             // We flip the sign of Fourier coefficients wherever CTF < 0.
             // Frequencies below cuton_freq are left unchanged.
-            let w = amp_contrast;
-            let w_phase = (1.0 - w * w).sqrt();
-            for fy_idx in 0..sh {
-                let freq_y = if fy_idx <= sh / 2 {
-                    fy_idx as f64
-                } else {
-                    fy_idx as f64 - sh as f64
+            if let Some(ref gpu) = gpu_session {
+                // GPU path: split complex data into separate re/im arrays
+                let mut re_data: Vec<f32> = strip_data.iter().map(|c| c.re).collect();
+                let mut im_data: Vec<f32> = strip_data.iter().map(|c| c.im).collect();
+
+                let gpu_params = gpu::CtfParams {
+                    sw: sw as u32,
+                    sh: sh as u32,
+                    pixel_a: pixel_a,
+                    wavelength: wavelength as f32,
+                    cs_a: cs_a as f32,
+                    amp_contrast: amp_contrast as f32,
+                    cuton_freq: cuton_freq as f32,
+                    defocus1: strip_base_defocus as f32,
+                    defocus2: strip_base_defocus2 as f32,
+                    astig_angle_rad: astig_angle_rad as f32,
+                    has_astigmatism: if has_astigmatism { 1 } else { 0 },
+                    plate_phase_rad: plate_phase_rad as f32,
+                    tilt_axis_rad: tilt_axis_rad as f32,
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
                 };
-                let sy = freq_y / (sh as f64 * pixel_a as f64);
 
-                for fx_idx in 0..sw {
-                    let freq_x = if fx_idx <= sw / 2 {
-                        fx_idx as f64
+                gpu.correct_strip(&mut re_data, &mut im_data, gpu_params);
+
+                // Write results back into complex array
+                for i in 0..strip_data.len() {
+                    strip_data[i] = Complex::new(re_data[i], im_data[i]);
+                }
+            } else {
+                // CPU path
+                let w = amp_contrast;
+                let w_phase = (1.0 - w * w).sqrt();
+                for fy_idx in 0..sh {
+                    let freq_y = if fy_idx <= sh / 2 {
+                        fy_idx as f64
                     } else {
-                        fx_idx as f64 - sw as f64
-                    };
-                    let sx = freq_x / (sw as f64 * pixel_a as f64);
-
-                    let s2 = sx * sx + sy * sy;
-                    let s = s2.sqrt();
-
-                    // Skip correction below cuton frequency
-                    if s < cuton_freq {
-                        continue;
-                    }
-
-                    // Compute effective defocus for this frequency direction
-                    let def_for_ctf = if has_astigmatism {
-                        let angle = sy.atan2(sx);
-                        effective_defocus(
-                            strip_base_defocus,
-                            strip_base_defocus2,
-                            angle,
-                            astig_angle_rad,
-                        )
-                    } else {
-                        strip_base_defocus
+                        fy_idx as f64 - sh as f64
                     };
 
-                    // CTF phase: chi(s) = pi * lambda * s^2 * (defocus - 0.5 * Cs * lambda^2 * s^2)
-                    let chi = std::f64::consts::PI * wavelength * s2
-                        * (def_for_ctf - 0.5 * cs_a * wavelength * wavelength * s2);
+                    for fx_idx in 0..sw {
+                        let freq_x = if fx_idx <= sw / 2 {
+                            fx_idx as f64
+                        } else {
+                            fx_idx as f64 - sw as f64
+                        };
 
-                    // Full CTF with amplitude contrast:
-                    // CTF = -sin(chi)*sqrt(1-w^2) + cos(chi)*w
-                    let ctf = -chi.sin() * w_phase + chi.cos() * w;
+                        // Rotate frequency coordinates by the tilt axis angle
+                        // to account for directional defocus in the frequency domain
+                        let (rot_freq_x, rot_freq_y) = if tilt_axis_rad.abs() > 1e-6 {
+                            let cos_ta = tilt_axis_rad.cos();
+                            let sin_ta = tilt_axis_rad.sin();
+                            (
+                                freq_x * cos_ta + freq_y * sin_ta,
+                                -freq_x * sin_ta + freq_y * cos_ta,
+                            )
+                        } else {
+                            (freq_x, freq_y)
+                        };
 
-                    // Phase-flip: negate Fourier coefficient where CTF < 0
-                    if ctf < 0.0 {
-                        strip_data[fy_idx * sw + fx_idx] =
-                            -strip_data[fy_idx * sw + fx_idx];
+                        let sx = rot_freq_x / (sw as f64 * pixel_a as f64);
+                        let sy = rot_freq_y / (sh as f64 * pixel_a as f64);
+
+                        let s2 = sx * sx + sy * sy;
+                        let s = s2.sqrt();
+
+                        // Skip correction below cuton frequency
+                        if s < cuton_freq {
+                            continue;
+                        }
+
+                        // Compute effective defocus for this frequency direction
+                        let def_for_ctf = if has_astigmatism {
+                            let angle = sy.atan2(sx);
+                            effective_defocus(
+                                strip_base_defocus,
+                                strip_base_defocus2,
+                                angle,
+                                astig_angle_rad,
+                            )
+                        } else {
+                            strip_base_defocus
+                        };
+
+                        // CTF phase: chi(s) = pi * lambda * s^2 * (defocus - 0.5 * Cs * lambda^2 * s^2)
+                        let chi = std::f64::consts::PI * wavelength * s2
+                            * (def_for_ctf - 0.5 * cs_a * wavelength * wavelength * s2);
+
+                        // Add phase plate constant phase shift
+                        let chi_total = chi + plate_phase_rad;
+
+                        // Full CTF with amplitude contrast:
+                        // CTF = -sin(chi)*sqrt(1-w^2) + cos(chi)*w
+                        let ctf = -chi_total.sin() * w_phase + chi_total.cos() * w;
+
+                        // Phase-flip: negate Fourier coefficient where CTF < 0
+                        if ctf < 0.0 {
+                            strip_data[fy_idx * sw + fx_idx] =
+                                -strip_data[fy_idx * sw + fx_idx];
+                        }
                     }
                 }
             }

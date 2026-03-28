@@ -85,6 +85,12 @@ struct Args {
     /// proportionally lower acceptance threshold.
     #[arg(long = "adapt-threshold", default_value_t = false)]
     adapt_threshold: bool,
+
+    /// Scale template contrast by 1/cos(tilt) to compensate for apparent bead
+    /// size changes due to defocus variation across the tilt series. When enabled,
+    /// the template intensity is scaled before cross-correlation at each view.
+    #[arg(long = "defocus-scale", default_value_t = false)]
+    defocus_scale: bool,
 }
 
 /// Result of tracking a bead at a single view.
@@ -320,8 +326,17 @@ fn main() {
         let mut views_since_update = 0usize;
         for v in (seed_view + 1)..nz {
             let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
+
+            // Scale template contrast by 1/cos(tilt) for defocus-dependent size
+            let tracking_template = if args.defocus_scale && tilt_angle.abs() > 0.1 {
+                let scale = 1.0 / tilt_angle.to_radians().cos().abs().max(0.1);
+                template.iter().map(|&v| v * scale).collect::<Vec<f32>>()
+            } else {
+                template.clone()
+            };
+
             if let Some(tr) = track_bead_tilt(
-                &template, &sections[v], nx, ny, cur_x, cur_y,
+                &tracking_template, &sections[v], nx, ny, cur_x, cur_y,
                 box_size, search_size, tilt_angle, &exclude_zones,
             ) {
                 results[v] = Some(tr);
@@ -350,8 +365,17 @@ fn main() {
         views_since_update = 0;
         for v in (0..seed_view).rev() {
             let tilt_angle = tilt_angles.get(v).copied().unwrap_or(0.0);
+
+            // Scale template contrast by 1/cos(tilt) for defocus-dependent size
+            let tracking_template = if args.defocus_scale && tilt_angle.abs() > 0.1 {
+                let scale = 1.0 / tilt_angle.to_radians().cos().abs().max(0.1);
+                template.iter().map(|&v| v * scale).collect::<Vec<f32>>()
+            } else {
+                template.clone()
+            };
+
             if let Some(tr) = track_bead_tilt(
-                &template, &sections[v], nx, ny, cur_x, cur_y,
+                &tracking_template, &sections[v], nx, ny, cur_x, cur_y,
                 box_size, search_size, tilt_angle, &exclude_zones,
             ) {
                 results[v] = Some(tr);

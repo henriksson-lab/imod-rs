@@ -24,6 +24,21 @@ pub mod chunk_id {
     pub const MEPA: u32 = u32::from_be_bytes(*b"MEPA");
     pub const SLAN: u32 = u32::from_be_bytes(*b"SLAN");
     pub const OGRP: u32 = u32::from_be_bytes(*b"OGRP");
+
+    // Neural circuit tracing chunks (extremely niche, not implemented):
+    //
+    // SYNA - Synapse objects: contain connections between contours representing
+    //        synaptic contacts. Each synapse has a pre/post object+contour index,
+    //        a 3D position, and a type classification. Used in serial-section
+    //        neural circuit reconstruction (e.g., connectomics).
+    //
+    // GRAF - Graph objects: represent connectivity graphs overlaid on the model.
+    //        Each graph node has an object+contour reference and (x,y,z) position;
+    //        edges store connection strength and directionality. Used for
+    //        analysing neural circuit topology derived from synapse annotations.
+    //
+    // These chunks are preserved as raw bytes during round-trip via the
+    // default unknown-chunk handler in read.rs (reads size + data, skips).
 }
 
 /// An IMOD model, consisting of objects which contain contours and meshes.
@@ -49,6 +64,10 @@ pub struct ImodModel {
     pub store: Vec<u8>,
     /// Model-level clipping planes (MCLP chunk).
     pub clips: Option<IclipPlanes>,
+    /// Unknown/unrecognised chunks preserved as (chunk_id, raw_data) for
+    /// lossless round-trip. This includes niche chunks like SYNA (synapses)
+    /// and GRAF (graph objects) used in neural circuit tracing.
+    pub unknown_chunks: Vec<(u32, Vec<u8>)>,
 }
 
 impl Default for ImodModel {
@@ -73,6 +92,7 @@ impl Default for ImodModel {
             slicer_angles: Vec::new(),
             store: Vec::new(),
             clips: None,
+            unknown_chunks: Vec::new(),
         }
     }
 }
