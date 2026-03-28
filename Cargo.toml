@@ -25,6 +25,14 @@ members = [
     "apps/eraser",
     "apps/ctfphaseflip",
     "apps/alignframes",
+    "apps/tilt",
+    "apps/tiltalign",
+    "apps/beadtrack",
+    "apps/blendmont",
+    "apps/findwarp",
+    "apps/warpvol",
+    "apps/corrsearch3d",
+    "apps/solvematch",
 ]
 
 [workspace.package]
@@ -48,3 +56,4 @@ rustfft = "6"
 thiserror = "2"
 binrw = "0.14"
 clap = { version = "4", features = ["derive"] }
+rayon = "1"

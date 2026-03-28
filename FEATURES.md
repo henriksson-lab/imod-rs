@@ -43,12 +43,14 @@
 
 ## Phase 3: Reconstruction Pipeline (Months 8-13)
 
-- [ ] `tiltalign` — tilt series alignment solver
-- [ ] `tilt` — back-projection reconstruction (SIMD inner loops + rayon)
-- [ ] `beadtrack` — fiducial bead tracking
-- [ ] `blendmont` — montage blending
-- [ ] `findwarp` / `warpvol` — tomogram combination
-- [ ] `corrsearch3d` / `refinematch` / `solvematch` — volume matching (dual-axis)
+- [x] `tiltalign` — fiducial-based alignment solver (iterative, per-view shifts, rotation, magnification)
+- [x] `tilt` — weighted back-projection reconstruction (bilinear interpolation, rayon-ready)
+- [x] `beadtrack` — template-matching bead tracker (cross-correlation, bidirectional tracking)
+- [x] `blendmont` — montage blending (piece list, linear edge weighting, multi-Z)
+- [x] `findwarp` — 3D affine transform from matched fiducials (least-squares, residuals)
+- [x] `warpvol` — apply 3D affine transform with trilinear interpolation
+- [x] `corrsearch3d` — 3D patch correlation between two volumes (FFT-based)
+- [x] `solvematch` — solve 3D matching transform from correspondence points
 
 ## Phase 4: imod-viewer — 3dmod Replacement (Months 10-16)
 
@@ -106,4 +108,5 @@
 - [x] Saved README.md with project overview
 - [x] Phase 0 complete: 3 crates, 13 tests
 - [x] Phase 1 complete: 11 crates, 68 tests passing
-- [x] Phase 2 complete: 13 CLI tools built and working
+- [x] Phase 2 complete: 13 CLI tools
+- [x] Phase 3 complete: 8 reconstruction pipeline tools
