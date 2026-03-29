@@ -1,6 +1,5 @@
-import { VerticalBox, HorizontalBox, Slider, Button, GroupBox, TabWidget, CheckBox, SpinBox } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Slider, Button, GroupBox, CheckBox } from "std-widgets.slint";
 
-// A single model object entry for the list
 export struct ModelObjectEntry {
     name: string,
     color: color,
@@ -10,41 +9,139 @@ export struct ModelObjectEntry {
 
 export component MainWindow inherits Window {
     title: "IMOD Viewer";
-    preferred-width: 1100px;
-    preferred-height: 750px;
+    preferred-width: 1400px;
+    preferred-height: 800px;
 
-    // Image properties
+    // ===== NATIVE MENU BAR (matches 3dmod) =====
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem { title: "New Model"; activated => { root.menu-file-new-model(); } }
+            MenuItem { title: "Open Model..."; activated => { root.open-model(); } }
+            MenuItem { title: "Reload Model"; activated => { root.menu-file-reload-model(); } }
+            MenuItem { title: "Save Model"; activated => { root.save-model(); } }
+            MenuItem { title: "Save Model As..."; activated => { root.menu-file-save-as(); } }
+            MenuSeparator {}
+            MenuItem { title: "Open Image..."; activated => { root.open-file(); } }
+            MenuSeparator {}
+            Menu {
+                title: "Write Model As";
+                MenuItem { title: "IMOD"; activated => { root.save-model(); } }
+                MenuItem { title: "OBJ"; activated => { root.menu-file-write-obj(); } }
+                MenuItem { title: "VRML"; activated => { root.menu-file-write-vrml(); } }
+            }
+            MenuSeparator {}
+            MenuItem { title: "Snapshot..."; activated => { root.menu-file-snapshot(); } }
+            MenuItem { title: "Quit"; activated => { root.menu-file-quit(); } }
+        }
+
+        Menu {
+            title: "Edit";
+            MenuItem { title: "Undo"; activated => { root.undo(); } }
+            MenuItem { title: "Redo"; activated => { root.redo(); } }
+            MenuSeparator {}
+            Menu {
+                title: "Model";
+                MenuItem { title: "Header..."; activated => { root.menu-edit-model-header(); } }
+                MenuItem { title: "Offsets..."; activated => { root.menu-edit-model-offsets(); } }
+                MenuItem { title: "Clean"; activated => { root.menu-edit-model-clean(); } }
+            }
+            Menu {
+                title: "Object";
+                MenuItem { title: "New"; activated => { root.menu-edit-object-new(); } }
+                MenuItem { title: "Delete"; activated => { root.menu-edit-object-delete(); } }
+                MenuItem { title: "Color..."; activated => { root.menu-edit-object-color(); } }
+                MenuItem { title: "Type..."; activated => { root.menu-edit-object-type(); } }
+                MenuItem { title: "Move..."; activated => { root.menu-edit-object-move(); } }
+                MenuItem { title: "Info"; activated => { root.menu-edit-object-info(); } }
+            }
+            Menu {
+                title: "Contour";
+                MenuItem { title: "New"; activated => { root.menu-edit-contour-new(); } }
+                MenuItem { title: "Delete"; activated => { root.menu-edit-contour-delete(); } }
+                MenuItem { title: "Move..."; activated => { root.menu-edit-contour-move(); } }
+                MenuItem { title: "Copy..."; activated => { root.menu-edit-contour-copy(); } }
+                MenuItem { title: "Sort"; activated => { root.menu-edit-contour-sort(); } }
+                MenuItem { title: "Break..."; activated => { root.menu-edit-contour-break(); } }
+                MenuItem { title: "Join..."; activated => { root.menu-edit-contour-join(); } }
+                MenuItem { title: "Info"; activated => { root.menu-edit-contour-info(); } }
+            }
+            Menu {
+                title: "Point";
+                MenuItem { title: "Delete"; activated => { root.menu-edit-point-delete(); } }
+                MenuItem { title: "Size..."; activated => { root.menu-edit-point-size(); } }
+                MenuItem { title: "Distance"; activated => { root.menu-edit-point-distance(); } }
+                MenuItem { title: "Value"; activated => { root.menu-edit-point-value(); } }
+                MenuItem { title: "Sort by Z"; activated => { root.menu-edit-point-sort-z(); } }
+            }
+            MenuSeparator {}
+            Menu {
+                title: "Image";
+                MenuItem { title: "Flip/Rotate"; activated => { root.menu-edit-image-flip(); } }
+                MenuItem { title: "Process..."; activated => { root.menu-edit-image-process(); } }
+                MenuItem { title: "Reload..."; activated => { root.menu-edit-image-reload(); } }
+                MenuItem { title: "Fill Cache"; activated => { root.menu-edit-image-fillcache(); } }
+            }
+            MenuSeparator {}
+            MenuItem { title: "Fine Grain..."; activated => { root.menu-edit-fine-grain(); } }
+            MenuItem { title: "Options..."; activated => { root.menu-edit-options(); } }
+        }
+
+        Menu {
+            title: "Image";
+            MenuItem { title: "ZaP"; activated => { root.view-mode = 0; root.view-mode-changed(0); } }
+            MenuItem { title: "Multi-Z"; activated => { root.view-mode = 0; root.view-mode-changed(0); } }
+            MenuItem { title: "XYZ"; activated => { root.view-mode = 2; root.view-mode-changed(2); } }
+            MenuItem { title: "Slicer"; activated => { root.view-mode = 1; root.view-mode-changed(1); } }
+            MenuItem { title: "Model View"; activated => { root.show-3d-panel = true; } }
+            MenuSeparator {}
+            MenuItem { title: "Pixel View"; activated => { root.menu-image-pixel-view(); } }
+            MenuItem { title: "Graph"; activated => { root.menu-image-graph(); } }
+            MenuItem { title: "Isosurface"; activated => { root.iso-threshold = root.white-level / 2; root.iso-threshold-changed(root.iso-threshold); } }
+            MenuItem { title: "Tumbler"; activated => { root.menu-image-tumbler(); } }
+        }
+
+        Menu {
+            title: "Special";
+            MenuItem { title: "Bead Fixer..."; activated => { root.menu-special-beadfixer(); } }
+            MenuItem { title: "Drawing Tools..."; activated => { root.menu-special-drawing(); } }
+            MenuItem { title: "Interpolator..."; activated => { root.menu-special-interpolator(); } }
+        }
+
+        Menu {
+            title: "Help";
+            MenuItem { title: "Menus"; activated => { root.menu-help-menus(); } }
+            MenuItem { title: "Controls"; activated => { root.menu-help-controls(); } }
+            MenuItem { title: "Hot Keys"; activated => { root.menu-help-hotkeys(); } }
+            MenuItem { title: "About"; activated => { root.menu-help-about(); } }
+        }
+    }
+
+    // ===== PROPERTIES =====
     in property <string> filename: "No file loaded";
     in property <string> info-text: "";
     in property <image> slice-image;
+    in property <image> model-3d-image;
     in property <int> max-z: 0;
     in property <int> nx: 0;
     in property <int> ny: 0;
     in property <string> pixel-value-text: "";
     in property <string> model-info: "No model";
-
-    // Model objects list
     in property <[ModelObjectEntry]> model-objects: [];
 
-    // Mutable state
     in-out property <int> current-z: 0;
     in-out property <float> black-level: 0.0;
     in-out property <float> white-level: 255.0;
     in-out property <float> zoom: 1.0;
     in-out property <bool> show-model: true;
-    in-out property <int> view-mode: 0;  // 0=ZAP, 1=Slicer, 2=XYZ, 3=Model 3D, 4=Iso
+    in-out property <int> view-mode: 0;
     in-out property <float> iso-threshold: 128.0;
     in-out property <float> slicer-angle-x: 0.0;
     in-out property <float> slicer-angle-y: 0.0;
-    // Edit mode: 0=view, 1=add points, 2=move points, 3=delete points
     in-out property <int> edit-mode: 0;
     in property <string> edit-status: "View";
-
-    // Undo/redo availability (for potential UI indicators)
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
-
-    // Object/contour/point navigation
     in-out property <int> current-object: 0;
     in property <int> total-objects: 0;
     in-out property <int> current-contour: 0;
@@ -54,8 +151,9 @@ export component MainWindow inherits Window {
     in property <string> point-xyz-text: "";
     in-out property <bool> movie-mode: false;
     in property <string> image-size-text: "";
+    in-out property <bool> show-3d-panel: true;
 
-    // Callbacks
+    // ===== CALLBACKS =====
     callback open-file();
     callback open-model();
     callback z-changed(int);
@@ -78,534 +176,273 @@ export component MainWindow inherits Window {
     callback point-changed(int);
     callback auto-contrast();
     callback toggle-movie();
+    callback model-3d-mouse-moved(float, float);
+    callback model-3d-mouse-released();
+    callback model-3d-zoom-changed(float);
 
+    // Menu callbacks (stubs for unimplemented features)
+    callback menu-file-new-model();
+    callback menu-file-reload-model();
+    callback menu-file-save-as();
+    callback menu-file-write-obj();
+    callback menu-file-write-vrml();
+    callback menu-file-snapshot();
+    callback menu-file-quit();
+    callback menu-edit-model-header();
+    callback menu-edit-model-offsets();
+    callback menu-edit-model-clean();
+    callback menu-edit-object-new();
+    callback menu-edit-object-delete();
+    callback menu-edit-object-color();
+    callback menu-edit-object-type();
+    callback menu-edit-object-move();
+    callback menu-edit-object-info();
+    callback menu-edit-contour-new();
+    callback menu-edit-contour-delete();
+    callback menu-edit-contour-move();
+    callback menu-edit-contour-copy();
+    callback menu-edit-contour-sort();
+    callback menu-edit-contour-break();
+    callback menu-edit-contour-join();
+    callback menu-edit-contour-info();
+    callback menu-edit-point-delete();
+    callback menu-edit-point-size();
+    callback menu-edit-point-distance();
+    callback menu-edit-point-value();
+    callback menu-edit-point-sort-z();
+    callback menu-edit-image-flip();
+    callback menu-edit-image-process();
+    callback menu-edit-image-reload();
+    callback menu-edit-image-fillcache();
+    callback menu-edit-fine-grain();
+    callback menu-edit-options();
+    callback menu-image-pixel-view();
+    callback menu-image-graph();
+    callback menu-image-tumbler();
+    callback menu-special-beadfixer();
+    callback menu-special-drawing();
+    callback menu-special-interpolator();
+    callback menu-help-menus();
+    callback menu-help-controls();
+    callback menu-help-hotkeys();
+    callback menu-help-about();
+
+    // ===== KEYBOARD HANDLER =====
     forward-focus: key-handler;
 
     key-handler := FocusScope {
         key-pressed(ev) => {
-            if (ev.text == Key.PageUp) {
-                root.key-pressed("PageUp");
-                return accept;
-            }
-            if (ev.text == Key.PageDown) {
-                root.key-pressed("PageDown");
-                return accept;
-            }
-            if (ev.text == "+" || ev.text == "=") {
-                root.key-pressed("ZoomIn");
-                return accept;
-            }
-            if (ev.text == "-") {
-                root.key-pressed("ZoomOut");
-                return accept;
-            }
-            if (ev.text == "1") {
-                root.view-mode = 0;
-                root.view-mode-changed(0);
-                return accept;
-            }
-            if (ev.text == "2") {
-                root.view-mode = 1;
-                root.view-mode-changed(1);
-                return accept;
-            }
-            if (ev.text == "3") {
-                root.view-mode = 2;
-                root.view-mode-changed(2);
-                return accept;
-            }
-            if (ev.text == "4") {
-                root.view-mode = 3;
-                root.view-mode-changed(3);
-                return accept;
-            }
-            if (ev.text == "5") {
-                root.view-mode = 4;
-                root.view-mode-changed(4);
-                return accept;
-            }
-            // Ctrl+Z = undo
-            if (ev.modifiers.control && (ev.text == "z" || ev.text == "Z") && !ev.modifiers.shift) {
-                root.undo();
-                return accept;
-            }
-            // Ctrl+Y = redo
-            if (ev.modifiers.control && (ev.text == "y" || ev.text == "Y")) {
-                root.redo();
-                return accept;
-            }
-            // Ctrl+S = save
-            if (ev.modifiers.control && (ev.text == "s" || ev.text == "S")) {
-                root.save-model();
-                return accept;
-            }
-            // M = toggle model overlay
-            if (ev.text == "m" || ev.text == "M") {
-                if (!ev.modifiers.control) {
-                    root.show-model = !root.show-model;
-                    root.toggle-model(root.show-model);
-                    return accept;
-                }
-            }
-            // A = add points mode
-            if (ev.text == "a" || ev.text == "A") {
-                if (!ev.modifiers.control) {
-                    root.edit-mode = 1;
-                    root.key-pressed("AddMode");
-                    return accept;
-                }
-            }
-            // D = delete points mode
-            if (ev.text == "d" || ev.text == "D") {
-                if (!ev.modifiers.control) {
-                    root.edit-mode = 3;
-                    root.key-pressed("DeleteMode");
-                    return accept;
-                }
-            }
-            // V = view mode
-            if (ev.text == "v" || ev.text == "V") {
-                if (!ev.modifiers.control) {
-                    root.edit-mode = 0;
-                    root.key-pressed("ViewMode");
-                    return accept;
-                }
+            if (ev.text == Key.PageUp) { root.key-pressed("PageUp"); return accept; }
+            if (ev.text == Key.PageDown) { root.key-pressed("PageDown"); return accept; }
+            if (ev.text == "+" || ev.text == "=") { root.key-pressed("ZoomIn"); return accept; }
+            if (ev.text == "-") { root.key-pressed("ZoomOut"); return accept; }
+            if (ev.text == "1") { root.view-mode = 0; root.view-mode-changed(0); return accept; }
+            if (ev.text == "2") { root.view-mode = 1; root.view-mode-changed(1); return accept; }
+            if (ev.text == "3") { root.view-mode = 2; root.view-mode-changed(2); return accept; }
+            if (ev.modifiers.control && (ev.text == "z" || ev.text == "Z") && !ev.modifiers.shift) { root.undo(); return accept; }
+            if (ev.modifiers.control && (ev.text == "y" || ev.text == "Y")) { root.redo(); return accept; }
+            if (ev.modifiers.control && (ev.text == "s" || ev.text == "S")) { root.save-model(); return accept; }
+            if (!ev.modifiers.control) {
+                if (ev.text == "m" || ev.text == "M") { root.show-model = !root.show-model; root.toggle-model(root.show-model); return accept; }
+                if (ev.text == "a" || ev.text == "A") { root.edit-mode = 1; root.key-pressed("AddMode"); return accept; }
+                if (ev.text == "d" || ev.text == "D") { root.edit-mode = 3; root.key-pressed("DeleteMode"); return accept; }
+                if (ev.text == "v" || ev.text == "V") { root.edit-mode = 0; root.key-pressed("ViewMode"); return accept; }
+                if (ev.text == "t" || ev.text == "T") { root.show-3d-panel = !root.show-3d-panel; return accept; }
+                if (ev.text == "n" || ev.text == "N") { root.menu-edit-contour-new(); return accept; }
             }
             return reject;
         }
 
         VerticalBox {
-            // Toolbar
+            // ===== TOOLBAR =====
             HorizontalBox {
-                height: 40px;
-                padding: 4px;
-                spacing: 6px;
+                height: 32px;
+                padding: 2px;
+                spacing: 3px;
 
-                Button { text: "Open Image..."; clicked => { root.open-file(); } }
-                Button { text: "Open Model..."; clicked => { root.open-model(); } }
-                Button { text: "Save Model"; clicked => { root.save-model(); } }
+                Button { text: "View"; enabled: root.edit-mode != 0; clicked => { root.edit-mode = 0; } }
+                Button { text: "Add"; enabled: root.edit-mode != 1; clicked => { root.edit-mode = 1; } }
+                Button { text: "Del"; enabled: root.edit-mode != 3; clicked => { root.edit-mode = 3; } }
 
-                Rectangle { width: 1px; background: #444; }
+                Rectangle { width: 1px; background: #333; }
 
-                Button {
-                    text: "Undo";
-                    enabled: root.can-undo;
-                    clicked => { root.undo(); }
-                }
-                Button {
-                    text: "Redo";
-                    enabled: root.can-redo;
-                    clicked => { root.redo(); }
-                }
+                Button { text: "ZAP"; enabled: root.view-mode != 0; clicked => { root.view-mode = 0; root.view-mode-changed(0); } }
+                Button { text: "Slicer"; enabled: root.view-mode != 1; clicked => { root.view-mode = 1; root.view-mode-changed(1); } }
+                Button { text: "XYZ"; enabled: root.view-mode != 2; clicked => { root.view-mode = 2; root.view-mode-changed(2); } }
 
-                Rectangle { width: 1px; background: #444; }
+                Rectangle { width: 1px; background: #333; }
 
-                Button {
-                    text: "View";
-                    enabled: root.edit-mode != 0;
-                    clicked => { root.edit-mode = 0; }
-                }
-                Button {
-                    text: "Add Pts";
-                    enabled: root.edit-mode != 1;
-                    clicked => { root.edit-mode = 1; }
-                }
-                Button {
-                    text: "Del Pts";
-                    enabled: root.edit-mode != 3;
-                    clicked => { root.edit-mode = 3; }
-                }
-                Text {
-                    text: root.edit-status;
-                    vertical-alignment: center;
-                    color: #ff8;
-                    font-size: 11px;
-                }
-
-                Rectangle { width: 1px; background: #444; }
-
-                Button {
-                    text: "ZAP";
-                    enabled: root.view-mode != 0;
-                    clicked => { root.view-mode = 0; root.view-mode-changed(0); }
-                }
-                Button {
-                    text: "Slicer";
-                    enabled: root.view-mode != 1;
-                    clicked => { root.view-mode = 1; root.view-mode-changed(1); }
-                }
-                Button {
-                    text: "XYZ";
-                    enabled: root.view-mode != 2;
-                    clicked => { root.view-mode = 2; root.view-mode-changed(2); }
-                }
-                Button {
-                    text: "3D";
-                    enabled: root.view-mode != 3;
-                    clicked => { root.view-mode = 3; root.view-mode-changed(3); }
-                }
-                Button {
-                    text: "Iso";
-                    enabled: root.view-mode != 4;
-                    clicked => { root.view-mode = 4; root.view-mode-changed(4); }
-                }
+                CheckBox { text: "3D"; checked: root.show-3d-panel; toggled => { root.show-3d-panel = self.checked; } }
+                CheckBox { text: "Model"; checked: root.show-model; toggled => { root.toggle-model(self.checked); } }
 
                 Rectangle { horizontal-stretch: 1; }
 
-                CheckBox {
-                    text: "Model";
-                    checked: root.show-model;
-                    toggled => { root.toggle-model(self.checked); }
-                }
-
-                Text {
-                    text: root.filename;
-                    vertical-alignment: center;
-                    color: #aaa;
-                }
+                Text { text: root.edit-status; vertical-alignment: center; color: #ff8; font-size: 10px; }
+                Text { text: root.filename; vertical-alignment: center; color: #888; font-size: 10px; }
             }
 
+            // ===== MAIN AREA: Split panels =====
             HorizontalBox {
-                // Main image area
-                Rectangle {
-                    background: #1a1a1a;
-                    clip: true;
+                // ---- LEFT: ZAP / Slicer / XYZ ----
+                VerticalBox {
                     horizontal-stretch: 3;
 
-                    img := Image {
-                        source: root.slice-image;
-                        width: self.source.width * 1px * root.zoom;
-                        height: self.source.height * 1px * root.zoom;
-                        image-rendering: pixelated;
+                    Rectangle {
+                        background: #1a1a1a;
+                        clip: true;
+
+                        Image {
+                            source: root.slice-image;
+                            width: self.source.width * 1px * root.zoom;
+                            height: self.source.height * 1px * root.zoom;
+                            image-rendering: pixelated;
+                        }
+
+                        TouchArea {
+                            moved => { root.mouse-moved(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom); }
+                            clicked => { root.mouse-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom); }
+                            pointer-event(ev) => {
+                                if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up) {
+                                    root.mouse-right-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
+                                }
+                                if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up) {
+                                    root.mouse-released();
+                                }
+                            }
+                            scroll-event(ev) => {
+                                if (ev.delta-y > 0) { root.zoom = Math.min(root.zoom * 1.1, 20.0); }
+                                else { root.zoom = Math.max(root.zoom / 1.1, 0.05); }
+                                root.zoom-changed(root.zoom);
+                                return accept;
+                            }
+                        }
                     }
 
-                    // Mouse tracking area
-                    ta := TouchArea {
-                        moved => {
-                            root.mouse-moved(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
-                        }
-                        clicked => {
-                            root.mouse-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
-                        }
-                        pointer-event(ev) => {
-                            if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up) {
-                                root.mouse-right-clicked(self.mouse-x / 1px / root.zoom, self.mouse-y / 1px / root.zoom);
-                            }
-                            if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up) {
-                                root.mouse-released();
-                            }
-                        }
-                        scroll-event(ev) => {
-                            if (ev.delta-y > 0) {
-                                root.zoom = Math.min(root.zoom * 1.1, 20.0);
-                            } else {
-                                root.zoom = Math.max(root.zoom / 1.1, 0.05);
-                            }
-                            root.zoom-changed(root.zoom);
-                            return accept;
-                        }
+                    // Z + contrast
+                    HorizontalBox {
+                        height: 28px;
+                        padding: 2px;
+                        spacing: 3px;
+                        Text { text: "Z:"; vertical-alignment: center; font-size: 10px; }
+                        Slider { minimum: 0; maximum: root.max-z; value: root.current-z; changed(v) => { root.current-z = Math.round(v); root.z-changed(Math.round(v)); } horizontal-stretch: 2; }
+                        Text { text: root.current-z + "/" + root.max-z; vertical-alignment: center; min-width: 45px; font-size: 10px; }
+                        Text { text: "B:"; vertical-alignment: center; font-size: 10px; }
+                        Slider { minimum: -1000; maximum: 65535; value: root.black-level; changed(v) => { root.black-level = v; root.contrast-changed(root.black-level, root.white-level); } horizontal-stretch: 1; }
+                        Text { text: "W:"; vertical-alignment: center; font-size: 10px; }
+                        Slider { minimum: -1000; maximum: 65535; value: root.white-level; changed(v) => { root.white-level = v; root.contrast-changed(root.black-level, root.white-level); } horizontal-stretch: 1; }
+                        Text { text: Math.round(root.zoom * 100) + "%"; vertical-alignment: center; min-width: 30px; color: #888; font-size: 9px; }
                     }
                 }
 
-                // Side panel
+                // ---- CENTER: 3D Model View ----
+                if root.show-3d-panel: VerticalBox {
+                    horizontal-stretch: 3;
+
+                    Rectangle {
+                        background: #222;
+                        clip: true;
+                        Image { source: root.model-3d-image; width: parent.width; height: parent.height; }
+                        TouchArea {
+                            moved => { root.model-3d-mouse-moved(self.mouse-x / 1px, self.mouse-y / 1px); }
+                            pointer-event(ev) => {
+                                if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up) { root.model-3d-mouse-released(); }
+                            }
+                            scroll-event(ev) => {
+                                if (ev.delta-y > 0) { root.model-3d-zoom-changed(1.1); }
+                                else { root.model-3d-zoom-changed(0.9); }
+                                return accept;
+                            }
+                        }
+                    }
+
+                    if root.iso-threshold > 0: HorizontalBox {
+                        height: 24px;
+                        padding: 2px;
+                        Text { text: "Iso:"; vertical-alignment: center; font-size: 10px; }
+                        Slider { minimum: 0; maximum: root.white-level; value: root.iso-threshold; changed(v) => { root.iso-threshold = v; root.iso-threshold-changed(v); } }
+                        Text { text: Math.round(root.iso-threshold); vertical-alignment: center; font-size: 9px; min-width: 30px; }
+                    }
+                }
+
+                // ---- RIGHT: Info panel ----
                 VerticalBox {
-                    width: 220px;
-                    padding: 4px;
-                    spacing: 4px;
+                    width: 190px;
+                    padding: 3px;
+                    spacing: 2px;
 
                     GroupBox {
                         title: "Info";
                         VerticalBox {
-                            spacing: 2px;
-                            Text { text: root.info-text; wrap: word-wrap; font-size: 11px; }
-                            Text { text: root.pixel-value-text; font-size: 11px; color: #ccc; }
+                            spacing: 1px;
+                            Text { text: root.info-text; wrap: word-wrap; font-size: 10px; }
+                            Text { text: root.pixel-value-text; font-size: 10px; color: #ccc; }
                         }
                     }
 
                     GroupBox {
-                        title: "Model";
+                        title: "Navigate";
                         VerticalBox {
                             spacing: 2px;
-                            Text { text: root.model-info; font-size: 11px; }
+                            HorizontalBox {
+                                spacing: 2px;
+                                Text { text: "Obj"; vertical-alignment: center; width: 22px; font-size: 10px; }
+                                Button { text: "<"; width: 18px; clicked => { if (root.current-object > 0) { root.current-object -= 1; root.object-changed(root.current-object); } } }
+                                Text { text: (root.current-object + 1) + "/" + root.total-objects; vertical-alignment: center; horizontal-alignment: center; min-width: 40px; font-size: 10px; }
+                                Button { text: ">"; width: 18px; clicked => { if (root.current-object < root.total-objects - 1) { root.current-object += 1; root.object-changed(root.current-object); } } }
+                            }
+                            HorizontalBox {
+                                spacing: 2px;
+                                Text { text: "Con"; vertical-alignment: center; width: 22px; font-size: 10px; }
+                                Button { text: "<"; width: 18px; clicked => { if (root.current-contour > 0) { root.current-contour -= 1; root.contour-changed(root.current-contour); } } }
+                                Text { text: (root.current-contour + 1) + "/" + root.total-contours; vertical-alignment: center; horizontal-alignment: center; min-width: 40px; font-size: 10px; }
+                                Button { text: ">"; width: 18px; clicked => { if (root.current-contour < root.total-contours - 1) { root.current-contour += 1; root.contour-changed(root.current-contour); } } }
+                            }
+                            HorizontalBox {
+                                spacing: 2px;
+                                Text { text: "Pt"; vertical-alignment: center; width: 22px; font-size: 10px; }
+                                Button { text: "<"; width: 18px; clicked => { if (root.current-point > 0) { root.current-point -= 1; root.point-changed(root.current-point); } } }
+                                Text { text: (root.current-point + 1) + "/" + root.total-points; vertical-alignment: center; horizontal-alignment: center; min-width: 40px; font-size: 10px; }
+                                Button { text: ">"; width: 18px; clicked => { if (root.current-point < root.total-points - 1) { root.current-point += 1; root.point-changed(root.current-point); } } }
+                            }
+                            Text { text: root.point-xyz-text; font-size: 9px; color: #aaa; }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Objects";
+                        VerticalBox {
+                            spacing: 1px;
                             for obj[idx] in root.model-objects: HorizontalBox {
-                                spacing: 4px;
-                                height: 20px;
-                                Rectangle {
-                                    width: 12px;
-                                    height: 12px;
-                                    background: obj.color;
-                                    border-radius: 2px;
-                                }
-                                Text {
-                                    text: obj.name + " (" + obj.num-contours + ")";
-                                    font-size: 10px;
-                                    vertical-alignment: center;
-                                }
+                                spacing: 3px;
+                                height: 15px;
+                                Rectangle { width: 9px; height: 9px; background: obj.color; border-radius: 2px; }
+                                Text { text: obj.name + " (" + obj.num-contours + ")"; font-size: 9px; vertical-alignment: center; }
                             }
                         }
                     }
 
-                    // Isosurface threshold (only when iso mode)
-                    if root.view-mode == 4: GroupBox {
-                        title: "Isosurface";
-                        VerticalBox {
-                            spacing: 4px;
-                            HorizontalBox {
-                                Text { text: "Threshold:"; vertical-alignment: center; width: 65px; font-size: 11px; }
-                                Text {
-                                    text: Math.round(root.iso-threshold);
-                                    vertical-alignment: center;
-                                    width: 40px;
-                                    font-size: 11px;
-                                    color: #ccc;
-                                }
-                            }
-                            Slider {
-                                minimum: 0;
-                                maximum: root.white-level;
-                                value: root.iso-threshold;
-                                changed(v) => {
-                                    root.iso-threshold = v;
-                                    root.iso-threshold-changed(v);
-                                }
-                            }
-                        }
-                    }
-
-                    // Object/Contour/Point navigation
-                    GroupBox {
-                        title: "Navigation";
-                        VerticalBox {
-                            spacing: 4px;
-                            // Object spinner
-                            HorizontalBox {
-                                spacing: 4px;
-                                Text { text: "Obj:"; vertical-alignment: center; width: 30px; font-size: 11px; }
-                                Button {
-                                    text: "<";
-                                    width: 24px;
-                                    clicked => {
-                                        if (root.current-object > 0) {
-                                            root.current-object -= 1;
-                                            root.object-changed(root.current-object);
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: (root.current-object + 1) + "/" + root.total-objects;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
-                                    min-width: 50px;
-                                    font-size: 11px;
-                                }
-                                Button {
-                                    text: ">";
-                                    width: 24px;
-                                    clicked => {
-                                        if (root.current-object < root.total-objects - 1) {
-                                            root.current-object += 1;
-                                            root.object-changed(root.current-object);
-                                        }
-                                    }
-                                }
-                            }
-                            // Contour spinner
-                            HorizontalBox {
-                                spacing: 4px;
-                                Text { text: "Con:"; vertical-alignment: center; width: 30px; font-size: 11px; }
-                                Button {
-                                    text: "<";
-                                    width: 24px;
-                                    clicked => {
-                                        if (root.current-contour > 0) {
-                                            root.current-contour -= 1;
-                                            root.contour-changed(root.current-contour);
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: (root.current-contour + 1) + "/" + root.total-contours;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
-                                    min-width: 50px;
-                                    font-size: 11px;
-                                }
-                                Button {
-                                    text: ">";
-                                    width: 24px;
-                                    clicked => {
-                                        if (root.current-contour < root.total-contours - 1) {
-                                            root.current-contour += 1;
-                                            root.contour-changed(root.current-contour);
-                                        }
-                                    }
-                                }
-                            }
-                            // Point spinner
-                            HorizontalBox {
-                                spacing: 4px;
-                                Text { text: "Pt:"; vertical-alignment: center; width: 30px; font-size: 11px; }
-                                Button {
-                                    text: "<";
-                                    width: 24px;
-                                    clicked => {
-                                        if (root.current-point > 0) {
-                                            root.current-point -= 1;
-                                            root.point-changed(root.current-point);
-                                        }
-                                    }
-                                }
-                                Text {
-                                    text: (root.current-point + 1) + "/" + root.total-points;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
-                                    min-width: 50px;
-                                    font-size: 11px;
-                                }
-                                Button {
-                                    text: ">";
-                                    width: 24px;
-                                    clicked => {
-                                        if (root.current-point < root.total-points - 1) {
-                                            root.current-point += 1;
-                                            root.point-changed(root.current-point);
-                                        }
-                                    }
-                                }
-                            }
-                            // XYZ coordinate display
-                            Text {
-                                text: root.point-xyz-text;
-                                font-size: 10px;
-                                color: #ccc;
-                            }
-                        }
-                    }
-
-                    // Actions
-                    GroupBox {
-                        title: "Actions";
-                        VerticalBox {
-                            spacing: 4px;
-                            HorizontalBox {
-                                spacing: 4px;
-                                Button {
-                                    text: "Auto Contrast";
-                                    clicked => { root.auto-contrast(); }
-                                }
-                                Button {
-                                    text: root.movie-mode ? "Stop" : "Movie";
-                                    clicked => {
-                                        root.movie-mode = !root.movie-mode;
-                                        root.toggle-movie();
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Slicer angles (only when slicer mode)
                     if root.view-mode == 1: GroupBox {
-                        title: "Slicer Angles";
+                        title: "Slicer";
                         VerticalBox {
-                            spacing: 4px;
+                            spacing: 2px;
                             HorizontalBox {
-                                Text { text: "X:"; vertical-alignment: center; width: 20px; }
-                                Slider {
-                                    minimum: -90;
-                                    maximum: 90;
-                                    value: root.slicer-angle-x;
-                                    changed(v) => {
-                                        root.slicer-angle-x = v;
-                                        root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
-                                    }
-                                }
+                                Text { text: "X:"; vertical-alignment: center; width: 14px; font-size: 10px; }
+                                Slider { minimum: -90; maximum: 90; value: root.slicer-angle-x; changed(v) => { root.slicer-angle-x = v; root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y); } }
                             }
                             HorizontalBox {
-                                Text { text: "Y:"; vertical-alignment: center; width: 20px; }
-                                Slider {
-                                    minimum: -90;
-                                    maximum: 90;
-                                    value: root.slicer-angle-y;
-                                    changed(v) => {
-                                        root.slicer-angle-y = v;
-                                        root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y);
-                                    }
-                                }
+                                Text { text: "Y:"; vertical-alignment: center; width: 14px; font-size: 10px; }
+                                Slider { minimum: -90; maximum: 90; value: root.slicer-angle-y; changed(v) => { root.slicer-angle-y = v; root.slicer-angle-changed(root.slicer-angle-x, root.slicer-angle-y); } }
                             }
                         }
+                    }
+
+                    HorizontalBox {
+                        spacing: 3px;
+                        Button { text: "Auto C"; clicked => { root.auto-contrast(); } }
+                        Button { text: root.movie-mode ? "Stop" : "Movie"; clicked => { root.movie-mode = !root.movie-mode; root.toggle-movie(); } }
                     }
 
                     Rectangle { vertical-stretch: 1; }
-                }
-            }
-
-            // Bottom controls
-            HorizontalBox {
-                height: 36px;
-                padding: 4px;
-                spacing: 6px;
-
-                Text { text: "Z:"; vertical-alignment: center; }
-
-                Slider {
-                    minimum: 0;
-                    maximum: root.max-z;
-                    value: root.current-z;
-                    changed(val) => {
-                        root.current-z = Math.round(val);
-                        root.z-changed(Math.round(val));
-                    }
-                    horizontal-stretch: 2;
-                }
-
-                Text {
-                    text: root.current-z + "/" + root.max-z;
-                    vertical-alignment: center;
-                    min-width: 60px;
-                }
-
-                Rectangle { width: 1px; background: #444; }
-
-                Text { text: "B:"; vertical-alignment: center; }
-                Slider {
-                    minimum: -1000;
-                    maximum: 65535;
-                    value: root.black-level;
-                    changed(val) => {
-                        root.black-level = val;
-                        root.contrast-changed(root.black-level, root.white-level);
-                    }
-                    horizontal-stretch: 1;
-                }
-
-                Text { text: "W:"; vertical-alignment: center; }
-                Slider {
-                    minimum: -1000;
-                    maximum: 65535;
-                    value: root.white-level;
-                    changed(val) => {
-                        root.white-level = val;
-                        root.contrast-changed(root.black-level, root.white-level);
-                    }
-                    horizontal-stretch: 1;
-                }
-
-                Text {
-                    text: Math.round(root.zoom * 100) + "%";
-                    vertical-alignment: center;
-                    min-width: 40px;
-                    color: #aaa;
-                }
-
-                Rectangle { width: 1px; background: #444; }
-
-                Text {
-                    text: root.image-size-text;
-                    vertical-alignment: center;
-                    min-width: 80px;
-                    color: #888;
-                    font-size: 10px;
                 }
             }
         }

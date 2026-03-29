@@ -113,6 +113,75 @@ nda, sda, mtk
 
 ---
 
+## imod-viewer Menu Stubs To Implement
+
+The viewer has a native menu bar matching 3dmod's structure. These menu items are declared but not yet wired to functionality:
+
+### File Menu
+- [ ] `menu-file-new-model` — Create a new empty model
+- [ ] `menu-file-reload-model` — Reload model from disk
+- [ ] `menu-file-save-as` — Save model to a new path (file dialog)
+- [ ] `menu-file-write-obj` — Export model as Wavefront OBJ
+- [ ] `menu-file-write-vrml` — Export model as VRML
+- [ ] `menu-file-snapshot` — Save current view as image file
+- [ ] `menu-file-quit` — Exit application
+
+### Edit > Model
+- [ ] `menu-edit-model-header` — Show/edit model header (name, pixel size, units)
+- [ ] `menu-edit-model-offsets` — Show/edit model coordinate offsets
+- [ ] `menu-edit-model-clean` — Remove empty objects/contours
+
+### Edit > Object
+- [ ] `menu-edit-object-new` — Create a new object
+- [ ] `menu-edit-object-delete` — Delete current object
+- [ ] `menu-edit-object-color` — Change object color (color picker dialog)
+- [ ] `menu-edit-object-type` — Change object type (open/closed/scattered)
+- [ ] `menu-edit-object-move` — Move contours between objects
+- [ ] `menu-edit-object-info` — Show object statistics
+
+### Edit > Contour
+- [ ] `menu-edit-contour-new` — Start a new contour (N key)
+- [ ] `menu-edit-contour-delete` — Delete current contour
+- [ ] `menu-edit-contour-move` — Move contour to another object
+- [ ] `menu-edit-contour-copy` — Copy contour
+- [ ] `menu-edit-contour-sort` — Sort contours by Z
+- [ ] `menu-edit-contour-break` — Break contour at current point
+- [ ] `menu-edit-contour-join` — Join two contours
+- [ ] `menu-edit-contour-info` — Show contour statistics (length, area, points)
+
+### Edit > Point
+- [ ] `menu-edit-point-delete` — Delete current point
+- [ ] `menu-edit-point-size` — Set point size for scattered objects
+- [ ] `menu-edit-point-distance` — Measure distance between points
+- [ ] `menu-edit-point-value` — Show pixel value at point
+- [ ] `menu-edit-point-sort-z` — Sort points by Z coordinate
+
+### Edit > Image
+- [ ] `menu-edit-image-flip` — Flip/rotate loaded image
+- [ ] `menu-edit-image-process` — Apply image processing (filter, FFT)
+- [ ] `menu-edit-image-reload` — Reload image from disk
+- [ ] `menu-edit-image-fillcache` — Preload all slices into memory
+
+### Edit > Other
+- [ ] `menu-edit-fine-grain` — Fine-grained drawing controls
+- [ ] `menu-edit-options` — Preferences dialog
+
+### Image Menu
+- [ ] `menu-image-pixel-view` — Show pixel values in a table
+- [ ] `menu-image-graph` — Show intensity profile graph
+- [ ] `menu-image-tumbler` — Animated rotation through Z slices
+
+### Special Menu
+- [ ] `menu-special-beadfixer` — Interactive bead fixing/editing
+- [ ] `menu-special-drawing` — Drawing tools (lines, circles, etc.)
+- [ ] `menu-special-interpolator` — Contour interpolation between Z sections
+
+### Help Menu
+- [ ] `menu-help-menus` — Show menu documentation
+- [ ] `menu-help-controls` — Show mouse/keyboard controls
+- [ ] `menu-help-hotkeys` — Show keyboard shortcut list
+- [ ] `menu-help-about` — Show version and credits
+
 ## Build Configuration
 
 - `RUSTFLAGS="-C target-cpu=native"` via `.cargo/config.toml`
