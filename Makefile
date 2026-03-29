@@ -12,9 +12,11 @@ loc:
 
 
 loc_orig:
-	find IMOD -name '*.c' | xargs wc -l
-	find IMOD -name '*.cpp' | xargs wc -l
-	find IMOD -name '*.h' | xargs wc -l
+	find IMOD -name '*.c' | xargs wc -l | tail -n 2
+	find IMOD -name '*.cpp' | xargs wc -l | tail -n 2
+	find IMOD -name '*.h' | xargs wc -l | tail -n 2
+	find IMOD -name '*.f' | xargs wc -l | tail -n 2 
+	find IMOD -name '*.java' | xargs wc -l | tail -n 2
 
 gitaddall:
 	git add crates apps
