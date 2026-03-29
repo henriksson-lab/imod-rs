@@ -44,6 +44,17 @@ export component MainWindow inherits Window {
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
 
+    // Object/contour/point navigation
+    in-out property <int> current-object: 0;
+    in property <int> total-objects: 0;
+    in-out property <int> current-contour: 0;
+    in property <int> total-contours: 0;
+    in-out property <int> current-point: 0;
+    in property <int> total-points: 0;
+    in property <string> point-xyz-text: "";
+    in-out property <bool> movie-mode: false;
+    in property <string> image-size-text: "";
+
     // Callbacks
     callback open-file();
     callback open-model();
@@ -62,6 +73,11 @@ export component MainWindow inherits Window {
     callback undo();
     callback redo();
     callback key-pressed(string);
+    callback object-changed(int);
+    callback contour-changed(int);
+    callback point-changed(int);
+    callback auto-contrast();
+    callback toggle-movie();
 
     forward-focus: key-handler;
 
@@ -356,6 +372,138 @@ export component MainWindow inherits Window {
                         }
                     }
 
+                    // Object/Contour/Point navigation
+                    GroupBox {
+                        title: "Navigation";
+                        VerticalBox {
+                            spacing: 4px;
+                            // Object spinner
+                            HorizontalBox {
+                                spacing: 4px;
+                                Text { text: "Obj:"; vertical-alignment: center; width: 30px; font-size: 11px; }
+                                Button {
+                                    text: "<";
+                                    width: 24px;
+                                    clicked => {
+                                        if (root.current-object > 0) {
+                                            root.current-object -= 1;
+                                            root.object-changed(root.current-object);
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: (root.current-object + 1) + "/" + root.total-objects;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                    min-width: 50px;
+                                    font-size: 11px;
+                                }
+                                Button {
+                                    text: ">";
+                                    width: 24px;
+                                    clicked => {
+                                        if (root.current-object < root.total-objects - 1) {
+                                            root.current-object += 1;
+                                            root.object-changed(root.current-object);
+                                        }
+                                    }
+                                }
+                            }
+                            // Contour spinner
+                            HorizontalBox {
+                                spacing: 4px;
+                                Text { text: "Con:"; vertical-alignment: center; width: 30px; font-size: 11px; }
+                                Button {
+                                    text: "<";
+                                    width: 24px;
+                                    clicked => {
+                                        if (root.current-contour > 0) {
+                                            root.current-contour -= 1;
+                                            root.contour-changed(root.current-contour);
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: (root.current-contour + 1) + "/" + root.total-contours;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                    min-width: 50px;
+                                    font-size: 11px;
+                                }
+                                Button {
+                                    text: ">";
+                                    width: 24px;
+                                    clicked => {
+                                        if (root.current-contour < root.total-contours - 1) {
+                                            root.current-contour += 1;
+                                            root.contour-changed(root.current-contour);
+                                        }
+                                    }
+                                }
+                            }
+                            // Point spinner
+                            HorizontalBox {
+                                spacing: 4px;
+                                Text { text: "Pt:"; vertical-alignment: center; width: 30px; font-size: 11px; }
+                                Button {
+                                    text: "<";
+                                    width: 24px;
+                                    clicked => {
+                                        if (root.current-point > 0) {
+                                            root.current-point -= 1;
+                                            root.point-changed(root.current-point);
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: (root.current-point + 1) + "/" + root.total-points;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                    min-width: 50px;
+                                    font-size: 11px;
+                                }
+                                Button {
+                                    text: ">";
+                                    width: 24px;
+                                    clicked => {
+                                        if (root.current-point < root.total-points - 1) {
+                                            root.current-point += 1;
+                                            root.point-changed(root.current-point);
+                                        }
+                                    }
+                                }
+                            }
+                            // XYZ coordinate display
+                            Text {
+                                text: root.point-xyz-text;
+                                font-size: 10px;
+                                color: #ccc;
+                            }
+                        }
+                    }
+
+                    // Actions
+                    GroupBox {
+                        title: "Actions";
+                        VerticalBox {
+                            spacing: 4px;
+                            HorizontalBox {
+                                spacing: 4px;
+                                Button {
+                                    text: "Auto Contrast";
+                                    clicked => { root.auto-contrast(); }
+                                }
+                                Button {
+                                    text: root.movie-mode ? "Stop" : "Movie";
+                                    clicked => {
+                                        root.movie-mode = !root.movie-mode;
+                                        root.toggle-movie();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Slicer angles (only when slicer mode)
                     if root.view-mode == 1: GroupBox {
                         title: "Slicer Angles";
@@ -448,6 +596,16 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                     min-width: 40px;
                     color: #aaa;
+                }
+
+                Rectangle { width: 1px; background: #444; }
+
+                Text {
+                    text: root.image-size-text;
+                    vertical-alignment: center;
+                    min-width: 80px;
+                    color: #888;
+                    font-size: 10px;
                 }
             }
         }

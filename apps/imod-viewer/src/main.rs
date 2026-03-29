@@ -1,4 +1,5 @@
 mod render3d;
+mod wgpu_renderer;
 
 use imod_core::Point3f;
 use imod_math::min_max_mean;
@@ -13,6 +14,7 @@ use std::env;
 use std::rc::Rc;
 
 use render3d::Renderer3D;
+use wgpu_renderer::WgpuRenderer;
 
 slint::include_modules!();
 
@@ -41,6 +43,8 @@ struct ViewerState {
     volume: Option<Vec<Vec<f32>>>,
     // 3D model renderer
     renderer3d: Renderer3D,
+    // GPU renderer (lazy init, falls back to software if None)
+    wgpu_renderer: Option<WgpuRenderer>,
     // Mouse drag tracking for 3D rotation
     drag_last: Option<(f32, f32)>,
     // Isosurface
@@ -69,6 +73,7 @@ impl ViewerState {
             slicer_angle_y: 0.0,
             volume: None,
             renderer3d: Renderer3D::new(800, 600),
+            wgpu_renderer: None, // lazy init on first 3D mode use
             drag_last: None,
             iso_threshold: 128.0,
             iso_mesh: None,
@@ -183,6 +188,30 @@ impl ViewerState {
         Ok(())
     }
 
+    /// Ensure the GPU renderer is available; returns true if it is usable.
+    fn ensure_wgpu(&mut self, w: u32, h: u32) -> bool {
+        if let Some(ref mut gpu) = self.wgpu_renderer {
+            gpu.resize(w, h);
+            return true;
+        }
+        // Try to initialise
+        match WgpuRenderer::new(w, h) {
+            Some(mut gpu) => {
+                // Copy current camera state from software renderer
+                gpu.rot_x = self.renderer3d.rot_x;
+                gpu.rot_y = self.renderer3d.rot_y;
+                gpu.zoom = self.renderer3d.zoom;
+                self.wgpu_renderer = Some(gpu);
+                eprintln!("wgpu GPU renderer initialised successfully");
+                true
+            }
+            None => {
+                eprintln!("wgpu init failed, falling back to software renderer");
+                false
+            }
+        }
+    }
+
     fn render_image(&mut self) -> Image {
         match self.view_mode {
             1 => self.render_slicer(),
@@ -208,16 +237,27 @@ impl ViewerState {
     fn render_isosurface_view(&mut self) -> Image {
         let w = if self.nx > 0 { self.nx } else { 800 };
         let h = if self.ny > 0 { self.ny } else { 600 };
-        self.renderer3d.resize(w, h);
 
         if self.iso_mesh.is_none() {
             self.extract_isosurface();
         }
 
+        // Try GPU renderer first
+        if self.ensure_wgpu(w as u32, h as u32) {
+            let empty_mesh = IsosurfaceMesh {
+                vertices: Vec::new(),
+                normals: Vec::new(),
+                indices: Vec::new(),
+            };
+            let mesh = self.iso_mesh.as_ref().unwrap_or(&empty_mesh);
+            return self.wgpu_renderer.as_mut().unwrap().render_isosurface(mesh);
+        }
+
+        // Fallback to software renderer
+        self.renderer3d.resize(w, h);
         match &self.iso_mesh {
             Some(mesh) => self.renderer3d.render_isosurface(mesh),
             None => {
-                // No volume / empty mesh -- render dark background.
                 let empty = IsosurfaceMesh {
                     vertices: Vec::new(),
                     normals: Vec::new(),
@@ -232,6 +272,14 @@ impl ViewerState {
         // Use image dimensions or a default size
         let w = if self.nx > 0 { self.nx } else { 800 };
         let h = if self.ny > 0 { self.ny } else { 600 };
+
+        // Try GPU renderer first
+        if self.ensure_wgpu(w as u32, h as u32) {
+            let model = self.model.clone().unwrap_or_default();
+            return self.wgpu_renderer.as_mut().unwrap().render_model(&model);
+        }
+
+        // Fallback to software renderer
         self.renderer3d.resize(w, h);
         match &self.model {
             Some(m) => {
@@ -607,6 +655,50 @@ fn update_window(w: &MainWindow, s: &mut ViewerState) {
     w.set_model_objects(ModelRc::from(model));
     w.set_can_undo(s.can_undo());
     w.set_can_redo(s.can_redo());
+
+    // Update navigation spinners
+    if let Some(ref m) = s.model {
+        w.set_total_objects(m.objects.len() as i32);
+        w.set_current_object(s.current_object as i32);
+        if s.current_object < m.objects.len() {
+            let obj = &m.objects[s.current_object];
+            w.set_total_contours(obj.contours.len() as i32);
+            // Determine current contour/point info
+            let cur_cont = w.get_current_contour().max(0) as usize;
+            if cur_cont < obj.contours.len() {
+                let cont = &obj.contours[cur_cont];
+                w.set_total_points(cont.points.len() as i32);
+                let cur_pt = w.get_current_point().max(0) as usize;
+                if cur_pt < cont.points.len() {
+                    let pt = &cont.points[cur_pt];
+                    w.set_point_xyz_text(
+                        format!("X:{:.1}  Y:{:.1}  Z:{:.1}", pt.x, pt.y, pt.z).into(),
+                    );
+                } else {
+                    w.set_point_xyz_text("".into());
+                }
+            } else {
+                w.set_total_points(0);
+                w.set_point_xyz_text("".into());
+            }
+        } else {
+            w.set_total_contours(0);
+            w.set_total_points(0);
+            w.set_point_xyz_text("".into());
+        }
+    } else {
+        w.set_total_objects(0);
+        w.set_total_contours(0);
+        w.set_total_points(0);
+        w.set_point_xyz_text("".into());
+    }
+
+    // Image size text
+    if s.nx > 0 && s.ny > 0 {
+        w.set_image_size_text(format!("{}x{}x{}", s.nx, s.ny, s.nz).into());
+    } else {
+        w.set_image_size_text("".into());
+    }
 }
 
 fn main() {
@@ -677,6 +769,9 @@ fn main() {
                     let dy = y - ly;
                     if dx.abs() > 0.1 || dy.abs() > 0.1 {
                         s.renderer3d.rotate(dx, dy);
+                        if let Some(ref mut gpu) = s.wgpu_renderer {
+                            gpu.rotate(dx, dy);
+                        }
                         if let Some(w) = ww.upgrade() {
                             w.set_slice_image(s.render_image());
                         }
@@ -762,6 +857,9 @@ fn main() {
             let mut s = state.borrow_mut();
             if s.view_mode == 3 || s.view_mode == 4 {
                 s.renderer3d.set_zoom(z);
+                if let Some(ref mut gpu) = s.wgpu_renderer {
+                    gpu.set_zoom(z);
+                }
                 if let Some(w) = ww.upgrade() {
                     w.set_slice_image(s.render_image());
                 }
@@ -991,6 +1089,110 @@ fn main() {
                 }
                 _ => {}
             }
+        });
+    }
+
+    // Object changed
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_object_changed(move |idx| {
+            let mut s = state.borrow_mut();
+            s.current_object = (idx as usize).min(
+                s.model
+                    .as_ref()
+                    .map_or(0, |m| m.objects.len().saturating_sub(1)),
+            );
+            if let Some(w) = ww.upgrade() {
+                w.set_current_contour(0);
+                w.set_current_point(0);
+                update_window(&w, &mut s);
+            }
+        });
+    }
+
+    // Contour changed
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_contour_changed(move |_idx| {
+            let mut s = state.borrow_mut();
+            if let Some(w) = ww.upgrade() {
+                w.set_current_point(0);
+                update_window(&w, &mut s);
+            }
+        });
+    }
+
+    // Point changed
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_point_changed(move |_idx| {
+            let mut s = state.borrow_mut();
+            if let Some(w) = ww.upgrade() {
+                update_window(&w, &mut s);
+            }
+        });
+    }
+
+    // Auto contrast
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_auto_contrast(move || {
+            let mut s = state.borrow_mut();
+            if !s.current_data.is_empty() {
+                let (min_val, max_val, _mean) = min_max_mean(&s.current_data);
+                s.black = min_val;
+                s.white = max_val;
+                if let Some(w) = ww.upgrade() {
+                    w.set_black_level(min_val);
+                    w.set_white_level(max_val);
+                    update_window(&w, &mut s);
+                }
+            }
+        });
+    }
+
+    // Toggle movie mode
+    {
+        let state = state.clone();
+        let ww = window.as_weak();
+        window.on_toggle_movie(move || {
+            let s = state.borrow();
+            if let Some(w) = ww.upgrade() {
+                if w.get_movie_mode() {
+                    // Start a timer to advance Z slices
+                    let state2 = state.clone();
+                    let ww2 = w.as_weak();
+                    let timer = slint::Timer::default();
+                    timer.start(
+                        slint::TimerMode::Repeated,
+                        std::time::Duration::from_millis(100),
+                        move || {
+                            if let Some(w2) = ww2.upgrade() {
+                                if !w2.get_movie_mode() {
+                                    return; // stopped
+                                }
+                                let mut s2 = state2.borrow_mut();
+                                let next_z = if s2.current_z + 1 < s2.nz {
+                                    s2.current_z + 1
+                                } else {
+                                    0
+                                };
+                                let _ = s2.load_slice(next_z);
+                                w2.set_current_z(next_z as i32);
+                                update_window(&w2, &mut s2);
+                            }
+                        },
+                    );
+                    // We need to keep the timer alive -- leak it intentionally
+                    // (it will stop when movie_mode is set false)
+                    std::mem::forget(timer);
+                }
+            }
+            drop(s);
         });
     }
 
