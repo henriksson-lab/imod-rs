@@ -1,127 +1,121 @@
-# IMOD Rust Rewrite — Progress Tracker
+# IMOD Rust Rewrite — Status
 
-## Phase 0: Scaffolding (Months 1-2)
+**Current totals: 11 crates, 126 apps, ~54K lines Rust+Slint+WGSL, 148 test suites, zero failures.**
 
-- [x] Set up Cargo workspace (`Cargo.toml`)
-- [x] `imod-core` — shared types (MrcMode, ExtHeaderType, PixelUnit, Point3f), error handling
-- [x] `imod-mrc` — MRC file format read/write with `binrw`
-  - [x] MRC header parsing (1024-byte header, all modes)
-  - [x] Extended header type detection (FEI, SerialEM, Agard)
-  - [x] Byte-swapped file reading (auto-detect big-endian)
-  - [x] Round-trip tests (header, byte mode, float mode)
-  - [x] MrcReader: read slices as raw bytes or f32 (byte, short, ushort, float, RGB, 4-bit)
-  - [x] MrcWriter: write slices from f32 with statistics finalization
-- [x] `imod-autodoc` — PIP parameter spec parsing (tested against real newstack.adoc)
+## Library Crates (11)
 
-## Phase 1: Core Libraries (Months 2-5)
+| Crate | Features |
+|-------|----------|
+| `imod-core` | MrcMode (all 9 modes), ExtHeaderType, PixelUnit, Point3f, ImodError |
+| `imod-mrc` | MRC read/write, byte-swap detection, sub-area reading, complex/half-float modes, extended header parsing (SERI+FEI), Y-axis reading, old-style MRC support |
+| `imod-autodoc` | .adoc PIP parameter spec parser |
+| `imod-math` | Stats, robust stats, regression (multiple/robust/polynomial), gaussj, amoeba (Nelder-Mead), circlefit, parselist, cubinterp |
+| `imod-transforms` | LinearTransform, .xf/.xg/.tlt I/O, anglesToMatrix, matrixToAngles, findTransform, 3D rotation |
+| `imod-fft` | 1D/2D FFT (real↔complex), power spectrum, cross-correlation |
+| `imod-model` | Full chunk-based read/write: OBJT, CONT, MESH, VIEW, IMAT, CLIP, MCLP, SLAN, SIZE, MINX, MOST/OBST/COST/MEST, unknown chunk preservation |
+| `imod-slice` | Slice type, bilinear/cubic interpolation, filtering (sobel, blur, median, aniso diffusion), morphological ops, binning |
+| `imod-image-io` | ImageFile trait, MRC + TIFF backends, format detection (MRC/TIFF/HDF5/EER) |
+| `imod-warp` | Delaunay triangulation, warp file I/O, natural neighbor interpolation |
+| `imod-mesh` | Contour skinning, marching cubes isosurface, Douglas-Peucker simplification |
 
-- [x] `imod-math` — mean, SD, min/max, robust stats (median/MADN), sampling, linear regression
-- [x] `imod-transforms` — LinearTransform (multiply, invert, apply, rotate, scale), .xf/.xg I/O, .tlt I/O
-- [x] `imod-fft` — 1D/2D FFT (real↔complex), power spectrum, cross-correlation (via rustfft)
-- [x] `imod-slice` — Slice type, bilinear interp, scale/clamp/threshold/invert, add/subtract/multiply, convolve, sobel, blur, median, bin, subregion
-- [x] `imod-image-io` — ImageFile trait, MRC backend, format detection (.mrc/.st/.ali/.rec/.tif/.hdf)
-- [x] `imod-model` — IMOD model read/write (chunk-based binary: IMOD/OBJT/CONT/MESH/IEOF)
-- [x] `imod-warp` — Bowyer-Watson Delaunay triangulation, warp file read/write, point-in-triangle search
-- [x] `imod-mesh` — contour skinning (triangle strip between Z sections), Douglas-Peucker simplification
+## GUI Applications (4)
 
-## Phase 2: Command-Line Tools (Months 5-9)
+| App | Features |
+|-----|----------|
+| `imod-viewer` | ZAP/Slicer/XYZ/3D/Isosurface views, model overlay, contour editing (add/delete), undo/redo (50 states), keyboard shortcuts, file dialogs, software 3D renderer with Z-buffer + lighting |
+| `imod-studio` | 9-step reconstruction workflow using library calls, bead tracking, fine alignment, reconstruction, post-processing, log output |
+| `imod-aligner` | Reference/current section overlay, shift/rotation/mag sliders, auto-align (FFT CC), save .xf |
+| `imod-ctfplot` | Power spectrum display, radial average + CTF overlay, defocus fitting, per-section defocus, GPU support |
 
-- [x] `newstack` — section selection, binning, transform application, mode conversion, scaling
-- [x] `clip` — stats, flip, multiply, add, resize, median filter, gradient (Sobel)
-- [x] `mrcinfo` — header display (dimensions, mode, pixel size, labels, IMOD stamp)
-- [x] `mrcbyte` — convert to byte mode with auto/manual/contrast scaling
-- [x] `tiltxcorr` — cross-correlation alignment of tilt series (FFT-based, reference section, exclusion)
-- [x] `ccderaser` — automatic X-ray/hot pixel detection and replacement
-- [x] `ctfphaseflip` — CTF phase-flip correction (strip-based, tilt-dependent defocus, relativistic wavelength)
-- [x] `alignframes` — iterative frame alignment by cross-correlation, aligned sum output, optional .xf output
-- [x] `binvol` — 3D volume binning (independent XY and Z factors)
-- [x] `trimvol` — subvolume extraction, Y/Z rotation, float-to-byte
-- [x] `rotatevol` — Z-axis rotation with bilinear interpolation
-- [x] `mtffilter` — Fourier-space low-pass/high-pass filtering with Gaussian falloff
-- [x] `eraser` — gold bead eraser using IMOD model positions, ring interpolation
+## CLI Tools — Reconstruction Pipeline (15)
 
-## Phase 3: Reconstruction Pipeline (Months 8-13)
+| Tool | Key Features |
+|------|-------------|
+| `tiltxcorr` | FFT CC alignment, bandpass filtering, cumulative mode, patch-based correlation |
+| `beadtrack` | Tilt-compensated search, sub-pixel refinement, gap filling, residual rejection, trajectory fitting, adaptive template, elongation filtering |
+| `tiltalign` | Full projection model, robust fitting (Tukey bisquare), surface fitting (1/2 surfaces), beam tilt, group variables, local alignment output, leave-one-out, fixed view constraints |
+| `tilt` | R-weighting filter, SIRT, cosine stretch, local alignment, X-axis tilt, Z-factor, GPU (wgpu), log scaling, density weighting, Hamming filter, edge fill modes |
+| `raptor` | Automatic fiducial detection (NCC template matching), RANSAC correspondence, trajectory building, 3D estimation, bundle adjustment, contour refinement |
+| `newstack` | Antialias (Lanczos-2), float modes, rotation (bicubic), expand/shrink, subarea, piece lists, distortion, taper, warp transforms, phase shift, Fourier reduce, transpose, gradient, multi-file |
+| `ctfphaseflip` | Defocus file, 2D strip processing, astigmatism, zero-crossing detection, auto strip width, plate phase, amplitude contrast, cuton frequency, GPU (wgpu) |
+| `blendmont` | Edge cross-correlation refinement, linear weight blending, multi-Z |
+| `alignframes` | Gain reference correction, dose weighting (Fourier), aligned stack output, iterative alignment |
+| `ccderaser` | Grown pixel flood-fill, diffraction spike detection, model-based erasure, edge exclusion |
+| `findwarp` | 3D affine from matched fiducials |
+| `warpvol` | 3D affine transform with trilinear interpolation |
+| `corrsearch3d` | 3D patch cross-correlation |
+| `solvematch` | 3D matching from correspondences |
+| `trimvol` | Subvolume extraction, Y/Z rotation, float-to-byte |
 
-- [x] `tiltalign` — fiducial-based alignment solver (iterative, per-view shifts, rotation, magnification)
-- [x] `tilt` — weighted back-projection reconstruction (bilinear interpolation, rayon-ready)
-- [x] `beadtrack` — template-matching bead tracker (cross-correlation, bidirectional tracking)
-- [x] `blendmont` — montage blending (piece list, linear edge weighting, multi-Z)
-- [x] `findwarp` — 3D affine transform from matched fiducials (least-squares, residuals)
-- [x] `warpvol` — apply 3D affine transform with trilinear interpolation
-- [x] `corrsearch3d` — 3D patch correlation between two volumes (FFT-based)
-- [x] `solvematch` — solve 3D matching transform from correspondence points
+## CLI Tools — Image Utilities (20+)
 
-## Phase 4: imod-viewer — 3dmod Replacement (Months 10-16)
+mrcinfo, mrcbyte, mrc2tif, binvol, rotatevol, mtffilter, eraser, clip, fftrans, avgstack, header, alterheader, extracttilts, extractpieces, xftoxg, xcorrstack, checkxforms, xfsimplex, xfinverse, xfproduct, densmatch, assemblevol, taperoutvol, squeezevol, xyzproj, extstack, tomopieces, montagesize, findcontrast, densnorm, fixmont, goodframe, edgemtf, edpiecepoint, extposition, extractmagrad, fixboundaries, maxjoinsize, numericdiff, rotmont, calc, reducestack, matchvol, combinefft, addtostack, subimage, excise, taperprep, tapervoledge, enhancecontrast, preNAD, nad_eed_3d, stitchalign, subimanova, subimstat, avganova, rotmatwarp, mtdetect, stitchvars
 
-- [x] Image display engine (ZAP window) — Slint UI, slice viewing, Z navigation, contrast (black/white), scroll-zoom
-- [x] Model overlay rendering — contour lines (Bresenham), point crosses, per-object colors, toggle on/off
-- [x] Slicer — arbitrary oblique plane through volume, X/Y angle sliders, trilinear interpolation
-- [x] XYZ multi-axis view — simultaneous XY, XZ, YZ planes in one image
-- [x] Object/contour management panel — sidebar listing objects with colors and contour counts
-- [x] Pixel value readout — mouse position tracking with coordinate and value display
-- [x] Volume caching — full volume loaded on demand for slicer/XYZ modes
-- [x] View mode switching — toolbar buttons for ZAP/Slicer/XYZ
-- [x] Command-line model loading — pass .mod/.fid files alongside image
-- [ ] Model view (3D rendering with lighting, depth cue) — requires wgpu
-- [ ] Isosurface rendering — requires wgpu
-- [ ] Contour editing tools
-- [ ] Bead fixing interface
-- [ ] Preferences system
-- [ ] Plugin loading (`libloading` + Rust trait objects)
+## CLI Tools — Model Utilities (25+)
 
-## Phase 5: imod-studio + Other GUIs (Months 14-18)
+imodinfo, imodtrans, imodmesh, imodjoin, point2model, imodextract, imodfillin, imodsortsurf, imodsetvalues, clonemodel, clipmodel, smoothsurf, findbeads3d, model2point, remapmodel, patch2imod, imod2patch, imodchopconts, imodcurvature, imodexplode, imodauto, pickbestseed, rec2imod, findsection, flattenwarp, joinwarp2model, clonevolume, imodmop
 
-- [x] `imod-studio` — Etomo replacement (Slint), uses library calls directly (no process spawning)
-  - [x] Pipeline step definitions (9 steps: setup through post-processing)
-  - [x] Setup: reads stack header via imod-mrc
-  - [x] Pre-processing: hot pixel removal via imod-math + imod-slice
-  - [x] Coarse alignment: cross-correlation via imod-fft, transforms via imod-transforms
-  - [x] Reconstruction: back-projection via imod-transforms + imod-mrc
-  - [x] Log output panel
-  - [x] Single/dual axis toggle
-  - [ ] Bead tracking integration (needs interactive seed selection)
-  - [ ] Fine alignment integration (needs full tiltalign solver)
-  - [ ] Parallel job management
-  - [ ] Batch processing
-- [ ] `imod-aligner` — midas replacement (Slint + wgpu)
-- [ ] `imod-ctfplot` — ctfplotter replacement (Slint)
+## CLI Tools — Format Converters (15+)
 
-## Phase 6: RAPTOR + Remaining Tools (Months 16-20)
+imod2obj, imod2vrml, imod2vrml2, imod2meta, imod2nff, imod2rib, imod2synu, imod2ccdbxml, wmod2imod, imod2wmod, adocxmlconv, holefinder, imodholefinder, slashfindspheres, slashmasksort, nogputxc
 
-- [ ] `raptor` — automatic fiducial tracking (RANSAC, correspondence)
-- [x] All flib/image programs translated (~30 tools)
-- [x] All imodutil programs translated (~30 tools)
-- [x] All model utilities translated (~15 tools)
-- [x] Transform utilities: xfinverse, xfproduct, xftoxg, xfsimplex, checkxforms
-- [x] Format converters: mrc2tif, imod2obj, imod2vrml, imod2vrml2, imod2meta, imod2nff, imod2rib, imod2synu, imod2ccdbxml, wmod2imod, imod2wmod, adocxmlconv
-- [ ] `raptor` — automatic fiducial tracking (106K C++ — consider skipping)
-- [ ] ndasda spatial analysis tools (rarely used)
+## CLI Tools — Spatial Analysis (3)
 
-## Phase 7: Testing & Polish (Months 18-22)
-
-- [ ] Comprehensive file format round-trip test suite
-- [ ] Performance benchmarking vs C/Fortran originals
-- [ ] GPU acceleration (`cudarc` for backprojection, `wgpu` compute shaders)
-- [ ] Script migration (Python/shell to Rust CLIs)
-- [ ] Documentation
-- [ ] Release packaging
+nda, sda, mtk
 
 ---
 
-## Completed
+## Not Yet Ported
 
-- [x] Downloaded IMOD source code via Mercurial
-- [x] Analyzed codebase: ~969K lines (Java 346K, C++ 320K, C 127K, Headers 98K, Fortran 69K+, Python 6K, Shell 4K)
-- [x] Created rewrite plan with workspace structure, phased migration, and key decisions
-- [x] Saved README.md with project overview
-- [x] Phase 0 complete: 3 crates, 13 tests
-- [x] Phase 1 complete: 11 crates, 68 tests passing
-- [x] Phase 2 complete: 13 CLI tools
-- [x] Phase 3 complete: 8 reconstruction pipeline tools
-- [x] Phase 4 mostly complete: imod-viewer with ZAP/Slicer/XYZ views, model overlay, pixel readout
-- [x] Phase 5 started: imod-studio with library-based workflow (no process spawning)
-- [x] Phase 6 complete: all flib/image + imodutil programs translated
-- [x] AI translation of libcfshr: stats, regression, gaussj, circlefit, parselist, amoeba, cubinterp, linearxforms
-- [x] Full tiltalign solver: projection model with rotation, magnification, tilt refinement
-- [x] File dialogs (rfd), contour editing, TIFF backend
-- [x] Current totals: 11 crates, 120 apps, ~39K lines Rust, 142 test suites
+### High-Value Missing (~10 programs)
+
+| Program | Category | Purpose |
+|---------|----------|---------|
+| `refinematch` | flib/model | Refine 3D volume matching for dual-axis combination |
+| `tomopitch` | flib/model | Analyze section boundaries for positioning |
+| `filltomo` | flib/model | Fill in missing wedge regions |
+| `repackseed` | flib/model | Repackage seed model for Transferfid |
+| `sortbeadsurfs` | flib/model | Sort beads onto surfaces |
+| `framealign` (C++) | mrc | Movie frame alignment (more features than our alignframes) |
+| `tif2mrc` | mrc | TIFF to MRC conversion |
+| `raw2mrc` | mrc | Raw data to MRC conversion |
+| `mrctaper` | mrc | Taper MRC file edges |
+| `processchunks` | standalone | Parallel job distribution (critical for large datasets) |
+
+### Medium-Value Missing (~40 programs)
+
+**flib/model (~25):** boxavg, boxstartend, checkmtmod, contourmod, convertmod, edgeeraser, edmont, endmodel, fenestra, fiberpitch, findhotpixels, get_region_contours, howflared, imavgstat, joinmodel, mtlengths, mtmodel, mtrotlong, mtsmooth, planefit, realscalemod, reducecont, reducemtmod, resamplemod, scalemodel, solve_wo_outliers, sumdensity, xfinterstack, xfjointomo, xfmodel
+
+**mrc (~15):** mrcx, mrclog, mrctilt, fakevolume, frameutil, measuredrift, modifymdoc, preNID, recline, tiff, tifinfo, dm3props
+
+### Low-Value / Obsolete (~20)
+
+- `vmstocsh` — VMS to csh converter (obsolete)
+- `echo2`, `imodwincpu`, `imod-dist`, `recfile` — platform/packaging utilities
+- `mtsubs`, `rotmatwarpsubs` — subroutine libraries (not standalone programs)
+- `ShrMemClient`, `manageshrmem`, `shrmemframe` — shared memory utilities
+- `nogpuctf`, `nogpuframe`, `nrutil` — GPU stubs / numerical recipes
+
+### Scripts Not Ported (~12)
+
+- `prochunks.csh`, `slurmCleanup.sh`, `slurmInit.sh` — job management
+- `autodoc.py`, `comchanger.py`, `imodpy.py`, `pip.py`, `prochunks.py`, `pysed.py`, `supermont.py`, `tiltmatch.py`, `tomocoords.py` — Python workflow scripts
+
+### Not Ported By Design
+
+| Component | Original LOC | Replacement |
+|-----------|-------------|-------------|
+| 3dmod (Qt/OpenGL) | 105K | imod-viewer (Slint) |
+| midas (Qt) | 8.5K | imod-aligner (Slint) |
+| ctfplotter (Qt) | 15K | imod-ctfplot (Slint) |
+| Etomo (Java Swing) | 346K | imod-studio (Slint) |
+| Plugins (C++) | 63K | Not ported (plugin system not yet implemented) |
+
+---
+
+## Build Configuration
+
+- `RUSTFLAGS="-C target-cpu=native"` via `.cargo/config.toml`
+- GPU acceleration via wgpu compute shaders (tilt + ctfphaseflip)
+- Parallel processing via rayon (tilt backprojection, bead detection)
+- All crates documented with `cargo doc`
