@@ -1,0 +1,82 @@
+[package]
+name = "imod-rs"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-2.0-only"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Enables the direct C++/Qt QImage boundary used by mrc2tif JPEG/PNG output.
+# The embedding application supplies `mrc2tif_qimage_save` from a Qt build.
+qt = []
+
+[dependencies]
+libc = "0.2"
+regex = "1"
+
+[[bin]]
+name = "newstack"
+path = "src/bin/newstack.rs"
+
+[[bin]]
+name = "header"
+path = "src/bin/header.rs"
+
+[[bin]]
+name = "binvol"
+path = "src/bin/binvol.rs"
+
+[[bin]]
+name = "alterheader"
+path = "src/bin/alterheader.rs"
+
+[[bin]]
+name = "clip"
+path = "src/bin/clip.rs"
+
+[[bin]]
+name = "tif2mrc"
+path = "src/bin/tif2mrc.rs"
+
+[[bin]]
+name = "mrc2tif"
+path = "src/bin/mrc2tif.rs"
+
+[[bin]]
+name = "imodinfo"
+path = "src/bin/imodinfo.rs"
+
+[[bin]]
+name = "imodjoin"
+path = "src/bin/imodjoin.rs"
+
+[[bin]]
+name = "wmod2imod"
+path = "src/bin/wmod2imod.rs"
+
+[[bin]]
+name = "convertmod"
+path = "src/bin/convertmod.rs"
+
+[[bin]]
+name = "trimvol"
+path = "src/bin/trimvol.rs"
+
+[[bin]]
+name = "submfg"
+path = "src/bin/submfg.rs"
+
+[[bin]]
+name = "subm"
+path = "src/bin/subm.rs"
+
+[[bin]]
+name = "batchruntomo"
+path = "src/bin/batchruntomo.rs"
+
+[[bin]]
+name = "etomo"
+path = "src/bin/etomo.rs"

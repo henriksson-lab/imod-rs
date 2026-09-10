@@ -1,0 +1,593 @@
+//! Translation of `IMOD/libiimod/iishrmem.c`.
+//!
+//! This module retains the operating-system shared-memory ABI.
+#![allow(dead_code, unused_variables)]
+
+use crate::imod::libcfshr::islice::slice_mode_if_real;
+use crate::imod::libiimod::iimage::{
+    ImodImageFile, LineProcData, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
+    ii_convert_line_of_floats, ii_delete, ii_new, ii_sync_from_mrc_header,
+};
+use crate::imod::libiimod::iimrc::ii_mrc_set_load_info;
+use crate::imod::libiimod::mrcfiles::{
+    LoadInfo, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MrcHeader,
+    mrc_getdcsize, mrc_head_new,
+};
+use crate::imod::libiimod::mrcsec::{ii_init_read_section_any, ii_process_read_line};
+use core::ffi::{CStr, c_char, c_void};
+use core::mem::zeroed;
+
+#[cfg(windows)]
+const INVALID_HANDLE_VALUE: *mut c_void = -1_isize as *mut c_void;
+#[cfg(windows)]
+const PAGE_READWRITE: u32 = 0x04;
+#[cfg(windows)]
+const FILE_MAP_ALL_ACCESS: u32 = 0x000f_001f;
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateFileMappingA(
+        file: *mut c_void,
+        attributes: *mut c_void,
+        protect: u32,
+        maximum_size_high: u32,
+        maximum_size_low: u32,
+        name: *const c_char,
+    ) -> *mut c_void;
+    fn OpenFileMappingA(access: u32, inherit_handle: i32, name: *const c_char) -> *mut c_void;
+    fn MapViewOfFile(
+        mapping: *mut c_void,
+        access: u32,
+        file_offset_high: u32,
+        file_offset_low: u32,
+        number_of_bytes_to_map: usize,
+    ) -> *mut c_void;
+    fn UnmapViewOfFile(base_address: *const c_void) -> i32;
+    fn CloseHandle(handle: *mut c_void) -> i32;
+}
+
+pub const IIFILE_SHR_MEM: i32 = 8;
+pub const SHR_MEM_NAME_TAG: &[u8] = b"/IMODShrMem_\0";
+pub const SHR_MEM_DATA_OFFSET: usize = 2048;
+
+pub unsafe fn ii_shr_mem_create(filename: *const c_char, ii_file: *mut ImodImageFile) -> i32 {
+    unsafe {
+        let mut map_file = 0;
+        let address = open_and_get_address(filename, c"iiShrMemCreate".as_ptr(), &mut map_file);
+        if address.is_null() {
+            return 1;
+        }
+        (*ii_file).shr_mem_file = map_file;
+        (*ii_file).user_data = address.cast();
+        (*ii_file).header = core::ptr::null_mut();
+        (*ii_file).filename = libc::strdup(filename);
+        (*ii_file).close = Some(shm_close);
+        (*ii_file).clean_up = Some(clean_up);
+        0
+    }
+}
+
+pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *mut ImodImageFile {
+    unsafe {
+        let ii_file = ii_new();
+        if ii_file.is_null() {
+            return ii_file;
+        }
+        (*ii_file).close = Some(shm_close);
+        (*ii_file).clean_up = Some(clean_up);
+        (*ii_file).reopen = Some(reopen);
+        (*ii_file).filename = libc::strdup(filename);
+        let header = libc::malloc(core::mem::size_of::<MrcHeader>()).cast::<MrcHeader>();
+        (*ii_file).header = header.cast();
+        if header.is_null() || (*ii_file).filename.is_null() {
+            ii_delete(ii_file);
+            return core::ptr::null_mut();
+        }
+        (*ii_file).user_data = open_and_get_address(
+            filename,
+            c"iiShrMemOpen".as_ptr(),
+            &mut (*ii_file).shr_mem_file,
+        )
+        .cast();
+        if (*ii_file).user_data.is_null() {
+            ii_delete(ii_file);
+            return core::ptr::null_mut();
+        }
+        libc::strncpy((*ii_file).fmode.as_mut_ptr(), mode, 3);
+        (*ii_file).file = IIFILE_SHR_MEM;
+        if libc::strstr(mode, c"w".as_ptr()).is_null() {
+            core::ptr::copy_nonoverlapping((*ii_file).user_data.cast::<MrcHeader>(), header, 1);
+            ii_sync_from_mrc_header(ii_file, header);
+        } else {
+            mrc_head_new(&mut *header, 1, 1, 1, 0);
+            (*header).packed4bits = 0;
+            (*header).half_floats = 0;
+            (*header).fp = (*ii_file).user_data.cast();
+        }
+        (*ii_file).fp = (*ii_file).user_data.cast();
+        (*header).fp = (*ii_file).fp.cast();
+        (*ii_file).sync_from_mrc_header = Some(sync_from_mrc_header);
+        (*ii_file).write_header = Some(write_header);
+        (*ii_file).read_section = Some(read_section);
+        (*ii_file).read_section_byte = Some(read_section_byte);
+        (*ii_file).read_section_ushort = Some(read_section_ushort);
+        (*ii_file).read_section_float = Some(read_section_float);
+        (*ii_file).write_section = Some(write_section);
+        (*ii_file).write_section_float = Some(write_section_float);
+        ii_file
+    }
+}
+
+pub unsafe fn ii_shr_mem_check_size(filename: *const c_char) -> usize {
+    unsafe {
+        if filename.is_null()
+            || libc::strstr(filename, SHR_MEM_NAME_TAG.as_ptr().cast()) != filename.cast_mut()
+        {
+            return 0;
+        }
+        let mut end = core::ptr::null_mut();
+        let base = filename.add(SHR_MEM_NAME_TAG.len() - 1);
+        let val = libc::strtol(base, &mut end, 10);
+        if end.is_null() || *end != (b'_' as c_char) {
+            return 0;
+        }
+        (1024_i64.wrapping_mul(val as i64)) as usize
+    }
+}
+
+unsafe fn open_and_get_address(
+    filename: *const c_char,
+    caller: *const c_char,
+    map_file: *mut isize,
+) -> *mut c_void {
+    unsafe {
+        let mem_size = ii_shr_mem_check_size(filename);
+        if mem_size == 0 {
+            return core::ptr::null_mut();
+        }
+        #[cfg(windows)]
+        {
+            let create = !libc::strstr(caller, c"Create".as_ptr()).is_null();
+            let mapping = if create {
+                CreateFileMappingA(
+                    INVALID_HANDLE_VALUE,
+                    core::ptr::null_mut(),
+                    PAGE_READWRITE,
+                    0,
+                    mem_size as u32,
+                    filename,
+                )
+            } else {
+                OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, filename)
+            };
+            if mapping.is_null() {
+                return core::ptr::null_mut();
+            }
+            let address = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mem_size);
+            if address.is_null() {
+                CloseHandle(mapping);
+                return core::ptr::null_mut();
+            }
+            *map_file = mapping as isize;
+            return address;
+        }
+        #[cfg(not(windows))]
+        {
+            let create = !libc::strstr(caller, c"Create".as_ptr()).is_null();
+            if create && libc::shm_unlink(filename) == 0 {
+                libc::printf(
+                    c"Shared memory file %s already exists, recreating it\n".as_ptr(),
+                    filename,
+                );
+            }
+            let fd = libc::shm_open(
+                filename,
+                if create {
+                    libc::O_CREAT | libc::O_RDWR | libc::O_EXCL
+                } else {
+                    libc::O_RDWR
+                },
+                libc::S_IRUSR | libc::S_IWUSR,
+            );
+            if fd < 0 {
+                return core::ptr::null_mut();
+            }
+            let truncate = cfg!(not(target_os = "macos"));
+            if create || truncate {
+                if libc::ftruncate(fd, mem_size as libc::off_t) != 0 {
+                    libc::shm_unlink(filename);
+                    return core::ptr::null_mut();
+                }
+            }
+            let address = libc::mmap(
+                core::ptr::null_mut(),
+                mem_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                fd,
+                0,
+            );
+            if address == libc::MAP_FAILED {
+                libc::shm_unlink(filename);
+                return core::ptr::null_mut();
+            }
+            if create {
+                libc::munmap(address, mem_size);
+            }
+            *map_file = fd as isize;
+            address
+        }
+    }
+}
+
+unsafe extern "C" fn shm_close(ii_file: *mut ImodImageFile) {
+    unsafe {
+        if (*ii_file).user_data.is_null() {
+            return;
+        }
+        #[cfg(windows)]
+        {
+            UnmapViewOfFile((*ii_file).user_data.cast());
+            if (*ii_file).shr_mem_file != 0 {
+                CloseHandle((*ii_file).shr_mem_file as *mut c_void);
+            }
+            (*ii_file).shr_mem_file = 0;
+        }
+        #[cfg(not(windows))]
+        {
+            if (*ii_file).filename.is_null() {
+                return;
+            }
+            let size = ii_shr_mem_check_size((*ii_file).filename);
+            if size == 0 {
+                return;
+            }
+            if !(*ii_file).header.is_null() {
+                libc::munmap((*ii_file).user_data.cast(), size);
+            } else {
+                libc::shm_unlink((*ii_file).filename);
+            }
+        }
+        (*ii_file).user_data = core::ptr::null_mut();
+    }
+}
+pub unsafe fn ii_shr_mem_remove(filename: *const c_char) -> i32 {
+    unsafe {
+        #[cfg(windows)]
+        {
+            let _ = filename;
+            1
+        }
+        #[cfg(not(windows))]
+        {
+            libc::shm_unlink(filename)
+        }
+    }
+}
+unsafe extern "C" fn clean_up(ii_file: *mut ImodImageFile) {
+    unsafe {
+        libc::free((*ii_file).header.cast());
+    }
+}
+unsafe extern "C" fn reopen(ii_file: *mut ImodImageFile) -> i32 {
+    unsafe {
+        (*ii_file).user_data = open_and_get_address(
+            (*ii_file).filename,
+            c"iiShrMemOpen".as_ptr(),
+            &mut (*ii_file).shr_mem_file,
+        )
+        .cast();
+        if (*ii_file).user_data.is_null() { 1 } else { 0 }
+    }
+}
+unsafe extern "C" fn sync_from_mrc_header(
+    ii_file: *mut ImodImageFile,
+    hdata: *mut MrcHeader,
+) -> i32 {
+    unsafe {
+        if (*ii_file).header.cast::<MrcHeader>() != hdata {
+            core::ptr::copy_nonoverlapping(hdata, (*ii_file).header.cast(), 1);
+        }
+        0
+    }
+}
+unsafe extern "C" fn write_header(ii_file: *mut ImodImageFile) -> i32 {
+    unsafe {
+        if (*ii_file).user_data.is_null() || (*ii_file).header.is_null() {
+            return 1;
+        }
+        core::ptr::copy_nonoverlapping(
+            (*ii_file).header.cast::<MrcHeader>(),
+            (*ii_file).user_data.cast(),
+            1,
+        );
+        0
+    }
+}
+unsafe extern "C" fn read_section(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+) -> i32 {
+    unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_NOPROC) }
+}
+unsafe extern "C" fn read_section_byte(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+) -> i32 {
+    unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_BYTE) }
+}
+unsafe extern "C" fn read_section_ushort(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+) -> i32 {
+    unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_USHORT) }
+}
+unsafe extern "C" fn read_section_float(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+) -> i32 {
+    unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_FLOAT) }
+}
+unsafe fn shm_read_section_any(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+    typ: i32,
+) -> i32 {
+    unsafe {
+        let h = (*in_file).header.cast::<MrcHeader>();
+        if h.is_null() || (*in_file).user_data.is_null() {
+            return 1;
+        }
+        let mut pix_size_buf = [0, 1, 4, 2];
+        let mut d: LineProcData = zeroed();
+        let mut li: LoadInfo = zeroed();
+        ii_mrc_set_load_info(in_file, &mut li);
+        let pad_left = li.pad_left.max(0);
+        let pad_right = li.pad_right.max(0);
+        li.outmin = (*in_file).smin as i32;
+        li.outmax = (*in_file).smax as i32;
+        li.mirror_fft = 0;
+        d.type_ = typ;
+        d.read_y = if li.axis == 2 { 1 } else { 0 };
+        let mut y_end = if d.read_y != 0 { li.zmax } else { li.ymax };
+        d.cz = in_section;
+        d.swapped = 0;
+        li.outmin = 0;
+        li.outmax = if typ == MRSA_USHORT { 65535 } else { 255 };
+        let mut free_map = 0;
+        let err = ii_init_read_section_any(
+            h,
+            &mut li,
+            buf.cast(),
+            &mut d,
+            &mut free_map,
+            &mut y_end,
+            c"shmReadSectionAny".as_ptr(),
+        );
+        if err != 0 {
+            return err;
+        }
+        d.x_dimension = d.xsize + pad_left + pad_right;
+        pix_size_buf[0] = d.pix_size;
+        let shm_buf = (*in_file).user_data.cast::<u8>().add(
+            SHR_MEM_DATA_OFFSET
+                + d.pix_size as usize
+                    * (*h).nx as usize
+                    * ((*h).ny as usize * in_section as usize + d.y_start as usize),
+        );
+        d.bufp = d
+            .bufp
+            .add(pix_size_buf[typ as usize] as usize * pad_left as usize);
+        d.usbufp = d.usbufp.add(pad_left as usize);
+        d.fbufp = d.fbufp.add(pad_left as usize);
+        d.pix_index += pad_left as u32;
+        let lines = y_end + 1 - d.y_start;
+        if ((typ == MRSA_FLOAT && (*h).mode == MRC_MODE_FLOAT) || typ == MRSA_NOPROC)
+            && pad_left == 0
+            && pad_right == 0
+            && d.xsize == (*h).nx
+            && d.read_y == 0
+        {
+            core::ptr::copy_nonoverlapping(
+                shm_buf,
+                buf.cast(),
+                d.pix_size as usize * (*h).nx as usize * lines as usize,
+            );
+            return 0;
+        }
+        for iy in 0..lines {
+            let line = shm_buf
+                .add((d.x_start as usize + iy as usize * (*h).nx as usize) * d.pix_size as usize);
+            if (typ == MRSA_FLOAT && (*h).mode != MRC_MODE_FLOAT)
+                || typ == MRSA_USHORT
+                || typ == MRSA_BYTE
+            {
+                let output = match typ {
+                    MRSA_FLOAT => d.fbufp.add(iy as usize * d.x_dimension as usize).cast(),
+                    MRSA_USHORT => d.usbufp.add(iy as usize * d.x_dimension as usize).cast(),
+                    _ => d.bufp.add(iy as usize * d.x_dimension as usize),
+                };
+                ii_process_read_line(h, &mut li, &mut d, line, output);
+            } else {
+                let output = d.bufp.add(
+                    iy as usize * d.x_dimension as usize * pix_size_buf[typ as usize] as usize,
+                );
+                core::ptr::copy_nonoverlapping(
+                    line,
+                    output,
+                    d.xsize as usize * d.pix_size as usize,
+                );
+            }
+        }
+        if free_map != 0 {
+            libc::free(d.map.cast());
+        }
+        0
+    }
+}
+unsafe extern "C" fn write_section(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+) -> i32 {
+    unsafe { shm_write_section_any(in_file, buf, in_section, 0) }
+}
+unsafe extern "C" fn write_section_float(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+) -> i32 {
+    unsafe { shm_write_section_any(in_file, buf, in_section, 1) }
+}
+unsafe fn shm_write_section_any(
+    in_file: *mut ImodImageFile,
+    buf: *mut c_char,
+    in_section: i32,
+    from_float: i32,
+) -> i32 {
+    unsafe {
+        let h = (*in_file).header.cast::<MrcHeader>();
+        if h.is_null() || (*in_file).user_data.is_null() {
+            return 1;
+        }
+        let mut li: LoadInfo = zeroed();
+        ii_mrc_set_load_info(in_file, &mut li);
+        let mut buf_mode = (*h).mode;
+        let convert =
+            from_float > 0 && !matches!((*h).mode, MRC_MODE_COMPLEX_FLOAT | MRC_MODE_FLOAT);
+        if convert {
+            buf_mode = MRC_MODE_FLOAT;
+        }
+        if li.xmin != 0 || li.xmax != (*h).nx - 1 {
+            return 1;
+        }
+        let mut bytes_per_chan_out = 0;
+        let mut num_chan_out = 0;
+        if mrc_getdcsize((*h).mode, &mut bytes_per_chan_out, &mut num_chan_out) != 0
+            || (*h).mode == MRC_MODE_COMPLEX_SHORT
+        {
+            return -1;
+        }
+        let mut bytes_per_chan_buf = 0;
+        let mut num_chan_buf = 0;
+        mrc_getdcsize(buf_mode, &mut bytes_per_chan_buf, &mut num_chan_buf);
+        let pix_size_out = bytes_per_chan_out * num_chan_out;
+        let _pix_size_buf = bytes_per_chan_buf * num_chan_buf;
+        if convert && slice_mode_if_real((*h).mode) < 0 {
+            return 1;
+        }
+        let y_start = li.ymin;
+        let y_end = li.ymax;
+        let chunk_lines = y_end + 1 - y_start;
+        let dest = (*in_file).user_data.cast::<u8>().add(
+            SHR_MEM_DATA_OFFSET
+                + pix_size_out as usize
+                    * (*h).nx as usize
+                    * ((*h).ny as usize * in_section as usize + y_start as usize),
+        );
+        if from_float == 0 || (*h).mode == MRC_MODE_FLOAT {
+            core::ptr::copy_nonoverlapping(
+                buf.cast(),
+                dest,
+                pix_size_out as usize * (*h).nx as usize * chunk_lines as usize,
+            );
+            return 0;
+        }
+        let bytes_signed = ((*h).mode == 0 && (*h).bytes_signed != 0) as i32;
+        for iy in 0..chunk_lines {
+            ii_convert_line_of_floats(
+                buf.cast::<f32>().add(iy as usize * (*h).nx as usize),
+                dest.add(pix_size_out as usize * iy as usize * (*h).nx as usize),
+                (*h).nx,
+                (*h).mode,
+                bytes_signed,
+                0,
+            );
+        }
+        0
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn posix_shared_memory_round_trips_a_native_section() {
+        unsafe {
+            let name =
+                std::ffi::CString::new(format!("/IMODShrMem_1024_iishrmem_{}", std::process::id()))
+                    .unwrap();
+            let manager = ii_new();
+            assert!(!manager.is_null());
+            assert_eq!(ii_shr_mem_create(name.as_ptr(), manager), 0);
+            let writer = ii_shr_mem_open(name.as_ptr(), c"wb+".as_ptr());
+            assert!(!writer.is_null());
+            let header = (*writer).header.cast::<MrcHeader>();
+            mrc_head_new(&mut *header, 2, 2, 1, 0);
+            ii_sync_from_mrc_header(writer, header);
+            assert_eq!(((*writer).write_header.unwrap())(writer), 0);
+            let input = [3_i8, 1, 4, 1];
+            assert_eq!(
+                ((*writer).write_section.unwrap())(writer, input.as_ptr().cast_mut().cast(), 0),
+                0
+            );
+            let reader = ii_shr_mem_open(name.as_ptr(), c"rb".as_ptr());
+            assert!(!reader.is_null());
+            let mut output = [0_i8; 4];
+            assert_eq!(
+                ((*reader).read_section.unwrap())(reader, output.as_mut_ptr(), 0),
+                0
+            );
+            assert_eq!(output, input);
+            ii_delete(reader);
+            ii_delete(writer);
+            ii_delete(manager);
+            assert_ne!(ii_shr_mem_remove(name.as_ptr()), 0);
+        }
+    }
+
+    #[test]
+    fn posix_shared_memory_reads_cropped_padded_floats() {
+        unsafe {
+            let name = std::ffi::CString::new(format!(
+                "/IMODShrMem_1024_iishrmem_convert_{}",
+                std::process::id()
+            ))
+            .unwrap();
+            let manager = ii_new();
+            assert_eq!(ii_shr_mem_create(name.as_ptr(), manager), 0);
+            let writer = ii_shr_mem_open(name.as_ptr(), c"wb+".as_ptr());
+            let header = (*writer).header.cast::<MrcHeader>();
+            mrc_head_new(&mut *header, 3, 2, 1, 1);
+            ii_sync_from_mrc_header(writer, header);
+            assert_eq!(((*writer).write_header.unwrap())(writer), 0);
+            let input = [10_i16, 20, 30, 40, 50, 60];
+            assert_eq!(
+                ((*writer).write_section.unwrap())(writer, input.as_ptr().cast_mut().cast(), 0),
+                0
+            );
+            let reader = ii_shr_mem_open(name.as_ptr(), c"rb".as_ptr());
+            (*reader).llx = 1;
+            (*reader).urx = 2;
+            (*reader).pad_left = 1;
+            (*reader).pad_right = 1;
+            let mut output = [-1_f32; 8];
+            assert_eq!(
+                ((*reader).read_section_float.unwrap())(reader, output.as_mut_ptr().cast(), 0),
+                0
+            );
+            assert_eq!(output, [-1., 20., 30., -1., -1., 50., 60., -1.]);
+            ii_delete(reader);
+            ii_delete(writer);
+            ii_delete(manager);
+            assert_ne!(ii_shr_mem_remove(name.as_ptr()), 0);
+        }
+    }
+}

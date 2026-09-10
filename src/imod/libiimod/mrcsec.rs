@@ -1,0 +1,1466 @@
+//! Translation of `IMOD/libiimod/mrcsec.c`.
+//!
+//! This unit is the next bottom-up dependency of `iimrc.c`.  Each entry below
+//! is one source function rendered in systematic Rust snake case.
+#![allow(dead_code, unused_variables)]
+
+use crate::imod::libcfshr::b3dutil::mrc_huge_seek;
+use crate::imod::libiimod::halffloat::{imnp_halfbits_to_floatbits, imnp_halfbuf_to_floats};
+use crate::imod::libiimod::iimage::IIERR_QUITTING;
+use crate::imod::libiimod::iimage::{
+    IIFILE_MRC, IIFILE_RAW, IiSectionFunc, ImodImageFile, LineProcData, ii_calling_read_or_write,
+    ii_lookup_file_from_fp, ii_read_section, ii_read_section_byte, ii_read_section_float,
+    ii_read_section_ushort, ii_save_load_params, ii_sync_from_mrc_header,
+};
+use crate::imod::libiimod::mrcfiles::{LoadInfo, MrcHeader};
+use crate::imod::libiimod::mrcfiles::{
+    MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MRC_MODE_RGB,
+    MRC_MODE_SHORT, MRC_MODE_USHORT, get_byte_map, get_short_map, mrc_get_complex_scale,
+    mrc_getdcsize, mrc_mirror_source, mrc_swap_floats, mrc_swap_shorts,
+};
+use core::ffi::c_char;
+
+const MRSA_BYTE: i32 = 1;
+const MRSA_FLOAT: i32 = 2;
+const MRSA_USHORT: i32 = 3;
+const MRC_RAMP_EXP: i32 = 2;
+const MRC_RAMP_LOG: i32 = 3;
+
+pub unsafe fn mrc_read_z(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf, z, 0, 0, Some(ii_read_section)) }
+}
+pub unsafe fn mrc_read_z_byte(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf, z, 0, 1, Some(ii_read_section_byte)) }
+}
+pub unsafe fn mrc_read_z_ushort(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf, z, 0, 3, Some(ii_read_section_ushort)) }
+}
+pub unsafe fn mrc_read_z_float(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut f32,
+    z: i32,
+) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf.cast(), z, 0, 2, Some(ii_read_section_float)) }
+}
+pub unsafe fn mrc_read_y(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf, z, 1, 0, Some(ii_read_section)) }
+}
+pub unsafe fn mrc_read_y_byte(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf, z, 1, 1, Some(ii_read_section_byte)) }
+}
+pub unsafe fn mrc_read_y_ushort(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf, z, 1, 3, Some(ii_read_section_ushort)) }
+}
+pub unsafe fn mrc_read_y_float(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut f32,
+    z: i32,
+) -> i32 {
+    unsafe { call_ii_or_mrsa(hdata, li, buf.cast(), z, 1, 2, Some(ii_read_section_float)) }
+}
+pub unsafe fn mrc_read_section(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe {
+        call_ii_or_mrsa(
+            hdata,
+            li,
+            buf,
+            z,
+            if (*li).axis == 2 { 1 } else { 0 },
+            0,
+            Some(ii_read_section),
+        )
+    }
+}
+pub unsafe fn mrc_read_section_byte(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe {
+        call_ii_or_mrsa(
+            hdata,
+            li,
+            buf,
+            z,
+            if (*li).axis == 2 { 1 } else { 0 },
+            1,
+            Some(ii_read_section_byte),
+        )
+    }
+}
+pub unsafe fn mrc_read_section_ushort(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+) -> i32 {
+    unsafe {
+        call_ii_or_mrsa(
+            hdata,
+            li,
+            buf,
+            z,
+            if (*li).axis == 2 { 1 } else { 0 },
+            3,
+            Some(ii_read_section_ushort),
+        )
+    }
+}
+pub unsafe fn mrc_read_section_float(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut f32,
+    z: i32,
+) -> i32 {
+    unsafe {
+        call_ii_or_mrsa(
+            hdata,
+            li,
+            buf.cast(),
+            z,
+            if (*li).axis == 2 { 1 } else { 0 },
+            2,
+            Some(ii_read_section_float),
+        )
+    }
+}
+pub unsafe fn call_ii_or_mrsa(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    z: i32,
+    read_y: i32,
+    type_: i32,
+    func: IiSectionFunc,
+) -> i32 {
+    let mut ii_save: ImodImageFile = unsafe { core::mem::zeroed() };
+    let ii_file =
+        unsafe { lookup_ii_file(hdata, li, if read_y != 0 { 2 } else { 3 }, &mut ii_save) };
+    if !ii_file.is_null() {
+        let Some(func) = func else {
+            return -1;
+        };
+        return unsafe {
+            crate::imod::libiimod::iimage::ii_restore_load_params(
+                func(ii_file, buf.cast(), z),
+                ii_file,
+                &mut ii_save,
+            )
+        };
+    }
+    unsafe { mrc_read_section_any(hdata, li, buf, z, read_y, type_) }
+}
+pub unsafe fn mrc_read_section_any(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    cz: i32,
+    read_y: i32,
+    mut type_: i32,
+) -> i32 {
+    let fin = unsafe { (*hdata).fp.cast::<libc::FILE>() };
+    let mut d: LineProcData = unsafe { core::mem::zeroed() };
+    let mut free_map = 0;
+    let mut y_end = if read_y != 0 {
+        unsafe { (*li).zmax }
+    } else {
+        unsafe { (*li).ymax }
+    };
+    if type_ == 0 && unsafe { (*hdata).mode == MRC_MODE_FLOAT && (*hdata).half_floats != 0 } {
+        type_ = MRSA_FLOAT;
+    }
+    d.type_ = type_;
+    d.read_y = read_y;
+    d.cz = cz;
+    d.swapped = unsafe { (*hdata).swapped };
+    let init = unsafe {
+        ii_init_read_section_any(
+            hdata,
+            li,
+            buf,
+            &mut d,
+            &mut free_map,
+            &mut y_end,
+            c"mrcReadSectionAny".as_ptr(),
+        )
+    };
+    if init != 0 {
+        return init;
+    }
+    let pad_left = unsafe { (*li).pad_left.max(0) };
+    let pad_right = unsafe { (*li).pad_right.max(0) };
+    d.x_dimension = d.xsize + pad_left + pad_right;
+    let pix_size_buf = [0, 1, 4, 2];
+    if unsafe { (*hdata).y_inverted } != 0 {
+        if unsafe { (*li).mirror_fft } != 0 {
+            if free_map != 0 {
+                unsafe { libc::free(d.map.cast()) }
+            };
+            return 1;
+        }
+        let ny = unsafe { (*hdata).ny };
+        let old_start = d.y_start;
+        d.y_start = ny - 1 - y_end;
+        y_end = ny - 1 - old_start;
+        let lines = (y_end - d.y_start) as isize * d.x_dimension as isize;
+        unsafe {
+            d.bdata = d.bdata.offset(lines * d.pix_size as isize);
+            d.pix_index = d.pix_index.wrapping_add(lines as u32);
+            d.bufp = d.bufp.offset(lines * pix_size_buf[type_ as usize] as isize);
+            d.usbufp = d.usbufp.offset(lines);
+            d.fbufp = d.fbufp.offset(lines);
+        }
+        d.delta_y_sign = -1;
+    }
+    unsafe {
+        d.bufp = d
+            .bufp
+            .add((pix_size_buf[type_ as usize] * pad_left) as usize);
+        d.usbufp = d.usbufp.add(pad_left as usize);
+        d.fbufp = d.fbufp.add(pad_left as usize);
+    }
+    d.pix_index = d.pix_index.wrapping_add(pad_left as u32);
+    let nx = unsafe { (*hdata).nx };
+    let ny = unsafe { (*hdata).ny };
+    let nx_seek = if d.packed4bits != 0 { (nx + 1) / 2 } else { nx };
+    let target_lines = (2_000_000_f32 / (d.pix_size * nx_seek) as f32 + 0.5) as i32;
+    let mut chunk_lines = 1_i32;
+    if read_y == 0
+        && !(d.convert != 0 && unsafe { (*li).mirror_fft } != 0)
+        && unsafe { (*hdata).y_inverted } == 0
+        && d.xsize as f32 / nx as f32 > 0.5
+        && (target_lines > 1 || (d.need_data == 0 && nx == d.xsize))
+    {
+        if nx > d.xsize {
+            d.need_data = 1;
+        }
+        chunk_lines = (y_end + 1 - d.y_start).min((100_000_000 / nx_seek).max(1));
+        if d.need_data != 0 {
+            chunk_lines = chunk_lines.min(target_lines).max(1);
+        }
+    }
+    let mut temporary: *mut u8 = core::ptr::null_mut();
+    if d.need_data != 0 {
+        let bytes = d.pix_size as usize
+            * if chunk_lines > 1 {
+                (nx_seek * chunk_lines) as usize
+            } else if d.packed4bits != 0 {
+                ((d.xsize + 4) / 2) as usize
+            } else {
+                d.xsize as usize
+            };
+        temporary = unsafe { libc::malloc(bytes).cast() };
+        if temporary.is_null() {
+            if free_map != 0 {
+                unsafe { libc::free(d.map.cast()) }
+            };
+            return 2;
+        }
+    }
+    let seek_line = if d.packed4bits != 0 {
+        d.x_start / 2
+    } else {
+        d.x_start * d.pix_size
+    };
+    let seek_end_x = if d.packed4bits != 0 {
+        (nx_seek - (d.x_end + 2) / 2).max(0)
+    } else {
+        (nx - d.x_end - 1).max(0)
+    };
+    let seek_error = if read_y != 0 {
+        unsafe {
+            mrc_huge_seek(
+                fin,
+                (*hdata).header_size + (*hdata).section_skip * d.y_start,
+                0,
+                d.cz,
+                d.y_start,
+                nx_seek,
+                ny,
+                d.pix_size,
+                libc::SEEK_SET,
+            )
+        }
+    } else {
+        unsafe {
+            mrc_huge_seek(
+                fin,
+                (*hdata).header_size + (*hdata).section_skip * d.cz,
+                0,
+                d.y_start,
+                d.cz,
+                nx_seek,
+                ny,
+                d.pix_size,
+                libc::SEEK_SET,
+            )
+        }
+    };
+    if seek_error != 0 {
+        if !temporary.is_null() {
+            unsafe { libc::free(temporary.cast()) }
+        };
+        if free_map != 0 {
+            unsafe { libc::free(d.map.cast()) }
+        };
+        return 3;
+    }
+    d.line = d.y_start;
+    while d.line <= y_end {
+        if chunk_lines > 1 {
+            let line_end = y_end.min(d.line + chunk_lines - 1);
+            let lines = line_end + 1 - d.line;
+            let chunk_start = if temporary.is_null() {
+                d.bufp
+            } else {
+                temporary
+            };
+            if unsafe {
+                libc::fread(
+                    chunk_start.cast(),
+                    d.pix_size as usize,
+                    (lines * nx_seek) as usize,
+                    fin,
+                )
+            } != (lines * nx_seek) as usize
+            {
+                if !temporary.is_null() {
+                    unsafe { libc::free(temporary.cast()) }
+                }
+                if free_map != 0 {
+                    unsafe { libc::free(d.map.cast()) }
+                }
+                return 3;
+            }
+            d.bdata = unsafe { chunk_start.add(seek_line as usize) };
+            while d.line <= line_end {
+                if unsafe {
+                    ii_process_read_line(
+                        hdata,
+                        li,
+                        &mut d,
+                        core::ptr::null_mut(),
+                        core::ptr::null_mut(),
+                    )
+                } != 0
+                {
+                    if !temporary.is_null() {
+                        unsafe { libc::free(temporary.cast()) }
+                    }
+                    if free_map != 0 {
+                        unsafe { libc::free(d.map.cast()) }
+                    }
+                    return IIERR_QUITTING;
+                }
+                d.bdata = unsafe { d.bdata.add((nx_seek * d.pix_size) as usize) };
+                d.line += 1;
+            }
+            continue;
+        }
+        if seek_line != 0
+            && unsafe { libc::fseek(fin, seek_line as libc::c_long, libc::SEEK_CUR) } != 0
+        {
+            break;
+        }
+        let bdata = if temporary.is_null() {
+            d.bufp
+        } else {
+            temporary
+        };
+        let count = if d.packed4bits != 0 {
+            ((d.x_end + 2) / 2 - d.x_start / 2) as usize
+        } else {
+            d.xsize as usize
+        };
+        if unsafe { libc::fread(bdata.cast(), d.pix_size as usize, count, fin) } != count {
+            if !temporary.is_null() {
+                unsafe { libc::free(temporary.cast()) }
+            };
+            if free_map != 0 {
+                unsafe { libc::free(d.map.cast()) }
+            };
+            return 3;
+        }
+        d.bdata = bdata;
+        if unsafe {
+            ii_process_read_line(
+                hdata,
+                li,
+                &mut d,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        } != 0
+        {
+            if !temporary.is_null() {
+                unsafe { libc::free(temporary.cast()) }
+            };
+            if free_map != 0 {
+                unsafe { libc::free(d.map.cast()) }
+            };
+            return IIERR_QUITTING;
+        }
+        if unsafe {
+            mrc_huge_seek(
+                fin,
+                if read_y != 0 {
+                    (*hdata).section_skip
+                } else {
+                    0
+                },
+                seek_end_x,
+                d.seek_end_y,
+                0,
+                nx_seek,
+                ny,
+                d.pix_size,
+                libc::SEEK_CUR,
+            )
+        } != 0
+        {
+            if !temporary.is_null() {
+                libc::free(temporary.cast());
+            }
+            if free_map != 0 {
+                libc::free(d.map.cast());
+            }
+            return 3;
+        }
+        d.line += 1;
+    }
+    if !temporary.is_null() {
+        unsafe { libc::free(temporary.cast()) }
+    }
+    if free_map != 0 {
+        unsafe { libc::free(d.map.cast()) }
+    }
+    0
+}
+pub unsafe fn ii_init_read_section_any(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    data: *mut LineProcData,
+    free_map: *mut i32,
+    y_end: *mut i32,
+    caller: *const c_char,
+) -> i32 {
+    let h = unsafe { &*hdata };
+    let l = unsafe { &*li };
+    let d = unsafe { &mut *data };
+    d.x_start = l.xmin;
+    d.x_end = l.xmax;
+    d.y_start = if d.read_y != 0 { l.zmin } else { l.ymin };
+    let urfy = if d.read_y != 0 { l.zmax } else { l.ymax };
+    if l.xmin > l.xmax || d.y_start > urfy {
+        return 1;
+    }
+    d.xsize = d.x_end - d.x_start + 1;
+    d.byte = (d.type_ == MRSA_BYTE) as i32;
+    d.to_short = (d.type_ == MRSA_USHORT) as i32;
+    d.map_sbytes = (h.mode == MRC_MODE_BYTE && h.bytes_signed != 0) as i32;
+    d.convert = d.byte + d.to_short;
+    d.pix_index = 0;
+    d.delta_y_sign = 1;
+    d.pix_size = 1;
+    d.need_data = 0;
+    d.packed4bits = (h.packed4bits != 0 && h.mode == MRC_MODE_BYTE) as i32;
+    d.half_floats = (h.mode == MRC_MODE_FLOAT && h.half_floats != 0) as i32;
+    let eps = if d.to_short != 0 { 0.005 / 256. } else { 0.005 };
+    d.do_scale =
+        (l.offset <= -1. || l.offset >= 1. || l.slope < 1. - eps || l.slope > 1. + eps) as i32;
+    d.bdata = buf;
+    d.buf = buf;
+    d.bufp = buf;
+    d.fbufp = buf.cast();
+    d.usbufp = buf.cast();
+    d.fft = buf;
+    d.usfft = buf.cast();
+    d.map = core::ptr::null_mut();
+    if (d.type_ == 0 && d.map_sbytes != 0) || d.packed4bits != 0 {
+        d.convert = 1;
+    }
+    if d.type_ == MRSA_FLOAT
+        && !matches!(
+            h.mode,
+            MRC_MODE_BYTE | MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT | MRC_MODE_RGB
+        )
+    {
+        return 1;
+    }
+    if (d.byte != 0 && l.outmax > 255) || (d.to_short != 0 && l.outmax < 256) {
+        return 1;
+    }
+    /* This follows the source's four-corner construction exactly: the resulting
+    file rectangle is read before ii_process_read_line places direct and reflected data. */
+    if l.mirror_fft != 0 && d.convert != 0 {
+        d.im_xsize = d.xsize;
+        let im_nx = 2 * (h.nx - 1);
+        d.im_ymin = if d.read_y != 0 { d.cz } else { l.ymin };
+        d.im_ymax = if d.read_y != 0 { d.cz } else { l.ymax };
+        let x_start2 = if d.x_start < d.x_end {
+            d.x_start + 1
+        } else {
+            d.x_start
+        };
+        let (llfx, llfy) = mrc_mirror_source(im_nx, h.ny, d.x_start, d.im_ymin);
+        let (ulfx, ulfy) = mrc_mirror_source(im_nx, h.ny, d.x_start, d.im_ymax);
+        let (llfx2, llfy2) = mrc_mirror_source(im_nx, h.ny, x_start2, d.im_ymin);
+        let (ulfx2, ulfy2) = mrc_mirror_source(im_nx, h.ny, x_start2, d.im_ymax);
+        let (lrfx, lrfy) = mrc_mirror_source(im_nx, h.ny, d.x_end, d.im_ymin);
+        let (urfx, urfy) = mrc_mirror_source(im_nx, h.ny, d.x_end, d.im_ymax);
+        d.x_start = 0;
+        if d.x_end < im_nx / 2 {
+            d.x_start = lrfx;
+        }
+        if d.x_start > im_nx / 2 {
+            d.x_start = llfx;
+        }
+        d.x_end = urfx.max(llfx).max(llfx2).max(3);
+        d.ymin = llfy.min(ulfy).min(lrfy).min(urfy).min(llfy2).min(ulfy2);
+        d.ymax = llfy.max(ulfy).max(lrfy).max(urfy).max(llfy2).max(ulfy2);
+        d.y_start = if d.read_y != 0 { l.zmin } else { d.ymin };
+        *y_end = if d.read_y != 0 { l.zmax } else { d.ymax };
+        d.xsize = d.x_end - d.x_start + 1;
+        d.toggle_y = -1;
+        if d.read_y != 0 && d.ymin < d.ymax {
+            d.toggle_y = 0;
+            d.cz = d.ymin;
+        }
+    }
+    if d.cz < 0
+        || d.cz >= if d.read_y != 0 { h.ny } else { h.nz }
+        || d.y_start < 0
+        || unsafe { *y_end } >= if d.read_y != 0 { h.nz } else { h.ny }
+    {
+        return 1;
+    }
+    match h.mode {
+        MRC_MODE_BYTE => {
+            d.pix_size = 1;
+            if (d.byte != 0 && d.do_scale != 0) || d.to_short != 0 {
+                d.map =
+                    unsafe { get_byte_map(l.slope, l.offset, l.outmin, l.outmax, h.bytes_signed) };
+            } else if d.map_sbytes != 0 {
+                d.map = unsafe { get_byte_map(1., 0., 0, 255, 1) };
+            };
+            d.need_data =
+                (d.type_ == MRSA_FLOAT || d.type_ == MRSA_USHORT || d.packed4bits != 0) as i32;
+        }
+        MRC_MODE_SHORT | MRC_MODE_USHORT => {
+            d.pix_size = 2;
+            if (d.to_short != 0 && (d.do_scale != 0 || h.mode == MRC_MODE_SHORT)) || d.byte != 0 {
+                d.map = unsafe {
+                    get_short_map(
+                        l.slope,
+                        l.offset,
+                        l.outmin,
+                        l.outmax,
+                        l.ramp,
+                        d.swapped,
+                        (h.mode == MRC_MODE_SHORT) as i32,
+                    )
+                };
+                unsafe { *free_map = 1 };
+                if d.map.is_null() {
+                    return 2;
+                }
+            };
+            d.need_data = (d.type_ == MRSA_FLOAT || d.type_ == MRSA_BYTE) as i32;
+        }
+        MRC_MODE_RGB => {
+            d.pix_size = 3;
+            d.need_data = (d.convert != 0 || d.type_ == MRSA_FLOAT) as i32;
+            if d.do_scale != 0 {
+                d.map =
+                    unsafe { get_byte_map(l.slope, l.offset, l.outmin, l.outmax, h.bytes_signed) };
+            }
+        }
+        MRC_MODE_FLOAT => {
+            d.pix_size = if d.half_floats != 0 { 2 } else { 4 };
+            d.need_data = d.convert;
+            if d.half_floats != 0 {
+                d.need_data = (d.to_short == 0) as i32;
+            }
+        }
+        MRC_MODE_COMPLEX_SHORT => {
+            d.pix_size = 4;
+            if d.convert != 0 {
+                return 1;
+            }
+        }
+        MRC_MODE_COMPLEX_FLOAT => {
+            d.pix_size = 8;
+            d.need_data = d.convert;
+        }
+        _ => {
+            if d.convert != 0 {
+                return 1;
+            }
+        }
+    }
+    d.usmap = d.map.cast();
+    d.bytes_since_check = 0;
+    0
+}
+pub unsafe fn ii_process_read_line(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    data: *mut LineProcData,
+    bdata_in: *mut u8,
+    bufp_in: *mut u8,
+) -> i32 {
+    let h = unsafe { &*hdata };
+    let l = unsafe { &*li };
+    let d = unsafe { &mut *data };
+    let passed = !bdata_in.is_null() && !bufp_in.is_null();
+    let bdata = if passed { bdata_in } else { d.bdata };
+    let mut bufp = if passed { bufp_in } else { d.bufp };
+    let mut usbufp = bufp.cast::<u16>();
+    let mut fbufp = bufp.cast::<f32>();
+    let map = d.map;
+    let usmap = d.usmap;
+    let n = d.xsize as usize;
+    unsafe {
+        if d.convert != 0
+            || (d.type_ == MRSA_FLOAT && (h.mode != MRC_MODE_FLOAT || d.half_floats != 0))
+        {
+            match h.mode {
+                MRC_MODE_BYTE if d.packed4bits != 0 => {
+                    let mut input = 0_usize;
+                    let mut output = 0_usize;
+                    let mut xsize = n;
+                    if d.x_start & 1 != 0 {
+                        let value = *bdata.add(input) >> 4;
+                        if d.byte != 0 && d.do_scale != 0 {
+                            *bufp.add(output) = *map.add(value as usize);
+                        } else if d.to_short != 0 {
+                            *usbufp.add(output) = *usmap.add(value as usize);
+                        } else if d.type_ == MRSA_FLOAT {
+                            *fbufp.add(output) = value as f32;
+                        } else {
+                            *bufp.add(output) = value;
+                        }
+                        input += 1;
+                        output += 1;
+                        xsize -= 1;
+                    }
+                    while input < xsize / 2 {
+                        let value = *bdata.add(input);
+                        if d.byte != 0 && d.do_scale != 0 {
+                            *bufp.add(output) = *map.add((value & 15) as usize);
+                            *bufp.add(output + 1) = *map.add((value >> 4) as usize);
+                        } else if d.to_short != 0 {
+                            *usbufp.add(output) = *usmap.add((value & 15) as usize);
+                            *usbufp.add(output + 1) = *usmap.add((value >> 4) as usize);
+                        } else if d.type_ == MRSA_FLOAT {
+                            *fbufp.add(output) = (value & 15) as f32;
+                            *fbufp.add(output + 1) = (value >> 4) as f32;
+                        } else {
+                            *bufp.add(output) = value & 15;
+                            *bufp.add(output + 1) = value >> 4;
+                        }
+                        input += 1;
+                        output += 2;
+                    }
+                    if xsize & 1 != 0 {
+                        let value = *bdata.add(input) & 15;
+                        if d.byte != 0 && d.do_scale != 0 {
+                            *bufp.add(output) = *map.add(value as usize);
+                        } else if d.to_short != 0 {
+                            *usbufp.add(output) = *usmap.add(value as usize);
+                        } else if d.type_ == MRSA_FLOAT {
+                            *fbufp.add(output) = value as f32;
+                        } else {
+                            *bufp.add(output) = value;
+                        }
+                    }
+                }
+                MRC_MODE_BYTE => {
+                    if d.type_ == MRSA_FLOAT {
+                        for i in 0..n {
+                            *fbufp.add(i) = if d.map_sbytes != 0 {
+                                *map.add(*bdata.add(i) as usize) as f32
+                            } else {
+                                *bdata.add(i) as f32
+                            };
+                        }
+                    } else if d.to_short != 0 {
+                        for i in 0..n {
+                            *usbufp.add(i) = *usmap.add(*bdata.add(i) as usize);
+                        }
+                    } else if d.do_scale != 0 || d.map_sbytes != 0 {
+                        for i in 0..n {
+                            *bufp.add(i) = *map.add(*bdata.add(i) as usize);
+                        }
+                    } else if d.need_data != 0 {
+                        core::ptr::copy_nonoverlapping(bdata, bufp, n);
+                    }
+                }
+                MRC_MODE_SHORT | MRC_MODE_USHORT => {
+                    let src = bdata.cast::<u16>();
+                    if d.swapped != 0 {
+                        mrc_swap_shorts(core::slice::from_raw_parts_mut(src.cast::<i16>(), n), n);
+                    }
+                    if d.type_ == MRSA_FLOAT {
+                        for i in 0..n {
+                            *fbufp.add(i) = if h.mode == MRC_MODE_SHORT {
+                                *src.add(i) as i16 as f32
+                            } else {
+                                *src.add(i) as f32
+                            };
+                        }
+                    } else if d.byte != 0 {
+                        for i in 0..n {
+                            *bufp.add(i) = *map.add(*src.add(i) as usize);
+                        }
+                    } else if d.to_short != 0 && (d.do_scale != 0 || h.mode == MRC_MODE_SHORT) {
+                        for i in 0..n {
+                            *usbufp.add(i) = *usmap.add(*src.add(i) as usize);
+                        }
+                    } else if d.need_data != 0 {
+                        core::ptr::copy_nonoverlapping(src, usbufp, n);
+                    }
+                }
+                MRC_MODE_RGB => {
+                    for i in 0..n {
+                        let p = bdata.add(3 * i);
+                        let fpixel =
+                            0.3 * *p as f32 + 0.59 * *p.add(1) as f32 + 0.11 * *p.add(2) as f32;
+                        if d.type_ == MRSA_FLOAT {
+                            *fbufp.add(i) = fpixel;
+                        } else if d.byte != 0 {
+                            *bufp.add(i) = if d.do_scale != 0 {
+                                *map.add((fpixel + 0.499) as usize)
+                            } else {
+                                (fpixel + 0.5) as u8
+                            };
+                        } else {
+                            *usbufp.add(i) = if d.do_scale != 0 {
+                                *usmap.add((fpixel + 0.499) as usize)
+                            } else {
+                                (255. * fpixel + 0.5) as u16
+                            };
+                        }
+                    }
+                }
+                MRC_MODE_FLOAT => {
+                    if d.half_floats != 0 {
+                        let src = bdata.cast::<u16>();
+                        if d.swapped != 0 {
+                            mrc_swap_shorts(core::slice::from_raw_parts_mut(src.cast(), n), n);
+                        }
+                        if d.type_ == MRSA_FLOAT {
+                            imnp_halfbuf_to_floats(src, fbufp, n as i32);
+                        } else {
+                            for i in 0..n {
+                                let mut v = f32::from_bits(imnp_halfbits_to_floatbits(*src.add(i)));
+                                if l.ramp == MRC_RAMP_LOG {
+                                    v = v.ln();
+                                } else if l.ramp == MRC_RAMP_EXP {
+                                    v = v.exp();
+                                }
+                                v = (v * l.slope + l.offset)
+                                    .clamp(l.outmin as f32, l.outmax as f32);
+                                if d.byte != 0 {
+                                    *bufp.add(i) = (v + 0.5) as u8;
+                                } else {
+                                    *usbufp.add(i) = (v + 0.5) as u16;
+                                }
+                            }
+                        }
+                    } else {
+                        let src = bdata.cast::<f32>();
+                        if d.swapped != 0 {
+                            mrc_swap_floats(core::slice::from_raw_parts_mut(src, n), n);
+                        }
+                        if d.type_ != MRSA_FLOAT {
+                            for i in 0..n {
+                                let mut v = *src.add(i);
+                                if l.ramp == MRC_RAMP_LOG {
+                                    v = v.ln();
+                                } else if l.ramp == MRC_RAMP_EXP {
+                                    v = v.exp();
+                                }
+                                v = (v * l.slope + l.offset)
+                                    .clamp(l.outmin as f32, l.outmax as f32);
+                                if d.byte != 0 {
+                                    *bufp.add(i) = (v + 0.5) as u8
+                                } else {
+                                    *usbufp.add(i) = (v + 0.5) as u16
+                                }
+                            }
+                        }
+                    }
+                }
+                MRC_MODE_COMPLEX_FLOAT => {
+                    let src = bdata.cast::<f32>();
+                    if d.swapped != 0 {
+                        mrc_swap_floats(core::slice::from_raw_parts_mut(src, 2 * n), 2 * n);
+                    }
+                    let scale = mrc_get_complex_scale();
+                    let mut pix_index = if l.mirror_fft != 0 {
+                        0
+                    } else {
+                        d.pix_index as usize
+                    };
+                    let fft = if l.mirror_fft != 0 { bdata } else { d.fft };
+                    let usfft = fft.cast::<u16>();
+                    for i in 0..n {
+                        let a = *src.add(2 * i);
+                        let b = *src.add(2 * i + 1);
+                        let v = ((1. + scale * (a * a + b * b).sqrt()).ln() * l.slope + l.offset)
+                            .clamp(l.outmin as f32, l.outmax as f32);
+                        if d.byte != 0 {
+                            *fft.add(pix_index) = v as u8
+                        } else {
+                            *usfft.add(pix_index) = v as u16
+                        };
+                        pix_index += 1;
+                    }
+                    if l.mirror_fft != 0 {
+                        let cury = if d.read_y != 0 { d.cz } else { d.line };
+                        let mut ybase = if d.read_y != 0 {
+                            d.line - d.y_start
+                        } else {
+                            cury - d.im_ymin
+                        };
+                        let x0 = h.nx - 1 + d.x_start;
+                        let x1 = h.nx - 1 + d.x_end;
+                        if cury >= d.im_ymin && cury <= d.im_ymax && x1 >= l.xmin && x0 <= l.xmax {
+                            let x2 = x0.max(l.xmin);
+                            let x3 = x1.min(l.xmax);
+                            if d.byte != 0 {
+                                core::ptr::copy_nonoverlapping(
+                                    fft.add((x2 - x0) as usize),
+                                    d.buf.add((x2 - l.xmin + ybase * d.im_xsize) as usize),
+                                    (x3 + 1 - x2) as usize,
+                                );
+                            } else {
+                                core::ptr::copy_nonoverlapping(
+                                    usfft.add((x2 - x0) as usize),
+                                    d.usbufp.add((x2 - l.xmin + ybase * d.im_xsize) as usize),
+                                    (x3 + 1 - x2) as usize,
+                                );
+                            }
+                            if d.x_end == h.nx - 1 && l.xmin == 0 {
+                                if d.byte != 0 {
+                                    *d.buf.add((ybase * d.im_xsize) as usize) =
+                                        *fft.add(d.xsize as usize - 1);
+                                } else {
+                                    *d.usbufp.add((ybase * d.im_xsize) as usize) =
+                                        *usfft.add(d.xsize as usize - 1);
+                                }
+                            }
+                        }
+                        let cury_mirror = h.ny - cury;
+                        let mut x2 = (h.nx - 1 - d.x_end).max(l.xmin);
+                        let mut x3 = (h.nx - 1 - d.x_start).min(l.xmax);
+                        if x2 == 0 {
+                            x2 = 1;
+                        }
+                        if x3 >= h.nx - 1 {
+                            x3 = h.nx - 2;
+                        }
+                        ybase = if d.read_y != 0 {
+                            d.line - d.y_start
+                        } else {
+                            cury_mirror - d.im_ymin
+                        };
+                        if cury_mirror >= d.im_ymin && cury_mirror <= d.im_ymax {
+                            for i in (0..=(x3 - x2).max(0) as usize).rev() {
+                                if d.byte != 0 {
+                                    *d.buf.add(
+                                        i + x2 as usize - l.xmin as usize
+                                            + (ybase * d.im_xsize) as usize,
+                                    ) = *fft.add((h.nx - 1 - d.x_start - x2 - i as i32) as usize);
+                                } else {
+                                    *d.usbufp.add(
+                                        i + x2 as usize - l.xmin as usize
+                                            + (ybase * d.im_xsize) as usize,
+                                    ) = *usfft.add((h.nx - 1 - d.x_start - x2 - i as i32) as usize);
+                                }
+                            }
+                        }
+                        /* C's special duplicated bottom-left row (clip-compatible FFT). */
+                        if cury_mirror == 1 && d.im_ymin == 0 {
+                            let bottom_ybase = if d.read_y != 0 { d.line - d.y_start } else { 0 };
+                            for i in (0..=(x3 - x2).max(0) as usize).rev() {
+                                let source = (h.nx - 1 - d.x_start - x2 - i as i32) as usize;
+                                let destination = i + x2 as usize - l.xmin as usize
+                                    + (bottom_ybase * d.im_xsize) as usize;
+                                if d.byte != 0 {
+                                    *d.buf.add(destination) = *fft.add(source);
+                                } else {
+                                    *d.usbufp.add(destination) = *usfft.add(source);
+                                }
+                            }
+                        }
+                        if d.toggle_y >= 0 {
+                            d.toggle_y = 1 - d.toggle_y;
+                            if d.toggle_y != 0 {
+                                d.cz = d.ymax;
+                                d.seek_end_y = d.ymax - d.ymin - 1;
+                                d.line -= 1;
+                            } else {
+                                d.cz = d.ymin;
+                                d.seek_end_y = d.ymin + h.ny - d.ymax - 1;
+                            }
+                        }
+                    } else {
+                        d.pix_index =
+                            (pix_index as i32 + d.x_dimension * (d.delta_y_sign - 1)) as u32;
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            if d.swapped != 0 {
+                match h.mode {
+                    MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_COMPLEX_SHORT => mrc_swap_shorts(
+                        core::slice::from_raw_parts_mut(
+                            bdata.cast(),
+                            n * (d.pix_size as usize / 2),
+                        ),
+                        n * (d.pix_size as usize / 2),
+                    ),
+                    MRC_MODE_FLOAT | MRC_MODE_COMPLEX_FLOAT => mrc_swap_floats(
+                        core::slice::from_raw_parts_mut(
+                            bdata.cast(),
+                            n * (d.pix_size as usize / 4),
+                        ),
+                        n * (d.pix_size as usize / 4),
+                    ),
+                    _ => {}
+                }
+            }
+            if d.need_data != 0 {
+                core::ptr::copy_nonoverlapping(bdata, bufp, n * d.pix_size as usize);
+            }
+        }
+        let advance = d.x_dimension * d.delta_y_sign;
+        if d.type_ == MRSA_FLOAT {
+            fbufp = fbufp.offset(advance as isize);
+            bufp = fbufp.cast();
+        } else if d.to_short != 0 {
+            usbufp = usbufp.offset(advance as isize);
+            bufp = usbufp.cast();
+        } else {
+            bufp = bufp.offset((advance * d.pix_size) as isize);
+        }
+        if !passed {
+            d.bufp = bufp;
+            d.usbufp = usbufp;
+            d.fbufp = fbufp;
+            d.bytes_since_check += (d.xsize * d.pix_size + 100000).min(h.nx * d.pix_size);
+            if d.bytes_since_check > 4000000 {
+                d.bytes_since_check = 0;
+                return crate::imod::libiimod::iimage::ii_check_for_quit(d.cz);
+            }
+        }
+    }
+    0
+}
+pub unsafe fn mrc_write_z(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
+    let mut save: ImodImageFile = unsafe { core::mem::zeroed() };
+    let file = unsafe { lookup_ii_file(hdata, li, 3, &mut save) };
+    if !file.is_null() {
+        unsafe {
+            ii_sync_from_mrc_header(file, hdata);
+            if (*file).file == IIFILE_MRC && (*file).header.cast::<MrcHeader>() != hdata {
+                core::ptr::copy_nonoverlapping(hdata, (*file).header.cast::<MrcHeader>(), 1);
+            }
+        }
+        let answer = unsafe {
+            match (*file).write_section {
+                Some(func) => func(file, buf.cast(), z),
+                None => -1,
+            }
+        };
+        return unsafe {
+            crate::imod::libiimod::iimage::ii_restore_load_params(answer, file, &mut save)
+        };
+    }
+    unsafe { mrc_write_section_any(hdata, li, buf, z, (*hdata).mode) }
+}
+pub unsafe fn mrc_write_z_float(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut f32,
+    z: i32,
+) -> i32 {
+    let mut save: ImodImageFile = unsafe { core::mem::zeroed() };
+    let file = unsafe { lookup_ii_file(hdata, li, 3, &mut save) };
+    if !file.is_null() {
+        unsafe {
+            ii_sync_from_mrc_header(file, hdata);
+            if (*file).file == IIFILE_MRC && (*file).header.cast::<MrcHeader>() != hdata {
+                core::ptr::copy_nonoverlapping(hdata, (*file).header.cast::<MrcHeader>(), 1);
+            }
+        }
+        let answer = unsafe {
+            match (*file).write_section_float {
+                Some(func) => func(file, buf.cast(), z),
+                None => -1,
+            }
+        };
+        return unsafe {
+            crate::imod::libiimod::iimage::ii_restore_load_params(answer, file, &mut save)
+        };
+    }
+    unsafe {
+        mrc_write_section_any(
+            hdata,
+            li,
+            buf.cast(),
+            z,
+            if (*hdata).mode == MRC_MODE_COMPLEX_FLOAT || (*hdata).mode == MRC_MODE_COMPLEX_SHORT {
+                (*hdata).mode
+            } else {
+                MRC_MODE_FLOAT
+            },
+        )
+    }
+}
+pub unsafe fn mrc_write_section_any(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    buf: *mut u8,
+    cz: i32,
+    buf_mode: i32,
+) -> i32 {
+    let h = unsafe { &*hdata };
+    let l = unsafe { &*li };
+    let fin = h.fp.cast::<libc::FILE>();
+    if l.xmin != 0 || l.xmax != h.nx - 1 {
+        return 1;
+    }
+    let mut bytes_chan = 0;
+    let mut channels = 0;
+    if mrc_getdcsize(h.mode, &mut bytes_chan, &mut channels) != 0 {
+        return -1;
+    }
+    if h.half_floats != 0 && h.mode == MRC_MODE_FLOAT {
+        bytes_chan = 2;
+    }
+    let pix_out = bytes_chan * channels;
+    let mut buf_bytes = 0;
+    let mut buf_channels = 0;
+    if mrc_getdcsize(buf_mode, &mut buf_bytes, &mut buf_channels) != 0 {
+        return -1;
+    }
+    let pix_buf = buf_bytes * buf_channels;
+    if h.mode != buf_mode
+        && !matches!(
+            h.mode,
+            MRC_MODE_BYTE | MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT
+        )
+    {
+        return 1;
+    }
+    let pack = h.mode == MRC_MODE_BYTE && h.packed4bits != 0;
+    let signed = h.mode == MRC_MODE_BYTE && h.bytes_signed != 0 && !pack;
+    let nx_seek = if pack { (h.nx + 1) / 2 } else { h.nx };
+    let bytes_line = nx_seek * pix_out;
+    let need = h.mode != buf_mode
+        || h.half_floats != 0
+        || h.swapped != 0 && bytes_chan > 1
+        || signed
+        || pack
+        || h.y_inverted != 0
+        || l.pad_left > 0
+        || l.pad_right > 0;
+    let mut chunk_lines = (l.ymax + 1 - l.ymin).min((100_000_000 / bytes_line).max(1));
+    if need {
+        chunk_lines =
+            ((2_000_000_f32 / bytes_line as f32 + 0.5) as i32).clamp(1, l.ymax + 1 - l.ymin);
+    }
+    let temp = if need {
+        unsafe { libc::malloc((bytes_line * chunk_lines) as usize).cast::<u8>() }
+    } else {
+        core::ptr::null_mut()
+    };
+    if need && temp.is_null() {
+        return 2;
+    }
+    if unsafe {
+        mrc_huge_seek(
+            fin,
+            h.header_size + h.section_skip * cz,
+            0,
+            l.ymin,
+            cz,
+            nx_seek,
+            h.ny,
+            pix_out,
+            libc::SEEK_SET,
+        )
+    } != 0
+    {
+        if !temp.is_null() {
+            unsafe { libc::free(temp.cast()) }
+        };
+        return 3;
+    }
+    let xdim = h.nx + l.pad_left.max(0) + l.pad_right.max(0);
+    let mut line = if h.y_inverted != 0 { l.ymax } else { l.ymin };
+    let step = if h.y_inverted != 0 { -1 } else { 1 };
+    let mut lines_in_chunk = 0_i32;
+    let mut chunk_write_ptr: *mut u8 = core::ptr::null_mut();
+    while line >= l.ymin && line <= l.ymax {
+        let src = unsafe {
+            buf.offset(
+                (line - l.ymin) as isize * xdim as isize * pix_buf as isize
+                    + l.pad_left.max(0) as isize * pix_buf as isize,
+            )
+        };
+        let out = if temp.is_null() {
+            src
+        } else {
+            unsafe { temp.add((lines_in_chunk * bytes_line) as usize) }
+        };
+        if lines_in_chunk == 0 {
+            chunk_write_ptr = out;
+        }
+        unsafe {
+            if h.mode != buf_mode || h.half_floats != 0 {
+                crate::imod::libiimod::iimage::ii_convert_line_of_floats(
+                    src.cast(),
+                    out,
+                    h.nx,
+                    if h.half_floats != 0 {
+                        crate::imod::libiimod::mrcfiles::MRC_MODE_HALF_FLOAT
+                    } else {
+                        h.mode
+                    },
+                    h.bytes_signed,
+                    pack as i32,
+                );
+            } else if pack {
+                for i in 0..(h.nx / 2) as usize {
+                    *out.add(i) =
+                        ((*src.add(2 * i)).min(15)) | ((*src.add(2 * i + 1)).min(15) << 4);
+                }
+                if h.nx & 1 != 0 {
+                    *out.add((h.nx / 2) as usize) = (*src.add((h.nx - 1) as usize)).min(15);
+                }
+            } else if signed {
+                for i in 0..h.nx as usize {
+                    *out.add(i) = (*src.add(i) as i8).wrapping_sub(-128) as u8;
+                }
+            } else if !temp.is_null() {
+                core::ptr::copy_nonoverlapping(src, out, (h.nx * pix_out) as usize);
+            }
+            if h.swapped != 0 && bytes_chan > 1 {
+                if bytes_chan == 2 {
+                    mrc_swap_shorts(
+                        core::slice::from_raw_parts_mut(out.cast(), (h.nx * channels) as usize),
+                        (h.nx * channels) as usize,
+                    )
+                } else {
+                    mrc_swap_floats(
+                        core::slice::from_raw_parts_mut(out.cast(), (h.nx * channels) as usize),
+                        (h.nx * channels) as usize,
+                    )
+                }
+            }
+        }
+        lines_in_chunk += 1;
+        let last_line = if step > 0 {
+            line + step > l.ymax
+        } else {
+            line + step < l.ymin
+        };
+        if lines_in_chunk == chunk_lines || last_line {
+            if unsafe {
+                libc::fwrite(
+                    chunk_write_ptr.cast(),
+                    pix_out as usize,
+                    (nx_seek * lines_in_chunk) as usize,
+                    fin,
+                )
+            } != (nx_seek * lines_in_chunk) as usize
+            {
+                if !temp.is_null() {
+                    unsafe { libc::free(temp.cast()) }
+                }
+                return 3;
+            }
+            lines_in_chunk = 0;
+        }
+        line += step;
+    }
+    if !temp.is_null() {
+        unsafe { libc::free(temp.cast()) }
+    };
+    0
+}
+pub unsafe fn lookup_ii_file(
+    hdata: *mut MrcHeader,
+    li: *mut LoadInfo,
+    axis: i32,
+    ii_save: *mut ImodImageFile,
+) -> *mut ImodImageFile {
+    unsafe {
+        if ii_calling_read_or_write() != 0 {
+            return core::ptr::null_mut();
+        }
+        let ii_file = ii_lookup_file_from_fp((*hdata).fp.cast());
+        if ii_file.is_null() || (*ii_file).file == IIFILE_MRC || (*ii_file).file == IIFILE_RAW {
+            return core::ptr::null_mut();
+        }
+        ii_save_load_params(ii_file, ii_save);
+        (*ii_file).llx = (*li).xmin;
+        (*ii_file).urx = (*li).xmax;
+        if axis == 3 {
+            (*ii_file).lly = (*li).ymin;
+            (*ii_file).ury = (*li).ymax;
+        } else {
+            (*ii_file).llz = (*li).zmin;
+            (*ii_file).urz = (*li).zmax;
+        }
+        (*ii_file).axis = axis;
+        (*ii_file).pad_left = (*li).pad_left;
+        (*ii_file).pad_right = (*li).pad_right;
+        (*ii_file).slope = (*li).slope;
+        (*ii_file).offset = (*li).offset;
+        ii_file
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::imod::libiimod::mrcfiles::{
+        mrc_head_new, mrc_head_read, mrc_head_write, mrc_init_li,
+    };
+
+    #[test]
+    fn byte_line_to_float_preserves_unsigned_pixels() {
+        unsafe {
+            let mut header: MrcHeader = core::mem::zeroed();
+            header.nx = 3;
+            header.ny = 1;
+            header.nz = 1;
+            header.mode = MRC_MODE_BYTE;
+            let mut load: LoadInfo = core::mem::zeroed();
+            load.xmin = 0;
+            load.xmax = 2;
+            load.ymin = 0;
+            load.ymax = 0;
+            load.zmin = 0;
+            load.zmax = 0;
+            load.slope = 1.0;
+            load.outmax = 255;
+            let mut input = [0_u8, 17, 255];
+            let mut output = [0.0_f32; 3];
+            let mut data: LineProcData = core::mem::zeroed();
+            let mut free_map = 0;
+            let mut y_end = 0;
+            data.type_ = MRSA_FLOAT;
+            data.read_y = 0;
+            assert_eq!(
+                ii_init_read_section_any(
+                    &mut header,
+                    &mut load,
+                    output.as_mut_ptr().cast(),
+                    &mut data,
+                    &mut free_map,
+                    &mut y_end,
+                    c"test".as_ptr(),
+                ),
+                0
+            );
+            assert_eq!(
+                ii_process_read_line(
+                    &mut header,
+                    &mut load,
+                    &mut data,
+                    input.as_mut_ptr(),
+                    output.as_mut_ptr().cast(),
+                ),
+                0
+            );
+            assert_eq!(output, [0.0, 17.0, 255.0]);
+        }
+    }
+
+    #[test]
+    fn packed_four_bit_line_uses_low_then_high_nibbles() {
+        unsafe {
+            let mut header: MrcHeader = core::mem::zeroed();
+            header.nx = 4;
+            header.ny = 1;
+            header.nz = 1;
+            header.mode = MRC_MODE_BYTE;
+            header.packed4bits = 1;
+            let mut load: LoadInfo = core::mem::zeroed();
+            load.xmin = 0;
+            load.xmax = 3;
+            load.ymin = 0;
+            load.ymax = 0;
+            load.zmin = 0;
+            load.zmax = 0;
+            load.slope = 1.0;
+            load.outmax = 255;
+            let mut input = [0x21_u8, 0x43];
+            let mut output = [0.0_f32; 4];
+            let mut data: LineProcData = core::mem::zeroed();
+            let mut free_map = 0;
+            let mut y_end = 0;
+            data.type_ = MRSA_FLOAT;
+            assert_eq!(
+                ii_init_read_section_any(
+                    &mut header,
+                    &mut load,
+                    output.as_mut_ptr().cast(),
+                    &mut data,
+                    &mut free_map,
+                    &mut y_end,
+                    c"test".as_ptr(),
+                ),
+                0
+            );
+            assert_eq!(
+                ii_process_read_line(
+                    &mut header,
+                    &mut load,
+                    &mut data,
+                    input.as_mut_ptr(),
+                    output.as_mut_ptr().cast(),
+                ),
+                0
+            );
+            assert_eq!(output, [1.0, 2.0, 3.0, 4.0]);
+        }
+    }
+
+    #[test]
+    fn rgb_float_conversion_retains_weighted_fraction() {
+        unsafe {
+            let mut header: MrcHeader = core::mem::zeroed();
+            header.nx = 1;
+            header.ny = 1;
+            header.nz = 1;
+            header.mode = MRC_MODE_RGB;
+            let mut load: LoadInfo = core::mem::zeroed();
+            load.xmin = 0;
+            load.xmax = 0;
+            load.ymin = 0;
+            load.ymax = 0;
+            load.zmin = 0;
+            load.zmax = 0;
+            load.slope = 1.0;
+            load.outmax = 255;
+            let mut input = [1_u8, 2, 3];
+            let mut output = [0.0_f32; 1];
+            let mut data: LineProcData = core::mem::zeroed();
+            let mut free_map = 0;
+            let mut y_end = 0;
+            data.type_ = MRSA_FLOAT;
+            assert_eq!(
+                ii_init_read_section_any(
+                    &mut header,
+                    &mut load,
+                    output.as_mut_ptr().cast(),
+                    &mut data,
+                    &mut free_map,
+                    &mut y_end,
+                    c"test".as_ptr(),
+                ),
+                0
+            );
+            assert_eq!(
+                ii_process_read_line(
+                    &mut header,
+                    &mut load,
+                    &mut data,
+                    input.as_mut_ptr(),
+                    output.as_mut_ptr().cast(),
+                ),
+                0
+            );
+            assert_eq!(output, [1.81]);
+        }
+    }
+
+    #[test]
+    fn inverted_y_complex_section_from_real_mrc_starts_at_last_output_row() {
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-inverted-complex-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(
+                mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_COMPLEX_FLOAT),
+                0
+            );
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let values = [0.0_f32, 0.0, 2.0, 0.0, 4.0, 0.0, 6.0, 0.0];
+            assert_eq!(
+                libc::fwrite(
+                    values.as_ptr().cast(),
+                    core::mem::size_of::<f32>(),
+                    values.len(),
+                    file,
+                ),
+                values.len()
+            );
+            libc::fclose(file);
+
+            let file = libc::fopen(path.as_ptr(), c"rb".as_ptr());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut header), 0);
+            header.fp = file.cast();
+            header.y_inverted = 1;
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            load.slope = 10.;
+            let mut output = [0_u8; 4];
+            assert_eq!(
+                mrc_read_z_byte(&mut header, &mut load, output.as_mut_ptr(), 0),
+                0
+            );
+            libc::fclose(file);
+            assert_eq!(output, [30, 34, 0, 23]);
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+}

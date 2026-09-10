@@ -1,0 +1,385 @@
+use imod_rs::imod::libiimod::iimage::{
+    IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_read_section_float,
+    ii_sync_from_mrc_header, ii_write_section_float,
+};
+use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
+use std::ffi::CString;
+use std::process::Command;
+
+#[test]
+fn trimvol_removed_s_option_exits_as_the_python_command_does() {
+    let output = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .arg("-s")
+        .output()
+        .expect("run trimvol removed option");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("The -s option has been eliminated; use -sz instead and add -f")
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
+    let base = std::env::temp_dir().join(format!("imod-rs-trimvol-mode-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut section = [1.0_f32, 2., 3., 4.];
+        assert_eq!(
+            ii_write_section_float(file, section.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .args([
+            "-mode",
+            "1",
+            "-c",
+            "0,10",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run trimvol mode/contrast conflict");
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        "ERROR: trimvol - You cannot enter -mode with -c, or when running findcontrast\n"
+    );
+    assert!(result.stderr.is_empty());
+    assert!(!output.exists());
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
+    let base = std::env::temp_dir().join(format!("imod-rs-trimvol-oldflip-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 2, 3, 4, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for z in 0..4 {
+            let mut section = [
+                (z * 10) as f32,
+                (z * 10 + 1) as f32,
+                (z * 10 + 2) as f32,
+                (z * 10 + 3) as f32,
+                (z * 10 + 4) as f32,
+                (z * 10 + 5) as f32,
+            ];
+            assert_eq!(
+                ii_write_section_float(file, section.as_mut_ptr().cast(), z),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .args([
+            "-f",
+            "-old",
+            "1",
+            "-y",
+            "2,3",
+            "-z",
+            "1,2",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run trimvol old flipped coordinates");
+    assert!(result.status.success(), "{:?}", result);
+    let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
+        let mut section = [0.0_f32; 4];
+        assert_eq!(
+            ii_read_section_float(file, section.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(section, [10., 11., 12., 13.]);
+        assert_eq!(
+            ii_read_section_float(file, section.as_mut_ptr().cast(), 1),
+            0
+        );
+        assert_eq!(section, [20., 21., 22., 23.]);
+        ii_close(file);
+    }
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
+    let base = std::env::temp_dir().join(format!(
+        "imod-rs-trimvol-oldflip-even-{}",
+        std::process::id()
+    ));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 2, 3, 4, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for z in 0..4 {
+            let mut section = [
+                (z * 10) as f32,
+                (z * 10 + 1) as f32,
+                (z * 10 + 2) as f32,
+                (z * 10 + 3) as f32,
+                (z * 10 + 4) as f32,
+                (z * 10 + 5) as f32,
+            ];
+            assert_eq!(
+                ii_write_section_float(file, section.as_mut_ptr().cast(), z),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .args([
+            "-f",
+            "-old",
+            "2",
+            "-y",
+            "2,3",
+            "-z",
+            "1,2",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run trimvol even old flipped coordinates");
+    assert!(result.status.success(), "{:?}", result);
+    let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
+        let mut section = [0.0_f32; 4];
+        assert_eq!(
+            ii_read_section_float(file, section.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(section, [12., 13., 14., 15.]);
+        assert_eq!(
+            ii_read_section_float(file, section.as_mut_ptr().cast(), 1),
+            0
+        );
+        assert_eq!(section, [22., 23., 24., 25.]);
+        ii_close(file);
+    }
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
+    let base = std::env::temp_dir().join(format!("imod-rs-trimvol-minmax-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut section = [10.0_f32, 20., 30., 40.];
+        assert_eq!(
+            ii_write_section_float(file, section.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .args([
+            "-mm",
+            "100,200",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run trimvol integer min/max scaling");
+    assert!(result.status.success(), "{:?}", result);
+    let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!(header.mode, 1);
+        let mut section = [0.0_f32; 4];
+        assert_eq!(
+            ii_read_section_float(file, section.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+        for (actual, expected) in section.into_iter().zip([100., 133., 167., 200.]) {
+            assert!((actual - expected).abs() <= 1., "{actual} != {expected}");
+        }
+    }
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
+    let base = std::env::temp_dir().join(format!("imod-rs-trimvol-crop-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 3, 3, 2, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut first = [1.0_f32, 2., 3., 4., 5., 6., 7., 8., 9.];
+        let mut second = [11.0_f32, 12., 13., 14., 15., 16., 17., 18., 19.];
+        assert_eq!(
+            ii_write_section_float(file, first.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(
+            ii_write_section_float(file, second.as_mut_ptr().cast(), 1),
+            0
+        );
+        ii_close(file);
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .args([
+            "-x",
+            "2,3",
+            "-y",
+            "1,2",
+            "-z",
+            "1,2",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{:?}", result);
+    assert!(String::from_utf8_lossy(&result.stdout).contains("newstack -siz 2,2 -off 1,0"));
+    let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
+        let mut pixels = [0.0_f32; 4];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(pixels, [2., 3., 5., 6.]);
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 1),
+            0
+        );
+        assert_eq!(pixels, [12., 13., 15., 16.]);
+        ii_close(file);
+    }
+    let bytes = std::fs::read(&output).unwrap();
+    let pixels: Vec<f32> = bytes[1024..]
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
+    assert_eq!(pixels, [2., 3., 5., 6., 12., 13., 15., 16.]);
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn trimvol_flip_yz_preserves_clip_plane_order() {
+    let base = std::env::temp_dir().join(format!("imod-rs-trimvol-flip-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 2, 2, 3, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for (z, mut section) in [
+            [1.0_f32, 2., 3., 4.],
+            [11.0_f32, 12., 13., 14.],
+            [21.0_f32, 22., 23., 24.],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                ii_write_section_float(file, section.as_mut_ptr().cast(), z as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_trimvol"))
+            .args(["-yz", input.to_str().unwrap(), output.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.nx, header.ny, header.nz), (2, 3, 2));
+        let mut pixels = [0.0_f32; 6];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(pixels, [1., 2., 11., 12., 21., 22.]);
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 1),
+            0
+        );
+        assert_eq!(pixels, [3., 4., 13., 14., 23., 24.]);
+        ii_close(file);
+    }
+    let bytes = std::fs::read(&output).unwrap();
+    let pixels: Vec<f32> = bytes[1024..]
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect();
+    assert_eq!(
+        pixels,
+        [1., 2., 11., 12., 21., 22., 3., 4., 13., 14., 23., 24.]
+    );
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}

@@ -1,0 +1,381 @@
+//! Translation of `IMOD/libcfshr/findtransform.c`.
+#![allow(dead_code)]
+
+use super::linearxforms::{xf_apply, xf_unit};
+use super::regression::{mult_regress, robust_regress, stat_matrices};
+
+static mut S_KFACTOR: f32 = 0.;
+static mut S_MAX_CHANGE: f32 = 0.;
+static mut S_MAX_OSCILL: f32 = 0.;
+static mut S_MAX_ITER: i32 = 0;
+static mut S_MAX_ZERO_WGT: i32 = 0;
+
+/// Original `findTransform` (`findtransform.c:59`).
+pub unsafe fn find_transform(
+    x_mat: *mut f32,
+    m_size: i32,
+    icol_x: i32,
+    num_points: i32,
+    xcen: f32,
+    y_cen: f32,
+    if_trans: i32,
+    if_rotrans: i32,
+    mut if_dev: i32,
+    xf: *mut f32,
+    dev_avg: *mut f32,
+    dev_sd: *mut f32,
+    dev_max: *mut f32,
+    ipnt_max: *mut i32,
+) -> i32 {
+    unsafe {
+        let icol_y = icol_x + 1;
+        let mut array_tot = icol_y * 5
+            + icol_y * icol_y
+            + (3 * icol_y * icol_y).max(if S_KFACTOR != 0. { 2 * num_points } else { 0 });
+        let mut num_extra = 0;
+        if if_dev < 0 {
+            if_dev = -if_dev;
+            num_extra = 0.max(*ipnt_max);
+        }
+        if array_tot < 0 {
+            return -1;
+        }
+        let mut array = vec![0_f32; array_tot as usize];
+        let sum_x = array.as_mut_ptr();
+        let x_mean = sum_x.add(icol_y as usize);
+        let sd = x_mean.add(icol_y as usize);
+        let ss_mat = sd.add(icol_y as usize);
+        let ss_dev = ss_mat.add((icol_y * icol_y) as usize);
+        let d_mat = ss_dev.add((icol_y * icol_y) as usize);
+        let r_mat = d_mat.add((icol_y * icol_y) as usize);
+        xf_unit(core::slice::from_raw_parts_mut(xf, 6), 1., 2);
+        if if_rotrans == 0 && if_trans == 0 {
+            if icol_x > 3 {
+                for i in 0..num_points {
+                    *x_mat.add((i * m_size + 2) as usize) = *x_mat.add((i * m_size + 3) as usize);
+                    *x_mat.add((i * m_size + 3) as usize) = *x_mat.add((i * m_size + 4) as usize);
+                }
+            }
+            let mut b_mat = [0_f32; 4];
+            let mut c_vec = [0_f32; 2];
+            let mut isol = 1;
+            if S_KFACTOR != 0. {
+                isol = robust_regress(
+                    x_mat,
+                    m_size,
+                    1,
+                    2,
+                    num_points,
+                    2,
+                    b_mat.as_mut_ptr(),
+                    2,
+                    c_vec.as_mut_ptr(),
+                    x_mean,
+                    sd,
+                    ss_mat,
+                    S_KFACTOR,
+                    ipnt_max,
+                    S_MAX_ITER,
+                    S_MAX_ZERO_WGT,
+                    S_MAX_CHANGE,
+                    S_MAX_OSCILL,
+                );
+            }
+            if isol != 0 {
+                isol = mult_regress(
+                    x_mat,
+                    m_size,
+                    1,
+                    2,
+                    num_points,
+                    2,
+                    0,
+                    b_mat.as_mut_ptr(),
+                    2,
+                    c_vec.as_mut_ptr(),
+                    x_mean,
+                    sd,
+                    ss_mat,
+                );
+                for i in 0..num_points {
+                    *x_mat.add((i * m_size + 4) as usize) = 1.;
+                }
+            }
+            if isol != 0 {
+                S_KFACTOR = 0.;
+                return isol;
+            }
+            for i in 0..2 {
+                *xf.add(i as usize) = b_mat[(i * 2) as usize];
+                *xf.add((2 + i) as usize) = b_mat[(i * 2 + 1) as usize];
+                *xf.add((4 + i) as usize) = c_vec[i as usize];
+            }
+            if icol_x > 3 {
+                for i in 0..num_points {
+                    if S_KFACTOR != 0. {
+                        *x_mat.add((i * m_size + 5) as usize) =
+                            *x_mat.add((i * m_size + 4) as usize);
+                    }
+                    *x_mat.add((i * m_size + 4) as usize) = *x_mat.add((i * m_size + 3) as usize);
+                    *x_mat.add((i * m_size + 3) as usize) = *x_mat.add((i * m_size + 2) as usize);
+                }
+            }
+        } else if if_rotrans == 0 {
+            for isol in 0..2 {
+                let mut constant = 0.;
+                for i in 0..num_points {
+                    constant += *x_mat.add((i * m_size + icol_x + isol - 1) as usize)
+                        - *x_mat.add((i * m_size + isol) as usize);
+                }
+                *xf.add((4 + isol) as usize) = constant / num_points as f32;
+            }
+        } else {
+            stat_matrices(
+                x_mat, m_size, 1, icol_y, icol_y, num_points, sum_x, ss_mat, ss_dev, d_mat, r_mat,
+                x_mean, sd, 1,
+            );
+            let theta = -((*ss_dev.add(((icol_x - 1) * icol_y + 1) as usize)
+                - *ss_dev.add((icol_x * icol_y) as usize))
+                / (*ss_dev.add(((icol_x - 1) * icol_y) as usize)
+                    + *ss_dev.add((icol_x * icol_y + 1) as usize)))
+            .atan();
+            let mut sin_theta = theta.sin();
+            let mut cos_theta = theta.cos();
+            if if_rotrans == 2 {
+                let gmag = ((*ss_dev.add(((icol_x - 1) * icol_y) as usize)
+                    + *ss_dev.add((icol_x * icol_y + 1) as usize))
+                    * cos_theta
+                    - (*ss_dev.add(((icol_x - 1) * icol_y + 1) as usize)
+                        - *ss_dev.add((icol_x * icol_y) as usize))
+                        * sin_theta)
+                    / (*ss_dev.add((icol_y) as usize) + *ss_dev.add((icol_y + 1) as usize));
+                sin_theta *= gmag;
+                cos_theta *= gmag;
+            }
+            *xf = cos_theta;
+            *xf.add(2) = -sin_theta;
+            *xf.add(1) = sin_theta;
+            *xf.add(3) = cos_theta;
+            *xf.add(4) = *x_mean.add((icol_x - 1) as usize) - *x_mean * cos_theta
+                + *x_mean.add(1) * sin_theta;
+            *xf.add(5) = *x_mean.add((icol_y - 1) as usize)
+                - *x_mean * sin_theta
+                - *x_mean.add(1) * cos_theta;
+        }
+        S_KFACTOR = 0.;
+        if if_dev == 0 {
+            return 0;
+        }
+        let mut dev_sum = 0.;
+        let mut dev_sum_sq = 0.;
+        *dev_max = -1.;
+        for ipnt in 0..num_points + num_extra {
+            let (xx, yy) = xf_apply(
+                core::slice::from_raw_parts(xf, 6),
+                0.,
+                0.,
+                *x_mat.add((ipnt * m_size) as usize),
+                *x_mat.add((ipnt * m_size + 1) as usize),
+                2,
+            );
+            let x_dev = *x_mat.add((ipnt * m_size + icol_x - 1) as usize) - xx;
+            let y_dev = *x_mat.add((ipnt * m_size + icol_y - 1) as usize) - yy;
+            let dev_pnt = (x_dev * x_dev + y_dev * y_dev).sqrt();
+            *x_mat.add((ipnt * m_size + 9) as usize) = x_dev;
+            *x_mat.add((ipnt * m_size + 10) as usize) = y_dev;
+            *x_mat.add((ipnt * m_size + 12) as usize) = dev_pnt;
+            if ipnt < num_points {
+                dev_sum += dev_pnt;
+                dev_sum_sq += dev_pnt * dev_pnt;
+                if dev_pnt > *dev_max {
+                    *dev_max = dev_pnt;
+                    *ipnt_max = ipnt + 1;
+                }
+            }
+            if if_dev > 1 {
+                *x_mat.add((ipnt * m_size + 7) as usize) =
+                    *x_mat.add((ipnt * m_size + icol_x - 1) as usize) + xcen;
+                *x_mat.add((ipnt * m_size + 8) as usize) =
+                    *x_mat.add((ipnt * m_size + icol_y - 1) as usize) + y_cen;
+                *x_mat.add((ipnt * m_size + 11) as usize) =
+                    if x_dev.abs() > 1.0e-6 && y_dev.abs() > 1.0e-6 {
+                        y_dev.atan2(x_dev) / 0.017453292519943295
+                    } else {
+                        0.
+                    };
+            }
+        }
+        *dev_avg = 0.;
+        *dev_sd = 0.;
+        if num_points > 0 {
+            *dev_avg = dev_sum / num_points as f32;
+            if num_points > 1 {
+                let den = (dev_sum_sq - num_points as f32 * *dev_avg * *dev_avg)
+                    / (num_points as f32 - 1.);
+                if den > 0. {
+                    *dev_sd = den.sqrt();
+                }
+            }
+        }
+        0
+    }
+}
+
+/// Original `findxf` (`findtransform.c:225`).
+pub unsafe fn findxf(
+    x_mat: *mut f32,
+    m_size: *mut i32,
+    icol_x: *mut i32,
+    num_points: *mut i32,
+    xcen: *mut f32,
+    y_cen: *mut f32,
+    if_trans: *mut i32,
+    if_rotrans: *mut i32,
+    if_dev: *mut i32,
+    xf: *mut f32,
+    dev_avg: *mut f32,
+    dev_sd: *mut f32,
+    dev_max: *mut f32,
+    ipnt_max: *mut i32,
+) {
+    unsafe {
+        if find_transform(
+            x_mat,
+            *m_size,
+            *icol_x,
+            *num_points,
+            *xcen,
+            *y_cen,
+            *if_trans,
+            *if_rotrans,
+            *if_dev,
+            xf,
+            dev_avg,
+            dev_sd,
+            dev_max,
+            ipnt_max,
+        ) != 0
+        {
+            print!("ERROR: Findxf function - Allocating array for matrices\n");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Original `findXfRobustParams` (`findtransform.c:242`).
+pub unsafe fn find_xf_robust_params(
+    k_factor: f32,
+    max_iter: i32,
+    max_zero_wgt: i32,
+    max_change: f32,
+    max_oscill: f32,
+) {
+    unsafe {
+        S_KFACTOR = k_factor;
+        S_MAX_ITER = max_iter;
+        S_MAX_ZERO_WGT = max_zero_wgt;
+        S_MAX_CHANGE = max_change;
+        S_MAX_OSCILL = max_oscill;
+    }
+}
+
+/// Original `findxfrobustparams` (`findtransform.c:253`).
+pub unsafe fn findxfrobustparams(
+    kfactor: *mut f32,
+    max_iter: *mut i32,
+    max_zero_wgt: *mut i32,
+    max_change: *mut f32,
+    max_oscill: *mut f32,
+) {
+    unsafe {
+        find_xf_robust_params(*kfactor, *max_iter, *max_zero_wgt, *max_change, *max_oscill);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn translation_and_deviation_columns_match_source_layout() {
+        unsafe {
+            let mut x = vec![0_f32; 13 * 3];
+            for i in 0..3 {
+                x[i * 13] = i as f32;
+                x[i * 13 + 1] = 2. * i as f32;
+                x[i * 13 + 2] = i as f32 + 3.;
+                x[i * 13 + 3] = 2. * i as f32 - 4.;
+            }
+            let mut xf = [0.; 6];
+            let mut avg = 0.;
+            let mut sd = 0.;
+            let mut max = 0.;
+            let mut at = 0;
+            assert_eq!(
+                find_transform(
+                    x.as_mut_ptr(),
+                    13,
+                    3,
+                    3,
+                    0.,
+                    0.,
+                    1,
+                    0,
+                    2,
+                    xf.as_mut_ptr(),
+                    &mut avg,
+                    &mut sd,
+                    &mut max,
+                    &mut at
+                ),
+                0
+            );
+            assert_eq!(xf, [1., 0., 0., 1., 3., -4.]);
+            assert_eq!(avg, 0.);
+            assert_eq!(max, 0.);
+            assert_eq!(at, 1);
+            assert_eq!(x[7], 3.);
+            assert_eq!(x[8], -4.);
+        }
+    }
+
+    #[test]
+    fn general_affine_fit_uses_the_two_output_columns() {
+        unsafe {
+            let mut x = vec![0_f32; 5 * 4];
+            let points = [(0., 0.), (1., 0.), (0., 1.), (2., -1.)];
+            for (i, (px, py)) in points.into_iter().enumerate() {
+                x[5 * i] = px;
+                x[5 * i + 1] = py;
+                x[5 * i + 2] = 2. * px + 3. * py + 4.;
+                x[5 * i + 3] = -px + 0.5 * py - 2.;
+            }
+            let mut xf = [0.; 6];
+            let mut avg = 0.;
+            let mut sd = 0.;
+            let mut max = 0.;
+            let mut at = 0;
+            assert_eq!(
+                find_transform(
+                    x.as_mut_ptr(),
+                    5,
+                    3,
+                    4,
+                    0.,
+                    0.,
+                    0,
+                    0,
+                    0,
+                    xf.as_mut_ptr(),
+                    &mut avg,
+                    &mut sd,
+                    &mut max,
+                    &mut at
+                ),
+                0
+            );
+            for (got, expected) in xf.into_iter().zip([2., -1., 3., 0.5, 4., -2.]) {
+                assert!((got - expected).abs() < 1.0e-5, "{got} != {expected}");
+            }
+        }
+    }
+}
