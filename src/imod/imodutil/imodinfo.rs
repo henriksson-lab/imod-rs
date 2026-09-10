@@ -9,7 +9,7 @@
 use std::env;
 use std::ffi::CString;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 
 use crate::imod::libcfshr::parselist::parselist;
 use crate::imod::libimod::imodel::{
@@ -278,6 +278,12 @@ pub fn imodinfo() {
         }
         if mode == 4 {
             if let Some(file) = file_output.as_mut() {
+                // Source `imodinfo.cpp` assigns fout to model->file; `imodWriteAscii`
+                // then calls rewind(imod->file), replacing the preliminary report.
+                file.seek(SeekFrom::Start(0)).unwrap_or_else(|_| {
+                    eprintln!("ERROR: imodinfo - Writing ASCII output");
+                    std::process::exit(1)
+                });
                 imod_write_ascii(&model, file).unwrap_or_else(|_| {
                     eprintln!("ERROR: imodinfo - Writing ASCII output");
                     std::process::exit(1)
@@ -434,10 +440,14 @@ pub fn imodinfo_print_model(
             model.zscale as f64,
         );
         if obj.flags & IMOD_OBJFLAG_OPEN == 0 && obj.flags & IMOD_OBJFLAG_SCAT == 0 {
-            output.push_str(&format!(
-                ", length = {dist},  area = {}\n",
-                info_contour_vol(Some(cont), obj.flags, 1.0, 1.0)
-            ));
+            let mut area = 0.0_f64;
+            for pt in 0..cont.pts.len() {
+                let next = (pt + 1) % cont.pts.len();
+                area += cont.pts[pt].x as f64 * cont.pts[next].y as f64
+                    - cont.pts[next].x as f64 * cont.pts[pt].y as f64;
+            }
+            area = area.abs() * 0.5 * model.pixsize as f64 * model.pixsize as f64;
+            output.push_str(&format!(", length = {dist},  area = {area}\n",));
         } else {
             output.push_str(&format!("\tlength = {dist} {}\n", print_units(model.units)));
         }
@@ -694,8 +704,25 @@ pub fn imodinfo_full_object_report(
         return String::new();
     }
     let obj = &imod.obj[ob - 1];
-    let (surf, vol, msurf, mvol, inmvol, cent) =
-        compute_object_area_vol(imod, obj, scaninside, subarea, min, max, useclip);
+    // `imodinfo.cpp` deliberately prints the unrestricted object values first;
+    // a clipped/subsetted block, when applicable, follows that report.
+    let (surf, vol, msurf, mvol, inmvol, cent) = compute_object_area_vol(
+        imod,
+        obj,
+        false,
+        false,
+        Ipoint {
+            x: -1.0e30,
+            y: -1.0e30,
+            z: -1.0e30,
+        },
+        Ipoint {
+            x: 1.0e30,
+            y: 1.0e30,
+            z: 1.0e30,
+        },
+        0,
+    );
     let mut output = format!(
         "Object # {}:\n{}\n\tNumber of Contours = {}\n\tNumber of Contours with Data = {}\n\tNumber of Meshes   = {}\n\tNumber of Surfaces = {}\n",
         ob,
@@ -706,15 +733,68 @@ pub fn imodinfo_full_object_report(
         obj.surfsize
     );
     output.push_str(&format!(
+        "\tColor  = (Red, Green, Blue, Alpha) = ({}, {}, {}, {})\n\tAmbient Light  = {}\n\tDiffuse Light  = {}\n\tSpecular Light = {}\n\tShininess      = {}\n",
+        obj.red,
+        obj.green,
+        obj.blue,
+        obj.trans as f32 * 0.01,
+        obj.ambient,
+        obj.diffuse,
+        obj.specular,
+        obj.shininess,
+    ));
+    let mut lower = Ipoint {
+        x: f32::MAX,
+        y: f32::MAX,
+        z: f32::MAX,
+    };
+    let mut upper = Ipoint {
+        x: -f32::MAX,
+        y: -f32::MAX,
+        z: -f32::MAX,
+    };
+    if obj.cont.is_empty() {
+        for mesh in &obj.mesh {
+            for point in &mesh.vert {
+                lower.x = lower.x.min(point.x);
+                lower.y = lower.y.min(point.y);
+                lower.z = lower.z.min(point.z);
+                upper.x = upper.x.max(point.x);
+                upper.y = upper.y.max(point.y);
+                upper.z = upper.z.max(point.z);
+            }
+        }
+    } else {
+        for cont in &obj.cont {
+            for point in &cont.pts {
+                lower.x = lower.x.min(point.x);
+                lower.y = lower.y.min(point.y);
+                lower.z = lower.z.min(point.z);
+                upper.x = upper.x.max(point.x);
+                upper.y = upper.y.max(point.y);
+                upper.z = upper.z.max(point.z);
+            }
+        }
+    }
+    output.push_str(&format!(
+        "\n\tBounding Box   = {{ ({}, {}, {}), ({}, {}, {})}}\n",
+        lower.x, lower.y, lower.z, upper.x, upper.y, upper.z
+    ));
+    output.push_str(&format!(
         "\tCenter         = ({}, {}, {})\n",
         cent.x, cent.y, cent.z
     ));
-    output.push_str(&format!(
-        "\t{} Volume          = {} {}^3\n",
-        if mvol > 0.0 { "Contour" } else { "Cylinder" },
-        if mvol > 0.0 { mvol } else { vol },
-        print_units(imod.units)
-    ));
+    if mvol > 0.0 {
+        output.push_str(&format!(
+            "\tContour Volume          = {mvol} {}^3\n",
+            print_units(imod.units)
+        ));
+    } else {
+        output.push_str(&format!(
+            "\tCylinder Volume         = {vol} {}^3\n",
+            print_units(imod.units)
+        ));
+    }
     if inmvol > 0.0 {
         output.push_str(&format!(
             "\tVolume Inside Mesh      = {inmvol} {}^3\n",
@@ -727,6 +807,60 @@ pub fn imodinfo_full_object_report(
         if msurf > 0.0 { msurf } else { surf },
         print_units(imod.units)
     ));
+    let mut num_clips = 0;
+    for clip in 0..obj.clips.count as usize {
+        if obj.clips.flags & (1 << clip) != 0 {
+            output.push_str(&format!(
+                "\tClip {} Normal    = ({}, {}, {})\n\tClip {} Point     = ({}, {}, {})\n",
+                clip,
+                obj.clips.normal[clip].x,
+                obj.clips.normal[clip].y,
+                obj.clips.normal[clip].z / imod.zscale,
+                clip,
+                obj.clips.point[clip].x,
+                obj.clips.point[clip].y,
+                obj.clips.point[clip].z,
+            ));
+            num_clips += 1;
+        }
+    }
+    if obj.clips.flags & (1 << 7) == 0 {
+        if let Some(view) = imod.view.get(imod.cview.max(0) as usize) {
+            for clip in 0..view.clips.count as usize {
+                if view.clips.flags & (1 << clip) != 0 {
+                    num_clips += 1;
+                }
+            }
+        }
+    }
+    if subarea || (useclip != 0 && num_clips != 0) {
+        output.push_str("    Clipped and/or subsetted values:\n");
+        let (surf, vol, msurf, mvol, _inmvol, _cent) =
+            compute_object_area_vol(imod, obj, scaninside, subarea, min, max, useclip);
+        if mvol > 0.0 {
+            output.push_str(&format!(
+                "\tContour Volume          = {mvol} {}^3\n",
+                print_units(imod.units)
+            ));
+        } else {
+            output.push_str(&format!(
+                "\tCylinder Volume         = {vol} {}^3\n",
+                print_units(imod.units)
+            ));
+        }
+        if msurf > 0.0 {
+            output.push_str(&format!(
+                "\tMesh Surface Area       = {msurf} {}^2\n",
+                print_units(imod.units)
+            ));
+        } else if surf > 0.0 {
+            output.push_str(&format!(
+                "\tCylinder Surface Area   = {surf} {}^2\n",
+                print_units(imod.units)
+            ));
+        }
+    }
+    output.push('\n');
     output
 }
 /// Original: `imodinfo_object` (`imodinfo.cpp:1218`).
@@ -809,7 +943,7 @@ pub fn compute_object_area_vol(
             model.zscale as f64,
         );
         vol += contour_vol;
-        mvol += contour_vol;
+        mvol += contour_vol * contour_volume_factor(obj, cont, min, max) as f64;
         surf += info_contour_length(
             Some(cont),
             obj.flags,
@@ -828,6 +962,7 @@ pub fn compute_object_area_vol(
         cent.y /= weight as f32;
         cent.z /= weight as f32;
     }
+    surf *= model.pixsize as f64 * model.zscale as f64;
     let mut msurf = 0.0;
     for mesh in &obj.mesh {
         msurf += imesh_surface_subarea(

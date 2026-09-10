@@ -7,18 +7,26 @@
 //! the two explicitly spawned analysis programs remain process boundaries.
 #![allow(dead_code)]
 
+use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::libiimod::iimage::{
     IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_read_section_float,
     ii_sync_from_mrc_header,
 };
 use crate::imod::libiimod::mrcfiles::{
-    LoadInfo, MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write,
+    LoadInfo, MRC_MODE_FLOAT, MRC_NLABELS, MrcHeader, mrc_head_new, mrc_head_write,
 };
 use crate::imod::libiimod::mrcsec::mrc_write_section_any;
 use std::ffi::CString;
 
 /// Original Python program top level (`pysrc/trimvol:1`).
 pub fn trimvol() -> i32 {
+    // `pysrc/trimvol:16-29`: the installed command requires its IMOD runtime
+    // root before it imports its command support modules, so this deliberately
+    // precedes even the special-case option handling below.
+    if std::env::var_os("IMOD_DIR").is_none() {
+        println!("ERROR: trimvol -  IMOD_DIR is not defined!");
+        return 1;
+    }
     let mut x_limits = None::<(i32, i32)>;
     let mut y_limits = None::<(i32, i32)>;
     let mut z_limits = None::<(i32, i32)>;
@@ -96,11 +104,27 @@ pub fn trimvol() -> i32 {
         println!("ERROR: trimvol - wrong number of arguments");
         return 1;
     }
-    if x_limits.is_some() && x_size.is_some()
-        || y_limits.is_some() && y_size.is_some()
-        || z_limits.is_some() && z_size.is_some()
-    {
-        println!("ERROR: trimvol - You cannot enter both coordinate and size options for one axis");
+    // `pysrc/trimvol:65-69` checks the input pathname immediately after PIP
+    // has supplied the two positional names, before any option-combination
+    // validation.  Keep that ordering because it controls the command's
+    // observable first diagnostic.
+    if !std::path::Path::new(&positional[0]).exists() {
+        println!(
+            "ERROR: trimvol - Input file {} does not exist",
+            positional[0]
+        );
+        return 1;
+    }
+    if x_limits.is_some() && x_size.is_some() {
+        println!("ERROR: trimvol - You cannot enter both -x and -nx options");
+        return 1;
+    }
+    if y_limits.is_some() && y_size.is_some() {
+        println!("ERROR: trimvol - You cannot enter both -y and -ny options");
+        return 1;
+    }
+    if z_limits.is_some() && z_size.is_some() {
+        println!("ERROR: trimvol - You cannot enter both -z and -nz options");
         return 1;
     }
     if rotate_x && flip_yz {
@@ -285,6 +309,34 @@ pub fn trimvol() -> i32 {
             (out_ny, out_nz)
         };
         mrc_head_new(&mut *out_header, out_nx, final_ny, final_nz, output_mode);
+        // `trimvol:350-360` delegates the ordinary path to newstack.  Its
+        // `iiuTransHeader` preserves input labels and its final
+        // `iiuWriteHeader(..., 1, ...)` appends the NEWSTACK title.  The flip
+        // paths then delegate to clip and have their own title lifecycle.
+        if !rotate_x && !flip_yz {
+            (*out_header).labels = header.labels;
+            (*out_header).nlabl = header.nlabl;
+            (*out_header).nlabl = ((*out_header).nlabl + 1).min(MRC_NLABELS as i32);
+            let mut title = [b' '; 80];
+            title[..23].copy_from_slice(b"NEWSTACK: Images copied");
+            let mut date = [b' '; 9];
+            b3d_date(&mut date);
+            title[56..65].copy_from_slice(&date);
+            let mut now = 0_i64;
+            let mut local = std::mem::zeroed::<libc::tm>();
+            libc::time(&raw mut now);
+            libc::localtime_r(&raw const now, &raw mut local);
+            let mut time = [0_i8; 9];
+            libc::strftime(
+                time.as_mut_ptr(),
+                time.len(),
+                c"%H:%M:%S".as_ptr(),
+                &raw const local,
+            );
+            title[67..75].copy_from_slice(std::slice::from_raw_parts(time.as_ptr().cast(), 8));
+            (&mut (*out_header).labels[((*out_header).nlabl - 1) as usize])[..80]
+                .copy_from_slice(&title);
+        }
         (*out_header).xlen = header.xlen * out_nx as f32 / nx as f32;
         (*out_header).ylen = if rotate_x || flip_yz {
             header.zlen * out_nz as f32 / nz as f32
@@ -319,6 +371,30 @@ pub fn trimvol() -> i32 {
             (*out_header).xorg = header.xorg - x0 as f32 * dx;
             (*out_header).yorg = header.yorg - y0 as f32 * dy;
             (*out_header).zorg = header.zorg - z0 as f32 * dz;
+        }
+        // `trimvol` sends `-rx` through `clip rotx`.  Preserve its direct
+        // rotation-header branch after the equivalent newstack crop/origin
+        // setup above.
+        let pre_rotate_ylen = header.ylen * out_ny as f32 / ny as f32;
+        let pre_rotate_zlen = header.zlen * out_nz as f32 / nz as f32;
+        if rotate_x
+            && out_ny != 0
+            && pre_rotate_ylen != 0.0
+            && out_nz != 0
+            && pre_rotate_zlen != 0.0
+        {
+            for index in 0..3 {
+                (*out_header).tiltangles[index] = header.tiltangles[index + 3];
+            }
+            (*out_header).tiltangles[3] = header.tiltangles[3] - 90.0;
+            (*out_header).tiltangles[4] = header.tiltangles[4];
+            (*out_header).tiltangles[5] = header.tiltangles[5];
+            let ycen = out_ny as f32 / 2.0 - (*out_header).yorg * out_ny as f32 / pre_rotate_ylen;
+            let zcen = out_nz as f32 / 2.0 - (*out_header).zorg * out_nz as f32 / pre_rotate_zlen;
+            (*out_header).yorg =
+                (final_ny as f32 / 2.0 - zcen) * (*out_header).ylen / final_ny as f32;
+            (*out_header).zorg =
+                (final_nz as f32 / 2.0 + ycen) * (*out_header).zlen / final_nz as f32;
         }
         ii_sync_from_mrc_header(output, out_header);
         if mrc_head_write((*output).fp, out_header) != 0 {
@@ -377,7 +453,9 @@ pub fn trimvol() -> i32 {
             for final_y in 0..final_ny {
                 for ox in 0..out_nx {
                     let (oz, oy) = if rotate_x {
-                        (final_ny - 1 - final_y, final_z)
+                        // `trimvol` delegates `-rx` to `clip rotx`; its
+                        // `clip_flip` route rotates by -90 degrees about X.
+                        (final_y, out_ny - 1 - final_z)
                     } else if flip_yz {
                         (final_y, final_z)
                     } else {

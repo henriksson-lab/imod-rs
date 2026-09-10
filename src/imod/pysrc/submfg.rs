@@ -140,7 +140,9 @@ pub fn submfg(arguments: &[OsString]) -> i32 {
             let com_exists = Path::new(&(rootname.clone() + ".com")).exists();
             let pcm_exists = Path::new(&(rootname.clone() + ".pcm")).exists();
             if com_exists && pcm_exists {
-                eprintln!("{prefix}Both {rootname}.com and {rootname}.pcm exist; specify which");
+                // `submfg:127-128`: PIP `exitError` follows the prefix's
+                // default stdout route for command-file resolution errors.
+                println!("{prefix}Both {rootname}.com and {rootname}.pcm exist; specify which");
                 exit_value = 1;
                 if !continue_if_error {
                     break;
@@ -152,7 +154,7 @@ pub fn submfg(arguments: &[OsString]) -> i32 {
             } else if pcm_exists {
                 rootname.clone() + ".pcm"
             } else {
-                eprintln!("{prefix}Neither {rootname}.com nor {rootname}.pcm exists");
+                println!("{prefix}Neither {rootname}.com nor {rootname}.pcm exists");
                 exit_value = 1;
                 if !continue_if_error {
                     break;

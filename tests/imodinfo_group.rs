@@ -88,6 +88,56 @@ fn standard_report_emits_source_object_drawing_and_color_preamble() {
 }
 
 #[test]
+fn standard_report_scales_closed_contour_area_by_source_pixel_size_squared() {
+    let input = std::env::temp_dir().join(format!(
+        "imod-rs-imodinfo-scaled-area-{}.mod",
+        std::process::id()
+    ));
+    imod_file_write(
+        &Imod {
+            pixsize: 2.,
+            obj: vec![Iobj {
+                cont: vec![Icont {
+                    pts: vec![
+                        Ipoint {
+                            x: 0.,
+                            y: 0.,
+                            z: 0.,
+                        },
+                        Ipoint {
+                            x: 4.,
+                            y: 0.,
+                            z: 0.,
+                        },
+                        Ipoint {
+                            x: 0.,
+                            y: 3.,
+                            z: 0.,
+                        },
+                    ],
+                    ..Icont::default()
+                }],
+                ..Iobj::default()
+            }],
+            ..Imod::default()
+        },
+        &input,
+    )
+    .unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    assert!(
+        String::from_utf8(result.stdout)
+            .unwrap()
+            .contains(", length = 24,  area = 24\n")
+    );
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
 fn source_special_edit_writes_its_modified_binary_model() {
     let output = std::env::temp_dir().join(format!(
         "imod-rs-imodinfo-special-{}.mod",
@@ -291,6 +341,177 @@ fn standard_report_emits_source_ref_image_coordinates_for_binary_model() {
     assert!(stdout.contains("#      SCALE  = ( 2, 3, 4)"));
     assert!(stdout.contains("#      OFFSET = ( 5, 6, 7)"));
     assert!(stdout.contains("#      ANGLES = ( 8, 9, 10)"));
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn full_report_uses_source_cylinder_volume_and_surface_scaling() {
+    let input = std::env::temp_dir().join(format!(
+        "imod-rs-imodinfo-cylinder-scaling-{}.mod",
+        std::process::id()
+    ));
+    imod_file_write(
+        &Imod {
+            pixsize: 2.,
+            zscale: 3.,
+            obj: vec![Iobj {
+                name: "scaled triangle".into(),
+                cont: vec![Icont {
+                    pts: vec![
+                        Ipoint {
+                            x: 0.,
+                            y: 0.,
+                            z: 0.,
+                        },
+                        Ipoint {
+                            x: 4.,
+                            y: 0.,
+                            z: 0.,
+                        },
+                        Ipoint {
+                            x: 0.,
+                            y: 3.,
+                            z: 0.,
+                        },
+                    ],
+                    ..Icont::default()
+                }],
+                ..Iobj::default()
+            }],
+            ..Imod::default()
+        },
+        &input,
+    )
+    .unwrap();
+    let rust = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .args(["-F", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(rust.status.success(), "{rust:?}");
+    let rust = String::from_utf8(rust.stdout).unwrap();
+    assert!(
+        rust.contains("Cylinder Volume         = 144 pixels^3"),
+        "{rust}"
+    );
+    assert!(
+        rust.contains("Cylinder Surface Area   = 144 pixels^2"),
+        "{rust}"
+    );
+    for line in [
+        "Color  = (Red, Green, Blue, Alpha) = (0, 0, 0, 0)",
+        "Ambient Light  = 0",
+        "Diffuse Light  = 0",
+        "Specular Light = 0",
+        "Shininess      = 0",
+        "Bounding Box   = { (0, 0, 0), (4, 3, 0)}",
+    ] {
+        assert!(rust.contains(line), "missing {line} in {rust}");
+    }
+
+    let native = std::path::Path::new("/tmp/imod-reference-build/imodutil/imodinfo");
+    if native.exists() {
+        let reference = Command::new(native)
+            .env("LD_LIBRARY_PATH", "/tmp/imod-reference-build/buildlib")
+            .args(["-F", input.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(reference.status.success(), "{reference:?}");
+        let reference = String::from_utf8(reference.stdout).unwrap();
+        assert!(reference.contains("Cylinder Volume         = 144 pixels^3"));
+        assert!(reference.contains("Cylinder Surface Area   = 144 pixels^2"));
+        for line in [
+            "Color  = (Red, Green, Blue, Alpha) = (0, 0, 0, 0)",
+            "Ambient Light  = 0",
+            "Diffuse Light  = 0",
+            "Specular Light = 0",
+            "Shininess      = 0",
+            "Bounding Box   = { (0, 0, 0), (4, 3, 0)}",
+        ] {
+            assert!(reference.contains(line), "missing {line} in {reference}");
+        }
+    }
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn full_report_emits_source_clip_and_secondary_values_block() {
+    let input = std::env::temp_dir().join(format!(
+        "imod-rs-imodinfo-full-clip-{}.mod",
+        std::process::id()
+    ));
+    let mut object = Iobj {
+        name: "clipped open line".into(),
+        flags: IMOD_OBJFLAG_OPEN,
+        cont: vec![Icont {
+            pts: vec![
+                Ipoint {
+                    x: 0.,
+                    y: 0.,
+                    z: 0.,
+                },
+                Ipoint {
+                    x: 4.,
+                    y: 0.,
+                    z: 2.,
+                },
+            ],
+            ..Icont::default()
+        }],
+        ..Iobj::default()
+    };
+    object.clips.count = 1;
+    object.clips.flags = 1;
+    object.clips.normal[0] = Ipoint {
+        x: 1.,
+        y: 2.,
+        z: 4.,
+    };
+    object.clips.point[0] = Ipoint {
+        x: 3.,
+        y: 4.,
+        z: 5.,
+    };
+    imod_file_write(
+        &Imod {
+            zscale: 2.,
+            obj: vec![object],
+            ..Imod::default()
+        },
+        &input,
+    )
+    .unwrap();
+    let rust = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .args(["-F", "-t", "1", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(rust.status.success(), "{rust:?}");
+    let rust = String::from_utf8(rust.stdout).unwrap();
+    for line in [
+        "Clip 0 Normal    = (1, 2, 2)",
+        "Clip 0 Point     = (3, 4, 5)",
+        "Clipped and/or subsetted values:",
+        "Cylinder Volume         = 0 pixels^3",
+    ] {
+        assert!(rust.contains(line), "missing {line} in {rust}");
+    }
+    let native = std::path::Path::new("/tmp/imod-reference-build/imodutil/imodinfo");
+    if native.exists() {
+        let native = Command::new(native)
+            .env("LD_LIBRARY_PATH", "/tmp/imod-reference-build/buildlib")
+            .args(["-F", "-t", "1", input.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(native.status.success(), "{native:?}");
+        let native = String::from_utf8(native.stdout).unwrap();
+        for line in [
+            "Clip 0 Normal    = (1, 2, 2)",
+            "Clip 0 Point     = (3, 4, 5)",
+            "Clipped and/or subsetted values:",
+            "Cylinder Volume         = 0 pixels^3",
+        ] {
+            assert!(native.contains(line), "missing {line} in {native}");
+        }
+    }
     let _ = std::fs::remove_file(input);
 }
 
@@ -570,8 +791,10 @@ fn ascii_file_mode_writes_implemented_binary_model_categories_and_backup() {
     assert!(status.success());
     assert_eq!(std::fs::read_to_string(&backup).unwrap(), "old ascii");
     let text = std::fs::read_to_string(&output).unwrap();
-    assert!(text.starts_with(&format!("# MODEL {}\n", input.display())));
-    assert!(text.contains("# NAME  "));
+    // `imodWriteAscii` rewinds the `-f` stream in the source, so the command
+    // replaces its preliminary report with ASCII rather than appending it.
+    assert!(text.starts_with("# imod ascii file version 2.0\n\n"));
+    assert!(!text.contains("# MODEL "));
     for line in [
         "# imod ascii file version 2.0",
         "angles 1 2 3",

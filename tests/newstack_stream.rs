@@ -4,7 +4,9 @@ use imod_rs::imod::libiimod::iimage::{
     IIFILE_DEFAULT, IIFILE_TIFF, ii_close, ii_fill_mrc_header, ii_open, ii_open_new,
     ii_read_section_float, ii_sync_from_mrc_header, ii_write_section_float,
 };
-use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
+use imod_rs::imod::libiimod::mrcfiles::{
+    MrcHeader, mrc_head_new, mrc_head_write, mrc_write_extra_header,
+};
 use std::ffi::CString;
 use std::process::Command;
 
@@ -19,6 +21,8 @@ fn newstack_streams_real_mrc_sections() {
         assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
+        (*header).nlabl = 1;
+        (&mut (*header).labels[0])[..24].copy_from_slice(b"acquisition source label");
         ii_sync_from_mrc_header(file, header);
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         let mut first = [1.0_f32, 2.0, 3.0, 4.0];
@@ -65,6 +69,9 @@ fn newstack_streams_real_mrc_sections() {
         let mut header = std::mem::zeroed::<MrcHeader>();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 1));
+        assert_eq!(header.nlabl, 2);
+        assert_eq!(&header.labels[0][..24], b"acquisition source label");
+        assert_eq!(&header.labels[1][..23], b"NEWSTACK: Images copied");
         let mut pixels = [0.0_f32; 4];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -75,6 +82,339 @@ fn newstack_streams_real_mrc_sections() {
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn newstack_reorders_real_tilt_stack_from_explicit_angle_file() {
+    let base =
+        std::env::temp_dir().join(format!("imod-rs-newstack-reorder-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let angles = base.with_extension("angles.txt");
+    let reordered = base.with_extension("reordered.txt");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 1, 1, 4, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for (section, value) in [10.0_f32, 20.0, 30.0, 40.0].into_iter().enumerate() {
+            let mut pixel = [value];
+            assert_eq!(
+                ii_write_section_float(file, pixel.as_mut_ptr().cast(), section as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    std::fs::write(&angles, "10\n-20\n0\n20\n").unwrap();
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_newstack"))
+            .args([
+                "-input",
+                input.to_str().unwrap(),
+                "-output",
+                output.to_str().unwrap(),
+                "-reorder",
+                "1",
+                "-angle",
+                angles.to_str().unwrap(),
+                "-newangle",
+                reordered.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        for (section, expected) in [20.0_f32, 30.0, 10.0, 40.0].into_iter().enumerate() {
+            let mut pixel = [f32::NAN];
+            assert_eq!(
+                ii_read_section_float(file, pixel.as_mut_ptr().cast(), section as i32),
+                0
+            );
+            assert_eq!(pixel, [expected]);
+        }
+        ii_close(file);
+    }
+    assert_eq!(
+        std::fs::read_to_string(&reordered).unwrap(),
+        "   -20.00\n     0.00\n    10.00\n    20.00\n"
+    );
+    for path in [input, output, angles, reordered] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn newstack_inserts_tilts_as_generic_mrc_extended_header_reals() {
+    let base = std::env::temp_dir().join(format!("imod-rs-newstack-tilt-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let angles = base.with_extension("angles.txt");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 1, 1, 2, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for (section, value) in [10.0_f32, 20.0].into_iter().enumerate() {
+            let mut pixel = [value];
+            assert_eq!(
+                ii_write_section_float(file, pixel.as_mut_ptr().cast(), section as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    std::fs::write(&angles, "-30.5\n12.25\n").unwrap();
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_newstack"))
+            .args([
+                "-input",
+                input.to_str().unwrap(),
+                "-output",
+                output.to_str().unwrap(),
+                "-tilt",
+                angles.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.next, header.nint, header.nreal), (8, 0, 1));
+        ii_close(file);
+    }
+    let bytes = std::fs::read(&output).unwrap();
+    assert_eq!(bytes.len(), 1024 + 8 + 8);
+    assert_eq!(
+        [
+            f32::from_le_bytes(bytes[1024..1028].try_into().unwrap()),
+            f32::from_le_bytes(bytes[1028..1032].try_into().unwrap()),
+        ],
+        [-30.5, 12.25]
+    );
+    for path in [input, output, angles] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn newstack_replaces_generic_extended_header_tilts_for_selected_sections() {
+    let base = std::env::temp_dir().join(format!(
+        "imod-rs-newstack-existing-tilts-{}",
+        std::process::id()
+    ));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let angles = base.with_extension("angles.txt");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 1, 1, 3, 2), 0);
+        (*header).nint = 0;
+        (*header).nreal = 1;
+        (*header).next = 12;
+        (*header).header_size = 1036;
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut initial_angles = [-60.0_f32, 0.0, 60.0];
+        assert_eq!(
+            mrc_write_extra_header(header, initial_angles.as_mut_ptr().cast(), 12),
+            0
+        );
+        for (section, value) in [10.0_f32, 20.0, 30.0].into_iter().enumerate() {
+            let mut pixel = [value];
+            assert_eq!(
+                ii_write_section_float(file, pixel.as_mut_ptr().cast(), section as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    std::fs::write(&angles, "-4.5\n18.25\n").unwrap();
+    let native_output = base.with_extension("native-output.mrc");
+    if let Ok(native_newstack) = std::env::var("IMOD_NATIVE_NEWSTACK") {
+        assert!(
+            Command::new(native_newstack)
+                .env(
+                    "AUTODOC_DIR",
+                    std::env::var("AUTODOC_DIR")
+                        .unwrap_or_else(|_| "/tmp/imod-reference-build/autodoc".into()),
+                )
+                .args([
+                    "-input",
+                    input.to_str().unwrap(),
+                    "-output",
+                    native_output.to_str().unwrap(),
+                    "-secs",
+                    "2,0",
+                    "-tilt",
+                    angles.to_str().unwrap(),
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_newstack"))
+            .args([
+                "-input",
+                input.to_str().unwrap(),
+                "-output",
+                output.to_str().unwrap(),
+                "-secs",
+                "2,0",
+                "-tilt",
+                angles.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let bytes = std::fs::read(&output).unwrap();
+    assert_eq!(bytes.len(), 1024 + 8 + 8);
+    assert_eq!(
+        [
+            f32::from_le_bytes(bytes[1024..1028].try_into().unwrap()),
+            f32::from_le_bytes(bytes[1028..1032].try_into().unwrap()),
+        ],
+        [-4.5, 18.25]
+    );
+    assert_eq!(
+        [
+            f32::from_le_bytes(bytes[1032..1036].try_into().unwrap()),
+            f32::from_le_bytes(bytes[1036..1040].try_into().unwrap()),
+        ],
+        [30.0, 10.0]
+    );
+    if native_output.exists() {
+        let native = std::fs::read(&native_output).unwrap();
+        assert_eq!(&native[92..100], &bytes[92..100]);
+        assert_eq!(&native[128..132], &bytes[128..132]);
+        assert_eq!(&native[1024..], &bytes[1024..]);
+    }
+    for path in [input, output, native_output, angles] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn newstack_replaces_selected_serialem_extended_header_tilts() {
+    let base = std::env::temp_dir().join(format!(
+        "imod-rs-newstack-serialem-tilts-{}",
+        std::process::id()
+    ));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let angles = base.with_extension("angles.txt");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 1, 1, 3, 2), 0);
+        // SerialEM represents these fields as bytes per section and flags.
+        // Bit 0 says that the leading short is a tilt angle in centidegrees.
+        (*header).nint = 8;
+        (*header).nreal = 3;
+        (*header).next = 24;
+        (*header).header_size = 1048;
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut serialem = [0_u8; 24];
+        for (record, angle) in [-6000_i16, 0, 6000].into_iter().enumerate() {
+            serialem[8 * record..8 * record + 2].copy_from_slice(&angle.to_le_bytes());
+            serialem[8 * record + 2..8 * record + 8].copy_from_slice(&[record as u8 + 1; 6]);
+        }
+        assert_eq!(mrc_write_extra_header(header, serialem.as_mut_ptr(), 24), 0);
+        for (section, value) in [10.0_f32, 20.0, 30.0].into_iter().enumerate() {
+            let mut pixel = [value];
+            assert_eq!(
+                ii_write_section_float(file, pixel.as_mut_ptr().cast(), section as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    std::fs::write(&angles, "-4.505\n18.255\n").unwrap();
+    let native_output = base.with_extension("native-output.mrc");
+    if let Ok(native_newstack) = std::env::var("IMOD_NATIVE_NEWSTACK") {
+        assert!(
+            Command::new(native_newstack)
+                .env(
+                    "AUTODOC_DIR",
+                    std::env::var("AUTODOC_DIR")
+                        .unwrap_or_else(|_| "/tmp/imod-reference-build/autodoc".into()),
+                )
+                .args([
+                    "-input",
+                    input.to_str().unwrap(),
+                    "-output",
+                    native_output.to_str().unwrap(),
+                    "-secs",
+                    "2,0",
+                    "-tilt",
+                    angles.to_str().unwrap(),
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_newstack"))
+            .args([
+                "-input",
+                input.to_str().unwrap(),
+                "-output",
+                output.to_str().unwrap(),
+                "-secs",
+                "2,0",
+                "-tilt",
+                angles.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let bytes = std::fs::read(&output).unwrap();
+    assert_eq!(bytes.len(), 1024 + 16 + 8);
+    assert_eq!(
+        i16::from_le_bytes(bytes[1024..1026].try_into().unwrap()),
+        -451
+    );
+    assert_eq!(
+        i16::from_le_bytes(bytes[1032..1034].try_into().unwrap()),
+        1825
+    );
+    assert_eq!(&bytes[1026..1032], &[3; 6]);
+    assert_eq!(&bytes[1034..1040], &[1; 6]);
+    if native_output.exists() {
+        let native = std::fs::read(&native_output).unwrap();
+        assert_eq!(&native[92..100], &bytes[92..100]);
+        assert_eq!(&native[128..132], &bytes[128..132]);
+        assert_eq!(&native[1024..], &bytes[1024..]);
+    }
+    for path in [input, output, native_output, angles] {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[test]
@@ -240,6 +580,102 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
         ii_close(file);
     }
     for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
+    let base = std::env::temp_dir().join(format!(
+        "imod-rs-newstack-pixel-mdoc-{}",
+        std::process::id()
+    ));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let mdoc = std::path::PathBuf::from(format!("{}.mdoc", input.display()));
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 1, 1, 2, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for (section, value) in [10.0_f32, 20.0].into_iter().enumerate() {
+            let mut pixel = [value];
+            assert_eq!(
+                ii_write_section_float(file, pixel.as_mut_ptr().cast(), section as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    std::fs::write(
+        &mdoc,
+        "[ZValue = 0]\nPixelSpacing = 2.5\n\n[ZValue = 1]\nPixelSpacing = 4.0\n",
+    )
+    .unwrap();
+    let native_output = base.with_extension("native-output.mrc");
+    if let Ok(native_newstack) = std::env::var("IMOD_NATIVE_NEWSTACK") {
+        assert!(
+            Command::new(native_newstack)
+                .env(
+                    "AUTODOC_DIR",
+                    std::env::var("AUTODOC_DIR")
+                        .unwrap_or_else(|_| "/tmp/imod-reference-build/autodoc".into()),
+                )
+                .args([
+                    "-input",
+                    input.to_str().unwrap(),
+                    "-output",
+                    native_output.to_str().unwrap(),
+                    "-secs",
+                    "1",
+                    "-pixel",
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_newstack"))
+            .args([
+                "-input",
+                input.to_str().unwrap(),
+                "-output",
+                output.to_str().unwrap(),
+                "-secs",
+                "1",
+                "-pixel",
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.mx, header.my, header.mz), (1, 1, 1));
+        assert_eq!((header.xlen, header.ylen, header.zlen), (4.0, 4.0, 4.0));
+        ii_close(file);
+    }
+    if native_output.exists() {
+        unsafe {
+            let name = CString::new(native_output.to_string_lossy().as_bytes()).unwrap();
+            let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+            assert!(!file.is_null());
+            let mut header = std::mem::zeroed::<MrcHeader>();
+            assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+            assert_eq!((header.mx, header.my, header.mz), (1, 1, 1));
+            assert_eq!((header.xlen, header.ylen, header.zlen), (4.0, 4.0, 4.0));
+            ii_close(file);
+        }
+    }
+    for path in [input, output, native_output, mdoc] {
         let _ = std::fs::remove_file(path);
     }
 }

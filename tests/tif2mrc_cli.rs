@@ -151,6 +151,73 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
 }
 
 #[test]
+fn tif2mrc_converts_signed_32_bit_tiff_through_the_source_float_path() {
+    let stamp = format!("imod-rs-tif2mrc-signed32-{}", std::process::id());
+    let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
+    let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
+    let mut image = vec![0_u8; 162];
+    image[..8].copy_from_slice(b"II*\0\x08\0\0\0");
+    image[8..10].copy_from_slice(&11_u16.to_le_bytes());
+    for (entry, (tag, kind, count, value)) in [
+        (256_u16, 4_u16, 1_u32, 2_u32),
+        (257, 4, 1, 2),
+        (258, 3, 1, 32),
+        (259, 3, 1, 1),
+        (262, 3, 1, 1),
+        (273, 4, 1, 146),
+        (277, 3, 1, 1),
+        (278, 4, 1, 2),
+        (279, 4, 1, 16),
+        (284, 3, 1, 1),
+        (339, 3, 1, 2),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = 10 + entry * 12;
+        image[start..start + 2].copy_from_slice(&tag.to_le_bytes());
+        image[start + 2..start + 4].copy_from_slice(&kind.to_le_bytes());
+        image[start + 4..start + 8].copy_from_slice(&count.to_le_bytes());
+        image[start + 8..start + 12].copy_from_slice(&value.to_le_bytes());
+    }
+    image[146..150].copy_from_slice(&(-1_i32).to_le_bytes());
+    image[150..154].copy_from_slice(&2_i32.to_le_bytes());
+    image[154..158].copy_from_slice(&(-300_000_000_i32).to_le_bytes());
+    image[158..162].copy_from_slice(&(400_000_000_i32).to_le_bytes());
+    std::fs::write(&tiff, image).unwrap();
+    let conversion = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        .arg(&tiff)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        conversion.status.success(),
+        "{}",
+        String::from_utf8_lossy(&conversion.stderr)
+    );
+    unsafe {
+        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_read(file, &mut header), 0);
+        assert_eq!((header.nx, header.ny, header.nz, header.mode), (2, 2, 1, 2));
+        assert_eq!(
+            libc::fseek(file, header.header_size as i64, libc::SEEK_SET),
+            0
+        );
+        let mut values = [0_f32; 4];
+        assert_eq!(
+            libc::fread(values.as_mut_ptr().cast(), 4, values.len(), file),
+            values.len()
+        );
+        libc::fclose(file);
+        assert_eq!(values, [-300_000_000., 400_000_000., -1., 2.]);
+    }
+    std::fs::remove_file(tiff).unwrap();
+    std::fs::remove_file(output).unwrap();
+}
+
+#[test]
 fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
     unsafe {
         let stamp = format!("imod-rs-tif2mrc-stack-{}", std::process::id());

@@ -7,6 +7,7 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
+use crate::imod::flib::subrs::imsubs::wrap_iiunit::imopen;
 use crate::imod::libcfshr::autodoc::{
     ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_get_float, adoc_get_number_of_sections,
     adoc_get_section_name, adoc_open_image_metadata,
@@ -24,8 +25,7 @@ use crate::imod::libiimod::iitif::{
 };
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_get_scale, mrc_read_extra_header};
 use crate::imod::libiimod::unit_fileio::{
-    ialbrief_, iiu_close, iiu_file_info, iiu_open, iiu_ret_num_volumes, iiu_volume_open,
-    iiualtprint_,
+    ialbrief_, iiu_close, iiu_file_info, iiu_ret_num_volumes, iiu_volume_open, iiualtprint_,
 };
 use crate::imod::libiimod::unit_header::{
     iiu_ret_delta, iiu_ret_extended_data, iiu_ret_extended_type, iiu_ret_imod_flags,
@@ -181,7 +181,7 @@ pub fn header() {
         if silent {
             unsafe {
                 ii_allow_multi_volume(1);
-                iiu_open(1, filename.as_ptr(), c"RO".as_ptr());
+                imopen(1, &in_file, "RO");
                 let num_volumes = iiu_ret_num_volumes(1);
                 let mut im_unit = 1;
                 if i_volume > num_volumes.max(1) {
@@ -242,21 +242,76 @@ pub fn header() {
                 if do_pixel {
                     let mut delta = [0.0_f32; 3];
                     iiu_ret_delta(im_unit, delta.as_mut_ptr());
-                    println!("{:15.5}{:15.5}{:15.5}", delta[0], delta[1], delta[2]);
+                    let precision0 = if delta[0] == 0.0 {
+                        4
+                    } else {
+                        (4 - delta[0].abs().log10().floor() as i32).max(0) as usize
+                    };
+                    let precision1 = if delta[1] == 0.0 {
+                        4
+                    } else {
+                        (4 - delta[1].abs().log10().floor() as i32).max(0) as usize
+                    };
+                    let precision2 = if delta[2] == 0.0 {
+                        4
+                    } else {
+                        (4 - delta[2].abs().log10().floor() as i32).max(0) as usize
+                    };
+                    println!(
+                        "{:>11}    {:>11}    {:>11}    ",
+                        format!("{:.precision0$}", delta[0]),
+                        format!("{:.precision1$}", delta[1]),
+                        format!("{:.precision2$}", delta[2])
+                    );
                 }
                 if do_origin {
                     let mut origin = [0.0_f32; 3];
                     iiu_ret_origin(im_unit, &mut origin[0], &mut origin[1], &mut origin[2]);
-                    println!("{:15.5}{:15.5}{:15.5}", origin[0], origin[1], origin[2]);
+                    let precision0 = if origin[0] == 0.0 {
+                        4
+                    } else {
+                        (4 - origin[0].abs().log10().floor() as i32).max(0) as usize
+                    };
+                    let precision1 = if origin[1] == 0.0 {
+                        4
+                    } else {
+                        (4 - origin[1].abs().log10().floor() as i32).max(0) as usize
+                    };
+                    let precision2 = if origin[2] == 0.0 {
+                        4
+                    } else {
+                        (4 - origin[2].abs().log10().floor() as i32).max(0) as usize
+                    };
+                    println!(
+                        "{:>11}    {:>11}    {:>11}    ",
+                        format!("{:.precision0$}", origin[0]),
+                        format!("{:.precision1$}", origin[1]),
+                        format!("{:.precision2$}", origin[2])
+                    );
                 }
                 if do_min {
-                    println!("{:13.5}", dmin);
+                    let precision = if dmin == 0.0 {
+                        4
+                    } else {
+                        (4 - dmin.abs().log10().floor() as i32).max(0) as usize
+                    };
+                    println!("{:>9}    ", format!("{:.precision$}", dmin));
                 }
                 if do_max {
-                    println!("{:13.5}", dmax);
+                    let precision = if dmax == 0.0 {
+                        4
+                    } else {
+                        (4 - dmax.abs().log10().floor() as i32).max(0) as usize
+                    };
+                    println!("{:>9}    ", format!("{:.precision$}", dmax));
                 }
                 if do_mean {
-                    println!("{:13.5}", dmean);
+                    let precision = if dmean == 0.0 {
+                        4
+                    } else {
+                        (4 - dmean.abs().log10().floor() as i32).max(0) as usize
+                    };
+                    println!("{:>9}    ", format!("{:.precision$}", dmean));
                 }
                 if do_rms {
                     let mut imod_flags = 0;
@@ -273,7 +328,12 @@ pub fn header() {
                     } else {
                         "(not computed)"
                     };
-                    println!("{:13.5}{computed}", rms);
+                    let precision = if rms == 0.0 {
+                        4
+                    } else {
+                        (4 - rms.abs().log10().floor() as i32).max(0) as usize
+                    };
+                    println!("{:>9}    {computed}", format!("{:.precision$}", rms));
                 }
                 iiu_close(im_unit);
                 if im_unit > 1 {
@@ -295,7 +355,7 @@ pub fn header() {
             let mut dmean = 0.0_f32;
             unsafe {
                 ii_allow_multi_volume(1);
-                iiu_open(1, filename.as_ptr(), c"RO".as_ptr());
+                imopen(1, &in_file, "RO");
                 let num_volumes = iiu_ret_num_volumes(1);
                 let mut im_unit = 1;
                 if i_volume > num_volumes.max(1) {

@@ -240,11 +240,11 @@ fn stat_reports_source_table_for_real_multisection_mrc() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("   0     1.0000 (   0,   0)    9.0000 (   1.00,   1.00)    5.0000"),
+        stdout.contains("   0     1.0000 (   0,   0)    9.0000 (  -0.14,  -0.79)    5.0000"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("   1    10.0000 (   0,   0)   20.0000 (   1.00,   1.00)   14.2222"),
+        stdout.contains("   1    10.0000 (   0,   0)   20.0000 (  -1.00,  -1.00)   14.2222"),
         "{stdout}"
     );
     assert!(
@@ -291,11 +291,11 @@ fn stat_uses_real_piece_list_coordinates_and_overlap_path() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("   0     1.0000 (   0,   0,   0)    9.0000 (   1,   1,   0)    5.0000"),
+        stdout.contains("   0     1.0000 (   0,   0,   0)    9.0000 (   0,  -1,   0)    5.0000"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("   1    10.0000 (   2,   0,   1)   20.0000 (   3,   1,   1)   14.2222"),
+        stdout.contains("   1    10.0000 (   2,   0,   1)   20.0000 (   1,  -1,   1)   14.2222"),
         "{stdout}"
     );
     assert!(
@@ -385,7 +385,7 @@ fn stat_marks_piece_coordinates_in_real_mrc_mad_outlier_rows() {
         "{stdout}"
     );
     assert!(
-        stdout.contains(" 100.0000 (   0,   0,   3)  100.0000*(   0,   0,   3)"),
+        stdout.contains(" 100.0000 (   0,   0,   3)  100.0000*(   1,   1,   3)"),
         "{stdout}"
     );
     assert!(
@@ -662,10 +662,7 @@ fn two_input_process_reports_source_error_when_second_real_mrc_is_missing() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!(
-            "ERROR: CLIP - Error opening {0}\nERROR: CLIP - Error opening {0}\n",
-            missing.display()
-        )
+        format!("ERROR: CLIP - Error opening {0}\n", missing.display())
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -703,10 +700,7 @@ fn info_reports_source_open_error_for_corrupt_second_mrc() {
     let stdout = String::from_utf8(result.stdout).unwrap();
     assert_eq!(
         stdout,
-        format!(
-            "ERROR: CLIP - Error opening {0}\nERROR: CLIP - Error opening {0}\n",
-            corrupt.display()
-        )
+        format!("ERROR: CLIP - Error opening {0}\n", corrupt.display())
     );
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(corrupt);
@@ -1140,7 +1134,7 @@ fn threshold_process_error_exits_before_clip_main_finalization_for_real_mrc() {
     assert_eq!(result.status.code(), Some(255));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "Threshold...\nERROR: clip threshold: You must enter a threshold value\nERROR: clip threshold: You must enter a threshold value\n"
+        "Threshold...\nERROR: clip threshold: You must enter a threshold value\n"
     );
     assert!(output.exists());
     unsafe {
@@ -1495,6 +1489,10 @@ fn brightness_real_mrc_append_updates_source_weighted_header_mean() {
             let header = (*file).header.cast::<MrcHeader>();
             assert_eq!(mrc_head_new(&mut *header, 2, 1, 1, MRC_MODE_FLOAT), 0);
             (*header).amean = mean;
+            // `mrcFillLabelString` must replace all 80 bytes of a reused
+            // output label, including its source `strftime` NUL terminator.
+            // This makes the append path detect a stale final byte.
+            (*header).labels[0][79] = b'/';
             ii_sync_from_mrc_header(file, header);
             assert_eq!(mrc_head_write((*file).fp, header), 0);
             assert_eq!(
@@ -1529,6 +1527,10 @@ fn brightness_real_mrc_append_updates_source_weighted_header_mean() {
         assert_eq!(((*header).nz, (*header).amean), (2, 6.));
         ii_close(file);
     }
+    // The in-memory header reader normalizes embedded NUL title padding to
+    // spaces.  Check the serialized MRC label, where C `strftime` supplies
+    // the terminator at byte 80.
+    assert_eq!(std::fs::read(&output).unwrap()[224 + 79], 0);
     for path in [input, output] {
         let _ = std::fs::remove_file(path);
     }
@@ -2564,12 +2566,13 @@ fn multifile_real_mrc_mismatch_reports_source_file_io_diagnostic() {
         .unwrap();
     assert!(!result.status.success());
     assert_eq!(
-        String::from_utf8(result.stderr).unwrap(),
+        String::from_utf8(result.stdout).unwrap(),
         format!(
-            "ERROR: Files must be same mode and same size in X, Y, and Z; {} differs\n",
+            "ERROR: clip -  Files must be same mode and same size in X, Y, and Z; {} differs\n",
             second.to_string_lossy()
         )
     );
+    assert!(result.stderr.is_empty());
     for path in [first, second, output] {
         let _ = std::fs::remove_file(path);
     }
@@ -2675,9 +2678,10 @@ fn multifile_real_mrc_append_is_rejected_before_output_lifecycle_setup() {
         .unwrap();
     assert!(!result.status.success());
     assert_eq!(
-        String::from_utf8(result.stderr).unwrap(),
-        "ERROR: Multiple input files can not be entered with appending or overwriting\n"
+        String::from_utf8(result.stdout).unwrap(),
+        "ERROR: clip -  Multiple input files can not be entered with appending or overwriting\n"
     );
+    assert!(result.stderr.is_empty());
     for path in [first, second, output] {
         let _ = std::fs::remove_file(path);
     }
@@ -2719,11 +2723,11 @@ fn multifile_real_mrc_rejects_source_blank_output_sections() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(result.stdout.is_empty());
     assert_eq!(
-        String::from_utf8(result.stderr).unwrap(),
-        "ERROR: Blank slices cannot be output with multiple input files\n"
+        String::from_utf8(result.stdout).unwrap(),
+        "ERROR: clip -  Blank slices cannot be output with multiple input files\n"
     );
+    assert!(result.stderr.is_empty());
     for path in [first, second, output] {
         let _ = std::fs::remove_file(path);
     }
@@ -3274,7 +3278,7 @@ fn boxsd_rejects_subunit_reduction_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Reduction factor (-n) must be at least 1 for boxsd process\nERROR: CLIP - Reduction factor (-n) must be at least 1 for boxsd process\n"
+        "ERROR: CLIP - Reduction factor (-n) must be at least 1 for boxsd process\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3318,7 +3322,7 @@ fn defect_list_without_both_camera_sizes_fatals_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries\nERROR: CLIP - Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries\n"
+        "ERROR: CLIP - Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries\n"
     );
     assert!(!output.exists());
     for path in [input, defects] {
@@ -3360,7 +3364,7 @@ fn supergain_rejects_eer_option_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - The -es, -ez, and other EER options cannot be entered with the supergain operation\nERROR: CLIP - The -es, -ez, and other EER options cannot be entered with the supergain operation\n"
+        "ERROR: CLIP - The -es, -ez, and other EER options cannot be entered with the supergain operation\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3402,7 +3406,7 @@ fn defect_binning_below_source_minimum_fatals_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Binning must be at least 0.5\nERROR: CLIP - Binning must be at least 0.5\n"
+        "ERROR: CLIP - Binning must be at least 0.5\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3445,10 +3449,7 @@ fn missing_defect_list_reports_source_open_error_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!(
-            "ERROR: CLIP - Error opening {0}\nERROR: CLIP - Error opening {0}\n",
-            missing.display()
-        )
+        format!("ERROR: CLIP - Error opening {0}\n", missing.display())
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3488,7 +3489,7 @@ fn invalid_mode_reports_source_error_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Invalid mode entry invalid-mode.\nERROR: CLIP - Invalid mode entry invalid-mode.\n"
+        "ERROR: CLIP - Invalid mode entry invalid-mode.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3591,7 +3592,7 @@ fn invalid_option_reports_source_fatal_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Invalid option -q.\nERROR: CLIP - Invalid option -q.\n"
+        "ERROR: CLIP - Invalid option -q.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3633,7 +3634,7 @@ fn invalid_output_format_reports_source_fatal_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Output file format entry not-a-format is not recognized.\nERROR: CLIP - Output file format entry not-a-format is not recognized.\n"
+        "ERROR: CLIP - Output file format entry not-a-format is not recognized.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3991,7 +3992,7 @@ fn standalone_z_option_reports_source_invalid_option_for_real_mrc() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Invalid option -z.\nERROR: CLIP - Invalid option -z.\n"
+        "ERROR: CLIP - Invalid option -z.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -4536,6 +4537,64 @@ fn integral_uses_a_real_immutable_float_reference_slice() {
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn integral_uses_source_x_extent_for_its_lower_y_border_on_non_square_mrc() {
+    let base = std::env::temp_dir().join(format!(
+        "imod-rs-clip-integral-nonsquare-{}",
+        std::process::id()
+    ));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 10, 12, 1, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut pixels = [0_f32; 120];
+        // A peak precisely in the source's ix-based lower-Y border makes the
+        // distinction observable: a conventional iy-based boundary would process it.
+        pixels[4 + 7 * 10] = 1000.;
+        assert_eq!(
+            ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "integral",
+            "-n",
+            "1",
+            "-h",
+            "1000000",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    unsafe {
+        let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let mut values = [f32::NAN; 120];
+        assert_eq!(
+            ii_read_section_float(file, values.as_mut_ptr().cast(), 0),
+            0
+        );
+        // C++ processing.cpp tests j against ix here, rather than iy.  Thus its
+        // lower Y border starts at 10 - 3, even though this image is 12 rows tall.
+        assert_eq!(values[4 + 7 * 10], 0.);
+        ii_close(file);
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[test]
@@ -5403,7 +5462,7 @@ fn blankfile_rejects_nonpositive_source_output_size_before_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - You must enter a positive output size for all dimensions\nERROR: CLIP - You must enter a positive output size for all dimensions\n"
+        "ERROR: CLIP - You must enter a positive output size for all dimensions\n"
     );
     assert!(!output.exists());
 }
@@ -5444,7 +5503,7 @@ fn chunk_sizes_reject_explicit_nonhdf_output_format_before_real_mrc_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - You cannot specify chunk sizes and an output format other than HDF\nERROR: CLIP - You cannot specify chunk sizes and an output format other than HDF\n"
+        "ERROR: CLIP - You cannot specify chunk sizes and an output format other than HDF\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -5488,7 +5547,7 @@ fn resize_rejects_source_x_and_center_conflict_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - You cannot use -x together with -cx or -ix\nERROR: CLIP - You cannot use -x together with -cx or -ix\n"
+        "ERROR: CLIP - You cannot use -x together with -cx or -ix\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -6404,7 +6463,7 @@ fn supergain_rejects_a_real_non_eer_byte_mrc_with_source_diagnostic() {
     assert!(!result.status.success());
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: clip supergain: all input files must be EER files.\nERROR: clip supergain: all input files must be EER files.\n"
+        "ERROR: clip supergain: all input files must be EER files.\n"
     );
     assert!(result.stderr.is_empty());
     let _ = std::fs::remove_file(input);

@@ -1,11 +1,9 @@
 # imod-rs
 
 An in-progress, source-auditable Rust translation of the IMOD commands used by
-[SNARTomo](https://github.com/rubenlab/snartomo).  It is currently a Phase 0
-scaffold: command binaries intentionally stop at untranslated stubs and must
-not be used for data processing.
-
-**Not yet ready**
+[SNARTomo](https://github.com/rubenlab/snartomo).  The crate includes working,
+partially translated command paths with focused native-reference regressions;
+it is not yet a complete or production-ready replacement for IMOD.
 
 ## Reference source
 
@@ -17,11 +15,13 @@ translation and verification rules are in [TODO.md](TODO.md).
 
 ## Scope
 
-The initial command set is `newstack`, `header`, `binvol`, `alterheader`,
-`clip`, `tif2mrc`, `mrc2tif`, `imodinfo`, `imodjoin`, `wmod2imod`, and
-`convertmod`.  Rust command names intentionally match IMOD's installed binary
-names.  Python/Java orchestration (`trimvol`, `submfg`, `etomo`, and
-`batchruntomo`) is tracked but not yet translated.
+The command set is `newstack`, `header`, `binvol`, `alterheader`, `clip`,
+`tif2mrc`, `mrc2tif`, `imodinfo`, `imodjoin`, `wmod2imod`, `convertmod`,
+`trimvol`, `submfg`, and `batchruntomo`. Rust command names intentionally
+match IMOD's installed binary names. `etomo` remains an external batch-process
+boundary; GUI applications are out of scope. `mrc2tif` uses the source-shaped
+TIFF path; successful JPEG/PNG output remains the explicit Qt `QImage`
+encoder boundary rather than a replacement encoder in Rust.
 
 ## Audit workflow
 

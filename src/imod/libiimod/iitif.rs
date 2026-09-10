@@ -133,6 +133,8 @@ const TIFFTAG_DM_ORIGIN_0: u32 = 65006;
 const TIFFTAG_DM_SCALE_0: u32 = 65009;
 const TIFFTAG_DM_UINFO_UNIT_0: u32 = 65012;
 const TIFFTAG_DM_UINFO_POWER_0: u32 = 65015;
+const TIFFTAG_JPEGQUALITY: u32 = 65537;
+const TIFFTAG_ZIPQUALITY: u32 = 65557;
 const TIFF_SLONG: i32 = 9;
 const TIFF_DOUBLE: i32 = 12;
 const TIFF_ASCII: i32 = 2;
@@ -140,6 +142,7 @@ const FIELD_CUSTOM: u16 = 65;
 const TIFFTAG_TILEWIDTH: u32 = 322;
 const TIFFTAG_TILELENGTH: u32 = 323;
 const PLANARCONFIG_CONTIG: i32 = 1;
+const PLANARCONFIG_SEPARATE: i32 = 2;
 const PHOTOMETRIC_MINISBLACK: i32 = 1;
 const PHOTOMETRIC_RGB: i32 = 2;
 const SAMPLEFORMAT_UINT: i32 = 1;
@@ -151,6 +154,7 @@ const RESUNIT_CENTIMETER: i32 = 3;
 
 static S_USE_MAPPING: AtomicI32 = AtomicI32::new(2);
 static S_WARNINGS_SUPPRESSED: AtomicI32 = AtomicI32::new(0);
+static S_OLD_ERR_HANDLER: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 static S_MAX_EER_SUPER_RESOLUTION: AtomicI32 = AtomicI32::new(2);
 static S_MIN_EER_SUPER_RESOLUTION: AtomicI32 = AtomicI32::new(-3);
 static S_READ_EER_AS_SUPER_RES: AtomicI32 = AtomicI32::new(-1);
@@ -304,44 +308,14 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     let mut bits = 8u16;
     let mut samples = 1u16;
     let mut sample_format = SAMPLEFORMAT_UINT as u16;
+    let mut photometric = PHOTOMETRIC_MINISBLACK as u16;
+    let mut planar_config = PLANARCONFIG_CONTIG as u16;
     let mut rows = 0u32;
     let mut compression = IICOMPRESSION_NONE as u16;
-    if TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &mut width) == 0
-        || TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &mut height) == 0
-        || TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &mut bits) == 0
-    {
-        tiff_close(in_file);
-        return IIERR_NO_SUPPORT;
-    }
-    TIFFGetField(tif, TIFFTAG_SAMPLESPERPIXEL, &mut samples);
-    TIFFGetField(tif, TIFFTAG_SAMPLEFORMAT, &mut sample_format);
-    TIFFGetField(tif, TIFFTAG_ROWSPERSTRIP, &mut rows);
-    TIFFGetField(tif, TIFFTAG_COMPRESSION, &mut compression);
-    (*in_file).tiff_compression = compression as i32;
     // `iiTIFFCheck` obtains physical pixel sizes from the directory resolution
     // tags.  TIFF stores pixels per inch or centimetre while IMOD stores
     // Angstroms per pixel, hence the source's 1.e8 conversion (and 2.54 for
     // inches).  A missing Y resolution deliberately inherits X resolution.
-    let mut x_resolution = 0.0f32;
-    let mut y_resolution = 0.0f32;
-    let mut resolution_unit = 0u16;
-    let has_pixel_size = TIFFGetField(tif, TIFFTAG_XRESOLUTION, &mut x_resolution) != 0;
-    TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT, &mut resolution_unit);
-    if has_pixel_size && resolution_unit > 1 && x_resolution > 0.0 {
-        if TIFFGetField(tif, TIFFTAG_YRESOLUTION, &mut y_resolution) == 0 {
-            y_resolution = x_resolution;
-        }
-        if y_resolution > 0.0 {
-            let resolution_scale = if resolution_unit == RESUNIT_INCH as u16 {
-                2.54e8
-            } else {
-                1.0e8
-            };
-            (*in_file).xscale = resolution_scale / x_resolution;
-            (*in_file).yscale = resolution_scale / y_resolution;
-            (*in_file).zscale = (*in_file).xscale;
-        }
-    }
     // Preserve the physical directory number for each uniform image in the
     // source stack.  Source `setMatchingDirectory` indexes this list, rather
     // than assuming an output section is the same as a TIFF directory number.
@@ -351,33 +325,107 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_MEMORY_ERR;
     }
     let mut directory = 0i32;
-    if ilist_append(directories, (&mut directory as *mut i32).cast()) != 0 {
-        ilist_delete(directories);
-        tiff_close(in_file);
-        return IIERR_MEMORY_ERR;
-    }
-    while TIFFReadDirectory(tif) != 0 {
-        directory += 1;
+    loop {
         let mut next_width = 0u32;
         let mut next_height = 0u32;
         let mut next_bits = 8u16;
         let mut next_samples = 1u16;
         let mut next_format = SAMPLEFORMAT_UINT as u16;
-        TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &mut next_width);
-        TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &mut next_height);
-        TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &mut next_bits);
+        let mut next_photometric = PHOTOMETRIC_MINISBLACK as u16;
+        let mut next_planar_config = PLANARCONFIG_CONTIG as u16;
+        let mut next_rows = 0u32;
+        let mut next_compression = IICOMPRESSION_NONE as u16;
+        if TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &mut next_width) == 0
+            || TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &mut next_height) == 0
+            || TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &mut next_bits) == 0
+        {
+            ilist_delete(directories);
+            tiff_close(in_file);
+            return IIERR_NO_SUPPORT;
+        }
         TIFFGetField(tif, TIFFTAG_SAMPLESPERPIXEL, &mut next_samples);
+        TIFFGetField(tif, TIFFTAG_PHOTOMETRIC, &mut next_photometric);
+        TIFFGetField(tif, TIFFTAG_PLANARCONFIG, &mut next_planar_config);
         TIFFGetField(tif, TIFFTAG_SAMPLEFORMAT, &mut next_format);
+        TIFFGetField(tif, TIFFTAG_ROWSPERSTRIP, &mut next_rows);
+        TIFFGetField(tif, TIFFTAG_COMPRESSION, &mut next_compression);
+        // `iitif.c` makes a larger IFD the standard image and drops earlier
+        // thumbnail directories from the section map.  It is not valid to
+        // assume that directory zero is the science image.
+        if next_width.saturating_mul(next_height) > width.saturating_mul(height) {
+            width = next_width;
+            height = next_height;
+            bits = next_bits;
+            samples = next_samples;
+            sample_format = next_format;
+            photometric = next_photometric;
+            planar_config = next_planar_config;
+            rows = next_rows;
+            compression = next_compression;
+            (*directories).size = 0;
+        }
         if next_width == width
             && next_height == height
             && next_bits == bits
             && next_samples == samples
             && next_format == sample_format
+            && next_photometric == photometric
+            && next_planar_config == planar_config
             && ilist_append(directories, (&mut directory as *mut i32).cast()) != 0
         {
             ilist_delete(directories);
             tiff_close(in_file);
             return IIERR_MEMORY_ERR;
+        }
+        if next_width == width
+            && next_height == height
+            && (next_bits != bits
+                || next_samples != samples
+                || next_format != sample_format
+                || next_photometric != photometric
+                || next_planar_config != planar_config)
+        {
+            ilist_delete(directories);
+            tiff_close(in_file);
+            return IIERR_NO_SUPPORT;
+        }
+        if TIFFReadDirectory(tif) == 0 {
+            break;
+        }
+        directory += 1;
+    }
+    (*in_file).tiff_compression = compression as i32;
+    let selected_directory = *(ilist_item(directories, 0).cast::<i32>());
+    TIFFSetDirectory(tif, selected_directory as u16);
+    let mut x_resolution = 0.0f32;
+    let mut y_resolution = 0.0f32;
+    let mut resolution_unit = 0u16;
+    let has_pixel_size = TIFFGetField(tif, TIFFTAG_XRESOLUTION, &mut x_resolution) != 0;
+    TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT, &mut resolution_unit);
+    if has_pixel_size && resolution_unit > 1 && x_resolution > 0.0 {
+        if TIFFGetField(tif, TIFFTAG_YRESOLUTION, &mut y_resolution) == 0 {
+            y_resolution = x_resolution;
+        }
+        let resolution_scale = if resolution_unit == RESUNIT_INCH as u16 {
+            2.54e8
+        } else {
+            1.0e8
+        };
+        let x_pixel = resolution_scale / x_resolution;
+        let pixel_limit = if libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr()).is_null() {
+            3.0
+        } else {
+            CStr::from_ptr(libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr()))
+                .to_string_lossy()
+                .parse::<f32>()
+                .unwrap_or(0.0)
+        };
+        if y_resolution > 0.0
+            && ((*in_file).any_tiff_pix_size != 0 || x_pixel / 1.0e4 <= pixel_limit)
+        {
+            (*in_file).xscale = x_pixel;
+            (*in_file).yscale = resolution_scale / y_resolution;
+            (*in_file).zscale = x_pixel;
         }
     }
     TIFFSetDirectory(tif, 0);
@@ -385,18 +433,28 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     (*in_file).nx = width as i32;
     (*in_file).ny = height as i32;
     (*in_file).nz = (*directories).size;
-    (*in_file).contig_samples = samples as i32;
+    (*in_file).contig_samples = 1;
     (*in_file).planes_per_image = 1;
+    (*in_file).rgb_samples = samples as i32;
+    if photometric < PHOTOMETRIC_RGB as u16 {
+        if planar_config == PLANARCONFIG_SEPARATE as u16 {
+            (*in_file).planes_per_image = samples as i32;
+        } else {
+            (*in_file).contig_samples = samples as i32;
+        }
+        (*in_file).nz *= samples as i32;
+    }
     (*in_file).tile_size_y = rows as i32;
     (*in_file).type_ = match (bits, sample_format) {
         (8, 2) => IITYPE_BYTE,
         (8, _) => IITYPE_UBYTE,
         (16, 2) => IITYPE_SHORT,
         (16, _) => IITYPE_USHORT,
+        (32, 2) => IITYPE_INT,
         (32, 3) => IITYPE_FLOAT,
         _ => return IIERR_NO_SUPPORT,
     };
-    (*in_file).format = if samples >= 3 {
+    (*in_file).format = if photometric == PHOTOMETRIC_RGB as u16 {
         IIFORMAT_RGB
     } else {
         IIFORMAT_LUMINANCE
@@ -408,6 +466,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             IITYPE_SHORT => MRC_MODE_SHORT,
             IITYPE_USHORT => MRC_MODE_USHORT,
             IITYPE_FLOAT => MRC_MODE_FLOAT,
+            IITYPE_INT | IITYPE_UINT => -1,
             _ => MRC_MODE_BYTE,
         }
     };
@@ -667,13 +726,18 @@ pub unsafe fn tiff_get_array(
 }
 /// C `tiffSuppressErrors` (`iitif.c:843`).
 pub fn tiff_suppress_errors() {
-    let _ = unsafe { TIFFSetErrorHandler(core::ptr::null_mut()) };
+    if S_OLD_ERR_HANDLER.load(Ordering::SeqCst).is_null() {
+        S_OLD_ERR_HANDLER.store(
+            unsafe { TIFFSetErrorHandler(core::ptr::null_mut()) },
+            Ordering::SeqCst,
+        );
+    } else {
+        let _ = unsafe { TIFFSetErrorHandler(core::ptr::null_mut()) };
+    }
 }
 /// C `tiffRestoreErrors` (`iitif.c:851`).
 pub fn tiff_restore_errors() {
-    // Source restores the saved callback.  The direct callback value is process-global
-    // libtiff state and is intentionally left null in this standalone ABI build.
-    let _ = unsafe { TIFFSetErrorHandler(core::ptr::null_mut()) };
+    let _ = unsafe { TIFFSetErrorHandler(S_OLD_ERR_HANDLER.load(Ordering::SeqCst)) };
 }
 /// C `tiffSuppressWarnings` (`iitif.c:856`).
 pub fn tiff_suppress_warnings() {
@@ -818,7 +882,12 @@ unsafe fn read_section(
         return -1;
     }
     let tif = (*in_file).header.cast::<Tiff>();
-    if tif.is_null() || set_matching_directory(in_file, in_section) != 0 {
+    let samples = (*in_file).contig_samples.max(1);
+    let planes = (*in_file).planes_per_image.max(1);
+    let row = in_section / (planes * samples);
+    let plane = in_section % planes;
+    let sample_offset = in_section % samples;
+    if tif.is_null() || set_matching_directory(in_file, row) != 0 {
         return -1;
     }
     let mut rows = 0u32;
@@ -836,18 +905,22 @@ unsafe fn read_section(
         (*in_file).ury
     };
     let xout = xmax + 1 - xmin;
-    let bytes = match (*in_file).type_ {
+    let mut pixsize = match (*in_file).type_ {
         IITYPE_SHORT | IITYPE_USHORT => 2,
-        IITYPE_FLOAT => 4,
+        IITYPE_FLOAT | IITYPE_INT | IITYPE_UINT => 4,
         _ => 1,
     };
-    let samples = (*in_file).contig_samples.max(1);
+    if (*in_file).format == IIFORMAT_RGB {
+        pixsize = (*in_file).rgb_samples;
+    }
     let move_size = if convert == MRSA_FLOAT {
         4
     } else if convert == MRSA_USHORT {
         2
+    } else if (*in_file).format == IIFORMAT_RGB || (*in_file).format == IIFORMAT_COLORMAP {
+        3
     } else {
-        bytes * samples
+        pixsize
     };
     if !has_strips {
         let mut tile_width = 0u32;
@@ -875,7 +948,7 @@ unsafe fn read_section(
                 }
                 if TIFFReadEncodedTile(
                     tif,
-                    (x_tile + y_tile * x_tiles) as u32,
+                    (x_tile + y_tile * x_tiles + plane * x_tiles * y_tiles) as u32,
                     tmp.as_mut_ptr().cast(),
                     tile_size,
                 ) < 0
@@ -887,25 +960,22 @@ unsafe fn read_section(
                     let input = tmp.as_ptr().add(
                         ((row * tile_width as i32 + start_x - x_tile * tile_width as i32)
                             * samples
-                            * bytes) as usize,
+                            * pixsize
+                            + sample_offset * pixsize) as usize,
                     );
                     let output = buf
                         .cast::<u8>()
                         .add((((y - ymin) * xout + start_x - xmin) * move_size) as usize);
                     let count = end_x + 1 - start_x;
                     if convert == MRSA_NOPROC {
-                        core::ptr::copy_nonoverlapping(
-                            input,
-                            output,
-                            (count * samples * bytes) as usize,
-                        );
+                        core::ptr::copy_nonoverlapping(input, output, (count * pixsize) as usize);
                     } else {
                         copy_line(
                             input.cast_mut(),
                             output,
                             count,
                             convert,
-                            bytes,
+                            pixsize,
                             (*in_file).type_,
                             (*in_file).format,
                             samples,
@@ -929,9 +999,15 @@ unsafe fn read_section(
         return IIERR_IO_ERROR;
     }
     let mut tmp = vec![0u8; strip_size as usize];
-    let strips = TIFFNumberOfStrips(tif) as i32;
+    let strips = TIFFNumberOfStrips(tif) as i32 / planes;
     for strip in 0..strips {
-        if TIFFReadEncodedStrip(tif, strip as u32, tmp.as_mut_ptr().cast(), strip_size) < 0 {
+        if TIFFReadEncodedStrip(
+            tif,
+            (strip + plane * strips) as u32,
+            tmp.as_mut_ptr().cast(),
+            strip_size,
+        ) < 0
+        {
             return IIERR_IO_ERROR;
         }
         let strip_y_start = (*in_file).ny - rows as i32 * (strip + 1);
@@ -939,21 +1015,22 @@ unsafe fn read_section(
         let end = ymax.min((*in_file).ny - 1 - rows as i32 * strip);
         for y in start..=end {
             let row = (*in_file).ny - 1 - y - rows as i32 * strip;
-            let input = tmp
-                .as_ptr()
-                .add(((row * (*in_file).nx + xmin) * samples * bytes) as usize);
+            let input = tmp.as_ptr().add(
+                ((row * (*in_file).nx + xmin) * samples * pixsize + sample_offset * pixsize)
+                    as usize,
+            );
             let output = buf
                 .cast::<u8>()
                 .add(((y - ymin) * xout * move_size) as usize);
             if convert == MRSA_NOPROC {
-                core::ptr::copy_nonoverlapping(input, output, (xout * samples * bytes) as usize);
+                core::ptr::copy_nonoverlapping(input, output, (xout * pixsize) as usize);
             } else {
                 copy_line(
                     input.cast_mut(),
                     output,
                     xout,
                     convert,
-                    bytes,
+                    pixsize,
                     (*in_file).type_,
                     (*in_file).format,
                     samples,
@@ -1801,6 +1878,12 @@ pub unsafe fn tiff_write_setup(
         );
         tiff_restore_errors();
     }
+    if quality >= 0 && compression == IICOMPRESSION_JPEG {
+        TIFFSetField(tif, TIFFTAG_JPEGQUALITY, quality.min(100));
+    }
+    if quality > 0 && compression == IICOMPRESSION_ZIP {
+        TIFFSetField(tif, TIFFTAG_ZIPQUALITY, quality.min(9));
+    }
     let (samples, bits, photometric, sample_format) = if (*in_file).format == IIFORMAT_RGB {
         (3, 8, PHOTOMETRIC_RGB, SAMPLEFORMAT_UINT)
     } else {
@@ -1879,7 +1962,7 @@ pub unsafe fn tiff_write_setup(
         let datetime = std::ffi::CString::new(format!(
             "{:04}:{:02}:{:02} {:02}:{:02}:{:02}",
             (*time_info).tm_year + 1900,
-            (*time_info).tm_mon + 1,
+            (*time_info).tm_mon,
             (*time_info).tm_mday,
             (*time_info).tm_hour,
             (*time_info).tm_min,
@@ -2628,6 +2711,22 @@ mod tests {
     }
 
     #[test]
+    fn suppress_and_restore_errors_reinstates_source_saved_handler() {
+        let _guard = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let original = TIFFSetErrorHandler(core::ptr::null_mut());
+            let sentinel = warning_handler as *const () as *mut c_void;
+            let _ = TIFFSetErrorHandler(sentinel);
+            S_OLD_ERR_HANDLER.store(core::ptr::null_mut(), Ordering::SeqCst);
+            tiff_suppress_errors();
+            tiff_restore_errors();
+            assert_eq!(TIFFSetErrorHandler(core::ptr::null_mut()), sentinel);
+            let _ = TIFFSetErrorHandler(original);
+            S_OLD_ERR_HANDLER.store(core::ptr::null_mut(), Ordering::SeqCst);
+        }
+    }
+
+    #[test]
     fn cleanup_from_eer_releases_source_owned_buffers_and_resets_flags() {
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
@@ -3196,6 +3295,129 @@ mod tests {
     }
 
     #[test]
+    fn tiff_check_reads_separate_grayscale_planes_as_source_sections() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iitif-separate-gray-{}.tif",
+                std::process::id()
+            ));
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let writer = TIFFOpen(name.as_ptr(), c"w".as_ptr());
+            assert!(!writer.is_null());
+            assert_ne!(TIFFSetField(writer, TIFFTAG_IMAGEWIDTH, 2_u32), 0);
+            assert_ne!(TIFFSetField(writer, TIFFTAG_IMAGELENGTH, 2_u32), 0);
+            assert_ne!(TIFFSetField(writer, TIFFTAG_BITSPERSAMPLE, 8_i32), 0);
+            assert_ne!(TIFFSetField(writer, TIFFTAG_SAMPLESPERPIXEL, 2_i32), 0);
+            assert_ne!(
+                TIFFSetField(writer, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_MINISBLACK),
+                0
+            );
+            assert_ne!(
+                TIFFSetField(writer, TIFFTAG_PLANARCONFIG, PLANARCONFIG_SEPARATE),
+                0
+            );
+            assert_ne!(TIFFSetField(writer, TIFFTAG_ROWSPERSTRIP, 2_u32), 0);
+            let first_plane = [1_u8, 2, 3, 4];
+            let second_plane = [5_u8, 6, 7, 8];
+            assert_eq!(
+                TIFFWriteEncodedStrip(
+                    writer,
+                    0,
+                    first_plane.as_ptr().cast_mut().cast(),
+                    first_plane.len() as isize,
+                ),
+                first_plane.len() as isize
+            );
+            assert_eq!(
+                TIFFWriteEncodedStrip(
+                    writer,
+                    1,
+                    second_plane.as_ptr().cast_mut().cast(),
+                    second_plane.len() as isize,
+                ),
+                second_plane.len() as isize
+            );
+            TIFFClose(writer);
+
+            let reader = ii_new();
+            assert!(!reader.is_null());
+            (*reader).filename = libc::strdup(name.as_ptr());
+            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
+            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            assert_eq!(ii_tiff_check(reader), 0);
+            assert_eq!(
+                (
+                    (*reader).nz,
+                    (*reader).contig_samples,
+                    (*reader).planes_per_image,
+                    (*reader).rgb_samples,
+                ),
+                (2, 1, 2, 2)
+            );
+            let mut first = [0_u8; 4];
+            let mut second = [0_u8; 4];
+            assert_eq!(tiff_read_section(reader, first.as_mut_ptr().cast(), 0), 0);
+            assert_eq!(tiff_read_section(reader, second.as_mut_ptr().cast(), 1), 0);
+            assert_eq!(first, [3, 4, 1, 2]);
+            assert_eq!(second, [7, 8, 5, 6]);
+            ii_delete(reader);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn tiff_check_uses_the_largest_ifd_instead_of_a_leading_thumbnail() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iitif-thumbnail-{}.tif",
+                std::process::id()
+            ));
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let writer = ii_new();
+            assert!(!writer.is_null());
+            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).nx = 1;
+            (*writer).ny = 1;
+            (*writer).nz = 2;
+            (*writer).format = IIFORMAT_LUMINANCE;
+            (*writer).type_ = IITYPE_UBYTE;
+            assert_eq!(tiff_open_new(writer), 0);
+            let thumbnail = [17_u8];
+            assert_eq!(
+                tiff_write_section(writer, thumbnail.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                0
+            );
+            (*writer).nx = 2;
+            (*writer).ny = 2;
+            let science = [3_u8, 1, 4, 1];
+            assert_eq!(
+                tiff_write_section(writer, science.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                0
+            );
+            tiff_close(writer);
+            ii_delete(writer);
+
+            let reader = ii_new();
+            (*reader).filename = libc::strdup(name.as_ptr());
+            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
+            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            assert_eq!(ii_tiff_check(reader), 0);
+            assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (2, 2, 1));
+            assert_eq!(
+                *(ilist_item((*reader).directory_nums.cast(), 0).cast::<i32>()),
+                1
+            );
+            let mut decoded = [0_u8; 4];
+            assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);
+            assert_eq!(decoded, science);
+            ii_delete(reader);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
     fn tiff_section_callback_rejects_complex_data_before_writing() {
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
@@ -3354,6 +3576,56 @@ mod tests {
             assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);
             assert_eq!(decoded, pixels);
             ii_delete(reader);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn tiff_write_setup_caps_deflate_quality_at_source_tag_limit() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iitif-zip-quality-{}.tif",
+                std::process::id()
+            ));
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let writer = ii_new();
+            assert!(!writer.is_null());
+            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).nx = 1;
+            (*writer).ny = 1;
+            (*writer).nz = 1;
+            (*writer).format = IIFORMAT_LUMINANCE;
+            (*writer).type_ = IITYPE_UBYTE;
+            assert_eq!(tiff_open_new(writer), 0);
+            let mut rows = 0;
+            let mut strips = 0;
+            let mut tiles = 0;
+            assert_eq!(
+                tiff_write_setup(
+                    writer,
+                    IICOMPRESSION_ZIP,
+                    0,
+                    0,
+                    100,
+                    &mut rows,
+                    &mut strips,
+                    &mut tiles,
+                ),
+                0
+            );
+            let mut quality = 0_i32;
+            assert_ne!(
+                TIFFGetField(
+                    (*writer).header.cast::<Tiff>(),
+                    TIFFTAG_ZIPQUALITY,
+                    &mut quality
+                ),
+                0
+            );
+            assert_eq!(quality, 9);
+            tiff_close(writer);
+            ii_delete(writer);
             std::fs::remove_file(path).unwrap();
         }
     }

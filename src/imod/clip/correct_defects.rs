@@ -655,7 +655,6 @@ pub unsafe fn correct_pixel(
                 count += 1;
                 let ind = x + y * nxdim;
                 match data_type {
-                    0 => {}
                     1 => integer_sum += *array.cast::<i16>().offset(ind as isize) as i32,
                     6 => integer_sum += *array.cast::<u16>().offset(ind as isize) as i32,
                     2 => float_sum += *array.cast::<f32>().offset(ind as isize),
@@ -3082,6 +3081,41 @@ mod tests {
             correct_pixel(image.as_mut_ptr().cast(), 0, 2, 2, 2, 0, 0, 0, 0.);
         }
         assert_eq!(image[0], 0);
+    }
+
+    #[test]
+    fn master_byte_edge_defect_matches_native_correct_defects_fixture() {
+        let mut image = [1_u8, 2, 3, 4, 99, 6, 7, 8, 9];
+        let defects = CameraDefects {
+            was_scaled: 0,
+            rotation_flip: 0,
+            k2_type: 0,
+            falcon_type: 0,
+            usable_top: 0,
+            usable_left: 0,
+            usable_bottom: 0,
+            usable_right: 0,
+            num_avg_super_res: 0,
+            bad_column_start: vec![],
+            bad_column_width: vec![],
+            partial_bad_col: vec![],
+            partial_bad_width: vec![],
+            partial_bad_start_y: vec![],
+            partial_bad_end_y: vec![],
+            bad_row_start: vec![],
+            bad_row_height: vec![],
+            partial_bad_row: vec![],
+            partial_bad_height: vec![],
+            partial_bad_start_x: vec![],
+            partial_bad_end_x: vec![],
+            bad_pixel_x: vec![0],
+            bad_pixel_y: vec![0],
+            pix_use_mean: vec![],
+        };
+        unsafe {
+            cor_def_correct_defects(&defects, image.as_mut_ptr().cast(), 0, 1, 0, 0, 3, 3);
+        }
+        assert_eq!(image, [0, 2, 3, 4, 99, 6, 7, 8, 9]);
     }
 
     #[test]

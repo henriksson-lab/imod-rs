@@ -1,11 +1,12 @@
 //! `IMOD/imodutil/imodjoin.c`: join selected objects from IMOD model files.
 
+use std::env;
 use std::ffi::CString;
 use std::io::Write;
-use std::path::Path;
-use std::{env, fs};
 
-use crate::imod::libcfshr::b3dutil::{imod_copyright, imod_version, replace_file_arg_vec};
+use crate::imod::libcfshr::b3dutil::{
+    imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
+};
 use crate::imod::libcfshr::parselist::parselist;
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_read};
 use crate::imod::libimod::imodel::{
@@ -328,6 +329,14 @@ pub fn imodjoin() {
         }
         let mut join_model = imod_read(&argv[iarg]).unwrap_or_else(|_| readerr(njoin));
         iarg += 1;
+        // Source: `flipState = (keepFlip ? joinModel->flags : inModel->flags) &
+        // IMODF_FLIPYZ;` immediately after reading the joining model.  The
+        // later reconciliation is deliberately outside the transform paths.
+        let wanted_flip = if keep_flip {
+            join_model.flags & IMODF_FLIPYZ
+        } else {
+            in_model.flags & IMODF_FLIPYZ
+        };
         if !suppress {
             if let Some(join_ref) = join_model.ref_image {
                 if diff_vols {
@@ -344,11 +353,6 @@ pub fn imodjoin() {
                 if keep_scale {
                     use_ref.cscale = use_ref.oscale;
                 }
-                let wanted_flip = if keep_flip {
-                    join_model.flags & IMODF_FLIPYZ
-                } else {
-                    in_model.flags & IMODF_FLIPYZ
-                };
                 let _ = imod_trans_from_ref_image(
                     &mut join_model,
                     &use_ref,
@@ -358,15 +362,17 @@ pub fn imodjoin() {
                         z: 1.,
                     },
                 );
-                if wanted_flip != join_model.flags & IMODF_FLIPYZ {
-                    imod_flip_yz(&mut join_model);
-                    join_model.flags ^= IMODF_FLIPYZ;
-                }
             } else {
                 println!(
                     "WARNING: imodjoin - Model {njoin} has no image reference data and will not be transformed"
                 );
             }
+        }
+        // Original: `if (flipState != (joinModel->flags & IMODF_FLIPYZ))
+        // imodFlipYZ(joinModel);`.  imodFlipYZ changes coordinates, not the
+        // model flag; this must also run with -n or without a ref image.
+        if wanted_flip != join_model.flags & IMODF_FLIPYZ {
+            imod_flip_yz(&mut join_model);
         }
         if list2.is_empty() {
             list2 = (1..=join_model.obj.len()).collect();
@@ -573,10 +579,12 @@ pub fn imodjoin() {
     in_model.ymax = in_model.ymax.max(max.y as i32);
     in_model.zmax = in_model.zmax.max(max.z as i32);
     let output = &argv[argv.len() - 1];
-    let backup = format!("{output}~");
-    if Path::new(output).exists() {
-        let _ = fs::remove_file(&backup);
-        let _ = fs::rename(output, &backup);
+    let output_name = CString::new(output.as_str()).unwrap_or_else(|_| {
+        eprintln!("ERROR: imodjoin - Fatal error opening new model");
+        std::process::exit(1)
+    });
+    unsafe {
+        imod_backup_file(output_name.as_ptr());
     }
     imod_file_write(&in_model, output).unwrap_or_else(|_| {
         eprintln!("ERROR: imodjoin - Fatal error opening new model");

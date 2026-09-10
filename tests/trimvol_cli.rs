@@ -7,8 +7,24 @@ use std::ffi::CString;
 use std::process::Command;
 
 #[test]
+fn trimvol_requires_imod_dir_before_parsing_options() {
+    let output = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env_remove("IMOD_DIR")
+        .arg("-s")
+        .output()
+        .expect("run trimvol without IMOD_DIR");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "ERROR: trimvol -  IMOD_DIR is not defined!\n"
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn trimvol_removed_s_option_exits_as_the_python_command_does() {
     let output = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .arg("-s")
         .output()
         .expect("run trimvol removed option");
@@ -41,6 +57,7 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
         ii_close(file);
     }
     let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-mode",
             "1",
@@ -59,6 +76,67 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
     assert!(result.stderr.is_empty());
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access() {
+    let base = std::env::temp_dir().join(format!(
+        "imod-rs-trimvol-coordinate-size-conflict-{}",
+        std::process::id()
+    ));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 1, 1, 1, 2), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        ii_close(file);
+    }
+    for (limits, size, expected) in [
+        ("-x", "-nx", "You cannot enter both -x and -nx options"),
+        ("-y", "-ny", "You cannot enter both -y and -ny options"),
+        ("-z", "-nz", "You cannot enter both -z and -nz options"),
+    ] {
+        let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+            .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+            .args([
+                limits,
+                "1,2",
+                size,
+                "2",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run trimvol coordinate/size conflict");
+        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout),
+            format!("ERROR: trimvol - {expected}\n")
+        );
+        assert!(result.stderr.is_empty());
+    }
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn trimvol_checks_missing_input_before_option_conflicts_as_python_does() {
+    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+        .args(["-x", "1,2", "-nx", "2", "missing-input.mrc", "output.mrc"])
+        .output()
+        .expect("run trimvol missing input with conflict");
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        "ERROR: trimvol - Input file missing-input.mrc does not exist\n"
+    );
+    assert!(result.stderr.is_empty());
 }
 
 #[test]
@@ -91,6 +169,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
         ii_close(file);
     }
     let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-f",
             "-old",
@@ -161,6 +240,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
         ii_close(file);
     }
     let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-f",
             "-old",
@@ -219,6 +299,7 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
         ii_close(file);
     }
     let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-mm",
             "100,200",
@@ -259,6 +340,8 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
         assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 3, 3, 2, 2), 0);
+        (*header).nlabl = 1;
+        (&mut (*header).labels[0])[..22].copy_from_slice(b"acquisition title line");
         ii_sync_from_mrc_header(file, header);
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         let mut first = [1.0_f32, 2., 3., 4., 5., 6., 7., 8., 9.];
@@ -274,6 +357,7 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
         ii_close(file);
     }
     let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-x",
             "2,3",
@@ -294,6 +378,9 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
         let mut header = std::mem::zeroed::<MrcHeader>();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
+        assert_eq!(header.nlabl, 2);
+        assert_eq!(&header.labels[0][..22], b"acquisition title line");
+        assert_eq!(&header.labels[1][..23], b"NEWSTACK: Images copied");
         let mut pixels = [0.0_f32; 4];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -347,6 +434,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
     }
     assert!(
         Command::new(env!("CARGO_BIN_EXE_trimvol"))
+            .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
             .args(["-yz", input.to_str().unwrap(), output.to_str().unwrap()])
             .status()
             .unwrap()
@@ -380,6 +468,75 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
         pixels,
         [1., 2., 11., 12., 21., 22., 3., 4., 13., 14., 23., 24.]
     );
+    let _ = std::fs::remove_file(input);
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
+    let base = std::env::temp_dir().join(format!("imod-rs-trimvol-rotx-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 4, 4, 2, 1), 0);
+        (*header).xlen = 8.0;
+        (*header).ylen = 12.0;
+        (*header).zlen = 20.0;
+        (*header).xorg = 1.0;
+        (*header).yorg = 3.0;
+        (*header).zorg = -5.0;
+        (*header).tiltangles = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut first = [
+            1.0_f32, 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ];
+        let mut second = [
+            17.0_f32, 18., 19., 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30., 31., 32.,
+        ];
+        assert_eq!(
+            ii_write_section_float(file, first.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(
+            ii_write_section_float(file, second.as_mut_ptr().cast(), 1),
+            0
+        );
+        ii_close(file);
+    }
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_trimvol"))
+            .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
+            .args(["-rx", input.to_str().unwrap(), output.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let mut header = std::mem::zeroed::<MrcHeader>();
+        assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+        assert_eq!((header.nx, header.ny, header.nz), (4, 2, 4));
+        assert_eq!((header.xorg, header.yorg, header.zorg), (1.0, -5.0, 9.0));
+        assert_eq!(header.tiltangles, [4.0, 5.0, 6.0, -86.0, 5.0, 6.0]);
+        let mut pixels = [0.0_f32; 8];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        assert_eq!(pixels, [13., 14., 15., 16., 29., 30., 31., 32.]);
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 3),
+            0
+        );
+        assert_eq!(pixels, [1., 2., 3., 4., 17., 18., 19., 20.]);
+        ii_close(file);
+    }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
 }

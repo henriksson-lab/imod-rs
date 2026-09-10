@@ -18,7 +18,7 @@ pub fn convertmod() {
             std::process::exit(1);
         }
     };
-    let imod = match readw_or_imod(&oldfile) {
+    let mut imod = match readw_or_imod(&oldfile) {
         Ok(imod) => imod,
         Err(()) => {
             // `convertmod.f:16` is a direct Fortran `print *`; the prefix
@@ -27,9 +27,32 @@ pub fn convertmod() {
             std::process::exit(1);
         }
     };
+    // `imodWriteAsWimp` calls `writeimod` before `imod_to_wmod`.  Reverse
+    // the `openImodData` reference-coordinate transform with the same f32
+    // matrix-operation order from `imodel_fwrap.c:1567-1592`.
+    if let Some(reference) = imod.ref_image {
+        let scale_x = (1.0_f64 / reference.cscale.x as f64) as f32;
+        let scale_y = (1.0_f64 / reference.cscale.y as f64) as f32;
+        let scale_z = (1.0_f64 / reference.cscale.z as f64) as f32;
+        for object in &mut imod.obj {
+            for contour in &mut object.cont {
+                for point in &mut contour.pts {
+                    point.x = point.x * scale_x + reference.ctrans.x * scale_x;
+                    point.y = point.y * scale_y + reference.ctrans.y * scale_y;
+                    point.z = point.z * scale_z + reference.ctrans.z * scale_z;
+                }
+            }
+        }
+    }
+    if imod.flags & crate::imod::libimod::imodel::IMODF_FLIPYZ != 0 {
+        crate::imod::libimod::imodel::imod_flip_yz(&mut imod);
+    }
     let mut output = match OpenOptions::new()
         .write(true)
-        .create_new(true)
+        // `imodel_fwrap.c:1762` opens the destination with `"wb"`, which
+        // creates it or truncates an existing WIMP file.
+        .create(true)
+        .truncate(true)
         .open(&newfile)
     {
         Ok(file) => file,

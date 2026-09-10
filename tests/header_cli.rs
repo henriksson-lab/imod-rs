@@ -24,6 +24,8 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
         mrc.amin = -1.25;
         mrc.amax = 9.5;
         mrc.amean = 4.125;
+        mrc.labels[0][..80].fill(b'A');
+        mrc.nlabl = 1;
         mrc.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut mrc), 0);
         libc::fclose(file);
@@ -41,8 +43,8 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
         assert_eq!(
             String::from_utf8_lossy(&result.stdout),
             format!(
-                "{:8}{:8}{:8}\n{:4}\n{:13.5}\n{:13.5}\n{:13.5}\n",
-                3, 4, 2, 2, -1.25_f32, 9.5_f32, 4.125_f32
+                "{:8}{:8}{:8}\n{:4}\n{:>9}    \n{:>9}    \n{:>9}    \n",
+                3, 4, 2, 2, "-1.2500", "9.5000", "4.1250"
             )
         );
         let ordinary = Command::new(env!("CARGO_BIN_EXE_header"))
@@ -55,9 +57,20 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
             String::from_utf8_lossy(&ordinary.stderr)
         );
         let text = String::from_utf8_lossy(&ordinary.stdout);
+        let open_report = format!("RO image file on unit   1 : {}", input.display());
+        assert!(text.contains(&open_report));
+        assert!(
+            text.find(&open_report).unwrap()
+                < text.find("Number of columns, rows, sections").unwrap()
+        );
         assert!(text.contains("Number of columns, rows, sections .....       3       4       2"));
         assert!(text.contains("Map mode ..............................    2   (32-bit float)"));
         assert!(text.contains("Space group,# extra bytes,idtype,lens"));
+        // `irdhdr.f90` FORMAT 1020 uses `1x,i5` and `19a4,a3`, so it
+        // prints a five-wide count after a leading blank and exactly 79 label
+        // characters, despite an MRC label occupying 80 bytes.
+        assert!(text.contains(&format!("\n     1 Titles :\n{}\n", "A".repeat(79))));
+        assert!(!text.contains(&"A".repeat(80)));
         let brief = Command::new(env!("CARGO_BIN_EXE_header"))
             .args(["-brief"])
             .arg(&input)

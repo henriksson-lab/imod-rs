@@ -21,9 +21,10 @@ fn usage_and_missing_command_file_follow_source_contract() {
         .expect("run submfg missing input");
     assert_eq!(missing.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&missing.stderr)
+        String::from_utf8_lossy(&missing.stdout)
             .contains("Neither does-not-exist.com nor does-not-exist.pcm exists")
     );
+    assert!(missing.stderr.is_empty());
 }
 
 #[test]
@@ -186,4 +187,26 @@ fn real_imod_com_fixture_reaches_vmstopy_boundary() {
         String::from_utf8_lossy(&output.stderr)
             .contains(&format!("Error executing {}", fixture.display()))
     );
+}
+
+#[test]
+fn missing_com_and_pcm_root_uses_source_exiterror_stdout() {
+    let root =
+        std::env::temp_dir().join(format!("imod-rs-submfg-no-command-{}", std::process::id()));
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
+    let result = Command::new(env!("CARGO_BIN_EXE_submfg"))
+        .env("IMOD_DIR", source)
+        .arg(&root)
+        .output()
+        .expect("run submfg with a missing command-file root");
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        format!(
+            "ERROR: submfg - Neither {}.com nor {}.pcm exists\n",
+            root.display(),
+            root.display()
+        )
+    );
+    assert!(result.stderr.is_empty());
 }

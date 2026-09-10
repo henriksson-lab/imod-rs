@@ -529,15 +529,6 @@ pub unsafe fn tiff_open_file(
                     (*tif).iifile = core::ptr::null_mut();
                     return 1;
                 }
-                // The direct ii_tiff_check mapping presently exposes only its
-                // current directory as nz = 1.  This source caller requires a
-                // complete stack count before choosing its reader, so retain the
-                // legacy path until the libtiff mapping represents every IFD.
-                if tiff_ifd_number((*tif).fp) > (*(*tif).iifile).nz {
-                    crate::imod::libiimod::iimage::ii_delete((*tif).iifile);
-                    (*tif).iifile = core::ptr::null_mut();
-                    tiff_first_ifd((*tif).fp);
-                }
             }
         }
         0

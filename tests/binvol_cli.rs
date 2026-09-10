@@ -35,6 +35,8 @@ fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
         header.amin = 1.;
         header.amax = 32.;
         header.amean = 16.5;
+        header.nlabl = 1;
+        header.labels[0][..24].copy_from_slice(b"acquisition source label");
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         let pixels: Vec<f32> = (1..=32).map(|value| value as f32).collect();
@@ -71,16 +73,17 @@ fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
         );
         assert_eq!((written.xlen, written.ylen, written.zlen), (8., 12., 20.));
         assert_eq!((written.xorg, written.yorg, written.zorg), (3., -2., 7.));
-        assert_eq!(written.nlabl, 1);
-        let label = String::from_utf8_lossy(&written.labels[0][..56]);
+        assert_eq!(written.nlabl, 2);
+        assert_eq!(&written.labels[0][..24], b"acquisition source label");
+        let label = String::from_utf8_lossy(&written.labels[1][..56]);
         assert!(
             label.starts_with("BINVOL: Volume binned down by factors   2   2   2"),
             "{label:?}"
         );
-        assert_eq!(written.labels[0][56 + 2], b'-');
-        assert_eq!(written.labels[0][56 + 6], b'-');
-        assert_eq!(written.labels[0][67 + 2], b':');
-        assert_eq!(written.labels[0][67 + 5], b':');
+        assert_eq!(written.labels[1][56 + 2], b'-');
+        assert_eq!(written.labels[1][56 + 6], b'-');
+        assert_eq!(written.labels[1][67 + 2], b':');
+        assert_eq!(written.labels[1][67 + 5], b':');
         let mut binned = [0_f32; 4];
         assert_eq!(
             libc::fseek(file, written.header_size as i64, libc::SEEK_SET),
@@ -198,6 +201,10 @@ fn binvol_applies_source_xy_antialias_through_unit_reduced() {
             result.status.success(),
             "{}",
             String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&result.stdout)
+                .contains(" Antialiasing is being applied in X and Y as well as Z\n")
         );
         let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
         let mut written: MrcHeader = core::mem::zeroed();

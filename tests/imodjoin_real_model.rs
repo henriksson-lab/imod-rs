@@ -459,6 +459,64 @@ fn keep_scale_and_keep_flip_preserve_their_source_transform_states() {
 }
 
 #[test]
+fn suppressing_transforms_still_reconciles_the_joined_model_flip_state() {
+    let stem = format!("imod-rs-imodjoin-suppress-flip-{}", std::process::id());
+    let first_path = std::env::temp_dir().join(format!("{stem}-first.mod"));
+    let second_path = std::env::temp_dir().join(format!("{stem}-second.mod"));
+    let output_path = std::env::temp_dir().join(format!("{stem}-out.mod"));
+    imod_file_write(
+        &Imod {
+            obj: vec![Iobj::default()],
+            ..Imod::default()
+        },
+        &first_path,
+    )
+    .unwrap();
+    imod_file_write(
+        &Imod {
+            flags: IMODF_FLIPYZ,
+            obj: vec![Iobj {
+                cont: vec![Icont {
+                    pts: vec![Ipoint {
+                        x: 1.,
+                        y: 2.,
+                        z: 3.,
+                    }],
+                    ..Icont::default()
+                }],
+                ..Iobj::default()
+            }],
+            // No ref image: C still executes its flip reconciliation.
+            ..Imod::default()
+        },
+        &second_path,
+    )
+    .unwrap();
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+            .arg("-n")
+            .arg(&first_path)
+            .arg(&second_path)
+            .arg(&output_path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let output = imod_read(&output_path).unwrap();
+    assert_eq!(
+        output.obj[1].cont[0].pts[0],
+        Ipoint {
+            x: 1.,
+            y: 3.,
+            z: 2.
+        }
+    );
+    for path in [first_path, second_path, output_path] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
 fn existing_output_is_backed_up_before_the_joined_model_is_written() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture = root.join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
@@ -472,6 +530,14 @@ fn existing_output_is_backed_up_before_the_joined_model_is_written() {
         ..Imod::default()
     };
     imod_file_write(&old, &output).expect("old output writes");
+    imod_file_write(
+        &Imod {
+            name: "stale backup replaced by source imodBackupFile".into(),
+            ..Imod::default()
+        },
+        &backup,
+    )
+    .expect("stale backup writes");
     let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
         .arg(&fixture)
         .arg(&fixture)

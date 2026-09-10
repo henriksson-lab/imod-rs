@@ -4,10 +4,12 @@
 //! copied `MrcHeader` adapter is used.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
+use crate::imod::flib::subrs::imsubs::wrap_iiunit::imopen;
 use crate::imod::libcfshr::b3dutil::{extra_is_nbytes_and_flags, override_invert_mrc_origin};
 use crate::imod::libiimod::iimage::ii_read_section_float;
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT};
-use crate::imod::libiimod::unit_fileio::{iiu_close, iiu_get_ii_file, iiu_open};
+use crate::imod::libiimod::unit_fileio::{ialbrief_, iiu_close, iiu_get_ii_file, iiu_open};
 use crate::imod::libiimod::unit_header::*;
 use std::ffi::CString;
 
@@ -15,12 +17,18 @@ use std::ffi::CString;
 pub fn alterheader() {
     let words: Vec<String> = std::env::args().skip(1).collect();
     let mut name_at = None;
+    let mut num_option_args = 0;
+    let mut copy_from = false;
     let mut i = 0;
     while i < words.len() {
         if !words[i].starts_with('-') {
             name_at = Some(i);
         }
         let key = words[i].trim_start_matches('-').to_ascii_lowercase();
+        if words[i].starts_with('-') {
+            num_option_args += 1;
+            copy_from |= matches!(key.as_str(), "copy" | "copyfromimage");
+        }
         i += 1 + usize::from(
             matches!(
                 key.as_str(),
@@ -66,13 +74,19 @@ pub fn alterheader() {
         eprintln!("ERROR: ALTERHEADER - Image filename must be entered");
         return;
     };
+    // `alterheader.f90:95-96` sends CopyFromImage directly to the copy
+    // branch, and rejects every combination before opening either image.
+    if copy_from && num_option_args > 1 {
+        println!("ERROR: ALTERHEADER - No other options can be entered with -copy");
+        std::process::exit(1);
+    }
     let Ok(name) = CString::new(words[name_at].as_bytes()) else {
         eprintln!("ERROR: ALTERHEADER - Image filename contains a NUL byte");
         return;
     };
-    unsafe {
-        iiu_open(2, name.as_ptr(), c"OLD".as_ptr());
-    }
+    let mut brief = 0;
+    unsafe { ialbrief_(&mut brief) };
+    unsafe { imopen(2, &words[name_at], "OLD") };
     let image = unsafe { iiu_get_ii_file(2) };
     if image.is_null() {
         eprintln!("ERROR: ALTERHEADER - Could not open '{}'", words[name_at]);
@@ -81,7 +95,7 @@ pub fn alterheader() {
     let (mut nxyz, mut mxyz, mut nxyzst) = ([0; 3], [0; 3], [0; 3]);
     let (mut mode, mut dmin, mut dmax, mut dmean) = (0, 0., 0., 0.);
     unsafe {
-        iiu_ret_basic_head(
+        irdhdr(
             2,
             nxyz.as_mut_ptr(),
             mxyz.as_mut_ptr(),
@@ -90,7 +104,6 @@ pub fn alterheader() {
             &mut dmax,
             &mut dmean,
         );
-        iiu_ret_size(2, nxyz.as_mut_ptr(), mxyz.as_mut_ptr(), nxyzst.as_mut_ptr());
     }
     let (mut version, mut flags, mut imod) = (0, 0, 0);
     unsafe {
@@ -343,6 +356,23 @@ pub fn alterheader() {
             "modefix" | "fixmode" => {
                 if mode == 1 || mode == 6 {
                     mode = 7 - mode;
+                    // `alterheader.f90:562-572`: mode conversion is a
+                    // visible header operation, including the source's
+                    // range-loss warnings before the altered header is
+                    // committed below.
+                    println!("\nChanging mode to{:2}", mode);
+                    if dmax > 32767.0 && mode == 1 {
+                        println!(
+                            "\nThe file maximum is{:12.1} and numbers bigger than 32767 will not be\n represented correctly in this mode.",
+                            dmax
+                        );
+                    }
+                    if dmin < 0.0 && mode == 6 {
+                        println!(
+                            "\nThe file minimum is{:12.1} and negative numbers will not be\n represented correctly in this mode.",
+                            dmin
+                        );
+                    }
                     unsafe { iiu_alt_mode(2, mode) };
                     changed = true
                 } else {
@@ -704,5 +734,20 @@ pub fn alterheader() {
     }
     unsafe {
         iiu_close(2);
+    }
+    if changed {
+        unsafe {
+            imopen(3, &words[name_at], "RO");
+            irdhdr(
+                3,
+                nxyz.as_mut_ptr(),
+                mxyz.as_mut_ptr(),
+                &mut mode,
+                &mut dmin,
+                &mut dmax,
+                &mut dmean,
+            );
+            iiu_close(3);
+        }
     }
 }

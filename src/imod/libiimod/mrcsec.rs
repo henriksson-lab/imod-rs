@@ -4,7 +4,7 @@
 //! is one source function rendered in systematic Rust snake case.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::b3dutil::mrc_huge_seek;
+use crate::imod::libcfshr::b3dutil::{b3d_error, mrc_huge_seek};
 use crate::imod::libiimod::halffloat::{imnp_halfbits_to_floatbits, imnp_halfbuf_to_floats};
 use crate::imod::libiimod::iimage::IIERR_QUITTING;
 use crate::imod::libiimod::iimage::{
@@ -18,7 +18,11 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_SHORT, MRC_MODE_USHORT, get_byte_map, get_short_map, mrc_get_complex_scale,
     mrc_getdcsize, mrc_mirror_source, mrc_swap_floats, mrc_swap_shorts,
 };
-use core::ffi::c_char;
+use core::ffi::{CStr, c_char};
+
+unsafe extern "C" {
+    static mut stderr: *mut libc::FILE;
+}
 
 const MRSA_BYTE: i32 = 1;
 const MRSA_FLOAT: i32 = 2;
@@ -221,6 +225,13 @@ pub unsafe fn mrc_read_section_any(
     let pix_size_buf = [0, 1, 4, 2];
     if unsafe { (*hdata).y_inverted } != 0 {
         if unsafe { (*li).mirror_fft } != 0 {
+            // `mrcsec.c:264-267`: this combination has no source transform.
+            b3d_error(
+                unsafe { stderr },
+                format_args!(
+                    "ERROR: mrcReadSectionAny - cannot mirror FFT with inverted Y data.\n"
+                ),
+            );
             if free_map != 0 {
                 unsafe { libc::free(d.map.cast()) }
             };
@@ -481,6 +492,13 @@ pub unsafe fn ii_init_read_section_any(
     d.y_start = if d.read_y != 0 { l.zmin } else { l.ymin };
     let urfy = if d.read_y != 0 { l.zmax } else { l.ymax };
     if l.xmin > l.xmax || d.y_start > urfy {
+        b3d_error(
+            unsafe { stderr },
+            format_args!(
+                "ERROR: iiInitReadSectionAny - Specification of area to read (x {} to {} y {} to {}) is incorrect\n",
+                l.xmin, l.xmax, d.y_start, urfy
+            ),
+        );
         return 1;
     }
     d.xsize = d.x_end - d.x_start + 1;
@@ -514,9 +532,27 @@ pub unsafe fn ii_init_read_section_any(
             MRC_MODE_BYTE | MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT | MRC_MODE_RGB
         )
     {
+        let caller = unsafe { CStr::from_ptr(caller) }.to_string_lossy();
+        b3d_error(
+            unsafe { stderr },
+            format_args!(
+                "ERROR: {} - Only real modes can be read as floats\n",
+                caller
+            ),
+        );
         return 1;
     }
     if (d.byte != 0 && l.outmax > 255) || (d.to_short != 0 && l.outmax < 256) {
+        let caller = unsafe { CStr::from_ptr(caller) }.to_string_lossy();
+        b3d_error(
+            unsafe { stderr },
+            format_args!(
+                "ERROR: {} - outmax ({}) is not in right range for conversion to {}\n",
+                caller,
+                l.outmax,
+                if d.byte != 0 { "bytes" } else { "shorts" }
+            ),
+        );
         return 1;
     }
     /* This follows the source's four-corner construction exactly: the resulting
@@ -561,6 +597,14 @@ pub unsafe fn ii_init_read_section_any(
         || d.y_start < 0
         || unsafe { *y_end } >= if d.read_y != 0 { h.nz } else { h.ny }
     {
+        let caller = unsafe { CStr::from_ptr(caller) }.to_string_lossy();
+        b3d_error(
+            unsafe { stderr },
+            format_args!(
+                "ERROR: {} - Requested area to read is out of range for file size\n",
+                caller
+            ),
+        );
         return 1;
     }
     match h.mode {
@@ -623,6 +667,13 @@ pub unsafe fn ii_init_read_section_any(
         }
         _ => {
             if d.convert != 0 {
+                b3d_error(
+                    unsafe { stderr },
+                    format_args!(
+                        "ERROR: {} - unsupported data type.\n",
+                        unsafe { CStr::from_ptr(caller) }.to_string_lossy()
+                    ),
+                );
                 return 1;
             }
         }
@@ -1259,6 +1310,7 @@ pub unsafe fn lookup_ii_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
     use crate::imod::libiimod::mrcfiles::{
         mrc_head_new, mrc_head_read, mrc_head_write, mrc_init_li,
     };
@@ -1310,6 +1362,48 @@ mod tests {
                 0
             );
             assert_eq!(output, [0.0, 17.0, 255.0]);
+        }
+    }
+
+    #[test]
+    fn invalid_read_area_reports_the_source_diagnostic() {
+        unsafe {
+            let mut header: MrcHeader = core::mem::zeroed();
+            header.nx = 3;
+            header.ny = 1;
+            header.nz = 1;
+            header.mode = MRC_MODE_BYTE;
+            let mut load: LoadInfo = core::mem::zeroed();
+            load.xmin = 2;
+            load.xmax = 1;
+            load.ymin = 0;
+            load.ymax = 0;
+            load.zmin = 0;
+            load.zmax = 0;
+            load.slope = 1.0;
+            load.outmax = 255;
+            let mut output = [0_u8; 3];
+            let mut data: LineProcData = core::mem::zeroed();
+            let mut free_map = 0;
+            let mut y_end = 0;
+            b3d_set_store_error(1);
+            assert_eq!(
+                ii_init_read_section_any(
+                    &mut header,
+                    &mut load,
+                    output.as_mut_ptr(),
+                    &mut data,
+                    &mut free_map,
+                    &mut y_end,
+                    c"mrcReadSectionAny".as_ptr(),
+                ),
+                1
+            );
+            assert_eq!(
+                CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: iiInitReadSectionAny - Specification of area to read (x 2 to 1 y 0 to 0) is incorrect\n"
+            );
+            b3d_set_store_error(0);
         }
     }
 
@@ -1457,6 +1551,63 @@ mod tests {
             );
             libc::fclose(file);
             assert_eq!(output, [30, 34, 0, 23]);
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn inverted_y_mirrored_fft_reports_the_source_error() {
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-inverted-mirror-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(
+                mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_COMPLEX_FLOAT),
+                0
+            );
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let values = [0.0_f32; 8];
+            assert_eq!(
+                libc::fwrite(
+                    values.as_ptr().cast(),
+                    core::mem::size_of::<f32>(),
+                    values.len(),
+                    file,
+                ),
+                values.len()
+            );
+            libc::fclose(file);
+
+            let file = libc::fopen(path.as_ptr(), c"rb".as_ptr());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut header), 0);
+            header.fp = file.cast();
+            header.y_inverted = 1;
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            load.mirror_fft = 1;
+            let mut output = [0_u8; 4];
+            b3d_set_store_error(1);
+            assert_eq!(
+                mrc_read_z_byte(&mut header, &mut load, output.as_mut_ptr(), 0),
+                1
+            );
+            assert_eq!(
+                std::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrcReadSectionAny - cannot mirror FFT with inverted Y data.\n"
+            );
+            b3d_set_store_error(0);
+            libc::fclose(file);
             std::fs::remove_file(std::path::Path::new(
                 std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
             ))

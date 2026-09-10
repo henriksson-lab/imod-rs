@@ -791,8 +791,23 @@ mod tests {
             list.iter().map(|item| item.type_).collect::<Vec<_>>(),
             [1, 2, 3, 6, 10]
         );
+        assert_eq!(list[0].flags, 3 << 2);
+        assert_eq!(list[1].flags, 3 << 2);
         assert_eq!(unsafe { list[0].value.b }, [255, 127, 0, 0]);
         assert_eq!(unsafe { list[4].value.f }, 1.25);
+
+        // `imodWriteStore` must retain source byte order for generated colour
+        // payloads: treating this as GEN_STORE_SHORT reverses each pair.
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-istore-generated-colour-{}.bin",
+            std::process::id()
+        ));
+        let mut file = File::create(&path).unwrap();
+        assert_eq!(imod_write_store(&list[..1], 0x5354_4f52, &mut file), 0);
+        drop(file);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[16..20], &[255, 127, 0, 0]);
+        std::fs::remove_file(path).unwrap();
 
         let contour_list = [Istore {
             type_: 3,
@@ -924,6 +939,30 @@ mod tests {
         }];
         assert_eq!(istore_invert(&mut gap, 4), 0);
         assert_eq!(unsafe { gap[0].index.i }, 2);
+
+        // `istoreInvert` consumes the matching successor while translating a
+        // multi-point change; otherwise that old end is translated a second
+        // time as an independent start.
+        let mut range = vec![
+            Istore {
+                type_: 3,
+                index: StoreUnion { i: 1 },
+                value: StoreUnion { i: 7 },
+                ..Default::default()
+            },
+            Istore {
+                type_: 3,
+                flags: 1 << 5,
+                index: StoreUnion { i: 4 },
+                ..Default::default()
+            },
+        ];
+        assert_eq!(istore_invert(&mut range, 6), 0);
+        assert_eq!(range.len(), 2);
+        assert_eq!(unsafe { range[0].index.i }, 2);
+        assert_eq!(range[0].flags & (1 << 5), 0);
+        assert_eq!(unsafe { range[1].index.i }, 5);
+        assert_ne!(range[1].flags & (1 << 5), 0);
     }
 
     #[test]
@@ -1353,7 +1392,7 @@ pub fn istore_generate_items(
             list,
             Istore {
                 type_: 1,
-                flags: 1 << 3,
+                flags: 3 << 2,
                 index: StoreUnion { i: index },
                 value: StoreUnion {
                     b: [
@@ -1373,7 +1412,7 @@ pub fn istore_generate_items(
             list,
             Istore {
                 type_: 2,
-                flags: 1 << 3,
+                flags: 3 << 2,
                 index: StoreUnion { i: index },
                 value: StoreUnion {
                     b: [
@@ -1649,11 +1688,10 @@ pub fn istore_invert(list: &mut Vec<Istore>, psize: i32) -> i32 {
     if istore_break_changes(list, psize, psize) != 0 {
         return 1;
     }
-    let source = list.clone();
     let mut inverted = Vec::new();
     let mut cur_start = 0;
-    while cur_start < source.len() {
-        let current = source[cur_start];
+    while cur_start < list.len() {
+        let current = list[cur_start];
         if current.flags & ((1 << 4) | 3) != 0 {
             if istore_insert(&mut inverted, current) != 0 {
                 return 1;
@@ -1686,8 +1724,8 @@ pub fn istore_invert(list: &mut Vec<Istore>, psize: i32) -> i32 {
             return 1;
         }
         let mut next = cur_start + 1;
-        while next < source.len() {
-            let successor = source[next];
+        while next < list.len() {
+            let successor = list[next];
             if current.type_ == successor.type_ {
                 let mut start = current;
                 start.index = StoreUnion {
@@ -1696,9 +1734,11 @@ pub fn istore_invert(list: &mut Vec<Istore>, psize: i32) -> i32 {
                 if istore_insert(&mut inverted, start) != 0 {
                     return 1;
                 }
+                list.remove(next);
                 if successor.flags & (1 << 5) != 0 {
                     break;
                 }
+                continue;
             }
             next += 1;
         }

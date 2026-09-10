@@ -9,8 +9,9 @@ publish = false
 path = "src/lib.rs"
 
 [features]
+default = ["qt"]
 # Enables the direct C++/Qt QImage boundary used by mrc2tif JPEG/PNG output.
-# The embedding application supplies `mrc2tif_qimage_save` from a Qt build.
+# The workspace builds `mrc2tif_qimage_save` against the system Qt installation.
 qt = []
 
 [dependencies]

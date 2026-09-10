@@ -415,7 +415,9 @@ pub unsafe fn clip_scaling(
                                     if i < border
                                         || i >= (*opt).ix - border
                                         || j < border
-                                        || j >= (*opt).iy - border
+                                        // processing.cpp deliberately uses ix for this lower
+                                        // Y boundary too.  Preserve that non-square behavior.
+                                        || j >= (*opt).ix - border
                                         || ((*opt).low != IP_DEFAULT as f32 && val[0] > (*opt).low)
                                         || ((*opt).high != IP_DEFAULT as f32
                                             && val[0] > (*opt).high)
@@ -4355,8 +4357,14 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                 crate::imod::clip::clip::show_error("stat: error reading slice.");
                 return -1;
             }
-            let mut min = f32::INFINITY;
-            let mut max = f32::NEG_INFINITY;
+            // `processing.cpp:3541-3551` deliberately seeds both extrema from
+            // the center pixel while their coordinates start at zero.  In
+            // particular, a center maximum is not selected again by the
+            // strict `>` comparison below; its fitted position therefore uses
+            // the source's `(0, 0)` coordinate.
+            let center = slice_get_pixel_magnitude(s, (*s).xsize / 2, (*s).ysize / 2);
+            let mut min = center;
+            let mut max = center;
             let mut xmin = 0;
             let mut ymin = 0;
             let mut xmax = 0;
@@ -4385,6 +4393,29 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
             let sd = ((square - n * mean * mean) / 1_f64.max(n - 1.))
                 .max(0.)
                 .sqrt();
+            // `processing.cpp:3636-3649`: refine the maximum with the same
+            // source-mapped 3x3 parabolic fit before applying output coordinates.
+            let mut data = [[0_f64; 3]; 3];
+            for dj in -1..=1 {
+                for di in -1..=1 {
+                    data[(dj + 1) as usize][(di + 1) as usize] =
+                        slice_get_pixel_magnitude(s, xmax + di, ymax + dj) as f64;
+                }
+            }
+            let (mut cx, mut cy) = (0_f64, 0_f64);
+            crate::imod::clip::correlation::parabolic_fit(&mut cx, &mut cy, &data);
+            let (mut peak_x, mut peak_y) = (cx + xmax as f64, cy + ymax as f64);
+            if (*opt).sano != 0 {
+                peak_x -= (*s).xsize as f64 / 2.;
+                peak_y -= (*s).ysize as f64 / 2.;
+            } else {
+                let adjust_x = (*opt).cx as i32 - (*opt).ix / 2;
+                let adjust_y = (*opt).cy as i32 - (*opt).iy / 2;
+                peak_x += adjust_x as f64;
+                peak_y += adjust_y as f64;
+                xmin += adjust_x;
+                ymin += adjust_y;
+            }
             if !outliers && !pcoords.is_empty() {
                 let base = (3 * iz) as usize;
                 libc::printf(
@@ -4395,8 +4426,8 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                     ymin + pcoords[base + 1] + add,
                     pcoords[base + 2] + add,
                     max as f64,
-                    xmax + pcoords[base],
-                    ymax + pcoords[base + 1],
+                    peak_x.round() as i32 + pcoords[base] + add,
+                    peak_y.round() as i32 + pcoords[base + 1] + add,
                     pcoords[base + 2] + add,
                     mean,
                 );
@@ -4408,8 +4439,8 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                     xmin + add,
                     ymin + add,
                     max as f64,
-                    xmax as f64,
-                    ymax as f64,
+                    peak_x,
+                    peak_y,
                     mean,
                     sd,
                 );
@@ -4427,7 +4458,7 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
             total_n += n as i64;
             allmins.push(min);
             allmaxes.push(max);
-            stat_rows.push((iz, xmin, ymin, xmax, ymax, mean, sd));
+            stat_rows.push((iz, xmin, ymin, peak_x, peak_y, mean, sd));
             slice_free(s);
         }
         if outliers {
@@ -4469,7 +4500,7 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                 if max_drops[index] > 0. {
                     flagged[kk] = true;
                 }
-                let (iz, xmin, ymin, xmax, ymax, mean, sd) = stat_rows[kk];
+                let (iz, xmin, ymin, peak_x, peak_y, mean, sd) = stat_rows[kk];
                 let starmin = if min_drops[index] < 0. { b'*' } else { b' ' };
                 let starmax = if max_drops[index] > 0. { b'*' } else { b' ' };
                 if !pcoords.is_empty() {
@@ -4484,8 +4515,8 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                         pcoords[base + 2] + add,
                         allmaxes[kk] as f64,
                         starmax as i32,
-                        xmax + pcoords[base],
-                        ymax + pcoords[base + 1],
+                        peak_x.round() as i32 + pcoords[base] + add,
+                        peak_y.round() as i32 + pcoords[base + 1] + add,
                         pcoords[base + 2] + add,
                         mean,
                         sd,
@@ -4500,8 +4531,8 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                         ymin,
                         allmaxes[kk] as f64,
                         starmax as i32,
-                        xmax,
-                        ymax,
+                        peak_x.round() as i32,
+                        peak_y.round() as i32,
                         mean,
                         sd,
                     );

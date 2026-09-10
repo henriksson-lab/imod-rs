@@ -42,7 +42,12 @@ fn wmod2imod_preserves_imodnew_scale_defaults_and_source_x_option_typo() {
     // C assigns zscale = Xscale, yscale = Yscale, then zscale = Zscale.
     assert_eq!((model.xscale, model.yscale, model.zscale), (1., 3., 4.));
     assert_eq!(model.name, "IMOD-NewModel");
-    assert_eq!(model.flags, (1 << 11) | (1 << 10));
+    // `imodWrite` adds the byte-material, multiple-clip and mesh-thickness
+    // format bits before it writes the source-created default model.
+    assert_eq!(
+        model.flags,
+        (1 << 13) | (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9)
+    );
     assert_eq!(
         (
             model.drawmode,

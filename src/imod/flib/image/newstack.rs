@@ -8,10 +8,13 @@ use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
 use crate::imod::flib::subrs::imsubs::wrap_iiunit::{ialprt, imopen};
 use crate::imod::flib::subrs::xfsubs::xfrdall::xfrdall2;
 use crate::imod::libcfshr::autodoc::{
-    adoc_get_collection_name, adoc_get_num_collections, adoc_get_number_of_sections,
-    adoc_get_section_name, adoc_transfer_section,
+    ADOC_ZVALUE_NAME, adoc_clear, adoc_get_collection_name, adoc_get_float,
+    adoc_get_num_collections, adoc_get_number_of_sections, adoc_get_section_name,
+    adoc_open_image_metadata, adoc_set_current, adoc_transfer_section,
 };
-use crate::imod::libcfshr::b3dutil::{override_write_bytes, set_output_type_from_string};
+use crate::imod::libcfshr::b3dutil::{
+    extra_is_nbytes_and_flags, override_write_bytes, set_output_type_from_string,
+};
 use crate::imod::libcfshr::cubinterp::cubinterp;
 use crate::imod::libcfshr::linearxforms::xfmult;
 use crate::imod::libcfshr::parse_params::{
@@ -23,7 +26,10 @@ use crate::imod::libiimod::iimage::{
     IIFILE_DEFAULT, IIFILE_MRC, ii_allow_multi_volume, ii_close, ii_open, ii_open_new,
     ii_read_section_float, ii_sync_from_mrc_header, ii_write_header, ii_write_section_float,
 };
-use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
+use crate::imod::libiimod::mrcfiles::{
+    MRC_NLABELS, MrcHeader, mrc_head_new, mrc_head_write, mrc_read_extra_header,
+    mrc_write_extra_header,
+};
 use crate::imod::libiimod::unit_fileio::{
     iiu_close, iiu_get_ii_file, iiu_open, iiu_set_position, iiu_volume_open, iiu_write_lines,
 };
@@ -119,6 +125,10 @@ pub fn newstack() {
         mut if_linear,
         mut transform_lines_option,
         mut size_to_output,
+        mut tilt_angle_file,
+        mut reorder_by_tilt,
+        mut angle_file_to_reorder,
+        mut new_angle_output_file,
     ) = (
         String::new(),
         String::new(),
@@ -133,6 +143,10 @@ pub fn newstack() {
         0_i32,
         None::<String>,
         None::<[i32; 2]>,
+        String::new(),
+        0_i32,
+        String::new(),
+        String::new(),
     );
     let mut adjust_origin = false;
     let mut print_size_and_exit = false;
@@ -144,6 +158,7 @@ pub fn newstack() {
     let mut odd_even_ok = 0_i32;
     let mut quiet = false;
     let mut bytes_signed = None::<i32>;
+    let mut pixel_from_mdoc = false;
     let mut non_options = Vec::<String>::new();
     let mut words = std::env::args().skip(1);
     while let Some(word) = words.next() {
@@ -193,6 +208,21 @@ pub fn newstack() {
             // path can coexist with the still-untranslated option dispatcher.
             "offset" | "offsetsinxandy" => {
                 let _ = words.next();
+            }
+            "tilt" | "tiltanglefile" => tilt_angle_file = words.next().unwrap_or_default(),
+            "pixel" | "pixelsizefrommdoc" => pixel_from_mdoc = true,
+            "reorder" | "reorderbytiltangle" => {
+                let Some(value) = words.next().and_then(|value| value.parse::<i32>().ok()) else {
+                    eprintln!("ERROR: NEWSTACK - Reorder by tilt angle must be an integer");
+                    return;
+                };
+                reorder_by_tilt = value;
+            }
+            "angle" | "anglefiletoreorder" => {
+                angle_file_to_reorder = words.next().unwrap_or_default()
+            }
+            "newangle" | "newangleoutputfile" => {
+                new_angle_output_file = words.next().unwrap_or_default()
             }
             "applyfirst" | "applyoffsetsfirst" => {}
             "origin" | "adjustorigin" => adjust_origin = true,
@@ -343,6 +373,16 @@ pub fn newstack() {
     }
     if linear_entered && nearest_entered {
         eprintln!("ERROR: NEWSTACK - You cannot enter both -linear and -nearest");
+        return;
+    }
+    if !tilt_angle_file.is_empty() && reorder_by_tilt != 0 {
+        eprintln!(
+            "ERROR: NEWSTACK - You cannot enter -tilt with angles to insert and -reorder to reorder by angle"
+        );
+        return;
+    }
+    if reorder_by_tilt != 0 && output_names.len() > 1 {
+        eprintln!("ERROR: NEWSTACK - You cannot use -reorder with more than one output file");
         return;
     }
     if let Some(bytes_signed) = bytes_signed {
@@ -502,6 +542,7 @@ pub fn newstack() {
     }
     unsafe {
         let mut routes = Vec::<(usize, i32)>::new();
+        let mut mdoc_pixel_spacing = Vec::<Vec<Option<f32>>>::new();
         let mut first_header: Option<MrcHeader> = None;
         for (file_index, name) in input_names.iter().enumerate() {
             let Ok(name) = CString::new(name.as_bytes()) else {
@@ -530,6 +571,36 @@ pub fn newstack() {
             }
             let header = std::ptr::read((*ii_file).header.cast::<MrcHeader>());
             iiu_close(1);
+            let mut spacing_for_section = vec![None; header.nz as usize];
+            if pixel_from_mdoc {
+                let mut montage = 0;
+                let mut num_sections = 0;
+                let mut section_type = 0;
+                let adoc_index = adoc_open_image_metadata(
+                    name.as_ptr(),
+                    1,
+                    &raw mut montage,
+                    &raw mut num_sections,
+                    &raw mut section_type,
+                );
+                if adoc_index >= 0 {
+                    adoc_set_current(adoc_index);
+                    for section in 0..header.nz {
+                        let mut spacing = 0.0_f32;
+                        if adoc_get_float(
+                            ADOC_ZVALUE_NAME.as_ptr(),
+                            section,
+                            c"PixelSpacing".as_ptr(),
+                            &raw mut spacing,
+                        ) == 0
+                        {
+                            spacing_for_section[section as usize] = Some(spacing);
+                        }
+                    }
+                    adoc_clear(adoc_index);
+                }
+            }
+            mdoc_pixel_spacing.push(spacing_for_section);
             if let Some(ref first) = first_header {
                 if header.nx != first.nx || header.ny != first.ny {
                     eprintln!("ERROR: NEWSTACK - Input image sizes differ");
@@ -567,6 +638,96 @@ pub fn newstack() {
                     .copied()
                     .map(|section| (file_index, section)),
             );
+        }
+        // Source `newstack.f90:1006-1024,1668-1683`: with an explicitly
+        // supplied angle file, reorder each input file's selected sections
+        // in-place by tilt.  The nested swaps (rather than a Rust sort) retain
+        // the source's 0.01-degree comparison and tie behavior.
+        let mut reordered_angles = Vec::<f32>::new();
+        if reorder_by_tilt != 0 {
+            if angle_file_to_reorder.is_empty() {
+                eprintln!(
+                    "ERROR: NEWSTACK - There is no extended header; tilt angles for -reorder must be entered with the -angles option"
+                );
+                return;
+            }
+            let Ok(contents) = std::fs::read_to_string(&angle_file_to_reorder) else {
+                eprintln!(
+                    "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                );
+                return;
+            };
+            let mut angles = Vec::new();
+            for line in contents.lines().take(routes.len()) {
+                let Ok(value) = line.trim().parse::<f32>() else {
+                    eprintln!(
+                        "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                    );
+                    return;
+                };
+                angles.push(value);
+            }
+            if angles.len() < routes.len() {
+                eprintln!(
+                    "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                );
+                return;
+            }
+            angles.truncate(routes.len());
+            let mut start = 0usize;
+            for sections in &section_lists {
+                let end = start + sections.len();
+                for index in start..end.saturating_sub(1) {
+                    for other in index + 1..end {
+                        if reorder_by_tilt.signum() as f32 * (angles[index] - angles[other]) > 0.01
+                        {
+                            routes.swap(index, other);
+                            angles.swap(index, other);
+                        }
+                    }
+                }
+                start = end;
+            }
+            reordered_angles = angles;
+        }
+        // `newstack.f90:986-1024`: -tilt reads exactly one angle for every
+        // section being written, then the output loop saves them as generic
+        // MRC extended-header reals when the input has no extended header.
+        // A leading period is relative to the first input basename in the
+        // source (e.g. input.mrc with -tilt .tlt reads input.tlt).
+        let mut inserted_tilts = Vec::<f32>::new();
+        if !tilt_angle_file.is_empty() {
+            if tilt_angle_file.starts_with('.') {
+                let end = input_names[0].rfind('.').unwrap_or(input_names[0].len());
+                tilt_angle_file = format!("{}{}", &input_names[0][..end], tilt_angle_file);
+            }
+            let Ok(contents) = std::fs::read_to_string(&tilt_angle_file) else {
+                eprintln!(
+                    "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                );
+                return;
+            };
+            for line in contents.lines().take(routes.len()) {
+                let Some(word) = line.split_whitespace().next() else {
+                    eprintln!(
+                        "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                    );
+                    return;
+                };
+                let Ok(value) = word.parse::<f32>() else {
+                    eprintln!(
+                        "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                    );
+                    return;
+                };
+                inserted_tilts.push(value);
+            }
+            if inserted_tilts.len() < routes.len() {
+                eprintln!(
+                    "ERROR: NEWSTACK - Reading tilt angle file: it must have as many lines as sections being written"
+                );
+                return;
+            }
         }
         let mut float_densities = 0_i32;
         let float_entered = pip_get_integer(c"FloatDensities".as_ptr(), &mut float_densities) == 0;
@@ -1200,6 +1361,7 @@ pub fn newstack() {
             std::ptr::null_mut();
         let mut active_chunk_input = usize::MAX;
         for (output_index, name) in output_names.iter().enumerate() {
+            let output_tilt_start = route_index;
             let Ok(name) = CString::new(name.as_bytes()) else {
                 eprintln!("ERROR: NEWSTACK - Invalid output file name");
                 if !active_input_file.is_null() {
@@ -1267,6 +1429,16 @@ pub fn newstack() {
                 (*chunk_header).xlen = (*chunk_header).mx as f32 * header.xlen / header.mx as f32;
                 (*chunk_header).ylen = (*chunk_header).my as f32 * header.ylen / header.my as f32;
                 (*chunk_header).zlen = (*chunk_header).mz as f32 * header.zlen / header.mz as f32;
+                if pixel_from_mdoc {
+                    let (input_index, input_section) = routes[route_index];
+                    if let Some(spacing) = mdoc_pixel_spacing[input_index][input_section as usize] {
+                        (*chunk_header).xlen =
+                            (*chunk_header).mx as f32 * spacing / expand_factor.max(1.0);
+                        (*chunk_header).ylen =
+                            (*chunk_header).my as f32 * spacing / expand_factor.max(1.0);
+                        (*chunk_header).zlen = (*chunk_header).mz as f32 * spacing;
+                    }
+                }
                 if adjust_origin {
                     let first_section = routes[route_index].1;
                     let x_center = if transforms.is_empty() {
@@ -1341,6 +1513,8 @@ pub fn newstack() {
                 (*out_header).mapc = header.mapc;
                 (*out_header).mapr = header.mapr;
                 (*out_header).maps = header.maps;
+                (*out_header).imod_stamp = header.imod_stamp;
+                (*out_header).imod_flags = header.imod_flags;
                 (*out_header).alpha = header.alpha;
                 (*out_header).beta = header.beta;
                 (*out_header).gamma = header.gamma;
@@ -1359,6 +1533,36 @@ pub fn newstack() {
                 (*out_header).xlen = (*out_header).mx as f32 * header.xlen / header.mx as f32;
                 (*out_header).ylen = (*out_header).my as f32 * header.ylen / header.my as f32;
                 (*out_header).zlen = (*out_header).mz as f32 * header.zlen / header.mz as f32;
+                if pixel_from_mdoc {
+                    let (input_index, input_section) = routes[route_index];
+                    if let Some(spacing) = mdoc_pixel_spacing[input_index][input_section as usize] {
+                        (*out_header).xlen =
+                            (*out_header).mx as f32 * spacing / expand_factor.max(1.0);
+                        (*out_header).ylen =
+                            (*out_header).my as f32 * spacing / expand_factor.max(1.0);
+                        (*out_header).zlen = (*out_header).mz as f32 * spacing;
+                    }
+                }
+                if !inserted_tilts.is_empty() && header.next == 0 && (*out_file).file == IIFILE_MRC
+                {
+                    (*out_header).nint = 0;
+                    (*out_header).nreal = 1;
+                    (*out_header).next = 4 * num_output_sections[output_index];
+                    (*out_header).header_size = 1024 + (*out_header).next;
+                } else if header.next > 0 && (*out_file).file == IIFILE_MRC {
+                    // `newstack.f90:1907-1935`: retain a conventional MRC
+                    // extended header, one source record for every selected
+                    // output section.  The record bytes themselves are copied
+                    // below in the section loop, where the selected input Z is
+                    // known; the header must reserve their space before pixel
+                    // writes begin.
+                    let bytes_per_section = header.next / header.nz;
+                    (*out_header).nint = header.nint;
+                    (*out_header).nreal = header.nreal;
+                    (*out_header).ext_type = header.ext_type;
+                    (*out_header).next = bytes_per_section * num_output_sections[output_index];
+                    (*out_header).header_size = 1024 + (*out_header).next;
+                }
                 if adjust_origin {
                     let first_section = routes[route_index].1;
                     let x_center = if transforms.is_empty() {
@@ -1393,8 +1597,16 @@ pub fn newstack() {
                     (*out_header).amax = 0.0;
                     (*out_header).amean = 0.0;
                 }
-                (*out_header).nlabl = 1;
-                (&mut (*out_header).labels[0])[..80].copy_from_slice(&title);
+                // `iiuTransHeader` retains source titles, and the final
+                // `iiuWriteHeader(..., 1, ...)` appends this title (or replaces
+                // the final slot at the source limit).  `mrc_head_new` above
+                // initializes storage fields and clears labels, so restore that
+                // explicitly before applying the source title operation.
+                (*out_header).labels = header.labels;
+                (*out_header).nlabl = header.nlabl;
+                (*out_header).nlabl = ((*out_header).nlabl + 1).min(MRC_NLABELS as i32);
+                let title_index = ((*out_header).nlabl - 1) as usize;
+                (&mut (*out_header).labels[title_index])[..80].copy_from_slice(&title);
                 ii_sync_from_mrc_header(out_file, out_header);
                 (*out_file).llx = 0;
                 (*out_file).lly = 0;
@@ -1421,6 +1633,7 @@ pub fn newstack() {
             let mut dmin = f32::INFINITY;
             let mut dmax = f32::NEG_INFINITY;
             let mut dsum = 0.0_f64;
+            let mut output_extra_data = Vec::<u8>::new();
             for out_section in 0..num_output_sections[output_index] as usize {
                 let (input_index, in_section) = routes[route_index];
                 route_index += 1;
@@ -1689,6 +1902,44 @@ pub fn newstack() {
                         ii_close(out_file);
                         return;
                     }
+                    if (*out_file).file == IIFILE_MRC && header.next > 0 {
+                        let input_header = (*active_input_file).header.cast::<MrcHeader>();
+                        let bytes_per_section = (*input_header).next / (*input_header).nz;
+                        let mut input_extra = std::ptr::null_mut();
+                        if bytes_per_section <= 0
+                            || mrc_read_extra_header(input_header, &mut input_extra) != 0
+                        {
+                            eprintln!("ERROR: NEWSTACK - Reading extended header");
+                            ii_close(active_input_file);
+                            ii_close(out_file);
+                            return;
+                        }
+                        let offset = in_section as usize * bytes_per_section as usize;
+                        output_extra_data.extend_from_slice(std::slice::from_raw_parts(
+                            input_extra.add(offset),
+                            bytes_per_section as usize,
+                        ));
+                        libc::free(input_extra.cast());
+                        // `newstack.f90:2654-2670`: when -tilt is supplied
+                        // for a conventional real-valued extended header, the
+                        // inserted value replaces its first real.
+                        if !inserted_tilts.is_empty() && (*input_header).nint == 0 {
+                            let record_start = output_extra_data.len() - bytes_per_section as usize;
+                            output_extra_data[record_start..record_start + 4]
+                                .copy_from_slice(&inserted_tilts[route_index - 1].to_ne_bytes());
+                        } else if !inserted_tilts.is_empty()
+                            && extra_is_nbytes_and_flags(
+                                (*input_header).nint as i32,
+                                (*input_header).nreal as i32,
+                            ) != 0
+                        {
+                            let record_start = output_extra_data.len() - bytes_per_section as usize;
+                            output_extra_data[record_start..record_start + 2].copy_from_slice(
+                                &((100.0 * inserted_tilts[route_index - 1]).round() as i16)
+                                    .to_ne_bytes(),
+                            );
+                        }
+                    }
                     if bin_factor > 1 {
                         let mut binned = vec![0.0_f32; bin_nx as usize * bin_ny as usize];
                         for iy in 0..bin_ny {
@@ -1927,6 +2178,34 @@ pub fn newstack() {
                     / f64::from(output_ny)
                     / f64::from(num_output_sections[output_index]))
                     as f32;
+                if ((!inserted_tilts.is_empty() && header.next == 0)
+                    || !output_extra_data.is_empty())
+                    && (*out_file).file == IIFILE_MRC
+                    && mrc_write_extra_header(
+                        out_header,
+                        if output_extra_data.is_empty() {
+                            inserted_tilts[output_tilt_start
+                                ..output_tilt_start + num_output_sections[output_index] as usize]
+                                .as_ptr()
+                                .cast_mut()
+                                .cast()
+                        } else {
+                            output_extra_data.as_mut_ptr()
+                        },
+                        if output_extra_data.is_empty() {
+                            4 * num_output_sections[output_index]
+                        } else {
+                            output_extra_data.len() as i32
+                        },
+                    ) != 0
+                {
+                    eprintln!("ERROR: NEWSTACK - Writing output header");
+                    ii_close(out_file);
+                    if !active_input_file.is_null() {
+                        ii_close(active_input_file);
+                    }
+                    return;
+                }
                 ii_sync_from_mrc_header(out_file, out_header);
                 if ((*out_file).file == IIFILE_MRC
                     && mrc_head_write((*out_file).fp, out_header) != 0)
@@ -1944,6 +2223,19 @@ pub fn newstack() {
         }
         if !active_input_file.is_null() {
             ii_close(active_input_file);
+        }
+        if reorder_by_tilt != 0 && !new_angle_output_file.is_empty() {
+            let Ok(mut file) = std::fs::File::create(&new_angle_output_file) else {
+                eprintln!("ERROR: NEWSTACK - Opening new tilt angle output file");
+                return;
+            };
+            use std::io::Write;
+            for angle in &reordered_angles {
+                if writeln!(file, "{angle:9.2}").is_err() {
+                    eprintln!("ERROR: NEWSTACK - Writing new tilt angle output file");
+                    return;
+                }
+            }
         }
         if !quiet && num_trunc_low + num_trunc_high > 0 {
             println!(

@@ -361,6 +361,7 @@ pub const IMOD_OBJFLAG_OPEN: u32 = 1 << 3;
 pub const IMOD_OBJFLAG_OUT: u32 = 1 << 5;
 pub const IMOD_OBJFLAG_SCAT: u32 = 1 << 9;
 pub const ICONT_OPEN: u32 = 1 << 3;
+pub const ICONT_WILD: u32 = 1 << 4;
 pub const IMOD_MESH_END: i32 = -1;
 pub const IMOD_MESH_ENDPOLY: i32 = -22;
 pub const IMOD_MESH_BGNPOLYNORM: i32 = -23;

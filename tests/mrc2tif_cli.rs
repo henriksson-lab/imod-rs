@@ -35,7 +35,7 @@ fn mrc2tif_uses_source_validation_diagnostic_before_opening_input() {
 }
 
 #[test]
-fn mrc2tif_malformed_option_and_non_qt_qimage_request_fail() {
+fn mrc2tif_malformed_option_and_qimage_request_reaches_source_input_opening() {
     let malformed = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
         .args(["-r", "not-a-number", "not-opened.mrc", "not-written.tif"])
         .output()
@@ -46,6 +46,9 @@ fn mrc2tif_malformed_option_and_non_qt_qimage_request_fail() {
         .output()
         .unwrap();
     assert!(!qimage.status.success());
+    #[cfg(feature = "qt")]
+    assert!(String::from_utf8_lossy(&qimage.stderr).contains("Couldn't open not-opened.mrc"));
+    #[cfg(not(feature = "qt"))]
     assert!(String::from_utf8_lossy(&qimage.stderr).contains("QImage Qt boundary"));
 }
 
@@ -107,6 +110,11 @@ fn mrc2tif_chunked_tiff_roundtrips_each_source_y_range() {
             result.status.success(),
             "{}",
             String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&result.stdout).starts_with("Writing TIFF images. .\r\n"),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
         );
         assert!(
             String::from_utf8_lossy(&result.stdout).contains("Actual tile size = 16 x 16\n"),
@@ -254,6 +262,43 @@ fn mrc2tif_old_writer_converts_real_mrc_pixels_to_classic_tiff() {
         // `mrcHeadNew` marks byte data as signed; mrcReadZ applies its source
         // byte map before the legacy writer flips the two scan lines.
         assert_eq!(&bytes[8..12], &[131, 132, 129, 130]);
+        std::fs::remove_file(input).unwrap();
+        std::fs::remove_file(output).unwrap();
+    }
+}
+
+#[test]
+fn mrc2tif_new_libtiff_writer_uses_source_tm_mon_datetime_tag() {
+    unsafe {
+        let stamp = format!("imod-rs-mrc2tif-datetime-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let output = std::env::temp_dir().join(format!("{stamp}.tif"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 1, 1, 1, MRC_MODE_BYTE), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        assert_eq!(libc::fwrite([7_u8].as_ptr().cast(), 1, 1, file), 1);
+        libc::fclose(file);
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{:?}", result);
+        let now = libc::time(core::ptr::null_mut());
+        let local = libc::localtime(&now);
+        assert!(!local.is_null());
+        let expected = format!("{:04}:{:02}:", (*local).tm_year + 1900, (*local).tm_mon);
+        let bytes = std::fs::read(&output).unwrap();
+        let datetime = bytes
+            .windows(19)
+            .find(|value| value.starts_with(expected.as_bytes()))
+            .expect("TIFF DateTime tag must use source tm_mon");
+        assert_eq!(datetime[4], b':');
+        assert_eq!(datetime[7], b':');
+        assert_eq!(datetime[10], b' ');
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(output).unwrap();
     }

@@ -1307,6 +1307,9 @@ pub fn imodel_write_object(object: &Iobj, file: &mut File) -> Result<(), i32> {
 
 /// Original: `imodViewModelWrite` / `imodViewWrite` (`iview.c:230`, `iview.c:136`).
 pub fn imod_view_model_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
+    if imod.view.len() < 2 {
+        return Ok(());
+    }
     imod_put_int(file, ID_VIEW as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, 4).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, imod.cview).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -1453,12 +1456,16 @@ pub fn imodel_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
     let source = imod.name.as_bytes();
     name[..source.len().min(127)].copy_from_slice(&source[..source.len().min(127)]);
     file.write_all(&name).map_err(|_| IMOD_ERROR_WRITE)?;
+    // `imodel_files.c:286` sets these bits before serializing the header.
+    // They declare the byte material fields, multiple clip-plane support, and
+    // mesh-thickness field emitted by this writer.
+    let flags = imod.flags | (1 << 13) | (1 << 12) | (1 << 9);
     for value in [
         imod.xmax,
         imod.ymax,
         imod.zmax,
         imod.obj.len() as i32,
-        imod.flags as i32,
+        flags as i32,
         imod.drawmode,
         imod.mousemode,
         imod.blacklevel,
@@ -1534,6 +1541,26 @@ mod tests {
         assert_eq!(decoded.group_list, model.group_list);
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn writer_sets_source_format_flags_and_skips_default_view_chunk() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-imodel-write-default-view-{}",
+            std::process::id()
+        ));
+        let mut file = File::create(&path).unwrap();
+        imodel_write(&Imod::default(), &mut file).unwrap();
+        drop(file);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            i32::from_be_bytes(bytes[152..156].try_into().unwrap()),
+            (1 << 13) | (1 << 12) | (1 << 9)
+        );
+        assert_eq!(bytes.len(), 244);
+        assert_eq!(&bytes[240..], b"IEOF");
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn binary_imod_roundtrip_keeps_header_contours_sizes_and_meshes() {
         let path =

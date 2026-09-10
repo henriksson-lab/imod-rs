@@ -39,6 +39,12 @@ fn converts_bundled_fiducial_model_to_source_wimp_text() {
         2 * points
     )));
     assert!(text.ends_with("\n  END\n"));
+    // `convertmod` passes binary models through the legacy Fortran bridge:
+    // `openImodData` applies its reference-image normalization and
+    // `imodWriteAsWimp` reverses it.  These real points lie on hundredth
+    // boundaries where that source f32 round trip is observable.
+    assert!(text.contains("    970  328.36  224.00   39.00   0\n"));
+    assert!(text.contains("   1200  203.69  503.72   21.00   0\n"));
     let reread = std::env::temp_dir().join(format!(
         "imod-rs-convertmod-reread-{}.wimp",
         std::process::id()
@@ -96,7 +102,7 @@ fn rejects_malformed_legacy_wimp_with_source_stdout_diagnostic_and_no_output() {
 }
 
 #[test]
-fn refuses_to_overwrite_existing_source_wimp_output() {
+fn overwrites_existing_wimp_output_like_source_writeimod() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture = root.join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
     let output = std::env::temp_dir().join(format!(
@@ -109,10 +115,12 @@ fn refuses_to_overwrite_existing_source_wimp_output() {
         .arg(&output)
         .output()
         .unwrap();
-    assert_eq!(result.status.code(), Some(1));
-    assert_eq!(
-        std::fs::read_to_string(&output).unwrap(),
-        "preserve this existing WIMP output\n"
-    );
+    assert!(result.status.success());
+    let text = std::fs::read_to_string(&output).unwrap();
+    assert!(text.starts_with(&format!(
+        " Model file name........................{}\n",
+        output.display()
+    )));
+    assert!(text.ends_with("\n  END\n"));
     let _ = std::fs::remove_file(output);
 }

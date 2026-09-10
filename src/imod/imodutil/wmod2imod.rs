@@ -4,8 +4,11 @@ use std::env;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
-use crate::imod::libimod::imodel::{IMOD_OBJFLAG_OPEN, Icont, Imod, Iobj, Ipoint};
+use crate::imod::libimod::imodel::{
+    IMOD_OBJFLAG_OPEN, Imod, Ipoint, imod_new_contour, imod_new_object,
+};
 use crate::imod::libimod::imodel_files::imod_write;
+use crate::imod::libimod::ipoint::imod_point_add;
 
 /// Original: `main` (`wmod2imod.c:21`).
 pub fn wmod2imod() {
@@ -153,13 +156,14 @@ pub fn imod_from_wmod(fin: &mut File) -> Option<Imod> {
             let color = wimp_number as f32 / 255.0;
             (color, color, color)
         };
-        model.obj.push(Iobj {
-            name: format!("Wimp no. {wimp_number}"),
-            red,
-            green,
-            blue,
-            ..Iobj::default()
-        });
+        if imod_new_object(&mut model) != 0 {
+            return None;
+        }
+        let object = model.obj.last_mut()?;
+        object.name = format!("Wimp no. {wimp_number}");
+        object.red = red;
+        object.green = green;
+        object.blue = blue;
     }
     line_index = 0;
     // Second source pass: turn each WIMP object record into one IMOD contour.
@@ -191,19 +195,38 @@ pub fn imod_from_wmod(fin: &mut File) -> Option<Imod> {
             } else {
                 0
             };
-        let object = model.obj.get_mut(object_index)?;
-        let mut contour = Icont::default();
+        // `wmod2imod.c` sets the current contour to the previous one and
+        // creates the next contour with `imodNewContour`; that routine updates
+        // the persisted current index and inherits its source contour state.
+        model.cindex.object = object_index as i32;
+        model.cindex.contour = model.obj.get(object_index)?.cont.len() as i32 - 1;
+        if imod_new_contour(&mut model) != 0 {
+            return None;
+        }
+        let contour_index = model.cindex.contour as usize;
+        let contour = model
+            .obj
+            .get_mut(object_index)?
+            .cont
+            .get_mut(contour_index)?;
         for point_index in 0..points {
             let point_line = *lines.get(line_index + 4 + point_index)?;
             let mut values = point_line.split_whitespace();
             let _number = values.next()?;
-            contour.pts.push(Ipoint {
-                x: values.next()?.parse().ok()?,
-                y: values.next()?.parse().ok()?,
-                z: values.next()?.parse().ok()?,
-            });
+            if imod_point_add(
+                contour,
+                Some(Ipoint {
+                    x: values.next()?.parse().ok()?,
+                    y: values.next()?.parse().ok()?,
+                    z: values.next()?.parse().ok()?,
+                }),
+                point_index as i32,
+            ) == 0
+            {
+                return None;
+            }
         }
-        object.cont.push(contour);
+        let object = model.obj.get_mut(object_index)?;
         if object.cont[0].pts.len() < 2 || object.cont[0].pts[0].z != object.cont[0].pts[1].z {
             object.flags |= IMOD_OBJFLAG_OPEN;
         }
@@ -216,6 +239,7 @@ pub fn imod_from_wmod(fin: &mut File) -> Option<Imod> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libimod::imodel::{ICONT_WILD, Icont, Iobj};
     use crate::imod::libimod::imodel_files::{imod_file_write, imod_read};
     use crate::imod::libimod::imodel_to::imod_to_wmod;
     use std::fs::File;
@@ -263,7 +287,25 @@ mod tests {
             (0.90, 0.82, 0.37)
         );
         assert_eq!(converted.obj[0].cont[0].pts, source.obj[0].cont[0].pts);
+        assert_eq!(
+            (
+                converted.cindex.object,
+                converted.cindex.contour,
+                converted.cindex.point,
+            ),
+            (0, 0, -1)
+        );
         assert_ne!(converted.obj[0].flags & IMOD_OBJFLAG_OPEN, 0);
+        assert_ne!(converted.obj[0].cont[0].flags & ICONT_WILD, 0);
+        // wmod2imod.c obtains each object with imodNewObject, not a zeroed Iobj.
+        assert_eq!(
+            converted.obj[0].flags & ((1 << 27) | (1 << 28)),
+            (1 << 27) | (1 << 28)
+        );
+        assert_eq!(converted.obj[0].drawmode, 1);
+        assert_eq!(converted.obj[0].symbol, 1);
+        assert_eq!(converted.obj[0].symsize, 3);
+        assert_eq!(converted.obj[0].linewidth, 1);
         imod_file_write(&converted, &imod).unwrap();
         let reread = imod_read(&imod).unwrap();
         assert_eq!(reread.obj[0].cont[0].pts, source.obj[0].cont[0].pts);

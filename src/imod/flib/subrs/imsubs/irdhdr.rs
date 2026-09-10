@@ -229,9 +229,10 @@ pub unsafe fn irdhdr(
                 " Space group,# extra bytes,idtype,lens .{:9}{:9}{:9}{:9}\n",
                 ispg, num_extra, idtype, lensnum
             );
-            println!("{:5} Titles :", num_labels);
+            // FORMAT 1020: `1x,i5,' Titles :' / 10(19a4,a3/)`.
+            println!(" {:5} Titles :", num_labels);
             for label in labels.iter().take(num_labels.clamp(0, 10) as usize) {
-                println!("{}", String::from_utf8_lossy(&label[..80]));
+                println!("{}", String::from_utf8_lossy(&label[..79]));
             }
         }
         if do_print && if_brief > 0 {
@@ -249,12 +250,12 @@ pub unsafe fn irdhdr(
                 use_mode, *dmin, *dmax, *dmean
             );
             if num_labels > 0 {
-                println!("{}", String::from_utf8_lossy(&labels[0][..80]));
+                println!("{}", String::from_utf8_lossy(&labels[0][..79]));
             }
             if num_labels > 1 {
                 println!(
                     "{}",
-                    String::from_utf8_lossy(&labels[(num_labels - 1).min(9) as usize][..80])
+                    String::from_utf8_lossy(&labels[(num_labels - 1).min(9) as usize][..79])
                 );
             }
             if if_brief < 2 {

@@ -6,6 +6,7 @@ use crate::imod::clip::clip::{
     IP_DEFAULT, show_warning,
 };
 use crate::imod::libcfshr::islice::{Islice, Istack, slice_create, slice_free, slice_put_val};
+use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libiimod::iimage::{
     ii_fclose, ii_fopen, ii_limited_tile_size, ii_lookup_file_from_fp, ii_set_chunk_sizes,
 };
@@ -118,7 +119,7 @@ pub unsafe fn set_input_options(
         if (*options).ix == IP_DEFAULT {
             (*options).ix = (*input).nx;
         }
-        if (*options).cx == IP_DEFAULT as f32 {
+        if (*options).cx as i32 == IP_DEFAULT {
             (*options).cx = (*input).nx as f32 * 0.5;
         }
         if (*options).y != IP_DEFAULT {
@@ -129,7 +130,7 @@ pub unsafe fn set_input_options(
         if (*options).iy == IP_DEFAULT {
             (*options).iy = (*input).ny;
         }
-        if (*options).cy == IP_DEFAULT as f32 {
+        if (*options).cy as i32 == IP_DEFAULT {
             (*options).cy = (*input).ny as f32 * 0.5;
         }
         if (*options).process == IP_BOXSD {
@@ -237,30 +238,32 @@ pub unsafe fn set_multifile_input_options(options: *mut ClipOptions, input: *mut
     unsafe {
         if (*options).infiles > 1 {
             if (*options).add2file != 0 {
-                eprintln!(
-                    "ERROR: Multiple input files can not be entered with appending or overwriting"
+                exit_error(
+                    c"Multiple input files can not be entered with appending or overwriting"
+                        .as_ptr(),
                 );
-                libc::exit(1);
             }
             for file_index in 0..(*options).infiles {
                 let fp = ii_fopen(*(*options).fnames.add(file_index as usize), c"rb".as_ptr());
                 if fp.is_null() {
-                    eprintln!(
-                        "ERROR: Opening {}.",
+                    let message = std::ffi::CString::new(format!(
+                        "Opening {}.",
                         core::ffi::CStr::from_ptr(*(*options).fnames.add(file_index as usize))
                             .to_string_lossy()
-                    );
-                    libc::exit(1);
+                    ))
+                    .unwrap();
+                    exit_error(message.as_ptr());
                 }
                 let mut header: MrcHeader = core::mem::zeroed();
                 if mrc_head_read(fp, &mut header) != 0 {
                     ii_fclose(fp);
-                    eprintln!(
-                        "ERROR: Reading header of {}.",
+                    let message = std::ffi::CString::new(format!(
+                        "Reading header of {}.",
                         core::ffi::CStr::from_ptr(*(*options).fnames.add(file_index as usize))
                             .to_string_lossy()
-                    );
-                    libc::exit(1);
+                    ))
+                    .unwrap();
+                    exit_error(message.as_ptr());
                 }
                 if (*input).nx != header.nx
                     || (*input).ny != header.ny
@@ -268,12 +271,13 @@ pub unsafe fn set_multifile_input_options(options: *mut ClipOptions, input: *mut
                     || (*input).mode != header.mode
                 {
                     ii_fclose(fp);
-                    eprintln!(
-                        "ERROR: Files must be same mode and same size in X, Y, and Z; {} differs",
+                    let message = std::ffi::CString::new(format!(
+                        "Files must be same mode and same size in X, Y, and Z; {} differs",
                         core::ffi::CStr::from_ptr(*(*options).fnames.add(file_index as usize))
                             .to_string_lossy()
-                    );
-                    libc::exit(1);
+                    ))
+                    .unwrap();
+                    exit_error(message.as_ptr());
                 }
                 ii_fclose(fp);
             }
@@ -281,8 +285,7 @@ pub unsafe fn set_multifile_input_options(options: *mut ClipOptions, input: *mut
         set_input_options(options, input);
         if (*options).infiles > 1 {
             if (*options).out_before != IP_DEFAULT || (*options).out_after != IP_DEFAULT {
-                eprintln!("ERROR: Blank slices cannot be output with multiple input files");
-                libc::exit(1);
+                exit_error(c"Blank slices cannot be output with multiple input files".as_ptr());
             }
             (*options).out_before = -1;
         }

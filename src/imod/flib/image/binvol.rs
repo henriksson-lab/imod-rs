@@ -6,6 +6,7 @@
 
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
+use crate::imod::flib::subrs::imsubs::wrap_iiunit::iiu_open_print;
 use crate::imod::libcfshr::b3dutil::{b3d_physical_memory, standard_memory_limit_mb};
 use crate::imod::libcfshr::filtxcorr::{
     fourier_crop_sizes, fourier_expand_volume, fourier_reduce_volume,
@@ -14,9 +15,9 @@ use crate::imod::libcfshr::reduce_by_binning::{bin_into_slice, irepak};
 use crate::imod::libcfshr::taperpad::slice_taper_out_pad;
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_filt_value};
 use crate::imod::libfft::{nice_fft_limit, thrdfft};
-use crate::imod::libiimod::mrcfiles::{MRC_LABEL_SIZE, MrcHeader, mrc_head_write};
+use crate::imod::libiimod::mrcfiles::{MRC_LABEL_SIZE, MrcHeader};
 use crate::imod::libiimod::unit_fileio::{
-    iiu_close, iiu_mrc_header, iiu_open, iiu_read_lines, iiu_read_section, iiu_set_position,
+    iiu_close, iiu_mrc_header, iiu_read_lines, iiu_read_section, iiu_set_position,
     iiu_sync_with_mrc_header, iiu_write_lines, iiu_write_section,
 };
 use crate::imod::libiimod::unit_header::{
@@ -24,7 +25,6 @@ use crate::imod::libiimod::unit_header::{
     iiu_ret_origin, iiu_trans_header, iiu_write_header, iiu_write_header_str,
 };
 use crate::imod::libiimod::unit_reduced::iiu_read_reduced;
-use std::ffi::CString;
 
 /// Original program `binvol` (`binvol.f90:5`).
 ///
@@ -238,21 +238,7 @@ pub fn binvol() {
         eprintln!("ERROR: BINVOL - Setting up the antialias filter");
         std::process::exit(1);
     }
-    let input_name = match CString::new(big_file.as_bytes()) {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("ERROR: BINVOL - Input file name contains a NUL byte");
-            std::process::exit(1);
-        }
-    };
-    let output_name = match CString::new(out_file.as_bytes()) {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("ERROR: BINVOL - Output file name contains a NUL byte");
-            std::process::exit(1);
-        }
-    };
-    if unsafe { iiu_open(1, input_name.as_ptr(), c"RO".as_ptr()) } != 0 {
+    if unsafe { iiu_open_print(1, &big_file, "RO") } != 0 {
         eprintln!("ERROR: BINVOL - Opening input file");
         std::process::exit(1);
     }
@@ -345,6 +331,11 @@ pub fn binvol() {
     }
     let antialias_z = ifilt_type > 1 && bin_z > 1.0;
     let antialias_xy = ifilt_type > 1 && !unequal_xy && bin_x > 1.0;
+    if antialias_xy {
+        // `binvol.f90:177-181`: this notice is emitted whenever the source
+        // applies its XY filtering, independently of the Z filtering state.
+        println!(" Antialiasing is being applied in X and Y as well as Z");
+    }
     let mut z_center_offset = bin_z / 2.0;
     let mut output_z_origin = input_header.zorg;
     if antialias_z && spread_z && bin_z * input_header.nz as f32 - nz_bin as f32 > 0.49 {
@@ -355,7 +346,7 @@ pub fn binvol() {
         // path has the same delta representation in the copied header.
         output_z_origin += input_header.zlen / input_header.mz as f32 * extra_pixels / 2.0;
     }
-    if unsafe { iiu_open(3, output_name.as_ptr(), c"NEW".as_ptr()) } != 0 {
+    if unsafe { iiu_open_print(3, &out_file, "NEW") } != 0 {
         eprintln!("ERROR: BINVOL - Opening output file");
         unsafe { iiu_close(1) };
         std::process::exit(1);
@@ -976,18 +967,12 @@ pub fn binvol() {
             local.tm_hour, local.tm_min, local.tm_sec
         );
         title[67..75].copy_from_slice(time.as_bytes());
-        (*output_header).nlabl = 1;
-        (*output_header).labels[0] = title;
         let mut title_c = [0_i8; MRC_LABEL_SIZE + 1];
-        core::ptr::copy_nonoverlapping(
-            (*output_header).labels[0].as_ptr().cast(),
-            title_c.as_mut_ptr(),
-            MRC_LABEL_SIZE,
-        );
+        core::ptr::copy_nonoverlapping(title.as_ptr().cast(), title_c.as_mut_ptr(), MRC_LABEL_SIZE);
         if iiu_write_header_str(
             3,
             title_c.as_ptr(),
-            0,
+            1,
             (*output_header).amin,
             (*output_header).amax,
             (*output_header).amean,

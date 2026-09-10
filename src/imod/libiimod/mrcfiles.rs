@@ -40,7 +40,7 @@ pub const MRC_EXT_TYPE_UNKNOWN: i32 = 4;
 pub const IMOD_MRC_STAMP: i32 = 1_146_047_817;
 pub const MRC_FLAGS_BAD_RMS_NEG: i32 = 8;
 pub const MRC_FLAGS_SBYTES: i32 = 1;
-pub const MRC_FLAGS_INV_ORIGIN: i32 = 16;
+pub const MRC_FLAGS_INV_ORIGIN: i32 = 4;
 pub const MRC_FLAGS_4BIT_BYTES: i32 = 32;
 pub const PACKED_HALF_XSIZE: i32 = 2;
 pub const IIUNIT_SWAPPED: i32 = 1;
@@ -979,7 +979,7 @@ pub fn mrc_fill_label_string(label: &[u8], out_label: &mut [u8; MRC_LABEL_SIZE +
             tmp,
         );
     }
-    for ind in 0..date_len - 1 {
+    for ind in 0..date_len {
         out_label[i + ind] = date[ind] as u8;
     }
 }
@@ -2259,7 +2259,7 @@ mod tests {
 
     #[test]
     fn header_runtime_flags_match_source_bit_values() {
-        assert_eq!(MRC_FLAGS_INV_ORIGIN, 16);
+        assert_eq!(MRC_FLAGS_INV_ORIGIN, 4);
         assert_eq!(MRC_FLAGS_4BIT_BYTES, 32);
         assert_eq!(PACKED_HALF_XSIZE, 2);
         assert_eq!(IIUNIT_SWAPPED | IIUNIT_HALF_FLOATS, 257);

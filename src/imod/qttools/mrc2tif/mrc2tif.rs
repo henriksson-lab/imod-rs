@@ -809,7 +809,7 @@ pub fn mrc2tif() {
                 ii_close(iifile);
             }
         }
-        println!();
+        print!("\r\n");
         if tile_x != 0 {
             println!("Actual tile size = {tile_x} x {lines_per_chunk}");
         }

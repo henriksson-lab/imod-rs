@@ -1,6 +1,8 @@
 //! Scaffold for `IMOD/clip/clip.cpp` and its paired `IMOD/clip/clip.h`.
 #![allow(dead_code)]
 
+use crate::imod::libcfshr::b3dutil::imod_prog_name;
+use crate::imod::libcfshr::parse_params::setExitPrefix;
 use crate::imod::libiimod::mrcfiles::MrcHeader;
 
 pub const IP_NONE: i32 = 0;
@@ -268,7 +270,6 @@ options:\n\
 /// Original: `show_error` (`clip.cpp:124`).
 pub fn show_error(message: &str) {
     println!("ERROR: {message}");
-    println!("ERROR: {message}");
 }
 /// Original: `show_warning` (`clip.cpp:133`).
 pub fn show_warning(reason: &str) {
@@ -345,6 +346,13 @@ pub fn clip() {
         use crate::imod::clip::{correlation, fft, filter, processing};
         use crate::imod::libiimod::{iimage, mrcfiles};
         let raw: Vec<String> = std::env::args().collect();
+        let program = std::ffi::CString::new(raw[0].as_bytes()).unwrap();
+        let prefix = std::ffi::CString::new(format!(
+            "ERROR: {} - ",
+            core::ffi::CStr::from_ptr(imod_prog_name(program.as_ptr())).to_string_lossy()
+        ))
+        .unwrap();
+        setExitPrefix(prefix.as_ptr());
         if raw.len() < 3 {
             usage();
             return;
@@ -544,6 +552,14 @@ pub fn clip() {
             binning: IP_DEFAULT as f32,
             scale_defects: 0,
         };
+        // Keep the source initialization as an explicit mapped call.  The literal above
+        // supplies safe Rust ownership values for fields that the C initializer leaves
+        // untouched; this function then establishes every C-owned default.
+        default_options(&mut options);
+        options.process = process;
+        if process == IP_QUADRANT {
+            options.dim = 2;
+        }
         if process == IP_FLATFIELD {
             options.ocanresize = 0;
             options.mode = crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;

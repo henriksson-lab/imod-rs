@@ -11,12 +11,12 @@ use super::imodpy::{add_imod_bin_ignore_sighup, print_pid};
 
 /// Matches the top-level program in `IMOD/pysrc/batchruntomo`.
 pub fn batchruntomo(arguments: &[OsString]) -> i32 {
-    if std::env::var_os("IMOD_DIR").is_none() {
+    let Some(imod_dir) = std::env::var_os("IMOD_DIR") else {
         // The top-level Python startup writes directly to stdout; `prefix`
         // already has a trailing space and this literal starts with one.
         println!("ERROR: batchruntomo -  IMOD_DIR is not defined!");
         return 1;
-    }
+    };
     // Source initialization does this before PIP parsing and process use.
     add_imod_bin_ignore_sighup();
     let mut directives = Vec::new();
@@ -35,6 +35,11 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
                 if let Some(value) = arguments.get(index) {
                     directives.push(PathBuf::from(value));
                 }
+            }
+            "-root" | "-RootName" => {
+                // `batchruntomo:5263-5274`: RootName has a value of its own;
+                // it must not be mistaken for an unnamed directive file.
+                index += 1;
             }
             "-validation" | "-ValidationType" => {
                 // `batchruntomo:5490`: keep the PIP integer rather than
@@ -56,8 +61,18 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
     // `batchruntomo:5166`: report the launcher PID before validating files.
     print_pid(do_pid);
     if directives.is_empty() {
-        eprintln!("ERROR: batchruntomo - You must enter at least one directive file");
+        println!("ERROR: batchruntomo - You must enter at least one directive file");
         return 1;
+    }
+    if validation >= 0 {
+        let validation_file = PathBuf::from(imod_dir).join("com/directives.csv");
+        if !validation_file.exists() {
+            eprintln!(
+                "ERROR: batchruntomo - Cannot find file for validating directives, {}",
+                validation_file.display()
+            );
+            return 1;
+        }
     }
     for directive in directives {
         if !directive.exists() {

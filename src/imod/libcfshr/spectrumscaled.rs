@@ -221,7 +221,20 @@ pub unsafe fn spectrum_scaled(
                     + *fft.add((i + 1) as usize) * *fft.add((i + 1) as usize))
                     as f64)
                     .sqrt();
-                *dst = (scale * (log_scale * val + 1.).ln()) as i16;
+                // C assigns the double expression through an `int` to a
+                // `short int *`.  On the x86 reference build, `cvttsd2si`
+                // produces the integer-indefinite value for non-finite or
+                // out-of-range input, then the short store retains its low
+                // 16 bits.  Rust casts otherwise saturate.
+                let converted = scale * (log_scale * val + 1.).ln();
+                *dst = if converted.is_finite()
+                    && converted >= i32::MIN as f64
+                    && converted <= i32::MAX as f64
+                {
+                    converted as i32 as i16
+                } else {
+                    i32::MIN as i16
+                };
                 dst = dst.add(1);
             }
             let i = base + pad_size;
@@ -229,8 +242,16 @@ pub unsafe fn spectrum_scaled(
                 + *fft.add((i + 1) as usize) * *fft.add((i + 1) as usize))
                 as f64)
                 .sqrt();
-            *stemp.add((((pad_size - yout) % pad_size) * pad_size) as usize) =
-                (scale * (log_scale * val + 1.).ln()) as i16;
+            let converted = scale * (log_scale * val + 1.).ln();
+            *stemp.add((((pad_size - yout) % pad_size) * pad_size) as usize) = if converted
+                .is_finite()
+                && converted >= i32::MIN as f64
+                && converted <= i32::MAX as f64
+            {
+                converted as i32 as i16
+            } else {
+                i32::MIN as i16
+            };
             yin = (yin + 1) % pad_size;
         }
         for yout in 0..pad_size {
@@ -374,6 +395,31 @@ mod tests {
                 0
             );
             assert_eq!(output[2 + 2 * 4], 255);
+        }
+    }
+
+    #[test]
+    fn two_by_two_scaled_spectrum_retains_native_integer_indefinite_narrowing() {
+        unsafe {
+            let mut image = [1_u8, 2, 3, 4];
+            let mut output = [0_i16; 4];
+            assert_eq!(
+                spectrum_scaled(
+                    image.as_mut_ptr().cast(),
+                    0,
+                    2,
+                    2,
+                    output.as_mut_ptr().cast(),
+                    2,
+                    2,
+                    0,
+                    0.02,
+                    3,
+                    crate::imod::libfft::todfft,
+                ),
+                0
+            );
+            assert_eq!(output, [0, 0, 0, 32000]);
         }
     }
 }
