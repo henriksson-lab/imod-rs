@@ -1,0 +1,255 @@
+// Widgets the reconstruction back-end dialogs need that
+// `gui/etomo-ui-common/ui/widgets.slint` does not carry.  Each is named after
+// the Swing class in `IMOD/Etomo/src/etomo/ui/swing` it stands for.  This file
+// mirrors no single Java dialog; it is the local half of the shared
+// vocabulary, kept here because the common crate must not be edited.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `EtchedBorder` (`EtchedBorder.java`): a titled etched group box.  Swing's
+// etched border draws a dark line with a light line inside it; Slint gives a
+// Rectangle one border colour, so the light half is an inset Rectangle.
+export component EtchedBorder inherits Rectangle {
+    in property <string> title;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Rectangle {
+        border-width: 1px;
+        border-color: EtomoStyle.border-light;
+        background: transparent;
+    }
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        if root.title != "": Text {
+            text: root.title;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            color: EtomoStyle.text;
+        }
+        @children
+    }
+}
+
+// `SingleLineButton` (`SingleLineButton.java`): the exit-row button.
+export component SingleLineButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height + 4px;
+    min-width: 90px;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-weight: 700;
+    }
+}
+
+// `GlobalExpandButton` (`GlobalExpandButton.java`): the Advanced/Basic toggle.
+// `GlobalExpandButton.getInstance("Advanced", "Basic")` shows the label of the
+// state it would switch *to*; the collapsed state shows "Advanced".
+export component GlobalExpandButton inherits SingleLineButton {
+    in property <bool> expanded: false;
+    text: root.expanded ? "Basic" : "Advanced";
+}
+
+// `ProcessDialog.pnlExitButtons` (`ProcessDialog.java:76-91`): Cancel,
+// Postpone, Execute and Advanced, separated by horizontal glue.  Slint has no
+// glue, so the row is `alignment: space-around`, which is what the glue does.
+export component ExitButtons inherits HorizontalLayout {
+    in property <string> execute-text: "Execute";
+    in property <bool> use-postpone: true;
+    in property <bool> show-advanced: true;
+    alignment: space-around;
+    padding: EtomoStyle.inset;
+    spacing: EtomoStyle.gap;
+    SingleLineButton { text: "Cancel"; }
+    if root.use-postpone: SingleLineButton { text: "Postpone"; }
+    SingleLineButton { text: root.execute-text; }
+    if root.show-advanced: GlobalExpandButton { }
+}
+
+// `ComboBox` (`ComboBox.java`) / `JComboBox`: label, closed drop-down box.
+export component ComboBox inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 180px;
+    in property <length> box-width: 140px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    if root.label != "": Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    Rectangle {
+        width: root.box-width;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        HorizontalLayout {
+            padding-left: 3px;
+            Text { text: root.text; vertical-alignment: center; }
+            Rectangle {
+                width: 16px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+    }
+}
+
+// `javax.swing.JFileChooser` embedded in a panel with
+// `setControlButtonsAreShown(false)` (`CleanupPanel.java:217-221`).  Slint has
+// no file chooser widget; this is the static stand-in for its file list.
+export component FileChooser inherits Rectangle {
+    in property <string> directory: ".";
+    height: 220px;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            Text { text: "Look in:"; vertical-alignment: center; }
+            Rectangle {
+                height: EtomoStyle.field-height;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { x: 3px; text: root.directory; vertical-alignment: center; }
+            }
+        }
+        Rectangle {
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+        }
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            Text { text: "File Name:"; vertical-alignment: center; }
+            Rectangle {
+                height: EtomoStyle.field-height;
+                background: EtomoStyle.field-background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+            }
+        }
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            Text { text: "Files of Type:"; vertical-alignment: center; }
+            ComboBox { label: ""; text: "Intermediate files"; box-width: 200px; }
+        }
+    }
+}
+
+// `JLabel` added with `Component.CENTER_ALIGNMENT`.
+export component CenteredLabel inherits Text {
+    horizontal-alignment: center;
+    color: EtomoStyle.text;
+    font-size: EtomoStyle.font-size-pt * 1px;
+}
+
+// `TextField` (`TextField.java`): an entry box with no label of its own; the
+// wording comes from the check box or radio button next to it.
+export component TextField inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    width: 70px;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        x: 3px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `Spinner` (`Spinner.java`) built with `Spinner.getInstance(...)`: the string
+// passed is an internal name only, so no label is drawn.
+export component Spinner inherits HorizontalLayout {
+    in property <string> text: "1";
+    in property <bool> enabled: true;
+    spacing: 0px;
+    Rectangle {
+        width: 50px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text {
+            x: 3px;
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+    Rectangle {
+        width: 14px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            Text { text: "^"; horizontal-alignment: center; }
+            Text { text: "v"; horizontal-alignment: center; }
+        }
+    }
+}
+
+// `FileTextField` (`FileTextField.java`) and `ButtonControlTextEfield`
+// (`ButtonControlTextEfield.java`): a label, an entry box and a small
+// file-chooser icon button, optionally followed by a clear button.  Swing draws
+// real icons; Slint has no icon resource here, so the buttons carry the glyphs
+// the icons stand for.
+export component FileTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> clear-button: false;
+    in property <length> label-width: 220px;
+    spacing: EtomoStyle.gap;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    Rectangle {
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { x: 3px; text: root.text; vertical-alignment: center; }
+    }
+    Rectangle {
+        width: 22px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    if root.clear-button: Rectangle {
+        width: 22px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "X"; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}

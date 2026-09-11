@@ -1,0 +1,55 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectivesSectionRow.java`.
+//
+// One section header row of the `DirectivesTable`.  `display()` puts
+// `btnSection` in one grid cell and `hEmpty` in a cell with
+// `gridwidth = REMAINDER`, so the row is the open/close button followed by an
+// empty header cell that runs to the end of the table.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Ebutton } from "widgets_local.slint";
+
+export component DirectivesSectionRow inherits HorizontalLayout {
+    // `Ebutton.getOpenCloseInstance(DirectiveDescrElement.getSectionHeader(lineArray))`,
+    // or the literal "Unknown Directives" for `getExtrasInstance`.
+    in property <string> title;
+    // `btnSection` is not selected at construction; `setOpen`/`updateOpen`
+    // drive it afterwards.
+    in property <bool> open: false;
+    // `updateEnabled()` disables the section when none of its rows can display.
+    in property <bool> enabled: false;
+    // Grid column widths.  Slint's `GridLayout` rows can only be written
+    // literally inside the layout, not handed over by a component, so the
+    // table's columns are fixed widths on the row instead of grid cells.
+    in property <length> title-width: 320px;
+
+    spacing: 0px;
+
+    // `btnSection` at `constraints.gridwidth = 1`.
+    Ebutton {
+        width: root.title-width;
+        text: root.title;
+        button-style: "open-close";
+        selected: root.open;
+        enabled: root.enabled;
+    }
+    // `hEmpty = Ebutton.getHeaderInstance()` at
+    // `constraints.gridwidth = GridBagConstraints.REMAINDER`.
+    Ebutton {
+        text: "";
+        button-style: "header";
+    }
+}
+
+export component DirectivesSectionRowWindow inherits Window {
+    title: "eTomo Directives Section Row";
+    preferred-width: 620px;
+    preferred-height: 60px;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+        DirectivesSectionRow { title: "Section"; }
+    }
+}

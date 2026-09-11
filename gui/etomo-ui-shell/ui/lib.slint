@@ -1,0 +1,25 @@
+// Entry point for `build.rs`: pulls in every dialog in this crate so that
+// `slint::include_modules!()` in `src/lib.rs` generates one Rust type per
+// window.  One import per Java source under
+// `IMOD/Etomo/src/etomo/ui/swing`.
+//
+// Each dialog file exports both the plain component and its `Window` wrapper.
+// Only the wrappers are re-exported here: Slint generates Rust code for
+// exported components that inherit `Window`, and warns about the rest.  The
+// plain components stay importable from Slint (`import { ParallelDialog } from
+// "ParallelDialog.slint"`), which is how a dialog is embedded in a larger
+// window later.
+
+import { FrontPageDialogWindow } from "FrontPageDialog.slint";
+import { SettingsDialogWindow } from "SettingsDialog.slint";
+import { ToolsDialogWindow } from "ToolsDialog.slint";
+import { AnisotropicDiffusionDialogWindow } from "AnisotropicDiffusionDialog.slint";
+import { ParallelDialogWindow } from "ParallelDialog.slint";
+import { UtilitiesDialogWindow } from "UtilitiesDialog.slint";
+
+export { FrontPageDialogWindow }
+export { SettingsDialogWindow }
+export { ToolsDialogWindow }
+export { AnisotropicDiffusionDialogWindow }
+export { ParallelDialogWindow }
+export { UtilitiesDialogWindow }

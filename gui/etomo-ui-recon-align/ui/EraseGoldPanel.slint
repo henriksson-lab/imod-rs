@@ -1,0 +1,298 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/EraseGoldPanel.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+//
+// `createPanel()` (`EraseGoldPanel.java:132-148`) puts a radio box over three
+// embedded panels.  Those panels live in their own Java files and, apart from
+// `CpuGpuPanel`, are translated inline here:
+//
+//   * `XfModelPanel.java`            (`createPanel()`, `:72-80`)
+//   * `Beads3dFindPanel.java`        (`createPanel()`, `:115-133`), which in
+//     turn embeds `NewstackOrBlendmont3dFindPanel.java` (the base of
+//     `Newstack3dFindPanel.java` / `Blendmont3dFindPanel.java`),
+//     `Tilt3dFindPanel.java` (a subclass of `AbstractTiltPanel.java`),
+//     `FindBeads3dPanel.java` and `ReprojectModelPanel.java`
+//   * `CcdEraserBeadsPanel.java`     (`createPanel()`, `:124-189`)
+
+import { EtomoStyle, PanelHeader, LabeledTextField, LabeledSpinner, RadioButton,
+         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, RadioTextField, CheckBoxSpinner } from "widgets_local.slint";
+import { CpuGpuPanel } from "CpuGpuPanel.slint";
+
+export component EraseGoldPanel inherits VerticalLayout {
+    // `rbModelUseFid` / `rbModelUseFindBeads3d`.  `updateDisplay()`
+    // (`EraseGoldPanel.java:198-203`) shows `xfModelPanel` for the first and
+    // `beads3dFindPanel` for the second.  Neither is selected by the
+    // constructor; `setParameters(ConstMetaData)` (`:267-273`) picks one from
+    // `metaData.getEraseGoldModelUseFid(axisID)`.
+    in property <bool> model-use-fid: true;
+    // `EraseGoldPanel.updateAdvanced(advanced)` (`:161-163`) forwards to
+    // `FindBeads3dPanel.updateAdvanced` (`FindBeads3dPanel.java:177-183`).
+    in property <bool> advanced: true;
+    // `Beads3dFindPanel.header` ("Align Stack and Create Tomogram",
+    // `Beads3dFindPanel.java:63`) and `FindBeads3dPanel.header`
+    // ("Find Beads 3d", `FindBeads3dPanel.java:87-88`).
+    in property <bool> generate-tomogram-open: true;
+    in property <bool> find-beads-3d-open: true;
+    // `lCtf3d1`/`lCtf3d2` in `CcdEraserBeadsPanel` are `setVisible(false)` at
+    // construction (`CcdEraserBeadsPanel.java:138-139`) and shown when the
+    // dataset has a 3D CTF slab thickness (`:229-230`).  Drawn here so their
+    // strings are part of the translation.
+    in property <bool> ctf3d: false;
+    // `NewstackOrBlendmont3dFindPanel` is `Blendmont3dFindPanel` for a
+    // montage dataset (`Beads3dFindPanel.java:64-71`); the two subclasses have
+    // identical layouts, so this only records which one is in play.
+    in property <bool> montage: false;
+
+    spacing: EtomoStyle.gap;
+
+    // `pnlRoot.setBorder(new EtchedBorder("Bead Eraser").getBorder())` (`:136`).
+    EtchedBorder {
+        title: "Bead Eraser";
+
+        // `pnlModel`
+        HorizontalLayout {
+            alignment: center;
+            EtchedBorder {
+                title: "Model Creation Method";
+                RadioButton { text: "Use the existing fiducial model"; selected: root.model-use-fid; }
+                RadioButton { text: "Use findbeads3d"; selected: !root.model-use-fid; }
+            }
+        }
+
+        // ---- `XfModelPanel.java` ----
+        // An X box holding the two buttons.  `btnXfModel` is
+        // `ProcessResultDisplayFactory.xfModel`
+        // (`ProcessResultDisplayFactory.java:109-111`).
+        if root.model-use-fid: HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            MultiLineButton { text: "Transform Fiducial Model"; width: 220px; }
+            MultiLineButton { text: "View Transformed Model"; width: 220px; }
+        }
+
+        // ---- `Beads3dFindPanel.java` ----
+        if !root.model-use-fid: VerticalLayout {
+            spacing: EtomoStyle.gap;
+
+            // `pnlGenerateTomogram`: Y box with an etched border.
+            Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: EtomoStyle.inset;
+                    spacing: EtomoStyle.gap;
+                    PanelHeader { title: "Align Stack and Create Tomogram"; open: root.generate-tomogram-open; }
+                    // `pnlGenerateTomogramBody`
+                    if root.generate-tomogram-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+
+                        // ---- `NewstackOrBlendmont3dFindPanel.java` ----
+                        // `createPanel()` (`:83-86`) adds nothing but the
+                        // binning spinner, labelled
+                        // `NewstackAndBlendmontParamPanel.BINNING_LABEL + ": "`
+                        // (`NewstackAndBlendmontParamPanel.java:48`), default 1,
+                        // range 1..12 (`:58-59`).
+                        HorizontalLayout {
+                            alignment: start;
+                            LabeledSpinner { label: "Aligned image stack binning: "; text: "1"; label-width: 260px; }
+                        }
+
+                        // ---- `Tilt3dFindPanel.java` (`createPanel()`, `:148-181`) ----
+                        // Its root is `AbstractTiltPanel.pnlRoot`, a plain
+                        // `SpacedPanel` with no border in this subclass.
+                        VerticalLayout {
+                            spacing: EtomoStyle.gap;
+                            // `getCpuGpuPanel()`; the instance is built with
+                            // `CpuGpuPanel.getInstance(manager, axisID, panelId, 3,
+                            // true, -1)` (`AbstractTiltPanel.java:158`) — max GPU 3,
+                            // recommended max CPUs shown, Y layout.
+                            CpuGpuPanel {
+                                max-gpus-label: ": Maximum number of GPUs recommended is 3";
+                            }
+                            // Informational fields, `setEditable(false)` (`:152-153`).
+                            LabeledTextField { label: "Center to center thickness: "; text: ""; label-width: 260px; enabled: false; }
+                            LabeledTextField { label: "Additional unbinned diameters to add : "; text: ""; label-width: 260px; enabled: false; }
+                            // `pnlA`.  `ltfTomoThickness` and `ltfZShift` are
+                            // relabelled by the constructor (`:129-130`).
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                LabeledTextField { label: "Thickness: "; text: ""; label-width: 90px; }
+                                LabeledTextField { label: "Added Z Shift: "; text: ""; label-width: 110px; }
+                            }
+                            // `pnlButtons`: the tilt button
+                            // (`ProcessResultDisplayFactory.stackTilt`,
+                            // `ProcessResultDisplayFactory.java:112-114`,
+                            // labelled `TILT_3D_FIND_LABEL`,
+                            // `Tilt3dFindPanel.java:111`), then `extraButton`
+                            // — `NewstackOrBlendmont3dFindPanel.btn3dmodFull`
+                            // (`:59-60`) — then `btn3dmodTomogram`
+                            // (`AbstractTiltPanel.java:59-60`).
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                MultiLineButton { text: "Align and Build Tomogram"; width: 220px; }
+                                MultiLineButton { text: "View Full Aligned Stack"; width: 220px; }
+                                MultiLineButton { text: "View Tomogram In 3dmod"; width: 220px; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- `FindBeads3dPanel.java` ----
+            Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: EtomoStyle.inset;
+                    spacing: EtomoStyle.gap;
+                    PanelHeader { title: "Find Beads 3d"; open: root.find-beads-3d-open; }
+                    // `pnlBody`
+                    if root.find-beads-3d-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        // `BEAD_SIZE_LABEL + " (pixels): "` (`:44`, `:49-50`).
+                        LabeledTextField { label: "Bead diameter (pixels): "; text: ""; label-width: 240px; }
+                        // `pnlA`.  `setParameters(..., initialize=true)`
+                        // (`:194-200`) preloads .9 and .05.
+                        if root.advanced: HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            LabeledTextField { label: "Minimum spacing: "; text: "0.9"; label-width: 140px; }
+                            LabeledTextField { label: "Estimated number of beads: "; text: ""; label-width: 200px; }
+                        }
+                        // `pnlB`
+                        if root.advanced: HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            LabeledTextField { label: "Minimum peak strength: "; text: "0.05"; label-width: 180px; }
+                            LabeledTextField { label: "Threshold for averaging: "; text: ""; label-width: 180px; }
+                        }
+                        // `pnlStorageThreshold`, a `GridLayout(3, 2, 3, 3)`
+                        // (`:144`) holding three components, so they land in
+                        // row-major order: two on the first row and one on the
+                        // second.  Slint has no GridLayout with fixed cell
+                        // counts, so this is a `GridLayout` with explicit
+                        // row/col placement.  None of the three is selected by
+                        // the constructor.
+                        EtchedBorder {
+                            title: "Storage Threshold";
+                            GridLayout {
+                                spacing: 3px;
+                                Row {
+                                    RadioButton { text: "Store some points below threshold"; }
+                                    RadioButton { text: "Store only points above threshold"; }
+                                }
+                                Row {
+                                    RadioTextField { label: "Set threshold for storing: "; text: ""; }
+                                    Rectangle { }
+                                }
+                            }
+                        }
+                        if root.advanced: LabeledTextField { label: "Max points to analyze: "; text: ""; label-width: 240px; }
+                        // `pnlButtons`.  `btnFindBeads3d` is
+                        // `ProcessResultDisplayFactory.findBeads3d`
+                        // (`ProcessResultDisplayFactory.java:115-116`).
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            MultiLineButton { text: "Run Findbeads3d"; width: 200px; }
+                            MultiLineButton { text: "View 3D Model on Tomogram"; width: 240px; }
+                        }
+                    }
+                }
+            }
+
+            // ---- `ReprojectModelPanel.java` (`createPanel()`, `:81-89`) ----
+            // `btnReprojectModel` is
+            // `ProcessResultDisplayFactory.reprojectModel`
+            // (`ProcessResultDisplayFactory.java:117-119`), labelled
+            // `REPROJECT_MODEL_LABEL` (`ReprojectModelPanel.java:53`).
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                MultiLineButton { text: "Reproject Model"; width: 200px; }
+                MultiLineButton { text: "View 2D Model on Aligned Stack"; width: 240px; }
+            }
+        }
+
+        // ---- `CcdEraserBeadsPanel.java` ----
+        EtchedBorder {
+            title: "Erase Beads";
+
+            // `ccdEraserParameterPanel`, an X box.
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+
+                // `fiducialDiameterPanel`
+                VerticalLayout {
+                    spacing: EtomoStyle.gap;
+                    // `FIDUCIAL_DIAMETER_LABEL + " (binned pixels): "` (`:54`, `:59-60`).
+                    LabeledTextField { label: "Diameter to erase (binned pixels): "; text: ""; label-width: 240px; }
+                    // `lFiducialDiameter1` / `lFiducialDiameter2`, each built
+                    // as `new Label(FIDUCIAL_DIAMETER_LABEL)` (`:61-62`) and
+                    // coloured `ProcessControlPanel.colorComplete`
+                    // (`ProcessControlPanel.java:88`, `new Color(0, 153, 0)`).
+                    // `focusLost()` (`:346-371`) replaces the text with
+                    // "Enter diameter in unbinned pixels" when the aligned
+                    // stack's binning is unknown, or with "(corresponds to
+                    // unbinned diameter of <d>" / "with current binning of
+                    // <b>)" when it is.
+                    Text { text: "Diameter to erase"; color: #009900; font-size: EtomoStyle.font-size-pt * 1px; }
+                    Text { text: "Diameter to erase"; color: #009900; font-size: EtomoStyle.font-size-pt * 1px; }
+                    Rectangle { }
+                    // `cbspExpandCircleIterations`: default 2, range 1..5 (`:63-64`).
+                    CheckBoxSpinner { label: "Iterations to grow circular areas:"; text: "2"; }
+                    Rectangle { }
+                }
+
+                // `polynomialOrderPanel`.  `PolynomialOrder.DEFAULT` is
+                // `USE_MEAN` (`:444-448`).
+                EtchedBorder {
+                    title: "Pixel Filling Method";
+                    RadioButton { text: "Use mean of surrounding points"; selected: true; }
+                    RadioButton { text: "Fill pixels with noise values"; }
+                    RadioButton { text: "Fit a plane to surrounding points"; }
+                }
+            }
+
+            // `Box.createVerticalStrut(3)`
+            Rectangle { height: 3px; }
+            // `pnlCtf3d`, centred.
+            if root.ctf3d: HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: "If doing 3D CTF, finalize model and set erasing options; no need";
+                    color: #009900;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+            }
+            if root.ctf3d: HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: "to run \"Erase Beads\" if \"Erase gold\" option set in 3D CTF.";
+                    color: #009900;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+            }
+            // `Box.createVerticalStrut(5)`
+            Rectangle { height: 5px; }
+
+            // `ccdEraserButtonPanel`.  `btnCcdEraser` / `btnUseCcdEraser` come
+            // from the display factory
+            // (`ProcessResultDisplayFactory.java:120-125`) and carry
+            // `CCD_ERASER_LABEL` / `USE_ERASED_STACK_LABEL` (`:52-53`).
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                MultiLineButton { text: "Erase Beads"; width: 180px; }
+                MultiLineButton { text: "View Erased Stack"; width: 180px; }
+                MultiLineButton { text: "Use Erased Stack"; width: 180px; }
+            }
+        }
+    }
+}

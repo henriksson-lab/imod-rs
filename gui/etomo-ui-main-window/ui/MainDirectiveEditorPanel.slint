@@ -1,0 +1,45 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainDirectiveEditorPanel.java`, a `MainPanel`
+// subclass.  It instantiates the base component from `MainPanel.slint` and
+// puts its one axis column in the base's `panelCenter` slot:
+//
+// `MainDirectiveEditorPanel(DirectiveEditorManager)` (`:25-28`) forwards to
+// `super(manager)`; `createAxisPanelA` (`:48-52`) builds a
+// `DirectiveEditorProcessPanel` with `InterfaceType.DIRECTIVE_EDITOR`, and
+// `addAxisPanelA` (`:30-33`) puts its container in `scrollA`.
+//
+// `createAxisPanelB` is empty (`:55`) and `getAxisPanelB()` returns null,
+// so there is no B column.  `setStatusBarText(String, int)` (`:118-120`)
+// delegates to `MainPanel.setStatusBarTextToDirectory`.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { MainPanel } from "MainPanel.slint";
+import { DirectiveEditorProcessPanel } from "DirectiveEditorProcessPanel.slint";
+
+export component MainDirectiveEditorPanel inherits Rectangle {
+    in property <string> status-bar-text: "No data set loaded";
+    in property <color> panel-background: Colors.background-tools;
+    background: EtomoStyle.background;
+    MainPanel {
+        width: 100%;
+        height: 100%;
+        status-bar-text: root.status-bar-text;
+        panel-background: root.panel-background;
+        // `addAxisPanelA()`: `getScrollA().add(axisPanelA.getContainer())`.
+        DirectiveEditorProcessPanel {
+            panel-background: root.panel-background;
+        }
+        // `createAxisPanelB` has an empty body and `getAxisPanelB()` returns
+        // null, so there is no B column to draw.
+    }
+}
+
+export component MainDirectiveEditorPanelWindow inherits Window {
+    title: "eTomo MainDirectiveEditorPanel";
+    preferred-width: 800px;
+    preferred-height: 600px;
+    background: EtomoStyle.background;
+    MainDirectiveEditorPanel { }
+}

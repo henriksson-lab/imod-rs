@@ -1,0 +1,438 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TomogramGenerationDialog.java` and the
+// panels it nests: `TiltPanel.java` (whose whole body comes from
+// `AbstractTiltPanel.java`, with `CpuGpuPanel.java`, `RadialPanel.java` and
+// `TrialTiltPanel.java`), `MultifiltPanel.java`, `SirtPanel.java` and
+// `Ctf3dPanel.java`.
+//
+// Appearance only — no listeners, no manager, no process launching.
+//
+// `Run3dmodButton` differs from `MultiLineButton` only by the right-click
+// deferred-3dmod menu it carries, which is behaviour; both draw as
+// `MultiLineButton` here.
+
+import { EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, LabeledSpinner,
+         CheckBox, RadioButton, MultiLineButton, SpacedPanel }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, ExitButtons, ComboBox, TextField, Spinner } from "LocalWidgets.slint";
+
+// `CpuGpuPanel` (`CpuGpuPanel.java`) as `AbstractTiltPanel` embeds it: no
+// border, two rows.
+export component CpuGpuPanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Parallel processing:  Maximum number of cores recommended is 8"; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Use the GPU"; }
+        Text { text: ": Maximum number of GPUs recommended is 3"; vertical-alignment: center; }
+    }
+}
+
+// `RadialPanel` (`RadialPanel.java`) for `PanelId.TILT`: both the form box and
+// the high-frequency box.
+export component RadialPanelTilt inherits EtchedBorder {
+    title: "Radial Filtering";
+    EtchedBorder {
+        title: "Form of Radial Filter";
+        HorizontalLayout {
+            alignment: start;
+            RadioButton { text: "Standard ramp function"; selected: true; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Use SIRT-like filter equivalent to: "; }
+            TextField { text: ""; enabled: false; }
+            Text { text: " iterations"; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Use 'exact filter' functions with 'object size' of: "; }
+            TextField { text: ""; enabled: false; }
+        }
+    }
+    EtchedBorder {
+        title: "High-Frequency Filtering";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Standard Gaussian,"; selected: true; }
+            LabeledTextField { label: "cutoff: "; label-width: 60px; text: "0.35"; }
+            LabeledTextField { label: " Falloff (1.4 * sigma): "; label-width: 165px; text: "0.05"; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Hamming-like filter (as in tomo3d) starting from: "; }
+            TextField { text: ""; enabled: false; }
+        }
+    }
+}
+
+// `RadialPanel` for `PanelId.SIRTSETUP`: the "Form of Radial Filter" box and
+// the radio buttons exist only for `PanelId.TILT`, so this variant carries just
+// the high-frequency box with the two fields, un-radioed.
+export component RadialPanelSirtsetup inherits EtchedBorder {
+    title: "Radial Filtering";
+    EtchedBorder {
+        title: "High-Frequency Filtering";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Standard Gaussian, cutoff: "; label-width: 190px; text: "0.35"; }
+            LabeledTextField { label: " Falloff (1.4 * sigma): "; label-width: 165px; text: "0.05"; }
+        }
+    }
+}
+
+// `TrialTiltPanel` (`TrialTiltPanel.java`).
+export component TrialTiltPanel inherits EtchedBorder {
+    title: "";
+    PanelHeader { title: "Trial Tilt"; }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        ComboBox { label: "Trial tomogram filename: "; label-width: 190px; text: ""; }
+    }
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Generate Trial Tomogram"; min-width: 210px; }
+        MultiLineButton { text: "View Trial in 3dmod"; min-width: 180px; }
+        MultiLineButton { text: "Use Current Trial Tomogram"; min-width: 230px; }
+    }
+}
+
+// `TiltPanel` (`TiltPanel.java`), whose visible structure is
+// `AbstractTiltPanel.createPanel()` (`AbstractTiltPanel.java`).
+export component TiltPanel inherits EtchedBorder {
+    title: "";
+    // The header text is "Tilt" for back projection, "Tilt Parameters"
+    // otherwise.
+    in property <bool> back-projection: true;
+    PanelHeader { title: root.back-projection ? "Tilt" : "Tilt Parameters"; }
+    Rectangle { height: 5px; }
+    CpuGpuPanel { }
+    // `ctfLog`, a `CheckTextField`: check box plus a bare field.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Take logarithm of densities with offset: "; }
+        TextField { text: ""; enabled: false; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        LabeledTextField { label: "Logarithm density scaling factor: "; label-width: 240px; text: ""; }
+        LabeledTextField { label: " Offset: "; label-width: 65px; text: ""; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        LabeledTextField { label: "Linear density scaling factor: "; label-width: 240px; text: ""; }
+        LabeledTextField { label: " Offset: "; label-width: 65px; text: ""; }
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        spacing: 5px;
+        LabeledTextField { label: "Tomogram width in X: "; label-width: 163px; text: ""; }
+        LabeledTextField { label: "X shift: "; label-width: 65px; text: ""; }
+    }
+    Rectangle { height: 3px; }
+    HorizontalLayout {
+        alignment: start;
+        spacing: 5px;
+        LabeledTextField { label: "Tomogram height in Y: "; label-width: 159px; text: ""; }
+        LabeledTextField { label: " Y shift: "; label-width: 65px; text: ""; }
+    }
+    Rectangle { height: 3px; }
+    HorizontalLayout {
+        alignment: start;
+        spacing: 5px;
+        LabeledTextField { label: "Tomogram thickness in Z: "; label-width: 180px; text: ""; }
+        LabeledTextField { label: " Z shift: "; label-width: 65px; text: ""; }
+    }
+    Rectangle { height: 5px; }
+    LabeledTextField { label: "X axis tilt: "; label-width: 180px; text: "0.0"; }
+    LabeledTextField { label: "Tilt angle offset: "; label-width: 180px; text: ""; }
+    Rectangle { height: 5px; }
+    EtchedBorder {
+        title: "Reconstruction with super-sampling of pixels";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Super-sample by"; }
+            Spinner { text: "2"; enabled: false; }
+            Rectangle { width: 5px; }
+            CheckBox { text: "Super-sample input also"; enabled: false; }
+        }
+    }
+    Rectangle { height: 5px; }
+    RadialPanelTilt { }
+    LabeledTextField { label: "Extra views to exclude: "; label-width: 190px; text: ""; }
+    VerticalLayout {
+        spacing: EtomoStyle.gap;
+        HorizontalLayout { alignment: start; CheckBox { text: "Use local alignments"; } }
+        HorizontalLayout { alignment: start; CheckBox { text: "Use Z factors"; } }
+    }
+    // `trialPanel` holds `TrialTiltPanel`, shown for back projection only.
+    if root.back-projection: TrialTiltPanel { }
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Generate Tomogram"; min-width: 190px; }
+        MultiLineButton { text: "View Tomogram In 3dmod"; min-width: 210px; }
+        MultiLineButton { text: "Delete Intermediate Image Stacks"; min-width: 260px; }
+    }
+}
+
+// `MultifiltPanel` (`MultifiltPanel.java`).
+export component MultifiltPanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Filter Trials"; }
+        EtchedBorder {
+            title: "Filter To Try";
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "SIRT-like filter with iterations:"; selected: true; }
+                TextField { text: ""; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "'Exact filter' function with 'object sizes':"; }
+                TextField { text: ""; enabled: false; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "Standard Gaussian with cutoffs:"; }
+                TextField { width: 108px; text: ""; enabled: false; }
+                LabeledTextField { label: " falloffs:"; label-width: 70px; text: ""; enabled: false; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "Hamming-like filter with start frequencies:"; }
+                TextField { text: ""; enabled: false; }
+            }
+        }
+        EtchedBorder {
+            title: "Subarea";
+            Rectangle { height: 5px; }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 5px;
+                LabeledTextField { label: "Tomogram width in X: "; label-width: 163px; text: ""; }
+                LabeledTextField { label: "X shift: "; label-width: 65px; text: ""; }
+            }
+            Rectangle { height: 3px; }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 5px;
+                LabeledTextField { label: "Tomogram height in Y: "; label-width: 159px; text: ""; }
+                LabeledTextField { label: " Y shift: "; label-width: 65px; text: ""; }
+            }
+            Rectangle { height: 3px; }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 5px;
+                LabeledTextField { label: "Tomogram thickness in Z: "; label-width: 180px; text: ""; }
+                LabeledTextField { label: " Z shift: "; label-width: 65px; text: ""; }
+            }
+            Rectangle { height: 5px; }
+        }
+    }
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Run Filter Trials"; min-width: 180px; }
+        MultiLineButton { text: "View Tomogram(s) In 3dmod"; min-width: 240px; }
+    }
+}
+
+// `SirtPanel` (`SirtPanel.java`).
+export component SirtPanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+    // `pnlSubarea`: untitled etched border.
+    EtchedBorder {
+        title: "";
+        HorizontalLayout { alignment: start; CheckBox { text: "Reconstruct subarea"; } }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Size in X and Y: "; label-width: 130px; text: ""; enabled: false; }
+            LabeledTextField { label: " Offset in Y: "; label-width: 100px; text: ""; enabled: false; }
+        }
+    }
+    // `pnlSirtsetupParams`: untitled etched border with a header.
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "SIRT"; }
+        SpacedPanel {
+            RadialPanelSirtsetup { }
+            LabeledTextField { label: "Iteration #'s to retain: "; label-width: 190px; text: ""; }
+            HorizontalLayout { alignment: start; CheckBox { text: "Scale retained volumes to integers"; } }
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Do not make vertical slice output files used for resuming"; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Delete existing reconstructions after starting point"; checked: true; }
+            }
+            LabeledTextField { label: "Flat filter fraction: "; label-width: 190px; text: ""; }
+            // `pnlStartFrom`
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton { text: "Start from beginning"; selected: true; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton { text: "Resume from last iteration"; enabled: false; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: EtomoStyle.gap;
+                    RadioButton { text: "Go back, resume from iteration:"; enabled: false; }
+                    ComboBox { label: ""; text: ""; box-width: 80px; enabled: false; }
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Run SIRT"; min-width: 130px; }
+        MultiLineButton { text: "View Tomogram(s) In 3dmod"; min-width: 240px; }
+        MultiLineButton { text: "Use SIRT Output File"; min-width: 200px; }
+    }
+}
+
+// `Ctf3dPanel` (`Ctf3dPanel.java`).
+export component Ctf3dPanel inherits EtchedBorder {
+    title: "";
+    // `getAdvancedBasicOnlyInstance`: title and Advanced/Basic button, but no
+    // open/close button.  `PanelHeader` in the shared vocabulary always draws
+    // the open/close glyph, so the difference is not expressible here.
+    PanelHeader { title: "3D CTF Correction Parameters"; }
+    Rectangle { height: 2px; }
+    Text { text: "Parameters must already be set in Final Aligned Stack CTF Correction"; }
+    Rectangle { height: 10px; }
+    // `pnlSlabThicknessInNm`.  The `Box.createHorizontalGlue()` that was meant
+    // for the row below is added to this row instead (`Ctf3dPanel.java:185`);
+    // Slint has no glue, so nothing distinguishes the two rows here.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        LabeledTextField {
+            label: "Thickness of slab for each CTF correction (nm): ";
+            label-width: 330px;
+            text: "15";
+        }
+        Text { text: ""; vertical-alignment: center; }
+    }
+    HorizontalLayout { alignment: start; CheckBox { text: "Compute slabs in parallel"; } }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Erase gold"; }
+        Text { text: "   Parameters must already be set for gold erasing"; vertical-alignment: center; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Apply 2D filter"; }
+        Text { text: "   Parameters must already be set for 2-D filtering"; vertical-alignment: center; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Reconstruct from raw images"; }
+        Rectangle { width: 15px; }
+        LabeledSpinner { label: "Reduced by: "; label-width: 100px; text: "1"; enabled: false; }
+        Rectangle { width: 1px; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Adjust for Z shift in fine alignment and positioning"; }
+    }
+    Rectangle { height: 5px; }
+    EtchedBorder {
+        title: "Computing X-axis Tilted Slices";
+        RadioButton { text: "Let programs decide whether to interpolate from vertical slices"; selected: true; }
+        RadioButton { text: "Always use direct backprojection into X-tilted output slice"; }
+        RadioButton { text: "Always make vertical slices and interpolate to get X-tilted output"; }
+    }
+    Rectangle { height: 5px; }
+    // `ButtonControlTextEfield`: label, field, directory-chooser button.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        LabeledTextField { label: "Temporary directory: "; label-width: 170px; text: ""; }
+        Rectangle {
+            width: 22px;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Generate CTF-corrected Tomogram"; min-width: 280px; }
+        MultiLineButton { text: "View Tomogram In 3dmod"; min-width: 210px; }
+        MultiLineButton { text: "Use CTF-corrected Tomogram"; min-width: 240px; }
+    }
+    Rectangle { height: 5px; }
+}
+
+// `TomogramGenerationDialog` (`TomogramGenerationDialog.java:739-779`).
+export component TomogramGenerationDialog inherits BeveledBorder {
+    title: "Tomogram Generation";
+    // `bgMethod`: 0 Back Projection, 1 Filter Trials, 2 SIRT, 3 3D CTF.
+    // `rbBackProjection.setSelected(true)` in `createPanel()`.
+    in property <int> method: 0;
+    // `pnlMethod`: the radio row, glue between every button.
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        RadioButton { text: "Back Projection"; selected: root.method == 0; }
+        RadioButton { text: "Filter Trials"; selected: root.method == 1; }
+        RadioButton { text: "SIRT"; selected: root.method == 2; }
+        RadioButton { text: "3D CTF"; selected: root.method == 3; }
+    }
+    // All four panels are children of the root panel; `methodChanged()` shows
+    // exactly the one the selected method needs (the tilt panel stays up for
+    // Back Projection, Filter Trials and SIRT).
+    TiltPanel { back-projection: root.method == 0; }
+    if root.method == 1: MultifiltPanel { }
+    if root.method == 2: SirtPanel { }
+    if root.method == 3: Ctf3dPanel { }
+    // `btnExecute.setText("Done"); addExitButtons();`
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component TomogramGenerationDialogWindow inherits Window {
+    title: "eTomo — Tomogram Generation";
+    background: EtomoStyle.background;
+    preferred-width: 900px;
+    preferred-height: 900px;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        TomogramGenerationDialog { }
+    }
+}

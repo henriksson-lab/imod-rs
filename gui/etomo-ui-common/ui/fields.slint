@@ -1,0 +1,518 @@
+// Shared field, button and spacing vocabulary, one component per Swing widget
+// class in `IMOD/Etomo/src/etomo/ui/swing`.  Named after the Java class it
+// stands for.  Covers:
+//
+//   `EfieldContainer.java`      - the label/field/control container
+//   `SpinnerEfield.java`        - an extensible labelled spinner
+//   `FieldLockController.java`  - the enabled/editable/locked state machine
+//   `MenuButton.java`           - a MultiLineButton with a right-click menu
+//   `Minibutton.java`           - the small square and round buttons
+//   `Run3dmodMenu.java`         - the run-3dmod right-click menu
+//   `ParallelChooser.java`      - the ParallelManager process chooser
+//   `SpacedLabel.java`          - a label wrapped in rigid areas
+//   `SpacedTextField.java`      - a labelled text field wrapped in rigid areas
+//   `PagingPanel.java`          - the six table paging buttons
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, BeveledBorder, MultiLineButton } from "widgets.slint";
+import { Colors } from "cells.slint";
+
+// `EfieldContainer` (`EfieldContainer.java`): "If label and/or fieldControl are
+// present create a JPanel and add to it in order: label, field, fieldControl.
+// If only field is present then no JPanel is created and the field is returned
+// in getComponent." (EfieldContainer.java:23-32).
+export component EfieldContainer inherits Rectangle {
+    // `EfieldContainer(modifiable, useGridBag, label, field, fieldControl)`
+    // (EfieldContainer.java:33-34).  A field with no label, no fieldControl and
+    // `modifiable` false is returned bare (:44-46).
+    in property <bool> modifiable: false;
+    in property <bool> use-grid-bag: false;
+    in property <bool> has-label: false;
+    in property <bool> has-field-control: false;
+    in property <string> label;
+    // The panel exists only when the field is not returned bare.
+    property <bool> has-panel: root.modifiable || root.has-label || root.has-field-control;
+    background: root.has-panel ? EtomoStyle.panel : transparent;
+    HorizontalLayout {
+        // `createPanel` (EfieldContainer.java:108-121) uses either a
+        // GridBagLayout (fill BOTH, weightx/weighty 0, gridheight/gridwidth 1)
+        // or a `BoxLayout.X_AXIS`.  Slint has no weightx/weighty, so both are
+        // one row; the difference that survives is the insets below.
+        spacing: 0px;
+        // label
+        if root.has-label: Text {
+            text: root.label;
+            vertical-alignment: center;
+            color: EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // field.  `FIELD_INSETS = new Insets(0, 0, 0, -1)`
+        // (EfieldContainer.java:13), applied only under grid bag (:57-60):
+        // a right inset of -1 pulls the next component one pixel left.
+        Rectangle {
+            x: 0px;
+            HorizontalLayout {
+                padding-right: root.use-grid-bag ? -1px : 0px;
+                @children
+            }
+        }
+        // fieldControl (:63-68).  `COMPONENT_INSETS = new Insets(0, 0, 0, -1)`
+        // (EfieldContainer.java:14) is applied to a component added later by
+        // `add()` (:100-103).
+        if root.has-field-control: Rectangle {
+            width: EtomoStyle.field-height;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+        }
+    }
+}
+
+// `SpinnerEfield` (`SpinnerEfield.java`): "An extensible spinner"
+// (SpinnerEfield.java:22).  `getInstance(label, value, minimum, maximum)`
+// (:57-62) builds a `SpinnerNumberModel(value, minimum, maximum, 1)` (:42); a
+// null label means no panel and no JLabel (:51-54), so the spinner stands
+// alone.
+export component SpinnerEfield inherits HorizontalLayout {
+    // `label != null` (SpinnerEfield.java:46) decides whether `pnlRoot` and
+    // `jLabel` exist at all.
+    in property <bool> has-label: true;
+    in property <string> label;
+    in property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    // `setEnabled` also greys the label (SpinnerEfield.java:221-223).
+    in property <bool> enabled: true;
+    // "Always starts as editable." (SpinnerEfield.java:246, :272).
+    in property <bool> editable: true;
+    // `setPreferredWidth(width)` multiplies by the font size adjustment, 1 at
+    // the default font size (SpinnerEfield.java:237-243, UIParameters.java:228).
+    // Unset until a caller asks; `UIParameters.dimSpinner` is 2 * 21 = 42px
+    // (UIParameters.java:233-234).
+    in property <length> spinner-width: 42px;
+    // `createPanel` (SpinnerEfield.java:64-70) is a `BoxLayout.X_AXIS` holding
+    // the label then the spinner.
+    spacing: 0px;
+    if root.has-label: Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        width: root.spinner-width + 14px;
+        height: EtomoStyle.field-height;
+        HorizontalLayout {
+            Rectangle {
+                background: root.editable ? Colors.background : Colors.cell-not-editable-background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text {
+                    x: 3px;
+                    text: root.value;
+                    vertical-alignment: center;
+                    color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                }
+            }
+            Rectangle {
+                width: 14px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    Text { text: "^"; horizontal-alignment: center; color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text; }
+                    Text { text: "v"; horizontal-alignment: center; color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text; }
+                }
+            }
+        }
+    }
+}
+
+// `FieldLockController` (`FieldLockController.java`): the controller that owns
+// a field's real enabled and editable state.  It constructs no widget of its
+// own - each factory is handed the widget it drives - so what it contributes to
+// the appearance is `applyState` (:105-144): a component is enabled when
+// `canEnable && !readOnly && !locked && editable && enabled` (:125), and a text
+// component is enabled on `canEnable && enabled` alone (:138) while its
+// *editable* state carries the lock (`!readOnly && !locked && editable`, :142).
+// `canEnable` is false when a toggle button is present and is itself disabled
+// or unselected (:108-111).
+//
+// `field-kind` names the factory that made the controller:
+//
+//   "toggle-button"  -> `getToggleButtonInstance`   (FieldLockController.java:41, :45)
+//   "button"         -> `getButtonInstance`         (:50)
+//   "text-component" -> `getTextComponentInstance`  (:54, :59)
+//   "spinner"        -> `getSpinnerInstance`        (:64)
+export component FieldLockController inherits Rectangle {
+    in property <string> field-kind: "text-component";
+    // Controller state (FieldLockController.java:23-25).
+    in property <bool> enabled: true;
+    in property <bool> editable: true;
+    in property <bool> locked: false;
+    // `readOnly` is false for every factory but the two-argument
+    // `getTextComponentInstance` (:59-62).
+    in property <bool> read-only: false;
+    // The toggle button's own state, which gates the fields it controls.
+    in property <bool> toggle-enabled: true;
+    in property <bool> toggle-selected: true;
+    in property <string> text;
+    // `applyState(Component, canEnable)` (FieldLockController.java:120-127).
+    property <bool> can-enable: root.field-kind == "toggle-button"
+        ? true
+        : (root.toggle-enabled && root.toggle-selected);
+    out property <bool> applied-enabled: root.field-kind == "text-component"
+        // `applyState(JTextComponent, canEnable)` (:132-144).
+        ? (root.can-enable && root.enabled)
+        : (root.can-enable && !root.read-only && !root.locked && root.editable && root.enabled);
+    out property <bool> applied-editable: !root.read-only && !root.locked && root.editable;
+    height: EtomoStyle.field-height;
+    background: root.field-kind == "text-component"
+        ? (root.applied-editable ? Colors.background : Colors.cell-not-editable-background)
+        : EtomoStyle.panel;
+    border-width: root.field-kind == "text-component" ? 1px : 2px;
+    border-color: EtomoStyle.border;
+    Text {
+        x: 3px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.applied-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `MenuButton` (`MenuButton.java`): "MenuButton is a MultiLineButton which can
+// create a custom right-click menu" (MenuButton.java:14-15).
+// `getToggleMenuButtonInstance(label, dialogType)` (:69-72) is the only
+// factory, so the button is always a toggle
+// (`MultiLineButton(label, true, dialogType, false, false, false, null)`,
+// MenuButton.java:65-67).
+//
+// Slint has no JPopupMenu cascade, so `addMenu` (:74-93) is drawn as the list
+// of items it would build, shown by `popUpContextMenu` (:95-99).
+export component MenuButton inherits VerticalLayout {
+    in property <string> text;
+    in property <bool> enabled: true;
+    // A fresh JToggleButton is unselected.
+    in property <bool> selected: false;
+    // The action commands `addMenu` is handed (MenuButton.java:80).  Empty
+    // until a container calls it; `container` starts null (:54).
+    in property <[string]> action-commands;
+    // Drawn only while the right-click menu is up (:96-98).
+    in property <bool> menu-open: false;
+    spacing: 0px;
+    MultiLineButton {
+        text: root.text;
+        enabled: root.enabled;
+        background: root.selected ? EtomoStyle.background.darker(10%) : EtomoStyle.panel;
+    }
+    if root.menu-open: Rectangle {
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: 2px;
+            for command in root.action-commands: Text {
+                // `new MenuItem(MENU_STRING + " " + actionElement.getActionCommand())`
+                // (MenuButton.java:88-89).  `MENU_STRING` is "Run To"
+                // (MenuButton.java:52).
+                text: "Run To " + command;
+                color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+        }
+    }
+}
+
+// `Minibutton` (`Minibutton.java`): a small JButton, square or round.
+//
+// `button-style` names the factory:
+//
+//   "square" -> `getSquareInstance(label, border)` / `(icon, border)` /
+//               `(border)` (Minibutton.java:220, :227, :234) - the border is
+//               supplied by the caller, `round` is false (:171)
+//   "round"  -> `getRoundInstance(label, italics, small, color, rolloverColor,
+//               pressedColor, outlineColor)` (:241-260)
+//   "blue"   -> `getBlueInstance(label, italics, small)` (:262-266)
+//   "green"  -> `getGreenInstance(label, italics, small)` (:268-272)
+export component Minibutton inherits Rectangle {
+    in property <string> button-style: "square";
+    in property <string> text;
+    in property <bool> enabled: true;
+    // `getRoundInstance` (:241-251): an italic label is wrapped in
+    // `<html><i>`, and a label longer than one character is padded with a
+    // space on each side.
+    in property <bool> italics: false;
+    // `small` picks an empty border over an etched one (:252-257).
+    in property <bool> small: false;
+    // An icon instance (`getSquareInstance(Icon, Border)`, :227) or
+    // `setIcon(Image)` (:274-278).  The icon itself is supplied by the caller,
+    // so the slot is sized but carries no image of its own here.
+    in property <bool> has-icon: false;
+    property <bool> round: root.button-style != "square";
+    // `getBlueInstance` (Minibutton.java:264-265):
+    //   color (176,248,255), rollover (203,232,255), pressed (134,189,255),
+    //   outline (15,4,75).
+    // `getGreenInstance` (Minibutton.java:270-271):
+    //   color (188,254,186), rollover (231,254,245), pressed (86,226,138),
+    //   outline (0,40,2).
+    property <color> fill: root.button-style == "blue"
+        ? #b0f8ff
+        : (root.button-style == "green" ? #bcfeba : EtomoStyle.panel);
+    property <color> outline: root.button-style == "blue"
+        ? #0f044b
+        : (root.button-style == "green" ? #002802 : Colors.foreground);
+    // `setSize` (Minibutton.java:280-286) squares the preferred size up.
+    height: 21px;
+    min-width: 21px;
+    // `paintComponent` fills an oval and `paintBorder` draws one
+    // (Minibutton.java:294-344); a square instance falls through to the
+    // caller's border.
+    border-radius: root.round ? self.height / 2 : 0px;
+    background: root.round ? root.fill : EtomoStyle.panel;
+    // `small` -> `BorderFactory.createEmptyBorder()`, otherwise
+    // `createEtchedBorder()` (Minibutton.java:252-257); EtchedBorder insets
+    // are 2px a side.
+    border-width: root.round && root.small ? 0px : 2px;
+    border-color: root.round ? root.outline : Colors.bevel-shadow;
+    HorizontalLayout {
+        padding-left: 2px;
+        padding-right: 2px;
+        alignment: center;
+        if root.has-icon: Rectangle {
+            width: 17px;
+            height: 17px;
+        }
+        Text {
+            // The space padding `getRoundInstance` adds around a label longer
+            // than one character (Minibutton.java:249-250).
+            text: root.round && root.text.character-count > 1 ? " " + root.text + " " : root.text;
+            font-italic: root.italics;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.enabled ? root.outline : EtomoStyle.disabled-text;
+        }
+    }
+}
+
+// `Run3dmodMenu` (`Run3dmodMenu.java`): "Constructs a run 3dmod context menu"
+// (Run3dmodMenu.java:14-16).  The popup is `new JPopupMenu("3dmod Options")`
+// (:27) and `createMenu` (:72-78) adds, in order, the plain run item (process
+// buttons only), the startup-window item and the bin-by-2 item.
+//
+// `menu-kind` names the factory:
+//
+//   "3dmod-button"  -> `get3dmodButtonInstance(button, descr)` (:52-59):
+//                      openString = `descr == null ? "Open" : "Open " + descr`,
+//                      processButton false, so there is no plain run item
+//   "process-button" -> `getProcessButtonInstance(button, descr)` (:61-70):
+//                      descr defaults to `DEFAULT_DESCR` = "3dmod" (:25),
+//                      openString = "And open " + descr, processButton true
+export component Run3dmodMenu inherits Rectangle {
+    in property <string> menu-kind: "3dmod-button";
+    in property <string> descr;
+    // `fileToOpenKnown` starts true (Run3dmodMenu.java:35); when it is false a
+    // process button's plain and bin-by-2 items are disabled (:84-94).
+    in property <bool> file-to-open-known: true;
+    in property <bool> target-enabled: true;
+    property <bool> process-button: root.menu-kind == "process-button";
+    property <string> open-string: root.process-button
+        ? "And open " + (root.descr == "" ? "3dmod" : root.descr)
+        : (root.descr == "" ? "Open" : "Open " + root.descr);
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: 2px;
+        spacing: 2px;
+        Text {
+            // The JPopupMenu's own title (Run3dmodMenu.java:27).
+            text: "3dmod Options";
+            font-weight: 700;
+            color: EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // `run3dmod` exists only for a process button (Run3dmodMenu.java:44-49)
+        // and is added first (:73-75).
+        if root.process-button: Text {
+            text: root.open-string;
+            color: root.file-to-open-known ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Text {
+            // `startupWindow` (Run3dmodMenu.java:42).
+            text: root.open-string + " with startup window";
+            color: EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Text {
+            // `binBy2` (Run3dmodMenu.java:43).
+            text: root.open-string + " binned by 2";
+            color: root.process-button && !root.file-to-open-known
+                ? EtomoStyle.disabled-text
+                : EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+    }
+}
+
+// `ParallelChooser` (`ParallelChooser.java`): the ParallelManager's "Main
+// dialog ... Allows user to choose either a generic parallel process or
+// anisotropic diffusion" (ParallelChooser.java:168-169).  `rootPanel` is a
+// `SpacedPanel` set to `BoxLayout.X_AXIS` with
+// `new BeveledBorder("Choose a process").getBorder()`
+// (ParallelChooser.java:186-187).
+export component ParallelChooser inherits BeveledBorder {
+    in property <bool> enabled: true;
+    title: "Choose a process";
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        MultiLineButton {
+            // `btnGeneric` (ParallelChooser.java:177-178).
+            text: "Generic Parallel Process";
+            enabled: root.enabled;
+        }
+        MultiLineButton {
+            // `btnAnisotropicDiffusion` (ParallelChooser.java:179-180).
+            text: "Nonlinear Anisotropic Diffusion";
+            enabled: root.enabled;
+        }
+    }
+}
+
+// `SpacedLabel` (`SpacedLabel.java`): "Class to encapsulate rigid areas within
+// the label" (SpacedLabel.java:82-83).  `labelPanel` is a `BoxLayout.X_AXIS`
+// holding a 5px rigid area, the JLabel and another 5px rigid area
+// (SpacedLabel.java:39-41); `yAxisPanel` is a `BoxLayout.Y_AXIS` holding that
+// panel and a 5px rigid area (:43-44).  `FixedDim.x5_y0` is (5,0)
+// (FixedDim.java:71) and `FixedDim.x0_y5` is (0,5) (FixedDim.java:102).
+export component SpacedLabel inherits VerticalLayout {
+    // `label = label.trim()` (SpacedLabel.java:31).
+    in property <string> text;
+    in property <string> tooltip;
+    spacing: 0px;
+    HorizontalLayout {
+        spacing: 0px;
+        Rectangle { width: 5px; }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Rectangle { width: 5px; }
+    }
+    Rectangle { height: 5px; }
+}
+
+// `SpacedTextField` (`SpacedTextField.java`): "Class to encapsulate rigid areas
+// within a labeled text field" (SpacedTextField.java:76-77).  `fieldPanel` is a
+// `BoxLayout.X_AXIS` holding a 5px rigid area, the JLabel, a 5px rigid area,
+// the JTextField and a 5px rigid area (SpacedTextField.java:58-62);
+// `yAxisPanel` adds a 5px rigid area below it (:64-65).
+export component SpacedTextField inherits VerticalLayout {
+    // `label = label.trim()` (SpacedTextField.java:52).
+    in property <string> label;
+    // `new JTextField()` (SpacedTextField.java:33): empty until a caller sets
+    // it.
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <string> tooltip;
+    spacing: 0px;
+    HorizontalLayout {
+        spacing: 0px;
+        Rectangle { width: 5px; }
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Rectangle { width: 5px; }
+        Rectangle {
+            height: EtomoStyle.field-height;
+            background: Colors.background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text {
+                x: 3px;
+                text: root.text;
+                vertical-alignment: center;
+                color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            }
+        }
+        Rectangle { width: 5px; }
+    }
+    Rectangle { height: 5px; }
+}
+
+// One paging button as `PagingPanel.setupButton` (PagingPanel.java:101-110)
+// makes it: a `SingleLineButton` with a raised bevel border and a 17x17 icon,
+// its preferred size squared up.
+component PagingButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <string> tooltip;
+    width: 21px;
+    height: 21px;
+    // `BorderFactory.createBevelBorder(BevelBorder.RAISED)`
+    // (PagingPanel.java:103).  Two-tone bevel -> one 2px border.
+    border-width: 2px;
+    border-color: Colors.bevel-shadow;
+    background: EtomoStyle.panel;
+    Image {
+        width: 17px;
+        height: 17px;
+        source: root.icon;
+        opacity: root.enabled ? 1.0 : 0.5;
+    }
+}
+
+// `PagingPanel` (`PagingPanel.java`): "Panel that holds paging buttons"
+// (PagingPanel.java:21).  `createPanel` (:82-99) is a `BoxLayout.Y_AXIS` of
+// home, page-up and up, a vertical glue, then down, page-down and end.
+export component PagingPanel inherits VerticalLayout {
+    // `setUpEnabled` / `setDownEnabled` (PagingPanel.java:187-197) drive the
+    // two halves; a fresh SingleLineButton is enabled.
+    in property <bool> up-enabled: true;
+    in property <bool> down-enabled: true;
+    // `addTooltips` (PagingPanel.java:169-181) appends the hotkey only when
+    // the viewport reported focusable parents (:171-174).
+    in property <bool> hotkeys: false;
+    spacing: 0px;
+    PagingButton {
+        icon: @image-url("../../../IMOD/Etomo/src/images/home.png");
+        enabled: root.up-enabled;
+        tooltip: "Top of table";
+    }
+    PagingButton {
+        icon: @image-url("../../../IMOD/Etomo/src/images/pageUp.png");
+        enabled: root.up-enabled;
+        tooltip: root.hotkeys ? "Page up [Page Up]" : "Page up";
+    }
+    PagingButton {
+        icon: @image-url("../../../IMOD/Etomo/src/images/up.png");
+        enabled: root.up-enabled;
+        tooltip: root.hotkeys ? "Up one line [Up_Arrow]" : "Up one line";
+    }
+    // `Box.createVerticalGlue()` (PagingPanel.java:95).
+    Rectangle { vertical-stretch: 1; }
+    PagingButton {
+        icon: @image-url("../../../IMOD/Etomo/src/images/down.png");
+        enabled: root.down-enabled;
+        tooltip: root.hotkeys ? "Down one line [Down_Arrow]" : "Down one line";
+    }
+    PagingButton {
+        icon: @image-url("../../../IMOD/Etomo/src/images/pageDown.png");
+        enabled: root.down-enabled;
+        // The Java writes "Page up" here too (PagingPanel.java:179); the
+        // string is copied as written.
+        tooltip: root.hotkeys ? "Page up [Page Down]" : "Page up";
+    }
+    PagingButton {
+        icon: @image-url("../../../IMOD/Etomo/src/images/end.png");
+        enabled: root.down-enabled;
+        tooltip: "Bottom of table";
+    }
+}

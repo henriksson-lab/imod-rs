@@ -1,0 +1,96 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SerialSectionsStartupDialog.java`
+// (the modal "Starting Serial Sections" JDialog).  Appearance only: field
+// values are the static defaults the Java constructor sets.
+
+import { EtomoStyle, CheckBox, RadioButton, MultiLineButton, LabeledSpinner }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, FileTextField } from "LocalWidgets.slint";
+
+export component SerialSectionsStartupDialog inherits Rectangle {
+    background: EtomoStyle.panel;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+
+        // pnlRoot.add(Box.createRigidArea(FixedDim.x0_y10))
+        Rectangle { height: 10px; }
+
+        // ftfStack = FileTextField2.getInstance(manager, "Stack: ")
+        FileTextField {
+            label: "Stack: ";
+            label-width: 50px;
+            field-width: 320px;
+        }
+
+        Rectangle { height: 30px; }
+
+        // pnlViewTypeX: 5px indent, then the "Frame Type" group box.
+        HorizontalLayout {
+            padding-left: 5px;
+            alignment: start;
+            EtchedBorder {
+                title: "Frame Type";
+                RadioButton { text: "Single frame"; selected: true; }
+                RadioButton { text: "Montage"; }
+            }
+        }
+
+        Rectangle { height: 10px; }
+
+        // pnlMdocMetadata: cbMdocMetadataFile starts disabled
+        // (createPanel: cbMdocMetadataFile.setEnabled(false)).
+        HorizontalLayout {
+            padding-left: 5px;
+            alignment: start;
+            CheckBox {
+                text: "Extract montage piece list from .mdoc file";
+                enabled: false;
+            }
+        }
+
+        Rectangle { height: 10px; }
+
+        // pnlImage: distortion field file then the binning spinner.
+        HorizontalLayout {
+            padding-left: 5px;
+            spacing: 5px;
+            alignment: start;
+            FileTextField {
+                label: "Image distortion field file: ";
+                label-width: 170px;
+                field-width: 175px;
+            }
+            LabeledSpinner {
+                label: "Binning: ";
+                label-width: 55px;
+                text: "1";
+            }
+        }
+
+        Rectangle { height: 30px; }
+
+        // pnlButtons
+        HorizontalLayout {
+            spacing: 15px;
+            alignment: start;
+            MultiLineButton { text: "OK"; width: 80px; }
+            MultiLineButton { text: "Cancel"; width: 80px; }
+        }
+
+        // pnlStatus: BorderLayout with busyStatusPanel at EAST.  BusyStatusPanel
+        // is a JLabel carrying an animated icon (`BusyStatusPanel.java:31`);
+        // no icon is vendored, so the strip is drawn empty and right-aligned.
+        HorizontalLayout {
+            alignment: end;
+            Rectangle { width: 20px; height: 20px; }
+        }
+    }
+}
+
+export component SerialSectionsStartupDialogWindow inherits Window {
+    title: "Starting Serial Sections";
+    background: EtomoStyle.background;
+    preferred-width: 620px;
+    preferred-height: 380px;
+    SerialSectionsStartupDialog { }
+}

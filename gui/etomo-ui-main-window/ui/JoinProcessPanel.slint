@@ -1,0 +1,41 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/JoinProcessPanel.java`, an `AxisProcessPanel`
+// subclass.  It instantiates the base component from
+// `AxisProcessPanel.slint` with the flags its constructor passes to
+// `super`, and adds nothing to `panelProcessSelect`:
+//
+// `super(axis, joinManager, true, true, InterfaceType.JOIN, false,
+//  axisProgressPanel)` then `createProcessControlPanel()`, `showBothAxis()`
+//  and `initializePanels()` (`:61-67`).
+//
+// Overrides `showBothAxis()` (`:69-72`) to
+// `setBackground(Colors.getBackgroundJoin())`, which is `Colors.VIOLET`
+// (`Colors.java:47`, `:169-179`).  `axisID` comes from the caller;
+// `MainJoinPanel.createAxisPanelA` (`MainJoinPanel.java:47-50`) passes the
+// axis the manager is showing, which is `AxisID.ONLY` for a join, so no axis
+// label is drawn.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { AxisProcessPanel } from "AxisProcessPanel.slint";
+
+export component JoinProcessPanel inherits Rectangle {
+    in property <color> panel-background: Colors.violet;
+    background: root.panel-background;
+    AxisProcessPanel {
+        width: 100%;
+        height: 100%;
+        axis-id: "ONLY";
+        panel-background: root.panel-background;
+        alt-parallel-loc: false;
+    }
+}
+
+export component JoinProcessPanelWindow inherits Window {
+    title: "eTomo JoinProcessPanel";
+    preferred-width: 700px;
+    preferred-height: 500px;
+    background: EtomoStyle.background;
+    JoinProcessPanel { }
+}

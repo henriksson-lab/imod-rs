@@ -1,0 +1,95 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectivesDirectiveRow.java`.
+//
+// One directive row of the `DirectivesTable`.  `display()` (lines 688-711) puts
+// `hTitle` in one grid cell, then whichever value widget the constructor built,
+// then - at `gridwidth = REMAINDER` - either the override toggle or `hEmpty`.
+// The constructor (lines 96-161) picks the value widget from the directive's
+// value type:
+//
+//   BOOLEAN     -> `bcbValue` (`BooleanComboBoxEfield`), and `hEmpty`; there is
+//                  no override toggle for a boolean row
+//   choice list -> `cbValue` (`ComboBoxEfield.getOverrideInstance`) + toggle
+//   FILE        -> `bctfValue` (`ButtonControlTextEfield.getFileOverrideInstance`) + toggle
+//   otherwise   -> `tfValue` (`TextEfield.getOverrideInstance`) + toggle
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    Ebutton, ToggleEbutton, TextEfield, ComboBoxEfield, BooleanComboBoxEfield,
+    ButtonControlTextEfield,
+} from "widgets_local.slint";
+
+export component DirectivesDirectiveRow inherits HorizontalLayout {
+    // The row title: the .csv Label column if there is one, else
+    // `directiveDef.toString()`, else the directive name (lines 82-91).
+    in property <string> title;
+    // Which constructor branch built the row: "boolean", "choice", "file" or "".
+    in property <string> value-kind: "";
+    in property <string> value: "";
+    // `open` starts false (line 58), and `updateVisible()` hides every widget of
+    // the row while it is closed.  Kept as a gate rather than an omission.
+    in property <bool> open: false;
+    // `setEditable` follows `BatchRunTomoStatus`; `statusChanged` is called with
+    // `BatchRunTomoStatus.DEFAULT` at the end of `RowList.createPanel`.
+    in property <bool> editable: true;
+    // `tbtnOverrideToggle.setEnabled(false)` in both constructors (lines
+    // 163-165 and 196-198).
+    in property <bool> override-enabled: false;
+    in property <bool> override-selected: false;
+    // Grid column widths - see the note in `DirectivesSectionRow.slint`.
+    in property <length> title-width: 320px;
+    in property <length> value-width: 160px;
+
+    spacing: 0px;
+
+    // `hTitle = Ebutton.getHeaderInstance(title)`, right aligned by
+    // `createPanel` (line 245).
+    Ebutton {
+        width: root.title-width;
+        text: root.title;
+        button-style: "header";
+        align-right: true;
+    }
+    if root.value-kind == "boolean": BooleanComboBoxEfield {
+        width: root.value-width;
+        enabled: root.editable;
+    }
+    if root.value-kind == "choice": ComboBoxEfield {
+        width: root.value-width;
+        text: root.value;
+        enabled: root.editable;
+    }
+    if root.value-kind == "file": ButtonControlTextEfield {
+        field-width: root.value-width;
+        text: root.value;
+        enabled: root.editable;
+    }
+    if root.value-kind == "": TextEfield {
+        field-width: root.value-width;
+        text: root.value;
+        enabled: root.editable;
+    }
+    // `gridwidth = REMAINDER`: the override toggle, or - for a boolean row,
+    // which has no toggle - the empty header cell.
+    if root.value-kind != "boolean": ToggleEbutton {
+        selected: root.override-selected;
+        enabled: root.override-enabled;
+    }
+    if root.value-kind == "boolean": Ebutton {
+        text: "";
+        button-style: "header";
+    }
+}
+
+export component DirectivesDirectiveRowWindow inherits Window {
+    title: "eTomo Directives Row";
+    preferred-width: 620px;
+    preferred-height: 60px;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+        DirectivesDirectiveRow { title: "Directive"; }
+    }
+}

@@ -1,0 +1,66 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/GpuTiltTestPanel.java`, the tool
+// panel `ToolsDialog` builds for `ToolType.GPU_TILT_TEST`
+// (`ToolsDialog.java:72-74`).
+//
+// `createPanel()` (`:63-81`):
+//   pnlRoot   Y_AXIS, no border
+//     rigid area FixedDim.x0_y5   (0 x 5)
+//     pnlFields
+//     rigid area FixedDim.x0_y23  (0 x 23)
+//     btnRunTest                  -- Box.CENTER_ALIGNMENT, set at `:66`
+//     rigid area FixedDim.x0_y15  (0 x 15)
+//   pnlFields X_AXIS
+//     rigid area FixedDim.x10_y0  (10 x 0)
+//     ltfNMinutes                 -- preferred width 80 (`:65`)
+//     rigid area FixedDim.x15_y0  (15 x 0)
+//     spGpuNumber
+//     rigid area FixedDim.x10_y0  (10 x 0)
+//
+// Field values are the construction-time ones: `ltfNMinutes.setText("1")`
+// (`:64`), and `LabeledSpinner.getInstance("GPU #: ", 0, 0, 8, 1)` (`:43-44`)
+// -- value 0, range 0..8, step 1.  `FixedDim` sizes are from
+// `FixedDim.java:69-110`.
+
+import { EtomoStyle, MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { InlineSpinner, InlineTextField } from "ShellWidgets.slint";
+
+export component GpuTiltTestPanel inherits VerticalLayout {
+    alignment: start;
+
+    // `Box.createRigidArea(FixedDim.x0_y5)`.
+    Rectangle { height: 5px; }
+
+    // `pnlFields`: BoxLayout.X_AXIS.
+    HorizontalLayout {
+        alignment: start;
+        Rectangle { width: 10px; }
+        // `ltfNMinutes` = new LabeledTextField(FLOATING_POINT, "# of minutes: ")
+        InlineTextField {
+            label: "# of minutes: ";
+            text: "1";
+            field-width: 80px;
+        }
+        Rectangle { width: 15px; }
+        // `spGpuNumber` = LabeledSpinner.getInstance("GPU #: ", 0, 0, 8, 1)
+        InlineSpinner {
+            label: "GPU #: ";
+            text: "0";
+        }
+        Rectangle { width: 10px; }
+    }
+
+    // `Box.createRigidArea(FixedDim.x0_y23)`.
+    Rectangle { height: 23px; }
+
+    // `btnRunTest` = new MultiLineButton("Run GPU Test"), CENTER_ALIGNMENT.
+    HorizontalLayout {
+        alignment: center;
+        MultiLineButton {
+            text: "Run GPU Test";
+            width: 140px;
+        }
+    }
+
+    // `Box.createRigidArea(FixedDim.x0_y15)`.
+    Rectangle { height: 15px; }
+}

@@ -1,0 +1,149 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/PreProcessingDialog.java`.
+//
+// The dialog itself is two bevelled boxes: "Digital Micrograph Conversion" and
+// "CCD Eraser".  The eraser box holds `CcdEraserXRaysPanel.java`, translated
+// inline below in the order that class adds its components.  The exit-button
+// row comes from `ProcessDialog.java`; this dialog renames `btnExecute` to
+// "Done".
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import {
+    EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, CheckBox,
+    MultiLineButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder } from "widgets_local.slint";
+
+export component PreProcessingDialog inherits Rectangle {
+    // `disableDM2MRC()` runs in the constructor and calls
+    // `pnlDMConvert.setVisible(false)`, so the Digital Micrograph box is
+    // hidden unless digital micrograph data was found.  Exposed as a static
+    // property rather than dropped, so the translated layout stays in place.
+    in property <bool> show-dm-convert: false;
+
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: 5px;
+
+        // ---- pnlDMConvert -----------------------------------------------
+        if root.show-dm-convert: BeveledBorder {
+            title: "Digital Micrograph Conversion";
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                Text { text: "No digital micrograph files detected:  "; }
+                Rectangle { height: 0px; }
+                // `disableDM2MRC()` also clears and disables this box.
+                CheckBox {
+                    text: "Digital micrograph files have unique headers";
+                    checked: false;
+                    enabled: false;
+                }
+            }
+        }
+
+        // ---- pnlEraser / CcdEraserXRaysPanel ----------------------------
+        BeveledBorder {
+            title: "CCD Eraser";
+            VerticalLayout {
+                spacing: 5px;
+
+                // `pnlXRayReplacement`
+                EtchedBorder {
+                    title: "Automatic X-ray Replacement";
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        CheckBox { text: "Automatic x-ray replacement"; checked: true; }
+                        LabeledTextField { label: "Peak criterion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Difference criterion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Maximum radius:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Extra-large peak criterion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Extra-large difference criterion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Maximum radius of extra-large peak:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Grow criterion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Edge exclusion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Annulus width:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "XY scan size:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Scan criterion:"; label-width: 250px; text: ""; }
+                        // `pnlXRayButtons`.  The Java labels come from
+                        // `ProcessResultDisplayFactory.findXRays` and from
+                        // `btnViewXRayModel`.
+                        HorizontalLayout {
+                            spacing: 20px;
+                            alignment: center;
+                            MultiLineButton { text: "Find X-rays (Trial Mode)"; width: 200px; }
+                            MultiLineButton { text: "View X-ray Model"; width: 200px; }
+                        }
+                    }
+                }
+
+                // `pnlManualReplacement`: an untitled etched border holding the
+                // "Manual Pixel Region Replacement" panel header and its body.
+                EtchedBorder {
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        PanelHeader { title: "Manual Pixel Region Replacement"; }
+                        // `pnlManualReplacementBody`
+                        VerticalLayout {
+                            spacing: EtomoStyle.gap;
+                            CheckBox { text: "Manual replacement"; }
+                            LabeledTextField { label: "All section replacement list: "; label-width: 220px; text: ""; }
+                            LabeledTextField { label: "Line replacement list: "; label-width: 220px; text: ""; }
+                            LabeledTextField { label: "Boundary replacement list: "; label-width: 220px; text: ""; }
+                            // `pnlManualButtons`
+                            HorizontalLayout {
+                                alignment: center;
+                                MultiLineButton { text: "Create Manual Replacement Model"; width: 260px; }
+                            }
+                        }
+                    }
+                }
+
+                LabeledTextField { label: "Border pixels: "; label-width: 250px; text: ""; }
+                LabeledTextField { label: "Polynomial order: "; label-width: 250px; text: ""; }
+                CheckBox { text: "Include adjacent points"; }
+
+                Rectangle { height: 5px; }
+                // `pnlEraseButtons`: `pnlErase` above `pnlClipStats`.  The
+                // first three labels come from `ProcessResultDisplayFactory`
+                // (`createFixedStack` is `CcdEraserXRaysPanel.ERASE_LABEL`,
+                // `useFixedStack` is `USE_FIXED_STACK_LABEL`).
+                VerticalLayout {
+                    spacing: EtomoStyle.gap;
+                    HorizontalLayout {
+                        spacing: 20px;
+                        alignment: center;
+                        MultiLineButton { text: "Create Fixed Stack"; width: 200px; }
+                        MultiLineButton { text: "View Fixed Stack"; width: 200px; }
+                        MultiLineButton { text: "Use Fixed Stack"; width: 200px; }
+                    }
+                    HorizontalLayout {
+                        spacing: 20px;
+                        alignment: center;
+                        MultiLineButton { text: "Show Min/Max for Raw Stack"; width: 200px; }
+                        MultiLineButton { text: "Show Min/Max for Fixed Stack"; width: 200px; }
+                    }
+                }
+            }
+        }
+
+        // ---- pnlExitButtons (ProcessDialog.java) -------------------------
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            spacing: 20px;
+            alignment: center;
+            MultiLineButton { text: "Cancel"; width: 120px; }
+            MultiLineButton { text: "Postpone"; width: 120px; }
+            MultiLineButton { text: "Done"; width: 120px; }
+            MultiLineButton { text: "Advanced"; width: 120px; }
+        }
+    }
+}
+
+export component PreProcessingDialogWindow inherits Window {
+    title: "eTomo Pre-processing";
+    preferred-width: 760px;
+    preferred-height: 900px;
+    background: EtomoStyle.background;
+    PreProcessingDialog { }
+}

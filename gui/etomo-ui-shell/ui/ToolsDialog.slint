@@ -1,0 +1,77 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/ToolsDialog.java`.
+//
+// `createPanel()` (`:188-201`) builds `pnlRoot` as BoxLayout.Y_AXIS holding,
+// in order:
+//   1. `toolPanel.getComponent()` -- when a tool panel exists, and
+//   2. `scrTaskLog`, a JScrollPane over the non-editable, word-wrapping
+//      `taTaskLog` JTextArea of 5 rows.
+// The tool panel itself is chosen in the constructor from `ToolType`
+// (`:64-80`): FLATTEN_VOLUME -> FlattenVolumePanel.getToolsInstance,
+// GPU_TILT_TEST -> GpuTiltTestPanel.getInstance,
+// ALIGN_FRAMES -> AlignFramesPanel.getToolsInstance, else null.
+//
+// Each of those three panels is translated in its own file beside this one --
+// `FlattenVolumePanel.slint`, `GpuTiltTestPanel.slint`,
+// `AlignFramesPanel.slint` -- and `tool-type` selects between them with the
+// same three-way branch, indexed in the order the Java tests them.
+// `has-tool-panel` reproduces the `toolPanel != null` test.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { FlattenVolumePanel } from "FlattenVolumePanel.slint";
+import { GpuTiltTestPanel } from "GpuTiltTestPanel.slint";
+import { AlignFramesPanel } from "AlignFramesPanel.slint";
+
+export component ToolsDialog inherits Rectangle {
+    // `toolType`, as the constructor branches on it: 0 =
+    // `ToolType.FLATTEN_VOLUME`, 1 = `ToolType.GPU_TILT_TEST`,
+    // 2 = `ToolType.ALIGN_FRAMES` (`etomo/type/ToolType.java:21-24`).  The
+    // FLATTEN_VOLUME branch is the first one the constructor tests, so it is
+    // the default here.
+    in property <int> tool-type: 0;
+    // `toolPanel != null` (`:190`).
+    in property <bool> has-tool-panel: true;
+    background: EtomoStyle.background;
+
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+
+        // `pnlRoot.add(toolPanel.getComponent())`, only when non-null.
+        if root.has-tool-panel && root.tool-type == 0: FlattenVolumePanel {
+            // `ToolsDialog` uses `FlattenVolumePanel.getToolsInstance`.
+            post-instance: false;
+        }
+        if root.has-tool-panel && root.tool-type == 1: GpuTiltTestPanel { }
+        if root.has-tool-panel && root.tool-type == 2: AlignFramesPanel { }
+
+        // `scrTaskLog` = new JScrollPane(taTaskLog); taTaskLog.setRows(5),
+        // setEditable(false), setLineWrap(true), setWrapStyleWord(true).
+        // Slint has no read-only multi-line text area in this widget
+        // vocabulary, so the log is an empty white, bordered five-row box with
+        // the scroll pane's vertical bar drawn beside it.
+        Rectangle {
+            min-height: EtomoStyle.field-height * 5;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            HorizontalLayout {
+                padding: 1px;
+                Rectangle { }
+                Rectangle {
+                    width: 14px;
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                }
+            }
+        }
+    }
+}
+
+export component ToolsDialogWindow inherits Window {
+    title: "Tools";
+    background: EtomoStyle.background;
+    preferred-width: 560px;
+    preferred-height: 360px;
+    ToolsDialog { }
+}

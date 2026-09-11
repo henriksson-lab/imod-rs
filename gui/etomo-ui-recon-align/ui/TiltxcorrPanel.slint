@@ -1,0 +1,237 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TiltxcorrPanel.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+//
+// `createPanel()` (`TiltxcorrPanel.java:186-325`) builds two completely
+// different layouts from the same field set, selected by `panelId`:
+// `PanelId.CROSS_CORRELATION` (`getCrossCorrelationInstance`, used by the
+// coarse alignment dialog) and `PanelId.PATCH_TRACKING`
+// (`getPatchTrackingInstance`, `:176-185`, what `FiducialModelDialog` uses).
+
+import { EtomoStyle, PanelHeader, LabeledTextField, LabeledSpinner, CheckBox,
+         RadioButton, MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, RadioTextField, CheckTextField } from "widgets_local.slint";
+
+export component TiltxcorrPanel inherits VerticalLayout {
+    // `PanelId`: 0 CROSS_CORRELATION, 1 PATCH_TRACKING.  `FiducialModelDialog`
+    // instantiates `getPatchTrackingInstance`, so 1 is the default here.
+    in property <int> panel-id: 1;
+    // `header = PanelHeader.getAdvancedBasicInstance("Tiltxcorr", ...)` (`:146`).
+    // `updateAdvanced(state)` (`:363-374`) hides `pnlAdvanced`, `pnlAdvanced2`
+    // and, in patch tracking, `ltfAngleOffset` and `ltfShiftLimitsXandY`.
+    in property <bool> advanced: true;
+    // `magChangesMode` (`:133`): when true `ctfMagChanges` is not an advanced
+    // field.  Only a CROSS_CORRELATION instance has `ctfMagChanges` at all
+    // (`:152-159`).
+    in property <bool> mag-changes-mode: false;
+    // `btnTiltxcorr` comes from `factory.getTiltxcorr(dialogType)`
+    // (`ProcessResultDisplayFactory.java:450-458`): "Track Patches" for
+    // `DialogType.FIDUCIAL_MODEL`, "Calculate Cross-Correlation" for
+    // `DialogType.COARSE_ALIGNMENT`.
+    in property <string> tiltxcorr-button-text: "Track Patches";
+    // `cbCumulativeCorrelation` / `cbNoCosineStretch` drive `updatePanel()`
+    // (`:674-692`), which enables `cbAbsoluteCosineStretch`.
+    in property <bool> cumulative-correlation: false;
+    in property <bool> no-cosine-stretch: false;
+    // `cbBoundaryModel` enables `btn3dmodBoundaryModel` (`:682`).
+    in property <bool> boundary-model: false;
+    // `ctfLengthOfPiecesMinimumOverlap` enables the two length radio buttons
+    // (`:689-691`); it starts unselected.
+    in property <bool> length-of-pieces-minimum-overlap: false;
+    // `rbLengthOfPiecesDefault.setText("Use default length (" +
+    // ImodchopcontsParam.getLengthOfPiecesDefault(...) + ")")` (`:188-191`);
+    // the number is read from the prealigned stack header at run time.
+    in property <string> length-of-pieces-default: "Use default length ()";
+    // `ltfTrim.setText(TiltxcorrParam.getBordersInXandYDefault(...))` (`:252`)
+    // is likewise 5% of the prealigned stack's X and Y size.
+    in property <string> borders-in-x-and-y: "";
+
+    spacing: EtomoStyle.gap;
+
+    // ---- PanelId.CROSS_CORRELATION (`:249`) ----
+    if root.panel-id == 0: Rectangle {
+        // `pnlRoot.setBorder(BorderFactory.createEtchedBorder())` (`:241`)
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: EtomoStyle.inset;
+            spacing: EtomoStyle.gap;
+            PanelHeader { title: "Tiltxcorr"; }
+            // `pnlBody`
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                Rectangle { height: 5px; }
+                // `pnlAdvanced`
+                if root.advanced: VerticalLayout {
+                    spacing: EtomoStyle.gap;
+                    LabeledTextField { label: "Tilt angle offset: "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "Low frequency rolloff sigma: "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "High frequency cutoff radius: "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "High frequency rolloff sigma: "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "Pixels to trim (x,y): "; text: ""; label-width: 260px; }
+                    // `pnlXMinAndMax`
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        LabeledTextField { label: "X axis min "; text: ""; label-width: 90px; }
+                        LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+                    }
+                    // `pnlYMinAndMax`
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        LabeledTextField { label: "Y axis min "; text: ""; label-width: 90px; }
+                        LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+                    }
+                    LabeledTextField { label: "Pixels to pad (x,y): "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "Pixels to taper (x,y): "; text: ""; label-width: 260px; }
+                }
+                // `ctfMagChanges` exists only for a CROSS_CORRELATION instance.
+                if root.advanced || root.mag-changes-mode: CheckTextField {
+                    label: "Find mag change at view(s):";
+                    text: "";
+                    // `updatePanel()` (`:684-688`) makes this and
+                    // `cbCumulativeCorrelation` mutually exclusive.
+                    enabled: !root.cumulative-correlation;
+                }
+                // `pnlAdvanced2`
+                if root.advanced: VerticalLayout {
+                    spacing: EtomoStyle.gap;
+                    CheckBox { text: "Cumulative correlation"; checked: root.cumulative-correlation; }
+                    CheckBox {
+                        text: "Absolute Cosine Stretch";
+                        // `updatePanel()` (`:675-681`)
+                        enabled: root.cumulative-correlation && !root.no-cosine-stretch;
+                    }
+                    CheckBox { text: "No Cosine Stretch"; checked: root.no-cosine-stretch; }
+                    CheckBox { text: "Exclude central peak due to fixed pattern noise"; }
+                    LabeledTextField { label: "Test output: "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "View range (start,end): "; text: ""; label-width: 260px; }
+                    LabeledTextField { label: "Views to skip: "; text: ""; label-width: 260px; }
+                }
+                Rectangle { height: 5px; }
+                HorizontalLayout {
+                    alignment: center;
+                    MultiLineButton { text: root.tiltxcorr-button-text; width: 240px; }
+                }
+                Rectangle { height: 5px; }
+            }
+        }
+    }
+
+    // ---- PanelId.PATCH_TRACKING (`:246-325`) ----
+    // No `PanelHeader` here: the header is added only in the cross-correlation
+    // branch (`:243`); the root carries `new EtchedBorder("Patch Tracking")`.
+    if root.panel-id == 1: EtchedBorder {
+        title: "Patch Tracking";
+
+        LabeledTextField { label: "Size of patches (X,Y): "; text: ""; label-width: 280px; }
+
+        // `pnlPatchLayout`.  `rtfOverlapOfPatchesXandY` is selected and
+        // preloaded with `TiltxcorrParam.OVERLAP_OF_PATCHES_X_AND_Y_DEFAULT`
+        // (`TiltxcorrParam.java:151`) at `:250-251`.
+        EtchedBorder {
+            title: "Patch Layout";
+            RadioTextField { label: "Fractional overlap of patches (X,Y): "; text: ".33,.33"; selected: true; }
+            RadioTextField { label: "Number of patches (X,Y): "; text: ""; }
+        }
+
+        // `pnlBoundaryModel`
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Use boundary model"; checked: root.boundary-model; }
+            Rectangle { }
+            MultiLineButton { text: "Create Boundary Model"; width: 200px; enabled: root.boundary-model; }
+            Rectangle { }
+        }
+
+        // `pnlIterateCorrelations`.  Defaults/limits are
+        // `TiltxcorrParam.ITERATE_CORRELATIONS_DEFAULT` 1, `_MIN` 1, `_MAX` 4
+        // (`TiltxcorrParam.java:154-156`).
+        HorizontalLayout {
+            alignment: start;
+            LabeledSpinner { label: "Iterations to increase subpixel accuracy: "; text: "1"; label-width: 280px; }
+        }
+
+        if root.advanced: LabeledTextField { label: "Limits on shifts from correlation (X,Y): "; text: ""; label-width: 280px; }
+
+        // `ctfLengthOfPiecesMinimumOverlap`, `setTextPreferredWidth(30)` (`:252`).
+        CheckTextField {
+            label: "Break contours into pieces with overlap: ";
+            text: "";
+            checked: root.length-of-pieces-minimum-overlap;
+            field-width: 30px;
+        }
+        // `pnlLengthOfPieces`; both entries are enabled only while the check
+        // box above is selected (`:689-691`).
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            RadioButton {
+                text: root.length-of-pieces-default;
+                selected: true;
+                enabled: root.length-of-pieces-minimum-overlap;
+            }
+            Rectangle { width: 10px; }
+            RadioTextField { label: "Use length"; text: ""; enabled: root.length-of-pieces-minimum-overlap; }
+        }
+
+        if root.advanced: LabeledTextField { label: "Tilt angle offset: "; text: ""; label-width: 280px; }
+
+        // `pnlAdvanced2`, preloaded at `:253-255` with
+        // `FILTER_SIGMA_1_DEFAULT`, `FILTER_RADIUS_2_DEFAULT` and
+        // `FILTER_SIGMA_2_DEFAULT` (`TiltxcorrParam.java:160-162`).
+        if root.advanced: VerticalLayout {
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Low frequency rolloff sigma: "; text: "0.03"; label-width: 280px; }
+            LabeledTextField { label: "High frequency cutoff radius: "; text: "0.25"; label-width: 280px; }
+            LabeledTextField { label: "High frequency rolloff sigma: "; text: "0.05"; label-width: 280px; }
+        }
+
+        LabeledTextField { label: "Pixels to trim (x,y): "; text: root.borders-in-x-and-y; label-width: 280px; }
+        // `pnlXMinAndMax` / `pnlYMinAndMax` are added to the root here, not to
+        // `pnlAdvanced`, so they are not advanced fields in this layout.
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            LabeledTextField { label: "X axis min "; text: ""; label-width: 90px; }
+            LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+        }
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            LabeledTextField { label: "Y axis min "; text: ""; label-width: 90px; }
+            LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+        }
+
+        // `pnlAdvanced`
+        if root.advanced: VerticalLayout {
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Pixels to pad (x,y): "; text: ""; label-width: 280px; }
+            LabeledTextField { label: "Pixels to taper (x,y): "; text: ""; label-width: 280px; }
+            LabeledTextField { label: "Test output: "; text: ""; label-width: 280px; }
+            LabeledTextField { label: "View range (start,end): "; text: ""; label-width: 280px; }
+            LabeledTextField { label: "Views to skip: "; text: ""; label-width: 280px; }
+        }
+
+        // `pnlButtons`
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            Rectangle { }
+            MultiLineButton { text: root.tiltxcorr-button-text; width: 200px; }
+            Rectangle { }
+            MultiLineButton { text: "Open Tracked Patches"; width: 200px; }
+            Rectangle { }
+        }
+        // `pnlImodchopconts`; `btnImodchopconts` is
+        // `ProcessResultDisplayFactory.imodchopconts`
+        // (`ProcessResultDisplayFactory.java:76-78`).
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            Rectangle { }
+            MultiLineButton { text: "Recut or Restore Contours"; width: 220px; }
+            Rectangle { }
+        }
+    }
+}

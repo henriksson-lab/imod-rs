@@ -1,0 +1,221 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/ContextPopup.java`.
+//
+// The right-mouse-button help menu.  `ContextPopup` has no `createPanel`: each
+// of its eleven constructors *is* a menu shape, assembled at the bottom of the
+// constructor out of six blocks in a fixed order —
+//
+//     addTabbedLogFileSetMenuItems   ContextPopup.java:1302
+//     addLogFileMenuItems            ContextPopup.java:1272
+//     [separator +] addGraphMenuItems ContextPopup.java:1284
+//     [separator +] addManPageMenuItems ContextPopup.java:1141
+//     [separator +] addStandardMenuItems ContextPopup.java:1072
+//
+// — and then `showMenu` (`:1327`) shows the whole `JPopupMenu` at the mouse
+// position.  `shape` below selects which constructor's assembly is drawn; each
+// value names the constructor and its line.
+//
+// The item *labels* the caller supplies (man page names, log file names,
+// tabbed log-file-set window names, graph tasks) only exist at run time, so
+// they are `in property` arrays.  Their defaults are a real call site's
+// arrays: `CoarseAlignDialog.java:524-535` for the man page / log file shapes
+// and `AlignmentEstimationDialog.java:201-239` for the tabbed shape, so the
+// menu draws at its true width.  The `" man page ..."`, `" log file ..."`
+// suffixes are added here exactly where the Java adds them.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { JPopupMenu, JPopupMenuSeparator, MenuItem } from "WindowWidgets.slint";
+
+export component ContextPopup inherits JPopupMenu {
+    // Which constructor's menu assembly to draw.  In source order:
+    //
+    //   0  ContextPopup.java:230  (component, mouseEvent, tomoAnchor, manager, axisID)
+    //        "Simple context popup constructor.  Only the default menu items
+    //        are displayed."  addStandardMenuItems(false, null) — :252.
+    //   1  ContextPopup.java:265  (..., tomoAnchor, guideToAnchor, manPageLabel,
+    //        manPage, manager, axisID) — man pages, separator, standard (:298-300).
+    //   2  ContextPopup.java:311  (..., tomoAnchor, guideToAnchor, manager,
+    //        axisID) — separator, standard (:335-336).
+    //   3  ContextPopup.java:353  (..., manPageLabel, manPage, logFileLabel,
+    //        logFile, manager, axisID) — log files, sep, man pages, sep,
+    //        standard (:414-418).
+    //   4  ContextPopup.java:438  (..., tomoAnchor, tomoGuideLabelSuffix,
+    //        tomoAnchor2, tomoGuideLabelSuffix2, ...) — same blocks (:507-511),
+    //        but with two Tomography Guide items carrying suffixed labels.
+    //   5  ContextPopup.java:537  (..., graph, graphInputFile, manager, axisID)
+    //        — log files, [sep, graphs], sep, man pages, sep, standard (:612-620).
+    //   6  ContextPopup.java:640  (..., graph, manager, axisID, serialSections)
+    //        — same blocks (:713-721) with the serial-sections guide.
+    //   7  ContextPopup.java:739  (..., manager, axisID, subdirName) — log
+    //        files, sep, man pages, sep, standard (:792-796).
+    //   8  ContextPopup.java:811  (..., manPageLabel, manPage, addPeetGuide,
+    //        manager, axisID) — man pages, sep, standard(addPeetGuide) (:853-855).
+    //   9  ContextPopup.java:867  (..., manager, axisID, serialSections) —
+    //        separator, standard (:908-909).
+    //  10  ContextPopup.java:930  (..., logFileSetWindowLabel, logFileSetLabel,
+    //        logFileSet, logFileLabel, logFile, graph, graphInputFile,
+    //        applicationManager, updateLogCommandName, axisID) — tabbed log
+    //        file sets, log files, [sep, graphs], sep, man pages, sep,
+    //        standard (:1056-1065).
+    in property <int> shape: 0;
+
+    // `JPopupMenu("Help Documents")` — ContextPopup.java:192.
+    label: "Help Documents";
+
+    // --- caller-supplied item labels ------------------------------------
+    // `addManPageMenuItems`: `manPageLabel[i] + " man page ..."` — :1146.
+    in property <[string]> man-page-labels: ["Tiltxcorr", "Xftoxg", "Prenewst", "3dmod", "Midas"];
+    // `addLogFileMenuItems`: `logFileLabel[i] + " log file ..."` — :1277.
+    in property <[string]> log-file-labels: ["Xcorr", "Prenewst"];
+    // `addTabbedLogFileSetMenuItems`: `logFileSetWindowLabel[i] + " log file ..."` — :1306.
+    in property <[string]> log-file-set-labels: ["Align"];
+    // `addGraphMenuItems`: `graphTask.get(i).toString()` — :1296.  The task
+    // labels are `TomodataplotsParam.Task`'s (`TomodataplotsParam.java:97-108`);
+    // only the tasks whose input file exists are added (:1288-1292).
+    in property <[string]> graph-labels: ["Plot rotation", "Plot delta tilt and skew",
+        "Plot magnification", "Plot X-stretch (dmag)", "Plot global mean residual",
+        "Plot average of local mean residual"];
+
+    // --- addStandardMenuItems arguments ---------------------------------
+    // `guideToAnchor`, which decides `batch` and `alignframes` — :1074-1077.
+    // One of "tomoguide.html", "tomojoin.html", "serialalign.html",
+    // "batchGuide.html", "alignframesGuide.html" (:185-189), or "" for the
+    // constructors that pass null.
+    in property <string> guide-to-anchor: "tomoguide.html";
+    // `addPeetGuide`, true only from the constructor at :811 (shape 8).
+    in property <bool> add-peet-guide: false;
+    // `serialSections`, the field at :218; set only by the constructors at
+    // :640 (shape 6) and :867 (shape 9).  Defaults false, as the field does.
+    in property <bool> serial-sections: false;
+    // `peetHelpItem.setEnabled(false)` when PARTICLE_DIR is not in the
+    // environment — :1092-1095.  An install without PEET is the common case,
+    // so the construction-time state is disabled.
+    in property <bool> peet-help-enabled: false;
+    // `tomoGuideAltLabel` / `tomoGuideAltLabel2`, built by
+    // `buildTomoGuideAltLabel` as `"Tomography Guide (" + suffix + ") ..."`
+    // (:515-521) and used only by the constructor at :438 (shape 4).
+    in property <string> tomo-guide-label-suffix: "Positioning";
+    in property <string> tomo-guide-label-suffix-2: "Final Alignment";
+
+    // --- which blocks this shape assembles ------------------------------
+    property <bool> has-log-file-set-items: root.shape == 10;
+    property <bool> has-log-file-items: root.shape == 3 || root.shape == 4 || root.shape == 5
+        || root.shape == 6 || root.shape == 7 || root.shape == 10;
+    // `if (graph != null && graph.length > 0)` — :613, :714, :1058.
+    property <bool> has-graph-items: root.shape == 5 || root.shape == 6 || root.shape == 10;
+    property <bool> has-man-page-items: root.shape == 1 || root.shape == 3 || root.shape == 4
+        || root.shape == 5 || root.shape == 6 || root.shape == 7 || root.shape == 8
+        || root.shape == 10;
+    // The separator the log-file shapes put before the man pages (:415, :508,
+    // :617, :718, :793, :1062).  Shapes 1 and 8 start with the man pages and
+    // have none.
+    property <bool> separator-before-man-pages: root.shape == 3 || root.shape == 4
+        || root.shape == 5 || root.shape == 6 || root.shape == 7 || root.shape == 10;
+    // Every shape but 0 adds a separator ahead of the standard items.
+    property <bool> separator-before-standard: root.shape != 0;
+
+    // --- the two guideToAnchor branches in addStandardMenuItems ---------
+    // BATCHRUNTOMO_GUIDE (:188) and ALIGNFRAMES_GUIDE (:189).
+    property <bool> batch: root.guide-to-anchor == "batchGuide.html";
+    property <bool> alignframes: root.guide-to-anchor == "alignframesGuide.html";
+
+    min-width: 260px;
+
+    // `addTabbedLogFileSetMenuItems(logFileSetWindowLabel)` — :1056, :1302-1310.
+    if root.has-log-file-set-items: VerticalLayout {
+        spacing: 0px;
+        for label in root.log-file-set-labels: MenuItem {
+            text: label + " log file ...";
+        }
+    }
+
+    // `addLogFileMenuItems(logFileLabel, logFile)` — :1272-1282.
+    if root.has-log-file-items: VerticalLayout {
+        spacing: 0px;
+        for label in root.log-file-labels: MenuItem {
+            text: label + " log file ...";
+        }
+    }
+
+    // `contextMenu.add(new JPopupMenu.Separator()); addGraphMenuItems(...)`.
+    if root.has-graph-items: VerticalLayout {
+        spacing: 0px;
+        JPopupMenuSeparator { }
+        for label in root.graph-labels: MenuItem {
+            text: label;
+        }
+    }
+
+    if root.separator-before-man-pages: JPopupMenuSeparator { }
+
+    // `addManPageMenuItems(manPageLabel, manPage)` — :1141-1151.
+    if root.has-man-page-items: VerticalLayout {
+        spacing: 0px;
+        for label in root.man-page-labels: MenuItem {
+            text: label + " man page ...";
+        }
+    }
+
+    if root.separator-before-standard: JPopupMenuSeparator { }
+
+    // --- addStandardMenuItems(addPeetGuide, guideToAnchor) — :1072-1134 ---
+
+    // `if (batch) { contextMenu.add(batchGuideItem); }` — :1078-1081.
+    if root.batch: MenuItem { text: "Batch Interface Guide ..."; }
+    // `else if (alignframes) { contextMenu.add(alignframesGuideItem); }` — :1082-1085.
+    if !root.batch && root.alignframes: MenuItem { text: "Align Frames Guide ..."; }
+
+    // `if (addPeetGuide)` — :1087-1096.
+    if root.add-peet-guide: VerticalLayout {
+        spacing: 0px;
+        MenuItem { text: "PEET Users Guide ..."; }
+        MenuItem { text: "PEET Help ..."; enabled: root.peet-help-enabled; }
+    }
+
+    // `if (serialSections) { contextMenu.add(serialSectionsGuideItem); }` — :1097-1100.
+    if root.serial-sections: MenuItem { text: "Serial Section Guide ..."; }
+    // `else` — the tomo guide item, relabelled when a suffix was supplied
+    // (:1101-1115).  `tomoGuideItem2` exists only when the second suffix does.
+    if !root.serial-sections: VerticalLayout {
+        spacing: 0px;
+        MenuItem {
+            text: root.shape == 4 && root.tomo-guide-label-suffix != ""
+                ? "Tomography Guide (" + root.tomo-guide-label-suffix + ") ..."
+                : "Tomography Guide ...";
+        }
+        if root.shape == 4 && root.tomo-guide-label-suffix-2 != "": MenuItem {
+            text: "Tomography Guide (" + root.tomo-guide-label-suffix-2 + ") ...";
+        }
+    }
+
+    // `modelGuideItem`, `it3dmodGuide`, `etomoGuideItem` — :1116-1121.
+    MenuItem { text: "IMOD Users Guide ..."; }
+    MenuItem { text: "3dmod Users Guide ..."; }
+    MenuItem { text: "Etomo Users Guide ..."; }
+
+    // `if (!serialSections) { contextMenu.add(joinGuideItem); }` — :1122-1125.
+    if !root.serial-sections: MenuItem { text: "Join Users Guide ..."; }
+    // `if (!batch) { contextMenu.add(batchGuideItem); }` — :1126-1129.
+    if !root.batch: MenuItem { text: "Batch Interface Guide ..."; }
+    // `if (!alignframes) { contextMenu.add(alignframesGuideItem); }` — :1130-1133.
+    if !root.alignframes: MenuItem { text: "Align Frames Guide ..."; }
+}
+
+export component ContextPopupWindow inherits Window {
+    // The menu is not a window of its own: `showMenu` (:1327-1330) shows it
+    // over the component the popup is attached to.  This wrapper exists so the
+    // component can be looked at on its own.
+    in property <int> shape: 10;
+    title: "eTomo Context Popup";
+    preferred-width: 460px;
+    preferred-height: 560px;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+        ContextPopup {
+            shape: root.shape;
+        }
+    }
+}

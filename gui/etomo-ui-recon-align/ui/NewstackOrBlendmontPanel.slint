@@ -1,0 +1,100 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/NewstackOrBlendmontPanel.java`,
+// which is the abstract base carrying the whole layout, plus its two concrete
+// subclasses `NewstackPanel.java` and `BlendmontPanel.java` — those add
+// nothing but `getHeaderTitle()` ("Newstack", `NewstackPanel.java:54-56`, and
+// "Blendmont", `BlendmontPanel.java:50-52`) and the run action.
+// `FinalAlignedStackDialog.java:241-247` picks `BlendmontPanel` for
+// `ViewType.MONTAGE` and `NewstackPanel` otherwise.
+//
+// The body panel it embeds, `NewstackAndBlendmontParamPanel.java`, is
+// translated inline below.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, PanelHeader, LabeledTextField, LabeledSpinner, CheckBox,
+         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+
+export component NewstackOrBlendmontPanel inherits Rectangle {
+    // `ViewType.MONTAGE` selects `BlendmontPanel`; false is the default the
+    // non-montage dataset gets.
+    in property <bool> montage: false;
+    // `header = PanelHeader.getAdvancedBasicOnlyInstance(getHeaderTitle(),
+    // ...)` (`NewstackOrBlendmontPanel.java:83-84`) — an advanced/basic button
+    // with no open/close button.  `updateAdvanced(advanced)` (`:247-249`)
+    // forwards to the param panel, which hides `ltfSizeToOutputInXandY`
+    // (`NewstackAndBlendmontParamPanel.java:279-281`).
+    in property <bool> advanced: true;
+    // `cbFiducialess` enables `ltfRotation` (`updateFiducialess()`,
+    // `NewstackAndBlendmontParamPanel.java:269-271`).
+    in property <bool> fiducialess: false;
+    // `lCtf3d1`/`lCtf3d2` are `setVisible(false)` at construction
+    // (`NewstackAndBlendmontParamPanel.java:110-111`) and shown when the
+    // dataset has a 3D CTF slab thickness.  Drawn here so their strings are
+    // part of the translation.
+    in property <bool> ctf3d: false;
+
+    // `pnlRoot.setBorder(BorderFactory.createEtchedBorder())` (`:111`).
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+
+        PanelHeader { title: root.montage ? "Blendmont" : "Newstack"; }
+
+        // `pnlBody`
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+
+            // ---- `NewstackAndBlendmontParamPanel.createPanel()`
+            // (`NewstackAndBlendmontParamPanel.java:106-134`) ----
+            CheckBox { text: "Use linear interpolation"; }
+            // `pnlBinning`: `spinBinning` (`BINNING_LABEL + ": "`, default 1,
+            // range 1..8) then a glue (`:51-52`, `:116-121`).
+            HorizontalLayout {
+                alignment: start;
+                LabeledSpinner { label: "Aligned image stack binning: "; text: "1"; label-width: 260px; }
+            }
+            // `cbAntialiasFilter` exists only for a non-montage dataset
+            // (`:76-83`, `:122-124`).
+            if !root.montage: CheckBox { text: "Reduce size with antialiasing filter"; }
+            CheckBox { text: "Coarse alignment only"; checked: root.fiducialess; }
+            LabeledTextField { label: "Tilt axis rotation: "; text: ""; label-width: 260px; enabled: root.fiducialess; }
+            if root.advanced: LabeledTextField {
+                // `SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL + " (X,Y - unbinned): "` (`:47`, `:53-54`).
+                label: "Size to output (X,Y - unbinned): ";
+                text: "";
+                label-width: 260px;
+            }
+            // `Box.createVerticalStrut(2)`
+            Rectangle { height: 2px; }
+            // `lCtf3d1` / `lCtf3d2`, coloured `ProcessControlPanel.colorComplete`
+            // (`ProcessControlPanel.java:88`, `new Color(0, 153, 0)`).
+            if root.ctf3d: Text {
+                text: "No need to make stack if doing 3D CTF and using raw images - ";
+                color: #009900;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            if root.ctf3d: Text {
+                text: "unless you want to check gold erasing with an aligned stack.";
+                color: #009900;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            // `Box.createVerticalStrut(3)`
+            Rectangle { height: 3px; }
+
+            // `pnlButtons`.  `btnRunProcess` is
+            // `ProcessResultDisplayFactory.fullAlignedStack`
+            // (`ProcessResultDisplayFactory.java:100-102`), labelled
+            // `RUN_BUTTON_LABEL` (`NewstackOrBlendmontPanel.java:61`).
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                MultiLineButton { text: "Create Full Aligned Stack"; width: 220px; }
+                MultiLineButton { text: "View Full Aligned Stack"; width: 220px; }
+            }
+        }
+    }
+}

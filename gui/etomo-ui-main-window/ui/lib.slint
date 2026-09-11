@@ -1,0 +1,64 @@
+// Entry point for `build.rs`: pulls in every component in this crate so that
+// `slint::include_modules!()` in `src/lib.rs` generates one Rust type per
+// window.  One import per Java source under
+// `IMOD/Etomo/src/etomo/ui/swing`.
+//
+// Each file exports both the plain component and, where it is a top-level
+// frame or panel, a `<Name>Window` wrapper.  slint-build only generates code
+// for exported components that inherit `Window` and warns about the rest, so
+// the plain components are exported here too — that is how one is embedded in
+// a larger window from Slint (`import { MainPanel } from "MainPanel.slint"`)
+// — and the warnings are expected.
+
+// The frame and the two shared panel bases.
+import { MainFrame, MainFrameWindow } from "MainFrame.slint";
+import { MainPanel } from "MainPanel.slint";
+import { AxisProcessPanel } from "AxisProcessPanel.slint";
+
+// The per-manager main panels (each a `MainPanel` subclass).
+import { MainTomogramPanel, MainTomogramPanelWindow } from "MainTomogramPanel.slint";
+import { MainJoinPanel, MainJoinPanelWindow } from "MainJoinPanel.slint";
+import { MainParallelPanel, MainParallelPanelWindow } from "MainParallelPanel.slint";
+import { MainFrontPagePanel, MainFrontPagePanelWindow } from "MainFrontPagePanel.slint";
+import { MainPeetPanel, MainPeetPanelWindow } from "MainPeetPanel.slint";
+import { MainToolsPanel, MainToolsPanelWindow } from "MainToolsPanel.slint";
+import { MainDirectiveEditorPanel, MainDirectiveEditorPanelWindow } from "MainDirectiveEditorPanel.slint";
+import { MainSerialSectionsPanel, MainSerialSectionsPanelWindow } from "MainSerialSectionsPanel.slint";
+import { MainBatchRunTomoPanel, MainBatchRunTomoPanelWindow } from "MainBatchRunTomoPanel.slint";
+
+// The process panels (each an `AxisProcessPanel` subclass).
+import { TomogramProcessPanel, TomogramProcessPanelWindow } from "TomogramProcessPanel.slint";
+import { JoinProcessPanel, JoinProcessPanelWindow } from "JoinProcessPanel.slint";
+import { ParallelProcessPanel, ParallelProcessPanelWindow } from "ParallelProcessPanel.slint";
+import { ToolsProcessPanel, ToolsProcessPanelWindow } from "ToolsProcessPanel.slint";
+import { PeetProcessPanel, PeetProcessPanelWindow } from "PeetProcessPanel.slint";
+import { FrontPageProcessPanel, FrontPageProcessPanelWindow } from "FrontPageProcessPanel.slint";
+import { SerialSectionsProcessPanel, SerialSectionsProcessPanelWindow } from "SerialSectionsProcessPanel.slint";
+import { BatchRunTomoProcessPanel, BatchRunTomoProcessPanelWindow } from "BatchRunTomoProcessPanel.slint";
+import { DirectiveEditorProcessPanel, DirectiveEditorProcessPanelWindow } from "DirectiveEditorProcessPanel.slint";
+import { DirectivesProcessPanel, DirectivesProcessPanelWindow } from "DirectivesProcessPanel.slint";
+
+export { MainFrame, MainFrameWindow }
+export { MainPanel }
+export { AxisProcessPanel }
+
+export { MainTomogramPanel, MainTomogramPanelWindow }
+export { MainJoinPanel, MainJoinPanelWindow }
+export { MainParallelPanel, MainParallelPanelWindow }
+export { MainFrontPagePanel, MainFrontPagePanelWindow }
+export { MainPeetPanel, MainPeetPanelWindow }
+export { MainToolsPanel, MainToolsPanelWindow }
+export { MainDirectiveEditorPanel, MainDirectiveEditorPanelWindow }
+export { MainSerialSectionsPanel, MainSerialSectionsPanelWindow }
+export { MainBatchRunTomoPanel, MainBatchRunTomoPanelWindow }
+
+export { TomogramProcessPanel, TomogramProcessPanelWindow }
+export { JoinProcessPanel, JoinProcessPanelWindow }
+export { ParallelProcessPanel, ParallelProcessPanelWindow }
+export { ToolsProcessPanel, ToolsProcessPanelWindow }
+export { PeetProcessPanel, PeetProcessPanelWindow }
+export { FrontPageProcessPanel, FrontPageProcessPanelWindow }
+export { SerialSectionsProcessPanel, SerialSectionsProcessPanelWindow }
+export { BatchRunTomoProcessPanel, BatchRunTomoProcessPanelWindow }
+export { DirectiveEditorProcessPanel, DirectiveEditorProcessPanelWindow }
+export { DirectivesProcessPanel, DirectivesProcessPanelWindow }

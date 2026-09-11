@@ -1,0 +1,45 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainToolsPanel.java`, a `MainPanel`
+// subclass.  It instantiates the base component from `MainPanel.slint` and
+// puts its one axis column in the base's `panelCenter` slot:
+//
+// `MainToolsPanel(ToolsManager)` (`:34-37`) forwards to `super(manager)`;
+// `createAxisPanelA` (`:57-60`) builds a `ToolsProcessPanel`, and
+// `addAxisPanelA` (`:39-42`) puts its container in `scrollA`.
+//
+// `createAxisPanelB` is empty (`:63`) and `getAxisPanelB()` returns null,
+// so there is no B column.  `setStatusBarText(String, int)` (`:126-128`)
+// delegates to `MainPanel.setStatusBarTextToDirectory`, which shortens a
+// directory to `maxTitleLength` at run time.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { MainPanel } from "MainPanel.slint";
+import { ToolsProcessPanel } from "ToolsProcessPanel.slint";
+
+export component MainToolsPanel inherits Rectangle {
+    in property <string> status-bar-text: "No data set loaded";
+    in property <color> panel-background: Colors.background-tools;
+    background: EtomoStyle.background;
+    MainPanel {
+        width: 100%;
+        height: 100%;
+        status-bar-text: root.status-bar-text;
+        panel-background: root.panel-background;
+        // `addAxisPanelA()`: `getScrollA().add(axisPanelA.getContainer())`.
+        ToolsProcessPanel {
+            panel-background: root.panel-background;
+        }
+        // `createAxisPanelB` has an empty body and `getAxisPanelB()` returns
+        // null, so there is no B column to draw.
+    }
+}
+
+export component MainToolsPanelWindow inherits Window {
+    title: "eTomo MainToolsPanel";
+    preferred-width: 800px;
+    preferred-height: 600px;
+    background: EtomoStyle.background;
+    MainToolsPanel { }
+}

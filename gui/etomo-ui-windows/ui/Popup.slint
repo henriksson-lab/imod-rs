@@ -1,0 +1,108 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/Popup.java`.
+//
+// eTomo's configurable message dialog.  `display()` (`Popup.java:133-180`)
+// builds the whole thing: the message is wrapped by `PopupTool.wrapMessage`
+// into an `Object[]` of lines, a check box is appended after a 0x10 rigid area
+// when one was asked for (`:154-157`), and the result goes into
+// `new JOptionPane(popupMessage, messageType, optionType, null, buttonLabels,
+// null)` (`:158-159`) whose `createDialog(component, title)` (`:161`) is the
+// window.
+//
+// `shape` selects the factory that made the instance; each value names it and
+// its line.  The four factories differ only in the constructor arguments they
+// pass (`:44-69`), so one component covers them.
+//
+// The message text and the title come from the caller at run time; the
+// defaults below are a real one so the dialog draws at its true size.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle, CheckBox } from "../../etomo-ui-common/ui/widgets.slint";
+import { JOptionPane, JButton } from "WindowWidgets.slint";
+
+export component Popup inherits Rectangle {
+    // Which factory made this instance:
+    //
+    //   0  getErrorInstance             `Popup.java:71-76`
+    //        ERROR_MESSAGE, DEFAULT_OPTION, no check box, formatted message.
+    //   1  getYesNoInstance             `Popup.java:82-86`
+    //        QUESTION_MESSAGE, YES_NO_OPTION, optional check box, formatted.
+    //   2  getCustomButtonInstance      `Popup.java:93-98`
+    //        QUESTION_MESSAGE, DEFAULT_OPTION with `buttonLabels`, optional
+    //        check box, formatted.
+    //   3  getUnformattedErrorInstance  `Popup.java:100-104`
+    //        ERROR_MESSAGE, DEFAULT_OPTION, no check box, message as given.
+    in property <int> shape: 0;
+
+    // `PopupTool.wrapMessage(message, null)` breaks the message on "\n" and
+    // then at `WIDTH = 60` characters, keeping at most `MAX_LINES = 20` lines
+    // (`PopupTool.java:17-18`, `:36-79`).  For shape 3 the message is passed
+    // through whole (`Popup.java:150-152`).
+    in property <[string]> message-lines: [
+        "The PEET version is incompatible with this IMOD version.  IMOD",
+        "4.4.4 or later requires PEET 1.8.0 or later.",
+    ];
+    // `new CheckBox(checkBoxTitle)` when `checkBoxTitle != null` — `:63-68`.
+    // The error factories always pass null, so the check box belongs to
+    // shapes 1 and 2 and only when their caller supplied a message.
+    in property <bool> show-check-box: false;
+    in property <string> check-box-text: "Do not ask again";
+    // `buttonLabels`, used by shape 2 only (`:93-98`).
+    in property <[string]> button-labels: ["Use existing", "Start over", "Cancel"];
+
+    // `JOptionPane.ERROR_MESSAGE` is 0 and `QUESTION_MESSAGE` is 3.
+    property <int> message-type: (root.shape == 1 || root.shape == 2) ? 3 : 0;
+
+    background: EtomoStyle.panel;
+    VerticalLayout {
+        spacing: 0px;
+        JOptionPane {
+            message-type: root.message-type;
+            // The wrapped message, one row per array element — `:142-148`.
+            for line in root.message-lines: Text {
+                text: line;
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            // `new Object[] { popupMessage, Box.createRigidArea(FixedDim.x0_y10),
+            //   checkBox.getComponent() }` — `:155-156`.  `x0_y10 = (0,10)` —
+            // `FixedDim.java:106`.
+            if root.show-check-box: Rectangle { height: 10px; }
+            if root.show-check-box: CheckBox {
+                text: root.check-box-text;
+                checked: false;
+            }
+        }
+        // The option-button row `JOptionPane` lays out under the message.
+        // With `optionType == DEFAULT_OPTION` and no `buttonLabels` Metal
+        // supplies one "OK"; with `YES_NO_OPTION` it supplies "Yes" and "No";
+        // with `buttonLabels` it uses those, in order.
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            padding-bottom: 10px;
+            if root.shape == 0 || root.shape == 3: JButton { text: "OK"; }
+            if root.shape == 1: JButton { text: "Yes"; }
+            if root.shape == 1: JButton { text: "No"; }
+            if root.shape == 2: HorizontalLayout {
+                spacing: 6px;
+                for label in root.button-labels: JButton { text: label; }
+            }
+        }
+    }
+}
+
+export component PopupWindow inherits Window {
+    // `pane.createDialog(component, title)` — `:161` — titles the dialog with
+    // the caller's `title`; `Popup` sets no size of its own, so the dialog is
+    // the `JOptionPane`'s packed size.
+    in property <string> title-text: "Wrong Version of PEET";
+    in property <int> shape: 0;
+    title: root.title-text;
+    preferred-width: 520px;
+    preferred-height: 170px;
+    background: EtomoStyle.background;
+    Popup {
+        shape: root.shape;
+    }
+}

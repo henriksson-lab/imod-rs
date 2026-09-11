@@ -1,0 +1,183 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SeriesWatcherPanel.java`, the
+// serieswatcher parameter panel `BatchRunTomoDialog` builds in its constructor
+// (`BatchRunTomoDialog.java:249-250`) and inserts into pnlRunSettings ahead of
+// the step panel while "Watch for stacks to run" is checked
+// (`BatchRunTomoDialog.java:649-655`).  The check box is unselected until
+// `setParameters` loads the meta data, so the panel is not in the layout at
+// construction time; `BatchRunTomoDialog.slint` gates it on
+// `use-series-watcher`, defaulting to false, and this file draws it.
+//
+// Appearance only: values are the static defaults `createPanel` sets.
+
+import { EtomoStyle, CheckBox, RadioButton, LabeledTextField }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { AdvancedBasicPanelHeader } from "LocalWidgets.slint";
+
+export component SeriesWatcherPanel inherits VerticalLayout {
+    // `advanced` starts false (`SeriesWatcherPanel.java:82`), and
+    // `updateDisplay` hides ltfMinimumTiltRange, ltfMinimumNumberOfViews and
+    // ltfMinimumAgeOfStacks whenever it is false
+    // (`SeriesWatcherPanel.java:414-416`).  The header's advanced/basic button
+    // is what flips it.
+    in property <bool> advanced: false;
+    // `updateDisplay` enables every field only while the parent's
+    // `isSeriesWatcherOn()` holds (`SeriesWatcherPanel.java:403-413`).
+    in property <bool> series-watcher-on: true;
+    // cbDualAxis drives the enabled state of the three MatchPatternOrExt radio
+    // buttons (`SeriesWatcherPanel.java:407-409`).
+    in property <bool> dual-axis: false;
+
+    spacing: 0px;
+    alignment: start;
+
+    // pnlRoot: rigid area, then pnlHeader (`SeriesWatcherPanel.java:139-141`).
+    Rectangle { height: 15px; }
+
+    // pnlHeader: etched border around the header cell and pnlBody
+    // (`SeriesWatcherPanel.java:143-146`).
+    Rectangle {
+        background: EtomoStyle.panel;
+        border-width: 2px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: 2px;
+            spacing: 0px;
+            alignment: start;
+            // PanelHeader.getAdvancedBasicOnlyInstance("Series Watching Mode",
+            // ...) (`SeriesWatcherPanel.java:91-92`).
+            AdvancedBasicPanelHeader {
+                title: "Series Watching Mode";
+                advanced: root.advanced;
+            }
+
+            // pnlBody (`SeriesWatcherPanel.java:148-161`).
+            VerticalLayout {
+                spacing: 0px;
+                alignment: start;
+
+                Rectangle { height: 5px; }
+
+                // pnlSettings (`SeriesWatcherPanel.java:163-167`).
+                HorizontalLayout {
+                    spacing: 3px;
+                    alignment: start;
+                    CheckBox {
+                        text: "Dual axis";
+                        checked: root.dual-axis;
+                        enabled: root.series-watcher-on;
+                    }
+                    CheckBox {
+                        text: "Fiducials on 2 surfaces";
+                        enabled: root.series-watcher-on;
+                    }
+                }
+
+                Rectangle { height: 15px; }
+
+                // pnlMatchPatternOrExt (`SeriesWatcherPanel.java:169-173`):
+                // ltfMpoeRootName (setPreferredWidth(100)) then ltfMpoeExt
+                // (setPreferredWidth(50)) (`SeriesWatcherPanel.java:124-125`).
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    LabeledTextField {
+                        label: "Do stacks with root names matching ";
+                        label-width: 220px;
+                        width: 324px;
+                        enabled: root.series-watcher-on;
+                    }
+                    LabeledTextField {
+                        label: "Extension: ";
+                        label-width: 70px;
+                        width: 124px;
+                        enabled: root.series-watcher-on;
+                    }
+                }
+
+                // pnlMpoeSeparateB, pnlMpoeIncludeCombine, pnlMpoeAOnly, in
+                // that layout order (`SeriesWatcherPanel.java:153-155`).
+                // rbMpoeSeparateB is the selected one
+                // (`SeriesWatcherPanel.java:126`).
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton {
+                        text: "Do two runs: A axis first; then B axis and combine";
+                        selected: true;
+                        enabled: root.series-watcher-on && root.dual-axis;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton {
+                        text: "Do both axes in one run OR Do B axis and finish combine";
+                        enabled: root.series-watcher-on && root.dual-axis;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton {
+                        text: "Do A axis only";
+                        enabled: root.series-watcher-on && root.dual-axis;
+                    }
+                }
+
+                Rectangle { height: 10px; }
+
+                // pnlMatchString (`SeriesWatcherPanel.java:181-185`):
+                // lMatchStringLabel then lMatchString, whose text
+                // `buildMatchPatternOrExt` builds from the empty root name and
+                // extension as "*" + "." + "mrc"
+                // (`SeriesWatcherPanel.java:425-470`).  lMatchString is set two
+                // points larger than the rest (`SeriesWatcherPanel.java:135`).
+                HorizontalLayout {
+                    spacing: 0px;
+                    alignment: start;
+                    Text {
+                        text: "File name match string: ";
+                        vertical-alignment: center;
+                        color: EtomoStyle.text;
+                    }
+                    Text {
+                        text: "*.mrc";
+                        vertical-alignment: center;
+                        font-size: (EtomoStyle.font-size-pt + 2) * 1px;
+                        color: EtomoStyle.text;
+                    }
+                }
+
+                Rectangle { height: 15px; }
+
+                // The three advanced-only fields.  `updateDisplay` calls
+                // setVisible(advanced) on each and `advanced` starts false
+                // (`SeriesWatcherPanel.java:414-416`), so they are gated here
+                // rather than dropped.  Texts are the SeriesWatcherParam
+                // defaults (`SeriesWatcherParam.java:38-40`) rendered by
+                // LabeledTextField.setText, which for a double with no
+                // maxDecimalPlaces is Double.toString
+                // (`LabeledTextField.java:949-952`,
+                // `Utilities.java:946-957`).
+                if root.advanced: LabeledTextField {
+                    label: "Minimum range of tilt angles (degrees): ";
+                    label-width: 250px;
+                    width: 344px;
+                    text: "40.0";
+                    enabled: root.series-watcher-on;
+                }
+                if root.advanced: LabeledTextField {
+                    label: "Minimum number of views: ";
+                    label-width: 160px;
+                    width: 254px;
+                    text: "12";
+                    enabled: root.series-watcher-on;
+                }
+                if root.advanced: LabeledTextField {
+                    label: "Minimum time to wait if no .openTS (sec): ";
+                    label-width: 260px;
+                    width: 354px;
+                    text: "300.0";
+                    enabled: root.series-watcher-on;
+                }
+            }
+        }
+    }
+}

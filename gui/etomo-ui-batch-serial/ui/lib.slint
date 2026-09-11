@@ -1,0 +1,7 @@
+// Entry point for `slint_build::compile`: re-exports every dialog in this
+// crate so one `slint::include_modules!()` in `src/lib.rs` carries them all.
+
+export { BatchRunTomoDialog, BatchRunTomoDialogWindow } from "BatchRunTomoDialog.slint";
+export { BatchRunTomoDatasetDialog, BatchRunTomoDatasetDialogWindow } from "BatchRunTomoDatasetDialog.slint";
+export { SerialSectionsDialog, SerialSectionsDialogWindow } from "SerialSectionsDialog.slint";
+export { SerialSectionsStartupDialog, SerialSectionsStartupDialogWindow } from "SerialSectionsStartupDialog.slint";

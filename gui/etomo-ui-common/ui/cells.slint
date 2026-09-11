@@ -1,0 +1,607 @@
+// Shared table-cell and table-row vocabulary, one component per Swing widget
+// class in `IMOD/Etomo/src/etomo/ui/swing`.  Named after the Java class it
+// stands for.  Covers:
+//
+//   `Cell.java`              - the abstract parent of every table cell
+//   `InputCell.java`         - the writable cell's state/colour machine
+//   `FileButtonCell.java`    - the open-file button cell
+//   `RadioButtonCell.java`   - a radio button in a table
+//   `SpinnerCell.java`       - an integer JSpinner in a table
+//   `HighlightList.java`     - a column of labels, one of them highlighted
+//   `HighlighterButton.java` - the "=>" row highlighter toggle
+//   `BoundaryRow.java`       - one row of the join Boundary Table
+//   `ProcessorTableRow.java` - one row of the parallel-processing table
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, RadioButton } from "widgets.slint";
+
+// `Colors` (`Colors.java`): the cell palette.  Every value is the
+// `ColorUIResource` the Java declares, at the cited line.
+export global Colors {
+    out property <color> cell-foreground: #000000;                      // Colors.java:21 (0,0,0)
+    out property <color> cell-not-in-use-foreground: #666666;            // Colors.java:22-23 (102,102,102)
+    out property <color> cell-error-background: #ffcccc;                 // Colors.java:24 (255,204,204)
+    out property <color> cell-error-background-not-editable: #e6b8b8;    // Colors.java:25-26 (230,184,184)
+    out property <color> background: #ffffff;                            // Colors.java:27 (255,255,255)
+    out property <color> warning-background: #ffffcc;                    // Colors.java:28-29 (255,255,204)
+    out property <color> warning-background-not-editable: #e6e6b8;       // Colors.java:30-31 (230,230,184)
+    out property <color> highlight-background: #ccffff;                  // Colors.java:32 (204,255,255)
+    out property <color> highlight-background-not-editable: #b8e6e6;     // Colors.java:33-34 (184,230,230)
+    out property <color> run-highlight-background: #ccffcc;              // Colors.java:35-36 (204,255,204)
+    out property <color> run-highlight-background-not-editable: #b8e6b8; // Colors.java:37-38 (184,230,184)
+    out property <color> violet: #c7ade0;                                // Colors.java:39 (199,173,224)
+    out property <color> foreground: #000000;                            // Colors.java:41 (0,0,0)
+    out property <color> cell-disabled-foreground: #787878;              // Colors.java:44-45 (120,120,120)
+    out property <color> available-background: #e0f0ff;                  // Colors.java:46 (224,240,255)
+    out property <color> available-border: #99ccff;                      // Colors.java:47 (153,204,255)
+    out property <color> field-highlight: #0000b9;                       // Colors.java:48 (0,0,185)
+    out property <color> header-background: #efefef;                     // Colors.java:50 (239,239,239)
+    // `Colors.getCellNotEditableBackground` (Colors.java:145-150):
+    // `subtractColor(BACKGROUND, BACKGROUND_GREYOUT)` = (255,255,255)-(25,25,25).
+    out property <color> cell-not-editable-background: #e6e6e6;
+    // `BevelBorder`/`EtchedBorder` are two-tone in Swing and both carry 2px
+    // insets.  Slint has no two-tone border, so every cell below draws a single
+    // 2px border in these colours and the deviation is noted where it is used.
+    out property <color> bevel-highlight: #ffffff;
+    out property <color> bevel-shadow: #797c88;
+}
+
+// `Cell` (`Cell.java`): "Parent class for header cells and input cells"
+// (Cell.java:12).  It builds no Swing component of its own - what it
+// contributes to a table is the display gate and the grid width every subclass
+// inherits, plus the abstract `setEnabled` (Cell.java:32).
+export component Cell inherits Rectangle {
+    // `Cell.isDisplay` (Cell.java:46-51): true when no TableState was set.
+    in property <bool> display: true;
+    // `Cell.getGridwidth` (Cell.java:53-58) falls back to
+    // `TableState.DEFAULT_GRIDWIDTH` (etomo/logic/TableState.java:15) = 1.
+    in property <int> gridwidth: 1;
+    in property <bool> enabled: true;
+    visible: root.display;
+    HorizontalLayout {
+        @children
+    }
+}
+
+// `InputCell` (`InputCell.java`): the writable cell.  Its whole appearance is
+// `setBackground()` (InputCell.java:216-260), whose order of precedence the
+// Java states at :209-215 - error, warning, runHighlight, highlight - each
+// picking an enabled or a not-editable shade, then the plain enabled colour
+// (header or normal), then the not-editable grey.
+export component InputCell inherits Rectangle {
+    // Inherited from `Cell`.
+    in property <bool> display: true;
+    in property <int> gridwidth: 1;
+    // Constructor state.  `InputCell()` (InputCell.java:104-106) delegates to
+    // `InputCell(false, false)`, so headerBackground and debug both start false.
+    in property <bool> header-background: false;   // InputCell.java:90, :110
+    in property <bool> highlight: false;           // InputCell.java:92
+    in property <bool> warning: false;             // InputCell.java:93
+    in property <bool> error: false;               // InputCell.java:94
+    in property <bool> run-highlight: false;       // InputCell.java:102
+    in property <bool> enabled: true;
+    in property <bool> editable: true;             // InputCell.java:129 (abstract)
+    in property <bool> locked: false;              // InputCell.java:127 (abstract)
+    // `InputCell.setFont` (InputCell.java:262-265) keeps a plain and an italic
+    // font of the component's own size; the subclass decides which is shown.
+    in property <bool> italic: false;
+    // `InputCell.setToolTipText` is abstract (InputCell.java:119); the
+    // `setWarning`/`setError` overloads at :184-192 pass the tooltip in with
+    // the flag.
+    in property <string> tooltip;
+    visible: root.display;
+    background: root.error
+        ? (root.enabled ? Colors.cell-error-background : Colors.cell-error-background-not-editable)
+        : root.warning
+            ? (root.enabled ? Colors.warning-background : Colors.warning-background-not-editable)
+            : root.run-highlight
+                ? (root.enabled ? Colors.run-highlight-background : Colors.run-highlight-background-not-editable)
+                : root.highlight
+                    ? (root.enabled ? Colors.highlight-background : Colors.highlight-background-not-editable)
+                    : root.enabled
+                        ? (root.header-background ? Colors.header-background : Colors.background)
+                        : Colors.cell-not-editable-background;
+    HorizontalLayout {
+        @children
+    }
+}
+
+// `FileButtonCell` (`FileButtonCell.java`): a `SimpleButton` carrying the
+// open-file icon, with a raised bevel border.
+export component FileButtonCell inherits InputCell {
+    // `FileButtonCell.java:43-44`: the icon is `ScaledImage.OPEN_FILE_PEET`
+    // ("openFilePeet.png", ScaledImage.java:27) unless `Utilities.APRIL_FOOLS`
+    // (Utilities.java:58-59, true only on April 1), which swaps in
+    // `OPEN_FILE_FOOL` ("openFileFool.png", ScaledImage.java:28).
+    in property <bool> april-fools: false;
+    // `FileButtonCell.getText` returns null (FileButtonCell.java:74-77): this
+    // button never carries text.
+    //
+    // The file chooser's title, `label == null ? "Open File" : label`
+    // (FileButtonCell.java:47), is the only fixed string in the class.
+    in property <string> chooser-title: "Open File";
+    // `FieldLockController.getButtonInstance(button)` (FileButtonCell.java:45-46)
+    // owns the enabled state; see `FieldLockController` in fields.slint.
+    Rectangle {
+        // `button.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED))`
+        // (FileButtonCell.java:50).  Two-tone bevel -> one 2px border.
+        border-width: 2px;
+        border-color: Colors.bevel-shadow;
+        background: EtomoStyle.panel;
+        // `FileButtonCell.java:52-56`: the preferred size is squared up
+        // (width raised to height) before `setSize`.  The images are 17x17,
+        // so the button is 17 + 2 + 2 = 21px on a side.
+        width: 21px;
+        height: 21px;
+        Image {
+            width: 17px;
+            height: 17px;
+            source: root.april-fools
+                ? @image-url("../../../IMOD/Etomo/src/images/openFileFool.png")
+                : @image-url("../../../IMOD/Etomo/src/images/openFilePeet.png");
+            opacity: root.enabled ? 1.0 : 0.5;
+        }
+    }
+}
+
+// `RadioButtonCell` (`RadioButtonCell.java`): a `RadioButton` in a table cell.
+export component RadioButtonCell inherits InputCell {
+    // `RadioButtonCell.unformattedLabel` starts "" (RadioButtonCell.java:181)
+    // and `getText`/`getLabel` return it (:102-104, :177-179).
+    in property <string> text: "";
+    in property <bool> selected: false;
+    HorizontalLayout {
+        // `radioButton.setBorderPainted(true)` and
+        // `setBorder(BorderFactory.createEtchedBorder())`
+        // (RadioButtonCell.java:40-41).  EtchedBorder insets are 2px a side.
+        padding: 2px;
+        Rectangle {
+            border-width: 2px;
+            border-color: Colors.bevel-shadow;
+            background: transparent;
+            HorizontalLayout {
+                padding: 1px;
+                RadioButton {
+                    // `setHtmlLabel` (RadioButtonCell.java:85-89) wraps the
+                    // label in `<html><P style="font-weight:normal; color:rgb(
+                    // r,g,b)">`, with rgb from `Colors.CELL_FOREGROUND`
+                    // (RadioButtonCell.java:81-82).
+                    text: root.text;
+                    selected: root.selected;
+                    enabled: root.enabled;
+                }
+            }
+        }
+    }
+}
+
+// `SpinnerCell` (`SpinnerCell.java`): "Table cell with an integer JSpinner"
+// (SpinnerCell.java:21).
+export component SpinnerCell inherits InputCell {
+    // `new JSpinner(new SpinnerNumberModel(min, min, max, 1))`
+    // (SpinnerCell.java:195): the value starts at the minimum and steps by 1.
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> value: root.minimum;
+    // `setDisabledValue` (SpinnerCell.java:111-113); null until a caller sets
+    // it, and `setEnabled` (:55-81) then swaps the displayed value between the
+    // disabled value and the last enabled one.
+    in property <bool> has-disabled-value: false;
+    in property <int> disabled-value: 0;
+    HorizontalLayout {
+        // `spinner.setBorder(BorderFactory.createEtchedBorder())`
+        // (SpinnerCell.java:197).  EtchedBorder insets are 2px a side.
+        padding: 2px;
+        Rectangle {
+            border-width: 2px;
+            border-color: Colors.bevel-shadow;
+            // `SpinnerCell.setBackground(ColorUIResource)`
+            // (SpinnerCell.java:178-181) paints the *text field*, not the
+            // spinner, so the cell colour lands here.
+            background: root.background;
+            HorizontalLayout {
+                Rectangle {
+                    // `SpinnerCell` sets no preferred size, so the spinner is
+                    // at its natural width; `UIParameters.dimSpinner` is
+                    // 2 * 21 = 42px wide (UIParameters.java:233-234).
+                    width: 42px;
+                    height: EtomoStyle.field-height;
+                    Text {
+                        x: 3px;
+                        // `getTextField().setHorizontalAlignment(JTextField.LEFT)`
+                        // (SpinnerCell.java:198).
+                        horizontal-alignment: left;
+                        vertical-alignment: center;
+                        text: root.has-disabled-value && !root.enabled
+                            ? root.disabled-value
+                            : root.value;
+                        // `setForeground` (SpinnerCell.java:183-187) sets both
+                        // the foreground and the *disabled* text colour to
+                        // `Colors.CELL_FOREGROUND`, so the digits stay black
+                        // when the spinner is disabled.
+                        color: Colors.cell-foreground;
+                        font-italic: root.italic;
+                    }
+                }
+                Rectangle {
+                    width: 14px;
+                    height: EtomoStyle.field-height;
+                    background: EtomoStyle.panel;
+                    VerticalLayout {
+                        Text { text: "^"; horizontal-alignment: center; color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text; }
+                        Text { text: "v"; horizontal-alignment: center; color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// `HighlightList` (`HighlightList.java`): a `BoxLayout.Y_AXIS` column of
+// `JLabel`s (HighlightList.java:49-58) in which one label is highlighted.
+export component HighlightList inherits VerticalLayout {
+    in property <[string]> items;
+    // `currentSelected` starts -1 (HighlightList.java:43): nothing selected.
+    in property <int> current-selected: -1;
+    for item[index] in root.items: VerticalLayout {
+        Text {
+            text: item;
+            // `unselected` = new Color(128,128,128) (HighlightList.java:44),
+            // `selected` = new Color(160,0,64) (HighlightList.java:45).
+            color: index == root.current-selected ? #a00040 : #808080;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // `panel.add(Box.createRigidArea(FixedDim.x0_y5))`
+        // (HighlightList.java:57) - added after every label, the last
+        // included.  `FixedDim.x0_y5` is (0,5) (FixedDim.java:102).
+        Rectangle { height: 5px; }
+    }
+}
+
+// `HighlighterButton` (`HighlighterButton.java`): wraps a toggle `HeaderCell`
+// which, when pressed, highlights its row.
+export component HighlighterButton inherits Rectangle {
+    // `cell.isSelected()` (HighlighterButton.java:182-184); a fresh
+    // JToggleButton is unselected.
+    in property <bool> highlighted: false;
+    // `cell.setEnabled(true)` (HighlighterButton.java:160).
+    in property <bool> enabled: true;
+    // `setToolTipText()` (HighlighterButton.java:239-249).  `mask` is
+    // "[alt option]" on macOS and "[Alt]" elsewhere (:241-246).
+    in property <string> tooltip: "Press to highlight row.  Hotkeys: [Alt]+[Up_Arrow] and [Alt]+[Down_Arrow]";
+    // `HeaderCell.getToggleInstance("=>", (int)(40 * fontSizeAdjustment))`
+    // (HighlighterButton.java:157-158).  `fontSizeAdjustment` is 1 at the
+    // default font size (UIParameters.java:47, :228), so the width is 40.
+    width: 40px;
+    height: EtomoStyle.field-height;
+    // `cell.setBorder(BorderFactory.createBevelBorder(BevelBorder.RAISED))`
+    // (HighlighterButton.java:159).  Two-tone bevel -> one 2px border.
+    border-width: 2px;
+    border-color: Colors.bevel-shadow;
+    background: root.highlighted ? Colors.highlight-background : EtomoStyle.panel;
+    Text {
+        // The toggle instance's text (HighlighterButton.java:157).
+        text: "=>";
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// One ineditable `FieldCell` slot as `BoundaryRow` and `ProcessorTableRow`
+// place it.  `FieldCell` itself is translated in the crates that own the
+// tables; this is the geometry the two rows below give it.
+component RowFieldCell inherits InputCell {
+    in property <string> text;
+    min-width: 60px;
+    HorizontalLayout {
+        padding: 1px;
+        Text {
+            x: 3px;
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? Colors.cell-foreground : Colors.cell-not-in-use-foreground;
+        }
+    }
+}
+
+// One `HeaderCell` slot as the two rows below place it: a JButton with an
+// etched border and `setContentAreaFilled(false)` (HeaderCell.java, the
+// non-toggle branch).
+component RowHeaderCell inherits Rectangle {
+    in property <string> text;
+    min-width: 60px;
+    height: EtomoStyle.field-height;
+    border-width: 2px;
+    border-color: Colors.bevel-shadow;
+    background: transparent;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: Colors.cell-foreground;
+    }
+}
+
+// `BoundaryRow` (`BoundaryRow.java`): one row of the join Boundary Table.  The
+// row draws two different column sets, `displayModel` (BoundaryRow.java:198-208)
+// on the Model tab and `displayRejoin` (:210-222) on the Rejoin tab, chosen by
+// `display(index, viewport, tab)` (:186-196).
+export component BoundaryRow inherits HorizontalLayout {
+    // "model" -> `displayModel`, "rejoin" -> `displayRejoin`.
+    in property <string> tab: "model";
+    // `String firstSection = Integer.toString(key)` and
+    // `firstSection + " & " + Integer.toString(key + 1)` (BoundaryRow.java:73-75).
+    in property <int> key: 1;
+    // Values loaded from JoinScreenState / SectionTableRowData
+    // (BoundaryRow.java:77-104); empty until the join has been run.
+    in property <string> best-gap;
+    in property <string> mean-error;
+    in property <string> max-error;
+    in property <string> orig-end;
+    in property <string> orig-start;
+    // `data.getInverted().is()` (BoundaryRow.java:87, :97); both start false
+    // (:62-63).  An inverted section puts a warning on the original value.
+    in property <bool> end-inverted: false;
+    in property <bool> start-inverted: false;
+    // `INVERTED_TOOLTIP` (BoundaryRow.java:40-41).
+    in property <string> inverted-tooltip: "This value comes from an inverted section.";
+    // `EMPTY_SLICE_WARNING` (BoundaryRow.java:42-43), attached by
+    // `setAdjustedValueWarnings` (:149-162) when the gap is not OK.
+    in property <string> empty-slice-warning: "Empty slices will be added to the section.";
+    in property <bool> left-gap-ok: true;
+    in property <bool> right-gap-ok: true;
+    // `SpinnerCell.getIntInstance(zMax * 2 * -1, zMax * 2)`
+    // (BoundaryRow.java:106-107).
+    in property <int> z-max-end: 0;
+    in property <int> z-max-start: 0;
+    in property <int> adjusted-end: 0;
+    in property <int> adjusted-start: 0;
+    spacing: 1px;
+
+    // displayModel: boundary, bestGap, meanError, maxError.
+    if root.tab == "model": RowHeaderCell {
+        // `boundary.setText(firstSection)` (BoundaryRow.java:74).
+        text: root.key;
+    }
+    if root.tab == "model": RowFieldCell { text: root.best-gap; enabled: false; }
+    if root.tab == "model": RowFieldCell { text: root.mean-error; enabled: false; }
+    if root.tab == "model": RowFieldCell { text: root.max-error; enabled: false; }
+
+    // displayRejoin: sections, origEnd, origStart, bestGap, adjustedEnd,
+    // adjustedStart.
+    if root.tab == "rejoin": RowHeaderCell {
+        // `sections.setText(firstSection + " & " + (key + 1))`
+        // (BoundaryRow.java:75).
+        text: root.key + " & " + (root.key + 1);
+    }
+    if root.tab == "rejoin": RowFieldCell {
+        text: root.orig-end;
+        enabled: false;
+        warning: root.end-inverted;
+        tooltip: root.end-inverted ? root.inverted-tooltip : "";
+    }
+    if root.tab == "rejoin": RowFieldCell {
+        text: root.orig-start;
+        enabled: false;
+        warning: root.start-inverted;
+        tooltip: root.start-inverted ? root.inverted-tooltip : "";
+    }
+    if root.tab == "rejoin": RowFieldCell { text: root.best-gap; enabled: false; }
+    if root.tab == "rejoin": SpinnerCell {
+        minimum: root.z-max-end * -2;
+        maximum: root.z-max-end * 2;
+        value: root.adjusted-end;
+        warning: !root.left-gap-ok;
+        tooltip: root.left-gap-ok ? "" : root.empty-slice-warning;
+    }
+    if root.tab == "rejoin": SpinnerCell {
+        minimum: root.z-max-start * -2;
+        maximum: root.z-max-start * 2;
+        value: root.adjusted-start;
+        warning: !root.right-gap-ok;
+        tooltip: root.right-gap-ok ? "" : root.empty-slice-warning;
+    }
+}
+
+// `ProcessorTableRow` (`ProcessorTableRow.java`): one computer or queue row of
+// the parallel-processing table.  Which cells exist is decided in the private
+// constructor (:105-301) from `displayQueues`, `dualSelectionQueueTable` and
+// the `tableState.isUse(ProcessorTableField...)` flags; which of those are laid
+// out, and in what order, is `display(index, viewport)` (:613-713).  Every
+// column below is gated on the flag that constructs it, defaulting to the
+// `getComputerInstance` case (`displayQueues` false, ProcessorTableRow.java:648).
+export component ProcessorTableRow inherits HorizontalLayout {
+    // `getComputerInstance` (:648-652) passes displayQueues=false and
+    // dualSelectionQueueTable=false; `getQueueInstance` (:658-669) passes
+    // displayQueues=true.
+    in property <bool> display-queues: false;
+    in property <bool> dual-selection-queue-table: false;
+    // `tableState.isUse(ProcessorTableField.TWO_QUEUES_H2)` (:136).
+    in property <bool> two-queues-h2: false;
+    // `node.isSecondaryQueue()` (:118); false when not a dual-selection table
+    // (:122).
+    in property <bool> secondary-queue: false;
+    // `enableSecondaryQueue` starts false (:98) and decides whether the CPUs
+    // spinner or the GPU-jobs spinner is laid out (:637-642).
+    in property <bool> enable-secondary-queue: false;
+    // `cellComputer.setLabel(node.getName())` (:550) - or, in a dual-selection
+    // table, `cellQueueName.setText(node.getName())` (:553).
+    in property <string> computer-name;
+    // `cellComputer.isSelected()` (:856-858).
+    in property <bool> selected: false;
+    in property <bool> selection-enabled: true;   // ProcessorTableRow.java:97
+    // `numCpus` starts 1 (:91).  `numCpus > 1` (and, for a dual-selection
+    // table, a single-CPU queue mode) makes cellCPUsSelected a SpinnerCell,
+    // otherwise an ineditable FieldCell (:172-182).
+    in property <int> num-cpus: 1;
+    in property <bool> cpus-selected-is-spinner: false;
+    // `DEFAULT_CPUS_SELECTED` = 1 (:46), `DUAL_SELECTION_MIN` = 2 (:47);
+    // `initRow` sets the spinner to one of them (:523-529) and the FieldCell
+    // to 1 (:533).
+    in property <int> cpus-selected: 1;
+    // Column flags, each `tableState.isUse(...)` in the constructor.
+    in property <bool> use-num-cpus-max: false;    // NUM_CPUS_MAX_H2, :184
+    in property <bool> use-num-gpus: false;        // NUM_GPUS, :191
+    // `node.isGpu()` decides `gpusPerClusterJob` (:127-132); when it is null
+    // the # GPUs column is a blank HeaderCell instead of a FieldCell (:192-201).
+    in property <bool> has-gpus-per-cluster-job: false;
+    in property <string> gpus-per-cluster-job;
+    in property <bool> use-load-average: false;    // LOAD_AVERAGE_H1, :207
+    in property <bool> use-cpu-usage: false;       // CPU_USAGE_H1, :215
+    in property <bool> use-load-array-0: false;    // LOAD_ARRAY_0_H1, :221
+    in property <bool> use-load-array-x: false;    // LOAD_ARRAY_X_H1, :222
+    in property <int> queue-load-array-size: 1;    // :227-231
+    in property <bool> use-users: false;           // USERS_H1, :236
+    in property <bool> use-type: false;            // TYPE_H1, :242
+    in property <bool> use-speed: false;           // SPEED_H1, :248
+    in property <bool> use-memory: false;          // MEMORY_H1, :254
+    in property <bool> use-os: false;              // OS_H1, :260
+    in property <bool> use-gpu-type: false;        // GPU_TYPE_H1, :266
+    in property <bool> use-gpu-speed: false;       // GPU_SPEED_H1, :272
+    in property <bool> use-gpu-memory: false;      // GPU_MEMORY_H1, :278
+    in property <bool> use-gpu-ncores: false;      // GPU_NCORES_H1, :284
+    in property <bool> use-restarts: false;        // RESTARTS_H1, :290
+    // Values `initRow` copies out of the Node (:545-573); empty until the
+    // node has reported.
+    in property <string> cpu-type;
+    in property <string> speed;
+    in property <string> memory;
+    in property <string> os;
+    in property <string> gpu-type;
+    in property <string> gpu-speed;
+    in property <string> gpu-memory;
+    in property <string> gpu-ncores;
+    in property <string> load-1;
+    in property <string> load-5;
+    in property <string> cpu-usage;
+    in property <string> users;
+    in property <string> restarts;
+    in property <string> successes;
+    in property <string> failure-reason;
+    // `msgDropped` (:735-742) puts the reason in the failure column with this
+    // tooltip.
+    in property <string> failure-tooltip: "This computer was dropped from the current distributed process.";
+    spacing: 1px;
+
+    // cellComputer: a RadioButtonCell in a queue table (:137, :157), a
+    // CheckBoxCell otherwise (:166).  Both are named from
+    // `table.getHeader1ComputerText()`; the *label* is the node name (:550).
+    if root.display-queues: RadioButtonCell {
+        text: root.dual-selection-queue-table ? "" : root.computer-name;
+        selected: root.selected;
+        enabled: root.selection-enabled;
+    }
+    if !root.display-queues: InputCell {
+        enabled: root.selection-enabled;
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            padding: 2px;
+            Rectangle {
+                width: 13px;
+                height: 13px;
+                background: Colors.background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                if root.selected: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            Text {
+                text: root.computer-name;
+                vertical-alignment: center;
+                color: root.selection-enabled ? Colors.cell-foreground : Colors.cell-not-in-use-foreground;
+            }
+        }
+    }
+    // cellSecondaryQueue: only for a secondary queue in a TWO_QUEUES_H2 table
+    // (:139-146); otherwise a blank HeaderCell holds the slot (:149-151).
+    // `ProcessorTable.SECONDARY_QUEUE_LABEL` is "2nd" (ProcessorTable.java:59)
+    // and `FIRST_QUEUE_LABEL` is "1st" (:58); both name the cells rather than
+    // labelling them.
+    if root.display-queues && root.two-queues-h2 && root.secondary-queue: RadioButtonCell {
+        // `cellSecondaryQueue.setEnabled(enableSecondaryQueue)` (:803-805).
+        enabled: root.enable-secondary-queue;
+    }
+    if root.display-queues && root.two-queues-h2 && !root.secondary-queue: RowHeaderCell { }
+    // cellQueueName: `new HeaderCell()` (:154), filled with the node name
+    // (:553).
+    if root.display-queues && root.two-queues-h2: RowHeaderCell {
+        text: root.computer-name;
+    }
+    // cellCPUsSelected, laid out unless the GPU-jobs spinner replaces it
+    // (:637-642).  `cellCPUsSelected.setEnabled(isSelected())` (:807).
+    if !(root.display-queues && root.two-queues-h2 && root.secondary-queue && root.enable-secondary-queue): SpinnerCell {
+        // The spinner form (:178): min is 0, or DUAL_SELECTION_MIN = 2 in a
+        // dual-selection table (:174-177); max is numCpus (:134).
+        // `setDisabledValue(0)` (:530).
+        minimum: root.dual-selection-queue-table ? 2 : 0;
+        maximum: root.num-cpus;
+        value: root.cpus-selected;
+        has-disabled-value: true;
+        disabled-value: 0;
+        enabled: root.selected && root.cpus-selected-is-spinner;
+        // The FieldCell form (:181) shows 0 when the row is not selected and
+        // 1 when it is (:809-816).
+        display: root.cpus-selected-is-spinner;
+    }
+    if !(root.display-queues && root.two-queues-h2 && root.secondary-queue && root.enable-secondary-queue)
+        && !root.cpus-selected-is-spinner: RowFieldCell {
+        text: root.selected ? 1 : 0;
+        enabled: root.selected;
+    }
+    // cellMaxGPUJobsOnQueue: `SpinnerCell.getIntInstance(1, max)` (:145),
+    // created disabled with value 0 (:535-538).
+    if root.display-queues && root.two-queues-h2 && root.secondary-queue && root.enable-secondary-queue: SpinnerCell {
+        minimum: 1;
+        maximum: root.num-cpus;
+        value: 0;
+        enabled: false;
+    }
+    // cellNumberCpus: `ProcessorTable.NUMBER_CPUS_MAX_LABEL` is "Max."
+    // (ProcessorTable.java:57); the value is numCpus (:539-541).
+    if root.use-num-cpus-max: RowFieldCell {
+        text: root.num-cpus;
+        enabled: false;
+    }
+    // cellNumberGpus / cellBlankNumberGpus: `GpuTable.NUMBER_CPUS_LABEL` is
+    // "# GPUs" (GpuTable.java:37).
+    if root.use-num-gpus && root.has-gpus-per-cluster-job: RowFieldCell {
+        text: root.gpus-per-cluster-job;
+        enabled: false;
+    }
+    if root.use-num-gpus && !root.has-gpus-per-cluster-job: RowHeaderCell { }
+    // cellLoad1 / cellLoad5 (:208-209).
+    if root.use-load-average: RowFieldCell { text: root.load-1; enabled: false; }
+    if root.use-load-average: RowFieldCell { text: root.load-5; enabled: false; }
+    // cellCPUUsage (:216).
+    if root.use-cpu-usage: RowFieldCell { text: root.cpu-usage; enabled: false; }
+    // cellLoadArray: one cell when LOAD_ARRAY_X_H1 is off (:223-224),
+    // otherwise queueLoadArraySize of them (:227-231).
+    if root.use-load-array-0 && !root.use-load-array-x: RowFieldCell { enabled: false; }
+    if root.use-load-array-0 && root.use-load-array-x: HorizontalLayout {
+        spacing: 1px;
+        for i in root.queue-load-array-size: RowFieldCell { enabled: false; }
+    }
+    // cellUsers (:237).
+    if root.use-users: RowFieldCell { text: root.users; enabled: false; }
+    // cellCPUType: `ProcessorTable.CPU_TYPE_LABEL` is "CPU Type"
+    // (ProcessorTable.java:55).
+    if root.use-type: RowFieldCell { text: root.cpu-type; enabled: false; }
+    if root.use-speed: RowFieldCell { text: root.speed; enabled: false; }
+    // cellMemory is additionally `setEditable(false)` (:542-544).
+    if root.use-memory: RowFieldCell { text: root.memory; enabled: false; editable: false; }
+    if root.use-os: RowFieldCell { text: root.os; enabled: false; }
+    if root.use-gpu-type: RowFieldCell { text: root.gpu-type; enabled: false; }
+    if root.use-gpu-speed: RowFieldCell { text: root.gpu-speed; enabled: false; }
+    if root.use-gpu-memory: RowFieldCell { text: root.gpu-memory; enabled: false; }
+    if root.use-gpu-ncores: RowFieldCell { text: root.gpu-ncores; enabled: false; }
+    // cellRestarts / cellSuccesses / cellFailureReason (:291-294).
+    // `ProcessorTable.RESTARTS_LABEL` is "Retries" (ProcessorTable.java:56).
+    if root.use-restarts: RowFieldCell { text: root.restarts; enabled: false; }
+    if root.use-restarts: RowFieldCell { text: root.successes; enabled: false; }
+    if root.use-restarts: RowFieldCell {
+        text: root.failure-reason;
+        enabled: false;
+        tooltip: root.failure-reason == "" ? "" : root.failure-tooltip;
+    }
+}

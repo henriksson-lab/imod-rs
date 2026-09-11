@@ -1,0 +1,412 @@
+// Widgets the main-window frame family needs that the shared vocabulary in
+// `gui/etomo-ui-common/ui/widgets.slint` does not carry.  Same convention as
+// the common crate: one component per Swing widget class in
+// `IMOD/Etomo/src/etomo/ui/swing`, named after that class.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `Colors` (`Colors.java`): the per-interface panel backgrounds
+// `AxisProcessPanel.setBackground` is called with, and the process-state
+// foregrounds of `ProcessControlPanel`.  Every value is the non-April-Fools
+// branch of the corresponding `Colors.getBackground*()` accessor
+// (`Utilities.APRIL_FOOLS` is a calendar test, so the joke palette is a
+// run-time branch and is recorded in the comments rather than drawn).
+export global Colors {
+    // `getBackgroundA()` (`Colors.java:61-71`), `new Color(173, 199, 224)` "saphire".
+    // April-Fools branch: rgb(163, 214, 247).
+    out property <color> background-a: #adc7e0;
+    // `getBackgroundB()` (`Colors.java:73-83`), `new Color(173, 224, 199)` "jade".
+    // April-Fools branch: rgb(255, 216, 141).
+    out property <color> background-b: #ade0c7;
+    // `VIOLET` (`Colors.java:39`), `new ColorUIResource(199, 173, 224)`.
+    // `getBackgroundJoin()` and `getBackgroundBatchruntomo()` both return it.
+    out property <color> violet: #c7ade0;
+    // `getBackgroundParallel()` (`Colors.java:97-107`), `new Color(186, 224, 173)` "lime".
+    out property <color> background-parallel: #bae0ad;
+    // `getBackgroundSerialSections()` (`Colors.java:121-131`), `new Color(218, 232, 250)`.
+    out property <color> background-serial-sections: #dae8fa;
+    // `getBackgroundTools()` (`Colors.java:133-143`), `new Color(173, 212, 224)` "azure".
+    out property <color> background-tools: #add4e0;
+    // `ProcessControlPanel.colorNotStarted` (`ProcessControlPanel.java:85`),
+    // `new Color(0.75f, 0.0f, 0.0f)`, which Java rounds to rgb(191, 0, 0).
+    out property <color> state-not-started: #bf0000;
+    // `ProcessControlPanel.colorInProgress` (`:86`), `new Color(0.75f, 0.0f, 0.75f)`.
+    out property <color> state-in-progress: #bf00bf;
+    // `ProcessControlPanel.colorComplete` (`:88`), `new Color(0, 153, 0)`.
+    out property <color> state-complete: #009900;
+    // The Metal default panel grey, which a panel whose `setBackground` is
+    // never called keeps (`PeetProcessPanel`, `FrontPageProcessPanel`,
+    // `DirectivesProcessPanel`, and a `TomogramProcessPanel` for axis B before
+    // it is first shown).
+    out property <color> default-panel: #d9d9d9;
+}
+
+// `SimpleButton` (`SimpleButton.java`): a plain `JButton` that only overrides
+// `setName`.  `setToPreferredSize()` (`:29-33`) pins the preferred and maximum
+// size, which `TomogramProcessPanel` uses to give the two axis buttons a
+// stable width; `axis-width` stands in for that.
+export component SimpleButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: 26px;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+}
+
+// `SimpleToggleButton` (`SimpleToggleButton.java`): a plain `JToggleButton`
+// that only overrides `setName`.  `ProcessControlPanel` gives it two lines of
+// HTML text, so the label is drawn as two rows.
+export component SimpleToggleButton inherits Rectangle {
+    in property <string> text;
+    in property <string> second-line;
+    in property <color> text-color: EtomoStyle.text;
+    in property <bool> selected: false;
+    background: EtomoStyle.panel;
+    border-width: root.selected ? 3px : 2px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: 3px;
+        alignment: center;
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            color: root.text-color;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        if root.second-line != "": Text {
+            text: root.second-line;
+            horizontal-alignment: center;
+            color: root.text-color;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+    }
+}
+
+// `ScrollPanel` (`ScrollPanel.java`): a `JPanel` implementing `Scrollable`
+// whose every `getScrollable*` override returns 0/false.  `MainPanel` wraps
+// one in a `JScrollPane` per axis (`MainPanel.java:557-562`, `:570-584`) and
+// sets the unit/block increments to 10/50 (`:626-627`).  Slint has no
+// `JScrollPane`, so the scroll viewport is expressed as a `Flickable`; the
+// vertical scrollbar policy (`setVerticalScrollBarPolicy`, `:726-735`) is a
+// run-time setting and is not drawn.
+export component ScrollPanel inherits Rectangle {
+    in property <color> panel-background: EtomoStyle.background;
+    background: root.panel-background;
+    clip: true;
+    Flickable {
+        viewport-height: inner.preferred-height;
+        viewport-width: inner.preferred-width;
+        inner := VerticalLayout {
+            alignment: start;
+            @children
+        }
+    }
+}
+
+// `ProgressPanel` (`ProgressPanel.java`): the constructor (`:69-88`) lays out
+// `taskLabel`, a 5px rigid area and `progressBar` in a `BoxLayout.Y_AXIS`.
+// `AxisProgressPanel` constructs it with the label "No process"
+// (`AxisProgressPanel.java:48`).
+export component ProgressPanel inherits VerticalLayout {
+    in property <string> label: "No process";
+    in property <string> bar-string;
+    // `JProgressBar` starts indeterminate-off at value 0 (`stopped = true`,
+    // `ProgressPanel.java:60`), so the bar is drawn empty.
+    in property <float> fraction: 0.0;
+    spacing: 0px;
+    Text {
+        // `taskLabel` (`ProgressPanel.java:42`), name `the-progress-bar-label`.
+        text: root.label;
+        color: EtomoStyle.text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    // `Box.createRigidArea(FixedDim.x0_y5)` (`ProgressPanel.java:81`).
+    Rectangle { height: 5px; }
+    Rectangle {
+        // `progressBar` (`ProgressPanel.java:43`), name `the-progress-bar`.
+        height: 18px;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: (parent.width - 2px) * root.fraction;
+            height: parent.height - 2px;
+            background: #6c8ebf;
+        }
+        Text {
+            text: root.bar-string;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+    }
+}
+
+// `AxisProgressPanel` (`AxisProgressPanel.java`): `createPanel()` (`:77-92`)
+// builds `pnlRoot` as a `BoxLayout.X_AXIS` of a 5px rigid area, the
+// `ProgressPanel` container, another 5px rigid area, `buttonKillProcess` and a
+// trailing `FixedDim.x0_y5` rigid area.  `buttonKillProcess.setEnabled(false)`
+// on line 79, so the button starts disabled.
+export component AxisProgressPanel inherits HorizontalLayout {
+    in property <string> label: "No process";
+    spacing: 0px;
+    // `Box.createRigidArea(FixedDim.x5_y0)`.
+    Rectangle { width: 5px; }
+    ProgressPanel { label: root.label; }
+    Rectangle { width: 5px; }
+    SimpleButton {
+        // `KILL_BUTTON_LABEL` (`AxisProgressPanel.java:30`).
+        text: "Kill Process";
+        enabled: false;
+        width: 110px;
+        // Tooltip: "Press to end the current process." (`:100`).
+    }
+    // `Box.createRigidArea(FixedDim.x0_y5)`: zero width, so nothing shows.
+    Rectangle { width: 0px; }
+}
+
+// `ProcessControlPanel` (`ProcessControlPanel.java`) together with
+// `ColoredStateText` (`ColoredStateText.java`), which it uses to pick the
+// state word and its colour.  The constructor (`:99-127`) builds `panelRoot` as
+// a `BoxLayout.Y_AXIS` holding only `buttonRun` (`:126`); the `panelState`
+// field (`:95`) is declared and never instantiated or added, so nothing else is in
+// the panel.  `updateLabel()` (`:177-185`) sets the button text to
+// `"<HTML><CENTER>" + command + "<br>" + stateText + "</CENTER>"` and its
+// foreground to the state colour.  `highlightState.setSelected(0)` (`:118`)
+// makes "Not Started" the construction-time state.
+//
+// `textStates` (`:84`) is `{ "Not Started", "In Progress", "Complete" }`.  In
+// compact display `ColoredStateText` is built from the colours alone
+// (`:113`), `getSelectedText()` returns null and the second line is dropped.
+// `dimPanelProcess = FixedDim.processPanel` (`:83`, 80x130) is declared and
+// never applied.
+export component ProcessControlPanel inherits Rectangle {
+    // `command`: `dialogType.toString()`, or `dialogType.getCompactLabel()`
+    // under compact display (`ProcessControlPanel.java:100-106`).
+    in property <string> label;
+    in property <string> compact-label;
+    // `UserConfiguration.compactDisplay` defaults to false
+    // (`etomo/type/UserConfiguration.java:148`).
+    in property <bool> compact-display: false;
+    // `highlightState.getSelected()`: 0 "Not Started", 1 "In Progress",
+    // 2 "Complete".
+    in property <int> state: 0;
+    in property <bool> selected: false;
+    height: 44px;
+    background: transparent;
+    SimpleToggleButton {
+        width: 100%;
+        height: 100%;
+        selected: root.selected;
+        text: root.compact-display ? root.compact-label : root.label;
+        second-line: root.compact-display ? ""
+            : (root.state == 0 ? "Not Started" : (root.state == 1 ? "In Progress" : "Complete"));
+        text-color: root.state == 0 ? Colors.state-not-started
+            : (root.state == 1 ? Colors.state-in-progress : Colors.state-complete);
+    }
+}
+
+// `MenuItem` (`MenuItem.java`): a `JMenuItem` that only overrides `setName`.
+// The mnemonic passed to `new MenuItem(text, KeyEvent.VK_x)` underlines that
+// letter in Swing; Slint has no per-glyph underline in a `Text`, so the
+// mnemonic is carried in `mnemonic` and shown after the label instead.  The
+// accelerator (`setAccelerator`) is right-aligned as Swing draws it.
+export component MenuItem inherits Rectangle {
+    in property <string> text;
+    in property <string> mnemonic;
+    in property <string> accelerator;
+    in property <bool> enabled: true;
+    in property <bool> visible-item: true;
+    height: root.visible-item ? 20px : 0px;
+    background: transparent;
+    if root.visible-item: HorizontalLayout {
+        padding-left: 22px;
+        padding-right: 8px;
+        spacing: 16px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Text {
+            text: root.mnemonic != "" ? "(" + root.mnemonic + ")" : "";
+            vertical-alignment: center;
+            color: EtomoStyle.disabled-text;
+            font-size: (EtomoStyle.font-size-pt - 2) * 1px;
+        }
+        Text {
+            text: root.accelerator;
+            vertical-alignment: center;
+            color: EtomoStyle.disabled-text;
+            font-size: (EtomoStyle.font-size-pt - 1) * 1px;
+        }
+    }
+}
+
+// `CheckBoxMenuItem` (`CheckBoxMenuItem.java`): a `JCheckBoxMenuItem`.  Used
+// for the two 3dmod options and for `WindowSwitch`'s window list.
+export component CheckBoxMenuItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    height: 20px;
+    background: transparent;
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 8px;
+        spacing: 4px;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            y: (parent.height - 13px) / 2;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+}
+
+// `JMenu.addSeparator()`.
+export component MenuSeparator inherits Rectangle {
+    height: 5px;
+    background: transparent;
+    Rectangle {
+        y: 2px;
+        height: 1px;
+        x: 4px;
+        width: parent.width - 8px;
+        background: EtomoStyle.border;
+    }
+}
+
+// `Menu` (`Menu.java`): a `JMenu` that only overrides `setName`.  A Swing menu
+// shows its title on the bar and pops its items up only while open, so the
+// drop-down body is gated on `open` — the same shape as the accepted
+// `JTabbedPane` deviation, and the reason `MainFrame` carries an
+// `open-menu` index.  A `Menu` nested inside another menu (`New`,
+// `Recent Projects`, `Templates`) is drawn as a submenu row with its body
+// indented underneath, because Slint has no cascading popup.
+export component Menu inherits Rectangle {
+    in property <string> title;
+    in property <string> mnemonic;
+    in property <bool> open: false;
+    in property <bool> enabled: true;
+    in property <bool> submenu: false;
+    background: transparent;
+    VerticalLayout {
+        alignment: start;
+        Rectangle {
+            height: root.submenu ? 20px : 22px;
+            background: root.open ? EtomoStyle.background.darker(12%) : transparent;
+            HorizontalLayout {
+                padding-left: root.submenu ? 22px : 8px;
+                padding-right: 8px;
+                spacing: 6px;
+                Text {
+                    text: root.title;
+                    vertical-alignment: center;
+                    color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                Text {
+                    text: root.mnemonic != "" ? "(" + root.mnemonic + ")" : "";
+                    vertical-alignment: center;
+                    color: EtomoStyle.disabled-text;
+                    font-size: (EtomoStyle.font-size-pt - 2) * 1px;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if root.submenu: Text {
+                    text: ">";
+                    vertical-alignment: center;
+                    color: EtomoStyle.text;
+                }
+            }
+        }
+        // The drop-down body.  Slint refuses `@children` inside a conditional
+        // element, so a closed menu is collapsed to zero height and clipped
+        // rather than dropped from the tree.
+        Rectangle {
+            clip: true;
+            background: root.open ? EtomoStyle.panel : transparent;
+            border-width: root.open ? 1px : 0px;
+            border-color: EtomoStyle.border;
+            min-height: root.open ? body.preferred-height : 0px;
+            max-height: root.open ? body.preferred-height : 0px;
+            body := VerticalLayout {
+                padding: 2px;
+                alignment: start;
+                @children
+            }
+        }
+    }
+}
+
+// The `JMenuBar` `EtomoFrame.getMenus()` (`EtomoFrame.java:519-522`) hands to
+// `setJMenuBar`.  The bar itself carries no labels; the menus do.
+export component MenuBar inherits Rectangle {
+    height: 24px;
+    background: EtomoStyle.panel;
+    HorizontalLayout {
+        alignment: start;
+        padding: 1px;
+        spacing: 2px;
+        @children
+    }
+}
+
+// `MainPanel`'s busy-status label, built by `createBusyStatusLabel()`
+// (`MainPanel.java:688-692`) from `BusyStatusPanel.ICON`
+// (`CompleteIcon.createIcon("busy.png")`, `BusyStatusPanel.java:27`) and named
+// `BusyStatusPanel.LABEL` = "lb.busy".  `lBusyStatusA.setEnabled(false)` in
+// the `MainPanel` constructor (`:117`), and a `lBusyStatusB` created later is
+// disabled too (`:717`); Swing greys a disabled icon label.
+export component BusyStatusLabel inherits Rectangle {
+    in property <bool> enabled: false;
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    Image {
+        source: @image-url("../../../IMOD/Etomo/src/images/busy.png");
+        width: 16px;
+        height: 16px;
+        opacity: root.enabled ? 1.0 : 0.35;
+    }
+}
+
+// The tab close button `WindowSwitch.createCloseButton()`
+// (`WindowSwitch.java:290-302`) gets from `Ebutton.getCloseInstance()`
+// (`Ebutton.java:171-177`), whose style is `CloseButtonStyleExtension` —
+// a `CompleteIcon` over `ScaledImage.SMALL_X` ("smallX.png") with an empty
+// border.
+export component TabCloseButton inherits Rectangle {
+    width: 16px;
+    height: 16px;
+    background: transparent;
+    Image {
+        source: @image-url("../../../IMOD/Etomo/src/images/smallX.png");
+        width: 12px;
+        height: 12px;
+    }
+}

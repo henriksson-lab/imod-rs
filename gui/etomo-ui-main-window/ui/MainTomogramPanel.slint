@@ -1,0 +1,108 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainTomogramPanel.java`, the
+// `MainPanel` subclass of `ApplicationManager` and the only one in the family
+// that builds a B column.  It instantiates the base component from
+// `MainPanel.slint` and puts its axis column(s) in the base's `panelCenter`
+// slot.
+//
+// `MainTomogramPanel(ApplicationManager)` (`:156-158`) only forwards to
+// `super(appManager)`.  `createAxisPanelA` (`:410-414`) and `createAxisPanelB`
+// (`:416-421`) each build a `TomogramProcessPanel` — the second always with
+// `AxisID.SECOND` — and `addAxisPanelA` / `addAxisPanelB` (`:428-437`) put
+// their containers in `scrollA` and `scrollB`.
+//
+// It overrides `showAxisA()` (`:175-186`), `showAxisB()` (`:188-192`),
+// `showBothAxis()` (`:194-198`), `showProcessingPanel` (`:200-204`),
+// `showBlankProcess` (`:462-467`), `saveDisplayState` (`:168-174`) and
+// `setState`, and adds `openSetupPanel`, `selectButton`,
+// `updateAllProcessingStates` and the ten `set*State` forwarders.
+//
+// `MainPanel.showProcessingPanel` (`MainPanel.java:551-585`) builds both
+// scroll panes for a dual axis but ends in `setAxisA()`, and
+// `MainPanel.showAxisB()` swaps `scrollPaneB` into `panelCenter` in A's place,
+// so only one column is ever in the panel.  When both axes are shown,
+// `MainPanel.showBothAxis()` (`:630-641`) returns `scrollPaneB` for
+// `MainFrame.showBothAxis()` (`MainFrame.java:721-735`) to hand to a
+// `SubFrame` — a second top-level window, which is why this panel still shows
+// one column then.  Both columns are kept in the layout here and picked by
+// `showing-axis`, so neither is dropped from the translation.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { MainPanel } from "MainPanel.slint";
+import { TomogramProcessPanel } from "TomogramProcessPanel.slint";
+
+export component MainTomogramPanel inherits Rectangle {
+    in property <string> status-bar-text: "No data set loaded";
+    // `MainPanel.axisType` (`MainPanel.java:61`) is `AxisType.NOT_SET` until
+    // `showProcessingPanel` runs; "SINGLE_AXIS" is what a single-axis data set
+    // passes, and it makes `createAxisPanelA` use `AxisID.ONLY` rather than
+    // `AxisID.FIRST` (`MainPanel.java:551-570`).
+    in property <string> axis-type: "SINGLE_AXIS";
+    // `MainPanel.showingAxisA` (`:59`) starts true.  "A" is `scrollPaneA` in
+    // `panelCenter`; "B" is what `showAxisB()` puts there.
+    in property <string> showing-axis: "A";
+    // `MainPanel.showingSetup` (`:60`) starts false.  `openSetupPanel`
+    // (`MainTomogramPanel.java:245-251`) empties `panelCenter` and puts the
+    // `SetupDialogExpert` container in it instead of any axis column; that
+    // dialog is `SetupDialog.java`, translated in
+    // `gui/etomo-ui-recon-setup/ui/SetupDialog.slint`, so the slot is left
+    // empty here rather than duplicated.
+    in property <bool> showing-setup: false;
+    in property <bool> compact-display: false;
+
+    background: EtomoStyle.background;
+
+    MainPanel {
+        width: 100%;
+        height: 100%;
+        status-bar-text: root.status-bar-text;
+        axis-type: root.axis-type;
+        showing-axis-a: root.showing-axis == "A";
+        panel-background: root.showing-axis == "B"
+            ? Colors.background-b : Colors.background-a;
+
+        // `openSetupPanel` (`:245-251`): `panelCenter` holds the Setup dialog
+        // and no axis column at all.
+        if root.showing-setup: Rectangle {
+            height: 40px;
+            background: Colors.background-a;
+            Text {
+                text: "Setup Tomogram";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: EtomoStyle.font-size-pt * 1px;
+                color: EtomoStyle.text;
+            }
+        }
+
+        // `addAxisPanelA()` (`:428-432`): `scrollA` holds `axisPanelA`.  Its
+        // `AxisID` is `AxisID.ONLY` for a single-axis data set and
+        // `AxisID.FIRST` for a dual-axis one (`MainPanel.java:552`, `:565`).
+        if !root.showing-setup && root.showing-axis == "A": TomogramProcessPanel {
+            axis-id: root.axis-type == "SINGLE_AXIS" ? "ONLY" : "FIRST";
+            compact-display: root.compact-display;
+        }
+
+        // `addAxisPanelB()` (`:433-437`): `scrollB` holds `axisPanelB`, built
+        // only for a dual axis and always with `AxisID.SECOND`.
+        if !root.showing-setup && root.showing-axis == "B": TomogramProcessPanel {
+            axis-id: "SECOND";
+            compact-display: root.compact-display;
+            // `showAxisB()` (`TomogramProcessPanel.java:386-401`) sets the
+            // jade background and relabels the axis buttons "Axis A" / "Both".
+            panel-background: Colors.background-b;
+            axis-button-1-text: "Axis A";
+            axis-button-2-text: "Both";
+        }
+    }
+}
+
+export component MainTomogramPanelWindow inherits Window {
+    title: "eTomo Main Tomogram Panel";
+    preferred-width: 900px;
+    preferred-height: 800px;
+    background: EtomoStyle.background;
+    MainTomogramPanel { }
+}

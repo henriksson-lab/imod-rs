@@ -1,0 +1,170 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SettingsDialog.java`.
+//
+// `buildDialog()` sets the title "Etomo Settings" and puts `pnlMain`
+// (SpacedPanel, BoxLayout.Y_AXIS) inside a JScrollPane.  Slint has no scroll
+// pane in this widget vocabulary, so the main column is laid out directly and
+// the window is simply tall enough; the two `setScrollBarIncrements` calls
+// have no visual counterpart.
+//
+// `EtchedBorder` group boxes are drawn with the common `BeveledBorder`, the
+// only titled group box in the shared vocabulary.
+//
+// Composite labels are the Java string concatenations, resolved:
+//   cbSingleAxis   = SetupDialog.AXIS_TYPE_LABEL + ":  " + SINGLE_AXIS_LABEL
+//   cbMontage      = SetupDialog.FRAME_TYPE_LABEL + ":  " + MONTAGE_LABEL
+//   cbNoParallelProcessing = "Start with " + ParallelPanel.FIELD_LABEL + " off"
+//   cbTiltAnglesRawtltFile = "Angle Source:  " + TiltAngleType.FILE.getDescr()
+//   cbSwapYAndZ    = TrimvolPanel.REORIENTATION_GROUP_LABEL + "  " + SWAP_YZ_LABEL
+
+import {
+    EtomoStyle,
+    BeveledBorder,
+    LabeledTextField,
+    CheckBox,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { ComboBox, FileTextField, PlainButton, ScrollList, InlineTextField } from "ShellWidgets.slint";
+
+export component SettingsDialog inherits Rectangle {
+    background: EtomoStyle.background;
+
+    // `pnlMain`: SpacedPanel, BoxLayout.Y_AXIS.
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        alignment: start;
+
+        // `panelFontSelect`: SpacedPanel, BoxLayout.X_AXIS --
+        // JLabel "Font family:", the font family JList in a JScrollPane
+        // (SINGLE_SELECTION, visible row count 3), then `ltfFontSize`
+        // (3 columns).  The list contents come from
+        // GraphicsEnvironment.getAvailableFontFamilyNames() at run time; three
+        // static placeholder rows stand in, with "Dialog" -- FontFamilies'
+        // default -- selected.
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            Text {
+                text: "Font family:";
+                vertical-alignment: center;
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            ScrollList {
+                width: 200px;
+                visible-rows: 3;
+                rows: ["Dialog", "DialogInput", "Monospaced"];
+                selected: 0;
+            }
+            InlineTextField {
+                label: "Size: ";
+                text: "12";
+                field-width: 34px;
+            }
+        }
+
+        // UserConfiguration.toolTipsInitialDelay defaults to 2000 ms; setParameters
+        // divides by 1000 before display.
+        LabeledTextField { label: "Tooltips initial delay: "; text: "2"; }
+        // UserConfiguration.toolTipsDismissDelay defaults to 20000 ms.
+        LabeledTextField { label: "Tooltips dismiss delay: "; text: "20"; }
+        Rectangle { height: 5px; }
+        LabeledTextField { label: "Outgoing mail server: "; text: ""; }
+        Rectangle { height: 5px; }
+
+        // `pnlSettings`: SpacedPanel, BoxLayout.X_AXIS, LEFT_ALIGNMENT.
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+
+            // `pnlGeneralSettings`: BoxLayout.Y_AXIS, no border.
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                // cbAutoFit.setEnabled(false) -- "TEMP bug# 614".
+                CheckBox { text: "Auto-fit"; enabled: false; }
+                CheckBox { text: "Native look & feel"; }
+                CheckBox { text: "Always use advanced dialogs"; }
+                CheckBox { text: "Compact Display"; }
+            }
+
+            // `pnlEnhancedProcessing`: EtomoPanel, BoxLayout.Y_AXIS,
+            // EtchedBorder("Enhanced Local Processing").
+            BeveledBorder {
+                title: "Enhanced Local Processing";
+                // Each row is a BoxLayout.X_AXIS panel whose first element is
+                // Box.createHorizontalGlue(), so the widget is right-aligned.
+                HorizontalLayout {
+                    alignment: end;
+                    CheckBox { text: "Enable parallel processing"; }
+                }
+                LabeledTextField { label: "# of true CPU cores: "; text: ""; }
+                HorizontalLayout {
+                    alignment: end;
+                    CheckBox { text: "Enable graphics processing"; }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    LabeledTextField { label: "# of local GPUs: "; text: ""; }
+                }
+            }
+        }
+
+        // `panelDefaults`: SpacedPanel, BoxLayout.Y_AXIS, LEFT_ALIGNMENT,
+        // EtchedBorder("Defaults").
+        BeveledBorder {
+            title: "Defaults";
+            CheckBox { text: "Axis Type:  Single axis"; }
+            CheckBox { text: "Frame Type:  Montage"; }
+            CheckBox { text: "Start with Parallel processing off"; }
+            CheckBox { text: "Start with graphics card processing on"; }
+            CheckBox { text: "Default to removing excluded views"; }
+            CheckBox { text: "Angle Source:  Tilt angles in existing rawtlt file"; }
+            CheckBox { text: "Reorientation:  Swap Y and Z dimensions"; }
+            CheckBox { text: "Set pixel size from mdoc file or in file from FEI"; }
+        }
+
+        // `pnlTableSize`: EtomoPanel, BoxLayout.Y_AXIS,
+        // EtchedBorder("Table Sizes").
+        BeveledBorder {
+            title: "Table Sizes";
+            LabeledTextField { label: "Parallel table size: "; text: ""; }
+            LabeledTextField { label: "Join tables size: "; text: ""; }
+            LabeledTextField { label: "PEET table size: "; text: ""; }
+            LabeledTextField { label: "Batchruntomo table size: "; text: ""; }
+        }
+
+        // `ftfUserTemplateDir`: FileTextField2, DIRECTORIES_ONLY, absolute
+        // path, initialised to ConfigTool.getDefaultUserTemplateDir().
+        FileTextField { label: "User templates directory: "; text: ""; }
+
+        // `templatePanel`: TemplatePanel.getInstance(..., "Default Templates",
+        // ..., drawBorder=false).  Its `createPanel` adds three ComboBoxes
+        // separated by rigid areas; the border is drawn from the passed title
+        // only when drawBorder is true, which it is not here, so the group is
+        // untitled.
+        BeveledBorder {
+            title: "";
+            ComboBox { label: "Scope template:"; text: ""; }
+            ComboBox { label: "System template:"; text: ""; }
+            ComboBox { label: "User template:"; text: ""; }
+        }
+
+        // `panelButtons`: SpacedPanel, BoxLayout.X_AXIS, CENTER_ALIGNMENT.
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: center;
+            PlainButton { text: "Cancel"; }
+            PlainButton { text: "Apply"; }
+            PlainButton { text: "Done"; }
+        }
+    }
+}
+
+export component SettingsDialogWindow inherits Window {
+    // setTitle("Etomo Settings")
+    title: "Etomo Settings";
+    background: EtomoStyle.background;
+    preferred-width: 640px;
+    preferred-height: 760px;
+    SettingsDialog { }
+}

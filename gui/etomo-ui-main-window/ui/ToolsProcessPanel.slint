@@ -1,0 +1,38 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/ToolsProcessPanel.java`, an `AxisProcessPanel`
+// subclass.  It instantiates the base component from
+// `AxisProcessPanel.slint` with the flags its constructor passes to
+// `super`, and adds nothing to `panelProcessSelect`:
+//
+// `super(AxisID.ONLY, manager, true, true, InterfaceType.TOOLS, false,
+//  axisProgressPanel)` then `createProcessControlPanel()`, `showBothAxis()`
+//  and `initializePanels()` (`:28-34`).
+//
+// Overrides `showBothAxis()` (`:36-39`) to
+// `setBackground(Colors.getBackgroundTools())` — `new Color(173, 212, 224)`
+// "azure" (`Colors.java:217-227`).
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { AxisProcessPanel } from "AxisProcessPanel.slint";
+
+export component ToolsProcessPanel inherits Rectangle {
+    in property <color> panel-background: Colors.background-tools;
+    background: root.panel-background;
+    AxisProcessPanel {
+        width: 100%;
+        height: 100%;
+        axis-id: "ONLY";
+        panel-background: root.panel-background;
+        alt-parallel-loc: false;
+    }
+}
+
+export component ToolsProcessPanelWindow inherits Window {
+    title: "eTomo ToolsProcessPanel";
+    preferred-width: 700px;
+    preferred-height: 500px;
+    background: EtomoStyle.background;
+    ToolsProcessPanel { }
+}

@@ -1,0 +1,93 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainPanel.java`, the abstract base
+// that every per-manager main panel extends.
+//
+// The constructor (`:114-132`) puts `panelCenter` (a `BoxLayout.X_AXIS`) in
+// the CENTER of a `BorderLayout` and `pnlStatus` in the SOUTH.  `pnlStatus`
+// uses `createStatusBorderLayout()` (`:138-142`) — a `BorderLayout` with a 2px
+// horizontal gap — and holds `statusBar` in the WEST and `pnlBusyStatus` in
+// the EAST; `pnlBusyStatus` is itself a `BorderLayout` with `lBusyStatusA` in
+// the EAST.  `statusBar` is constructed with `STATUS_BAR_EMPTY_TITLE`
+// ("No data set loaded", `:40`, `:43`) and `lBusyStatusA.setEnabled(false)`
+// on line 118.
+//
+// `showProcessingPanel(AxisType)` (`:543-586`) fills `panelCenter`: one
+// `JScrollPane` around a `ScrollPanel` for a single axis, and for a dual axis
+// the same for A plus a second pair for B, ending in `setAxisA()` so only A is
+// in `panelCenter`.  `showAxisB()` (`:709-720`) swaps `scrollPaneB` in and
+// `lBusyStatusB` into the busy strip.  `showBothAxis()` (`:630-641`) does not
+// put both in `panelCenter` — it returns `scrollPaneB` for `MainFrame` to hand
+// to a `SubFrame`.  So exactly one axis is in `panelCenter` at a time, and the
+// axis panel a subclass builds arrives here as `@children`; a dual-axis
+// subclass puts both of its columns in that slot behind its own `if`.
+//
+// `setDividerLocation(double)` (`:226`) is an empty method: the `JSplitPane`
+// this class once used was removed upstream, so there is no divider to
+// translate.
+//
+// The subclass files (`MainTomogramPanel.slint`, `MainJoinPanel.slint`, …)
+// instantiate this component rather than copying its shape, which is how the
+// Java inheritance is expressed here.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors, ScrollPanel, BusyStatusLabel } from "MainWindowWidgets.slint";
+
+export component MainPanel inherits Rectangle {
+    // `statusBar` (`:43`), constructed with `STATUS_BAR_EMPTY_TITLE`.
+    // `setStatusBarText` (`:178-202`) replaces it at run time with
+    // `STATUS_BAR_BASE_TITLE` ("Data file: ", `:41`) plus the dataset path, or
+    // with "Data file: NOT SAVED" when there is no param file.
+    in property <string> status-bar-text: "No data set loaded";
+    // `axisType` (`:61`), `AxisType.NOT_SET` until `showProcessingPanel` sets it.
+    in property <string> axis-type: "NOT_SET";
+    // `showingAxisA` (`:59`) starts true, `showingBothAxis` (`:58`) false.
+    in property <bool> showing-axis-a: true;
+    in property <bool> showing-both-axis: false;
+    // `lBusyStatusA.setEnabled(false)` (`:118`); a `lBusyStatusB` created by
+    // `showAxisB` is disabled too (`:715-718`).
+    in property <bool> busy-status-enabled: false;
+    // The colour the axis panel paints itself, used for the scroll viewport
+    // behind it.
+    in property <color> panel-background: Colors.default-panel;
+
+    background: EtomoStyle.background;
+
+    VerticalLayout {
+        spacing: 0px;
+        // ---- panelCenter (`:44`, `BoxLayout.X_AXIS`), BorderLayout.CENTER (`:121-122`)
+        // The `JScrollPane` around `scrollA` / `scrollB`; unit and block
+        // increments 10 and 50 (`:625-627`).
+        ScrollPanel {
+            vertical-stretch: 1;
+            panel-background: root.panel-background;
+            @children
+        }
+
+        // ---- pnlStatus (`:123-128`), BorderLayout.SOUTH -------------------
+        Rectangle {
+            height: 22px;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                // `createStatusBorderLayout().setHgap(2)` (`:140`).
+                spacing: 2px;
+                // WEST: `statusBar`.
+                Text {
+                    text: root.status-bar-text;
+                    vertical-alignment: center;
+                    color: EtomoStyle.text;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // EAST: `pnlBusyStatus` (`:67`), itself a `BorderLayout` whose
+                // EAST is `lBusyStatusA` (`:130-131`).  `showAxisB` adds
+                // `lBusyStatusB` in its place (`:719`).
+                BusyStatusLabel { enabled: root.busy-status-enabled; }
+            }
+        }
+    }
+}

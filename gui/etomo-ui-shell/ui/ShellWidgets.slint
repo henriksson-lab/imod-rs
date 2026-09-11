@@ -1,0 +1,419 @@
+// Widgets these shell dialogs need that
+// `gui/etomo-ui-common/ui/widgets.slint` does not carry.  One component per
+// Swing widget class in `IMOD/Etomo/src/etomo/ui/swing`, named after the Java
+// class it stands for, in the same style as the common vocabulary.  Defined
+// here rather than in the common crate so nothing shared is disturbed.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `ComboBox` (`ComboBox.java`): `pnlRoot` is BoxLayout.X_AXIS holding a rigid
+// 2px gap, the JLabel, a rigid 3px gap, the JComboBox and a rigid 2px gap.
+export component ComboBox inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 130px;
+    in property <length> box-width: 200px;
+    alignment: start;
+    Rectangle { width: 2px; }
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle { width: 3px; }
+    Rectangle {
+        width: root.box-width;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        HorizontalLayout {
+            padding-left: 3px;
+            Text {
+                text: root.text;
+                vertical-alignment: center;
+                color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            }
+            Rectangle {
+                width: 16px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+    }
+    Rectangle { width: 2px; }
+}
+
+// `FileTextField` / `FileTextField2` (`FileTextField.java`,
+// `FileTextField2.java`): JLabel, text field, then the `SimpleButton` carrying
+// `ScaledImage.OPEN_FILE` (a folder icon).  No icon asset is vendored for this
+// crate, so the button shows the folder glyph as text.
+export component FileTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 160px;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text {
+            x: 3px;
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+    Rectangle {
+        width: EtomoStyle.field-height;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "📁"; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+// `javax.swing.JButton` as used directly by `SettingsDialog` for Cancel /
+// Apply / Done -- a plain single-line button, not eTomo's `MultiLineButton`.
+export component PlainButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height + 4px;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+}
+
+// `javax.swing.JList` inside a `JScrollPane`, as `SettingsDialog` uses for the
+// font-family list (SINGLE_SELECTION, visible row count 3).  Static rows.
+export component ScrollList inherits Rectangle {
+    in property <[string]> rows;
+    in property <int> selected: 0;
+    in property <int> visible-rows: 3;
+    height: EtomoStyle.field-height * root.visible-rows;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding: 1px;
+        VerticalLayout {
+            alignment: start;
+            for row[index] in root.rows: Rectangle {
+                height: EtomoStyle.field-height;
+                background: index == root.selected ? #b0c4de : EtomoStyle.field-background;
+                HorizontalLayout {
+                    padding-left: 3px;
+                    Text {
+                        text: row;
+                        vertical-alignment: center;
+                        color: EtomoStyle.text;
+                    }
+                }
+            }
+        }
+        // The JScrollPane's vertical bar.
+        Rectangle {
+            width: 14px;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+        }
+    }
+}
+
+// `Spinner` (`Spinner.java`) laid out horizontally with its label, as
+// `ParallelDialog` and `FilterFullVolumePanel` place it in an X_AXIS row.
+// Same shape as the common `LabeledSpinner`, but sized to its label instead of
+// a fixed 180px column.
+export component InlineSpinner inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        width: 60px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { x: 3px; text: root.text; vertical-alignment: center; color: EtomoStyle.text; }
+    }
+    Rectangle {
+        width: 14px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            Text { text: "^"; horizontal-alignment: center; }
+            Text { text: "v"; horizontal-alignment: center; }
+        }
+    }
+}
+
+// A `LabeledTextField` sized to its label rather than to the common widget's
+// fixed 180px label column, for the X_AXIS rows where Swing packs two or three
+// labelled fields side by side.
+export component InlineTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> field-width: 120px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        width: root.field-width;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text {
+            x: 3px;
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+}
+
+// `Label` (`Label.java`): eTomo's JLabel wrapper, with the enabled state its
+// `setEnabled` drives.
+export component Label inherits Text {
+    in property <bool> enabled: true;
+    color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    vertical-alignment: center;
+    font-size: EtomoStyle.font-size-pt * 1px;
+}
+
+// `Spinner` (`Spinner.java`) as built by `Spinner.getInstance(text, ...)`:
+// that factory passes `labeled = false` (`Spinner.java:165-177`) and the
+// constructor only creates the JLabel when `labeled` is true
+// (`Spinner.java:125-129`), so the text is a name for tooltips and UI tests,
+// not a drawn label.  The widget is the JSpinner alone.
+export component Spinner inherits HorizontalLayout {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> box-width: 50px;
+    alignment: start;
+    Rectangle {
+        width: root.box-width;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text {
+            x: 3px;
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+    Rectangle {
+        width: 14px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            Text { text: "^"; horizontal-alignment: center; }
+            Text { text: "v"; horizontal-alignment: center; }
+        }
+    }
+}
+
+// `TextField` (`TextField.java`): an unlabeled entry box.  Its owner sets the
+// drawn width with `setPreferredWidth`.
+export component TextField inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> editable: true;
+    width: 100px;
+    height: EtomoStyle.field-height;
+    background: root.editable ? EtomoStyle.field-background : EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        x: 3px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `TextArea` (`TextArea.java`) inside a `JScrollPane`.  `rows` and `columns`
+// are the JTextArea constructor arguments; the vertical scroll bar is drawn
+// beside it, as `ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS` asks for.
+export component TextArea inherits Rectangle {
+    in property <string> text;
+    in property <int> rows: 5;
+    in property <int> columns: 15;
+    in property <bool> editable: true;
+    height: EtomoStyle.field-height * root.rows;
+    width: root.columns * 8px + 14px;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding: 1px;
+        Rectangle {
+            background: root.editable ? EtomoStyle.field-background : EtomoStyle.panel;
+            Text {
+                x: 3px;
+                y: 3px;
+                text: root.text;
+                wrap: word-wrap;
+                color: EtomoStyle.text;
+            }
+        }
+        Rectangle {
+            width: 14px;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+        }
+    }
+}
+
+// `EtchedBorder` (`EtchedBorder.java`) and the untitled
+// `BorderFactory.createEtchedBorder()` group box.  Slint has no titled border,
+// so -- as elsewhere in this translation -- the title is the first row inside
+// the box, and an empty title draws no row at all.
+export component EtchedBorder inherits Rectangle {
+    in property <string> title;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        if root.title != "": Text {
+            text: root.title;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            font-weight: 700;
+            color: EtomoStyle.text;
+        }
+        @children
+    }
+}
+
+// `Ebutton` (`Ebutton.java`) in its icon-only forms.  The select-file
+// factories build the button with a null label (`Ebutton.java:185-224`) and
+// hand it `FileOpenButtonStyleExtension`, whose icon is
+// `ScaledImage.OPEN_FILE`, a folder; `getClearInstance` uses
+// `ClearButtonStyleExtension`, an eraser.  `ButtonStyleExtension.setup` sets
+// only the icon and the size, never the text, so these buttons carry no
+// caption.  No icon asset is vendored for this crate, so the glyph stands in
+// for the image, the same substitution `FileTextField` above makes.
+// `FixedDim.INLINE_SQUARE_SIZE` is 22 x 22.
+export component Ebutton inherits Rectangle {
+    in property <string> glyph: "📁";
+    in property <bool> enabled: true;
+    width: 22px;
+    height: 22px;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.glyph;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `SingleLineButton` (`SingleLineButton.java`): a one-line JButton, as
+// `GlobalExpandButton` uses for the dialog-level Advanced/Basic button.
+export component SingleLineButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height + 2px;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-weight: 700;
+        }
+    }
+}
+
+// `ButtonControlTextEfield` (`ButtonControlTextEfield.java`), which extends
+// `TextEfield`: the container holds the optional JLabel and the text field
+// (`TextEfield.java:73-98`), then the constructor appends the select-file
+// `Ebutton` and, when `includeClearButton` is set, the clear `Ebutton`
+// (`ButtonControlTextEfield.java:46-65`).  `getFileInstance` passes
+// `useLabelComponent = false`, so those instances draw no label;
+// `getLabeledFileInstance` passes true.
+export component ButtonControlTextEfield inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> clear-button: true;
+    in property <length> field-width: 200px;
+    spacing: 2px;
+    alignment: start;
+    if root.label != "": Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        width: root.field-width;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text {
+            x: 3px;
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+    Ebutton { glyph: "📁"; enabled: root.enabled; }
+    if root.clear-button: Ebutton { glyph: "🧽"; enabled: root.enabled; }
+}

@@ -1,0 +1,12 @@
+// Re-export point so `build.rs` compiles the three dialogs in one pass.
+// One file per Swing dialog class in `IMOD/Etomo/src/etomo/ui/swing`.
+
+import { SetupDialog, SetupDialogWindow } from "SetupDialog.slint";
+import { PreProcessingDialog, PreProcessingDialogWindow } from "PreProcessingDialog.slint";
+import { CoarseAlignDialog, CoarseAlignDialogWindow } from "CoarseAlignDialog.slint";
+
+export {
+    SetupDialog, SetupDialogWindow,
+    PreProcessingDialog, PreProcessingDialogWindow,
+    CoarseAlignDialog, CoarseAlignDialogWindow,
+}

@@ -1,0 +1,90 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/PeetStartupDialog.java`.
+//
+// Appearance only.  The Java is a modal `JDialog` titled "Starting PEET"
+// (NAME, PeetStartupDialog.java:41) whose root panel is a Y-axis `BoxLayout`
+// holding, in order: a 20px rigid area, the two-line label panel, a 20px rigid
+// area, the three-row data panel, a 40px rigid area, the button panel and the
+// status panel (createPanel, PeetStartupDialog.java:104-149).
+
+import { EtomoStyle, MultiLineButton, CheckBox, LabeledTextField }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { FileTextField, PlainLabel } from "EtomoTables.slint";
+
+export component PeetStartupDialog inherits Rectangle {
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        // pnlRoot: Box.createRigidArea(FixedDim.x0_y20)
+        Rectangle { height: 20px; }
+        // pnlLabelX / pnlLabel: GridLayout(2, 1), indented by FixedDim.x15_y0.
+        HorizontalLayout {
+            Rectangle { width: 15px; }
+            VerticalLayout {
+                PlainLabel { text: "Each PEET project must reside in its own directory."; }
+                PlainLabel { text: "Please choose a directory and a base name for output files."; }
+            }
+        }
+        Rectangle { height: 20px; }
+        // pnlDataX / pnlData: GridLayout(3, 1, 0, 15), indented by FixedDim.x15_y0.
+        HorizontalLayout {
+            Rectangle { width: 15px; }
+            VerticalLayout {
+                spacing: 15px;
+                // pnlDirectory: ftfDirectory, DIRECTORIES_ONLY, adjusted field width 175.
+                HorizontalLayout {
+                    alignment: start;
+                    FileTextField {
+                        label: "Directory: ";
+                        field-width: 175px;
+                        text: "";
+                    }
+                }
+                // pnlCopyFrom: cbCopyFrom then the unlabeled ftfCopyFrom
+                // (adjusted field width 225).  ftfCopyFrom is disabled until
+                // the check box is selected (updateDisplay, line 268).
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: EtomoStyle.gap;
+                    CheckBox { text: "Copy project from "; checked: false; }
+                    FileTextField { label: ""; field-width: 225px; text: ""; enabled: false; }
+                }
+                // ltfBaseName, preferred width 125.
+                HorizontalLayout {
+                    alignment: start;
+                    LabeledTextField {
+                        label: "Base name: ";
+                        label-width: 80px;
+                        text: "";
+                        width: 205px;
+                    }
+                }
+            }
+        }
+        Rectangle { height: 40px; }
+        // pnlButtons: 200px rigid area, OK, 15px, Cancel, 40px.
+        HorizontalLayout {
+            alignment: start;
+            Rectangle { width: 200px; }
+            MultiLineButton { text: "OK"; width: 70px; }
+            Rectangle { width: 15px; }
+            MultiLineButton { text: "Cancel"; width: 70px; }
+            Rectangle { width: 40px; }
+        }
+        // pnlStatus: BusyStatusPanel added BorderLayout.EAST.  The Swing label
+        // carries the "busy.png" ImageIcon (BusyStatusPanel.java:27); there is
+        // no icon asset in this crate, so an empty right-aligned strip of the
+        // same height stands in for it.
+        HorizontalLayout {
+            alignment: end;
+            Rectangle { width: 16px; height: 16px; }
+        }
+    }
+}
+
+export component PeetStartupDialogWindow inherits Window {
+    title: "Starting PEET";
+    background: EtomoStyle.background;
+    preferred-width: 640px;
+    preferred-height: 320px;
+    PeetStartupDialog { }
+}

@@ -1,0 +1,173 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/CoarseAlignDialog.java`.
+//
+// One bevelled "Coarse Alignment" box holding, in order: the cross-correlation
+// instance of `TiltxcorrPanel.java`, the montage-only "Fix Edges" box,
+// `PrenewstPanel.java`, the fiducialess row, the Midas binning spinner and the
+// Midas button.  Both embedded panel classes are translated inline here, in
+// the place `CoarseAlignDialog` adds them.  The exit-button row comes from
+// `ProcessDialog.java`; this dialog renames `btnExecute` to "Done".
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import {
+    EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, LabeledSpinner,
+    CheckBox, MultiLineButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, CheckTextField } from "widgets_local.slint";
+
+export component CoarseAlignDialog inherits Rectangle {
+    // `metaData.getViewType() == ViewType.MONTAGE` selects the "Fix Edges" box
+    // and renames the Prenewst panel header from "Newstack" to "Blendmont";
+    // it also drops the byte/float check boxes and the antialias check box.
+    // A static property here, since this crate carries no metadata.
+    in property <bool> montage: false;
+
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: 10px;
+
+        BeveledBorder {
+            title: "Coarse Alignment";
+            VerticalLayout {
+                spacing: 10px;
+
+                // ---- TiltxcorrPanel, PanelId.CROSS_CORRELATION ------------
+                // An untitled etched border holding the "Tiltxcorr" panel
+                // header above `pnlBody`.
+                EtchedBorder {
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        PanelHeader { title: "Tiltxcorr"; }
+                        Rectangle { height: 5px; }
+                        // `pnlAdvanced`
+                        VerticalLayout {
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Tilt angle offset: "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "Low frequency rolloff sigma: "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "High frequency cutoff radius: "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "High frequency rolloff sigma: "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "Pixels to trim (x,y): "; label-width: 230px; text: ""; }
+                            // `pnlXMinAndMax`, a BoxLayout.X_AXIS row.
+                            HorizontalLayout {
+                                spacing: 5px;
+                                alignment: start;
+                                LabeledTextField { label: "X axis min "; label-width: 80px; width: 180px; text: ""; }
+                                LabeledTextField { label: "Max "; label-width: 40px; width: 140px; text: ""; }
+                            }
+                            // `pnlYMinAndMax`
+                            HorizontalLayout {
+                                spacing: 5px;
+                                alignment: start;
+                                LabeledTextField { label: "Y axis min "; label-width: 80px; width: 180px; text: ""; }
+                                LabeledTextField { label: "Max "; label-width: 40px; width: 140px; text: ""; }
+                            }
+                            LabeledTextField { label: "Pixels to pad (x,y): "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "Pixels to taper (x,y): "; label-width: 230px; text: ""; }
+                        }
+                        // `ctfMagChanges`, built for every panel id except
+                        // PATCH_TRACKING.
+                        CheckTextField { text: "Find mag change at view(s):"; field-text: ""; }
+                        // `pnlAdvanced2`
+                        VerticalLayout {
+                            spacing: EtomoStyle.gap;
+                            CheckBox { text: "Cumulative correlation"; }
+                            CheckBox { text: "Absolute Cosine Stretch"; }
+                            CheckBox { text: "No Cosine Stretch"; }
+                            CheckBox { text: "Exclude central peak due to fixed pattern noise"; }
+                            LabeledTextField { label: "Test output: "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "View range (start,end): "; label-width: 230px; text: ""; }
+                            LabeledTextField { label: "Views to skip: "; label-width: 230px; text: ""; }
+                        }
+                        Rectangle { height: 5px; }
+                        // `btnTiltxcorr`, from
+                        // `ProcessResultDisplayFactory.coarseTiltxcorr`.
+                        HorizontalLayout {
+                            alignment: center;
+                            MultiLineButton { text: "Calculate Cross-Correlation"; width: 240px; }
+                        }
+                        Rectangle { height: 5px; }
+                    }
+                }
+
+                // ---- Fix Edges, montage view type only --------------------
+                if root.montage: EtchedBorder {
+                    title: "Fix Edges";
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        // Disabled unless `metaData.isDistortionCorrection()`.
+                        MultiLineButton { text: "Make Distortion Corrected Stack"; enabled: false; }
+                        MultiLineButton { text: "Fix Edges With Midas"; }
+                    }
+                }
+
+                // ---- PrenewstPanel ---------------------------------------
+                EtchedBorder {
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        PanelHeader { title: root.montage ? "Blendmont" : "Newstack"; }
+                        // `pnlBody`
+                        LabeledSpinner {
+                            label: "Coarse aligned image stack binning ";
+                            label-width: 250px;
+                            text: "1";
+                        }
+                        // Non-montage only; disabled until binning > 1.
+                        if !root.montage: CheckBox {
+                            text: "Reduce size with antialiasing filter";
+                            enabled: false;
+                        }
+                        // `pnlCheckBoxes`, non-montage only.
+                        if !root.montage: VerticalLayout {
+                            spacing: EtomoStyle.gap;
+                            CheckBox { text: "Convert to bytes"; }
+                            CheckBox { text: "Float intensities to mean"; }
+                        }
+                        // `pnlButtons`.  The first label comes from
+                        // `ProcessResultDisplayFactory.coarseAlign`.
+                        HorizontalLayout {
+                            spacing: 20px;
+                            alignment: center;
+                            MultiLineButton { text: "Generate Coarse Aligned Stack"; width: 240px; }
+                            MultiLineButton { text: "View Aligned Stack In 3dmod"; width: 240px; }
+                        }
+                    }
+                }
+
+                // ---- pnlFiducialess --------------------------------------
+                VerticalLayout {
+                    spacing: EtomoStyle.gap;
+                    CheckBox { text: "Coarse alignment only"; }
+                    LabeledTextField { label: "Tilt axis rotation:"; label-width: 150px; text: ""; }
+                }
+
+                // `spMidasBinning`, a `Spinner` with range 1..8.
+                LabeledSpinner { label: "Binning in Midas: "; label-width: 150px; text: "1"; }
+
+                // `btnMidas`, from `ProcessResultDisplayFactory.midas`.
+                HorizontalLayout {
+                    alignment: center;
+                    MultiLineButton { text: "Fix Alignment With Midas"; width: 240px; }
+                }
+            }
+        }
+
+        // ---- pnlExitButtons (ProcessDialog.java) -------------------------
+        HorizontalLayout {
+            spacing: 20px;
+            alignment: center;
+            MultiLineButton { text: "Cancel"; width: 120px; }
+            MultiLineButton { text: "Postpone"; width: 120px; }
+            MultiLineButton { text: "Done"; width: 120px; }
+            MultiLineButton { text: "Advanced"; width: 120px; }
+        }
+    }
+}
+
+export component CoarseAlignDialogWindow inherits Window {
+    title: "eTomo Coarse Alignment";
+    preferred-width: 720px;
+    preferred-height: 900px;
+    background: EtomoStyle.background;
+    CoarseAlignDialog { }
+}

@@ -1,0 +1,23 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/UtilitiesDialog.java`.
+//
+// The upstream class is an empty stub: a package-private `final class
+// UtilitiesDialog` whose only member is `public static final String rcsid`.
+// It builds no panel, declares no widget and is referenced nowhere, so there
+// is no appearance to reproduce.  The component below is the same empty shell
+// -- an unpopulated panel -- kept so that every named Java dialog in this
+// batch has a same-named .slint file.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+export component UtilitiesDialog inherits Rectangle {
+    background: EtomoStyle.background;
+    // No children: `UtilitiesDialog.java` declares none.
+}
+
+export component UtilitiesDialogWindow inherits Window {
+    title: "Utilities";
+    background: EtomoStyle.background;
+    preferred-width: 320px;
+    preferred-height: 120px;
+    UtilitiesDialog { }
+}

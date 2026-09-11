@@ -1,0 +1,188 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/FlattenVolumePanel.java`, the tool
+// panel `ToolsDialog` builds for `ToolType.FLATTEN_VOLUME`
+// (`ToolsDialog.java:69-71`, via `getToolsInstance`).
+//
+// `createPanel()` (`:172-243`):
+//   pnlRoot = SpacedPanel, Y_AXIS, BeveledBorder("Flatten Volume"),
+//             Box.CENTER_ALIGNMENT
+//     pnlInputFile     -- only when panelId == PanelId.POST_FLATTEN_VOLUME
+//     ftfInputFile     -- only when panelId == PanelId.TOOLS_FLATTEN_VOLUME
+//     pnlFlattenWarp
+//     pnlInterpolationOrder
+//     ltfOutputSizeZ
+//     ftfTemporaryDirectory
+//     pnlFlatten
+//
+// The panel has two constructors and the input-file row is the only place they
+// differ (`:193-198` and `:201-208`): the ApplicationManager constructor sets
+// `panelId = PanelId.POST_FLATTEN_VOLUME` (`:106`) and gets the "Set Input
+// File" radio group; the ToolsManager constructor sets
+// `PanelId.TOOLS_FLATTEN_VOLUME` (`:120`) and gets the `ftfInputFile` file
+// field instead.  Both branches are drawn, selected by `post-instance`, which
+// defaults to false -- the ToolsManager branch, since `ToolsDialog` is what
+// instantiates this file.
+//
+// Two further widget classes are expanded inline below, each at the point the
+// Java adds it:
+//   * `BinnedXY3dmodButton` (`BinnedXY3dmodButton.java:63-97`) for
+//     `btnMakeSurfaceModel`.
+//   * `SmoothingAssessmentPanel` (`SmoothingAssessmentPanel.java:125-144`) for
+//     `smoothingAssessmentPanel`.
+//
+// Construction-time state: `rbInputFileTrimVol.setSelected(true)` (`:180`),
+// `ftfInputFile.setFieldEditable(false)` (`:183`).  No text field is given a
+// default except the smoothing-assessment list, which takes
+// `FlattenWarpParam.LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT` = "1,1.5,2,2.5,3"
+// (`FlattenWarpParam.java:58`); the rest are filled by `setParameters` at run
+// time and are empty here.
+//
+// Button captions are the same in both branches: the POST branch takes them
+// from `ProcessResultDisplayFactory`, which builds them from this class's own
+// `FLATTEN_LABEL` / `FLATTEN_WARP_LABEL` and from
+// `SmoothingAssessmentPanel.FLATTEN_WARP_LABEL`
+// (`ProcessResultDisplayFactory.java:178-187`), and the TOOLS branch uses
+// those same constants directly (`:121-123`).
+//
+// Slint has no titled border, so a `BeveledBorder`/`EtchedBorder` title is the
+// first row inside the box.
+
+import {
+    EtomoStyle,
+    BeveledBorder,
+    CheckBox,
+    LabeledTextField,
+    MultiLineButton,
+    RadioButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    EtchedBorder,
+    FileTextField,
+    InlineSpinner,
+    InlineTextField,
+    Label,
+} from "ShellWidgets.slint";
+
+export component FlattenVolumePanel inherits VerticalLayout {
+    // Which constructor built the panel.  False is `PanelId.TOOLS_FLATTEN_VOLUME`
+    // (`FlattenVolumePanel.java:113-124`), the one `ToolsDialog` uses; true is
+    // `PanelId.POST_FLATTEN_VOLUME` (`:100-111`), used by
+    // `PostProcessingDialog`.
+    in property <bool> post-instance: false;
+    alignment: start;
+
+    // `pnlRoot`: SpacedPanel, Y_AXIS, BeveledBorder("Flatten Volume").
+    BeveledBorder {
+        title: "Flatten Volume";
+
+        // `pnlInputFile`: Y_AXIS, BeveledBorder("Set Input File"),
+        // CENTER_ALIGNMENT -- POST_FLATTEN_VOLUME only (`:193-199`).
+        if root.post-instance: BeveledBorder {
+            title: "Set Input File";
+            RadioButton { text: "Flatten the trimvol output"; selected: true; }
+            RadioButton { text: "Flatten the reducefiltvol output"; selected: false; }
+        }
+
+        // `ftfInputFile` = new FileTextField("Input file:"), field not
+        // editable (`:183`) -- TOOLS_FLATTEN_VOLUME only (`:196-198`).
+        if !root.post-instance: FileTextField {
+            label: "Input file:";
+            text: "";
+        }
+
+        // `pnlFlattenWarp`: SpacedPanel, Y_AXIS, CENTER_ALIGNMENT.
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+
+            // `btnMakeSurfaceModel.getContainer()` --
+            // `BinnedXY3dmodButton.java:68-96`: an X_AXIS panel of three
+            // horizontal glues, an etched-bordered SpacedPanel, and three more
+            // glues.  The border panel holds a spinner row and a button row.
+            HorizontalLayout {
+                alignment: center;
+                EtchedBorder {
+                    // `spinnerPanel`: X_AXIS -- spBinningXY then the label.
+                    HorizontalLayout {
+                        alignment: start;
+                        // LabeledSpinner.getInstance("Open binned by ", 1, 1, 50, 1)
+                        InlineSpinner { label: "Open binned by "; text: "1"; }
+                        Label { text: " in X and Y"; }
+                    }
+                    // `pnlButtons`: X_AXIS -- the Run3dmodButton.
+                    HorizontalLayout {
+                        alignment: start;
+                        MultiLineButton { text: "Make Surface Model"; width: 180px; }
+                    }
+                }
+            }
+
+            // `pnlOneSurface`: Y_AXIS -- the check box then a horizontal glue.
+            VerticalLayout {
+                alignment: start;
+                CheckBox { text: "Contours are all on one surface"; checked: false; }
+            }
+
+            // `pnlWarpSpacing`: X_AXIS -- the two spacing fields.
+            HorizontalLayout {
+                alignment: start;
+                InlineTextField { label: "Spacing in X: "; text: ""; }
+                InlineTextField { label: " and Y: "; text: ""; }
+            }
+
+            // `smoothingAssessmentPanel.getComponent()` --
+            // `SmoothingAssessmentPanel.java:125-144`: pnlRoot is a SpacedPanel,
+            // Y_AXIS, EtchedBorder("Smoothing Assessment"), holding the
+            // smoothing-factor list, a rigid FixedDim.x0_y5, and a button row.
+            EtchedBorder {
+                title: "Smoothing Assessment";
+                LabeledTextField {
+                    label: "Smoothing factors to try: ";
+                    // FlattenWarpParam.LAMBDA_FOR_SMOOTHING_ASSESSMENT_DEFAULT
+                    text: "1,1.5,2,2.5,3";
+                }
+                // `Box.createRigidArea(FixedDim.x0_y5)`.
+                Rectangle { height: 5px; }
+                // `pnlButtons`: X_AXIS -- btnFlattenWarp, rigid
+                // FixedDim.x5_y0, btn3dmod.
+                HorizontalLayout {
+                    alignment: start;
+                    MultiLineButton {
+                        text: "Run Flattenwarp to Assess Smoothing";
+                        width: 280px;
+                    }
+                    Rectangle { width: 5px; }
+                    MultiLineButton { text: "Open Assessment in 3dmod"; width: 210px; }
+                }
+            }
+
+            // `ltfLambdaForSmoothing` = LAMBDA_FOR_SMOOTHING_LABEL + ": ".
+            LabeledTextField { label: "Smoothing factor: "; text: ""; }
+
+            // `pnlFlattenWarpButtons`: Y_AXIS -- btnFlattenWarp.
+            VerticalLayout {
+                alignment: start;
+                MultiLineButton { text: "Run Flattenwarp"; width: 180px; }
+            }
+        }
+
+        // `pnlInterpolationOrder`: X_AXIS -- the check box then a glue.
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Linear interpolation"; checked: false; }
+        }
+
+        // `ltfOutputSizeZ` = OUTPUT_SIZE_Z_LABEL + ": ".
+        LabeledTextField { label: "Output thickness in Z: "; text: ""; }
+
+        // `ftfTemporaryDirectory` = new FileTextField("Temporary directory:").
+        FileTextField { label: "Temporary directory:"; text: ""; }
+
+        // `pnlFlatten`: SpacedPanel, X_AXIS, CENTER_ALIGNMENT.
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            MultiLineButton { text: "Flatten"; width: 120px; }
+            MultiLineButton { text: "Open Flattened Tomogram"; width: 210px; }
+        }
+    }
+}

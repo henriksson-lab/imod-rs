@@ -1,0 +1,13 @@
+// Single compilation entry point for this crate's dialogs; `build.rs` compiles
+// this file and `slint::include_modules!()` re-exports everything named here.
+//
+// Each dialog mirrors the Swing class of the same base name under
+// `IMOD/Etomo/src/etomo/ui/swing`.
+
+export { JoinDialog, JoinDialogWindow, JoinSetupTab, JoinAlignTab, JoinJoinTab,
+         JoinModelTab, JoinRejoinTab, SectionTableSetup, SectionTableAlign,
+         SectionTableJoin, BoundaryTableModel, BoundaryTableRejoin }
+    from "JoinDialog.slint";
+export { PeetDialog, PeetDialogWindow, PeetSetupTab, PeetRunTab, PeetMoreOptionsTab }
+    from "PeetDialog.slint";
+export { PeetStartupDialog, PeetStartupDialogWindow } from "PeetStartupDialog.slint";

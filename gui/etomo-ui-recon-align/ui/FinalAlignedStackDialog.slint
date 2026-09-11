@@ -1,0 +1,213 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/FinalAlignedStackDialog.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, CheckBox,
+         RadioButton, MultiLineButton, TabbedPane }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, TextField, SimpleButton, FileTextField,
+         ExitButtons } from "widgets_local.slint";
+import { NewstackOrBlendmontPanel } from "NewstackOrBlendmontPanel.slint";
+import { CpuGpuPanel } from "CpuGpuPanel.slint";
+import { EraseGoldPanel } from "EraseGoldPanel.slint";
+
+export component FinalAlignedStackDialog inherits VerticalLayout {
+    // `FinalAlignedStackDialog.Tab`: 0 NEWST, 1 CTF_CORRECTION, 2 CCD_ERASER,
+    // 3 MTF_FILTER.  `changeTab()` moves the body panel into the selected tab.
+    in property <int> tab: 0;
+    // `ctfCorrectionHeader.setOpen(false)` at the end of
+    // `layoutCtfCorrectionPanel()`; the body is shown here so the source
+    // layout is visible.
+    in property <bool> ctf-correction-open: true;
+    in property <bool> filter-open: true;
+    // `ViewType.MONTAGE` selects `BlendmontPanel` over `NewstackPanel` for the
+    // Create tab (`FinalAlignedStackDialog.java:241-247`).
+    in property <bool> montage: false;
+
+    spacing: EtomoStyle.gap;
+
+    // `rootPanel`, bordered with `new BeveledBorder("Final Aligned Stack")`.
+    BeveledBorder {
+        title: "Final Aligned Stack";
+
+        TabbedPane {
+            // Tab order follows the constructor's `layoutNewstPanel()`,
+            // `layoutCtfCorrectionPanel()`, `layoutCcdEraser()`,
+            // `layoutFilterPanel()`.
+            tabs: ["Create", "Correct CTF", "Erase Gold", "2D Filter"];
+            current: root.tab;
+
+            // ---- Tab.NEWST ----
+            // `layoutNewstPanel()` (`FinalAlignedStackDialog.java:905-910`)
+            // adds nothing but `newstackOrBlendmontPanel.getComponent()`;
+            // `:241-247` picks `BlendmontPanel` for a montage dataset and
+            // `NewstackPanel` otherwise.
+            if root.tab == 0: NewstackOrBlendmontPanel { montage: root.montage; }
+
+            // ---- Tab.CTF_CORRECTION: `ctfCorrectionMainPanel` ----
+            if root.tab == 1: Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: EtomoStyle.inset;
+                    spacing: EtomoStyle.gap;
+                    PanelHeader { title: "CTF Correction"; open: root.ctf-correction-open; }
+                    if root.ctf-correction-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        LabeledTextField { label: "Voltage (KV): "; text: "300"; label-width: 260px; }
+                        LabeledTextField { label: "Spherical Aberration (mm): "; text: "2.0"; label-width: 260px; }
+                        LabeledTextField { label: "Amplitude contrast: "; text: "0.07"; label-width: 260px; }
+                        CheckBox { text: "Invert sign of tilt angles"; }
+                        // `ctfPlotterPanel`
+                        EtchedBorder {
+                            title: "CTF Plotter";
+                            FileTextField { label: "Config file: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Defocus range to scan (low, high in microns): "; text: ""; label-width: 300px; }
+                            LabeledTextField { label: "Expected defocus (microns): "; text: ""; label-width: 300px; }
+                            LabeledTextField { label: "Expected phase shift (degrees): "; text: ""; label-width: 300px; }
+                            LabeledTextField { label: "Offset to add to image values: "; text: ""; label-width: 300px; }
+                            MultiLineButton { text: "Run CTF Plotter"; }
+                        }
+                        // `ctfCorrectionPanel`
+                        EtchedBorder {
+                            title: "CTF Correction";
+                            CheckBox { text: "Use expected defocus instead of ctfplotter output"; }
+                            // `cpuGpuPanel`, built with
+                            // `CpuGpuPanel.getInstance(appMgr, axisID,
+                            // PanelId.CTF_PHASE_FLIP, -1, false,
+                            // BoxLayout.X_AXIS)` (`:239-240`) — no recommended
+                            // GPU or CPU counts, X layout.
+                            CpuGpuPanel { horizontal: true; }
+                            LabeledTextField { label: "Interpolation width (pixels): "; text: ""; label-width: 260px; }
+                            // `pnlCtfPhaseFlipXAxisTilt`
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                CheckBox { text: "Correct for X axis tilt of"; }
+                                TextField { text: ""; enabled: false; field-width: 70px; }
+                                Text { text: " (takes much longer)"; vertical-alignment: center; }
+                            }
+                            // `pnlScaleByCtfPower`
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                CheckBox { text: "Scale by CTF to the power:"; }
+                                TextField { text: ""; enabled: false; field-width: 70px; }
+                            }
+                            LabeledTextField { label: "Defocus tolerance (nm): "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Minimum zero spacing in strip FFTs:"; text: ""; label-width: 260px; }
+                            // `pnlCtf3dCorrectCtf`; `lCtf3dCorrectCtf` starts
+                            // invisible (`setVisible(false)`) and is drawn in
+                            // `ProcessControlPanel.colorComplete` when shown.
+                            // `buttonPanel`
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: center;
+                                MultiLineButton { text: "Correct CTF"; width: 160px; }
+                                MultiLineButton { text: "View CTF Correction"; width: 160px; }
+                                MultiLineButton { text: "Use CTF Correction"; width: 160px; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- Tab.CCD_ERASER ----
+            // `eraseGoldPanel.getComponent()`, built at `:237-238`.
+            if root.tab == 2: EraseGoldPanel { }
+
+            // ---- Tab.MTF_FILTER: `filterPanel` ----
+            if root.tab == 3: Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: EtomoStyle.inset;
+                    spacing: EtomoStyle.gap;
+                    PanelHeader { title: "2D Filtering (optional)"; open: root.filter-open; }
+                    if root.filter-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        CheckBox { text: "Apply dose weighting"; }
+                        // `pnlUniformFiltering`
+                        EtchedBorder {
+                            title: "Uniform Filtering";
+                            LabeledTextField { label: "Low pass (cutoff,sigma): "; text: ""; label-width: 220px; }
+                            // `inverseParamsPanel`
+                            EtchedBorder {
+                                title: "Inverse Filtering Parameters: ";
+                                // `mtfFilePanel`
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    LabeledTextField { label: "MTF file: "; text: ""; label-width: 220px; }
+                                    SimpleButton { }
+                                }
+                                // `inversePanel`
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    alignment: start;
+                                    LabeledTextField { label: "Maximum Inverse: "; text: ""; label-width: 140px; }
+                                    LabeledTextField { label: "Rolloff (radius,sigma): "; text: ""; label-width: 160px; }
+                                }
+                            }
+                        }
+                        // `pnlDoseWeighting`
+                        EtchedBorder {
+                            title: "Dose Weighting";
+                            // `pnlFixedImageDose`
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                CheckBox { text: "No dose file; use fixed dose per image: "; }
+                                TextField { text: ""; field-width: 70px; }
+                                Text { text: " e/sq A"; vertical-alignment: center; }
+                            }
+                            // `pnlGlueTypeOfDoseFile` centres `pnlTypeOfDoseFile`.
+                            HorizontalLayout {
+                                alignment: center;
+                                EtchedBorder {
+                                    title: "Type of Dose File";
+                                    RadioButton { text: "Metadata in .mdoc file"; selected: true; }
+                                    RadioButton { text: "Dose for each image"; }
+                                    RadioButton { text: "Prior dose and dose of image"; }
+                                    RadioButton { text: "Cumulative dose before and after image"; }
+                                }
+                            }
+                            FileTextField { label: "Dose information file: "; text: ""; label-width: 220px; }
+                            CheckBox { text: "Microscope voltage is 200 KV"; }
+                            LabeledTextField { label: "Optimal dose scaling"; text: ""; label-width: 300px; }
+                            // `tfBidirectionalNumViews`'s Java label carries a
+                            // leading newline so Swing's HTML label wraps it
+                            // onto its own line; there is no equivalent here.
+                            LabeledTextField { label: "# of views in first half of bidirectional series"; text: ""; label-width: 300px; }
+                        }
+                        LabeledTextField { label: "Starting and ending views: "; text: ""; label-width: 220px; }
+                        // `pnlCtf3d2dFilter`; `lCtf3d2dFilter1`/`2` start
+                        // invisible (`setVisible(false)`).
+                        // `buttonPanel`
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            MultiLineButton { text: "Filter"; width: 160px; }
+                            MultiLineButton { text: "View Filtered Stack"; width: 160px; }
+                            MultiLineButton { text: "Use Filtered Stack"; width: 160px; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // `ProcessDialog.addExitButtons()`.  `btnExecute.setText("Done")`.
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component FinalAlignedStackDialogWindow inherits Window {
+    title: "Final Aligned Stack";
+    background: EtomoStyle.background;
+    preferred-width: 760px;
+    preferred-height: 820px;
+    VerticalLayout {
+        FinalAlignedStackDialog { }
+    }
+}

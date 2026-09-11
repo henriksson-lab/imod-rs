@@ -1,0 +1,214 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/FiducialModelDialog.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, BeveledBorder, LabeledTextField, CheckBox, RadioButton,
+         MultiLineButton, TabbedPane } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, RadioTextField, CheckBoxSpinner,
+         ExitButtons } from "widgets_local.slint";
+import { BeadtrackPanel } from "BeadtrackPanel.slint";
+import { TransferfidPanel } from "TransferfidPanel.slint";
+import { TiltxcorrPanel } from "TiltxcorrPanel.slint";
+import { RaptorPanel } from "RaptorPanel.slint";
+
+export component FiducialModelDialog inherits VerticalLayout {
+    // `TrackingMethod`: 0 SEED, 1 PATCH_TRACKING, 2 RAPTOR.  `updateMethod()`
+    // swaps `pnlMethodArray[curMethodIndex]` into `pnlMain`.
+    in property <int> method: 0;
+    // `SeedAndTrackTab`: 0 SEED, 1 TRACK.
+    in property <int> seed-and-track-tab: 0;
+    // `SeedModelEnumeratedType`: 0 MANUAL, 1 AUTO, 2 TRANSFER.  `updateEnabled()`
+    // falls back to AUTO when the other axis has nothing to transfer.
+    in property <int> seed-model: 1;
+    // `RunRaptorTab`: 0 RAPTOR, 1 TRACK.
+    in property <int> run-raptor-tab: 0;
+    // `updateAdvanced(advanced)` hides a set of fields in basic mode.  Shown
+    // here so the full source layout is visible.
+    in property <bool> advanced: true;
+
+    spacing: EtomoStyle.gap;
+
+    // `rootPanel`, bordered with `new BeveledBorder("Fiducial Model Generation")`.
+    BeveledBorder {
+        title: "Fiducial Model Generation";
+
+        // `pnlMethodX` centres `pnlMethod`, an untitled etched radio box.
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: EtomoStyle.inset;
+                    RadioButton { text: "Make seed and track"; selected: root.method == 0; }
+                    RadioButton { text: "Use patch tracking to make fiducial model"; selected: root.method == 1; }
+                    RadioButton { text: "Run RAPTOR and fix"; selected: root.method == 2; }
+                }
+            }
+        }
+
+        // ---- TrackingMethod.SEED: `tpSeedAndTrack` ----
+        if root.method == 0: TabbedPane {
+            tabs: ["Seed Model", "Track Beads"];
+            current: root.seed-and-track-tab;
+
+            // `SeedAndTrackTab.SEED`
+            if root.seed-and-track-tab == 0: VerticalLayout {
+                spacing: EtomoStyle.gap;
+                padding: EtomoStyle.inset;
+                // `pnlSeedModelX` centres `pnlSeedModel`, an untitled etched
+                // radio box.  `rbSeedModelAuto`'s text is
+                // AUTOFIDSEED_NEW_MODEL_TITLE until `cbAppendToSeedModel` is
+                // set, when `updateDisplay()` swaps in
+                // AUTOFIDSEED_APPEND_TITLE ("Add points to seed model
+                // automatically").
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        background: EtomoStyle.panel;
+                        border-width: 1px;
+                        border-color: EtomoStyle.border;
+                        VerticalLayout {
+                            padding: EtomoStyle.inset;
+                            RadioButton { text: "Make seed model manually"; selected: root.seed-model == 0; }
+                            RadioButton { text: "Generate seed model automatically"; selected: root.seed-model == 1; }
+                            RadioButton { text: "Transfer seed model from the other axis"; selected: root.seed-model == 2; enabled: false; }
+                        }
+                    }
+                }
+
+                // `pnlManualSeedModel`
+                if root.seed-model == 0: VerticalLayout {
+                    spacing: 5px;
+                    // `pnlSeed`.  `updateDisplay()` shows SEEDING_DONE_LABEL
+                    // ("View Seed Model") once seeding is done.
+                    HorizontalLayout {
+                        alignment: center;
+                        MultiLineButton { text: "Seed Fiducial Model"; width: 200px; }
+                    }
+                    EtchedBorder {
+                        title: "Find shifts near zero tilt";
+                        LabeledTextField { label: "Estimated number of beads in sample"; text: ""; label-width: 240px; }
+                        HorizontalLayout {
+                            alignment: center;
+                            MultiLineButton { text: "Run Autofidseed to Find Shifts"; width: 220px; }
+                        }
+                    }
+                }
+
+                // `pnlAutoSeedModel`: the shared beadtrack panel, then
+                // `pnlAutofidseed`.
+                if root.seed-model == 1: VerticalLayout {
+                    spacing: EtomoStyle.gap;
+                    // `pnlBeadtrack.getContainer()`, put into
+                    // `pnlAutoSeedModel` by `updateSeedModel()` with
+                    // `updateAutofidseed(true)` (`FiducialModelDialog.java:596-601`).
+                    BeadtrackPanel { advanced: root.advanced; autofidseed-mode: true; }
+                    // `pnlAutofidseedParam`: the two parameter boxes side by side.
+                    HorizontalLayout {
+                        spacing: 5px;
+                        EtchedBorder {
+                            title: "Initial Bead Finding Parameters";
+                            // `pnlBoundaryModel`
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                CheckBox { text: "Use boundary model"; }
+                                MultiLineButton { text: "Create/Edit Boundary Model"; width: 200px; enabled: false; }
+                            }
+                            CheckBox { text: "Exclude inside boundary contours"; enabled: false; }
+                            if root.advanced: CheckBox { text: "Find and adjust bead size"; }
+                            if root.advanced: LabeledTextField { label: "Borders in X & Y: "; text: ""; label-width: 240px; }
+                            if root.advanced: LabeledTextField { label: "Estimated number of beads in sample: "; text: ""; label-width: 240px; }
+                            if root.advanced: LabeledTextField { label: "Minimum spacing: "; text: ""; label-width: 240px; }
+                            if root.advanced: LabeledTextField { label: "Fraction of peaks to store: "; text: ""; label-width: 240px; }
+                            // `pnl3dmodInitialBeadFinding`
+                            HorizontalLayout {
+                                alignment: center;
+                                MultiLineButton { text: "Open Initial Bead Model"; width: 200px; enabled: false; }
+                            }
+                        }
+                        EtchedBorder {
+                            title: "Selection and Sorting Parameters";
+                            EtchedBorder {
+                                title: "Seed Points to Select";
+                                RadioTextField { label: "Total number:"; text: ""; selected: true; }
+                                RadioTextField { label: "Density (per megapixel):"; text: ""; }
+                            }
+                            CheckBox { text: "Select beads on two surfaces"; }
+                            CheckBox { text: "Add beads to existing model"; }
+                            if root.advanced: LabeledTextField { label: "Ignore sorting in tracked models: "; text: ""; enabled: false; label-width: 240px; }
+                            if root.advanced: LabeledTextField { label: "Drop tracked models: "; text: ""; label-width: 240px; }
+                            if root.advanced: LabeledTextField { label: "Maximum ratio between surfaces: "; text: ""; label-width: 240px; }
+                            // `pnlAllowClusteredElongated`
+                            if root.advanced: EtchedBorder {
+                                title: "Clustered/Elongated Beads";
+                                CheckBox { text: "Allow clustered beads"; }
+                                CheckBoxSpinner { label: "Allow elongated beads of severity: "; text: "1"; }
+                                LabeledTextField { label: "Lower target number for allowing "; text: ""; enabled: false; label-width: 240px; }
+                            }
+                            // `pnl3dmodBeadSortingAndSearching`
+                            HorizontalLayout {
+                                alignment: center;
+                                MultiLineButton { text: "Open Sorted 3D Models"; width: 220px; enabled: false; }
+                            }
+                            // `pnl3dmodClusteredElongatedModel`
+                            if root.advanced: HorizontalLayout {
+                                alignment: center;
+                                MultiLineButton { text: "Open Clustered / Elongated Model"; width: 250px; enabled: false; }
+                            }
+                        }
+                    }
+                    // `pnlButtons`.  `btnAutofidseed` shows
+                    // AUTOFIDSEED_NEW_MODEL_LABEL until `cbAppendToSeedModel`
+                    // is set, when `updateDisplay()` swaps in
+                    // AUTOFIDSEED_APPEND_LABEL ("Add Points to Seed Model").
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        MultiLineButton { text: "Generate Seed Model"; }
+                        MultiLineButton { text: "Open Seed Model"; }
+                        MultiLineButton { text: "Use Adjusted Track Com File"; enabled: false; }
+                        MultiLineButton { text: "Clean Up Temporary Files"; }
+                    }
+                }
+
+                // `pnlTransferfid.getContainer()`
+                // (`FiducialModelDialog.java:189`).
+                if root.seed-model == 2: TransferfidPanel { advanced: root.advanced; }
+            }
+
+            // `SeedAndTrackTab.TRACK` holds the shared beadtrack panel.
+            // `changeSeedAndTrackTab()` adds the shared beadtrack panel with
+            // `updateAutofidseed(false)` (`FiducialModelDialog.java:533-536`).
+            if root.seed-and-track-tab == 1: BeadtrackPanel { advanced: root.advanced; }
+        }
+
+        // ---- TrackingMethod.PATCH_TRACKING ----
+        // `tiltxcorrPanel.getPanel()` (`FiducialModelDialog.java:279`), the
+        // `TiltxcorrPanel.getPatchTrackingInstance` built at `:185-186`.
+        if root.method == 1: TiltxcorrPanel { panel-id: 1; advanced: root.advanced; }
+
+        // ---- TrackingMethod.RAPTOR: `tpRunRaptor` ----
+        if root.method == 2: TabbedPane {
+            tabs: ["Run RAPTOR", "Track Beads"];
+            current: root.run-raptor-tab;
+            if root.run-raptor-tab == 0: RaptorPanel { }
+            // `changeRunRaptorTab()` (`FiducialModelDialog.java:567-571`)
+            if root.run-raptor-tab == 1: BeadtrackPanel { advanced: root.advanced; }
+        }
+    }
+
+    // `ProcessDialog.addExitButtons()`.  `btnExecute.setText("Done")`.
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component FiducialModelDialogWindow inherits Window {
+    title: "Fiducial Model Generation";
+    background: EtomoStyle.background;
+    preferred-width: 1000px;
+    preferred-height: 820px;
+    VerticalLayout {
+        FiducialModelDialog { }
+    }
+}

@@ -1,0 +1,101 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/CpuGpuPanel.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+//
+// The layout is built in `createPanel(int boxLayoutAxis)`
+// (`CpuGpuPanel.java:122-145`).  `boxLayoutAxis` is `BoxLayout.Y_AXIS` unless
+// the caller passes `BoxLayout.X_AXIS`; Slint cannot switch a layout's
+// direction at run time, so the two local panels below are declared once and
+// instantiated in each branch.
+
+import { EtomoStyle, CheckBox } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `pnlParallelProcess` (`:128`, `:135-137`): the check box then a glue.
+component ParallelProcessPanel inherits HorizontalLayout {
+    in property <string> label;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    spacing: EtomoStyle.gap;
+    CheckBox { text: root.label; checked: root.checked; enabled: root.enabled; }
+    Rectangle { }
+}
+
+// `pnlUseGpu` (`:129`, `:139-144`): the check box, the optional `lMaxGpus`
+// label, then a glue.
+component UseGpuPanel inherits HorizontalLayout {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> max-gpus-label;
+    in property <bool> show-max-gpus: true;
+    spacing: EtomoStyle.gap;
+    CheckBox { text: "Use the GPU"; checked: root.checked; enabled: root.enabled; }
+    // `lMaxGpus` is null when `maxGpu == -1` or the network has at most one
+    // GPU (`:82-92`); `updateDisplay()` also hides it when `useMaxGpus` is
+    // false (`:367-369`).
+    if root.max-gpus-label != "" && root.show-max-gpus: Text {
+        text: root.max-gpus-label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle { }
+}
+
+export component CpuGpuPanel inherits VerticalLayout {
+    // `createPanel(BoxLayout.X_AXIS)` vs the `BoxLayout.Y_AXIS` default.
+    // `FinalAlignedStackDialog.java:239-240` passes `BoxLayout.X_AXIS`;
+    // `AbstractTiltPanel.java:158` passes -1, i.e. the Y default.
+    in property <bool> horizontal: false;
+    // `cbParallelProcess = new CheckBox(ParallelPanel.FIELD_LABEL)` (`:48`),
+    // "Parallel processing" (`ParallelPanel.java:60`).  `init()` (`:147-154`)
+    // appends `ParallelPanel.MAX_CPUS_STRING` (":  Maximum number of cores
+    // recommended is ", `ParallelPanel.java:61`) plus `CpuAdoc.getMaxTilt()`
+    // for a TILT / TILT_3D_FIND panel with `useMaxCpu`.
+    in property <string> parallel-process-label: "Parallel processing";
+    in property <bool> parallel-process: false;
+    // `updateDisplay()`: `cbParallelProcess.setVisible(!alwaysParallel)` and
+    // `setEnabled(!processingMethodLocked)` (`:356-357`).
+    in property <bool> always-parallel: false;
+    in property <bool> processing-method-locked: false;
+    // `lMaxGpus = new JLabel(": Maximum number of GPUs recommended is " +
+    // maxGpu)` (`:87`).
+    in property <string> max-gpus-label: "";
+    in property <bool> use-max-gpus: true;
+    in property <bool> use-gpu: false;
+    // `cbUseGpu.setEnabled(...)` (`:361-366`) depends on what the network
+    // reports about local and remote GPUs, which is not a static property of
+    // the layout.
+    in property <bool> use-gpu-enabled: true;
+
+    spacing: EtomoStyle.gap;
+
+    if root.horizontal: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        if !root.always-parallel: ParallelProcessPanel {
+            label: root.parallel-process-label;
+            checked: root.parallel-process;
+            enabled: !root.processing-method-locked;
+        }
+        UseGpuPanel {
+            checked: root.use-gpu;
+            enabled: root.use-gpu-enabled;
+            max-gpus-label: root.max-gpus-label;
+            show-max-gpus: root.use-max-gpus;
+        }
+    }
+
+    if !root.horizontal: VerticalLayout {
+        spacing: EtomoStyle.gap;
+        if !root.always-parallel: ParallelProcessPanel {
+            label: root.parallel-process-label;
+            checked: root.parallel-process;
+            enabled: !root.processing-method-locked;
+        }
+        UseGpuPanel {
+            checked: root.use-gpu;
+            enabled: root.use-gpu-enabled;
+            max-gpus-label: root.max-gpus-label;
+            show-max-gpus: root.use-max-gpus;
+        }
+    }
+}

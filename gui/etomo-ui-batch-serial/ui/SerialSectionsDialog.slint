@@ -1,0 +1,369 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SerialSectionsDialog.java`.
+//
+// The Align tab's body is `AutoAlignmentPanel.getSerialSectionsInstance(...)`
+// (`AutoAlignmentPanel.java`), which in turn embeds
+// `TransformChooserPanel.getSerialSectionsInstance()`; both are drawn inline
+// below, since only this dialog is in scope here.
+//
+// Appearance only: values are the static defaults the Java constructors and
+// `createPanel` set.
+
+import { EtomoStyle, BeveledBorder, CheckBox, RadioButton, MultiLineButton,
+         LabeledTextField, LabeledSpinner, TabbedPane }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, CheckTextField, RadioTextField, Spinner, CheckBoxSpinner,
+         TextEntry }
+    from "LocalWidgets.slint";
+
+// Tab.INITIAL_BLEND, "Initial Blend" (`SerialSectionsDialog.java:1149`).
+component InitialBlendTab inherits VerticalLayout {
+    spacing: 0px;
+    padding: EtomoStyle.inset;
+    alignment: start;
+
+    // pnlPreblendReadInXcorrs
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Use existing edge displacement file (.ecd)"; }
+    }
+    // pnlPreblendVerySloppyBlend
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Treat as very sloppy montage"; }
+    }
+    // pnlPreblendRobustFitCriterion
+    HorizontalLayout {
+        alignment: start;
+        CheckTextField { label: "Robust fitting with criterion: "; }
+    }
+
+    Rectangle { height: 10px; }
+
+    // pnlMultipleCorrelation
+    HorizontalLayout {
+        alignment: start;
+        EtchedBorder {
+            title: "Analysis of Multiple Correlation Peaks";
+            // pnlPreblendEMGridMapFilter
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Treat as low-magnification EM grid map and use peak weighting"; }
+            }
+            // pnlPreblendHighFrequencyFilterCutoff: 20px indent
+            HorizontalLayout {
+                padding-left: 20px;
+                alignment: start;
+                LabeledTextField {
+                    label: "High-frequency filter cutoff in 1/microns ";
+                    label-width: 250px;
+                    text: "0.25";
+                    width: 340px;
+                }
+            }
+            // pnlPreblendWeightForExpectedShifts
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Just weight correlation peaks by deviations from expected shift"; }
+            }
+            // pnlPreblendWeightForExpectedShifts2: 5px indent, then the
+            // strDistanceInPixels JLabel, the "default" radio, the alternate-label
+            // RadioTextField (its own label is ""), and the strPixels JLabel.
+            HorizontalLayout {
+                padding-left: 5px;
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                Text {
+                    text: "Distance at which weighting falls to 0.5: ";
+                    vertical-alignment: center;
+                }
+                RadioButton { text: "default"; selected: true; }
+                RadioTextField { }
+                Text { text: " pixels"; vertical-alignment: center; }
+            }
+        }
+    }
+
+    Rectangle { height: 10px; }
+
+    // pnlIntensityCorrection
+    HorizontalLayout {
+        alignment: start;
+        EtchedBorder {
+            title: "Intensity Correction from Differences in Edges";
+            RadioButton { text: "None"; selected: true; }
+            RadioButton { text: "Piece-to-piece differences only"; }
+            RadioButton { text: "Gradient within pieces also"; }
+        }
+    }
+
+    Rectangle { height: 10px; }
+
+    // pnlInitialGradientCorrection
+    HorizontalLayout {
+        alignment: start;
+        EtchedBorder {
+            title: "Initial Gradient Correction from Summed Images";
+            RadioButton { text: "None"; selected: true; }
+            RadioButton { text: "Planar fit to sum of pieces in this input file"; }
+            RadioButton { text: "Gradient file from other summed images:"; }
+            // pnlGradientFileChooser: 20px indent, then bctfGradientFile, an
+            // unlabelled ButtonControlTextEfield with a file-chooser button
+            // (`ButtonControlTextEfield.getFileInstance("Gradient file", ...)`),
+            // disabled until "Gradient file from other summed images" is picked.
+            HorizontalLayout {
+                padding-left: 20px;
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                TextEntry { width: 250px; enabled: false; }
+                Rectangle {
+                    width: EtomoStyle.field-height;
+                    height: EtomoStyle.field-height;
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    Rectangle { height: 10px; }
+
+    // pnlInitialBlendButtons
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: center;
+        MultiLineButton { text: "Open Raw Stack"; width: 150px; }
+        MultiLineButton { text: "Make Blended Stack"; width: 150px; }
+        MultiLineButton { text: "Open Blended Stack"; width: 150px; }
+    }
+
+    Rectangle { height: 10px; }
+
+    // pnlMidasX / pnlMidas
+    HorizontalLayout {
+        alignment: center;
+        EtchedBorder {
+            title: "Fix Shifts Between Pieces";
+            HorizontalLayout {
+                alignment: center;
+                Spinner { label: "Binning: "; text: "1"; }
+            }
+            Rectangle { height: 5px; }
+            HorizontalLayout {
+                alignment: center;
+                MultiLineButton { text: "Fix Edges With Midas"; width: 180px; }
+            }
+            Rectangle { height: 5px; }
+            Text { text: "Replaces the edge displacement file (.ecd)."; }
+        }
+    }
+
+    Rectangle { height: 5px; }
+}
+
+// `TransformChooserPanel.getSerialSectionsInstance()`
+// (`TransformChooserPanel.java:78`): the optional-search variant, so the
+// "Search For:" line is a check box rather than a JLabel.
+component TransformChooserPanel inherits HorizontalLayout {
+    alignment: start;
+    VerticalLayout {
+        alignment: start;
+        // setTransform(null) selects Transform.DEFAULT ==
+        // FULL_LINEAR_TRANSFORMATION and checks the search box.
+        CheckBox { text: "Search For:"; checked: true; }
+        RadioButton { text: "Full linear transformation"; selected: true; }
+        RadioButton { text: "Rotation/translation/magnification"; }
+        RadioButton { text: "Rotation/translation"; }
+    }
+}
+
+// `AutoAlignmentPanel.getSerialSectionsInstance()` (`AutoAlignmentPanel.java`),
+// the body of Tab.ALIGN.
+component AutoAlignmentPanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+    padding: EtomoStyle.inset;
+    alignment: start;
+
+    EtchedBorder {
+        title: "Auto Alignment Parameters";
+        LabeledTextField { label: "Sigma for low-frequency filter: "; label-width: 230px; text: "0.0"; }
+        LabeledTextField { label: "Cutoff for high-frequency filter: "; label-width: 230px; text: "0.35"; }
+        LabeledTextField { label: "Sigma for high-frequency filter: "; label-width: 230px; text: "0.05"; }
+        // pnlSobelFilter
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Apply Sobel filter"; }
+        }
+        // pnlPreCrossCorrelation
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Find initial shifts with cross-correlation"; }
+        }
+        TransformChooserPanel { }
+        // pnlWarping
+        EtchedBorder {
+            title: "Warping";
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Find warping transformations"; }
+            }
+            Rectangle { height: 3px; }
+            HorizontalLayout {
+                alignment: start;
+                LabeledTextField { label: "Correlation patch size in X: "; label-width: 200px; width: 280px; }
+                LabeledTextField { label: " Y: "; label-width: 30px; width: 110px; }
+            }
+            Rectangle { height: 3px; }
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                CheckBox { text: "Use boundary model:"; }
+                MultiLineButton { text: "Create/View Boundary Model"; width: 200px; }
+            }
+            Rectangle { height: 3px; }
+            HorizontalLayout {
+                alignment: start;
+                LabeledTextField { label: "Limits to shifts in X: "; label-width: 200px; width: 280px; }
+                LabeledTextField { label: " Y: "; label-width: 30px; width: 110px; }
+            }
+        }
+        LabeledTextField { label: "Sections to skip: "; label-width: 230px; }
+        LabeledTextField { label: "Fraction to ignore on edges: "; label-width: 230px; text: "0.05"; }
+        LabeledSpinner { label: "Binning in search: "; label-width: 230px; text: "2"; }
+    }
+
+    Spinner { label: "Binning in Midas: "; text: "1"; }
+
+    // pnlButtons: pnlLeftButtons then pnlRightButtons, each a column.
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            MultiLineButton { text: "Initial Auto Alignment"; width: 200px; }
+            MultiLineButton { text: "Midas"; width: 200px; }
+            MultiLineButton { text: "Refine with Auto Alignment"; width: 200px; }
+        }
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            MultiLineButton { text: "Revert Auto Alignment to Midas"; width: 220px; }
+            MultiLineButton { text: "Revert to No Transforms"; width: 220px; }
+        }
+    }
+}
+
+// Tab.ALIGN, "Align" (`SerialSectionsDialog.java:1150`).
+component AlignTab inherits VerticalLayout {
+    padding: EtomoStyle.inset;
+    alignment: start;
+    Rectangle { height: 3px; }
+    // pnlOpenAlignedStack
+    HorizontalLayout {
+        alignment: center;
+        MultiLineButton { text: "Open Stack"; width: 150px; }
+    }
+    Rectangle { height: 5px; }
+    AutoAlignmentPanel { }
+}
+
+// Tab.MAKE_ALIGNED_STACK, "Make Stack" (`SerialSectionsDialog.java:1151`).
+component MakeStackTab inherits VerticalLayout {
+    spacing: 0px;
+    padding: EtomoStyle.inset;
+    alignment: start;
+
+    // pnlXftoxgAlignmentX / pnlXftoxgAlignment
+    HorizontalLayout {
+        alignment: start;
+        EtchedBorder {
+            title: "Stack alignment transforms";
+            RadioButton { text: "Local fitting (retain trends)"; selected: true; }
+            RadioButton { text: "Remove trends in rotation"; }
+            RadioButton { text: "Remove trends in translation"; }
+            RadioButton { text: "Remove trends in translation & rotation"; }
+            RadioButton { text: "Global alignments (remove all trends)"; }
+        }
+    }
+
+    Rectangle { height: 3px; }
+
+    CheckBoxSpinner { label: "Reference section for global alignment: "; text: "1"; }
+
+    Rectangle { height: 10px; }
+
+    // pnlSize
+    HorizontalLayout {
+        spacing: 5px;
+        alignment: start;
+        LabeledTextField { label: "Size in X: "; label-width: 90px; width: 190px; }
+        LabeledTextField { label: "Y: "; label-width: 20px; width: 120px; }
+    }
+
+    Rectangle { height: 5px; }
+
+    // pnlShift
+    HorizontalLayout {
+        spacing: 5px;
+        alignment: start;
+        LabeledTextField { label: "Shift in X: "; label-width: 90px; width: 190px; }
+        LabeledTextField { label: "Y: "; label-width: 20px; width: 120px; }
+    }
+
+    Rectangle { height: 5px; }
+
+    // pnlMakeStackA
+    HorizontalLayout {
+        spacing: 20px;
+        alignment: start;
+        Spinner { label: "Binning: "; text: "1"; }
+        CheckBox { text: "Fill empty areas with 0"; }
+    }
+
+    Rectangle { height: 15px; }
+
+    // pnlMakeStackButtons
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        MultiLineButton { text: "Make Aligned Stack"; width: 160px; }
+        MultiLineButton { text: "Open Aligned Stack"; width: 160px; }
+    }
+
+    Rectangle { height: 5px; }
+}
+
+export component SerialSectionsDialog inherits Rectangle {
+    // Swing shows one tab body at a time; `current-tab` picks which, exactly as
+    // the JTabbedPane selection does.  Nothing is wired, so it is a plain
+    // in-property with the Java default (Tab.INITIAL_BLEND for a montage view).
+    in property <int> current-tab: 0;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        alignment: start;
+        BeveledBorder {
+            title: "Serial Sections";
+            TabbedPane {
+                tabs: ["Initial Blend", "Align", "Make Stack"];
+                current: root.current-tab;
+                Rectangle {
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    if root.current-tab == 0: InitialBlendTab { }
+                    if root.current-tab == 1: AlignTab { }
+                    if root.current-tab == 2: MakeStackTab { }
+                }
+            }
+        }
+    }
+}
+
+export component SerialSectionsDialogWindow inherits Window {
+    in property <int> current-tab: 0;
+    title: "Serial Sections";
+    background: EtomoStyle.background;
+    preferred-width: 720px;
+    preferred-height: 760px;
+    SerialSectionsDialog { current-tab: root.current-tab; }
+}

@@ -1,0 +1,87 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TabbedTextWindow.java`.
+//
+// The tabbed log-file frame `ContextPopup` opens for a log file *set*
+// (`ContextPopup.java:1002-1008`).  `openFiles` (`TabbedTextWindow.java:111-192`)
+// is the constructor of the visible window: it makes a `JTabbedPane`, adds it
+// to the content pane, titles the frame with the `label` handed to the
+// constructor (`:100-103`, `:136`), sizes it from the `UIManager`'s current
+// font size (`:137`), and then adds one tab per file — each a `JScrollPane`
+// around a monospaced `JEditorPane` (`:149-153`).
+//
+// The tab labels and the file text only exist at run time.  The defaults are
+// the ten tabs `AlignmentEstimationDialog.java:215-224` builds for the "Align"
+// log set, so the tab strip draws at its true width; `tabs` and `page-text`
+// replace them.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { JScrollPane, JEditorPane, JTabbedPane } from "WindowWidgets.slint";
+
+export component TabbedTextWindow inherits VerticalLayout {
+    // `tabPane.add(labels[i], scrollPane)` — `:153`.
+    in property <[string]> tabs: ["Robust", "Errors", "Solution", "Surface Angles",
+        "Locals", "Large Residual", "Mappings", "Coordinates", "Beam Tilt",
+        "Complete Log"];
+    // Slint cannot switch a `JTabbedPane` body from the strip, so the shown
+    // tab is selected here.  `JTabbedPane` starts on its first tab.
+    in property <int> current-tab: 0;
+    // `editorPane.read(reader, file)` — `:276`.
+    in property <string> page-text:
+        "  Residual error mean and sd:   0.53   0.31\n\n  view   n   mean   sd\n     1  24   0.48  0.27\n     2  24   0.55  0.33\n";
+    // `display(false, ...)` puts `file.getName() + " is too large to display"`
+    // in the pane instead of the file (`:280`), for the tabs `checkSize`
+    // (`:202-261`) switched off.  All three of `displayWholeLog`,
+    // `displayResiduals` and `displaySolutions` start true (`:95-97`), so the
+    // constructed state is the file's own text; naming a file here draws the
+    // other body.
+    in property <string> too-large-file: "";
+    // The `currentFontSize` `openFiles` finds in the `UIManager` defaults
+    // (`:117-128`); Metal's default is 12.
+    in property <int> font-size-pt: 12;
+
+    spacing: 0px;
+
+    // `tabPane = new JTabbedPane(); mainPanel.add(tabPane)` — `:133-135`.
+    // Reached when `displayEverythingElse` is true, which is its initial value
+    // (`:98`).  When `checkSize` clears it the class builds no tab pane at all
+    // and hands `UIHarness.INSTANCE.openMessageDialog` the string
+    // "Unable to display log files:  <names>.  Not enough available memory.
+    // Close unnecessary windows." (`:142`, `:187-189`) — a `Popup`, which
+    // `Popup.slint` draws.
+    JTabbedPane {
+        tabs: root.tabs;
+        current-tab: root.current-tab;
+    }
+    // The selected tab's body: `new JScrollPane(editorPane)` — `:151`.
+    JScrollPane {
+        vertical-stretch: 1;
+        JEditorPane {
+            // `new Font("monospaced", Font.PLAIN, currentFontSize)` — `:150`.
+            monospaced: true;
+            font-size-pt: root.font-size-pt;
+            text: root.too-large-file != ""
+                ? root.too-large-file + " is too large to display"
+                : root.page-text;
+        }
+    }
+}
+
+export component TabbedTextWindowWindow inherits Window {
+    // `setTitle(label)` — `:136` — where `label` is the constructor's
+    // `logFileSetWindowLabel[i]` (`ContextPopup.java:1003`), e.g. "Align" or
+    // "Align Axis:a" (`AlignmentEstimationDialog.java:203`, `:209`).
+    in property <string> title-text: "Align";
+    in property <int> current-tab: 0;
+    in property <int> font-size-pt: 12;
+    title: root.title-text;
+    // `setSize(currentFontSize * 625 / 12, currentFontSize * 800 / 12)` —
+    // `:137`.  At Metal's 12pt default that is 625 x 800.
+    preferred-width: root.font-size-pt * 625 / 12 * 1px;
+    preferred-height: root.font-size-pt * 800 / 12 * 1px;
+    background: EtomoStyle.background;
+    TabbedTextWindow {
+        current-tab: root.current-tab;
+        font-size-pt: root.font-size-pt;
+    }
+}

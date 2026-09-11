@@ -1,0 +1,474 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TomogramCombinationDialog.java` and
+// the three tab panels it nests: `SetupCombinePanel.java` (with
+// `PatchSizePanel.java` and `SolvematchPanel.java`),
+// `InitialCombinePanel.java` and `FinalCombinePanel.java`.
+//
+// Appearance only — no listeners, no manager, no process launching.
+//
+// `Run3dmodButton` differs from `MultiLineButton` only by the right-click
+// deferred-3dmod menu it carries, which is behaviour; both draw as
+// `MultiLineButton` here.
+
+import { EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, CheckBox,
+         RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, ExitButtons, CenteredLabel, TextField } from "LocalWidgets.slint";
+
+// `PatchSizePanel` (`PatchSizePanel.java`).  `final-size` picks between the two
+// instances `SetupCombinePanel` builds: "Patch Size" carries "Small patches"
+// and no "Extra Large patches", "Max Patch Size" the other way round.
+export component PatchSizePanel inherits EtchedBorder {
+    in property <bool> final-size: false;
+    title: root.final-size ? "Max Patch Size" : "Patch Size";
+    HorizontalLayout {
+        spacing: EtomoStyle.inset;
+        alignment: start;
+        // `pnlType`
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            if !root.final-size: RadioButton { text: "Small patches"; }
+            RadioButton { text: "Medium patches"; selected: true; }
+            RadioButton { text: "Large patches"; }
+            if root.final-size: RadioButton { text: "Extra Large patches"; }
+            RadioButton { text: "Custom"; }
+        }
+        // `pnlXYZ`
+        EtchedBorder {
+            title: "In Pixels";
+            LabeledTextField { label: "X: "; label-width: 30px; text: ""; enabled: false; }
+            LabeledTextField { label: "Y: "; label-width: 30px; text: ""; enabled: false; }
+            LabeledTextField { label: "Z: "; label-width: 30px; text: ""; enabled: false; }
+        }
+    }
+}
+
+// `SolvematchPanel` (`SolvematchPanel.java`).  `initial-tab` selects the
+// "Initial Match" configuration, which adds two Solvematch fields, the
+// "Dualvolmatch Parameters" box and the "Restart Combine" button.
+export component SolvematchPanel inherits EtchedBorder {
+    in property <bool> initial-tab: false;
+    // `rbOneSideInverted` and `rbUseModel` are `@deprecated`; the constructor
+    // adds them to `pnlFiducialRadio` and then calls `setVisible(false)` on
+    // both (`SolvematchPanel.java:177-178`).  Only legacy state turns them back
+    // on (`SolvematchPanel.java:325,329`), so this defaults to the
+    // construction-time visibility, false.
+    in property <bool> deprecated-fiducial-options-visible: false;
+    title: "";
+    PanelHeader { title: "Initial Matching Parameters"; }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Use image correlations instead of Solvematch for initial match"; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlSolveMatch`
+    EtchedBorder {
+        title: "Solvematch Parameters";
+        // `pnlFiducialSelect`
+        HorizontalLayout {
+            spacing: EtomoStyle.inset;
+            alignment: start;
+            // `pnlFiducialRadio` (`SolvematchPanel.java:228-233`), all five
+            // members of `bgFiducialParams` in Java source order.  The two
+            // deprecated ones are hidden at construction; see
+            // `deprecated-fiducial-options-visible` above.
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "Fiducials on both sides"; selected: true; }
+                RadioButton { text: "Fiducials on one side"; }
+                if root.deprecated-fiducial-options-visible: RadioButton {
+                    text: "Fiducials on one side, inverted";
+                }
+                if root.deprecated-fiducial-options-visible: RadioButton {
+                    text: "Use matching models and fiducials";
+                }
+                RadioButton { text: "Use matching models only"; }
+            }
+            Rectangle { width: 20px; }
+            // `pnlImodMatchModels`
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                CheckBox { text: "Load binned by 2"; }
+                MultiLineButton { text: "Create Matching Models in 3dmod"; min-width: 260px; }
+            }
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Specify corresponding points instead of using coordinate file"; }
+        }
+        LabeledTextField { label: "Starting points to use from A: "; label-width: 260px; text: ""; }
+        LabeledTextField { label: "Corresponding fiducial list A: "; label-width: 260px; text: ""; }
+        LabeledTextField { label: "Corresponding fiducial list B: "; label-width: 260px; text: ""; }
+        if root.initial-tab: LabeledTextField {
+            label: "Limit on maximum residual: ";
+            label-width: 260px;
+            text: "";
+        }
+        if root.initial-tab: LabeledTextField {
+            label: "Limit on center shift: ";
+            label-width: 260px;
+            text: "";
+        }
+    }
+    // `pnlDualvolmatch`
+    if root.initial-tab: EtchedBorder {
+        title: "Dualvolmatch Parameters";
+        LabeledTextField {
+            label: "Limit on mean residual in patch correlations: ";
+            label-width: 330px;
+            text: "";
+        }
+        LabeledTextField { label: "Limit on center shift: "; label-width: 330px; text: ""; }
+    }
+    // `pnlRestart`
+    if root.initial-tab: HorizontalLayout {
+        alignment: center;
+        MultiLineButton { text: "Restart Combine"; min-width: 180px; }
+    }
+}
+
+// `SetupCombinePanel` (`SetupCombinePanel.java`), the "Setup" tab.
+export component SetupCombinePanel inherits BeveledBorder {
+    title: "Combination Parameters";
+    // `tempDirectoryHeader.setOpen(false)` (`SetupCombinePanel.java:577`) runs
+    // the open/close button's action, which hides `pnlTempDirectoryBody`
+    // (`SetupCombinePanel.java:946`), so the body is built and added
+    // (`SetupCombinePanel.java:707-710`) but not visible at construction.
+    in property <bool> temp-directory-open: false;
+    CenteredLabel {
+        text: "You must create new combine scripts for some changes in these parameters to take effect.";
+        wrap: word-wrap;
+    }
+    // `pnlToSelector`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Tomogram Matching Relationship"; }
+        HorizontalLayout {
+            alignment: start;
+            RadioButton { text: "Match the B tomogram to A"; selected: true; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            RadioButton { text: "Match the A tomogram to B"; }
+        }
+    }
+    SolvematchPanel { initial-tab: false; }
+    // `pnlPatchAndMinMax`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Patch Parameters for Refining Alignment"; }
+        Rectangle { height: 5px; }
+        // The tomogram-size warning label, invisible until the tomogram
+        // changes.
+        CenteredLabel { text: ""; }
+        // `pnlPatch`: the two columns, 20px apart.
+        HorizontalLayout {
+            spacing: 20px;
+            alignment: start;
+            // `pnlPatchSize`
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                PatchSizePanel { final-size: false; }
+                CheckBox { text: "Use patch region model"; }
+                MultiLineButton { text: "Create/Edit Patch Region Model"; min-width: 260px; }
+            }
+            // `pnlAutoPatch`
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                HorizontalLayout {
+                    alignment: start;
+                    CheckBox { text: "Use Automatic Patch Fitting"; checked: true; }
+                }
+                Rectangle { height: 5px; }
+                PatchSizePanel { final-size: true; }
+                Rectangle { height: 10px; }
+                LabeledTextField { label: "Extra warping limits: "; label-width: 170px; text: ""; }
+                Rectangle { height: 10px; }
+            }
+        }
+        Rectangle { height: 20px; }
+        // The binning warning label, empty at build time.
+        CenteredLabel { text: ""; }
+        // `pnlMinMax`: a GridLayout(2, 3) beside the Defaults button.
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            GridLayout {
+                spacing: EtomoStyle.gap;
+                Row {
+                    LabeledTextField { label: "X axis min: "; label-width: 90px; text: ""; }
+                    LabeledTextField { label: "Y axis min: "; label-width: 90px; text: ""; }
+                    LabeledTextField { label: "Z axis min: "; label-width: 90px; text: ""; }
+                }
+                Row {
+                    LabeledTextField { label: "X axis max: "; label-width: 90px; text: ""; }
+                    LabeledTextField { label: "Y axis max: "; label-width: 90px; text: ""; }
+                    LabeledTextField { label: "Z axis max: "; label-width: 90px; text: ""; }
+                }
+            }
+            MultiLineButton { text: "Defaults"; min-width: 110px; }
+        }
+        Rectangle { height: 1px; }
+    }
+    // `pnlVolcombineControls`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Volcombine Controls"; }
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Parallel processing:  Maximum number of cores recommended is 8"; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Stop before running volcombine"; }
+        }
+    }
+    // `pnlTempDirectory`: its header starts closed, so `pnlTempDirectoryBody`
+    // is hidden; see `temp-directory-open` above.
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Intermediate Data Storage"; open: root.temp-directory-open; }
+        // `pnlTempDirectoryBody`
+        if root.temp-directory-open: Rectangle { height: 5px; }
+        if root.temp-directory-open: LabeledTextField {
+            label: "Temporary directory: ";
+            label-width: 160px;
+            text: "";
+        }
+        // `pnlManualCleanup`
+        if root.temp-directory-open: HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Manual cleanup"; }
+        }
+    }
+    // `pnlButton`
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "3dmod Volume A"; min-width: 160px; }
+        MultiLineButton { text: "3dmod Volume B"; min-width: 160px; }
+        MultiLineButton { text: "Create Combine Scripts"; min-width: 200px; }
+        MultiLineButton { text: "Start Combine"; min-width: 160px; }
+    }
+}
+
+// `InitialCombinePanel` (`InitialCombinePanel.java`), the "Initial Match" tab.
+// Its root panel carries no border.
+export component InitialCombinePanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+    SolvematchPanel { initial-tab: true; }
+    // `pnlMatchvol1`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Matchvol1"; }
+        SpacedPanel {
+            LabeledTextField { label: "Initial match size: "; label-width: 170px; text: ""; }
+            // The size report label, empty until a tomogram is read.
+            CenteredLabel { text: ""; }
+            HorizontalLayout {
+                alignment: center;
+                MultiLineButton { text: "Restart at Matchvol1"; min-width: 200px; }
+            }
+        }
+    }
+}
+
+// `FinalCombinePanel` (`FinalCombinePanel.java`), the "Final Match" tab.  Its
+// root panel carries no border.
+export component FinalCombinePanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+    // `pnlPatchRegionModel`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Patch Region Model"; }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Use patch region model"; }
+            MultiLineButton { text: "Create/Edit Patch Region Model"; min-width: 260px; }
+        }
+    }
+    // `pnlPatchcorr`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Patchcorr Parameters"; }
+        SpacedPanel {
+            // `pnlPatchsize`: the three fields beside the two resize buttons.
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                VerticalLayout {
+                    spacing: 5px;
+                    LabeledTextField { label: "X patch size :"; label-width: 130px; text: ""; }
+                    LabeledTextField { label: "Y patch size :"; label-width: 130px; text: ""; }
+                    LabeledTextField { label: "Z patch size :"; label-width: 130px; text: ""; }
+                }
+                VerticalLayout {
+                    spacing: 5px;
+                    MultiLineButton { text: "Patch Size +20%"; min-width: 170px; }
+                    MultiLineButton { text: "Patch Size -20%"; min-width: 170px; }
+                }
+            }
+            // `pnlBoundary`: GridLayout(3, 3), advanced only.
+            GridLayout {
+                spacing: EtomoStyle.gap;
+                Row {
+                    LabeledTextField { label: "Number of X patches :"; label-width: 175px; text: ""; }
+                    LabeledTextField { label: "X Low :"; label-width: 65px; text: ""; }
+                    LabeledTextField { label: "X high :"; label-width: 65px; text: ""; }
+                }
+                Row {
+                    LabeledTextField { label: "Number of Y patches :"; label-width: 175px; text: ""; }
+                    LabeledTextField { label: "Y Low :"; label-width: 65px; text: ""; }
+                    LabeledTextField { label: "Y high :"; label-width: 65px; text: ""; }
+                }
+                Row {
+                    LabeledTextField { label: "Number of Z patches :"; label-width: 175px; text: ""; }
+                    LabeledTextField { label: "Z Low :"; label-width: 65px; text: ""; }
+                    LabeledTextField { label: "Z high :"; label-width: 65px; text: ""; }
+                }
+            }
+            // `pnlInitialShiftXYZ`, advanced only.
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                LabeledTextField { label: "Initial shift in X:"; label-width: 130px; text: ""; }
+                LabeledTextField { label: "Y:"; label-width: 24px; text: ""; }
+                LabeledTextField { label: "Z:"; label-width: 24px; text: ""; }
+            }
+            // `pnlKernelSigma`, advanced only.
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                CheckBox { text: "Kernel filtering with sigma: "; }
+                TextField { text: ""; enabled: false; }
+            }
+            // `pnlPatchcorrButtons`
+            HorizontalLayout {
+                alignment: space-around;
+                spacing: EtomoStyle.gap;
+                MultiLineButton { text: "Restart at Patchcorr"; min-width: 200px; }
+                MultiLineButton { text: "Open Vector Model with Correlations"; min-width: 290px; }
+            }
+        }
+    }
+    // `pnlMatchorwarp`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Matchorwarp Parameters"; }
+        Rectangle { height: 10px; }
+        LabeledTextField {
+            label: "Residual limit for single transform: ";
+            label-width: 340px;
+            text: "";
+        }
+        Rectangle { height: 10px; }
+        LabeledTextField { label: "Warping residual limits: "; label-width: 340px; text: ""; }
+        Rectangle { height: 10px; }
+        LabeledTextField {
+            label: "Number of columns to exclude on left (in X): ";
+            label-width: 340px;
+            text: "";
+        }
+        Rectangle { height: 5px; }
+        LabeledTextField {
+            label: "Number of columns to exclude on right (in X): ";
+            label-width: 340px;
+            text: "";
+        }
+        Rectangle { height: 5px; }
+        LabeledTextField {
+            label: "Number of rows to exclude on bottom (in Y): ";
+            label-width: 340px;
+            text: "";
+        }
+        Rectangle { height: 5px; }
+        LabeledTextField {
+            label: "Number of rows to exclude on top (in Y): ";
+            label-width: 340px;
+            text: "";
+        }
+        Rectangle { height: 5px; }
+        HorizontalLayout { alignment: start; CheckBox { text: "Use linear interpolation"; } }
+        Rectangle { height: 5px; }
+        HorizontalLayout {
+            alignment: space-around;
+            spacing: EtomoStyle.gap;
+            MultiLineButton { text: "Restart at Matchorwarp"; min-width: 230px; }
+            MultiLineButton { text: "Matchorwarp Trial Run"; min-width: 220px; }
+        }
+        Rectangle { height: 5px; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlVolcombine`
+    EtchedBorder {
+        title: "";
+        PanelHeader { title: "Volcombine Parameters"; }
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Parallel processing:  Maximum number of cores recommended is 8"; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Stop before running volcombine"; }
+        }
+        LabeledTextField {
+            label: "Reduction factor for matching amplitudes in combined FFT: ";
+            label-width: 430px;
+            text: "";
+        }
+        LabeledTextField {
+            label: "Radius below which to average components from both tomograms: ";
+            label-width: 430px;
+            text: "";
+        }
+        Rectangle { height: 5px; }
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Restart at Volcombine"; min-width: 220px; }
+        }
+    }
+    Rectangle { height: 5px; }
+    // `pnlButton`
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Examine Patch Vector Model"; min-width: 240px; }
+        MultiLineButton { text: "Replace Patch Vectors"; min-width: 200px; }
+        MultiLineButton { text: "Open Volume Being Matched To"; min-width: 260px; }
+        MultiLineButton { text: "Open Combined Volume"; min-width: 220px; }
+    }
+}
+
+// `TomogramCombinationDialog` (`TomogramCombinationDialog.java:442-486`).
+export component TomogramCombinationDialog inherits BeveledBorder {
+    title: "Tomogram Combination";
+    // `SETUP_INDEX` 0, `INITIAL_INDEX` 1, `FINAL_INDEX` 2.
+    in property <int> current-tab: 0;
+    // `parallelPanelContainer`: an empty JPanel the manager fills with the
+    // parallel processing panel at run time.
+    Rectangle { height: 0px; }
+    CenteredLabel { text: "For all 3D parameters Z represents the depth domain"; }
+    TabbedPane {
+        // `lblSetup`, `lblInitial`, `lblFinal`.
+        tabs: ["Setup", "Initial Match", "Final Match"];
+        current: root.current-tab;
+        if root.current-tab == 0: SetupCombinePanel { }
+        if root.current-tab == 1: InitialCombinePanel { }
+        if root.current-tab == 2: FinalCombinePanel { }
+    }
+    // `addExitButtons()`; `btnExecute.setText("Done")`.
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component TomogramCombinationDialogWindow inherits Window {
+    title: "eTomo — Tomogram Combination";
+    background: EtomoStyle.background;
+    preferred-width: 940px;
+    preferred-height: 900px;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        TomogramCombinationDialog { }
+    }
+}

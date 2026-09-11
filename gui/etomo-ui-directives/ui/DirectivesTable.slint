@@ -1,0 +1,84 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectivesTable.java`.
+//
+// `pnlRoot` is a `GridBagLayout` panel with a black line border
+// (`createPanel`, lines 80-91).  `RowList.createPanel` walks
+// `DirectiveDescrFile` and appends a `DirectivesSectionRow` for every section
+// line and a `DirectivesDirectiveRow` for every directive line that the current
+// `DirectiveFileType` includes, then calls `display` on each in turn.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { DirectivesSectionRow } from "DirectivesSectionRow.slint";
+import { DirectivesDirectiveRow } from "DirectivesDirectiveRow.slint";
+
+// One entry of `RowList.list`, which holds the `DirectivesRow` interface
+// (`DirectivesRow.java`) - a section row or a directive row.  The rows are read
+// from `IMOD/com/directives.csv` through `DirectiveDescrFile` at run time, so
+// this is a model, not a literal.
+export struct DirectivesRowData {
+    // "section" for a `DirectivesSectionRow`, "directive" for a
+    // `DirectivesDirectiveRow`.
+    kind: string,
+    title: string,
+    // Directive rows only: "boolean", "choice", "file" or "".
+    value-kind: string,
+    value: string,
+    open: bool,
+    enabled: bool,
+    editable: bool,
+    override-selected: bool,
+    override-enabled: bool,
+}
+
+export component DirectivesTable inherits Rectangle {
+    in property <[DirectivesRowData]> rows;
+    in property <length> title-width: 320px;
+    in property <length> value-width: 160px;
+
+    // `pnlRoot.setBorder(LineBorder.createBlackLineBorder())`.
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: #000000;
+
+    VerticalLayout {
+        padding: 1px;
+        spacing: 0px;
+        // Slint has no `GridBagLayout`, and neither `weightx`/`weighty` nor a
+        // `gridwidth` spanning cell can be expressed from inside a repeated
+        // component, so the table is a column of rows whose cells are fixed
+        // widths.  The cell order in each row is the source's.
+        for row in root.rows: VerticalLayout {
+            if row.kind == "section": DirectivesSectionRow {
+                title: row.title;
+                open: row.open;
+                enabled: row.enabled;
+                title-width: root.title-width;
+            }
+            // A directive row hides all of its widgets while it is closed
+            // (`DirectivesDirectiveRow.updateVisible`).
+            if row.kind == "directive" && row.open: DirectivesDirectiveRow {
+                title: row.title;
+                value-kind: row.value-kind;
+                value: row.value;
+                open: row.open;
+                editable: row.editable;
+                override-selected: row.override-selected;
+                override-enabled: row.override-enabled;
+                title-width: root.title-width;
+                value-width: root.value-width;
+            }
+        }
+    }
+}
+
+export component DirectivesTableWindow inherits Window {
+    title: "eTomo Directives Table";
+    preferred-width: 620px;
+    preferred-height: 400px;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        DirectivesTable { }
+    }
+}

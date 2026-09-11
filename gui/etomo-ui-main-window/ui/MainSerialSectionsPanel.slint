@@ -1,0 +1,45 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainSerialSectionsPanel.java`, a `MainPanel`
+// subclass.  It instantiates the base component from `MainPanel.slint` and
+// puts its one axis column in the base's `panelCenter` slot:
+//
+// `MainSerialSectionsPanel(BaseManager)` (`:29-31`) forwards to
+// `super(manager)`; `createAxisPanelA` (`:41-45`) builds a
+// `SerialSectionsProcessPanel`, and `addAxisPanelA` (`:33-36`) puts its
+// container in `scrollA`.
+//
+// `createAxisPanelB` is empty (`:47`) and `getAxisPanelB()` returns null,
+// so there is no B column.  `getDataFileFilter()` returns a
+// `SerialSectionsFileFilter`.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { MainPanel } from "MainPanel.slint";
+import { SerialSectionsProcessPanel } from "SerialSectionsProcessPanel.slint";
+
+export component MainSerialSectionsPanel inherits Rectangle {
+    in property <string> status-bar-text: "No data set loaded";
+    in property <color> panel-background: Colors.background-serial-sections;
+    background: EtomoStyle.background;
+    MainPanel {
+        width: 100%;
+        height: 100%;
+        status-bar-text: root.status-bar-text;
+        panel-background: root.panel-background;
+        // `addAxisPanelA()`: `getScrollA().add(axisPanelA.getContainer())`.
+        SerialSectionsProcessPanel {
+            panel-background: root.panel-background;
+        }
+        // `createAxisPanelB` has an empty body and `getAxisPanelB()` returns
+        // null, so there is no B column to draw.
+    }
+}
+
+export component MainSerialSectionsPanelWindow inherits Window {
+    title: "eTomo MainSerialSectionsPanel";
+    preferred-width: 800px;
+    preferred-height: 600px;
+    background: EtomoStyle.background;
+    MainSerialSectionsPanel { }
+}

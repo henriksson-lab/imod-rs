@@ -1,0 +1,17 @@
+// Entry point for `build.rs`: re-exports every dialog this crate carries.
+// One file per Java dialog under `IMOD/Etomo/src/etomo/ui/swing`.
+
+export { FiducialModelDialog, FiducialModelDialogWindow } from "FiducialModelDialog.slint";
+export { AlignmentEstimationDialog, AlignmentEstimationDialogWindow } from "AlignmentEstimationDialog.slint";
+export { FinalAlignedStackDialog, FinalAlignedStackDialogWindow } from "FinalAlignedStackDialog.slint";
+export { TomogramPositioningDialog, TomogramPositioningDialogWindow } from "TomogramPositioningDialog.slint";
+
+// The embedded panel classes those dialogs share.  One file per Java class
+// under `IMOD/Etomo/src/etomo/ui/swing`.
+export { BeadtrackPanel } from "BeadtrackPanel.slint";
+export { TransferfidPanel } from "TransferfidPanel.slint";
+export { TiltxcorrPanel } from "TiltxcorrPanel.slint";
+export { RaptorPanel } from "RaptorPanel.slint";
+export { EraseGoldPanel } from "EraseGoldPanel.slint";
+export { CpuGpuPanel } from "CpuGpuPanel.slint";
+export { NewstackOrBlendmontPanel } from "NewstackOrBlendmontPanel.slint";

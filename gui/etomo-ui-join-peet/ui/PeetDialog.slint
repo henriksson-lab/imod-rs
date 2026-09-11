@@ -1,0 +1,613 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/PeetDialog.java`, together with the
+// panels it embeds:
+//   `VolumeTable.java`, `IterationTable.java`      - the two tables
+//   `FixPathsPanel.java`                           - "Fix File Paths"
+//   `ReferencePanel.java`                          - "Reference"
+//   `MissingWedgeCompensationPanel.java`           - "Volume Size" / "Missing Wedge Compensation"
+//   `MaskingPanel.java`                            - "Masking"
+//   `YAxisTypePanel.java`                          - "Particle Y Axis"
+//   `SphericalSamplingForThetaAndPsiPanel.java`    - "Spherical Sampling for Theta and Psi"
+// Label strings come from `etomo/ui/SharedStrings.java` and
+// `etomo/storage/MatlabParam.java` where the Java reads them from there.
+//
+// Appearance only: no callbacks, no manager, no state.  Field values are the
+// static defaults `setDefaults` installs (PeetDialog.java:1157-1164).
+
+import { EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, LabeledSpinner,
+         CheckBox, RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { HeaderCell, FieldCell, ExpandButton, SingleLineButton, FileTextField,
+         RadioTextField, ComboBox, PlainLabel }
+    from "EtomoTables.slint";
+
+// `VolumeTable.display` (VolumeTable.java:470-511): ten grid columns.  Both
+// tails of every row are drawn - `tiltRangeMultiAxes` selects between the
+// "Tilt Range" Min/Max pair (VolumeTable.java:474-477, 488-493) and the
+// "Missing Wedge"/"Mask" cell plus its expand button
+// (VolumeTable.java:478-482, 494-497).  `VolumeRow.display`
+// (VolumeRow.java:417-425) branches the body rows the same way.
+component VolumeTable inherits BeveledBorder {
+    // `tiltRangeMultiAxes` follows the "2 or more" tilt-axes radio button, which
+    // is not the selected one by default (rbTiltRangeSingle.setSelected(true),
+    // MissingWedgeCompensationPanel.java:109).
+    in property <bool> tilt-range-multi-axes: false;
+    title: "Volume Table";
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            GridLayout {
+                spacing: 1px;
+                Row {
+                    HeaderCell { colspan: 2; text: "Vol #"; }
+                    HeaderCell { text: "Volume"; }
+                    ExpandButton { }
+                    HeaderCell { text: "Model"; }
+                    ExpandButton { }
+                    HeaderCell { text: "Initial"; }
+                    ExpandButton { }
+                    // header1TiltRange (VolumeTable.java:61) or
+                    // header1TiltRangeMultiAxes + btnExpandTiltRangeMultiAxes
+                    // (VolumeTable.java:62, 139).
+                    if !root.tilt-range-multi-axes: HeaderCell { colspan: 2; text: "Tilt Range"; }
+                    if root.tilt-range-multi-axes: HeaderCell { text: "Missing Wedge"; }
+                    if root.tilt-range-multi-axes: ExpandButton { }
+                }
+                Row {
+                    HeaderCell { colspan: 2; text: ""; }
+                    HeaderCell { colspan: 2; text: ""; }
+                    HeaderCell { colspan: 2; text: ""; }
+                    HeaderCell { colspan: 2; text: "MOTL"; }
+                    // header2TiltRangeStart/End, or header2TiltRangeMultiAxes
+                    // spanning both columns (VolumeTable.java:63, 87-88).
+                    if !root.tilt-range-multi-axes: HeaderCell { text: "Min"; }
+                    if !root.tilt-range-multi-axes: HeaderCell { text: "Max"; }
+                    if root.tilt-range-multi-axes: HeaderCell { colspan: 2; text: "Mask"; }
+                }
+                // Two representative `VolumeRow` rows.
+                Row {
+                    HeaderCell { colspan: 2; text: "1"; }
+                    FieldCell { colspan: 2; text: "vol1.mrc"; }
+                    FieldCell { colspan: 2; text: "vol1.mod"; }
+                    FieldCell { colspan: 2; text: ""; }
+                    if !root.tilt-range-multi-axes: FieldCell { text: "-60.0"; }
+                    if !root.tilt-range-multi-axes: FieldCell { text: "60.0"; }
+                    // tiltRangeMultiAxes plus its fbTiltRangeMultiAxes file
+                    // button (VolumeRow.java:422-424), the same field-plus-button
+                    // pair the file columns use.
+                    if root.tilt-range-multi-axes: FieldCell { colspan: 2; text: "vol1_wedge.mrc"; }
+                }
+                Row {
+                    HeaderCell { colspan: 2; text: "2"; }
+                    FieldCell { colspan: 2; text: "vol2.mrc"; }
+                    FieldCell { colspan: 2; text: "vol2.mod"; }
+                    FieldCell { colspan: 2; text: ""; }
+                    if !root.tilt-range-multi-axes: FieldCell { text: "-60.0"; }
+                    if !root.tilt-range-multi-axes: FieldCell { text: "60.0"; }
+                    if root.tilt-range-multi-axes: FieldCell { colspan: 2; text: "vol2_wedge.mrc"; }
+                }
+            }
+            // pnlBottomButtons (VolumeTable.java:377-383).
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                CheckBox { text: "File names are templates"; }
+                SingleLineButton { text: "Open in 3dmod"; }
+                SingleLineButton { text: "Read tilt file"; }
+            }
+        }
+        // pnlSideButtons (VolumeTable.java:364-375).
+        VerticalLayout {
+            spacing: 5px;
+            alignment: start;
+            SingleLineButton { text: "Up"; }
+            SingleLineButton { text: "Down"; }
+            SingleLineButton { text: "Insert"; }
+            SingleLineButton { text: "Delete"; }
+            SingleLineButton { text: "Dup"; }
+        }
+    }
+}
+
+// `IterationTable.display` (IterationTable.java:484-541): sixteen grid columns.
+component IterationTable inherits BeveledBorder {
+    title: "Iteration Table";
+    HorizontalLayout {
+        spacing: 3px;
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            GridLayout {
+                spacing: 1px;
+                Row {
+                    HeaderCell { colspan: 2; text: "Run #"; }
+                    HeaderCell { colspan: 6; text: "Angular Search Range"; }
+                    HeaderCell { text: "Search"; }
+                    HeaderCell { colspan: 2; text: "Low-pass"; }
+                    HeaderCell { colspan: 2; text: "High-pass"; }
+                    HeaderCell { text: "Ref"; }
+                    HeaderCell { colspan: 2; text: "Duplicate"; }
+                }
+                Row {
+                    HeaderCell { colspan: 2; text: ""; }
+                    HeaderCell { colspan: 2; text: "Phi"; }
+                    HeaderCell { colspan: 2; text: "Theta"; }
+                    HeaderCell { colspan: 2; text: "Psi"; }
+                    HeaderCell { text: "Distance"; }
+                    HeaderCell { colspan: 2; text: "Filter"; }
+                    HeaderCell { colspan: 2; text: "Filter"; }
+                    HeaderCell { text: "Threshold"; }
+                    HeaderCell { colspan: 2; text: "Tolerance"; }
+                }
+                Row {
+                    HeaderCell { colspan: 2; text: ""; }
+                    HeaderCell { text: "Max"; }
+                    HeaderCell { text: "Step"; }
+                    HeaderCell { text: "Max"; }
+                    HeaderCell { text: "Step"; }
+                    HeaderCell { text: "Max"; }
+                    HeaderCell { text: "Step"; }
+                    HeaderCell { text: ""; }
+                    HeaderCell { text: "Cutoff"; }
+                    HeaderCell { text: "Sigma"; }
+                    HeaderCell { text: "Cutoff"; }
+                    HeaderCell { text: "Sigma"; }
+                    HeaderCell { text: ""; }
+                    HeaderCell { text: "Shift"; }
+                    HeaderCell { text: "Angle"; }
+                }
+                // One representative `IterationRow`.
+                Row {
+                    HeaderCell { colspan: 2; text: "1"; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                    FieldCell { text: ""; }
+                }
+            }
+            // pnlFlgRemoveDuplicates (IterationTable.java:451-457).
+            HorizontalLayout {
+                spacing: 40px;
+                alignment: start;
+                CheckBox { text: "Remove duplicates"; }
+                CheckBox { text: "Bandpass filtering"; }
+                CheckBox { text: "Strict search limit checking"; }
+            }
+        }
+        // pnlButtons (IterationTable.java:432-446).
+        VerticalLayout {
+            spacing: 5px;
+            alignment: start;
+            SingleLineButton { text: "Up"; }
+            SingleLineButton { text: "Down"; }
+            SingleLineButton { text: "Insert"; }
+            SingleLineButton { text: "Delete"; }
+            SingleLineButton { text: "Dup"; }
+        }
+    }
+}
+
+// `FixPathsPanel` (FixPathsPanel.java:80-105).  The Java leaves pnlRoot
+// `setVisible(false)` until a file cannot be found, so it is drawn but gated
+// on its construction-time visibility, like the other hidden-at-construction
+// widgets in this crate.
+component FixPathsPanel inherits VerticalLayout {
+    PanelHeader { title: "Fix File Paths"; open: true; }
+    Rectangle {
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: EtomoStyle.inset;
+            spacing: EtomoStyle.gap;
+            // lblwarning is painted ProcessControlPanel.colorNotStarted (red).
+            Text {
+                text: "Files cannot be found.  PEET may not run.";
+                color: #ff0000;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            CheckBox { text: "Files may be in separate directories"; }
+            HorizontalLayout {
+                alignment: center;
+                MultiLineButton { text: "Fix Incorrect Paths"; width: 180px; }
+            }
+        }
+    }
+}
+
+// `ReferencePanel.createPanel` (ReferencePanel.java:93-146).
+component ReferencePanel inherits BeveledBorder {
+    // pnlParticle adds sVolume and then ltfVolume in adjacent slots
+    // (ReferencePanel.java:132-133); `msgFlgVolNamesAreTemplates`
+    // (ReferencePanel.java:302-308) shows exactly one of them.  updateDisplay
+    // calls it at init with the volume table's check box clear
+    // (ReferencePanel.java:349), so the spinner is the visible one.
+    in property <bool> file-names-are-templates: false;
+    title: "Reference";
+    // pnlParticle.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        RadioTextField { label: "Particle "; selected: true; text: ""; }
+        Rectangle { width: 10px; }
+        // sVolume: Spinner.getLabeledInstance("In Volume: ") (ReferencePanel.java:56).
+        if !root.file-names-are-templates: LabeledSpinner { label: "In Volume: "; label-width: 70px; text: "1"; }
+        // ltfVolume: the LabeledTextField carrying the same "In Volume: " label
+        // (ReferencePanel.java:63-64).
+        if root.file-names-are-templates: LabeledTextField { label: "In Volume: "; label-width: 70px; text: ""; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        RadioButton { text: "User supplied file: "; }
+        FileTextField { label: ""; field-width: 225px; text: ""; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        RadioButton { text: "Multiparticle reference with"; }
+        ComboBox { text: "50"; }
+        PlainLabel { text: "particles"; }
+    }
+}
+
+// `MissingWedgeCompensationPanel.createPanel`
+// (MissingWedgeCompensationPanel.java:108-170).
+component MissingWedgeCompensationPanel inherits VerticalLayout {
+    // createPanel hides cbTiltRange and cbFlgWedgeWeight together
+    // (MissingWedgeCompensationPanel.java:110-111); both are marked deprecated,
+    // replaced by cbMissingWedgeCompensation
+    // (MissingWedgeCompensationPanel.java:67-75).  One property gates the pair.
+    in property <bool> show-deprecated-tilt-range: false;
+    spacing: EtomoStyle.gap;
+    BeveledBorder {
+        title: "Volume Size (Voxels)";
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "X: "; label-width: 20px; text: ""; }
+            LabeledTextField { label: "Y: "; label-width: 20px; text: ""; }
+            LabeledTextField { label: "Z: "; label-width: 20px; text: ""; }
+        }
+    }
+    BeveledBorder {
+        title: "Missing Wedge Compensation";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Enabled"; }
+            LabeledSpinner { label: "Edge shift: "; label-width: 80px; text: "1"; }
+            LabeledSpinner { label: "Weight groups: "; label-width: 100px; text: "8"; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            PlainLabel { text: "Number of Tilt Axes: "; }
+            RadioButton { text: "1"; selected: true; }
+            Rectangle { width: 15px; }
+            RadioButton { text: "2 or more"; }
+        }
+        // cbTiltRange and cbFlgWedgeWeight, added to
+        // pnlMissingWedgeCompensation after pnlTiltRange
+        // (MissingWedgeCompensationPanel.java:150-151); labels at
+        // MissingWedgeCompensationPanel.java:71 and 75.
+        if root.show-deprecated-tilt-range: CheckBox { text: "Use tilt range in averaging"; }
+        if root.show-deprecated-tilt-range: CheckBox { text: "Use tilt range in alignment"; }
+    }
+}
+
+// `MaskingPanel.createPanel` (MaskingPanel.java:107-234).
+component MaskingPanel inherits BeveledBorder {
+    title: "Masking";
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        // pnlMaskType
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "None"; selected: true; }
+            RadioButton { text: "Sphere"; }
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "Cylinder"; }
+                Rectangle { width: 50px; }
+                LabeledTextField { label: "Height: "; label-width: 55px; text: ""; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                RadioButton { text: "User supplied binary file:"; }
+                FileTextField { label: ""; field-width: 190px; text: ""; }
+            }
+        }
+        // pnlSphereCylinder
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                LabeledTextField { label: "Inner radius: "; label-width: 90px; text: ""; }
+                Rectangle { width: 40px; }
+                LabeledTextField { label: "Outer radius: "; label-width: 90px; text: ""; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                LabeledTextField { label: "Blur mask by: "; label-width: 90px; text: ""; }
+            }
+            // pnlCylinderOrientation: BorderFactory.createEtchedBorder(), untitled.
+            BeveledBorder {
+                title: "";
+                CheckBox { text: "Manual Cylinder Orientation"; }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: EtomoStyle.gap;
+                    LabeledTextField { label: "Z Rotation: "; label-width: 80px; text: ""; }
+                    Rectangle { width: 40px; }
+                    LabeledTextField { label: "Y Rotation: "; label-width: 80px; text: ""; }
+                }
+            }
+        }
+    }
+}
+
+// `YAxisTypePanel.createPanel` (YAxisTypePanel.java:74-96).  The radio labels
+// are the `MatlabParam.YAxisType` enum labels (MatlabParam.java:2413-2420).
+component YAxisTypePanel inherits BeveledBorder {
+    title: "Particle Y Axis";
+    // `new RadioButton(MatlabParam.YAxisType.Y_AXIS, bgYAxisType)`: the
+    // enum-taking constructor selects itself when the enum is its own default
+    // (RadioButton.java:114-116), and `YAxisType.DEFAULT = Y_AXIS`
+    // (MatlabParam.java:2421).  Label from SharedStrings.java:28.
+    RadioButton { text: "Tomogram Y axis"; selected: true; }
+    RadioButton { text: "Particle model points"; }
+    RadioButton { text: "End points of contour"; }
+    RadioButton { text: "User supplied csv files"; }
+}
+
+// `SphericalSamplingForThetaAndPsiPanel.createPanel`
+// (SphericalSamplingForThetaAndPsiPanel.java:82-100).
+component SphericalSamplingForThetaAndPsiPanel inherits BeveledBorder {
+    title: "Spherical Sampling for Theta and Psi";
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        Rectangle { width: 20px; }
+        RadioButton { text: "None"; selected: true; }
+        Rectangle { width: 10px; }
+        RadioButton { text: "Full sphere"; }
+        Rectangle { width: 10px; }
+        RadioButton { text: "Half sphere"; }
+        Rectangle { width: 70px; }
+        LabeledTextField {
+            label: "Sample interval (degrees) : ";
+            label-width: 180px;
+            text: "";
+            width: 250px;
+        }
+    }
+}
+
+// `PeetDialog.createSetupPanel` (PeetDialog.java:790-845).  pnlSetup carries
+// BorderFactory.createEtchedBorder(), i.e. an untitled group box.
+export component PeetSetupTab inherits BeveledBorder {
+    title: "";
+    // pnlProject
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        LabeledTextField { label: "Directory: "; label-width: 70px; text: ""; width: 320px; }
+        Rectangle { width: 10px; }
+        LabeledTextField { label: "Root name for output: "; label-width: 150px; text: ""; width: 400px; }
+        Rectangle { width: 20px; }
+    }
+    // `setVisible(false)` at construction (FixPathsPanel.java:80-105); shown
+    // only once a file cannot be found.
+    in property <bool> show-fix-paths: false;
+    if root.show-fix-paths: FixPathsPanel { }
+    VolumeTable { }
+    // pnlReferenceAndMissingWedgeCompensation
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        ReferencePanel { }
+        MissingWedgeCompensationPanel { }
+    }
+    MaskingPanel { }
+    // pnlInitMotlAndYAxisType
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        YAxisTypePanel { }
+        Rectangle { }
+        // pnlInitMotlX / pnlInitMotl.  Radio labels are the
+        // `MatlabParam.InitMotlCode` labels (MatlabParam.java:2205-2217).
+        BeveledBorder {
+            title: "Initial Motive List";
+            RadioButton { text: "Set all angles to 0"; selected: true; }
+            RadioButton { text: "Align particle Y axes"; }
+            RadioButton { text: "User supplied csv files"; }
+            RadioButton { text: "Uniform random rotations"; }
+            RadioButton { text: "Random axial (Y) rotations"; }
+        }
+    }
+}
+
+// `PeetDialog.createRunPanel` (PeetDialog.java:846-914).
+export component PeetRunTab inherits BeveledBorder {
+    title: "";
+    HorizontalLayout {
+        alignment: start;
+        LabeledSpinner { label: "Particles per CPU (core): "; label-width: 170px; text: "20"; }
+    }
+    IterationTable { }
+    SphericalSamplingForThetaAndPsiPanel { }
+    // pnlLstThresholds
+    BeveledBorder {
+        title: "Number of Particles to Average";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            Rectangle { width: 20px; }
+            LabeledTextField { label: "Start: "; label-width: 45px; text: ""; width: 115px; }
+            Rectangle { width: 10px; }
+            LabeledTextField { label: "Incr.: "; label-width: 45px; text: ""; width: 115px; }
+            Rectangle { width: 10px; }
+            LabeledTextField { label: "End: "; label-width: 45px; text: ""; width: 115px; }
+            Rectangle { width: 20px; }
+            LabeledTextField { label: " Additional numbers: "; label-width: 145px; text: ""; width: 265px; }
+        }
+    }
+    // pnlEqualNumber
+    BeveledBorder {
+        title: "Use Equal Numbers of Particles from All Tomograms";
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "For average volumes"; }
+            CheckBox { text: "For new references"; }
+        }
+    }
+    Rectangle { height: 20px; }
+    // pnlButton
+    HorizontalLayout {
+        alignment: start;
+        spacing: 30px;
+        Rectangle { width: 0px; }
+        SingleLineButton { text: "Run"; }
+        SingleLineButton { text: "Open averages in 3dmod"; }
+        SingleLineButton { text: "Open references in 3dmod"; }
+        SingleLineButton { text: "Remake Averages"; }
+    }
+}
+
+// `PeetDialog.createMoreOptionsPanel` (PeetDialog.java:918-1054).
+export component PeetMoreOptionsTab inherits SpacedPanel {
+    BeveledBorder {
+        title: "Particle Selection";
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle { width: 5px; }
+            LabeledTextField { label: "Exclude particles "; label-width: 130px; text: ""; width: 400px; }
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle { width: 5px; }
+            LabeledTextField { label: "Include particles "; label-width: 130px; text: ""; width: 400px; }
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle { width: 5px; }
+            LabeledTextField { label: "Average only members of classes "; label-width: 220px; text: ""; width: 490px; }
+        }
+        Rectangle { height: 10px; }
+        // pnlParticleSelectionFlags: GridLayout(1, 2, 20, 0).
+        HorizontalLayout {
+            spacing: 20px;
+            CheckBox { text: "Elevation Compensation"; }
+            CheckBox { text: "Randomized particle selection"; }
+        }
+        Rectangle { height: 5px; }
+    }
+    BeveledBorder {
+        title: "Alignment";
+        // pnlAlignment: GridLayout(3, 3, 20, 0) filled row-major with six
+        // check boxes, so it renders as two rows of three.
+        GridLayout {
+            spacing: 20px;
+            Row {
+                CheckBox { text: "Fast rotational matching"; checked: true; }
+                CheckBox { text: "Masked correlation computation"; }
+                CheckBox { text: "Filter reference only"; }
+            }
+            Row {
+                CheckBox { text: "Search along particle axes"; }
+                CheckBox { text: "Floating point wedge mask"; }
+                CheckBox { text: "Use absolute value of cross-correlation"; checked: true; }
+            }
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle { width: 5px; }
+            LabeledTextField {
+                label: "Per iteration c<N> axial search order ";
+                label-width: 250px;
+                text: "";
+                width: 520px;
+            }
+        }
+        Rectangle { height: 10px; }
+    }
+    BeveledBorder {
+        title: "Processing";
+        // pnlProcessing: GridLayout(3, 3, 20, 0) filled row-major with six
+        // components.
+        GridLayout {
+            spacing: 20px;
+            Row {
+                CheckBox { text: "Align averages to have their Y axes vertical"; }
+                CheckBox { text: "Use previously extracted particles"; }
+                CheckBox { text: "No reference refinement (template matching)"; }
+            }
+            Row {
+                CheckBox { text: "Save individual aligned particles"; }
+                // pnlCNSymmetricAveraging: the check box, the "=" JLabel, then
+                // the spinner.
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: EtomoStyle.gap;
+                    CheckBox { text: "c<N> symmetric averaging with N"; }
+                    PlainLabel { text: "="; }
+                    LabeledSpinner { label: ""; label-width: 0px; text: "2"; }
+                }
+                CheckBox { text: "Masking during c<N> averaging"; checked: true; }
+            }
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle { width: 5px; }
+            LabeledTextField { label: "User commands "; label-width: 120px; text: ""; width: 520px; }
+        }
+        Rectangle { height: 10px; }
+        HorizontalLayout {
+            alignment: start;
+            LabeledSpinner { label: "Debug level: "; label-width: 90px; text: "3"; }
+        }
+        Rectangle { height: 5px; }
+    }
+}
+
+// `PeetDialog`'s root panel: `new BeveledBorder("PEET")` around the tab pane
+// (PeetDialog.java:210-217).
+//
+// Swing shows one tab body at a time (`changeTab`, PeetDialog.java:1184-1200).
+// Slint has no tab container in this crate's vocabulary and this is an
+// appearance-only mirror, so all three bodies are laid out in sequence below
+// the strip rather than only the selected one.  Each body is also exported on
+// its own for viewing in isolation.
+export component PeetDialog inherits BeveledBorder {
+    title: "PEET";
+    TabbedPane {
+        tabs: ["Setup", "Run", "More Options"];
+        current: 0;
+    }
+    PeetSetupTab { }
+    PeetRunTab { }
+    PeetMoreOptionsTab { }
+}
+
+export component PeetDialogWindow inherits Window {
+    title: "PEET";
+    background: EtomoStyle.background;
+    preferred-width: 1200px;
+    preferred-height: 900px;
+    PeetDialog { }
+}

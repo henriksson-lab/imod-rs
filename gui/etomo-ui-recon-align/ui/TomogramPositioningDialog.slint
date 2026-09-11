@@ -1,0 +1,125 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TomogramPositioningDialog.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, BeveledBorder, LabeledTextField, LabeledSpinner, CheckBox,
+         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, TextField, ExitButtons } from "widgets_local.slint";
+
+// `TomogramPositioningDialog.CalcPanel` (inner class, line 1083): a label, then
+// read-only Original and Added fields, then an editable Total field, all six
+// digits wide.  The constructor calls `updateDisplay(false)`, which hides
+// Original and Added until tomopitch has produced values, so `more` is false by
+// default here too.
+component CalcPanel inherits HorizontalLayout {
+    in property <string> label;
+    in property <bool> more: false;
+    in property <string> original: "0.0";
+    in property <string> added: "0.0";
+    in property <string> total: "0.0";
+    in property <bool> enabled: true;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label + ":";
+        width: 130px;
+        vertical-alignment: center;
+        color: EtomoStyle.text;
+    }
+    if root.more: LabeledTextField {
+        label: "Original:";
+        text: root.original;
+        label-width: 60px;
+    }
+    if root.more: LabeledTextField {
+        label: "Added:";
+        text: root.added;
+        label-width: 60px;
+    }
+    Text { text: "Total:"; vertical-alignment: center; }
+    TextField { text: root.total; enabled: root.enabled; field-width: 70px; }
+}
+
+export component TomogramPositioningDialog inherits VerticalLayout {
+    // `cbFiducialess` drives `updateDisplay()`: when set, `pnlFinalAlign` is
+    // hidden and `cpTiltAngleOffset`/`cpZShift` are shown.  Both branches are
+    // laid out here so the whole source layout is visible; the flag selects
+    // what the Java would actually be showing.
+    in property <bool> fiducialess: false;
+    // `cbSampleTypeCryo` swaps `ltfExtraThickness` for `ltfExtraThicknessCryo`.
+    in property <bool> cryo: false;
+
+    spacing: EtomoStyle.gap;
+
+    // `pnlPosition`, bordered with `new BeveledBorder("Tomogram Positioning")`.
+    BeveledBorder {
+        title: "Tomogram Positioning";
+
+        // `pnlTomoParams`
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Use the GPU"; }
+            CheckBox { text: "Find boundary model automatically"; }
+            CheckBox { text: "Do positioning for cryo sample"; enabled: false; }
+            // `pnlGoldBeads`
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                CheckBox { text: "Sample has gold beads of size:"; enabled: false; }
+                TextField { text: "10.0"; enabled: false; field-width: 70px; }
+                Text { text: " pixels"; vertical-alignment: center; color: EtomoStyle.disabled-text; }
+            }
+            LabeledTextField { label: "Positioning tomogram thickness: "; text: "1200"; label-width: 210px; }
+            CheckBox { text: "Coarse alignment only"; }
+            LabeledTextField { label: "Tilt axis rotation:"; text: "0.0"; enabled: root.fiducialess; label-width: 210px; }
+            // `pnlWholeTomogram`
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                CheckBox { text: "Use whole tomogram"; }
+                LabeledSpinner { label: "   Binning "; text: "3"; label-width: 70px; enabled: false; }
+            }
+        }
+
+        MultiLineButton { text: "Create Sample Tomograms"; }
+        MultiLineButton { text: "Create Boundary Model"; }
+
+        if !root.cryo: LabeledTextField { label: "Added border thickness (unbinned): "; text: ""; label-width: 230px; }
+        if root.cryo: LabeledTextField { label: "Added border thickness (unbinned): "; text: ""; label-width: 230px; }
+
+        CheckBox { text: "Keep X-axis tilt at zero"; }
+        MultiLineButton { text: "Compute Z Shift & Pitch Angles"; }
+
+        // `pnlFinalAlign`; `updateDisplay()` hides it while fiducialess.
+        if !root.fiducialess: EtchedBorder {
+            title: "Final Alignment";
+            CalcPanel { label: "Angle offset"; }
+            CalcPanel { label: "Z shift"; }
+            MultiLineButton { text: "Create Final Alignment"; }
+        }
+
+        // `pnlTiltParameters`
+        EtchedBorder {
+            title: "Tilt Parameters";
+            // `cpTiltAngleOffset` and `cpZShift` are visible only while
+            // fiducialess (`updateDisplay()`).
+            if root.fiducialess: CalcPanel { label: "Tilt angle offset"; }
+            if root.fiducialess: CalcPanel { label: "Z shift"; }
+            CalcPanel { label: "X axis tilt"; }
+            LabeledTextField { label: "Final Tomogram Thickness: "; text: "1200"; label-width: 210px; }
+        }
+    }
+
+    // `ProcessDialog.addExitButtons()`.  `btnExecute.setText("Done")`.
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component TomogramPositioningDialogWindow inherits Window {
+    title: "Tomogram Positioning";
+    background: EtomoStyle.background;
+    preferred-width: 640px;
+    preferred-height: 760px;
+    VerticalLayout {
+        TomogramPositioningDialog { }
+    }
+}

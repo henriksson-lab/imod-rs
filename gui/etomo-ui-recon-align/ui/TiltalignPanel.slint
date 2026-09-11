@@ -1,0 +1,336 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TiltalignPanel.java`.
+//
+// This panel is the entire body of `AlignmentEstimationDialog`, so it is
+// reproduced here rather than stubbed.  Its own Java file is not one of the
+// four dialogs this crate is named for; if a panel crate later carries it,
+// this file is the one to drop.
+//
+// Appearance only: no callbacks, no manager state.  Every field carries a
+// static default.
+
+import { EtomoStyle, LabeledTextField, CheckBox, RadioButton, PanelHeader,
+         TabbedPane } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, RadioTextField, CheckTextField, SingleLineButton }
+    from "widgets_local.slint";
+
+export component TiltalignPanel inherits VerticalLayout {
+    // `TiltalignPanel.Tab`: GENERAL, GLOBAL_VARIABLES, LOCAL_VARIABLES.  The
+    // Java swaps the tab body in a JTabbedPane; Slint selects it with `if`.
+    in property <int> tab: 0;
+
+    EtchedBorder {
+        title: "Tiltalign Parameters";
+        TabbedPane {
+            tabs: ["General", "Global Variables", "Local Variables"];
+            current: root.tab;
+
+            // ---- General (`createGeneralTab`) ----
+            if root.tab == 0: VerticalLayout {
+                spacing: EtomoStyle.gap;
+                padding: EtomoStyle.inset;
+                LabeledTextField { label: "List of views to exclude: "; text: ""; }
+                LabeledTextField { label: "Separate view groups: "; text: ""; }
+                EtchedBorder {
+                    title: "Residual Reporting";
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        LabeledTextField { label: "Threshold for residual report: "; text: "3.0"; label-width: 210px; }
+                        Text { text: "s.d."; vertical-alignment: center; }
+                    }
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        Text { text: "Relative to"; vertical-alignment: center; }
+                        RadioButton { text: "All views"; selected: true; }
+                        RadioButton { text: "Neighboring views"; }
+                    }
+                    CheckBox { text: "Compute prediction errors for points left out of test fits"; }
+                }
+                EtchedBorder {
+                    title: "Analysis of Surface Angles";
+                    RadioButton { text: "Do not sort fiducials into 2 surfaces for analysis"; selected: true; }
+                    RadioButton { text: "Assume fiducials on 2 surfaces for analysis"; }
+                }
+                EtchedBorder {
+                    title: "Volume Position Parameters";
+                    LabeledTextField { label: "Total tilt angle offset: "; text: "0.0"; }
+                    LabeledTextField { label: "Tilt axis z shift: "; text: "0.0"; }
+                }
+                EtchedBorder {
+                    title: "Minimization Parameters";
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        CheckTextField { label: "Do robust fitting with tuning factor:"; text: "1.0"; }
+                        CheckBox { text: "Find weights for contours, not points"; }
+                    }
+                    HorizontalLayout {
+                        spacing: 3px;
+                        alignment: start;
+                        LabeledTextField { label: "Metro factor: "; text: "0.25"; label-width: 90px; }
+                        LabeledTextField { label: "Iteration limit: "; text: "1000"; label-width: 90px; }
+                    }
+                }
+                EtchedBorder {
+                    title: "Local Alignment Parameters";
+                    CheckBox { text: "Enable local alignments"; checked: true; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        EtchedBorder {
+                            title: "Local Patch Layout:";
+                            RadioTextField { label: "Target patch size (x,y): "; text: "700,700"; selected: true; }
+                            RadioTextField { label: "# of local patches (x,y): "; text: "5,5"; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Overlap factor (x,y): "; text: "0.5,0.5"; }
+                            LabeledTextField { label: "Min. # of fiducials (total, each surface): "; text: "8,3"; label-width: 240px; }
+                            CheckBox { text: "Use global X-Y-Z coordinates"; checked: true; }
+                        }
+                    }
+                }
+                EtchedBorder {
+                    title: "Restrict Align Variables with Cross-Validation";
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        Text { text: "Test local "; vertical-alignment: center; }
+                        // `bgLocalAlignValidation` (TiltalignPanel.java:257-266).
+                        // The three-argument `RadioButton(String, EnumeratedType,
+                        // ButtonGroup)` selects itself when the enum is its own
+                        // default (RadioButton.java:114-116), and
+                        // `LocalAlignValidation.DEFAULT = AREA_REQUIREMENTS`
+                        // (TiltalignPanel.java:2218) -- so the *first* button is
+                        // selected at construction, not "Both".
+                        RadioButton { text: "Area requirements"; selected: true; }
+                        RadioButton { text: "Variables"; }
+                        RadioButton { text: "Both"; }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        LabeledTextField { label: "Fallback ratio of measurements to unknowns:  Target "; text: ""; label-width: 300px; }
+                        LabeledTextField { label: "Minimum "; text: ""; label-width: 60px; }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        SingleLineButton { text: "Run Cross-Validation"; width: 160px; }
+                    }
+                }
+            }
+
+            // ---- Global Variables (`createGlobalSolutionTab`) ----
+            if root.tab == 1: VerticalLayout {
+                spacing: EtomoStyle.gap;
+                padding: EtomoStyle.inset;
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Rotation Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            RadioButton { text: "No rotation"; }
+                            RadioButton { text: "One rotation"; }
+                            RadioButton { text: "Group rotations"; }
+                            RadioButton { text: "Solve for all rotations"; selected: true; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Rotation angle: "; text: "0.0"; }
+                            LabeledTextField { label: "Group size: "; text: "5"; }
+                            LabeledTextField { label: "Non-default grouping: "; text: ""; }
+                        }
+                    }
+                }
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Magnification Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            RadioButton { text: "Fixed magnification at 1.0"; }
+                            RadioButton { text: "Group magnifications"; }
+                            RadioButton { text: "Solve for all magnifications"; selected: true; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Reference view: "; text: "1"; }
+                            LabeledTextField { label: "Group size: "; text: "4"; }
+                            LabeledTextField { label: "Non-default grouping: "; text: ""; }
+                        }
+                    }
+                }
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Tilt Angle Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            RadioButton { text: "Fixed tilt angles"; }
+                            RadioButton { text: "Group tilt angles "; selected: true; }
+                            RadioButton { text: "Solve for all except minimum tilt"; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Group size: "; text: "5"; }
+                            LabeledTextField { label: "Non-default grouping: "; text: ""; }
+                        }
+                    }
+                }
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Distortion Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            RadioButton { text: "Disabled"; selected: true; }
+                            RadioButton { text: "Full solution"; }
+                            RadioButton { text: "Skew only"; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "X stretch group size: "; text: "7"; label-width: 210px; }
+                            LabeledTextField { label: "X stretch non-default grouping: "; text: ""; label-width: 210px; }
+                            LabeledTextField { label: "Skew group size: "; text: "11"; label-width: 210px; }
+                            LabeledTextField { label: "Skew non-default grouping: "; text: ""; label-width: 210px; }
+                        }
+                    }
+                }
+                // `pnlSingleVariables`: an untitled etched box whose title strip
+                // is a PanelHeader rather than a border title.
+                Rectangle {
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    VerticalLayout {
+                        padding: EtomoStyle.inset;
+                        spacing: EtomoStyle.gap;
+                        PanelHeader { title: "Single Variables: Beam Tilt, X Tilt, Projection Stretch"; }
+                        // `createGlobalSolutionTab` adds `pnlBeamTiltRadioButtons`
+                        // to `pnlSingleVariablesBody` twice; in Swing the second
+                        // add just re-parents the same component, so it appears
+                        // once.  Added once here.
+                        Rectangle {
+                            background: EtomoStyle.panel;
+                            border-width: 1px;
+                            border-color: EtomoStyle.border;
+                            VerticalLayout {
+                                padding: EtomoStyle.inset;
+                                spacing: EtomoStyle.gap;
+                                RadioButton { text: "No beam tilt"; selected: true; }
+                                RadioTextField { label: "Fixed beam tilt (degrees): "; text: "0.0"; }
+                                RadioButton { text: "Solve for beam tilt"; }
+                            }
+                        }
+                        CheckBox { text: "Solve for X axis tilt between separate groups"; }
+                        CheckBox { text: "Solve for single stretch during projection"; }
+                    }
+                }
+            }
+
+            // ---- Local Variables (`createLocalSolutionTab`) ----
+            if root.tab == 2: VerticalLayout {
+                spacing: EtomoStyle.gap;
+                padding: EtomoStyle.inset;
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Local Rotation Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            CheckBox { text: "Enable"; checked: true; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Group size: "; text: "6"; }
+                            LabeledTextField { label: "Non-default grouping: "; text: ""; }
+                        }
+                    }
+                }
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Local Magnification Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            CheckBox { text: "Enable"; checked: true; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Group size: "; text: "7"; }
+                            LabeledTextField { label: "Non-default grouping: "; text: ""; }
+                        }
+                    }
+                }
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Local Tilt Angle Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            CheckBox { text: "Enable"; checked: true; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Group size: "; text: "6"; }
+                            LabeledTextField { label: "Non-default grouping: "; text: ""; }
+                        }
+                    }
+                }
+                // `createVariablePanel`: button column, a 40px rigid area, then the
+                // column of fields; the solution type is the etched border title.
+                EtchedBorder {
+                    title: "Local Distortion Solution Type";
+                    HorizontalLayout {
+                        spacing: 40px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: start;
+                            RadioButton { text: "Disabled"; selected: true; }
+                            RadioButton { text: "Full solution"; }
+                            RadioButton { text: "Skew only"; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "X stretch group size: "; text: "7"; label-width: 210px; }
+                            LabeledTextField { label: "X stretch non-default grouping: "; text: ""; label-width: 210px; }
+                            LabeledTextField { label: "Skew group size: "; text: "11"; label-width: 210px; }
+                            LabeledTextField { label: "Skew non-default grouping: "; text: ""; label-width: 210px; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

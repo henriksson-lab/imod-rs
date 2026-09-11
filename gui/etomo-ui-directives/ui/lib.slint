@@ -1,0 +1,20 @@
+// Re-export point so `build.rs` compiles both dialogs in one pass.
+// One file per Swing class in `IMOD/Etomo/src/etomo/ui/swing`.
+
+import { DirectiveEditorDialog, DirectiveEditorDialogWindow } from "DirectiveEditorDialog.slint";
+import { DirectivesDialog, DirectivesDialogWindow } from "DirectivesDialog.slint";
+import { DirectiveSectionPanel, DirectiveSectionPanelShowCheckBox, DirectiveSectionPanelWindow, DirectiveSectionData } from "DirectiveSectionPanel.slint";
+import { DirectivePanel, DirectivePanelWindow, DirectivePanelData } from "DirectivePanel.slint";
+import { DirectivesTable, DirectivesTableWindow, DirectivesRowData } from "DirectivesTable.slint";
+import { DirectivesSectionRow, DirectivesSectionRowWindow } from "DirectivesSectionRow.slint";
+import { DirectivesDirectiveRow, DirectivesDirectiveRowWindow } from "DirectivesDirectiveRow.slint";
+
+export {
+    DirectiveEditorDialog, DirectiveEditorDialogWindow,
+    DirectivesDialog, DirectivesDialogWindow,
+    DirectiveSectionPanel, DirectiveSectionPanelShowCheckBox, DirectiveSectionPanelWindow, DirectiveSectionData,
+    DirectivePanel, DirectivePanelWindow, DirectivePanelData,
+    DirectivesTable, DirectivesTableWindow, DirectivesRowData,
+    DirectivesSectionRow, DirectivesSectionRowWindow,
+    DirectivesDirectiveRow, DirectivesDirectiveRowWindow,
+}

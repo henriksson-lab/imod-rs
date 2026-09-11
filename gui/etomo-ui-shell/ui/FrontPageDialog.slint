@@ -1,0 +1,88 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/FrontPageDialog.java`.
+//
+// Appearance only.  The button labels are `EtomoMenu`'s *_LABEL constants
+// (`EtomoMenu.java:38-47`), which FrontPageDialog passes to MultiLineButton.
+
+import { EtomoStyle, MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+
+export component FrontPageDialog inherits Rectangle {
+    background: EtomoStyle.background;
+    // `pnlRoot`: BoxLayout.Y_AXIS, Box.LEFT_ALIGNMENT.  The Box.createRigidArea
+    // calls between the sub-panels (x0_y3, x0_y7, x0_y10) become explicit
+    // spacer rectangles so the vertical rhythm survives.
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+
+        // `pnlProjectLabel`: BoxLayout.X_AXIS, JLabel + horizontal glue.
+        HorizontalLayout {
+            alignment: start;
+            Text {
+                text: "New project:";
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+        }
+        Rectangle { height: 3px; }
+
+        // `pnlProjects`: GridLayout(3, 2, 7, 7).
+        GridLayout {
+            spacing: 7px;
+            Row {
+                MultiLineButton { text: "Build Tomogram"; }
+                MultiLineButton { text: "Join Serial Tomograms"; }
+            }
+            Row {
+                MultiLineButton { text: "Subvolume Averaging (PEET)"; }
+                MultiLineButton { text: "Align Serial Sections / Blend Montages"; }
+            }
+            Row {
+                MultiLineButton { text: "Nonlinear Anisotropic Diffusion"; }
+                MultiLineButton { text: "Generic Parallel Process"; }
+            }
+        }
+        Rectangle { height: 7px; }
+
+        // `pnlBatchRunTomo`: BoxLayout.X_AXIS, glue - button - glue.
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Batch Tomograms"; width: 220px; }
+        }
+        Rectangle { height: 10px; }
+
+        // `pnlToolLabel`: BoxLayout.X_AXIS, JLabel + horizontal glue.
+        HorizontalLayout {
+            alignment: start;
+            Text {
+                text: "Tools:";
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+        }
+        Rectangle { height: 3px; }
+
+        // `pnlTools`: GridLayout(1, 2, 7, 7).
+        GridLayout {
+            spacing: 7px;
+            Row {
+                MultiLineButton { text: "Flatten Volume"; }
+                MultiLineButton { text: "Test GPU"; }
+            }
+        }
+        Rectangle { height: 7px; }
+
+        // `pnlAlignFrames`: BoxLayout.X_AXIS, glue - button - glue.
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Align Frames"; width: 220px; }
+        }
+    }
+}
+
+export component FrontPageDialogWindow inherits Window {
+    title: "eTomo";
+    background: EtomoStyle.background;
+    preferred-width: 520px;
+    preferred-height: 300px;
+    FrontPageDialog { }
+}

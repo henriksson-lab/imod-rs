@@ -1,0 +1,207 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TomogramProcessPanel.java`,
+// the `AxisProcessPanel` subclass of `ApplicationManager` (reconstruction).
+//
+// It instantiates the base component from `AxisProcessPanel.slint` — the Java
+// constructor (`:207-216`) is `super(axis, appManager, true, true,
+// InterfaceType.RECON, false, axisProgressPanel)` followed by
+// `createProcessControlPanel()` and `initializePanels()` — and supplies as
+// `@children` exactly what its `createProcessControlPanel()` override
+// (`:421-531`) appends to `panelProcessSelect` after calling `super`.
+//
+// It overrides: `createProcessControlPanel()` (the ten process buttons and the
+// two axis buttons), `showBothAxis()` (`:352-360`), `setBackground()`
+// (`:408-412`, which also paints `axisButtonPanel`), and adds `selectButton`,
+// the ten `set*State` setters and the tooltips.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors, SimpleButton, ProcessControlPanel } from "MainWindowWidgets.slint";
+import { AxisProcessPanel } from "AxisProcessPanel.slint";
+
+export component TomogramProcessPanel inherits Rectangle {
+    in property <string> axis-id: "ONLY";
+    // `UserConfiguration.getCompactDisplay()` (`:445-447`), false by default
+    // (`etomo/type/UserConfiguration.java:148`).  It swaps every process
+    // button's label for `DialogType.getCompactLabel()` and turns
+    // `axisButtonPanel` from `BoxLayout.X_AXIS` into `Y_AXIS` (`:446-450`).
+    in property <bool> compact-display: false;
+    // `showAxisOnly()` (`:362-364`) and `showAxisA()` (`:366-381`) both call
+    // `setBackground(Colors.getBackgroundA())`, and both run inside
+    // `createProcessControlPanel` — for `AxisID.ONLY` and `AxisID.FIRST`
+    // respectively (`:451-453`, `:467-469`).  For `AxisID.SECOND` nothing sets
+    // the background until `showAxisB()` runs at display time, so the Metal
+    // default stands at construction; `Colors.background-b` is what
+    // `showAxisB()` (`:386-401`) then applies.
+    in property <color> panel-background: root.axis-id == "SECOND"
+        ? Colors.default-panel : Colors.background-a;
+    // `axisButtonPanel` is added to `panelProcessSelect` only when
+    // `axisID != AxisID.ONLY` (`:451-470`); for `AxisID.ONLY` the two buttons
+    // are constructed but never put in a container.
+    in property <bool> show-axis-buttons: root.axis-id != "ONLY";
+    // `createProcessControlPanel` (`:424-435`) sets both buttons to the widest
+    // of { `AXIS_B_LABEL` "Axis B", `AXIS_A_LABEL` "Axis A",
+    // `BOTH_AXIS_LABEL` "Both" }, defaulting to "Axis B" when
+    // `UIUtilities.getMaxWidthIndex` returns -1.  For `AxisID.FIRST`,
+    // `showAxisA()` immediately relabels them "Axis B" / "Both" (`:375-378`);
+    // for `AxisID.SECOND` they keep the sizing label until `showAxisB()`
+    // relabels them "Axis A" / "Both" (`:394-396`), and when both axes are
+    // shown `showAxisA(true)` uses "Axis A" / "Axis B" (`:371-374`) while
+    // `showAxisB(true)` hides the panel entirely (`:391-393`).
+    in property <string> axis-button-1-text: root.axis-id == "FIRST" ? "Axis B" : "Axis B";
+    in property <string> axis-button-2-text: root.axis-id == "FIRST" ? "Both" : "Axis B";
+
+    background: root.panel-background;
+
+    AxisProcessPanel {
+        width: 100%;
+        height: 100%;
+        axis-id: root.axis-id;
+        panel-background: root.panel-background;
+        alt-parallel-loc: false;
+
+        // `panelProcessSelect.add(Box.createRigidArea(FixedDim.x0_y5))` (`:443`).
+        Rectangle { height: 5px; }
+
+        // ---- axisButtonPanel (`:193`) -----------------------------------
+        // Tooltips: `bothAxisTooltip` "See Axis A and B.", `axisATooltip`
+        // "See Axis A only.", `axisBTooltip` "See Axis B only." (`:600-605`).
+        if root.show-axis-buttons: HorizontalLayout {
+            alignment: center;
+            spacing: 0px;
+            SimpleButton { text: root.axis-button-1-text; width: 70px; }
+            // `FixedDim.x40_y0` normally, `FixedDim.x0_y5` under compact
+            // display (`:458-463`) — which also stacks the two buttons.
+            Rectangle { width: root.compact-display ? 0px : 40px; }
+            SimpleButton { text: root.axis-button-2-text; width: 70px; }
+        }
+
+        // `panelProcessSelect.add(Box.createRigidArea(FixedDim.x0_y10))` (`:471`).
+        Rectangle { height: 10px; }
+        // `procCtlPreProc` = `new ProcessControlPanel(DialogType.PRE_PROCESSING)`.
+        // Tooltip: "Open the Pre-processing panel to erase x-rays, bad pixels
+        // and/or bad CCD rows from the raw projection stack."
+        ProcessControlPanel {
+            label: "Pre-processing";
+            compact-label: "Pre";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        Rectangle { height: 10px; }
+        // `procCtlCoarseAlign` (`DialogType.COARSE_ALIGNMENT`).  Tooltip:
+        // "Open the Coarse Alignment panel to generate a coarsely aligned
+        // stack using cross correlation and to fix coarse alignment problems
+        // with Midas."
+        ProcessControlPanel {
+            label: "Coarse Alignment";
+            compact-label: "Coarse";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        Rectangle { height: 10px; }
+        // `procCtlFiducialModel` (`DialogType.FIDUCIAL_MODEL`).  Tooltip:
+        // "Open the Fiducial Model Generation panel to create a fiducial model
+        // to be used in the fine alignment step."
+        ProcessControlPanel {
+            label: "Fiducial Model Gen.";
+            compact-label: "Track";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        Rectangle { height: 10px; }
+        // `procCtlFineAlignment` (`DialogType.FINE_ALIGNMENT`).  Tooltip:
+        // "Open the Fine Alignment panel to use the generated fiducial model
+        // to sub-pixel align the project sequence."
+        ProcessControlPanel {
+            label: "Fine Alignment";
+            compact-label: "Fine";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        Rectangle { height: 10px; }
+        // `procCtlTomogramPositioning` (`DialogType.TOMOGRAM_POSITIONING`).
+        // Tooltip: "Open the Tomogram Position panel to optimally adjust the
+        // 3D location and size of the reconstruction volume."
+        ProcessControlPanel {
+            label: "Tomogram Positioning";
+            compact-label: "Pos";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        Rectangle { height: 10px; }
+        // `procCtlFinalAlignedStack` (`DialogType.FINAL_ALIGNED_STACK`); the
+        // label is `SharedStrings.FINAL_ALIGNED_STACK_LABEL`
+        // (`etomo/ui/SharedStrings.java:78`).  Tooltip: "Open the Final
+        // Aligned Stack panel to generate the final aligned stack."
+        ProcessControlPanel {
+            label: "Final Aligned Stack";
+            compact-label: "Stack";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        Rectangle { height: 10px; }
+        // `procCtlTomogramGeneration` (`DialogType.TOMOGRAM_GENERATION`).
+        // Tooltip: "Open the Tomogram Generation panel to calcuate the
+        // tomographic reconstruction."
+        ProcessControlPanel {
+            label: "Tomogram Generation";
+            compact-label: "Gen";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        // `if (axisID == AxisID.FIRST)` (`:513-519`): tomogram combination is
+        // on the A-axis column of a dual-axis data set only.
+        if root.axis-id == "FIRST": Rectangle { height: 10px; }
+        if root.axis-id == "FIRST": ProcessControlPanel {
+            // `procCtlTomogramCombination` (`DialogType.TOMOGRAM_COMBINATION`).
+            // Tooltip: "Open the Tomogram Combination panel to combine the
+            // tomograms generated from the A and B axes into a single dual
+            // axis reconstruction."
+            label: "Tomogram Combination";
+            compact-label: "Comb";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        // `if (axisID != AxisID.SECOND)` (`:520-530`): post-processing and
+        // clean up are not repeated on the B column.
+        if root.axis-id != "SECOND": Rectangle { height: 10px; }
+        if root.axis-id != "SECOND": ProcessControlPanel {
+            // `procCtlPostProcessing` (`DialogType.POST_PROCESSING`).
+            // Tooltip: "Open the Post Processing panel to trim the final
+            // reconstruction to size and squeeze the final reconstruction
+            // volume."
+            label: "Post-processing";
+            compact-label: "Post";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+        if root.axis-id != "SECOND": Rectangle { height: 10px; }
+        if root.axis-id != "SECOND": ProcessControlPanel {
+            // `procCtlCleanUp` (`DialogType.CLEAN_UP`).  Tooltip: "Open the
+            // Clean Up panel to delete the intermediate files."
+            label: "Clean Up";
+            compact-label: "Clean";
+            compact-display: root.compact-display;
+            width: 130px;
+        }
+
+        // Trailing `Box.createRigidArea(FixedDim.x0_y10)` (`:531`).
+        Rectangle { height: 10px; }
+    }
+}
+
+export component TomogramProcessPanelWindow inherits Window {
+    title: "eTomo Tomogram Process Panel";
+    preferred-width: 700px;
+    preferred-height: 900px;
+    background: EtomoStyle.background;
+    TomogramProcessPanel { axis-id: "FIRST"; }
+}

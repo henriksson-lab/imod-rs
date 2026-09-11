@@ -1,0 +1,85 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectivePanel.java`.
+//
+// One row of a `DirectiveSectionPanel`: the include check box, then the value
+// widget that matches the directive's value type, then horizontal glue.  Which
+// value widget exists is decided in the constructor
+// (`DirectivePanel.java:71-105`): a boolean or choice-list directive gets
+// `cbValue` (a `ComboBox`) and no text field; anything else gets `tfValue` (a
+// `TextField`), plus `sbFileValue` (a `SimpleButton` carrying
+// `ScaledImage.OPEN_FILE`) when the value type is FILE.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle, CheckBox } from "../../etomo-ui-common/ui/widgets.slint";
+import { TextField, ComboBox, SimpleButton } from "widgets_local.slint";
+
+// One directive, as `DirectiveSectionPanel.createPanel` pulls it out of the
+// `DirectiveMap`.  The directives themselves are read from
+// `IMOD/com/directives.csv` at run time, so this is a model, not a literal.
+//
+// `value-kind` says which branch of the constructor built the panel:
+//   "combo" -> `cbValue`, either the boolean instance (items "Yes", "No",
+//              `ComboBox.getUnlabeledInstance`) or the choice-list instance
+//              (`ComboBox.getUnlabeledEmptyChoiceInstance`)
+//   "file"  -> `tfValue` plus `sbFileValue`
+//   ""      -> `tfValue` alone
+export struct DirectivePanelData {
+    title: string,
+    value-kind: string,
+    value: string,
+    include: bool,
+    // `DirectivePanel.init` (`DirectivePanel.java:193-195`) hides the row when
+    // `tool.isDirectiveVisible` says no.  That answer needs a `DirectiveTool`
+    // and the loaded dataset, so it is a model field rather than a constant.
+    directive-visible: bool,
+}
+
+export component DirectivePanel inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> value-kind;
+    in property <string> value;
+    // `cbInclude` starts unselected unless `setIncluded()` toggles it.
+    in property <bool> include: false;
+    in property <length> value-width: 160px;
+
+    spacing: EtomoStyle.gap;
+
+    // `cbInclude = new CheckBox(" -  " + title + ": ")` (`DirectivePanel.java:66`).
+    CheckBox {
+        text: " -  " + root.title + ": ";
+        checked: root.include;
+    }
+    // `enableValue()`: the value widget is enabled only while the include check
+    // box is both selected and enabled.
+    if root.value-kind == "combo": ComboBox {
+        width: root.value-width;
+        text: root.value;
+        enabled: root.include;
+    }
+    if root.value-kind != "combo": TextField {
+        width: root.value-width;
+        text: root.value;
+        enabled: root.include;
+    }
+    if root.value-kind == "file": SimpleButton {
+        enabled: root.include;
+    }
+    // `Box.createHorizontalGlue()`.
+    Rectangle { }
+}
+
+export component DirectivePanelWindow inherits Window {
+    title: "eTomo Directive";
+    preferred-width: 560px;
+    preferred-height: 60px;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+        DirectivePanel {
+            title: "Directive";
+            value-kind: "";
+            value: "";
+        }
+    }
+}

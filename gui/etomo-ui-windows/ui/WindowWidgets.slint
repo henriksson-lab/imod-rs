@@ -1,0 +1,334 @@
+// Widget vocabulary the secondary windows need that the shared file in
+// `gui/etomo-ui-common/ui/widgets.slint` does not carry.  Same convention as
+// the common crate: one component per Swing widget class, named after that
+// class.  The eTomo classes here live in `IMOD/Etomo/src/etomo/ui/swing`
+// (`EtomoPanel.java`, `EtchedBorder.java`, `Menu.java`, `MenuItem.java`); the
+// `J...` components stand for the `javax.swing` containers the eTomo sources
+// instantiate directly.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `EtomoPanel` (`EtomoPanel.java:36`): `JPanel` that names itself after its
+// titled border.  A plain column, since the naming is a uitest concern.
+export component EtomoPanel inherits Rectangle {
+    background: EtomoStyle.panel;
+    VerticalLayout {
+        @children
+    }
+}
+
+// `EtchedBorder` (`EtchedBorder.java:58-61`): a `TitledBorder` wrapped around
+// `BorderFactory.createEtchedBorder(highlight, shadow)`.
+export component EtchedBorder inherits Rectangle {
+    in property <string> title;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    // Swing's etched border is a light line (248,254,255) inside a dark one
+    // (121,124,136) — `EtchedBorder.java:53-56`.  Slint has one border colour
+    // per rectangle, so only the dark line is painted.
+    border-color: #797c88;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        // Slint has no titled border, so the title is the first row inside the
+        // box instead of being painted into its top edge.
+        if root.title != "": Text {
+            text: root.title;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            color: EtomoStyle.text;
+        }
+        @children
+    }
+}
+
+// `MenuItem` (`MenuItem.java:32-43`): a self-naming `JMenuItem`.  The two-arg
+// constructor takes a mnemonic key code, which Metal paints as an underline
+// under the first matching character of the label; Slint's `Text` has no
+// per-character underline, so `mnemonic` is drawn as a trailing hint instead.
+// `KeyStroke` accelerators (`LogWindow.java:141-143`) are right-aligned, as
+// Metal draws them.
+export component MenuItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <string> mnemonic;
+    in property <string> accelerator;
+    height: 21px;
+    background: transparent;
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 10px;
+        spacing: 20px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if root.mnemonic != "": Text {
+            text: "[" + root.mnemonic + "]";
+            vertical-alignment: center;
+            color: EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        if root.accelerator != "": Text {
+            text: root.accelerator;
+            vertical-alignment: center;
+            color: EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+    }
+}
+
+// `Menu` (`Menu.java:32-35`): a self-naming `JMenu`.  In a menu bar it is the
+// clickable title; the item list drops below it, which Slint cannot cascade,
+// so the drop-down body is selected by `open-menu` on `JMenuBar` below.
+export component Menu inherits Rectangle {
+    in property <string> text;
+    in property <string> mnemonic;
+    in property <bool> open: false;
+    height: 22px;
+    background: root.open ? EtomoStyle.background.darker(10%) : transparent;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+    }
+}
+
+// `javax.swing.JMenuBar`: the strip of `Menu` titles across the top of a
+// frame.  Callers put the `Menu`s in as children.
+export component JMenuBar inherits Rectangle {
+    height: 24px;
+    background: EtomoStyle.panel;
+    HorizontalLayout {
+        alignment: start;
+        padding-left: 2px;
+        @children
+    }
+}
+
+// `JPopupMenu.Separator`: the thin rule `ContextPopup` puts between its
+// blocks (`ContextPopup.java:299`, `:415`, `:417`, ...).
+export component JPopupMenuSeparator inherits Rectangle {
+    height: 5px;
+    background: transparent;
+    Rectangle {
+        y: 2px;
+        height: 1px;
+        background: EtomoStyle.border;
+    }
+}
+
+// `javax.swing.JPopupMenu`: the floating bordered box that holds menu items.
+// `ContextPopup.java:192` constructs it as `new JPopupMenu("Help Documents")`;
+// Metal never paints a `JPopupMenu`'s label, so the box shows its items only,
+// and the label is kept here as `label` for the record.
+export component JPopupMenu inherits Rectangle {
+    in property <string> label;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 0px;
+        @children
+    }
+}
+
+// `javax.swing.JScrollPane`.  Slint has no scroll pane whose viewport can be
+// handed over by a component, so this is a `Flickable` inside the bevelled
+// viewport border with the vertical and horizontal bars painted beside it —
+// the deviation the other `gui/*` crates already make.
+export component JScrollPane inherits Rectangle {
+    in property <bool> horizontal-bar: true;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        spacing: 0px;
+        HorizontalLayout {
+            spacing: 0px;
+            Flickable {
+                viewport-width: self.width;
+                viewport-height: self.height;
+                @children
+            }
+            // Vertical bar: Metal's is 15px wide with a raised thumb.
+            Rectangle {
+                width: 15px;
+                background: EtomoStyle.background.darker(5%);
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Rectangle {
+                    y: 2px;
+                    x: 2px;
+                    width: 11px;
+                    height: 40px;
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                }
+            }
+        }
+        if root.horizontal-bar: Rectangle {
+            height: 15px;
+            background: EtomoStyle.background.darker(5%);
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Rectangle {
+                x: 2px;
+                y: 2px;
+                width: 60px;
+                height: 11px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+            }
+        }
+    }
+}
+
+// `javax.swing.JEditorPane`, as `TextPageWindow`, `HTMLPageWindow` and
+// `TabbedTextWindow` use it: `setEditable(false)` after the document is read,
+// so it is a read-only page.  Slint has no read-only multi-line text view, so
+// the pane is the painted white page with its text laid out in it.
+export component JEditorPane inherits Rectangle {
+    in property <string> text;
+    // `new Font("monospaced", Font.PLAIN, currentFontSize)` —
+    // `TextPageWindow.java:96`, `TabbedTextWindow.java:150`.
+    in property <bool> monospaced: true;
+    in property <int> font-size-pt: 12;
+    background: EtomoStyle.field-background;
+    VerticalLayout {
+        padding: 3px;
+        alignment: start;
+        Text {
+            text: root.text;
+            color: EtomoStyle.text;
+            font-family: root.monospaced ? "monospace" : "";
+            font-size: root.font-size-pt * 1px;
+            wrap: no-wrap;
+            horizontal-alignment: left;
+        }
+    }
+}
+
+// `javax.swing.JTextArea`, as `LogWindow.java:71` builds it:
+// `new JTextArea(10, 60)` — ten rows by sixty columns of the default font.
+export component JTextArea inherits Rectangle {
+    in property <string> text;
+    in property <int> rows: 10;
+    in property <int> columns: 60;
+    // Metal's default 12pt font: a row is about 16px high and a column about
+    // 7px wide, which is what `JTextArea` asks its layout for.
+    preferred-width: root.columns * 7px;
+    preferred-height: root.rows * 16px;
+    background: EtomoStyle.field-background;
+    VerticalLayout {
+        padding: 2px;
+        alignment: start;
+        Text {
+            text: root.text;
+            color: EtomoStyle.text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            wrap: no-wrap;
+        }
+    }
+}
+
+// `javax.swing.JTabbedPane`.  Slint cannot switch a body from a tab strip on
+// its own, so the strip is drawn here and the body is selected by the owner's
+// `current-tab`, the deviation the other `gui/*` crates make.
+export component JTabbedPane inherits VerticalLayout {
+    in property <[string]> tabs;
+    in property <int> current-tab: 0;
+    spacing: 0px;
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: start;
+        for tab[index] in root.tabs: Rectangle {
+            height: EtomoStyle.field-height;
+            background: index == root.current-tab ? EtomoStyle.panel : EtomoStyle.background.darker(10%);
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                Text {
+                    text: tab;
+                    vertical-alignment: center;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+            }
+        }
+    }
+    @children
+}
+
+// `javax.swing.JOptionPane`, as `Popup.display()` builds it
+// (`Popup.java:158-159`): the message-type icon on the left, the message rows
+// and any check box in the middle, and the option buttons in a centred row
+// underneath.  Metal draws the icon; eTomo passes `null` for a custom one, so
+// the standard error/question glyph is what appears.
+export component JOptionPane inherits Rectangle {
+    // `JOptionPane.ERROR_MESSAGE` (0) or `JOptionPane.QUESTION_MESSAGE` (3).
+    in property <int> message-type: 0;
+    background: EtomoStyle.panel;
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+        alignment: start;
+        // The message-type icon.  The Metal icons are not vendored with the
+        // sources, so the glyph stands in for them.
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            background: root.message-type == 0 ? #cc3333 : #3355aa;
+            Text {
+                text: root.message-type == 0 ? "!" : "?";
+                color: #ffffff;
+                font-size: 22px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        VerticalLayout {
+            alignment: start;
+            spacing: 0px;
+            @children
+        }
+    }
+}
+
+// `javax.swing.JButton` as `JOptionPane` and `MainFrame_AboutBox.java:112`
+// create it directly — the plain Metal push button, not eTomo's
+// `MultiLineButton`.
+export component JButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: 26px;
+    min-width: 73px;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+    }
+}

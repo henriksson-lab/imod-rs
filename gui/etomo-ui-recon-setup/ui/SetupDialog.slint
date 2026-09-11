@@ -1,0 +1,290 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SetupDialog.java`.
+//
+// The Java dialog composes three panel classes that are translated inline
+// here, in the place the Java adds them:
+//   * `TemplatePanel.java`      -> the "Templates" box of three combo boxes
+//   * `TiltAnglePanel.java`     -> the tilt-angle source radio group per axis
+//   * `AxisProgressPanel.java`  -> the progress row at the top
+// The exit-button row comes from `ProcessDialog.java`; `SetupDialog` passes
+// `usePostpone == false`, so there is no Postpone button, and it renames
+// `btnExecute` to "Create Com Scripts".
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import {
+    EtomoStyle, BeveledBorder, LabeledTextField, CheckBox, RadioButton,
+    MultiLineButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    EtchedBorder, TextField, FileTextField, ButtonControlTextEfield, ComboBox,
+    AxisProgressPanel,
+} from "widgets_local.slint";
+
+// `TiltAnglePanel.java`.  The radio labels are `TiltAngleType`'s descriptions
+// (`etomo/type/TiltAngleType.java`): EXTRACT, RANGE and FILE.  `pnlSource`
+// adds them in the order label, Extract, Specify, the angle row, File.
+component TiltAnglePanel inherits VerticalLayout {
+    spacing: 2px;
+    // `lExcludeViewsMsg`: empty until excludeviews has run.
+    Text { text: ""; height: 0px; }
+    RadioButton {
+        text: "Extract tilt angles from raw stack header or mdoc file";
+        selected: true;
+    }
+    // `rbSpecify` is a `RadioEbutton`, a radio button that can show a warning
+    // decoration; Slint has no such decoration, so a plain radio button.
+    RadioButton { text: "Specify the starting angle and step (degrees)"; }
+    // `pnlAngle`, a BoxLayout.X_AXIS row.  Both fields start disabled because
+    // `rbSpecify` is not selected.
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        LabeledTextField {
+            label: "Starting angle:";
+            label-width: 100px;
+            width: 190px;
+            text: "";
+            enabled: false;
+        }
+        LabeledTextField {
+            label: "Increment:";
+            label-width: 70px;
+            width: 160px;
+            text: "";
+            enabled: false;
+        }
+    }
+    RadioButton { text: "Tilt angles in existing rawtlt file"; }
+}
+
+// `pnlAxisInfoA` / `pnlAxisInfoB` of `createPerAxisInfoPanel`.  Both are built
+// the same way, so one component with the border title as a property.
+component AxisInfoPanel inherits BeveledBorder {
+    in property <string> axis-title;
+    in property <bool> enabled: true;
+    title: root.axis-title;
+    VerticalLayout {
+        spacing: 3px;
+        TiltAnglePanel { }
+        // `pnlTwodir`: cbTfTwodir, rbBidirectional, rbDoseSymmetric, "from",
+        // tfTwodir, tfDoseSym, lTwodir.  `tfDoseSym` starts invisible and both
+        // text fields and both radio buttons start disabled.
+        HorizontalLayout {
+            spacing: 0px;
+            alignment: start;
+            CheckBox { text: "Series was"; checked: false; }
+            RadioButton { text: "bidirectional"; selected: true; enabled: false; }
+            RadioButton { text: "dose-symmetric"; selected: false; enabled: false; }
+            Rectangle { width: 10px; }
+            Text { text: "from"; vertical-alignment: center; }
+            Rectangle { width: 5px; }
+            TextField { width: 60px; text: ""; enabled: false; }
+            Text { text: " degrees"; vertical-alignment: center; }
+        }
+        LabeledTextField {
+            label: "Exclude views: ";
+            label-width: 100px;
+            text: "";
+            enabled: root.enabled;
+        }
+        // `lRemoveExcludeViewsMsgA`: empty until excludeviews has run; painted
+        // in `ProcessControlPanel.colorComplete` when set.
+        Text { text: ""; height: 0px; }
+        Rectangle { height: 10px; }
+        MultiLineButton {
+            text: "View Raw Image Stack";
+            width: 200px;
+            enabled: root.enabled;
+        }
+        // `pnlAdjustedFocus`: `cbAdjustedFocus.setEnabled(false)`.
+        CheckBox {
+            text: "Focus was adjusted between montage frames";
+            enabled: false;
+        }
+    }
+}
+
+export component SetupDialog inherits Rectangle {
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: 10px;
+
+        // ---- pnlDataParameters ------------------------------------------
+        // `progressPanel.setVisible(false)` in the constructor; shown here so
+        // the translated row is visible, since this crate has no behaviour to
+        // turn it on.
+        AxisProgressPanel { }
+
+        // `pnlDataset`, a BoxLayout.X_AXIS row.
+        HorizontalLayout {
+            spacing: 10px;
+            ButtonControlTextEfield {
+                label: "Raw Image Stack: ";
+                label-width: 130px;
+                text: "";
+            }
+            FileTextField {
+                label: "Backup directory: ";
+                label-width: 130px;
+                text: "";
+            }
+        }
+
+        // `pnlRow2`: the Templates panel beside the Data Type panel.
+        HorizontalLayout {
+            spacing: 2px;
+            // `TemplatePanel.getInstance(..., "Templates", ...)`.
+            EtchedBorder {
+                title: "Templates";
+                VerticalLayout {
+                    spacing: 3px;
+                    ComboBox { label: "Scope template:"; text: "No selection (0 available)"; }
+                    ComboBox { label: "System template:"; text: "No selection (0 available)"; }
+                    ComboBox { label: "User template:"; text: "No selection (0 available)"; }
+                }
+            }
+            // `pnlDataType`, holding `pnlAxisType` and `pnlViewType`.
+            EtchedBorder {
+                title: "Data Type";
+                HorizontalLayout {
+                    spacing: 10px;
+                    EtchedBorder {
+                        title: "Axis Type";
+                        width: 150px;
+                        VerticalLayout {
+                            spacing: 2px;
+                            RadioButton { text: "Single axis"; selected: true; }
+                            RadioButton { text: "Dual axis"; }
+                        }
+                    }
+                    EtchedBorder {
+                        title: "Frame Type";
+                        width: 150px;
+                        VerticalLayout {
+                            spacing: 2px;
+                            RadioButton { text: "Single frame"; selected: true; }
+                            RadioButton { text: "Montage"; }
+                        }
+                    }
+                }
+            }
+        }
+
+        // `pnlImageParams` -> `pnlImageRows`.
+        VerticalLayout {
+            spacing: 5px;
+            // `pnlStackInfo`
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                MultiLineButton { text: "Scan Header"; width: 130px; }
+                LabeledTextField {
+                    label: "Pixel size (nm): ";
+                    label-width: 110px;
+                    width: 190px;
+                    text: "";
+                }
+                LabeledTextField {
+                    label: "Fiducial diameter (nm): ";
+                    label-width: 150px;
+                    width: 220px;
+                    text: "";
+                }
+                LabeledTextField {
+                    label: "Image rotation (degrees): ";
+                    label-width: 165px;
+                    width: 235px;
+                    text: "";
+                }
+            }
+            Rectangle { height: 15px; }
+            // `pnlHalfFloatModeOutput`.  `lHalfFloatModeOutputActive` starts
+            // invisible; it is drawn here at zero width to keep the order.
+            HorizontalLayout {
+                spacing: 0px;
+                alignment: start;
+                Rectangle { width: 8px; }
+                Text { text: "Output as half-size floats: "; vertical-alignment: center; }
+                Rectangle { width: 2px; }
+                CheckBox { text: "Unconditionally"; }
+                Rectangle { width: 9px; }
+                CheckBox { text: "Only if raw stack is floating point"; }
+                Rectangle { width: 14px; }
+                Text { text: ""; width: 0px; }
+            }
+            Rectangle { height: 15px; }
+            // `pnlParallelProcess`
+            HorizontalLayout {
+                spacing: 0px;
+                alignment: start;
+                Rectangle { width: 5px; }
+                CheckBox { text: "Parallel Processing"; }
+                Rectangle { width: 15px; }
+                CheckBox { text: "Graphics card processing"; }
+            }
+            Rectangle { height: 5px; }
+            // `pnlDistortionInfo`
+            HorizontalLayout {
+                spacing: 10px;
+                FileTextField {
+                    label: "Image distortion field file: ";
+                    label-width: 170px;
+                    text: "";
+                }
+                LabeledTextField {
+                    label: "Binning: ";
+                    label-width: 60px;
+                    width: 130px;
+                    text: "1";
+                }
+            }
+            Rectangle { height: 5px; }
+            // `pnlMagGradientInfo`
+            HorizontalLayout {
+                spacing: 0px;
+                FileTextField {
+                    label: "Mag gradients correction: ";
+                    label-width: 170px;
+                    text: "";
+                }
+                Rectangle { width: 119px; }
+            }
+            // `pnlRemoveExcludedViews`
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                CheckBox { text: "Remove excluded views"; }
+                CheckBox { text: "Delete original files"; }
+            }
+        }
+
+        // ---- pnlPerAxisInfo ---------------------------------------------
+        HorizontalLayout {
+            spacing: 0px;
+            AxisInfoPanel { axis-title: "Axis A: "; }
+            // Axis B is disabled while "Single axis" is selected.
+            AxisInfoPanel { axis-title: "Axis B: "; enabled: false; }
+        }
+
+        // ---- pnlExitButtons (ProcessDialog.java) -------------------------
+        // `usePostpone == false`, so no Postpone button.  `btnAdvanced` is a
+        // `GlobalExpandButton` labelled "Advanced"/"Basic"; it is removed when
+        // calibration data is available.
+        HorizontalLayout {
+            spacing: 20px;
+            alignment: center;
+            MultiLineButton { text: "Cancel"; width: 140px; }
+            MultiLineButton { text: "Create Com Scripts"; width: 140px; }
+            MultiLineButton { text: "Advanced"; width: 140px; }
+        }
+    }
+}
+
+export component SetupDialogWindow inherits Window {
+    title: "eTomo Setup";
+    preferred-width: 1180px;
+    preferred-height: 900px;
+    background: EtomoStyle.background;
+    SetupDialog { }
+}

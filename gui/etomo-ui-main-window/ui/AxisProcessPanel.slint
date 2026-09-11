@@ -1,0 +1,131 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/AxisProcessPanel.java`, the abstract
+// base of every per-manager process panel: one axis column.
+//
+// Three methods build it:
+//
+//   * the constructor (`:315-334`) stacks `axisProgressPanel.getComponent()`
+//     and `parallelStatusPanel` in `outerStatusPanel` (`BoxLayout.Y_AXIS`),
+//     with `parallelStatusPanel.setVisible(false)` on line 329 and the panel
+//     added only when `!altParallelLoc` (`:330-332`);
+//   * `createProcessControlPanel()` (`:557-570`) starts `panelProcessSelect`
+//     (`BoxLayout.Y_AXIS`) with an "Axis A:" or "Axis B:" label, for
+//     `AxisID.FIRST` / `AxisID.SECOND` only;
+//   * `initializePanels()` (`:355-370`) puts `outerStatusPanel` in the NORTH
+//     and `panelDialog` in the CENTER of `panelProcessInfo`, then builds
+//     `panelRoot` as `BoxLayout.X_AXIS` of `FixedDim.x5_y0`,
+//     `panelProcessSelect`, `panelProcessInfo`, `FixedDim.x5_y0` (`:365-369`).
+//
+// A subclass adds its process buttons to `panelProcessSelect` by overriding
+// `createProcessControlPanel()` and calling `super` first, so this component
+// puts `@children` directly under the axis label.  The subclass files
+// (`TomogramProcessPanel.slint`, `JoinProcessPanel.slint`, …) instantiate this
+// component with their own flags and children rather than copying the shape,
+// which is how the Java inheritance is expressed here — Slint's own
+// `inherits` appends a derived component's elements to the base's root element
+// instead of routing them to `@children`, so composition is the faithful form.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors, AxisProgressPanel } from "MainWindowWidgets.slint";
+
+export component AxisProcessPanel inherits Rectangle {
+    // `axisID`.  `createProcessControlPanel` (`:560-569`) prints an axis label
+    // for FIRST and SECOND only; ONLY gets none.
+    in property <string> axis-id: "ONLY";
+    // The colour a subclass passes to `setBackground` (`:346-353`), which
+    // paints `panelRoot`, `outerStatusPanel`, `parallelStatusPanel`,
+    // `panelDialog`, `panelProcessSelect` and the progress panel.  A subclass
+    // that never calls it keeps the Metal default.
+    in property <color> panel-background: Colors.default-panel;
+    // `altParallelLoc` (`:293`): when true the constructor does NOT add
+    // `parallelStatusPanel` to `outerStatusPanel` (`:330-332`) — the panel
+    // exists but lives elsewhere.  Only `BatchRunTomoProcessPanel` passes true.
+    in property <bool> alt-parallel-loc: false;
+    // `initializePanels` (`:361`) adds `outerStatusPanel` only when
+    // `manager.getProcessManager() != null && manager.allowProcessWatching()`.
+    // Both are run-time manager queries; true is the ordinary case.
+    in property <bool> show-status-panel: true;
+    // `parallelStatusPanel.setVisible(false)` in the constructor (`:329`).
+    // `showParallelPanel(true)` (`:429-448`) turns it on at run time, after
+    // `buildParallelPanel()` (`:415-423`) has put a `ParallelPanel` in it.
+    in property <bool> show-parallel-status: false;
+    in property <string> progress-label: "No process";
+
+    background: root.panel-background;
+
+    HorizontalLayout {
+        spacing: 0px;
+        alignment: start;
+        // `panelRoot.add(Box.createRigidArea(FixedDim.x5_y0))` (`:366`).
+        Rectangle { width: 5px; }
+
+        // ---- panelProcessSelect (`:287`, `BoxLayout.Y_AXIS`) -------------
+        VerticalLayout {
+            alignment: start;
+            spacing: 0px;
+            padding: 0px;
+            // `createProcessControlPanel` (`:560-569`).  Both labels are kept
+            // in the layout and picked by `axis-id`; `AxisID.ONLY` shows
+            // neither, as the Java adds neither.
+            if root.axis-id == "FIRST": Text {
+                text: "Axis A:";
+                horizontal-alignment: center;
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            if root.axis-id == "SECOND": Text {
+                text: "Axis B:";
+                horizontal-alignment: center;
+                color: EtomoStyle.text;
+                font-size: EtomoStyle.font-size-pt * 1px;
+            }
+            // Whatever the subclass's `createProcessControlPanel` override
+            // appends after `super.createProcessControlPanel()`.
+            @children
+        }
+
+        // ---- panelProcessInfo (`:282`, BorderLayout) ---------------------
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 0px;
+            alignment: start;
+            // NORTH: outerStatusPanel (`:359-362`).
+            if root.show-status-panel: VerticalLayout {
+                spacing: 0px;
+                // `outerStatusPanel.add(axisProgressPanel.getComponent())` (`:328`).
+                AxisProgressPanel { label: root.progress-label; }
+                // `parallelStatusPanel` (`:285`), added only when
+                // `!altParallelLoc`, and `setVisible(false)` until a process
+                // asks for it.  Its content — `ParallelPanel.getInstance(...)`
+                // preceded by a `FixedDim.x5_y0` rigid area (`:415-423`) — is
+                // built lazily at run time and is not constructed by any
+                // constructor in this family, so nothing is drawn inside it
+                // here.  `ParallelPanel.java` is not translated in this crate.
+                if !root.alt-parallel-loc && root.show-parallel-status: HorizontalLayout {
+                    spacing: 0px;
+                    Rectangle { width: 5px; }
+                    Rectangle {
+                        height: 24px;
+                        background: root.panel-background;
+                    }
+                }
+            }
+            // CENTER: panelDialog (`:284`, `:363`).  This is the one
+            // legitimately empty slot in this crate: `replaceDialogPanel`
+            // (`:521-529`) drops the current `*Dialog` panel in here at run
+            // time.  Those dialogs are translated in the sibling crates
+            // `gui/etomo-ui-recon-setup`, `gui/etomo-ui-recon-align`,
+            // `gui/etomo-ui-recon-gen`, `gui/etomo-ui-join-peet`,
+            // `gui/etomo-ui-batch-serial` and `gui/etomo-ui-shell`.
+            Rectangle {
+                vertical-stretch: 1;
+                min-height: 120px;
+                background: root.panel-background;
+            }
+        }
+
+        // `panelRoot.add(Box.createRigidArea(FixedDim.x5_y0))` (`:369`).
+        Rectangle { width: 5px; }
+    }
+}

@@ -1,0 +1,104 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/LogWindow.java`.
+//
+// The project log frame.  `createWindow()` (`LogWindow.java:113-134`) builds
+// it: the `LogFrame` gets its title from the `EtchedBorder`, then the
+// `JMenuBar` with `menuFile` and `menuView`, then the content pane holding
+// `rootPanel` — an `EtomoPanel` with a `BoxLayout.Y_AXIS`, the etched titled
+// border, and the `JScrollPane` around a `JTextArea(10, 60)`.
+//
+// `LogWindow.java:560-578`'s `LogFrame` inner class is the frame itself: a
+// `JFrame` with `DO_NOTHING_ON_CLOSE` whose close box clicks `menuHide`.  It
+// is translated as the `LogWindowWindow` wrapper below rather than a file of
+// its own, since it adds no widget.
+//
+// The text the log holds only exists at run time — `EtomoLogger` appends to
+// the text area through `append(String)` (`:483-485`), and `setTitle` reads
+// the dataset's `<name>_project.log` into it (`:249-289`).  The text area is
+// drawn at its constructed ten-by-sixty size with a sample of what the logger
+// writes; `log-text` replaces it.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoPanel, EtchedBorder, JMenuBar, Menu, MenuItem, JScrollPane, JTextArea,
+    JPopupMenu } from "WindowWidgets.slint";
+
+export component LogWindow inherits VerticalLayout {
+    // `border.getTitle()`, which `setTitle` sets to `TITLE` alone until a
+    // dataset is known and then to `datasetName + " " + TITLE`
+    // (`LogWindow.java:253`, `:285`).  `TITLE = "Project Log"` — `:54`.
+    in property <string> title: "Project Log";
+    // The log body.  `EtomoLogger.logMessage` writes the dataset name and
+    // directory into a new log first (`:279`).
+    in property <string> log-text: "BBa\n/home/user/BBa\n";
+    // Slint cannot cascade a `JMenu`'s items below its title, so the open
+    // drop-down is selected here: "" (none), "File" or "View".
+    in property <string> open-menu: "";
+
+    spacing: 0px;
+
+    // `frame.setJMenuBar(menuBar)` — `:118`; `menuBar.add(menuFile);
+    // menuBar.add(menuView)` — `:120-121`.
+    JMenuBar {
+        // `new Menu("File")` with `setMnemonic(KeyEvent.VK_F)` — `:64`, `:138`.
+        Menu { text: "File"; mnemonic: "F"; open: root.open-menu == "File"; }
+        // `new Menu("View")` with `setMnemonic(KeyEvent.VK_V)` — `:66`, `:139`.
+        Menu { text: "View"; mnemonic: "V"; open: root.open-menu == "View"; }
+    }
+
+    // The drop-down bodies.  `menuFile.add(menuSave)` — `:122`;
+    // `menuView.add(menuHide); menuView.add(menuFitWindow)` — `:123-124`.
+    if root.open-menu == "File": JPopupMenu {
+        min-width: 200px;
+        // `new MenuItem("Save Log", KeyEvent.VK_S)` — `:65`.
+        MenuItem { text: "Save Log"; mnemonic: "S"; }
+    }
+    if root.open-menu == "View": JPopupMenu {
+        min-width: 240px;
+        // `new MenuItem("Hide Log Window", KeyEvent.VK_H)` — `:67` — with
+        // `KeyStroke.getKeyStroke(VK_L, CTRL_MASK)` — `:141`.
+        MenuItem { text: "Hide Log Window"; mnemonic: "H"; accelerator: "Ctrl-L"; }
+        // `new MenuItem("Fit Log Window", KeyEvent.VK_F)` — `:68` — with
+        // `KeyStroke.getKeyStroke(VK_F, CTRL_MASK)` — `:142-143`.
+        MenuItem { text: "Fit Log Window"; mnemonic: "F"; accelerator: "Ctrl-F"; }
+    }
+
+    // `contentPane.add(rootPanel)` — `:128`.
+    EtomoPanel {
+        vertical-stretch: 1;
+        // `rootPanel.setBorder(border.getBorder())` — `:132`, with
+        // `border = new EtchedBorder(TITLE)` — `:70`.
+        EtchedBorder {
+            title: root.title;
+            // `rootPanel.add(scrollPane)` — `:133`, with
+            // `scrollPane = new JScrollPane(textArea)` — `:72`.
+            JScrollPane {
+                JTextArea {
+                    // `new JTextArea(10, 60)` — `:71`.
+                    rows: 10;
+                    columns: 60;
+                    text: root.log-text;
+                }
+            }
+        }
+    }
+}
+
+export component LogWindowWindow inherits Window {
+    // `LogFrame` (`LogWindow.java:560-578`).  `frame.setTitle(border.getTitle())`
+    // — `:117`.
+    in property <string> title-text: "Project Log";
+    in property <string> open-menu: "";
+    title: root.title-text;
+    // `frameSizeWidthProperty.setDisplayValue(683)` and
+    // `frameSizeHeightProperty.setDisplayValue(230)` — `LogWindow.java:88-89`
+    // — are the size `show()` applies the first time the frame is displayed
+    // (`:214-215`).
+    preferred-width: 683px;
+    preferred-height: 230px;
+    background: EtomoStyle.background;
+    LogWindow {
+        title: root.title-text;
+        open-menu: root.open-menu;
+    }
+}

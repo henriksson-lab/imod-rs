@@ -1,0 +1,560 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/PostProcessingDialog.java` and the
+// five tab panels it nests: `TrimvolPanel.java` (with `VolumeRangePanel.java`
+// and `RubberbandPanel.java`), `FlattenVolumePanel.java` (with
+// `SmoothingAssessmentPanel.java`), `SqueezeVolPanel.java`,
+// `AltStackPanel.java` and `SubtomogramsPanel.java`.
+//
+// Appearance only — no listeners, no manager, no process launching.
+//
+// `Run3dmodButton` differs from `MultiLineButton` only by the right-click
+// deferred-3dmod menu it carries, which is behaviour; both draw as
+// `MultiLineButton` here.
+
+import { EtomoStyle, BeveledBorder, LabeledTextField, LabeledSpinner, CheckBox,
+         RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, ExitButtons, CenteredLabel, TextField, Spinner, FileTextField }
+    from "LocalWidgets.slint";
+
+// `VolumeRangePanel` (`VolumeRangePanel.java`): GridLayout(3, 2, 5, 5).
+export component VolumeRangePanel inherits EtchedBorder {
+    title: "Volume Range";
+    GridLayout {
+        spacing: 5px;
+        Row {
+            LabeledTextField { label: "X min: "; label-width: 60px; text: "1"; }
+            LabeledTextField { label: "X max: "; label-width: 60px; text: "1024"; }
+        }
+        Row {
+            LabeledTextField { label: "Y min: "; label-width: 60px; text: "1"; }
+            LabeledTextField { label: "Y max: "; label-width: 60px; text: "1024"; }
+        }
+        Row {
+            LabeledTextField { label: "Z min: "; label-width: 60px; text: "1"; }
+            LabeledTextField { label: "Z max: "; label-width: 60px; text: "200"; }
+        }
+    }
+}
+
+// `RubberbandPanel.getNoButtonInstance` (`RubberbandPanel.java`) as
+// `TrimvolPanel` uses it: `btnImod == null`, so only the X and Y rows of
+// `pnlRange` are added and the button is placed by the parent, outside the box.
+export component RubberbandPanel inherits EtchedBorder {
+    title: "Scaling from sub-area:";
+    GridLayout {
+        spacing: 5px;
+        Row {
+            LabeledTextField { label: "X min: "; label-width: 60px; text: ""; enabled: false; }
+            LabeledTextField { label: "X max: "; label-width: 60px; text: ""; enabled: false; }
+        }
+        Row {
+            LabeledTextField { label: "Y min: "; label-width: 60px; text: ""; enabled: false; }
+            LabeledTextField { label: "Y max: "; label-width: 60px; text: ""; enabled: false; }
+        }
+    }
+}
+
+// `TrimvolPanel` (`TrimvolPanel.java`), the "Trim vol" tab.
+export component TrimvolPanel inherits BeveledBorder {
+    title: "Volume Trimming";
+    // `warning`: centered, empty until `setStartupWarnings` fills it in.
+    CenteredLabel { text: ""; }
+    // `pnlImodFull`
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "3dmod Full Volume"; min-width: 160px; }
+        MultiLineButton { text: "Get XYZ Volume Range From 3dmod"; min-width: 250px; }
+    }
+    VolumeRangePanel { }
+    Rectangle { height: 10px; }
+    // `pnlScale`
+    EtchedBorder {
+        title: "Scaling";
+        // `pnlConvertToBytes`
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Convert to bytes"; checked: true; }
+        }
+        // `pnlScaleFixed`
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Scale to match contrast  "; selected: true; }
+            LabeledTextField { label: "black: "; label-width: 50px; text: ""; }
+            LabeledTextField { label: " white: "; label-width: 55px; text: ""; }
+        }
+        // `pnlScaleSection`
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Find scaling from sections  "; }
+            LabeledTextField { label: "Z min: "; label-width: 55px; text: ""; enabled: false; }
+            LabeledTextField { label: " Z max: "; label-width: 60px; text: ""; enabled: false; }
+        }
+        RubberbandPanel { }
+        // The rubberband panel's own button, added by `TrimvolPanel` below the
+        // box and centered.
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Get XYZ Sub-Area From 3dmod"; min-width: 230px; }
+        }
+    }
+    Rectangle { height: 10px; }
+    // `pnlReorientation`: the choices box and the warning labels side by side.
+    HorizontalLayout {
+        spacing: EtomoStyle.inset;
+        alignment: start;
+        EtchedBorder {
+            title: "Reorientation:";
+            RadioButton { text: "None"; }
+            RadioButton { text: "Swap Y and Z dimensions"; selected: true; }
+            RadioButton { text: "Rotate around X axis"; }
+        }
+        VerticalLayout {
+            alignment: start;
+            Text { text: "Warning:"; }
+            Text { text: "For serial joins, use"; }
+            Text { text: "the same reorientation"; }
+            Text { text: "method for each"; }
+            Text { text: "section."; }
+        }
+    }
+    Rectangle { height: 10px; }
+    // `pnlButton`
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Trim Volume"; min-width: 140px; }
+        MultiLineButton { text: "3dmod Trimmed Volume"; min-width: 200px; }
+    }
+    Rectangle { height: 10px; }
+}
+
+// `SmoothingAssessmentPanel` (`SmoothingAssessmentPanel.java`).
+export component SmoothingAssessmentPanel inherits EtchedBorder {
+    title: "Smoothing Assessment";
+    LabeledTextField {
+        label: "Smoothing factors to try: ";
+        label-width: 190px;
+        text: "1,2,4,6,8,10";
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        spacing: 5px;
+        alignment: start;
+        MultiLineButton { text: "Run Flattenwarp to Assess Smoothing"; min-width: 280px; }
+        MultiLineButton { text: "Open Assessment in 3dmod"; min-width: 200px; }
+    }
+}
+
+// `FlattenVolumePanel` (`FlattenVolumePanel.java`) in its
+// `POST_FLATTEN_VOLUME` configuration, the "Flatten" tab.
+export component FlattenVolumePanel inherits BeveledBorder {
+    title: "Flatten Volume";
+    // `pnlInputFile`
+    BeveledBorder {
+        title: "Set Input File";
+        RadioButton { text: "Flatten the trimvol output"; selected: true; }
+        RadioButton { text: "Flatten the reducefiltvol output"; }
+    }
+    // `pnlFlattenWarp`: no border of its own.
+    SpacedPanel {
+        // `BinnedXY3dmodButton btnMakeSurfaceModel`: an untitled etched box.
+        HorizontalLayout {
+            alignment: center;
+            EtchedBorder {
+                title: "";
+                HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    LabeledSpinner { label: "Open binned by "; label-width: 110px; text: "1"; }
+                    Text { text: " in X and Y"; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    MultiLineButton { text: "Make Surface Model"; min-width: 180px; }
+                }
+            }
+        }
+        // `pnlOneSurface`
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Contours are all on one surface"; }
+        }
+        // `pnlWarpSpacing`
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Spacing in X: "; label-width: 100px; text: ""; }
+            LabeledTextField { label: " and Y: "; label-width: 60px; text: ""; }
+        }
+        SmoothingAssessmentPanel { }
+        LabeledTextField { label: "Smoothing factor: "; label-width: 140px; text: ""; }
+        // `pnlFlattenWarpButtons`
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Run Flattenwarp"; min-width: 160px; }
+        }
+    }
+    // `pnlInterpolationOrder`
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Linear interpolation"; }
+    }
+    LabeledTextField { label: "Output thickness in Z: "; label-width: 180px; text: ""; }
+    FileTextField { label: "Temporary directory:"; text: ""; }
+    // `pnlFlatten`
+    HorizontalLayout {
+        alignment: center;
+        spacing: EtomoStyle.inset;
+        MultiLineButton { text: "Flatten"; min-width: 120px; }
+        MultiLineButton { text: "Open Flattened Tomogram"; min-width: 220px; }
+    }
+}
+
+// `SqueezeVolPanel` (`SqueezeVolPanel.java`), the "Reduce/filt vol" tab.
+export component SqueezeVolPanel inherits BeveledBorder {
+    title: "Reduce and/or Filter Volume";
+    // `pnlInputFile`
+    BeveledBorder {
+        title: "Set Input File";
+        RadioButton { text: "Use the trimvol output"; selected: true; }
+        RadioButton { text: "Use the flatten output"; }
+    }
+    // `pnlReduceByOverallFactor`: check box, bare field, then a labelled field.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Reduce by overall factor (>=1)"; }
+        TextField { text: ""; enabled: false; }
+        Rectangle { width: 10px; }
+        LabeledTextField { label: "Factor in Z "; label-width: 90px; text: ""; enabled: false; }
+    }
+    // `pnlFiltering`
+    BeveledBorder {
+        title: "Filtering";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.inset;
+            RadioButton { text: "None"; selected: true; }
+            RadioButton { text: "Gaussian low-pass"; }
+            RadioButton { text: "Deconvolution"; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            LabeledTextField {
+                label: "Low pass cutoff and sigma (1/pixel) ";
+                label-width: 270px;
+                text: "";
+                enabled: false;
+            }
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Deconvolution strength "; label-width: 180px; text: ""; enabled: false; }
+            Rectangle { width: 10px; }
+            LabeledTextField { label: "SNR falloff "; label-width: 100px; text: ""; enabled: false; }
+        }
+        HorizontalLayout {
+            alignment: start;
+            LabeledTextField {
+                label: "High pass filter cutoff (fraction of Nyquist) ";
+                label-width: 320px;
+                text: "";
+                enabled: false;
+            }
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            LabeledTextField { label: "Defocus (microns) "; label-width: 150px; text: ""; enabled: false; }
+            Rectangle { width: 10px; }
+            LabeledTextField { label: "Phase shift (degrees) "; label-width: 170px; text: ""; enabled: false; }
+        }
+    }
+    // `pnlDataModeOfOutput`
+    HorizontalLayout {
+        alignment: start;
+        LabeledTextField { label: "Data mode of output "; label-width: 160px; text: ""; }
+    }
+    // `pnlButtons`
+    HorizontalLayout {
+        alignment: space-between;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Reduce/Filter Volume"; min-width: 200px; }
+        MultiLineButton { text: "Open Output Volume in 3dmod"; min-width: 240px; }
+    }
+}
+
+// `AltStackPanel` (`AltStackPanel.java`), the "Alt Stack" tab.  The layout
+// branches on single- versus dual-axis; `dual-axis` selects between them.
+export component AltStackPanel inherits BeveledBorder {
+    title: "Alternative Stack";
+    in property <bool> dual-axis: true;
+    // `CpuGpuPanel.cbParallelProcess`; see the comment on `pnlParallelProcess`
+    // below.
+    in property <bool> parallel-process-visible: true;
+    Rectangle { height: 5px; }
+    // `pnlProcessEvenOddPairs`: single axis only.
+    if !root.dual-axis: HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Process even and odd pairs"; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlRootnameAlternativeStack`
+    HorizontalLayout {
+        alignment: start;
+        padding-left: 2px;
+        LabeledTextField { label: "Rootname of alternative stack "; label-width: 220px; text: ""; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlAxesToProcess`: dual axis only.
+    if root.dual-axis: HorizontalLayout {
+        alignment: start;
+        padding-left: 2px;
+        spacing: EtomoStyle.inset;
+        Text { text: "Axes to process:"; vertical-alignment: center; }
+        RadioButton { text: "Both"; selected: true; }
+        RadioButton { text: "A only"; }
+        RadioButton { text: "B only"; }
+    }
+    Rectangle { height: 5px; }
+    // `CpuGpuPanel` (`CpuGpuPanel.java`), built by
+    // `CpuGpuPanel.getInstance(..., PanelId.POST_ALT_STACK, 3, true, -1)`
+    // (`AltStackPanel.java:153`): no border, `BoxLayout.Y_AXIS`, a
+    // "Parallel processing" row over a "Use the GPU" row
+    // (`CpuGpuPanel.java:124-144`).
+    VerticalLayout {
+        spacing: EtomoStyle.gap;
+        // `pnlParallelProcess`.  `updateDisplay` does
+        // `cbParallelProcess.setVisible(!alwaysParallel)`
+        // (`CpuGpuPanel.java:356`) and `alwaysParallel` is false at
+        // construction, so this defaults to visible.
+        if root.parallel-process-visible: HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Parallel processing"; }
+        }
+        // `pnlUseGpu`
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Use the GPU"; }
+            Text { text: ": Maximum number of GPUs recommended is 3"; vertical-alignment: center; }
+        }
+    }
+    Rectangle { height: 5px; }
+    // `pnlProcessingStepsToRun`
+    EtchedBorder {
+        title: "Processing Steps to Run";
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            CheckBox { text: "Preprocess"; }
+            Rectangle { width: 20px; }
+            CheckBox { text: "Archive original stack"; enabled: false; }
+        }
+        Rectangle { height: 2px; }
+        HorizontalLayout { alignment: start; CheckBox { text: "Correct CTF"; } }
+        Rectangle { height: 2px; }
+        HorizontalLayout { alignment: start; CheckBox { text: "Erase gold"; enabled: false; } }
+        Rectangle { height: 2px; }
+        HorizontalLayout { alignment: start; CheckBox { text: "Filter in 2D"; } }
+        Rectangle { height: 2px; }
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Trim volume"; enabled: !root.dual-axis; }
+        }
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Clean up intermediate files"; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlButtons`
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: 5px;
+        MultiLineButton { text: "Run"; min-width: 100px; }
+        MultiLineButton {
+            text: root.dual-axis ? "Open Axis A Tomogram in 3dmod"
+                                 : "Open Alternative Tomogram in 3dmod";
+            min-width: 250px;
+        }
+        if root.dual-axis: MultiLineButton { text: "Open Axis B Tomogram in 3dmod"; min-width: 250px; }
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        MultiLineButton { text: "Restore Swapped Files"; min-width: 200px; }
+    }
+    Rectangle { height: 5px; }
+}
+
+// `SubtomoSetupCpuGpuPanel`, the inner class of `SubtomogramsPanel.java`.
+export component SubtomoSetupCpuGpuPanel inherits EtchedBorder {
+    title: "Processing resources to use";
+    HorizontalLayout { alignment: start; RadioButton { text: "Use CPU cores only"; selected: true; } }
+    HorizontalLayout {
+        alignment: start;
+        RadioButton { text: "Use the GPU for reconstruction and CTF correction"; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        RadioButton {
+            text: "Use CPU cores for reconstruction and one GPU for CTF correction";
+            enabled: false;
+        }
+    }
+}
+
+// `SubtomogramsPanel` (`SubtomogramsPanel.java`), the "Subtomograms" tab.
+export component SubtomogramsPanel inherits BeveledBorder {
+    title: "Subtomogram Generation";
+    Rectangle { height: 10px; }
+    FileTextField { label: "Tomogram that was modeled: "; text: ""; }
+    Rectangle { height: 5px; }
+    // `pnlReorientationType`: advanced only.  Note the on-screen order is
+    // None, Flipped, Rotated, which is not the field declaration order.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Specify reorientation of tomogram: "; }
+        RadioButton { text: "None"; selected: true; enabled: false; }
+        RadioButton { text: "Flipped"; enabled: false; }
+        RadioButton { text: "Rotated"; enabled: false; }
+    }
+    Rectangle { height: 5px; }
+    FileTextField { label: "Model or point file: "; text: ""; }
+    Rectangle { height: 5px; }
+    LabeledTextField { label: "Objects with points to use: "; label-width: 210px; text: ""; }
+    Rectangle { height: 5px; }
+    // `pnlSizeInXYZ`: three fields side by side.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        LabeledTextField { label: "Output size in X: "; label-width: 130px; text: ""; }
+        LabeledTextField { label: "Y: "; label-width: 24px; text: ""; }
+        LabeledTextField { label: "Z: "; label-width: 24px; text: ""; }
+    }
+    Rectangle { height: 5px; }
+    FileTextField { label: "Output directory for subvolumes: "; text: ""; clear-button: true; }
+    Rectangle { height: 5px; }
+    // `pnlMakeVolumeStacks`
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Make MRC volume stacks with up to "; }
+        Spinner { text: "1000"; enabled: false; }
+        Text { text: " subvolumes each"; vertical-alignment: center; }
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Skip numbers for skipped subvolumes near edge"; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlSourceOfImages`
+    EtchedBorder {
+        title: "Source of images";
+        HorizontalLayout {
+            alignment: start;
+            RadioButton { text: "Use existing aligned stack"; selected: true; }
+        }
+        Rectangle { height: 2px; }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Make new aligned stack with binning"; }
+            Spinner { text: "1"; enabled: false; }
+        }
+        Rectangle { height: 2px; }
+        HorizontalLayout {
+            alignment: start;
+            spacing: EtomoStyle.gap;
+            RadioButton { text: "Reconstruct from raw images with reduction by"; }
+            Spinner { text: "1"; enabled: false; }
+        }
+        Rectangle { height: 2px; }
+    }
+    Rectangle { height: 5px; }
+    HorizontalLayout {
+        alignment: start;
+        Text { text: "Parameters must already be set in Final Aligned Stack CTF Correction"; }
+    }
+    Rectangle { height: 5px; }
+    // `pnlExtentOfZLevelsInNm`
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Do 3D CTF correction with division into "; }
+        TextField { text: ""; enabled: false; }
+        Text { text: "nm extents"; vertical-alignment: center; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        CheckBox { text: "Adjust for Z shift in fine alignment and positioning"; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Erase gold"; }
+        Text { text: "   Parameters must already be set for gold erasing"; vertical-alignment: center; }
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        CheckBox { text: "Apply 2D filter"; }
+        Text { text: "   Parameters must already be set for 2-D filtering"; vertical-alignment: center; }
+    }
+    Rectangle { height: 5px; }
+    SubtomoSetupCpuGpuPanel { }
+    Rectangle { height: 5px; }
+    // `pnlButtons`
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Generate Subtomograms"; min-width: 210px; }
+        Rectangle { width: 70px; }
+        MultiLineButton { text: "View Subtomograms In 3dmod"; min-width: 240px; }
+    }
+    Rectangle { height: 5px; }
+}
+
+// `PostProcessingDialog` (`PostProcessingDialog.java:63-101`).
+export component PostProcessingDialog inherits BeveledBorder {
+    title: "Post Processing";
+    // `Tab.DEFAULT` is `TRIM_VOL`, index 0.
+    in property <int> current-tab: 0;
+    // The "Subtomograms" tab is added only for a single axis, non-montage
+    // dataset (`PostProcessingDialog.java:70-77`).
+    in property <bool> show-subtomograms: true;
+    TabbedPane {
+        tabs: root.show-subtomograms
+            ? ["Trim vol", "Flatten", "Reduce/filt vol", "Alt Stack", "Subtomograms"]
+            : ["Trim vol", "Flatten", "Reduce/filt vol", "Alt Stack"];
+        current: root.current-tab;
+        // Swing keeps one root panel per tab and moves the live panel into the
+        // selected one; only the selected tab's panel is ever on screen.
+        if root.current-tab == 0: TrimvolPanel { }
+        if root.current-tab == 1: FlattenVolumePanel { }
+        if root.current-tab == 2: SqueezeVolPanel { }
+        if root.current-tab == 3: AltStackPanel { }
+        if root.current-tab == 4: SubtomogramsPanel { }
+    }
+    // `addExitButtons()`; `btnExecute.setText("Done")`.
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component PostProcessingDialogWindow inherits Window {
+    title: "eTomo — Post Processing";
+    background: EtomoStyle.background;
+    preferred-width: 860px;
+    preferred-height: 780px;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        PostProcessingDialog { }
+    }
+}

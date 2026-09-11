@@ -1,0 +1,156 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/ParallelDialog.java`.
+//
+// The whole layout is built in the private constructor.  `pnlRoot` is a
+// SpacedPanel, BoxLayout.Y_AXIS, with `new BeveledBorder("Parallel Process")`;
+// it holds a rigid 5px area, `pnlChunkSetup`, a rigid 10px area and
+// `pnlRunProcess`.  `EtchedBorder` is drawn with the common `BeveledBorder`,
+// the only titled group box in the shared vocabulary.
+//
+// Note: this dialog has no processor table.  The table of CPU/GPU rows belongs
+// to `ParallelPanel`/`ProcessorTable`, which `ParallelDialog` does not embed.
+//
+// Default field values are the Java initialisers: the Spinner instances are
+// created with `Spinner.getLabeledInstance(label, value, min, max, step)`, so
+// `spOverlapPixels` starts at OVERLAP_PIXELS_STEP = 8 (range 8..80, step 8)
+// and `spMegavoxelMaximum` at MEMORY_PER_CHUNK_STEP * 5 = 250
+// (range 50..1100, step 50).
+
+import {
+    EtomoStyle,
+    BeveledBorder,
+    CheckBox,
+    RadioButton,
+    MultiLineButton,
+    LabeledTextField,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { FileTextField, InlineSpinner, InlineTextField } from "ShellWidgets.slint";
+
+export component ParallelDialog inherits Rectangle {
+    background: EtomoStyle.background;
+
+    // `pnlRoot`: SpacedPanel, BoxLayout.Y_AXIS, BeveledBorder("Parallel Process").
+    BeveledBorder {
+        title: "Parallel Process";
+
+        Rectangle { height: 5px; }
+
+        // `pnlChunkSetup`: BoxLayout.Y_AXIS,
+        // EtchedBorder("Set Up Chunks for One-line Command").
+        BeveledBorder {
+            title: "Set Up Chunks for One-line Command";
+
+            Rectangle { height: 5px; }
+            // `pnlOneLineCommandProgram`: X_AXIS, field then horizontal glue.
+            // ltfOneLineCommandProgram.setPreferredWidth(130).
+            HorizontalLayout {
+                alignment: start;
+                InlineTextField { label: "Program: "; text: ""; field-width: 130px; }
+            }
+            Rectangle { height: 3px; }
+            // ltfOneLineCommandArguments.setColumns(35).
+            InlineTextField { label: "Arguments: "; text: ""; field-width: 300px; }
+            Rectangle { height: 3px; }
+            // `ftfInputImageFile`: FileTextField2.getAltLayoutInstance -- label,
+            // text field, folder button, horizontal glue.
+            FileTextField { label: "Input file: "; text: ""; }
+            Rectangle { height: 3px; }
+
+            // `pnlOutput`: X_AXIS -- suffix field, rigid 10px,
+            // `pnlFormatOfOutputFile`.
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                InlineTextField { label: "Suffix for output file: "; text: ""; field-width: 90px; }
+                Rectangle { width: 10px; }
+                // `pnlFormatOfOutputFile`: X_AXIS -- JLabel, three radio
+                // buttons in `bgFormatOfOutputFile`, horizontal glue.  Their
+                // texts are ImageOutputFormat.getLabel(): MRC / HDF / TIFF.
+                HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    Text {
+                        text: "Output file format: ";
+                        vertical-alignment: center;
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                    RadioButton { text: "MRC"; selected: true; }
+                    RadioButton { text: "HDF"; }
+                    RadioButton { text: "TIFF"; }
+                }
+            }
+            Rectangle { height: 3px; }
+
+            // `pnlSpinners`: X_AXIS -- spinner, rigid 10px, spinner.
+            HorizontalLayout {
+                alignment: start;
+                InlineSpinner { label: "Min. overlap in pixels: "; text: "8"; }
+                Rectangle { width: 10px; }
+                InlineSpinner { label: "Max. megavoxels per chunk: "; text: "250"; }
+            }
+            Rectangle { height: 15px; }
+
+            // `pnlChunkSetupButtons`: X_AXIS -- glue, button, glue.
+            HorizontalLayout {
+                alignment: center;
+                MultiLineButton { text: "Run Chunksetup"; width: 180px; }
+            }
+            Rectangle { height: 5px; }
+
+            // `pnlChunkSetupOutputFile`: X_AXIS -- lChunkSetupOutputFile, glue.
+            HorizontalLayout {
+                alignment: start;
+                Text {
+                    text: "Output File: ";
+                    vertical-alignment: center;
+                    color: EtomoStyle.text;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+            }
+            Rectangle { height: 5px; }
+        }
+
+        Rectangle { height: 10px; }
+
+        // `pnlRunProcess`: BoxLayout.Y_AXIS, no border.
+        VerticalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+
+            // `pnlProcessName`: X_AXIS -- ltfProcessName (text preferred width
+            // 125), `btnChunkComscript` (a SimpleButton carrying
+            // ScaledImage.OPEN_FILE, named PROCESS_NAME_LABEL), glue.  The
+            // labelled field plus folder button is exactly the FileTextField
+            // shape, so it is drawn with that component.
+            HorizontalLayout {
+                alignment: start;
+                FileTextField { label: "Process name: "; text: ""; width: 320px; }
+            }
+            Rectangle { height: 5px; }
+
+            // `pnlUseGpus`: X_AXIS -- cbUseGpus, glue.
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Use GPUs"; }
+            }
+            Rectangle { height: 15px; }
+
+            // `pnlRunProcessButtons`: X_AXIS -- glue, btnRunProcess, glue,
+            // btnRunProcess3dmod, glue.
+            HorizontalLayout {
+                alignment: center;
+                spacing: 20px;
+                MultiLineButton { text: "Run Parallel Process"; width: 200px; }
+                MultiLineButton { text: "Run 3dmod"; width: 130px; }
+            }
+        }
+    }
+}
+
+export component ParallelDialogWindow inherits Window {
+    title: "Parallel Process";
+    background: EtomoStyle.background;
+    preferred-width: 700px;
+    preferred-height: 520px;
+    ParallelDialog { }
+}

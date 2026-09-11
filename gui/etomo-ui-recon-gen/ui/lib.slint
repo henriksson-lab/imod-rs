@@ -1,0 +1,8 @@
+// Re-exports the dialogs this crate mirrors so that one `slint_build::compile`
+// covers them all.  Only the `Window` wrappers are listed: Slint generates Rust
+// code for `Window`-inheriting components only, and re-exporting the plain
+// dialog components here would just warn.  Each dialog file exports both.
+export { CleanUpDialogWindow } from "CleanUpDialog.slint";
+export { PostProcessingDialogWindow } from "PostProcessingDialog.slint";
+export { TomogramGenerationDialogWindow } from "TomogramGenerationDialog.slint";
+export { TomogramCombinationDialogWindow } from "TomogramCombinationDialog.slint";

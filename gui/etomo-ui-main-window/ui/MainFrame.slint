@@ -1,0 +1,273 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainFrame.java`, the eTomo
+// application window.
+//
+// The constructor (`:505-531`) makes the content pane `rootPanel` a
+// `BorderLayout` and caps it at twice the screen width less
+// `FixedDim.frameBorder` (10 x 48, `:486`, `:509-512`, `FixedDim.java:116`), then
+// calls `EtomoFrame.initialize()` (`EtomoFrame.java:54-59`), which builds
+// `EtomoMenu.getInstance(this)` and hands its `JMenuBar` to `setJMenuBar`
+// (`EtomoFrame.java:519-522`).  `setCurrentManager` (`:553-604`) empties
+// `rootPanel` and adds `windowSwitch.getPanel(managerKey)`, which is the
+// current manager's `MainPanel` when one window is open and a `TabbedPane`
+// carrying it when several are (`WindowSwitch.java:174-187`).
+//
+// The menu bar structure below is `EtomoMenu.createPanel()`
+// (`EtomoMenu.java:154-266`) taken along the `dataset = true, savable = true`
+// path, which is the branch `EtomoMenu.getInstance(AbstractFrame)`
+// (`:137-144`) uses — the one `MainFrame` gets.  Item labels, mnemonics and
+// accelerators are verbatim.
+//
+// `WindowSwitch` also builds a `Menu("Window")` (`WindowSwitch.java:58`) and
+// keeps a `CheckBoxMenuItem` per open window in it, but nothing adds that menu
+// to the bar (upstream revision 3.19: "Removing the Window menu, since it is
+// redundant"), so it is drawn under the tab strip it belongs with rather than
+// on the bar.
+//
+// Deviations, all of them Swing constructs Slint has no equivalent for:
+//   * A Swing drop-down is invisible until its menu is opened, so the bodies
+//     are gated on `open-menu`, the same shape as the accepted `JTabbedPane`
+//     `current-tab` deviation.  Every label is in this file regardless.
+//   * A nested `JMenu` cascades into its own popup; here a submenu's body is
+//     drawn indented under its row.
+//   * A mnemonic underlines one letter of a label; it is shown in parentheses.
+//   * `setIconImage(images/etomo.png)` (`EtomoFrame.java:56-58`) sets the
+//     window-manager icon, which is not part of the drawn page.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    Colors, MenuBar, Menu, MenuItem, CheckBoxMenuItem, MenuSeparator,
+    TabCloseButton,
+} from "MainWindowWidgets.slint";
+
+export component MainFrame inherits Rectangle {
+    // Which menu's drop-down is open; -1 (none) is the state a freshly built
+    // `JMenuBar` is in.  0 File, 1 Tools, 2 View, 3 Options, 4 Help.
+    in property <int> open-menu: -1;
+    // `menuNew` / `menuRecentProjects` / `menuTemplate` are nested `JMenu`s;
+    // Swing opens them on hover.
+    in property <bool> open-new-submenu: false;
+    in property <bool> open-recent-projects-submenu: false;
+    in property <bool> open-templates-submenu: false;
+    // `peetAvailable` (`EtomoMenu.java:127-129`):
+    // `EnvironmentVariable.INSTANCE.exists(null, originalUserDir,
+    // EnvironmentVariable.PARTICLE_DIR, AxisID.ONLY)`, evaluated once when the
+    // menu is constructed.  It gates the two PEET help items (`:260-263`).
+    in property <bool> peet-available: true;
+    // `menuCancel` (`:60`) is constructed unconditionally but added to the
+    // File menu only on the `!dataset` path (`:228-232`) — the
+    // `EtomoMenu.getInstance(ManagerFrame, boolean)` branch, not `MainFrame`'s.
+    in property <bool> show-cancel-item: false;
+    // `WindowSwitch.getPanel` (`:174-187`) returns the bare `MainPanel` while
+    // `tabList.size() == 1` and the `TabbedPane` once a second window is
+    // opened; a fresh `MainFrame` has at most one.
+    in property <bool> show-window-tabs: false;
+    in property <[string]> window-tab-titles: ["dataset"];
+    in property <int> current-window-tab: 0;
+
+    background: EtomoStyle.background;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // ================= menuBar (EtomoMenu.createPanel) =================
+        // `menuBar.add(menuFile)` (`:192`), then `menuTools`, `menuView`,
+        // `menuOptions`, `menuHelp` (`:244-247`).
+        MenuBar {
+            // ---- menuFile, "File", mnemonic F (`:54`, `:173`) -------------
+            Menu {
+                title: "File";
+                mnemonic: "F";
+                open: root.open-menu == 0;
+
+                // `menuFile.add(menuNew)` (`:218`).  "New", mnemonic N (`:69`, `:164`).
+                Menu {
+                    title: "New";
+                    mnemonic: "N";
+                    submenu: true;
+                    open: root.open-new-submenu;
+                    // `menuNew.add(...)` in this order (`:199-205`).  The
+                    // labels are `EtomoMenu`'s own constants (`:38-47`).
+                    MenuItem { text: "Build Tomogram"; mnemonic: "T"; }
+                    MenuItem { text: "Join Serial Tomograms"; mnemonic: "J"; }
+                    MenuItem { text: "Subvolume Averaging (PEET)"; mnemonic: "P"; }
+                    MenuItem { text: "Align Serial Sections / Blend Montages"; mnemonic: "R"; }
+                    MenuItem { text: "Nonlinear Anisotropic Diffusion"; mnemonic: "D"; }
+                    MenuItem { text: "Generic Parallel Process"; mnemonic: "G"; }
+                    MenuItem { text: "Batch Tomograms"; mnemonic: "H"; }
+                }
+                MenuItem { text: "Open..."; mnemonic: "O"; }
+                // `menuFile.add(menuRecentProjects)` appears twice (`:220` and
+                // `:222`) with a separator between.  Swing's `add` moves an
+                // already-added component rather than duplicating it, so the
+                // menu ends up with the separator first and one "Recent
+                // Projects" row after it; that quirk is reproduced here.
+                MenuSeparator { }
+                Menu {
+                    title: "Recent Projects";
+                    submenu: true;
+                    open: root.open-recent-projects-submenu;
+                    // `menuMRUList` (`:64`): ten `MenuItem`s created with no
+                    // text and `setVisible(false)` (`:328-332`), filled in by
+                    // `setMRUFileLabels` at run time.  Drawn as ten hidden
+                    // rows so the slot and the count stay in the translation.
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                    MenuItem { text: ""; visible-item: false; }
+                }
+                MenuSeparator { }
+                // `:225-227`.
+                MenuItem { text: "Close"; mnemonic: "C"; }
+                MenuItem { text: "Save"; mnemonic: "S"; }
+                MenuItem { text: "Save As..."; mnemonic: "A"; }
+                // The `!dataset` branch (`:228-232`).
+                if root.show-cancel-item: MenuSeparator { }
+                if root.show-cancel-item: MenuItem { text: "Cancel"; }
+                // The `dataset` branch (`:233-240`).
+                MenuSeparator { }
+                MenuItem { text: "Run Tomosnapshot"; mnemonic: "T"; }
+                MenuItem { text: "Export Batch Directive File"; mnemonic: "B"; }
+                MenuSeparator { }
+                // `menuTemplate`, "Templates", mnemonic M (`:67`, `:175`).
+                Menu {
+                    title: "Templates";
+                    mnemonic: "M";
+                    submenu: true;
+                    open: root.open-templates-submenu;
+                    // `:207-209`.
+                    MenuItem { text: "Save Scope Template"; mnemonic: "C"; }
+                    MenuItem { text: "Save System Template"; mnemonic: "Y"; }
+                    MenuItem { text: "Save User Template"; mnemonic: "U"; }
+                }
+                MenuSeparator { }
+                MenuItem { text: "Exit"; mnemonic: "X"; }
+            }
+
+            // ---- menuTools, "Tools", mnemonic T (`:89`, `:158`) ----------
+            Menu {
+                title: "Tools";
+                mnemonic: "T";
+                open: root.open-menu == 1;
+                // `:251-253`; labels from `FLATTEN_VOLUME_LABEL`,
+                // `GPU_TILT_TEST_LABEL`, `ALIGN_FRAMES_LABEL` (`:44-46`).
+                MenuItem { text: "Flatten Volume"; mnemonic: "F"; }
+                MenuItem { text: "Test GPU"; mnemonic: "U"; }
+                MenuItem { text: "Align Frames"; mnemonic: "A"; }
+            }
+
+            // ---- menuView, "View", mnemonic V (`:97`, `:159`) ------------
+            Menu {
+                title: "View";
+                mnemonic: "V";
+                open: root.open-menu == 2;
+                // `:211-214`, all four accelerated in the `dataset` branch
+                // (`:176-185`).  "Axis B" is `TomogramProcessPanel.AXIS_B_LABEL`
+                // (`TomogramProcessPanel.java:168`).
+                MenuItem { text: "Show/Hide Log Window"; mnemonic: "L"; accelerator: "Ctrl+L"; }
+                MenuItem { text: "Axis A"; mnemonic: "A"; accelerator: "Ctrl+A"; }
+                MenuItem { text: "Axis B"; mnemonic: "B"; accelerator: "Ctrl+B"; }
+                MenuItem { text: "Both Axes"; mnemonic: "2"; accelerator: "Ctrl+2"; }
+                // `menuView.add(menuFitWindow)` comes after the menu-bar adds
+                // (`:249`), so it is last.
+                MenuItem { text: "Fit Window"; mnemonic: "F"; accelerator: "Ctrl+F"; }
+            }
+
+            // ---- menuOptions, "Options", mnemonic O (`:106`, `:160`) -----
+            Menu {
+                title: "Options";
+                mnemonic: "O";
+                open: root.open-menu == 3;
+                // `menuOptions.add(menuSettings)` (`:188`) runs before the
+                // `dataset` block, so Settings is first.
+                MenuItem { text: "Settings"; mnemonic: "S"; accelerator: "Ctrl+S"; }
+                // `:196-197`.  Both are `CheckBoxMenuItem`s and start
+                // unchecked; `setMenu3dmodStartupWindow` /
+                // `setMenu3dmodBinBy2` (`EtomoFrame.java:94-101`) set them
+                // from the user configuration at run time.
+                CheckBoxMenuItem { text: "Open 3dmod with Startup Window"; }
+                CheckBoxMenuItem { text: "Open 3dmod Binned by 2"; }
+            }
+
+            // ---- menuHelp, "Help", mnemonic H (`:113`, `:161`) -----------
+            Menu {
+                title: "Help";
+                mnemonic: "H";
+                open: root.open-menu == 4;
+                // `:255-265`.
+                MenuItem { text: "Tomography Guide"; mnemonic: "T"; }
+                MenuItem { text: "Imod Users Guide"; mnemonic: "I"; }
+                MenuItem { text: "3dmod Users Guide"; mnemonic: "3"; }
+                MenuItem { text: "Etomo Users Guide"; mnemonic: "E"; }
+                MenuItem { text: "Join Users Guide"; mnemonic: "J"; }
+                if root.peet-available: MenuItem { text: "PEET Users Guide"; mnemonic: "P"; }
+                if root.peet-available: MenuItem { text: "PEET Help"; }
+                MenuItem { text: "Batch Interface Guide"; mnemonic: "B"; }
+                MenuItem { text: "About"; mnemonic: "A"; }
+            }
+        }
+
+        // ================= rootPanel (BorderLayout) =======================
+        // `rootPanel.add(windowSwitch.getPanel(managerKey))` (`:583`).
+        Rectangle {
+            vertical-stretch: 1;
+            background: EtomoStyle.background;
+            VerticalLayout {
+                spacing: 0px;
+                // `WindowSwitch.setTabs` (`:237-286`): one tab per open
+                // window, each tab component a `GridBagLayout` panel of the
+                // window name, a `FixedDim.x25_y0` rigid area and the close
+                // button (`addCloseButtonToTab`, `:301-320`).  Only the
+                // selected tab carries the `MainPanel`; the rest get an
+                // invisible `JLabel` placeholder (`:272-274`).
+                if root.show-window-tabs: HorizontalLayout {
+                    alignment: start;
+                    spacing: 2px;
+                    padding: 2px;
+                    for tab[index] in root.window-tab-titles: Rectangle {
+                        height: 24px;
+                        background: index == root.current-window-tab
+                            ? EtomoStyle.panel : EtomoStyle.background.darker(10%);
+                        border-width: 1px;
+                        border-color: EtomoStyle.border;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 6px;
+                            spacing: 0px;
+                            Text {
+                                text: tab;
+                                vertical-alignment: center;
+                                font-size: EtomoStyle.font-size-pt * 1px;
+                            }
+                            // `Box.createRigidArea(FixedDim.x25_y0)` (`:313`).
+                            Rectangle { width: 25px; }
+                            TabCloseButton { y: (parent.height - 16px) / 2; }
+                        }
+                    }
+                }
+                // The current manager's `MainPanel` — one of the
+                // `Main*Panel.slint` components in this crate.
+                @children
+            }
+        }
+    }
+}
+
+export component MainFrameWindow inherits Window {
+    // `MainFrame.setTitle(AxisID)` (`:678-694`): `ETOMO_TITLE` "Etomo"
+    // (`:487`) alone with no manager, `"<manager name> - Etomo"` with one
+    // (`:581`), and for a dual axis prefixed with `aAxisTitle` "A Axis - " or
+    // `bAxisTitle` "B Axis - " (`:490-491`).
+    title: "Etomo";
+    preferred-width: 1000px;
+    preferred-height: 820px;
+    background: EtomoStyle.background;
+    MainFrame { }
+}

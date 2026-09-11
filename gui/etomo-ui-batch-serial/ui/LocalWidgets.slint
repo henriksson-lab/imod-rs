@@ -1,0 +1,398 @@
+// Widgets these four dialogs use that the shared vocabulary in
+// `gui/etomo-ui-common/ui/widgets.slint` does not carry yet.  Each one is
+// named after the Swing class in `IMOD/Etomo/src/etomo/ui/swing` it stands
+// for.  Defined here rather than in the common crate so that crate stays
+// untouched.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `EtchedBorder` (`EtchedBorder.java`): a titled etched group box.  Swing
+// paints the title *into* the top border line; Slint has no border-title, so
+// the title is the first row inside the box, the same compromise the shared
+// `BeveledBorder` makes.
+export component EtchedBorder inherits Rectangle {
+    in property <string> title;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        if root.title != "": Text {
+            text: root.title;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            font-weight: 700;
+            color: EtomoStyle.text;
+        }
+        @children
+    }
+}
+
+// `JSeparator`: the horizontal rule eTomo drops between field groups.
+export component Separator inherits Rectangle {
+    height: 2px;
+    background: EtomoStyle.border;
+}
+
+// `SingleLineButton` (`SingleLineButton.java`): the one-line variant of
+// `MultiLineButton`, used for Run/Reset/OK and the table buttons.
+export component SingleLineButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: root.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+    }
+}
+
+// A bare entry box, the `TextField` inside the composite fields below.
+export component TextEntry inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        x: 3px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `FileTextField2` (`FileTextField2.java`): label, entry box, chooser button.
+// The Java button carries the `ScaledImage.OPEN_FILE` folder icon
+// (`FileTextField2.java:107`); no icon is vendored here, so it is drawn as a
+// square button reading "...".
+export component FileTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 200px;
+    in property <length> field-width: 260px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    if root.label != "": Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    TextEntry {
+        width: root.field-width;
+        text: root.text;
+        enabled: root.enabled;
+    }
+    Rectangle {
+        width: EtomoStyle.field-height;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+// `CheckTextField` (`CheckTextField.java`): check box then entry box.
+export component CheckTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <length> field-width: 90px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Rectangle {
+        width: 13px;
+        height: EtomoStyle.field-height;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    TextEntry {
+        width: root.field-width;
+        text: root.text;
+        enabled: root.enabled;
+    }
+}
+
+// `RadioTextField` (`RadioTextField.java`): radio button then entry box.
+export component RadioTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    in property <length> field-width: 90px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Rectangle {
+        width: 13px;
+        height: EtomoStyle.field-height;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            border-radius: 6px;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.selected: Rectangle {
+                width: 7px;
+                height: 7px;
+                border-radius: 3px;
+                background: EtomoStyle.text;
+            }
+        }
+    }
+    if root.label != "": Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    TextEntry {
+        width: root.field-width;
+        text: root.text;
+        enabled: root.enabled;
+    }
+}
+
+// `Spinner` (`Spinner.java`): the same widget as the shared `LabeledSpinner`
+// but sized to its label instead of a fixed label column.
+export component Spinner inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    TextEntry { width: 46px; text: root.text; enabled: root.enabled; }
+    Rectangle {
+        width: 14px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            Text { text: "^"; horizontal-alignment: center; }
+            Text { text: "v"; horizontal-alignment: center; }
+        }
+    }
+}
+
+// `CheckBoxSpinner` (`CheckBoxSpinner.java`): check box, its label, spinner.
+export component CheckBoxSpinner inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Rectangle {
+        width: 13px;
+        height: EtomoStyle.field-height;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    TextEntry { width: 46px; text: root.text; enabled: root.enabled; }
+    Rectangle {
+        width: 14px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            Text { text: "^"; horizontal-alignment: center; }
+            Text { text: "v"; horizontal-alignment: center; }
+        }
+    }
+}
+
+// `ComboBox` (`ComboBox.java`): label then a drop-down.
+export component ComboBox inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 130px;
+    in property <length> field-width: 300px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    Rectangle {
+        width: root.field-width;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        HorizontalLayout {
+            padding-left: 3px;
+            Text {
+                text: root.text;
+                vertical-alignment: center;
+                color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            }
+            Rectangle {
+                width: 16px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+    }
+}
+
+// `HeaderCell` (`HeaderCell.java`): one cell of a table's header rows.
+export component HeaderCell inherits Rectangle {
+    in property <string> text;
+    in property <length> cell-width: 70px;
+    width: root.cell-width;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-weight: 700;
+        color: EtomoStyle.text;
+    }
+}
+
+// `FieldCell` (`FieldCell.java`): one editable/ineditable cell of a table row.
+export component FieldCell inherits Rectangle {
+    in property <string> text;
+    in property <length> cell-width: 70px;
+    in property <bool> editable: true;
+    width: root.cell-width;
+    height: EtomoStyle.field-height;
+    background: root.editable ? EtomoStyle.field-background : EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: 3px;
+        padding-right: 3px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            overflow: elide;
+            color: EtomoStyle.text;
+        }
+    }
+}
+
+// `CheckBoxCell` (`CheckBoxCell.java`): a check box sitting in a table cell.
+export component CheckBoxCell inherits Rectangle {
+    in property <bool> checked;
+    in property <length> cell-width: 70px;
+    width: root.cell-width;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Rectangle {
+        width: 13px;
+        height: 13px;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+// `ButtonCell`/`MinibuttonCell` (`ButtonCell.java`, `MinibuttonCell.java`):
+// a small button sitting in a table cell.  The 3dmod/log minibuttons carry
+// icons in Swing; no icon is vendored, so their text stands in for the icon.
+export component ButtonCell inherits Rectangle {
+    in property <string> text;
+    in property <length> cell-width: 70px;
+    width: root.cell-width;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: EtomoStyle.text;
+    }
+}
+
+// `PanelHeader.getAdvancedBasicOnlyInstance` (`PanelHeader.java:94-99`): the
+// header strip built with `openClose == false` and `advancedBasic == true`, so
+// it carries the title cell and the advanced/basic `ExpandButton` only.  That
+// button defaults to contracted (basic), whose symbol is "A"; expanded
+// (advanced) is "B" (`ExpandButton.java:427-428`, `434-435`).  The shared
+// `PanelHeader` only covers the open/close form, so this variant lives here.
+export component AdvancedBasicPanelHeader inherits Rectangle {
+    in property <string> title;
+    in property <bool> advanced: false;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding-left: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        Text {
+            text: root.title;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            font-weight: 700;
+            color: EtomoStyle.text;
+        }
+        Rectangle {
+            width: 23px;
+            background: EtomoStyle.panel;
+            border-width: 2px;
+            border-color: EtomoStyle.border;
+            Text {
+                text: root.advanced ? "B" : "A";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: EtomoStyle.text;
+            }
+        }
+    }
+}

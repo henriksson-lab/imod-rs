@@ -1,0 +1,157 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/MainFrame_AboutBox.java`.
+//
+// The "About" dialog.  Its whole layout is the constructor
+// (`MainFrame_AboutBox.java:114-164`): the content pane is a `BorderLayout`
+// with a 20-wide rigid area WEST and EAST (`:161-162`) and `pnlAbout` CENTER
+// (`:160`).  `pnlAbout` is a `BoxLayout.Y_AXIS` (`:124`) holding, in order, a
+// 0x10 rigid area (`:133`), `pnlText` (`:158`) and `pnlButton` (`:159`).
+// `pnlText` is also `BoxLayout.Y_AXIS` (`:123`).  The `FixedDim` struts are
+// `x0_y5 = (0,5)`, `x0_y10 = (0,10)`, `x0_y20 = (0,20)` and
+// `x20_y0 = (20,0)` — `FixedDim.java:102`, `:106`, `:109`, `:77`.
+//
+// `AboutActionListener` (`:187-199`) just forwards the OK click to `cancel()`,
+// so it adds no widget of its own.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { JButton } from "WindowWidgets.slint";
+
+export component MainFrame_AboutBox inherits Rectangle {
+    // `VersionControl.getImodInfo(axisID)` runs `imodinfo` with no arguments
+    // and keeps { version, stdout[1], stdout[2] } (`VersionControl.java:108-132`).
+    // `imodinfo` with no arguments prints `imodVersion` then `imodCopyright`
+    // then its usage (`IMOD/imodutil/imodinfo.cpp:144-148`), so those are the
+    // IMOD version, the copyright line and the usage line.  All three only
+    // exist at run time; these defaults are what that build prints.
+    in property <string> imod-version: "5.2.17";
+    in property <string> imod-info-1:
+        "Copyright (C) 1994-2025 by the Regents of the University of Colorado";
+    in property <string> imod-info-2: "usage: imodinfo [options] <imod filename>";
+    // `imodInfo != null && imodInfo.size() > 2` — `:138` — gates the two
+    // copyright rows; `imodInfo != null && imodInfo.size() > 0` — `:146` —
+    // gates the IMOD version row.  `imodinfo` prints more than three lines, so
+    // both hold whenever IMOD is installed.
+    in property <bool> show-imod-info: true;
+    in property <bool> show-imod-version: true;
+    // `VersionControl.getPeetVersion()` reads `PEETVersion.txt` under
+    // PARTICLE_DIR and returns null when PEET is not installed
+    // (`VersionControl.java:75-99`); `version != null` — `:151` — gates the
+    // PEET row.  An install without PEET is the common case.
+    in property <bool> show-peet-version: false;
+    in property <string> peet-version: "1.15.0";
+
+    background: EtomoStyle.background;
+    HorizontalLayout {
+        spacing: 0px;
+        // `pnlRoot.add(Box.createRigidArea(FixedDim.x20_y0), BorderLayout.WEST)` — `:161`.
+        Rectangle { width: 20px; }
+        // `pnlRoot.add(pnlAbout, BorderLayout.CENTER)` — `:160`.
+        VerticalLayout {
+            spacing: 0px;
+            alignment: start;
+            // `pnlAbout.add(Box.createRigidArea(FixedDim.x0_y10))` — `:133`.
+            Rectangle { height: 10px; }
+            // pnlText — `:117`, `:123`, added at `:158`.
+            VerticalLayout {
+                spacing: 0px;
+                // `new JLabel("Etomo: The IMOD Tomography GUI")` — `:126`,
+                // added at `:134`.
+                Text {
+                    text: "Etomo: The IMOD Tomography GUI";
+                    color: EtomoStyle.text;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                // `pnlText.add(Box.createRigidArea(FixedDim.x0_y5))` — `:135`.
+                Rectangle { height: 5px; }
+                // `new JLabel("Version " + ImodVersion.CURRENT_VERSION + " "
+                //   + VersionControl.TIME_STAMP)` — `:127-128` — added at
+                // `:136`.  `CURRENT_VERSION = "5.2.17"` (`ImodVersion.java:20`)
+                // and `TIME_STAMP = "8/14/2026 16:32"`
+                // (`VersionControl.java:33`), both compiled-in constants.
+                Text {
+                    text: "Version 5.2.17 8/14/2026 16:32";
+                    color: EtomoStyle.text;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                // `if (imodInfo != null && imodInfo.size() > 2)` — `:138-143`.
+                if root.show-imod-info: VerticalLayout {
+                    spacing: 0px;
+                    // rigid x0_y10 — `:139`.
+                    Rectangle { height: 10px; }
+                    // `new JLabel(imodInfo.get(1))` — `:140`.
+                    Text {
+                        text: root.imod-info-1;
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                    // rigid x0_y5 — `:141`.
+                    Rectangle { height: 5px; }
+                    // `new JLabel(imodInfo.get(2))` — `:142`.
+                    Text {
+                        text: root.imod-info-2;
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                }
+                // `pnlText.add(Box.createRigidArea(FixedDim.x0_y10))` — `:144`.
+                Rectangle { height: 10px; }
+                // `new JLabel("Written by: Rick Gaudette & Sue Held")` —
+                // `:129`, added at `:145`.
+                Text {
+                    text: "Written by: Rick Gaudette & Sue Held";
+                    color: EtomoStyle.text;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                // `if (imodInfo != null && imodInfo.size() > 0)` — `:146-149`.
+                if root.show-imod-version: VerticalLayout {
+                    spacing: 0px;
+                    // rigid x0_y20 — `:147`.
+                    Rectangle { height: 20px; }
+                    // `new JLabel("IMOD Version: " + imodInfo.get(0))` — `:148`.
+                    Text {
+                        text: "IMOD Version: " + root.imod-version;
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                }
+                // `if (version != null)` — `:151-154`.
+                if root.show-peet-version: VerticalLayout {
+                    spacing: 0px;
+                    // rigid x0_y5 — `:152`.
+                    Rectangle { height: 5px; }
+                    // `new JLabel("PEET Version: " + VersionControl.getPeetVersion())`
+                    // — `:153`.
+                    Text {
+                        text: "PEET Version: " + root.peet-version;
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                }
+                // `pnlText.add(Box.createRigidArea(FixedDim.x0_y10))` — `:155`.
+                Rectangle { height: 10px; }
+            }
+            // pnlButton — `:118`, added at `:159`.  It keeps the default
+            // `FlowLayout`, which centres its one child.
+            HorizontalLayout {
+                alignment: center;
+                // `btnOK = new JButton("OK")` — `:112`, added at `:156`.
+                JButton { text: "OK"; }
+            }
+        }
+        // `pnlRoot.add(Box.createRigidArea(FixedDim.x20_y0), BorderLayout.EAST)` — `:162`.
+        Rectangle { width: 20px; }
+    }
+}
+
+export component MainFrame_AboutBoxWindow inherits Window {
+    // `setTitle("About")` — `:120`.  `setResizable(false)` — `:121` — and
+    // `pack()` — `:163` — so the frame is exactly the layout's preferred size;
+    // Slint has no non-resizable window flag, and `pack()` is what the
+    // preferred size below reproduces.
+    title: "About";
+    preferred-width: 480px;
+    preferred-height: 210px;
+    background: EtomoStyle.background;
+    MainFrame_AboutBox { }
+}

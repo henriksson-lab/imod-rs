@@ -1,0 +1,68 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/CleanUpDialog.java` (and the
+// `CleanupPanel.java` it nests).  Appearance only — no listeners, no manager,
+// no file system access.
+
+import { EtomoStyle, BeveledBorder, MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, ExitButtons, FileChooser, CenteredLabel } from "LocalWidgets.slint";
+
+// `CleanupPanel` (`CleanupPanel.java:223-242`): the "Intermediate File Cleanup"
+// panel the dialog adds under the archive button.
+export component CleanupPanel inherits EtchedBorder {
+    title: "Intermediate File Cleanup";
+    // `instructions`, centered (`CleanupPanel.java:172-174`).
+    CenteredLabel {
+        text: "Select files to be deleted then press the \"Delete Selected\" button. Ctrl-A selects all displayed files.";
+        wrap: word-wrap;
+    }
+    // FixedDim.x0_y5
+    Rectangle { height: 5px; }
+    // `lDirSize`, set by `setDirSize()` to "Directory size (MB): " + size.
+    CenteredLabel { text: "Directory size (MB): 0"; }
+    // FixedDim.x0_y10
+    Rectangle { height: 10px; }
+    FileChooser { }
+    Rectangle { height: 10px; }
+    // `pnlButton`: glue, Delete Selected, glue, Rescan Directory, glue.
+    HorizontalLayout {
+        alignment: space-around;
+        spacing: EtomoStyle.gap;
+        MultiLineButton { text: "Delete Selected"; min-width: 130px; }
+        MultiLineButton { text: "Rescan Directory"; min-width: 130px; }
+    }
+    Rectangle { height: 10px; }
+}
+
+// `CleanUpDialog` (`CleanUpDialog.java:38-71`).
+export component CleanUpDialog inherits BeveledBorder {
+    title: "Clean Up";
+    // Dual axis reads "Archive Original Stacks", single axis "Archive Original
+    // Stack" (`CleanUpDialog.java:44-51`).  Dual axis is shown here.
+    in property <bool> dual-axis: true;
+    in property <string> archive-info-a: "To restore original stack, run:  archiveorig -r BBa.st";
+    in property <string> archive-info-b: "To restore original stack, run:  archiveorig -r BBb.st";
+    HorizontalLayout {
+        alignment: center;
+        MultiLineButton {
+            text: root.dual-axis ? "Archive Original Stacks" : "Archive Original Stack";
+            min-width: 200px;
+        }
+    }
+    CenteredLabel { text: root.archive-info-a; }
+    // `archiveInfoB` is hidden outright for a single axis dataset.
+    if root.dual-axis: CenteredLabel { text: root.archive-info-b; }
+    CleanupPanel { }
+    // `addExitButtons()`; `btnAdvanced.setVisible(false)` and
+    // `btnExecute.setText("Done")` (`CleanUpDialog.java:63-65`).
+    ExitButtons { execute-text: "Done"; show-advanced: false; }
+}
+
+export component CleanUpDialogWindow inherits Window {
+    title: "eTomo — Clean Up";
+    background: EtomoStyle.background;
+    preferred-width: 720px;
+    preferred-height: 620px;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        CleanUpDialog { }
+    }
+}

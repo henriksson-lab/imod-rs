@@ -1,0 +1,55 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/RaptorPanel.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+//
+// The layout is built in `createPanel()` (`RaptorPanel.java:139-166`).
+
+import { EtomoStyle, LabeledTextField, RadioButton,
+         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder } from "widgets_local.slint";
+
+export component RaptorPanel inherits VerticalLayout {
+    spacing: EtomoStyle.gap;
+
+    // `pnlRoot.setBorder(new EtchedBorder(RUN_RAPTOR_LABEL).getBorder())`
+    // (`:141`); `RUN_RAPTOR_LABEL` is "Run RAPTOR" (`:70`).
+    EtchedBorder {
+        title: "Run RAPTOR";
+
+        // `pnlInput`: Y box with `BorderFactory.createEtchedBorder()`, no
+        // title.  `rbInputPreali.setSelected(true)` at `:161`.
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: EtomoStyle.inset;
+                    RadioButton { text: "Run against the coarse aligned stack"; selected: true; }
+                    RadioButton { text: "Run against the raw stack"; }
+                }
+            }
+        }
+
+        // `btnOpenStack`, `Box.CENTER_ALIGNMENT` (`:162`).
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Open Stack in 3dmod"; width: 200px; }
+        }
+
+        // `MARK_LABEL + ": "` and `DIAM_LABEL + " (in pixels): "` (`:68-69`).
+        LabeledTextField { label: "# of beads to choose: "; text: ""; label-width: 260px; }
+        LabeledTextField { label: "Unbinned Bead diameter (in pixels): "; text: ""; label-width: 260px; }
+
+        // `pnlRaptorButtons`.  `btnRaptor` and `btnUseRaptorResult` come from
+        // the display factory (`ProcessResultDisplayFactory.java:57-61`) and
+        // carry `RUN_RAPTOR_LABEL` / `USE_RAPTOR_RESULT_LABEL` (`:70-71`).
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            MultiLineButton { text: "Run RAPTOR"; width: 160px; }
+            MultiLineButton { text: "Open RAPTOR Model in 3dmod"; width: 220px; }
+            MultiLineButton { text: "Use RAPTOR Result as Fiducial Model"; width: 260px; }
+        }
+    }
+}

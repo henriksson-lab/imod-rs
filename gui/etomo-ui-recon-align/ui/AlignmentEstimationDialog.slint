@@ -1,0 +1,50 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/AlignmentEstimationDialog.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+
+import { EtomoStyle, BeveledBorder, MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { ExitButtons } from "widgets_local.slint";
+import { TiltalignPanel } from "TiltalignPanel.slint";
+
+export component AlignmentEstimationDialog inherits VerticalLayout {
+    // `TiltalignPanel.Tab` shown in the embedded panel.
+    in property <int> tiltalign-tab: 0;
+
+    spacing: EtomoStyle.gap;
+
+    // `pnlAlignEst`, bordered with `new BeveledBorder("Fine Alignment")`.
+    BeveledBorder {
+        title: "Fine Alignment";
+        TiltalignPanel { tab: root.tiltalign-tab; }
+        // `panelButton`: two rows of buttons under the tiltalign panel.
+        VerticalLayout {
+            spacing: 10px;
+            padding: EtomoStyle.inset;
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                MultiLineButton { text: "Compute Alignment"; width: 180px; }
+                MultiLineButton { text: "View/Edit Fiducial Model"; width: 180px; }
+            }
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                MultiLineButton { text: "View 3D Model"; width: 180px; }
+                MultiLineButton { text: "View Residual Vectors"; width: 180px; }
+            }
+        }
+    }
+
+    // `ProcessDialog.addExitButtons()`.  `btnExecute.setText("Done")`.
+    ExitButtons { execute-text: "Done"; }
+}
+
+export component AlignmentEstimationDialogWindow inherits Window {
+    title: "Fine Alignment";
+    background: EtomoStyle.background;
+    preferred-width: 760px;
+    preferred-height: 900px;
+    VerticalLayout {
+        AlignmentEstimationDialog { }
+    }
+}

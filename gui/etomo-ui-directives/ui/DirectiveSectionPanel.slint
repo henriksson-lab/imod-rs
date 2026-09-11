@@ -1,0 +1,107 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectiveSectionPanel.java`.
+//
+// One section of the directive editor.  The class owns two widgets that the
+// parent puts in two different places: `pnlRoot` (returned by `getComponent`),
+// which `DirectiveEditorDialog` adds to the lower half of a section column, and
+// `cbShow` (returned by `getShowCheckBox`), which it adds to the upper half.
+// Slint has no way to hand out two children of one component, so the check box
+// is exported as its own component next to the panel.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle, CheckBox } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder } from "widgets_local.slint";
+import { DirectivePanel, DirectivePanelData } from "DirectivePanel.slint";
+
+// One section, as `DirectiveEditorDialog.createPanel` pulls it out of
+// `DirectiveEditorBuilder.getSectionArray()`.  The sections are read from
+// `IMOD/com/directives.csv` at run time, so this is a model, not a literal.
+export struct DirectiveSectionData {
+    title: string,
+    directives: [DirectivePanelData],
+    // The last line of `createPanel` is `msgControlChanged(false, true, true)`,
+    // which ends in `pnlRoot.setVisible(cbShow.isSelected() && cbShow.isEnabled())`
+    // (`DirectiveSectionPanel.java:128`).  `cbShow` is unselected at
+    // construction, so a section panel starts hidden and is revealed by its
+    // check box; `cbShow.setEnabled(visibleDirectives)` gates the check box on
+    // whether any directive in the section is visible.
+    show: bool,
+    show-enabled: bool,
+}
+
+// `cbShow = new CheckBox(descrSection.toString())` (`DirectiveSectionPanel.java:64`),
+// returned by `getShowCheckBox` and placed by the parent.
+export component DirectiveSectionPanelShowCheckBox inherits CheckBox {
+    // Defaults match the constructor: unselected, and `msgControlChanged`
+    // enables it only when the section has visible directives.
+    checked: false;
+    enabled: false;
+}
+
+export component DirectiveSectionPanel inherits Rectangle {
+    in property <string> title;
+    in property <[DirectivePanelData]> directives;
+    // `pnlRoot.setVisible(...)` at the end of `createPanel`, via
+    // `msgControlChanged` (`DirectiveSectionPanel.java:128`).  Kept as a gate
+    // rather than an omission so the section's layout stays in place.
+    in property <bool> show: false;
+
+    height: root.show ? self.preferred-height : 0px;
+
+    if root.show: EtchedBorder {
+        // `pnlRoot.setBorder(new EtchedBorder(descrSection.toString()).getBorder())`.
+        title: root.title;
+        VerticalLayout {
+            spacing: 0px;
+            // `pnlBody`
+            VerticalLayout {
+                spacing: 0px;
+                // `Box.createRigidArea(FixedDim.x0_y3)`
+                Rectangle { height: 3px; }
+                // An X-axis panel holding `new JLabel("Include:")` and glue.
+                HorizontalLayout {
+                    Text {
+                        text: "Include:";
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                    Rectangle { }
+                }
+                // `pnlDirectives`: one `DirectivePanel` per directive in the
+                // section's name order that the `DirectiveMap` knows.
+                VerticalLayout {
+                    spacing: 0px;
+                    for directive in root.directives: VerticalLayout {
+                        // `DirectivePanel.init` can hide the row outright.
+                        height: directive.directive-visible ? self.preferred-height : 0px;
+                        if directive.directive-visible: DirectivePanel {
+                            title: directive.title;
+                            value-kind: directive.value-kind;
+                            value: directive.value;
+                            include: directive.include;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component DirectiveSectionPanelWindow inherits Window {
+    title: "eTomo Directive Section";
+    preferred-width: 560px;
+    preferred-height: 240px;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        DirectiveSectionPanelShowCheckBox { text: "Section"; }
+        // The dialog leaves this hidden at construction; the demo window opens
+        // it so the translated body is visible.
+        DirectiveSectionPanel {
+            title: "Section";
+            show: true;
+        }
+    }
+}

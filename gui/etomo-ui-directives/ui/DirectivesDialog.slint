@@ -1,0 +1,122 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectivesDialog.java`.
+//
+// `pnlRoot` is a Y-axis box of the control panel above the table
+// (`createPanel`, lines 155-157).  The table is `DirectivesTable.java`,
+// translated in `DirectivesTable.slint`.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, Ebutton, CheckBoxEfield } from "widgets_local.slint";
+import { DirectivesTable, DirectivesRowData } from "DirectivesTable.slint";
+
+export component DirectivesDialog inherits Rectangle {
+    // The only live factory (`getInstance`, line 100) passes
+    // `directiveFileType == null`, which makes `btnSave`, `btnCancel`,
+    // `cbShowUnchanged` and therefore `pnlSave` null (lines 77-87).  The
+    // commented-out factory above it (lines 89-98) passes a type, so those
+    // widgets are drawn here and gated on the type being present rather than
+    // dropped, which would lose their labels.
+    in property <bool> has-directive-file-type: false;
+    // `directiveFileType.isBatch()` disables and hides `cbShowForTemplateOnly`;
+    // any other type selects it (lines 143-151).
+    in property <bool> directive-file-type-is-batch: false;
+    // `pnlShow.add(cbShowForTemplateOnly.getComponent())` is commented out at
+    // line 182, so the check box is constructed and never put in the layout.
+    // Gated instead of dropped so its label survives the translation.
+    in property <bool> show-for-template-only-in-layout: false;
+    // `btnBasic` is handed in by `BatchRunTomoDatasetDialog`, which builds it as
+    // `Ebutton.getSingleLineInstance("Basic")` (`BatchRunTomoDatasetDialog.java:181`)
+    // and always passes it from the live call site (line 890).
+    in property <bool> show-basic-button: true;
+    // `shiftBasicButton` (`BatchRunTomoDatasetDialog.java:217`) starts false and
+    // adds a 5px rigid area above `btnBasic` when set (lines 169-171).
+    in property <bool> shift-basic-button: false;
+    // The table's rows come from `DirectiveDescrFile` at run time.
+    in property <[DirectivesRowData]> rows;
+
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: 0px;
+        // `UIUtilities.alignComponentsX(pnlRoot, Box.LEFT_ALIGNMENT)`.
+        alignment: start;
+
+        // ---- pnlControl, an X-axis box ----------------------------------
+        HorizontalLayout {
+            spacing: 0px;
+            alignment: start;
+
+            // `pnlShow`
+            VerticalLayout {
+                spacing: 0px;
+                alignment: start;
+                EtchedBorder {
+                    title: "Which Directives to Show";
+                    VerticalLayout {
+                        spacing: 0px;
+                        // `cbShowUnchanged` exists only when the dialog has a
+                        // directive file type.
+                        if root.has-directive-file-type: CheckBoxEfield {
+                            text: "Show unchanged";
+                            checked: false;
+                        }
+                        if root.show-for-template-only-in-layout: CheckBoxEfield {
+                            text: "Only items saved to template by default";
+                            // `setSelected(true)` for a non-batch type,
+                            // `setEnabled(false)`/`setVisible(false)` for batch.
+                            checked: root.has-directive-file-type
+                                && !root.directive-file-type-is-batch;
+                            enabled: !root.directive-file-type-is-batch;
+                        }
+                        CheckBoxEfield {
+                            text: "Only items containing a value";
+                            checked: false;
+                        }
+                        CheckBoxEfield {
+                            text: "Only items output to batch files";
+                            checked: false;
+                        }
+                    }
+                }
+            }
+
+            // `Box.createRigidArea(FixedDim.x143_y0)`
+            Rectangle { width: 143px; }
+
+            // `pnlButtons`, a Y-axis box.
+            // `UIUtilities.alignComponentsX(pnlButtons, Box.RIGHT_ALIGNMENT)`.
+            VerticalLayout {
+                spacing: 0px;
+                // `pnlSave`, an X-axis box with glue around and between the two
+                // buttons.  Built only when `btnSave` is not null.
+                if root.has-directive-file-type: HorizontalLayout {
+                    spacing: 0px;
+                    Rectangle { }
+                    Ebutton { text: "Save"; width: 100px; }
+                    Rectangle { }
+                    Ebutton { text: "Cancel"; width: 100px; }
+                    Rectangle { }
+                }
+                if root.show-basic-button && root.shift-basic-button: Rectangle { height: 5px; }
+                if root.show-basic-button: Ebutton { text: "Basic"; width: 100px; }
+                // `Box.createVerticalGlue()`
+                Rectangle { }
+                Ebutton { text: "Close All Sections"; width: 160px; }
+            }
+        }
+
+        // ---- table.getContainer() ---------------------------------------
+        DirectivesTable {
+            rows: root.rows;
+        }
+    }
+}
+
+export component DirectivesDialogWindow inherits Window {
+    title: "eTomo Directives";
+    preferred-width: 900px;
+    preferred-height: 700px;
+    background: EtomoStyle.background;
+    DirectivesDialog { }
+}

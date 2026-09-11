@@ -1,0 +1,152 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/BeadtrackPanel.java`.
+//
+// Appearance only: no callbacks, no process launching, no manager state.
+//
+// The whole layout is built in the private constructor
+// (`BeadtrackPanel.java:143-259`); `updateAdvanced(boolean)` (`:719-739`) and
+// `updateAutofidseed(boolean)` (`:267-303`) decide which of those fields are
+// visible, and `setEnabled()` (`:710-715`) which are enabled.
+
+import { EtomoStyle, PanelHeader, LabeledTextField, CheckBox,
+         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, TextEfield } from "widgets_local.slint";
+
+export component BeadtrackPanel inherits HorizontalLayout {
+    // `header = PanelHeader.getAdvancedBasicInstance("Beadtracker", ...)`
+    // (`:154`).  `updateAdvanced(state)` hides a set of fields in basic mode;
+    // shown here so the full source layout is visible.
+    in property <bool> advanced: true;
+    // `autofidseedMode` (`:139`) starts false; `updateAutofidseed(true)`
+    // (called from `FiducialModelDialog.updateSeedModel()`) pads the panel
+    // with two 197px rigid areas and hides most of the body.
+    in property <bool> autofidseed-mode: false;
+    // `expertParametersHeader = PanelHeader.getInstance("Expert Parameters",
+    // ...)` (`:152`); `expand()` (`:328`) toggles `pnlExpertParametersBody`.
+    in property <bool> expert-parameters-open: true;
+    // `cbLocalAreaTracking` / `cbSobelFilterCentering` drive `setEnabled()`.
+    in property <bool> local-area-tracking: false;
+    in property <bool> sobel-filter-centering: false;
+
+    // `panelBeadtrackX`, an X box.  In autofidseed mode `updateAutofidseed()`
+    // brackets `panelBeadtrack` with `FixedDim.x197_y0` rigid areas (`:274-280`).
+    if root.autofidseed-mode: Rectangle { width: 197px; }
+
+    // `panelBeadtrack`: Y box with `BorderFactory.createEtchedBorder()` (`:249`).
+    Rectangle {
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: EtomoStyle.inset;
+            spacing: EtomoStyle.gap;
+
+            PanelHeader { title: "Beadtracker"; }
+
+            // `panelBeadtrackBody`
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                // `Box.createRigidArea(FixedDim.x0_y5)`
+                Rectangle { height: 5px; }
+
+                LabeledTextField { label: "View skip list: "; text: ""; label-width: 260px; }
+                LabeledTextField { label: "Separate view groups: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Tilt angle group size: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Non-default tilt angle groups: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Magnification group size: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Non-default magnification groups: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Minimum # of views for tilt alignment: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Unbinned bead diameter: "; text: ""; label-width: 260px; }
+
+                // `pnlLightBeads`.  `cbLightBeads` is advanced-only in both
+                // modes (`updateAdvanced` sets it before the autofidseed
+                // early return, `:720-722`).
+                if root.advanced: CheckBox { text: "Light fiducial markers"; }
+
+                Rectangle { height: 2px; }
+                // `pnlSobelFilterCentering`
+                CheckBox { text: "Refine center with Sobel filter"; checked: root.sobel-filter-centering; }
+                LabeledTextField {
+                    label: "Sobel sigma relative to bead size: ";
+                    text: "";
+                    label-width: 260px;
+                    enabled: root.sobel-filter-centering;
+                }
+                // `tfLowPassCutoffInverseNm`, a `TextEfield.getLabeledInstance`
+                // with `setPreferredWidth(70)` (`:156`).
+                TextEfield { label: "Overall low-pass filter cutoff (/nm): "; text: ""; label-width: 260px; field-width: 70px; }
+                Rectangle { height: 2px; }
+
+                // `pnlCheckbox` -> `pnlFillGaps`
+                if !root.autofidseed-mode: CheckBox { text: "Fill seed model gaps"; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Maximum gap size: "; text: ""; label-width: 260px; }
+
+                // `pnlLocalAreaTracking`
+                if !root.autofidseed-mode: CheckBox { text: "Local tracking"; checked: root.local-area-tracking; }
+                if !root.autofidseed-mode: LabeledTextField {
+                    label: "Local area size: "; text: ""; label-width: 260px;
+                    enabled: root.local-area-tracking;
+                }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField {
+                    label: "Minimum beads in area: "; text: ""; label-width: 260px;
+                    enabled: root.local-area-tracking;
+                }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField {
+                    label: "Minimum beads overlapping: "; text: ""; label-width: 260px;
+                    enabled: root.local-area-tracking;
+                }
+                if !root.autofidseed-mode: LabeledTextField { label: "Max. # views to include in align: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Rounds of tracking: "; text: ""; label-width: 260px; }
+
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Minimum tilt range for finding axis: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Minimum tilt range for finding angles: "; text: ""; label-width: 260px; }
+                if root.advanced && !root.autofidseed-mode: LabeledTextField { label: "Search box size (pixels): "; text: ""; label-width: 260px; }
+                Rectangle { height: 5px; }
+
+                // `pnlExpertParameters`: Y box with an etched border, carrying
+                // its own `PanelHeader` and `pnlExpertParametersBody` (`:225-232`).
+                if root.advanced && !root.autofidseed-mode: Rectangle {
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    VerticalLayout {
+                        padding: EtomoStyle.inset;
+                        spacing: EtomoStyle.gap;
+                        PanelHeader { title: "Expert Parameters"; open: root.expert-parameters-open; }
+                        if root.expert-parameters-open: VerticalLayout {
+                            spacing: EtomoStyle.gap;
+                            Rectangle { height: 5px; }
+                            LabeledTextField { label: "Maximum # of views for fiducial avg.: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Fiducial extrapolation limits: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Rescue attempt criteria: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Distance criterion for rescue (pixels): "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Rescue relaxation factors: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "First pass residual limit for deletion: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Second pass density relaxation: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Second pass maximum rescue distance: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Residual change limits: "; text: ""; label-width: 260px; }
+                            LabeledTextField { label: "Deletion residual parameters: "; text: ""; label-width: 260px; }
+                        }
+                    }
+                }
+
+                // `btnTrack`, `ProcessResultDisplayFactory.trackFiducials`
+                // (`ProcessResultDisplayFactory.java:65-66`), centred.
+                if !root.autofidseed-mode: HorizontalLayout {
+                    alignment: center;
+                    MultiLineButton { text: "Track Seed Model"; width: 220px; }
+                }
+                Rectangle { height: 5px; }
+                // `pnlTrack`: `btnFixModel` then `btnUseModel`.
+                if !root.autofidseed-mode: HorizontalLayout {
+                    alignment: center;
+                    spacing: 5px;
+                    MultiLineButton { text: "Fix Fiducial Model"; width: 200px; }
+                    MultiLineButton { text: "Track with Fiducial Model as Seed"; width: 260px; }
+                }
+                Rectangle { height: 5px; }
+            }
+        }
+    }
+
+    if root.autofidseed-mode: Rectangle { width: 197px; }
+}

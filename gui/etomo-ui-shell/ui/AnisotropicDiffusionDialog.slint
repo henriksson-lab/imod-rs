@@ -1,0 +1,193 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/AnisotropicDiffusionDialog.java`.
+//
+// The layout is built in the private constructor: `rootPanel` is a
+// SpacedPanel, BoxLayout.X_AXIS, CENTER_ALIGNMENT, bordered
+// `new BeveledBorder("Anisotropic Diffusion")` -- the constructor's
+// `Utilities.APRIL_FOOLS` branch titles it "Anisotropic Delusion" instead;
+// the normal title is used here.  It holds two columns, `pnlFirst` and
+// `pnlSecond`.
+//
+// Two sub-panels are separate Java classes, expanded inline here because they
+// are what the dialog shows:
+//   * `pnlTestVolumeRubberband` = RubberbandPanel.getInstance(..., border
+//     "Test Volume Range:", button "Get Test Volume Range from 3dmod", ...,
+//     btnViewFullVolume) -- `RubberbandPanel.java:86-125` lays out a button row
+//     (glue, btnImod, glue, btnRubberband, glue) then a GridLayout(3, 2, 5, 5)
+//     of X min / X max / Y min / Y max / Z min / Z max.
+//   * `filterFullVolumePanel` = FilterFullVolumePanel.getInstance(...) --
+//     `FilterFullVolumePanel.java:111-132`, EtchedBorder("Filter Full Volume").
+//
+// `EtchedBorder` group boxes are drawn with the common `BeveledBorder`, the
+// only titled group box in the shared vocabulary.
+//
+// Spinner defaults are the Java initialisers:
+//   spTestIteration    = Spinner.getLabeledInstance("Iterations: ", 10, 1, 200)
+//   spIteration        = Spinner.getLabeledInstance("Iterations: ", 10, 1, 200)
+//   spMemoryPerChunk   = MEMORY_PER_CHUNK_DEFAULT = 14 * ChunksetupParam
+//                        .MEMORY_TO_VOXEL (36) = 504, range 36..1080, step 36
+
+import {
+    EtomoStyle,
+    BeveledBorder,
+    CheckBox,
+    MultiLineButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { FileTextField, InlineSpinner, InlineTextField } from "ShellWidgets.slint";
+
+export component AnisotropicDiffusionDialog inherits Rectangle {
+    background: EtomoStyle.background;
+
+    // `rootPanel`: SpacedPanel, BoxLayout.X_AXIS,
+    // BeveledBorder("Anisotropic Diffusion").
+    BeveledBorder {
+        title: "Anisotropic Diffusion";
+
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+
+            // ---- first column: `pnlFirst`, BoxLayout.Y_AXIS ----
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+
+                // `ftfVolume` = FileTextField.getPartialPathInstance("Pick a volume")
+                FileTextField { label: "Pick a volume"; text: ""; }
+
+                // `pnlLoadWithFlipping`: X_AXIS -- check box, glue.
+                HorizontalLayout {
+                    alignment: start;
+                    CheckBox { text: "Load with flipping"; }
+                }
+
+                // `pnlExtract`: Y_AXIS, EtchedBorder("Extract Test Volume"),
+                // CENTER_ALIGNMENT.
+                BeveledBorder {
+                    title: "Extract Test Volume";
+
+                    // `pnlTestVolumeRubberband`: EtchedBorder("Test Volume Range:").
+                    BeveledBorder {
+                        title: "Test Volume Range:";
+                        // `pnlButtons`: X_AXIS -- glue, btnImod, glue,
+                        // btnRubberband, glue.
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 12px;
+                            MultiLineButton { text: "View Full Volume"; width: 150px; }
+                            MultiLineButton { text: "Get Test Volume Range from 3dmod"; width: 230px; }
+                        }
+                        // `pnlRange`: GridLayout(3, 2, 5, 5).
+                        GridLayout {
+                            spacing: 5px;
+                            Row {
+                                InlineTextField { label: "X min: "; text: ""; field-width: 70px; }
+                                InlineTextField { label: "X max: "; text: ""; field-width: 70px; }
+                            }
+                            Row {
+                                InlineTextField { label: "Y min: "; text: ""; field-width: 70px; }
+                                InlineTextField { label: "Y max: "; text: ""; field-width: 70px; }
+                            }
+                            Row {
+                                InlineTextField { label: "Z min: "; text: ""; field-width: 70px; }
+                                InlineTextField { label: "Z max: "; text: ""; field-width: 70px; }
+                            }
+                        }
+                    }
+
+                    // `pnlExtractButtons`: X_AXIS -- glue, btnExtractTestVolume,
+                    // glue, btnViewTestVolume, glue.
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        MultiLineButton { text: "Extract Test Volume"; width: 170px; }
+                        MultiLineButton { text: "View Test Volume"; width: 150px; }
+                    }
+                }
+            }
+
+            // ---- second column: `pnlSecond`, BoxLayout.Y_AXIS ----
+            VerticalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+
+                // `pnlVaryingK`: Y_AXIS,
+                // EtchedBorder("Find a K Value for Test Volume"), CENTER.
+                BeveledBorder {
+                    title: "Find a K Value for Test Volume";
+                    // `pnlVaryingKFields`: X_AXIS.
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        InlineTextField { label: "List of K values: "; text: ""; field-width: 170px; }
+                        InlineSpinner { label: "Iterations: "; text: "10"; }
+                    }
+                    // `pnlVaryingKButtons`: X_AXIS -- glue, btnRunVaryingK,
+                    // glue, btnViewVaryingK, glue.
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        MultiLineButton { text: "Run with Different K Values"; width: 210px; }
+                        MultiLineButton { text: "View Different K Values Test Results"; width: 250px; }
+                    }
+                }
+
+                // `pnlVaryingIteration`: Y_AXIS,
+                // EtchedBorder("Find an Iteration Number for Test Volume").
+                BeveledBorder {
+                    title: "Find an Iteration Number for Test Volume";
+                    // `pnlVaryingIterationFields`: X_AXIS.
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        InlineTextField { label: "K value: "; text: ""; field-width: 90px; }
+                        InlineTextField { label: "List of iterations: "; text: ""; field-width: 170px; }
+                    }
+                    // `pnlVaryingIterationButtons`: X_AXIS -- glue,
+                    // btnRunVaryingIteration, glue, btnViewVaryingIteration, glue.
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        MultiLineButton { text: "Run with Different Iterations"; width: 210px; }
+                        MultiLineButton { text: "View Different Iteration Test Results"; width: 250px; }
+                    }
+                }
+
+                // `filterFullVolumePanel`: SpacedPanel, Y_AXIS,
+                // EtchedBorder("Filter Full Volume").
+                BeveledBorder {
+                    title: "Filter Full Volume";
+                    // `pnlFields`: X_AXIS -- ltfKValue, spIteration,
+                    // spMemoryPerChunk, glue.
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        InlineTextField { label: "K value: "; text: ""; field-width: 90px; }
+                        InlineSpinner { label: "Iterations: "; text: "10"; }
+                        InlineSpinner { label: "Memory per chunk (MB): "; text: "504"; }
+                    }
+                    // `pnlCheckBox`: X_AXIS -- check box, glue.
+                    HorizontalLayout {
+                        alignment: start;
+                        CheckBox { text: "Overlap chunks by 4 times # of iterations"; }
+                    }
+                    // `pnlButtons`: X_AXIS.
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        MultiLineButton { text: "Filter Full Volume"; width: 160px; }
+                        MultiLineButton { text: "View Filtered Volume"; width: 170px; }
+                        MultiLineButton { text: "Clean Up Subdirectory"; width: 180px; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AnisotropicDiffusionDialogWindow inherits Window {
+    title: "Anisotropic Diffusion";
+    background: EtomoStyle.background;
+    preferred-width: 1080px;
+    preferred-height: 620px;
+    AnisotropicDiffusionDialog { }
+}

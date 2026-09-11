@@ -1,0 +1,823 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/AlignFramesPanel.java`, the tool
+// panel `ToolsDialog` builds for `ToolType.ALIGN_FRAMES`
+// (`ToolsDialog.java:75-77`).
+//
+// `createPanel()` (`:454-760`) plus the five private panel builders it calls --
+// `getPnlInputFileSpecification` (`:760-822`),
+// `getPnlOtherSourceOfMetadata` (`:824-889`), `getPnlGainReference`
+// (`:891-928`), `getPnlPathToFramesInMdoc` (`:930-945`) and
+// `getPnlCameraDefectFile` (`:947-962`).
+//
+//   pnlRoot        SpacedPanel, X_AXIS, FlowLayout(LEADING)
+//     pnlOuterPanel  Y_AXIS, BeveledBorder("Align Frames"), max 900 x 10000
+//       tabPane                    -- the JTabbedPane, 2 tabs
+//       horizontal glue
+//       pnlRunAlignFramesButtons   FlowLayout(CENTER)
+//       pnlStartReconButton        FlowLayout(CENTER)
+//       horizontal glue
+//
+// The tabs come from the private `Tab` class (`:1222-1260`):
+// index 0 "Input and Pre-processing", index 1 "Alignment".  Only the selected
+// tab's body is in the container -- `changeTab()` removes one body and adds
+// the other (`:1281-1294`) -- and `createPanel` seeds it with
+// `tabPane.getSelectedIndex()`, which is 0 (`:753`).  Slint has no JTabbedPane,
+// so `current-tab` selects the body, as agreed for this translation.
+//
+// Construction-time state, all set in `createPanel`'s "set defaults" block
+// (`:474-491`) unless noted:
+//   ltfDelimitersOpen   = SortTiltFramesParam.DELIMITER_OPEN_DEFAULT  = "["
+//   ltfDelimitersClose  = SortTiltFramesParam.DELIMITER_CLOSE_DEFAULT = "]"
+//   ltfFilterCutoffs    = AlignFramesParam.VARY_FILTER_DEFAULT = "0.05,0.06,0.08,0.1"
+//   ltfShiftLimit       = AlignFramesParam.SHIFT_LIMIT_DEFAULT  = 20
+//   ltfStopIterationsAtShift = AlignFramesParam.STOP_ITERATIONS_AT_SHIFT_DEFAULT = 0.1
+//   selected: rbMetadataFile, rbTruncateAboveNone, rbAllPairwiseFrames,
+//             rbBinningDefault, rbFixedTotalDose, rbScalingOfSumDefault,
+//             rbModeToOutput16bitInt, rbRotationAndFlip, rbSumRotationAndFlip
+//   checked:  cbUseHybridShifts, cbRefineAlignment, cbMinForSplineSmoothing,
+//             cbNormalizeDoseWeighting
+//   not editable: ltfDirectory, ltfOutputImageFile (`:470-471`),
+//                 textAreaInputFiles (`:770`)
+// Spinner values and ranges are the `AlignFramesParam` constants named at each
+// declaration (`AlignFramesParam.java:73-120`).
+//
+// The enabled/disabled states drawn below are what `updateDisplay()`
+// (`:1116-1192`) computes from that starting state -- e.g. `rbMetadataFile` is
+// selected, so every "other source of metadata" control is disabled, and
+// `cbDoDoseWeighting` is unchecked, so the whole Dose Weighting body is
+// disabled.
+//
+// Three groups of widgets are hidden at construction and stay in the layout
+// behind a property:
+//   * `advanced` (default false).  `updateAdvanced(isAdvanced())` runs at the
+//     end of `createPanel` (`:758`); `isAdvanced()` is
+//     `btnAdvanced.isExpanded()` (`:1084-1086`) and `GlobalExpandButton`
+//     starts `expanded = false` (`GlobalExpandButton.java:43`).  It hides
+//     pnlOuterPathToFramesInMdoc, pnlGainReferenceFile, pnlRotationAndFlip,
+//     pnlOuterCameraDefectFile, pnlTestBinnings, pnlShiftLimit,
+//     pnlRefineWithGroupSums, pnlStopIterationsAtShift,
+//     pnlStartingEndingFrames, pnlScalingOfSum and pnlModeToOutout
+//     (`:1100-1113`).
+//   * `dose-weighting-open` (default false).  `phDoseWeighting.setOpen(false)`
+//     at `:417` forces `expand()`, which does
+//     `pnlDoseWeightingBody.setVisible(false)` (`:1203`).
+//   * `dose-weighting-advanced` (default false).  `doseWeightingAdvanced` is
+//     set false at `:416`, and `setDoseWeightingAdvanced` hides
+//     ltfOptimalDoseScaling and cbUnweightedOutputFile (`:1088-1095`).
+// `phOtherSourceOfMetadata` gets no `setOpen` call, so its body starts open.
+//
+// Two font-size branches add rigid areas only -- no widget, no caption --
+// `UIUtilities.isFontLessThanDefaultSize()` at `:598` and
+// `UIUtilities.isFontGreaterThanDefaultSize()` at `:602` and `:721`.  They are
+// drawn behind properties defaulting to false, the default-font state.
+//
+// `ButtonControlTextEfield` instances built by `getFileInstance` pass
+// `useLabelComponent = false` (`ButtonControlTextEfield.java:87-107`), so the
+// label string they carry is an identifier for validation and UI tests and is
+// not drawn; the visible caption is the neighbouring radio button or check
+// box.  `getLabeledFileInstance` instances (`:110-127`) do draw their label.
+//
+// `EERSuperResZSumPaddingPanel` is its own file, as in Java; it is added to
+// the first tab body at `:509`.
+//
+// Slint has no titled border and no GridBagLayout weights, so a
+// `BeveledBorder`/`EtchedBorder` title is the first row inside the box and
+// FlowLayout rows become HorizontalLayouts; `Box.createHorizontalGlue()` is
+// `alignment: start` on the row.
+
+import {
+    EtomoStyle,
+    BeveledBorder,
+    CheckBox,
+    LabeledTextField,
+    MultiLineButton,
+    PanelHeader,
+    RadioButton,
+    TabbedPane,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import {
+    ButtonControlTextEfield,
+    ComboBox,
+    Ebutton,
+    EtchedBorder,
+    InlineSpinner,
+    InlineTextField,
+    Label,
+    SingleLineButton,
+    Spinner,
+    TextArea,
+    TextField,
+} from "ShellWidgets.slint";
+import { EERSuperResZSumPaddingPanel } from "EERSuperResZSumPaddingPanel.slint";
+
+export component AlignFramesPanel inherits VerticalLayout {
+    // `tabPane.getSelectedIndex()` at construction (`:753`).
+    in property <int> current-tab: 0;
+    // `btnAdvanced.isExpanded()` (`:1084`), false at construction.
+    in property <bool> advanced: false;
+    // `pnlDoseWeightingBody.isVisible()` after `phDoseWeighting.setOpen(false)`
+    // (`:417`).
+    in property <bool> dose-weighting-open: false;
+    // `doseWeightingAdvanced` (`:416`).
+    in property <bool> dose-weighting-advanced: false;
+    // `pnlOtherSourceOfMetadataBody.isVisible()`; no `setOpen` call, so open.
+    in property <bool> other-source-of-metadata-open: true;
+    // `UIUtilities.isFontLessThanDefaultSize()` (`:598`).
+    in property <bool> font-less-than-default: false;
+    // `UIUtilities.isFontGreaterThanDefaultSize()` (`:602`, `:721`).
+    in property <bool> font-greater-than-default: false;
+    alignment: start;
+
+    // `pnlOuterPanel`: Y_AXIS, BeveledBorder("Align Frames").
+    BeveledBorder {
+        title: "Align Frames";
+        max-width: 900px;
+
+        // `tabPane` = new TabbedPane(), holding the two `Tab` titles.
+        TabbedPane {
+            tabs: ["Input and Pre-processing", "Alignment"];
+            current: root.current-tab;
+
+            // ======================================================
+            // `pnlTabBodyArray[Tab.INPUT_AND_PREPROCESSING.index]`: Y_AXIS
+            // (`:498-514`).
+            // ======================================================
+            if root.current-tab == 0: VerticalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+
+                // `pnlBtnLoadComFile`: FlowLayout(CENTER).
+                HorizontalLayout {
+                    alignment: center;
+                    MultiLineButton { text: "Load Starting Com File"; width: 200px; }
+                }
+
+                // ---- `getPnlInputFileSpecification()` (`:760-822`) ----
+                // Outer X_AXIS panel: the bordered panel then a glue.
+                HorizontalLayout {
+                    alignment: start;
+                    // `pnlInputFileSpecification`: FlowLayout(LEADING),
+                    // BeveledBorder("Input file specification"), max 800 x 250.
+                    BeveledBorder {
+                        title: "Input file specification";
+                        max-width: 800px;
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+
+                            // `pnlInputFileSpecLeft`: Y_AXIS.
+                            VerticalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+
+                                // `pnlMetadataFile`: FlowLayout(LEADING).
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    alignment: start;
+                                    RadioButton {
+                                        text: "Metadata (.mdoc) file:";
+                                        selected: true;
+                                    }
+                                    // bctfMetadataFile: unlabeled, no clear
+                                    // button, preferred width 167 (`:780`).
+                                    ButtonControlTextEfield {
+                                        text: "";
+                                        field-width: 167px;
+                                        clear-button: false;
+                                        enabled: true;
+                                    }
+                                }
+
+                                // `pnlListOfInputFiles`: FlowLayout(LEADING).
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    alignment: start;
+                                    RadioButton {
+                                        text: "Text file with list of files:";
+                                        selected: false;
+                                    }
+                                    // bctfListOfInputFiles: preferred width 150
+                                    // (`:781`); disabled -- `updateDisplay`
+                                    // `:1120`.
+                                    ButtonControlTextEfield {
+                                        text: "";
+                                        field-width: 150px;
+                                        clear-button: false;
+                                        enabled: false;
+                                    }
+                                }
+
+                                // `pnlSelectedFiles`: FlowLayout(LEADING).
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    alignment: start;
+                                    RadioButton { text: "Selected Files"; selected: false; }
+                                    // btnSelectedFiles =
+                                    // Ebutton.getSelectMultipleFilesInstance(...):
+                                    // an icon-only folder button, disabled
+                                    // (`:1121`).
+                                    Ebutton { glyph: "📁"; enabled: false; }
+                                }
+
+                                // `pnlDirectory`: FlowLayout(LEADING) --
+                                // rigid FixedDim.x5_y0 then ltfDirectory.
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Rectangle { width: 5px; }
+                                    // Not editable (`:470`), preferred width 295.
+                                    InlineTextField {
+                                        label: "Directory: ";
+                                        text: "";
+                                        field-width: 295px;
+                                    }
+                                }
+                            }
+
+                            // `pnlInputFileSpecRight`: Y_AXIS -- the label then
+                            // the scroll pane over `textAreaInputFiles`.
+                            VerticalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                Label { text: "Input File(s):"; }
+                                // new TextArea(INPUT_FILES_LABEL, 7, 15), not
+                                // editable, vertical scroll bar always shown.
+                                TextArea { rows: 7; columns: 15; editable: false; }
+                            }
+                        }
+                    }
+                }
+
+                // ---- `pnlRootnameOutputFiles`: X_AXIS (`:539-543`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    InlineTextField {
+                        label: " Root name for output files: ";
+                        text: "";
+                        field-width: 300px;
+                    }
+                }
+
+                // ---- `getPnlPathToFramesInMdoc()` (`:930-945`) ----
+                // `updateAdvanced` hides the whole outer panel (`:1101`).
+                if root.advanced: HorizontalLayout {
+                    alignment: start;
+                    // `pnlPathToFramesInMdoc`: FlowLayout(LEADING); the field
+                    // is labeled and carries a clear button, preferred
+                    // width 245.  Enabled -- `updateDisplay` `:1122`.
+                    ButtonControlTextEfield {
+                        label: "Other directory with frames: ";
+                        text: "";
+                        field-width: 245px;
+                        clear-button: true;
+                        enabled: true;
+                    }
+                }
+
+                // ---- `getPnlOtherSourceOfMetadata()` (`:824-889`) ----
+                // Y_AXIS, BorderFactory.createEtchedBorder(), untitled.
+                EtchedBorder {
+                    PanelHeader {
+                        title: "Other sources of metadata";
+                        open: root.other-source-of-metadata-open;
+                    }
+                    if root.other-source-of-metadata-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+
+                        // `pnlCorrespondingStack`: FlowLayout(LEADING).
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            // Disabled: rbMetadataFile is selected (`:1123`).
+                            CheckBox {
+                                text: "Matching tilt series file: ";
+                                checked: false;
+                                enabled: false;
+                            }
+                            ButtonControlTextEfield {
+                                text: "";
+                                field-width: 250px;
+                                clear-button: true;
+                                enabled: false;
+                            }
+                        }
+
+                        // `pnlTiltAngleFile`: FlowLayout(LEADING).
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            CheckBox {
+                                text: "Text file with tilt angles:";
+                                checked: false;
+                                enabled: false;
+                            }
+                            ButtonControlTextEfield {
+                                text: "";
+                                field-width: 250px;
+                                clear-button: true;
+                                enabled: false;
+                            }
+                        }
+
+                        // `pnlAnglesInFilenames`: FlowLayout(LEADING).
+                        HorizontalLayout {
+                            alignment: start;
+                            CheckBox {
+                                text: "Tilt angles in filenames";
+                                checked: false;
+                                enabled: false;
+                            }
+                        }
+
+                        // `pnlDelimiterOpenClose`: FlowLayout(LEADING).
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            InlineTextField {
+                                label: "Delimiting character at start ";
+                                text: "[";
+                                field-width: 100px;
+                                enabled: false;
+                            }
+                            InlineTextField {
+                                label: "and end ";
+                                text: "]";
+                                field-width: 100px;
+                                enabled: false;
+                            }
+                        }
+
+                        // `pnlAxisRotationAngle`: FlowLayout(LEADING).
+                        HorizontalLayout {
+                            alignment: start;
+                            InlineTextField {
+                                label: "Tilt axis rotation: ";
+                                text: "";
+                                field-width: 350px;
+                                enabled: false;
+                            }
+                        }
+                    }
+                }
+
+                // `Box.createVerticalStrut(2)` (`:508`).
+                Rectangle { height: 2px; }
+
+                // `eerSuperResZSumPaddingPanel.getComponent()` (`:509`).
+                EERSuperResZSumPaddingPanel { }
+
+                // ---- `getPnlGainReference()` (`:891-928`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    // `pnlGainReference`: Y_AXIS.
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+
+                        // `pnlRefAndDefect`: FlowLayout(LEADING).
+                        HorizontalLayout {
+                            alignment: start;
+                            CheckBox {
+                                text: "Gain normalize from reference and defect files in frame file header";
+                                checked: false;
+                            }
+                        }
+
+                        // `pnlGainReferenceFile`: FlowLayout(LEADING), hidden
+                        // by `updateAdvanced` (`:1102`).  Labeled field with a
+                        // clear button, preferred width 307.
+                        if root.advanced: HorizontalLayout {
+                            alignment: start;
+                            ButtonControlTextEfield {
+                                label: "Gain reference file: ";
+                                text: "";
+                                field-width: 307px;
+                                clear-button: true;
+                            }
+                        }
+
+                        // `pnlRotationAndFlip`: FlowLayout(LEADING), hidden by
+                        // `updateAdvanced` (`:1103`).  Every control in it is
+                        // disabled at construction (`:1135-1145`).
+                        if root.advanced: HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            alignment: start;
+                            Label { text: "Reference rotation and flip"; enabled: false; }
+                            RadioButton {
+                                text: "Value in title";
+                                selected: true;
+                                enabled: false;
+                            }
+                            // rbRotationAndFlip2: new RadioButton("",
+                            // "rotation and flip spinner", bgRotationAndFlip)
+                            // -- an empty caption by construction.
+                            RadioButton { text: ""; selected: false; enabled: false; }
+                            // spRotationAndFlip: default 0, range 0..7,
+                            // maximum width 50 (`:899`).
+                            Spinner { text: "0"; enabled: false; }
+                            // cmbRotationAndFlipTranslation:
+                            // ComboBox.getUnlabeledInstance(...), filled from
+                            // `rotationAndFlipStringList` (`:422-425`) and set
+                            // to the spinner's value, index 0 (`:903-904`).
+                            ComboBox {
+                                label: "";
+                                label-width: 0px;
+                                box-width: 180px;
+                                text: "0 degrees, No flip";
+                                enabled: false;
+                            }
+                        }
+                    }
+                }
+
+                // ---- `getPnlCameraDefectFile()` (`:947-962`) ----
+                // Hidden by `updateAdvanced` (`:1104`).
+                if root.advanced: HorizontalLayout {
+                    alignment: start;
+                    ButtonControlTextEfield {
+                        label: "Defect file: ";
+                        text: "";
+                        field-width: 370px;
+                        clear-button: true;
+                    }
+                }
+
+                // ---- `pnlTruncateValues` (`:545-564`) ----
+                // Y_AXIS, BeveledBorder("Truncate values").
+                BeveledBorder {
+                    title: "Truncate values";
+                    RadioButton { text: "None"; selected: true; }
+                    // `pnlTruncateAboveInputCounts`: X_AXIS.
+                    HorizontalLayout {
+                        alignment: start;
+                        RadioButton { text: "Above"; selected: false; }
+                        // tfTruncateAboveInputCounts: preferred width 100,
+                        // disabled (`:1146`).
+                        TextField { text: ""; width: 100px; enabled: false; }
+                        Rectangle { width: 2px; }
+                        Label { text: "input counts"; }
+                    }
+                    // `pnlTruncateAboveSDs`: X_AXIS.
+                    HorizontalLayout {
+                        alignment: start;
+                        RadioButton { text: "Above"; selected: false; }
+                        TextField { text: ""; width: 100px; enabled: false; }
+                        Rectangle { width: 2px; }
+                        Label { text: "SDs from mean"; }
+                    }
+                }
+            }
+
+            // ======================================================
+            // `pnlTabBodyArray[Tab.ALIGNMENT.index]`: Y_AXIS (`:516-534`).
+            // ======================================================
+            if root.current-tab == 1: VerticalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+
+                // ---- `pnlFitPairwiseShifts` (`:566-580`) ----
+                BeveledBorder {
+                    title: "Fit pairwise shifts";
+                    // `pnlCustomPairwiseFrames`: X_AXIS.
+                    HorizontalLayout {
+                        alignment: start;
+                        RadioButton { text: "Fit to sets of"; selected: false; }
+                        // spPairwiseFrames: default 7, range 7..99, maximum
+                        // width 50 (`:568`); disabled (`:1148`).
+                        Spinner { text: "7"; enabled: false; }
+                        Label { text: " frames "; }
+                    }
+                    RadioButton {
+                        text: "Fit to sets of half the frames";
+                        selected: false;
+                    }
+                    RadioButton { text: "One fit to all frames"; selected: true; }
+                }
+
+                // ---- `pnlBinningForAlignment` (`:582-608`) ----
+                BeveledBorder {
+                    title: "Binning (reduction) for alignment";
+                    RadioButton { text: "Default"; selected: true; }
+                    // `pnlReduceBy`: X_AXIS.
+                    HorizontalLayout {
+                        alignment: start;
+                        RadioButton { text: "Reduce by"; selected: false; }
+                        // spReduceBy: default 4, range 1..16, maximum width 50.
+                        Spinner { text: "4"; enabled: false; }
+                    }
+                    // `pnlTargetAlignSize`: X_AXIS.
+                    HorizontalLayout {
+                        alignment: start;
+                        RadioButton { text: "Reduce to about"; selected: false; }
+                        // spTargetAlignSize: default 1250, range 250..4000
+                        // step 50, maximum width 70.
+                        Spinner { text: "1250"; box-width: 70px; enabled: false; }
+                        // `UIUtilities.isFontLessThanDefaultSize()` branch
+                        // (`:598-600`): rigid FixedDim.x2_y0.
+                        if root.font-less-than-default: Rectangle { width: 2px; }
+                        Label { text: "  pixels  "; }
+                        // `UIUtilities.isFontGreaterThanDefaultSize()` branch
+                        // (`:602-604`): rigid FixedDim.x20_y0.
+                        if root.font-greater-than-default: Rectangle { width: 20px; }
+                    }
+                    // `pnlTestBinnings`: X_AXIS, hidden by `updateAdvanced`
+                    // (`:1105`).
+                    if root.advanced: HorizontalLayout {
+                        alignment: start;
+                        RadioButton { text: "Test multiple binnings:"; selected: false; }
+                        // tfTestBinnings: preferred width 300, disabled
+                        // (`:1151`).
+                        TextField { text: ""; width: 300px; enabled: false; }
+                    }
+                }
+
+                // ---- `pnlVaryFilter` / `pnlFilterCutoffs` (`:610-616`) ----
+                VerticalLayout {
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        InlineTextField {
+                            label: "Filter cutoffs: ";
+                            text: "0.05,0.06,0.08,0.1";
+                            field-width: 300px;
+                        }
+                        // cbUseHybridShifts: checked (`:483`) but disabled --
+                        // rbAllPairwiseFrames is selected (`:1152-1153`).
+                        CheckBox {
+                            text: "Use hybrid shifts";
+                            checked: true;
+                            enabled: false;
+                        }
+                    }
+                }
+
+                // ---- `pnlShiftLimit` (`:618-622`) ----
+                // Hidden by `updateAdvanced` (`:1106`).
+                if root.advanced: HorizontalLayout {
+                    alignment: start;
+                    InlineTextField {
+                        label: "Maximum shift between frames: ";
+                        text: "20";
+                        field-width: 70px;
+                    }
+                    Label { text: " unbinned pixels"; }
+                }
+
+                // ---- `pnlGroupFrames` (`:624-629`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    CheckBox { text: "Group frames by"; checked: false; }
+                    // spGroupFrames: default 2, range 2..20, maximum width 50;
+                    // disabled (`:1154`).
+                    Spinner { text: "2"; enabled: false; }
+                }
+
+                // ---- `pnlRefinement` (`:631-655`) ----
+                BeveledBorder {
+                    title: "Refinement";
+                    // `pnlRefineAlignment`: X_AXIS.
+                    HorizontalLayout {
+                        alignment: start;
+                        CheckBox {
+                            text: "Refine alignment with up to";
+                            checked: true;
+                        }
+                        // spRefineAlignment: default 5, range 1..16 (min from
+                        // REFINE_ALIGNMENT_SPINNER_MIN, max from
+                        // ALIGN_AND_SUM_BINNING_SPINNER_MAX), maximum width 50.
+                        Spinner { text: "5"; enabled: true; }
+                        Label { text: " iterations "; }
+                    }
+                    // `pnlRefineWithGroupSums`: X_AXIS, hidden by
+                    // `updateAdvanced` (`:1107`).
+                    if root.advanced: HorizontalLayout {
+                        alignment: start;
+                        // Disabled: cbGroupFrames is unchecked (`:1157-1158`).
+                        CheckBox {
+                            text: "Refine in groups";
+                            checked: false;
+                            enabled: false;
+                        }
+                        Rectangle { width: 30px; }
+                        InlineTextField {
+                            label: "Filter cutoff for refining ";
+                            text: "";
+                            field-width: 100px;
+                        }
+                    }
+                    // `pnlStopIterationsAtShift`: X_AXIS, hidden by
+                    // `updateAdvanced` (`:1108`).
+                    if root.advanced: HorizontalLayout {
+                        alignment: start;
+                        Rectangle { width: 2px; }
+                        InlineTextField {
+                            label: "Refine until changes are below ";
+                            text: "0.1";
+                            field-width: 100px;
+                        }
+                        Label { text: " unbinned pixels "; }
+                    }
+                }
+
+                // ---- `pnlMinForSplineSmoothing` (`:657-663`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    CheckBox {
+                        text: "Spline smoothing of shifts if more than";
+                        checked: true;
+                    }
+                    // spMinForSplineSmoothing: default 20, range 10..30,
+                    // maximum width 50.
+                    Spinner { text: "20"; enabled: true; }
+                    Label { text: " frames "; }
+                }
+
+                // ---- `pnlStartingEndingFrames` (`:665-672`) ----
+                // Hidden by `updateAdvanced` (`:1109`).
+                if root.advanced: HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    InlineTextField {
+                        label: "Align subsets of frames from ";
+                        text: "";
+                        field-width: 100px;
+                    }
+                    InlineTextField {
+                        label: " to ";
+                        text: "";
+                        field-width: 100px;
+                    }
+                }
+
+                // ---- `pnlDoDoseWeighting` (`:674-676`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    CheckBox { text: "Do dose weighting"; checked: false; }
+                }
+
+                // ---- `pnlDoseWeighting` (`:678-697`) ----
+                // Y_AXIS, BorderFactory.createEtchedBorder(), untitled.
+                EtchedBorder {
+                    // phDoseWeighting =
+                    // PanelHeader.getAdvancedBasicInstance("Dose Weighting",
+                    // this, dialogType, btnAdvanced) (`:410-411`).
+                    PanelHeader {
+                        title: "Dose Weighting";
+                        open: root.dose-weighting-open;
+                    }
+                    if root.dose-weighting-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+
+                        // `pnlFixedTotalDose`: X_AXIS.  Everything here is
+                        // disabled: cbDoDoseWeighting is unchecked
+                        // (`:1170-1176`).
+                        HorizontalLayout {
+                            alignment: start;
+                            RadioButton {
+                                text: "Dose weighting with fixed dose/image of ";
+                                selected: true;
+                                enabled: false;
+                            }
+                            TextField { text: ""; width: 100px; enabled: false; }
+                            Rectangle { width: 2px; }
+                            Label { text: "e/A2"; enabled: false; }
+                            Rectangle { width: 2px; }
+                        }
+                        RadioButton {
+                            text: "Dose weighting with doses from .mdoc file";
+                            selected: false;
+                            enabled: false;
+                        }
+                        CheckBox {
+                            text: "Normalize within each set of frames";
+                            checked: true;
+                            enabled: false;
+                        }
+                        CheckBox {
+                            text: "Microscope voltage is 200 kV";
+                            checked: false;
+                            enabled: false;
+                        }
+                        // ltfOptimalDoseScaling and cbUnweightedOutputFile are
+                        // hidden by `setDoseWeightingAdvanced` (`:1091-1092`).
+                        if root.dose-weighting-advanced: InlineTextField {
+                            label: " Optimal dose scaling: ";
+                            text: "";
+                            field-width: 100px;
+                            enabled: false;
+                        }
+                        if root.dose-weighting-advanced: CheckBox {
+                            text: "Non-dose weighted output also";
+                            checked: false;
+                            enabled: false;
+                        }
+                    }
+                }
+
+                // ---- `pnlScalingOfSum` (`:699-705`) ----
+                // Hidden by `updateAdvanced` (`:1110`).
+                if root.advanced: HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    Label { text: "Scale output by"; }
+                    RadioButton { text: "Default"; selected: true; }
+                    RadioButton { text: "Factor:"; selected: false; }
+                    // tfScalingOfSumFactor: preferred width 100, disabled
+                    // (`:1190`).
+                    TextField { text: ""; width: 100px; enabled: false; }
+                }
+
+                // ---- `pnlModeToOutout` (`:707-711`) ----
+                // Hidden by `updateAdvanced` (`:1111`).
+                if root.advanced: HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    Label { text: "Output file mode"; }
+                    RadioButton { text: "16-bit integers"; selected: true; }
+                    RadioButton { text: "Floating point"; selected: false; }
+                }
+
+                // ---- `pnlSumRotationAndFlip` (`:713-726`) ----
+                HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    Label { text: "Rotation/flip for output "; }
+                    RadioButton { text: "Value in title"; selected: true; }
+                    // rbSumRotationAndFlip2: new RadioButton("", "sum rotation
+                    // and flip spinner", bgSumRotationAndFlip) -- empty caption.
+                    RadioButton { text: ""; selected: false; }
+                    // spSumRotationAndFlip: default 0, range 0..7, maximum
+                    // width 50; disabled (`:1191`).
+                    Spinner { text: "0"; enabled: false; }
+                    Rectangle { width: 5px; }
+                    // cmbSumRotationAndFlipTranslation: unlabeled, maximum
+                    // width 180, filled from `rotationAndFlipStringList` and
+                    // set to the spinner's value, index 0 (`:714-717`);
+                    // disabled (`:1192`).
+                    ComboBox {
+                        label: "";
+                        label-width: 0px;
+                        box-width: 180px;
+                        text: "0 degrees, No flip";
+                        enabled: false;
+                    }
+                    // `UIUtilities.isFontGreaterThanDefaultSize()` branch
+                    // (`:721-723`): rigid FixedDim.x20_y0.
+                    if root.font-greater-than-default: Rectangle { width: 20px; }
+                }
+
+                // ---- `pnlAlignAndSumBinning` (`:728-732`) ----
+                // spAlignAndSumBinningValue2 =
+                // Spinner.getLabeledInstance("Reduce output size by ", 1, 1, 8)
+                // -- a LABELED spinner (`Spinner.java:183-186`), so the caption
+                // is drawn here.
+                HorizontalLayout {
+                    alignment: start;
+                    InlineSpinner { label: "Reduce output size by "; text: "1"; }
+                }
+
+                // ---- `pnlOutputImageFile` (`:734-737`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    // Not editable (`:471`), preferred width 300.
+                    InlineTextField {
+                        label: "Output file name: ";
+                        text: "";
+                        field-width: 300px;
+                    }
+                }
+
+                // ---- `pnlUseGPU` (`:739-741`) ----
+                HorizontalLayout {
+                    alignment: start;
+                    CheckBox { text: "Use the GPU"; checked: false; }
+                }
+            }
+        }
+
+        // `pnlRunAlignFramesButtons`: FlowLayout(CENTER) (`:743-749`).
+        HorizontalLayout {
+            alignment: center;
+            MultiLineButton { text: "Run Alignframes"; width: 160px; }
+            Rectangle { width: 5px; }
+            MultiLineButton { text: "Plot All Results"; width: 160px; }
+            Rectangle { width: 5px; }
+            MultiLineButton { text: "Open Output Tilt Series"; width: 200px; }
+        }
+
+        // `pnlStartReconButton`: FlowLayout(CENTER) (`:750-754`) -- rigid
+        // FixedDim.x175_y0, btnSetupReconstruction, rigid FixedDim.x70_y0,
+        // btnAdvanced.
+        HorizontalLayout {
+            alignment: center;
+            Rectangle { width: 175px; }
+            MultiLineButton { text: "Setup Reconstruction"; width: 190px; }
+            Rectangle { width: 70px; }
+            // btnAdvanced = GlobalExpandButton.getInstance("Advanced", "Basic")
+            // (`:318-319`): a SingleLineButton showing the contracted label
+            // until it is expanded (`GlobalExpandButton.java:43-48`).
+            SingleLineButton { text: root.advanced ? "Basic" : "Advanced"; }
+        }
+    }
+}

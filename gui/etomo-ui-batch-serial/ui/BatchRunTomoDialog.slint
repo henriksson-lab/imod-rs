@@ -1,0 +1,576 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/BatchRunTomoDialog.java`, the
+// batchruntomo interface: a BeveledBorder("Batchruntomo Interface") around a
+// JTabbedPane with the four `etomo.ui.BatchRunTomoTab` tabs -- "Batch Setup",
+// "Stacks", "Dataset Values" and "Run" (`BatchRunTomoTab.java:15-18`).
+//
+// Panels the dialog builds from neighbouring Swing classes and that are drawn
+// inline here: `TemplatePanel` (Batch Setup), `BatchRunTomoTable` with
+// `BatchRunTomoRow` (Stacks / Dataset Values / Run) and
+// `BatchRunTomoStepPanel` (Run).  The Dataset Values tab embeds the global
+// `BatchRunTomoDatasetDialog`, which lives in its own file.
+//
+// Appearance only: values are the static defaults `createPanel` sets, and the
+// tables carry a few representative static rows.
+
+import { EtomoStyle, BeveledBorder, PanelHeader, CheckBox, RadioButton,
+         LabeledTextField, TabbedPane }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, SingleLineButton, FileTextField, CheckTextField,
+         Spinner, ComboBox, HeaderCell, FieldCell, CheckBoxCell, ButtonCell,
+         TextEntry }
+    from "LocalWidgets.slint";
+import { BatchRunTomoDatasetDialog } from "BatchRunTomoDatasetDialog.slint";
+import { SeriesWatcherPanel } from "SeriesWatcherPanel.slint";
+
+// Column widths shared by the three views of `BatchRunTomoTable`, so the
+// header rows and the data rows line up the way GridBagLayout makes them.
+global TableMetrics {
+    out property <length> num: 30px;
+    out property <length> stack: 170px;
+    out property <length> expand: 24px;
+    out property <length> dual: 50px;
+    out property <length> montage: 60px;
+    out property <length> skip: 60px;
+    out property <length> boundary: 70px;
+    out property <length> surfaces: 60px;
+    out property <length> open-a: 50px;
+    out property <length> open-b: 30px;
+    out property <length> specific-values: 380px;
+    out property <length> status: 90px;
+    out property <length> reached: 90px;
+    out property <length> axis: 40px;
+    out property <length> run: 40px;
+    out property <length> open-set: 50px;
+    out property <length> open-rec: 50px;
+    out property <length> proj-log: 50px;
+    out property <length> brt-log: 50px;
+}
+
+// BatchRunTomoTab.BATCH, "Batch Setup".  pnlBatch, EtchedBorder("Batch Setup
+// Parameters").
+component BatchSetupTab inherits VerticalLayout {
+    padding: EtomoStyle.inset;
+    alignment: start;
+    EtchedBorder {
+        title: "Batch Setup Parameters";
+        // pnlDeliver
+        VerticalLayout {
+            spacing: 0px;
+            alignment: start;
+            RadioButton { text: "Stacks are already in dataset directories"; selected: true; }
+            // pnlDeliverToDirectory: the radio, then the unlabeled
+            // ftfDeliverToDirectory (its label text is the radio's).
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                RadioButton { text: "Move all stacks to dataset directories under: "; }
+                FileTextField { field-width: 260px; }
+            }
+            RadioButton { text: "Move stacks to dataset directories under their current locations"; }
+        }
+
+        Rectangle { height: 20px; }
+
+        // pnlInputDirectiveFile
+        HorizontalLayout {
+            spacing: EtomoStyle.gap;
+            alignment: start;
+            FileTextField {
+                label: "Starting directive file: ";
+                label-width: 160px;
+                field-width: 300px;
+            }
+            SingleLineButton { text: "Clear"; }
+            Rectangle { width: 100px; }
+        }
+
+        Rectangle { height: 6px; }
+
+        // pnlTemplates: TemplatePanel.getBorderlessInstance(...)
+        // (`TemplatePanel.java:40-42`).
+        VerticalLayout {
+            spacing: 3px;
+            alignment: start;
+            ComboBox { label: "Scope template:"; }
+            ComboBox { label: "System template:"; }
+            ComboBox { label: "User template:"; }
+        }
+
+        Rectangle { height: 15px; }
+
+        // pnlRootName
+        EtchedBorder {
+            title: "Batchruntomo Project Files";
+            LabeledTextField { label: "Batchruntomo root name: "; label-width: 190px; width: 480px; }
+            Rectangle { height: 2px; }
+            FileTextField { label: "Location: "; label-width: 190px; field-width: 300px; }
+        }
+    }
+}
+
+// The Stacks view of `BatchRunTomoTable` (NUM_STACKS_HEADER_ROWS == 3).
+// GridBagLayout column spans are reproduced by summing the column widths;
+// the extra highlight column the Java gives hcNumber is not drawn.
+component StacksTable inherits VerticalLayout {
+    spacing: 0px;
+    alignment: start;
+    // header row 0
+    HorizontalLayout {
+        alignment: start;
+        HeaderCell { text: "#"; cell-width: TableMetrics.num; }
+        HeaderCell { text: "Stack"; cell-width: TableMetrics.stack; }
+        // btnStack: ExpandButton.Type.MORE
+        HeaderCell { text: ">"; cell-width: TableMetrics.expand; }
+        HeaderCell { text: "Dual"; cell-width: TableMetrics.dual; }
+        HeaderCell { text: "Montage"; cell-width: TableMetrics.montage; }
+        HeaderCell { text: "Exclude"; cell-width: TableMetrics.skip * 2; }
+        HeaderCell { text: "Boundary"; cell-width: TableMetrics.boundary; }
+        HeaderCell { text: "Beads"; cell-width: TableMetrics.surfaces; }
+        HeaderCell { text: "Open"; cell-width: TableMetrics.open-a + TableMetrics.open-b; }
+    }
+    // header row 1
+    HorizontalLayout {
+        alignment: start;
+        HeaderCell { cell-width: TableMetrics.num; }
+        HeaderCell { cell-width: TableMetrics.stack + TableMetrics.expand; }
+        HeaderCell { text: "Axis"; cell-width: TableMetrics.dual; }
+        HeaderCell { cell-width: TableMetrics.montage; }
+        HeaderCell { text: "Views"; cell-width: TableMetrics.skip * 2; }
+        HeaderCell { text: "Model"; cell-width: TableMetrics.boundary; }
+        HeaderCell { text: "on Two"; cell-width: TableMetrics.surfaces; }
+        HeaderCell { text: "Stack"; cell-width: TableMetrics.open-a + TableMetrics.open-b; }
+    }
+    // header row 2
+    HorizontalLayout {
+        alignment: start;
+        HeaderCell { cell-width: TableMetrics.num; }
+        HeaderCell { cell-width: TableMetrics.stack + TableMetrics.expand; }
+        HeaderCell { cell-width: TableMetrics.dual; }
+        HeaderCell { cell-width: TableMetrics.montage; }
+        HeaderCell { text: "from A"; cell-width: TableMetrics.skip; }
+        HeaderCell { text: "from B"; cell-width: TableMetrics.skip; }
+        HeaderCell { cell-width: TableMetrics.boundary; }
+        HeaderCell { text: "Surfaces"; cell-width: TableMetrics.surfaces; }
+        HeaderCell { text: "A"; cell-width: TableMetrics.open-a; }
+        HeaderCell { text: "B"; cell-width: TableMetrics.open-b; }
+    }
+    // representative BatchRunTomoRow rows
+    for row[i] in [
+        { number: "1", stack: "BBa.st", dual: true, montage: false },
+        { number: "2", stack: "BBb.st", dual: false, montage: true },
+        { number: "3", stack: "tomo3.mrc", dual: false, montage: false },
+    ]: HorizontalLayout {
+        alignment: start;
+        HeaderCell { text: row.number; cell-width: TableMetrics.num; }
+        FieldCell {
+            text: row.stack;
+            cell-width: TableMetrics.stack + TableMetrics.expand;
+            editable: false;
+        }
+        CheckBoxCell { checked: row.dual; cell-width: TableMetrics.dual; }
+        CheckBoxCell { checked: row.montage; cell-width: TableMetrics.montage; }
+        FieldCell { cell-width: TableMetrics.skip; }
+        FieldCell { cell-width: TableMetrics.skip; }
+        CheckBoxCell { cell-width: TableMetrics.boundary; }
+        CheckBoxCell { cell-width: TableMetrics.surfaces; }
+        ButtonCell { text: "3dmod"; cell-width: TableMetrics.open-a; }
+        ButtonCell { cell-width: TableMetrics.open-b; }
+    }
+}
+
+// BatchRunTomoTab.STACKS, "Stacks".
+component StacksTab inherits VerticalLayout {
+    padding: EtomoStyle.inset;
+    alignment: start;
+    // pnlStacksTable
+    EtchedBorder {
+        title: "Datasets";
+        StacksTable { }
+        Rectangle { height: 5px; }
+        // pnlStackButtons
+        HorizontalLayout {
+            spacing: 20px;
+            alignment: center;
+            SingleLineButton { text: "Add Stack(s)"; }
+            SingleLineButton { text: "Copy Down"; }
+            SingleLineButton { text: "Delete"; }
+        }
+    }
+}
+
+// The Dataset view of `BatchRunTomoTable` (NUM_DATASET_HEADER_ROWS == 1).
+component DatasetTable inherits VerticalLayout {
+    spacing: 0px;
+    alignment: start;
+    HorizontalLayout {
+        alignment: start;
+        HeaderCell { text: "#"; cell-width: TableMetrics.num; }
+        HeaderCell { text: "Stack"; cell-width: TableMetrics.stack; }
+        HeaderCell { text: ">"; cell-width: TableMetrics.expand; }
+        HeaderCell { text: "Specific Values"; cell-width: TableMetrics.specific-values; }
+    }
+    for row[i] in [
+        { number: "1", stack: "BBa.st" },
+        { number: "2", stack: "BBb.st" },
+        { number: "3", stack: "tomo3.mrc" },
+    ]: HorizontalLayout {
+        alignment: start;
+        HeaderCell { text: row.number; cell-width: TableMetrics.num; }
+        FieldCell {
+            text: row.stack;
+            cell-width: TableMetrics.stack + TableMetrics.expand;
+            editable: false;
+        }
+        HorizontalLayout {
+            alignment: start;
+            FieldCell {
+                cell-width: TableMetrics.specific-values - 60px;
+                editable: false;
+            }
+            // bcEditDataset = ButtonCell.getToggleInstance("Open")
+            ButtonCell { text: "Open"; cell-width: 60px; }
+        }
+    }
+}
+
+// BatchRunTomoTab.DATASET, "Dataset Values".
+component DatasetValuesTab inherits VerticalLayout {
+    padding: EtomoStyle.inset;
+    alignment: start;
+    // datasetDialog.getComponent(): the global BatchRunTomoDatasetDialog
+    BatchRunTomoDatasetDialog { global: true; }
+    // pnlDatasetTable
+    Rectangle {
+        background: EtomoStyle.panel;
+        border-width: 2px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: 2px;
+            alignment: start;
+            PanelHeader { title: "Datasets"; }
+            Rectangle { height: 2px; }
+            DatasetTable { }
+        }
+    }
+}
+
+// The Run view of `BatchRunTomoTable` (NUM_RUN_HEADER_ROWS == 2).
+component RunTable inherits VerticalLayout {
+    spacing: 0px;
+    alignment: start;
+    // header row 0
+    HorizontalLayout {
+        alignment: start;
+        HeaderCell { text: "#"; cell-width: TableMetrics.num; }
+        HeaderCell { text: "Stack"; cell-width: TableMetrics.stack; }
+        HeaderCell { text: ">"; cell-width: TableMetrics.expand; }
+        HeaderCell { text: "Status"; cell-width: TableMetrics.status; }
+        HeaderCell { text: "Reached"; cell-width: TableMetrics.reached; }
+        HeaderCell { text: "Axis"; cell-width: TableMetrics.axis; }
+        HeaderCell { text: "Run"; cell-width: TableMetrics.run; }
+        HeaderCell { text: "Open"; cell-width: TableMetrics.open-set; }
+        HeaderCell { text: "Open"; cell-width: TableMetrics.open-rec; }
+        HeaderCell { text: "Proj"; cell-width: TableMetrics.proj-log; }
+        HeaderCell { text: "BRT"; cell-width: TableMetrics.brt-log; }
+    }
+    // header row 1: the Run column carries cbcRunToggle instead of a label.
+    HorizontalLayout {
+        alignment: start;
+        HeaderCell { cell-width: TableMetrics.num; }
+        HeaderCell { cell-width: TableMetrics.stack + TableMetrics.expand; }
+        HeaderCell { cell-width: TableMetrics.status; }
+        HeaderCell { cell-width: TableMetrics.reached; }
+        HeaderCell { cell-width: TableMetrics.axis; }
+        CheckBoxCell { cell-width: TableMetrics.run; }
+        HeaderCell { text: "Set"; cell-width: TableMetrics.open-set; }
+        HeaderCell { text: "Rec"; cell-width: TableMetrics.open-rec; }
+        HeaderCell { text: "Log"; cell-width: TableMetrics.proj-log; }
+        HeaderCell { text: "Log"; cell-width: TableMetrics.brt-log; }
+    }
+    for row[i] in [
+        { number: "1", stack: "BBa.st", state: "Done", step: "Reconstruction", axis: "A" },
+        { number: "2", stack: "BBb.st", state: "Running", step: "Tracking", axis: "B" },
+        { number: "3", stack: "tomo3.mrc", state: "", step: "", axis: "" },
+    ]: HorizontalLayout {
+        alignment: start;
+        HeaderCell { text: row.number; cell-width: TableMetrics.num; }
+        FieldCell {
+            text: row.stack;
+            cell-width: TableMetrics.stack + TableMetrics.expand;
+            editable: false;
+        }
+        FieldCell { text: row.state; cell-width: TableMetrics.status; editable: false; }
+        FieldCell { text: row.step; cell-width: TableMetrics.reached; editable: false; }
+        FieldCell { text: row.axis; cell-width: TableMetrics.axis; editable: false; }
+        CheckBoxCell { checked: true; cell-width: TableMetrics.run; }
+        ButtonCell { text: "e"; cell-width: TableMetrics.open-set; }
+        ButtonCell { text: "3d"; cell-width: TableMetrics.open-rec; }
+        ButtonCell { text: "L"; cell-width: TableMetrics.proj-log; }
+        ButtonCell { text: "L"; cell-width: TableMetrics.brt-log; }
+    }
+}
+
+// `BatchRunTomoStepPanel` (`BatchRunTomoStepPanel.java`), the right-hand half
+// of pnlRunSettings.  The radio labels come from `Step` via
+// `EndingStep.getLabel()` / `StartingStep.getLabel()` (`Step.java:20-28`).
+component StepPanel inherits VerticalLayout {
+    alignment: start;
+    Rectangle { height: 8px; }
+    EtchedBorder {
+        title: "Subset of Steps to Run";
+        HorizontalLayout {
+            spacing: 5px;
+            alignment: start;
+            // pnlEndingStep
+            VerticalLayout {
+                alignment: start;
+                CheckBox { text: "Stop after"; }
+                RadioButton { text: "Tracking"; }
+                RadioButton { text: "Fine alignment"; }
+                RadioButton { text: "Positioning"; }
+                RadioButton { text: "CTF/gold detection"; }
+                RadioButton { text: "Finished stack"; }
+            }
+            // pnlStartingStep
+            VerticalLayout {
+                alignment: start;
+                CheckBox { text: "Start from"; }
+                RadioButton { text: "Fine alignment"; }
+                RadioButton { text: "Positioning"; }
+                RadioButton { text: "Aligned stack"; }
+                RadioButton { text: "Finish CTF/gold"; }
+                RadioButton { text: "Reconstruction"; }
+            }
+        }
+        Rectangle { height: 5px; }
+        // pnlEnableStartingStep
+        HorizontalLayout {
+            alignment: start;
+            CheckBox { text: "Enable starting from any step"; }
+        }
+    }
+}
+
+// BatchRunTomoTab.RUN, "Run".
+component RunTab inherits VerticalLayout {
+    // `Network.hasQueues()` decides whether the queue-mode group box exists at
+    // all (`BatchRunTomoDialog.java:303-313`); it is drawn here so every
+    // source-declared widget is visible.
+    in property <bool> queues-available: true;
+    // `spQueueNumberOfJobsToMake.setVisible(false)`
+    // (`BatchRunTomoDialog.java:403`); `updateDisplay` turns it on with the
+    // queue table (`BatchRunTomoDialog.java:1949-1950`).
+    in property <bool> queue-number-of-jobs-visible: false;
+    // `pnlMaxGPUsForOneJobOne.setVisible(false)`
+    // (`BatchRunTomoDialog.java:426`); `updateDisplay` swaps it for
+    // pnlMaxGPUsForOneJob (`BatchRunTomoDialog.java:1974-1982`).
+    in property <bool> max-gpus-for-one-job-one-visible: false;
+    // cbUseSeriesWatcher, unselected until `setParameters` loads the meta data
+    // (`BatchRunTomoDialog.java:922`).  `buildRunSettingsPanel` puts
+    // seriesWatcherPanel in pnlRunSettings only while it is selected
+    // (`BatchRunTomoDialog.java:649-655`).
+    in property <bool> use-series-watcher: false;
+
+    padding: EtomoStyle.inset;
+    alignment: start;
+
+    // parallelStatusPanel comes from MainPanel.createParallelPanel and is not
+    // part of this dialog's source; drawn as an empty strip.
+    Rectangle { height: 18px; background: EtomoStyle.panel; }
+    Rectangle { height: 2px; }
+
+    // pnlResources
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: center;
+        // pnlParallelSettings
+        EtchedBorder {
+            title: "Resources to Use";
+            CheckBox { text: "Use multiple cores"; checked: true; }
+            RadioButton { text: "No GPU"; }
+            RadioButton { text: "Local GPU"; }
+            RadioButton { text: "Parallel GPUs"; selected: true; }
+        }
+        // pnlSplitBatchOuter / pnlSplitBatch
+        EtchedBorder {
+            title: "Multiple Jobs";
+            CheckBox { text: "Run multiple batch jobs in parallel"; }
+            // pnlNumberOfJobsToMake (`BatchRunTomoDialog.java:542-550`):
+            // spNumberOfJobsToMake, then spQueueNumberOfJobsToMake when
+            // queuesAvailable, then a 1px rigid area and the " jobs" JLabel.
+            // spQueueNumberOfJobsToMake carries the same
+            // NUMBER_OF_JOBS_TO_MAKE_LABEL "Run up to " and a DEFAULT_CORES
+            // value of 4 (`BatchRunTomoDialog.java:268-269`), and starts
+            // invisible (`BatchRunTomoDialog.java:403`).
+            HorizontalLayout {
+                spacing: 1px;
+                alignment: start;
+                Spinner { label: "Run up to "; text: "4"; }
+                if root.queues-available && root.queue-number-of-jobs-visible:
+                    Spinner { label: "Run up to "; text: "4"; }
+                Text { text: " jobs"; vertical-alignment: center; }
+            }
+            // pnlMaxGPUsForOneJob
+            Spinner { label: "Max # of GPUs to use by one job: "; text: "4"; }
+            // pnlMaxGPUsForOneJobOne (`BatchRunTomoDialog.java:560-565`): the
+            // lMaxGPUsForOneJobOne JLabel, MAX_GPUS_LABEL + "1"
+            // (`BatchRunTomoDialog.java:175`), then a horizontal glue.  The
+            // panel starts invisible (`BatchRunTomoDialog.java:426`).
+            if root.max-gpus-for-one-job-one-visible: HorizontalLayout {
+                alignment: start;
+                Text {
+                    text: "Max # of GPUs to use by one job: 1";
+                    vertical-alignment: center;
+                    color: EtomoStyle.text;
+                }
+            }
+        }
+        if root.queues-available: EtchedBorder {
+            title: "How a Batch Job Should Run Processes";
+            RadioButton { text: "Job submits processes to single-core queue"; }
+            RadioButton { text: "Job and its processes run directly on one node"; }
+            CheckBox { text: "Use one GPU on secondary queue"; }
+        }
+    }
+
+    Rectangle { height: 20px; }
+
+    // pnlUseSeriesWatcher: the check box then ftfWatchDirectory, an *unlabeled*
+    // FileTextField (its label string "Watch for stacks to run in: " is only
+    // the action command), so no " in: " text is painted.
+    HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        CheckBox { text: "Watch for stacks to run"; checked: root.use-series-watcher; }
+        TextEntry { width: 400px; }
+        Rectangle {
+            width: EtomoStyle.field-height;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+
+    Rectangle { height: 5px; }
+
+    // pnlRunSettings (`BatchRunTomoDialog.java:649-662`): when
+    // cbUseSeriesWatcher is selected, seriesWatcherPanel and a 2px strut come
+    // first, then the glue, another 2px strut and stepPanel; otherwise just the
+    // glue and stepPanel.  cbUseSeriesWatcher is unselected until
+    // `setParameters` (`BatchRunTomoDialog.java:922-924`), so
+    // `use-series-watcher` defaults to false.  SeriesWatcherPanel is its own
+    // Swing class and lives in `SeriesWatcherPanel.slint`.
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+        if root.use-series-watcher: SeriesWatcherPanel {
+            series-watcher-on: root.use-series-watcher;
+        }
+        StepPanel { }
+    }
+
+    Rectangle { height: 15px; }
+
+    // pnlEmail
+    HorizontalLayout {
+        alignment: start;
+        CheckTextField { label: "Email notification: "; field-width: 300px; }
+    }
+
+    Rectangle { height: 25px; }
+
+    // pnlRunButtons.  btnPause/btnResume each sit beside the MainPanel's
+    // parallel pause/resume button of the same function; only one of each pair
+    // is visible at a time, so one of each is drawn.
+    HorizontalLayout {
+        spacing: 30px;
+        alignment: center;
+        SingleLineButton { text: "Run"; }
+        SingleLineButton { text: "Pause"; }
+        SingleLineButton { text: "Resume"; }
+        SingleLineButton { text: "Reset"; }
+    }
+
+    // pnlSeriesWatcherRunButtons
+    HorizontalLayout {
+        spacing: 30px;
+        alignment: center;
+        SingleLineButton { text: "Start Watching"; }
+        SingleLineButton { text: "Finish"; }
+        SingleLineButton { text: "Reset"; }
+    }
+
+    Rectangle { height: 10px; }
+
+    // pnlRunTable
+    Rectangle {
+        background: EtomoStyle.panel;
+        border-width: 2px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            padding: 2px;
+            alignment: start;
+            PanelHeader { title: "Datasets"; }
+            Rectangle { height: 2px; }
+            RunTable { }
+        }
+    }
+}
+
+export component BatchRunTomoDialog inherits Rectangle {
+    // Swing shows one tab body at a time; `current-tab` picks which, exactly as
+    // the JTabbedPane selection does.  Nothing is wired, so it is a plain
+    // in-property with BatchRunTomoTab.DEFAULT (BATCH) as its value.
+    in property <int> current-tab: 0;
+    in property <bool> queues-available: true;
+    in property <bool> queue-number-of-jobs-visible: false;
+    in property <bool> max-gpus-for-one-job-one-visible: false;
+    in property <bool> use-series-watcher: false;
+
+    background: EtomoStyle.background;
+    VerticalLayout {
+        alignment: start;
+        BeveledBorder {
+            title: "Batchruntomo Interface";
+            TabbedPane {
+                tabs: ["Batch Setup", "Stacks", "Dataset Values", "Run"];
+                current: root.current-tab;
+                Rectangle {
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    if root.current-tab == 0: BatchSetupTab { }
+                    if root.current-tab == 1: StacksTab { }
+                    if root.current-tab == 2: DatasetValuesTab { }
+                    if root.current-tab == 3: RunTab {
+                        queues-available: root.queues-available;
+                        queue-number-of-jobs-visible: root.queue-number-of-jobs-visible;
+                        max-gpus-for-one-job-one-visible: root.max-gpus-for-one-job-one-visible;
+                        use-series-watcher: root.use-series-watcher;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component BatchRunTomoDialogWindow inherits Window {
+    in property <int> current-tab: 0;
+    in property <bool> queues-available: true;
+    in property <bool> queue-number-of-jobs-visible: false;
+    in property <bool> max-gpus-for-one-job-one-visible: false;
+    in property <bool> use-series-watcher: false;
+    title: "Batchruntomo Interface";
+    background: EtomoStyle.background;
+    preferred-width: 1060px;
+    preferred-height: 860px;
+    BatchRunTomoDialog {
+        current-tab: root.current-tab;
+        queues-available: root.queues-available;
+        queue-number-of-jobs-visible: root.queue-number-of-jobs-visible;
+        max-gpus-for-one-job-one-visible: root.max-gpus-for-one-job-one-visible;
+        use-series-watcher: root.use-series-watcher;
+    }
+}

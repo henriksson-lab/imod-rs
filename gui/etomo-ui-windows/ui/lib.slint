@@ -1,0 +1,36 @@
+// Entry point for `build.rs`: pulls in every component in this crate so that
+// `slint::include_modules!()` in `src/lib.rs` generates one Rust type per
+// window.  One import per Java source under
+// `IMOD/Etomo/src/etomo/ui/swing`.
+//
+// Each file exports both the plain component and a `<Name>Window` wrapper.
+// slint-build only generates code for exported components that inherit
+// `Window` and warns about the rest, so the plain components are exported here
+// too — that is how one is embedded in a larger window from Slint
+// (`import { ContextPopup } from "ContextPopup.slint"`) — and the warnings are
+// expected.
+
+import { ContextPopup, ContextPopupWindow } from "ContextPopup.slint";
+import { LogWindow, LogWindowWindow } from "LogWindow.slint";
+import { TabbedTextWindow, TabbedTextWindowWindow } from "TabbedTextWindow.slint";
+import { TextPageWindow, TextPageWindowWindow } from "TextPageWindow.slint";
+import { HTMLPageWindow, HTMLPageWindowWindow } from "HTMLPageWindow.slint";
+import { MainFrame_AboutBox, MainFrame_AboutBoxWindow } from "MainFrame_AboutBox.slint";
+import { Popup, PopupWindow } from "Popup.slint";
+
+// The widget vocabulary these windows share.
+import { EtomoPanel, EtchedBorder, Menu, MenuItem, JMenuBar, JPopupMenu,
+    JPopupMenuSeparator, JScrollPane, JEditorPane, JTextArea, JTabbedPane,
+    JOptionPane, JButton } from "WindowWidgets.slint";
+
+export { ContextPopup, ContextPopupWindow }
+export { LogWindow, LogWindowWindow }
+export { TabbedTextWindow, TabbedTextWindowWindow }
+export { TextPageWindow, TextPageWindowWindow }
+export { HTMLPageWindow, HTMLPageWindowWindow }
+export { MainFrame_AboutBox, MainFrame_AboutBoxWindow }
+export { Popup, PopupWindow }
+
+export { EtomoPanel, EtchedBorder, Menu, MenuItem, JMenuBar, JPopupMenu,
+    JPopupMenuSeparator, JScrollPane, JEditorPane, JTextArea, JTabbedPane,
+    JOptionPane, JButton }

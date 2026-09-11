@@ -1,0 +1,234 @@
+// Widget vocabulary this crate needs that `etomo-ui-common/ui/widgets.slint`
+// does not carry.  Each component is named after the Swing class it stands for
+// in `IMOD/Etomo/src/etomo/ui/swing`.
+
+import { EtomoStyle, CheckBox, RadioButton } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `EtchedBorder` (`EtchedBorder.java`): a `TitledBorder` around
+// `BorderFactory.createEtchedBorder()`.  Swing draws the title inline in the
+// top border line; Slint has no titled border, so the title is the first row
+// of the box and the etch is a single-pixel frame.
+export component EtchedBorder inherits Rectangle {
+    in property <string> title;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        if root.title != "": Text {
+            text: root.title;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            color: EtomoStyle.text;
+        }
+        @children
+    }
+}
+
+// `TextField` (`TextField.java`): a bare entry box with no label of its own.
+export component TextField inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> editable: true;
+    in property <length> field-width: 90px;
+    width: root.field-width;
+    height: EtomoStyle.field-height;
+    background: root.editable ? EtomoStyle.field-background : EtomoStyle.panel;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        x: 3px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `RadioTextField` (`RadioTextField.java`): a radio button followed by the
+// text field it enables.
+export component RadioTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    in property <length> field-width: 90px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    RadioButton {
+        text: root.label;
+        selected: root.selected;
+        enabled: root.enabled;
+    }
+    TextField {
+        text: root.text;
+        enabled: root.enabled;
+        field-width: root.field-width;
+    }
+}
+
+// `CheckTextField` (`CheckTextField.java`): a check box followed by the text
+// field it enables.
+export component CheckTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <length> field-width: 90px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    CheckBox {
+        text: root.label;
+        checked: root.checked;
+        enabled: root.enabled;
+    }
+    TextField {
+        text: root.text;
+        enabled: root.enabled;
+        field-width: root.field-width;
+    }
+}
+
+// `CheckBoxSpinner` (`CheckBoxSpinner.java`): a check box followed by the
+// spinner it enables.
+export component CheckBoxSpinner inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    CheckBox {
+        text: root.label;
+        checked: root.checked;
+        enabled: root.enabled;
+    }
+    Rectangle {
+        width: 40px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { x: 3px; text: root.text; vertical-alignment: center; }
+    }
+    Rectangle {
+        width: 14px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        VerticalLayout {
+            Text { text: "^"; horizontal-alignment: center; }
+            Text { text: "v"; horizontal-alignment: center; }
+        }
+    }
+}
+
+// `SimpleButton` (`SimpleButton.java`): the small icon-only button eTomo uses
+// for a file chooser.  The Swing button carries a `ScaledImage` open-file
+// icon; there is no image asset here, so the glyph stands in for it.
+export component SimpleButton inherits Rectangle {
+    in property <string> text: "...";
+    in property <bool> enabled: true;
+    width: 24px;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `FileTextField2` (`FileTextField2.java`) and
+// `ButtonControlTextEfield.getLabeledFileInstance` : label, path entry box and
+// the chooser button.
+export component FileTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 180px;
+    spacing: EtomoStyle.gap;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { x: 3px; text: root.text; vertical-alignment: center; }
+    }
+    SimpleButton { }
+}
+
+// `SingleLineButton` (`SingleLineButton.java`): the narrow, single-line button
+// used for the exit row and for `Run Cross-Validation`.
+export component SingleLineButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.panel;
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+    Text {
+        text: root.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-weight: 700;
+    }
+}
+
+// `ProcessDialog.pnlExitButtons` (`ProcessDialog.java:76-90`): Cancel,
+// Postpone, Execute and the global Advanced/Basic expand button, each
+// separated by a horizontal glue.  `GlobalExpandButton.getInstance("Advanced",
+// "Basic")` shows the contracted label first.  Every dialog here retitles
+// `btnExecute` to "Done".
+export component ExitButtons inherits HorizontalLayout {
+    in property <string> execute-text: "Done";
+    in property <bool> use-postpone: true;
+    in property <string> advanced-text: "Advanced";
+    spacing: EtomoStyle.gap;
+    padding: EtomoStyle.inset;
+    Rectangle { }
+    SingleLineButton { text: "Cancel"; width: 90px; }
+    Rectangle { }
+    if root.use-postpone: SingleLineButton { text: "Postpone"; width: 90px; }
+    if root.use-postpone: Rectangle { }
+    SingleLineButton { text: root.execute-text; width: 90px; }
+    Rectangle { }
+    SingleLineButton { text: root.advanced-text; width: 90px; }
+    Rectangle { }
+}
+
+// `TextEfield` (`TextEfield.java`), the `getLabeledInstance` shape: a label
+// followed by an entry box whose width the caller sets with
+// `setPreferredWidth`.
+export component TextEfield inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 180px;
+    in property <length> field-width: 90px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    TextField {
+        text: root.text;
+        enabled: root.enabled;
+        field-width: root.field-width;
+    }
+}

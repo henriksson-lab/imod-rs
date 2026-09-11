@@ -1,0 +1,38 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SerialSectionsProcessPanel.java`, an `AxisProcessPanel`
+// subclass.  It instantiates the base component from
+// `AxisProcessPanel.slint` with the flags its constructor passes to
+// `super`, and adds nothing to `panelProcessSelect`:
+//
+// `super(AxisID.ONLY, manager, false, true, InterfaceType.SERIAL_SECTIONS,
+//  false, axisProgressPanel)` then `createProcessControlPanel()`,
+//  `showBothAxis()` and `initializePanels()` (`:23-30`).
+//
+// Overrides `showBothAxis()` (`:32-35`) to
+// `setBackground(Colors.getBackgroundSerialSections())` —
+// `new Color(218, 232, 250)` (`Colors.java:205-215`).
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { AxisProcessPanel } from "AxisProcessPanel.slint";
+
+export component SerialSectionsProcessPanel inherits Rectangle {
+    in property <color> panel-background: Colors.background-serial-sections;
+    background: root.panel-background;
+    AxisProcessPanel {
+        width: 100%;
+        height: 100%;
+        axis-id: "ONLY";
+        panel-background: root.panel-background;
+        alt-parallel-loc: false;
+    }
+}
+
+export component SerialSectionsProcessPanelWindow inherits Window {
+    title: "eTomo SerialSectionsProcessPanel";
+    preferred-width: 700px;
+    preferred-height: 500px;
+    background: EtomoStyle.background;
+    SerialSectionsProcessPanel { }
+}

@@ -1,0 +1,18 @@
+// Single compilation entry point for the shared widget vocabulary, so
+// `build.rs` compiles every file in this crate in one pass and
+// `slint::include_modules!()` re-exports everything named here.
+//
+// Dialog crates keep importing the individual files by path
+// (`../../etomo-ui-common/ui/widgets.slint`, `.../ui/cells.slint`,
+// `.../ui/fields.slint`); this file exists only for this crate's own build.
+
+export { EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, LabeledSpinner,
+         CheckBox, RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+    from "widgets.slint";
+export { Colors, Cell, InputCell, FileButtonCell, RadioButtonCell, SpinnerCell,
+         HighlightList, HighlighterButton, BoundaryRow, ProcessorTableRow }
+    from "cells.slint";
+export { EfieldContainer, SpinnerEfield, FieldLockController, MenuButton,
+         Minibutton, Run3dmodMenu, ParallelChooser, SpacedLabel,
+         SpacedTextField, PagingPanel }
+    from "fields.slint";

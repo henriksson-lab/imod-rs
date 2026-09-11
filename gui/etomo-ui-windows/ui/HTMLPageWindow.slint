@@ -1,0 +1,51 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/HTMLPageWindow.java`.
+//
+// The same frame as `TextPageWindow`, but the `JEditorPane` is given an
+// `HTMLEditorKit` (`HTMLPageWindow.java:213`) and the frame a fixed 625 x 800
+// (`:218`) rather than one scaled from the font size.  `openURL` (`:223-235`)
+// sets the page, the title and `setEditable(false)`; `hyperlinkUpdate`
+// (`:238-250`) follows a link and retitles the frame with the new path.
+//
+// The eTomo sources reach this class only through the commented-out branches
+// in `ContextPopup` (`ContextPopup.java:59-60`, `:1173-1175`, ...), which now
+// go to `ImodqtassistProcess` instead; the class itself is still built.
+//
+// The page only exists at run time — it is whatever HTML `openURL` loads, one
+// of IMOD's `html/` guides.  The pane is drawn at its constructed size with a
+// sample of that markup as the `HTMLEditorKit` lays it out; `page-html`
+// replaces it.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { JScrollPane, JEditorPane } from "WindowWidgets.slint";
+
+export component HTMLPageWindow inherits Rectangle {
+    in property <string> page-html:
+        "IMOD Tomography Guide\n\nThis guide describes the procedure for building a\ntomographic reconstruction from a tilt series.\n";
+
+    background: EtomoStyle.background;
+    // `mainPanel.add(scrollPane, BorderLayout.CENTER)` — `:215`, with
+    // `scrollPane = new JScrollPane(editorPane)` — `:210`.
+    JScrollPane {
+        JEditorPane {
+            // `editorPane.setEditorKit(new HTMLEditorKit())` — `:213`.  The
+            // HTML kit lays the page out in the document's own proportional
+            // face, not the monospaced one `TextPageWindow` forces.
+            monospaced: false;
+            text: root.page-html;
+        }
+    }
+}
+
+export component HTMLPageWindowWindow inherits Window {
+    // `setTitle(newURL)` — `:228` — then `setTitle(url.getPath())` after a
+    // link is followed — `:244`.
+    in property <string> title-text: "file:/usr/local/IMOD/html/tomoguide.html";
+    title: root.title-text;
+    // `setSize(625, 800)` — `:218`.
+    preferred-width: 625px;
+    preferred-height: 800px;
+    background: EtomoStyle.background;
+    HTMLPageWindow { }
+}

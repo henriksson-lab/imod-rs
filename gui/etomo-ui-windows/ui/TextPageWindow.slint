@@ -1,0 +1,54 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/TextPageWindow.java`.
+//
+// The plain text page `ContextPopup` opens for a single log file
+// (`ContextPopup.java:70-73` and the other log-file branches).  The
+// constructor (`TextPageWindow.java:82-102`) walks the `UIManager` defaults
+// for the first `FontUIResource` to learn the current font size, gives the
+// `JEditorPane` `new Font("monospaced", Font.PLAIN, currentFontSize)`, adds
+// the `JScrollPane` around it to the content pane's `BorderLayout.CENTER`,
+// and sizes the frame from that font size.
+//
+// The page text only exists at run time: `setFile()` (`:116-138`) reads the
+// named file into the editor pane and then `setEditable(false)`.  The pane is
+// drawn at its constructed size with a sample of a `.log`; `page-text`
+// replaces it.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { JScrollPane, JEditorPane } from "WindowWidgets.slint";
+
+export component TextPageWindow inherits Rectangle {
+    // `editorPane.read(reader, filename)` — `:119`.
+    in property <string> page-text:
+        "tiltxcorr\n Version 5.2.17\n\n Entering Tiltxcorr\n\n View  1 shifts:   0.00   0.00\n View  2 shifts:  -1.23   0.44\n";
+    // The `currentFontSize` the constructor finds in the `UIManager` defaults
+    // (`:83-94`); Metal's default is 12.
+    in property <int> font-size-pt: 12;
+
+    background: EtomoStyle.background;
+    // `mainPanel.add(scrollPane, BorderLayout.CENTER)` — `:99`.
+    JScrollPane {
+        JEditorPane {
+            // `new Font("monospaced", Font.PLAIN, currentFontSize)` — `:96`.
+            monospaced: true;
+            font-size-pt: root.font-size-pt;
+            text: root.page-text;
+        }
+    }
+}
+
+export component TextPageWindowWindow inherits Window {
+    // `setTitle(file.getName())` — `:106` — or `setTitle(fileName)` — `:112`.
+    in property <string> title-text: "xcorr.log";
+    in property <int> font-size-pt: 12;
+    title: root.title-text;
+    // `setSize(currentFontSize * 625 / 12, currentFontSize * 800 / 12)` —
+    // `:100`.  At Metal's 12pt default that is 625 x 800.
+    preferred-width: root.font-size-pt * 625 / 12 * 1px;
+    preferred-height: root.font-size-pt * 800 / 12 * 1px;
+    background: EtomoStyle.background;
+    TextPageWindow {
+        font-size-pt: root.font-size-pt;
+    }
+}

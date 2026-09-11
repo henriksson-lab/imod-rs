@@ -1,0 +1,277 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectiveEditorDialog.java`.
+//
+// `pnlRoot` is a Y-axis box of three panels, in this order: the Source panel,
+// the Control Panel, and the section columns (`createPanel`, lines 181-183).
+// The section panels themselves are `DirectiveSectionPanel.java`, translated in
+// `DirectiveSectionPanel.slint`.
+//
+// Appearance only: no callbacks, no state, static defaults everywhere.
+
+import {
+    EtomoStyle, PanelHeader, LabeledTextField, CheckBox, MultiLineButton,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, SingleLineButton } from "widgets_local.slint";
+import {
+    DirectiveSectionPanel, DirectiveSectionPanelShowCheckBox, DirectiveSectionData,
+} from "DirectiveSectionPanel.slint";
+
+export component DirectiveEditorDialog inherits Rectangle {
+    // `type.getIndex()`, or -1 when `type` is null (`createPanel`, lines
+    // 129-132).  `DirectiveFileType.BATCH` is index 4, which is the one value
+    // that also disables `cbShowHidden` (line 158-160).
+    in property <int> type-index: -1;
+    // `builder.getFileTypeExists()`, one flag per `DirectiveFileType.NUM` (5).
+    // It comes from the builder at run time; all-present is the default here so
+    // the translated grid is drawn in its enabled state.
+    in property <[bool]> file-type-exists: [true, true, true, true, true];
+    // `ltfSource.setText(sourceStatus)` and
+    // `ltfDatasetTimestamp.setText(saveTimestamp)`; `ltfFileTimestamp` is only
+    // filled later, by `setFileTimestamp`.  All three are `setEditable(false)`.
+    in property <string> source-status: "";
+    in property <string> save-timestamp: "";
+    in property <string> file-timestamp: "";
+    // `phSource` / `phControl` are `ExpandButton.getExpandedInstance`, so both
+    // bodies start open; `expand()` hides `pnlSourceBody` / `pnlControlBody`.
+    in property <bool> source-open: true;
+    in property <bool> control-open: true;
+    // The section array is built from `DirectiveEditorBuilder.getSectionArray()`
+    // at run time and dealt into three columns: `nSections / 3` rows per
+    // column, with the `nSections % 3` remainder handed one extra row at a time
+    // to the leftmost columns (`createPanel`, lines 247-295).  The contents only
+    // exist at run time, so the three column models are empty by default and
+    // the column structure is what is translated.
+    in property <[DirectiveSectionData]> column-1-sections;
+    in property <[DirectiveSectionData]> column-2-sections;
+    in property <[DirectiveSectionData]> column-3-sections;
+    // `int extraRow = remainder-- > 0 ? 1 : 0` decides the padding between a
+    // column's check boxes and its section panels: 20px with no extra row,
+    // 5px with one (lines 283-288).
+    in property <bool> column-1-extra-row: false;
+    in property <bool> column-2-extra-row: false;
+    in property <bool> column-3-extra-row: false;
+
+    // `lInclude[i] = new JLabel(DirectiveFileType.toString(i))`.  Note that
+    // `DirectiveFileType.toString(int)` has no case for index 0
+    // (`BATCH_DEFAULTS`) and returns null there, so the first row's file label
+    // is empty in the running program — that is the source's behaviour, not a
+    // gap in the translation.
+    property <[string]> include-labels: ["", "Scope", "System", "User", "Batch"];
+
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: 0px;
+
+        // ---- pnlSource --------------------------------------------------
+        // `pnlSource.setBorder(BorderFactory.createEtchedBorder())`: untitled.
+        EtchedBorder {
+            VerticalLayout {
+                spacing: 0px;
+                PanelHeader { title: "Source"; open: root.source-open; }
+                // `pnlSourceBody`
+                if root.source-open: VerticalLayout {
+                    spacing: 0px;
+                    LabeledTextField {
+                        label: "Dataset: ";
+                        text: root.source-status;
+                        enabled: false;
+                    }
+                    LabeledTextField {
+                        label: "Dataset saved at: ";
+                        text: root.save-timestamp;
+                        enabled: false;
+                    }
+                    LabeledTextField {
+                        label: "File saved at: ";
+                        text: root.file-timestamp;
+                        enabled: false;
+                    }
+                }
+            }
+        }
+
+        // ---- pnlControl -------------------------------------------------
+        // `pnlControl.setBorder(BorderFactory.createEtchedBorder())`: untitled.
+        EtchedBorder {
+            VerticalLayout {
+                spacing: 0px;
+                PanelHeader { title: "Control Panel"; open: root.control-open; }
+                // `pnlControlBody`, an X-axis box:
+                // pnlIncludeSettings, glue, pnlShow, glue, pnlButtons.
+                if root.control-open: HorizontalLayout {
+                    spacing: 0px;
+
+                    // `pnlIncludeSettings`
+                    EtchedBorder {
+                        title: "Include Based on Directives in Files";
+                        // `pnlIncludeCheckboxes`, a `GridLayout(0, 3)`.  Slint
+                        // has no `GridBagLayout`/`GridLayout` weighting, so the
+                        // three columns are a plain grid with no weights.
+                        GridLayout {
+                            spacing: EtomoStyle.gap;
+                            Row {
+                                Text { text: "Include"; color: EtomoStyle.text; }
+                                Text { text: "Exclude"; color: EtomoStyle.text; }
+                                Text { text: "File"; color: EtomoStyle.text; }
+                            }
+                            // The loop over `DirectiveFileType.NUM` file types
+                            // (lines 133-156 for the state, 217-221 for the
+                            // layout).
+                            for exists[i] in root.file-type-exists: Row {
+                                CheckBox {
+                                    // The matching file type is included.
+                                    checked: exists && i == root.type-index;
+                                    enabled: exists;
+                                }
+                                CheckBox {
+                                    // Lower priority file types are excluded;
+                                    // the class is indexed in priority order.
+                                    checked: exists && i < root.type-index;
+                                    enabled: exists;
+                                }
+                                Text {
+                                    text: root.include-labels[i];
+                                    vertical-alignment: center;
+                                    color: exists ? EtomoStyle.text : EtomoStyle.disabled-text;
+                                }
+                            }
+                        }
+                    }
+
+                    // `Box.createHorizontalGlue()`
+                    Rectangle { }
+
+                    // `pnlShow`, a Y-axis box.
+                    VerticalLayout {
+                        spacing: 0px;
+                        alignment: start;
+                        // `pnlShowCheckboxes`
+                        EtchedBorder {
+                            title: "Show Directives";
+                            VerticalLayout {
+                                spacing: 0px;
+                                CheckBox { text: "Show unchanged"; checked: false; }
+                                CheckBox {
+                                    text: "Show hidden";
+                                    checked: false;
+                                    // `if (type == DirectiveFileType.BATCH)
+                                    //    cbShowHidden.setEnabled(false)` (line 158).
+                                    enabled: root.type-index != 4;
+                                }
+                                // `Box.createRigidArea(FixedDim.x0_y10)`
+                                Rectangle { height: 10px; }
+                                CheckBox { text: "Show only included"; checked: false; }
+                                // `Box.createRigidArea(FixedDim.x0_y2)`
+                                Rectangle { height: 2px; }
+                            }
+                        }
+                        Rectangle { height: 2px; }
+                        SingleLineButton { text: "Close All Sections"; }
+                        Rectangle { height: 2px; }
+                        // `Box.createVerticalGlue()`
+                        Rectangle { }
+                    }
+
+                    // `Box.createHorizontalGlue()`
+                    Rectangle { }
+
+                    // `pnlButtons`, a Y-axis box with glue above, between and
+                    // below the two buttons.
+                    VerticalLayout {
+                        spacing: 0px;
+                        Rectangle { }
+                        MultiLineButton { text: "Save"; width: 120px; }
+                        Rectangle { }
+                        MultiLineButton { text: "Cancel"; width: 120px; }
+                        Rectangle { }
+                    }
+                }
+            }
+        }
+
+        // ---- pnlSections ------------------------------------------------
+        // An X-axis box of three columns separated by
+        // `rigid 5 / JSeparator(VERTICAL) / rigid 5`.
+        HorizontalLayout {
+            spacing: 0px;
+
+            // Column 0
+            VerticalLayout {
+                spacing: 0px;
+                for section in root.column-1-sections: HorizontalLayout {
+                    DirectiveSectionPanelShowCheckBox {
+                        text: section.title;
+                        checked: section.show;
+                        enabled: section.show-enabled;
+                    }
+                    Rectangle { }
+                }
+                Rectangle { height: root.column-1-extra-row ? 5px : 20px; }
+                for section in root.column-1-sections: DirectiveSectionPanel {
+                    title: section.title;
+                    directives: section.directives;
+                    show: section.show && section.show-enabled;
+                }
+                Rectangle { }
+            }
+            Rectangle { width: 5px; }
+            Rectangle { width: 1px; background: EtomoStyle.border; }
+            Rectangle { width: 5px; }
+
+            // Column 1
+            VerticalLayout {
+                spacing: 0px;
+                for section in root.column-2-sections: HorizontalLayout {
+                    DirectiveSectionPanelShowCheckBox {
+                        text: section.title;
+                        checked: section.show;
+                        enabled: section.show-enabled;
+                    }
+                    Rectangle { }
+                }
+                Rectangle { height: root.column-2-extra-row ? 5px : 20px; }
+                for section in root.column-2-sections: DirectiveSectionPanel {
+                    title: section.title;
+                    directives: section.directives;
+                    show: section.show && section.show-enabled;
+                }
+                Rectangle { }
+            }
+            Rectangle { width: 5px; }
+            Rectangle { width: 1px; background: EtomoStyle.border; }
+            Rectangle { width: 5px; }
+
+            // Column 2 - the last column adds no separator after it.
+            VerticalLayout {
+                spacing: 0px;
+                for section in root.column-3-sections: HorizontalLayout {
+                    DirectiveSectionPanelShowCheckBox {
+                        text: section.title;
+                        checked: section.show;
+                        enabled: section.show-enabled;
+                    }
+                    Rectangle { }
+                }
+                Rectangle { height: root.column-3-extra-row ? 5px : 20px; }
+                for section in root.column-3-sections: DirectiveSectionPanel {
+                    title: section.title;
+                    directives: section.directives;
+                    show: section.show && section.show-enabled;
+                }
+                Rectangle { }
+            }
+        }
+        // `createPanel` also builds a `JScrollPane` around `pnlRoot`
+        // (line 118) and never adds it to anything, and ends by opening a
+        // "Problems Building Editor" message dialog when the builder handed it
+        // an `errmsg` (lines 296-299).  Neither is part of this layout.
+    }
+}
+
+export component DirectiveEditorDialogWindow inherits Window {
+    title: "eTomo Directive Editor";
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: EtomoStyle.background;
+    DirectiveEditorDialog { }
+}

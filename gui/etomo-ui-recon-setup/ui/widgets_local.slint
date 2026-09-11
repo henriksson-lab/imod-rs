@@ -1,0 +1,218 @@
+// Widgets these three dialogs need that the shared vocabulary in
+// `gui/etomo-ui-common/ui/widgets.slint` does not carry.  Same convention as
+// the common crate: one component per Swing widget class in
+// `IMOD/Etomo/src/etomo/ui/swing`, named after that class.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+// `EtchedBorder` (`EtchedBorder.java`): a titled etched group box.  A distinct
+// Swing class from `BeveledBorder`, which is all the common crate carries;
+// Swing draws it with a thin two-tone etch rather than a raised bevel.
+export component EtchedBorder inherits Rectangle {
+    in property <string> title;
+    background: EtomoStyle.panel;
+    border-width: 1px;
+    // Swing's etched border is a dark line with a light line inside it.  Slint
+    // has one border colour per rectangle, so the etch is approximated by the
+    // dark line only.
+    border-color: EtomoStyle.border;
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        spacing: EtomoStyle.gap;
+        if root.title != "": Text {
+            text: root.title;
+            font-size: EtomoStyle.font-size-pt * 1px;
+            color: EtomoStyle.text;
+        }
+        @children
+    }
+}
+
+// `TextField` (`TextField.java`): an entry box with no label of its own.
+export component TextField inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    height: EtomoStyle.field-height;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    Text {
+        x: 3px;
+        text: root.text;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+}
+
+// `FileTextField` (`FileTextField.java`): label, entry box, folder button.
+// The Java button carries the `ScaledImage.OPEN_FILE` icon; Slint has no image
+// to point at here, so the glyph stands in for it.
+export component FileTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 180px;
+    spacing: 0px;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    TextField {
+        text: root.text;
+        enabled: root.enabled;
+    }
+    Rectangle {
+        width: EtomoStyle.field-height;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "[]"; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+// `ButtonControlTextEfield` (`ButtonControlTextEfield.java`), as built by
+// `getLabeledFileInstance`: a labelled `TextEfield` plus an `Ebutton` file
+// chooser (and no clear button for that instance).  Appearance-wise the same
+// shape as `FileTextField`; kept separate because the Java classes are.
+export component ButtonControlTextEfield inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 180px;
+    spacing: 0px;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    TextField {
+        text: root.text;
+        enabled: root.enabled;
+    }
+    Rectangle {
+        width: EtomoStyle.field-height;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "[]"; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
+
+// `ComboBox` (`ComboBox.java`): label then a drop-down.  Static: the popup and
+// the item list are behaviour, so only the closed box is drawn.
+export component ComboBox inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-width: 130px;
+    spacing: EtomoStyle.gap;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        HorizontalLayout {
+            padding-left: 3px;
+            Text {
+                text: root.text;
+                vertical-alignment: center;
+                color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            }
+            Rectangle {
+                width: 16px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+    }
+}
+
+// `CheckTextField` (`CheckTextField.java`): a check box that enables the entry
+// box beside it.
+export component CheckTextField inherits HorizontalLayout {
+    in property <string> text;
+    in property <bool> checked;
+    in property <string> field-text;
+    in property <bool> enabled: true;
+    in property <length> field-width: 120px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Rectangle {
+        width: 13px;
+        height: EtomoStyle.field-height;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    Text {
+        text: root.text;
+        vertical-alignment: center;
+        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+    }
+    TextField {
+        width: root.field-width;
+        text: root.field-text;
+        enabled: root.checked;
+    }
+}
+
+// `ProgressPanel` (`ProgressPanel.java`): the task label above a `JProgressBar`.
+export component ProgressPanel inherits VerticalLayout {
+    in property <string> label: "No process";
+    spacing: 5px;
+    Text {
+        text: root.label;
+        color: EtomoStyle.text;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    Rectangle {
+        height: 16px;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+    }
+}
+
+// `AxisProgressPanel` (`AxisProgressPanel.java`): the progress panel and its
+// `Kill Process` button.  `SetupDialog` starts it hidden.
+export component AxisProgressPanel inherits HorizontalLayout {
+    in property <string> label: "No process";
+    spacing: 5px;
+    ProgressPanel { label: root.label; }
+    Rectangle {
+        width: 110px;
+        height: 28px;
+        background: EtomoStyle.panel;
+        border-width: 2px;
+        border-color: EtomoStyle.border;
+        // `buttonKillProcess.setEnabled(false)` in `createPanel`.
+        Text {
+            text: "Kill Process";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: EtomoStyle.disabled-text;
+            font-weight: 700;
+        }
+    }
+}

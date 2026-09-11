@@ -1,0 +1,311 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/BatchRunTomoDatasetDialog.java`.
+//
+// The Java class is one panel used two ways: `getGlobalInstance` embeds it in
+// the batchruntomo "Dataset Values" tab with the header "Global Dataset
+// Values" and no buttons, `getRowInstance` puts it in its own JFrame with the
+// header " Dataset Values" and an OK / Revert to Global row.  Both are drawn
+// here, selected by `global`.
+//
+// Appearance only: values are the static defaults `createPanel` sets.
+
+import { EtomoStyle, PanelHeader, CheckBox, RadioButton, LabeledTextField,
+         LabeledSpinner }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, Separator, SingleLineButton, FileTextField,
+         CheckTextField, RadioTextField }
+    from "LocalWidgets.slint";
+
+export component BatchRunTomoDatasetDialog inherits Rectangle {
+    // getGlobalInstance vs getRowInstance / getSavedRowInstance.
+    in property <bool> global: true;
+    // `createPanel` calls `phPostprocessing.setOpen(false)`, so the
+    // Postprocessing body starts collapsed; open it to see those fields.
+    in property <bool> postprocessing-open: false;
+
+    background: EtomoStyle.panel;
+    // pnlRoot.setBorder(BorderFactory.createEtchedBorder())
+    border-width: 2px;
+    border-color: EtomoStyle.border;
+
+    VerticalLayout {
+        padding: EtomoStyle.inset;
+        alignment: start;
+
+        // phRoot
+        PanelHeader {
+            title: root.global ? "Global Dataset Values" : " Dataset Values";
+        }
+        Rectangle { height: 2px; }
+
+        // pnlRootBody / pnlBasic
+        VerticalLayout {
+            spacing: 0px;
+            alignment: start;
+
+            // pnlDistort.  The Java creates ftfDistort/ftfGradient only when a
+            // distortion directory exists (`BatchRunTomoDatasetDialog.java:228`);
+            // when it does not, btnAdvanced moves onto the Remove X-rays row
+            // instead.  The with-distortion layout is drawn here.
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                alignment: start;
+                FileTextField {
+                    label: "Image distortion file: ";
+                    label-width: 160px;
+                    field-width: 272px;
+                }
+                SingleLineButton { text: "Advanced"; }
+            }
+            FileTextField {
+                label: "Mag gradient file: ";
+                label-width: 160px;
+                field-width: 272px;
+            }
+
+            Rectangle { height: 3px; }
+            Separator { }
+
+            // pnlRemoveXrays
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Remove X-rays"; }
+            }
+            // pnlModelFile
+            HorizontalLayout {
+                spacing: 5px;
+                alignment: start;
+                FileTextField {
+                    label: "Manual replacement model: ";
+                    label-width: 190px;
+                    field-width: 272px;
+                }
+                SingleLineButton { text: "Make in 3dmod"; }
+            }
+
+            Rectangle { height: 3px; }
+            Separator { }
+            Rectangle { height: 5px; }
+
+            // pnlPreBinByFactor
+            HorizontalLayout {
+                spacing: 15px;
+                alignment: start;
+                LabeledSpinner {
+                    label: "Coarse aligned stack binning - single frame: ";
+                    label-width: 290px;
+                    text: "1";
+                }
+                LabeledSpinner { label: "Montage: "; label-width: 65px; text: "1"; }
+            }
+
+            Rectangle { height: 10px; }
+
+            // pnlTrackingMethod: GridLayout(2, 2) filled in the Java's add order,
+            // which is column-swapped relative to the field declarations.
+            EtchedBorder {
+                title: "Alignment Method";
+                GridLayout {
+                    spacing: EtomoStyle.gap;
+                    Row {
+                        RadioButton { text: "Autoseed and track"; selected: true; }
+                        RadioButton { text: "Patch tracking"; }
+                    }
+                    Row {
+                        RadioButton { text: "Raptor and track"; }
+                        RadioButton { text: "Coarse alignment only"; }
+                    }
+                }
+            }
+
+            Rectangle { height: 3px; }
+
+            // pnlGold: GridLayout(1, 2, 15, 1).  The second cell is
+            // ltfTargetNumberOfBeads while "Autoseed and track" is selected and
+            // ltfNumberOfMarkers (same label) while "Raptor and track" is
+            // (`updateGoldPanel`, `BatchRunTomoDatasetDialog.java:716`).
+            HorizontalLayout {
+                spacing: 15px;
+                alignment: start;
+                LabeledTextField { label: "Bead size (nm): "; label-width: 200px; width: 300px; }
+                LabeledTextField { label: "Target number of beads: "; label-width: 200px; width: 300px; }
+            }
+            // pnlSizeOfPatchesXandY: GridLayout(1, 2, 15, 0)
+            HorizontalLayout {
+                spacing: 15px;
+                alignment: start;
+                LabeledTextField { label: "Patch tracking size: "; label-width: 200px; width: 300px; }
+                CheckBox { text: "Break contours into pieces"; }
+            }
+
+            Rectangle { height: 10px; }
+
+            // pnlEnableStretching / pnlLocalAlignments
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Enable distortion (stretching) in alignment"; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Use local alignments"; }
+            }
+
+            Rectangle { height: 1px; }
+            Separator { }
+            Rectangle { height: 3px; }
+
+            // pnlSampleTypeChooser
+            HorizontalLayout {
+                spacing: 5px;
+                alignment: start;
+                CheckBox { text: "Do positioning for:"; }
+                RadioButton { text: "Plastic section"; }
+                RadioButton { text: "Cryo sample"; }
+            }
+            Rectangle { height: 3px; }
+            // pnlSampleTypeData: GridLayout(1, 3, 15, 5)
+            HorizontalLayout {
+                spacing: 15px;
+                alignment: start;
+                LabeledTextField { label: "Tomogram thickness: "; label-width: 160px; width: 230px; }
+                CheckBox { text: "Sample has gold beads"; }
+                LabeledTextField { label: "Bead size (nm): "; label-width: 120px; width: 190px; }
+            }
+
+            Rectangle { height: 3px; }
+            Separator { }
+            Rectangle { height: 3px; }
+
+            // pnlBinByFactor
+            HorizontalLayout {
+                alignment: start;
+                LabeledSpinner { label: "Aligned stack binning: "; label-width: 160px; text: "1"; }
+            }
+
+            Rectangle { height: 5px; }
+
+            // pnlAlignedStack: GridLayout(5, 2, 15, 0), filled row-major with
+            // nine components, so the last cell is empty.
+            GridLayout {
+                spacing: 15px;
+                Row {
+                    CheckBox { text: "Correct CTF"; }
+                    CheckBox { text: "Erase gold"; }
+                }
+                Row {
+                    // pnlDefocus
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        LabeledTextField { label: "Defocus: "; label-width: 70px; width: 170px; }
+                        CheckBox { text: "Autotune"; }
+                    }
+                    RadioButton { text: "Use fiducial model"; }
+                }
+                Row {
+                    LabeledTextField { label: "Defocus range to scan: "; label-width: 160px; width: 260px; }
+                    RadioButton { text: "Find beads in 3D"; selected: true; }
+                }
+                Row {
+                    // pnlAutoFitRangeAndStep
+                    HorizontalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        RadioTextField { label: "Autofit range "; selected: true; }
+                        LabeledTextField { label: " and step "; label-width: 70px; width: 160px; }
+                    }
+                    LabeledTextField { label: "Tomogram thickness (pixels): "; label-width: 190px; width: 290px; }
+                }
+                Row {
+                    RadioButton { text: "Fit every image"; }
+                    Rectangle { }
+                }
+            }
+
+            Rectangle { height: 5px; }
+
+            // pnlReconstruction
+            EtchedBorder {
+                title: "Reconstruction";
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    // pnlReconstructionType
+                    VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        CheckBox { text: "R-weighted backprojection"; checked: true; }
+                        CheckBox { text: "SIRT-like filter"; }
+                        CheckBox { text: "SIRT"; }
+                        Rectangle { height: 6px; }
+                        LabeledTextField { label: "Equivalent iterations: "; label-width: 160px; width: 250px; }
+                        LabeledTextField { label: "Leave iterations: "; label-width: 160px; width: 250px; }
+                        CheckBox { text: "Scale to integers"; }
+                    }
+                    // pnlThickness
+                    VerticalLayout {
+                        spacing: 0px;
+                        alignment: start;
+                        RadioTextField { label: "Thickness total (unbinned pixels): "; }
+                        Rectangle { height: 2px; }
+                        RadioTextField { label: "Thickness total (binned pixels): "; }
+                        Rectangle { height: 2px; }
+                        RadioButton { text: "Calculated thickness (unbinned pixels):"; }
+                        LabeledTextField { label: "          With fallback: "; label-width: 180px; width: 270px; }
+                        LabeledTextField { label: "          Plus (optional): "; label-width: 180px; width: 270px; }
+                    }
+                }
+            }
+
+            // pnlPostprocessing
+            Rectangle {
+                background: EtomoStyle.panel;
+                border-width: 2px;
+                border-color: EtomoStyle.border;
+                VerticalLayout {
+                    padding: 2px;
+                    alignment: start;
+                    PanelHeader { title: "Postprocessing"; open: root.postprocessing-open; }
+                    if root.postprocessing-open: VerticalLayout {
+                        spacing: EtomoStyle.gap;
+                        alignment: start;
+                        // pnlDoTrimvol
+                        HorizontalLayout {
+                            alignment: start;
+                            CheckBox { text: "Postprocess with trimvol"; }
+                        }
+                        // pnlTrimvol
+                        HorizontalLayout {
+                            spacing: 3px;
+                            alignment: start;
+                            CheckTextField { label: "Find plastic section limits and add: "; }
+                            // ctfScaleFromZ starts at
+                            // BatchRunTomoDatasetMetaData.SCALE_FROM_Z_DEFAULT.
+                            CheckTextField { label: "Fraction of Z slices to analyze:"; text: "0.5"; }
+                        }
+                    }
+                }
+            }
+
+            // pnlButtons: row instances only (frame != null).
+            if !root.global: HorizontalLayout {
+                spacing: 20px;
+                alignment: end;
+                SingleLineButton { text: "OK"; }
+                SingleLineButton { text: "Revert to Global"; }
+            }
+        }
+    }
+}
+
+export component BatchRunTomoDatasetDialogWindow inherits Window {
+    in property <bool> global: true;
+    in property <bool> postprocessing-open: false;
+    title: "Dataset Values";
+    background: EtomoStyle.background;
+    preferred-width: 1020px;
+    preferred-height: 900px;
+    BatchRunTomoDatasetDialog {
+        global: root.global;
+        postprocessing-open: root.postprocessing-open;
+    }
+}

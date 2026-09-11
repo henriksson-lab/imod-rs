@@ -1,0 +1,128 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/EERSuperResZSumPaddingPanel.java` --
+// "the alignframes EERSuperResZSumPadding parameter".  Constructed by
+// `AlignFramesPanel` (`AlignFramesPanel.java:414`) and added to the
+// Input and Pre-processing tab body at `AlignFramesPanel.java:509`.
+//
+// `createPanel()` (`:88-127`) builds:
+//   pnlRoot  Y_AXIS, BorderFactory.createEtchedBorder()
+//     header  = PanelHeader.getInstance("Reading EER Files", this, dialogType)
+//     pnlBody Y_AXIS
+//       pnlSuperRes      X_AXIS
+//       pnlZSumFrames    X_AXIS
+//       vertical strut 2
+//       pnlZSumSets      X_AXIS
+//       vertical strut 2
+//
+// `header.setOpen(false)` at `:93`, and `PanelHeader.setOpen` forwards to
+// `ExpandButton.setExpanded` (`PanelHeader.java:289-294`), which forces the
+// `expand()` callback even when the state already matches
+// (`ExpandButton.java:356-366`); `expand()` at `:190-196` then calls
+// `pnlBody.setVisible(false)`.  So the body is collapsed at construction:
+// `body-open` defaults to false and the body is drawn only when it is set.
+//
+// Radio group states at construction -- both groups DO have a selection, from
+// the widget constructors rather than from `setParameters`:
+//   * `rbSuperRes2x` is selected.  `new RadioButton(EERSuperRes.TWO_X,
+//     bgSuperRes)` runs `RadioButton.java:155-175`, which calls
+//     `radioButton.setSelected(true)` when `enumeratedType.isDefault()`, and
+//     `EERSuperRes.DEFAULT` is `TWO_X` (`etomo/type/EERSuperRes.java:20`).
+//   * `rbZSumFrames` is selected.  `RadioEbutton.getEnumInstance(EERZSum.FRAMES,
+//     bgZSum)` runs `RadioEbutton.java:51-75`, same `isDefault()` test, and
+//     `EERZSum.DEFAULT` is `FRAMES` (`:246`).
+// `setParameters` (`:146-171`) is what later moves either selection.
+//
+// `updateDisplay()` (`:141-148`) enables each Z-sum spinner and its trailing
+// label only while that row's own radio is selected, which is why the "frames"
+// row below is drawn disabled.
+//
+// The three frame-size radio labels are `EERSuperRes`'s own labels --
+// "4K", "8K", "16K" (`etomo/type/EERSuperRes.java:14-19`).  The two Z-sum
+// radio labels are the third constructor argument of the private `EERZSum`
+// class (`:241-244`).  Spinner values are
+// `AlignFramesParam.getEERZSumFramesDefault()` -- `EER_Z_SUM_FRAMES_DEFAULT`
+// is -12 and `convertEERZSumFrames` multiplies by -1
+// (`AlignFramesParam.java:127, 853-862`), so 12, range 2..100 -- and
+// `AlignFramesParam.EER_Z_SUM_SETS_DEFAULT` = 10, range 1..1000
+// (`AlignFramesParam.java:128`, `:37-40`).
+
+import { EtomoStyle, PanelHeader, RadioButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, Label, Spinner } from "ShellWidgets.slint";
+
+export component EERSuperResZSumPaddingPanel inherits VerticalLayout {
+    // `pnlBody`'s visibility.  False is the construction-time state -- see the
+    // `header.setOpen(false)` note above.
+    in property <bool> body-open: false;
+    // `bgZSum`'s selection, which `updateDisplay()` reads.
+    in property <bool> z-sum-frames-selected: true;
+    alignment: start;
+
+    // `pnlRoot`: Y_AXIS, BorderFactory.createEtchedBorder(), untitled.
+    EtchedBorder {
+        PanelHeader {
+            title: "Reading EER Files";
+            open: root.body-open;
+        }
+
+        if root.body-open: VerticalLayout {
+            // `pnlBody`: Y_AXIS.
+            alignment: start;
+
+            // `pnlSuperRes`: X_AXIS -- horizontal strut 2, lSuperRes, then the
+            // three `bgSuperRes` radios.
+            HorizontalLayout {
+                alignment: start;
+                Rectangle { width: 2px; }
+                Label { text: "Frame size to read in:"; }
+                RadioButton { text: "4K"; selected: false; }
+                RadioButton { text: "8K"; selected: true; }
+                RadioButton { text: "16K"; selected: false; }
+            }
+
+            // `pnlZSumFrames`: X_AXIS -- radio, spinner, strut 3, label,
+            // strut 2.
+            HorizontalLayout {
+                alignment: start;
+                RadioButton {
+                    text: "Sum frames to make";
+                    selected: root.z-sum-frames-selected;
+                }
+                Spinner {
+                    text: "12";
+                    enabled: root.z-sum-frames-selected;
+                }
+                Rectangle { width: 3px; }
+                Label {
+                    text: "images to align";
+                    enabled: root.z-sum-frames-selected;
+                }
+                Rectangle { width: 2px; }
+            }
+
+            // `Box.createVerticalStrut(2)`.
+            Rectangle { height: 2px; }
+
+            // `pnlZSumSets`: X_AXIS -- radio, spinner, strut 3, label,
+            // strut 2.
+            HorizontalLayout {
+                alignment: start;
+                RadioButton {
+                    text: "Sum successive sets of";
+                    selected: !root.z-sum-frames-selected;
+                }
+                Spinner {
+                    text: "10";
+                    enabled: !root.z-sum-frames-selected;
+                }
+                Rectangle { width: 3px; }
+                Label {
+                    text: "frames";
+                    enabled: !root.z-sum-frames-selected;
+                }
+                Rectangle { width: 2px; }
+            }
+
+            // `Box.createVerticalStrut(2)`.
+            Rectangle { height: 2px; }
+        }
+    }
+}
