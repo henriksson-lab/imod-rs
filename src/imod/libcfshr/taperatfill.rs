@@ -175,7 +175,10 @@ pub unsafe fn slice_taper_at_fill(sl: *mut Islice, mut ntaper: i32, inside: i32)
         for i in 1..=ntaper * 10 {
             let dist = if inside != 0 { i } else { ntaper * 10 + 1 - i };
             fracs[i as usize] = dist as f32 / (ntaper * 10 + 1) as f32;
-            fillpart[i as usize] = (1. - fracs[i as usize]) * fillval;
+            // `taperatfill.c:236` is `(1. - fracs[i]) * fillval` with `1.` a
+            // double, so both the subtraction and the product are double and
+            // only the store to `fillpart` rounds.
+            fillpart[i as usize] = ((1. - fracs[i as usize] as f64) * fillval as f64) as f32;
         }
         for (dx, dy, edgeind) in plist {
             let mut distmin = [0_i32; MAX_AVG_OUT];
@@ -231,7 +234,10 @@ pub unsafe fn slice_taper_at_fill(sl: *mut Islice, mut ntaper: i32, inside: i32)
             } else {
                 let (mut wsum, mut valsum) = (0., 0.);
                 for mm in 0..num_mins {
-                    let weight = 1. / (4. + (distmin[mm] as f64).sqrt()) as f32;
+                    // `taperatfill.c:319` is `weight = 1. / (4. + sqrt(distmin[mm]))`
+                    // with `weight` a float: the whole reciprocal is computed in
+                    // double and rounded once, not `(4 + sqrt)` rounded first.
+                    let weight = (1. / (4. + (distmin[mm] as f64).sqrt())) as f32;
                     wsum += weight;
                     slice_get_val(sl, elist[minedge[mm]].0, elist[minedge[mm]].1, &mut val);
                     valsum += weight * val[0];

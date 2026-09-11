@@ -369,7 +369,7 @@ pub unsafe extern "C" fn ii_setup_raw_headers(
     if hdr.is_null() {
         b3d_error(
             stderr,
-            format_args!("ERROR: ii_setup_raw_headers - Getting memory for header"),
+            format_args!("ERROR: iiSetupRawHeaders - Getting memory for header"),
         );
         return IIERR_MEMORY_ERR;
     }
@@ -912,10 +912,7 @@ pub unsafe extern "C" fn analyze_dm3(
     if dmind < 0 as ::core::ffi::c_int || dmind > 1 as ::core::ffi::c_int {
         b3d_error(
             stderr,
-            format_args!(
-                "ERROR: analyze_dm3 - DM format {} not supported\n",
-                dmformat
-            ),
+            format_args!("ERROR: analyzeDM3 - DM format {} not supported\n", dmformat),
         );
         return IIERR_NO_SUPPORT;
     }
@@ -923,7 +920,7 @@ pub unsafe extern "C" fn analyze_dm3(
         b3d_error(
             stderr,
             format_args!(
-                "ERROR: analyze_dm3 - Doing stat of {}\n",
+                "ERROR: analyzeDM3 - Doing stat of {}\n",
                 CStr::from_ptr(filename).to_string_lossy()
             ),
         );
@@ -982,7 +979,7 @@ pub unsafe extern "C" fn analyze_dm3(
             b3d_error(
                 stderr,
                 format_args!(
-                    "ERROR: analyze_dm3 - Seeking to end of {}\n",
+                    "ERROR: analyzeDM3 - Seeking to end of {}\n",
                     CStr::from_ptr(filename).to_string_lossy()
                 ),
             );
@@ -999,7 +996,7 @@ pub unsafe extern "C" fn analyze_dm3(
             b3d_error(
                 stderr,
                 format_args!(
-                    "ERROR: analyze_dm3 - Error Reading tail end of {}\n",
+                    "ERROR: analyzeDM3 - Error Reading tail end of {}\n",
                     CStr::from_ptr(filename).to_string_lossy()
                 ),
             );
@@ -1063,7 +1060,7 @@ pub unsafe extern "C" fn analyze_dm3(
                             b3d_error(
                                 stderr,
                                 format_args!(
-                                    "ERROR: analyze_dm3 - The number of dimensions seemsto be {}, not 2 or 3, in {}\n",
+                                    "ERROR: analyzeDM3 - The number of dimensions seemsto be {}, not 2 or 3, in {}\n",
                                     lowbyte,
                                     CStr::from_ptr(filename).to_string_lossy()
                                 ),
@@ -1147,7 +1144,7 @@ pub unsafe extern "C" fn analyze_dm3(
         b3d_error(
             stderr,
             format_args!(
-                "ERROR: analyze_dm3 - Dimensions or type not found in {}\n",
+                "ERROR: analyzeDM3 - Dimensions or type not found in {}\n",
                 CStr::from_ptr(filename).to_string_lossy()
             ),
         );
@@ -1200,7 +1197,7 @@ pub unsafe extern "C" fn analyze_dm3(
             b3d_error(
                 stderr,
                 format_args!(
-                    "ERROR: analyze_dm3 - Reading beginning of {}\n",
+                    "ERROR: analyzeDM3 - Reading beginning of {}\n",
                     CStr::from_ptr(filename).to_string_lossy()
                 ),
             );
@@ -1487,7 +1484,7 @@ pub unsafe extern "C" fn analyze_dm3(
         b3d_error(
             stderr,
             format_args!(
-                "ERROR: analyze_dm3 - Data string not found in {}\n",
+                "ERROR: analyzeDM3 - Data string not found in {}\n",
                 CStr::from_ptr(filename).to_string_lossy()
             ),
         );

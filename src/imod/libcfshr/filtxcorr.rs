@@ -7,6 +7,8 @@
 use core::ffi::c_char;
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
+use super::robuststat::{rs_set_sort_index_offset, rs_sort_indexed_floats};
+
 // C file-scope state for the peak-finder API (`filtxcorr.c:443-450`).
 static S_APPLY_LIMITS: AtomicI32 = AtomicI32::new(0);
 static S_LIMIT_XLO: AtomicI32 = AtomicI32::new(0);
@@ -392,12 +394,21 @@ pub unsafe fn weighted_corr_from_sums(
 
 pub unsafe fn slice_gaussian_kernel(mat: *mut f32, dim: i32, sigma: f32) {
     unsafe {
-        let mid = (dim - 1) as f32 / 2.;
-        let mut sum = 0.;
+        // `filtxcorr.c:376-385`: `mid` is a double, so `i - mid` and `j - mid`
+        // are double, `sigma * sigma` is computed in float and then widened by
+        // the division, and `exp` is the double routine whose result is cast to
+        // float once at the end.  Evaluating the whole expression in f32
+        // instead shifts the kernel weights by an ulp or two, which is visible
+        // in every pixel of a Gaussian-smoothed image.
+        let mid = (dim - 1) as f64 / 2.;
+        let mut sum = 0_f32;
         for y in 0..dim {
             for x in 0..dim {
-                let v = (-((x as f32 - mid).powi(2) + (y as f32 - mid).powi(2)) / (sigma * sigma))
-                    .exp();
+                let sigma_squared = sigma * sigma;
+                let v = (-((x as f64 - mid) * (x as f64 - mid)
+                    + (y as f64 - mid) * (y as f64 - mid))
+                    / sigma_squared as f64)
+                    .exp() as f32;
                 *mat.add((x + y * dim) as usize) = v;
                 sum += v;
             }
@@ -409,7 +420,9 @@ pub unsafe fn slice_gaussian_kernel(mat: *mut f32, dim: i32, sigma: f32) {
 }
 pub unsafe fn scaled_gaussian_kernel(mat: *mut f32, dim: *mut i32, limit: i32, sigma: f32) {
     unsafe {
-        *dim = (2. * sigma.ceil() + 1.) as i32;
+        // `filtxcorr.c:392` casts ceil() to int first, then does the doubling
+        // and the +1 in integer arithmetic.
+        *dim = 2 * (sigma as f64).ceil() as i32 + 1;
         *dim = (*dim).min(limit);
         slice_gaussian_kernel(mat, *dim, sigma)
     }
@@ -519,6 +532,7 @@ pub unsafe fn wrapfftslice(
     unsafe { wrap_fft_slice(a, t, *nx, *ny, *dir) }
 }
 
+/// `fourierShiftImage` (`filtxcorr.c:1906`).
 pub unsafe fn fourier_shift_image(
     fft: *mut f32,
     nx: i32,
@@ -528,23 +542,28 @@ pub unsafe fn fourier_shift_image(
     temp: *mut f32,
 ) {
     unsafe {
+        // `float pi = 3.141593;` -- not the full-precision constant.
+        let pi: f32 = 3.141593;
         if dx == 0. && dy == 0. {
             return;
         }
         let nxfft = nx / 2 + 1;
         let ndim = nx + 2;
         for x in 0..nxfft {
-            let arg = -2. * core::f32::consts::PI * 0.5 * x as f32 / (nxfft - 1) as f32 * dx;
-            *temp.add((2 * x) as usize) = arg.cos();
-            *temp.add((2 * x + 1) as usize) = arg.sin();
+            // `freq = 0.5 * ix / (nxFFT - 1.);` is a double expression stored into a float.
+            let freq = (0.5 * x as f64 / (nxfft as f64 - 1.)) as f32;
+            // `arg` is a double and cos/sin are the double routines, cast to float once.
+            let arg = -2. * pi as f64 * freq as f64 * dx as f64;
+            *temp.add((2 * x) as usize) = arg.cos() as f32;
+            *temp.add((2 * x + 1) as usize) = arg.sin() as f32;
         }
         for y in 0..ny {
             let mut fy = y as f32 / ny as f32;
             if fy > 0.5 {
-                fy -= 1.;
+                fy = (fy as f64 - 1.) as f32;
             }
-            let arg = -2. * core::f32::consts::PI * fy * dy;
-            let (c, s) = (arg.cos(), arg.sin());
+            let arg = -2. * pi as f64 * fy as f64 * dy as f64;
+            let (c, s) = (arg.cos() as f32, arg.sin() as f32);
             for x in 0..nxfft {
                 let q = 2 * x;
                 let pr = *temp.add(q as usize) * c - *temp.add((q + 1) as usize) * s;
@@ -571,6 +590,8 @@ pub unsafe fn fourier_reduce_image(
 ) {
     unsafe {
         let fac = nxi as f32 / nxo as f32;
+        // `float dxy = -(redFac - 1) / (2. * redFac);` -- the `2. *` makes the divide double.
+        let d = ((-(fac - 1.)) as f64 / (2. * fac as f64)) as f32;
         let mut dst = out;
         for loopi in 0..2 {
             let (start, end) = if loopi == 0 {
@@ -586,7 +607,6 @@ pub unsafe fn fourier_reduce_image(
             }
         }
         if !temp.is_null() {
-            let d = -(fac - 1.) / (2. * fac);
             fourier_shift_image(out, nxo, nyo, dx / fac + d, dy / fac + d, temp)
         }
     }
@@ -603,10 +623,11 @@ pub unsafe fn fourier_expand_image(
     temp: *mut f32,
 ) {
     unsafe {
-        core::ptr::write_bytes(out, 0, ((nxo + 2) * nyo) as usize);
         let fac = nxo as f32 / nxi as f32;
+        // `float dxy = (expFac - 1) / (2. * expFac);` -- integer 1 here, but a double divide.
+        let d = ((fac - 1.) as f64 / (2. * fac as f64)) as f32;
+        core::ptr::write_bytes(out, 0, ((nxo + 2) * nyo) as usize);
         if !temp.is_null() {
-            let d = (fac - 1.) / (2. * fac);
             fourier_shift_image(input, nxi, nyi, dx + d, dy + d, temp)
         }
         let mut src = input;
@@ -639,11 +660,17 @@ pub unsafe fn fourier_crop_sizes(
         if factor == 1. {
             return 1;
         }
-        let usefac = if factor < 1. { 1. / factor } else { factor };
+        // `useFac = 1. / factor;` is a double divide stored into a float.
+        let usefac = if factor < 1. {
+            (1. / factor as f64) as f32
+        } else {
+            factor
+        };
         let mut denom = 0;
         let mut numer = 0;
         for d in [1, 2, 3, 4, 5, 6, 8, 10] {
-            let n = (usefac * d as f32).round() as i32;
+            // `B3DNINT(a)` is `(int)floor((a) + 0.5)`, evaluated in double.
+            let n = ((usefac * d as f32) as f64 + 0.5).floor() as i32;
             *actual = n as f32 / d as f32;
             if (usefac - *actual).abs() < 0.001 {
                 denom = d;
@@ -655,7 +682,7 @@ pub unsafe fn fourier_crop_sizes(
             return 2;
         }
         if factor < 1. {
-            *actual = 1. / *actual;
+            *actual = (1. / *actual as f64) as f32;
             core::mem::swap(&mut denom, &mut numer);
         }
         let p = (min_pad as f32).max(pad * size as f32) as i32;
@@ -1136,6 +1163,17 @@ pub fn set_peak_find_limits(xlo: i32, xhi: i32, ylo: i32, yhi: i32, ellipse: i32
 pub fn set_peak_find_angle(angle: f32) {
     S_LIMIT_ANGLE.store(angle.to_bits(), Ordering::SeqCst);
 }
+/// `findManyXCorrPeaks` (`filtxcorr.c:1029`).
+///
+/// Translated statement by statement.  The previous version collected every
+/// local maximum into a `Vec` and sorted once at the end; the source instead
+/// keeps a running `threshold` (the lowest peak currently retained), skips
+/// anything below it, and sorts-and-repacks into an alternating pair of
+/// buffers whenever `maxGrow` is reached.  That is not just an optimisation:
+/// the threshold changes which peaks are examined at all, and the peak test
+/// itself is deliberately asymmetric — `>` against the lower/left neighbours
+/// and `>=` against the upper/right ones — so ties resolve to one particular
+/// pixel.
 pub unsafe fn find_many_xcorr_peaks(
     array: *mut f32,
     nxdim: i32,
@@ -1150,101 +1188,312 @@ pub unsafe fn find_many_xcorr_peaks(
     num_found: *mut i32,
 ) -> i32 {
     unsafe {
-        if (max_grow as f32) <= 1.05 * max_peaks as f32 {
+        let mut threshold = -1.0e30_f32;
+        let mut min_found = 1.0e30_f32;
+        let mut num_peaks = 0_i32;
+        let mut use_temp2 = 1_i32;
+        let mut if_first = 1_i32;
+
+        if max_grow as f32 <= 1.05 * max_peaks as f32 {
             return 1;
         }
-        let nx = nxdim - 2;
-        let xs = (ix_offset + 1).max(0);
-        let mut xe = (nxdim - ix_offset - 1).min(nxdim);
+
+        let indexes = libc::malloc(max_grow as usize * core::mem::size_of::<i32>()).cast::<i32>();
+        let ix_temp1 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
+        let ix_temp2 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
+        let iy_temp1 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
+        let iy_temp2 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
+        let peak_temp1 =
+            libc::malloc(max_grow as usize * core::mem::size_of::<f32>()).cast::<f32>();
+        let peak_temp2 =
+            libc::malloc(max_grow as usize * core::mem::size_of::<f32>()).cast::<f32>();
+        if ix_temp1.is_null()
+            || ix_temp2.is_null()
+            || iy_temp1.is_null()
+            || iy_temp2.is_null()
+            || peak_temp1.is_null()
+            || peak_temp2.is_null()
+            || indexes.is_null()
+        {
+            libc::free(indexes.cast());
+            libc::free(ix_temp1.cast());
+            libc::free(ix_temp2.cast());
+            libc::free(iy_temp1.cast());
+            libc::free(iy_temp2.cast());
+            libc::free(peak_temp1.cast());
+            libc::free(peak_temp2.cast());
+            return -1;
+        }
+
+        let mut ix_temp = ix_temp1;
+        let mut iy_temp = iy_temp1;
+        let mut peak_temp = peak_temp1;
+        let ix_start = 0.max(ix_offset + 1);
+        let mut ix_end = nxdim.min(nxdim - ix_offset - 1);
         if ix_offset < -1 {
-            xe = nxdim - 2;
+            ix_end = nxdim - 2;
         }
-        let ys = (iy_offset + 1).max(0);
-        let ye = (ny - iy_offset - 1).min(ny);
-        let mut found: Vec<(f32, i32, i32)> = Vec::new();
-        for iy in ys..ye {
-            for ix in xs..xe {
-                let v = *array.add((ix + iy * nxdim) as usize);
-                let edge = iy_offset < 0 && (iy == 0 || iy == ny - 1 || ix == 0 || ix == xe - 1);
-                let xl = (ix + xe - 1) % xe;
-                let xr = (ix + 1) % xe;
-                let yu = (iy + ny - 1) % ny;
-                let yd = (iy + 1) % ny;
-                let local = if edge {
-                    v >= *array.add((xl + iy * nxdim) as usize)
-                        && v >= *array.add((xr + iy * nxdim) as usize)
-                        && v >= *array.add((xl + yu * nxdim) as usize)
-                        && v >= *array.add((ix + yu * nxdim) as usize)
-                        && v >= *array.add((xr + yu * nxdim) as usize)
-                        && v >= *array.add((xl + yd * nxdim) as usize)
-                        && v >= *array.add((ix + yd * nxdim) as usize)
-                        && v >= *array.add((xr + yd * nxdim) as usize)
-                } else {
-                    v > *array.add((ix - 1 + (iy - 1) * nxdim) as usize)
-                        && v >= *array.add((ix + 1 + (iy - 1) * nxdim) as usize)
-                        && v > *array.add((ix - 1 + iy * nxdim) as usize)
-                        && v >= *array.add((ix + 1 + iy * nxdim) as usize)
-                        && v > *array.add((ix - 1 + (iy + 1) * nxdim) as usize)
-                        && v >= *array.add((ix + 1 + (iy + 1) * nxdim) as usize)
-                        && v > *array.add((ix + (iy - 1) * nxdim) as usize)
-                        && v >= *array.add((ix + (iy + 1) * nxdim) as usize)
-                };
-                if local {
-                    found.push((v, ix, iy));
+        let iy_start = 0.max(iy_offset + 1);
+        let iy_end = ny.min(ny - iy_offset - 1);
+
+        for iy in iy_start..iy_end {
+            let ybase = nxdim * iy;
+            let yprev = (iy + ny - 1) % ny;
+            let ynext = (iy + 1) % ny;
+            for ix in ix_start..ix_end {
+                let xbase = ybase + ix;
+                let val = *array.add(xbase as usize);
+
+                // Ignore anything below the lowest peak currently retained.
+                if val < threshold {
+                    continue;
+                }
+
+                let mut is_peak = 0;
+                if iy_offset < 0 && (iy == 0 || iy == ny - 1 || ix == 0 || ix == ix_end - 1) {
+                    let xprev = (ix + ix_end - 1) % ix_end;
+                    let xnext = (ix + 1) % ix_end;
+                    if val < *array.add((xprev + iy * nxdim) as usize)
+                        || val < *array.add((xnext + iy * nxdim) as usize)
+                        || val < *array.add((xprev + yprev * nxdim) as usize)
+                        || val < *array.add((ix + yprev * nxdim) as usize)
+                        || val < *array.add((xnext + yprev * nxdim) as usize)
+                        || val < *array.add((xprev + ynext * nxdim) as usize)
+                        || val < *array.add((ix + ynext * nxdim) as usize)
+                        || val < *array.add((xnext + ynext * nxdim) as usize)
+                    {
+                        continue;
+                    }
+                    is_peak = 1;
+                }
+
+                if is_peak != 0
+                    || (val > *array.add((xbase - nxdim) as usize)
+                        && val >= *array.add((xbase + nxdim) as usize)
+                        && val > *array.add((xbase - 1) as usize)
+                        && val >= *array.add((xbase + 1) as usize)
+                        && val > *array.add((xbase + nxdim - 1) as usize)
+                        && val >= *array.add((xbase + 1 - nxdim) as usize)
+                        && val > *array.add((xbase + nxdim + 1) as usize)
+                        && val >= *array.add((xbase - 1 - nxdim) as usize))
+                {
+                    *ix_temp.add(num_peaks as usize) = ix as i16;
+                    *iy_temp.add(num_peaks as usize) = iy as i16;
+                    *peak_temp.add(num_peaks as usize) = -val;
+                    *indexes.add(num_peaks as usize) = num_peaks;
+                    num_peaks += 1;
+
+                    if num_peaks <= max_peaks && val < min_found {
+                        min_found = val;
+                    }
+                    if num_peaks == max_peaks {
+                        threshold = min_found;
+                    }
+
+                    if num_peaks == max_grow {
+                        sort_and_repack(
+                            indexes,
+                            ix_temp,
+                            iy_temp,
+                            peak_temp,
+                            max_peaks,
+                            num_peaks,
+                            if use_temp2 != 0 { ix_temp2 } else { ix_temp1 },
+                            if use_temp2 != 0 { iy_temp2 } else { iy_temp1 },
+                            if use_temp2 != 0 {
+                                peak_temp2
+                            } else {
+                                peak_temp1
+                            },
+                            if_first,
+                        );
+                        if_first = 0;
+                        num_peaks = max_peaks;
+                        ix_temp = if use_temp2 != 0 { ix_temp2 } else { ix_temp1 };
+                        iy_temp = if use_temp2 != 0 { iy_temp2 } else { iy_temp1 };
+                        peak_temp = if use_temp2 != 0 {
+                            peak_temp2
+                        } else {
+                            peak_temp1
+                        };
+                        use_temp2 = 1 - use_temp2;
+                        threshold = -*peak_temp.add((max_peaks - 1) as usize);
+                    }
                 }
             }
         }
-        found.sort_unstable_by(|left, right| right.0.total_cmp(&left.0));
-        *num_found = found.len().min(max_peaks as usize) as i32;
-        for (i, (v, ix, iy)) in found.into_iter().take(max_peaks as usize).enumerate() {
-            *peak.add(i) = v;
-            let xl = (ix + xe - 1) % xe;
-            let xr = (ix + 1) % xe;
-            let yu = (iy + ny - 1) % ny;
-            let yd = (iy + 1) % ny;
-            let edge = iy_offset < 0 && (ix == 0 || iy == 0 || ix == xe - 1 || iy == ny - 1);
-            let mut px = ix as f32
-                + if edge {
-                    parabolic_fit_position(
-                        *array.add((xl + iy * nxdim) as usize),
-                        v,
-                        *array.add((xr + iy * nxdim) as usize),
-                    ) as f32
-                } else {
-                    parabolic_fit_position(
-                        *array.add((ix - 1 + iy * nxdim) as usize),
-                        v,
-                        *array.add((ix + 1 + iy * nxdim) as usize),
-                    ) as f32
-                };
-            let mut py = iy as f32
-                + if edge {
-                    parabolic_fit_position(
-                        *array.add((ix + yu * nxdim) as usize),
-                        v,
-                        *array.add((ix + yd * nxdim) as usize),
-                    ) as f32
-                } else {
-                    parabolic_fit_position(
-                        *array.add((ix + (iy - 1) * nxdim) as usize),
-                        v,
-                        *array.add((ix + (iy + 1) * nxdim) as usize),
-                    ) as f32
-                };
-            if iy_offset < 0 {
-                if px > nx as f32 / 2. {
-                    px -= nx as f32;
+
+        sort_and_repack(
+            indexes,
+            ix_temp,
+            iy_temp,
+            peak_temp,
+            max_peaks,
+            num_peaks,
+            if use_temp2 != 0 { ix_temp2 } else { ix_temp1 },
+            if use_temp2 != 0 { iy_temp2 } else { iy_temp1 },
+            if use_temp2 != 0 {
+                peak_temp2
+            } else {
+                peak_temp1
+            },
+            if_first,
+        );
+        ix_temp = if use_temp2 != 0 { ix_temp2 } else { ix_temp1 };
+        iy_temp = if use_temp2 != 0 { iy_temp2 } else { iy_temp1 };
+        peak_temp = if use_temp2 != 0 {
+            peak_temp2
+        } else {
+            peak_temp1
+        };
+        num_peaks = num_peaks.min(max_peaks);
+
+        for ind in 0..num_peaks {
+            *peak.add(ind as usize) = -*peak_temp.add(ind as usize);
+            let ix = *ix_temp.add(ind as usize) as i32;
+            let iy = *iy_temp.add(ind as usize) as i32;
+            let xbase = ix + iy * nxdim;
+            let (cx, cy);
+            if iy_offset < 0 && (ix == 0 || iy == 0 || ix == ix_end - 1 || iy == ny - 1) {
+                let xprev = (ix + ix_end - 1) % ix_end;
+                let xnext = (ix + 1) % ix_end;
+                let yprev = (iy + ny - 1) % ny;
+                let ynext = (iy + 1) % ny;
+                cx = parabolic_fit_position(
+                    *array.add((xprev + iy * nxdim) as usize),
+                    *array.add(xbase as usize),
+                    *array.add((xnext + iy * nxdim) as usize),
+                ) as f32;
+                cy = parabolic_fit_position(
+                    *array.add((ix + yprev * nxdim) as usize),
+                    *array.add(xbase as usize),
+                    *array.add((ix + ynext * nxdim) as usize),
+                ) as f32;
+            } else {
+                cx = parabolic_fit_position(
+                    *array.add((xbase - 1) as usize),
+                    *array.add(xbase as usize),
+                    *array.add((xbase + 1) as usize),
+                ) as f32;
+                cy = parabolic_fit_position(
+                    *array.add((xbase - nxdim) as usize),
+                    *array.add(xbase as usize),
+                    *array.add((xbase + nxdim) as usize),
+                ) as f32;
+            }
+            *xpeak.add(ind as usize) = ix as f32 + cx;
+            *ypeak.add(ind as usize) = iy as f32 + cy;
+        }
+        *num_found = num_peaks;
+
+        if iy_offset < 0 {
+            for ind in 0..num_peaks {
+                if *xpeak.add(ind as usize) > (ix_end / 2) as f32 {
+                    *xpeak.add(ind as usize) -= ix_end as f32;
                 }
-                if py > ny as f32 / 2. {
-                    py -= ny as f32;
+                if *ypeak.add(ind as usize) > (ny / 2) as f32 {
+                    *ypeak.add(ind as usize) -= ny as f32;
                 }
             }
-            *xpeak.add(i) = px;
-            *ypeak.add(i) = py;
         }
+
+        libc::free(indexes.cast());
+        libc::free(ix_temp1.cast());
+        libc::free(ix_temp2.cast());
+        libc::free(iy_temp1.cast());
+        libc::free(iy_temp2.cast());
+        libc::free(peak_temp1.cast());
+        libc::free(peak_temp2.cast());
         0
     }
 }
+
+/// `sortAndRepack` (`filtxcorr.c:1204`), the file-static helper that sorts the
+/// new part of the peak arrays and repacks the ones being kept into a different
+/// set of arrays.  `COPY_FROM_TO` (`filtxcorr.c:1198`) is expanded at each of
+/// its three use sites.
+unsafe fn sort_and_repack(
+    indexes: *mut i32,
+    ix_from: *const i16,
+    iy_from: *const i16,
+    peak_from: *mut f32,
+    keep_peaks: i32,
+    num_peaks: i32,
+    ix_to: *mut i16,
+    iy_to: *mut i16,
+    peak_to: *mut f32,
+    if_first: i32,
+) {
+    unsafe {
+        let mut ind: i32;
+        let mut from: i32;
+        let mut low: i32;
+        let mut high: i32;
+
+        /* First time or not enough peaks, just sort and repack */
+        if if_first > 0 || num_peaks <= keep_peaks {
+            rs_sort_indexed_floats(peak_from, indexes, num_peaks);
+            ind = 0;
+            while ind
+                < if keep_peaks < num_peaks {
+                    keep_peaks
+                } else {
+                    num_peaks
+                }
+            {
+                from = *indexes.add(ind as usize);
+                *ix_to.add(ind as usize) = *ix_from.add(from as usize);
+                *iy_to.add(ind as usize) = *iy_from.add(from as usize);
+                *peak_to.add(ind as usize) = *peak_from.add(from as usize);
+                *indexes.add(ind as usize) = ind;
+                ind += 1;
+            }
+        } else {
+            /* Otherwise sort the upper part of the array, setting index offset
+            appropriately */
+            rs_set_sort_index_offset(keep_peaks);
+            rs_sort_indexed_floats(
+                peak_from.add(keep_peaks as usize),
+                indexes.add(keep_peaks as usize),
+                num_peaks - keep_peaks,
+            );
+
+            /* Merge the two sections by taking the lowest value from each eat each step */
+            low = 0;
+            high = keep_peaks;
+            ind = 0;
+            while ind < keep_peaks && low < keep_peaks && high < num_peaks {
+                if *peak_from.add(*indexes.add(low as usize) as usize)
+                    < *peak_from.add(*indexes.add(high as usize) as usize)
+                {
+                    from = *indexes.add(low as usize);
+                    low += 1;
+                } else {
+                    from = *indexes.add(high as usize);
+                    high += 1;
+                }
+                *ix_to.add(ind as usize) = *ix_from.add(from as usize);
+                *iy_to.add(ind as usize) = *iy_from.add(from as usize);
+                *peak_to.add(ind as usize) = *peak_from.add(from as usize);
+                *indexes.add(ind as usize) = ind;
+                ind += 1;
+            }
+
+            /* Finish up with one or the other if deficient */
+            low = if low < keep_peaks { low } else { high };
+            while ind < keep_peaks {
+                from = *indexes.add(low as usize);
+                low += 1;
+                *ix_to.add(ind as usize) = *ix_from.add(from as usize);
+                *iy_to.add(ind as usize) = *iy_from.add(from as usize);
+                *peak_to.add(ind as usize) = *peak_from.add(from as usize);
+                *indexes.add(ind as usize) = ind;
+                ind += 1;
+            }
+        }
+    }
+}
+
 pub unsafe fn find_spaced_xcorr_peaks(
     array: *mut f32,
     nxdim: i32,
@@ -1409,6 +1658,7 @@ pub unsafe fn weighted_cc_coefficient(
         )
     }
 }
+/// `fourierShiftVolume` (`filtxcorr.c:2070`).
 pub unsafe fn fourier_shift_volume(
     fft: *mut f32,
     nx_pad: i32,
@@ -1420,30 +1670,35 @@ pub unsafe fn fourier_shift_volume(
     temp: *mut f32,
 ) {
     unsafe {
+        // `float pi = 3.141593;` -- not the full-precision constant.
+        let pi: f32 = 3.141593;
         if dx == 0. && dy == 0. && dz == 0. {
             return;
         }
         let nx_fft = nx_pad / 2 + 1;
         let nx_dim = nx_pad + 2;
         for ix in 0..nx_fft {
-            let arg = -2.0 * core::f32::consts::PI * 0.5 * ix as f32 / (nx_fft - 1) as f32 * dx;
-            *temp.add((2 * ix) as usize) = arg.cos();
-            *temp.add((2 * ix + 1) as usize) = arg.sin();
+            // `freq = 0.5 * ix / (nxFFT - 1.);` is a double expression stored into a float.
+            let freq = (0.5 * ix as f64 / (nx_fft as f64 - 1.)) as f32;
+            // `arg` is a double and cos/sin are the double routines, cast to float once.
+            let arg = -2.0 * pi as f64 * freq as f64 * dx as f64;
+            *temp.add((2 * ix) as usize) = arg.cos() as f32;
+            *temp.add((2 * ix + 1) as usize) = arg.sin() as f32;
         }
         for iz in 0..nz_pad {
             let mut zfreq = iz as f32 / nz_pad as f32;
             if zfreq > 0.5 {
-                zfreq -= 1.0;
+                zfreq = (zfreq as f64 - 1.0) as f32;
             }
-            let zarg = -2.0 * core::f32::consts::PI * zfreq * dz;
-            let (zcos, zsin) = (zarg.cos(), zarg.sin());
+            let zarg = -2.0 * pi as f64 * zfreq as f64 * dz as f64;
+            let (zcos, zsin) = (zarg.cos() as f32, zarg.sin() as f32);
             for iy in 0..ny_pad {
                 let mut yfreq = iy as f32 / ny_pad as f32;
                 if yfreq > 0.5 {
-                    yfreq -= 1.0;
+                    yfreq = (yfreq as f64 - 1.0) as f32;
                 }
-                let yarg = -2.0 * core::f32::consts::PI * yfreq * dy;
-                let (ycos, ysin) = (yarg.cos(), yarg.sin());
+                let yarg = -2.0 * pi as f64 * yfreq as f64 * dy as f64;
+                let (ycos, ysin) = (yarg.cos() as f32, yarg.sin() as f32);
                 let yzre = ycos * zcos - ysin * zsin;
                 let yzim = ycos * zsin + ysin * zcos;
                 let base = (iy * nx_dim + iz * nx_dim * ny_pad) as usize;
@@ -1463,6 +1718,7 @@ pub unsafe fn fourier_shift_volume(
         }
     }
 }
+/// `fourierReduceVolume` (`filtxcorr.c:2158`).
 pub unsafe fn fourier_reduce_volume(
     input: *mut f32,
     nxi: i32,
@@ -1479,8 +1735,12 @@ pub unsafe fn fourier_reduce_volume(
 ) {
     unsafe {
         let xfac = nxi as f32 / nxo as f32;
+        // `float dxy = -(redFac - 1) / (2. * redFac);` -- the `2. *` makes the divide double.
+        let dxy = ((-(xfac - 1.0)) as f64 / (2.0 * xfac as f64)) as f32;
         let zfac = nzi as f32 / nzo as f32;
-        let scale = 1.0 / (xfac * xfac * zfac).powf(1.0 / 3.0);
+        let zd = ((-(zfac - 1.0)) as f64 / (2.0 * zfac as f64)) as f32;
+        // `1. / pow(redFac * redFac * zRedFac, 1./3.)` -- the double `pow`, rounded once.
+        let scale = (1.0 / ((xfac * xfac * zfac) as f64).powf(1.0 / 3.0)) as f32;
         let mut dst = out;
         for zloop in 0..2 {
             let (zs, ze) = if zloop == 0 {
@@ -1506,8 +1766,6 @@ pub unsafe fn fourier_reduce_volume(
             }
         }
         if !temp.is_null() {
-            let dxy = -(xfac - 1.0) / (2.0 * xfac);
-            let zd = -(zfac - 1.0) / (2.0 * zfac);
             fourier_shift_volume(
                 out,
                 nxo,
@@ -1521,6 +1779,7 @@ pub unsafe fn fourier_reduce_volume(
         }
     }
 }
+/// `fourierExpandVolume` (`filtxcorr.c:2226`).
 pub unsafe fn fourier_expand_volume(
     input: *mut f32,
     nxi: i32,
@@ -1536,12 +1795,13 @@ pub unsafe fn fourier_expand_volume(
     temp: *mut f32,
 ) {
     unsafe {
-        core::ptr::write_bytes(out, 0, ((nxo + 2) * nyo * nzo) as usize);
         let xfac = nxo as f32 / nxi as f32;
         let zfac = nzo as f32 / nzi as f32;
+        // `float dxy = (expFac - 1.) / (2. * expFac);` -- a wholly double expression.
+        let dxy = ((xfac as f64 - 1.0) / (2.0 * xfac as f64)) as f32;
+        let zd = ((zfac as f64 - 1.0) / (2.0 * zfac as f64)) as f32;
+        core::ptr::write_bytes(out, 0, ((nxo + 2) * nyo * nzo) as usize);
         if !temp.is_null() {
-            let dxy = (xfac - 1.0) / (2.0 * xfac);
-            let zd = (zfac - 1.0) / (2.0 * zfac);
             fourier_shift_volume(input, nxi, nyi, nzi, dx + dxy, dy + dxy, dz + zd, temp);
         }
         let mut src = input;
@@ -1885,8 +2145,267 @@ pub unsafe fn fouriercropsizes(
 #[cfg(test)]
 mod tests {
     use super::{
-        find_many_xcorr_peaks, find_spaced_xcorr_peaks, wrap_fft_slice, xcorr_peak_find_width,
+        find_many_xcorr_peaks, find_spaced_xcorr_peaks, fourier_crop_sizes, fourier_expand_volume,
+        fourier_reduce_volume, fourier_shift_volume, wrap_fft_slice, xcorr_peak_find_width,
     };
+
+    #[test]
+    fn fourier_shift_volume_arg_is_evaluated_in_double() {
+        // `arg` is a double in the C and cos/sin are the double routines; the
+        // shift amounts here are chosen so that an all-f32 evaluation differs.
+        const SHIFT: [u32; 160] = [
+            0xc0400000, 0x40124924, 0x40ed414d, 0x3fea7ba6, 0xc0570245, 0x411ef380, 0xc0a72e20,
+            0x4068aa38, 0xc04aa27a, 0xc00328b7, 0x40c8bd90, 0x40ad752d, 0xc0e2bbb6, 0x410fa33b,
+            0xc0db24bb, 0x400fafb6, 0xc045e345, 0xc025b854, 0xc0bdb1a0, 0x40d922fa, 0x405250d2,
+            0x40af5263, 0xc1016573, 0x3d85b820, 0xc03bfda0, 0xc05b171a, 0xc10f8cb7, 0x40795910,
+            0xc0c0d606, 0x404656fa, 0x41008777, 0x40818b0c, 0x3fdf31d0, 0x409ae40d, 0x4126db6d,
+            0x3fedb6db, 0x40e57dba, 0x3fa363fa, 0xc0587ea2, 0x411542c5, 0xc0583b74, 0x409a30ca,
+            0xc062d87e, 0xbf9855a9, 0x3fce29fc, 0x40f725f8, 0xc12b2cca, 0x3ff305a2, 0xc0c1f5dd,
+            0xc0361f6c, 0xc05f93e6, 0xbfce1411, 0xc00c49cf, 0x4104951c, 0xc13a6ddb, 0xbffdb734,
+            0xc0b2e61c, 0xc0a29feb, 0x3f002976, 0xc0857dec, 0xc0c20422, 0x40e23782, 0xc06c2c1a,
+            0x40ac4f44, 0xc086022a, 0xc0eac7d0, 0x3fb524be, 0xc0910e82, 0xc0f7c52a, 0xc0cf9ad0,
+            0x40d46c57, 0xc0073aa9, 0x3ebddd38, 0x4115b6e9, 0xc05b339c, 0x4086da42, 0x4048b0d6,
+            0x41277825, 0x3ffe5e32, 0x40e7f3a5, 0xc10af880, 0x40b112fe, 0xc0c5d085, 0xbf018222,
+            0xbf812a39, 0xc06722d4, 0xc0cec5d9, 0x409f27de, 0xc0e14b76, 0xc10c4f36, 0xc0d1ffd9,
+            0xc0223508, 0xbf1d767c, 0xc07a76e9, 0xc10b0735, 0x3fdeb606, 0xc0be319f, 0x400af814,
+            0x3fe0e643, 0xc0f6c2d1, 0xbb38b700, 0xc08cd3a1, 0xc1154632, 0xc0170bf4, 0xc0d2ffe9,
+            0xbf8f8680, 0x4091cb4f, 0xc0f15f6a, 0x409b4d51, 0xbf9e3bdf, 0x40dfcf3b, 0x40f77ea6,
+            0x409c1644, 0x40a85970, 0xc1053d9c, 0x40a16d5a, 0xc0b56f54, 0xbf5498c4, 0xbed40454,
+            0xc06e8573, 0x40a98d04, 0xc0b580bd, 0x40ec17fe, 0x40f6ee50, 0x3f655246, 0x40cef6d0,
+            0xc04e31c8, 0x40016c6f, 0x40c1f302, 0x40bb7bfd, 0x4097ab23, 0x4129e2ef, 0xbf942943,
+            0x40e93f83, 0xc06f3442, 0x3fdbcf26, 0x4048b9a5, 0x4109b698, 0x403bf1de, 0x40b7f6d2,
+            0xc06f3442, 0x40ebf8bb, 0xc08f3406, 0x3f967488, 0xbf683f5b, 0x411e62f0, 0xbe8be748,
+            0x40dba29c, 0xc10a5514, 0xc0456d35, 0x40a806e0, 0x3f1b2ed7, 0x40d74458, 0xc1065816,
+            0x4096367a, 0xc0b6fcce, 0x40daa189, 0x40ee7de9, 0x3ef7c798, 0x40c0bc0e,
+        ];
+        let dx: f32 = -0.5 + 1.0 / 41.0;
+        let dz: f32 = -0.5 + 2.0 / 41.0;
+        let mut fft = (0..160)
+            .map(|i| ((i * 37) % 97) as f32 / 7.0 - 3.0)
+            .collect::<Vec<f32>>();
+        let mut temp = vec![0_f32; 16];
+        unsafe { fourier_shift_volume(fft.as_mut_ptr(), 8, 4, 4, dx, dx, dz, temp.as_mut_ptr()) };
+        assert_eq!(
+            fft.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+            SHIFT.to_vec()
+        );
+    }
+
+    #[test]
+    fn fourier_expand_volume_matches_native_bit_patterns() {
+        // Captured from the native libcfshr `fourierExpandVolume`.
+        const EXPAND: [u32; 160] = [
+            0xc0800000, 0x40b45d18, 0x401ffe3d, 0x410692cf, 0x411e6455, 0x40da0bc7, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x403504f1, 0xc0941b53, 0x409c2c48, 0xc0e0ffa1, 0x409d1741,
+            0xc13745d1, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x408ffe20, 0x40da0bc7, 0x412cda4b, 0x4039a17a, 0xc0000002, 0xc091745c,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x3f8ba2dd, 0xc0f45d17, 0xbe7774a0, 0xc1382d23,
+            0x40da0bc5, 0xc05e2900, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        ];
+        let mut input = (0..24)
+            .map(|i| ((i * 53) % 89) as f32 / 11.0 - 2.0)
+            .collect::<Vec<f32>>();
+        let mut out = vec![0_f32; 10 * 4 * 4];
+        let mut temp = vec![0_f32; 16];
+        unsafe {
+            fourier_expand_volume(
+                input.as_mut_ptr(),
+                4,
+                2,
+                2,
+                out.as_mut_ptr(),
+                8,
+                4,
+                4,
+                0.,
+                0.,
+                0.,
+                temp.as_mut_ptr(),
+            )
+        };
+        assert_eq!(
+            out.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+            EXPAND.to_vec()
+        );
+    }
+
+    #[test]
+    fn fourier_crop_sizes_matches_native_sizes_and_factors() {
+        // (size, factor bits, return code, fullPadSize, cropPadSize, actualFac bits)
+        // captured from the native libcfshr `fourierCropSizes`.
+        const CASES: [(i32, u32, i32, i32, i32, u32); 50] = [
+            (64, 0x40000000, 0, 96, 48, 0x40000000),
+            (64, 0x3fc00000, 0, 96, 64, 0x3fc00000),
+            (64, 0x3f000000, 0, 96, 192, 0x3f000000),
+            (64, 0x3f2aaaab, 0, 96, 144, 0x3f2aaaab),
+            (64, 0x40400000, 0, 96, 32, 0x40400000),
+            (64, 0x40200000, 0, 100, 40, 0x40200000),
+            (64, 0x3eaaaaab, 0, 96, 288, 0x3eaaaaab),
+            (64, 0x3f99999a, 0, 96, 80, 0x3f99999a),
+            (64, 0x3f4ccccd, 0, 96, 120, 0x3f4ccccd),
+            (64, 0x40e00000, 0, 98, 14, 0x40e00000),
+            (48, 0x40000000, 0, 80, 40, 0x40000000),
+            (48, 0x3fc00000, 0, 84, 56, 0x3fc00000),
+            (48, 0x3f000000, 0, 80, 160, 0x3f000000),
+            (48, 0x3f2aaaab, 0, 80, 120, 0x3f2aaaab),
+            (48, 0x40400000, 0, 84, 28, 0x40400000),
+            (48, 0x40200000, 0, 80, 32, 0x40200000),
+            (48, 0x3eaaaaab, 0, 80, 240, 0x3eaaaaab),
+            (48, 0x3f99999a, 0, 84, 70, 0x3f99999a),
+            (48, 0x3f4ccccd, 0, 80, 100, 0x3f4ccccd),
+            (48, 0x40e00000, 0, 84, 12, 0x40e00000),
+            (5, 0x40000000, 0, 40, 20, 0x40000000),
+            (5, 0x3fc00000, 0, 42, 28, 0x3fc00000),
+            (5, 0x3f000000, 0, 40, 80, 0x3f000000),
+            (5, 0x3f2aaaab, 0, 40, 60, 0x3f2aaaab),
+            (5, 0x40400000, 0, 42, 14, 0x40400000),
+            (5, 0x40200000, 0, 40, 16, 0x40200000),
+            (5, 0x3eaaaaab, 0, 40, 120, 0x3eaaaaab),
+            (5, 0x3f99999a, 0, 48, 40, 0x3f99999a),
+            (5, 0x3f4ccccd, 0, 40, 50, 0x3f4ccccd),
+            (5, 0x40e00000, 0, 42, 6, 0x40e00000),
+            (100, 0x40000000, 0, 132, 66, 0x40000000),
+            (100, 0x3fc00000, 0, 132, 88, 0x3fc00000),
+            (100, 0x3f000000, 0, 132, 264, 0x3f000000),
+            (100, 0x3f2aaaab, 0, 132, 198, 0x3f2aaaab),
+            (100, 0x40400000, 0, 132, 44, 0x40400000),
+            (100, 0x40200000, 0, 140, 56, 0x40200000),
+            (100, 0x3eaaaaab, 0, 132, 396, 0x3eaaaaab),
+            (100, 0x3f99999a, 0, 132, 110, 0x3f99999a),
+            (100, 0x3f4ccccd, 0, 144, 180, 0x3f4ccccd),
+            (100, 0x40e00000, 0, 140, 20, 0x40e00000),
+            (257, 0x40000000, 0, 300, 150, 0x40000000),
+            (257, 0x3fc00000, 0, 294, 196, 0x3fc00000),
+            (257, 0x3f000000, 0, 294, 588, 0x3f000000),
+            (257, 0x3f2aaaab, 0, 300, 450, 0x3f2aaaab),
+            (257, 0x40400000, 0, 294, 98, 0x40400000),
+            (257, 0x40200000, 0, 300, 120, 0x40200000),
+            (257, 0x3eaaaaab, 0, 294, 882, 0x3eaaaaab),
+            (257, 0x3f99999a, 0, 300, 250, 0x3f99999a),
+            (257, 0x3f4ccccd, 0, 312, 390, 0x3f4ccccd),
+            (257, 0x40e00000, 0, 294, 42, 0x40e00000),
+        ];
+        for (size, factor, code, full_expect, crop_expect, actual_expect) in CASES {
+            let (mut full, mut crop, mut actual) = (-1, -1, -1_f32);
+            let got = unsafe {
+                fourier_crop_sizes(
+                    size,
+                    f32::from_bits(factor),
+                    0.01,
+                    16,
+                    15,
+                    &mut full,
+                    &mut crop,
+                    &mut actual,
+                )
+            };
+            assert_eq!(
+                (got, full, crop, actual.to_bits()),
+                (code, full_expect, crop_expect, actual_expect),
+                "size {} factor {:08x}",
+                size,
+                factor
+            );
+        }
+    }
+
+    #[test]
+    fn fourier_shift_and_reduce_volume_match_native_bit_patterns() {
+        // Captured from the native libcfshr `fourierShiftVolume` and
+        // `fourierReduceVolume` (reference build) for these exact inputs.  The
+        // C uses `float pi = 3.141593;` and a *double* `arg`, so the phase
+        // factors are one ulp away from an all-f32 evaluation.
+        const SHIFT: [u32; 160] = [
+            0xc0400000, 0x40124924, 0x40f1245f, 0x3f9ed6c6, 0xbfe08852, 0x41256e0c, 0xc0872f59,
+            0x4098570a, 0xc0695db0, 0xbf76b362, 0x40e58673, 0xc0850cff, 0x40dd2364, 0x4111cd51,
+            0x3f828c72, 0x40e44c5e, 0xc037e29d, 0x403521e2, 0x40d5ed3e, 0x40c14e7b, 0x3f4c8f1c,
+            0xc0cad5cd, 0x40d8adb0, 0x408d858f, 0x3f6720cf, 0x408d6c62, 0x411c78f2, 0x3e3da1b0,
+            0x40d723a1, 0xbf58f7c0, 0xbf99c916, 0x410ea34e, 0xc06f3443, 0x40624632, 0x4051cd0a,
+            0x4121297f, 0x4032db1b, 0x40d742d8, 0xc117a160, 0x403c5076, 0xbf93a321, 0x40b8aa80,
+            0xc06bde81, 0x3f214d80, 0x40b12c64, 0x40b3db44, 0xc0eb6fd8, 0x40ffdc12, 0xc0cd3d8c,
+            0x3ff639ab, 0xbfa90818, 0x4067377a, 0x41087b84, 0x3f5713da, 0x3f567d80, 0x413ca1b8,
+            0xc044dcfa, 0x40dcd2b2, 0xc081492f, 0x3f939da4, 0x40f431e6, 0xc0aad62e, 0x4091e53e,
+            0xc0957f50, 0x405f1007, 0x40f640fa, 0xbfbd75e4, 0x4090641f, 0x41025526, 0x40bf29d1,
+            0x40c1f304, 0x405bcf2a, 0xc0c2360b, 0x40e43632, 0xc0a97c0e, 0x3f997e83, 0xc04bb1be,
+            0x41273e15, 0xbfe4ba21, 0x40e99d5a, 0xbfe593dc, 0x4122426f, 0xc0868d21, 0x4091e7fb,
+            0xc0646afc, 0xbf933de7, 0x3f9cc136, 0x4100fc7b, 0xc12e5429, 0x40323e14, 0x3f64495a,
+            0x40df4d02, 0xc03cd553, 0x40292fc8, 0x40d54b06, 0x40badf6a, 0x40b2df0e, 0x403dcf10,
+            0xc0d29ee9, 0x408c533c, 0x3f375864, 0x408af308, 0x4119f944, 0x3d698e10, 0x40d38c23,
+            0xbf81fc51, 0xbfa14aca, 0x410b8b6c, 0xc06f3443, 0x4055581c, 0x40558de6, 0x411e119c,
+            0x403a0a14, 0x40d1e2bb, 0xc11521b3, 0x40341c94, 0xc0ae2faa, 0xbfe53970, 0xbd849fa0,
+            0xc06ff40c, 0x40e443f6, 0xc043d00e, 0x408db6db, 0x411b6db7, 0xbf45c09a, 0x40cf78f1,
+            0xc061c774, 0x3fb61a75, 0x40aea381, 0x40cd9787, 0x41302bae, 0x406f343f, 0x40a028bf,
+            0x40ad914d, 0xbf260caa, 0x4081f9b1, 0x4110af66, 0x3fbb7fad, 0x40ce6674, 0xbe8850b8,
+            0x41043e84, 0xbe383700, 0x4059dde7, 0x40488dd2, 0x4106f715, 0xc0a84d4e, 0x40a9c973,
+            0xc08b99e6, 0x40838572, 0x4103545e, 0xbf83fe18, 0x40a5e490, 0x41061603, 0x40d7e8e6,
+            0x40c1f304, 0x4087c3b8, 0xc0c9b7c4, 0x40fcf544, 0xc0b7da01, 0x3fef8045,
+        ];
+        const REDUCE: [u32; 24] = [
+            0xbf800000, 0x3fb45d18, 0xbf85bfe3, 0x3ff6e1b9, 0xbfda0bca, 0x401e6454, 0x3f941b50,
+            0x40183887, 0xbfe75c95, 0xbdb39af0, 0xc01a2e8b, 0xb4c0ba2f, 0x3f941b52, 0x3d83a698,
+            0x3f204f3d, 0x3fc182c3, 0xbf45d179, 0x401a2e8b, 0xc02e8ba2, 0x3ea2e8ad, 0x3db11290,
+            0x3f9bb9b4, 0xbfbd3f5c, 0x3f941b4d,
+        ];
+
+        let mut fft = (0..160)
+            .map(|i| ((i * 37) % 97) as f32 / 7.0 - 3.0)
+            .collect::<Vec<f32>>();
+        let mut temp = vec![0_f32; 16];
+        unsafe {
+            fourier_shift_volume(
+                fft.as_mut_ptr(),
+                8,
+                4,
+                4,
+                -0.375,
+                0.3125,
+                -0.1875,
+                temp.as_mut_ptr(),
+            )
+        };
+        let got = fft.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
+        assert_eq!(got, SHIFT.to_vec());
+
+        let mut input = (0..160)
+            .map(|i| ((i * 53) % 89) as f32 / 11.0 - 2.0)
+            .collect::<Vec<f32>>();
+        let mut out = vec![0_f32; 6 * 2 * 2];
+        unsafe {
+            fourier_reduce_volume(
+                input.as_mut_ptr(),
+                8,
+                4,
+                4,
+                out.as_mut_ptr(),
+                4,
+                2,
+                2,
+                0.,
+                0.,
+                0.,
+                temp.as_mut_ptr(),
+            )
+        };
+        let got = out.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
+        assert_eq!(got, REDUCE.to_vec());
+    }
 
     #[test]
     fn wrap_fft_slice_matches_even_and_odd_source_permutations() {
@@ -1991,5 +2510,104 @@ mod tests {
         };
         assert_eq!(count, 2);
         assert_eq!(peaks, [9., 7.]);
+    }
+}
+
+#[cfg(test)]
+mod find_many_peaks_reference {
+    use super::*;
+
+    /// Values captured from a C driver linked directly against the reference
+    /// `libcfshr.so` at /tmp/imod-reference-build/buildlib, calling
+    /// `findManyXCorrPeaks` on a deterministic array full of ties (values 0..3
+    /// from a fixed LCG), which is where the source's asymmetric `>` / `>=`
+    /// peak test and its threshold/repack ordering actually show.
+    #[test]
+    fn find_many_xcorr_peaks_matches_the_reference_driver() {
+        let (nxdim, ny) = (34_i32, 32_i32);
+        let mut a = vec![0.0_f32; (nxdim * ny) as usize];
+        let mut s: u32 = 12345;
+        for j in 0..ny {
+            for i in 0..nxdim {
+                s = s.wrapping_mul(1103515245).wrapping_add(12345);
+                // 0..3 gives adjacent plateaus, so the source's asymmetric
+                // `>` / `>=` peak test actually decides the outcome.
+                a[(i + j * nxdim) as usize] = ((s >> 18) & 0x3) as f32;
+            }
+        }
+        let cases = [(-1_i32, -1_i32), (0, 0), (2, 2), (-3, -1)];
+        let expected: [&[(f32, f32, f32)]; 4] = [
+            &[
+                (-6.0, -2.75, 3.0),
+                (-0.25, -2.0, 3.0),
+                (7.5, -1.83333397, 3.0),
+                (11.0, -2.16666603, 3.0),
+                (-12.25, -2.0, 3.0),
+                (-3.0, -1.5, 3.0),
+                (2.0, -1.0, 3.0),
+                (14.5, -1.10000038, 3.0),
+            ],
+            &[
+                (21.75, 30.0, 3.0),
+                (31.0, 30.5, 3.0),
+                (24.8999996, 20.5, 3.0),
+                (9.5, 21.5, 3.0),
+                (12.75, 22.5, 3.0),
+                (6.75, 23.166666, 3.0),
+                (10.833333, 23.166666, 3.0),
+                (20.0, 23.0, 3.0),
+            ],
+            &[
+                (19.8999996, 25.833334, 3.0),
+                (23.0, 26.5, 3.0),
+                (27.0, 26.166666, 3.0),
+                (6.5, 27.833334, 3.0),
+                (12.1000004, 28.1000004, 3.0),
+                (19.25, 28.5, 3.0),
+                (6.0, 16.75, 3.0),
+                (11.0, 17.25, 3.0),
+            ],
+            &[
+                (7.5, -1.83333397, 3.0),
+                (11.0, -2.16666603, 3.0),
+                (-10.25, -2.0, 3.0),
+                (-0.5, -1.5, 3.0),
+                (2.0, -1.0, 3.0),
+                (14.5, -1.10000038, 3.0),
+                (14.5, -1.10000038, 3.0),
+                (-13.5, -0.5, 3.0),
+            ],
+        ];
+        for (index, &(ix_off, iy_off)) in cases.iter().enumerate() {
+            let mut xp = [0.0_f32; 64];
+            let mut yp = [0.0_f32; 64];
+            let mut pk = [0.0_f32; 64];
+            let mut n = 0_i32;
+            let rc = unsafe {
+                find_many_xcorr_peaks(
+                    a.as_mut_ptr(),
+                    nxdim,
+                    ny,
+                    ix_off,
+                    iy_off,
+                    xp.as_mut_ptr(),
+                    yp.as_mut_ptr(),
+                    pk.as_mut_ptr(),
+                    8,
+                    32,
+                    &mut n,
+                )
+            };
+            assert_eq!(rc, 0, "case {index}");
+            if expected[index].is_empty() {
+                continue;
+            }
+            assert_eq!(n as usize, expected[index].len(), "case {index} count");
+            for (k, &(ex, ey, ep)) in expected[index].iter().enumerate() {
+                assert_eq!(xp[k].to_bits(), ex.to_bits(), "case {index} x[{k}]");
+                assert_eq!(yp[k].to_bits(), ey.to_bits(), "case {index} y[{k}]");
+                assert_eq!(pk[k].to_bits(), ep.to_bits(), "case {index} peak[{k}]");
+            }
+        }
     }
 }

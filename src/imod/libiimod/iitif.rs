@@ -7,26 +7,37 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::{
-    b3d_error, b3d_shift_bytes, make_all_big_tiff, num_omp_threads,
+    b3d_error, b3d_shift_bytes, group_limits_remainder_at_end, make_all_big_tiff, num_omp_threads,
 };
-use crate::imod::libcfshr::ilist::{ilist_append, ilist_delete, ilist_item, ilist_new};
+use crate::imod::libcfshr::ilist::{
+    Ilist, ilist_append, ilist_delete, ilist_item, ilist_new, ilist_quantum,
+};
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_raw_filt_value};
+use crate::imod::libiimod::iilikemrc::{
+    RAW_MODE_BYTE, RAW_MODE_FLOAT, RAW_MODE_SBYTE, RAW_MODE_SHORT, RAW_MODE_USHORT,
+    ii_setup_raw_headers,
+};
 use crate::imod::libiimod::iimage::{
     IIFILE_TIFF, IIFORMAT_COLORMAP, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE, IIFORMAT_RGB,
     IISTATE_BUSY, IISTATE_READY, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_INT, IITYPE_SHORT, IITYPE_UBYTE,
     IITYPE_UINT, IITYPE_USHORT, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
-    ii_best_tile_size, ii_close, ii_delete, ii_make_buffer_convert_if_float, ii_new,
+    RawImageInfo, ii_best_tile_size, ii_close, ii_delete, ii_make_buffer_convert_if_float, ii_new,
+    ii_reopen,
 };
 use crate::imod::libiimod::mrcfiles::{
     IIUNIT_4BIT_MODE, IIUNIT_HALF_XSIZE, MRC_LABEL_SIZE, MRC_MODE_BYTE, MRC_MODE_FLOAT,
     MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT, MRC_NLABELS, MrcHeader, PACKED_4BIT_MODE,
-    PACKED_HALF_XSIZE, fix_title_padding, mrc_head_new, mrc_set_scale,
+    PACKED_HALF_XSIZE, fix_title_padding, get_byte_map, get_short_map, mrc_head_new, mrc_set_scale,
+    size_can_be_4_bit_k2_super_res,
 };
 use core::ffi::{CStr, c_char, c_void};
 use core::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
 
 unsafe extern "C" {
     static mut stderr: *mut libc::FILE;
+    // `warningHandler` formats libtiff's own `va_list` message.  On this ABI a
+    // `va_list` argument decays to a pointer, so the source call is direct.
+    fn vsnprintf(str: *mut c_char, size: usize, format: *const c_char, ap: *mut c_void) -> i32;
 }
 
 pub const IICOMPRESSION_NONE: i32 = 1;
@@ -49,6 +60,13 @@ pub const IIERR_NOT_FORMAT: i32 = 1;
 pub const IIERR_IO_ERROR: i32 = 2;
 pub const IIERR_MEMORY_ERR: i32 = 3;
 pub const IIERR_NO_SUPPORT: i32 = 4;
+pub const IIERR_NOT_PRESENT: i32 = 6;
+/// `iimage.h:116`
+pub const RAW_MODE_RGB: i32 = 6;
+/// `iimage.h:92`
+pub const IIFLAG_BYTES_SWAPPED: u32 = 1;
+/// `iimage.h:93`
+pub const IIFLAG_TVIPS_DATA: u32 = 2;
 
 /// Opaque libtiff handle.  Its representation is private to libtiff.
 #[repr(C)]
@@ -110,6 +128,7 @@ unsafe extern "C" {
     fn TIFFSetErrorHandler(handler: *mut c_void) -> *mut c_void;
     fn TIFFSetWarningHandler(handler: *mut c_void) -> *mut c_void;
     fn TIFFGetVersion() -> *const c_char;
+    fn TIFFIsByteSwapped(tif: *mut Tiff) -> i32;
 }
 
 const TIFFTAG_IMAGE_DESCRIPTION: u32 = 270;
@@ -129,6 +148,13 @@ const TIFFTAG_SAMPLEFORMAT: u32 = 339;
 const TIFFTAG_SMINSAMPLEVALUE: u32 = 340;
 const TIFFTAG_SMAXSAMPLEVALUE: u32 = 341;
 const TIFFTAG_FILLORDER: u32 = 266;
+const FILLORDER_MSB2LSB: i32 = 1;
+const FILLORDER_LSB2MSB: i32 = 2;
+const PHOTOMETRIC_PALETTE: i32 = 3;
+const TIFFTAG_COLORMAP: u32 = 320;
+const TIFFTAG_STRIPOFFSETS: u32 = 273;
+/// `mrcfiles.h:70`
+const MRC_RAMP_LIN: i32 = 1;
 const TIFFTAG_DM_ORIGIN_0: u32 = 65006;
 const TIFFTAG_DM_SCALE_0: u32 = 65009;
 const TIFFTAG_DM_UINFO_UNIT_0: u32 = 65012;
@@ -154,6 +180,7 @@ const RESUNIT_CENTIMETER: i32 = 3;
 
 static S_USE_MAPPING: AtomicI32 = AtomicI32::new(2);
 static S_WARNINGS_SUPPRESSED: AtomicI32 = AtomicI32::new(0);
+static S_OLD_HANDLER: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 static S_OLD_ERR_HANDLER: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 static S_MAX_EER_SUPER_RESOLUTION: AtomicI32 = AtomicI32::new(2);
 static S_MIN_EER_SUPER_RESOLUTION: AtomicI32 = AtomicI32::new(-3);
@@ -165,6 +192,8 @@ static S_ANTIALIAS_EER: AtomicI32 = AtomicI32::new(0);
 static S_EER_KERNEL_SCALE: AtomicI32 = AtomicI32::new(0);
 static S_GAIN_REFERENCE: AtomicPtr<f32> = AtomicPtr::new(core::ptr::null_mut());
 static S_TAG_TO_PRINT: AtomicI32 = AtomicI32::new(0);
+/// `ignoreFromVar`, the function-static of `tiffSetEERreadProperties`.
+static S_IGNORE_FROM_VAR: AtomicI32 = AtomicI32::new(-999);
 static S_FILE_BUF_SIZE: AtomicI32 = AtomicI32::new(0);
 static S_SETTING_UP_PARALLEL: AtomicI32 = AtomicI32::new(0);
 static mut S_FILE_BUF: [*mut c_char; MAX_TIFF_THREADS] = [core::ptr::null_mut(); MAX_TIFF_THREADS];
@@ -272,232 +301,853 @@ static mut S_XTIFF_FIELD_INFO: [TiffFieldInfo; 8] = [
 
 /// C `iiTIFFCheck` (`iitif.c:111`).
 pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
-    // The complete directory scan is a libtiff ABI operation.  Opening here retains
-    // the source's format gate and lets TIFF report malformed directory chains.
-    if in_file.is_null() || (*in_file).filename.is_null() {
+    let tif: *mut Tiff;
+    let fp: *mut libc::FILE;
+    let mut buf: u16 = 0;
+    let mut dirnum = 0i32;
+    let mut file_dir_num = 0i32;
+    let mut bits: u16 = 0;
+    let mut samples: u16 = 0;
+    let mut photometric: u16 = 0;
+    let mut sampleformat: u16 = 0;
+    let mut planar_config: u16 = 0;
+    let mut compression: u16 = 0;
+    let mut bits_im: u16 = 0;
+    let mut samples_im: u16 = 0;
+    let mut photo_im: u16 = 0;
+    let mut format_im: u16 = 0;
+    let mut planar_im: u16 = 0;
+    let mut res_unit: u16;
+    let mut rows_per_strip: u32 = 0;
+    let mut pr_count: u32 = 0;
+    let mut offsets: *mut u32 = core::ptr::null_mut();
+    let mut nxim: i32 = 0;
+    let mut nyim: i32 = 0;
+    let mut format_def = 0i32;
+    let mut tile_width: i32 = 0;
+    let mut tile_length: i32 = 0;
+    let mut got_min = 0i32;
+    let mut got_max = 0i32;
+    let mut defined: i32;
+    let mut i: i32 = 0;
+    let mut j: i32;
+    let mut has_pixel_im: i32;
+    let mut has_pixel = 0i32;
+    let mut mismatch = 0i32;
+    let mut err = 0i32;
+    let mut compression_im: i32;
+    let mut x_resol: f32 = 0.;
+    let mut y_resol: f32 = 0.;
+    let mut x_pixel_im: f32 = 0.;
+    let mut y_pixel_im: f32 = 0.;
+    let mut x_pixel: f32 = 0.;
+    let mut y_pixel: f32 = 0.;
+    let mut res_scale: f32;
+    let mut last_min: f64 = 0.;
+    let mut last_max: f64 = 0.;
+    let mut redp: *mut u16 = core::ptr::null_mut();
+    let mut greenp: *mut u16 = core::ptr::null_mut();
+    let mut bluep: *mut u16 = core::ptr::null_mut();
+    let mut resvar: *mut c_char;
+    let tvips_tag: u16 = 37708;
+    let mut pixel_limit: f32 = 3.;
+    let mut description: *mut c_char = core::ptr::null_mut();
+    let mut ptr: *const c_char;
+    let mut blank: *const c_char;
+    let mut colon: *const c_char;
+    let pr_copy: *mut c_char;
+    let mut pr_strng: *mut c_char = core::ptr::null_mut();
+    let mut image_j = 0i32;
+    let mut im_jslices = 0i32;
+    let mut im_jimages = 0i32;
+    let mut im_jmin: f32 = 9.0e37;
+    let mut im_jmax: f32 = -9.0e37;
+    let mut im_jpixel: f32 = -1.;
+    let format_defined: i32;
+    let mut has_date_time = 0i32;
+    let mut from_semccd = 0i32;
+    let mut byte_max: i32;
+    let mut eer_file: i32;
+    let skip_eer = if S_EER_FLAGS.load(Ordering::SeqCst) & IIFLAG_SKIP_EER_DIRS != 0 {
+        1
+    } else {
+        0
+    };
+    let mut num_eer_images = 0i32;
+    let mut num_non_eer_images = 0i32;
+    let mut skip_file: i32;
+    let mut max_electrons: i32 = 0;
+    let mut num_in_autogroup: i32 = 1;
+    let mut red_fac: i32;
+    let max_fac: i32;
+    let mut frame_mean: f32 = 0.;
+    let mut info = RawImageInfo {
+        type_: 0,
+        nx: 0,
+        ny: 0,
+        nz: 0,
+        swap_bytes: 0,
+        header_size: 0,
+        amin: 0.,
+        amax: 0.,
+        scan_min_max: 0,
+        all_match: 0,
+        section_skip: 0,
+        y_inverted: 0,
+        pixel: 0.,
+        z_pixel: 0.,
+    };
+
+    if S_AUTOGROUP_EER.load(Ordering::SeqCst) == -999_999 {
+        S_READ_EER_AS_SUPER_RES.store(
+            S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
+            Ordering::SeqCst,
+        );
+        S_AUTOGROUP_EER.store(1, Ordering::SeqCst);
+        resvar = libc::getenv(c"IMOD_READ_EER_SUPER_RES".as_ptr());
+        if !resvar.is_null() {
+            S_READ_EER_AS_SUPER_RES.store(libc::atoi(resvar), Ordering::SeqCst);
+            S_READ_EER_AS_SUPER_RES.store(
+                S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst).clamp(
+                    S_MIN_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
+                    S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
+                ),
+                Ordering::SeqCst,
+            );
+            if S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst) < 0 {
+                S_ANTIALIAS_EER.store(4, Ordering::SeqCst);
+            }
+        }
+        resvar = libc::getenv(c"IMOD_READ_EER_Z_SUMMING".as_ptr());
+        if !resvar.is_null() {
+            S_AUTOGROUP_EER.store(libc::atoi(resvar), Ordering::SeqCst);
+        }
+        resvar = libc::getenv(c"IMOD_READ_EER_ANTIALIASED".as_ptr());
+        if !resvar.is_null() {
+            red_fac = libc::atoi(resvar);
+            if red_fac != 0 {
+                red_fac = red_fac.clamp(1, 2);
+                S_ANTIALIAS_EER.store(5 - red_fac, Ordering::SeqCst);
+            }
+        }
+    }
+
+    if in_file.is_null() {
         return IIERR_BAD_CALL;
     }
-    // The source probes the two TIFF magic words before asking libtiff to open
-    // the file.  Besides preserving its result distinction, this keeps a
-    // non-TIFF MRC input from producing libtiff diagnostics while probing.
-    let mut magic = [0u8; 4];
-    libc::rewind((*in_file).fp);
-    if libc::fread(magic.as_mut_ptr().cast(), 1, magic.len(), (*in_file).fp) != magic.len() {
-        return IIERR_IO_ERROR;
+    fp = (*in_file).fp;
+    if fp.is_null() {
+        return IIERR_BAD_CALL;
     }
-    let byte_order = u16::from_ne_bytes([magic[0], magic[1]]);
-    if byte_order != 0x4949 && byte_order != 0x4d4d {
-        return IIERR_NOT_FORMAT;
+
+    if S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst) < 0
+        && S_ANTIALIAS_EER.load(Ordering::SeqCst) == 0
+    {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiTIFFCheck - A negative super-resolution factor can be used only with antialiased EER reading\n"
+            ),
+        );
+        return IIERR_BAD_CALL;
     }
-    let version = u16::from_ne_bytes([magic[2], magic[3]]);
-    if version != 0x002a && version != 0x2a00 && version != 0x002b && version != 0x2b00 {
-        return IIERR_NOT_FORMAT;
+
+    libc::rewind(fp);
+    if libc::fread((&raw mut buf).cast(), core::mem::size_of::<u16>(), 1, fp) < 1 {
+        err = IIERR_IO_ERROR;
     }
-    libc::fclose((*in_file).fp);
+    if err == 0 && buf != 0x4949 && buf != 0x4d4d {
+        err = IIERR_NOT_FORMAT;
+    }
+    if err == 0 && libc::fread((&raw mut buf).cast(), core::mem::size_of::<u16>(), 1, fp) < 1 {
+        err = IIERR_IO_ERROR;
+    }
+    if err == 0 && buf != 0x002a && buf != 0x2a00 && buf != 0x002b && buf != 0x2b00 {
+        err = IIERR_NOT_FORMAT;
+    }
+    if err != 0 {
+        if err == IIERR_IO_ERROR {
+            b3d_error(
+                stderr,
+                format_args!(
+                    "ERROR: iiTIFFCheck - Reading file {}\n",
+                    CStr::from_ptr((*in_file).filename).to_string_lossy()
+                ),
+            );
+        }
+        return err;
+    }
+
+    /* Close file now, but reopen it if there is a TIFF failure */
+    libc::fclose(fp);
     (*in_file).fp = core::ptr::null_mut();
-    let tif = open_without_b_mode(in_file);
+    tif = open_without_b_mode(in_file);
     if tif.is_null() {
         (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiTIFFCheck - Calling TIFFOpen on file {}\n",
+                CStr::from_ptr((*in_file).filename).to_string_lossy()
+            ),
+        );
         return IIERR_IO_ERROR;
     }
+
     (*in_file).header = tif.cast();
-    (*in_file).fp = tif.cast();
-    (*in_file).file = IIFILE_TIFF;
-    let mut width = 0u32;
-    let mut height = 0u32;
-    let mut bits = 8u16;
-    let mut samples = 1u16;
-    let mut sample_format = SAMPLEFORMAT_UINT as u16;
-    let mut photometric = PHOTOMETRIC_MINISBLACK as u16;
-    let mut planar_config = PLANARCONFIG_CONTIG as u16;
-    let mut rows = 0u32;
-    let mut compression = IICOMPRESSION_NONE as u16;
-    // `iiTIFFCheck` obtains physical pixel sizes from the directory resolution
-    // tags.  TIFF stores pixels per inch or centimetre while IMOD stores
-    // Angstroms per pixel, hence the source's 1.e8 conversion (and 2.54 for
-    // inches).  A missing Y resolution deliberately inherits X resolution.
-    // Preserve the physical directory number for each uniform image in the
-    // source stack.  Source `setMatchingDirectory` indexes this list, rather
-    // than assuming an output section is the same as a TIFF directory number.
-    let directories = ilist_new(core::mem::size_of::<i32>() as i32, 4);
-    if directories.is_null() {
-        tiff_close(in_file);
+    (*in_file).nx = 0;
+    (*in_file).ny = 0;
+    (*in_file).multiple_sizes = 0;
+    (*in_file).planes_per_image = 1;
+    (*in_file).contig_samples = 1;
+    (*in_file).directory_nums = ilist_new(core::mem::size_of::<i32>() as i32, 4).cast();
+    if (*in_file).directory_nums.is_null() {
         return IIERR_MEMORY_ERR;
     }
-    let mut directory = 0i32;
+    ilist_quantum((*in_file).directory_nums.cast(), 20);
+    resvar = libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr());
+    if !resvar.is_null() {
+        pixel_limit = libc::atof(resvar) as f32;
+    }
+
+    // If no tag to print set by program, look for environment variable
+    if S_TAG_TO_PRINT.load(Ordering::SeqCst) == 0 {
+        resvar = libc::getenv(c"TIFF_STRING_TAG_TO_PRINT".as_ptr());
+        if !resvar.is_null() {
+            S_TAG_TO_PRINT.store(libc::atoi(resvar), Ordering::SeqCst);
+        }
+    }
+
+    // Try to get tag to print
+    if S_TAG_TO_PRINT.load(Ordering::SeqCst) != 0 {
+        if TIFFGetField(
+            tif,
+            S_TAG_TO_PRINT.load(Ordering::SeqCst) as u32,
+            &raw mut pr_count,
+            &raw mut pr_strng,
+        ) > 0
+            && pr_count != 0
+        {
+            pr_copy = libc::malloc(pr_count as usize + 1).cast();
+            if !pr_copy.is_null() {
+                libc::strncpy(pr_copy, pr_strng, pr_count as usize);
+                *pr_copy.add(pr_count as usize) = 0;
+                libc::printf(
+                    c"Tag %d: %s\n".as_ptr(),
+                    S_TAG_TO_PRINT.load(Ordering::SeqCst),
+                    pr_copy,
+                );
+                libc::free(pr_copy.cast());
+            }
+        }
+    }
+
+    /* Read each directory of the file, get properties and count usable images */
     loop {
-        let mut next_width = 0u32;
-        let mut next_height = 0u32;
-        let mut next_bits = 8u16;
-        let mut next_samples = 1u16;
-        let mut next_format = SAMPLEFORMAT_UINT as u16;
-        let mut next_photometric = PHOTOMETRIC_MINISBLACK as u16;
-        let mut next_planar_config = PLANARCONFIG_CONTIG as u16;
-        let mut next_rows = 0u32;
-        let mut next_compression = IICOMPRESSION_NONE as u16;
-        if TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &mut next_width) == 0
-            || TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &mut next_height) == 0
-            || TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &mut next_bits) == 0
+        TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &raw mut nxim);
+        TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &raw mut nyim);
+        TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &raw mut bits_im);
+        TIFFGetField(tif, TIFFTAG_PHOTOMETRIC, &raw mut photo_im);
+
+        /* DNM 11/18/01: field need not be defined, set a default */
+        defined = TIFFGetField(tif, TIFFTAG_SAMPLESPERPIXEL, &raw mut samples_im);
+        if defined == 0 {
+            samples_im = 1;
+        }
+
+        TIFFGetField(tif, TIFFTAG_PLANARCONFIG, &raw mut planar_im);
+        // The source assigns PLANARCONFIG_CONTIG to `photoIm`, not `planarIm`,
+        // when SAMPLESPERPIXEL was absent (`iitif.c:248`).  Preserved as written.
+        if defined == 0 {
+            photo_im = PLANARCONFIG_CONTIG as u16;
+        }
+
+        defined = TIFFGetField(tif, TIFFTAG_SAMPLEFORMAT, &raw mut format_im);
+
+        /* Handle pixel sizes */
+        has_pixel_im = TIFFGetField(tif, TIFFTAG_XRESOLUTION, &raw mut x_resol);
+        res_unit = 0;
+        TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT, &raw mut res_unit);
+        if res_unit > 1 && has_pixel_im != 0 {
+            if TIFFGetField(tif, TIFFTAG_YRESOLUTION, &raw mut y_resol) == 0 {
+                y_resol = x_resol;
+            }
+            res_scale = 1.0e8 * if res_unit == 2 { 2.54 } else { 1. };
+            x_pixel_im = res_scale / x_resol;
+            y_pixel_im = res_scale / y_resol;
+        } else {
+            has_pixel_im = 0;
+        }
+
+        if dirnum == 0 && TIFFGetField(tif, TIFFTAG_DATETIME, &raw mut description) != 0 {
+            has_date_time = 1;
+        }
+
+        /* For the first directory, get the description and check if it ImageJ
+        If so look for various values that are useful.
+        Also check for SerialEMCCD title for packed 4 bit data */
+        if dirnum == 0 && TIFFGetField(tif, TIFFTAG_IMAGE_DESCRIPTION, &raw mut description) != 0 {
+            if !libc::strstr(description, c"SerialEMCCD".as_ptr()).is_null()
+                && !libc::strstr(description, c"4 bits packed".as_ptr()).is_null()
+            {
+                from_semccd = 1;
+
+                /* But if you find it, check for multiple titles from other programs, i.e.,
+                a line that has a colon before a blank */
+                ptr = description;
+                while !libc::strchr(ptr, '\n' as i32).is_null() {
+                    ptr = libc::strchr(ptr, '\n' as i32).add(1);
+                    blank = libc::strchr(ptr, ' ' as i32);
+                    colon = libc::strchr(ptr, ':' as i32);
+                    if !colon.is_null()
+                        && !blank.is_null()
+                        && blank.offset_from(ptr) > colon.offset_from(ptr)
+                    {
+                        from_semccd = 0;
+                        break;
+                    }
+                }
+            }
+            if libc::strstr(description, c"ImageJ=".as_ptr()) == description {
+                image_j = 1;
+                ptr = libc::strstr(description, c"slices=".as_ptr());
+                if !ptr.is_null() {
+                    im_jslices = libc::atoi(ptr.add(7));
+                }
+                ptr = libc::strstr(description, c"images=".as_ptr());
+                if !ptr.is_null() {
+                    im_jimages = libc::atoi(ptr.add(7));
+                }
+                ptr = libc::strstr(description, c"min=".as_ptr());
+                if !ptr.is_null() {
+                    im_jmin = libc::atoi(ptr.add(4)) as f32;
+                }
+                ptr = libc::strstr(description, c"max=".as_ptr());
+                if !ptr.is_null() {
+                    im_jmax = libc::atoi(ptr.add(4)) as f32;
+                }
+                ptr = libc::strstr(description, c"spacing=".as_ptr());
+                if !ptr.is_null() && !libc::strstr(description, c"unit=micron".as_ptr()).is_null() {
+                    im_jpixel = (1.0e4 * libc::atof(ptr.add(8))) as f32;
+                }
+            }
+        }
+
+        compression_im = IICOMPRESSION_NONE;
+        TIFFGetField(tif, TIFFTAG_COMPRESSION, &raw mut compression_im);
+        eer_file = if compression_im == IICOMPRESSION_EER_7BIT
+            || compression_im == IICOMPRESSION_EER_8BIT
         {
-            ilist_delete(directories);
-            tiff_close(in_file);
-            return IIERR_NO_SUPPORT;
+            1
+        } else {
+            0
+        };
+        if eer_file != 0 {
+            num_eer_images += 1;
+        } else {
+            num_non_eer_images += 1;
         }
-        TIFFGetField(tif, TIFFTAG_SAMPLESPERPIXEL, &mut next_samples);
-        TIFFGetField(tif, TIFFTAG_PHOTOMETRIC, &mut next_photometric);
-        TIFFGetField(tif, TIFFTAG_PLANARCONFIG, &mut next_planar_config);
-        TIFFGetField(tif, TIFFTAG_SAMPLEFORMAT, &mut next_format);
-        TIFFGetField(tif, TIFFTAG_ROWSPERSTRIP, &mut next_rows);
-        TIFFGetField(tif, TIFFTAG_COMPRESSION, &mut next_compression);
-        // `iitif.c` makes a larger IFD the standard image and drops earlier
-        // thumbnail directories from the section map.  It is not valid to
-        // assume that directory zero is the science image.
-        if next_width.saturating_mul(next_height) > width.saturating_mul(height) {
-            width = next_width;
-            height = next_height;
-            bits = next_bits;
-            samples = next_samples;
-            sample_format = next_format;
-            photometric = next_photometric;
-            planar_config = next_planar_config;
-            rows = next_rows;
-            compression = next_compression;
-            (*directories).size = 0;
+
+        if eer_file != 0 && skip_eer == 0 && (num_eer_images == 2 || num_eer_images == 20) {
+            count_eer_bytes_and_electrons(
+                tif,
+                if compression_im == IICOMPRESSION_EER_7BIT {
+                    1
+                } else {
+                    0
+                },
+                &raw mut i,
+                &raw mut max_electrons,
+            );
+            frame_mean = max_electrons as f32 / (nxim * nyim) as f32;
         }
-        if next_width == width
-            && next_height == height
-            && next_bits == bits
-            && next_samples == samples
-            && next_format == sample_format
-            && next_photometric == photometric
-            && next_planar_config == planar_config
-            && ilist_append(directories, (&mut directory as *mut i32).cast()) != 0
+
+        /* If this is a bigger image, it is a new standard, so set all the
+        properties and reset to one directory */
+        skip_file = if (skip_eer != 0 && eer_file != 0)
+            || (skip_eer == 0 && eer_file == 0 && num_eer_images > 0)
         {
-            ilist_delete(directories);
-            tiff_close(in_file);
-            return IIERR_MEMORY_ERR;
-        }
-        if next_width == width
-            && next_height == height
-            && (next_bits != bits
-                || next_samples != samples
-                || next_format != sample_format
-                || next_photometric != photometric
-                || next_planar_config != planar_config)
+            1
+        } else {
+            0
+        };
+
+        if (nxim as f32 * nyim as f32 > (*in_file).nx as f32 * (*in_file).ny as f32
+            || (nxim == (*in_file).nx
+                && nyim == (*in_file).ny
+                && eer_file != 0
+                && num_eer_images == 1))
+            && skip_file == 0
         {
-            ilist_delete(directories);
-            tiff_close(in_file);
-            return IIERR_NO_SUPPORT;
+            (*in_file).nx = nxim;
+            (*in_file).ny = nyim;
+
+            /* Record the strip and tile size for 3dmod caching */
+            (*in_file).tile_size_x = 0;
+            (*in_file).tile_size_y = 0;
+            if eer_file == 0 {
+                if TIFFGetField(tif, TIFFTAG_ROWSPERSTRIP, &raw mut rows_per_strip) != 0 {
+                    (*in_file).tile_size_y = rows_per_strip as i32;
+                } else if TIFFGetField(tif, TIFFTAG_TILEWIDTH, &raw mut tile_width) != 0
+                    && TIFFGetField(tif, TIFFTAG_TILELENGTH, &raw mut tile_length) != 0
+                {
+                    (*in_file).tile_size_x = tile_width;
+                    (*in_file).tile_size_y = tile_length;
+                }
+            }
+            bits = bits_im;
+            photometric = photo_im;
+            planar_config = planar_im;
+            samples = samples_im;
+            format_def = defined;
+            sampleformat = format_im;
+            has_pixel = has_pixel_im;
+            x_pixel = x_pixel_im;
+            y_pixel = y_pixel_im;
+            compression = compression_im as u16;
+
+            if dirnum != 0 && !(eer_file != 0 || num_non_eer_images > 0) {
+                (*in_file).multiple_sizes = 1;
+            }
+            dirnum = 1;
+            (*(*in_file).directory_nums.cast::<Ilist>()).size = 0;
+            if ilist_append(
+                (*in_file).directory_nums.cast(),
+                (&raw mut file_dir_num).cast(),
+            ) != 0
+            {
+                close_with_error(in_file, c"Memory error adding to directory list\n".as_ptr());
+                return IIERR_MEMORY_ERR;
+            }
+        } else if nxim == (*in_file).nx && nyim == (*in_file).ny && skip_file == 0 {
+            dirnum += 1;
+            if ilist_append(
+                (*in_file).directory_nums.cast(),
+                (&raw mut file_dir_num).cast(),
+            ) != 0
+            {
+                close_with_error(in_file, c"Memory error adding to directory list\n".as_ptr());
+                return IIERR_MEMORY_ERR;
+            }
+
+            /* If size matches, check that everything matches */
+            if bits_im != bits
+                || photo_im != photometric
+                || planar_im != planar_config
+                || samples != samples_im
+                || defined != format_def
+                || (defined != 0 && format_im != sampleformat)
+            {
+                mismatch = 1;
+                break;
+            }
+        } else if dirnum != 0 && skip_file == 0 {
+            (*in_file).multiple_sizes = 1;
         }
+        file_dir_num += 1;
         if TIFFReadDirectory(tif) == 0 {
             break;
         }
-        directory += 1;
     }
+
+    if skip_eer != 0 && num_non_eer_images == 0 {
+        close_with_error(
+            in_file,
+            c"ERROR: iiTIFFCheck - No non-EER images present in EER file\n".as_ptr(),
+        );
+        return IIERR_NOT_PRESENT;
+    }
+    eer_file = if compression as i32 == IICOMPRESSION_EER_7BIT
+        || compression as i32 == IICOMPRESSION_EER_8BIT
+    {
+        1
+    } else {
+        0
+    };
     (*in_file).tiff_compression = compression as i32;
-    let selected_directory = *(ilist_item(directories, 0).cast::<i32>());
-    TIFFSetDirectory(tif, selected_directory as u16);
-    let mut x_resolution = 0.0f32;
-    let mut y_resolution = 0.0f32;
-    let mut resolution_unit = 0u16;
-    let has_pixel_size = TIFFGetField(tif, TIFFTAG_XRESOLUTION, &mut x_resolution) != 0;
-    TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT, &mut resolution_unit);
-    if has_pixel_size && resolution_unit > 1 && x_resolution > 0.0 {
-        if TIFFGetField(tif, TIFFTAG_YRESOLUTION, &mut y_resolution) == 0 {
-            y_resolution = x_resolution;
-        }
-        let resolution_scale = if resolution_unit == RESUNIT_INCH as u16 {
-            2.54e8
-        } else {
-            1.0e8
-        };
-        let x_pixel = resolution_scale / x_resolution;
-        let pixel_limit = if libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr()).is_null() {
-            3.0
-        } else {
-            CStr::from_ptr(libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr()))
-                .to_string_lossy()
-                .parse::<f32>()
-                .unwrap_or(0.0)
-        };
-        if y_resolution > 0.0
-            && ((*in_file).any_tiff_pix_size != 0 || x_pixel / 1.0e4 <= pixel_limit)
-        {
-            (*in_file).xscale = x_pixel;
-            (*in_file).yscale = resolution_scale / y_resolution;
-            (*in_file).zscale = x_pixel;
-        }
+
+    /* get the min and max from last directory; if we wrote it, it applies to whole file */
+    if TIFFGetField(tif, TIFFTAG_SMINSAMPLEVALUE, &raw mut last_min) != 0 {
+        got_min = 1;
     }
+    if TIFFGetField(tif, TIFFTAG_SMAXSAMPLEVALUE, &raw mut last_max) != 0 {
+        got_max = 1;
+    }
+    if got_min == 0 && image_j != 0 && im_jmin < 8.0e37 {
+        last_min = im_jmin as f64;
+        got_min = 1;
+    }
+    if got_max == 0 && image_j != 0 && im_jmax > -8.0e37 {
+        last_max = im_jmax as f64;
+        got_max = 1;
+    }
+    if has_pixel == 0 && image_j != 0 && im_jpixel > 0. {
+        x_pixel = im_jpixel;
+        y_pixel = im_jpixel;
+        has_pixel = 1;
+    }
+
     TIFFSetDirectory(tif, 0);
-    (*in_file).directory_nums = directories.cast();
-    (*in_file).nx = width as i32;
-    (*in_file).ny = height as i32;
-    (*in_file).nz = (*directories).size;
-    (*in_file).contig_samples = 1;
-    (*in_file).planes_per_image = 1;
+    format_defined = TIFFGetField(tif, TIFFTAG_SAMPLEFORMAT, &raw mut sampleformat);
+    defined = TIFFGetField(tif, TIFFTAG_FILLORDER, &raw mut (*in_file).fill_order);
+    if defined == 0 {
+        (*in_file).fill_order = FILLORDER_MSB2LSB;
+    }
+
+    /* Don't know how to get the multiple bit entries from libtiff, so can't test
+    if they are all 8.  Allow 4 bit if it is not signed and one plane */
+    if mismatch != 0
+        || !((((bits == 4
+            && !(format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT)
+            && samples == 1)
+            || bits == 8
+            || bits == 16
+            || bits == 32)
+            && (photometric as i32) < PHOTOMETRIC_RGB)
+            || eer_file != 0
+            || (bits == 8
+                && (photometric as i32 == PHOTOMETRIC_RGB
+                    || photometric as i32 == PHOTOMETRIC_PALETTE)))
+    {
+        close_with_error(
+            in_file,
+            c"ERROR: iiTIFFCheck - Unsupported type of TIFF file\n".as_ptr(),
+        );
+        return IIERR_NO_SUPPORT;
+    }
+
+    /* Recognize K2 files from SerialEMCCD and mark as 4-bit: require either that it has
+    the exact dimensions of the full image with half size in X, or that it has the
+    description added by SerialEMCCD */
+    if bits == 8
+        && (photometric as i32) < PHOTOMETRIC_RGB
+        && samples == 1
+        && has_date_time != 0
+        && !(format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT)
+        && (size_can_be_4_bit_k2_super_res((*in_file).nx, (*in_file).ny) != 0 || from_semccd != 0)
+    {
+        (*in_file).packed4bits = PACKED_HALF_XSIZE;
+        (*in_file).nx *= 2;
+        (*in_file).fill_order = FILLORDER_LSB2MSB;
+    }
+
+    /* And switch true 4-bit files to 8 bit with the flag set */
+    if bits == 4 {
+        (*in_file).packed4bits = PACKED_4BIT_MODE;
+        bits = 8;
+    }
+
+    byte_max = 255;
+    (*in_file).num_frames_in_eerfile = 0;
+    if eer_file != 0 {
+        /* Set up autogrouping: save the full # of frames, compute the number of groups
+        and adjust the estimated frame mean for summing and super-res */
+        (*in_file).num_frames_in_eerfile = dirnum;
+        let autogroup = S_AUTOGROUP_EER.load(Ordering::SeqCst);
+        if autogroup > 1 || (autogroup < 0 && -autogroup < dirnum) {
+            if autogroup > 1 {
+                dirnum = (dirnum + autogroup - 1) / autogroup;
+            } else {
+                dirnum = -autogroup;
+            }
+            num_in_autogroup = ((*in_file).num_frames_in_eerfile + dirnum - 1) / dirnum;
+            frame_mean *= num_in_autogroup as f32;
+        }
+
+        /* Set size based on super-res and adjust maximum for that */
+        max_fac = (2.0_f64.powf(S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst) as f64) + 0.5)
+            .floor() as i32;
+        red_fac = (2.0_f64.powf(
+            (S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst)
+                - S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst)) as f64,
+        ) + 0.5)
+            .floor() as i32;
+        (*in_file).nx = ((*in_file).nx * max_fac) / red_fac;
+        (*in_file).ny = ((*in_file).ny * max_fac) / red_fac;
+        (*in_file).tile_size_y = ((*in_file).tile_size_y * max_fac) / red_fac;
+        frame_mean = (frame_mean * red_fac as f32 * red_fac as f32) / (max_fac * max_fac) as f32;
+        x_pixel = (x_pixel * red_fac as f32) / max_fac as f32;
+        y_pixel = (y_pixel * red_fac as f32) / max_fac as f32;
+        (*in_file).read_eer_as_super_res = S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst);
+
+        /* Set the max as 3 SDs above mean for Poisson sample where SD = mean */
+        byte_max = (4. * frame_mean as f64).ceil() as i32;
+        byte_max = byte_max.clamp(1, 255);
+        if S_ANTIALIAS_EER.load(Ordering::SeqCst) != 0 {
+            byte_max = (4. * frame_mean as f64 * S_EER_KERNEL_SCALE.load(Ordering::SeqCst) as f64)
+                .ceil() as i32;
+            byte_max = byte_max.clamp(1, 32767);
+        }
+        (*in_file).antialias_eerfilter = S_ANTIALIAS_EER.load(Ordering::SeqCst);
+        (*in_file).eerkernel_scale = S_EER_KERNEL_SCALE.load(Ordering::SeqCst);
+    }
+    if num_eer_images > 0 {
+        S_EER_FLAGS.store(0, Ordering::SeqCst);
+    }
+
+    (*in_file).nz = dirnum;
+    (*in_file).file = IIFILE_TIFF;
+    (*in_file).format = IIFORMAT_LUMINANCE;
+
+    /* Samples are assumed to be channels for RGB; record samples appropriately
+    and set Z size otherwise for multiple samples */
     (*in_file).rgb_samples = samples as i32;
-    if photometric < PHOTOMETRIC_RGB as u16 {
-        if planar_config == PLANARCONFIG_SEPARATE as u16 {
+    if (photometric as i32) < PHOTOMETRIC_RGB {
+        if planar_config as i32 == PLANARCONFIG_SEPARATE {
             (*in_file).planes_per_image = samples as i32;
         } else {
             (*in_file).contig_samples = samples as i32;
         }
-        (*in_file).nz *= samples as i32;
+        (*in_file).nz = dirnum * samples as i32;
     }
-    (*in_file).tile_size_y = rows as i32;
-    (*in_file).type_ = match (bits, sample_format) {
-        (8, 2) => IITYPE_BYTE,
-        (8, _) => IITYPE_UBYTE,
-        (16, 2) => IITYPE_SHORT,
-        (16, _) => IITYPE_USHORT,
-        (32, 2) => IITYPE_INT,
-        (32, 3) => IITYPE_FLOAT,
-        _ => return IIERR_NO_SUPPORT,
-    };
-    (*in_file).format = if photometric == PHOTOMETRIC_RGB as u16 {
-        IIFORMAT_RGB
-    } else {
-        IIFORMAT_LUMINANCE
-    };
-    (*in_file).mode = if samples >= 3 {
-        MRC_MODE_RGB
-    } else {
-        match (*in_file).type_ {
-            IITYPE_SHORT => MRC_MODE_SHORT,
-            IITYPE_USHORT => MRC_MODE_USHORT,
-            IITYPE_FLOAT => MRC_MODE_FLOAT,
-            IITYPE_INT | IITYPE_UINT => -1,
-            _ => MRC_MODE_BYTE,
-        }
-    };
+
+    /* 11/22/08: define this for all types, not just for 3-sample data */
     (*in_file).read_section = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
         unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
     >(tiff_read_section));
-    (*in_file).read_section_byte = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-    >(tiff_read_section_byte));
     (*in_file).read_section_ushort = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
         unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
     >(tiff_read_section_ushort));
+    (*in_file).read_section_byte = Some(core::mem::transmute::<
+        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+    >(tiff_read_section_byte));
     (*in_file).read_section_float = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
         unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
     >(tiff_read_section_float));
+
+    /* Set up file mode and default properties; fill in mode for raw info at same time */
+    if bits == 8 || eer_file != 0 {
+        (*in_file).type_ = if eer_file != 0 && S_ANTIALIAS_EER.load(Ordering::SeqCst) != 0 {
+            IITYPE_SHORT
+        } else {
+            IITYPE_UBYTE
+        };
+        (*in_file).amin = 0.;
+        (*in_file).amean = if eer_file != 0 {
+            frame_mean
+        } else {
+            byte_max as f32 / 2.
+        };
+        (*in_file).amax = byte_max as f32;
+        (*in_file).mode = MRC_MODE_BYTE;
+        info.type_ = RAW_MODE_BYTE;
+        if eer_file != 0 && S_ANTIALIAS_EER.load(Ordering::SeqCst) != 0 {
+            (*in_file).mode = MRC_MODE_SHORT;
+            info.type_ = RAW_MODE_SHORT;
+        }
+
+        /* Get the max right for 4-bit data, it matters for very low count data */
+        if (*in_file).packed4bits != 0 {
+            (*in_file).amean = 7.5;
+            (*in_file).amax = 15.;
+        }
+        if photometric as i32 == PHOTOMETRIC_RGB {
+            (*in_file).format = IIFORMAT_RGB;
+            (*in_file).mode = MRC_MODE_RGB;
+            info.type_ = RAW_MODE_RGB;
+        } else if photometric as i32 == PHOTOMETRIC_PALETTE {
+            /* For palette images, define as colormap, get the colormap and convert
+            it to bytes */
+            (*in_file).format = IIFORMAT_COLORMAP;
+            (*in_file).mode = MRC_MODE_RGB;
+            info.type_ = RAW_MODE_RGB;
+            (*in_file).colormap = libc::malloc(3 * 256 * dirnum as usize).cast();
+            if (*in_file).colormap.is_null() {
+                close_with_error(
+                    in_file,
+                    c"ERROR: iiTIFFCheck - Getting memory for colormap\n".as_ptr(),
+                );
+                return IIERR_MEMORY_ERR;
+            }
+            j = 0;
+            while j < dirnum {
+                if set_matching_directory(in_file, j) != 0 {
+                    close_with_error(
+                        in_file,
+                        c"ERROR: iiTIFFCheck - getting directory for colormap\n".as_ptr(),
+                    );
+                    return IIERR_IO_ERROR;
+                }
+
+                TIFFGetField(
+                    tif,
+                    TIFFTAG_COLORMAP,
+                    &raw mut redp,
+                    &raw mut greenp,
+                    &raw mut bluep,
+                );
+                i = 0;
+                while i < 256 {
+                    *(*in_file).colormap.add((j * 768 + i) as usize) =
+                        (*redp.add(i as usize) >> 8) as u8;
+                    *(*in_file).colormap.add((j * 768 + i + 256) as usize) =
+                        (*greenp.add(i as usize) >> 8) as u8;
+                    *(*in_file).colormap.add((j * 768 + i + 512) as usize) =
+                        (*bluep.add(i as usize) >> 8) as u8;
+                    i += 1;
+                }
+                j += 1;
+            }
+            TIFFSetDirectory(tif, 0);
+        } else if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT {
+            (*in_file).type_ = IITYPE_BYTE;
+            info.type_ = RAW_MODE_SBYTE;
+        }
+    } else {
+        /* If there is a field specifying signed numbers, set up for signed;
+        otherwise set up for unsigned */
+        if bits == 16 {
+            if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT {
+                (*in_file).type_ = IITYPE_SHORT;
+                (*in_file).amean = 0.;
+                (*in_file).amin = -32767.;
+                (*in_file).amax = 32767.;
+                (*in_file).mode = MRC_MODE_SHORT;
+                info.type_ = RAW_MODE_SHORT;
+            } else {
+                (*in_file).type_ = IITYPE_USHORT;
+                (*in_file).amean = 32767.;
+                (*in_file).amin = 0.;
+                (*in_file).amax = 65535.;
+                (*in_file).mode = MRC_MODE_USHORT; /* Why was this SHORT for both? */
+                info.type_ = RAW_MODE_USHORT;
+            }
+        } else {
+            /* Set up for integer data: until there is an MRC mode, set to -1 */
+            if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_INT {
+                (*in_file).type_ = IITYPE_INT;
+                (*in_file).amean = 0.;
+                (*in_file).amin = -65536.;
+                (*in_file).amax = 65536.;
+                (*in_file).mode = -1;
+            } else if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_UINT {
+                (*in_file).type_ = IITYPE_UINT;
+                (*in_file).amean = 65536.;
+                (*in_file).amin = 0.;
+                (*in_file).amax = 130000.;
+                (*in_file).mode = -1;
+            } else if format_defined != 0 && sampleformat as i32 == SAMPLEFORMAT_IEEEFP {
+                (*in_file).type_ = IITYPE_FLOAT;
+                (*in_file).amean = 128.;
+                (*in_file).amin = 0.;
+                (*in_file).amax = 255.;
+                (*in_file).mode = MRC_MODE_FLOAT;
+                info.type_ = RAW_MODE_FLOAT;
+            } else {
+                close_with_error(
+                    in_file,
+                    c"ERROR: iiTIFFCheck - 32-bit TIFF file with no data type defined\n".as_ptr(),
+                );
+                return IIERR_NO_SUPPORT;
+            }
+        }
+    }
+
+    if TIFFGetField(
+        tif,
+        tvips_tag as u32,
+        &raw mut bits,
+        &raw mut (*in_file).user_data,
+    ) > 0
+    {
+        (*in_file).user_count = bits as i32;
+        (*in_file).user_flags = IIFLAG_TVIPS_DATA;
+        if TIFFIsByteSwapped(tif) != 0 {
+            (*in_file).user_flags |= IIFLAG_BYTES_SWAPPED;
+        }
+    }
+
+    /* Use min and max from file if defined (better be there for float/int) */
+    if got_min != 0 {
+        if (*in_file).type_ == IITYPE_BYTE {
+            last_min += 128.;
+        }
+        (*in_file).amin = last_min as f32;
+    }
+    if got_max != 0 {
+        if (*in_file).type_ == IITYPE_BYTE {
+            last_max += 128.;
+        }
+        (*in_file).amax = last_max as f32;
+    }
+    (*in_file).amean = if eer_file != 0 {
+        frame_mean
+    } else {
+        ((*in_file).amin as f64 + (*in_file).amax as f64) as f32 / 2.
+    };
+
+    /* Handle pixel size if it is above threshold */
+    if has_pixel != 0 && ((*in_file).any_tiff_pix_size != 0 || x_pixel / 1.0e4 <= pixel_limit) {
+        (*in_file).xscale = x_pixel;
+        (*in_file).yscale = y_pixel;
+        (*in_file).zscale = x_pixel
+            * if eer_file != 0 {
+                num_in_autogroup as f32
+            } else {
+                1.
+            };
+    }
+
+    (*in_file).smin = (*in_file).amin;
+    (*in_file).smax = (*in_file).amax;
+
+    /* Intercept ImageJ big tiff and try to convert to mrc-like */
+    if image_j != 0
+        && dirnum == 1
+        && im_jslices == im_jimages
+        && im_jimages > 1
+        && (*in_file).planes_per_image == 1
+        && photometric as i32 != PHOTOMETRIC_PALETTE
+        && (*in_file).mode >= 0
+    {
+        info.nx = (*in_file).nx;
+        info.ny = (*in_file).ny;
+        info.nz = im_jimages;
+        info.swap_bytes = TIFFIsByteSwapped(tif);
+        info.section_skip = 0;
+        info.y_inverted = 1;
+        info.amin = (*in_file).amin;
+        info.amax = (*in_file).amax;
+        info.pixel = if has_pixel != 0 { x_pixel } else { 0. };
+        info.z_pixel = info.pixel;
+        if TIFFGetField(tif, TIFFTAG_STRIPOFFSETS, &raw mut offsets) > 0 {
+            info.header_size = *offsets as i32;
+            TIFFClose(tif);
+            (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
+            if (*in_file).fp.is_null() {
+                b3d_error(
+                    stderr,
+                    format_args!(
+                        "ERROR: iiTIFFCheck - Reopening file {} for treatment as MRC-like\n",
+                        CStr::from_ptr((*in_file).filename).to_string_lossy()
+                    ),
+                );
+                return IIERR_IO_ERROR;
+            }
+            return ii_setup_raw_headers(in_file, &raw mut info);
+        }
+    }
+
+    /* Otherwise proceed to return as a TIFF file */
+    (*in_file).header_size = 8;
+    (*in_file).section_skip = 0;
+    (*in_file).fp = tif.cast();
     (*in_file).clean_up = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile),
         unsafe extern "C" fn(*mut ImodImageFile),
     >(tiff_delete));
-    (*in_file).close = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile),
-        unsafe extern "C" fn(*mut ImodImageFile),
-    >(tiff_close));
     (*in_file).reopen = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile) -> i32,
         unsafe extern "C" fn(*mut ImodImageFile) -> i32,
     >(tiff_reopen));
+    (*in_file).close = Some(core::mem::transmute::<
+        unsafe fn(*mut ImodImageFile),
+        unsafe extern "C" fn(*mut ImodImageFile),
+    >(tiff_close));
     (*in_file).fill_mrc_header = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
         unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
@@ -542,11 +1192,9 @@ pub unsafe fn tiff_close(in_file: *mut ImodImageFile) {
 /// C `tiffDelete` (`iitif.c:708`).
 pub unsafe fn tiff_delete(in_file: *mut ImodImageFile) {
     if !in_file.is_null() {
+        ilist_delete((*in_file).directory_nums.cast());
+        (*in_file).directory_nums = core::ptr::null_mut();
         tiff_close(in_file);
-        if !(*in_file).directory_nums.is_null() {
-            ilist_delete((*in_file).directory_nums.cast());
-            (*in_file).directory_nums = core::ptr::null_mut();
-        }
     }
 }
 /// C `tiffFillMrcHeader` (`iitif.c:715`).
@@ -745,13 +1393,37 @@ pub fn tiff_suppress_warnings() {
     S_WARNINGS_SUPPRESSED.store(1, Ordering::SeqCst);
 }
 /// C `warningHandler` (`iitif.c:862`).
-unsafe fn warning_handler(module: *const c_char, format: *const c_char, ap: *mut c_void) {
-    let _ = (module, format, ap);
+unsafe extern "C" fn warning_handler(
+    module: *const c_char,
+    format: *const c_char,
+    ap: *mut c_void,
+) {
+    let mut buffer = [0 as c_char; 160];
+    vsnprintf(buffer.as_mut_ptr(), 159, format, ap);
+    /* va_end(ap) is a no-op in this ABI */
+
+    /* It didn't work to call the old handler with some errors, so print it
+    ourselves to stderr.  It was "unknown" in libtiff 3 and "Unknown" in 4 */
+    if libc::strstr(buffer.as_ptr(), c"nknown field with tag".as_ptr()).is_null() {
+        if !module.is_null() {
+            libc::fprintf(
+                stderr,
+                c"%s: Warning, %s\n".as_ptr(),
+                module,
+                buffer.as_ptr(),
+            );
+        } else {
+            libc::fprintf(stderr, c"Warning, %s\n".as_ptr(), buffer.as_ptr());
+        }
+    }
 }
 /// C `tiffFilterWarnings` (`iitif.c:879`).
 pub fn tiff_filter_warnings() {
     if S_WARNINGS_SUPPRESSED.load(Ordering::SeqCst) == 0 {
-        let _ = unsafe { TIFFSetWarningHandler(core::ptr::null_mut()) };
+        S_OLD_HANDLER.store(
+            unsafe { TIFFSetWarningHandler(warning_handler as *mut c_void) },
+            Ordering::SeqCst,
+        );
     }
 }
 /// C `tiffSetMapping` (`iitif.c:885`).
@@ -759,18 +1431,37 @@ pub fn tiff_set_mapping(value: i32) {
     S_USE_MAPPING.store(value, Ordering::SeqCst);
 }
 /// C `tiffSetEERreadProperties` (`iitif.c:896`).
+///
+/// Set the properties for opening EER files and flags for opening or reading.
+/// superRes can be 0 to the maximum allowed value; autogroup specifies the frame
+/// summing where a negative value specifies the number of frames to sum to;
+/// flags are defined in iimage.h.  Flags are cleared when opening or reading from
+/// file.  The flag to ignore bad endings is stored separately, not cleared between
+/// invocations, and can be overridden by an environment variable.
 pub fn tiff_set_eer_read_properties(super_res: i32, autogroup: i32, flags: i32) {
-    let super_res = super_res.clamp(
-        S_MIN_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
-        S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
-    );
+    if S_IGNORE_FROM_VAR.load(Ordering::SeqCst) == -999 {
+        let ignore_var = unsafe { libc::getenv(c"IGNORE_BAD_EER_ENDING".as_ptr()) };
+        if !ignore_var.is_null() {
+            S_IGNORE_FROM_VAR.store(unsafe { libc::atoi(ignore_var) }, Ordering::SeqCst);
+        } else {
+            S_IGNORE_FROM_VAR.store(-997, Ordering::SeqCst);
+        }
+    }
     S_READ_EER_AS_SUPER_RES.store(super_res, Ordering::SeqCst);
     S_EER_FLAGS.store(flags, Ordering::SeqCst);
     S_IGNORE_BAD_EER_END.store(
         (flags & IIFLAG_IGNORE_BAD_EER_END != 0) as i32,
         Ordering::SeqCst,
     );
+    if S_IGNORE_FROM_VAR.load(Ordering::SeqCst) > -990 {
+        S_IGNORE_BAD_EER_END.store(S_IGNORE_FROM_VAR.load(Ordering::SeqCst), Ordering::SeqCst);
+    }
     S_AUTOGROUP_EER.store(autogroup, Ordering::SeqCst);
+    let super_res = super_res.clamp(
+        S_MIN_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
+        S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
+    );
+    S_READ_EER_AS_SUPER_RES.store(super_res, Ordering::SeqCst);
     let antialias = if flags & IIFLAG_ANTIALIAS_EER != 0 {
         3 + (flags & IIFLAG_EER_USE_LANCZOS != 0) as i32
     } else {
@@ -845,10 +1536,12 @@ unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i3
 }
 /// C `closeWithError` (`iitif.c:994`).
 unsafe fn close_with_error(in_file: *mut ImodImageFile, message: *const c_char) {
-    if in_file.is_null() {
-        return;
-    }
-    tiff_close(in_file);
+    TIFFClose((*in_file).header.cast());
+    (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
+    b3d_error(
+        stderr,
+        format_args!("{}", CStr::from_ptr(message).to_string_lossy()),
+    );
 }
 /// C `countEERBytesAndElectrons` (`iitif.c:1005`).
 unsafe fn count_eer_bytes_and_electrons(
@@ -857,198 +1550,811 @@ unsafe fn count_eer_bytes_and_electrons(
     raw_total_bytes: *mut i32,
     max_electrons: *mut i32,
 ) {
-    if tif.is_null() {
-        return;
+    let nstrip = TIFFNumberOfStrips(tif) as i32;
+    *raw_total_bytes = 0;
+
+    /* Add up the strip sizes to get buffer needs */
+    let mut si = 0;
+    while si < nstrip {
+        *raw_total_bytes = (*raw_total_bytes).wrapping_add(TIFFRawStripSize(tif, si as u32) as i32);
+        si += 1;
     }
-    let mut total = 0i32;
-    for strip in 0..TIFFNumberOfStrips(tif) {
-        total = total.saturating_add(TIFFRawStripSize(tif, strip) as i32);
-    }
-    if !raw_total_bytes.is_null() {
-        *raw_total_bytes = total;
-    }
-    if !max_electrons.is_null() {
-        *max_electrons = 8 * total / (if is_7bit_eer != 0 { 7 } else { 8 } + 4);
-    }
+
+    /* maximum number of electrons is 11 or 12 bits each */
+    *max_electrons =
+        8i32.wrapping_mul(*raw_total_bytes) / (if is_7bit_eer != 0 { 7 } else { 8 } + 4);
 }
 /// C `ReadSection` (`iitif.c:1023`).
+///
+/// DNM 12/24/00: Got this working for bytes, shorts, and RGBs, for whole
+/// images or subsets, and using maps for scaling.
+/// DNM 11/18/01: Added ability to read tiles, made tiffReadSection and
+/// tiffReadSectionByte call a common routine to reduce duplicate code.
 unsafe fn read_section(
     in_file: *mut ImodImageFile,
     buf: *mut c_char,
     in_section: i32,
     convert: i32,
 ) -> i32 {
-    if in_file.is_null() || buf.is_null() || (*in_file).axis == 2 {
+    let mut nstrip: i32;
+    let mut si: i32;
+    let plane: i32;
+    let sample_offset: i32;
+    let xout: i32;
+    let mut xcopy: i32 = 0;
+    let xsize = (*in_file).nx;
+    let ysize = (*in_file).ny;
+    let samples = (*in_file).contig_samples;
+    let mut row: i32;
+    let mut xstart: i32;
+    let mut xend: i32;
+    let mut ystart: i32;
+    let mut yend: i32;
+    let mut y: i32;
+    let mut ofsin: i32;
+    let mut red_fac: i32;
+    let mut ofsout: usize;
+    let doscale: i32;
+    let byte = if convert == MRSA_BYTE { 1 } else { 0 };
+    let to_short = if convert == MRSA_USHORT { 1 } else { 0 };
+    let to_float = if convert == MRSA_FLOAT { 1 } else { 0 };
+    let signed_bytes = if (*in_file).type_ == IITYPE_BYTE {
+        1
+    } else {
+        0
+    };
+    let slope = (*in_file).slope;
+    let offset = (*in_file).offset;
+    let outmin = 0;
+    let outmax = if to_short != 0 { 65535 } else { 255 };
+    let eps: f32 = if to_short != 0 { 0.005 / 256. } else { 0.005 };
+    let pad_left = 0.max((*in_file).pad_left);
+    let pad_right = 0.max((*in_file).pad_right);
+    let mut stripsize: i32;
+    let mut max_electrons: i32 = 0;
+    let is_7bit_eer: i32;
+    let mut raw_total_bytes: i32 = 0;
+    let mut out_buf_size: i32;
+    let is_eerfile: i32;
+    let mut num_electrons: i32 = 0;
+    let byte_buf_size: i32;
+    let mut chip_size: i32;
+    let start_finish: i32;
+    let add_to_sum: i32;
+    let auto_group_eer: i32;
+    let mut sec_start: i32 = 0;
+    let mut sec_end: i32 = 0;
+    let mut raw_arr_size: i32;
+    let mut elec_arr_size: i32;
+    let need_convert: i32;
+    let mut positions: *mut i32 = core::ptr::null_mut();
+    let mut symbols: *mut u8 = core::ptr::null_mut();
+    let xmin: i32;
+    let xmax: i32;
+    let ymin: i32;
+    let ymax: i32;
+    let mut pixsize: i32 = 1;
+    let mut move_size: i32 = if to_short != 0 { 2 } else { 1 };
+    let mut obuf: *mut u8;
+    let mut tmp: *mut u8 = core::ptr::null_mut();
+    let mut eer_buf: *mut u8 = core::ptr::null_mut();
+    let mut use_buf: *mut u8 = core::ptr::null_mut();
+    let mut bdata: *mut u8;
+    let mut sobuf: *mut i16;
+    let mut sdata: *mut i16;
+    let mut map: *mut u8 = core::ptr::null_mut();
+    let mut first_4bits_map = [0u8; 256];
+    let mut second_4bits_map = [0u8; 256];
+
+    /* Send a color map to line converter for a colormap image if converting or
+    returning RGB values, but not if the actual bytes are wanted */
+    let colormap: *mut u8 = if (*in_file).format == IIFORMAT_COLORMAP
+        && (convert != 0 || (*in_file).raw_palette_bytes == 0)
+    {
+        (*in_file).colormap.add(768 * in_section as usize)
+    } else {
+        core::ptr::null_mut()
+    };
+    let mut free_map = 0;
+    let mut rowsperstrip: u32 = 0;
+    let mut nread: isize;
+    let mut line_bytes: i32;
+    let mut line_offset: i32;
+    let mut skip_half: i32;
+    let tilesize: isize;
+    let mut tilewidth: i32 = 0;
+    let mut tilelength: i32 = 0;
+    let xtiles: i32;
+    let ytiles: i32;
+    let mut xti: i32;
+    let mut yti: i32;
+    let x_dimension: i32;
+
+    let mut tif = (*in_file).header.cast::<Tiff>();
+    if (*in_file).axis == 2 {
+        b3d_error(
+            stderr,
+            format_args!("ERROR: tiffReadSection - Cannot read Y planes from a TIFF file\n"),
+        );
         return -1;
     }
-    let tif = (*in_file).header.cast::<Tiff>();
-    let samples = (*in_file).contig_samples.max(1);
-    let planes = (*in_file).planes_per_image.max(1);
-    let row = in_section / (planes * samples);
-    let plane = in_section % planes;
-    let sample_offset = in_section % samples;
-    if tif.is_null() || set_matching_directory(in_file, row) != 0 {
+
+    if tif.is_null() {
+        ii_reopen(in_file);
+    }
+    tif = (*in_file).header.cast::<Tiff>();
+    if tif.is_null() {
         return -1;
     }
-    let mut rows = 0u32;
-    let has_strips = TIFFGetField(tif, TIFFTAG_ROWSPERSTRIP, &mut rows) != 0 && rows != 0;
-    let xmin = (*in_file).llx;
-    let ymin = (*in_file).lly;
-    let xmax = if (*in_file).urx < 0 {
-        (*in_file).nx - 1
+
+    is_eerfile = if (*in_file).tiff_compression == IICOMPRESSION_EER_7BIT
+        || (*in_file).tiff_compression == IICOMPRESSION_EER_8BIT
+    {
+        1
     } else {
-        (*in_file).urx
+        0
     };
-    let ymax = if (*in_file).ury < 0 {
-        (*in_file).ny - 1
+    auto_group_eer = if is_eerfile != 0 && (*in_file).num_frames_in_eerfile > (*in_file).nz {
+        1
     } else {
-        (*in_file).ury
+        0
     };
-    let xout = xmax + 1 - xmin;
-    let mut pixsize = match (*in_file).type_ {
-        IITYPE_SHORT | IITYPE_USHORT => 2,
-        IITYPE_FLOAT | IITYPE_INT | IITYPE_UINT => 4,
-        _ => 1,
-    };
-    if (*in_file).format == IIFORMAT_RGB {
-        pixsize = (*in_file).rgb_samples;
+    if auto_group_eer != 0
+        && S_EER_FLAGS.load(Ordering::SeqCst) & (IIFLAG_ADD_TO_EER_SUM | IIFLAG_START_END_EER_SUM)
+            != 0
+    {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: tiffReadSection - Cannot set flags for summing frames when autogrouping an EER file\n"
+            ),
+        );
+        return -1;
     }
-    let move_size = if convert == MRSA_FLOAT {
-        4
-    } else if convert == MRSA_USHORT {
-        2
-    } else if (*in_file).format == IIFORMAT_RGB || (*in_file).format == IIFORMAT_COLORMAP {
-        3
+
+    /* set the dimensions to read in */
+    /* DNM 2/26/03: replace upper right only if negative */
+    xmin = (*in_file).llx;
+    ymin = (*in_file).lly;
+    if (*in_file).urx < 0 {
+        xmax = (*in_file).nx - 1;
     } else {
-        pixsize
+        xmax = (*in_file).urx;
+    }
+    if (*in_file).ury < 0 {
+        ymax = (*in_file).ny - 1;
+    } else {
+        ymax = (*in_file).ury;
+    }
+    xout = xmax + 1 - xmin;
+    x_dimension = xout + pad_left + pad_right;
+    doscale = if convert != 0
+        && (offset <= -1.0 || offset >= 1.0 || slope < 1. - eps || slope > 1. + eps)
+    {
+        1
+    } else {
+        0
     };
-    if !has_strips {
-        let mut tile_width = 0u32;
-        let mut tile_length = 0u32;
-        if TIFFGetField(tif, TIFFTAG_TILEWIDTH, &mut tile_width) == 0
-            || TIFFGetField(tif, TIFFTAG_TILELENGTH, &mut tile_length) == 0
+    line_bytes = xsize;
+    line_offset = xmin;
+    skip_half = 0;
+
+    /* Modify bytes and offset appropriately and set flag to skip half byte at start of line
+    for 4-bit, also set up byte to first/second pixel maps appropriate for fill order */
+    if (*in_file).packed4bits != 0 {
+        line_bytes = (xsize + 1) / 2;
+        line_offset = xmin / 2;
+        skip_half = xmin % 2;
+        let low_map: *mut u8;
+        let high_map: *mut u8;
+        if (*in_file).fill_order == FILLORDER_LSB2MSB {
+            low_map = first_4bits_map.as_mut_ptr();
+            high_map = second_4bits_map.as_mut_ptr();
+        } else {
+            high_map = first_4bits_map.as_mut_ptr();
+            low_map = second_4bits_map.as_mut_ptr();
+        }
+        xti = 0;
+        while xti < 16 {
+            yti = 0;
+            while yti < 16 {
+                *low_map.add((xti + 16 * yti) as usize) = xti as u8;
+                *high_map.add((xti + 16 * yti) as usize) = yti as u8;
+                yti += 1;
+            }
+            xti += 1;
+        }
+    }
+
+    row = in_section / ((*in_file).planes_per_image * samples);
+    if auto_group_eer == 0 && set_matching_directory(in_file, row) != 0 {
+        b3d_error(
+            stderr,
+            format_args!("ERROR: TIFF ReadSection - Cannot find directory {}\n", row),
+        );
+        return -1;
+    }
+    plane = in_section % (*in_file).planes_per_image;
+    sample_offset = in_section % samples;
+
+    /* Set up pixsize which is the number of bytes in the input data, and
+    moveSize which is number of bytes of output.  Also get scale maps */
+    if (convert != 0 && to_float == 0) || signed_bytes != 0 {
+        if (*in_file).type_ == IITYPE_SHORT {
+            pixsize = 2;
+            map = get_short_map(slope, offset, outmin, outmax, MRC_RAMP_LIN, 0, 1);
+            free_map = 1;
+        } else if (*in_file).type_ == IITYPE_USHORT {
+            pixsize = 2;
+            if byte != 0 || doscale != 0 {
+                map = get_short_map(slope, offset, outmin, outmax, MRC_RAMP_LIN, 0, 0);
+                free_map = 1;
+            }
+        } else if (*in_file).type_ == IITYPE_FLOAT
+            || (*in_file).type_ == IITYPE_INT
+            || (*in_file).type_ == IITYPE_UINT
         {
-            return IIERR_NO_SUPPORT;
+            pixsize = 4;
+        } else if ((to_short != 0 || doscale != 0) && colormap.is_null()) || signed_bytes != 0 {
+            map = get_byte_map(
+                slope,
+                offset,
+                outmin,
+                outmax,
+                if signed_bytes != 0 { 1 } else { 0 },
+            );
+            if (*in_file).format == IIFORMAT_RGB {
+                pixsize = (*in_file).rgb_samples;
+            }
+        } else if (*in_file).format == IIFORMAT_RGB {
+            pixsize = (*in_file).rgb_samples;
         }
-        let tile_size = TIFFTileSize(tif);
-        if tile_size <= 0 {
-            return IIERR_IO_ERROR;
+        if to_float != 0 {
+            move_size = 4;
         }
-        let mut tmp = vec![0u8; tile_size as usize];
-        let x_tiles = ((*in_file).nx + tile_width as i32 - 1) / tile_width as i32;
-        let y_tiles = ((*in_file).ny + tile_length as i32 - 1) / tile_length as i32;
-        for y_tile in 0..y_tiles {
-            for x_tile in 0..x_tiles {
-                let start_y = ymin.max((*in_file).ny - tile_length as i32 * (y_tile + 1));
-                let end_y = ymax.min((*in_file).ny - 1 - tile_length as i32 * y_tile);
-                let start_x = xmin.max(x_tile * tile_width as i32);
-                let end_x = xmax.min((x_tile + 1) * tile_width as i32 - 1);
-                if start_y > end_y || start_x > end_x {
-                    continue;
-                }
-                if TIFFReadEncodedTile(
-                    tif,
-                    (x_tile + y_tile * x_tiles + plane * x_tiles * y_tiles) as u32,
-                    tmp.as_mut_ptr().cast(),
-                    tile_size,
-                ) < 0
-                {
-                    return IIERR_IO_ERROR;
-                }
-                for y in start_y..=end_y {
-                    let row = (*in_file).ny - 1 - y - tile_length as i32 * y_tile;
-                    let input = tmp.as_ptr().add(
-                        ((row * tile_width as i32 + start_x - x_tile * tile_width as i32)
-                            * samples
-                            * pixsize
-                            + sample_offset * pixsize) as usize,
-                    );
-                    let output = buf
-                        .cast::<u8>()
-                        .add((((y - ymin) * xout + start_x - xmin) * move_size) as usize);
-                    let count = end_x + 1 - start_x;
-                    if convert == MRSA_NOPROC {
-                        core::ptr::copy_nonoverlapping(input, output, (count * pixsize) as usize);
+    } else {
+        if (*in_file).format == IIFORMAT_RGB {
+            pixsize = (*in_file).rgb_samples;
+        } else if (*in_file).type_ == IITYPE_SHORT || (*in_file).type_ == IITYPE_USHORT {
+            pixsize = 2;
+        } else if (*in_file).type_ == IITYPE_FLOAT
+            || (*in_file).type_ == IITYPE_INT
+            || (*in_file).type_ == IITYPE_UINT
+        {
+            pixsize = 4;
+        }
+        if to_float != 0 {
+            move_size = 4;
+        } else {
+            move_size = if (*in_file).format == IIFORMAT_RGB || !colormap.is_null() {
+                3
+            } else {
+                pixsize
+            };
+        }
+    }
+
+    if free_map != 0 && map.is_null() {
+        return -1;
+    }
+
+    if is_eerfile != 0 {
+        is_7bit_eer = if (*in_file).tiff_compression == IICOMPRESSION_EER_7BIT {
+            1
+        } else {
+            0
+        };
+        sec_start = in_section;
+        sec_end = in_section;
+        if auto_group_eer != 0 {
+            group_limits_remainder_at_end(
+                (*in_file).num_frames_in_eerfile,
+                (*in_file).nz,
+                in_section,
+                &mut sec_start,
+                &mut sec_end,
+            );
+        }
+        raw_arr_size = 0;
+        elec_arr_size = 0;
+        byte_buf_size = xout * (ymax + 1 - ymin) * pixsize;
+        if pixsize > move_size {
+            eer_buf = libc::malloc(byte_buf_size as usize).cast();
+            if eer_buf.is_null() {
+                cleanup_from_eer(
+                    tmp,
+                    if free_map != 0 {
+                        map
                     } else {
-                        copy_line(
-                            input.cast_mut(),
-                            output,
-                            count,
-                            convert,
-                            pixsize,
-                            (*in_file).type_,
-                            (*in_file).format,
-                            samples,
-                            (*in_file).slope,
-                            (*in_file).offset,
-                            0,
-                            0,
-                            core::ptr::null_mut(),
-                            core::ptr::null_mut(),
-                            core::ptr::null_mut(),
-                            core::ptr::null_mut(),
-                        );
-                    }
-                }
+                        core::ptr::null_mut()
+                    },
+                    positions,
+                    symbols,
+                    eer_buf,
+                );
+                return -1;
+            }
+            use_buf = eer_buf;
+        }
+
+        /* Allocate arrays for antialiasing */
+        if (*in_file).antialias_eerfilter != 0 && (*in_file).read_eer_as_super_res < 2 {
+            red_fac =
+                (2.0_f64.powf((2 - (*in_file).read_eer_as_super_res) as f64) + 0.5).floor() as i32;
+            si = red_fac * red_fac;
+            S_ALL_FILTERS = libc::malloc((si * 16) as usize * core::mem::size_of::<i32>()).cast();
+            S_FILTER_PTRS = libc::malloc(si as usize * core::mem::size_of::<*mut i32>()).cast();
+            S_FILT_X_START = libc::malloc(si as usize * core::mem::size_of::<i32>()).cast();
+            S_FILT_Y_START = libc::malloc(si as usize * core::mem::size_of::<i32>()).cast();
+            if S_ALL_FILTERS.is_null()
+                || S_FILTER_PTRS.is_null()
+                || S_FILT_X_START.is_null()
+                || S_FILT_Y_START.is_null()
+            {
+                cleanup_from_eer(
+                    tmp,
+                    if free_map != 0 {
+                        map
+                    } else {
+                        core::ptr::null_mut()
+                    },
+                    positions,
+                    symbols,
+                    eer_buf,
+                );
+                return -1;
+            }
+
+            if select_zoom_filter(
+                (*in_file).antialias_eerfilter,
+                1. / red_fac as f64,
+                &mut row,
+            ) != 0
+            {
+                b3d_error(
+                    stderr,
+                    format_args!("ERROR: tiffReadSection - Setting up antialias filter\n"),
+                );
+                return -1;
+            }
+            row = 0;
+            while row < si {
+                *S_FILTER_PTRS.add(row as usize) = S_ALL_FILTERS.add((row * 16) as usize);
+                row += 1;
             }
         }
-        return 0;
-    }
-    let strip_size = TIFFStripSize(tif);
-    if strip_size <= 0 {
-        return IIERR_IO_ERROR;
-    }
-    let mut tmp = vec![0u8; strip_size as usize];
-    let strips = TIFFNumberOfStrips(tif) as i32 / planes;
-    for strip in 0..strips {
-        if TIFFReadEncodedStrip(
-            tif,
-            (strip + plane * strips) as u32,
-            tmp.as_mut_ptr().cast(),
-            strip_size,
-        ) < 0
-        {
-            return IIERR_IO_ERROR;
-        }
-        let strip_y_start = (*in_file).ny - rows as i32 * (strip + 1);
-        let start = ymin.max(strip_y_start);
-        let end = ymax.min((*in_file).ny - 1 - rows as i32 * strip);
-        for y in start..=end {
-            let row = (*in_file).ny - 1 - y - rows as i32 * strip;
-            let input = tmp.as_ptr().add(
-                ((row * (*in_file).nx + xmin) * samples * pixsize + sample_offset * pixsize)
-                    as usize,
+
+        row = sec_start;
+        while row <= sec_end {
+            if auto_group_eer != 0 && set_matching_directory(in_file, row) != 0 {
+                b3d_error(
+                    stderr,
+                    format_args!("ERROR: tiffReadSection - Cannot find directory {}\n", row),
+                );
+                cleanup_from_eer(
+                    tmp,
+                    if free_map != 0 {
+                        map
+                    } else {
+                        core::ptr::null_mut()
+                    },
+                    positions,
+                    symbols,
+                    eer_buf,
+                );
+                return -1;
+            }
+
+            /* Get buffer needs */
+            nstrip = TIFFNumberOfStrips(tif) as i32;
+            count_eer_bytes_and_electrons(
+                tif,
+                is_7bit_eer,
+                &mut raw_total_bytes,
+                &mut max_electrons,
             );
-            let output = buf
-                .cast::<u8>()
-                .add(((y - ymin) * xout * move_size) as usize);
-            if convert == MRSA_NOPROC {
-                core::ptr::copy_nonoverlapping(input, output, (xout * pixsize) as usize);
+
+            /* Allocate arrays; make sure they are big enough */
+            if raw_total_bytes + 10 > raw_arr_size {
+                raw_arr_size = (1.05 * raw_total_bytes as f64) as i32 + 10;
+                if !tmp.is_null() {
+                    _TIFFfree(tmp.cast());
+                }
+                tmp = _TIFFmalloc(raw_arr_size as isize).cast();
+            }
+
+            if max_electrons + 10 > elec_arr_size {
+                libc::free(positions.cast());
+                libc::free(symbols.cast());
+                elec_arr_size = (1.05 * max_electrons as f64) as i32 + 10;
+                positions =
+                    libc::malloc(elec_arr_size as usize * core::mem::size_of::<i32>()).cast();
+                symbols = libc::malloc(elec_arr_size as usize).cast();
+            }
+            if tmp.is_null() || positions.is_null() || symbols.is_null() {
+                cleanup_from_eer(
+                    tmp,
+                    if free_map != 0 {
+                        map
+                    } else {
+                        core::ptr::null_mut()
+                    },
+                    positions,
+                    symbols,
+                    eer_buf,
+                );
+                return -1;
+            }
+
+            /* Read in the data */
+            ystart = 0;
+            si = 0;
+            while si < nstrip {
+                stripsize = TIFFRawStripSize(tif, si as u32) as i32;
+                nread = TIFFReadRawStrip(
+                    tif,
+                    si as u32,
+                    tmp.add(ystart as usize).cast(),
+                    stripsize as isize,
+                );
+                if nread < 0 {
+                    cleanup_from_eer(
+                        tmp,
+                        if free_map != 0 {
+                            map
+                        } else {
+                            core::ptr::null_mut()
+                        },
+                        positions,
+                        symbols,
+                        eer_buf,
+                    );
+                    return IIERR_IO_ERROR;
+                }
+                ystart += stripsize;
+                si += 1;
+            }
+            chip_size = xsize * ysize;
+            if (*in_file).read_eer_as_super_res >= 0 {
+                si = 0;
+                while si < (*in_file).read_eer_as_super_res {
+                    chip_size /= 4;
+                    si += 1;
+                }
             } else {
+                si = (*in_file).read_eer_as_super_res;
+                while si < 0 {
+                    chip_size *= 4;
+                    si += 1;
+                }
+            }
+
+            /* Set the flags for this frame */
+            if auto_group_eer != 0 {
+                let mut flags = 0;
+                if row > sec_start {
+                    flags = IIFLAG_ADD_TO_EER_SUM;
+                }
+                if row == sec_start || row == sec_end {
+                    flags |= IIFLAG_START_END_EER_SUM;
+                }
+                S_EER_FLAGS.store(flags, Ordering::SeqCst);
+            }
+
+            /* Decode it */
+            if decode_eer_image(
+                tmp,
+                positions,
+                symbols,
+                is_7bit_eer,
+                chip_size,
+                raw_total_bytes,
+                &mut num_electrons,
+            ) != 0
+            {
+                cleanup_from_eer(
+                    tmp,
+                    if free_map != 0 {
+                        map
+                    } else {
+                        core::ptr::null_mut()
+                    },
+                    positions,
+                    symbols,
+                    eer_buf,
+                );
+                return IIERR_IO_ERROR;
+            }
+
+            out_buf_size = move_size * x_dimension * (ymax + 1 - ymin);
+            if eer_buf.is_null() {
+                use_buf = buf
+                    .cast::<u8>()
+                    .offset((out_buf_size - byte_buf_size) as isize);
+            }
+            convert_eer_positions(
+                in_file,
+                positions,
+                symbols,
+                num_electrons,
+                use_buf,
+                xmin,
+                xmax,
+                ymin,
+                ymax,
+            );
+            row += 1;
+        }
+
+        /* The data need conversion/copying if convert is set, and not to a byte with no map,
+        or if there is any padding */
+        start_finish = S_EER_FLAGS.load(Ordering::SeqCst) & IIFLAG_START_END_EER_SUM;
+        add_to_sum = S_EER_FLAGS.load(Ordering::SeqCst) & IIFLAG_ADD_TO_EER_SUM;
+        need_convert =
+            if convert != 0 && (convert != MRSA_BYTE || !map.is_null() || !eer_buf.is_null()) {
+                1
+            } else {
+                0
+            };
+        if (need_convert != 0 || pad_left != 0 || pad_right != 0)
+            && ((start_finish == 0 && add_to_sum == 0) || (start_finish != 0 && add_to_sum != 0))
+        {
+            y = 0;
+            while y <= ymax - ymin {
+                ofsin = y * xout * pixsize;
+                bdata = use_buf.add(ofsin as usize);
+                ofsout = (move_size * (y * x_dimension + pad_left)) as usize;
+                obuf = buf.cast::<u8>().add(ofsout);
+
+                /* But if there is just byte data to be copied because of padding, it has to be
+                done explicitly due to overlap at some point */
+                if need_convert == 0 {
+                    if pixsize == 1 {
+                        si = 0;
+                        while si < xout {
+                            *obuf.add(si as usize) = *bdata.add(si as usize);
+                            si += 1;
+                        }
+                    } else {
+                        sdata = bdata.cast::<i16>();
+                        sobuf = obuf.cast::<i16>();
+                        si = 0;
+                        while si < xout {
+                            *sobuf.add(si as usize) = *sdata.add(si as usize);
+                            si += 1;
+                        }
+                    }
+                } else {
+                    /* Otherwise use the copy routine */
+                    copy_line(
+                        bdata,
+                        obuf,
+                        xout,
+                        convert,
+                        pixsize,
+                        (*in_file).type_,
+                        (*in_file).format,
+                        samples,
+                        slope,
+                        offset,
+                        doscale,
+                        0,
+                        map,
+                        core::ptr::null_mut(),
+                        core::ptr::null_mut(),
+                        core::ptr::null_mut(),
+                    );
+                }
+                y += 1;
+            }
+        }
+        cleanup_from_eer(
+            tmp,
+            if free_map != 0 {
+                map
+            } else {
+                core::ptr::null_mut()
+            },
+            positions,
+            symbols,
+            eer_buf,
+        );
+        return 0;
+    } else if TIFFGetField(tif, TIFFTAG_ROWSPERSTRIP, &mut rowsperstrip) != 0 {
+        /* if data are in strips, get strip size and memory for it */
+        stripsize = TIFFStripSize(tif) as i32;
+        tmp = _TIFFmalloc(stripsize as isize).cast();
+        if tmp.is_null() {
+            if free_map != 0 {
+                libc::free(map.cast());
+            }
+            return -1;
+        }
+
+        nstrip = TIFFNumberOfStrips(tif) as i32 / (*in_file).planes_per_image;
+
+        si = 0;
+        while si < nstrip {
+            /* Compute starting and ending Y values to use in each strip */
+            ystart = ysize - 1 - (rowsperstrip as i32 * (si + 1) - 1);
+            yend = ysize - 1 - (rowsperstrip as i32 * si);
+            if ymin > ystart {
+                ystart = ymin;
+            }
+            if ymax < yend {
+                yend = ymax;
+            }
+            if ystart > yend {
+                si += 1;
+                continue;
+            }
+
+            /* Read the strip if necessary */
+            nread = TIFFReadEncodedStrip(
+                tif,
+                (si + plane * nstrip) as u32,
+                tmp.cast(),
+                stripsize as isize,
+            );
+            let _ = nread;
+            y = ystart;
+            while y <= yend {
+                /* for each y, compute back to row, and get offsets into
+                input and output arrays */
+                row = ysize - 1 - y - rowsperstrip as i32 * si;
+                ofsin =
+                    samples * pixsize * (row * line_bytes + line_offset) + sample_offset * pixsize;
+                ofsout = (move_size as usize)
+                    * ((y - ymin) as usize * x_dimension as usize + pad_left as usize);
+                obuf = buf.cast::<u8>().add(ofsout);
+                bdata = tmp.add(ofsin as usize);
                 copy_line(
-                    input.cast_mut(),
-                    output,
+                    bdata,
+                    obuf,
                     xout,
                     convert,
                     pixsize,
                     (*in_file).type_,
                     (*in_file).format,
                     samples,
-                    (*in_file).slope,
-                    (*in_file).offset,
-                    0,
-                    0,
-                    core::ptr::null_mut(),
-                    core::ptr::null_mut(),
-                    core::ptr::null_mut(),
-                    core::ptr::null_mut(),
+                    slope,
+                    offset,
+                    doscale,
+                    if (*in_file).packed4bits != 0 {
+                        1 + skip_half
+                    } else {
+                        0
+                    },
+                    map,
+                    first_4bits_map.as_mut_ptr(),
+                    second_4bits_map.as_mut_ptr(),
+                    colormap,
                 );
+                y += 1;
             }
+            si += 1;
+        }
+    } else {
+        /* Otherwise make sure there are tiles, if not return with error */
+        if TIFFGetField(tif, TIFFTAG_TILEWIDTH, &mut tilewidth) != 0 {
+            tilesize = TIFFTileSize(tif);
+            tmp = _TIFFmalloc(tilesize).cast();
+        } else {
+            tilesize = 0;
+        }
+        let _ = tilesize;
+        if tmp.is_null() {
+            if free_map != 0 {
+                libc::free(map.cast());
+            }
+            return -1;
+        }
+        TIFFGetField(tif, TIFFTAG_TILELENGTH, &mut tilelength);
+        xtiles = (xsize + tilewidth - 1) / tilewidth;
+        ytiles = (ysize + tilelength - 1) / tilelength;
+
+        yti = 0;
+        while yti < ytiles {
+            xti = 0;
+            while xti < xtiles {
+                /* Compute starting and ending Y then X values to use in
+                this tile */
+                ystart = ysize - 1 - (tilelength * (yti + 1) - 1);
+                yend = ysize - 1 - (tilelength * yti);
+                if ymin > ystart {
+                    ystart = ymin;
+                }
+                if ymax < yend {
+                    yend = ymax;
+                }
+                if ystart > yend {
+                    xti += 1;
+                    continue;
+                }
+
+                xstart = xti * tilewidth;
+                xend = xstart + tilewidth - 1;
+                if xmin > xstart {
+                    xstart = xmin;
+                }
+                if xmax < xend {
+                    xend = xmax;
+                }
+                if xstart > xend {
+                    xti += 1;
+                    continue;
+                }
+
+                /* Read the tile if necessary */
+                si = xti + yti * xtiles + plane * xtiles * ytiles;
+                nread = TIFFReadEncodedTile(tif, si as u32, tmp.cast(), tilesize);
+                let _ = nread;
+                xcopy = xend + 1 - xstart;
+
+                /* Set up bytes and offset appropriately for this tile */
+                line_bytes = tilewidth;
+                line_offset = xstart - xti * tilewidth;
+                skip_half = 0;
+                if (*in_file).packed4bits != 0 {
+                    line_bytes = (tilewidth + 1) / 2;
+                    skip_half = line_offset % 2;
+                    line_offset /= 2;
+                }
+
+                y = ystart;
+                while y <= yend {
+                    /* for each y, compute back to row, and get offsets
+                    into input and output arrays */
+                    row = ysize - 1 - y - tilelength * yti;
+                    ofsin = pixsize * samples * (row * line_bytes + line_offset)
+                        + sample_offset * pixsize;
+                    ofsout = (move_size as usize)
+                        * ((y - ymin) as usize * x_dimension as usize
+                            + pad_left as usize
+                            + (xstart - xmin) as usize);
+                    obuf = buf.cast::<u8>().add(ofsout);
+                    bdata = tmp.add(ofsin as usize);
+                    copy_line(
+                        bdata,
+                        obuf,
+                        xcopy,
+                        convert,
+                        pixsize,
+                        (*in_file).type_,
+                        (*in_file).format,
+                        samples,
+                        slope,
+                        offset,
+                        doscale,
+                        if (*in_file).packed4bits != 0 {
+                            1 + skip_half
+                        } else {
+                            0
+                        },
+                        map,
+                        first_4bits_map.as_mut_ptr(),
+                        second_4bits_map.as_mut_ptr(),
+                        colormap,
+                    );
+                    y += 1;
+                }
+                xti += 1;
+            }
+            yti += 1;
         }
     }
+    _TIFFfree(tmp.cast());
+    if free_map != 0 {
+        libc::free(map.cast());
+    }
+
     0
 }
-/// C `decodeEERimage` (`iitif.c:1715`).
+/// C `decodeEERimage` (`iitif.c:1493`).
+///
+/// Uncompress the run-length encoded EER image.  The source is compiled with
+/// `NO_WASTED_BITS` defined (`iitif.c:100`), so the misalignment handling in the
+/// 8-bit branch is the selected variant.
 unsafe fn decode_eer_image(
     buf: *mut u8,
     positions: *mut i32,
@@ -1058,88 +2364,147 @@ unsafe fn decode_eer_image(
     pos_limit: i32,
     num_electrons: *mut i32,
 ) -> i32 {
-    let mut bit_pos = 0usize;
-    let mut pixels = 0i32;
-    let mut electrons = 0usize;
+    let mut bit_pos: u32 = 0;
+    let first_byte: u32;
+    let mut pos: u32 = 0;
+    let mut n_pix: u32 = 0;
+    let mut n_electron: u32 = 0;
+    let mut mis_aligned: u32 = 0;
+    let _ = first_byte;
+
     if is_7bit_eer != 0 {
         loop {
-            let first = bit_pos >> 3;
-            let shift = bit_pos & 7;
-            let chunk = u32::from_le_bytes([
-                *buf.add(first),
-                *buf.add(first + 1),
-                *buf.add(first + 2),
-                *buf.add(first + 3),
-            ]) >> shift;
-            for (entry, (jump, symbol)) in [
-                (chunk & 127, (chunk >> 7) & 15),
-                ((chunk >> 11) & 127, (chunk >> 18) & 15),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                bit_pos += if entry == 0 { 7 } else { 11 };
-                pixels += jump as i32;
-                if pixels >= eer_image_pixels {
-                    if !num_electrons.is_null() {
-                        *num_electrons = electrons as i32
-                    };
-                    return if pixels != eer_image_pixels
-                        && S_IGNORE_BAD_EER_END.load(Ordering::SeqCst) == 0
-                    {
-                        1
-                    } else {
-                        0
-                    };
-                }
-                if jump != 127 {
-                    *positions.add(electrons) = pixels;
-                    *symbols.add(electrons) = (symbol as u8) ^ 0x0a;
-                    electrons += 1;
-                    pixels += 1;
-                }
+            /* Fetch 32 bits and unpack up to 2 chunks of 7 + 4 bits.
+            This is faster than unpack 7 and 4 bits sequentially.
+            Since the size of buf is larger than the actual size of data read,
+            it is always safe to read ahead. */
+
+            let first_byte = bit_pos >> 3;
+            let bit_offset_in_first_byte = bit_pos & 7; // 7 = 00000111 (same as % 8)
+            let chunk = buf.add(first_byte as usize).cast::<u32>().read_unaligned()
+                >> bit_offset_in_first_byte;
+
+            let mut p = (chunk & 127) as u8; /* 127 = 01111111 */
+            bit_pos += 7;
+            n_pix += p as u32;
+            if n_pix >= eer_image_pixels as u32 {
+                break;
             }
+
+            /* this should be rare. */
+            if p == 127 {
+                continue;
+            }
+
+            /* If it is a valid jump to an electron, save the position and sup-pixel bits */
+            /* 15 = 00001111; See below for 0x0A */
+            let mut sym = (((chunk >> 7) & 15) as u8) ^ 0x0A;
+            bit_pos += 4;
+            *positions.add(n_electron as usize) = n_pix as i32;
+            *symbols.add(n_electron as usize) = sym;
+            n_electron += 1;
+            n_pix += 1;
+
+            /* Repeat on second chunk */
+            p = ((chunk >> 11) & 127) as u8;
+            bit_pos += 7;
+            n_pix += p as u32;
+            if n_pix >= eer_image_pixels as u32 {
+                break;
+            }
+            if p == 127 {
+                continue;
+            }
+
+            sym = (((chunk >> 18) & 15) as u8) ^ 0x0A;
+            bit_pos += 4;
+            *positions.add(n_electron as usize) = n_pix as i32;
+            *symbols.add(n_electron as usize) = sym;
+            n_electron += 1;
+            n_pix += 1;
         }
-    }
-    let mut pos = 0usize;
-    while pos < pos_limit as usize {
-        let p1 = *buf.add(pos);
-        let s1 = (*buf.add(pos + 1) & 15) ^ 0x0a;
-        let p2 = (*buf.add(pos + 1) >> 4) | (*buf.add(pos + 2) << 4);
-        let s2 = (*buf.add(pos + 2) >> 4) ^ 0x0a;
-        for (jump, symbol) in [(p1, s1), (p2, s2)] {
-            pixels += jump as i32;
-            if pixels >= eer_image_pixels {
-                if !num_electrons.is_null() {
-                    *num_electrons = electrons as i32
-                };
-                return if pixels != eer_image_pixels
-                    && S_IGNORE_BAD_EER_END.load(Ordering::SeqCst) == 0
-                {
-                    1
-                } else {
-                    0
-                };
-            }
-            if jump < 255 {
-                *positions.add(electrons) = pixels;
-                *symbols.add(electrons) = symbol;
-                electrons += 1;
-                pixels += 1;
-            }
-        }
-        pos += 3;
-    }
-    if !num_electrons.is_null() {
-        *num_electrons = electrons as i32;
-    }
-    if pixels != eer_image_pixels && S_IGNORE_BAD_EER_END.load(Ordering::SeqCst) == 0 {
-        1
     } else {
-        0
+        /* 8 bit code is untested with or without wasted bits */
+        /* The array was oversized, so it is safe to go beyond the limit by two bytes. */
+        while pos < pos_limit as u32 {
+            if mis_aligned != 0 {
+                let p1 = (*buf.add(pos as usize) >> 4) | (*buf.add(pos as usize + 1) << 4);
+                let s1 = (*buf.add(pos as usize + 1) >> 4) ^ 0x0A;
+                n_pix += p1 as u32;
+                if n_pix >= eer_image_pixels as u32 {
+                    break;
+                }
+                if p1 < 255 {
+                    *positions.add(n_electron as usize) = n_pix as i32;
+                    *symbols.add(n_electron as usize) = s1;
+                    n_electron += 1;
+                    n_pix += 1;
+                    mis_aligned = 0;
+                } else {
+                    pos += 1;
+                    continue;
+                }
+            }
+
+            /* symbol is bit tricky. 0000YyXx; Y and X must be flipped. */
+            let p1 = *buf.add(pos as usize);
+            let s1 = (*buf.add(pos as usize + 1) & 0x0F) ^ 0x0A; // 0x0F = 00001111, 0x0A = 00001010
+
+            let p2 = (*buf.add(pos as usize + 1) >> 4) | (*buf.add(pos as usize + 2) << 4);
+            let s2 = (*buf.add(pos as usize + 2) >> 4) ^ 0x0A;
+
+            // Note the order. Add p before checking the size and placing a new electron.
+            n_pix += p1 as u32;
+            if n_pix >= eer_image_pixels as u32 {
+                break;
+            }
+            if p1 < 255 {
+                *positions.add(n_electron as usize) = n_pix as i32;
+                *symbols.add(n_electron as usize) = s1;
+                n_electron += 1;
+                n_pix += 1;
+            } else {
+                pos += 1;
+                continue;
+            }
+
+            n_pix += p2 as u32;
+            if n_pix >= eer_image_pixels as u32 {
+                break;
+            }
+            if p2 < 255 {
+                *positions.add(n_electron as usize) = n_pix as i32;
+                *symbols.add(n_electron as usize) = s2;
+                n_electron += 1;
+                n_pix += 1;
+            } else {
+                pos += 2;
+                mis_aligned = 1;
+                continue;
+            }
+            pos += 3;
+        }
     }
+
+    *num_electrons = n_electron as i32;
+    if n_pix != eer_image_pixels as u32 && S_IGNORE_BAD_EER_END.load(Ordering::SeqCst) == 0 {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: TIFFReadSection - Final pixel position in EER image is not right ({} instead of {})\n.",
+                n_pix as i32, eer_image_pixels
+            ),
+        );
+        return 1;
+    }
+    0
 }
-/// C `convertEERpositions` (`iitif.c:1841`).
+/// C `convertEERpositions` (`iitif.c:1639`).
+///
+/// Convert the list of electron positions into counts in an image buffer with optional
+/// gain normalization and antialiasing.  The source `#pragma omp parallel for`
+/// directives select thread counts through `numOMPthreads`; this crate's
+/// `num_omp_threads` reports a serial build, so the loops run in source order.
 unsafe fn convert_eer_positions(
     in_file: *mut ImodImageFile,
     positions: *mut i32,
@@ -1151,24 +2516,23 @@ unsafe fn convert_eer_positions(
     ymin: i32,
     ymax: i32,
 ) {
-    if in_file.is_null() || positions.is_null() || symbols.is_null() || buf.is_null() {
-        return;
-    }
     let out_xsize = xmax + 1 - xmin;
     let out_ysize = ymax + 1 - ymin;
     let mut chip_xsize = (*in_file).nx;
     let mut chip_ysize = (*in_file).ny;
+    let mut y_offset;
     if (*in_file).read_eer_as_super_res >= 0 {
-        for _ in 0..(*in_file).read_eer_as_super_res {
+        for _ind in 0..(*in_file).read_eer_as_super_res {
             chip_xsize /= 2;
             chip_ysize /= 2;
         }
     } else {
-        for _ in (*in_file).read_eer_as_super_res..0 {
+        for _ind in 0..-(*in_file).read_eer_as_super_res {
             chip_xsize *= 2;
             chip_ysize *= 2;
         }
     }
+    let _ = chip_ysize;
     if S_EER_FLAGS.load(Ordering::SeqCst) & IIFLAG_ADD_TO_EER_SUM == 0 {
         core::ptr::write_bytes(
             buf,
@@ -1182,152 +2546,273 @@ unsafe fn convert_eer_positions(
                 }) as usize,
         );
     }
-    if (*in_file).antialias_eerfilter != 0 {
+    y_offset = ((*in_file).ny - 1) - ymin;
+
+    if (*in_file).antialias_eerfilter == 0 {
+        /* Returning full-super-resolution image */
+
+        /* The if test actually makes little difference,
+        but using bit shifts helps when the size is standard */
         if (*in_file).read_eer_as_super_res == 2 {
-            let short_buf = buf.cast::<i16>();
-            let gain = S_GAIN_REFERENCE.load(Ordering::SeqCst);
-            let gain_scale = (*in_file).eerkernel_scale;
-            for ind in 0..num_electrons as usize {
-                let position = *positions.add(ind);
-                let symbol = *symbols.add(ind) as i32;
-                let gain_x = ((position % chip_xsize) << 2) | (symbol & 3);
-                let gain_y =
-                    (*in_file).ny - 1 - (((position / chip_xsize) << 2) | ((symbol & 12) >> 2));
-                let x = gain_x - xmin;
-                let y = gain_y - ymin;
-                if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                    let value = if gain.is_null() {
-                        gain_scale
-                    } else {
-                        (gain_scale as f32 * *gain.add((gain_x + gain_y * (*in_file).nx) as usize))
-                            .round() as i32
-                    };
-                    *short_buf.add((x + y * out_xsize) as usize) += value as i16;
+            if chip_xsize == 4096 {
+                for ind in 0..num_electrons as usize {
+                    let x = ((((*positions.add(ind) & 4095) << 2) | (*symbols.add(ind) as i32 & 3))
+                        - xmin) as i32;
+                    let y = y_offset
+                        - (((*positions.add(ind) >> 12) << 2)
+                            | ((*symbols.add(ind) as i32 & 12) >> 2));
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = buf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(1);
+                    }
+                }
+            } else {
+                for ind in 0..num_electrons as usize {
+                    let x = (((*positions.add(ind) % chip_xsize) << 2)
+                        | (*symbols.add(ind) as i32 & 3))
+                        - xmin;
+                    let y = y_offset
+                        - (((*positions.add(ind) / chip_xsize) << 2)
+                            | ((*symbols.add(ind) as i32 & 12) >> 2));
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = buf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(1);
+                    }
                 }
             }
-        } else if S_GAIN_REFERENCE.load(Ordering::SeqCst).is_null() {
-            let red_fac = 2_i32.pow((2 - (*in_file).read_eer_as_super_res) as u32);
-            let gain_scale = (*in_file).eerkernel_scale;
-            let short_buf = buf.cast::<i16>();
-            let y_super_offset = (*in_file).ny * red_fac - 1;
-            for ind in 0..num_electrons as usize {
-                let position = *positions.add(ind);
-                let symbol = *symbols.add(ind) as i32;
-                let x_super = ((position % chip_xsize) << 2) | (symbol & 3);
-                let y_super =
-                    y_super_offset - (((position / chip_xsize) << 2) | ((symbol & 12) >> 2));
-                let x = x_super / red_fac - xmin;
-                let y = y_super / red_fac - ymin;
-                if x >= 2 && x < out_xsize - 2 && y >= 2 && y < out_ysize - 2 {
-                    let phase_x = x_super % red_fac;
-                    let phase_y = y_super % red_fac;
-                    let start_x = if phase_x < red_fac / 2 { -2 } else { -1 };
-                    let start_y = if phase_y < red_fac / 2 { -2 } else { -1 };
-                    let center_x = (phase_x as f32 + 0.5) / red_fac as f32;
-                    let center_y = (phase_y as f32 + 0.5) / red_fac as f32;
-                    let mut total = 0.0f64;
-                    for oy in 0..4 {
-                        for ox in 0..4 {
-                            total +=
-                                zoom_raw_filt_value(start_x as f32 + ox as f32 + 0.5 - center_x)
-                                    * zoom_raw_filt_value(
-                                        start_y as f32 + oy as f32 + 0.5 - center_y,
-                                    );
-                        }
+        } else if (*in_file).read_eer_as_super_res == 1 {
+            /* Returning super-resolution 1 image */
+            if chip_xsize == 4096 {
+                for ind in 0..num_electrons as usize {
+                    let x = (((*positions.add(ind) & 4095) << 1)
+                        | ((*symbols.add(ind) as i32 & 2) >> 1))
+                        - xmin;
+                    let y = y_offset
+                        - (((*positions.add(ind) >> 12) << 1)
+                            | ((*symbols.add(ind) as i32 & 8) >> 3));
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = buf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(1);
                     }
-                    for oy in 0..4 {
-                        for ox in 0..4 {
-                            let value = (gain_scale as f64
-                                * zoom_raw_filt_value(start_x as f32 + ox as f32 + 0.5 - center_x)
-                                * zoom_raw_filt_value(start_y as f32 + oy as f32 + 0.5 - center_y)
-                                / total)
-                                .round() as i16;
-                            let index =
-                                (x + start_x + ox + (y + start_y + oy) * out_xsize) as usize;
-                            *short_buf.add(index) += value;
-                        }
+                }
+            } else {
+                for ind in 0..num_electrons as usize {
+                    let x = (((*positions.add(ind) % chip_xsize) << 1)
+                        | ((*symbols.add(ind) as i32 & 2) >> 1))
+                        - xmin;
+                    let y = y_offset
+                        - (((*positions.add(ind) / chip_xsize) << 1)
+                            | ((*symbols.add(ind) as i32 & 8) >> 3));
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = buf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(1);
                     }
-                } else if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                    *short_buf.add((x + y * out_xsize) as usize) += gain_scale as i16;
                 }
             }
         } else {
-            let red_fac = 2_i32.pow((2 - (*in_file).read_eer_as_super_res) as u32);
-            let gain = S_GAIN_REFERENCE.load(Ordering::SeqCst);
-            let short_buf = buf.cast::<i16>();
-            let y_super_offset = (*in_file).ny * red_fac - 1;
-            let nx_gain = red_fac * (*in_file).nx;
-            for ind in 0..num_electrons as usize {
-                let position = *positions.add(ind);
-                let symbol = *symbols.add(ind) as i32;
-                let x_super = ((position % chip_xsize) << 2) | (symbol & 3);
-                let y_super =
-                    y_super_offset - (((position / chip_xsize) << 2) | ((symbol & 12) >> 2));
-                let x = x_super / red_fac - xmin;
-                let y = y_super / red_fac - ymin;
-                let reference = *gain.add((x_super + y_super * nx_gain) as usize);
-                if x >= 2 && x < out_xsize - 2 && y >= 2 && y < out_ysize - 2 {
-                    let phase_x = x_super % red_fac;
-                    let phase_y = y_super % red_fac;
-                    let start_x = if phase_x < red_fac / 2 { -2 } else { -1 };
-                    let start_y = if phase_y < red_fac / 2 { -2 } else { -1 };
-                    let center_x = (phase_x as f32 + 0.5) / red_fac as f32;
-                    let center_y = (phase_y as f32 + 0.5) / red_fac as f32;
-                    let mut total = 0.0f64;
-                    for oy in 0..4 {
-                        for ox in 0..4 {
-                            total +=
-                                zoom_raw_filt_value(start_x as f32 + ox as f32 + 0.5 - center_x)
-                                    * zoom_raw_filt_value(
-                                        start_y as f32 + oy as f32 + 0.5 - center_y,
-                                    );
-                        }
+            /* Returning image with no super-resolution */
+            if chip_xsize == 4096 {
+                for ind in 0..num_electrons as usize {
+                    let x = (*positions.add(ind) & 4095) - xmin;
+                    let y = y_offset - (*positions.add(ind) >> 12);
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = buf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(1);
                     }
-                    for oy in 0..4 {
-                        for ox in 0..4 {
-                            let value =
-                                ((zoom_raw_filt_value(start_x as f32 + ox as f32 + 0.5 - center_x)
-                                    * zoom_raw_filt_value(
-                                        start_y as f32 + oy as f32 + 0.5 - center_y,
-                                    )
-                                    / total)
-                                    * reference as f64)
-                                    .round() as i16;
-                            let index =
-                                (x + start_x + ox + (y + start_y + oy) * out_xsize) as usize;
-                            *short_buf.add(index) += value;
-                        }
+                }
+            } else {
+                for ind in 0..num_electrons as usize {
+                    let x = (*positions.add(ind) % chip_xsize) - xmin;
+                    let y = y_offset - (*positions.add(ind) / chip_xsize);
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = buf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(1);
                     }
-                } else if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-                    *short_buf.add((x + y * out_xsize) as usize) += reference.round() as i16;
                 }
             }
         }
-        return;
-    }
-    let y_offset = (*in_file).ny - 1 - ymin;
-    for ind in 0..num_electrons as usize {
-        let position = *positions.add(ind);
-        let symbol = *symbols.add(ind) as i32;
-        let (x, y) = if (*in_file).read_eer_as_super_res == 2 {
-            (
-                ((position % chip_xsize) << 2) | (symbol & 3) - xmin,
-                y_offset - (((position / chip_xsize) << 2) | ((symbol & 12) >> 2)),
-            )
-        } else if (*in_file).read_eer_as_super_res == 1 {
-            (
-                ((position % chip_xsize) << 1) | ((symbol & 2) >> 1) - xmin,
-                y_offset - (((position / chip_xsize) << 1) | ((symbol & 8) >> 3)),
-            )
+    } else {
+        /* COMPOSING A SCALED SHORT IMAGE WITH POSSIBLE ANTIALIASING AND NORMALIZATION */
+        let sbuf = buf.cast::<i16>();
+        let gain_reference = S_GAIN_REFERENCE.load(Ordering::SeqCst);
+
+        /* Returning full super-resolution image with or without gain normalization */
+        if (*in_file).read_eer_as_super_res == 2 {
+            /* With gain normalization */
+            if !gain_reference.is_null() {
+                y_offset = (*in_file).ny - 1;
+                let nx_gain = (*in_file).nx;
+                let scale = (*in_file).eerkernel_scale as f32;
+                for ind in 0..num_electrons as usize {
+                    let x_gain =
+                        ((*positions.add(ind) % chip_xsize) << 2) | (*symbols.add(ind) as i32 & 3);
+                    let x = x_gain - xmin;
+                    let y_gain = y_offset
+                        - (((*positions.add(ind) / chip_xsize) << 2)
+                            | ((*symbols.add(ind) as i32 & 12) >> 2));
+                    let y = y_gain - ymin;
+                    if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = sbuf.add((x + y * out_xsize) as usize);
+                        let value = ((scale
+                            * *gain_reference.add((x_gain + y_gain * nx_gain) as usize))
+                            as f64
+                            + 0.5)
+                            .floor() as i32;
+                        *cell = (*cell).wrapping_add(value as i16);
+                    }
+                }
+            } else {
+                /* Without gain normalization */
+                let gain_scale = (*in_file).eerkernel_scale;
+
+                /* Variant for standard size, somewhat faster */
+                if chip_xsize == 4096 {
+                    for ind in 0..num_electrons as usize {
+                        let x = (((*positions.add(ind) & 4095) << 2)
+                            | (*symbols.add(ind) as i32 & 3))
+                            - xmin;
+                        let y = y_offset
+                            - (((*positions.add(ind) >> 12) << 2)
+                                | ((*symbols.add(ind) as i32 & 12) >> 2));
+                        if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                            let cell = sbuf.add((x + y * out_xsize) as usize);
+                            *cell = (*cell).wrapping_add(gain_scale as i16);
+                        }
+                    }
+                } else {
+                    /* Or handle a different size */
+                    for ind in 0..num_electrons as usize {
+                        let x = (((*positions.add(ind) % chip_xsize) << 2)
+                            | (*symbols.add(ind) as i32 & 3))
+                            - xmin;
+                        let y = y_offset
+                            - (((*positions.add(ind) / chip_xsize) << 2)
+                                | ((*symbols.add(ind) as i32 & 12) >> 2));
+                        if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                            let cell = sbuf.add((x + y * out_xsize) as usize);
+                            *cell = (*cell).wrapping_add(gain_scale as i16);
+                        }
+                    }
+                }
+            }
         } else {
-            (
-                position % chip_xsize - xmin,
-                y_offset - position / chip_xsize,
-            )
-        };
-        if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
-            *buf.add((x + y * out_xsize) as usize) =
-                (*buf.add((x + y * out_xsize) as usize)).wrapping_add(1);
+            /* ANTIALIASED REDUCTION with or without gain reference */
+            /* Set up filters */
+            let red_fac =
+                (2.0_f64.powf((2 - (*in_file).read_eer_as_super_res) as f64) + 0.5).floor() as i32;
+            let scale = (*in_file).eerkernel_scale as f32;
+            let max_xout = out_xsize - 2;
+            let max_yout = out_ysize - 2;
+            for ix in 0..red_fac {
+                for iy in 0..red_fac {
+                    let k_ind = (ix + red_fac * iy) as usize;
+                    *S_FILT_X_START.add(k_ind) = if ix < red_fac / 2 { -2 } else { -1 };
+                    *S_FILT_Y_START.add(k_ind) = if iy < red_fac / 2 { -2 } else { -1 };
+                    let xcen = (ix as f32 + 0.5) / red_fac as f32;
+                    let ycen = (iy as f32 + 0.5) / red_fac as f32;
+                    let mut tsum = 0.0f64;
+                    for oy in 0..4 {
+                        let y_wgt = zoom_raw_filt_value(
+                            *S_FILT_Y_START.add(k_ind) as f32 + oy as f32 + 0.5 - ycen,
+                        );
+                        for ox in 0..4 {
+                            let x_wgt = zoom_raw_filt_value(
+                                *S_FILT_X_START.add(k_ind) as f32 + ox as f32 + 0.5 - xcen,
+                            );
+                            tsum += x_wgt * y_wgt;
+                        }
+                    }
+                    for oy in 0..4 {
+                        let y_wgt = zoom_raw_filt_value(
+                            *S_FILT_Y_START.add(k_ind) as f32 + oy as f32 + 0.5 - ycen,
+                        );
+                        for ox in 0..4 {
+                            let x_wgt = zoom_raw_filt_value(
+                                *S_FILT_X_START.add(k_ind) as f32 + ox as f32 + 0.5 - xcen,
+                            );
+                            let slot = (*S_FILTER_PTRS.add(k_ind)).add((ox + 4 * oy) as usize);
+                            if !gain_reference.is_null() {
+                                *slot.cast::<f32>() = (scale as f64 * x_wgt * y_wgt / tsum) as f32;
+                            } else {
+                                *slot =
+                                    ((scale as f64 * x_wgt * y_wgt / tsum) + 0.5).floor() as i32;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Compose image with no gain reference
+            if gain_reference.is_null() {
+                y_offset = (*in_file).ny * red_fac - 1;
+                let gain_scale = (*in_file).eerkernel_scale;
+                for ind in 0..num_electrons as usize {
+                    let xsr =
+                        ((*positions.add(ind) % chip_xsize) << 2) | (*symbols.add(ind) as i32 & 3);
+                    let ysr = y_offset
+                        - (((*positions.add(ind) / chip_xsize) << 2)
+                            | ((*symbols.add(ind) as i32 & 12) >> 2));
+                    let x = xsr / red_fac - xmin;
+                    let y = ysr / red_fac - ymin;
+
+                    /* Deposit packet within inner limits, or just add electron on edges */
+                    if x >= 2 && x < max_xout && y >= 2 && y < max_yout {
+                        let k_ind = ((xsr % red_fac) + red_fac * (ysr % red_fac)) as usize;
+                        let mut val_ptr = *S_FILTER_PTRS.add(k_ind);
+                        for iy in 0..4 {
+                            let ybase = (y + iy + *S_FILT_Y_START.add(k_ind)) * out_xsize;
+                            let mut ix = x + *S_FILT_X_START.add(k_ind);
+                            while ix < x + *S_FILT_X_START.add(k_ind) + 4 {
+                                let cell = sbuf.add((ix + ybase) as usize);
+                                *cell = (*cell).wrapping_add(*val_ptr as i16);
+                                val_ptr = val_ptr.add(1);
+                                ix += 1;
+                            }
+                        }
+                    } else if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = sbuf.add((x + y * out_xsize) as usize);
+                        *cell = (*cell).wrapping_add(gain_scale as i16);
+                    }
+                }
+            } else {
+                /* Compose gain normalized image: the most complex operation can use most
+                threads */
+                y_offset = (*in_file).ny * red_fac - 1;
+                let nx_gain = red_fac * (*in_file).nx;
+                // The source declares `refVal` outside the loop and assigns it only in
+                // the interior branch, so the edge branch below reuses the last value.
+                let mut ref_val: f32 = 0.0;
+                for ind in 0..num_electrons as usize {
+                    let xsr =
+                        ((*positions.add(ind) % chip_xsize) << 2) | (*symbols.add(ind) as i32 & 3);
+                    let ysr = y_offset
+                        - (((*positions.add(ind) / chip_xsize) << 2)
+                            | ((*symbols.add(ind) as i32 & 12) >> 2));
+                    let x = xsr / red_fac - xmin;
+                    let y = ysr / red_fac - ymin;
+
+                    if x >= 2 && x < max_xout && y >= 2 && y < max_yout {
+                        let k_ind = ((xsr % red_fac) + red_fac * (ysr % red_fac)) as usize;
+                        let mut filt_ptr = (*S_FILTER_PTRS.add(k_ind)).cast::<f32>();
+                        ref_val = *gain_reference.add((xsr + ysr * nx_gain) as usize);
+                        for iy in 0..4 {
+                            let ybase = (y + iy + *S_FILT_Y_START.add(k_ind)) * out_xsize;
+                            let mut ix = x + *S_FILT_X_START.add(k_ind);
+                            while ix < x + *S_FILT_X_START.add(k_ind) + 4 {
+                                let cell = sbuf.add((ix + ybase) as usize);
+                                let value = (*filt_ptr * ref_val + 0.5f32).floor() as i32;
+                                *cell = (*cell).wrapping_add(value as i16);
+                                filt_ptr = filt_ptr.add(1);
+                                ix += 1;
+                            }
+                        }
+                    } else if x >= 0 && x < out_xsize && y >= 0 && y < out_ysize {
+                        let cell = sbuf.add((x + y * out_xsize) as usize);
+                        let value = ((scale * ref_val) as f64 + 0.5).floor() as i32;
+                        *cell = (*cell).wrapping_add(value as i16);
+                    }
+                }
+            }
         }
     }
 }
@@ -1364,7 +2849,9 @@ unsafe fn cleanup_from_eer(
         S_FILT_Y_START = core::ptr::null_mut();
     }
 }
-/// C `copyLine` (`iitif.c:2171`).
+/// C `copyLine` (`iitif.c:1954`).
+///
+/// Copy one line of data appropriately for the data type and conversion.
 unsafe fn copy_line(
     bdata: *mut u8,
     obuf: *mut u8,
@@ -1383,196 +2870,530 @@ unsafe fn copy_line(
     second_4bits_map: *mut u8,
     colormap: *mut u8,
 ) {
-    let _ = (first_4bits_map, second_4bits_map);
-    if bdata.is_null() || obuf.is_null() || xout <= 0 {
-        return;
-    }
-    if format == IIFORMAT_RGB {
-        if convert == MRSA_NOPROC {
-            core::ptr::copy_nonoverlapping(bdata, obuf, (xout * pixsize) as usize);
-            return;
-        }
-        for ind in 0..xout as usize {
-            let pixel = 0.3 * *bdata.add(ind * pixsize as usize) as f32
-                + 0.59 * *bdata.add(ind * pixsize as usize + 1) as f32
-                + 0.11 * *bdata.add(ind * pixsize as usize + 2) as f32;
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(ind) = pixel;
-            } else if convert == MRSA_USHORT {
-                let value = if doscale != 0 && !map.is_null() {
-                    *(map.cast::<u16>()).add((pixel + 0.499) as usize)
+    let mut bdata = bdata;
+    let mut obuf = obuf;
+    let mut xout = xout;
+    let mut usdata: *mut u16;
+    let mut sdata: *mut i16;
+    let mut uldata: *mut u32;
+    let mut ldata: *mut i32;
+    let mut fdata: *mut f32;
+    let usmap = map.cast::<u16>();
+    let mut usobuf = obuf.cast::<u16>();
+    let mut fobuf = obuf.cast::<f32>();
+    let to_short = if convert == MRSA_USHORT { 1 } else { 0 };
+    let to_float = if convert == MRSA_FLOAT { 1 } else { 0 };
+    let outmax = if to_short != 0 { 65535 } else { 255 };
+    let signed_bytes = if type_ == IITYPE_BYTE { 1 } else { 0 };
+    let mut i: i32;
+    let mut j: i32;
+    let mut ival: i32;
+    let mut fpixel: f32;
+
+    if convert != 0 || signed_bytes != 0 || unpack_4bits != 0 {
+        /* Converted data */
+        if pixsize == 1 {
+            /* Converted from bytes: 4 bits */
+            if unpack_4bits != 0 {
+                i = 0;
+
+                /* If there is an odd pixel at start, get it */
+                if unpack_4bits > 1 {
+                    if to_float != 0 {
+                        *fobuf = *second_4bits_map.add(*bdata.add(i as usize) as usize) as f32;
+                        fobuf = fobuf.add(1);
+                        i += 1;
+                    } else if to_short != 0 {
+                        *usobuf = *usmap
+                            .add(*second_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        usobuf = usobuf.add(1);
+                        i += 1;
+                    } else if doscale != 0 {
+                        *obuf = *map
+                            .add(*second_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        obuf = obuf.add(1);
+                        i += 1;
+                    } else {
+                        *obuf = *second_4bits_map.add(*bdata.add(i as usize) as usize);
+                        obuf = obuf.add(1);
+                        i += 1;
+                    }
+                    xout -= 1;
+                }
+
+                /* Process pairs of pixels */
+                if to_float != 0 {
+                    while i < xout / 2 {
+                        *fobuf = *first_4bits_map.add(*bdata.add(i as usize) as usize) as f32;
+                        fobuf = fobuf.add(1);
+                        *fobuf = *second_4bits_map.add(*bdata.add(i as usize) as usize) as f32;
+                        fobuf = fobuf.add(1);
+                        i += 1;
+                    }
+                } else if to_short != 0 {
+                    while i < xout / 2 {
+                        *usobuf = *usmap
+                            .add(*first_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        usobuf = usobuf.add(1);
+                        *usobuf = *usmap
+                            .add(*second_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        usobuf = usobuf.add(1);
+                        i += 1;
+                    }
+                } else if doscale != 0 {
+                    while i < xout / 2 {
+                        *obuf = *map
+                            .add(*first_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        obuf = obuf.add(1);
+                        *obuf = *map
+                            .add(*second_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        obuf = obuf.add(1);
+                        i += 1;
+                    }
                 } else {
-                    (255. * pixel + 0.5) as u16
-                };
-                *obuf.cast::<u16>().add(ind) = value;
+                    while i < xout / 2 {
+                        *obuf = *first_4bits_map.add(*bdata.add(i as usize) as usize);
+                        obuf = obuf.add(1);
+                        *obuf = *second_4bits_map.add(*bdata.add(i as usize) as usize);
+                        obuf = obuf.add(1);
+                        i += 1;
+                    }
+                }
+
+                /* Then do odd pixel at end */
+                if xout % 2 != 0 {
+                    if to_float != 0 {
+                        *fobuf = *first_4bits_map.add(*bdata.add(i as usize) as usize) as f32;
+                        fobuf = fobuf.add(1);
+                    } else if to_short != 0 {
+                        *usobuf = *usmap
+                            .add(*first_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        usobuf = usobuf.add(1);
+                    } else if doscale != 0 {
+                        *obuf = *map
+                            .add(*first_4bits_map.add(*bdata.add(i as usize) as usize) as usize);
+                        obuf = obuf.add(1);
+                    } else {
+                        *obuf = *first_4bits_map.add(*bdata.add(i as usize) as usize);
+                        obuf = obuf.add(1);
+                    }
+                }
+            } else if format == IIFORMAT_COLORMAP {
+                /* RGB in a colormap with conversion to floats, shorts or bytes */
+                if to_float != 0 {
+                    i = 0;
+                    while i < xout {
+                        fpixel = (0.3 * *colormap.add(*bdata as usize) as f64) as f32;
+                        fpixel = (fpixel as f64
+                            + 0.59 * *colormap.add(256 + *bdata as usize) as f64)
+                            as f32;
+                        fpixel = (fpixel as f64
+                            + 0.11 * *colormap.add(512 + *bdata as usize) as f64)
+                            as f32;
+                        bdata = bdata.add(1);
+                        *fobuf = fpixel;
+                        fobuf = fobuf.add(1);
+                        i += 1;
+                    }
+                } else if to_short != 0 {
+                    i = 0;
+                    while i < xout {
+                        fpixel = (255. * 0.3 * *colormap.add(*bdata as usize) as f64) as f32;
+                        fpixel = (fpixel as f64
+                            + 255. * 0.59 * *colormap.add(256 + *bdata as usize) as f64)
+                            as f32;
+                        fpixel = (fpixel as f64
+                            + 255. * 0.11 * *colormap.add(512 + *bdata as usize) as f64)
+                            as f32;
+                        bdata = bdata.add(1);
+                        *usobuf = (fpixel + 0.5f32) as i32 as u16;
+                        usobuf = usobuf.add(1);
+                        i += 1;
+                    }
+                } else {
+                    i = 0;
+                    while i < xout {
+                        fpixel = (0.3 * *colormap.add(*bdata as usize) as f64) as f32;
+                        fpixel = (fpixel as f64
+                            + 0.59 * *colormap.add(256 + *bdata as usize) as f64)
+                            as f32;
+                        fpixel = (fpixel as f64
+                            + 0.11 * *colormap.add(512 + *bdata as usize) as f64)
+                            as f32;
+                        bdata = bdata.add(1);
+                        *obuf = (fpixel + 0.5f32) as i32 as u8;
+                        obuf = obuf.add(1);
+                        i += 1;
+                    }
+                }
+            } else if samples == 1 {
+                /* Single-sample conversions of bytes to float, short, mapped or unmapped bytes */
+                if to_float != 0 && signed_bytes != 0 {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *map.add(*bdata as usize) as f32;
+                        fobuf = fobuf.add(1);
+                        bdata = bdata.add(1);
+                        i += 1;
+                    }
+                } else if to_float != 0 {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *bdata as f32;
+                        fobuf = fobuf.add(1);
+                        bdata = bdata.add(1);
+                        i += 1;
+                    }
+                } else if to_short != 0 {
+                    i = 0;
+                    while i < xout {
+                        *usobuf = *usmap.add(*bdata as usize);
+                        usobuf = usobuf.add(1);
+                        bdata = bdata.add(1);
+                        i += 1;
+                    }
+                } else if doscale != 0 || signed_bytes != 0 {
+                    i = 0;
+                    while i < xout {
+                        *obuf = *map.add(*bdata as usize);
+                        obuf = obuf.add(1);
+                        bdata = bdata.add(1);
+                        i += 1;
+                    }
+                } else {
+                    libc::memcpy(obuf.cast(), bdata.cast(), xout as usize);
+                }
             } else {
-                *obuf.add(ind) = if doscale != 0 && !map.is_null() {
-                    *map.add((pixel + 0.499) as usize)
+                /* Interleaved sample conversions of bytes to float, short, mapped or unmapped
+                bytes */
+                if to_float != 0 && signed_bytes != 0 {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *map.add(*bdata as usize) as f32;
+                        fobuf = fobuf.add(1);
+                        bdata = bdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else if to_float != 0 {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *bdata as f32;
+                        fobuf = fobuf.add(1);
+                        bdata = bdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else if to_short != 0 {
+                    i = 0;
+                    while i < xout {
+                        *usobuf = *usmap.add(*bdata as usize);
+                        usobuf = usobuf.add(1);
+                        bdata = bdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else if doscale != 0 || signed_bytes != 0 {
+                    i = 0;
+                    while i < xout {
+                        *obuf = *map.add(*bdata as usize);
+                        obuf = obuf.add(1);
+                        bdata = bdata.add(samples as usize);
+                        i += 1;
+                    }
                 } else {
-                    (pixel + 0.5) as u8
-                };
+                    i = 0;
+                    while i < xout {
+                        *obuf = *bdata;
+                        obuf = obuf.add(1);
+                        bdata = bdata.add(samples as usize);
+                        i += 1;
+                    }
+                }
             }
-        }
-        return;
-    }
-    if format == IIFORMAT_COLORMAP && !colormap.is_null() {
-        for ind in 0..xout as usize {
-            let entry = *bdata.add(ind) as usize;
-            if convert == MRSA_NOPROC {
-                *obuf.add(3 * ind) = *colormap.add(entry);
-                *obuf.add(3 * ind + 1) = *colormap.add(256 + entry);
-                *obuf.add(3 * ind + 2) = *colormap.add(512 + entry);
-            } else {
-                let pixel = 0.3 * *colormap.add(entry) as f32
-                    + 0.59 * *colormap.add(256 + entry) as f32
-                    + 0.11 * *colormap.add(512 + entry) as f32;
-                if convert == MRSA_FLOAT {
-                    *obuf.cast::<f32>().add(ind) = pixel;
-                } else if convert == MRSA_USHORT {
-                    *obuf.cast::<u16>().add(ind) = (255. * pixel + 0.5) as u16;
+        } else if pixsize == 2 {
+            /* Integers converted */
+            usdata = bdata.cast::<u16>();
+            sdata = bdata.cast::<i16>();
+            if samples == 1 {
+                /* single-sample integer conversions to mapped short, float, unmapped short, or
+                mapped byte */
+                if to_short != 0 && !map.is_null() {
+                    i = 0;
+                    while i < xout {
+                        *usobuf = *usmap.add(*usdata as usize);
+                        usobuf = usobuf.add(1);
+                        usdata = usdata.add(1);
+                        i += 1;
+                    }
+                } else if to_float != 0 && type_ == IITYPE_SHORT {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *sdata as f32;
+                        fobuf = fobuf.add(1);
+                        sdata = sdata.add(1);
+                        i += 1;
+                    }
+                } else if to_float != 0 {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *usdata as f32;
+                        fobuf = fobuf.add(1);
+                        usdata = usdata.add(1);
+                        i += 1;
+                    }
+                } else if to_short != 0 {
+                    i = 0;
+                    while i < xout {
+                        *usobuf = *usdata;
+                        usobuf = usobuf.add(1);
+                        usdata = usdata.add(1);
+                        i += 1;
+                    }
                 } else {
-                    *obuf.add(ind) = (pixel + 0.5) as u8;
+                    i = 0;
+                    while i < xout {
+                        *obuf = *map.add(*usdata as usize);
+                        obuf = obuf.add(1);
+                        usdata = usdata.add(1);
+                        i += 1;
+                    }
+                }
+            } else {
+                /* interleaved sample conversions to mapped short, float, unmapped short, or
+                mapped byte */
+                if to_short != 0 && !map.is_null() {
+                    i = 0;
+                    while i < xout {
+                        *usobuf = *usmap.add(*usdata as usize);
+                        usobuf = usobuf.add(1);
+                        usdata = usdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else if to_float != 0 && type_ == IITYPE_SHORT {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *sdata as f32;
+                        fobuf = fobuf.add(1);
+                        sdata = sdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else if to_float != 0 {
+                    i = 0;
+                    while i < xout {
+                        *fobuf = *usdata as f32;
+                        fobuf = fobuf.add(1);
+                        usdata = usdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else if to_short != 0 {
+                    i = 0;
+                    while i < xout {
+                        *usobuf = *usdata;
+                        usobuf = usobuf.add(1);
+                        usdata = usdata.add(samples as usize);
+                        i += 1;
+                    }
+                } else {
+                    i = 0;
+                    while i < xout {
+                        *obuf = *map.add(*usdata as usize);
+                        obuf = obuf.add(1);
+                        usdata = usdata.add(samples as usize);
+                        i += 1;
+                    }
+                }
+            }
+        } else if type_ == IITYPE_INT {
+            /* Long ints */
+            ldata = bdata.cast::<i32>();
+            if to_float != 0 {
+                i = 0;
+                while i < xout {
+                    *fobuf = *ldata as f32;
+                    fobuf = fobuf.add(1);
+                    ldata = ldata.add(samples as usize);
+                    i += 1;
+                }
+            } else {
+                i = 0;
+                while i < xout {
+                    ival = (slope * (*ldata as f32) + offset) as i32;
+                    if to_short != 0 {
+                        *usobuf = 0.max(outmax.min(ival)) as u16;
+                        usobuf = usobuf.add(1);
+                    } else {
+                        *obuf = 0.max(outmax.min(ival)) as u8;
+                        obuf = obuf.add(1);
+                    }
+                    ldata = ldata.add(samples as usize);
+                    i += 1;
+                }
+            }
+        } else if type_ == IITYPE_UINT {
+            /* Unsigned Long ints */
+            uldata = bdata.cast::<u32>();
+            if to_float != 0 {
+                i = 0;
+                while i < xout {
+                    *fobuf = *uldata as f32;
+                    fobuf = fobuf.add(1);
+                    uldata = uldata.add(samples as usize);
+                    i += 1;
+                }
+            } else {
+                i = 0;
+                while i < xout {
+                    ival = (slope * (*uldata as f32) + offset) as i32;
+                    if to_short != 0 {
+                        *usobuf = 0.max(outmax.min(ival)) as u16;
+                        usobuf = usobuf.add(1);
+                    } else {
+                        *obuf = 0.max(outmax.min(ival)) as u8;
+                        obuf = obuf.add(1);
+                    }
+                    uldata = uldata.add(samples as usize);
+                    i += 1;
+                }
+            }
+        } else if format == IIFORMAT_RGB {
+            /* RGB conversions to float, mapped short, mapped byte, unmapped short or byte */
+            if to_float != 0 {
+                i = 0;
+                while i < xout {
+                    fpixel = (0.3 * *bdata.add(0) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.59 * *bdata.add(1) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.11 * *bdata.add(2) as f64) as f32;
+                    bdata = bdata.add(pixsize as usize);
+                    *fobuf = fpixel;
+                    fobuf = fobuf.add(1);
+                    i += 1;
+                }
+            } else if doscale != 0 && to_short != 0 {
+                i = 0;
+                while i < xout {
+                    fpixel = (0.3 * *bdata.add(0) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.59 * *bdata.add(1) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.11 * *bdata.add(2) as f64) as f32;
+                    bdata = bdata.add(pixsize as usize);
+                    *usobuf = *usmap.add((fpixel + 0.499f32) as i32 as usize);
+                    usobuf = usobuf.add(1);
+                    i += 1;
+                }
+            } else if doscale != 0 {
+                i = 0;
+                while i < xout {
+                    fpixel = (0.3 * *bdata.add(0) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.59 * *bdata.add(1) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.11 * *bdata.add(2) as f64) as f32;
+                    bdata = bdata.add(pixsize as usize);
+                    *obuf = *map.add((fpixel + 0.499f32) as i32 as usize);
+                    obuf = obuf.add(1);
+                    i += 1;
+                }
+            } else if to_short != 0 {
+                i = 0;
+                while i < xout {
+                    fpixel = (255. * 0.3 * *bdata.add(0) as f64) as f32;
+                    fpixel = (fpixel as f64 + 255. * 0.59 * *bdata.add(1) as f64) as f32;
+                    fpixel = (fpixel as f64 + 255. * 0.11 * *bdata.add(2) as f64) as f32;
+                    bdata = bdata.add(pixsize as usize);
+                    *usobuf = (fpixel + 0.5f32) as i32 as u16;
+                    usobuf = usobuf.add(1);
+                    i += 1;
+                }
+            } else {
+                i = 0;
+                while i < xout {
+                    fpixel = (0.3 * *bdata.add(0) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.59 * *bdata.add(1) as f64) as f32;
+                    fpixel = (fpixel as f64 + 0.11 * *bdata.add(2) as f64) as f32;
+                    bdata = bdata.add(pixsize as usize);
+                    *obuf = (fpixel + 0.5f32) as i32 as u8;
+                    obuf = obuf.add(1);
+                    i += 1;
+                }
+            }
+        } else {
+            /* Floats with interleaved samples or converted to short or byte */
+            fdata = bdata.cast::<f32>();
+            if to_float != 0 {
+                i = 0;
+                while i < xout {
+                    *fobuf = *fdata;
+                    fobuf = fobuf.add(1);
+                    fdata = fdata.add(samples as usize);
+                    i += 1;
+                }
+            } else if to_short != 0 {
+                i = 0;
+                while i < xout {
+                    ival = (slope * (*fdata) + offset) as i32;
+                    *usobuf = 0.max(outmax.min(ival)) as u16;
+                    usobuf = usobuf.add(1);
+                    fdata = fdata.add(samples as usize);
+                    i += 1;
+                }
+            } else {
+                i = 0;
+                while i < xout {
+                    ival = (slope * (*fdata) + offset) as i32;
+                    *obuf = 0.max(outmax.min(ival)) as u8;
+                    obuf = obuf.add(1);
+                    fdata = fdata.add(samples as usize);
+                    i += 1;
                 }
             }
         }
-        return;
-    }
-    if unpack_4bits != 0
-        && pixsize == 1
-        && !first_4bits_map.is_null()
-        && !second_4bits_map.is_null()
-    {
-        let mut input = 0usize;
-        let mut output = 0usize;
-        if unpack_4bits > 1 {
-            let value = *second_4bits_map.add(*bdata as usize);
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(output) = value as f32;
-            } else if convert == MRSA_USHORT {
-                *obuf.cast::<u16>().add(output) = value as u16;
-            } else {
-                *obuf.add(output) = value;
-            }
-            input = 1;
-            output = 1;
-        }
-        while output < xout as usize {
-            let packed = *bdata.add(input);
-            let first = *first_4bits_map.add(packed as usize);
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(output) = first as f32;
-            } else if convert == MRSA_USHORT {
-                *obuf.cast::<u16>().add(output) = first as u16;
-            } else {
-                *obuf.add(output) = first;
-            }
-            output += 1;
-            if output < xout as usize {
-                let second = *second_4bits_map.add(packed as usize);
-                if convert == MRSA_FLOAT {
-                    *obuf.cast::<f32>().add(output) = second as f32;
-                } else if convert == MRSA_USHORT {
-                    *obuf.cast::<u16>().add(output) = second as u16;
-                } else {
-                    *obuf.add(output) = second;
+    } else {
+        /* Non-converted data */
+        if samples == 1 {
+            /* RGB with extra samples - skip them */
+            if format == IIFORMAT_RGB && pixsize > 3 {
+                i = 0;
+                while i < xout {
+                    j = 0;
+                    while j < 3 {
+                        *obuf = *bdata;
+                        obuf = obuf.add(1);
+                        bdata = bdata.add(1);
+                        j += 1;
+                    }
+                    bdata = bdata.add((pixsize - 3) as usize);
+                    i += 1;
                 }
-                output += 1;
-            }
-            input += 1;
-        }
-        return;
-    }
-    if pixsize == 2 {
-        for ind in 0..xout as usize {
-            let source = bdata.cast::<u16>().add(ind * samples as usize);
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(ind) = if type_ == IITYPE_SHORT {
-                    *source.cast::<i16>() as f32
-                } else {
-                    *source as f32
-                };
-            } else if convert == MRSA_USHORT {
-                *obuf.cast::<u16>().add(ind) = if !map.is_null() {
-                    *map.cast::<u16>().add(*source as usize)
-                } else {
-                    *source
-                };
-            } else if !map.is_null() {
-                *obuf.add(ind) = *map.add(*source as usize);
-            }
-        }
-        return;
-    }
-    if pixsize == 1 && type_ == IITYPE_BYTE && !map.is_null() {
-        for ind in 0..xout as usize {
-            let value = *map.add(*bdata.add(ind * samples as usize) as usize);
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(ind) = value as f32;
-            } else if convert == MRSA_USHORT {
-                *obuf.cast::<u16>().add(ind) = *map
-                    .cast::<u16>()
-                    .add(*bdata.add(ind * samples as usize) as usize);
+
+            /* Colormap lookup */
+            } else if !colormap.is_null() {
+                i = 0;
+                while i < xout {
+                    *obuf = *colormap.add(*bdata as usize);
+                    obuf = obuf.add(1);
+                    *obuf = *colormap.add(256 + *bdata as usize);
+                    obuf = obuf.add(1);
+                    *obuf = *colormap.add(512 + *bdata as usize);
+                    obuf = obuf.add(1);
+                    bdata = bdata.add(1);
+                    i += 1;
+                }
+
+            /* Straight copy */
             } else {
-                *obuf.add(ind) = value;
+                libc::memcpy(obuf.cast(), bdata.cast(), (xout * pixsize) as usize);
             }
-        }
-        return;
-    }
-    if pixsize == 4 && matches!(type_, IITYPE_INT | IITYPE_UINT) {
-        for ind in 0..xout as usize {
-            let value = if type_ == IITYPE_INT {
-                *bdata.cast::<i32>().add(ind * samples as usize) as f32
-            } else {
-                *bdata.cast::<u32>().add(ind * samples as usize) as f32
-            };
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(ind) = value;
-            } else if convert == MRSA_USHORT {
-                *obuf.cast::<u16>().add(ind) = (slope * value + offset).clamp(0., 65535.) as u16;
-            } else {
-                *obuf.add(ind) = (slope * value + offset).clamp(0., 255.) as u8;
-            }
-        }
-        return;
-    }
-    if pixsize == 4 && type_ == IITYPE_FLOAT {
-        for ind in 0..xout as usize {
-            let source = *bdata.cast::<f32>().add(ind * samples as usize);
-            if convert == MRSA_FLOAT {
-                *obuf.cast::<f32>().add(ind) = source;
-            } else if convert == MRSA_USHORT {
-                *obuf.cast::<u16>().add(ind) = (slope * source + offset).clamp(0., 65535.) as u16;
-            } else {
-                *obuf.add(ind) = (slope * source + offset).clamp(0., 255.) as u8;
-            }
-        }
-        return;
-    }
-    for ind in 0..xout as usize {
-        let source = *bdata.add(ind * samples.max(1) as usize * pixsize.max(1) as usize);
-        let value = if !colormap.is_null() && format == 4 {
-            let index = source as usize;
-            (0.3 * (*colormap.add(index) as f32)
-                + 0.59 * (*colormap.add(256 + index) as f32)
-                + 0.11 * (*colormap.add(512 + index) as f32)) as u8
-        } else if doscale != 0 && !map.is_null() {
-            *map.add(source as usize)
         } else {
-            source
-        };
-        if convert == MRSA_FLOAT {
-            *(obuf.cast::<f32>().add(ind)) = if doscale != 0 {
-                slope * value as f32 + offset
-            } else {
-                value as f32
-            };
-        } else if convert == MRSA_USHORT {
-            *(obuf.cast::<u16>().add(ind)) = value as u16;
-        } else {
-            *obuf.add(ind) = value;
+            /* Multiple samples (planes) interleaved - skip the other samples */
+            i = 0;
+            while i < xout {
+                j = 0;
+                while j < pixsize {
+                    *obuf = *bdata;
+                    obuf = obuf.add(1);
+                    bdata = bdata.add(1);
+                    j += 1;
+                }
+                bdata = bdata.add(((samples - 1) * pixsize) as usize);
+                i += 1;
+            }
         }
     }
-    let _ = (type_, unpack_4bits);
 }
 /// C `tiffReadSectionByte` (`iitif.c:2294`).
 pub unsafe fn tiff_read_section_byte(
@@ -1650,6 +3471,7 @@ unsafe extern "C" fn buf_write_proc(fd: *mut c_void, buf: *mut c_void, size: isi
 unsafe extern "C" fn buf_seek_proc(fd: *mut c_void, off: u64, whence: i32) -> u64 {
     let fd = fd as usize;
     if fd >= MAX_TIFF_THREADS {
+        *libc::__errno_location() = libc::EINVAL;
         return u64::MAX;
     }
     let signed = off as i64;
@@ -1659,7 +3481,10 @@ unsafe extern "C" fn buf_seek_proc(fd: *mut c_void, off: u64, whence: i32) -> u6
             S_CUR_BUF_IND[fd].wrapping_add_signed(signed)
         }
         2 => S_MAX_BUF_IND[fd],
-        _ => return u64::MAX,
+        _ => {
+            *libc::__errno_location() = libc::EINVAL;
+            return u64::MAX;
+        }
     };
     if new_pos >= S_FILE_BUF_SIZE.load(Ordering::SeqCst) as u64 {
         *libc::__errno_location() = libc::EINVAL;
@@ -1851,7 +3676,11 @@ pub unsafe fn tiff_write_setup(
             dm_pixel *= 1000.;
             nano = 1;
         }
-        tiff_suppress_errors();
+        let mut suppressed = 0;
+        if S_OLD_ERR_HANDLER.load(Ordering::SeqCst).is_null() {
+            tiff_suppress_errors();
+            suppressed = 1;
+        }
         TIFFSetField(tif, TIFFTAG_DM_SCALE_0, dm_pixel);
         TIFFSetField(tif, TIFFTAG_DM_SCALE_0 + 1, dm_pixel);
         TIFFSetField(tif, TIFFTAG_DM_ORIGIN_0, 0.0_f64);
@@ -1876,7 +3705,9 @@ pub unsafe fn tiff_write_setup(
                 c"micrometer".as_ptr()
             },
         );
-        tiff_restore_errors();
+        if suppressed != 0 {
+            tiff_restore_errors();
+        }
     }
     if quality >= 0 && compression == IICOMPRESSION_JPEG {
         TIFFSetField(tif, TIFFTAG_JPEGQUALITY, quality.min(100));
@@ -1896,8 +3727,10 @@ pub unsafe fn tiff_write_setup(
             _ => return IIERR_NO_SUPPORT,
         }
     };
-    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, bits);
-    if (*in_file).format != IIFORMAT_RGB {
+    if (*in_file).format == IIFORMAT_RGB {
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, bits, bits, bits);
+    } else {
+        TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, bits);
         TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, sample_format);
         if (*in_file).amax > (*in_file).amin {
             constrain_and_store_min_max(in_file);
@@ -1907,6 +3740,8 @@ pub unsafe fn tiff_write_setup(
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, samples);
     if !S_DESCRIPTION.is_null() && S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) <= 0 {
         TIFFSetField(tif, TIFFTAG_IMAGE_DESCRIPTION, S_DESCRIPTION);
+    }
+    if S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) == 0 && !S_DESCRIPTION.is_null() {
         libc::free(S_DESCRIPTION.cast());
         S_DESCRIPTION = core::ptr::null_mut();
     }
@@ -2185,11 +4020,17 @@ unsafe fn tiff_write_section_any(
     let resolution = if (*in_file).xscale == 1.0 {
         0
     } else {
+        // `iitif.c:2775-2776`: `1.e8` and `-2.54e8` are double literals and
+        // `inFile->xscale` is a `float` promoted to double for the division, so
+        // the quotient is formed in double and only then truncated to the `int`
+        // `resolution`.  Dividing in f32 instead rounds first: an `xscale` of
+        // 1.5 gives 66666668 where the source gives 66666666, and the
+        // `XResolution` rational libtiff writes differs.
         (if libc::getenv(c"IMOD_TIFF_RESOL_PER_INCH".as_ptr()).is_null() {
-            1.0e8
+            1.0e8_f64
         } else {
-            -2.54e8
-        } / (*in_file).xscale) as i32
+            -2.54e8_f64
+        } / (*in_file).xscale as f64) as i32
     };
     let comp_env = libc::getenv(c"IMOD_TIFF_COMPRESSION".as_ptr());
     let compression = if comp_env.is_null() {
@@ -2508,6 +4349,13 @@ pub unsafe fn tiff_parallel_write(
     }
     S_SETTING_UP_PARALLEL.store(0, Ordering::SeqCst);
     if err == 0 && num_strips != cumulative_strips {
+        b3d_error(
+            stderr,
+            format_args!(
+                "tiffParallelWrite: number of strips for full file ({}) not equal to total for temp files ({})\n",
+                num_strips, cumulative_strips
+            ),
+        );
         err = IIERR_IO_ERROR;
     }
     if err == 0 {
@@ -2575,9 +4423,6 @@ pub unsafe fn tiff_parallel_write(
                 }
                 lines_done += number_lines;
             }
-            if err != 0 {
-                break;
-            }
         }
     }
     if err == 0 {
@@ -2586,30 +4431,51 @@ pub unsafe fn tiff_parallel_write(
             err = IIERR_MEMORY_ERR;
         } else {
             let mut copied_strips = 0;
+            let mut lines_done = 0;
             for file in 0..num_threads as usize {
                 for strip_index in 0..thread_num_strips[file] {
+                    let lines = S_ROWS_PER_STRIP.min((*in_file).ny - lines_done);
                     let bytes = TIFFReadRawStrip(
                         (*temp_files[file]).header.cast(),
                         strip_index as u32,
                         S_TMP_BUF.cast(),
                         (2 * strip_bytes) as isize,
                     );
-                    if bytes <= 0
-                        || TIFFWriteRawStrip(
-                            (*in_file).header.cast(),
-                            (strip_index + copied_strips) as u32,
-                            S_TMP_BUF.cast(),
-                            bytes,
-                        ) <= 0
-                    {
+                    if bytes <= 0 {
+                        b3d_error(
+                            stderr,
+                            format_args!(
+                                "tiffParallelWrite: Read error getting raw strip {} from file {}\n",
+                                strip_index, file
+                            ),
+                        );
                         err = IIERR_IO_ERROR;
                         break;
                     }
+                    if TIFFWriteRawStrip(
+                        (*in_file).header.cast(),
+                        (strip_index + copied_strips) as u32,
+                        S_TMP_BUF.cast(),
+                        bytes,
+                    ) <= 0
+                    {
+                        b3d_error(
+                            stderr,
+                            format_args!(
+                                "tiffParallelWrite: Error rewriting raw strip {} from file {}\n",
+                                strip_index, file
+                            ),
+                        );
+                        err = IIERR_IO_ERROR;
+                        break;
+                    }
+                    lines_done += lines;
                 }
                 copied_strips += thread_num_strips[file];
-                if err != 0 {
-                    break;
-                }
+                // The source clears the error at the end of every file iteration
+                // (`iitif.c:3110`), so a raw-strip failure is reported to stderr
+                // but not returned.  That behaviour is preserved deliberately.
+                err = 0;
             }
             _TIFFfree(S_TMP_BUF.cast());
             S_TMP_BUF = core::ptr::null_mut();
@@ -2619,6 +4485,7 @@ pub unsafe fn tiff_parallel_write(
         for index in 0..=last_clean as usize {
             if !temp_files[index].is_null() {
                 ii_close(temp_files[index]);
+                libc::remove((*temp_files[index]).filename);
                 ii_delete(temp_files[index]);
                 if inverted == 0 && !thread_tmp_buf[index].is_null() {
                     _TIFFfree(thread_tmp_buf[index].cast());
@@ -2712,6 +4579,12 @@ mod tests {
 
     #[test]
     fn suppress_and_restore_errors_reinstates_source_saved_handler() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _guard = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let original = TIFFSetErrorHandler(core::ptr::null_mut());
@@ -2822,6 +4695,15 @@ mod tests {
         unsafe {
             let mut width = 0;
             assert_eq!(select_zoom_filter(3, 0.5, &mut width), 0);
+            // `ReadSection` owns these arrays for the reduced-resolution filters.
+            let filter_count = 2 * 2;
+            S_ALL_FILTERS = libc::malloc(filter_count * 16 * 4).cast();
+            S_FILTER_PTRS = libc::malloc(filter_count * core::mem::size_of::<*mut i32>()).cast();
+            S_FILT_X_START = libc::malloc(filter_count * 4).cast();
+            S_FILT_Y_START = libc::malloc(filter_count * 4).cast();
+            for slot in 0..filter_count {
+                *S_FILTER_PTRS.add(slot) = S_ALL_FILTERS.add(slot * 16);
+            }
             let image = ii_new();
             (*image).nx = 16;
             (*image).ny = 16;
@@ -2847,6 +4729,13 @@ mod tests {
             );
             assert_eq!(output.iter().map(|v| *v as i32).sum::<i32>(), 100);
             assert!(output.iter().filter(|v| **v != 0).count() > 1);
+            cleanup_from_eer(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            );
             ii_delete(image);
         }
     }
@@ -2857,6 +4746,15 @@ mod tests {
         unsafe {
             let mut width = 0;
             assert_eq!(select_zoom_filter(3, 0.5, &mut width), 0);
+            // `ReadSection` owns these arrays for the reduced-resolution filters.
+            let filter_count = 2 * 2;
+            S_ALL_FILTERS = libc::malloc(filter_count * 16 * 4).cast();
+            S_FILTER_PTRS = libc::malloc(filter_count * core::mem::size_of::<*mut i32>()).cast();
+            S_FILT_X_START = libc::malloc(filter_count * 4).cast();
+            S_FILT_Y_START = libc::malloc(filter_count * 4).cast();
+            for slot in 0..filter_count {
+                *S_FILTER_PTRS.add(slot) = S_ALL_FILTERS.add(slot * 16);
+            }
             let image = ii_new();
             (*image).nx = 16;
             (*image).ny = 16;
@@ -2882,10 +4780,411 @@ mod tests {
                 0,
                 15,
             );
-            // Source rounds each of the 16 weighted contributions independently.
-            assert_eq!(output.iter().map(|v| *v as i32).sum::<i32>(), 199);
+            // The source filter values carry the EER kernel scale (100 here), and it
+            // rounds each of the 16 weighted contributions independently, so the
+            // deposited total is one short of `scale * refVal` = 100 * 200.
+            assert_eq!(output.iter().map(|v| *v as i32).sum::<i32>(), 19999);
             S_GAIN_REFERENCE.store(core::ptr::null_mut(), Ordering::SeqCst);
+            cleanup_from_eer(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            );
             ii_delete(image);
+        }
+    }
+
+    /// Pack a stream of (bits, count) fields LSB-first, as `decodeEERimage` reads them.
+    fn eer_bits(fields: &[(u32, u32)]) -> Vec<u8> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut bit = 0usize;
+        for (value, width) in fields {
+            for i in 0..*width {
+                if bit % 8 == 0 {
+                    out.push(0);
+                }
+                if value >> i & 1 != 0 {
+                    let last = out.len() - 1;
+                    out[last] |= 1 << (bit % 8);
+                }
+                bit += 1;
+            }
+        }
+        // The source reads four bytes ahead of the current byte on every chunk.
+        out.extend_from_slice(&[0u8; 8]);
+        out
+    }
+
+    #[test]
+    fn eer_7_bit_decoder_uses_source_eleven_bit_advance_and_127_skip() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            S_IGNORE_BAD_EER_END.store(0, Ordering::SeqCst);
+            // Two electrons, then a bare 127 run (7 bits only, no symbol), then a
+            // third electron, then the run that lands exactly on the pixel count.
+            // Only the source's 7+4 bit accounting decodes this stream.
+            let total: i32 = 3 + 1 + 10 + 1 + 127 + 5 + 1;
+            let mut positions = [0i32; 8];
+            let mut symbols = [0u8; 8];
+            let mut electrons = -1;
+            // The final run terminates exactly on the image pixel count.
+            let mut full = eer_bits(&[
+                (3, 7),
+                (0x0A ^ 0x01, 4),
+                (10, 7),
+                (0x0A ^ 0x0C, 4),
+                (127, 7),
+                (5, 7),
+                (0x0A ^ 0x07, 4),
+                (9, 7),
+            ]);
+            assert_eq!(
+                decode_eer_image(
+                    full.as_mut_ptr(),
+                    positions.as_mut_ptr(),
+                    symbols.as_mut_ptr(),
+                    1,
+                    total + 9,
+                    full.len() as i32,
+                    &mut electrons,
+                ),
+                0
+            );
+            assert_eq!(electrons, 3);
+            assert_eq!(&positions[..3], &[3, 14, 147]);
+            assert_eq!(&symbols[..3], &[1, 12, 7]);
+        }
+    }
+
+    #[test]
+    fn eer_7_bit_decoder_reports_source_bad_final_position() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            S_IGNORE_BAD_EER_END.store(0, Ordering::SeqCst);
+            let mut stream = eer_bits(&[(3, 7), (0x0A ^ 0x01, 4), (20, 7)]);
+            let mut positions = [0i32; 4];
+            let mut symbols = [0u8; 4];
+            let mut electrons = -1;
+            // The stream overshoots the image size, so the source returns 1.
+            assert_eq!(
+                decode_eer_image(
+                    stream.as_mut_ptr(),
+                    positions.as_mut_ptr(),
+                    symbols.as_mut_ptr(),
+                    1,
+                    10,
+                    stream.len() as i32,
+                    &mut electrons,
+                ),
+                1
+            );
+            assert_eq!(electrons, 1);
+            // The source's ignore flag turns the same stream into success.
+            S_IGNORE_BAD_EER_END.store(1, Ordering::SeqCst);
+            assert_eq!(
+                decode_eer_image(
+                    stream.as_mut_ptr(),
+                    positions.as_mut_ptr(),
+                    symbols.as_mut_ptr(),
+                    1,
+                    10,
+                    stream.len() as i32,
+                    &mut electrons,
+                ),
+                0
+            );
+            S_IGNORE_BAD_EER_END.store(0, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn eer_8_bit_decoder_realigns_after_a_source_wasted_bit_run() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            S_IGNORE_BAD_EER_END.store(1, Ordering::SeqCst);
+            // p1 = 255 makes the source advance one byte and restart without
+            // placing an electron; p2 = 255 advances two bytes and sets the
+            // misaligned flag for the nibble-shifted read on the next pass.
+            let mut stream = eer_bits(&[
+                (4, 8),
+                (0x0A ^ 0x02, 4),
+                (255, 8),
+                (0, 4),
+                (7, 8),
+                (0x0A ^ 0x09, 4),
+            ]);
+            let mut positions = [0i32; 16];
+            let mut symbols = [0u8; 16];
+            let mut electrons = -1;
+            // Stop at the five real bytes; the trailing pad is only read ahead.
+            assert_eq!(
+                decode_eer_image(
+                    stream.as_mut_ptr(),
+                    positions.as_mut_ptr(),
+                    symbols.as_mut_ptr(),
+                    0,
+                    1_000_000,
+                    5,
+                    &mut electrons,
+                ),
+                0
+            );
+            assert_eq!(electrons, 4);
+            // 4 from the aligned pair, then the 255 run advances two bytes and
+            // the next pass reads the nibble-shifted 112 run, after which the
+            // aligned pair resumes at the same byte.
+            assert_eq!(&positions[..4], &[4, 372, 388, 437]);
+            assert_eq!(&symbols[..4], &[2, 10, 13, 10]);
+            S_IGNORE_BAD_EER_END.store(0, Ordering::SeqCst);
+        }
+    }
+
+    /// Write a minimal single-strip TIFF whose IFDs carry EER compression and the
+    /// given raw strip payloads, the way an EER camera file is laid out.
+    fn write_eer_tiff(path: &std::path::Path, nx: u32, ny: u32, comp: u32, strips: &[Vec<u8>]) {
+        let tag_count: u16 = 9;
+        let ifd_size = 2 + 12 * tag_count as usize + 4;
+        let mut ifd_offsets = Vec::new();
+        let mut at = 8usize;
+        for _ in strips {
+            ifd_offsets.push(at);
+            at += ifd_size;
+        }
+        let mut data_offsets = Vec::new();
+        for strip in strips {
+            data_offsets.push(at);
+            at += strip.len();
+        }
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(b"II");
+        out.extend_from_slice(&42u16.to_le_bytes());
+        out.extend_from_slice(&8u32.to_le_bytes());
+        for (index, strip) in strips.iter().enumerate() {
+            let next = if index + 1 < strips.len() {
+                ifd_offsets[index + 1] as u32
+            } else {
+                0
+            };
+            let tags: [(u16, u16, u32, u32); 9] = [
+                (256, 3, 1, nx),
+                (257, 3, 1, ny),
+                (258, 3, 1, 8),
+                (259, 3, 1, comp),
+                (262, 3, 1, 1),
+                (273, 4, 1, data_offsets[index] as u32),
+                (277, 3, 1, 1),
+                (278, 3, 1, ny),
+                (279, 4, 1, strip.len() as u32),
+            ];
+            out.extend_from_slice(&tag_count.to_le_bytes());
+            for (tag, kind, count, value) in tags {
+                out.extend_from_slice(&tag.to_le_bytes());
+                out.extend_from_slice(&kind.to_le_bytes());
+                out.extend_from_slice(&count.to_le_bytes());
+                out.extend_from_slice(&value.to_le_bytes());
+            }
+            out.extend_from_slice(&next.to_le_bytes());
+        }
+        for strip in strips {
+            out.extend_from_slice(strip);
+        }
+        std::fs::write(path, out).unwrap();
+    }
+
+    #[test]
+    fn tiff_check_and_read_section_decode_a_native_eer_file() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let chip = 8u32;
+            let total = (chip * chip) as i32;
+            // One electron at sensor pixel 9 with sub-pixel symbol 0, then the
+            // terminating run that lands exactly on the sensor pixel count.
+            let frame = eer_bits(&[(9, 7), (0x0A ^ 0x00, 4), ((total - 10) as u32, 7)]);
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iitif-eer-{}-{:?}.tif",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            write_eer_tiff(&path, chip, chip, IICOMPRESSION_EER_7BIT as u32, &[frame]);
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+
+            // Match the source defaults that iiTIFFCheck installs from the
+            // environment on its first call in a process.
+            S_AUTOGROUP_EER.store(1, Ordering::SeqCst);
+            S_READ_EER_AS_SUPER_RES.store(2, Ordering::SeqCst);
+            S_ANTIALIAS_EER.store(0, Ordering::SeqCst);
+            S_EER_FLAGS.store(0, Ordering::SeqCst);
+            S_GAIN_REFERENCE.store(core::ptr::null_mut(), Ordering::SeqCst);
+
+            let reader = ii_new();
+            (*reader).filename = libc::strdup(name.as_ptr());
+            (*reader).fmode = [b'r' as c_char, b'b' as c_char, 0, 0];
+            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            assert_eq!(ii_tiff_check(reader), 0);
+            // Super-resolution 2 quadruples each sensor axis.
+            assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (32, 32, 1));
+            assert_eq!((*reader).tiff_compression, IICOMPRESSION_EER_7BIT);
+            assert_eq!((*reader).num_frames_in_eerfile, 1);
+            assert_eq!((*reader).read_eer_as_super_res, 2);
+            assert_eq!((*reader).type_, IITYPE_UBYTE);
+
+            (*reader).llx = 0;
+            (*reader).lly = 0;
+            (*reader).urx = (*reader).nx - 1;
+            (*reader).ury = (*reader).ny - 1;
+            let mut image = vec![0u8; 32 * 32];
+            assert_eq!(tiff_read_section(reader, image.as_mut_ptr().cast(), 0), 0);
+            // Sensor pixel 9 is chip column 1, chip row 1; symbol 0 keeps the
+            // low sub-pixel, and the source inverts Y on output.
+            let x = ((9 % chip as i32) << 2) | 0;
+            let y = ((*reader).ny - 1) - (((9 / chip as i32) << 2) | 0);
+            assert_eq!(image[(x + y * 32) as usize], 1);
+            assert_eq!(image.iter().map(|v| *v as i32).sum::<i32>(), 1);
+            ii_delete(reader);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn read_section_scales_unsigned_shorts_through_the_source_byte_map() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iitif-scale-{}-{:?}.tif",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let writer = ii_new();
+            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).nx = 4;
+            (*writer).ny = 2;
+            (*writer).nz = 1;
+            (*writer).format = IIFORMAT_LUMINANCE;
+            (*writer).type_ = IITYPE_USHORT;
+            (*writer).amin = 0.;
+            (*writer).amax = 1000.;
+            assert_eq!(tiff_open_new(writer), 0);
+            let pixels: [u16; 8] = [0, 100, 200, 400, 600, 800, 900, 1000];
+            assert_eq!(
+                tiff_write_section(writer, pixels.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                0
+            );
+            tiff_close(writer);
+            ii_delete(writer);
+
+            let reader = ii_new();
+            (*reader).filename = libc::strdup(name.as_ptr());
+            (*reader).fmode = [b'r' as c_char, b'b' as c_char, 0, 0];
+            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            assert_eq!(ii_tiff_check(reader), 0);
+            assert_eq!((*reader).type_, IITYPE_USHORT);
+            // The source builds a short-to-byte map from slope and offset when
+            // reading a 16-bit directory as bytes.  A unit slope leaves the map
+            // out of the byte path, so use the scaling the loader would set.
+            (*reader).slope = 255. / 1000.;
+            (*reader).offset = 0.;
+            (*reader).llx = 0;
+            (*reader).lly = 0;
+            (*reader).urx = 3;
+            (*reader).ury = 1;
+            let mut bytes = [0u8; 8];
+            assert_eq!(
+                tiff_read_section_byte(reader, bytes.as_mut_ptr().cast(), 0),
+                0
+            );
+            // `get_short_map` covers the whole 16-bit domain, so the result is
+            // monotone and reaches the source clamp limits at the endpoints.
+            assert_eq!(bytes[0], 0);
+            assert_eq!(bytes[7], 255);
+            assert!(bytes.windows(2).all(|pair| pair[0] <= pair[1]));
+            ii_delete(reader);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn filter_warnings_installs_the_source_handler_and_saves_the_old_one() {
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let original = TIFFSetWarningHandler(core::ptr::null_mut());
+            let sentinel = warning_handler as *mut c_void;
+            let _ = TIFFSetWarningHandler(sentinel);
+            S_WARNINGS_SUPPRESSED.store(0, Ordering::SeqCst);
+            S_OLD_HANDLER.store(core::ptr::null_mut(), Ordering::SeqCst);
+            tiff_filter_warnings();
+            // The source records the previous handler and installs its own.
+            assert_eq!(S_OLD_HANDLER.load(Ordering::SeqCst), sentinel);
+            let installed = TIFFSetWarningHandler(core::ptr::null_mut());
+            assert_eq!(installed, warning_handler as *mut c_void);
+            // With warnings suppressed the source leaves the handler alone.
+            S_WARNINGS_SUPPRESSED.store(1, Ordering::SeqCst);
+            let _ = TIFFSetWarningHandler(sentinel);
+            tiff_filter_warnings();
+            assert_eq!(TIFFSetWarningHandler(original), sentinel);
+            S_WARNINGS_SUPPRESSED.store(0, Ordering::SeqCst);
+            S_OLD_HANDLER.store(core::ptr::null_mut(), Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn write_setup_leaves_an_already_saved_error_handler_installed() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
+        let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iitif-dmtags-{}-{:?}.tif",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let writer = ii_new();
+            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).nx = 2;
+            (*writer).ny = 2;
+            (*writer).nz = 1;
+            (*writer).format = IIFORMAT_LUMINANCE;
+            (*writer).type_ = IITYPE_UBYTE;
+            (*writer).amin = 0.;
+            (*writer).amax = 3.;
+            assert_eq!(tiff_open_new(writer), 0);
+
+            // A handler already saved by an earlier suppress means the source
+            // does not suppress or restore around its DigitalMicrograph tags.
+            let original = TIFFSetErrorHandler(core::ptr::null_mut());
+            let sentinel = warning_handler as *mut c_void;
+            let _ = TIFFSetErrorHandler(sentinel);
+            S_OLD_ERR_HANDLER.store(sentinel, Ordering::SeqCst);
+            let pixels = [1_u8, 2, 3, 0];
+            assert_eq!(
+                tiff_write_section(writer, pixels.as_ptr().cast_mut().cast(), 1, 0, 100, -1),
+                0
+            );
+            assert_eq!(TIFFSetErrorHandler(core::ptr::null_mut()), sentinel);
+            let _ = TIFFSetErrorHandler(original);
+            S_OLD_ERR_HANDLER.store(core::ptr::null_mut(), Ordering::SeqCst);
+            tiff_close(writer);
+            ii_delete(writer);
+            std::fs::remove_file(path).unwrap();
         }
     }
 
@@ -3221,6 +5520,12 @@ mod tests {
 
     #[test]
     fn native_libtiff_write_and_read_section_roundtrip() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path =
@@ -3296,6 +5601,12 @@ mod tests {
 
     #[test]
     fn tiff_check_reads_separate_grayscale_planes_as_source_sections() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir().join(format!(
@@ -3368,6 +5679,12 @@ mod tests {
 
     #[test]
     fn tiff_check_uses_the_largest_ifd_instead_of_a_leading_thumbnail() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir().join(format!(
@@ -3419,6 +5736,12 @@ mod tests {
 
     #[test]
     fn tiff_section_callback_rejects_complex_data_before_writing() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir().join(format!(
@@ -3450,6 +5773,12 @@ mod tests {
 
     #[test]
     fn tiff_section_callback_rejects_nonsequential_real_tiff_section() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir().join(format!(
@@ -3480,6 +5809,12 @@ mod tests {
 
     #[test]
     fn tiff_close_stores_source_final_min_max_for_new_luminance_file() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir().join(format!(
@@ -3539,6 +5874,12 @@ mod tests {
 
     #[test]
     fn native_libtiff_tiled_write_and_read_section_roundtrip() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path =
@@ -3582,6 +5923,12 @@ mod tests {
 
     #[test]
     fn tiff_write_setup_caps_deflate_quality_at_source_tag_limit() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir().join(format!(
@@ -3632,6 +5979,12 @@ mod tests {
 
     #[test]
     fn lzw_parallel_write_falls_back_without_openmp_and_roundtrips() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
             let path = std::env::temp_dir()

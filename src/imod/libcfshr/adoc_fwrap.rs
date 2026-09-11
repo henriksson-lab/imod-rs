@@ -786,9 +786,9 @@ pub unsafe extern "C" fn adocgetstandardnames_(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{LazyLock, Mutex};
-
-    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    /// Shared with `autodoc::tests`: both drive the one process-global
+    /// autodoc collection.
+    use crate::imod::libcfshr::autodoc::tests::TEST_LOCK;
 
     #[test]
     fn fortran_wrappers_convert_trim_pad_and_one_base_indices() {
@@ -870,8 +870,14 @@ mod tests {
         }
     }
 
+    /// An all-blank Fortran value makes `adocsetkeyvalue` pass NULL to
+    /// `AdocSetKeyValue`, and `setKeyValueType` rejects a NULL value with -1
+    /// (`autodoc.c:1125`); nothing is stored, so `adocgetstring` then returns 1
+    /// and leaves the caller's buffer untouched (`adoc_fwrap.c:533`).
+    /// Verified against the reference `libcfshr.so`: `adocsetkeyvalue_` -> -1,
+    /// `adocgetstring_` -> 1.
     #[test]
-    fn empty_fortran_value_becomes_no_value() {
+    fn empty_fortran_value_is_rejected() {
         let _lock = TEST_LOCK.lock().unwrap();
         unsafe {
             adocdone_();
@@ -890,7 +896,7 @@ mod tests {
                     key.len() as i32,
                     value.len() as i32,
                 ),
-                0
+                -1
             );
             let mut output = [0i8; 8];
             assert_eq!(
@@ -903,9 +909,9 @@ mod tests {
                     key.len() as i32,
                     output.len() as i32,
                 ),
-                0
+                1
             );
-            assert_eq!(output, [b' ' as i8; 8]);
+            assert_eq!(output, [0i8; 8]);
         }
     }
 }

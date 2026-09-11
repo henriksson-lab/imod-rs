@@ -8,31 +8,96 @@
 
 use std::env;
 use std::ffi::CString;
-use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
 
+use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
+use crate::imod::libcfshr::b3dutil::{
+    imod_backup_file, imod_copyright, imod_prog_name, imod_version, number_in_list,
+};
+use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::parselist::parselist;
+use crate::imod::libcfshr::simplestat::sums_to_avg_sd;
+use crate::imod::libimod::icont::{
+    ICONT_TEMPUSE, Nesting, imod_contour_area, imod_contour_center_of_mass,
+    imod_contour_check_nesting, imod_contour_circularity, imod_contour_delete,
+    imod_contour_equiv_ellipse, imod_contour_free_nests, imod_contour_free_z_tables,
+    imod_contour_get_bbox, imod_contour_long_axis, imod_contour_make_z_tables,
+    imod_contour_nest_levels, imodel_contour_centroid, imodel_contour_scan,
+};
+use crate::imod::libimod::ilabel::imod_label_print;
 use crate::imod::libimod::imodel::{
-    ICONT_OPEN, IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_END, IMOD_MESH_ENDPOLY,
-    IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT, Icont, Imesh, Imod,
-    Iobj, Iplane, Ipoint,
+    ICONT_OPEN, IMOD_CLIPSIZE, IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_END,
+    IMOD_MESH_ENDPOLY, IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT,
+    Icont, Imesh, Imod, Iobj, Iplane, Ipoint,
 };
 use crate::imod::libimod::imodel_files::{imod_file_write, imod_read, imod_write_ascii};
+use crate::imod::libimod::iplane::{imod_plane_set_from_clips, imod_planes_clip};
+use crate::imod::libimod::ipoint::imod_point_delete;
 use crate::imod::libimod::objgroup::obj_group_lookup;
 
+unsafe extern "C" {
+    static mut stdout: *mut libc::FILE;
+}
+
+/// C `static FILE *fout` (`imodinfo.cpp:113`), the destination of every report.
+pub static mut FOUT: *mut libc::FILE = std::ptr::null_mut();
+
 /// Original: `imodinfo_usage` (`imodinfo.cpp:84`).
-pub fn imodinfo_usage() {
-    println!("usage: imodinfo [options] <imod filename>");
-    println!(
-        "options: -a -c -l -L -s -S N -p -r -e -F -o list -g # -i -x min,max -y min,max -z min,max -t 1/-1 -v -h -f filename"
-    );
+pub fn imodinfo_usage(name: *const std::ffi::c_char) {
+    unsafe {
+        libc::printf(c"usage: %s [options] <imod filename>\n".as_ptr(), name);
+        libc::printf(c"options:\n".as_ptr());
+        libc::printf(c"\t-a\tPrint ascii readable version of IMOD model file.\n".as_ptr());
+        libc::printf(c"\t-c\tPrint centroids of closed objects.\n".as_ptr());
+        libc::printf(c"\t-l\tPrint lengths of contours in column output.\n".as_ptr());
+        libc::printf(c"\t-L\tPrint lengths of contour portions by fine-grained color.\n".as_ptr());
+        libc::printf(c"\t-s\tPrint surface information.\n".as_ptr());
+        libc::printf(c"\t-S N\tPrint surface information for every Nth surface.\n".as_ptr());
+        libc::printf(c"\t-p\tPrint point size information.\n".as_ptr());
+        libc::printf(c"\t-r\tPrint ratio of length to area for closed contours.\n".as_ptr());
+        libc::printf(
+            c"\t-e\tPrint center and axes of equivalent ellipse for closed contours.\n".as_ptr(),
+        );
+        libc::printf(c"\t-F\tPrint full report on objects.\n".as_ptr());
+        libc::printf(c"\t-o list\tList of objects to process (default is all).\n".as_ptr());
+        libc::printf(c"\t-g #\tNumber of object group to process.\n".as_ptr());
+        libc::printf(c"\t-i\tAnalyze for inside contours and adjust volume.\n".as_ptr());
+        libc::printf(
+            c"\t-x min,max   Compute volume, mesh area, and point count and sizes\n".as_ptr(),
+        );
+        libc::printf(
+            c"\t-y min,max         between min and max in X (-x), Y (-y), or Z (-z).\n".as_ptr(),
+        );
+        libc::printf(c"\t-z min,max   \n".as_ptr());
+        libc::printf(
+            c"\t-t 1/-1\tApply clipping plane in normal (1) or inverted (-1) orientation\n"
+                .as_ptr(),
+        );
+        libc::printf(c"\t-v\tBe verbose on model output.\n".as_ptr());
+        libc::printf(c"\t-vv\tBe more verbose on model output (prints points).\n".as_ptr());
+        libc::printf(
+            c"\t-h\tHush - no detailed data in standard, point, or by-color output.\n".as_ptr(),
+        );
+        libc::printf(c"\t-f filename  Write output to file.\n".as_ptr());
+    }
 }
 /// Original: `main` (`imodinfo.cpp:116`).
 pub fn imodinfo() {
     let argv: Vec<String> = env::args().collect();
+    let arg_strings: Vec<CString> = argv
+        .iter()
+        .map(|value| CString::new(value.as_str()).unwrap_or_default())
+        .collect();
+    let progname = unsafe { imod_prog_name(arg_strings[0].as_ptr()) };
+    let mut prefix = [0_i8; 100];
+    unsafe {
+        libc::sprintf(prefix.as_mut_ptr(), c"ERROR: %s - ".as_ptr(), progname);
+        setExitPrefix(prefix.as_ptr());
+    }
     if argv.len() == 1 {
-        imodinfo_usage();
-        return;
+        unsafe { imod_version(progname) };
+        imod_copyright();
+        imodinfo_usage(progname);
+        unsafe { libc::exit(0) };
     }
     let mut iarg = 1_usize;
     let mut verbose = 0_i32;
@@ -56,6 +121,7 @@ pub fn imodinfo() {
         y: 1.0e30,
         z: 1.0e30,
     };
+    unsafe { FOUT = stdout };
     while iarg < argv.len() && argv[iarg].starts_with('-') {
         match argv[iarg].as_bytes().get(1).copied().unwrap_or_default() as char {
             'g' => {
@@ -63,11 +129,19 @@ pub fn imodinfo() {
                 let Some(value) = argv.get(iarg) else {
                     std::process::exit(1)
                 };
-                group_num = value.parse().unwrap_or(0);
+                group_num = unsafe { libc::atoi(CString::new(value.as_str()).unwrap().as_ptr()) };
                 if group_num <= 0 {
-                    eprintln!("ERROR: imodinfo - Group number {group_num} must be positive");
-                    std::process::exit(1);
+                    let mut message = [0_i8; 512];
+                    unsafe {
+                        libc::sprintf(
+                            message.as_mut_ptr(),
+                            c"Group number %d must be positive".as_ptr(),
+                            group_num,
+                        );
+                        exit_error(message.as_ptr());
+                    }
                 }
+                // The source `case 'g'` has no break and falls into `case 'c'`.
                 mode = 2;
             }
             'a' => mode = 4,
@@ -142,11 +216,17 @@ pub fn imodinfo() {
                 let mut count = 0_i32;
                 let values = unsafe { parselist(value.as_ptr(), &mut count) };
                 if values.is_null() {
-                    eprintln!("ERROR: imodinfo - Parsing list {}", argv[iarg]);
-                    std::process::exit(1);
+                    let mut message = [0_i8; 512];
+                    unsafe {
+                        libc::sprintf(
+                            message.as_mut_ptr(),
+                            c"Parsing list %s".as_ptr(),
+                            value.as_ptr(),
+                        );
+                        exit_error(message.as_ptr());
+                    }
                 }
                 list = unsafe { std::slice::from_raw_parts(values, count as usize) }.to_vec();
-                unsafe { libc::free(values.cast()) };
             }
             'v' => {
                 verbose += 1;
@@ -162,360 +242,964 @@ pub fn imodinfo() {
                 out_file = Some(value.clone());
             }
             'h' => {
-                if argv[iarg] == "-help" {
-                    imodinfo_usage();
-                    return;
-                }
-                if argv[iarg] != "-h" {
-                    eprintln!(
-                        "ERROR: imodinfo - Unknown option {}; enter -help for help",
-                        argv[iarg]
-                    );
-                    std::process::exit(1);
-                }
                 hush = true;
+                if argv[iarg].len() > 2 {
+                    if argv[iarg] == "-help" {
+                        imodinfo_usage(progname);
+                        unsafe { libc::exit(0) };
+                    }
+                    let mut message = [0_i8; 512];
+                    let option = CString::new(argv[iarg].as_str()).unwrap_or_default();
+                    unsafe {
+                        libc::sprintf(
+                            message.as_mut_ptr(),
+                            c"Unknown option %s; enter -help for help".as_ptr(),
+                            option.as_ptr(),
+                        );
+                        exit_error(message.as_ptr());
+                    }
+                }
             }
-            _ => {
-                eprintln!("{}: unknown option {}", argv[0], argv[iarg]);
-                imodinfo_usage();
-                std::process::exit(2);
-            }
+            _ => unsafe {
+                libc::printf(
+                    c"%s: unknown option %s\n".as_ptr(),
+                    progname,
+                    arg_strings[iarg].as_ptr(),
+                );
+                imodinfo_usage(progname);
+                libc::exit(2);
+            },
         }
         iarg += 1;
     }
     if iarg >= argv.len() {
-        imodinfo_usage();
-        std::process::exit(2);
+        imodinfo_usage(progname);
+        unsafe { libc::exit(2) };
+    }
+    if let Some(filename) = out_file.as_ref() {
+        let name = CString::new(filename.as_str()).unwrap_or_default();
+        if unsafe { imod_backup_file(name.as_ptr()) } != 0 {
+            let mut message = [0_i8; 512];
+            unsafe {
+                libc::sprintf(
+                    message.as_mut_ptr(),
+                    c"Could not make ~ backup of existing output file %s".as_ptr(),
+                    name.as_ptr(),
+                );
+                exit_error(message.as_ptr());
+            }
+        }
+        unsafe {
+            FOUT = libc::fopen(name.as_ptr(), c"w".as_ptr());
+            if FOUT.is_null() {
+                let mut message = [0_i8; 512];
+                libc::sprintf(
+                    message.as_mut_ptr(),
+                    c"Opening output file %s".as_ptr(),
+                    name.as_ptr(),
+                );
+                exit_error(message.as_ptr());
+            }
+        }
+    }
+    if !list.is_empty() && group_num > 0 {
+        unsafe {
+            exit_error(c"You cannot enter both an object list and an object group".as_ptr());
+        }
     }
     if hush && verbose == 0 {
         verbose = -1;
     }
-    let mut file_output = if let Some(filename) = out_file {
-        let backup = format!("{filename}~");
-        if std::path::Path::new(&filename).exists() {
-            let _ = std::fs::remove_file(&backup);
-            if std::fs::rename(&filename, &backup).is_err() {
-                eprintln!(
-                    "ERROR: imodinfo - Could not make ~ backup of existing output file {filename}"
+    for (index, filename) in argv.iter().enumerate().skip(iarg) {
+        let name = CString::new(filename.as_str()).unwrap_or_default();
+        unsafe {
+            *libc::__errno_location() = 0;
+            let fin = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            if fin.is_null() {
+                let errno = *libc::__errno_location();
+                let mut message = [0_i8; 512];
+                libc::sprintf(
+                    message.as_mut_ptr(),
+                    c"Opening input file %s%s%s".as_ptr(),
+                    name.as_ptr(),
+                    if errno != 0 {
+                        c" - system message: ".as_ptr()
+                    } else {
+                        c"".as_ptr()
+                    },
+                    if errno != 0 {
+                        libc::strerror(errno) as *const std::ffi::c_char
+                    } else {
+                        c"".as_ptr()
+                    },
                 );
-                std::process::exit(1);
+                exit_error(message.as_ptr());
             }
+            libc::fclose(fin);
         }
-        Some(File::create(&filename).unwrap_or_else(|_| {
-            eprintln!("ERROR: imodinfo - Opening output file {filename}");
-            std::process::exit(1)
-        }))
-    } else {
-        None
-    };
-    if !list.is_empty() && group_num > 0 {
-        eprintln!("ERROR: imodinfo - You cannot enter both an object list and an object group");
-        std::process::exit(1);
-    }
-    for filename in &argv[iarg..] {
-        if File::open(filename).is_err() {
-            eprintln!("ERROR: imodinfo - Opening input file {filename}");
-            std::process::exit(1);
-        }
-        let model = match imod_read(filename) {
+        let mut model = match imod_read(filename) {
             Ok(model) => model,
             Err(error) => {
-                println!("imodinfo: Error ({error}) reading imod model. ({filename})");
+                unsafe {
+                    libc::printf(
+                        c"%s: Error (%d) reading imod model. (%s)\n".as_ptr(),
+                        progname,
+                        error,
+                        name.as_ptr(),
+                    );
+                }
                 continue;
             }
         };
-        if group_num > 0 && model.group_list.is_empty() {
-            eprintln!("ERROR: imodinfo - There are no object groups in model {filename}");
-            std::process::exit(1);
-        }
-        if group_num > model.group_list.len() as i32 {
-            eprintln!(
-                "ERROR: imodinfo - Group # {group_num} is more than the number of object groups ({}) in {filename}",
-                model.group_list.len()
-            );
-            std::process::exit(1);
-        }
-        let mut header = format!(
-            "# MODEL {filename}\n# NAME  {}\n# PIX SCALE:  x = {}\n#             y = {}\n#             z = {}\n# PIX SIZE      = {}\n# UNITS: {}\n\n\n",
-            model.name,
-            model.xscale,
-            model.yscale,
-            model.zscale,
-            model.pixsize,
-            print_units(model.units)
-        );
-        if let Some(reference) = model.ref_image {
-            header = format!(
-                "# MODEL {filename}\n# NAME  {}\n# PIX SCALE:  x = {}\n#             y = {}\n#             z = {}\n# PIX SIZE      = {}\n# UNITS: {}\n\n# Model to Image index coords:\n#      SCALE  = ( {}, {}, {})\n#      OFFSET = ( {}, {}, {})\n#      ANGLES = ( {}, {}, {})\n\n\n",
-                model.name,
-                model.xscale,
-                model.yscale,
-                model.zscale,
-                model.pixsize,
-                print_units(model.units),
-                reference.cscale.x,
-                reference.cscale.y,
-                reference.cscale.z,
-                reference.ctrans.x,
-                reference.ctrans.y,
-                reference.ctrans.z,
-                reference.crot.x,
-                reference.crot.y,
-                reference.crot.z,
-            );
-        }
-        if let Some(file) = file_output.as_mut() {
-            write!(file, "{header}").unwrap();
-        } else {
-            print!("{header}");
-        }
-        if model.obj.is_empty() {
-            if let Some(file) = file_output.as_mut() {
-                writeln!(file, "Model has no objects!!!").unwrap();
-            } else {
-                println!("Model has no objects!!!");
-            }
-        }
-        if mode == 4 {
-            if let Some(file) = file_output.as_mut() {
-                // Source `imodinfo.cpp` assigns fout to model->file; `imodWriteAscii`
-                // then calls rewind(imod->file), replacing the preliminary report.
-                file.seek(SeekFrom::Start(0)).unwrap_or_else(|_| {
-                    eprintln!("ERROR: imodinfo - Writing ASCII output");
-                    std::process::exit(1)
-                });
-                imod_write_ascii(&model, file).unwrap_or_else(|_| {
-                    eprintln!("ERROR: imodinfo - Writing ASCII output");
-                    std::process::exit(1)
-                });
-                write!(file, "\n\n").unwrap();
-            } else {
-                let stdout = std::io::stdout();
-                let mut file = stdout.lock();
-                imod_write_ascii(&model, &mut file).unwrap_or_else(|_| {
-                    eprintln!("ERROR: imodinfo - Writing ASCII output");
-                    std::process::exit(1)
-                });
-                write!(file, "\n\n").unwrap();
-            }
-            continue;
-        }
-        if mode == 2 {
-            let chart_header = "#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center\n#--------------------------------------------------------------------------------------------\n";
-            if let Some(file) = file_output.as_mut() {
-                write!(file, "{chart_header}").unwrap();
-            } else {
-                print!("{chart_header}");
-            }
-        }
-        if mode == 5 {
-            let length_header = format!(
-                "# Obj Cont Pnts Length (in {})\n#------------------------\n",
-                print_units(model.units)
-            );
-            if let Some(file) = file_output.as_mut() {
-                write!(file, "{length_header}").unwrap();
-            } else {
-                print!("{length_header}");
-            }
-        }
-        for ob in 0..model.obj.len() {
-            if mode == 3 {
-                continue;
-            }
-            if group_num > 0 {
-                if obj_group_lookup(&model.group_list[group_num as usize - 1], ob as i32) < 0 {
-                    continue;
+        if group_num > 0 {
+            if model.group_list.is_empty() {
+                let mut message = [0_i8; 512];
+                unsafe {
+                    libc::sprintf(
+                        message.as_mut_ptr(),
+                        c"There are no object groups in model %s".as_ptr(),
+                        name.as_ptr(),
+                    );
+                    exit_error(message.as_ptr());
                 }
-            } else if !list.is_empty() && !list.contains(&(ob as i32 + 1)) {
-                continue;
             }
-            let report = match mode {
-                6 => imodinfo_surface(
-                    &model, ob, scaninside, minimum, maximum, useclip, sample, verbose,
-                ),
-                8 => imodinfo_points(&model, ob, subarea, minimum, maximum, useclip, verbose),
-                9 => imodinfo_ratios(&model, ob),
-                12 => imodinfo_ellipse(&model, ob, subarea, minimum, maximum),
-                7 => imodinfo_full_object_report(
-                    &model,
-                    ob + 1,
-                    scaninside,
-                    subarea,
-                    minimum,
-                    maximum,
-                    useclip,
-                ),
-                2 => imodinfo_object(&model, ob, scaninside, subarea, minimum, maximum, useclip),
-                5 => imodinfo_length(&model, ob),
-                10 => contour_length_by_color(&model, ob, verbose),
-                _ => imodinfo_print_model(
-                    &model, ob, verbose, scaninside, subarea, minimum, maximum, useclip,
-                ),
-            };
-            if let Some(file) = file_output.as_mut() {
-                write!(file, "{report}").unwrap();
-            } else {
-                print!("{report}");
+            if group_num > model.group_list.len() as i32 {
+                let mut message = [0_i8; 512];
+                unsafe {
+                    libc::sprintf(
+                        message.as_mut_ptr(),
+                        c"Group # %d is more than the number of object groups (%d) in %s".as_ptr(),
+                        group_num,
+                        model.group_list.len() as std::ffi::c_int,
+                        name.as_ptr(),
+                    );
+                    exit_error(message.as_ptr());
+                }
             }
         }
-        if mode == 3 {
-            let report = imodinfo_objndist(&model, bins);
-            if let Some(file) = file_output.as_mut() {
-                write!(file, "{report}").unwrap();
-            } else {
-                print!("{report}");
+        let _ = index;
+        unsafe {
+            libc::fprintf(FOUT, c"# MODEL %s\n".as_ptr(), name.as_ptr());
+            libc::fprintf(FOUT, c"# NAME  %s\n".as_ptr(), model.name.as_ptr());
+            libc::fprintf(
+                FOUT,
+                c"# PIX SCALE:  x = %g\n".as_ptr(),
+                model.xscale as std::ffi::c_double,
+            );
+            libc::fprintf(
+                FOUT,
+                c"#             y = %g\n".as_ptr(),
+                model.yscale as std::ffi::c_double,
+            );
+            libc::fprintf(
+                FOUT,
+                c"#             z = %g\n".as_ptr(),
+                model.zscale as std::ffi::c_double,
+            );
+            libc::fprintf(
+                FOUT,
+                c"# PIX SIZE      = %g\n".as_ptr(),
+                model.pixsize as std::ffi::c_double,
+            );
+            libc::fprintf(FOUT, c"# UNITS: ".as_ptr());
+            print_units(model.units);
+            if let Some(reference) = model.ref_image {
+                libc::fprintf(FOUT, c"\n# Model to Image index coords:\n".as_ptr());
+                libc::fprintf(
+                    FOUT,
+                    c"#      SCALE  = ( %g, %g, %g)\n".as_ptr(),
+                    reference.cscale.x as std::ffi::c_double,
+                    reference.cscale.y as std::ffi::c_double,
+                    reference.cscale.z as std::ffi::c_double,
+                );
+                libc::fprintf(
+                    FOUT,
+                    c"#      OFFSET = ( %g, %g, %g)\n".as_ptr(),
+                    reference.ctrans.x as std::ffi::c_double,
+                    reference.ctrans.y as std::ffi::c_double,
+                    reference.ctrans.z as std::ffi::c_double,
+                );
+                libc::fprintf(
+                    FOUT,
+                    c"#      ANGLES = ( %g, %g, %g)\n".as_ptr(),
+                    reference.crot.x as std::ffi::c_double,
+                    reference.crot.y as std::ffi::c_double,
+                    reference.crot.z as std::ffi::c_double,
+                );
             }
         }
-        if let Some(file) = file_output.as_mut() {
-            write!(file, "\n\n").unwrap();
-        } else {
-            print!("\n\n");
+        let mut obj_list = Vec::<usize>::new();
+        for ob in 0..model.obj.len() {
+            if group_num > 0 {
+                if obj_group_lookup(&model.group_list[group_num as usize - 1], ob as i32) >= 0 {
+                    obj_list.push(ob);
+                }
+            } else if unsafe { number_in_list(ob as i32 + 1, list.as_ptr(), list.len() as i32, 1) }
+                != 0
+            {
+                obj_list.push(ob);
+            }
         }
-        if let Some(file) = file_output.as_mut() {
-            file.flush().unwrap();
-        } else {
-            let _ = std::io::stdout().flush();
+        unsafe {
+            libc::fprintf(FOUT, c"\n\n".as_ptr());
+            if model.obj.is_empty() {
+                libc::fprintf(FOUT, c"Model has no objects!!!\n".as_ptr());
+            }
+        }
+        match mode {
+            4 => {
+                imod_write_ascii(&model, unsafe { FOUT });
+            }
+            6 => {
+                for ob in &obj_list {
+                    imodinfo_surface(
+                        &model, *ob, scaninside, minimum, maximum, useclip, sample, verbose,
+                    );
+                }
+            }
+            8 => {
+                for ob in &obj_list {
+                    imodinfo_points(&model, *ob, subarea, minimum, maximum, useclip, verbose);
+                }
+            }
+            12 => {
+                for ob in &obj_list {
+                    imodinfo_ellipse(&model, *ob, subarea, minimum, maximum);
+                }
+            }
+            9 => {
+                for ob in &obj_list {
+                    imodinfo_ratios(&model, *ob);
+                }
+            }
+            2 => {
+                unsafe {
+                    libc::fprintf(
+                        FOUT,
+                        c"#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center\n".as_ptr(),
+                    );
+                    libc::fprintf(
+                        FOUT,
+                        c"#--------------------------------------------------------------------------------------------\n".as_ptr(),
+                    );
+                }
+                for ob in &obj_list {
+                    imodinfo_object(&model, *ob, scaninside, subarea, minimum, maximum, useclip);
+                }
+            }
+            3 => imodinfo_objndist(&model, bins),
+            5 => {
+                unsafe {
+                    // `imodUnits` (`imodel.c:1360`).
+                    libc::fprintf(
+                        FOUT,
+                        c"# Obj Cont Pnts Length (in %s)\n".as_ptr(),
+                        match model.units {
+                            0 => c"pixels".as_ptr(),
+                            3 => c"km".as_ptr(),
+                            1 => c"m".as_ptr(),
+                            -2 => c"cm".as_ptr(),
+                            -3 => c"mm".as_ptr(),
+                            -6 => c"um".as_ptr(),
+                            -9 => c"nm".as_ptr(),
+                            -10 => c"A".as_ptr(),
+                            -12 => c"pm".as_ptr(),
+                            _ => c"unknown units".as_ptr(),
+                        },
+                    );
+                    libc::fprintf(FOUT, c"#------------------------\n".as_ptr());
+                }
+                for ob in &obj_list {
+                    imodinfo_length(&model, *ob);
+                }
+            }
+            10 => {
+                for ob in &obj_list {
+                    if model.obj[*ob].flags & (IMOD_OBJFLAG_OPEN | IMOD_OBJFLAG_SCAT) == 0
+                        || model.obj[*ob].flags & IMOD_OBJFLAG_SCAT == 0
+                    {
+                        contour_length_by_color(&model, *ob, verbose);
+                    }
+                }
+            }
+            7 => {
+                for ob in &obj_list {
+                    imodinfo_full_object_report(
+                        &model,
+                        *ob + 1,
+                        scaninside,
+                        subarea,
+                        minimum,
+                        maximum,
+                        useclip,
+                    );
+                }
+            }
+            _ => {
+                for ob in &obj_list {
+                    imodinfo_print_model(
+                        &mut model, *ob, verbose, scaninside, subarea, minimum, maximum, useclip,
+                    );
+                }
+            }
+        }
+        unsafe {
+            libc::fprintf(FOUT, c"\n\n".as_ptr());
         }
     }
+    unsafe { libc::exit(0) };
 }
 /// Original: `imodinfo_print_model` (`imodinfo.cpp:464`).
 pub fn imodinfo_print_model(
-    model: &Imod,
+    model: &mut Imod,
     ob: usize,
     verbose: i32,
-    _scaninside: bool,
-    _subarea: bool,
-    _min: Ipoint,
-    _max: Ipoint,
+    scaninside: bool,
+    subarea: bool,
+    min: Ipoint,
+    max: Ipoint,
     _useclip: i32,
-) -> String {
-    // Original: `imodinfo_print_model` (`imodinfo.cpp:464`).
-    let Some(obj) = model.obj.get(ob) else {
-        return String::new();
-    };
-    let mut output = format!(
-        "OBJECT {}\nNAME:  {}\n       {} contours\n",
-        ob + 1,
-        obj.name,
-        obj.cont.len()
+) {
+    // Original: `imodinfo_print_model` (`imodinfo.cpp:464`).  The source keeps
+    // `Iobj *obj = &(model->obj[ob])` for the whole body; the translation takes
+    // the alias afresh in each region because `contour_stats` is non-const.
+    if model.obj.get(ob).is_none() {
+        return;
+    }
+    let mut tsa = 0.0_f64;
+    let mut tvol = 0.0_f64;
+    let mut mvol = 0.0_f64;
+    let mut inmvol = 0.0_f64;
+    let mut msa = 0.0_f64;
+    // `imodPlaneSetFromClips` (`imodinfo.cpp:487`) fills `plane` from the
+    // object's and the current view's clip sets; `doclip` is `useclip` only
+    // when it produced any.
+    let view = &model.view[model.cview.clamp(0, model.view.len() as i32 - 1) as usize];
+    let mut plane = [Iplane::default(); 2 * IMOD_CLIPSIZE];
+    let mut n_planes = 0_i32;
+    imod_plane_set_from_clips(
+        Some(&model.obj[ob].clips),
+        Some(&view.clips),
+        &mut plane,
+        2 * IMOD_CLIPSIZE as i32,
+        &mut n_planes,
     );
-    if obj.flags & IMOD_OBJFLAG_OFF != 0 {
-        output.push_str("       object drawing is turned off\n");
-    }
-    if obj.flags & IMOD_OBJFLAG_SCAT != 0 {
-        output.push_str("       object uses scattered points.\n");
-    } else if obj.flags & IMOD_OBJFLAG_OPEN != 0 {
-        output.push_str("       object uses open contours.\n");
-    } else {
-        output.push_str("       object uses closed contours.\n");
-    }
-    if obj.flags & IMOD_OBJFLAG_OUT != 0 {
-        output.push_str("       contours in object are inside out.\n");
-    }
-    output.push_str(&format!(
-        "       color (red, green, blue) = ({}, {}, {})\n\n",
-        obj.red, obj.green, obj.blue
-    ));
-    for (co, cont) in obj.cont.iter().enumerate() {
-        if verbose >= 0 {
-            output.push_str(&format!(
-                "\tCONTOUR #{},{},{}  {} points",
-                co + 1,
-                ob + 1,
-                cont.surf,
-                cont.pts.len()
-            ));
-        }
-        if cont.pts.is_empty() {
-            if verbose >= 0 {
-                output.push('\n');
-            }
-            continue;
-        }
-        let dist = info_contour_length(
-            Some(cont),
-            obj.flags,
-            model.pixsize as f64,
-            model.zscale as f64,
+    let doclip = if n_planes != 0 { _useclip } else { 0 };
+    let obj = &model.obj[ob];
+    unsafe {
+        libc::fprintf(FOUT, c"OBJECT %d\n".as_ptr(), ob as std::ffi::c_int + 1);
+        libc::fprintf(FOUT, c"NAME:  %s\n".as_ptr(), obj.name.as_ptr());
+        libc::fprintf(
+            FOUT,
+            c"       %d contours\n".as_ptr(),
+            obj.cont.len() as std::ffi::c_int,
         );
-        if obj.flags & IMOD_OBJFLAG_OPEN == 0 && obj.flags & IMOD_OBJFLAG_SCAT == 0 {
-            let mut area = 0.0_f64;
-            for pt in 0..cont.pts.len() {
-                let next = (pt + 1) % cont.pts.len();
-                area += cont.pts[pt].x as f64 * cont.pts[next].y as f64
-                    - cont.pts[next].x as f64 * cont.pts[pt].y as f64;
-            }
-            area = area.abs() * 0.5 * model.pixsize as f64 * model.pixsize as f64;
-            output.push_str(&format!(", length = {dist},  area = {area}\n",));
+        if obj.flags & IMOD_OBJFLAG_OFF != 0 {
+            libc::fprintf(FOUT, c"       object drawing is turned off\n".as_ptr());
+        }
+        if obj.flags & IMOD_OBJFLAG_SCAT != 0 {
+            libc::fprintf(FOUT, c"       object uses scattered points.\n".as_ptr());
+        } else if obj.flags & IMOD_OBJFLAG_OPEN != 0 {
+            libc::fprintf(FOUT, c"       object uses open contours.\n".as_ptr());
         } else {
-            output.push_str(&format!("\tlength = {dist} {}\n", print_units(model.units)));
+            libc::fprintf(FOUT, c"       object uses closed contours.\n".as_ptr());
+        }
+        if obj.flags & IMOD_OBJFLAG_OUT != 0 {
+            libc::fprintf(
+                FOUT,
+                c"       contours in object are inside out.\n".as_ptr(),
+            );
+        }
+        libc::fprintf(
+            FOUT,
+            c"       color (red, green, blue) = (%g, %g, %g)\n".as_ptr(),
+            obj.red as std::ffi::c_double,
+            obj.green as std::ffi::c_double,
+            obj.blue as std::ffi::c_double,
+        );
+        libc::fprintf(FOUT, c"\n".as_ptr());
+    }
+    if scaninside && model.obj[ob].flags & IMOD_OBJFLAG_OPEN == 0 {
+        let mut mesh_vol = 0.0_f64;
+        tvol = model.pixsize as f64
+            * model.pixsize as f64
+            * scanned_volume(
+                &model.obj[ob],
+                subarea,
+                min,
+                max,
+                doclip,
+                &plane[..n_planes.max(0) as usize],
+                &mut mesh_vol,
+            ) as f64;
+        mvol = mesh_vol;
+    } else {
+        for co in 0..model.obj[ob].cont.len() {
+            let obj = &model.obj[ob];
+            let cont = &obj.cont[co];
+            let npt = cont.pts.len();
+            if verbose >= 0 {
+                unsafe {
+                    libc::fprintf(
+                        FOUT,
+                        c"\tCONTOUR #%d,%d,%d  %d points".as_ptr(),
+                        co as std::ffi::c_int + 1,
+                        ob as std::ffi::c_int + 1,
+                        cont.surf,
+                        npt as std::ffi::c_int,
+                    );
+                }
+            }
+            if verbose > 1 {
+                unsafe {
+                    libc::fprintf(FOUT, c"\n\t".as_ptr());
+                    // `imodinfo.cpp:540` prints the label to `stdout`, not to
+                    // `fout`.
+                    imod_label_print(cont.label.as_ref(), *(&raw const stdout));
+                }
+            }
+            if cont.pts.is_empty() {
+                if verbose >= 0 {
+                    unsafe { libc::fprintf(FOUT, c"\n".as_ptr()) };
+                }
+                continue;
+            }
+            if subarea && obj.flags & IMOD_OBJFLAG_OPEN == 0 {
+                let coz = cont.pts[0].z.round() as i32;
+                if (coz as f32) < min.z || (coz as f32) > max.z {
+                    if verbose >= 0 {
+                        unsafe { libc::fprintf(FOUT, c"\n".as_ptr()) };
+                    }
+                    let vol_fac = contour_volume_factor(obj, cont, min, max);
+                    if vol_fac > 0. {
+                        // `imodContourArea` (`icont.c:324`): magnitude of the summed cross
+                        // products of successive points, halved, accumulated in float.
+                        let mut n = Ipoint::default();
+                        if cont.pts.len() >= 3 {
+                            for i in 0..cont.pts.len() {
+                                let next = if i == cont.pts.len() - 1 { 0 } else { i + 1 };
+                                n.x += cont.pts[i].y * cont.pts[next].z
+                                    - cont.pts[i].z * cont.pts[next].y;
+                                n.y += cont.pts[i].z * cont.pts[next].x
+                                    - cont.pts[i].x * cont.pts[next].z;
+                                n.z += cont.pts[i].x * cont.pts[next].y
+                                    - cont.pts[i].y * cont.pts[next].x;
+                            }
+                        }
+                        let area =
+                            (((n.x * n.x + n.y * n.y + n.z * n.z) as f64).sqrt() * 0.5) as f32;
+                        mvol += vol_fac as f64
+                            * area as f64
+                            * model.pixsize as f64
+                            * model.pixsize as f64;
+                    }
+                    continue;
+                }
+            }
+            if verbose <= 0 {
+                let dist = info_contour_length(
+                    Some(cont),
+                    obj.flags,
+                    model.pixsize as f64,
+                    model.zscale as f64,
+                );
+                if obj.flags & IMOD_OBJFLAG_OPEN == 0 {
+                    if verbose >= 0 {
+                        unsafe {
+                            libc::fprintf(
+                                FOUT,
+                                c", length = %g, ".as_ptr(),
+                                dist as std::ffi::c_double,
+                            )
+                        };
+                    }
+                    // `imodContourArea` (`icont.c:324`): magnitude of the summed cross
+                    // products of successive points, halved, accumulated in float.
+                    let mut n = Ipoint::default();
+                    if cont.pts.len() >= 3 {
+                        for i in 0..cont.pts.len() {
+                            let next = if i == cont.pts.len() - 1 { 0 } else { i + 1 };
+                            n.x +=
+                                cont.pts[i].y * cont.pts[next].z - cont.pts[i].z * cont.pts[next].y;
+                            n.y +=
+                                cont.pts[i].z * cont.pts[next].x - cont.pts[i].x * cont.pts[next].z;
+                            n.z +=
+                                cont.pts[i].x * cont.pts[next].y - cont.pts[i].y * cont.pts[next].x;
+                        }
+                    }
+                    let area = (((n.x * n.x + n.y * n.y + n.z * n.z) as f64).sqrt() * 0.5) as f32;
+                    let mut sa = area as f64;
+                    sa *= model.pixsize as f64 * model.pixsize as f64;
+                    if verbose >= 0 {
+                        unsafe {
+                            libc::fprintf(FOUT, c" area = %g\n".as_ptr(), sa as std::ffi::c_double)
+                        };
+                    }
+                    tsa += dist;
+                    tvol += sa;
+                    mvol += sa * contour_volume_factor(obj, cont, min, max) as f64;
+                } else if verbose >= 0 {
+                    unsafe {
+                        // `imodUnits` (`imodel.c:1360`).
+                        libc::fprintf(
+                            FOUT,
+                            c"\tlength = %g %s\n".as_ptr(),
+                            dist as std::ffi::c_double,
+                            match model.units {
+                                0 => c"pixels".as_ptr(),
+                                3 => c"km".as_ptr(),
+                                1 => c"m".as_ptr(),
+                                -2 => c"cm".as_ptr(),
+                                -3 => c"mm".as_ptr(),
+                                -6 => c"um".as_ptr(),
+                                -9 => c"nm".as_ptr(),
+                                -10 => c"A".as_ptr(),
+                                -12 => c"pm".as_ptr(),
+                                _ => c"unknown units".as_ptr(),
+                            },
+                        )
+                    };
+                }
+            } else {
+                unsafe { libc::fprintf(FOUT, c".\n".as_ptr()) };
+            }
+            if verbose > 1 {
+                unsafe { libc::fprintf(FOUT, c"\t\tx\ty\tz\n".as_ptr()) };
+                for point in &cont.pts {
+                    unsafe {
+                        libc::fprintf(
+                            FOUT,
+                            c"\t\t%g\t%g\t%g\n".as_ptr(),
+                            point.x as std::ffi::c_double,
+                            point.y as std::ffi::c_double,
+                            point.z as std::ffi::c_double,
+                        )
+                    };
+                }
+            }
+            if verbose > 0 {
+                let obj_flags = obj.flags;
+                let pixsize = model.pixsize as f64;
+                let zscale = model.zscale as f64;
+                contour_stats(model.obj[ob].cont.get_mut(co), obj_flags, pixsize, zscale);
+            }
         }
     }
-    output
+    let obj = &model.obj[ob];
+    if !obj.mesh.is_empty() {
+        // `imodinfo.cpp:609-620` selects the nearest resolution first and then
+        // processes only the meshes at that resolution.  Looping over every
+        // mesh double-counts a multi-resolution object.
+        let mscale = Ipoint {
+            x: model.xscale,
+            y: model.yscale,
+            z: model.zscale,
+        };
+        let mut resol = 0;
+        crate::imod::libimod::imesh::imod_mesh_nearest_res(
+            &obj.mesh,
+            obj.mesh.len() as i32,
+            0,
+            &mut resol,
+        );
+        for mesh in &obj.mesh {
+            if crate::imod::libimod::imesh::imesh_resol(mesh.flag) != resol {
+                continue;
+            }
+            msa += imesh_surface_subarea(
+                Some(mesh),
+                Some(mscale),
+                min,
+                max,
+                doclip,
+                &plane[..n_planes.max(0) as usize],
+            ) as f64;
+            inmvol +=
+                crate::imod::libimod::imesh::imesh_volume(Some(mesh), Some(&mscale), None) as f64;
+        }
+        msa *= model.pixsize as f64 * model.pixsize as f64;
+        // `imodinfo.cpp:620` is `pow((double)pixsize, 3.)`, not three float
+        // multiplies.
+        inmvol *= (model.pixsize as f64).powf(3.);
+    }
+    unsafe {
+        if mvol > 0.0 {
+            mvol *= model.zscale as f64 * model.pixsize as f64;
+            libc::fprintf(
+                FOUT,
+                c"\tTotal contour volume = %g\n".as_ptr(),
+                mvol as f32 as std::ffi::c_double,
+            );
+        } else if tvol > 0.0 {
+            tvol *= model.zscale as f64 * model.pixsize as f64;
+            libc::fprintf(
+                FOUT,
+                c"\n\tTotal cylinder volume = %g\n".as_ptr(),
+                tvol as f32 as std::ffi::c_double,
+            );
+        }
+        if inmvol > 0. {
+            libc::fprintf(
+                FOUT,
+                c"\tTotal volume inside mesh = %g\n".as_ptr(),
+                inmvol as f32 as std::ffi::c_double,
+            );
+        }
+        if msa > 0. {
+            libc::fprintf(
+                FOUT,
+                c"\tTotal mesh surface area = %g\n".as_ptr(),
+                msa as f32 as std::ffi::c_double,
+            );
+        } else if tsa > 0.0 {
+            tsa *= model.zscale as f64 * model.pixsize as f64;
+            libc::fprintf(
+                FOUT,
+                c"\tTotal cylinder surface area = %g\n".as_ptr(),
+                tsa as f32 as std::ffi::c_double,
+            );
+        }
+        libc::fprintf(FOUT, c"\n".as_ptr());
+    }
 }
 /// Original: `imodinfo_surface` (`imodinfo.cpp:646`).
 pub fn imodinfo_surface(
     imod: &Imod,
     ob: usize,
-    _scaninside: bool,
+    scaninside: bool,
     min: Ipoint,
     max: Ipoint,
     _useclip: i32,
     sample: usize,
     _verbose: i32,
-) -> String {
+) {
     // Original: `imodinfo_surface` (`imodinfo.cpp:646`).
     let Some(obj) = imod.obj.get(ob) else {
-        return String::new();
+        return;
     };
-    let sample = sample.max(1);
-    let mut output = format!(
-        "\n#Object {} data, {}\n#Surface : Contours,  Cyl. Volume,  Cyl. Surface\n",
-        ob + 1,
-        obj.name
+    // `imodPlaneSetFromClips` (`imodinfo.cpp:669`).
+    let view = &imod.view[imod.cview.clamp(0, imod.view.len() as i32 - 1) as usize];
+    let mut plane = [Iplane::default(); 2 * IMOD_CLIPSIZE];
+    let mut n_planes = 0_i32;
+    imod_plane_set_from_clips(
+        Some(&obj.clips),
+        Some(&view.clips),
+        &mut plane,
+        2 * IMOD_CLIPSIZE as i32,
+        &mut n_planes,
     );
-    for surf in 0..=obj.surfsize.max(0) as usize {
-        if surf % sample != 0 {
+    let doclip = if n_planes != 0 { _useclip } else { 0 };
+    let plane = &plane[..n_planes.max(0) as usize];
+    let sample = sample.max(1);
+    let surfsize = obj.surfsize.max(0) as usize;
+    let mut sa = vec![0.0_f64; surfsize + 1];
+    let mut vol = vec![0.0_f64; surfsize + 1];
+    let mut mvol = vec![0.0_f64; surfsize + 1];
+    let mut nofc = vec![0_i32; surfsize + 1];
+    let mut extent = vec![0.0_f32; surfsize + 1];
+    let mut i = 0_usize;
+    while i <= surfsize {
+        let mut distmax = 0.0_f32;
+        for co in 0..obj.cont.len() {
+            let cont = &obj.cont[co];
+            if cont.pts.is_empty() || cont.surf != i as i32 {
+                continue;
+            }
+            for cont2 in obj.cont.iter().skip(co) {
+                if cont2.pts.is_empty() || cont2.surf != i as i32 {
+                    continue;
+                }
+                for p1 in &cont.pts {
+                    for p2 in &cont2.pts {
+                        let delx = p1.x - p2.x;
+                        let dely = p1.y - p2.y;
+                        let delz = (p1.z - p2.z) * imod.zscale;
+                        if delx.abs() + dely.abs() + delz.abs() < extent[i] {
+                            continue;
+                        }
+                        let dist = delx * delx + dely * dely + delz * delz;
+                        if dist > distmax {
+                            distmax = dist;
+                            extent[i] = (dist as f64).sqrt() as f32;
+                        }
+                    }
+                }
+            }
+        }
+        extent[i] *= imod.pixsize;
+        i += sample;
+    }
+    for cont in &obj.cont {
+        if cont.pts.is_empty() {
             continue;
         }
-        let mut num = 0;
-        let mut volume = 0.0;
-        let mut surface = 0.0;
-        for cont in &obj.cont {
-            if cont.surf != surf as i32 {
-                continue;
+        let i = cont.surf.max(0) as usize;
+        if i % sample != 0 || i > surfsize {
+            continue;
+        }
+        let mut mean_z = 0.0_f32;
+        for point in &cont.pts {
+            mean_z += point.z;
+        }
+        let coz = (mean_z / cont.pts.len() as f32 + 0.5).floor() as i32;
+        let skipz = (coz as f32) < min.z || (coz as f32) > max.z;
+        let vol_fac = contour_volume_factor(obj, cont, min, max);
+        if (vol_fac > 0. && !(scaninside || doclip != 0)) || !skipz {
+            if let Some((_scan, _pmin, _pmax, tvol)) =
+                contour_subarea_by_scan(cont, min, max, doclip, plane, false)
+            {
+                let tvol = tvol * imod.pixsize * imod.pixsize * imod.pixsize * imod.zscale;
+                if vol_fac != 0. {
+                    mvol[i] += tvol as f64 * vol_fac as f64;
+                }
+                if !skipz {
+                    nofc[i] += 1;
+                    vol[i] += tvol as f64;
+                }
             }
-            if cont.pts.iter().any(|pt| {
-                pt.x < min.x
-                    || pt.x > max.x
-                    || pt.y < min.y
-                    || pt.y > max.y
-                    || pt.z < min.z
-                    || pt.z > max.z
-            }) {
-                continue;
-            }
-            num += 1;
-            volume += info_contour_vol(
-                Some(cont),
-                obj.flags,
-                imod.pixsize as f64,
-                imod.zscale as f64,
-            );
-            surface += info_contour_surface_area(
+        }
+        if !(scaninside || doclip != 0 || skipz) {
+            sa[i] += info_contour_surface_area(
                 Some(cont),
                 obj.flags,
                 imod.pixsize as f64,
                 imod.zscale as f64,
             );
         }
-        output.push_str(&format!(
-            "{:7}   {:8}   {:12.6}  {:12.6}\n",
-            surf, num, volume, surface
-        ));
     }
-    output
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\n#Object %d data, %s\n".as_ptr(),
+            ob as std::ffi::c_int + 1,
+            obj.name.as_ptr(),
+        );
+    }
+    if !obj.mesh.is_empty() {
+        let zs = imod.zscale;
+        let mut max_mesh_surf = 0_i32;
+        let mut max_cont_surf = 0_i32;
+        let mut msa = vec![0.0_f64; surfsize + 1];
+        let mut vol_in_mesh = vec![0.0_f64; surfsize + 1];
+        let mut resol = 0;
+        crate::imod::libimod::imesh::imod_mesh_nearest_res(
+            &obj.mesh,
+            obj.mesh.len() as i32,
+            0,
+            &mut resol,
+        );
+
+        for mesh in &obj.mesh {
+            if mesh.list.is_empty() || crate::imod::libimod::imesh::imesh_resol(mesh.flag) != resol
+            {
+                continue;
+            }
+            if mesh.surf >= 0
+                && mesh.surf as usize <= surfsize
+                && (mesh.surf as usize % sample) == 0
+            {
+                let mscale = Ipoint {
+                    x: imod.xscale,
+                    y: imod.yscale,
+                    z: imod.zscale,
+                };
+                vol_in_mesh[mesh.surf as usize] +=
+                    crate::imod::libimod::imesh::imesh_volume(Some(mesh), Some(&mscale), None)
+                        as f64
+                        * (imod.pixsize as f64).powf(3.);
+                if mesh.surf as i32 > max_mesh_surf {
+                    max_mesh_surf = mesh.surf as i32;
+                }
+            }
+
+            if sample < 2 || _verbose >= 0 {
+                let mut i = 0_usize;
+                while i < mesh.list.len() {
+                    let mut list_inc = 0;
+                    let mut vert_base = 0;
+                    let mut norm_add = 0;
+                    if crate::imod::libimod::imesh::imod_mesh_poly_norm_factors(
+                        mesh.list[i],
+                        &mut list_inc,
+                        &mut vert_base,
+                        &mut norm_add,
+                    ) != 0
+                    {
+                        i += 1;
+
+                        /* Get a total area for this polygon and find
+                        the surface whose contours it matches */
+                        let mut psa = 0.;
+                        let mut found = false;
+                        let mut psurf = 0_i32;
+                        if obj.cont.is_empty() && mesh.surf >= 0 && mesh.surf as usize <= surfsize {
+                            psurf = mesh.surf as i32;
+                            found = true;
+                        }
+                        while i < mesh.list.len() && mesh.list[i] != IMOD_MESH_ENDPOLY {
+                            psa += clipped_triangle_area(
+                                mesh,
+                                i,
+                                zs,
+                                min,
+                                max,
+                                doclip,
+                                plane,
+                                list_inc as usize,
+                                vert_base as usize,
+                            );
+                            let p1 = mesh.vert[mesh.list[i + vert_base as usize] as usize];
+                            i += list_inc as usize;
+                            let p2 = mesh.vert[mesh.list[i + vert_base as usize] as usize];
+                            i += list_inc as usize;
+                            let p3 = mesh.vert[mesh.list[i + vert_base as usize] as usize];
+                            i += list_inc as usize;
+
+                            if !found {
+                                /* Scan contours to find match */
+                                for cont in &obj.cont {
+                                    if cont.pts.is_empty()
+                                        || (cont.surf.max(0) as usize % sample) != 0
+                                    {
+                                        continue;
+                                    }
+                                    for point in &cont.pts {
+                                        let (xx, yy, zz) = (point.x, point.y, point.z);
+                                        if zz != p1.z && zz != p2.z && zz != p3.z {
+                                            break;
+                                        }
+                                        if (xx == p1.x && yy == p1.y && zz == p1.z)
+                                            || (xx == p2.x && yy == p2.y && zz == p2.z)
+                                            || (xx == p3.x && yy == p3.y && zz == p3.z)
+                                        {
+                                            found = true;
+                                            psurf = cont.surf;
+                                            break;
+                                        }
+                                    }
+                                    if found {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if found
+                            && (psurf % sample as i32) == 0
+                            && psurf >= 0
+                            && psurf as usize <= surfsize
+                        {
+                            msa[psurf as usize] += psa * imod.pixsize as f64 * imod.pixsize as f64;
+                            if psurf > max_cont_surf {
+                                max_cont_surf = psurf;
+                            }
+                        }
+                    }
+                    i += 1;
+                }
+            }
+        }
+        unsafe {
+            if max_mesh_surf > 0 && obj.cont.is_empty() {
+                libc::fprintf(
+                    FOUT,
+                    c"#Surface : Contours,  Mesh Volume,  Mesh Surface\n".as_ptr(),
+                );
+                let mut i = 0_usize;
+                while i <= surfsize {
+                    libc::fprintf(
+                        FOUT,
+                        c"%7d   %8d   %12.6g  %12.6g\n".as_ptr(),
+                        i as std::ffi::c_int,
+                        nofc[i],
+                        vol_in_mesh[i],
+                        msa[i],
+                    );
+                    i += sample;
+                }
+            } else if max_cont_surf > 0 && max_mesh_surf == 0 && mvol[max_cont_surf as usize] > 0. {
+                libc::fprintf(
+                    FOUT,
+                    c"#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Surface,  Max Extent\n"
+                        .as_ptr(),
+                );
+                let mut i = 0_usize;
+                while i <= surfsize {
+                    libc::fprintf(
+                        FOUT,
+                        c"%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g\n".as_ptr(),
+                        i as std::ffi::c_int,
+                        nofc[i],
+                        vol[i],
+                        mvol[i],
+                        msa[i],
+                        extent[i] as std::ffi::c_double,
+                    );
+                    i += sample;
+                }
+            } else if max_cont_surf > 0 && max_mesh_surf > 0 && max_cont_surf == max_mesh_surf {
+                libc::fprintf(
+                    FOUT,
+                    c"#Surface : Contours,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent\n"
+                        .as_ptr(),
+                );
+                let mut i = 0_usize;
+                while i <= surfsize {
+                    libc::fprintf(
+                        FOUT,
+                        c"%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g\n".as_ptr(),
+                        i as std::ffi::c_int,
+                        nofc[i],
+                        mvol[i],
+                        vol_in_mesh[i],
+                        msa[i],
+                        extent[i] as std::ffi::c_double,
+                    );
+                    i += sample;
+                }
+            } else {
+                libc::fprintf(
+                    FOUT,
+                    c"#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent\n"
+                        .as_ptr(),
+                );
+                let mut i = 0_usize;
+                while i <= surfsize {
+                    libc::fprintf(
+                        FOUT,
+                        c"%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g  %12.6g\n".as_ptr(),
+                        i as std::ffi::c_int,
+                        nofc[i],
+                        vol[i],
+                        mvol[i],
+                        vol_in_mesh[i],
+                        msa[i],
+                        extent[i] as std::ffi::c_double,
+                    );
+                    i += sample;
+                }
+            }
+        }
+    } else {
+        unsafe {
+            libc::fprintf(
+                FOUT,
+                c"#Surface : Contours,  Cyl. Volume,  Cyl. Surface,  Max. Extent\n".as_ptr(),
+            );
+            let mut i = 0_usize;
+            while i <= surfsize {
+                libc::fprintf(
+                    FOUT,
+                    c"%7d   %8d   %12.6g  %12.6g  %12.6g\n".as_ptr(),
+                    i as std::ffi::c_int,
+                    nofc[i],
+                    vol[i],
+                    sa[i],
+                    extent[i] as std::ffi::c_double,
+                );
+                i += sample;
+            }
+        }
+    }
 }
 /// Original: `imodinfo_points` (`imodinfo.cpp:910`).
 pub fn imodinfo_points(
@@ -526,74 +1210,122 @@ pub fn imodinfo_points(
     max: Ipoint,
     _useclip: i32,
     verbose: i32,
-) -> String {
+) {
     // Original: `imodinfo_points` (`imodinfo.cpp:910`).
     let Some(obj) = imod.obj.get(ob) else {
-        return String::new();
+        return;
     };
-    let mut output = String::new();
+    let mut objheader = false;
     let mut rsum = 0.0_f64;
     let mut rsqsum = 0.0_f64;
     let mut rcubsum = 0.0_f64;
-    let mut nsum = 0;
-    let mut object_header = false;
+    let mut nsum = 0_i32;
+    let pi = 3.14159_f32;
+    // `imodPlaneSetFromClips` (`imodinfo.cpp:929`).
+    let view = &imod.view[imod.cview.clamp(0, imod.view.len() as i32 - 1) as usize];
+    let mut plane = [Iplane::default(); 2 * IMOD_CLIPSIZE];
+    let mut n_planes = 0_i32;
+    imod_plane_set_from_clips(
+        Some(&obj.clips),
+        Some(&view.clips),
+        &mut plane,
+        2 * IMOD_CLIPSIZE as i32,
+        &mut n_planes,
+    );
     for (co, cont) in obj.cont.iter().enumerate() {
-        if cont.sizes.is_empty()
-            && obj.flags & IMOD_OBJFLAG_SCAT == 0
-            && !(verbose > 0 && obj.pdrawsize > 0)
+        if !cont.sizes.is_empty()
+            || obj.flags & IMOD_OBJFLAG_SCAT != 0
+            || (verbose > 0 && obj.pdrawsize > 0)
         {
-            continue;
-        }
-        if !object_header {
-            output.push_str(&format!("\n#Object {} data, {}\n", ob + 1, obj.name));
-            object_header = true;
-        }
-        if verbose >= 0 {
-            output.push_str(&format!(
-                "\tCONTOUR #{},{},{}  {} points\n",
-                co + 1,
-                ob + 1,
-                cont.surf,
-                cont.pts.len()
-            ));
-        }
-        for (pt, point) in cont.pts.iter().enumerate() {
-            if subarea
-                && (point.x < min.x
-                    || point.x > max.x
-                    || point.y < min.y
-                    || point.y > max.y
-                    || point.z < min.z
-                    || point.z > max.z)
-            {
-                continue;
+            if !objheader {
+                objheader = true;
+                unsafe {
+                    libc::fprintf(
+                        FOUT,
+                        c"\n#Object %d data, %s\n".as_ptr(),
+                        ob as std::ffi::c_int + 1,
+                        obj.name.as_ptr(),
+                    );
+                }
             }
-            let rad = cont.sizes.get(pt).copied().unwrap_or(obj.pdrawsize as f32) as f64
-                * imod.pixsize as f64;
             if verbose >= 0 {
-                output.push_str(&format!("  {rad:11.6}\n"));
+                unsafe {
+                    libc::fprintf(
+                        FOUT,
+                        c"\tCONTOUR #%d,%d,%d  %d points".as_ptr(),
+                        co as std::ffi::c_int + 1,
+                        ob as std::ffi::c_int + 1,
+                        cont.surf,
+                        cont.pts.len() as std::ffi::c_int,
+                    );
+                    if subarea || (_useclip != 0 && n_planes != 0) {
+                        libc::fprintf(FOUT, c" total, before constraints".as_ptr());
+                    }
+                    libc::fprintf(FOUT, c"\n".as_ptr());
+                }
             }
-            rsum += rad;
-            rsqsum += rad * rad;
-            rcubsum += rad * rad * rad;
-            nsum += 1;
+            for (pt, p1) in cont.pts.iter().enumerate() {
+                let mut skip = subarea;
+                if skip
+                    && p1.x >= min.x
+                    && p1.x <= max.x
+                    && p1.y >= min.y
+                    && p1.y <= max.y
+                    && p1.z >= min.z
+                    && p1.z <= max.z
+                {
+                    skip = false;
+                }
+                if !skip {
+                    // `imodPointGetSize` (`iobj.c`): the point size if set,
+                    // else the object's default point-draw size.
+                    let size = match cont.sizes.get(pt) {
+                        Some(value) if *value >= 0. => *value,
+                        _ => obj.pdrawsize as f32,
+                    };
+                    let rad = size * imod.pixsize;
+                    if verbose >= 0 {
+                        unsafe {
+                            libc::fprintf(FOUT, c"  %11.6g\n".as_ptr(), rad as std::ffi::c_double)
+                        };
+                    }
+                    rsum += rad as f64;
+                    rsqsum += (rad * rad) as f64;
+                    rcubsum += (rad * rad * rad) as f64;
+                    nsum += 1;
+                }
+            }
         }
     }
     if nsum > 0 {
-        output.push_str(&format!("\n\tMean radius = {} for {} points.\n\tImplied total surface area = {}; total volume = {}\n", rsum / nsum as f64, nsum, 4.0 * std::f64::consts::PI * rsqsum, 4.0 * std::f64::consts::PI * rcubsum / 3.0));
+        let rad = (rsum / nsum as f64) as f32;
+        let area = (4. * pi as f64 * rsqsum) as f32;
+        let volume = (4. * pi as f64 * rcubsum / 3.) as f32;
+        unsafe {
+            libc::fprintf(
+                FOUT,
+                c"\n\tMean radius = %g for %d points.\n\tImplied total surface area = %g; total volume = %g\n".as_ptr(),
+                rad as std::ffi::c_double,
+                nsum,
+                area as std::ffi::c_double,
+                volume as std::ffi::c_double,
+            );
+        }
     }
-    output
 }
 /// Original: `imodinfo_ratios` (`imodinfo.cpp:996`).
-pub fn imodinfo_ratios(model: &Imod, ob: usize) -> String {
+pub fn imodinfo_ratios(model: &Imod, ob: usize) {
     // Original: `imodinfo_ratios` (`imodinfo.cpp:996`).
     let Some(obj) = model.obj.get(ob) else {
-        return String::new();
+        return;
     };
-    if obj.flags & (IMOD_OBJFLAG_SCAT | IMOD_OBJFLAG_OPEN) != 0 {
-        return String::new();
+    if obj.flags & IMOD_OBJFLAG_SCAT != 0 || obj.flags & IMOD_OBJFLAG_OPEN != 0 {
+        return;
     }
-    let mut output = format!("OBJECT {}\nNAME:  {}\n", ob + 1, obj.name);
+    unsafe {
+        libc::fprintf(FOUT, c"OBJECT %d\n".as_ptr(), ob as std::ffi::c_int + 1);
+        libc::fprintf(FOUT, c"NAME:  %s\n".as_ptr(), obj.name.as_ptr());
+    }
     for (co, cont) in obj.cont.iter().enumerate() {
         if cont.pts.len() <= 2 {
             continue;
@@ -604,90 +1336,175 @@ pub fn imodinfo_ratios(model: &Imod, ob: usize) -> String {
             model.pixsize as f64,
             model.zscale as f64,
         );
-        output.push_str(&format!(
-            "{} {}\n",
-            co + 1,
-            info_contour_vol(Some(cont), obj.flags, 1.0, 1.0)
-                * model.pixsize as f64
-                * model.pixsize as f64
-                / dist
-        ));
+        // `imodContourArea` (`icont.c:324`): magnitude of the summed cross
+        // products of successive points, halved, accumulated in float.
+        let mut n = Ipoint::default();
+        if cont.pts.len() >= 3 {
+            for i in 0..cont.pts.len() {
+                let next = if i == cont.pts.len() - 1 { 0 } else { i + 1 };
+                n.x += cont.pts[i].y * cont.pts[next].z - cont.pts[i].z * cont.pts[next].y;
+                n.y += cont.pts[i].z * cont.pts[next].x - cont.pts[i].x * cont.pts[next].z;
+                n.z += cont.pts[i].x * cont.pts[next].y - cont.pts[i].y * cont.pts[next].x;
+            }
+        }
+        let area = (((n.x * n.x + n.y * n.y + n.z * n.z) as f64).sqrt() * 0.5) as f32;
+        let mut sa = area as f64;
+        sa *= model.pixsize as f64 * model.pixsize as f64;
+        unsafe {
+            libc::fprintf(
+                FOUT,
+                c"%d %g\n".as_ptr(),
+                co as std::ffi::c_int + 1,
+                (sa / dist) as std::ffi::c_double,
+            );
+        }
     }
-    output
 }
 /// Original: `imodinfo_ellipse` (`imodinfo.cpp:1028`).
-pub fn imodinfo_ellipse(
-    model: &Imod,
-    ob: usize,
-    subarea: bool,
-    min: Ipoint,
-    max: Ipoint,
-) -> String {
+pub fn imodinfo_ellipse(model: &Imod, ob: usize, subarea: bool, min: Ipoint, max: Ipoint) {
     // Original: `imodinfo_ellipse` (`imodinfo.cpp:1028`).
     let Some(obj) = model.obj.get(ob) else {
-        return String::new();
+        return;
     };
-    if obj.flags & (IMOD_OBJFLAG_SCAT | IMOD_OBJFLAG_OPEN) != 0 {
-        return String::new();
+    if obj.flags & IMOD_OBJFLAG_SCAT != 0 || obj.flags & IMOD_OBJFLAG_OPEN != 0 {
+        return;
     }
-    let mut output = format!(
-        "\nOBJECT {}\nNAME:  {}\ncontour     center (pixels)                 axes ({})        eccen-   long\n   #      x        y        z       semi-major   semi-minor  tricity  angle\n",
-        ob + 1,
-        obj.name,
-        print_units(model.units)
-    );
+    let sector_crit = 44.0_f32;
+    let mut sector = 0_i32;
+    let mut nsum = 0_i32;
+    let mut ang_sum = 0.0_f32;
+    let mut ang_sum_sq = 0.0_f32;
+    let mut aa_sum = 0.0_f32;
+    let mut aa_sum_sq = 0.0_f32;
+    let mut bb_sum = 0.0_f32;
+    let mut bb_sum_sq = 0.0_f32;
+    let mut ecc_sum = 0.0_f32;
+    let mut ecc_sum_sq = 0.0_f32;
+    let mut min_angle = 1000.0_f32;
+    let mut max_angle = -1000.0_f32;
+    unsafe {
+        libc::fprintf(FOUT, c"\nOBJECT %d\n".as_ptr(), ob as std::ffi::c_int + 1);
+        libc::fprintf(FOUT, c"NAME:  %s\n".as_ptr(), obj.name.as_ptr());
+        // `imodUnits` (`imodel.c:1360`).
+        libc::fprintf(
+            FOUT,
+            c"contour     center (pixels)                 axes (%s)        eccen-   long\n   #      x        y        z       semi-major   semi-minor  tricity  angle\n".as_ptr(),
+            match model.units {
+                0 => c"pixels".as_ptr(),
+                3 => c"km".as_ptr(),
+                1 => c"m".as_ptr(),
+                -2 => c"cm".as_ptr(),
+                -3 => c"mm".as_ptr(),
+                -6 => c"um".as_ptr(),
+                -9 => c"nm".as_ptr(),
+                -10 => c"A".as_ptr(),
+                -12 => c"pm".as_ptr(),
+                _ => c"unknown units".as_ptr(),
+            },
+        );
+    }
     for (co, cont) in obj.cont.iter().enumerate() {
         if cont.pts.len() <= 2 {
             continue;
         }
         let mut center = Ipoint::default();
-        for pt in &cont.pts {
-            center.x += pt.x;
-            center.y += pt.y;
-            center.z += pt.z;
+        let mut aa = 0.0_f32;
+        let mut bb = 0.0_f32;
+        let mut angle = 0.0_f32;
+        if imod_contour_equiv_ellipse(Some(cont), &mut center, &mut aa, &mut bb, &mut angle) != 0 {
+            continue;
         }
-        center.x /= cont.pts.len() as f32;
-        center.y /= cont.pts.len() as f32;
-        center.z /= cont.pts.len() as f32;
         if subarea
-            && (center.x < min.x
-                || center.x > max.x
-                || center.y < min.y
-                || center.y > max.y
-                || center.z < min.z
-                || center.z > max.z)
+            && !(center.x >= min.x
+                && center.x <= max.x
+                && center.y >= min.y
+                && center.y <= max.y
+                && center.z >= min.z
+                && center.z <= max.z)
         {
             continue;
         }
-        let mut xx = 0.0_f64;
-        let mut yy = 0.0_f64;
-        let mut xy = 0.0_f64;
-        for pt in &cont.pts {
-            xx += (pt.x - center.x) as f64 * (pt.x - center.x) as f64;
-            yy += (pt.y - center.y) as f64 * (pt.y - center.y) as f64;
-            xy += (pt.x - center.x) as f64 * (pt.y - center.y) as f64;
+        // This is standard definition for eccentricity, a not terribly intuitive number
+        // (`imodinfo.cpp:1062`): `sqrt(1. - bb * bb / (aa * aa))` in double.
+        let ecc = (1. - (bb as f64 * bb as f64) / (aa as f64 * aa as f64)).sqrt() as f32;
+        aa *= model.pixsize;
+        bb *= model.pixsize;
+        if angle < sector_crit || angle > 180. - sector_crit {
+            if nsum == 0 {
+                sector = if angle < sector_crit { 1 } else { -1 };
+            } else if sector < 0 && angle < sector_crit {
+                angle += 180.;
+            } else if sector > 0 && angle > 180. - sector_crit {
+                angle -= 180.;
+            }
         }
-        let angle = 0.5 * (2.0 * xy).atan2(xx - yy);
-        let aa = xx.max(yy).sqrt() * model.pixsize as f64;
-        let bb = xx.min(yy).max(0.0).sqrt() * model.pixsize as f64;
-        let ecc = if aa != 0.0 {
-            (1.0 - bb * bb / (aa * aa)).max(0.0).sqrt()
-        } else {
-            0.0
-        };
-        output.push_str(&format!(
-            "{:4} {:8.1} {:8.1} {:8.1}   {:12.5} {:12.5}   {:.4}  {:6.2}\n",
-            co + 1,
-            center.x,
-            center.y,
-            center.z,
-            aa,
-            bb,
-            ecc,
-            angle.to_degrees()
-        ));
+        unsafe {
+            libc::fprintf(
+                FOUT,
+                c"%4d %8.1f %8.1f %8.1f   %12.5g %12.5g   %.4f  %6.2f\n".as_ptr(),
+                co as std::ffi::c_int + 1,
+                center.x as std::ffi::c_double,
+                center.y as std::ffi::c_double,
+                center.z as std::ffi::c_double,
+                aa as std::ffi::c_double,
+                bb as std::ffi::c_double,
+                ecc as std::ffi::c_double,
+                angle as std::ffi::c_double,
+            );
+        }
+        aa_sum += aa;
+        aa_sum_sq += aa * aa;
+        bb_sum += bb;
+        bb_sum_sq += bb * bb;
+        ecc_sum += ecc;
+        ecc_sum_sq += ecc * ecc;
+        ang_sum += angle;
+        ang_sum_sq += angle * angle;
+        nsum += 1;
+        min_angle = min_angle.min(angle);
+        max_angle = max_angle.max(angle);
     }
-    output
+    if nsum != 0 {
+        let mut aa_avg = 0.0_f32;
+        let mut aa_sd = 0.0_f32;
+        let mut bb_avg = 0.0_f32;
+        let mut bb_sd = 0.0_f32;
+        let mut ecc_avg = 0.0_f32;
+        let mut ecc_sd = 0.0_f32;
+        let mut ang_avg = 0.0_f32;
+        let mut ang_sd = 0.0_f32;
+        unsafe {
+            sums_to_avg_sd(aa_sum, aa_sum_sq, nsum, &mut aa_avg, &mut aa_sd);
+            sums_to_avg_sd(bb_sum, bb_sum_sq, nsum, &mut bb_avg, &mut bb_sd);
+            sums_to_avg_sd(ecc_sum, ecc_sum_sq, nsum, &mut ecc_avg, &mut ecc_sd);
+            sums_to_avg_sd(ang_sum, ang_sum_sq, nsum, &mut ang_avg, &mut ang_sd);
+        }
+        if ang_avg < 0. {
+            ang_avg += 180.;
+        }
+        if ang_avg >= 180. {
+            ang_avg -= 180.;
+        }
+        unsafe {
+            libc::printf(
+                c"Mean                              %12.5g %12.5g   %.4f  %6.2f\n SD                               %12.5g %12.5g   %.4f  %6.2f\n".as_ptr(),
+                aa_avg as std::ffi::c_double,
+                bb_avg as std::ffi::c_double,
+                ecc_avg as std::ffi::c_double,
+                ang_avg as std::ffi::c_double,
+                aa_sd as std::ffi::c_double,
+                bb_sd as std::ffi::c_double,
+                ecc_sd as std::ffi::c_double,
+                ang_sd as std::ffi::c_double,
+            );
+            if max_angle - min_angle > 2. * sector_crit {
+                libc::printf(
+                    c"WARNING: The range of angles is %.0f degrees and the mean may be inaccurate\n".as_ptr(),
+                    (max_angle - min_angle) as std::ffi::c_double,
+                );
+            }
+        }
+    }
 }
 /// Original: `imodinfo_full_object_report` (`imodinfo.cpp:1117`).
 pub fn imodinfo_full_object_report(
@@ -695,54 +1512,77 @@ pub fn imodinfo_full_object_report(
     ob: usize,
     scaninside: bool,
     subarea: bool,
-    min: Ipoint,
-    max: Ipoint,
+    ptmin: Ipoint,
+    ptmax: Ipoint,
     useclip: i32,
-) -> String {
+) {
     // Original: `imodinfo_full_object_report` (`imodinfo.cpp:1117`).
-    if ob == 0 || ob > imod.obj.len() {
-        return String::new();
+    if ob < 1 || ob > imod.obj.len() {
+        return;
     }
     let obj = &imod.obj[ob - 1];
-    // `imodinfo.cpp` deliberately prints the unrestricted object values first;
-    // a clipped/subsetted block, when applicable, follows that report.
-    let (surf, vol, msurf, mvol, inmvol, cent) = compute_object_area_vol(
-        imod,
-        obj,
-        false,
-        false,
-        Ipoint {
-            x: -1.0e30,
-            y: -1.0e30,
-            z: -1.0e30,
-        },
-        Ipoint {
-            x: 1.0e30,
-            y: 1.0e30,
-            z: 1.0e30,
-        },
-        0,
-    );
-    let mut output = format!(
-        "Object # {}:\n{}\n\tNumber of Contours = {}\n\tNumber of Contours with Data = {}\n\tNumber of Meshes   = {}\n\tNumber of Surfaces = {}\n",
-        ob,
-        obj.name,
-        obj.cont.len(),
-        obj.cont.iter().filter(|cont| !cont.pts.is_empty()).count(),
-        obj.mesh.len(),
-        obj.surfsize
-    );
-    output.push_str(&format!(
-        "\tColor  = (Red, Green, Blue, Alpha) = ({}, {}, {}, {})\n\tAmbient Light  = {}\n\tDiffuse Light  = {}\n\tSpecular Light = {}\n\tShininess      = {}\n",
-        obj.red,
-        obj.green,
-        obj.blue,
-        obj.trans as f32 * 0.01,
-        obj.ambient,
-        obj.diffuse,
-        obj.specular,
-        obj.shininess,
-    ));
+    // `imodUnits` (`imodel.c:1360`).
+    let units = match imod.units {
+        0 => c"pixels".as_ptr(),
+        3 => c"km".as_ptr(),
+        1 => c"m".as_ptr(),
+        -2 => c"cm".as_ptr(),
+        -3 => c"mm".as_ptr(),
+        -6 => c"um".as_ptr(),
+        -9 => c"nm".as_ptr(),
+        -10 => c"A".as_ptr(),
+        -12 => c"pm".as_ptr(),
+        _ => c"unknown units".as_ptr(),
+    };
+    unsafe {
+        libc::fprintf(FOUT, c"Object # %d:\n".as_ptr(), ob as std::ffi::c_int);
+        libc::fprintf(FOUT, c"%s\n".as_ptr(), obj.name.as_ptr());
+        libc::fprintf(
+            FOUT,
+            c"\tNumber of Contours = %d\n".as_ptr(),
+            obj.cont.len() as std::ffi::c_int,
+        );
+        libc::fprintf(
+            FOUT,
+            c"\tNumber of Contours with Data = %d\n".as_ptr(),
+            obj.cont.iter().filter(|cont| !cont.pts.is_empty()).count() as std::ffi::c_int,
+        );
+        libc::fprintf(
+            FOUT,
+            c"\tNumber of Meshes   = %d\n".as_ptr(),
+            obj.mesh.len() as std::ffi::c_int,
+        );
+        libc::fprintf(FOUT, c"\tNumber of Surfaces = %d\n".as_ptr(), obj.surfsize);
+        libc::fprintf(
+            FOUT,
+            c"\tColor  = (Red, Green, Blue, Alpha) = (%g, %g, %g, %g)\n".as_ptr(),
+            obj.red as std::ffi::c_double,
+            obj.green as std::ffi::c_double,
+            obj.blue as std::ffi::c_double,
+            (obj.trans as f32 * 0.01_f32) as std::ffi::c_double,
+        );
+        libc::fprintf(
+            FOUT,
+            c"\tAmbient Light  = %d\n".as_ptr(),
+            obj.ambient as std::ffi::c_int,
+        );
+        libc::fprintf(
+            FOUT,
+            c"\tDiffuse Light  = %d\n".as_ptr(),
+            obj.diffuse as std::ffi::c_int,
+        );
+        libc::fprintf(
+            FOUT,
+            c"\tSpecular Light = %d\n".as_ptr(),
+            obj.specular as std::ffi::c_int,
+        );
+        libc::fprintf(
+            FOUT,
+            c"\tShininess      = %d\n".as_ptr(),
+            obj.shininess as std::ffi::c_int,
+        );
+    }
+    // `imodObjectGetBBox` (`iobj.c`).
     let mut lower = Ipoint {
         x: f32::MAX,
         y: f32::MAX,
@@ -776,57 +1616,109 @@ pub fn imodinfo_full_object_report(
             }
         }
     }
-    output.push_str(&format!(
-        "\n\tBounding Box   = {{ ({}, {}, {}), ({}, {}, {})}}\n",
-        lower.x, lower.y, lower.z, upper.x, upper.y, upper.z
-    ));
-    output.push_str(&format!(
-        "\tCenter         = ({}, {}, {})\n",
-        cent.x, cent.y, cent.z
-    ));
-    if mvol > 0.0 {
-        output.push_str(&format!(
-            "\tContour Volume          = {mvol} {}^3\n",
-            print_units(imod.units)
-        ));
-    } else {
-        output.push_str(&format!(
-            "\tCylinder Volume         = {vol} {}^3\n",
-            print_units(imod.units)
-        ));
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\n\tBounding Box   = { (%g, %g, %g), (%g, %g, %g)}\n".as_ptr(),
+            lower.x as std::ffi::c_double,
+            lower.y as std::ffi::c_double,
+            lower.z as std::ffi::c_double,
+            upper.x as std::ffi::c_double,
+            upper.y as std::ffi::c_double,
+            upper.z as std::ffi::c_double,
+        );
     }
-    if inmvol > 0.0 {
-        output.push_str(&format!(
-            "\tVolume Inside Mesh      = {inmvol} {}^3\n",
-            print_units(imod.units)
-        ));
+    let (surf, vol, msurf, mvol, inmvol, cent) = compute_object_area_vol(
+        imod,
+        obj,
+        false,
+        false,
+        Ipoint {
+            x: -1.0e30,
+            y: -1.0e30,
+            z: -1.0e30,
+        },
+        Ipoint {
+            x: 1.0e30,
+            y: 1.0e30,
+            z: 1.0e30,
+        },
+        0,
+    );
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\tCenter         = (%g, %g, %g)\n".as_ptr(),
+            cent.x as std::ffi::c_double,
+            cent.y as std::ffi::c_double,
+            cent.z as std::ffi::c_double,
+        );
+        if mvol > 0. {
+            libc::fprintf(
+                FOUT,
+                c"\tContour Volume          = %g %s^3\n".as_ptr(),
+                mvol,
+                units,
+            );
+        } else {
+            libc::fprintf(
+                FOUT,
+                c"\tCylinder Volume         = %g %s^3\n".as_ptr(),
+                vol,
+                units,
+            );
+        }
+        if inmvol > 0. {
+            libc::fprintf(
+                FOUT,
+                c"\tVolume Inside Mesh      = %g %s^3\n".as_ptr(),
+                inmvol,
+                units,
+            );
+        }
+        if msurf > 0. {
+            libc::fprintf(
+                FOUT,
+                c"\tMesh Surface Area       = %g %s^2\n".as_ptr(),
+                msurf,
+                units,
+            );
+        } else {
+            libc::fprintf(
+                FOUT,
+                c"\tCylinder Surface Area   = %g %s^2\n".as_ptr(),
+                surf,
+                units,
+            );
+        }
     }
-    output.push_str(&format!(
-        "\t{} Surface Area   = {} {}^2\n",
-        if msurf > 0.0 { "Mesh" } else { "Cylinder" },
-        if msurf > 0.0 { msurf } else { surf },
-        print_units(imod.units)
-    ));
     let mut num_clips = 0;
-    for clip in 0..obj.clips.count as usize {
+    for clip in 0..(obj.clips.count as usize).min(obj.clips.normal.len()) {
         if obj.clips.flags & (1 << clip) != 0 {
-            output.push_str(&format!(
-                "\tClip {} Normal    = ({}, {}, {})\n\tClip {} Point     = ({}, {}, {})\n",
-                clip,
-                obj.clips.normal[clip].x,
-                obj.clips.normal[clip].y,
-                obj.clips.normal[clip].z / imod.zscale,
-                clip,
-                obj.clips.point[clip].x,
-                obj.clips.point[clip].y,
-                obj.clips.point[clip].z,
-            ));
+            unsafe {
+                libc::fprintf(
+                    FOUT,
+                    c"\tClip %d Normal    = (%g, %g, %g)\n".as_ptr(),
+                    clip as std::ffi::c_int,
+                    obj.clips.normal[clip].x as std::ffi::c_double,
+                    obj.clips.normal[clip].y as std::ffi::c_double,
+                    (obj.clips.normal[clip].z / imod.zscale) as std::ffi::c_double,
+                );
+                libc::fprintf(
+                    FOUT,
+                    c"\tClip %d Point     = (%g, %g, %g)\n".as_ptr(),
+                    clip as std::ffi::c_int,
+                    obj.clips.point[clip].x as std::ffi::c_double,
+                    obj.clips.point[clip].y as std::ffi::c_double,
+                    obj.clips.point[clip].z as std::ffi::c_double,
+                );
+            }
             num_clips += 1;
         }
     }
     if obj.clips.flags & (1 << 7) == 0 {
         if let Some(view) = imod.view.get(imod.cview.max(0) as usize) {
-            for clip in 0..view.clips.count as usize {
+            for clip in 0..(view.clips.count as usize).min(view.clips.normal.len()) {
                 if view.clips.flags & (1 << clip) != 0 {
                     num_clips += 1;
                 }
@@ -834,34 +1726,47 @@ pub fn imodinfo_full_object_report(
         }
     }
     if subarea || (useclip != 0 && num_clips != 0) {
-        output.push_str("    Clipped and/or subsetted values:\n");
-        let (surf, vol, msurf, mvol, _inmvol, _cent) =
-            compute_object_area_vol(imod, obj, scaninside, subarea, min, max, useclip);
-        if mvol > 0.0 {
-            output.push_str(&format!(
-                "\tContour Volume          = {mvol} {}^3\n",
-                print_units(imod.units)
-            ));
-        } else {
-            output.push_str(&format!(
-                "\tCylinder Volume         = {vol} {}^3\n",
-                print_units(imod.units)
-            ));
+        unsafe {
+            libc::fprintf(FOUT, c"    Clipped and/or subsetted values:\n".as_ptr());
         }
-        if msurf > 0.0 {
-            output.push_str(&format!(
-                "\tMesh Surface Area       = {msurf} {}^2\n",
-                print_units(imod.units)
-            ));
-        } else if surf > 0.0 {
-            output.push_str(&format!(
-                "\tCylinder Surface Area   = {surf} {}^2\n",
-                print_units(imod.units)
-            ));
+        let (surf, vol, msurf, mvol, _inmvol, _cent) =
+            compute_object_area_vol(imod, obj, scaninside, subarea, ptmin, ptmax, useclip);
+        unsafe {
+            if mvol > 0. {
+                libc::fprintf(
+                    FOUT,
+                    c"\tContour Volume          = %g %s^3\n".as_ptr(),
+                    mvol,
+                    units,
+                );
+            } else {
+                libc::fprintf(
+                    FOUT,
+                    c"\tCylinder Volume         = %g %s^3\n".as_ptr(),
+                    vol,
+                    units,
+                );
+            }
+            if msurf > 0. {
+                libc::fprintf(
+                    FOUT,
+                    c"\tMesh Surface Area       = %g %s^2\n".as_ptr(),
+                    msurf,
+                    units,
+                );
+            } else if surf > 0. {
+                libc::fprintf(
+                    FOUT,
+                    c"\tCylinder Surface Area   = %g %s^2\n".as_ptr(),
+                    surf,
+                    units,
+                );
+            }
         }
     }
-    output.push('\n');
-    output
+    unsafe {
+        libc::fprintf(FOUT, c"\n".as_ptr());
+    }
 }
 /// Original: `imodinfo_object` (`imodinfo.cpp:1218`).
 pub fn imodinfo_object(
@@ -872,211 +1777,397 @@ pub fn imodinfo_object(
     min: Ipoint,
     max: Ipoint,
     useclip: i32,
-) -> String {
+) {
     // Original: `imodinfo_object` (`imodinfo.cpp:1218`).
     let Some(obj) = imod.obj.get(ob) else {
-        return String::new();
+        return;
     };
     let (mut surf, mut vol, mut msurf, mut mvol, inmvol, cent) =
         compute_object_area_vol(imod, obj, scaninside, subarea, min, max, useclip);
-    if obj.flags & (IMOD_OBJFLAG_OPEN | IMOD_OBJFLAG_SCAT) != 0 {
+    if obj.flags & IMOD_OBJFLAG_OPEN != 0 || obj.flags & IMOD_OBJFLAG_SCAT != 0 {
         surf = 0.0;
         vol = 0.0;
         msurf = 0.0;
         mvol = 0.0;
     }
-    if !obj.cont.is_empty() {
-        format!(
-            "{:4}   {:12.6}  {:12.6}  {:12.6}  {:12.6}  {:9.2} {:9.2} {:9.2}\n",
-            ob + 1,
-            vol,
-            mvol,
-            inmvol,
-            msurf,
-            cent.x,
-            cent.y,
-            cent.z
-        )
-    } else if !obj.mesh.is_empty() {
-        format!(
-            "{:4}              x             x   {:12.6}  {:12.6}      x         x         x\n",
-            ob + 1,
-            inmvol,
-            msurf
-        )
-    } else {
-        format!(
-            "{:4}              0             0             0             0       x         x         x\n",
-            ob + 1
-        )
+    let _ = surf;
+    unsafe {
+        if !obj.cont.is_empty() {
+            libc::fprintf(
+                FOUT,
+                c"%4d   %12.6g  %12.6g  %12.6g  %12.6g  %9.2f %9.2f %9.2f\n".as_ptr(),
+                ob as std::ffi::c_int + 1,
+                vol,
+                mvol,
+                inmvol,
+                msurf,
+                cent.x as std::ffi::c_double,
+                cent.y as std::ffi::c_double,
+                cent.z as std::ffi::c_double,
+            );
+        } else if !obj.mesh.is_empty() {
+            libc::fprintf(
+                FOUT,
+                c"%4d              x             x   %12.6g  %12.6g      x         x         x\n"
+                    .as_ptr(),
+                ob as std::ffi::c_int + 1,
+                inmvol,
+                msurf,
+            );
+        } else {
+            libc::fprintf(
+                FOUT,
+                c"%4d              0             0             0             0       x         x         x\n".as_ptr(),
+                ob as std::ffi::c_int + 1,
+            );
+        }
     }
 }
 /// Original: `computeObjectAreaVol` (`imodinfo.cpp:1257`).
 pub fn compute_object_area_vol(
     model: &Imod,
     obj: &Iobj,
-    _scaninside: bool,
+    scaninside: bool,
     subarea: bool,
     min: Ipoint,
     max: Ipoint,
     _useclip: i32,
 ) -> (f64, f64, f64, f64, f64, Ipoint) {
     // Original: `computeObjectAreaVol` (`imodinfo.cpp:1257`).
-    let mut surf = 0.0;
-    let mut vol = 0.0;
-    let mut mvol = 0.0;
+    let mut surf = 0.0_f64;
+    let mut vol = 0.0_f64;
+    let mut mvol = 0.0_f64;
+    let mut msurf = 0.0_f64;
+    let mut inmvol = 0.0_f64;
     let mut cent = Ipoint::default();
-    let mut weight = 0.0_f64;
-    for cont in &obj.cont {
-        if subarea
-            && cont
-                .pts
-                .first()
-                .is_some_and(|pt| pt.z < min.z || pt.z > max.z)
-        {
-            continue;
+    let mut tweight = 0.0_f64;
+    let zscale = model.zscale as f64;
+    let pixsize = model.pixsize as f64;
+    // `imodPlaneSetFromClips` (`imodinfo.cpp:1280`) fills `plane` from the
+    // object's and the current view's clip sets.
+    let view = &model.view[model.cview.clamp(0, model.view.len() as i32 - 1) as usize];
+    let mut plane = [Iplane::default(); 2 * IMOD_CLIPSIZE];
+    let mut n_planes = 0_i32;
+    imod_plane_set_from_clips(
+        Some(&obj.clips),
+        Some(&view.clips),
+        &mut plane,
+        2 * IMOD_CLIPSIZE as i32,
+        &mut n_planes,
+    );
+    let doclip = if n_planes != 0 { _useclip } else { 0 };
+    let plane = &plane[..n_planes.max(0) as usize];
+    if scaninside && obj.flags & IMOD_OBJFLAG_OPEN == 0 {
+        let mut mesh_vol = 0.0_f64;
+        vol = pixsize.powi(3)
+            * zscale
+            * scanned_volume(obj, subarea, min, max, doclip, plane, &mut mesh_vol) as f64;
+        mvol = mesh_vol * pixsize.powi(3) * zscale;
+    } else {
+        for cont in &obj.cont {
+            let tvol = info_contour_vol(Some(cont), obj.flags, pixsize, zscale) as f32;
+            mvol += tvol as f64 * contour_volume_factor(obj, cont, min, max) as f64;
+            if subarea && obj.flags & IMOD_OBJFLAG_OPEN == 0 {
+                let mut mean_z = 0.0_f32;
+                for point in &cont.pts {
+                    mean_z += point.z;
+                }
+                let coz = if cont.pts.is_empty() {
+                    -1
+                } else {
+                    (mean_z / cont.pts.len() as f32 + 0.5).floor() as i32
+                };
+                if (coz as f32) < min.z || (coz as f32) > max.z {
+                    continue;
+                }
+            }
+            vol += tvol as f64;
+            surf += info_contour_length(Some(cont), obj.flags, pixsize, zscale);
+            /* 2/24/09: Compute differently for open contours, so set a flag
+            for an open contour object */
+            // `imodinfo.cpp:1303` sets ICONT_TEMPUSE on the contour for the
+            // duration of the call and clears it right after.  This function
+            // holds the object by shared reference, so the flag is set on a
+            // copy of the contour; `imodel_contour_centroid` (`icont.c:551`)
+            // reads the contour and never writes it, and nothing else observes
+            // the flag between the two calls.
+            let mut scratch = cont.clone();
+            let mut ccent = Ipoint::default();
+            let mut weight = 0.0_f64;
+            set_or_clear_flags(
+                &mut scratch.flags,
+                ICONT_TEMPUSE,
+                (obj.flags & IMOD_OBJFLAG_OPEN) as i32,
+            );
+            imodel_contour_centroid(Some(&scratch), &mut ccent, &mut weight);
+            set_or_clear_flags(&mut scratch.flags, ICONT_TEMPUSE, 0);
+            tweight += weight;
+            cent.x += ccent.x;
+            cent.y += ccent.y;
+            cent.z += ccent.z * model.zscale;
         }
-        let contour_vol = info_contour_vol(
-            Some(cont),
-            obj.flags,
-            model.pixsize as f64,
-            model.zscale as f64,
-        );
-        vol += contour_vol;
-        mvol += contour_vol * contour_volume_factor(obj, cont, min, max) as f64;
-        surf += info_contour_length(
-            Some(cont),
-            obj.flags,
-            model.pixsize as f64,
-            model.zscale as f64,
-        );
-        for point in &cont.pts {
-            cent.x += point.x;
-            cent.y += point.y;
-            cent.z += point.z * model.zscale;
-            weight += 1.0;
+        surf *= model.pixsize as f64 * model.zscale as f64;
+        if tweight != 0. {
+            cent.x /= tweight as f32;
+            cent.y /= tweight as f32;
+            cent.z /= tweight as f32;
         }
     }
-    if weight != 0.0 {
-        cent.x /= weight as f32;
-        cent.y /= weight as f32;
-        cent.z /= weight as f32;
-    }
-    surf *= model.pixsize as f64 * model.zscale as f64;
-    let mut msurf = 0.0;
-    for mesh in &obj.mesh {
-        msurf += imesh_surface_subarea(
-            Some(mesh),
-            Some(Ipoint {
-                x: model.xscale,
-                y: model.yscale,
-                z: model.zscale,
-            }),
-            min,
-            max,
+    if !obj.mesh.is_empty() {
+        msurf = 0.0;
+        let mscale = Ipoint {
+            x: model.xscale,
+            y: model.yscale,
+            z: model.zscale,
+        };
+        let mut resol = 0;
+        crate::imod::libimod::imesh::imod_mesh_nearest_res(
+            &obj.mesh,
+            obj.mesh.len() as i32,
             0,
-            &[],
-        ) as f64
-            * model.pixsize as f64
-            * model.pixsize as f64;
+            &mut resol,
+        );
+        for mesh in &obj.mesh {
+            if crate::imod::libimod::imesh::imesh_resol(mesh.flag) != resol {
+                continue;
+            }
+            if subarea || doclip != 0 {
+                msurf +=
+                    imesh_surface_subarea(Some(mesh), Some(mscale), min, max, doclip, plane) as f64;
+            } else {
+                msurf += crate::imod::libimod::imesh::imesh_surface_area(Some(mesh), Some(&mscale))
+                    as f64;
+            }
+            inmvol +=
+                crate::imod::libimod::imesh::imesh_volume(Some(mesh), Some(&mscale), None) as f64;
+        }
+        msurf *= model.pixsize as f64 * model.pixsize as f64;
+        inmvol *= model.pixsize as f64 * model.pixsize as f64 * model.pixsize as f64;
     }
-    (surf, vol, msurf, mvol, 0.0, cent)
+    (surf, vol, msurf, mvol, inmvol, cent)
 }
 /// Original: `print_units` (`imodinfo.cpp:1342`).
-pub fn print_units(units: i32) -> &'static str {
+pub fn print_units(units: i32) {
     // Original: `print_units` (`imodinfo.cpp:1342`).
-    match units {
-        0 => "pixels",
-        3 => "km",
-        1 => "m",
-        -2 => "cm",
-        -3 => "mm",
-        -6 => "um",
-        -9 => "nm",
-        -10 => "A",
-        -12 => "pm",
-        _ => "unknown units",
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            match units {
+                0 => c"pixels".as_ptr(),
+                3 => c"km".as_ptr(),
+                1 => c"m".as_ptr(),
+                -2 => c"cm".as_ptr(),
+                -3 => c"mm".as_ptr(),
+                -6 => c"um".as_ptr(),
+                -9 => c"nm".as_ptr(),
+                -10 => c"A".as_ptr(),
+                -12 => c"pm".as_ptr(),
+                _ => c"unknown units".as_ptr(),
+            },
+        );
     }
 }
 /// Original: `imodinfo_objndist` (`imodinfo.cpp:1381`).
-pub fn imodinfo_objndist(imod: &Imod, bins: usize) -> String {
+pub fn imodinfo_objndist(imod: &Imod, bins: usize) {
     // Original: `imodinfo_objndist` (`imodinfo.cpp:1381`).
-    let mut centers = Vec::new();
+    let bins = if bins == 0 { 20 } else { bins };
+    let mut pixsize = imod.pixsize as f64;
+    if pixsize == 0. {
+        pixsize = 1.;
+    }
+    let mut zscale = imod.zscale as f64;
+    if zscale == 0. {
+        zscale = 1.;
+    }
+    unsafe {
+        libc::fprintf(FOUT, c"#distance   number\n\n".as_ptr());
+    }
+    if imod.obj.is_empty() {
+        return;
+    }
+    let mut dcont = Vec::<Ipoint>::new();
     for obj in &imod.obj {
-        let mut center = Ipoint::default();
-        let mut count = 0_u32;
+        let mut pnt = Ipoint::default();
+        let mut tpt = 0_i32;
         for cont in &obj.cont {
             for point in &cont.pts {
-                center.x += point.x;
-                center.y += point.y;
-                center.z += point.z * imod.zscale;
-                count += 1;
+                pnt.x += point.x;
+                pnt.y += point.y;
+                pnt.z += (point.z as f64 * zscale) as f32;
+                tpt += 1;
             }
         }
-        if count != 0 {
-            center.x /= count as f32;
-            center.y /= count as f32;
-            center.z /= count as f32;
-            centers.push(center);
+        pnt.x /= tpt as f32;
+        pnt.y /= tpt as f32;
+        pnt.z /= tpt as f32;
+        dcont.push(pnt);
+    }
+    let mut dista = vec![0.0_f64; imod.obj.len()];
+    for i in 0..dcont.len().saturating_sub(1) {
+        let mut mindist = pixsize * pointdist(&dcont[1], &dcont[0]);
+        if i != 0 {
+            mindist = pixsize * pointdist(&dcont[i], &dcont[0]);
+        }
+        for pt in 0..dcont.len() {
+            if pt == i {
+                break;
+            }
+            let mut dist = pixsize * pointdist(&dcont[i], &dcont[pt]);
+            if dist < mindist {
+                dist += 1.;
+            }
+            let _ = dist;
+        }
+        dista[i] = mindist;
+    }
+    let mut max = dista[0];
+    let mut min = dista[0];
+    for value in dista.iter().skip(1) {
+        if *value < min {
+            min = *value;
+        }
+        if *value > max {
+            max = *value;
         }
     }
-    if centers.len() < 2 {
-        return "#distance   number\n\n".to_owned();
-    }
-    let mut distances = Vec::new();
-    for i in 0..centers.len() {
-        let mut nearest = f64::INFINITY;
-        for j in 0..centers.len() {
-            if i != j {
-                nearest = nearest.min(pointdist(&centers[i], &centers[j]) * imod.pixsize as f64);
+    let binsize = (max - min) / bins as f64;
+    let mut binval = min + binsize * 0.5;
+    for _bin in 0..bins {
+        let mut level = 0_i32;
+        let binmin = binval - binsize * 0.5;
+        let binmax = binval + binsize * 0.5;
+        for value in &dista {
+            if *value < binmax && *value > binmin {
+                level += 1;
             }
         }
-        distances.push(nearest);
+        unsafe {
+            libc::fprintf(FOUT, c"%f\t%d\n".as_ptr(), binval, level);
+        }
+        binval += binsize;
     }
-    let min = distances.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = distances.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let bins = bins.max(1);
-    let size = (max - min) / bins as f64;
-    let mut output = "#distance   number\n\n".to_owned();
-    for bin in 0..bins {
-        let value = min + size * (bin as f64 + 0.5);
-        let level = distances
-            .iter()
-            .filter(|distance| **distance > value - size * 0.5 && **distance < value + size * 0.5)
-            .count();
-        output.push_str(&format!("{value}\t{level}\n"));
-    }
-    output
 }
 /// Original: `contour_stats` (`imodinfo.cpp:1475`).
-pub fn contour_stats(cont: Option<&Icont>, flags: u32, pixsize: f64, zscale: f64) -> String {
+///
+/// The contour is taken by mutable reference because `imodContourCenterOfMass`
+/// (`icont.c:527-533`) saves, sets and restores the contour's `flags`, so the
+/// source's `Icont *cont` parameter is not const.
+pub fn contour_stats(cont: Option<&mut Icont>, flags: u32, pixsize: f64, zscale: f64) -> i32 {
     // Original: `contour_stats` (`imodinfo.cpp:1475`).
     let Some(cont) = cont else {
-        return String::new();
+        return -1;
     };
-    let mut center = Ipoint::default();
-    for point in &cont.pts {
-        center.x += point.x;
-        center.y += point.y;
-        center.z += point.z;
-    }
-    let count = cont.pts.len().max(1) as f32;
-    center.x /= count;
-    center.y /= count;
-    center.z /= count;
+    let mut cmass = Ipoint::default();
     if flags & IMOD_OBJFLAG_SCAT != 0 || cont.pts.len() < 3 {
-        return format!(
-            "\t\tCenter of Mass     = ({}, {}, {}) in pixel coords.\n",
-            center.x, center.y, center.z
+        for point in &cont.pts {
+            cmass.x += point.x;
+            cmass.y += point.y;
+            cmass.z += point.z;
+        }
+        let num = cont.pts.len().max(1) as f32;
+        unsafe {
+            libc::fprintf(
+                FOUT,
+                c"\t\tCenter of Mass     = (%g, %g, %g) in pixel coords.\n".as_ptr(),
+                (cmass.x / num) as std::ffi::c_double,
+                (cmass.y / num) as std::ffi::c_double,
+                (cmass.z / num) as std::ffi::c_double,
+            );
+        }
+        return 0;
+    }
+    let odist = info_contour_length(Some(cont), flags | IMOD_OBJFLAG_OPEN, pixsize, zscale) as f32;
+    let cdist = info_contour_length(Some(cont), flags & !IMOD_OBJFLAG_OPEN, pixsize, zscale) as f32;
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\t\tClosed/Open length = %g / %g\n".as_ptr(),
+            cdist as std::ffi::c_double,
+            odist as std::ffi::c_double,
         );
     }
-    let closed = info_contour_length(Some(cont), flags & !IMOD_OBJFLAG_OPEN, pixsize, zscale);
-    let open = info_contour_length(Some(cont), flags | IMOD_OBJFLAG_OPEN, pixsize, zscale);
-    let area = info_contour_vol(Some(cont), flags, 1.0, 1.0) * pixsize * pixsize;
-    format!(
-        "\t\tClosed/Open length = {} / {}\n\t\tEnclosed Area      = {}\n\t\tCenter of Mass     = ({}, {}, {}) in pixel coords.\n",
-        closed, open, area, center.x, center.y, center.z
-    )
+
+    let mut area = imod_contour_area(Some(cont));
+    area *= (pixsize * pixsize) as f32;
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\t\tEnclosed Area      = %g\n".as_ptr(),
+            area as std::ffi::c_double,
+        );
+    }
+
+    imod_contour_center_of_mass(Some(cont), &mut cmass);
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\t\tCenter of Mass     = (%g, %g, %g) in pixel coords.\n".as_ptr(),
+            cmass.x as std::ffi::c_double,
+            cmass.y as std::ffi::c_double,
+            cmass.z as std::ffi::c_double,
+        );
+    }
+
+    let mut ll = Ipoint::default();
+    let mut ur = Ipoint::default();
+    imod_contour_get_bbox(Some(cont), &mut ll, &mut ur);
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\t\tBounding Box        = {(%g, %g), (%g, %g)}\n".as_ptr(),
+            ll.x as std::ffi::c_double,
+            ll.y as std::ffi::c_double,
+            ur.x as std::ffi::c_double,
+            ur.y as std::ffi::c_double,
+        );
+
+        libc::fprintf(
+            FOUT,
+            c"\t\tCircularity        = %g\n".as_ptr(),
+            imod_contour_circularity(Some(cont)) as std::ffi::c_double,
+        );
+    }
+
+    let mut aspect = 0.;
+    let mut length = 0.;
+    let mut orientation = imod_contour_long_axis(Some(cont), 1.0, &mut aspect, &mut length);
+    orientation /= 0.01745329252;
+
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\t\tOrientation        = %g degrees.\n".as_ptr(),
+            orientation as std::ffi::c_double,
+        );
+    }
+
+    let width = if length > 0. { length / aspect } else { 0. };
+
+    unsafe {
+        if length != 0. && width != 0. {
+            libc::fprintf(
+                FOUT,
+                c"\t\tEllipse            = %g\n".as_ptr(),
+                (area / (0.7853981635 * length as f64 * width as f64 * pixsize * pixsize) as f32)
+                    as std::ffi::c_double,
+            );
+        }
+
+        libc::fprintf(
+            FOUT,
+            c"\t\tLength X Width     = %g x %g\n".as_ptr(),
+            length as std::ffi::c_double,
+            width as std::ffi::c_double,
+        );
+
+        libc::fprintf(
+            FOUT,
+            c"\t\tAspect Ratio       = %g\n".as_ptr(),
+            aspect as std::ffi::c_double,
+        );
+    }
+
+    0
 }
 /// Original: `imodinfo_special` (`imodinfo.cpp:1546`).
 pub fn imodinfo_special(imod: &mut Imod, fname: &str) {
@@ -1098,35 +2189,39 @@ pub fn imodinfo_special(imod: &mut Imod, fname: &str) {
     let _ = imod_file_write(imod, fname);
 }
 /// Original: `imodinfo_length` (`imodinfo.cpp:1569`).
-pub fn imodinfo_length(imod: &Imod, ob: usize) -> String {
+pub fn imodinfo_length(imod: &Imod, ob: usize) {
     // Original: `imodinfo_length` (`imodinfo.cpp:1569`).
     let Some(obj) = imod.obj.get(ob) else {
-        return String::new();
+        return;
     };
-    let mut output = String::new();
     for (co, cont) in obj.cont.iter().enumerate() {
-        output.push_str(&format!(
-            "{:3} {:3}  {:3}  {}\n",
-            ob + 1,
-            co + 1,
-            cont.pts.len(),
-            info_contour_length(
-                Some(cont),
-                obj.flags,
-                imod.pixsize as f64,
-                imod.zscale as f64
-            )
-        ));
+        let dist = info_contour_length(
+            Some(cont),
+            obj.flags,
+            imod.pixsize as f64,
+            imod.zscale as f64,
+        );
+        unsafe {
+            libc::fprintf(
+                FOUT,
+                c"%3d %3d  %3d  %g\n".as_ptr(),
+                ob as std::ffi::c_int + 1,
+                co as std::ffi::c_int + 1,
+                cont.pts.len() as std::ffi::c_int,
+                dist,
+            );
+        }
     }
-    output
 }
 /// Original: `pointdist` (`imodinfo.cpp:1587`).
 pub fn pointdist(p1: &Ipoint, p2: &Ipoint) -> f64 {
-    // Original: `pointdist` (`imodinfo.cpp:1587`).
-    (((p1.x - p2.x) as f64).powi(2)
-        + ((p1.y - p2.y) as f64).powi(2)
-        + ((p1.z - p2.z) as f64).powi(2))
-    .sqrt()
+    // Original: `pointdist` (`imodinfo.cpp:1587`).  Every operand of the sum is
+    // `float` in the source, so the squares and their sum are formed in single
+    // precision and only the `sqrt` is done in double.
+    let dist = ((p1.x - p2.x) * (p1.x - p2.x))
+        + ((p1.y - p2.y) * (p1.y - p2.y))
+        + ((p1.z - p2.z) * (p1.z - p2.z));
+    (dist as f64).sqrt()
 }
 /// Original: `info_contour_length` (`imodinfo.cpp:1598`).
 pub fn info_contour_length(cont: Option<&Icont>, objflags: u32, pixsize: f64, zscale: f64) -> f64 {
@@ -1150,10 +2245,7 @@ pub fn info_contour_length(cont: Option<&Icont>, objflags: u32, pixsize: f64, zs
                 y: cont.pts[pt + 1].y,
                 z: (cont.pts[pt + 1].z as f64 * zscale) as f32,
             };
-            dist += (((p1.x - p2.x) as f64).powi(2)
-                + ((p1.y - p2.y) as f64).powi(2)
-                + ((p1.z - p2.z) as f64).powi(2))
-            .sqrt();
+            dist += pointdist(&p1, &p2);
         }
         if objflags & IMOD_OBJFLAG_OPEN == 0 && cont.flags & ICONT_OPEN == 0 {
             let p1 = Ipoint {
@@ -1166,63 +2258,87 @@ pub fn info_contour_length(cont: Option<&Icont>, objflags: u32, pixsize: f64, zs
                 y: cont.pts[0].y,
                 z: (cont.pts[0].z as f64 * zscale) as f32,
             };
-            dist += (((p1.x - p2.x) as f64).powi(2)
-                + ((p1.y - p2.y) as f64).powi(2)
-                + ((p1.z - p2.z) as f64).powi(2))
-            .sqrt();
+            dist += pointdist(&p1, &p2);
         }
     }
     dist * pixsize
 }
 /// Original: `contourLengthByColor` (`imodinfo.cpp:1642`).
-pub fn contour_length_by_color(imod: &Imod, obj_num: usize, verbose: i32) -> String {
+pub fn contour_length_by_color(imod: &Imod, obj_num: usize, verbose: i32) {
     // Original: `contourLengthByColor` (`imodinfo.cpp:1642`).  Per-point store
     // properties are supplied by `istore.c`; absent such properties, source
     // default draw properties make every segment use the object color.
     let Some(obj) = imod.obj.get(obj_num) else {
-        return String::new();
+        return;
     };
-    let red = (255.0 * obj.red).round() as i32;
-    let green = (255.0 * obj.green).round() as i32;
-    let blue = (255.0 * obj.blue).round() as i32;
-    let mut output = format!(
-        "\nObject # {}:  {}\nFor color {red},{green},{blue}:\n",
-        obj_num + 1,
-        obj.name
-    );
-    if verbose >= 0 {
-        output.push_str(&format!(
-            "Cont #      Length  (in {})\n",
-            print_units(imod.units)
-        ));
-    }
-    let mut total = 0.0;
-    let mut number = 0;
-    for (co, cont) in obj.cont.iter().enumerate() {
-        let length = info_contour_length(
-            Some(cont),
-            obj.flags,
-            imod.pixsize as f64,
-            imod.zscale as f64,
+    // `imodUnits` (`imodel.c:1360`).
+    let units = match imod.units {
+        0 => c"pixels".as_ptr(),
+        3 => c"km".as_ptr(),
+        1 => c"m".as_ptr(),
+        -2 => c"cm".as_ptr(),
+        -3 => c"mm".as_ptr(),
+        -6 => c"um".as_ptr(),
+        -9 => c"nm".as_ptr(),
+        -10 => c"A".as_ptr(),
+        -12 => c"pm".as_ptr(),
+        _ => c"unknown units".as_ptr(),
+    };
+    let color = ((255.0_f32 * obj.red).round() as i32) << 16
+        | ((255.0_f32 * obj.green).round() as i32) << 8
+        | (255.0_f32 * obj.blue).round() as i32;
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"\nObject # %d:  %s\n".as_ptr(),
+            obj_num as std::ffi::c_int + 1,
+            obj.name.as_ptr(),
         );
-        if length != 0.0 {
-            if verbose >= 0 {
-                output.push_str(&format!("{:6} {:11.5}\n", co + 1, length));
-            }
-            total += length;
-            number += 1;
+        libc::fprintf(
+            FOUT,
+            c"For color %d,%d,%d:\n".as_ptr(),
+            color >> 16,
+            (color >> 8) & 255,
+            color & 255,
+        );
+        if verbose >= 0 {
+            libc::fprintf(FOUT, c"Cont #      Length  (in %s)\n".as_ptr(), units);
         }
     }
-    output.push_str(&format!(
-        "\n   {number} contours, length total = {total:12.6},  mean = {:12.5} {}\n\n",
-        if number == 0 {
-            0.0
-        } else {
-            total / number as f64
-        },
-        print_units(imod.units)
-    ));
-    output
+    let mut total = 0.0_f64;
+    let mut num_total = 0_i32;
+    for (co, cont) in obj.cont.iter().enumerate() {
+        let dist = info_contour_length(Some(cont), obj.flags, 1.0, imod.zscale as f64);
+        if dist != 0.0 {
+            if verbose >= 0 {
+                unsafe {
+                    libc::fprintf(
+                        FOUT,
+                        c"%6d %11.5g\n".as_ptr(),
+                        co as std::ffi::c_int + 1,
+                        dist * imod.pixsize as f64,
+                    );
+                }
+            }
+            total += dist;
+            num_total += 1;
+        }
+    }
+    unsafe {
+        libc::fprintf(
+            FOUT,
+            c"%s   %d contours, length total = %12.6g,  mean = %12.5g %s\n\n".as_ptr(),
+            if verbose >= 0 {
+                c"\n".as_ptr()
+            } else {
+                c"".as_ptr()
+            },
+            num_total,
+            imod.pixsize as f64 * total,
+            imod.pixsize as f64 * total / num_total as f64,
+            units,
+        );
+    }
 }
 /// Original: `info_contour_surface_area` (`imodinfo.cpp:1731`).
 pub fn info_contour_surface_area(
@@ -1246,13 +2362,21 @@ pub fn info_contour_vol(cont: Option<&Icont>, _objflags: u32, pixsize: f64, zsca
     if cont.pts.is_empty() {
         return 0.0;
     }
-    let mut area = 0.0_f64;
-    for pt in 0..cont.pts.len() {
-        let next = (pt + 1) % cont.pts.len();
-        area += cont.pts[pt].x as f64 * cont.pts[next].y as f64
-            - cont.pts[next].x as f64 * cont.pts[pt].y as f64;
+    // `imodContourArea` (`icont.c:324`): magnitude of the summed cross
+    // products of successive points, halved, accumulated in float.
+    let mut n = Ipoint::default();
+    if cont.pts.len() >= 3 {
+        for i in 0..cont.pts.len() {
+            let next = if i == cont.pts.len() - 1 { 0 } else { i + 1 };
+            n.x += cont.pts[i].y * cont.pts[next].z - cont.pts[i].z * cont.pts[next].y;
+            n.y += cont.pts[i].z * cont.pts[next].x - cont.pts[i].x * cont.pts[next].z;
+            n.z += cont.pts[i].x * cont.pts[next].y - cont.pts[i].y * cont.pts[next].x;
+        }
     }
-    area.abs() * 0.5 * pixsize * pixsize * pixsize * zscale
+    let area = (((n.x * n.x + n.y * n.y + n.z * n.z) as f64).sqrt() * 0.5) as f32;
+    let mut vol = area as f64;
+    vol *= pixsize * pixsize * pixsize * zscale;
+    vol
 }
 /// Original: `contourVolumeFactor` (`imodinfo.cpp:1765`).
 pub fn contour_volume_factor(obj: &Iobj, cont: &Icont, min: Ipoint, max: Ipoint) -> f32 {
@@ -1453,83 +2577,243 @@ pub fn clipped_triangle_area(
     clipfrac as f64 * ((n.x * n.x + n.y * n.y + n.z * n.z) as f64).sqrt() * 0.5
 }
 /// Original: `scanned_volume` (`imodinfo.cpp:2006`).
+///
+/// `imodContourMakeZTables` takes the object non-const in the source, but with
+/// `clearFlag` 0 -- the only value this caller passes -- its single write is
+/// `flags &= ~0`.  This function holds the object by shared reference, so the
+/// tables are built from a copy; nothing can diverge.
 pub fn scanned_volume(
     obj: &Iobj,
-    subarea: bool,
+    _subarea: bool,
     ptmin: Ipoint,
     ptmax: Ipoint,
-    _doclip: i32,
-    _plane: &[Iplane],
+    doclip: i32,
+    plane: &[Iplane],
     mesh_vol: &mut f64,
 ) -> f32 {
-    // Original: `scanned_volume` (`imodinfo.cpp:2006`).
-    *mesh_vol = 0.0;
-    let mut total = 0.0_f64;
-    for cont in &obj.cont {
-        let mut scan = cont.clone();
-        trim_scan_contour(&mut scan, ptmin, ptmax, 0, &[]);
-        if !subarea
-            || scan
-                .pts
-                .first()
-                .is_some_and(|point| point.z >= ptmin.z && point.z <= ptmax.z)
-        {
-            let area = info_contour_vol(Some(&scan), obj.flags, 1.0, 1.0);
-            total += area;
-            *mesh_vol += contour_volume_factor(obj, cont, ptmin, ptmax) as f64 * area;
+    let mut zmin: i32 = 0;
+    let mut zmax: i32 = 0;
+    let mut zlsize: i32 = 0;
+    let mut nummax: i32 = 0;
+    let mut numwarn: i32 = -1;
+    let mut tvol: f64 = 0.;
+
+    *mesh_vol = 0.;
+    if obj.cont.is_empty() {
+        return 0.;
+    }
+
+    let mut contz: Vec<i32> = Vec::new();
+    let mut zlist: Vec<i32> = Vec::new();
+    let mut numatz: Vec<i32> = Vec::new();
+    let mut contatz: Vec<Vec<i32>> = Vec::new();
+    let mut tables_obj = obj.clone();
+    if imod_contour_make_z_tables(
+        &mut tables_obj,
+        1,
+        0,
+        &mut contz,
+        &mut zlist,
+        &mut numatz,
+        &mut contatz,
+        &mut zmin,
+        &mut zmax,
+        &mut zlsize,
+        &mut nummax,
+    ) != 0
+    {
+        return -1.;
+    }
+
+    /* Allocate space for lists of min's max's, and scan contours */
+    let mut pmin: Vec<Ipoint> = vec![Ipoint::default(); nummax.max(0) as usize];
+    let mut pmax: Vec<Ipoint> = vec![Ipoint::default(); nummax.max(0) as usize];
+    let mut scancont: Vec<Icont> = vec![Icont::default(); nummax.max(0) as usize];
+    let mut areas: Vec<f32> = vec![0.; nummax.max(0) as usize];
+    let mut vol_facs: Vec<f32> = vec![0.; nummax.max(0) as usize];
+
+    /* Get array for index to inside/outside information */
+    let mut nestind: Vec<i32> = vec![0; nummax.max(0) as usize];
+
+    for indz in 0..(zmax + 1 - zmin).max(0) {
+        if ((indz + zmin) as f32) < ptmin.z || ((indz + zmin) as f32) > ptmax.z {
+            continue;
+        }
+        let mut inbox: usize = 0;
+        let mut numnests: i32 = 0;
+        let mut nests: Vec<Nesting> = Vec::new();
+        for kis in 0..numatz[indz as usize] as usize {
+            let co = contatz[indz as usize][kis] as usize;
+
+            if let Some((scan, lower, upper, area)) =
+                contour_subarea_by_scan(&obj.cont[co], ptmin, ptmax, doclip, plane, true)
+            {
+                scancont[inbox] = scan.unwrap_or_default();
+                pmin[inbox] = lower;
+                pmax[inbox] = upper;
+                areas[inbox] = area;
+                vol_facs[inbox] = contour_volume_factor(obj, &obj.cont[co], ptmin, ptmax);
+                nestind[inbox] = -1;
+                inbox += 1;
+            }
+        }
+
+        /* Look for overlapping contours as in imodmesh */
+        for co in 0..inbox.saturating_sub(1) {
+            for eco in (co + 1)..inbox {
+                if imod_contour_check_nesting(
+                    co as i32,
+                    eco as i32,
+                    &mut scancont[..inbox],
+                    &pmin[..inbox],
+                    &pmax[..inbox],
+                    &mut nests,
+                    &mut nestind[..inbox],
+                    &mut numnests,
+                    &mut numwarn,
+                ) != 0
+                {
+                    return -1.;
+                }
+            }
+        }
+
+        /* Analyze inside and outside contours to determine level */
+        imod_contour_nest_levels(&mut nests, &nestind[..inbox], numnests);
+
+        /* now add up areas of non-nested and odd levels, minus even levels */
+        for co in 0..inbox {
+            let mut level = 1;
+            if nestind[co] >= 0 {
+                level = nests[nestind[co] as usize].level;
+            }
+            if level % 2 != 0 {
+                tvol += areas[co] as f64;
+                *mesh_vol += (vol_facs[co] * areas[co]) as f64;
+            } else {
+                tvol -= areas[co] as f64;
+                *mesh_vol -= (vol_facs[co] * areas[co]) as f64;
+            }
+        }
+
+        /* clean up inside the nests */
+        imod_contour_free_nests(&mut nests, numnests);
+
+        /* clean up scan conversions */
+        for co in 0..inbox {
+            imod_contour_delete(&mut scancont[co]);
         }
     }
-    total as f32
+
+    /* clean up everything else */
+    imod_contour_free_z_tables(
+        &mut numatz,
+        &mut contatz,
+        &mut contz,
+        &mut zlist,
+        zmin,
+        zmax,
+    );
+    tvol as f32
 }
 /// Original: `contourSubareaByScan` (`imodinfo.cpp:2133`).
+///
+/// Returns `None` where the source returns 0 (no area to count), otherwise the
+/// scan contour it created (`None` when `makeScan` is 0), the bounding box and
+/// the area.
 pub fn contour_subarea_by_scan(
     cont: &Icont,
     ptmin: Ipoint,
     ptmax: Ipoint,
-    _doclip: i32,
-    _plane: &[Iplane],
+    doclip: i32,
+    plane: &[Iplane],
     make_scan: bool,
 ) -> Option<(Option<Icont>, Ipoint, Ipoint, f32)> {
-    // Original: `contourSubareaByScan` (`imodinfo.cpp:2133`).
+    let mut tmpmin = Ipoint::default();
+    let mut tmpmax = Ipoint::default();
+    let mut clipsum = 0;
+    let mut scancont: Option<Icont> = None;
+    let mut area = 0f32;
+
     if cont.pts.is_empty() {
         return None;
     }
-    let mut lower = Ipoint {
-        x: f32::INFINITY,
-        y: f32::INFINITY,
-        z: f32::INFINITY,
-    };
-    let mut upper = Ipoint {
-        x: f32::NEG_INFINITY,
-        y: f32::NEG_INFINITY,
-        z: f32::NEG_INFINITY,
-    };
-    for point in &cont.pts {
-        lower.x = lower.x.min(point.x);
-        lower.y = lower.y.min(point.y);
-        lower.z = lower.z.min(point.z);
-        upper.x = upper.x.max(point.x);
-        upper.y = upper.y.max(point.y);
-        upper.z = upper.z.max(point.z);
-    }
-    if lower.x > ptmax.x || upper.x < ptmin.x || lower.y > ptmax.y || upper.y < ptmin.y {
+
+    /* Get limits and test in X and Y */
+    imod_contour_get_bbox(Some(cont), &mut tmpmin, &mut tmpmax);
+    if tmpmin.x > ptmax.x || tmpmax.x < ptmin.x || tmpmin.y > ptmax.y || tmpmax.y < ptmin.y {
         return None;
     }
-    let mut scan = cont.clone();
-    trim_scan_contour(&mut scan, ptmin, ptmax, 0, &[]);
-    if scan.pts.is_empty() {
-        return None;
+
+    if doclip != 0 {
+        /* Evaluate the corners of the bounding box: if all on
+        wrong side of clip plane, skip */
+        let mut corner = tmpmin;
+        clipsum = imod_planes_clip(plane, plane.len() as i32, &corner);
+        corner.y = tmpmax.y;
+        clipsum += imod_planes_clip(plane, plane.len() as i32, &corner);
+        corner.x = tmpmax.x;
+        clipsum += imod_planes_clip(plane, plane.len() as i32, &corner);
+        corner.y = tmpmin.y;
+        clipsum += imod_planes_clip(plane, plane.len() as i32, &corner);
+        if (clipsum == 0 && doclip > 0) || (clipsum == 4 && doclip < 0) {
+            return None;
+        }
     }
-    let area = info_contour_vol(Some(&scan), 0, 1.0, 1.0) as f32;
-    if make_scan {
-        Some((Some(scan), lower, upper, area))
-    } else {
-        Some((None, lower, upper, area))
+
+    /* Start with true area of untrimmed contour */
+    area = imod_contour_area(Some(cont));
+
+    /* If contour is not wholly inside the box, or is not all on
+    the good side of the clip plane, need to trim scan
+    contour down */
+    if tmpmin.x < ptmin.x
+        || tmpmax.x > ptmax.x
+        || tmpmin.y < ptmin.y
+        || tmpmax.y > ptmax.y
+        || (doclip != 0 && clipsum > 0 && clipsum < 4)
+    {
+        let mut scan = imodel_contour_scan(Some(cont))?;
+
+        /* need to copy the z coordinate over! */
+        if !scan.pts.is_empty() {
+            scan.pts[0].z = cont.pts[0].z;
+        }
+
+        let frac1 = scan_contour_area(Some(&scan));
+        trim_scan_contour(&mut scan, ptmin, ptmax, doclip, plane);
+        if scan.pts.is_empty() {
+            /* If contour now empty, delete and skip it */
+            imod_contour_delete(&mut scan);
+            return None;
+        }
+        imod_contour_get_bbox(Some(&scan), &mut tmpmin, &mut tmpmax);
+
+        /* Adjust true area down by ratio of trimmed to original
+        scan-contour area */
+        let frac2 = scan_contour_area(Some(&scan));
+        if frac1 != 0. && frac2 < frac1 {
+            area *= (frac2 / frac1) as f32;
+        }
+        scancont = Some(scan);
     }
+
+    /* Make scan contour if necessary and requested; delete if not requested */
+    if make_scan && scancont.is_none() {
+        let mut scan = imodel_contour_scan(Some(cont))?;
+        if !scan.pts.is_empty() {
+            scan.pts[0].z = cont.pts[0].z;
+        }
+        scancont = Some(scan);
+    } else if !make_scan && scancont.is_some() {
+        imod_contour_delete(scancont.as_mut().unwrap());
+        scancont = None;
+    }
+
+    Some((scancont, tmpmin, tmpmax, area))
 }
 /// Original: `scan_contour_area` (`imodinfo.cpp:2216`).
 pub fn scan_contour_area(cont: Option<&Icont>) -> f64 {
-    // Original: `scan_contour_area` (`imodinfo.cpp:2216`).
     let Some(cont) = cont else {
         return 0.0;
     };
@@ -1540,17 +2824,30 @@ pub fn scan_contour_area(cont: Option<&Icont>) -> f64 {
     let mut i = 0_usize;
     while i + 1 < cont.pts.len() {
         let bgnpt = i;
+        // `imodinfo.cpp:2233` reads `pts[i+1].y` at `i == psize - 1`, one past
+        // the array, and only then tests `i == psize`; the bound here stops
+        // one step earlier, which is the same for the paired scan contours
+        // this is ever called on.
         while i + 1 < cont.pts.len() && cont.pts[i].y == cont.pts[i + 1].y {
             i += 1;
         }
         let endpt = i;
+
+        /* check for odd amount of scans, shouldn't happen! */
         if (endpt - bgnpt) % 2 != 0 {
             let mut j = bgnpt;
             while j < endpt {
-                if cont.pts[j].x >= cont.surf as f32 {
-                    pix += (cont.pts[j + 1].x - cont.pts[j].x) as f64;
+                // `xmin` and `xmax` are `int` in the source, so both ends of
+                // the scan line are truncated toward zero before subtracting
+                // and the difference is an integer count of pixels, not the
+                // float width.
+                let xmin = cont.pts[j].x as i32;
+                let xmax = cont.pts[j + 1].x as i32;
+                if xmin >= cont.surf {
+                    pix += (xmax - xmin) as f64;
                 }
-                j += 2;
+                j += 1;
+                j += 1;
             }
         }
         i += 1;
@@ -1558,50 +2855,98 @@ pub fn scan_contour_area(cont: Option<&Icont>) -> f64 {
     pix
 }
 /// Original: `trim_scan_contour` (`imodinfo.cpp:2261`).
+///
+/// `doclip` is the source's by-value parameter and it is *assigned zero*
+/// inside the plane loop whenever the plane's `a` is negligible.  The loop
+/// bound `ipl < (doclip ? nPlanes : 1)` re-reads it, so the first such plane
+/// ends the loop -- only the planes before it ever trim anything.
 pub fn trim_scan_contour(
     cont: &mut Icont,
     min: Ipoint,
     max: Ipoint,
-    doclip: i32,
+    mut doclip: i32,
     plane: &[Iplane],
 ) {
-    // Original: `trim_scan_contour` (`imodinfo.cpp:2261`).
+    let n_planes = plane.len() as i32;
+
     if cont.pts.len() < 2 {
         return;
     }
-    let mut kept = Vec::new();
-    let mut i = 0;
-    while i + 1 < cont.pts.len() {
-        let mut left = cont.pts[i];
-        let mut right = cont.pts[i + 1];
-        let y = left.y;
-        let mut good = y >= min.y && y <= max.y && left.x <= max.x && right.x >= min.x;
+    let contz = cont.pts[0].z;
+
+    /* DNM 9/26/04: just loop on multiple planes.  Fix probable bug; take max
+    of clipping crit and overall min, min of clipping crit and overall max */
+    let mut ipl = 0;
+    while ipl < if doclip != 0 { n_planes } else { 1 } {
+        let pl = plane.get(ipl as usize).copied().unwrap_or_default();
+        let mut tmin = min;
+        let mut tmax = max;
+        let mut ylast = 1.0e20_f32;
         if doclip != 0 {
-            for pl in plane {
-                let value = pl.b * y + pl.c * left.z + pl.d;
-                if pl.a == 0.0 {
-                    if (doclip > 0 && value < 0.0) || (doclip < 0 && value >= 0.0) {
-                        good = false;
-                    }
-                } else {
-                    let crit = -value / pl.a;
-                    if (doclip > 0 && pl.a > 0.0) || (doclip < 0 && pl.a < 0.0) {
-                        left.x = left.x.max(crit);
-                    } else {
-                        right.x = right.x.min(crit);
+            let pmag = ((pl.a * pl.a + pl.b * pl.b + pl.c * pl.c) as f64).sqrt() as f32;
+
+            /* If a is small, compute y limit; but if b is small also, skip
+            checking for these limits.  In either case set doclip to 0 */
+            if pl.a < 1.0e-10 * pmag && pl.a > -1.0e-10 * pmag {
+                if pl.b > 1.0e-10 * pmag || pl.b < -1.0e-10 * pmag {
+                    let crit = -(pl.c * contz + pl.d) / pl.b;
+                    if (doclip > 0 && pl.b > 0.) || (doclip < 0 && pl.b < 0.) {
+                        if tmin.y < crit {
+                            tmin.y = crit;
+                        }
+                    } else if tmax.y > crit {
+                        tmax.y = crit;
                     }
                 }
+                doclip = 0;
             }
         }
-        if good && left.x <= right.x {
-            left.x = left.x.max(min.x);
-            right.x = right.x.min(max.x);
-            kept.push(left);
-            kept.push(right);
+
+        let mut i: i32 = 0;
+        while i < cont.pts.len() as i32 {
+            let yline = cont.pts[i as usize].y;
+            if yline != ylast && doclip != 0 {
+                /* If its a new line and clip needs to be checked, compute the
+                limit in X for this Y and assign it to min or max */
+                tmin = min;
+                tmax = max;
+                ylast = yline;
+                let crit = -(pl.b * yline + pl.c * contz + pl.d) / pl.a;
+                if (doclip > 0 && pl.a > 0.) || (doclip < 0 && pl.a < 0.) {
+                    if tmin.x < crit {
+                        tmin.x = crit;
+                    }
+                } else if tmax.x > crit {
+                    tmax.x = crit;
+                }
+            }
+
+            if (i as usize) + 1 < cont.pts.len() && yline == cont.pts[i as usize + 1].y {
+                if yline < tmin.y
+                    || yline > tmax.y
+                    || cont.pts[i as usize].x > tmax.x
+                    || cont.pts[i as usize + 1].x < tmin.x
+                {
+                    /* If line is out of bounds in y or x, delete 2 points */
+                    imod_point_delete(cont, i);
+                    imod_point_delete(cont, i);
+                    i -= 1;
+                } else {
+                    /* otherwise, check and truncate the left and right ends
+                    of the scan line */
+                    if cont.pts[i as usize].x < tmin.x {
+                        cont.pts[i as usize].x = tmin.x;
+                    }
+                    if cont.pts[i as usize + 1].x > tmax.x {
+                        cont.pts[i as usize + 1].x = tmax.x;
+                    }
+                    i += 1;
+                }
+            }
+            i += 1;
         }
-        i += 2;
+        ipl += 1;
     }
-    cont.pts = kept;
 }
 
 #[cfg(test)]
@@ -1691,8 +3036,22 @@ mod tests {
 
     #[test]
     fn imodinfo_units_are_the_imodel_header_values() {
-        assert_eq!(print_units(-9), "nm");
-        assert_eq!(print_units(0), "pixels");
-        assert_eq!(print_units(2), "unknown units");
+        // `print_units` writes the unit name to `fout`; drive it through a
+        // temporary file and read back what the source formats there.
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-imodinfo-print-units-{}.txt",
+            std::process::id()
+        ));
+        let name = CString::new(path.to_str().unwrap()).unwrap();
+        for (units, expected) in [(-9, "nm"), (0, "pixels"), (2, "unknown units")] {
+            unsafe {
+                FOUT = libc::fopen(name.as_ptr(), c"w".as_ptr());
+                print_units(units);
+                libc::fclose(FOUT);
+                FOUT = std::ptr::null_mut();
+            }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+        }
+        let _ = std::fs::remove_file(path);
     }
 }

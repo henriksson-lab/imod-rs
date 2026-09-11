@@ -265,12 +265,15 @@ pub unsafe fn array_min_max_mean_sd(
             let mut sum_tmp = 0.0;
             let mut sum_tmp_sq = 0.0;
             for ix in ix0..=ix1 {
-                let mut den = *array.add((iy * nx + ix) as usize) as f64;
-                *dmin = (*dmin).min(den as f32);
-                *dmax = (*dmax).max(den as f32);
-                den -= rough_mean;
-                sum_tmp += den;
-                sum_tmp_sq += den * den;
+                // `den` is a `float` in the source, so subtracting the double
+                // `roughMean` rounds back to single before it is accumulated,
+                // and `den * den` is a single-precision product.
+                let mut den = *array.add((iy * nx + ix) as usize);
+                *dmin = (*dmin).min(den);
+                *dmax = (*dmax).max(den);
+                den = (den as f64 - rough_mean) as f32;
+                sum_tmp += den as f64;
+                sum_tmp_sq += (den * den) as f64;
             }
             *sum_dbl += sum_tmp;
             *sum_sq_dbl += sum_tmp_sq;
@@ -279,7 +282,9 @@ pub unsafe fn array_min_max_mean_sd(
         let mut sd8 = 0.0;
         sums_to_avg_sd_all_dbl(*sum_dbl, *sum_sq_dbl, nx_area, ny_area, &mut avg8, &mut sd8);
         avg8 += rough_mean;
-        *sum_dbl = nx_area as f64 * ny_area as f64 * avg8;
+        // `nxArea * (nyArea * avg8)`: the parenthesised product is what the
+        // source multiplies, and the two groupings do not round alike.
+        *sum_dbl = nx_area as f64 * (ny_area as f64 * avg8);
         *sum_sq_dbl = (nx_area as f64 * ny_area as f64 - 1.0) * sd8 * sd8 + *sum_dbl * avg8;
         *avg = avg8 as f32;
         *sd = sd8 as f32;

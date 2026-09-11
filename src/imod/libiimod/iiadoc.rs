@@ -1,11 +1,8 @@
 //! Translation of `IMOD/libiimod/iiadoc.c`.
-//!
-//! The autodoc parser is retained at its original C ABI boundary until the
-//! corresponding `libcfshr/autodoc.c` source unit is translated.
 #![allow(dead_code)]
 
 use crate::imod::libcfshr::autodoc::{
-    adoc_clear, adoc_get_float, adoc_get_integer, adoc_get_number_of_sections,
+    ADOC_GLOBAL_NAME, adoc_clear, adoc_get_float, adoc_get_integer, adoc_get_number_of_sections,
     adoc_get_section_name, adoc_get_three_floats, adoc_get_two_integers, adoc_open_image_metadata,
     adoc_read,
 };
@@ -21,8 +18,9 @@ use crate::imod::libiimod::mrcfiles::{
 };
 use core::ffi::c_char;
 
+/// Matches C `IIADOC_IMAGE` (`iiadoc.c:14`).  `ADOC_GLOBAL_NAME` comes from
+/// `autodoc.h` ("PreData"), which `iiadoc.c` includes.
 const IIADOC_IMAGE: &core::ffi::CStr = c"Image";
-const ADOC_GLOBAL_NAME: &core::ffi::CStr = c"Global";
 
 unsafe extern "C" {
     static mut stderr: *mut libc::FILE;
@@ -115,8 +113,13 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
                     (*in_file).amin = tmin;
                     (*in_file).amax = tmax;
                 } else {
-                    (*in_file).amin = (*in_file).amin.min(tmin);
-                    (*in_file).amax = (*in_file).amax.max(tmax);
+                    /* ACCUM_MIN / ACCUM_MAX from b3dutil.h */
+                    if tmin < (*in_file).amin {
+                        (*in_file).amin = tmin;
+                    }
+                    if tmax > (*in_file).amax {
+                        (*in_file).amax = tmax;
+                    }
                 }
             }
         }

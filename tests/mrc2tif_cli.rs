@@ -8,6 +8,240 @@ use imod_rs::imod::mrc::tiff::tiff_ifd_number;
 use std::ffi::CString;
 use std::process::Command;
 
+#[cfg(feature = "rust-image-encoder")]
+#[test]
+fn mrc2tif_rust_png_encoder_writes_a_decodable_image() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-png-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let output = std::env::temp_dir().join(format!("{stamp}.png"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels = [1_u8, 2, 3, 4];
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            4
+        );
+        libc::fclose(file);
+
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_MRC2TIF_ENCODER", "rust")
+            .arg("-p")
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let decoded = image::open(&output).unwrap().to_luma8();
+        assert_eq!(decoded.dimensions(), (2, 2));
+        // mrcReadZ applies IMOD's signed-byte map before mrc2tif reverses rows.
+        assert_eq!(decoded.into_raw(), vec![131, 132, 129, 130]);
+        std::fs::remove_file(input).unwrap();
+        std::fs::remove_file(output).unwrap();
+    }
+}
+
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-tiff-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
+        let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels = [1_u8, 2, 3, 4];
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            4
+        );
+        libc::fclose(file);
+
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .arg(&input)
+            .arg(&tiff)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .arg(&tiff)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        assert_eq!(libc::fseek(file, 1024, libc::SEEK_SET), 0);
+        let mut written = [0_u8; 4];
+        assert_eq!(
+            libc::fread(written.as_mut_ptr().cast(), 1, written.len(), file),
+            4
+        );
+        libc::fclose(file);
+        assert_eq!(written, pixels);
+        for path in [input, tiff, output] {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn mrc2tif_rust_tiff_writer_roundtrips_lzw_and_zip_images() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-tiff-compression-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels = [1_u8, 2, 3, 4];
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            4
+        );
+        libc::fclose(file);
+
+        for compression in ["lzw", "zip"] {
+            let tiff = std::env::temp_dir().join(format!("{stamp}-{compression}.tif"));
+            let output = std::env::temp_dir().join(format!("{stamp}-{compression}.mrc"));
+            let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
+            let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+                .env("IMOD_RS_TIFF_BACKEND", "rust")
+                .args(["-c", compression])
+                .arg(&input)
+                .arg(&tiff)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{compression}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+                .env("IMOD_RS_TIFF_BACKEND", "rust")
+                .arg(&tiff)
+                .arg(&output)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{compression}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
+            assert!(!file.is_null());
+            assert_eq!(libc::fseek(file, 1024, libc::SEEK_SET), 0);
+            let mut written = [0_u8; 4];
+            assert_eq!(
+                libc::fread(written.as_mut_ptr().cast(), 1, written.len(), file),
+                4
+            );
+            libc::fclose(file);
+            assert_eq!(written, pixels, "{compression}");
+            std::fs::remove_file(tiff).unwrap();
+            std::fs::remove_file(output).unwrap();
+        }
+        std::fs::remove_file(input).unwrap();
+    }
+}
+
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn mrc2tif_rust_tiff_writer_roundtrips_a_two_page_stack() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-tiff-stack-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
+        let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_BYTE), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels = [1_u8, 2, 3, 4, 5, 6, 7, 8];
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            8
+        );
+        libc::fclose(file);
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .arg("-s")
+            .arg(&input)
+            .arg(&tiff)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .arg(&tiff)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let mut out_header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_read(file, &mut out_header), 0);
+        assert_eq!((out_header.nx, out_header.ny, out_header.nz), (2, 2, 2));
+        assert_eq!(
+            libc::fseek(file, out_header.header_size as i64, libc::SEEK_SET),
+            0
+        );
+        let mut written = [0_u8; 8];
+        assert_eq!(
+            libc::fread(written.as_mut_ptr().cast(), 1, written.len(), file),
+            8
+        );
+        libc::fclose(file);
+        assert_eq!(written, pixels);
+        for path in [input, tiff, output] {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
 #[test]
 fn mrc2tif_rejects_source_illegal_compression_before_opening_input() {
     let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
@@ -18,7 +252,10 @@ fn mrc2tif_rejects_source_illegal_compression_before_opening_input() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("Compression value 42 not allowed"));
+    // `mrc2tif.cpp:116` installs `"\nERROR: %s - "` as the exit prefix, and
+    // `PipSetError` (`parse_params.c:2049`) writes it plus one more space to
+    // **stdout**, not stderr.  These assertions had encoded the wrong stream.
+    assert!(String::from_utf8_lossy(&result.stdout).contains("Compression value 42 not allowed"));
 }
 
 #[test]
@@ -29,8 +266,8 @@ fn mrc2tif_uses_source_validation_diagnostic_before_opening_input() {
         .unwrap();
     assert!(!result.status.success());
     assert_eq!(
-        String::from_utf8_lossy(&result.stderr),
-        "ERROR: mrc2tif - Resolution setting is not available with old writing code\n"
+        String::from_utf8_lossy(&result.stdout),
+        "\nERROR: mrc2tif -  Resolution setting is not available with old writing code\n"
     );
 }
 
@@ -47,9 +284,9 @@ fn mrc2tif_malformed_option_and_qimage_request_reaches_source_input_opening() {
         .unwrap();
     assert!(!qimage.status.success());
     #[cfg(feature = "qt")]
-    assert!(String::from_utf8_lossy(&qimage.stderr).contains("Couldn't open not-opened.mrc"));
+    assert!(String::from_utf8_lossy(&qimage.stdout).contains("Couldn't open not-opened.mrc"));
     #[cfg(not(feature = "qt"))]
-    assert!(String::from_utf8_lossy(&qimage.stderr).contains("QImage Qt boundary"));
+    assert!(String::from_utf8_lossy(&qimage.stdout).contains("QImage Qt boundary"));
 }
 
 #[test]
@@ -72,7 +309,7 @@ fn mrc2tif_rejects_source_out_of_range_z_after_reading_header() {
             .unwrap();
         assert!(!result.status.success());
         assert!(
-            String::from_utf8_lossy(&result.stderr)
+            String::from_utf8_lossy(&result.stdout)
                 .contains("zmin,zmax values are reversed or out of the range 0 to 0")
         );
         std::fs::remove_file(input).unwrap();
@@ -799,6 +1036,125 @@ fn mrc2tif_jpeg_compression_uses_the_installed_libtiff_codec() {
         );
         for path in [input, jpeg, output] {
             std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+/// Reads every directory of the TIFF at [path] and returns whether it carries
+/// an `ImageDescription` (tag 270) together with its `SMinSampleValue` (tag
+/// 340) and `SMaxSampleValue` (tag 341).  libtiff gives the two sample-value
+/// tags the field type of the image data, so a float image keeps them inline.
+fn tiff_page_description_and_min_max(
+    path: &std::path::Path,
+) -> Vec<(bool, Option<f64>, Option<f64>)> {
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(
+        &bytes[0..2],
+        b"II",
+        "the libtiff writer makes little-endian files"
+    );
+    let short_at =
+        |offset: usize| u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
+    let long_at =
+        |offset: usize| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+    let mut pages = Vec::new();
+    let mut directory = long_at(4);
+    while directory != 0 {
+        let entries = short_at(directory) as usize;
+        let mut described = false;
+        let mut minimum = None;
+        let mut maximum = None;
+        for entry in 0..entries {
+            let field = directory + 2 + entry * 12;
+            match short_at(field) {
+                270 => described = true,
+                tag @ (340 | 341) => {
+                    let field_type = short_at(field + 2);
+                    let start = match field_type {
+                        11 => field + 8,
+                        12 => long_at(field + 8),
+                        other => panic!("unexpected sample value field type {other}"),
+                    };
+                    let value = if field_type == 11 {
+                        f64::from(f32::from_le_bytes(
+                            bytes[start..start + 4].try_into().unwrap(),
+                        ))
+                    } else {
+                        f64::from_le_bytes(bytes[start..start + 8].try_into().unwrap())
+                    };
+                    if tag == 340 {
+                        minimum = Some(value);
+                    } else {
+                        maximum = Some(value);
+                    }
+                }
+                _ => {}
+            }
+        }
+        pages.push((described, minimum, maximum));
+        directory = long_at(directory + 2 + entries * 12);
+    }
+    pages
+}
+
+/// `mrc2tif -s` sets `iifile->amin`/`amax` itself from this section's own
+/// min and max before each `tiffWriteSection` -- `sliceMin`/`sliceMax` are
+/// re-seeded at the top of the Z loop (`mrc2tif.cpp:475-476`) and fed to the
+/// file at `mrc2tif.cpp:557-564` -- so every directory of the stack gets a
+/// min/max pair of its own through `constrainAndStoreMinMax`
+/// (`iitif.c:2591-2593`), and the last one is then overwritten by `tiffClose`
+/// with the whole-stack range (`mrc2tif.cpp:637-638`, `iitif.c:696-700`).
+/// Nothing in this program calls `tiffAddDescription`, so no directory carries
+/// an `ImageDescription`.
+#[test]
+fn mrc2tif_stack_writes_running_min_max_on_every_directory_and_no_description() {
+    unsafe {
+        let stamp = format!("imod-rs-mrc2tif-pages-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let output = std::env::temp_dir().join(format!("{stamp}.tif"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 3, 2, 3, 2), 0);
+        header.nlabl = 1;
+        header.labels[0][..80].copy_from_slice(
+            b"imod-rs mrc2tif page fixture                                                    ",
+        );
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels: Vec<f32> = (0..6)
+            .map(|value| value as f32)
+            .chain((0..6).map(|value| 10.0 + value as f32))
+            .chain((0..6).map(|value| -3.0 + value as f32))
+            .collect();
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 4, pixels.len(), file),
+            18
+        );
+        libc::fclose(file);
+
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .arg("-s")
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let pages = tiff_page_description_and_min_max(&output);
+        assert_eq!(pages.len(), 3, "one directory per section of the stack");
+        for (index, page) in pages.iter().enumerate() {
+            assert!(!page.0, "directory {index} must have no ImageDescription");
+        }
+        assert_eq!((pages[0].1, pages[0].2), (Some(0.0), Some(5.0)));
+        assert_eq!((pages[1].1, pages[1].2), (Some(10.0), Some(15.0)));
+        assert_eq!((pages[2].1, pages[2].2), (Some(-3.0), Some(15.0)));
+        for path in [input, output] {
+            let _ = std::fs::remove_file(path);
         }
     }
 }

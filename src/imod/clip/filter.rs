@@ -4,7 +4,6 @@
 use crate::imod::clip::clip::{ClipOptions, IP_DEFAULT, show_error, show_status};
 use crate::imod::clip::fft::{clip_nicesize, slice_fft};
 use crate::imod::clip::file_io::{clip_write_slice, set_options};
-use crate::imod::libcfshr::islice::slice_free;
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MrcHeader, mrc_head_label,
 };
@@ -18,7 +17,7 @@ pub unsafe fn clip_3dfilter(
 ) -> i32 {
     unsafe {
         if !input.is_null() && !output.is_null() && !options.is_null() {
-            println!("clip: 3d filter... (non-functional).");
+            libc::printf(c"clip: 3d filter... (non-functional).\n".as_ptr());
         }
         0
     }
@@ -59,28 +58,30 @@ pub unsafe fn clip_bandpass_filter(
             return z;
         }
         if !complex
-            && (clip_nicesize((*options).ix, false) == 0
-                || clip_nicesize((*options).iy, false) == 0
+            && (clip_nicesize((*options).ix) == 0
+                || clip_nicesize((*options).iy) == 0
                 || (*options).ix % 2 != 0)
         {
             if crate::imod::libfft::using_fftw() != 0 {
-                println!(
-                    "ERROR: clip - filter input size in X ({}) must be even: use Mtffilter.",
-                    (*options).ix
+                libc::printf(
+                    c"ERROR: clip - filter input size in X (%d) must be even: use Mtffilter.\n"
+                        .as_ptr(),
+                    (*options).ix,
                 );
             } else {
-                println!(
-                    "ERROR: clip - filter input size ({}, {}) is odd and/or has factors greater than 19: use Mtffilter.",
+                libc::printf(
+                    c"ERROR: clip - filter input size (%d, %d) is odd and/or has factors greater than 19: use Mtffilter.\n"
+                        .as_ptr(),
                     (*options).ix,
-                    (*options).iy
+                    (*options).iy,
                 );
             }
             return -1;
         }
-        if (*options).low as i32 == IP_DEFAULT {
+        if (*options).low == IP_DEFAULT as f32 {
             (*options).low = 1.;
         }
-        if (*options).high as i32 == IP_DEFAULT {
+        if (*options).high == IP_DEFAULT as f32 {
             (*options).high = 0.;
         }
         mrc_head_label(&mut *output, b"clip: fourier filter");
@@ -99,15 +100,9 @@ pub unsafe fn clip_bandpass_filter(
                 return -1;
             }
             if !complex {
-                if slice_fft(slice) != 0 {
-                    slice_free(slice);
-                    return -1;
-                }
+                slice_fft(slice);
                 mrc_bandpass_filter(slice, (*options).high as f64, (*options).low as f64);
-                if slice_fft(slice) != 0 {
-                    slice_free(slice);
-                    return -1;
-                }
+                slice_fft(slice);
             } else {
                 slice_complex_float(slice);
                 mrc_bandpass_filter(slice, (*options).high as f64, (*options).low as f64);

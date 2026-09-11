@@ -3,9 +3,10 @@
 #![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::{
-    b3d_error, b3d_shift_bytes, data_size_for_mode, extra_is_nbytes_and_flags, imod_backup_file,
-    invert_mrc_origin_on_output, mrc_huge_seek, read_bytes_signed, set_or_clear_flags,
-    write_4_bit_mode_for_bytes, write_16_bit_mode_for_floats, write_bytes_signed,
+    b3d_error, b3d_shift_bytes, data_size_for_mode, extra_is_nbytes_and_flags, fgetline,
+    imod_backup_file, invert_mrc_origin_on_output, mrc_huge_seek, read_bytes_signed,
+    set_or_clear_flags, write_4_bit_mode_for_bytes, write_16_bit_mode_for_floats,
+    write_bytes_signed,
 };
 use crate::imod::libiimod::iimage::{
     IIFILE_MRC, IIFILE_RAW, ii_fill_mrc_header, ii_lookup_file_from_fp, ii_sync_from_mrc_header,
@@ -20,6 +21,15 @@ unsafe extern "C" {
     static mut stdin: *mut libc::FILE;
 }
 
+pub const MRC_IDTYPE_MONO: i32 = 0;
+pub const MRC_IDTYPE_TILT: i32 = 1;
+pub const MRC_IDTYPE_TILTS: i32 = 2;
+pub const MRC_IDTYPE_LINA: i32 = 3;
+pub const MRC_IDTYPE_LINS: i32 = 4;
+pub const MRC_SCALE_LINEAR: i32 = 1;
+pub const MRC_SCALE_POWER: i32 = 2;
+pub const MRC_SCALE_LOG: i32 = 3;
+pub const MRC_SCALE_BKG: i32 = 4;
 pub const MRC_MODE_BYTE: i32 = 0;
 pub const MRC_MODE_SHORT: i32 = 1;
 pub const MRC_MODE_FLOAT: i32 = 2;
@@ -29,6 +39,11 @@ pub const MRC_MODE_USHORT: i32 = 6;
 pub const MRC_MODE_HALF_FLOAT: i32 = 12;
 pub const MRC_MODE_RGB: i32 = 16;
 pub const MRC_MODE_4BIT: i32 = 101;
+pub const MRC_RAMP_LIN: i32 = 1;
+pub const MRC_RAMP_EXP: i32 = 2;
+pub const MRC_RAMP_LOG: i32 = 3;
+pub const MRC_NEXTRA: usize = 16;
+pub const MRC_MAXCSIZE: usize = 3;
 pub const MRC_LABEL_SIZE: usize = 80;
 pub const MRC_NLABELS: usize = 10;
 pub const MRC_HEADER_SIZE: usize = 1024;
@@ -323,8 +338,10 @@ pub unsafe fn mrc_head_read(fin: *mut libc::FILE, hdata: *mut MrcHeader) -> i32 
             b3d_error(
                 stderr,
                 format_args!(
-                    "ERROR: mrc_head_read - reading header data; {} of 56 words read\\n",
-                    words_read
+                    "ERROR: mrc_head_read - reading header data; {} of 56 words read, system error: {}\n",
+                    words_read,
+                    core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location()))
+                        .to_string_lossy()
                 ),
             );
         }
@@ -427,7 +444,7 @@ pub unsafe fn mrc_head_read(fin: *mut libc::FILE, hdata: *mut MrcHeader) -> i32 
             unsafe {
                 b3d_error(
                     stderr,
-                    format_args!("ERROR: mrc_head_read - reading label {}.\\n", i),
+                    format_args!("ERROR: mrc_head_read - reading label {}.\n", i),
                 );
             }
             hdata.labels[i][MRC_LABEL_SIZE] = 0;
@@ -471,7 +488,7 @@ pub unsafe fn mrc_head_read(fin: *mut libc::FILE, hdata: *mut MrcHeader) -> i32 
                 b3d_error(
                     stderr,
                     format_args!(
-                        "ERROR: mrc_head_read - cannot read 4-bit data packed in signed bytes.\\n"
+                        "ERROR: mrc_head_read - cannot read 4-bit data packed in signed bytes.\n"
                     ),
                 );
             }
@@ -483,7 +500,7 @@ pub unsafe fn mrc_head_read(fin: *mut libc::FILE, hdata: *mut MrcHeader) -> i32 
         unsafe {
             b3d_error(
                 stderr,
-                format_args!("ERROR: mrc_head_read - bad file mode {}.\\n", hdata.mode),
+                format_args!("ERROR: mrc_head_read - bad file mode {}.\n", hdata.mode),
             );
         }
         return 1;
@@ -493,7 +510,7 @@ pub unsafe fn mrc_head_read(fin: *mut libc::FILE, hdata: *mut MrcHeader) -> i32 
             b3d_error(
                 stderr,
                 format_args!(
-                    "ERROR: mrc_head_read - impossible number of labels, {}.\\n",
+                    "ERROR: mrc_head_read - impossible number of labels, {}.\n",
                     hdata.nlabl
                 ),
             );
@@ -551,7 +568,7 @@ pub unsafe fn mrc_head_read(fin: *mut libc::FILE, hdata: *mut MrcHeader) -> i32 
             unsafe {
                 b3d_error(
                     stderr,
-                    format_args!("ERROR: mrc_head_read - bad file mode {}.\\n", hdata.mode),
+                    format_args!("ERROR: mrc_head_read - bad file mode {}.\n", hdata.mode),
                 );
             }
             return 1;
@@ -624,7 +641,7 @@ pub unsafe fn mrc_head_write(fout: *mut libc::FILE, hdata: *mut MrcHeader) -> i3
                 b3d_error(
                     stderr,
                     format_args!(
-                        "ERROR: mrc_head_write - Cannot write an odd size in X as 4 bits without using mode 101\\n"
+                        "ERROR: mrc_head_write - Cannot write an odd size in X as 4 bits without using mode 101\n"
                     ),
                 );
             }
@@ -674,7 +691,7 @@ pub unsafe fn mrc_head_write(fout: *mut libc::FILE, hdata: *mut MrcHeader) -> i3
         unsafe {
             b3d_error(
                 stderr,
-                format_args!("ERROR: mrc_head_write - writing header to file\\n"),
+                format_args!("ERROR: mrc_head_write - writing header to file\n"),
             );
         }
         return 1;
@@ -684,7 +701,7 @@ pub unsafe fn mrc_head_write(fout: *mut libc::FILE, hdata: *mut MrcHeader) -> i3
             unsafe {
                 b3d_error(
                     stderr,
-                    format_args!("ERROR: mrc_head_write - writing header to file\\n"),
+                    format_args!("ERROR: mrc_head_write - writing header to file\n"),
                 );
             }
             return 1;
@@ -852,8 +869,11 @@ pub fn mrc_head_new(hdata: &mut MrcHeader, x: i32, y: i32, z: i32, mode: i32) ->
     hdata.mapc = 1;
     hdata.mapr = 2;
     hdata.maps = 3;
-    hdata.amin = f32::MAX;
-    hdata.amax = -f32::MAX;
+    // `mrcfiles.c:31-34` locally defines `FLT_MAX` as `1.e37f` under `#ifndef FLT_MAX`;
+    // this unit never includes <float.h>, so `mrcfiles.c:714-716` seeds the sentinels
+    // with 1.e37f, not the real C `FLT_MAX`.  Verified against the reference binary.
+    hdata.amin = 1.0e37_f32;
+    hdata.amax = -1.0e37_f32;
     hdata.amean = 0.0;
     hdata.ispg = 0;
     hdata.next = 0;
@@ -992,12 +1012,20 @@ pub fn mrc_print_label_string(hdata: Option<&MrcHeader>, label_ind: i32) -> i32 
     if label_ind < 0 || label_ind >= hdata.nlabl {
         return 1;
     }
-    let source = &hdata.labels[label_ind as usize];
-    let mut end = MRC_LABEL_SIZE;
-    while end > 0 && source[end - 1] == b' ' {
-        end -= 1;
+    let mut label = [0_u8; MRC_LABEL_SIZE + 1];
+    let mut got_non_blank = 0;
+    let mut ind = MRC_LABEL_SIZE as i32 - 1;
+    while ind >= 0 {
+        if got_non_blank == 0 && hdata.labels[label_ind as usize][ind as usize] != b' ' {
+            got_non_blank = 1;
+            label[ind as usize + 1] = 0x00;
+        }
+        if got_non_blank != 0 {
+            label[ind as usize] = hdata.labels[label_ind as usize][ind as usize];
+        }
+        ind -= 1;
     }
-    println!("{}", String::from_utf8_lossy(&source[..end]));
+    unsafe { libc::printf(c"%s\n".as_ptr(), label.as_ptr()) };
     0
 }
 
@@ -1290,7 +1318,7 @@ pub fn mrc_byte_mmm(hdata: Option<&mut MrcHeader>, idata: Option<&[&[u8]]>) -> i
             }
         }
     }
-    mean /= (hdata.nx * hdata.ny * hdata.nz) as f64;
+    mean /= hdata.nx.wrapping_mul(hdata.ny).wrapping_mul(hdata.nz) as f64;
     hdata.amin = min as f32;
     hdata.amean = mean as f32;
     hdata.amax = max as f32;
@@ -1318,8 +1346,8 @@ pub fn mrc_complex_smin_smax(mut in_min: f32, in_max: f32) -> (f32, f32) {
         min_sign = -1.0;
         in_min = -in_min;
     }
-    let out_min = min_sign * (1.0_f64 + kscale as f64 * in_min as f64).ln() as f32;
-    let out_max = (1.0_f64 + kscale as f64 * in_max as f64).ln() as f32;
+    let out_min = min_sign * (1.0_f64 + (kscale * in_min) as f64).ln() as f32;
+    let out_max = (1.0_f64 + (kscale * in_max) as f64).ln() as f32;
     (out_min, out_max)
 }
 
@@ -1353,11 +1381,11 @@ pub fn mrc_contrast_scaling(
         max = smax;
         min = smin;
     }
-    if ramptype == 3 {
+    if ramptype == MRC_RAMP_LOG {
         min = (min as f64).ln() as f32;
         max = (max as f64).ln() as f32;
     }
-    if ramptype == 2 {
+    if ramptype == MRC_RAMP_EXP {
         min = (min as f64).exp() as f32;
         max = (max as f64).exp() as f32;
     }
@@ -1368,14 +1396,15 @@ pub fn mrc_contrast_scaling(
     if range == 0 {
         range = 1;
     }
-    let rscale = 256.0_f32 / range as f32;
+    let rscale = (256.0_f64 / range as f64) as f32;
     let mut slope = if max - min != 0.0 {
-        255.0_f32 / (max - min)
+        (255.0_f64 / (max - min) as f64) as f32
     } else {
         1.0
     };
     slope *= rscale;
-    let offset = -(((black as f32 / 255.0) * (max - min)) + min) * slope;
+    let offset = (-(((black as f32 as f64 / 255.0) * (max - min) as f64) + min as f64)
+        * slope as f64) as f32;
     (slope, offset)
 }
 
@@ -1409,7 +1438,7 @@ pub fn mrc_init_li(li: Option<&mut LoadInfo>, hd: Option<&MrcHeader>) -> i32 {
         li.slope = 1.0;
         li.offset = 0.0;
         li.plist = 0;
-        li.ramp = 1;
+        li.ramp = MRC_RAMP_LIN;
     }
     0
 }
@@ -1494,11 +1523,11 @@ pub fn mrc_fix_li(li: &mut LoadInfo, nx: i32, ny: i32, nz: i32) -> i32 {
 pub fn mrc_liso(hdata: &MrcHeader, li: &mut LoadInfo) {
     let mut max = hdata.amax;
     let mut min = hdata.amin;
-    if li.ramp == 3 {
+    if li.ramp == MRC_RAMP_LOG {
         min = (hdata.amin as f64).ln() as f32;
         max = (hdata.amax as f64).ln() as f32;
     }
-    if li.ramp == 2 {
+    if li.ramp == MRC_RAMP_EXP {
         min = (hdata.amin as f64).exp() as f32;
         max = (hdata.amax as f64).exp() as f32;
     }
@@ -1506,14 +1535,15 @@ pub fn mrc_liso(hdata: &MrcHeader, li: &mut LoadInfo) {
     if range == 0 {
         range = 1;
     }
-    let rscale = 256.0_f32 / range as f32;
+    let rscale = (256.0_f64 / range as f64) as f32;
     li.slope = if max - min != 0.0 {
-        255.0_f32 / (max - min)
+        (255.0_f64 / (max - min) as f64) as f32
     } else {
         1.0
     };
     li.slope *= rscale;
-    li.offset = -(((li.black as f32 / 255.0) * (max - min)) + min) * li.slope;
+    li.offset = (-(((li.black as f32 as f64 / 255.0) * (max - min) as f64) + min as f64)
+        * li.slope as f64) as f32;
 }
 
 /// Matches C `get_loadinfo(MrcHeader *, IloadInfo *)` (`mrcfiles.c:1934`).
@@ -1523,7 +1553,7 @@ pub unsafe fn get_loadinfo(hdata: *mut MrcHeader, li: *mut LoadInfo) -> i32 {
         libc::fflush(stdout);
         libc::fflush(stdin);
         libc::printf(c" Enter (min x, max x). (return for default) >".as_ptr());
-        libc::fgets(line.as_mut_ptr(), 128, stdin);
+        fgetline(stdin, line.as_mut_ptr(), 127);
         if line[0] != 0 {
             libc::sscanf(
                 line.as_ptr(),
@@ -1537,7 +1567,7 @@ pub unsafe fn get_loadinfo(hdata: *mut MrcHeader, li: *mut LoadInfo) -> i32 {
         }
 
         libc::printf(c" Enter (min y, max y). (return for default)  >".as_ptr());
-        libc::fgets(line.as_mut_ptr(), 128, stdin);
+        fgetline(stdin, line.as_mut_ptr(), 127);
         if line[0] != 0 {
             libc::sscanf(
                 line.as_ptr(),
@@ -1551,7 +1581,7 @@ pub unsafe fn get_loadinfo(hdata: *mut MrcHeader, li: *mut LoadInfo) -> i32 {
         }
 
         libc::printf(c" Enter sections (low, high)  >".as_ptr());
-        libc::fgets(line.as_mut_ptr(), 128, stdin);
+        fgetline(stdin, line.as_mut_ptr(), 127);
         if line[0] != 0 {
             libc::sscanf(
                 line.as_ptr(),
@@ -1592,7 +1622,7 @@ pub unsafe fn loadtilts(ti: *mut TiltInfo, hdata: *mut MrcHeader) -> i32 {
                 *(*ti).tilt = 0.0;
             } else {
                 let tiltoff = -60.0;
-                let tslope = 120.0 / ((*hdata).nz as f32 - 1.0);
+                let tslope = (120.0_f64 / ((*hdata).nz as f64 - 1.0)) as f32;
                 for i in 0..(*hdata).nz {
                     *(*ti).tilt.add(i as usize) = tiltoff + i as f32 * tslope;
                 }
@@ -1698,13 +1728,6 @@ pub unsafe fn mrc_read_slice(
             (*hdata).fp = fp_save;
             return result;
         }
-        if !matches!(axis as u8, b'x' | b'X') {
-            b3d_error(
-                stderr,
-                format_args!("ERROR: mrc_read_slice - axis error.\n"),
-            );
-            return -1;
-        }
         let ii_file = ii_lookup_file_from_fp(fin);
         if !ii_file.is_null() && (*ii_file).file != IIFILE_MRC && (*ii_file).file != IIFILE_RAW {
             b3d_error(
@@ -1715,6 +1738,9 @@ pub unsafe fn mrc_read_slice(
             );
             return -1;
         }
+        libc::rewind(fin);
+        libc::fseek(fin, (*hdata).header_size as libc::c_long, libc::SEEK_SET);
+        let mut data = buf.cast::<u8>();
         if (*hdata).packed4bits != 0 {
             b3d_error(
                 stderr,
@@ -1724,18 +1750,29 @@ pub unsafe fn mrc_read_slice(
         }
         let mut dsize = 0;
         let mut csize = 0;
-        if mrc_getdcsize((*hdata).mode, &mut dsize, &mut csize) != 0 || slice >= (*hdata).nx {
+        if mrc_getdcsize((*hdata).mode, &mut dsize, &mut csize) != 0 {
+            b3d_error(
+                stderr,
+                format_args!("ERROR: mrc_read_slice - unknown mode.\n"),
+            );
             return -1;
         }
-        libc::rewind(fin);
-        libc::fseek(fin, (*hdata).header_size as libc::c_long, libc::SEEK_SET);
         let dcsize = dsize * csize;
+        if !matches!(axis as u8, b'x' | b'X') {
+            b3d_error(
+                stderr,
+                format_args!("ERROR: mrc_read_slice - axis error.\n"),
+            );
+            return -1;
+        }
+        if slice >= (*hdata).nx {
+            return -1;
+        }
         libc::fseek(
             fin,
             slice as libc::c_long * dcsize as libc::c_long,
             libc::SEEK_CUR,
         );
-        let mut data = buf.cast::<u8>();
         for _ in 0..(*hdata).nz {
             for _ in 0..(*hdata).ny {
                 if libc::fread(data.cast(), dcsize as usize, 1, fin) != 1 {
@@ -2208,10 +2245,10 @@ pub unsafe fn get_short_map(
         if i > 32767 && signedint != 0 {
             fpixel = i as i32 as f32 - 65536.0;
         }
-        if ramptype == 2 {
+        if ramptype == MRC_RAMP_EXP {
             fpixel = (fpixel as f64).exp() as f32;
         }
-        if ramptype == 3 {
+        if ramptype == MRC_RAMP_LOG {
             fpixel = (fpixel as f64).ln() as f32;
         }
         let mut ival = ((fpixel * slope + offset) as f64 + 0.5).floor() as i32;
@@ -2240,9 +2277,9 @@ pub unsafe fn getfilename(name: *mut c_char, prompt: *const c_char) -> i32 {
         libc::printf(c"%s".as_ptr(), prompt);
         libc::fflush(stdout);
         let mut i = 0;
-        loop {
+        while i < 255 {
             let c = libc::getchar();
-            if i >= 255 || c == libc::EOF || c == b'\n' as i32 {
+            if c == libc::EOF || c == b'\n' as i32 {
                 break;
             }
             *name.add(i as usize) = c as c_char;
@@ -2402,7 +2439,7 @@ mod tests {
         let mut input: MrcHeader = unsafe { core::mem::zeroed() };
         assert_eq!(mrc_head_new(&mut input, 4, 5, 6, MRC_MODE_FLOAT), 0);
         assert_eq!((input.mx, input.my, input.mz), (4, 5, 6));
-        assert_eq!((input.amin, input.amax), (f32::MAX, -f32::MAX));
+        assert_eq!((input.amin, input.amax), (1.0e37_f32, -1.0e37_f32));
         assert_eq!(input.imod_stamp, IMOD_MRC_STAMP);
         assert_eq!(input.ext_type, [b' '; 4]);
         mrc_set_scale(&mut input, 2.0, 3.0, 4.0);
@@ -2745,6 +2782,400 @@ mod tests {
                 0
             );
             assert_eq!(read, written);
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:184-192,246-249`: the bad-mode diagnostics end in a real newline and
+    /// carry the source wording, as printed by the native `header` command.
+    #[test]
+    fn mrc_head_read_error_messages_use_source_text_and_a_real_newline() {
+        use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
+        unsafe {
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_BYTE), 0);
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            // Rewrite the on-disk mode word with an out-of-range value.
+            assert_eq!(libc::fseek(file, 12, libc::SEEK_SET), 0);
+            let bad_mode: i32 = 44;
+            assert_eq!(
+                libc::fwrite(core::ptr::addr_of!(bad_mode).cast(), 4, 1, file),
+                1
+            );
+            b3d_set_store_error(1);
+            let mut read_back: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut read_back), 1);
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_head_read - bad file mode 44.\n"
+            );
+
+            // An impossible label count reports the source count message.
+            assert_eq!(libc::fseek(file, 12, libc::SEEK_SET), 0);
+            let good_mode: i32 = MRC_MODE_BYTE;
+            assert_eq!(
+                libc::fwrite(core::ptr::addr_of!(good_mode).cast(), 4, 1, file),
+                1
+            );
+            assert_eq!(libc::fseek(file, 220, libc::SEEK_SET), 0);
+            let nlabl: i32 = 11;
+            assert_eq!(
+                libc::fwrite(core::ptr::addr_of!(nlabl).cast(), 4, 1, file),
+                1
+            );
+            assert_eq!(mrc_head_read(file, &mut read_back), 1);
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_head_read - impossible number of labels, 11.\n"
+            );
+            b3d_set_store_error(0);
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:68-73`: a short header read reports the word count and `strerror(errno)`.
+    #[test]
+    fn mrc_head_read_short_read_reports_the_source_word_count() {
+        use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
+        unsafe {
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let partial = [0_u8; 100];
+            assert_eq!(
+                libc::fwrite(partial.as_ptr().cast(), 1, partial.len(), file),
+                partial.len()
+            );
+            b3d_set_store_error(1);
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut header), -1);
+            let message = core::ffi::CStr::from_ptr(b3d_get_error())
+                .to_str()
+                .unwrap()
+                .to_string();
+            b3d_set_store_error(0);
+            assert!(
+                message.starts_with(
+                    "ERROR: mrc_head_read - reading header data; 25 of 56 words read, system \
+                     error: "
+                ),
+                "{message}"
+            );
+            assert!(message.ends_with('\n'), "{message}");
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:426-437`: a 4-bit half-X-size header with an odd X size is refused with
+    /// the source message.
+    #[test]
+    fn mrc_head_write_refuses_odd_x_for_half_size_4bit_output() {
+        use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
+        unsafe {
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 7, 4, 1, MRC_MODE_BYTE), 0);
+            header.packed4bits = PACKED_HALF_XSIZE;
+            b3d_set_store_error(1);
+            assert_eq!(mrc_head_write(file, &mut header), 1);
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_head_write - Cannot write an odd size in X as 4 bits without using \
+                 mode 101\n"
+            );
+            b3d_set_store_error(0);
+
+            // An even X size halves nx (and mx/xlen when they track nx) in the written copy.
+            let mut even: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut even, 8, 4, 1, MRC_MODE_BYTE), 0);
+            even.packed4bits = PACKED_HALF_XSIZE;
+            assert_eq!(mrc_head_write(file, &mut even), 0);
+            assert_eq!(libc::fseek(file, 0, libc::SEEK_SET), 0);
+            let mut prefix = [0_i32; 12];
+            assert_eq!(libc::fread(prefix.as_mut_ptr().cast(), 4, 12, file), 12);
+            assert_eq!((prefix[0], prefix[1], prefix[2]), (4, 4, 1));
+            assert_eq!(prefix[7], 4);
+            assert_eq!(even.nx, 8);
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:714-716` with the local `FLT_MAX` of `mrcfiles.c:31-34`: the min/max
+    /// sentinels are 1.e37f, which is what reaches the header of a file whose statistics
+    /// are never updated.
+    #[test]
+    fn mrc_head_new_seeds_the_local_flt_max_sentinels_on_disk() {
+        unsafe {
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_FLOAT), 0);
+            assert_eq!((header.amin, header.amax), (1.0e37_f32, -1.0e37_f32));
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            assert_eq!(libc::fseek(file, 76, libc::SEEK_SET), 0);
+            let mut stats = [0.0_f32; 3];
+            assert_eq!(libc::fread(stats.as_mut_ptr().cast(), 4, 3, file), 3);
+            assert_eq!((stats[0], stats[1]), (1.0e37_f32, -1.0e37_f32));
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:442-460`: the written copy carries the inverted origin, the
+    /// MRC_FLAGS_INV_ORIGIN bit and nversion 20140, while the caller's header is untouched.
+    #[test]
+    fn mrc_head_write_inverts_origin_and_stamps_nversion_on_disk() {
+        unsafe {
+            crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(1);
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_SHORT), 0);
+            header.xorg = 12.5;
+            header.yorg = -7.25;
+            header.zorg = 3.0;
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            assert_eq!((header.xorg, header.yorg, header.zorg), (12.5, -7.25, 3.0));
+
+            assert_eq!(libc::fseek(file, 108, libc::SEEK_SET), 0);
+            let mut nversion = 0_i32;
+            assert_eq!(
+                libc::fread(core::ptr::addr_of_mut!(nversion).cast(), 4, 1, file),
+                1
+            );
+            assert_eq!(nversion, 20140);
+            assert_eq!(libc::fseek(file, 156, libc::SEEK_SET), 0);
+            let mut flags = 0_i32;
+            assert_eq!(
+                libc::fread(core::ptr::addr_of_mut!(flags).cast(), 4, 1, file),
+                1
+            );
+            assert_eq!(flags & MRC_FLAGS_INV_ORIGIN, MRC_FLAGS_INV_ORIGIN);
+            assert_eq!(flags & MRC_FLAGS_BAD_RMS_NEG, MRC_FLAGS_BAD_RMS_NEG);
+            assert_eq!(libc::fseek(file, 196, libc::SEEK_SET), 0);
+            let mut origin = [0.0_f32; 3];
+            assert_eq!(libc::fread(origin.as_mut_ptr().cast(), 4, 3, file), 3);
+            assert_eq!(origin, [-12.5, 7.25, -3.0]);
+
+            // Reading the file back undoes the inversion (`mrcfiles.c:120-126`).
+            let mut read_back: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut read_back), 0);
+            assert_eq!(
+                (read_back.xorg, read_back.yorg, read_back.zorg),
+                (12.5, -7.25, 3.0)
+            );
+            crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(-1);
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:407-423`: byte output clamps to 0/255 and short/ushort output clamps to
+    /// the mode range, in the written copy only.
+    #[test]
+    fn mrc_head_write_clamps_mode_extremes_in_the_written_copy() {
+        unsafe {
+            crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(0);
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_BYTE), 0);
+            header.bytes_signed = 0;
+            header.amin = -40.0;
+            header.amax = 900.0;
+            header.amean = 12.0;
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            assert_eq!((header.amin, header.amax), (-40.0, 900.0));
+            assert_eq!(libc::fseek(file, 76, libc::SEEK_SET), 0);
+            let mut stats = [0.0_f32; 3];
+            assert_eq!(libc::fread(stats.as_mut_ptr().cast(), 4, 3, file), 3);
+            assert_eq!(stats, [0.0, 255.0, 12.0]);
+
+            let mut ushort: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut ushort, 4, 4, 1, MRC_MODE_USHORT), 0);
+            ushort.amin = -100.0;
+            ushort.amax = 90000.0;
+            ushort.amean = 5.0;
+            assert_eq!(mrc_head_write(file, &mut ushort), 0);
+            assert_eq!(libc::fseek(file, 76, libc::SEEK_SET), 0);
+            assert_eq!(libc::fread(stats.as_mut_ptr().cast(), 4, 3, file), 3);
+            assert_eq!(stats, [0.0, 65535.0, 5.0]);
+
+            let mut short_header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut short_header, 4, 4, 1, MRC_MODE_SHORT), 0);
+            short_header.amin = -40000.0;
+            short_header.amax = 40000.0;
+            short_header.amean = 5.0;
+            assert_eq!(mrc_head_write(file, &mut short_header), 0);
+            assert_eq!(libc::fseek(file, 76, libc::SEEK_SET), 0);
+            assert_eq!(libc::fread(stats.as_mut_ptr().cast(), 4, 3, file), 3);
+            assert_eq!(stats, [-32768.0, 32767.0, 5.0]);
+            crate::imod::libcfshr::b3dutil::override_invert_mrc_origin(-1);
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:1060-1095`: the X-slice path emits the source diagnostics in source
+    /// order - the non-MRC and 4-bit checks precede the mode check, which precedes the axis
+    /// check.
+    #[test]
+    fn mrc_read_slice_reports_x_path_errors_in_source_order() {
+        use crate::imod::libcfshr::b3dutil::{b3d_get_error, b3d_set_store_error};
+        unsafe {
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let mut buffer = [0_u8; 4];
+            b3d_set_store_error(1);
+
+            // 4-bit files are rejected before the mode and axis checks, even for a bad axis.
+            header.packed4bits = PACKED_4BIT_MODE;
+            assert_eq!(
+                mrc_read_slice(
+                    buffer.as_mut_ptr().cast(),
+                    file,
+                    &mut header,
+                    0,
+                    b'q' as c_char
+                ),
+                -1
+            );
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_read_slice - Cannot read X slice from 4-bit file\n"
+            );
+            header.packed4bits = 0;
+
+            // An unsupported mode is reported before the axis check.
+            header.mode = 99;
+            assert_eq!(
+                mrc_read_slice(
+                    buffer.as_mut_ptr().cast(),
+                    file,
+                    &mut header,
+                    0,
+                    b'q' as c_char
+                ),
+                -1
+            );
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_read_slice - unknown mode.\n"
+            );
+            header.mode = MRC_MODE_BYTE;
+
+            // Only then does a bad axis produce the axis error.
+            assert_eq!(
+                mrc_read_slice(
+                    buffer.as_mut_ptr().cast(),
+                    file,
+                    &mut header,
+                    0,
+                    b'q' as c_char
+                ),
+                -1
+            );
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_read_slice - axis error.\n"
+            );
+
+            // An X slice beyond nx returns -1 with no new message.
+            assert_eq!(
+                mrc_read_slice(
+                    buffer.as_mut_ptr().cast(),
+                    file,
+                    &mut header,
+                    5,
+                    b'X' as c_char
+                ),
+                -1
+            );
+            assert_eq!(
+                core::ffi::CStr::from_ptr(b3d_get_error()).to_str().unwrap(),
+                "ERROR: mrc_read_slice - axis error.\n"
+            );
+            b3d_set_store_error(0);
+            assert_eq!(libc::fclose(file), 0);
+        }
+    }
+
+    /// `mrcfiles.c:537-555`: the label print trims trailing blanks and emits through the C
+    /// stdout stream, and rejects an out-of-range index.
+    #[test]
+    fn mrc_print_label_string_trims_trailing_blanks_on_c_stdout() {
+        unsafe {
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_BYTE), 0);
+            header.labels[0] = [b' '; MRC_LABEL_SIZE + 1];
+            header.labels[0][..5].copy_from_slice(b"label");
+            header.labels[0][MRC_LABEL_SIZE] = 0;
+            header.nlabl = 1;
+            assert_eq!(mrc_print_label_string(None, 0), 1);
+            assert_eq!(mrc_print_label_string(Some(&header), -1), 1);
+            assert_eq!(mrc_print_label_string(Some(&header), 1), 1);
+
+            let path_buf = std::env::temp_dir()
+                .join(format!("imod_rs_mrcfiles_label_{}.txt", std::process::id()));
+            let path = std::ffi::CString::new(path_buf.to_str().unwrap()).unwrap();
+            let saved = libc::dup(1);
+            assert!(saved >= 0);
+            let capture = libc::open(
+                path.as_ptr(),
+                libc::O_CREAT | libc::O_TRUNC | libc::O_RDWR,
+                0o600,
+            );
+            assert!(capture >= 0);
+            libc::fflush(stdout);
+            assert!(libc::dup2(capture, 1) >= 0);
+            assert_eq!(mrc_print_label_string(Some(&header), 0), 0);
+            libc::fflush(stdout);
+            assert!(libc::dup2(saved, 1) >= 0);
+            libc::close(saved);
+            assert_eq!(libc::lseek(capture, 0, libc::SEEK_SET), 0);
+            let mut got = [0_u8; 32];
+            let read = libc::read(capture, got.as_mut_ptr().cast(), got.len());
+            libc::close(capture);
+            libc::unlink(path.as_ptr());
+            assert_eq!(&got[..read as usize], b"label\n");
+        }
+    }
+
+    /// `mrcfiles.c:653-670`: writing an extended header seeks to 1024, writes `next` bytes
+    /// and updates both `next` and `headerSize` in the output header.
+    #[test]
+    fn mrc_write_extra_header_updates_next_and_header_size_on_a_real_file() {
+        unsafe {
+            let file = libc::tmpfile();
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 4, 1, MRC_MODE_BYTE), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let extra = [1_u8, 2, 3, 4, 5, 6, 7, 8];
+            assert_eq!(
+                mrc_write_extra_header(&mut header, core::ptr::null_mut(), 8),
+                1
+            );
+            assert_eq!(
+                mrc_write_extra_header(&mut header, extra.as_ptr().cast_mut(), 0),
+                1
+            );
+            assert_eq!(
+                mrc_write_extra_header(&mut header, extra.as_ptr().cast_mut(), extra.len() as i32),
+                0
+            );
+            assert_eq!(header.next, 8);
+            assert_eq!(header.header_size, MRC_HEADER_SIZE as i32 + 8);
+            assert_eq!(
+                libc::fseek(file, MRC_HEADER_SIZE as libc::c_long, libc::SEEK_SET),
+                0
+            );
+            let mut got = [0_u8; 8];
+            assert_eq!(libc::fread(got.as_mut_ptr().cast(), 1, got.len(), file), 8);
+            assert_eq!(got, extra);
             assert_eq!(libc::fclose(file), 0);
         }
     }

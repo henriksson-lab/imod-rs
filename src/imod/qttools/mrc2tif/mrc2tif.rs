@@ -1,10 +1,11 @@
 //! Translation of `IMOD/qttools/mrc2tif/mrc2tif.cpp`.
 //!
-//! TIFF writing deliberately remains at IMOD's libtiff/QImage boundary.  This
-//! unit does not replace Qt JPEG/PNG output with another encoder: byte layout,
-//! orientation, colour tables, and quality meanings are observable behaviour.
+//! TIFF writing defaults to IMOD's libtiff/QImage boundary.  An explicitly
+//! selected, default-off Rust encoder owns only the JPEG/PNG save operation;
+//! source-visible image preparation and command behavior stay here.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::backends::{Mrc2TifEncoder, TiffBackend, mrc2tif_encoder, tiff_backend};
 use crate::imod::libcfshr::autodoc::{
     ADOC_ZVALUE_NAME, adoc_get_float, adoc_get_image_meta_info, adoc_lookup_by_name_value,
     adoc_open_image_metadata, adoc_set_current,
@@ -79,24 +80,69 @@ unsafe fn mrc2tif_qimage_save(
 
 /// Original: `usage` (`mrc2tif.cpp:28`).
 fn usage(progname: &str) {
-    println!("{progname} version");
-    crate::imod::libcfshr::b3dutil::imod_copyright();
-    println!("{progname} [options] <mrc file> <tiff name/root>\n");
-    println!(" Without -s, a series of tiff files will be created with the");
-    println!(" prefix [tiff root name] and with the suffix nnn.tif, where nnn is the z number.");
-    println!("  Options:");
-    println!("    -s  Stack all images into a single TIFF file");
-    println!("    -c val  Compression: lzw, zip, jpeg, or a libtiff value");
-    println!("    -q #  JPEG (0-100) or ZIP (1-9) quality");
-    println!("    -S min,max  Initial byte-scaling limits");
-    println!("    -C b,w  Contrast black/white values");
-    println!("    -a mn,sd  Scale to mean and SD");
-    println!("    -z min,max  Starting and ending Z (from 0)");
-    println!("    -i #  Initial file number");
-    println!("    -j  Output JPEG; -p  Output PNG");
-    println!("    -r #  Resolution in dots per inch; -P/-m use pixel spacing");
-    println!("    -T nx[,ny]  Output tiles; -O # override parallel TIFF compression");
-    println!("    -t #  Strip processing criterion in megabytes; -o old IMOD writer");
+    // `mrc2tif.cpp:28-62`.  Every line goes through `printf` so it interleaves
+    // with `imodCopyright`'s own `printf` in the source's order; a `println!`
+    // here lands after the whole libc buffer when stdout is a pipe.
+    let name = std::ffi::CString::new(progname).unwrap_or_default();
+    unsafe {
+        libc::printf(
+            c"%s version %s \n".as_ptr(),
+            name.as_ptr(),
+            c"5.2.17".as_ptr(),
+        );
+        crate::imod::libcfshr::b3dutil::imod_copyright();
+        libc::printf(
+            c"%s [options] <mrc file> <tiff name/root>\n\n".as_ptr(),
+            name.as_ptr(),
+        );
+        libc::printf(
+            c" Without -s, a series of tiff files will be created with the\n prefix [tiff root name] and with the suffix nnn.tif, where nnn is the z number. \n  Options:\n"
+                .as_ptr(),
+        );
+        libc::printf(
+            c"    -s         Stack all images in the mrc file into a single tiff file\n".as_ptr(),
+        );
+        libc::printf(
+            c"    -c val     Compress data; val can be lzw, zip, jpeg, or numbers defined\n\t\t in libtiff\n"
+                .as_ptr(),
+        );
+        libc::printf(
+            c"    -q #       Quality for jpeg compression (0-100) or for zip compression (1-9)\n"
+                .as_ptr(),
+        );
+        libc::printf(c"    -S min,max Initial scaling limits for conversion to bytes\n".as_ptr());
+        libc::printf(
+            c"    -C b,w     Contrast black/white values for conversion to bytes\n".as_ptr(),
+        );
+        libc::printf(
+            c"    -a mn,sd   Scale to mean and SD for conversion to bytes (0,0 for default)\n"
+                .as_ptr(),
+        );
+        libc::printf(c"    -z min,max Starting and ending Z (from 0) to output\n".as_ptr());
+        libc::printf(c"    -i #       Initial file number (default is starting Z)\n".as_ptr());
+        libc::printf(c"    -j         Output jpeg file instead of tiff\n".as_ptr());
+        libc::printf(c"    -p         Output png file instead of tiff\n".as_ptr());
+        libc::printf(c"    -r #       Resolution setting in dots per inch\n".as_ptr());
+        libc::printf(
+            c"    -P         Use pixel spacing in MRC header for resolution setting\n".as_ptr(),
+        );
+        libc::printf(
+            c"    -m         Use pixel spacings in mdoc file for resolution setting\n".as_ptr(),
+        );
+        libc::printf(
+            c"    -T nx[,ny] Output data in tiles of size nx by ny (nx by nx if ny omitted)\n"
+                .as_ptr(),
+        );
+        libc::printf(
+            c"    -O #       Override default for parallel tiff compression on whole image\n"
+                .as_ptr(),
+        );
+        libc::printf(
+            c"    -t #       Criterion image size in megabytes for processing file in strips\n"
+                .as_ptr(),
+        );
+        libc::printf(c"    -o         Write file with old IMOD code instead of libtiff\n".as_ptr());
+    }
 }
 
 /// Original: `main` (`mrc2tif.cpp:65`).
@@ -107,6 +153,23 @@ pub fn mrc2tif() {
             CString::new(args.first().map(String::as_bytes).unwrap_or(b"mrc2tif")).unwrap();
         let progname_alloc = imod_prog_name(full_progname.as_ptr());
         let progname = CStr::from_ptr(progname_alloc).to_str().unwrap_or("mrc2tif");
+        // `mrc2tif.cpp:116-117`: `sprintf(prefix, "\nERROR: %s - ", progname)`
+        // then `setExitPrefix(prefix)`.  `PipSetError` (`parse_params.c:2049`)
+        // prints the prefix with `"%s "` -- a second space -- and sends it to
+        // *stdout*, so an `eprintln!` here is wrong on three counts.
+        let exit_prefix = std::ffi::CString::new(format!("\nERROR: {progname} - ")).unwrap();
+        crate::imod::libcfshr::parse_params::setExitPrefix(exit_prefix.as_ptr());
+        // `mrc2tif.cpp:92`: `int doParallel = -1, didParallel = 0;` -- function
+        // scope, because the write-error message reads it.
+        let mut did_parallel = 0_i32;
+        let encoder = match mrc2tif_encoder() {
+            Ok(backend) => backend,
+            Err(error) => {
+                let message = std::ffi::CString::new(format!("{error}")).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
+        };
         let mut iarg = 1usize;
         let mut stack = false;
         let mut oldcode = false;
@@ -162,10 +225,14 @@ pub fn mrc2tif() {
                         }
                     }
                     if ![1, 5, 7, 8, 32773, 32946].contains(&compression) {
-                        eprintln!(
-                            "ERROR: {progname} - Compression value {compression} not allowed"
-                        );
-                        libc::exit(1);
+                        {
+                            let message = std::ffi::CString::new(format!(
+                                "Compression value {compression} not allowed"
+                            ))
+                            .unwrap();
+                            crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                            unreachable!()
+                        }
                     }
                 }
                 'r' => {
@@ -260,56 +327,101 @@ pub fn mrc2tif() {
             iarg += 1;
         }
         if oldcode && compression != 1 {
-            eprintln!("ERROR: {progname} - Compression not available with old writing code");
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "Compression not available with old writing code"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if oldcode && (resolution != 0 || use_pixel) {
-            eprintln!(
-                "ERROR: {progname} - Resolution setting is not available with old writing code"
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "Resolution setting is not available with old writing code"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if oldcode && tile_x != 0 {
-            eprintln!("ERROR: {progname} - Tiling not available with old writing code");
-            libc::exit(1);
+            {
+                let message =
+                    std::ffi::CString::new(format!("Tiling not available with old writing code"))
+                        .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if oldcode && (make_jpg || make_png) {
-            eprintln!(
-                "ERROR: {progname} - JPEG and PNG output not available with old writing code"
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "JPEG and PNG output not available with old writing code"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if (resolution != 0 && (use_pixel || use_mdoc)) || (use_pixel && use_mdoc) {
-            eprintln!("ERROR: {progname} - You cannot enter more than one of -r, -m, and -P");
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "You cannot enter more than one of -r, -m, and -P"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if use_mdoc && stack {
-            eprintln!(
-                "ERROR: {progname} - You cannot use pixel spacings from an mdoc file when making a stack"
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "You cannot use pixel spacings from an mdoc file when making a stack"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if make_jpg && make_png {
-            eprintln!("ERROR: {progname} - You cannot enter both -j and -p");
-            libc::exit(1);
+            {
+                let message =
+                    std::ffi::CString::new(format!("You cannot enter both -j and -p")).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if (make_jpg || make_png) && (stack || do_chunks || compression != 1 || tile_x != 0) {
-            eprintln!(
-                "ERROR: {progname} - You cannot enter -s, -c, or -T with JPEG and PNG output"
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "You cannot enter -s, -c, or -T with JPEG and PNG output"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if (compression == 8 || make_png) && (quality < -1 || quality == 0 || quality > 9) {
-            eprintln!(
-                "ERROR: {progname} - Quality for ZIP compression or PNG output must be between 1 and 9"
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "Quality for ZIP compression or PNG output must be between 1 and 9"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if convert && auto_contrast {
-            eprintln!(
-                "ERROR: {progname} - You cannot enter -C or -S for scaling with -a for auto-contrasting"
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "You cannot enter -C or -S for scaling with -a for auto-contrasting"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if auto_contrast {
             convert = true;
@@ -317,10 +429,45 @@ pub fn mrc2tif() {
         if make_png && quality >= 0 {
             quality = 10 * (9 - quality);
         }
+        let native_tiff_writer = if make_jpg || make_png {
+            false
+        } else {
+            match tiff_backend() {
+                Ok(TiffBackend::Parity) => false,
+                Ok(TiffBackend::Rust) => true,
+                Err(error) => {
+                    let message = std::ffi::CString::new(format!("{error}")).unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                    unreachable!()
+                }
+            }
+        };
+        if native_tiff_writer
+            && (oldcode
+                || do_chunks
+                || !matches!(compression, 1 | 5 | 8)
+                || resolution != 0
+                || use_pixel
+                || use_mdoc)
+        {
+            {
+                let message = std::ffi::CString::new(format!(
+                "Rust TIFF writer currently supports only non-tiled images with no/LZW/ZIP compression and without resolution or old-writer options"
+            )).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
+        }
         #[cfg(not(feature = "qt"))]
         if make_jpg || make_png {
-            eprintln!("ERROR: {progname} - JPEG/PNG output requires the source QImage Qt boundary");
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "JPEG/PNG output requires the source QImage Qt boundary"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if args.len().saturating_sub(iarg) != 2 {
             usage(progname);
@@ -329,23 +476,30 @@ pub fn mrc2tif() {
         let input = match CString::new(args[iarg].as_bytes()) {
             Ok(v) => v,
             Err(_) => {
-                eprintln!("ERROR: {progname} - input filename has NUL");
-                libc::exit(1);
+                let message = std::ffi::CString::new(format!("input filename has NUL")).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
             }
         };
         let fin = ii_fopen(input.as_ptr(), c"rb".as_ptr());
         if fin.is_null() {
-            eprintln!("ERROR: {progname} - Couldn't open {}", args[iarg]);
-            libc::exit(1);
+            {
+                let message =
+                    std::ffi::CString::new(format!("Couldn't open {}", args[iarg])).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         let mut hdata: MrcHeader = core::mem::zeroed();
         if mrc_head_read(fin, &mut hdata) != 0 {
             ii_fclose(fin);
-            eprintln!(
-                "ERROR: {progname} - Can't Read Input Header from {}",
-                args[iarg]
-            );
-            libc::exit(1);
+            {
+                let message =
+                    std::ffi::CString::new(format!("Can't Read Input Header from {}", args[iarg]))
+                        .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         if use_pixel || use_mdoc {
             let (xscale, _, _) = mrc_get_scale(&hdata);
@@ -357,8 +511,14 @@ pub fn mrc2tif() {
             let in_file = ii_lookup_file_from_fp(fin);
             if in_file.is_null() {
                 ii_fclose(fin);
-                eprintln!("ERROR: {progname} - could not get image-file data for input stream");
-                libc::exit(1);
+                {
+                    let message = std::ffi::CString::new(format!(
+                        "could not get image-file data for input stream"
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                    unreachable!()
+                }
             }
             let mut if_montage = 0;
             let mut adoc_ind = (*in_file).adoc_index;
@@ -377,8 +537,13 @@ pub fn mrc2tif() {
                     != 0
             {
                 ii_fclose(fin);
-                eprintln!("ERROR: {progname} - could not open or select input metadata");
-                libc::exit(1);
+                {
+                    let message =
+                        std::ffi::CString::new(format!("could not open or select input metadata"))
+                            .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                    unreachable!()
+                }
             }
         }
         if zmin == -1 && zmax == -1 {
@@ -387,11 +552,15 @@ pub fn mrc2tif() {
         }
         if zmin < 0 || zmax >= hdata.nz || zmin > zmax {
             ii_fclose(fin);
-            eprintln!(
-                "ERROR: {progname} - zmin,zmax values are reversed or out of the range 0 to {}",
-                hdata.nz - 1
-            );
-            libc::exit(1);
+            {
+                let message = std::ffi::CString::new(format!(
+                    "zmin,zmax values are reversed or out of the range 0 to {}",
+                    hdata.nz - 1
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
         }
         let (psize, type_, format) = match hdata.mode {
             MRC_MODE_BYTE => (1usize, IITYPE_UBYTE, IIFORMAT_LUMINANCE),
@@ -401,24 +570,30 @@ pub fn mrc2tif() {
             MRC_MODE_RGB => (3usize, IITYPE_UBYTE, IIFORMAT_RGB),
             _ => {
                 ii_fclose(fin);
-                eprintln!(
-                    "ERROR: {progname} - Data mode {} not supported.",
-                    hdata.mode
-                );
-                libc::exit(1);
+                {
+                    let message =
+                        std::ffi::CString::new(format!("Data mode {} not supported.", hdata.mode))
+                            .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                    unreachable!()
+                }
             }
         };
+        // `mrc2tif.cpp:356-358`: "Must convert to bytes if it is not color for
+        // PNG/JPEG output".  This has to run *before* `mrcContrastScaling`
+        // (`mrc2tif.cpp:376`), or a float image reaches the QImage writer with
+        // scale 1 and offset 0 and is never scaled into byte range.
+        if (make_jpg || make_png) && hdata.mode != MRC_MODE_BYTE && hdata.mode != MRC_MODE_RGB {
+            convert = true;
+        }
+        let real_mode = crate::imod::libcfshr::islice::slice_mode_if_real(hdata.mode);
         let mut scale = 1f32;
         let mut offset = 0f32;
         if convert && !auto_contrast {
             (scale, offset) = mrc_contrast_scaling(&hdata, smin, smax, black, white, 1);
         }
-        let real_mode = crate::imod::libcfshr::islice::slice_mode_if_real(hdata.mode);
-        if (make_jpg || make_png) && hdata.mode != MRC_MODE_BYTE && hdata.mode != MRC_MODE_RGB {
-            convert = true;
-        }
         let output_count = zmax - zmin + 1;
-        if !(make_jpg || make_png) {
+        if !(make_jpg || make_png) && !native_tiff_writer {
             let mut minor = 0;
             let version = tiff_version(&mut minor);
             if version < 4 {
@@ -432,13 +607,17 @@ pub fn mrc2tif() {
                     || (stack && output_count as f64 * image_bytes > save_criterion)
                 {
                     ii_fclose(fin);
-                    eprintln!(
-                        "ERROR: {progname} - TIFF {}.{} cannot save this {}",
-                        version,
-                        minor,
-                        if stack { "stack" } else { "image" }
-                    );
-                    libc::exit(1);
+                    {
+                        let message = std::ffi::CString::new(format!(
+                            "TIFF {}.{} cannot save this {}",
+                            version,
+                            minor,
+                            if stack { "stack" } else { "image" }
+                        ))
+                        .unwrap();
+                        crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                        unreachable!()
+                    }
                 }
             }
             if version > 0
@@ -492,7 +671,22 @@ pub fn mrc2tif() {
         let mut data_offset = 0u32;
         let mut all_min = 1.0e30f32;
         let mut all_max = -1.0e30f32;
-        if stack {
+        let rust_output_mode = if convert && real_mode > 0 {
+            MRC_MODE_BYTE
+        } else {
+            hdata.mode
+        };
+        let rust_output_pixel_size = if rust_output_mode == MRC_MODE_RGB {
+            3
+        } else if rust_output_mode == MRC_MODE_BYTE {
+            1
+        } else if rust_output_mode == MRC_MODE_SHORT || rust_output_mode == MRC_MODE_USHORT {
+            2
+        } else {
+            4
+        };
+        let mut rust_tiff_stack = Vec::new();
+        if stack && !native_tiff_writer {
             let name = CString::new(output_root.as_bytes()).unwrap();
             let pn = CString::new(progname).unwrap();
             old_fp = open_either_way(
@@ -528,7 +722,7 @@ pub fn mrc2tif() {
                     width = digits
                 )
             };
-            if !stack && !(make_jpg || make_png) {
+            if !stack && !(make_jpg || make_png) && !native_tiff_writer {
                 if z > zmin {
                     libc::free((*iifile).filename.cast());
                     (*iifile).filename = core::ptr::null_mut();
@@ -546,8 +740,12 @@ pub fn mrc2tif() {
                     oldcode as i32,
                 );
                 if old_fp.is_null() && (*iifile).header.is_null() {
-                    eprintln!("ERROR: {progname} - opening {name_text}");
-                    break;
+                    // `mrc2tif.cpp:662`.
+                    {
+                        let m = std::ffi::CString::new(format!("Opening {name_text}")).unwrap();
+                        crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                        unreachable!()
+                    }
                 }
             }
             if !stack && (make_jpg || make_png) {
@@ -597,12 +795,21 @@ pub fn mrc2tif() {
                     &mut tile_x,
                 ) != 0
                 {
-                    eprintln!("ERROR: {progname} - setting up TIFF chunks");
-                    break;
+                    // `mrc2tif.cpp:483` ignores the return of `tiffWriteSetup`; this reports it.
+                    {
+                        let m = std::ffi::CString::new(format!("Setting up TIFF chunks")).unwrap();
+                        crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                        unreachable!()
+                    }
                 }
                 if tile_x > hdata.nx + 16 || lines_per_chunk > hdata.ny + 16 {
-                    eprintln!("ERROR: {progname} - entered tile size was too large");
-                    break;
+                    // `mrc2tif.cpp:486`.
+                    {
+                        let m = std::ffi::CString::new(format!("Entered tile size was too large"))
+                            .unwrap();
+                        crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                        unreachable!()
+                    }
                 }
             }
             let mut lines_done = 0;
@@ -618,8 +825,14 @@ pub fn mrc2tif() {
                 // again by Vec's destructor.
                 let buffer = libc::malloc(hdata.nx as usize * nlines as usize * psize).cast::<u8>();
                 if buffer.is_null() {
-                    eprintln!("ERROR: {progname} - failed to allocate memory for slice");
-                    break;
+                    // `mrc2tif.cpp:497`.
+                    {
+                        let m =
+                            std::ffi::CString::new(format!("Failed to allocate memory for slice"))
+                                .unwrap();
+                        crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                        unreachable!()
+                    }
                 }
                 if do_chunks {
                     li.ymin = hdata.ny - (lines_done + nlines);
@@ -627,9 +840,12 @@ pub fn mrc2tif() {
                     lines_done += nlines;
                 }
                 if mrc_read_z(&mut hdata, &mut li, buffer, z) != 0 {
-                    libc::free(buffer.cast());
-                    eprintln!("ERROR: {progname} - reading section {z}");
-                    break;
+                    // `mrc2tif.cpp:509`; `exitError` exits, so the source frees nothing here.
+                    {
+                        let m = std::ffi::CString::new(format!("Reading section {z}")).unwrap();
+                        crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                        unreachable!()
+                    }
                 }
                 let mut slice: Islice = core::mem::zeroed();
                 if slice_init(&mut slice, hdata.nx, nlines, hdata.mode, buffer.cast()) != 0 {
@@ -640,10 +856,15 @@ pub fn mrc2tif() {
                     let line_ptrs =
                         make_line_pointers(slice.data.b.cast(), hdata.nx, hdata.ny, psize as i32);
                     if line_ptrs.is_null() {
-                        eprintln!(
-                            "ERROR: {progname} - allocating line pointers for autocontrasting"
-                        );
-                        break;
+                        // `mrc2tif.cpp:516`.
+                        {
+                            let m = std::ffi::CString::new(format!(
+                                "Allocating line pointers for autocontrasting"
+                            ))
+                            .unwrap();
+                            crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                            unreachable!()
+                        }
                     }
                     let sample =
                         (hdata.nx * hdata.ny).min(100_000) as f32 / (hdata.nx * hdata.ny) as f32;
@@ -664,10 +885,15 @@ pub fn mrc2tif() {
                     );
                     libc::free(line_ptrs.cast());
                     if sample_error != 0 {
-                        eprintln!(
-                            "ERROR: {progname} - autocontrasting sample failed ({sample_error})"
-                        );
-                        break;
+                        // `mrc2tif.cpp:521`.
+                        {
+                            let m = std::ffi::CString::new(format!(
+                                "Error {sample_error} calling sampleMeanSD for autocontrasting"
+                            ))
+                            .unwrap();
+                            crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                            unreachable!()
+                        }
                     }
                     scale = auto_sd / image_sd;
                     offset = auto_mean - scale * image_mean;
@@ -699,6 +925,7 @@ pub fn mrc2tif() {
                         (*iifile).amax = slice_max;
                     }
                 }
+                let mut rust_encoder_error = None;
                 let write_error = if make_jpg || make_png {
                     let format = if make_jpg {
                         c"JPEG".as_ptr()
@@ -722,17 +949,60 @@ pub fn mrc2tif() {
                             (hdata.nx * out_pixel_size) as usize,
                         );
                     }
-                    mrc2tif_qimage_save(
-                        qbuf.as_mut_ptr(),
-                        hdata.nx,
-                        hdata.ny,
-                        line_bytes,
-                        if psize == 3 { 1 } else { 0 },
-                        use_resol,
-                        filename.as_ptr(),
-                        format,
-                        quality,
-                    )
+                    match encoder {
+                        Mrc2TifEncoder::Parity => mrc2tif_qimage_save(
+                            qbuf.as_mut_ptr(),
+                            hdata.nx,
+                            hdata.ny,
+                            line_bytes,
+                            if psize == 3 { 1 } else { 0 },
+                            use_resol,
+                            filename.as_ptr(),
+                            format,
+                            quality,
+                        ),
+                        Mrc2TifEncoder::Rust => match super::rust_encoder::save(
+                            &qbuf,
+                            hdata.nx,
+                            hdata.ny,
+                            line_bytes,
+                            psize == 3,
+                            use_resol,
+                            &name_text,
+                            if make_jpg { "JPEG" } else { "PNG" },
+                            quality,
+                        ) {
+                            Ok(()) => 0,
+                            Err(error) => {
+                                rust_encoder_error = Some(error);
+                                1
+                            }
+                        },
+                    }
+                } else if native_tiff_writer {
+                    let rust_bytes = hdata.nx as usize * nlines as usize * rust_output_pixel_size;
+                    if stack {
+                        rust_tiff_stack
+                            .push(core::slice::from_raw_parts(write_buffer, rust_bytes).to_vec());
+                        0
+                    } else {
+                        match crate::imod::mrc::rust_tiff::write_image(
+                            &name_text,
+                            hdata.nx,
+                            nlines,
+                            rust_output_mode,
+                            compression,
+                            quality,
+                            write_buffer,
+                            rust_bytes,
+                        ) {
+                            Ok(()) => 0,
+                            Err(error) => {
+                                rust_encoder_error = Some(error);
+                                1
+                            }
+                        }
+                    }
                 } else if !old_fp.is_null() {
                     tiff_write_image(
                         old_fp,
@@ -748,7 +1018,6 @@ pub fn mrc2tif() {
                 } else if do_chunks {
                     tiff_write_strip(iifile, chunk, write_buffer.cast())
                 } else if do_parallel != 0 {
-                    let mut did_parallel = 0;
                     tiff_parallel_write(
                         iifile,
                         write_buffer.cast(),
@@ -756,7 +1025,7 @@ pub fn mrc2tif() {
                         0,
                         use_resol,
                         quality,
-                        &mut did_parallel,
+                        &raw mut did_parallel,
                     )
                 } else {
                     tiff_write_section(
@@ -774,17 +1043,21 @@ pub fn mrc2tif() {
                     libc::free(buffer.cast());
                 }
                 if write_error != 0 {
-                    eprintln!(
-                        "ERROR: {progname} - TIFF/libtiff writing boundary returned {write_error} for {name_text}"
-                    );
-                    if !old_fp.is_null() {
-                        libc::fclose(old_fp);
-                    } else if !(make_jpg || make_png) {
-                        ii_close(iifile);
-                    }
-                    ii_delete(iifile);
-                    ii_fclose(fin);
-                    libc::exit(1);
+                    // `mrc2tif.cpp:610-613`: one `exitError` with the section
+                    // number and the file name, plus the parallel-compression
+                    // hint when that path ran.  `exitError` exits without
+                    // closing anything, so the source's cleanup here is none.
+                    let message = std::ffi::CString::new(format!(
+                        "Error ({write_error}) writing section {z} to {name_text}{}",
+                        if did_parallel != 0 {
+                            "; you could use option -O 0 to try again without parallelized compression"
+                        } else {
+                            ""
+                        }
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                    unreachable!()
                 }
             }
             (*iifile).amin = slice_min;
@@ -792,7 +1065,7 @@ pub fn mrc2tif() {
             if do_chunks {
                 tiff_write_finish(iifile);
             }
-            if !stack && !(make_jpg || make_png) {
+            if !stack && !(make_jpg || make_png) && !native_tiff_writer {
                 if !old_fp.is_null() {
                     libc::fclose(old_fp);
                 } else {
@@ -803,7 +1076,24 @@ pub fn mrc2tif() {
         if stack {
             (*iifile).amin = all_min;
             (*iifile).amax = all_max;
-            if !old_fp.is_null() {
+            if native_tiff_writer {
+                if let Err(error) = crate::imod::mrc::rust_tiff::write_stack(
+                    output_root,
+                    hdata.nx,
+                    hdata.ny,
+                    rust_output_mode,
+                    compression,
+                    quality,
+                    &rust_tiff_stack,
+                ) {
+                    // The Rust TIFF writer's own failure has no source
+                    // counterpart; report it through the same `exitError`
+                    // path so the prefix and stream match.
+                    let m = std::ffi::CString::new(error).unwrap_or_default();
+                    crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
+                    unreachable!()
+                }
+            } else if !old_fp.is_null() {
                 libc::fclose(old_fp);
             } else {
                 ii_close(iifile);
@@ -835,12 +1125,13 @@ unsafe fn open_either_way(
             let fp = libc::fopen(iname, c"wb".as_ptr());
             if fp.is_null() {
                 libc::perror(c"mrc2tif system message".as_ptr());
-                eprintln!(
-                    "ERROR: {} - Opening {}",
-                    CStr::from_ptr(progname).to_string_lossy(),
+                // `mrc2tif.cpp:661-662`.
+                let m = std::ffi::CString::new(format!(
+                    "Opening {}",
                     CStr::from_ptr(iname).to_string_lossy()
-                );
-                libc::exit(1);
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(m.as_ptr());
             }
             if oldcode == 0 && WARNED == 0 {
                 WARNED = 1;

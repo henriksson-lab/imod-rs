@@ -7,6 +7,19 @@ pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i
         let nx = *nxp;
         let ny = *nyp;
         let idir = *idirp;
+        match crate::imod::backends::fft_backend() {
+            Ok(crate::imod::backends::FftBackend::Rustfft) => {
+                if let Err(error) = super::rustfft_backend::odfft(array, nx, ny, idir) {
+                    eprintln!("ERROR: Rust-native backend - {error}");
+                }
+                return;
+            }
+            Ok(crate::imod::backends::FftBackend::Parity) => {}
+            Err(error) => {
+                eprintln!("{error}");
+                return;
+            }
+        }
         if nx <= 0 || ny <= 0 || (idir >= 0 && nx & 1 != 0) {
             return;
         }

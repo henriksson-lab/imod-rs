@@ -19,9 +19,11 @@ The command set is `newstack`, `header`, `binvol`, `alterheader`, `clip`,
 `tif2mrc`, `mrc2tif`, `imodinfo`, `imodjoin`, `wmod2imod`, `convertmod`,
 `trimvol`, `submfg`, and `batchruntomo`. Rust command names intentionally
 match IMOD's installed binary names. `etomo` remains an external batch-process
-boundary; GUI applications are out of scope. `mrc2tif` uses the source-shaped
-TIFF path; successful JPEG/PNG output remains the explicit Qt `QImage`
-encoder boundary rather than a replacement encoder in Rust.
+boundary; GUI applications are out of scope. The default `mrc2tif` path uses
+the source-shaped Qt/libtiff boundaries. Default-off experimental pure-Rust
+TIFF, JPEG/PNG, and FFT paths are documented in
+[RUST_NATIVE_BACKENDS_PLAN.md](RUST_NATIVE_BACKENDS_PLAN.md); they are selected
+only with their corresponding `IMOD_RS_*_BACKEND` environment variables.
 
 ## Audit workflow
 

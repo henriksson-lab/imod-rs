@@ -52,8 +52,15 @@ pub unsafe fn threshold_with_min_size(
         }
         let out = slice_create(nx, ny, (*opt).mode);
         if out.is_null() {
+            // `threshminsize.cpp:126-129`.  Note the doubled space in the
+            // source's text.
+            libc::printf(c"ERROR: CLIP - Allocating  memory\n".as_ptr());
             return -1;
         }
+        // The source's two `catch` blocks (`threshminsize.cpp:358-365`,
+        // `std::bad_alloc` and `exception&`) have no counterpart: Rust has no
+        // exceptions, and the STL containers they guard are `Vec`s here.  Their
+        // texts are therefore unreachable rather than omitted.
         let mut grouped = vec![0_u8; (nx * ny) as usize];
         let mut planes: Vec<Vec<PlaneConnectedPoints>> =
             (0..(*opt).nofsecs).map(|_| Vec::new()).collect();

@@ -58,6 +58,45 @@ fn source_rejects_both_first_model_replace_and_object_list_before_real_models() 
 }
 
 #[test]
+fn changed_colors_restore_the_stock_cycle_color_of_a_newly_created_object() {
+    // `imodjoin.c:427` creates the destination with `imodNewObject`, so the
+    // colour saved at `:429-431` and restored under -c is the stock colour
+    // cycle entry for that index.  Native
+    // /tmp/imod-reference-build/imodutil/imodjoin -c BBa_erase.fid
+    // BBa_erase.fid out.mod leaves object 1 green (0, 1, 0) and object 2 cyan
+    // (0, 1, 1); its output is byte-identical to this crate's.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture = root.join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
+    let output = std::env::temp_dir().join(format!(
+        "imod-rs-imodjoin-changecolor-{}.mod",
+        std::process::id()
+    ));
+    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+        .arg("-c")
+        .arg(&fixture)
+        .arg(&fixture)
+        .arg(&output)
+        .status()
+        .expect("imodjoin executable must start");
+    assert!(status.success());
+    let joined = imod_read(&output).expect("imodjoin output must be an IMOD model");
+    assert_eq!(joined.obj.len(), 2);
+    assert_eq!(
+        (joined.obj[0].red, joined.obj[0].green, joined.obj[0].blue),
+        (0., 1., 0.)
+    );
+    assert_eq!(
+        (joined.obj[1].red, joined.obj[1].green, joined.obj[1].blue),
+        (0., 1., 1.)
+    );
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_file(output.with_file_name(format!(
+        "{}~",
+        output.file_name().unwrap().to_string_lossy()
+    )));
+}
+
+#[test]
 fn one_input_model_is_rejected_before_the_requested_output_is_touched() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture = root.join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
@@ -99,7 +138,7 @@ fn replacement_keeps_colors_and_transfers_expanded_object_views() {
 
     let mut first = Imod {
         obj: vec![Iobj {
-            name: "first".into(),
+            name: name_array("first"),
             red: 0.1,
             green: 0.2,
             blue: 0.3,
@@ -119,7 +158,7 @@ fn replacement_keeps_colors_and_transfers_expanded_object_views() {
 
     let mut second = Imod {
         obj: vec![Iobj {
-            name: "second".into(),
+            name: name_array("second"),
             red: 0.9,
             green: 0.8,
             blue: 0.7,
@@ -152,7 +191,10 @@ fn replacement_keeps_colors_and_transfers_expanded_object_views() {
     assert!(status.success());
     let output = imod_read(&output_path).expect("joined model must decode");
     assert_eq!(output.obj.len(), 1);
-    assert_eq!(output.obj[0].name, "second");
+    assert_eq!(
+        unsafe { std::ffi::CStr::from_ptr(output.obj[0].name.as_ptr()) },
+        c"second"
+    );
     assert_eq!(
         (output.obj[0].red, output.obj[0].green, output.obj[0].blue),
         (0.1, 0.2, 0.3)
@@ -526,13 +568,13 @@ fn existing_output_is_backed_up_before_the_joined_model_is_written() {
     ));
     let backup = std::path::PathBuf::from(format!("{}~", output.display()));
     let old = Imod {
-        name: "model replaced by imodjoin".into(),
+        name: name_array("model replaced by imodjoin"),
         ..Imod::default()
     };
     imod_file_write(&old, &output).expect("old output writes");
     imod_file_write(
         &Imod {
-            name: "stale backup replaced by source imodBackupFile".into(),
+            name: name_array("stale backup replaced by source imodBackupFile"),
             ..Imod::default()
         },
         &backup,
@@ -546,8 +588,8 @@ fn existing_output_is_backed_up_before_the_joined_model_is_written() {
         .expect("imodjoin executable must start");
     assert!(status.success());
     assert_eq!(
-        imod_read(&backup).unwrap().name,
-        "model replaced by imodjoin"
+        unsafe { std::ffi::CStr::from_ptr(imod_read(&backup).unwrap().name.as_ptr()) },
+        c"model replaced by imodjoin"
     );
     assert!(!imod_read(&output).unwrap().obj.is_empty());
     let _ = std::fs::remove_file(output);
@@ -590,21 +632,31 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
         .output()
         .unwrap();
     assert_eq!(read_error.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&read_error.stderr).contains("Error reading file for model 1"));
+    // `exitError` writes the exit prefix and message to stdout, as the native
+    // imodjoin does for each of the diagnostics below.
+    assert!(
+        String::from_utf8_lossy(&read_error.stdout)
+            .contains("ERROR: imodjoin -  Error reading file for model 1")
+    );
     let image_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
         .arg("-i")
         .arg(&missing)
         .output()
         .unwrap();
     assert_eq!(image_error.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&image_error.stderr).contains("Couldn't open"));
+    assert!(
+        String::from_utf8_lossy(&image_error.stdout).contains("ERROR: imodjoin -  Couldn't open")
+    );
     let header_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
         .arg("-i")
         .arg(&malformed)
         .output()
         .unwrap();
     assert_eq!(header_error.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&header_error.stderr).contains("Reading header from"));
+    assert!(
+        String::from_utf8_lossy(&header_error.stdout)
+            .contains("ERROR: imodjoin -  Reading header from")
+    );
     let object_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
         .args(["-o", "999"])
         .arg(&fixture)
@@ -614,8 +666,8 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
         .unwrap();
     assert_eq!(object_error.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&object_error.stderr)
-            .contains("Invalid object number 999 for model 1")
+        String::from_utf8_lossy(&object_error.stdout)
+            .contains("ERROR: imodjoin -  Invalid object number 999 for model 1")
     );
     let _ = std::fs::remove_file(malformed);
 }
@@ -962,4 +1014,41 @@ fn imod_contour_get_accessors_select_decoded_binary_model_contours() {
     assert!(imod_contour_get_first(None).is_none());
     assert!(imod_contour_get_next(None).is_none());
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn read_error_uses_the_source_exit_prefix_on_stdout() {
+    // `readerr` calls `exitError`, which routes through `PipSetError` and
+    // writes "<prefix> <message>" to stdout, leaving stderr empty.  The native
+    // imodjoin prints exactly "ERROR: imodjoin -  Error reading file for
+    // model 1" there (note the two spaces from the prefix's own trailing one).
+    let missing = std::env::temp_dir().join(format!(
+        "imod-rs-imodjoin-prefix-missing-{}.mod",
+        std::process::id()
+    ));
+    let output = std::env::temp_dir().join(format!(
+        "imod-rs-imodjoin-prefix-out-{}.mod",
+        std::process::id()
+    ));
+    let result = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+        .arg(&missing)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1));
+    assert!(result.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        "ERROR: imodjoin -  Error reading file for model 1\n"
+    );
+    let _ = std::fs::remove_file(output);
+}
+
+/// Test-only: builds a fixed-size NUL-padded model/object name array.
+fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+    let mut name = [0; N];
+    for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
+        *slot = *byte as std::ffi::c_char;
+    }
+    name
 }

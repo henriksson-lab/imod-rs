@@ -8,7 +8,7 @@ use crate::imod::libiimod::iimage::{
     ImodImageFile, LineProcData, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
     ii_convert_line_of_floats, ii_delete, ii_new, ii_sync_from_mrc_header,
 };
-use crate::imod::libiimod::iimrc::ii_mrc_set_load_info;
+use crate::imod::libiimod::iimrc::{ii_mrc_fill_header, ii_mrc_set_load_info};
 use crate::imod::libiimod::mrcfiles::{
     LoadInfo, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MrcHeader,
     mrc_getdcsize, mrc_head_new,
@@ -78,6 +78,7 @@ pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *
         (*ii_file).clean_up = Some(clean_up);
         (*ii_file).reopen = Some(reopen);
         (*ii_file).filename = libc::strdup(filename);
+        (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
         let header = libc::malloc(core::mem::size_of::<MrcHeader>()).cast::<MrcHeader>();
         (*ii_file).header = header.cast();
         if header.is_null() || (*ii_file).filename.is_null() {
@@ -107,6 +108,7 @@ pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *
         }
         (*ii_file).fp = (*ii_file).user_data.cast();
         (*header).fp = (*ii_file).fp.cast();
+        (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
         (*ii_file).sync_from_mrc_header = Some(sync_from_mrc_header);
         (*ii_file).write_header = Some(write_header);
         (*ii_file).read_section = Some(read_section);

@@ -202,15 +202,22 @@ pub unsafe fn slice_put_val(s: *mut Islice, x: i32, y: i32, val: [f32; 4]) -> i3
             return -1;
         }
         let mut i = x as usize + y as usize * (*s).xsize as usize;
+        // `islice.c:270-285` casts the float straight to the narrow integer
+        // type.  In C that truncates toward zero into an int and then keeps the
+        // low bits, so -1.0f stores 255 and 300.0f stores 44.  Rust's float
+        // `as u8` SATURATES instead (0 and 255), which silently rewrites pixel
+        // data: `clip multiply` of a byte file by a float file wrote 15300 of
+        // 15360 pixels as 127.  Going through `as i32` first reproduces the C
+        // for every value in i32 range; outside it the C is undefined anyway.
         match (*s).mode {
-            0 => *(*s).data.b.add(i) = val[0] as u8,
-            1 => *(*s).data.s.add(i) = val[0] as i16,
-            6 => *(*s).data.us.add(i) = val[0] as u16,
+            0 => *(*s).data.b.add(i) = val[0] as i32 as u8,
+            1 => *(*s).data.s.add(i) = val[0] as i32 as i16,
+            6 => *(*s).data.us.add(i) = val[0] as i32 as u16,
             2 => *(*s).data.f.add(i) = val[0],
             3 => {
                 i *= 2;
-                *(*s).data.s.add(i) = val[0] as i16;
-                *(*s).data.s.add(i + 1) = val[1] as i16
+                *(*s).data.s.add(i) = val[0] as i32 as i16;
+                *(*s).data.s.add(i + 1) = val[1] as i32 as i16
             }
             4 => {
                 i *= 2;
@@ -219,9 +226,9 @@ pub unsafe fn slice_put_val(s: *mut Islice, x: i32, y: i32, val: [f32; 4]) -> i3
             }
             16 => {
                 i *= 3;
-                *(*s).data.b.add(i) = val[0] as u8;
-                *(*s).data.b.add(i + 1) = val[1] as u8;
-                *(*s).data.b.add(i + 2) = val[2] as u8
+                *(*s).data.b.add(i) = val[0] as i32 as u8;
+                *(*s).data.b.add(i + 1) = val[1] as i32 as u8;
+                *(*s).data.b.add(i + 2) = val[2] as i32 as u8
             }
             99 => {
                 i *= 3;
@@ -345,29 +352,31 @@ pub unsafe fn slice_scale_and_free(sout: *mut Islice, sin: *mut Islice) {
             aval = (*sin).min - mval * (*sout).min;
         }
         let imax = (*sin).xsize * (*sin).ysize;
+        // `islice.c:448-460` narrows with `(unsigned char)`, which truncates
+        // toward zero and keeps the low bits rather than saturating.
         match (*sout).mode {
             2 => {
                 for i in 0..imax {
                     *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.f.add(i as usize) * mval + aval) as u8;
+                        (*(*sout).data.f.add(i as usize) * mval + aval) as i32 as u8;
                 }
             }
             1 => {
                 for i in 0..imax {
                     *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.s.add(i as usize) as f32 * mval + aval) as u8;
+                        (*(*sout).data.s.add(i as usize) as f32 * mval + aval) as i32 as u8;
                 }
             }
             6 => {
                 for i in 0..imax {
                     *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.us.add(i as usize) as f32 * mval + aval) as u8;
+                        (*(*sout).data.us.add(i as usize) as f32 * mval + aval) as i32 as u8;
                 }
             }
             0 => {
                 for i in 0..imax {
                     *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.b.add(i as usize) as f32 * mval + aval) as u8;
+                        (*(*sout).data.b.add(i as usize) as f32 * mval + aval) as i32 as u8;
                 }
             }
             _ => {}

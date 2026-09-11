@@ -7,6 +7,11 @@ use crate::imod::libwarp::hull::{
     free_simplex_storage, free_tree_storage, new_block_basis, new_block_simplex, visit_hull,
     visit_triang_gen,
 };
+use crate::imod::libwarp::hull::{Fg, Tree};
+use crate::imod::libwarp::hull_fg::print_fg;
+use crate::imod::libwarp::hull_io::{
+    MAXS, MINS, panic, print_basis, print_neighbor_full, print_simplex_f,
+};
 use crate::imod::libwarp::pointops::{PDIM, print_point};
 
 /// C globals defined by `hull-ch.c`.
@@ -16,8 +21,6 @@ pub static mut HULL_INFINITY: [Coord; 10] = [57.2, 0., 0., 0., 0., 0., 0., 0., 0
 /// C `mo` (`hull-ch.c:624`), shared with the source face-graph traversal.
 pub static mut MO: [i16; 10_000] = [0; 10_000];
 pub static mut MI: [i16; 10_000] = [0; 10_000];
-pub static mut MINS: [Coord; 8] = [0.; 8];
-pub static mut MAXS: [Coord; 8] = [0.; 8];
 pub static mut HUGE: f64 = 0.;
 pub static mut HUGE_CRIT: f64 = 0.;
 pub static mut EXACT_BITS: i32 = 0;
@@ -143,6 +146,20 @@ unsafe fn lower_terms(basis: *mut Basis) -> f64 {
         let vector = (*basis).vecs.as_mut_ptr();
         let factors = [2., 3., 5., 7., 11., 13.];
         let mut output = 1.;
+
+        /* DEBTR(-10) print_basis(DFILE, v); printf("\n"); DEBTR(0)
+        `DEBUG` is -7 (`hull.h:30`), so `DEBS(-10)` -- `if (DEBUG > -10)` --
+        is taken and `DEBS(0)` is not; `print_basis` and the newline sit
+        outside the macro's braces and run unconditionally. */
+        libc::fprintf(
+            crate::imod::libwarp::hull_io::DFILE,
+            c"hull-ch.c line %d \n".as_ptr(),
+            234,
+        );
+        libc::fflush(crate::imod::libwarp::hull_io::DFILE);
+        print_basis(crate::imod::libwarp::hull_io::DFILE, basis);
+        libc::printf(c"\n".as_ptr());
+
         for factor in factors {
             loop {
                 let mut index = 0;
@@ -295,6 +312,30 @@ unsafe fn reduce_inner(basis: *mut Basis, simplex: *mut Simplex, k: i32) -> i32 
                     vector_a,
                 );
             }
+        }
+        /* `hull-ch.c:320`: `DEB(-8, ...)` and `DEBTR(-8)` are taken because
+        `DEBUG` is -7, and the two prints after them are outside the macro. */
+        static mut FAILCOUNT: i32 = 0;
+        let count = FAILCOUNT;
+        FAILCOUNT += 1;
+        if count < 10 {
+            libc::fprintf(
+                crate::imod::libwarp::hull_io::DFILE,
+                c"reduce_inner failed on:\n".as_ptr(),
+            );
+            libc::fflush(crate::imod::libwarp::hull_io::DFILE);
+            libc::fprintf(
+                crate::imod::libwarp::hull_io::DFILE,
+                c"hull-ch.c line %d \n".as_ptr(),
+                322,
+            );
+            libc::fflush(crate::imod::libwarp::hull_io::DFILE);
+            print_basis(crate::imod::libwarp::hull_io::DFILE, basis);
+            print_simplex_f(
+                simplex,
+                crate::imod::libwarp::hull_io::DFILE,
+                Some(print_neighbor_full),
+            );
         }
         0
     }
@@ -696,6 +737,122 @@ unsafe fn one_marks(s: *mut Simplex, _: *mut core::ffi::c_void) -> *mut core::ff
         core::ptr::null_mut()
     }
 }
+/// Original static `show_marks` (`hull-ch.c:555`).
+unsafe fn show_marks(s: *mut Simplex, _: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
+    unsafe {
+        libc::printf(c"%d".as_ptr(), (*s).mark as core::ffi::c_int);
+        core::ptr::null_mut()
+    }
+}
+
+/// Original static `vols` (`hull-ch.c:677`).
+///
+/// `s` and `sn` are function statics in the source, allocated from the simplex
+/// free list on the first call and reused by every later one.
+unsafe fn vols(f: *mut Fg, t: *mut Tree, n: *mut Basis, depth: i32) {
+    unsafe {
+        static mut S: *mut Simplex = core::ptr::null_mut();
+        static mut SN: *mut Neighbor = core::ptr::null_mut();
+
+        let tdim = CDIM;
+        let mut nn: *mut Basis = core::ptr::null_mut();
+        let signum: i32;
+
+        if t.is_null() {
+            return;
+        }
+
+        if S.is_null() {
+            /* NEWL(simplex, s) */
+            S = if !SIMPLEX_LIST.is_null() {
+                SIMPLEX_LIST
+            } else {
+                new_block_simplex(1)
+            };
+            SIMPLEX_LIST = (*S).next;
+            SN = (*S).neigh.as_mut_ptr();
+        }
+        CDIM = depth;
+        (*S).normal = n;
+        if depth > 1 && sees((*t).key, S) != 0 {
+            signum = -1;
+        } else {
+            signum = 1;
+        }
+        CDIM = tdim;
+
+        if (*(*t).fgs).dist == 0. {
+            (*SN.add(depth as usize - 1)).vert = (*t).key;
+            /* NULLIFY(basis_s, sn[depth-1].basis) */
+            let basis = (*SN.add(depth as usize - 1)).basis;
+            if !basis.is_null() {
+                (*basis).ref_count -= 1;
+                if (*basis).ref_count == 0 {
+                    libc::memset(basis.cast(), 0, BASIS_SIZE);
+                    (*basis).next = BASIS_LIST;
+                    BASIS_LIST = basis;
+                }
+            }
+            (*SN.add(depth as usize - 1)).basis = core::ptr::null_mut();
+            CDIM = depth;
+            get_basis_sede(S);
+            CDIM = tdim;
+            reduce(
+                core::ptr::addr_of_mut!(nn),
+                core::ptr::addr_of_mut!(HULL_INFINITY).cast::<Coord>(),
+                S,
+                depth,
+            );
+            let nnv = (*nn).vecs.as_mut_ptr();
+
+            /* DNM: change tests ==Huge to > HugeCrit and != Huge to < HugeCrit */
+            if (*t).key == core::ptr::addr_of_mut!(HULL_INFINITY).cast::<Coord>()
+                || (*f).dist > HUGE_CRIT
+                || (*nnv.add(RDIM as usize - 1) < f32::EPSILON as f64
+                    && *nnv.add(RDIM as usize - 1) > -(f32::EPSILON as f64))
+            {
+                (*(*t).fgs).dist = HUGE;
+            } else {
+                (*(*t).fgs).dist = vec_dot_pdim(nnv, nnv)
+                    / 4.
+                    / *nnv.add(RDIM as usize - 1)
+                    / *nnv.add(RDIM as usize - 1);
+            }
+            if (*(*t).fgs).facets.is_null() {
+                (*(*t).fgs).vol = 1.;
+            } else {
+                vols((*t).fgs, (*(*t).fgs).facets, nn, depth + 1);
+            }
+        }
+
+        /* assert(f->dist < HugeCrit || t->fgs->dist > HugeCrit) */
+        if (*(*t).fgs).dist > HUGE_CRIT || (*(*t).fgs).vol > HUGE_CRIT {
+            (*f).vol = HUGE;
+        } else {
+            let sqq = (*(*t).fgs).dist - (*f).dist;
+            if sqq < f32::EPSILON as f64 && sqq > -(f32::EPSILON as f64) {
+                (*f).vol = 0.;
+            } else {
+                (*f).vol +=
+                    signum as f64 * sqq.sqrt() * (*(*t).fgs).vol / (CDIM - depth + 1) as f64;
+            }
+        }
+        vols(f, (*t).left, n, depth);
+        vols(f, (*t).right, n, depth);
+    }
+}
+
+/// Original `find_volumes` (`hull-ch.c:730`).
+pub unsafe fn find_volumes(faces_gr: *mut Fg, file: *mut libc::FILE) {
+    unsafe {
+        if faces_gr.is_null() {
+            return;
+        }
+        vols(faces_gr, (*faces_gr).facets, core::ptr::null_mut(), 1);
+        print_fg(faces_gr, file);
+    }
+}
+
 /// Original static `conv_facetv` (`hull-ch.c:608`).
 unsafe fn conv_facetv(s: *mut Simplex, _: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     unsafe {
@@ -868,7 +1025,13 @@ pub unsafe fn build_convex_hull(
         VD = delaunay;
         let rdim = if VD != 0 { PDIM + 1 } else { PDIM };
         if rdim > 8 {
-            return core::ptr::null_mut();
+            /* panic("dimension bound MAXDIM exceeded; rdim=%d; pdim=%d\n", rdim, pdim) */
+            let pdim = *(&raw const PDIM);
+            let text = std::ffi::CString::new(format!(
+                "dimension bound MAXDIM exceeded; rdim={rdim}; pdim={pdim}\n"
+            ))
+            .unwrap();
+            panic(&text);
         }
         RDIM = rdim;
         EXACT_BITS = (f64::MANTISSA_DIGITS as f64 * (f64::RADIX as f64).log2()).floor() as i32;

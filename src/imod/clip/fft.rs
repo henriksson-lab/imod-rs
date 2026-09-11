@@ -25,6 +25,15 @@ pub unsafe fn clip_fft(
         let complex =
             (*input).mode == MRC_MODE_COMPLEX_FLOAT || (*input).mode == MRC_MODE_COMPLEX_SHORT;
         if complex {
+            if (*options).ix != IP_DEFAULT
+                || (*options).iy != IP_DEFAULT
+                || (*options).cx != IP_DEFAULT as f32
+                || (*options).cy != IP_DEFAULT as f32
+            {
+                crate::imod::clip::clip::show_warning(
+                    "clip inverse fft - input sizes or centers are ignored",
+                );
+            }
             (*options).ix = IP_DEFAULT;
             (*options).iy = IP_DEFAULT;
             (*options).cx = IP_DEFAULT as f32;
@@ -33,6 +42,15 @@ pub unsafe fn clip_fft(
                 (*options).mode = MRC_MODE_FLOAT;
             }
         } else {
+            if (*options).ox != IP_DEFAULT
+                || (*options).oy != IP_DEFAULT
+                || (*options).oz != IP_DEFAULT
+                || (*options).mode != IP_DEFAULT
+            {
+                crate::imod::clip::clip::show_warning(
+                    "clip forward fft - output sizes or mode are ignored",
+                );
+            }
             (*options).ox = IP_DEFAULT;
             (*options).oy = IP_DEFAULT;
             (*options).oz = IP_DEFAULT;
@@ -47,10 +65,23 @@ pub unsafe fn clip_fft(
         }
         set_input_options(options, input);
         if !complex
-            && (clip_nicesize((*options).ix, false) == 0
-                || clip_nicesize((*options).iy, false) == 0
+            && (clip_nicesize((*options).ix) == 0
+                || clip_nicesize((*options).iy) == 0
                 || (*options).ix % 2 != 0)
         {
+            if crate::imod::libfft::using_fftw() != 0 {
+                libc::printf(
+                    c"ERROR: clip - fft input size in X (%d) must be even.\n".as_ptr(),
+                    (*options).ix,
+                );
+            } else {
+                libc::printf(
+                    c"ERROR: clip - fft input size (%d, %d) is odd and/or has factors greater than 19.\n"
+                        .as_ptr(),
+                    (*options).ix,
+                    (*options).iy,
+                );
+            }
             return -1;
         }
         if !complex {
@@ -62,6 +93,9 @@ pub unsafe fn clip_fft(
                     || (*output).nx != (*options).ox
                     || (*output).ny != (*options).oy)
             {
+                crate::imod::clip::clip::show_error(
+                    "clip forward 2d fft - cannot append to output file of different size or mode",
+                );
                 return -1;
             }
         }
@@ -71,6 +105,7 @@ pub unsafe fn clip_fft(
         }
         mrc_head_label_cp(&*input, &mut *output);
         mrc_head_label(&mut *output, b"clip: 2d fft");
+        crate::imod::clip::clip::show_status("Doing fast fourier transform...\n");
         for k in 0..(*options).nofsecs {
             let slice = slice_read_subm(
                 input,
@@ -82,6 +117,7 @@ pub unsafe fn clip_fft(
                 (*options).cy as i32,
             );
             if slice.is_null() {
+                crate::imod::clip::clip::show_error("fft: Error reading slice.");
                 return -1;
             }
             slice_fft(slice);
@@ -172,11 +208,18 @@ pub unsafe fn clip_3dfft(
             if (*options).iz == IP_DEFAULT {
                 (*options).iz = (*input).nz;
             }
-            if clip_nicesize((*options).ix, crate::imod::libfft::using_fftw() != 0) == 0
-                || clip_nicesize((*options).iy, crate::imod::libfft::using_fftw() != 0) == 0
-                || clip_nicesize((*options).iz, crate::imod::libfft::using_fftw() != 0) == 0
+            if clip_nicesize((*options).ix) == 0
+                || clip_nicesize((*options).iy) == 0
+                || clip_nicesize((*options).iz) == 0
                 || (*options).ix % 2 != 0
             {
+                libc::printf(
+                    c"ERROR: clip - fft input size %dx%dx%d is odd and/or has factors greater than 19.\n"
+                        .as_ptr(),
+                    (*options).ix,
+                    (*options).iy,
+                    (*options).iz,
+                );
                 return -1;
             }
         }
@@ -184,47 +227,46 @@ pub unsafe fn clip_3dfft(
         if volume.is_null() {
             return -1;
         }
-        for z in 0..(*volume).zsize {
-            let slice = *(*volume).vol.add(z as usize);
-            if (*input).mode == MRC_MODE_COMPLEX_SHORT {
-                slice_complex_float(slice);
-            } else if (*input).mode != MRC_MODE_COMPLEX_FLOAT {
-                slice_float(slice);
+        if (*input).mode != MRC_MODE_COMPLEX_FLOAT {
+            for z in 0..(*volume).zsize {
+                let slice = *(*volume).vol.add(z as usize);
+                if (*input).mode == MRC_MODE_COMPLEX_SHORT {
+                    slice_complex_float(slice);
+                } else {
+                    slice_float(slice);
+                }
             }
         }
-        let result = clip_fftvol(volume);
-        if result == 0 {
-            mrc_head_new(
-                &mut *output,
-                (*(*(*volume).vol)).xsize,
-                (*(*(*volume).vol)).ysize,
-                (*volume).zsize,
-                (*(*(*volume).vol)).mode,
-            );
-            mrc_head_label_cp(&*input, &mut *output);
-            mrc_head_label(
-                &mut *output,
-                if (*input).mode != MRC_MODE_COMPLEX_FLOAT {
-                    b"Clip: Forward 3D FFT"
-                } else {
-                    b"Clip: Inverse 3D FFT"
-                },
-            );
-            grap_volume_write(volume, output, options);
-            mrc_coord_cp(&mut *output, &*input);
-            if (*input).nx == (*input).mx
-                && (*input).ny == (*input).my
-                && (*input).nz == (*input).mz
-            {
-                (*output).mx = (*output).nx;
-            }
-            if mrc_head_write((*output).fp.cast(), output) != 0 {
-                grap_volume_free(volume);
-                return -1;
-            }
+        crate::imod::clip::clip::show_status("Doing 3d fast fourier transform in core...\n");
+        clip_fftvol(volume);
+        mrc_head_new(
+            &mut *output,
+            (*(*(*volume).vol)).xsize,
+            (*(*(*volume).vol)).ysize,
+            (*volume).zsize,
+            (*(*(*volume).vol)).mode,
+        );
+        mrc_head_label_cp(&*input, &mut *output);
+        mrc_head_label(
+            &mut *output,
+            if (*input).mode != MRC_MODE_COMPLEX_FLOAT {
+                b"Clip: Forward 3D FFT"
+            } else {
+                b"Clip: Inverse 3D FFT"
+            },
+        );
+        if grap_volume_write(volume, output, options) != 0 {
+            return -1;
+        }
+        mrc_coord_cp(&mut *output, &*input);
+        if (*input).nx == (*input).mx && (*input).ny == (*input).my && (*input).nz == (*input).mz {
+            (*output).mx = (*output).nx;
+        }
+        if mrc_head_write((*output).fp.cast(), output) != 0 {
+            return -1;
         }
         grap_volume_free(volume);
-        result
+        0
     }
 }
 /// C++ `clip_fftvol` (`fft.cpp:258`).
@@ -328,6 +370,9 @@ pub unsafe fn clip_wrapvol(volume: *mut Istack, direction: i32) -> i32 {
         let temporary =
             libc::malloc((2 * (*first).xsize) as usize * core::mem::size_of::<f32>()).cast::<f32>();
         if temporary.is_null() {
+            crate::imod::clip::clip::show_error(
+                "fft: Memory error getting array for temporary line of data\n",
+            );
             return 1;
         }
         for z in 0..(*volume).zsize {
@@ -387,11 +432,8 @@ pub unsafe fn mrc_odfft(buffer: *mut f32, nx: i32, ny: i32, idir: i32) -> i32 {
     0
 }
 /// C++ `clip_nicesize` (`fft.cpp:405`).
-///
-/// The caller supplies the `usingFFTW()` result because the FFT backend is an
-/// external IMOD build-time dependency.
-pub fn clip_nicesize(mut size: i32, using_fftw: bool) -> i32 {
-    if using_fftw {
+pub fn clip_nicesize(mut size: i32) -> i32 {
+    if crate::imod::libfft::using_fftw() != 0 {
         return 1;
     }
     for factor in 2..20 {
@@ -408,8 +450,7 @@ mod tests {
 
     #[test]
     fn nice_sizes_match_clip_factor_rule() {
-        assert_eq!(clip_nicesize(19 * 19 * 18, false), 1);
-        assert_eq!(clip_nicesize(23, false), 0);
-        assert_eq!(clip_nicesize(23, true), 1);
+        assert_eq!(clip_nicesize(19 * 19 * 18), 1);
+        assert_eq!(clip_nicesize(23), 0);
     }
 }

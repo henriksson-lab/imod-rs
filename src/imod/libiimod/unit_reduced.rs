@@ -141,7 +141,7 @@ pub unsafe extern "C" fn iiu_read_binned(
     binsq = (nbin * nbin) as ::core::ffi::c_float;
     if (lenTemp as ::core::ffi::c_float) < binsq {
         printf(
-            b"\nERROR: iiu_read_binned - Binning too large for temporary array\n\0" as *const u8
+            b"\nERROR: iiuReadBinned - Binning too large for temporary array\n\0" as *const u8
                 as *const ::core::ffi::c_char,
         );
         return;

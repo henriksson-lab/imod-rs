@@ -1,34 +1,43 @@
 //! `IMOD/Etomo/src/etomo/storage/autodoc/ReadOnlyAttributeList.java`.
+#![allow(dead_code)]
 
+use super::attribute::Attribute;
 use super::read_only_attribute_iterator::ReadOnlyAttributeIterator;
 
-/// Source `ReadOnlyAttributeList` interface.  `T` is the eventual Rust
-/// translation of Java's package-private `Attribute`; the generic is directly
-/// equivalent to Java's `Iterator<Attribute>` return contract.
-pub trait ReadOnlyAttributeList<T> {
+/// Source `ReadOnlyAttributeList` interface.  Java's `ReadOnlyAttributeIterator` walks
+/// a `List<Attribute>`; `AttributeList`'s list holds Java references, so the element
+/// type is `*mut Attribute` here.
+pub trait ReadOnlyAttributeList {
     /// Java `iterator()`.
-    fn iterator(&self) -> ReadOnlyAttributeIterator<'_, T>;
+    fn iterator(&self) -> ReadOnlyAttributeIterator<'_, *mut Attribute>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::ReadOnlyAttributeList;
-    use crate::imod::etomo::storage::autodoc::read_only_attribute_iterator::ReadOnlyAttributeIterator;
+    use crate::imod::etomo::storage::autodoc::attribute_list::AttributeList;
+    use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+    use crate::imod::etomo::storage::autodoc::read_only_attribute::ReadOnlyAttribute;
+    use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+    use crate::imod::etomo::storage::autodoc::writable_autodoc::WritableAutodoc;
 
-    struct AttributeList {
-        values: Vec<String>,
-    }
-    impl ReadOnlyAttributeList<String> for AttributeList {
-        fn iterator(&self) -> ReadOnlyAttributeIterator<'_, String> {
-            ReadOnlyAttributeIterator::new(&self.values)
-        }
-    }
+    /// `iterator()` walks `list`, which carries the source's insertion order, and a
+    /// repeated attribute is one entry with a second occurrence rather than a second
+    /// entry.
     #[test]
-    fn source_interface_returns_read_only_attribute_iterator() {
-        let list = AttributeList {
-            values: vec!["Name".into()],
-        };
-        let mut iterator = list.iterator();
-        assert_eq!(iterator.next().map(String::as_str), Some("Name"));
+    fn iterator_keeps_the_source_insertion_order() {
+        unsafe {
+            let autodoc = Autodoc::new(Some("iter"), std::ptr::null_mut());
+            (*autodoc).add_name_value_pair_attribute(Some("first"), Some("1"));
+            (*autodoc).add_name_value_pair_attribute(Some("second"), Some("2"));
+            (*autodoc).add_name_value_pair_attribute(Some("first"), Some("3"));
+            let children: *mut AttributeList = (*autodoc).get_children();
+            let mut iterator = (*children).iterator();
+            let mut names = Vec::new();
+            while iterator.has_next() {
+                names.push(ReadOnlyAttribute::get_name(&**iterator.next().unwrap()));
+            }
+            assert_eq!(names, ["first", "second"]);
+        }
     }
 }

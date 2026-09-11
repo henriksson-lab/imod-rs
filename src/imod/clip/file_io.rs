@@ -33,20 +33,20 @@ pub unsafe fn set_mrc_coords(options: *mut ClipOptions) -> i32 {
         (*output).nxstart = (*input).nxstart;
         (*output).nystart = (*input).nystart;
         (*output).nzstart = (*input).nzstart;
-        let mut tx =
-            ((*options).cx as i32 - (*options).ix / 2 + ((*options).ix - (*options).ox) / 2) as f32;
+        let mut tx = ((*options).cx as i32 - (*options).ix / 2) as f32;
+        tx += (((*options).ix - (*options).ox) / 2) as f32;
         if sx != 0. {
             tx *= sx;
         }
         (*output).xorg -= tx;
-        let mut ty =
-            ((*options).cy as i32 - (*options).iy / 2 + ((*options).iy - (*options).oy) / 2) as f32;
+        let mut ty = ((*options).cy as i32 - (*options).iy / 2) as f32;
+        ty += (((*options).iy - (*options).oy) / 2) as f32;
         if sy != 0. {
             ty *= sy;
         }
         (*output).yorg -= ty;
         if (*options).dim == 3 {
-            let mut tz = ((*options).cz - (*options).iz as f32 / 2.).floor();
+            let mut tz = ((*options).cz as f64 - (*options).iz as f64 / 2.).floor() as i32 as f32;
             tz += (((*options).iz - (*options).oz) / 2) as f32;
             if sz != 0. {
                 tz *= sz;
@@ -69,8 +69,10 @@ pub unsafe fn set_input_options(
     unsafe {
         if (*options).nofsecs == IP_DEFAULT {
             (*options).nofsecs = (*input).nz;
-            (*options).secs =
-                libc::malloc(core::mem::size_of::<i32>() * (*input).nz as usize).cast();
+            (*options).secs = libc::malloc(
+                core::mem::size_of::<i32>().wrapping_mul((*input).nz as isize as usize),
+            )
+            .cast();
             for i in 0..(*input).nz {
                 *(*options).secs.add(i as usize) = i;
             }
@@ -90,17 +92,22 @@ pub unsafe fn set_input_options(
             if (*options).nofsecs != IP_DEFAULT {
                 libc::free((*options).secs.cast());
             }
-            let mut zst = ((*options).cz - (*options).iz as f32 / 2.).floor() as i32;
+            let mut zst = ((*options).cz as f64 - (*options).iz as f64 / 2.).floor() as i32;
             let znd = (zst + (*options).iz - 1).min((*input).nz - 1).max(0);
             zst = zst.min((*input).nz - 1).max(0);
             (*options).nofsecs = znd + 1 - zst;
-            (*options).secs =
-                libc::malloc(core::mem::size_of::<i32>() * (*options).nofsecs as usize).cast();
+            // `file_io.cpp:113`: sizeof(int) * opt->nofsecs is a size_t product;
+            // a negative nofsecs wraps and malloc fails, and the fill loop below
+            // then does not run.
+            (*options).secs = libc::malloc(
+                core::mem::size_of::<i32>().wrapping_mul((*options).nofsecs as isize as usize),
+            )
+            .cast();
             for i in zst..=znd {
                 *(*options).secs.add((i - zst) as usize) = i;
             }
             if (*options).oz != IP_DEFAULT && (*options).oz > (*options).nofsecs {
-                let ozst = ((*options).cz - (*options).oz as f32 / 2.).floor() as i32;
+                let ozst = ((*options).cz as f64 - (*options).oz as f64 / 2.).floor() as i32;
                 (*options).out_before = (zst - ozst).max(0);
                 (*options).out_after = (*options).oz - (*options).nofsecs - (*options).out_before;
                 if (*options).out_after < 0 {
@@ -543,7 +550,6 @@ pub unsafe fn grap_volume_read(input: *mut MrcHeader, options: *mut ClipOptions)
         for z in 0..(*options).iz {
             let out = slice_create((*options).ix, (*options).iy, (*input).mode);
             if out.is_null() {
-                grap_volume_free(volume);
                 return core::ptr::null_mut();
             }
             (*volume).vol.add(z as usize).write(out);
@@ -558,10 +564,9 @@ pub unsafe fn grap_volume_read(input: *mut MrcHeader, options: *mut ClipOptions)
         }
         let source = slice_create((*input).nx, (*input).ny, (*input).mode);
         if source.is_null() {
-            grap_volume_free(volume);
             return core::ptr::null_mut();
         }
-        let start_z = ((*options).cz - (*options).iz as f32 / 2.).floor() as i32;
+        let start_z = ((*options).cz - (*options).iz as f32 * 0.5f32).floor() as i32;
         for z in 0..(*options).iz {
             let file_z = start_z + z;
             if file_z < 0 || file_z >= (*input).nz {
@@ -575,17 +580,15 @@ pub unsafe fn grap_volume_read(input: *mut MrcHeader, options: *mut ClipOptions)
                 b'z' as i8,
             ) != 0
             {
-                slice_free(source);
-                grap_volume_free(volume);
                 return core::ptr::null_mut();
             }
-            let start_y = ((*options).cy - (*options).iy as f32 / 2.).floor() as i32;
+            let start_y = ((*options).cy as f64 - (*options).iy as f64 / 2.).floor() as i32;
             for y in 0..(*options).iy {
                 let from_y = start_y + y;
                 if from_y < 0 || from_y >= (*input).ny {
                     continue;
                 }
-                let start_x = ((*options).cx - (*options).ix as f32 / 2.).floor() as i32;
+                let start_x = ((*options).cx as f64 - (*options).ix as f64 / 2.).floor() as i32;
                 for x in 0..(*options).ix {
                     let from_x = start_x + x;
                     if from_x < 0 || from_x >= (*input).nx {

@@ -2,9 +2,9 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libcfshr::autodoc::{
-    adoc_get_collection_name, adoc_get_image_meta_info, adoc_get_num_collections,
-    adoc_get_number_of_sections, adoc_get_section_name, adoc_new, adoc_read, adoc_set_current,
-    adoc_transfer_section,
+    ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_get_collection_name, adoc_get_image_meta_info,
+    adoc_get_num_collections, adoc_get_number_of_sections, adoc_get_section_name, adoc_new,
+    adoc_read, adoc_set_current, adoc_transfer_section,
 };
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_output_file_type};
 use crate::imod::libcfshr::ilist::{
@@ -458,6 +458,18 @@ pub unsafe fn ii_open(filename: *const c_char, mode: *const c_char) -> *mut Imod
             ii_delete(file);
             return core::ptr::null_mut();
         }
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiOpen - {} has shared memory prefix but does not have correct form: {}\n",
+                core::ffi::CStr::from_ptr(filename).to_string_lossy(),
+                // `iimage.c:284` passes a single argument for two `%s`
+                // conversions; the reference reads whatever follows in the
+                // varargs list.  Repeat the name rather than emulate that
+                // undefined read.
+                core::ffi::CStr::from_ptr(filename).to_string_lossy()
+            ),
+        );
         return core::ptr::null_mut();
     }
     let file = ii_new();
@@ -465,25 +477,53 @@ pub unsafe fn ii_open(filename: *const c_char, mode: *const c_char) -> *mut Imod
         return core::ptr::null_mut();
     }
     unsafe {
+        *libc::__errno_location() = 0;
         (*file).fp = if filename.is_null() || *filename == 0 {
             stdin
         } else {
             libc::fopen(filename, mode)
         };
         if (*file).fp.is_null() || init_check_list() != 0 {
+            if (*file).fp.is_null() {
+                b3d_error(
+                    stderr,
+                    format_args!(
+                        "ERROR: iiOpen - Opening file {} ({})\n",
+                        core::ffi::CStr::from_ptr(filename).to_string_lossy(),
+                        core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location()))
+                            .to_string_lossy()
+                    ),
+                );
+            } else {
+                b3d_error(
+                    stderr,
+                    format_args!(
+                        "ERROR: iiOpen - Opening file {}\n",
+                        core::ffi::CStr::from_ptr(filename).to_string_lossy()
+                    ),
+                );
+            }
             ii_delete(file);
             return core::ptr::null_mut();
         }
+        (*file).format = IIFILE_UNKNOWN;
         if !filename.is_null() {
             (*file).filename = libc::strdup(filename);
         }
         if !mode.is_null() {
             core::ptr::copy_nonoverlapping(mode, (*file).fmode.as_mut_ptr(), 3);
         }
-        (*file).format = IIFILE_UNKNOWN;
         for index in 0..ilist_size(S_CHECK_LIST) {
             let check = *ilist_item(S_CHECK_LIST, index).cast::<IiFileCheckFunction>();
             if (*file).fp.is_null() {
+                // `iimage.c:292-294`.
+                b3d_error(
+                    stderr,
+                    format_args!(
+                        "ERROR: iiOpen - {} could not be reopened\n",
+                        core::ffi::CStr::from_ptr(filename).to_string_lossy()
+                    ),
+                );
                 break;
             }
             let err = check.unwrap()(file);
@@ -493,6 +533,15 @@ pub unsafe fn ii_open(filename: *const c_char, mode: *const c_char) -> *mut Imod
                     if add_to_opened_list(file) == 0 {
                         return file;
                     }
+                } else {
+                    // `iimage.c:299-302`.
+                    b3d_error(
+                        stderr,
+                        format_args!(
+                            "ERROR: iiOpen - {} is an HDF file with multiple volumes and cannot be opened by this program or with current options to the program\n",
+                            core::ffi::CStr::from_ptr(filename).to_string_lossy()
+                        ),
+                    );
                 }
                 ii_delete(file);
                 return core::ptr::null_mut();
@@ -979,26 +1028,54 @@ pub unsafe fn ii_fclose(fp: *mut libc::FILE) {
         }
     }
 }
+/// Matches C `iiFOpenVolume` (`iimage.c:896`).
 pub unsafe fn ii_fopen_volume(in_file: *mut ImodImageFile, vol_index: i32) -> *mut libc::FILE {
-    if in_file.is_null()
-        || (*in_file).file != IIFILE_HDF
-        || (*in_file).num_volumes < 2
-        || vol_index < 1
-        || vol_index >= (*in_file).num_volumes
-    {
+    if in_file.is_null() {
+        return core::ptr::null_mut();
+    }
+    if (*in_file).file != IIFILE_HDF || (*in_file).num_volumes < 2 {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiFOpenVolume - Attempting to open a secondary volume for a non-HDF file or an HDF file with only a stack or one volume"
+            ),
+        );
+        return core::ptr::null_mut();
+    }
+    if vol_index < 1 || vol_index >= (*in_file).num_volumes {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiFOpenVolume - Requested volume index {vol_index} out of range\n"
+            ),
+        );
         return core::ptr::null_mut();
     }
     let volume = *(*in_file).ii_volumes.add(vol_index as usize);
     if ii_reopen(volume) != 0 {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiFOpenVolume - Error calling iiReopen on volume at index {vol_index}\n"
+            ),
+        );
         return core::ptr::null_mut();
     }
     (*volume).fp
 }
+/// Matches C `iiFOpenNewVolume` (`iimage.c:925`).
 pub unsafe fn ii_fopen_new_volume(in_file: *mut ImodImageFile) -> *mut libc::FILE {
-    if in_file.is_null()
-        || (*in_file).file != IIFILE_HDF
-        || (!(*in_file).stack_set_list.is_null() && (*in_file).nz > 1)
+    if in_file.is_null() {
+        return core::ptr::null_mut();
+    }
+    if (*in_file).file != IIFILE_HDF || (!(*in_file).stack_set_list.is_null() && (*in_file).nz > 1)
     {
+        b3d_error(
+            stderr,
+            format_args!(
+                "ERROR: iiFOpenNewVolume - Attempting to create an additional volume for a non-HDF file or an HDF file with a stack in it\n"
+            ),
+        );
         return core::ptr::null_mut();
     }
     if ii_hdf_open_new(in_file, c"wb+".as_ptr()) != 0 {
@@ -1129,10 +1206,10 @@ pub unsafe fn ii_transfer_adoc_sections(
     }
     if adoc_set_current((*from_file).adoc_index) != 0
         || adoc_transfer_section(
-            c"Global".as_ptr(),
+            ADOC_GLOBAL_NAME.as_ptr(),
             0,
             (*to_file).adoc_index,
-            c"Global".as_ptr(),
+            ADOC_GLOBAL_NAME.as_ptr(),
             0,
         ) != 0
     {
@@ -1157,7 +1234,7 @@ pub unsafe fn ii_transfer_adoc_sections(
             return 1;
         }
         let mut err = 0;
-        if libc::strcmp(coll_name, c"ZValue".as_ptr()) == 0 {
+        if libc::strcmp(coll_name, ADOC_ZVALUE_NAME.as_ptr()) == 0 {
             for section in 0..adoc_get_number_of_sections(coll_name) {
                 let mut section_name = core::ptr::null_mut();
                 if adoc_get_section_name(coll_name, section, &mut section_name) != 0 {
@@ -1504,7 +1581,11 @@ pub unsafe fn ii_convert_line_of_floats(
                     }
                 } else if bytes_signed != 0 {
                     for i in 0..nx {
-                        let mut ival = (*fbufp.add(i as usize) - 127.5).floor() as i32;
+                        // `iimage.c:1339`: `127.5` is a double literal and `floor`
+                        // is the double version, so the float promotes and the
+                        // whole expression evaluates in double.  Doing it in f32
+                        // lands one off on values near a .5 boundary.
+                        let mut ival = (*fbufp.add(i as usize) as f64 - 127.5).floor() as i32;
                         ival = ival.clamp(-128, 127);
                         *sbdata.add(i as usize) = ival as i8;
                     }
@@ -1518,7 +1599,9 @@ pub unsafe fn ii_convert_line_of_floats(
             }
             MRC_MODE_SHORT => {
                 for i in 0..nx {
-                    let mut ival = (*fbufp.add(i as usize) + 0.5).floor() as i32;
+                    // `iimage.c:1357`: `0.5` is a double literal and `floor` is the
+                    // double version -- unlike the unsigned arms, which use `0.5f`.
+                    let mut ival = (*fbufp.add(i as usize) as f64 + 0.5).floor() as i32;
                     ival = ival.clamp(-32768, 32767);
                     *sdata.add(i as usize) = ival as i16;
                 }

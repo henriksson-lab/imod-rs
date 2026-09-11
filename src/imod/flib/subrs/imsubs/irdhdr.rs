@@ -67,13 +67,50 @@ pub unsafe fn irdhdr(
         let mut nd2 = 0;
         let mut vd1 = 0.0;
         let mut vd2 = 0.0;
+        // Fortran `Gw.d` editing (F2008 10.7.5.2.2): a value whose decimal
+        // exponent falls in 0..=d prints in F editing with (d - exponent)
+        // fraction digits followed by four blanks, and anything else falls back
+        // to E editing.  `{:w.d}` is plain F editing and matches neither.
+        let g_edit = |value: f32, w: usize, d: i32| -> String {
+            let magnitude = value.abs();
+            let mut digits = String::new();
+            let mut exponent = 1_i32;
+            if magnitude != 0.0 {
+                let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
+                let (mantissa, power) = scientific.split_once('e').unwrap();
+                digits = mantissa.replace('.', "");
+                exponent = power.parse::<i32>().unwrap() + 1;
+            }
+            if (0..=d).contains(&exponent) {
+                let mut text = format!("{:.*}", (d - exponent) as usize, value);
+                if exponent == d {
+                    text.push('.');
+                }
+                format!("{:>1$}    ", text, w - 4)
+            } else {
+                format!(
+                    "{:>1$}",
+                    format!(
+                        "{}0.{}E{}{:02}",
+                        if value < 0.0 { "-" } else { "" },
+                        digits,
+                        if exponent < 0 { '-' } else { '+' },
+                        exponent.abs()
+                    ),
+                    w
+                )
+            }
+        };
         let mut delta = [0.0_f32; 3];
         let mut cell = [0.0_f32; 6];
         let mut mapcrs = [0_i32; 3];
         let mut xorig = 0.0;
         let mut yorig = 0.0;
         let mut zorig = 0.0;
-        let mut labels = [[0_u8; 81]; 10];
+        // `iiuRetLabels` stores 80-byte records (`unit_header.rs:755` steps
+        // by 20 four-byte words), so an 81-byte stride reads every title
+        // after the first one byte late.
+        let mut labels = [[0_u8; 80]; 10];
         let mut num_labels = 0;
         let mut tilt = [0.0_f32; 3];
         let mut tilt_orig = [0.0_f32; 3];
@@ -99,7 +136,7 @@ pub unsafe fn irdhdr(
         iiu_ret_rms(iunit, &mut rms);
         if ispg == 401 && *nxyz.add(2) / *mxyz.add(2) > 1 {
             println!(
-                "\n  This file is an MRC volume stack with{:7} subvolumes of{:4} x{:4} x{:4}",
+                "\n  This file is an MRC volume stack with{:7} subvolumes of {:4} x{:4} x{:4}",
                 *nxyz.add(2) / *mxyz.add(2),
                 *nxyz,
                 *nxyz.add(1),
@@ -118,13 +155,16 @@ pub unsafe fn irdhdr(
             } else {
                 "..................."
             };
+            // `irdhdr.f90:20` declares originText, minMaxText and meanText as
+            // `character*19`, so the 20-character literals assigned at
+            // `irdhdr.f90:95-96` are truncated to 19 characters on assignment.
             let min_max_text = if *dmin > *dmax {
-                "...(undetermined)..."
+                "...(undetermined).."
             } else {
                 "..................."
             };
             let mean_text = if *dmean < (*dmin).min(*dmax) {
-                "...(undetermined)..."
+                "...(undetermined).."
             } else {
                 "..................."
             };
@@ -147,7 +187,7 @@ pub unsafe fn irdhdr(
                 *nxyz.add(2)
             );
             println!(
-                " Map mode ..............................{:5}   {}",
+                " Map mode ..............................{:5}   {:<27}",
                 use_mode, mode_label
             );
             println!(
@@ -160,8 +200,10 @@ pub unsafe fn irdhdr(
                 *mxyz.add(2)
             );
             println!(
-                " Pixel spacing (Angstroms).............. {:11.4}{:11.4}{:11.4}",
-                delta[0], delta[1], delta[2]
+                " Pixel spacing (Angstroms).............. {}{}{}",
+                g_edit(delta[0], 11, 4),
+                g_edit(delta[1], 11, 4),
+                g_edit(delta[2], 11, 4)
             );
             println!(
                 " Cell angles ...........................{:9.3}{:9.3}{:9.3}",
@@ -187,39 +229,51 @@ pub unsafe fn irdhdr(
                 }
             );
             println!(
-                " Origin on x,y,z ..{}.. {:12.4}{:12.4}{:12.4}",
-                origin_text, xorig, yorig, zorig
+                " Origin on x,y,z ..{}.. {}{}{}",
+                origin_text,
+                g_edit(xorig, 12, 4),
+                g_edit(yorig, 12, 4),
+                g_edit(zorig, 12, 4)
             );
             let min_label = if *imode == 0 && (iflags & 2 != 0 || imod_flags & 1 != 0) {
-                format!(" ({:13.5} in file)", *dmin - 128.0)
+                format!(" ({} in file)", g_edit(*dmin - 128.0, 13, 5))
             } else {
                 String::new()
             };
             let max_label = if *imode == 0 && (iflags & 2 != 0 || imod_flags & 1 != 0) {
-                format!(" ({:13.5} in file)", *dmax - 128.0)
+                format!(" ({} in file)", g_edit(*dmax - 128.0, 13, 5))
             } else {
                 String::new()
             };
             let mean_label = if *imode == 0 && (iflags & 2 != 0 || imod_flags & 1 != 0) {
-                format!(" ({:13.5} in file)", *dmean - 128.0)
+                format!(" ({} in file)", g_edit(*dmean - 128.0, 13, 5))
             } else {
                 String::new()
             };
             println!(
-                " Minimum density ..{}..{:13.5}{}",
-                min_max_text, *dmin, min_label
+                " Minimum density ..{}..{}{}",
+                min_max_text,
+                g_edit(*dmin, 13, 5),
+                min_label
             );
             println!(
-                " Maximum density ..{}..{:13.5}{}",
-                min_max_text, *dmax, max_label
+                " Maximum density ..{}..{}{}",
+                min_max_text,
+                g_edit(*dmax, 13, 5),
+                max_label
             );
             println!(
-                " Mean density .....{}..{:13.5}{}",
-                mean_text, *dmean, mean_label
+                " Mean density .....{}..{}{}",
+                mean_text,
+                g_edit(*dmean, 13, 5),
+                mean_label
             );
             if rms > 0.0 || (rms == 0.0 && (nversion > 0 || (is_imod != 0 && imod_flags & 8 != 0)))
             {
-                println!(" RMS deviation from mean................{:13.5}", rms);
+                println!(
+                    " RMS deviation from mean................{}",
+                    g_edit(rms, 13, 5)
+                );
             }
             println!(
                 " tilt angles (original,current) ........{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}",
@@ -234,28 +288,34 @@ pub unsafe fn irdhdr(
             for label in labels.iter().take(num_labels.clamp(0, 10) as usize) {
                 println!("{}", String::from_utf8_lossy(&label[..79]));
             }
+            // `10(19a4,a3/)` ends in a slash, so the last title is followed by
+            // one further empty record.
+            println!();
         }
         if do_print && if_brief > 0 {
             println!(
-                " Dimensions:{:7}{:7}{:7}   Pixel size:{:11.4}{:11.4}{:11.4}",
+                " Dimensions:{:7}{:7}{:7}   Pixel size:{}{}{}",
                 *nxyz,
                 *nxyz.add(1),
                 *nxyz.add(2),
-                delta[0],
-                delta[1],
-                delta[2]
+                g_edit(delta[0], 11, 4),
+                g_edit(delta[1], 11, 4),
+                g_edit(delta[2], 11, 4)
             );
             println!(
-                " Mode:{:3}               Min, max, mean:{:13.5}{:13.5}{:13.5}",
-                use_mode, *dmin, *dmax, *dmean
+                " Mode:{:3}               Min, max, mean:{}{}{}",
+                use_mode,
+                g_edit(*dmin, 13, 5),
+                g_edit(*dmax, 13, 5),
+                g_edit(*dmean, 13, 5)
             );
-            if num_labels > 0 {
-                println!("{}", String::from_utf8_lossy(&labels[0][..79]));
-            }
+            // `irdhdr.f90:146-147` writes labels(i,1) unconditionally as the
+            // tail of FORMAT 1008, and labels(i,numLabels) when numLabels > 1.
+            println!("{}", String::from_utf8_lossy(&labels[0][..79]));
             if num_labels > 1 {
                 println!(
                     "{}",
-                    String::from_utf8_lossy(&labels[(num_labels - 1).min(9) as usize][..79])
+                    String::from_utf8_lossy(&labels[(num_labels - 1) as usize][..79])
                 );
             }
             if if_brief < 2 {
@@ -266,7 +326,7 @@ pub unsafe fn irdhdr(
             let lxyz = [' ', 'X', 'Y', 'Z'];
             if idtype == 1 {
                 println!(
-                    "     TILT data set, axis= {} delta,start angle= {:8.2}{:8.2}\n",
+                    "      TILT data set, axis= {} delta,start angle= {:8.2}{:8.2}\n",
                     if (1..=3).contains(&nd1) {
                         lxyz[nd1 as usize]
                     } else {
@@ -288,12 +348,12 @@ pub unsafe fn irdhdr(
                 );
             } else if idtype == 3 {
                 println!(
-                    "     AVERAGED data set, Navg,Noffset   =  {:6}{:6}\n",
+                    "      AVERAGED data set, Navg,Noffset   =  {:6}{:6}\n",
                     nd1, nd2
                 );
             } else if idtype == 4 {
                 println!(
-                    "     AVG STEREO data set, Navg,Noffset=  {:3}{:3} L,R angles= {:8.2}{:8.2}\n",
+                    "      AVG STEREO data set, Navg,Noffset= {:3}{:3} L,R angles= {:8.2}{:8.2}\n",
                     nd1, nd2, vd1, vd2
                 );
             }

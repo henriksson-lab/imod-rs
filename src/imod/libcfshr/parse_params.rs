@@ -67,18 +67,6 @@ unsafe extern "C" {
         __needle: *const ::core::ffi::c_char,
     ) -> *mut ::core::ffi::c_char;
     fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
-    fn AdocRead(filename: *const ::core::ffi::c_char) -> ::core::ffi::c_int;
-    fn AdocClear(index: ::core::ffi::c_int);
-    fn AdocLookupSection(
-        typeName: *const ::core::ffi::c_char,
-        name: *const ::core::ffi::c_char,
-    ) -> ::core::ffi::c_int;
-    fn AdocGetString(
-        collName: *const ::core::ffi::c_char,
-        sectInd: ::core::ffi::c_int,
-        key: *const ::core::ffi::c_char,
-        string: *mut *mut ::core::ffi::c_char,
-    ) -> ::core::ffi::c_int;
 }
 use crate::imod::libcfshr::b3dutil::expand_arg_list;
 pub struct _IO_wide_data {
@@ -2667,16 +2655,16 @@ pub unsafe extern "C" fn pip_read_prog_defaults(mut progName: *const ::core::ffi
         PATH_SEPARATOR,
         DEFAULTS_FILE.as_ptr(),
     );
-    adocInd = AdocRead(sTempStr);
+    adocInd = crate::imod::libcfshr::autodoc::adoc_read(sTempStr);
     if adocInd >= 0 as ::core::ffi::c_int {
-        sectInd = AdocLookupSection(
+        sectInd = crate::imod::libcfshr::autodoc::adoc_lookup_section(
             b"Program\0" as *const u8 as *const ::core::ffi::c_char,
             progName,
         );
         if sectInd >= 0 as ::core::ffi::c_int {
             i = 0 as ::core::ffi::c_int;
             while i < sTableSize {
-                AdocGetString(
+                crate::imod::libcfshr::autodoc::adoc_get_string(
                     b"Program\0" as *const u8 as *const ::core::ffi::c_char,
                     sectInd,
                     (*sOptTable.offset(i as isize)).longName,
@@ -2685,7 +2673,7 @@ pub unsafe extern "C" fn pip_read_prog_defaults(mut progName: *const ::core::ffi
                 i += 1;
             }
         }
-        AdocClear(adocInd);
+        crate::imod::libcfshr::autodoc::adoc_clear(adocInd);
     }
     sExitPrefix[0 as ::core::ffi::c_int as usize] = savePrefix;
 }
@@ -2993,7 +2981,13 @@ pub unsafe extern "C" fn pip_get_line_of_values(
                     numGot = *numToGet;
                     break;
                 } else {
-                    line_of_values_error(fullStr);
+                    line_of_values_error(
+                        fullStr,
+                        format_args!(
+                            "Default entry with a / is not allowed in value entry:  {}  ",
+                            ::core::ffi::CStr::from_ptr(option).to_string_lossy()
+                        ),
+                    );
                     return -(1 as ::core::ffi::c_int);
                 }
             } else {
@@ -3007,7 +3001,13 @@ pub unsafe extern "C" fn pip_get_line_of_values(
                                 break;
                             }
                         } else {
-                            line_of_values_error(fullStr);
+                            line_of_values_error(
+                                fullStr,
+                                format_args!(
+                                    "Default entries with commas are not allowed in value entry:  {}  ",
+                                    ::core::ffi::CStr::from_ptr(option).to_string_lossy()
+                                ),
+                            );
                             return -(1 as ::core::ffi::c_int);
                         }
                     }
@@ -3020,7 +3020,13 @@ pub unsafe extern "C" fn pip_get_line_of_values(
             endPtr = sepPtr;
         }
         if numGot >= arraySize {
-            line_of_values_error(fullStr);
+            line_of_values_error(
+                fullStr,
+                format_args!(
+                    "Too many values for input array in value entry:  {}  ",
+                    ::core::ffi::CStr::from_ptr(option).to_string_lossy()
+                ),
+            );
             return -(1 as ::core::ffi::c_int);
         }
         if valType == PIP_INTEGER {
@@ -3039,7 +3045,13 @@ pub unsafe extern "C" fn pip_get_line_of_values(
             *darray.offset(fresh18 as isize) = strtod(strPtr, &raw mut invalid);
         }
         if invalid != endPtr as *mut ::core::ffi::c_char {
-            line_of_values_error(fullStr);
+            line_of_values_error(
+                fullStr,
+                format_args!(
+                    "Illegal character in value entry:  {}  ",
+                    ::core::ffi::CStr::from_ptr(option).to_string_lossy()
+                ),
+            );
             return -(1 as ::core::ffi::c_int);
         }
         gotComma = 0 as ::core::ffi::c_int;
@@ -3055,14 +3067,26 @@ pub unsafe extern "C" fn pip_get_line_of_values(
         *numToGet = numGot;
     }
     if numGot < *numToGet {
-        line_of_values_error(fullStr);
+        line_of_values_error(
+            fullStr,
+            format_args!(
+                "{} values expected but only {} values found in value entry:  {}  ",
+                *numToGet,
+                numGot,
+                ::core::ffi::CStr::from_ptr(option).to_string_lossy()
+            ),
+        );
         return -(1 as ::core::ffi::c_int);
     }
     return 0 as ::core::ffi::c_int;
 }
-/// Source `LineOfValuesError`; formatting arguments are consumed at the C
-/// variadic boundary, while this Rust body preserves its state effect.
-unsafe fn line_of_values_error(full_str: *const ::core::ffi::c_char) {
+/// Source `LineOfValuesError` (`parse_params.c:1999`).  The C `format`/varargs
+/// pair maps to `core::fmt::Arguments`, the same boundary shape `b3dError`
+/// uses, and `vsprintf` into `sTempStr` is reproduced byte for byte.
+unsafe fn line_of_values_error(
+    full_str: *const ::core::ffi::c_char,
+    format: core::fmt::Arguments<'_>,
+) {
     // `PipLineOfValues` is explicitly usable before `PipInitialize`; the C
     // `LineOfValuesError` therefore obtains this scratch buffer on demand.
     if sTempStr.is_null() {
@@ -3071,7 +3095,15 @@ unsafe fn line_of_values_error(full_str: *const ::core::ffi::c_char) {
     if sTempStr.is_null() {
         return;
     }
-    *sTempStr = 0;
+    let text = format.to_string();
+    let bytes = text.as_bytes();
+    let count = bytes.len().min(TEMP_STR_SIZE as usize - 1);
+    ::core::ptr::copy_nonoverlapping(
+        bytes.as_ptr().cast::<::core::ffi::c_char>(),
+        sTempStr,
+        count,
+    );
+    *sTempStr.add(count) = 0;
     append_to_error_string(full_str);
 }
 pub unsafe extern "C" fn get_next_value_string(

@@ -1,8 +1,9 @@
 //! Translation of `IMOD/mrc/tif2mrc.c`.
 //!
-//! The old `b3dtiff.h` reader remains at its C ABI.  This intentionally does
-//! not substitute another TIFF decoder: palette and TVIPS behaviour must match IMOD.
-#![allow(dead_code, unused_variables)]
+//! The old `b3dtiff.h` reader remains the default C-ABI path.  A deliberately
+//! opt-in Rust decoder may be selected for its currently supported TIFF cases;
+//! palette and TVIPS behavior continue to require the parity reader.
+#![allow(dead_code, unused_variables, unused_assignments, unused_mut)]
 
 use crate::imod::libcfshr::b3dutil::{
     b3d_shift_bytes, imod_backup_file, imod_prog_name, mrc_big_seek, override_write_bytes,
@@ -16,10 +17,19 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_NLABELS, MrcHeader, mrc_head_label, mrc_head_new, mrc_head_write,
 };
 pub use crate::imod::mrc::tiff::{
-    TfEntry, TfHeader, TfInfo, tiff_close_file, tiff_ifd_number, tiff_open_file, tiff_read_file,
-    tiff_read_section,
+    TfEntry, TfHeader, TfInfo, read_tiffentries, read_tiffheader, tiff_close_file, tiff_first_ifd,
+    tiff_ifd_number, tiff_open_file, tiff_read_file, tiff_read_section,
 };
 use core::ffi::c_char;
+
+unsafe extern "C" {
+    static mut stdout: *mut libc::FILE;
+}
+
+/// `b3dtiff.h:68`.
+const WIDTHINDEX: usize = 1;
+/// `b3dtiff.h:69`.
+const LENGTHINDEX: usize = 2;
 
 const IITYPE_INT: i32 = 4;
 const IITYPE_UINT: i32 = 5;
@@ -30,7 +40,13 @@ const IIFLAG_BYTES_SWAPPED: u32 = 4;
 /// Original `usage` (`tif2mrc.c:32`).
 unsafe fn usage(progname: *const c_char) -> ! {
     unsafe {
-        libc::printf(c"Tif2mrc Version\n".as_ptr());
+        // `tif2mrc.c:33`: `VERSION_NAME`, `__DATE__` and `__TIME__`.
+        libc::printf(
+            c"Tif2mrc Version %s %s %s\n".as_ptr(),
+            c"5.2.17".as_ptr(),
+            crate::imod::libcfshr::b3dutil::IMOD_BUILD_DATE.as_ptr(),
+            crate::imod::libcfshr::b3dutil::IMOD_BUILD_TIME.as_ptr(),
+        );
         crate::imod::libcfshr::b3dutil::imod_copyright();
         libc::printf(
             c"Usage: %s [options] <tiff files...> <mrcfile>\n".as_ptr(),
@@ -51,7 +67,7 @@ unsafe fn usage(progname: *const c_char) -> ! {
         );
         libc::printf(c"\t-B #    Write bytes as unsigned (for # 0) or signed (for # 1)\n".as_ptr());
         libc::printf(c"\t-i      Invert order of sections in output stack\n".as_ptr());
-        libc::printf(c"\t-p #    Set pixel spacing in MRC header to given #\n".as_ptr());
+        libc::printf(c"\t-p  #   Set pixel spacing in MRC header to given #\n".as_ptr());
         libc::printf(
             c"\t-P      Set pixel spacing in MRC header from resolution in TIFF file\n".as_ptr(),
         );
@@ -60,7 +76,7 @@ unsafe fn usage(progname: *const c_char) -> ! {
         );
         libc::printf(c"\t-f      Read only first image of multi-page file\n".as_ptr());
         libc::printf(c"\t-o x,y  Set output file size in X and Y\n".as_ptr());
-        libc::printf(c"\t-F #    Set value to fill areas with no image data to given #\n".as_ptr());
+        libc::printf(c"\t-F  #   Set value to fill areas with no image data to given #\n".as_ptr());
         libc::printf(c"\t-b file Background subtract image in given file\n".as_ptr());
         libc::printf(
             c"\t-t #    Set criterion in megabytes for reading files in chunks\n".as_ptr(),
@@ -107,20 +123,38 @@ unsafe fn manage_mode(
 /// Original `convertrgb` (`tif2mrc.c:661`).
 unsafe fn convertrgb(tifdata: *mut u8, xsize: i32, ysize: i32, ntsc: i32) {
     unsafe {
+        let mut pixel: i32;
+        let mut fpixel: f32;
         let mut input = tifdata;
         let mut output = tifdata;
-        for _ in 0..(xsize as usize * ysize as usize) {
-            let value = if ntsc != 0 {
-                (*input as f32 * 0.3
-                    + *input.add(1) as f32 * 0.59
-                    + *input.add(2) as f32 * 0.11
-                    + 0.5) as u8
-            } else {
-                ((*input as i32 + *input.add(1) as i32 + *input.add(2) as i32) / 3) as u8
-            };
-            *output = value;
-            input = input.add(3);
-            output = output.add(1);
+        let xysize = xsize as usize * ysize as usize;
+        if ntsc != 0 {
+            for _ in 0..xysize {
+                // `tif2mrc.c:672-674` accumulates through a `float fpixel`
+                // while each term is computed in double (the weights are
+                // double constants), so the running sum is rounded back to
+                // float after every term.  Keeping this as one f32 expression
+                // shifts occasional pixels by one count.
+                fpixel = (*input as f64 * 0.3) as f32;
+                input = input.add(1);
+                fpixel = (fpixel as f64 + *input as f64 * 0.59) as f32;
+                input = input.add(1);
+                fpixel = (fpixel as f64 + *input as f64 * 0.11) as f32;
+                input = input.add(1);
+                *output = (fpixel + 0.5f32) as i32 as u8;
+                output = output.add(1);
+            }
+        } else {
+            for _ in 0..xysize {
+                pixel = *input as i32;
+                input = input.add(1);
+                pixel += *input as i32;
+                input = input.add(1);
+                pixel += *input as i32;
+                input = input.add(1);
+                *output = (pixel / 3) as u8;
+                output = output.add(1);
+            }
         }
     }
 }
@@ -321,137 +355,212 @@ unsafe fn manage_tvipsdata(
 }
 
 /// Original `main` (`tif2mrc.c:58`).  It retains C argv semantics for binary wiring.
-pub unsafe fn tif2mrc(argc: i32, argv: *mut *mut c_char) -> i32 {
+pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
     unsafe {
-        if argc < 3 || argv.is_null() {
-            if argv.is_null() {
-                libc::exit(3);
-            }
-            usage(*argv);
-        }
-        let progname = imod_prog_name(*argv);
-        let prefix = match std::ffi::CString::new(format!(
-            "\nERROR: {} - ",
-            core::ffi::CStr::from_ptr(progname).to_string_lossy(),
-        )) {
-            Ok(prefix) => prefix,
-            Err(_) => return 1,
-        };
-        setExitPrefix(prefix.as_ptr());
-        let mut makegray = 0;
-        let mut use_ntsc = 0;
-        let mut unsign = 0;
-        let mut divide = 0;
-        let mut keep_ushort = 0;
-        let mut force_signed = 0;
-        let mut invert_stack = 0;
-        let mut read_first = 0;
-        let mut pixel_size = 1.0_f32;
-        let mut y_pixel_size = 1.0_f32;
-        let mut pixel_entered = 0;
-        let mut any_tif_pixel = 0;
-        let mut fill_entered = 0;
-        let mut user_fill = 0.0_f32;
+        let bgfp: *mut libc::FILE;
+        let mut tiffp: *mut libc::FILE;
+        let mut mrcfp: *mut libc::FILE;
+
+        let mut tiff: TfInfo = core::mem::zeroed();
+        let mut hdata: MrcHeader = core::mem::zeroed();
+
+        let mut mode = 0_i32;
+        let mut pix_size = 0_i32;
+        let mut bgdata: *mut u8 = core::ptr::null_mut();
+        let mut tifdata: *mut u8;
+        let mut min: f32;
+        let mut max: f32;
+        let mut iarg: i32;
+        let mut k: i32;
+        let mut tmpdata: i32;
+        let mut bg = 0_i32;
+        let mut makegray = 0_i32;
+        let mut fill_entered = 0_i32;
+        let mut unsign = 0_i32;
+        let mut divide = 0_i32;
+        let mut keep_ushort = 0_i32;
+        let mut force_signed = 0_i32;
+        let mut read_first = 0_i32;
+        let mut use_ntsc = 0_i32;
+        let mut any_tif_pixel = 0_i32;
+        let mut pixel_entered = 0_i32;
+        let mut invert_stack = 0_i32;
+        let mut xsize: i32;
+        let mut ysize: i32;
+        let mut iread: i32;
         let mut mrcxsize = 0_i32;
         let mut mrcysize = 0_i32;
-        let mut background = String::new();
-        let mut tilt_file = String::new();
+        let mut user_fill = 0.0_f32;
+        let mut fill_val = 0.0_f32;
+        let mut mean: f32;
+        let mut tmean: f32;
+        let mut tilt_angle = 0.0_f32;
+        let mut pixel_size = 1.0_f32;
+        let mut y_pixel_size = 1.0_f32;
         let mut chunk_criterion = 100.0_f32;
-        let mut names = Vec::<String>::new();
-        let mut index = 1;
-        while index < argc - 1 {
-            let value = core::ffi::CStr::from_ptr(*argv.add(index as usize))
-                .to_string_lossy()
-                .into_owned();
-            if !value.starts_with('-') || value == "-" {
+        let mut bg_bits = 0_i32;
+        let mut bgxsize = 0_i32;
+        let mut bgysize = 0_i32;
+        let mut xoffset: i32;
+        let mut yoffset: i32;
+        let mut xdo: usize;
+        let mut ydo: i32;
+        let first_file_ind: i32;
+        let mut do_chunks: i32;
+        let mut num_chunks: i32;
+        let mut lines_per_chunk: i32;
+        let mut nlines: i32;
+        let mut lines_done: i32;
+        let mut fill_ptr: *const u8;
+        let mut byte_fill = [0_u8; 3];
+        let mut short_fill: i16 = 0;
+        let mut ushort_fill: u16 = 0;
+        let mut label = [0_i8; MRC_LABEL_SIZE + 1];
+        let mut tilt_file: *mut c_char = core::ptr::null_mut();
+        let mut tiltfp: *mut libc::FILE = core::ptr::null_mut();
+        let openmode = c"rb".as_ptr().cast_mut();
+        let mut bgfile: *mut c_char = core::ptr::null_mut();
+        let progname = imod_prog_name(*argv);
+        let mut prefix = [0_i8; 100];
+        // `tif2mrc.c:105-106`.
+        libc::sprintf(prefix.as_mut_ptr(), c"\nERROR: %s - ".as_ptr(), progname);
+        setExitPrefix(prefix.as_ptr());
+        // `exitError` is variadic in the source; the translated entry point takes a
+        // single formatted string, so each call formats into this buffer first.
+        let mut errmess = [0_i8; 512];
+
+        xsize = 0;
+        ysize = 0;
+        mean = 0.;
+        min = 100000.;
+        max = -100000.;
+        label[0] = 0x00;
+
+        if argc < 3 {
+            usage(progname);
+        }
+
+        iarg = 1;
+        while iarg < argc - 1 {
+            let arg = *argv.add(iarg as usize);
+            if *arg == b'-' as c_char {
+                match *arg.add(1) as u8 {
+                    /* help */
+                    b'h' => usage(progname),
+
+                    /* convert rgb to gray scale */
+                    b'g' => makegray = 1,
+
+                    /* convert rgb to gray scale */
+                    b'G' => {
+                        makegray = 1;
+                        use_ntsc = 1;
+                    }
+
+                    /* treat ints as unsigned */
+                    b'u' => unsign = 1,
+
+                    /* treat ints as unsigned and divide by 2*/
+                    b'd' => divide = 1,
+
+                    /* save as unsigned */
+                    b'k' => keep_ushort = 1,
+
+                    /* save unsigned as signed */
+                    b's' => force_signed = 1,
+
+                    /* Control signed nature of byte output */
+                    b'B' => {
+                        iarg += 1;
+                        override_write_bytes(if libc::atof(*argv.add(iarg as usize)) != 0. {
+                            1
+                        } else {
+                            0
+                        });
+                    }
+
+                    /* Invert output stack */
+                    b'i' => invert_stack = 1,
+
+                    /* Insert pixel size in header */
+                    b'p' => {
+                        iarg += 1;
+                        pixel_size = libc::atof(*argv.add(iarg as usize)) as f32;
+                        if pixel_size <= 0. {
+                            pixel_size = 1.;
+                        } else {
+                            pixel_entered = 1;
+                        }
+                        y_pixel_size = pixel_size;
+                    }
+
+                    /* Use resolution from TIFF file regardless of value */
+                    b'P' => any_tif_pixel = 1,
+
+                    /* read only first image */
+                    b'f' => read_first = 1,
+
+                    /* Define fill value */
+                    b'F' => {
+                        iarg += 1;
+                        user_fill = libc::atof(*argv.add(iarg as usize)) as f32;
+                        fill_entered = 1;
+                    }
+
+                    b'b' => {
+                        iarg += 1;
+                        bgfile = libc::strdup(*argv.add(iarg as usize));
+                        bg = 1;
+                    }
+
+                    /* Set output size */
+                    b'o' => {
+                        iarg += 1;
+                        libc::sscanf(
+                            *argv.add(iarg as usize),
+                            c"%d%*c%d".as_ptr(),
+                            &mut mrcxsize as *mut i32,
+                            &mut mrcysize as *mut i32,
+                        );
+                    }
+
+                    b'm' => tiff_set_mapping(0),
+
+                    b't' => {
+                        iarg += 1;
+                        chunk_criterion = libc::atof(*argv.add(iarg as usize)) as f32;
+                    }
+
+                    b'T' => {
+                        iarg += 1;
+                        tilt_file = libc::strdup(*argv.add(iarg as usize));
+                    }
+
+                    _ => {}
+                }
+            } else {
                 break;
             }
-            match value.as_bytes().get(1).copied() {
-                Some(b'g') => makegray = 1,
-                Some(b'G') => {
-                    makegray = 1;
-                    use_ntsc = 1;
-                }
-                Some(b'u') => unsign = 1,
-                Some(b'd') => divide = 1,
-                Some(b'k') => keep_ushort = 1,
-                Some(b's') => force_signed = 1,
-                Some(b'i') => invert_stack = 1,
-                Some(b'f') => read_first = 1,
-                Some(b'P') => any_tif_pixel = 1,
-                Some(b'p') | Some(b'F') | Some(b'o') | Some(b'b') | Some(b't') | Some(b'T')
-                | Some(b'B') => {
-                    index += 1;
-                    if index >= argc - 1 {
-                        usage(progname);
-                    }
-                    let option =
-                        core::ffi::CStr::from_ptr(*argv.add(index as usize)).to_string_lossy();
-                    match value.as_bytes()[1] {
-                        b'p' => {
-                            pixel_size = option.parse::<f32>().unwrap_or(1.0);
-                            if pixel_size <= 0.0 {
-                                pixel_size = 1.0;
-                            } else {
-                                pixel_entered = 1;
-                            }
-                            y_pixel_size = pixel_size;
-                        }
-                        b'F' => {
-                            user_fill = option.parse::<f32>().unwrap_or(0.0);
-                            fill_entered = 1;
-                        }
-                        b'o' => {
-                            let mut pair =
-                                option.split(|character| character == ',' || character == 'x');
-                            mrcxsize = pair.next().and_then(|part| part.parse().ok()).unwrap_or(0);
-                            mrcysize = pair.next().and_then(|part| part.parse().ok()).unwrap_or(0);
-                        }
-                        b'B' => {
-                            override_write_bytes(if option.parse::<f32>().unwrap_or(0.0) != 0.0 {
-                                1
-                            } else {
-                                0
-                            });
-                        }
-                        b'b' => background = option.into_owned(),
-                        b'T' => tilt_file = option.into_owned(),
-                        b't' => chunk_criterion = option.parse().unwrap_or(100.0),
-                        _ => {}
-                    }
-                }
-                Some(b'm') => tiff_set_mapping(0),
-                Some(b'h') => usage(progname),
-                _ => {}
-            }
-            index += 1;
+            iarg += 1;
         }
-        let mut arg_count = argc;
-        let mut first_argument = index;
-        let mut allocated = 0;
-        let mut argument_vector = argv.cast::<*const c_char>() as *const *const c_char;
+
+        if (argc - 1) < (iarg + 1) {
+            exit_error(c"Argument error: no output file specified".as_ptr());
+        }
+        let mut argvp = argv;
+        let mut replaced = 0_i32;
         if replace_file_arg_vec(
-            &mut argument_vector,
-            &mut arg_count,
-            &mut first_argument,
-            &mut allocated,
+            (&mut argvp as *mut *mut *mut c_char).cast::<*const *const c_char>(),
+            &mut argc,
+            &mut iarg,
+            &mut replaced,
         ) != 0
         {
-            return 1;
+            libc::exit(1);
         }
-        names.clear();
-        for input_index in first_argument..arg_count - 1 {
-            names.push(
-                core::ffi::CStr::from_ptr(*argument_vector.add(input_index as usize))
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-        }
+
         if divide + unsign + keep_ushort + force_signed > 1 {
-            exit_error(c"You must select only one of -u, -d, -k, or -s.\n".as_ptr());
-        }
-        if pixel_entered != 0 && any_tif_pixel != 0 {
-            exit_error(c"You cannot enter both -p and -P\n".as_ptr());
+            exit_error(c"You must select only one of -u, -d, -k, or -s.".as_ptr());
         }
         if divide != 0 {
             unsign = 1;
@@ -460,543 +569,613 @@ pub unsafe fn tif2mrc(argc: i32, argv: *mut *mut c_char) -> i32 {
             force_signed = 1;
         }
         tiff_filter_warnings();
-        chunk_criterion *= 1024.0 * 1024.0;
-        let output = core::ffi::CStr::from_ptr(*argument_vector.add((arg_count - 1) as usize))
-            .to_string_lossy()
-            .into_owned();
-        if names.is_empty() {
-            exit_error(c"Argument error: no output file specified\n".as_ptr());
+        chunk_criterion *= 1024. * 1024.;
+        if pixel_entered != 0 && any_tif_pixel != 0 {
+            exit_error(c"You cannot enter both -p and -P".as_ptr());
         }
-        let first_name = match std::ffi::CString::new(names[0].as_bytes()) {
-            Ok(name) => name,
-            Err(_) => return 1,
-        };
-        let mut first: TfInfo = core::mem::zeroed();
-        if tiff_open_file(
-            first_name.as_ptr().cast_mut(),
-            c"rb".as_ptr().cast_mut(),
-            &mut first,
-            any_tif_pixel,
-        ) != 0
-        {
-            exit_error(c"Couldn't open first TIFF file.\n".as_ptr());
-        }
-        if first.iifile.is_null() {
-            let probe = tiff_read_file(first.fp, &mut first);
-            if probe.is_null() {
-                tiff_close_file(&mut first);
-                exit_error(c"Couldn't read first TIFF file.\n".as_ptr());
-            }
-            libc::free(probe.cast());
-        }
-        let mut pix_size = 0;
-        let mut mode = 0;
-        manage_mode(
-            &first,
-            keep_ushort,
-            force_signed,
-            makegray,
-            &mut pix_size,
-            &mut mode,
-        );
-        let first_width = first.width;
-        let first_height = first.length;
-        if first_width < 1 || first_height < 1 {
-            tiff_close_file(&mut first);
-            exit_error(c"First TIFF file has invalid dimensions.\n".as_ptr());
-        }
-        if !first.iifile.is_null() && pixel_entered == 0 {
-            pixel_size = (*first.iifile).xscale;
-            y_pixel_size = (*first.iifile).yscale;
-        }
-        let first_pages = if read_first != 0 {
-            1
-        } else if !first.iifile.is_null() {
-            (*first.iifile).nz
-        } else {
-            tiff_ifd_number(first.fp)
-        };
-        if names.len() == 1 && read_first == 0 && first_pages > 1 {
-            libc::printf(c"Reading multi-paged TIFF file.\n".as_ptr());
-            if !background.is_empty() {
-                tiff_close_file(&mut first);
-                exit_error(
-                    c"Background subtraction not supported for multi-paged images.".as_ptr(),
+        if !tilt_file.is_null() {
+            imod_backup_file(tilt_file);
+            tiltfp = libc::fopen(tilt_file, c"w".as_ptr());
+            if tiltfp.is_null() {
+                libc::snprintf(
+                    errmess.as_mut_ptr(),
+                    512,
+                    c"Opening tilt angle file %s".as_ptr(),
+                    tilt_file,
                 );
+                exit_error(errmess.as_ptr());
             }
-            if mrcxsize != 0 {
+        }
+
+        if iarg == (argc - 2) && read_first == 0 {
+            /* check for multi-paged tiff file. */
+            /* Open the TIFF file. */
+            let tiff_pages: i32;
+
+            if tiff_open_file(
+                *argvp.add(iarg as usize),
+                openmode,
+                &mut tiff,
+                any_tif_pixel,
+            ) != 0
+            {
+                libc::snprintf(
+                    errmess.as_mut_ptr(),
+                    512,
+                    c"Couldn't open %s.".as_ptr(),
+                    *argvp.add(iarg as usize),
+                );
+                exit_error(errmess.as_ptr());
+            }
+
+            tiffp = tiff.fp;
+            if !tiff.iifile.is_null() {
+                tiff_pages = (*tiff.iifile).nz;
+            } else {
+                tiff_pages = tiff_ifd_number(tiffp);
+            }
+            if tiff_pages > 1 {
+                libc::printf(c"Reading multi-paged TIFF file.\n".as_ptr());
+
+                if bg != 0 {
+                    exit_error(
+                        c"Background subtraction not supported for multi-paged images.".as_ptr(),
+                    );
+                }
+
+                if mrcxsize != 0 {
+                    libc::printf(
+                        c"Warning: output file size option ignored for multi-paged file\n".as_ptr(),
+                    );
+                }
+
+                if tiff.iifile.is_null() {
+                    read_tiffheader(tiffp, &mut tiff.header);
+                    libc::rewind(tiffp);
+                    libc::fread((&mut tiff.header.byteorder as *mut i16).cast(), 2, 1, tiffp);
+
+                    tiff.header.first_ifd_offset = tiff_first_ifd(tiffp) as i32;
+                    libc::rewind(tiffp);
+                    read_tiffentries(tiffp, &mut tiff);
+                }
+
+                if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
+                    && imod_backup_file(*argvp.add((argc - 1) as usize)) != 0
+                {
+                    exit_error(c"Couldn't create backup file".as_ptr());
+                }
+                mrcfp = libc::fopen(*argvp.add((argc - 1) as usize), c"wb".as_ptr());
+                if mrcfp.is_null() {
+                    libc::perror(c"tif2mrc".as_ptr());
+                    libc::snprintf(
+                        errmess.as_mut_ptr(),
+                        512,
+                        c"Opening %s\n".as_ptr(),
+                        *argvp.add((argc - 1) as usize),
+                    );
+                    exit_error(errmess.as_ptr());
+                }
+
+                xsize = tiff.directory[WIDTHINDEX].value;
+                ysize = tiff.directory[LENGTHINDEX].value;
+                mrc_head_new(&mut hdata, xsize, ysize, tiff_pages, mode);
+                mrc_head_write(mrcfp, &mut hdata);
+                manage_mode(
+                    &tiff,
+                    keep_ushort,
+                    force_signed,
+                    makegray,
+                    &mut pix_size,
+                    &mut mode,
+                );
+
                 libc::printf(
-                    c"Warning: output file size option ignored for multi-paged file\n".as_ptr(),
+                    c"Converting %d images size %d x %d\n".as_ptr(),
+                    tiff_pages,
+                    xsize,
+                    ysize,
                 );
+
+                for section in 0..tiff_pages {
+                    let in_section = if invert_stack != 0 {
+                        tiff_pages - 1 - section
+                    } else {
+                        section
+                    };
+
+                    tifdata = tiff_read_section(tiffp, &mut tiff, in_section);
+
+                    if tifdata.is_null() {
+                        libc::snprintf(
+                            errmess.as_mut_ptr(),
+                            512,
+                            c"Failed to get image data for section %d".as_ptr(),
+                            in_section,
+                        );
+                        exit_error(errmess.as_ptr());
+                    }
+
+                    if tiff.photometric_interpretation == 3 {
+                        expand_index_to_rgb(&mut tifdata, tiff.iifile, in_section);
+                    }
+
+                    /* convert RGB to gray scale */
+                    if tiff.photometric_interpretation / 2 == 1 && makegray != 0 {
+                        convertrgb(tifdata, xsize, ysize, use_ntsc);
+                    }
+
+                    /* Convert long ints to floats */
+                    convert_long_to_float(tifdata, tiff.iifile);
+
+                    mean += minmaxmean(
+                        tifdata, mode, unsign, divide, xsize, ysize, &mut min, &mut max,
+                    );
+
+                    mrc_big_seek(
+                        mrcfp,
+                        1024,
+                        section * xsize,
+                        ysize * pix_size,
+                        libc::SEEK_SET,
+                    );
+
+                    if mode == 0 && hdata.bytes_signed != 0 {
+                        b3d_shift_bytes(tifdata, tifdata.cast(), xsize, ysize, 1, 1);
+                    }
+                    libc::fwrite(
+                        tifdata.cast(),
+                        (pix_size * xsize) as usize,
+                        ysize as usize,
+                        mrcfp,
+                    );
+
+                    libc::free(tifdata.cast());
+                }
+                /* write more info to mrc header. 1/17/04 eliminate unneeded rewind */
+                if !tiff.iifile.is_null() && pixel_entered == 0 {
+                    pixel_size = (*tiff.iifile).xscale;
+                    y_pixel_size = (*tiff.iifile).yscale;
+                }
+                hdata.nx = xsize;
+                hdata.ny = ysize;
+                hdata.mx = hdata.nx;
+                hdata.my = hdata.ny;
+                hdata.mz = hdata.nz;
+                hdata.xlen = hdata.nx as f32 * pixel_size;
+                hdata.ylen = hdata.ny as f32 * y_pixel_size;
+                hdata.zlen = hdata.nz as f32 * pixel_size;
+                if mode == MRC_MODE_RGB {
+                    hdata.amax = 255.;
+                    hdata.amean = 128.0;
+                    hdata.amin = 0.;
+                } else {
+                    hdata.amax = max;
+                    hdata.amean = mean / hdata.nz as f32;
+                    hdata.amin = min;
+                    libc::printf(
+                        c"Min = %g, Max = %g, Mean = %g\n".as_ptr(),
+                        min as f64,
+                        max as f64,
+                        hdata.amean as f64,
+                    );
+                }
+                hdata.mode = mode;
+                mrc_head_label(&mut hdata, b"tif2mrc: Converted to mrc format.");
+                mrc_head_write(mrcfp, &mut hdata);
+
+                /* cleanup */
+                libc::fclose(mrcfp);
+                libc::exit(0);
+            }
+            tiff_close_file(&mut tiff);
+        }
+
+        /* read in bg file */
+        if bg != 0 {
+            if tiff_open_file(bgfile, openmode, &mut tiff, any_tif_pixel) != 0 {
+                libc::snprintf(
+                    errmess.as_mut_ptr(),
+                    512,
+                    c"Couldn't open %s.".as_ptr(),
+                    bgfile,
+                );
+                exit_error(errmess.as_ptr());
+            }
+            bgfp = tiff.fp;
+            bgdata = tiff_read_file(bgfp, &mut tiff);
+            if bgdata.is_null() {
+                libc::snprintf(errmess.as_mut_ptr(), 512, c"Reading %s.".as_ptr(), bgfile);
+                exit_error(errmess.as_ptr());
+            }
+            bg_bits = tiff.bits_per_sample;
+            if (bg_bits != 8 && bg_bits != 16) || tiff.photometric_interpretation >= 2 {
+                exit_error(c"Background file must be 8 or 16-bit grayscale".as_ptr());
+            }
+
+            bgxsize = tiff.directory[WIDTHINDEX].value;
+            bgysize = tiff.directory[LENGTHINDEX].value;
+
+            if bg_bits == 8 {
+                max = 0.;
+                min = 255.;
+
+                for y in 0..bgysize {
+                    for x in 0..bgxsize as usize {
+                        tmpdata = *bgdata.add(x + (y * bgxsize) as usize) as i32;
+                        if tmpdata as f32 > max {
+                            max = tmpdata as f32;
+                        }
+                        if (tmpdata as f32) < min {
+                            min = tmpdata as f32;
+                        }
+                    }
+                }
+
+                for y in 0..bgysize {
+                    for x in 0..bgxsize as usize {
+                        let at = x + (y * bgxsize) as usize;
+                        *bgdata.add(at) = (max - *bgdata.add(at) as f32) as u8;
+                    }
+                }
+            }
+
+            tiff_close_file(&mut tiff);
+        }
+
+        /* Write out mrcheader */
+        if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
+            && imod_backup_file(*argvp.add((argc - 1) as usize)) != 0
+        {
+            exit_error(c"Couldn't create backup file".as_ptr());
+        }
+        mrcfp = libc::fopen(*argvp.add((argc - 1) as usize), c"wb".as_ptr());
+        if mrcfp.is_null() {
+            libc::perror(c"tif2mrc".as_ptr());
+            libc::snprintf(
+                errmess.as_mut_ptr(),
+                512,
+                c"Opening %s".as_ptr(),
+                *argvp.add((argc - 1) as usize),
+            );
+            exit_error(errmess.as_ptr());
+        }
+        mrc_head_new(&mut hdata, xsize, ysize, argc - iarg - 1, mode);
+        mrc_head_write(mrcfp, &mut hdata);
+
+        /* Loop through all the tiff files adding them to the MRC stack. */
+        first_file_ind = iarg;
+        while iarg < argc - 1 {
+            iread = if invert_stack != 0 {
+                first_file_ind + argc - 2 - iarg
+            } else {
+                iarg
+            };
+
+            /* Open the TIFF file. */
+            if tiff_open_file(
+                *argvp.add(iread as usize),
+                openmode,
+                &mut tiff,
+                any_tif_pixel,
+            ) != 0
+            {
+                libc::snprintf(
+                    errmess.as_mut_ptr(),
+                    512,
+                    c"Couldn't open %s.".as_ptr(),
+                    *argvp.add(iread as usize),
+                );
+                exit_error(errmess.as_ptr());
             }
             libc::printf(
-                c"Converting %d images size %d x %d\n".as_ptr(),
-                first_pages,
-                first_width,
-                first_height,
+                c"Opening %s for input\n".as_ptr(),
+                *argvp.add(iread as usize),
             );
-            let output_name = match std::ffi::CString::new(output.as_bytes()) {
-                Ok(name) => name,
-                Err(_) => {
-                    tiff_close_file(&mut first);
-                    return 1;
-                }
-            };
-            if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
-                && imod_backup_file(output_name.as_ptr()) != 0
-            {
-                tiff_close_file(&mut first);
-                exit_error(c"Couldn't create backup file\n".as_ptr());
-            }
-            let mrcfp = libc::fopen(output_name.as_ptr(), c"wb".as_ptr());
-            if mrcfp.is_null() {
-                tiff_close_file(&mut first);
-                return 1;
-            }
-            let mut hdata: MrcHeader = core::mem::zeroed();
-            if mrc_head_new(&mut hdata, first_width, first_height, first_pages, mode) != 0
-                || mrc_head_write(mrcfp, &mut hdata) != 0
-            {
-                libc::fclose(mrcfp);
-                tiff_close_file(&mut first);
-                return 1;
-            }
-            let mut min = 100000.0_f32;
-            let mut max = -100000.0_f32;
-            let mut mean = 0.0_f32;
-            for section in 0..first_pages {
-                let input_section = if invert_stack != 0 {
-                    first_pages - 1 - section
-                } else {
-                    section
-                };
-                let mut data = tiff_read_section(first.fp, &mut first, input_section);
-                if data.is_null() {
-                    libc::fclose(mrcfp);
-                    tiff_close_file(&mut first);
-                    return 1;
-                }
-                if first.photometric_interpretation == 3 {
-                    expand_index_to_rgb(&mut data, first.iifile, input_section);
-                }
-                if first.photometric_interpretation / 2 == 1 && makegray != 0 {
-                    convertrgb(data, first_width, first_height, use_ntsc);
-                }
-                convert_long_to_float(data, first.iifile);
-                mean += minmaxmean(
-                    data,
-                    mode,
-                    unsign,
-                    divide,
-                    first_width,
-                    first_height,
-                    &mut min,
-                    &mut max,
-                );
-                if mrc_big_seek(
-                    mrcfp,
-                    1024,
-                    section * first_width,
-                    first_height * pix_size,
-                    libc::SEEK_SET,
-                ) != 0
-                {
-                    libc::free(data.cast());
-                    libc::fclose(mrcfp);
-                    tiff_close_file(&mut first);
-                    return 1;
-                }
-                if mode == MRC_MODE_BYTE && hdata.bytes_signed != 0 {
-                    b3d_shift_bytes(data, data.cast(), first_width, first_height, 1, 1);
-                }
-                if libc::fwrite(
-                    data.cast(),
-                    (pix_size * first_width) as usize,
-                    first_height as usize,
-                    mrcfp,
-                ) != first_height as usize
-                {
-                    libc::free(data.cast());
-                    libc::fclose(mrcfp);
-                    tiff_close_file(&mut first);
-                    return 1;
-                }
-                libc::free(data.cast());
-            }
-            if !first.iifile.is_null() && pixel_entered == 0 {
-                pixel_size = (*first.iifile).xscale;
-                y_pixel_size = (*first.iifile).yscale;
-            }
-            hdata.mx = first_width;
-            hdata.my = first_height;
-            hdata.mz = first_pages;
-            hdata.xlen = first_width as f32 * pixel_size;
-            hdata.ylen = first_height as f32 * y_pixel_size;
-            hdata.zlen = first_pages as f32 * pixel_size;
-            if mode == MRC_MODE_RGB {
-                hdata.amin = 0.0;
-                hdata.amax = 255.0;
-                hdata.amean = 128.0;
-            } else {
-                hdata.amin = min;
-                hdata.amax = max;
-                hdata.amean = mean / first_pages as f32;
-                libc::printf(
-                    c"Min = %g, Max = %g, Mean = %g\n".as_ptr(),
-                    min as f64,
-                    max as f64,
-                    hdata.amean as f64,
-                );
-            }
-            hdata.mode = mode;
-            mrc_head_label(&mut hdata, b"tif2mrc: Converted to mrc format.");
-            let result = mrc_head_write(mrcfp, &mut hdata);
-            libc::fclose(mrcfp);
-            tiff_close_file(&mut first);
-            return if result == 0 { 0 } else { 1 };
-        }
-        tiff_close_file(&mut first);
-        let sections = names.len() as i32;
-        if sections < 1 {
-            return 1;
-        }
-        if mrcxsize == 0 || mrcysize == 0 {
-            mrcxsize = first_width;
-            mrcysize = first_height;
-        }
-        let mut bgdata: *mut u8 = core::ptr::null_mut();
-        let mut bg_bits = 0_i32;
-        let mut bgxsize = 0_i32;
-        let mut bgysize = 0_i32;
-        if !background.is_empty() {
-            let name = match std::ffi::CString::new(background.as_bytes()) {
-                Ok(name) => name,
-                Err(_) => return 1,
-            };
-            let mut tif: TfInfo = core::mem::zeroed();
-            if tiff_open_file(
-                name.as_ptr().cast_mut(),
-                c"rb".as_ptr().cast_mut(),
-                &mut tif,
-                any_tif_pixel,
-            ) != 0
-            {
-                return 1;
-            }
-            bgdata = tiff_read_file(tif.fp, &mut tif);
-            bg_bits = tif.bits_per_sample;
-            bgxsize = tif.width;
-            bgysize = tif.length;
-            let invalid = bgdata.is_null()
-                || (bg_bits != 8 && bg_bits != 16)
-                || tif.photometric_interpretation >= 2;
-            tiff_close_file(&mut tif);
-            if invalid {
-                exit_error(c"Background file must be 8 or 16-bit grayscale\n".as_ptr());
-            }
-            if bg_bits == 8 {
-                let mut bgmin = 255_u8;
-                let mut bgmax = 0_u8;
-                for y in 0..bgysize {
-                    for x in 0..bgxsize {
-                        let value = *bgdata.add((x + y * bgxsize) as usize);
-                        bgmax = bgmax.max(value);
-                        bgmin = bgmin.min(value);
-                    }
-                }
-                let _ = bgmin;
-                for y in 0..bgysize {
-                    for x in 0..bgxsize {
-                        let at = (x + y * bgxsize) as usize;
-                        *bgdata.add(at) = bgmax - *bgdata.add(at);
-                    }
-                }
-            }
-        }
-        let mut tiltfp: *mut libc::FILE = core::ptr::null_mut();
-        if !tilt_file.is_empty() {
-            let name = match std::ffi::CString::new(tilt_file.as_bytes()) {
-                Ok(name) => name,
-                Err(_) => {
-                    libc::exit(1);
-                }
-            };
-            if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
-                && imod_backup_file(name.as_ptr()) != 0
-            {
-                exit_error(c"Opening tilt angle file\n".as_ptr());
-            }
-            tiltfp = libc::fopen(name.as_ptr(), c"w".as_ptr());
-            if tiltfp.is_null() {
-                exit_error(c"Opening tilt angle file\n".as_ptr());
-            }
-        }
-        let output_name = match std::ffi::CString::new(output.as_bytes()) {
-            Ok(name) => name,
-            Err(_) => libc::exit(1),
-        };
-        if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
-            && imod_backup_file(output_name.as_ptr()) != 0
-        {
-            exit_error(c"Couldn't create output backup file\n".as_ptr());
-        }
-        let mrcfp = libc::fopen(output_name.as_ptr(), c"wb".as_ptr());
-        if mrcfp.is_null() {
-            exit_error(c"Opening output MRC file\n".as_ptr());
-        }
-        let mut hdata: MrcHeader = core::mem::zeroed();
-        if mrc_head_new(&mut hdata, mrcxsize, mrcysize, sections, mode) != 0 {
-            libc::exit(1);
-        }
-        hdata.fp = mrcfp.cast();
-        if mrc_head_write(mrcfp, &mut hdata) != 0 {
-            libc::exit(1);
-        }
-        let mut min = 100000.0_f32;
-        let mut max = -100000.0_f32;
-        let mut mean = 0.0_f32;
-        let mut out_section = 0_i32;
-        let mut tvips_label = [0_i8; MRC_LABEL_SIZE + 1];
-        for input_index in 0..names.len() {
-            let selected = if invert_stack != 0 {
-                names.len() - 1 - input_index
-            } else {
-                input_index
-            };
-            let name = match std::ffi::CString::new(names[selected].as_bytes()) {
-                Ok(name) => name,
-                Err(_) => {
-                    libc::fclose(mrcfp);
-                    return 1;
-                }
-            };
-            let mut tif: TfInfo = core::mem::zeroed();
-            if tiff_open_file(
-                name.as_ptr().cast_mut(),
-                c"rb".as_ptr().cast_mut(),
-                &mut tif,
-                any_tif_pixel,
-            ) != 0
-            {
-                exit_error(c"Couldn't open input TIFF file.\n".as_ptr());
-            }
-            // `tif2mrc.c:380-381`: regular (non-multipage-fast-path) input
-            // announces each opened TIFF before processing it.
-            libc::printf(c"Opening %s for input\n".as_ptr(), name.as_ptr());
-            libc::fflush(core::ptr::null_mut());
-            if !tiltfp.is_null() {
-                let mut tilt_angle = 0.0_f32;
-                let mut label = [0_i8; MRC_LABEL_SIZE + 1];
-                if manage_tvipsdata(tif.iifile, label.as_mut_ptr(), &mut tilt_angle) != 0 {
-                    exit_error(c"There is no tilt angle value in this file\n".as_ptr());
-                }
-                if label[0] != 0 {
-                    tvips_label = label;
+            libc::fflush(stdout);
+            tiffp = tiff.fp;
+            k = manage_tvipsdata(tiff.iifile, label.as_mut_ptr(), &mut tilt_angle);
+            if !tilt_file.is_null() {
+                if k != 0 {
+                    exit_error(c"There is no tilt angle value in this file".as_ptr());
                 }
                 libc::fprintf(tiltfp, c"%7.2f\n".as_ptr(), tilt_angle as f64);
             }
-            let mut num_chunks = 1;
-            let mut lines_per_chunk = tif.length;
-            if !tif.iifile.is_null() && background.is_empty() {
-                let bytes_per_pixel = if tif.photometric_interpretation == 2 {
+
+            /* Decide whether to set up chunks */
+            do_chunks = 0;
+            num_chunks = 1;
+            lines_per_chunk = 0;
+            lines_done = 0;
+            if !tiff.iifile.is_null() && bg == 0 {
+                xsize = (*tiff.iifile).nx;
+                ysize = (*tiff.iifile).ny;
+                k = if tiff.photometric_interpretation == 2 {
                     3
                 } else {
-                    tif.bits_per_sample / 8
+                    tiff.bits_per_sample / 8
                 };
-                if (mrcxsize == 0 || (tif.width == mrcxsize && tif.length == mrcysize))
-                    && tif.width as f32 * tif.length as f32 * bytes_per_pixel as f32
-                        > chunk_criterion
+                if (mrcxsize == 0 || (xsize == mrcxsize && ysize == mrcysize))
+                    && xsize as f64 * ysize as f64 * k as f64 > chunk_criterion as f64
                 {
                     num_chunks = 1
-                        + (tif.width as f32 * tif.length as f32 * bytes_per_pixel as f32
-                            / chunk_criterion) as i32;
-                    lines_per_chunk = (tif.length + num_chunks - 1) / num_chunks;
+                        + ((xsize as f64 * ysize as f64 * k as f64) / chunk_criterion as f64)
+                            as i32;
+                    do_chunks = 1;
+                    lines_per_chunk = (ysize + num_chunks - 1) / num_chunks;
+                    lines_done = 0;
+                    libc::printf(
+                        c"Reading file in %d chunks of %d lines\n".as_ptr(),
+                        num_chunks,
+                        lines_per_chunk,
+                    );
                 }
             }
-            let mut lines_done = 0;
+
             for chunk in 0..num_chunks {
-                let mut nlines = tif.length;
-                if num_chunks > 1 {
-                    nlines = lines_per_chunk.min(tif.length - lines_done);
-                    (*tif.iifile).lly = lines_done;
-                    (*tif.iifile).ury = lines_done + nlines - 1;
+                nlines = 0;
+                if do_chunks != 0 {
+                    nlines = if lines_per_chunk < ysize - lines_done {
+                        lines_per_chunk
+                    } else {
+                        ysize - lines_done
+                    };
+                    (*tiff.iifile).lly = lines_done;
+                    (*tiff.iifile).ury = lines_done + nlines - 1;
                     lines_done += nlines;
                 }
-                let mut data = tiff_read_file(tif.fp, &mut tif);
-                if data.is_null() {
-                    exit_error(c"Reading TIFF image data\n".as_ptr());
+
+                /* Read in tiff file */
+                tifdata = tiff_read_file(tiffp, &mut tiff);
+                if tifdata.is_null() {
+                    libc::snprintf(
+                        errmess.as_mut_ptr(),
+                        512,
+                        c"Reading %s.".as_ptr(),
+                        *argvp.add(iread as usize),
+                    );
+                    exit_error(errmess.as_ptr());
                 }
-                let xsize = tif.width;
-                let ysize = tif.length;
-                if (tif.bits_per_sample == 16 && mode != MRC_MODE_SHORT && mode != MRC_MODE_USHORT)
-                    || (tif.bits_per_sample == 32 && mode != MRC_MODE_FLOAT)
-                    || (tif.photometric_interpretation / 2 == 1
+
+                xsize = tiff.directory[WIDTHINDEX].value;
+                ysize = tiff.directory[LENGTHINDEX].value;
+                if nlines == 0 {
+                    nlines = ysize;
+                }
+
+                if chunk == 0 && first_file_ind == iarg {
+                    if mrcxsize == 0 || mrcysize == 0 {
+                        mrcxsize = xsize;
+                        mrcysize = ysize;
+                    }
+                    manage_mode(
+                        &tiff,
+                        keep_ushort,
+                        force_signed,
+                        makegray,
+                        &mut pix_size,
+                        &mut mode,
+                    );
+
+                    /* Collect the pixel size the first time */
+                    if !tiff.iifile.is_null() && pixel_entered == 0 {
+                        pixel_size = (*tiff.iifile).xscale;
+                        y_pixel_size = (*tiff.iifile).yscale;
+                    }
+                }
+
+                if (tiff.bits_per_sample == 16 && mode != MRC_MODE_SHORT && mode != MRC_MODE_USHORT)
+                    || (tiff.bits_per_sample == 32 && mode != MRC_MODE_FLOAT)
+                    || (tiff.photometric_interpretation / 2 == 1
                         && makegray == 0
                         && mode != MRC_MODE_RGB)
-                    || (((tif.photometric_interpretation / 2 == 1 && makegray != 0)
-                        || (tif.photometric_interpretation / 2 == 0 && tif.bits_per_sample == 8))
+                    || (((tiff.photometric_interpretation / 2 == 1 && makegray != 0)
+                        || (tiff.photometric_interpretation / 2 == 0 && tiff.bits_per_sample == 8))
                         && mode != MRC_MODE_BYTE)
                 {
-                    exit_error(c"All files must have the same data type.\n".as_ptr());
+                    exit_error(c"All files must have the same data type.".as_ptr());
                 }
-                if tif.photometric_interpretation == 3 {
-                    expand_index_to_rgb(&mut data, tif.iifile, 0);
+
+                if tiff.photometric_interpretation == 3 {
+                    expand_index_to_rgb(&mut tifdata, tiff.iifile, 0);
                 }
-                if tif.photometric_interpretation / 2 == 1 && makegray != 0 {
-                    convertrgb(data, xsize, nlines, use_ntsc);
+
+                /* convert RGB to gray scale */
+                if tiff.photometric_interpretation / 2 == 1 && makegray != 0 {
+                    convertrgb(tifdata, xsize, nlines, use_ntsc);
                 }
-                convert_long_to_float(data, tif.iifile);
-                if !bgdata.is_null() {
+
+                /* Convert long ints to floats */
+                convert_long_to_float(tifdata, tiff.iifile);
+
+                /* Correct for bg */
+                if bg != 0 {
                     if (mode != MRC_MODE_SHORT && mode != MRC_MODE_USHORT && bg_bits == 16)
                         || (mode != MRC_MODE_BYTE && bg_bits == 8)
                     {
                         exit_error(
-                            c"Background data must have the same data type as the image files.\n"
+                            c"Background data must have  the same data type as the image files."
                                 .as_ptr(),
                         );
                     }
-                    let xdo = bgxsize.min(xsize);
-                    let ydo = bgysize.min(ysize);
+
+                    xdo = if bgxsize < xsize { bgxsize } else { xsize } as usize;
+                    ydo = if bgysize < ysize { bgysize } else { ysize };
+
                     if mode == MRC_MODE_BYTE {
                         for y in 0..ydo {
                             for x in 0..xdo {
-                                let at = (x + y * xdo) as usize;
-                                *data.add(at) =
-                                    (*data.add(at) as i32 + *bgdata.add(at) as i32).min(255) as u8;
+                                let at = x + (y as usize * xdo);
+                                tmpdata = *tifdata.add(at) as i32 + *bgdata.add(at) as i32;
+                                if tmpdata > 255 {
+                                    tmpdata = 255;
+                                }
+                                *tifdata.add(at) = tmpdata as u8;
                             }
                         }
                     } else {
+                        let sptr = tifdata.cast::<i16>();
+                        let bgshort = bgdata.cast::<i16>();
                         for y in 0..ydo {
                             for x in 0..xdo {
-                                let at = (x + y * xdo) as usize;
-                                *data.cast::<i16>().add(at) -= *bgdata.cast::<i16>().add(at);
+                                let at = x + (y as usize * xdo);
+                                *sptr.add(at) = (*sptr.add(at)).wrapping_sub(*bgshort.add(at));
                             }
                         }
                     }
                 }
-                let section_mean = minmaxmean(
-                    data, mode, unsign, divide, xsize, nlines, &mut min, &mut max,
+
+                tmean = minmaxmean(
+                    tifdata, mode, unsign, divide, xsize, nlines, &mut min, &mut max,
                 );
-                mean += section_mean * nlines as f32 / ysize as f32;
-                if mode == MRC_MODE_BYTE && hdata.bytes_signed != 0 {
-                    b3d_shift_bytes(data, data.cast(), xsize, nlines, 1, 1);
+                mean += (tmean * nlines as f32) / ysize as f32;
+
+                if mode == 0 && hdata.bytes_signed != 0 {
+                    b3d_shift_bytes(tifdata, tifdata.cast(), xsize, nlines, 1, 1);
                 }
-                if xsize == mrcxsize && ysize == mrcysize {
-                    if libc::fwrite(
-                        data.cast(),
-                        pix_size as usize,
-                        (xsize * nlines) as usize,
+
+                if (xsize == mrcxsize) && (ysize == mrcysize) {
+                    /* Write out mrc file */
+                    libc::fwrite(
+                        tifdata.cast(),
+                        (pix_size * xsize) as usize,
+                        nlines as usize,
                         mrcfp,
-                    ) != (xsize * nlines) as usize
-                    {
-                        exit_error(c"Writing output MRC data\n".as_ptr());
-                    }
+                    );
                 } else {
-                    let fill = if fill_entered != 0 {
-                        user_fill
-                    } else {
-                        section_mean
-                    };
-                    let fill_bytes: Vec<u8> = match mode {
-                        MRC_MODE_BYTE => vec![if hdata.bytes_signed != 0 {
-                            ((fill as i32 - 128) & 255) as u8
-                        } else {
-                            fill as u8
-                        }],
-                        MRC_MODE_SHORT => (fill as i16).to_ne_bytes().to_vec(),
-                        MRC_MODE_USHORT => (fill as u16).to_ne_bytes().to_vec(),
-                        MRC_MODE_FLOAT => fill.to_ne_bytes().to_vec(),
-                        MRC_MODE_RGB => vec![
-                            if fill_entered != 0 {
-                                user_fill as u8
+                    libc::printf(
+                        c"WARNING: tif2mrc - File %s not same size.\n".as_ptr(),
+                        *argvp.add(iread as usize),
+                    );
+
+                    /* Unequal sizes: set the fill value and pointer */
+                    fill_val = if fill_entered != 0 { user_fill } else { tmean };
+                    fill_ptr = core::ptr::null();
+                    match mode {
+                        MRC_MODE_BYTE => {
+                            byte_fill[0] = fill_val as u8;
+                            if hdata.bytes_signed != 0 {
+                                byte_fill[0] = ((fill_val as i32 - 128) & 255) as u8;
+                            }
+                            fill_ptr = byte_fill.as_ptr();
+                        }
+                        MRC_MODE_RGB => {
+                            let value = if fill_entered != 0 {
+                                user_fill as i32 as u8
                             } else {
                                 128
                             };
-                            3
-                        ],
-                        _ => {
-                            exit_error(c"Unsupported output MRC mode\n".as_ptr());
-                            libc::exit(1);
+                            byte_fill[0] = value;
+                            byte_fill[1] = value;
+                            byte_fill[2] = value;
+                            fill_ptr = byte_fill.as_ptr();
                         }
-                    };
-                    let xoffset = (xsize - mrcxsize) / 2;
-                    let yoffset = (ysize - mrcysize) / 2;
+                        MRC_MODE_SHORT => {
+                            short_fill = fill_val as i16;
+                            fill_ptr = (&short_fill as *const i16).cast();
+                        }
+                        MRC_MODE_USHORT => {
+                            ushort_fill = fill_val as u16;
+                            fill_ptr = (&ushort_fill as *const u16).cast();
+                        }
+                        MRC_MODE_FLOAT => {
+                            fill_ptr = (&fill_val as *const f32).cast();
+                        }
+                        _ => {}
+                    }
+
+                    /* Output centered data */
+                    yoffset = (ysize - mrcysize) / 2;
+                    xoffset = (xsize - mrcxsize) / 2;
                     for y in 0..mrcysize {
-                        for x in 0..mrcxsize {
-                            if x + xoffset < 0
-                                || x + xoffset >= xsize
-                                || y + yoffset < 0
-                                || y + yoffset >= ysize
-                            {
-                                if libc::fwrite(
-                                    fill_bytes.as_ptr().cast(),
-                                    pix_size as usize,
-                                    1,
-                                    mrcfp,
-                                ) != 1
-                                {
-                                    exit_error(c"Writing padded output MRC data\n".as_ptr());
-                                }
-                            } else {
-                                let offset = ((x + xoffset) + (y + yoffset) * xsize) as usize
-                                    * pix_size as usize;
-                                if libc::fwrite(
-                                    data.add(offset).cast(),
-                                    pix_size as usize,
-                                    1,
-                                    mrcfp,
-                                ) != 1
-                                {
-                                    exit_error(c"Writing centered output MRC data\n".as_ptr());
-                                }
+                        if y + yoffset < 0 || y + yoffset >= ysize {
+                            /* Do fill lines */
+                            for _x in 0..mrcxsize {
+                                libc::fwrite(fill_ptr.cast(), pix_size as usize, 1, mrcfp);
+                            }
+                        } else {
+                            /* Fill left edge if necessary, write data, fill right if needed */
+                            k = xoffset;
+                            while k < 0 {
+                                libc::fwrite(fill_ptr.cast(), pix_size as usize, 1, mrcfp);
+                                k += 1;
+                            }
+                            xdo = (pix_size
+                                * (if xoffset > 0 { xoffset } else { 0 } + (y + yoffset) * xsize))
+                                as usize;
+                            libc::fwrite(
+                                tifdata.add(xdo).cast(),
+                                pix_size as usize,
+                                (if xsize < mrcxsize { xsize } else { mrcxsize }) as usize,
+                                mrcfp,
+                            );
+                            k = 0;
+                            while k < mrcxsize - xsize + xoffset {
+                                libc::fwrite(fill_ptr.cast(), pix_size as usize, 1, mrcfp);
+                                k += 1;
                             }
                         }
                     }
                 }
-                libc::free(data.cast());
+                if !tifdata.is_null() {
+                    libc::free(tifdata.cast());
+                }
+                tifdata = core::ptr::null_mut();
             }
-            out_section += 1;
-            tiff_close_file(&mut tif);
+
+            tiff_close_file(&mut tiff);
+            iarg += 1;
         }
+
+        /* write more info to mrc header. 1/17/04 eliminate unneeded rewind */
         hdata.nx = mrcxsize;
         hdata.ny = mrcysize;
-        hdata.mx = mrcxsize;
-        hdata.my = mrcysize;
-        hdata.mz = sections;
-        hdata.xlen = mrcxsize as f32 * pixel_size;
-        hdata.ylen = mrcysize as f32 * y_pixel_size;
-        hdata.zlen = sections as f32 * pixel_size;
-        hdata.mode = mode;
+        hdata.mx = hdata.nx;
+        hdata.my = hdata.ny;
+        hdata.mz = hdata.nz;
+        hdata.xlen = hdata.nx as f32 * pixel_size;
+        hdata.ylen = hdata.ny as f32 * y_pixel_size;
+        hdata.zlen = hdata.nz as f32 * pixel_size;
         if mode == MRC_MODE_RGB {
-            hdata.amin = 0.;
             hdata.amax = 255.;
-            hdata.amean = 128.;
+            hdata.amean = 128.0;
+            hdata.amin = 0.;
         } else {
-            hdata.amin = min;
             hdata.amax = max;
-            hdata.amean = mean / sections as f32;
+            hdata.amean = mean / hdata.nz as f32;
+            hdata.amin = min;
+            libc::printf(
+                c"Min = %g, Max = %g, Mean = %g\n".as_ptr(),
+                min as f64,
+                max as f64,
+                hdata.amean as f64,
+            );
         }
+        hdata.mode = mode;
         mrc_head_label(&mut hdata, b"tif2mrc: Converted to MRC format.");
-        if tvips_label[0] != 0 && hdata.nlabl < MRC_NLABELS as i32 {
-            for index in 0..MRC_LABEL_SIZE {
-                hdata.labels[hdata.nlabl as usize][index] = tvips_label[index] as u8;
+        if label[0] != 0x00 {
+            k = libc::strlen(label.as_ptr()) as i32;
+            while k < MRC_LABEL_SIZE as i32 {
+                label[k as usize] = b' ' as i8;
+                k += 1;
             }
-            hdata.labels[hdata.nlabl as usize][MRC_LABEL_SIZE] = 0;
-            hdata.nlabl += 1;
+            if hdata.nlabl < MRC_NLABELS as i32 {
+                for index in 0..MRC_LABEL_SIZE {
+                    hdata.labels[hdata.nlabl as usize][index] = label[index] as u8;
+                }
+                hdata.labels[hdata.nlabl as usize][MRC_LABEL_SIZE] = 0;
+                hdata.nlabl += 1;
+            }
         }
-        let result = mrc_head_write(mrcfp, &mut hdata);
-        libc::fclose(mrcfp);
-        if !bgdata.is_null() {
-            libc::free(bgdata.cast());
+        mrc_head_write(mrcfp, &mut hdata);
+
+        /* cleanup */
+        if !mrcfp.is_null() {
+            libc::fclose(mrcfp);
         }
-        if !tiltfp.is_null() {
+        if !tilt_file.is_null() {
             libc::fclose(tiltfp);
         }
-        if result != 0 || out_section != sections {
-            1
-        } else {
-            0
-        }
+        libc::exit(0);
     }
 }
 
@@ -1008,6 +1187,15 @@ mod tests {
         let mut values = [30_u8, 60, 90, 9, 12, 15];
         unsafe { convertrgb(values.as_mut_ptr(), 2, 1, 0) };
         assert_eq!(&values[..2], &[60, 12]);
+    }
+    #[test]
+    fn ntsc_weighting_rounds_between_terms_like_the_source() {
+        // `tif2mrc.c:672-674` stores each partial sum back into a `float`, so
+        // these triples come out one count above what a single f32 expression
+        // gives (3, 10, 15, 12).  Verified against the native binary.
+        let mut values = [0_u8, 5, 5, 0, 15, 15, 0, 19, 39, 0, 21, 1];
+        unsafe { convertrgb(values.as_mut_ptr(), 4, 1, 1) };
+        assert_eq!(&values[..4], &[4, 11, 16, 13]);
     }
     #[test]
     fn unsigned_short_conversion_and_stats() {

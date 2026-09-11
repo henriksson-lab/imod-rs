@@ -209,7 +209,7 @@ pub unsafe extern "C" fn iiu_open(
     u = find_new_unit(iunit);
     iiu_memory_error(
         u as *mut ::core::ffi::c_void,
-        b"ERROR: iiu_open - Allocating new unit\0" as *const u8 as *const ::core::ffi::c_char,
+        b"ERROR: iiuOpen - Allocating new unit\0" as *const u8 as *const ::core::ffi::c_char,
     );
     (*u).being_used = 1 as ::core::ffi::c_uchar;
     (*u).read_only = 0 as ::core::ffi::c_uchar;
@@ -240,7 +240,7 @@ pub unsafe extern "C" fn iiu_open(
                 errSave = *__errno_location();
                 fprintf(
                     stdout,
-                    b"\nWARNING: iiu_open - Could not rename '%s' to '%s~'\n\0" as *const u8
+                    b"\nWARNING: iiuOpen - Could not rename '%s' to '%s~'\n\0" as *const u8
                         as *const ::core::ffi::c_char,
                     name,
                     name,
@@ -274,7 +274,7 @@ pub unsafe extern "C" fn iiu_open(
         if (*u).ii_file.is_null() {
             b3d_error(
                 stdout.cast(),
-                format_args!("\nERROR: iiu_open - Opening new output file\n"),
+                format_args!("\nERROR: iiuOpen - Opening new output file\n"),
             );
             if sExitOnError != 0 {
                 exit(1 as ::core::ffi::c_int);
@@ -294,7 +294,7 @@ pub unsafe extern "C" fn iiu_open(
             b3d_error(
                 stdout.cast(),
                 format_args!(
-                    "\nERROR: iiu_open - Could not open '{}'\n",
+                    "\nERROR: iiuOpen - Could not open '{}'\n",
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
                 ),
             );
@@ -311,7 +311,7 @@ pub unsafe extern "C" fn iiu_open(
             b3d_error(
                 stdout.cast(),
                 format_args!(
-                    "\nERROR: iiu_open - Non-MRC-type file '{}' with no write function must be opened read-only\n",
+                    "\nERROR: iiuOpen - Non-MRC-type file '{}' with no write function must be opened read-only\n",
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
                 ),
             );
@@ -326,7 +326,7 @@ pub unsafe extern "C" fn iiu_open(
                 b3d_error(
                     stdout.cast(),
                     format_args!(
-                        "\nERROR: iiu_open - TIFF file '{}' has a data type that is not supported\n",
+                        "\nERROR: iiuOpen - TIFF file '{}' has a data type that is not supported\n",
                         core::ffi::CStr::from_ptr(name).to_string_lossy()
                     ),
                 );
@@ -348,13 +348,13 @@ pub unsafe extern "C" fn iiu_open(
                 as *mut MrcHeader;
         iiu_memory_error(
             (*u).header as *mut ::core::ffi::c_void,
-            b"ERROR: iiu_open - Allocating MRC header\0" as *const u8 as *const ::core::ffi::c_char,
+            b"ERROR: iiuOpen - Allocating MRC header\0" as *const u8 as *const ::core::ffi::c_char,
         );
         if iiFillMrcHeader((*u).ii_file, (*u).header) != 0 {
             b3d_error(
                 stdout.cast(),
                 format_args!(
-                    "\nERROR: iiu_open - file '{}' is not a format that provides an MRC-like header and cannot be read\n",
+                    "\nERROR: iiuOpen - file '{}' is not a format that provides an MRC-like header and cannot be read\n",
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
                 ),
             );
@@ -862,7 +862,7 @@ pub unsafe extern "C" fn iiu_write_section(
     }
     sprintf(
         &raw mut mess as *mut ::core::ffi::c_char,
-        b"\nERROR: iiu_write_section - writing section %d to unit %d\n\0" as *const u8
+        b"\nERROR: iiuWriteSection - writing section %d to unit %d\n\0" as *const u8
             as *const ::core::ffi::c_char,
         (*u).current_sec - 1 as ::core::ffi::c_int,
         iunit,
@@ -915,7 +915,7 @@ pub unsafe extern "C" fn iiu_write_subarray(
     }
     sprintf(
         &raw mut mess as *mut ::core::ffi::c_char,
-        b"\nERROR: iiu_write_subarray - writing section %d, lines %d to %d to unit %d\n\0"
+        b"\nERROR: iiuWriteSubarray - writing section %d, lines %d to %d to unit %d\n\0"
             as *const u8 as *const ::core::ffi::c_char,
         (*u).current_sec - 1 as ::core::ffi::c_int,
         iyStart,
@@ -975,7 +975,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
         b3d_error(
             stdout.cast(),
             format_args!(
-                "\nERROR: iiu_write_sec_part - Attempting to write to a portion of a line for a non-HDF file, unit {}\n",
+                "\nERROR: iiuWriteSecPart - Attempting to write to a portion of a line for a non-HDF file, unit {}\n",
                 iunit
             ),
         );
@@ -998,7 +998,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
         b3d_error(
             stdout.cast(),
             format_args!(
-                "\nERROR: iiu_write_sec_part - X dimension of data ({}) is not big enough for specified X indexes in writing to unit {} (xstart {} x0 {} x1 {})\n",
+                "\nERROR: iiuWriteSecPart - X dimension of data ({}) is not big enough for specified X indexes in writing to unit {} (xstart {} x0 {} x1 {})\n",
                 nxdim, iunit, ixStart, indX0, indX1
             ),
         );
@@ -1012,7 +1012,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
         b3d_error(
             stdout.cast(),
             format_args!(
-                "\nERROR: iiu_write_sec_part - Starting and ending lines ({} to {}) to write to unit {} go past end of end for section from line {}\n",
+                "\nERROR: iiuWriteSecPart - Starting and ending lines ({} to {}) to write to unit {} go past end of end for section from line {}\n",
                 iyStart,
                 iyEnd,
                 iunit,
@@ -1037,7 +1037,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
             b3d_error(
                 stdout.cast(),
                 format_args!(
-                    "\nERROR: iiu_write_sec_part - writing X {} to {}, Y {} to {} to section in unit {}\n",
+                    "\nERROR: iiuWriteSecPart - writing X {} to {}, Y {} to {} to section in unit {}\n",
                     indX0, indX1, iyStart, iyEnd, iunit
                 ),
             );
@@ -1104,7 +1104,7 @@ pub unsafe extern "C" fn iiu_write_lines(
         b3d_error(
             stdout.cast(),
             format_args!(
-                "\nERROR: iiu_write_lines - writing lines to unit {}.\n",
+                "\nERROR: iiuWriteLines - writing lines to unit {}.\n",
                 iunit
             ),
         );
@@ -1355,7 +1355,7 @@ pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: ::core::ffi::c_int) 
     );
     if (*(*u).ii_file).file != IIFILE_HDF {
         printf(
-            b"ERROR: iiu_reassign_header_ptr - File on unit %d is not HDF\n\0" as *const u8
+            b"ERROR: iiuReassignHeaderPtr - File on unit %d is not HDF\n\0" as *const u8
                 as *const ::core::ffi::c_char,
             iunit,
         );
@@ -1378,11 +1378,19 @@ pub unsafe extern "C" fn iiufiletype_(mut iunit: *mut ::core::ffi::c_int) -> ::c
     return iiu_file_type(*iunit);
 }
 #[unsafe(no_mangle)]
+/// Fortran wrapper `iisettifftagtoprint` (`unit_fileio.c:941`).
+///
+/// The source declares this `int` and then falls off the end without
+/// returning, so its value is indeterminate in C; every caller ignores it
+/// (`header.f90` calls it as a statement).  A c2rust-shaped `panic!` here
+/// aborted `header -tag <n>` outright, which the reference does not do, so the
+/// deterministic representation of that indeterminate value is returned
+/// instead.
 pub unsafe extern "C" fn iisettifftagtoprint_(
     mut tag: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    tiffSetStringTagToPrint(*tag);
-    panic!("Reached end of non-void function without returning");
+    unsafe { tiffSetStringTagToPrint(*tag) };
+    0
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_buf_bytes_per_pixel(
@@ -1455,7 +1463,7 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         b3d_error(
             stdout.cast(),
             format_args!(
-                "ERROR: iiu_open - A unit number of {} is out of range\n",
+                "ERROR: iiuOpen - A unit number of {} is out of range\n",
                 iunit
             ),
         );
@@ -1489,7 +1497,7 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         b3d_error(
             stdout.cast(),
             format_args!(
-                "WARNING: iiu_open - Unit number {} is already in use; closing it\n",
+                "WARNING: iiuOpen - Unit number {} is already in use; closing it\n",
                 iunit
             ),
         );

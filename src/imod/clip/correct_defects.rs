@@ -282,7 +282,12 @@ pub unsafe fn correct_edge(
             let mut fraction = 1_f32;
             let mut sum_factor = 0_f64;
             if taper > 0 {
-                fraction = ((taper as f32 - row as f32 - 1.) / taper as f32).max(0.);
+                // `CorrectDefects.cpp:252`: (float)((taper - row - 1.) / taper)
+                // is a double quotient narrowed to float.
+                fraction = ((taper as f64 - row as f64 - 1.) / taper as f64) as f32;
+                if fraction < 0. {
+                    fraction = 0.;
+                }
                 sum_factor = (1. - fraction as f64) / sum_length as f64;
             }
             for i in 0..length {
@@ -300,9 +305,13 @@ pub unsafe fn correct_edge(
                             sum += *array.cast::<u16>().offset(ind_add as isize) as f64
                                 - *array.cast::<u16>().offset(ind_drop as isize) as f64
                         }
+                        // `CorrectDefects.cpp:207`: csty is `float` for the
+                        // float instantiation, so the difference is computed in
+                        // single precision before it joins the double sum.
                         2 => {
-                            sum += *array.cast::<f32>().offset(ind_add as isize) as f64
-                                - *array.cast::<f32>().offset(ind_drop as isize) as f64
+                            sum += (*array.cast::<f32>().offset(ind_add as isize)
+                                - *array.cast::<f32>().offset(ind_drop as isize))
+                                as f64
                         }
                         _ => unreachable!(),
                     }
@@ -409,15 +418,33 @@ unsafe fn correct_column(
                             for j in 0..count {
                                 *data.offset((ind + j * x_stride) as isize) = mean as $ty;
                             }
-                            let remainder = sum % count;
-                            for _ in 0..remainder {
-                                let next = unsafe {
-                                    PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-                                    PSEUDO
-                                };
-                                let which = (next >> 2) & (count - 1);
-                                let ptr = data.offset((ind + which * x_stride) as isize);
-                                *ptr = (*ptr as i32 + 1) as $ty;
+                            // `CorrectDefects.cpp:411-416` CAC_ADD_ONE_REM runs
+                            // once whenever `isum % 2` is nonzero, which includes
+                            // the -1 a negative sum produces;
+                            // `CorrectDefects.cpp:419-424` CAC_ADD_REMAINDER
+                            // instead loops `irem` times, so a negative remainder
+                            // adds nothing.
+                            if count == 2 {
+                                if sum % 2 != 0 {
+                                    let next = unsafe {
+                                        PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
+                                        PSEUDO
+                                    };
+                                    let which = (next >> 2) & 1;
+                                    let ptr = data.offset((ind + which * x_stride) as isize);
+                                    *ptr = (*ptr as i32 + 1) as $ty;
+                                }
+                            } else {
+                                let remainder = sum % 4;
+                                for _ in 0..remainder {
+                                    let next = unsafe {
+                                        PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
+                                        PSEUDO
+                                    };
+                                    let which = (next >> 2) & 3;
+                                    let ptr = data.offset((ind + which * x_stride) as isize);
+                                    *ptr = (*ptr as i32 + 1) as $ty;
+                                }
                             }
                         } else {
                             let mean = fsum / count as f32;
@@ -429,7 +456,9 @@ unsafe fn correct_column(
                 }
             }
             for col in 0..num {
-                let f_right = (col + 1) as f32 / (num + 1) as f32;
+                // `CorrectDefects.cpp:512`: (float)((col + 1.) / (num + 1.)) is a
+                // double quotient narrowed to float.
+                let f_right = ((col as f64 + 1.) / (num as f64 + 1.)) as f32;
                 let f_left = 1. - f_right;
                 let mut left = ind_start - 1;
                 let mut right = ind_start + num;
@@ -443,92 +472,154 @@ unsafe fn correct_column(
                 let mut ind = (ind_start + col) * x_stride + y_stride * y_start;
                 let mut il = left * x_stride + y_stride * y_start;
                 let mut ir = right * x_stride + y_stride * y_start;
-                let full_start = if y_start < 7 { 7 } else { y_start };
-                let full_end = if y_end >= ny - 7 { ny - 8 } else { y_end };
-                for y in y_start..=y_end {
-                    let fill: f32;
-                    if num >= 3 && y_end - y_start >= 15 && five_plus_ok {
-                        if y < full_start {
-                            fill = (f_left
-                                * (*data.offset(il as isize) as f32
-                                    + *data.offset((il + y_stride) as isize) as f32
-                                    + *data.offset((il - x_stride) as isize) as f32
-                                    + *data.offset((il + y_stride - x_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset(ir as isize) as f32
-                                        + *data.offset((ir + y_stride) as isize) as f32
-                                        + *data.offset((ir + x_stride) as isize) as f32
-                                        + *data.offset((ir + y_stride + x_stride) as isize)
-                                            as f32))
-                                / 4.;
-                        } else if y <= full_end {
-                            let next = unsafe {
-                                PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-                                PSEUDO
-                            };
-                            let iy = (next >> 2) % 15;
-                            let ix = (next >> 6) & 15;
-                            fill = if next & 2048 != 0 {
-                                *data.offset((il + (iy - 7) * y_stride - ix * x_stride) as isize)
-                                    as f32
-                            } else {
-                                *data.offset((ir + (iy - 7) * y_stride + ix * x_stride) as isize)
-                                    as f32
-                            };
+                let mut full_start = y_start;
+                let mut full_end = y_end;
+                if y_start < 7 {
+                    full_start += 7 - y_start;
+                }
+                if y_end >= ny - 7 {
+                    full_end -= y_end + 8 - ny;
+                }
+                // `e` in the macros: the five-plus instantiations pass `+`, a
+                // plain cast, for every type; the other two pass
+                // RandomIntFillFromFloat for the integer types.
+                macro_rules! store_plain {
+                    ($v:expr) => {
+                        *data.offset(ind as isize) = if $integer {
+                            ($v) as i32 as $ty
                         } else {
-                            fill = (f_left
-                                * (*data.offset((il - y_stride) as isize) as f32
-                                    + *data.offset(il as isize) as f32
-                                    + *data.offset((il - x_stride - y_stride) as isize) as f32
-                                    + *data.offset((il - x_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset((ir - y_stride) as isize) as f32
-                                        + *data.offset(ir as isize) as f32
-                                        + *data.offset((ir + x_stride - y_stride) as isize)
-                                            as f32
-                                        + *data.offset((ir + x_stride) as isize) as f32))
-                                / 4.;
+                            ($v) as $ty
                         }
-                    } else if num >= 3 && y_end - y_start >= 1 {
-                        if y < full_start {
-                            fill = (f_left
-                                * (*data.offset(il as isize) as f32
-                                    + *data.offset((il + y_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset(ir as isize) as f32
-                                        + *data.offset((ir + y_stride) as isize) as f32))
-                                / 2.;
-                        } else if y <= full_end {
-                            fill = (f_left
-                                * (*data.offset((il - y_stride) as isize) as f32
-                                    + *data.offset(il as isize) as f32
-                                    + *data.offset((il + y_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset((ir - y_stride) as isize) as f32
-                                        + *data.offset(ir as isize) as f32
-                                        + *data.offset((ir + y_stride) as isize) as f32))
-                                / 3.;
-                        } else {
-                            fill = (f_left
-                                * (*data.offset((il - y_stride) as isize) as f32
-                                    + *data.offset(il as isize) as f32)
-                                + f_right
-                                    * (*data.offset((ir - y_stride) as isize) as f32
-                                        + *data.offset(ir as isize) as f32))
-                                / 2.;
-                        }
-                    } else {
-                        fill = f_left * *data.offset(il as isize) as f32
-                            + f_right * *data.offset(ir as isize) as f32;
-                    }
-                    *data.offset(ind as isize) = if $integer {
-                        random_int_fill_from_float(fill) as $ty
-                    } else {
-                        fill as $ty
                     };
-                    ind += y_stride;
-                    il += y_stride;
-                    ir += y_stride;
+                }
+                macro_rules! store_random {
+                    ($v:expr) => {
+                        *data.offset(ind as isize) = if $integer {
+                            random_int_fill_from_float($v) as $ty
+                        } else {
+                            ($v) as $ty
+                        }
+                    };
+                }
+                if num >= 3 && y_end - y_start >= 15 && five_plus_ok {
+                    // `CorrectDefects.cpp:355-386` CORRECT_FIVE_PLUS_COL.
+                    let mut i = y_start;
+                    while i < full_start {
+                        let fill = (f_left
+                            * (*data.offset(il as isize) as f32
+                                + *data.offset((il + y_stride) as isize) as f32
+                                + *data.offset((il - x_stride) as isize) as f32
+                                + *data.offset((il + y_stride - x_stride) as isize) as f32)
+                            + f_right
+                                * (*data.offset(ir as isize) as f32
+                                    + *data.offset((ir + y_stride) as isize) as f32
+                                    + *data.offset((ir + x_stride) as isize) as f32
+                                    + *data.offset((ir + y_stride + x_stride) as isize) as f32))
+                            / 4.;
+                        store_plain!(fill);
+                        ind += y_stride;
+                        il += y_stride;
+                        ir += y_stride;
+                        i += 1;
+                    }
+                    let mut i = full_start;
+                    while i <= full_end {
+                        let next = unsafe {
+                            PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
+                            PSEUDO
+                        };
+                        let iy1 = (next >> 2) % 15;
+                        let ifx1 = (next >> 6) & 15;
+                        let fill = if next & 2048 != 0 {
+                            *data.offset((il + (iy1 - 7) * y_stride - ifx1 * x_stride) as isize)
+                                as f32
+                        } else {
+                            *data.offset((ir + (iy1 - 7) * y_stride + ifx1 * x_stride) as isize)
+                                as f32
+                        };
+                        store_plain!(fill);
+                        ind += y_stride;
+                        il += y_stride;
+                        ir += y_stride;
+                        i += 1;
+                    }
+                    let mut i = full_end + 1;
+                    while i <= y_end {
+                        let fill = (f_left
+                            * (*data.offset((il - y_stride) as isize) as f32
+                                + *data.offset(il as isize) as f32
+                                + *data.offset((il - x_stride - y_stride) as isize) as f32
+                                + *data.offset((il - x_stride) as isize) as f32)
+                            + f_right
+                                * (*data.offset((ir - y_stride) as isize) as f32
+                                    + *data.offset(ir as isize) as f32
+                                    + *data.offset((ir + x_stride - y_stride) as isize) as f32
+                                    + *data.offset((ir + x_stride) as isize) as f32))
+                            / 4.;
+                        store_plain!(fill);
+                        ind += y_stride;
+                        il += y_stride;
+                        ir += y_stride;
+                        i += 1;
+                    }
+                } else if num >= 3 && y_end - y_start >= 1 {
+                    // `CorrectDefects.cpp:329-352` CORRECT_THREE_FOUR_COL: the
+                    // leading and trailing rows are single `if` statements, not
+                    // loops, so the middle loop's row counter and the running
+                    // indexes are decoupled and the tail of the column is left
+                    // uncorrected whenever ystart is below fullStart.
+                    if y_start < full_start {
+                        let fill = (f_left
+                            * (*data.offset(il as isize) as f32
+                                + *data.offset((il + y_stride) as isize) as f32)
+                            + f_right
+                                * (*data.offset(ir as isize) as f32
+                                    + *data.offset((ir + y_stride) as isize) as f32))
+                            / 2.;
+                        store_random!(fill);
+                        ind += y_stride;
+                        il += y_stride;
+                        ir += y_stride;
+                    }
+                    let mut i = full_start;
+                    while i <= full_end {
+                        let fill = (f_left
+                            * (*data.offset((il - y_stride) as isize) as f32
+                                + *data.offset(il as isize) as f32
+                                + *data.offset((il + y_stride) as isize) as f32)
+                            + f_right
+                                * (*data.offset((ir - y_stride) as isize) as f32
+                                    + *data.offset(ir as isize) as f32
+                                    + *data.offset((ir + y_stride) as isize) as f32))
+                            / 3.;
+                        store_random!(fill);
+                        ind += y_stride;
+                        il += y_stride;
+                        ir += y_stride;
+                        i += 1;
+                    }
+                    if y_end > full_end {
+                        let fill = (f_left
+                            * (*data.offset((il - y_stride) as isize) as f32
+                                + *data.offset(il as isize) as f32)
+                            + f_right
+                                * (*data.offset((ir - y_stride) as isize) as f32
+                                    + *data.offset(ir as isize) as f32))
+                            / 2.;
+                        store_random!(fill);
+                    }
+                } else {
+                    // `CorrectDefects.cpp:320-327` CORRECT_ONE_TWO_COL.
+                    let mut i = y_start;
+                    while i <= y_end {
+                        let fill = f_left * *data.offset(il as isize) as f32
+                            + f_right * *data.offset(ir as isize) as f32;
+                        store_random!(fill);
+                        ind += y_stride;
+                        il += y_stride;
+                        ir += y_stride;
+                        i += 1;
+                    }
                 }
             }
         }};
@@ -744,6 +835,38 @@ pub unsafe fn correct_super_pixel(
             (1, 3),
         ];
         let interior = xpix > 1 && xpix < nx - 3 && ypix > 1 && ypix < ny - 3;
+        if interior && data_type == 2 {
+            // `CorrectDefects.cpp:697-700` sums the sixteen float neighbours in
+            // its own order, which is not the `idx`/`idy` order used below, and
+            // divides by the literal 16.
+            let fdata = array.cast::<f32>();
+            let ipn = index + nxdim;
+            let imn = index - nxdim;
+            let im2n = index - 2 * nxdim;
+            let ip2n = index + 2 * nxdim;
+            let ip3n = index + 3 * nxdim;
+            let fsum = (*fdata.offset((index - 1) as isize)
+                + *fdata.offset((index - 2) as isize)
+                + *fdata.offset((ipn - 1) as isize)
+                + *fdata.offset((ipn - 2) as isize)
+                + *fdata.offset((index + 2) as isize)
+                + *fdata.offset((index + 3) as isize)
+                + *fdata.offset((ipn + 2) as isize)
+                + *fdata.offset((ipn + 3) as isize)
+                + *fdata.offset(imn as isize)
+                + *fdata.offset((imn + 1) as isize)
+                + *fdata.offset(im2n as isize)
+                + *fdata.offset((im2n + 1) as isize)
+                + *fdata.offset(ip2n as isize)
+                + *fdata.offset((ip2n + 1) as isize)
+                + *fdata.offset(ip3n as isize)
+                + *fdata.offset((ip3n + 1) as isize))
+                / 16.;
+            for ind in destinations {
+                *fdata.offset(ind as isize) = fsum;
+            }
+            return;
+        }
         let mut integer_sum = 0_i32;
         let mut float_sum = 0_f32;
         let mut count = 0_i32;
@@ -1311,10 +1434,13 @@ pub fn cor_def_find_touching_pixels(
                 &defects.partial_bad_end_x,
                 x_difference,
             ) != 0
-            || (x > 0 && point_map.contains(&(key - y_difference)))
-            || (x < camera_size_x - 1 && point_map.contains(&(key + y_difference)))
-            || (y > 0 && point_map.contains(&(key - x_difference as u32)))
-            || (y < camera_size_y - 1 && point_map.contains(&(key + x_difference as u32)))
+            // `CorrectDefects.cpp:1201-1204`: mapKey is an unsigned int, so
+            // these are wrapping additions and subtractions.
+            || (x > 0 && point_map.contains(&key.wrapping_sub(y_difference)))
+            || (x < camera_size_x - 1 && point_map.contains(&key.wrapping_add(y_difference)))
+            || (y > 0 && point_map.contains(&key.wrapping_sub(x_difference as u32)))
+            || (y < camera_size_y - 1
+                && point_map.contains(&key.wrapping_add(x_difference as u32)))
         {
             if defects.pix_use_mean.is_empty() {
                 defects.pix_use_mean.resize(defects.bad_pixel_x.len(), 0);
@@ -1865,7 +1991,8 @@ pub fn cor_def_parse_defects(
             Ok(value) => value,
             Err(_) => return 2,
         };
-        let mut value_array = [0_i32; 100];
+        // `CorrectDefects.cpp:1619` MAX_VALUES is 50.
+        let mut value_array = [0_i32; 50];
         let mut number_to_get = 0;
         let pip_error = unsafe {
             crate::imod::libcfshr::parse_params::pip_get_line_of_values(
@@ -1877,12 +2004,15 @@ pub fn cor_def_parse_defects(
                 value_array.len() as i32,
             )
         };
-        if pip_error != 0 {
-            return 2;
-        }
+        // `CorrectDefects.cpp:1704` keeps going after a PipGetLineOfValues
+        // error; only a recognised tag turns it into a return of 2, so a line
+        // whose tag is not known is skipped whatever its content.
         let values = &value_array[..number_to_get as usize];
         match tag {
             tag if "CameraSizeX".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     *camera_size_x = *value
                 } else {
@@ -1890,6 +2020,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "CameraSizeY".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     *camera_size_y = *value
                 } else {
@@ -1897,6 +2030,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "RotationAndFlip".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     defects.rotation_flip = *value
                 } else {
@@ -1904,6 +2040,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "WasScaled".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     defects.was_scaled = *value
                 } else {
@@ -1911,6 +2050,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "K2Type".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     defects.k2_type = *value
                 } else {
@@ -1918,6 +2060,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "FalconType".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     defects.falcon_type = *value
                 } else {
@@ -1925,6 +2070,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "NumToAvgSuperRes".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if let Some(value) = values.first() {
                     defects.num_avg_super_res = *value
                 } else {
@@ -1932,6 +2080,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "UsableArea".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if values.len() >= 4 {
                     defects.usable_top = values[0];
                     defects.usable_left = values[1];
@@ -1942,6 +2093,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "PartialBadColumn".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if values.len() >= 4 {
                     cor_def_add_partial_bad_col(
                         &[values[0], values[1], values[2], values[3]],
@@ -1955,6 +2109,9 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "PartialBadRow".starts_with(tag) => {
+                if pip_error != 0 {
+                    return 2;
+                }
                 if values.len() >= 4 {
                     cor_def_add_partial_bad_col(
                         &[values[0], values[1], values[2], values[3]],
@@ -1968,16 +2125,21 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "BadPixels".starts_with(tag) => {
-                if values.len() < 2 || values.len() % 2 != 0 {
+                if values.len() < 2 || pip_error != 0 {
                     return 2;
                 }
-                for pair in values.chunks_exact(2) {
-                    defects.bad_pixel_x.push(pair[0] as u16);
-                    defects.bad_pixel_y.push(pair[1] as u16);
+                // `CorrectDefects.cpp:1755` steps by two up to numToGet, so an
+                // odd count reads one element past what was filled in; C's
+                // `values` array is an uninitialised local there.
+                let mut ind = 0;
+                while ind < values.len() {
+                    defects.bad_pixel_x.push(value_array[ind] as u16);
+                    defects.bad_pixel_y.push(value_array[ind + 1] as u16);
+                    ind += 2;
                 }
             }
             tag if "BadColumns".starts_with(tag) => {
-                if values.is_empty() {
+                if values.is_empty() || pip_error != 0 {
                     return 2;
                 } else {
                     for value in values {
@@ -1990,7 +2152,7 @@ pub fn cor_def_parse_defects(
                 }
             }
             tag if "BadRows".starts_with(tag) => {
-                if values.is_empty() {
+                if values.is_empty() || pip_error != 0 {
                     return 2;
                 } else {
                     for value in values {
@@ -2640,16 +2802,14 @@ pub unsafe fn cor_def_find_drift_corr_edges(
     y_low: &mut i32,
     y_high: &mut i32,
 ) -> i32 {
-    if !matches!(data_type, 1 | 6 | 2) || nx < 2 || ny < 2 || max_width < 1 {
+    // `CorrectDefects.cpp:2306` tests only the data type.
+    if !matches!(data_type, 1 | 6 | 2) {
         return 1;
     }
     let x_start = (nx / 2 - analyze_len / 2).max(0);
     let y_start = (ny / 2 - analyze_len / 2).max(0);
     let x_end = (x_start + analyze_len).min(nx);
     let y_end = (y_start + analyze_len).min(ny);
-    if x_end - x_start < 2 || y_end - y_start < 2 || max_width >= nx || max_width >= ny {
-        return 1;
-    }
     let mut line_mean = vec![0_f32; (4 * max_width) as usize];
     let mut diff_mean = vec![0_f32; (4 * max_width) as usize];
     let mut diff_sd = vec![0_f32; (4 * max_width) as usize];

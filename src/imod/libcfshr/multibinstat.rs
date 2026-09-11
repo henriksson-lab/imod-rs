@@ -416,16 +416,20 @@ pub unsafe fn make_standard_dev_map(
             let by = (iy - box_left).clamp(0, ny_bin - box_size - 1);
             for ix in 0..nx_bin {
                 let bx = (ix - box_left).clamp(0, nx_bin - box_size - 1);
-                let sum = *sum_arr.add((bx + by * nx_bin) as usize);
-                let avg = sum / (box_size * box_size) as f32;
-                let den = (*sqr_arr.add((bx + by * nx_bin) as usize)
-                    - (box_size * box_size) as f32 * avg * avg)
-                    / ((box_size * box_size - 1) as f32);
-                let mut sd = if den > 0. { den.sqrt() } else { 0. };
+                // C `multibinstat.c:369-372` goes through `sumsToAvgSD`, where
+                // `den` is a double: `(n - 1.)` promotes the divide and the
+                // `sqrt` is the double routine, rounded to float exactly once.
+                let mut val = 0_f32;
+                crate::imod::libcfshr::simplestat::sums_to_avg_sd(
+                    *sum_arr.add((bx + by * nx_bin) as usize),
+                    *sqr_arr.add((bx + by * nx_bin) as usize),
+                    box_size * box_size,
+                    &mut val,
+                    sd_arr.add((ix + iy * nx_bin) as usize),
+                );
                 if variation {
-                    sd /= avg;
+                    *sd_arr.add((ix + iy * nx_bin) as usize) /= val;
                 }
-                *sd_arr.add((ix + iy * nx_bin) as usize) = sd;
             }
         }
         *x_offset = -ix_start / binning;

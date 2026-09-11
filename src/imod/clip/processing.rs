@@ -1,6 +1,14 @@
 //! Translation of `IMOD/clip/processing.cpp`.
 #![allow(dead_code)]
 
+unsafe extern "C" {
+    static mut stdout: *mut libc::FILE;
+    /// The reference build narrows `processing.cpp:291`'s `log10()` call to the
+    /// single-precision routine, and Rust's `f32::log10` instead evaluates the
+    /// double routine and rounds, which differs by one ulp on 3% of pixels.
+    fn log10f(value: f32) -> f32;
+}
+
 use crate::imod::clip::clip::ClipOptions;
 use crate::imod::libcfshr::islice::{
     Islice, Istack, slice_free, slice_get_pixel_magnitude, slice_get_val, slice_init, slice_put_val,
@@ -221,11 +229,10 @@ pub unsafe fn clip_scaling(
                 sum_arr = libc::malloc(bin_size * core::mem::size_of::<f32>()).cast();
                 sqr_arr = libc::malloc(bin_size * core::mem::size_of::<f32>()).cast();
                 sd_arr = libc::malloc(bin_size * core::mem::size_of::<f32>()).cast();
-                if sd_binning <= 0 || sum_arr.is_null() || sd_arr.is_null() || sqr_arr.is_null() {
-                    libc::free(sd_arr.cast());
-                    libc::free(sum_arr.cast());
-                    libc::free(sqr_arr.cast());
-                    return -1;
+                if sum_arr.is_null() || sd_arr.is_null() || sqr_arr.is_null() {
+                    crate::imod::libcfshr::parse_params::exit_error(
+                        c"Allocating arrays for SD map".as_ptr(),
+                    );
                 }
                 let (sx, sy, sz) = crate::imod::libiimod::mrcfiles::mrc_get_scale(&*hin);
                 crate::imod::libiimod::mrcfiles::mrc_set_scale(
@@ -242,7 +249,9 @@ pub unsafe fn clip_scaling(
             (*opt).val = 1.;
         }
         let alpha = (*opt).val as f64;
-        let min_for_log = 1.0e-20_f32.max(1.0e-5 * ((*hin).amax - (*hin).amin));
+        // `processing.cpp:57`: 1.e-20 and 1.e-5 are double literals, so the
+        // whole B3DMAX expression is evaluated in double before narrowing.
+        let min_for_log = 1.0e-20_f64.max(1.0e-5 * ((*hin).amax - (*hin).amin) as f64) as f32;
         // Keep the source's file-major order.  `set_multifile_input_options`
         // has already checked every header, but each nonfirst input is opened
         // again here and its own header is passed to `sliceReadSubm`.
@@ -254,13 +263,21 @@ pub unsafe fn clip_scaling(
                     c"rb".as_ptr(),
                 )
                 .cast();
-                if hdr.fp.is_null()
-                    || crate::imod::libiimod::mrcfiles::mrc_head_read(hdr.fp.cast(), &mut hdr) != 0
-                {
-                    if !hdr.fp.is_null() {
-                        crate::imod::libiimod::iimage::ii_fclose(hdr.fp.cast());
-                    }
-                    return -1;
+                if hdr.fp.is_null() {
+                    let message = std::ffi::CString::new(format!(
+                        "Opening file {}.",
+                        core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                }
+                if crate::imod::libiimod::mrcfiles::mrc_head_read(hdr.fp.cast(), &mut hdr) != 0 {
+                    let message = std::ffi::CString::new(format!(
+                        "Reading header of {}.",
+                        core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
                 }
                 &mut hdr as *mut MrcHeader
             } else {
@@ -403,7 +420,11 @@ pub unsafe fn clip_scaling(
                                 }
                                 IP_LOGARITHM => {
                                     for item in val.iter_mut().take((*slice).csize as usize) {
-                                        *item = min_for_log.max(*item + base).log10();
+                                        // `processing.cpp:291` calls log10() on a
+                                        // float and stores a float; the reference
+                                        // build narrows that to log10f, which is
+                                        // what matches its output byte for byte.
+                                        *item = log10f(min_for_log.max(*item + base));
                                     }
                                 }
                                 IP_SQROOT => {
@@ -528,7 +549,12 @@ pub unsafe fn clip_edge(hin: *mut MrcHeader, hout: *mut MrcHeader, opt: *mut Cli
             _ => return -1,
         };
         crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, title);
-        println!("clip: {message} {} slices...", (*opt).nofsecs);
+        let message_c = std::ffi::CString::new(message).unwrap();
+        libc::printf(
+            c"clip: %s %d slices...\n".as_ptr(),
+            message_c.as_ptr(),
+            (*opt).nofsecs,
+        );
         for k in 0..(*opt).nofsecs {
             let source = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
@@ -815,18 +841,24 @@ pub unsafe fn clip_median(
                     return -1;
                 }
             }
+            // `processing.cpp:640-650` keeps three separate cases.  Only the
+            // kernel/smoothing case re-derives firstNeed from lastNeed so the
+            // window always holds `size` slices; the median case leaves
+            // firstNeed at secs[k] - size / 2, which makes the window narrower
+            // at the ends of the volume.
             let (mut needed_first, mut needed_last) = if (*opt).dim == 2 {
                 let sec = *(*opt).secs.add(k as usize);
                 (sec, sec)
+            } else if !kernel.is_null() {
+                let sec = *(*opt).secs.add(k as usize);
+                let first_need = 0.max(sec - size / 2);
+                let last_need = ((*hin).nz - 1).min(first_need + size - 1);
+                (0.max(last_need + 1 - size), last_need)
             } else {
                 let sec = *(*opt).secs.add(k as usize);
-                let a = 0.max(sec - size / 2);
-                let b = ((*hin).nz - 1).min(if kernel.is_null() {
-                    sec + (size - 1) / 2
-                } else {
-                    a + size - 1
-                });
-                (0.max(b + 1 - size), b)
+                let first_need = 0.max(sec - size / 2);
+                let last_need = ((*hin).nz - 1).min(sec + (size - 1) / 2);
+                (first_need, last_need)
             };
             let mut kept = 0;
             for old in 0..stack.zsize {
@@ -1456,15 +1488,7 @@ pub unsafe fn clip_quadrant(
             let mut iz = 0;
             for ind in start..end {
                 iz = *(*opt).secs.add(ind as usize);
-                let s = crate::imod::libiimod::mrcslice::slice_read_subm(
-                    hin,
-                    iz,
-                    b'z' as i8,
-                    nx,
-                    ny,
-                    nx / 2,
-                    ny / 2,
-                );
+                let s = crate::imod::libiimod::mrcslice::slice_read_mrc(hin, iz, b'z' as i8);
                 if s.is_null() {
                     crate::imod::clip::clip::show_error("clip: Error reading slice.");
                     return -1;
@@ -1497,11 +1521,19 @@ pub unsafe fn clip_quadrant(
                 }
                 slice_free(s);
             }
+            // `processing.cpp:1344-1350`: the seeds are 1.e30 / -1.e30 and the
+            // divide happens inside the same loop as the min/max.
+            let mut qmin = 1.0e30_f64;
+            let mut qmax = -qmin;
             for v in &mut d {
                 *v /= nin_group as f64;
+                if qmin > *v {
+                    qmin = *v;
+                }
+                if qmax < *v {
+                    qmax = *v;
+                }
             }
-            let qmin = d.iter().copied().fold(f64::INFINITY, f64::min);
-            let qmax = d.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             let base =
                 (if user_base != 0. { 0.01 } else { 0.05 }) * (qmax - qmin) - qmin - user_base;
             if base > 0. {
@@ -1514,12 +1546,19 @@ pub unsafe fn clip_quadrant(
             let c2 = t[0] - t[6] + 2. * t[1] - 2. * t[3] + t[4] - t[2];
             let c3 = t[0] - t[6] + t[1] - t[3] + t[2] - t[4] + t[7] - t[5];
             let c4 = 2. * t[0] - 2. * t[6] + t[1] - t[3] + t[5] - t[7];
-            let det = 64.;
-            let g2 = (c2 * 20. - 2. * (c3 * 6. - 2. * c4) + 4. * (c3 * 2. - 4. * c4)) / det;
-            let g3 = (6. * (c3 * 6. - 2. * c4) - c2 * 4. + 4. * (2. * c4 - c3 * 4.)) / det;
-            let g4 = (6. * (4. * c4 - c3 * 2.) - 2. * (2. * c4 - c3 * 4.)
-                + c2 * (4. * 2. - 4. * 4.))
-                / det;
+            // `processing.cpp:1370-1373` with `determ3` from `b3dutil.h:83`:
+            // a1*b2*c3 - a1*b3*c2 + a2*b3*c1 - a2*b1*c3 + a3*b1*c2 - a3*b2*c1.
+            let denom = 6. * 4. * 6. - 6. * 2. * 2. + 2. * 2. * 4. - 2. * 2. * 6. + 4. * 2. * 2.
+                - 4. * 4. * 4.;
+            let g2 = (c2 * 4. * 6. - c2 * 2. * 2. + 2. * 2. * c4 - 2. * c3 * 6. + 4. * c3 * 2.
+                - 4. * 4. * c4)
+                / denom;
+            let g3 = (6. * c3 * 6. - 6. * 2. * c4 + c2 * 2. * 4. - c2 * 2. * 6. + 4. * 2. * c4
+                - 4. * c3 * 4.)
+                / denom;
+            let g4 = (6. * 4. * c4 - 6. * c3 * 2. + 2. * c3 * 4. - 2. * 2. * c4 + c2 * 2. * 2.
+                - c2 * 4. * 4.)
+                / denom;
             let gain = [
                 10_f64.powf(-(g2 + g3 + g4)),
                 10_f64.powf(g2),
@@ -1561,15 +1600,7 @@ pub unsafe fn clip_quadrant(
                 end_out = nz - 1;
             }
             for iz in last_out + 1..=end_out {
-                let s = crate::imod::libiimod::mrcslice::slice_read_subm(
-                    hin,
-                    iz,
-                    b'z' as i8,
-                    nx,
-                    ny,
-                    nx / 2,
-                    ny / 2,
-                );
+                let s = crate::imod::libiimod::mrcslice::slice_read_mrc(hin, iz, b'z' as i8);
                 if s.is_null() {
                     crate::imod::clip::clip::show_error("clip: Error reading slice.");
                     return -1;
@@ -2008,7 +2039,9 @@ pub unsafe fn write_byte_pixel(mut pixel: f32, hout: *mut MrcHeader) {
         if pixel > 255. {
             pixel = 255.;
         }
-        let mut byte = (pixel + 0.5) as u8;
+        // `processing.cpp:1702`: a float-to-unsigned-char conversion, which on
+        // this target truncates toward zero into an int and keeps the low byte.
+        let mut byte = (pixel + 0.5) as i32 as u8;
         if (*hout).bytes_signed != 0 {
             byte = ((byte as i32 - 128) & 255) as u8;
         }
@@ -2189,7 +2222,7 @@ pub unsafe fn clip_joinrgb(
         }
         for k in 0..(*h1).nz {
             libc::printf(c"\rJoining section %d of %d".as_ptr(), k + 1, (*h1).nz);
-            libc::fflush(core::ptr::null_mut());
+            libc::fflush(stdout);
             for n in 0..3 {
                 if crate::imod::libiimod::mrcfiles::mrc_read_slice(
                     (*component[n]).data.b.cast(),
@@ -2327,7 +2360,7 @@ pub unsafe fn clip_splitrgb(h1: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                 if (*opt).infiles > 1 {
                     libc::printf(c", file %d".as_ptr(), file + 1);
                 }
-                libc::fflush(core::ptr::null_mut());
+                libc::fflush(stdout);
                 if crate::imod::libiimod::mrcfiles::mrc_read_slice(
                     (*rgb).data.b.cast(),
                     input.fp.cast(),
@@ -2417,34 +2450,103 @@ pub unsafe fn clip_average(
         if z < 0 {
             return z;
         }
-        let variance = match (*opt).process {
-            IP_AVERAGE => 0,
-            IP_ADD => 0,
-            IP_VARIANCE => 1,
-            IP_STANDEV => 2,
-            IP_SUBTRACT => 0,
+        // `processing.cpp:2017`: both scales are double and start at 1.
+        let mut valscale = 1.0_f64;
+        let mut varscale = 1.0_f64;
+        if (*opt).low != IP_DEFAULT as f32 {
+            valscale = (*opt).low as f64;
+            varscale = ((*opt).low * (*opt).low) as f64;
+        }
+        let mut variance = 0;
+        // `processing.cpp:2043-2073`: the process switch also sets valscale, and
+        // IP_SUBTRACT resets it to 1, discarding any -l entry.
+        match (*opt).process {
+            IP_AVERAGE => {
+                valscale /= (*opt).infiles as f64;
+                crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: 3D Averaged");
+            }
+            IP_ADD => {
+                crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: Summed");
+            }
+            IP_VARIANCE => {
+                variance = 1;
+                valscale /= (*opt).infiles as f64;
+                crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: 3D Variance");
+            }
+            IP_STANDEV => {
+                variance = 2;
+                valscale /= (*opt).infiles as f64;
+                crate::imod::libiimod::mrcfiles::mrc_head_label(
+                    &mut *hout,
+                    b"clip: 3D Standard Deviation",
+                );
+            }
+            IP_SUBTRACT => {
+                valscale = 1.;
+                crate::imod::libiimod::mrcfiles::mrc_head_label(&mut *hout, b"clip: Subtract");
+            }
             _ => return -1,
-        };
-        let scale = if (*opt).low as i32 == IP_DEFAULT {
-            1.
+        }
+        let slice_mode = if (*h1).mode == crate::imod::libiimod::mrcfiles::MRC_MODE_COMPLEX_FLOAT {
+            crate::imod::libiimod::mrcfiles::MRC_MODE_COMPLEX_FLOAT
+        } else if (*h1).mode == crate::imod::libiimod::mrcfiles::MRC_MODE_RGB {
+            99
         } else {
-            (*opt).low
+            crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT
         };
-        let value_scale = if matches!((*opt).process, IP_AVERAGE | IP_VARIANCE | IP_STANDEV) {
-            scale / (*opt).infiles as f32
+        // `processing.cpp:2075-2083`: the sum-of-squares slice is made once.
+        let sq = if variance != 0 {
+            crate::imod::libcfshr::islice::slice_create((*opt).ix, (*opt).iy, slice_mode)
         } else {
-            scale
+            core::ptr::null_mut()
         };
-        crate::imod::libiimod::mrcfiles::mrc_head_label(
-            &mut *hout,
-            match (*opt).process {
-                IP_AVERAGE => b"clip: 3D Averaged",
-                IP_ADD => b"clip: Summed",
-                IP_VARIANCE => b"clip: 3D Variance",
-                IP_STANDEV => b"clip: 3D Standard Deviation",
-                _ => b"clip: Subtract",
-            },
-        );
+        // `processing.cpp:2084-2103`: every input header is opened and checked
+        // before the section loop starts.
+        let hdr = libc::malloc((*opt).infiles as usize * core::mem::size_of::<*mut MrcHeader>())
+            .cast::<*mut MrcHeader>();
+        if hdr.is_null() || (variance != 0 && sq.is_null()) {
+            return -1;
+        }
+        for f in 0..(*opt).infiles {
+            let h = libc::malloc(core::mem::size_of::<MrcHeader>()).cast::<MrcHeader>();
+            if h.is_null() {
+                return -1;
+            }
+            *hdr.add(f as usize) = h;
+            (*h).fp = crate::imod::libiimod::iimage::ii_fopen(
+                *(*opt).fnames.add(f as usize),
+                c"rb".as_ptr(),
+            )
+            .cast();
+            if (*h).fp.is_null() {
+                let message = std::ffi::CString::new(format!(
+                    "clip volume combining: error opening {}.",
+                    core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
+                ))
+                .unwrap();
+                crate::imod::clip::clip::show_error(message.to_str().unwrap());
+                return -1;
+            }
+            if crate::imod::libiimod::mrcfiles::mrc_head_read((*h).fp.cast(), h) != 0 {
+                let message = std::ffi::CString::new(format!(
+                    "clip volume combining: error reading header of {}.",
+                    core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
+                ))
+                .unwrap();
+                crate::imod::clip::clip::show_error(message.to_str().unwrap());
+                return -1;
+            }
+            if (*h1).nx != (*h).nx
+                || (*h1).ny != (*h).ny
+                || (*h1).nz != (*h).nz
+                || (*h1).mode != (*h).mode
+            {
+                crate::imod::clip::clip::show_error(
+                    "clip volume combining: all files must be the same size and mode.",
+                );
+                return -1;
+            }
+        }
         // h1/h2 are the dispatcher-opened first two files; subsequent input files follow
         // the exact C loop by being opened from fnames for each section.
         for k in 0..(*opt).nofsecs {
@@ -2459,24 +2561,12 @@ pub unsafe fn clip_average(
                 k + 1,
                 (*opt).nofsecs,
             );
-            libc::fflush(core::ptr::null_mut());
-            let slice_mode =
-                if (*h1).mode == crate::imod::libiimod::mrcfiles::MRC_MODE_COMPLEX_FLOAT {
-                    crate::imod::libiimod::mrcfiles::MRC_MODE_COMPLEX_FLOAT
-                } else if (*h1).mode == crate::imod::libiimod::mrcfiles::MRC_MODE_RGB {
-                    99
-                } else {
-                    crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT
-                };
+            libc::fflush(stdout);
             let out = crate::imod::libcfshr::islice::slice_create((*opt).ix, (*opt).iy, slice_mode);
-            let sq = if variance != 0 {
-                crate::imod::libcfshr::islice::slice_create((*opt).ix, (*opt).iy, slice_mode)
-            } else {
-                core::ptr::null_mut()
-            };
-            if out.is_null() || variance != 0 && sq.is_null() {
+            if out.is_null() {
                 return -1;
             }
+            let mut factor = 1.0_f32;
             let val = [0.; 4];
             for j in 0..(*opt).iy {
                 for i in 0..(*opt).ix {
@@ -2487,39 +2577,8 @@ pub unsafe fn clip_average(
                 }
             }
             for file in 0..(*opt).infiles {
-                let (mut hdr, close) = if file == 0 {
-                    (h1, false)
-                } else if file == 1 {
-                    (h2, false)
-                } else {
-                    let h = libc::calloc(1, core::mem::size_of::<MrcHeader>()).cast::<MrcHeader>();
-                    if h.is_null() {
-                        return -1;
-                    }
-                    (*h).fp = crate::imod::libiimod::iimage::ii_fopen(
-                        *(*opt).fnames.add(file as usize),
-                        c"rb".as_ptr(),
-                    )
-                    .cast();
-                    if (*h).fp.is_null()
-                        || crate::imod::libiimod::mrcfiles::mrc_head_read((*h).fp.cast(), h) != 0
-                    {
-                        return -1;
-                    }
-                    (h, true)
-                };
-                if (*hdr).nx != (*h1).nx
-                    || (*hdr).ny != (*h1).ny
-                    || (*hdr).nz != (*h1).nz
-                    || (*hdr).mode != (*h1).mode
-                {
-                    crate::imod::clip::clip::show_error(
-                        "clip volume combining: all files must be the same size and mode.",
-                    );
-                    return -1;
-                }
                 let s = crate::imod::libiimod::mrcslice::slice_read_subm(
-                    hdr,
+                    *hdr.add(file as usize),
                     *(*opt).secs.add(k as usize),
                     b'z' as i8,
                     (*opt).ix,
@@ -2528,22 +2587,16 @@ pub unsafe fn clip_average(
                     (*opt).cy as i32,
                 );
                 if s.is_null() {
-                    crate::imod::clip::clip::show_error("clip: Error reading slice.");
                     return -1;
                 }
-                let sign = if (*opt).process == IP_SUBTRACT && file > 0 {
-                    -1.
-                } else {
-                    1.
-                };
                 for y in 0..(*opt).iy {
                     for x in 0..(*opt).ix {
                         let (mut a, mut v) = ([0.; 4], [0.; 4]);
-                        slice_get_val(out, x, y, &mut a);
                         slice_get_val(s, x, y, &mut v);
-                        for n in 0..3 {
-                            a[n] += sign * v[n];
-                        }
+                        slice_get_val(out, x, y, &mut a);
+                        a[0] += factor * v[0];
+                        a[1] += factor * v[1];
+                        a[2] += factor * v[2];
                         slice_put_val(out, x, y, a);
                         if variance != 0 {
                             slice_get_val(sq, x, y, &mut a);
@@ -2555,43 +2608,55 @@ pub unsafe fn clip_average(
                     }
                 }
                 slice_free(s);
-                if close {
-                    crate::imod::libiimod::iimage::ii_fclose((*hdr).fp.cast());
-                    libc::free(hdr.cast());
+                if (*opt).process == IP_SUBTRACT {
+                    factor = -1.;
                 }
             }
-            for y in 0..(*opt).iy {
-                for x in 0..(*opt).ix {
-                    let mut a = [0.; 4];
-                    slice_get_val(out, x, y, &mut a);
-                    for n in 0..3 {
-                        a[n] *= value_scale;
-                    }
-                    if variance != 0 {
-                        let mut q = [0.; 4];
-                        slice_get_val(sq, x, y, &mut q);
+            // `processing.cpp:2160-2161`.
+            if valscale != 1. {
+                crate::imod::libiimod::mrcslice::mrc_slice_valscale(out, valscale);
+            }
+            if variance != 0 {
+                let f = (*opt).infiles;
+                for y in 0..(*opt).iy {
+                    for x in 0..(*opt).ix {
+                        let (mut a, mut v) = ([0.; 4], [0.; 4]);
+                        slice_get_val(sq, x, y, &mut v);
+                        slice_get_val(out, x, y, &mut a);
                         for n in 0..3 {
-                            a[n] = ((q[n] * scale * scale - (*opt).infiles as f32 * a[n] * a[n])
-                                / ((*opt).infiles - 1) as f32)
-                                .max(0.);
-                            if variance == 2 {
-                                a[n] = a[n].sqrt();
+                            // `processing.cpp:2168`: val[l] * varscale is double,
+                            // f * oval[l] * oval[l] is float, the subtraction and
+                            // the division by (f - 1.) are double.
+                            let mut t = (v[n] as f64 * varscale - (f as f32 * a[n] * a[n]) as f64)
+                                / (f as f64 - 1.);
+                            if 0. > t {
+                                t = 0.;
+                            }
+                            a[n] = t as f32;
+                            if variance > 1 {
+                                a[n] = (a[n] as f64).sqrt() as f32;
                             }
                         }
+                        slice_put_val(out, x, y, a);
                     }
-                    slice_put_val(out, x, y, a);
                 }
             }
             if crate::imod::clip::file_io::clip_write_slice(out, hout, opt, k, &mut z, 1) != 0 {
                 return -1;
             }
-            if !sq.is_null() {
-                slice_free(sq);
-            }
         }
         libc::printf(c"\n".as_ptr());
         (*hout).amean /= (*opt).nofsecs as f32;
-        crate::imod::libiimod::mrcfiles::mrc_head_write((*hout).fp.cast(), hout);
+        if crate::imod::libiimod::mrcfiles::mrc_head_write((*hout).fp.cast(), hout) != 0 {
+            return -1;
+        }
+        if variance != 0 {
+            slice_free(sq);
+        }
+        for f in 0..(*opt).infiles {
+            libc::free((*hdr.add(f as usize)).cast());
+        }
+        libc::free(hdr.cast());
         crate::imod::clip::file_io::set_mrc_coords(opt)
     }
 }
@@ -2633,7 +2698,13 @@ pub unsafe fn clip2d_average(
             },
         );
         crate::imod::clip::clip::show_status("2D Averaging...\n");
-        let mode = if (*hin).mode == 16 { 16 } else { 2 };
+        // `processing.cpp:2236`: SLICE_MODE_MAX is 99 (`mrcslice.h:28`), not
+        // the RGB byte mode.
+        let mode = if (*hin).mode == crate::imod::libiimod::mrcfiles::MRC_MODE_RGB {
+            99
+        } else {
+            2
+        };
         let avgs = crate::imod::libcfshr::islice::slice_create((*opt).ix, (*opt).iy, mode);
         let mut counts = vec![0_f32; ((*opt).ix * (*opt).iy) as usize];
         let squares = if variance != 0 {
@@ -2641,8 +2712,8 @@ pub unsafe fn clip2d_average(
         } else {
             core::ptr::null_mut()
         };
+        // `processing.cpp:2241` returns -1 with no diagnostic.
         if avgs.is_null() || (variance != 0 && squares.is_null()) {
-            crate::imod::clip::clip::show_error("CLIP - Memory error");
             return -1;
         }
         let aval = [0.; 4];
@@ -2670,7 +2741,7 @@ pub unsafe fn clip2d_average(
             }
             for y in 0..(*opt).iy {
                 for x in 0..(*opt).ix {
-                    if (*opt).val as i32 != IP_DEFAULT
+                    if (*opt).val != IP_DEFAULT as f32
                         && slice_get_pixel_magnitude(s, x, y) <= (*opt).val
                     {
                         continue;
@@ -2695,7 +2766,7 @@ pub unsafe fn clip2d_average(
             }
             slice_free(s);
         }
-        let scale = if (*opt).low as i32 == IP_DEFAULT {
+        let scale = if (*opt).low == IP_DEFAULT as f32 {
             1.
         } else {
             (*opt).low
@@ -2731,18 +2802,24 @@ pub unsafe fn clip2d_average(
                 slice_put_val(avgs, x, y, a);
             }
         }
+        // `processing.cpp:2328-2329` returns without a diagnostic here.
         if (*avgs).mode != (*hout).mode
             && crate::imod::libiimod::mrcslice::slice_new_mode(avgs, (*hout).mode) < 0
         {
-            crate::imod::clip::clip::show_error("CLIP - getting memory for slice array");
             return -1;
         }
-        crate::imod::libcfshr::islice::slice_min_max(avgs);
+        // `processing.cpp:2330` is sliceMMM, which sets mean as well as min and
+        // max.  sliceMinMax leaves `mean` at zero, so the output header's amean
+        // was written as 0 instead of the averaged mean.
+        crate::imod::libiimod::mrcslice::slice_mmm(avgs);
         (*hout).amin = (*hout).amin.min((*avgs).min);
         (*hout).amax = (*hout).amax.max((*avgs).max);
         if (*opt).add2file != 1 {
             (*hout).amean += (*avgs).mean / (*hout).nz as f32;
         }
+        // `processing.cpp:2336-2337`: carry the input pixel spacing to the output.
+        let (sx, sy, sz) = crate::imod::libiimod::mrcfiles::mrc_get_scale(&*hin);
+        crate::imod::libiimod::mrcfiles::mrc_set_scale(&mut *hout, sx as f64, sy as f64, sz as f64);
         if crate::imod::libiimod::mrcfiles::mrc_write_slice(
             (*avgs).data.b.cast(),
             (*hout).fp.cast(),
@@ -2813,7 +2890,7 @@ pub unsafe fn clip_multdiv(
             );
             return -1;
         }
-        let scale = if (*opt).val as i32 == IP_DEFAULT {
+        let scale = if (*opt).val == IP_DEFAULT as f32 {
             1.
         } else {
             (*opt).val
@@ -2823,7 +2900,7 @@ pub unsafe fn clip_multdiv(
             IP_DIVIDE => (c"Dividing", "Divide"),
             _ => return -1,
         };
-        let title = if (*opt).val as i32 != IP_DEFAULT {
+        let title = if (*opt).val != IP_DEFAULT as f32 {
             format!("clip: {title_proc}, scaled by {scale:.2}")
         } else {
             format!("clip: {title_proc}")
@@ -2844,7 +2921,7 @@ pub unsafe fn clip_multdiv(
                 k + 1,
                 (*opt).nofsecs,
             );
-            libc::fflush(core::ptr::null_mut());
+            libc::fflush(stdout);
             let out = crate::imod::libiimod::mrcslice::slice_read_subm(
                 h1,
                 *(*opt).secs.add(k as usize),
@@ -2897,10 +2974,11 @@ pub unsafe fn clip_multdiv(
                     slice_get_val(out, x, y, &mut a);
                     slice_get_val(s, x, y, &mut b);
                     if do_round {
+                        // `processing.cpp:2454`: B3DNINT is (int)floor(x + 0.5).
                         if (*opt).process == IP_MULTIPLY {
-                            a[0] = (a[0] * b[0] * scale).round();
+                            a[0] = ((a[0] * b[0] * scale) as f64 + 0.5).floor() as i32 as f32;
                         } else if b[0] != 0. {
-                            a[0] = (a[0] * (scale / b[0])).round();
+                            a[0] = ((a[0] * (scale / b[0])) as f64 + 0.5).floor() as i32 as f32;
                         } else {
                             div_by_zero += 1;
                             a[0] = 0.;
@@ -2997,19 +3075,17 @@ pub unsafe fn clip_planar_fit(
         }
         let n = ((*opt).ix * (*opt).iy) as usize;
         let mut sum = vec![0_f32; n];
-        let base = if (*opt).low as i32 == IP_DEFAULT {
+        let base = if (*opt).low == IP_DEFAULT as f32 {
             0.
         } else {
             (*opt).low
         };
         let mut count = 0;
-        let prefix = if (*opt).process == IP_PLANARFIT {
-            "Doing plane fit:"
-        } else {
-            "Making flatfield:"
-        };
+        // `processing.cpp:2532` declares `int indProc = 0` and never assigns
+        // it, so `prefix[indProc]` is always the plane-fit string.
+        let prefix = "Doing plane fit:";
         libc::printf(c"clip: summing slices...".as_ptr());
-        libc::fflush(core::ptr::null_mut());
+        libc::fflush(stdout);
         // C `clipPlanarFit` opens each named input independently: the header
         // handed to sliceReadSubm must be that file's header, not `hin`.
         for f in 0..(*opt).infiles {
@@ -3022,25 +3098,29 @@ pub unsafe fn clip_planar_fit(
                     c"rb".as_ptr(),
                 )
                 .cast();
-                if hdr.fp.is_null()
-                    || crate::imod::libiimod::mrcfiles::mrc_head_read(hdr.fp.cast(), &mut hdr) != 0
-                {
-                    if !hdr.fp.is_null() {
-                        crate::imod::libiimod::iimage::ii_fclose(hdr.fp.cast());
-                    }
-                    crate::imod::clip::clip::show_error(&format!(
-                        "\n{prefix} error opening or reading header of {}.",
+                if hdr.fp.is_null() {
+                    let message = std::ffi::CString::new(format!(
+                        "\n{prefix} error opening {}.",
                         core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
-                    ));
-                    return -1;
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                }
+                if crate::imod::libiimod::mrcfiles::mrc_head_read(hdr.fp.cast(), &mut hdr) != 0 {
+                    let message = std::ffi::CString::new(format!(
+                        "\n{prefix} error reading header of {}.",
+                        core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
                 }
                 if (*hin).nx != hdr.nx || (*hin).ny != hdr.ny {
-                    crate::imod::libiimod::iimage::ii_fclose(hdr.fp.cast());
-                    crate::imod::clip::clip::show_error(&format!(
+                    let message = std::ffi::CString::new(format!(
                         "\n{prefix} files must be same size in X and Y; {} differs",
                         core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
-                    ));
-                    return -1;
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
                 }
                 &mut hdr as *mut MrcHeader
             };
@@ -3058,15 +3138,13 @@ pub unsafe fn clip_planar_fit(
                     (*opt).cy as i32,
                 );
                 if s.is_null() {
-                    if f != 0 {
-                        crate::imod::libiimod::iimage::ii_fclose(hdr.fp.cast());
-                    }
-                    crate::imod::clip::clip::show_error(&format!(
+                    let message = std::ffi::CString::new(format!(
                         "\n{prefix} reading slice {} of {}",
                         *(*opt).secs.add(k as usize),
                         core::ffi::CStr::from_ptr(*(*opt).fnames.add(f as usize)).to_string_lossy()
-                    ));
-                    return -1;
+                    ))
+                    .unwrap();
+                    crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
                 }
                 for y in 0..(*opt).iy {
                     for x in 0..(*opt).ix {
@@ -3085,102 +3163,68 @@ pub unsafe fn clip_planar_fit(
         if count == 0 {
             return -1;
         }
-        let nx = (*opt).ix as f64;
-        let ny = (*opt).iy as f64;
-        let mut sx = 0.;
-        let mut sy = 0.;
-        let mut sxx = 0.;
-        let mut syy = 0.;
-        let mut sz = 0.;
-        let mut sxz = 0.;
-        let mut syz = 0.;
-        for y in 0..(*opt).iy {
-            for x in 0..(*opt).ix {
-                let xx = x as f64 - (nx - 1.) / 2.;
-                let yy = y as f64 - (ny - 1.) / 2.;
-                let v = sum[(x + y * (*opt).ix) as usize] as f64;
-                sx += xx;
-                sy += yy;
-                sxx += xx * xx;
-                syy += yy * yy;
-                sz += v;
-                sxz += xx * v;
-                syz += yy * v;
-            }
-        }
-        // C normalizes the binned sum to its center before `lsFit2`; a plane
-        // through the normalized, zero-centered bins has no constant term.
-        let (aa, bb, plane_rms) = if fitting {
+        // `processing.cpp:2643-2688`: bin the sum, normalize it to the centre
+        // bin, build the xx/yy coordinate arrays and fit a plane with no
+        // constant term.  aa and bb are floats in the source and lsFit2 is its
+        // own routine, not an inline normal-equation solve.
+        if (*opt).process == IP_PLANARFIT {
             let mut nx_trim = (0.005 * (*hin).nx as f32) as i32;
             let nx_in = ((*hin).nx - 2 * nx_trim).min((*opt).ix);
             nx_trim = 0.max(((*hin).nx - nx_in) / 2);
             let mut ny_trim = (0.005 * (*hin).ny as f32) as i32;
             let ny_in = ((*hin).ny - 2 * ny_trim).min((*opt).iy);
             ny_trim = 0.max(((*hin).ny - ny_in) / 2);
-            let ind = if (*opt).process == IP_PLANARFIT {
-                11
-            } else {
-                15
-            };
-            let x_binning = 1.max(nx_in / ind);
-            let y_binning = 1.max(ny_in / ind);
+            let x_binning = 1.max(nx_in / 11);
+            let y_binning = 1.max(ny_in / 11);
             let nx_bin = nx_in / x_binning;
             let ny_bin = ny_in / y_binning;
-            let mut bin_sum = vec![0_f64; (nx_bin * ny_bin) as usize];
+            let num_bin = (nx_bin * ny_bin) as usize;
+            let mut bin_sum = vec![0_f32; num_bin];
+            crate::imod::libcfshr::reduce_by_binning::bin_into_slice(
+                sum.as_mut_ptr()
+                    .add((ny_trim * (*opt).ix + nx_trim) as usize),
+                (*opt).ix,
+                bin_sum.as_mut_ptr(),
+                nx_bin,
+                ny_bin,
+                x_binning,
+                y_binning,
+                1.,
+            );
+            let cen_val = bin_sum[(nx_bin * (ny_bin / 2) + nx_bin / 2) as usize];
+            let mut warned = 0;
+            for value in &mut bin_sum {
+                if *value <= 0. && warned == 0 {
+                    warned += 1;
+                    crate::imod::clip::clip::show_warning(
+                        "Some binned values are negative; you must set a base value to subtract with the -l option",
+                    );
+                }
+                *value = *value / cen_val - 1.;
+            }
+            let xcen = (nx_bin as f64 / 2.) as f32;
+            let ycen = (ny_bin as f64 / 2.) as f32;
+            let mut xx = vec![0_f32; num_bin];
+            let mut yy = vec![0_f32; num_bin];
+            let mut k = 0_usize;
             for iy in 0..ny_bin {
                 for ix in 0..nx_bin {
-                    for by in 0..y_binning {
-                        for bx in 0..x_binning {
-                            bin_sum[(ix + iy * nx_bin) as usize] +=
-                                sum[((nx_trim + ix * x_binning + bx)
-                                    + (*opt).ix * (ny_trim + iy * y_binning + by))
-                                    as usize] as f64;
-                        }
-                    }
+                    xx[k] = (x_binning as f64 * (ix as f64 + 0.5 - xcen as f64)) as f32;
+                    yy[k] = (y_binning as f64 * (iy as f64 + 0.5 - ycen as f64)) as f32;
+                    k += 1;
                 }
             }
-            let center = bin_sum[(nx_bin * (ny_bin / 2) + nx_bin / 2) as usize];
-            if center == 0. {
-                return -1;
-            }
-            if bin_sum.iter().any(|value| *value <= 0.) {
-                crate::imod::clip::clip::show_warning(
-                    "Some binned values are negative; you must set a base value to subtract with the -l option",
-                );
-            }
-            let mut fit_sxx = 0.;
-            let mut fit_syy = 0.;
-            let mut fit_sxz = 0.;
-            let mut fit_syz = 0.;
-            for iy in 0..ny_bin {
-                for ix in 0..nx_bin {
-                    let k = (ix + iy * nx_bin) as usize;
-                    let xx = x_binning as f64 * (ix as f64 + 0.5 - nx_bin as f64 / 2.);
-                    let yy = y_binning as f64 * (iy as f64 + 0.5 - ny_bin as f64 / 2.);
-                    let value = bin_sum[k] / center - 1.;
-                    fit_sxx += xx * xx;
-                    fit_syy += yy * yy;
-                    fit_sxz += xx * value;
-                    fit_syz += yy * value;
-                }
-            }
-            let aa = fit_sxz / fit_sxx;
-            let bb = fit_syz / fit_syy;
-            let mut residual_sum = 0.;
-            for iy in 0..ny_bin {
-                for ix in 0..nx_bin {
-                    let k = (ix + iy * nx_bin) as usize;
-                    let xx = x_binning as f64 * (ix as f64 + 0.5 - nx_bin as f64 / 2.);
-                    let yy = y_binning as f64 * (iy as f64 + 0.5 - ny_bin as f64 / 2.);
-                    let residual = 100. * (bin_sum[k] / center - 1. - (aa * xx + bb * yy));
-                    residual_sum += residual * residual;
-                }
-            }
-            (aa, bb, (residual_sum / (nx_bin * ny_bin) as f64).sqrt())
-        } else {
-            (sxz / sxx, syz / syy, 0.)
-        };
-        if (*opt).process == IP_PLANARFIT {
+            let mut aa = 0_f32;
+            let mut bb = 0_f32;
+            crate::imod::libcfshr::simplestat::ls_fit2(
+                xx.as_ptr(),
+                yy.as_ptr(),
+                bin_sum.as_ptr(),
+                nx_bin * ny_bin,
+                &mut aa,
+                &mut bb,
+                core::ptr::null_mut(),
+            );
             let text = format!("{aa:.8}  {bb:.8}\n");
             crate::imod::libcfshr::b3dutil::b3d_fwrite(
                 text.as_ptr().cast(),
@@ -3191,10 +3235,21 @@ pub unsafe fn clip_planar_fit(
             libc::printf(
                 c"Plane slopes imply a gradient over full extent in X and Y of %.3f and %.3f\n"
                     .as_ptr(),
-                100. * aa * (*hin).nx as f64,
-                100. * bb * (*hin).ny as f64,
+                100. * aa as f64 * (*hin).nx as f64,
+                100. * bb as f64 * (*hin).ny as f64,
             );
-            libc::printf(c"Root-mean-squared residual = %.3f\n".as_ptr(), plane_rms);
+            let mut dmean = 0_f32;
+            for iy in 0..ny_bin {
+                for ix in 0..nx_bin {
+                    let k = (ix + iy * nx_bin) as usize;
+                    let resid = (100. * (bin_sum[k] - (aa * xx[k] + bb * yy[k])) as f64) as f32;
+                    dmean += resid * resid;
+                }
+            }
+            libc::printf(
+                c"Root-mean-squared residual = %.3f\n".as_ptr(),
+                ((dmean / (nx_bin * ny_bin) as f32) as f64).sqrt(),
+            );
             return 0;
         }
         if fitting && (*opt).process == IP_FLATFIELD {
@@ -3215,29 +3270,32 @@ pub unsafe fn clip_planar_fit(
             let ny_bin = ny_in / y_binning;
             let dim = 15 * 15 + 10;
             let col_dim = 18;
+            // `processing.cpp:2645` calls binIntoSlice, whose per-output-row
+            // partial sums are each scaled by 1/(binFacX*binFacY) before being
+            // accumulated; a plain unscaled sum rounds differently.
             let mut bin_sum = vec![0_f32; (nx_bin * ny_bin) as usize];
-            for iy in 0..ny_bin {
-                for ix in 0..nx_bin {
-                    for by in 0..y_binning {
-                        for bx in 0..x_binning {
-                            bin_sum[(ix + iy * nx_bin) as usize] +=
-                                sum[((nx_trim + ix * x_binning + bx)
-                                    + (*opt).ix * (ny_trim + iy * y_binning + by))
-                                    as usize];
-                        }
-                    }
-                }
-            }
+            crate::imod::libcfshr::reduce_by_binning::bin_into_slice(
+                sum.as_mut_ptr()
+                    .add((ny_trim * (*opt).ix + nx_trim) as usize),
+                (*opt).ix,
+                bin_sum.as_mut_ptr(),
+                nx_bin,
+                ny_bin,
+                x_binning,
+                y_binning,
+                1.,
+            );
             let center = bin_sum[(nx_bin * (ny_bin / 2) + nx_bin / 2) as usize];
-            if center == 0. {
-                return -1;
-            }
-            if bin_sum.iter().any(|value| *value <= 0.) {
-                crate::imod::clip::clip::show_warning(
-                    "Some binned values are negative; you must set a base value to subtract with the -l option",
-                );
-            }
+            // `processing.cpp:2650-2657`: the warning fires only for the first
+            // non-positive bin, and the normalization runs on every bin.
+            let mut warned = 0;
             for value in &mut bin_sum {
+                if *value <= 0. && warned == 0 {
+                    warned += 1;
+                    crate::imod::clip::clip::show_warning(
+                        "Some binned values are negative; you must set a base value to subtract with the -l option",
+                    );
+                }
                 *value = *value / center - 1.;
             }
             let mut x_mat = vec![0_f32; (col_dim * dim) as usize];
@@ -3247,16 +3305,22 @@ pub unsafe fn clip_planar_fit(
             let mut work = [0_f32; 18 * 18];
             let mut cons = 0_f32;
             let mut num_col = 0_i32;
+            // `processing.cpp:2659-2665`: xcen/ycen are floats from a double
+            // quotient, and each xx/yy is a double expression stored as float.
+            let bin_xcen = (nx_bin as f64 / 2.) as f32;
+            let bin_ycen = (ny_bin as f64 / 2.) as f32;
             for iy in 0..ny_bin {
                 for ix in 0..nx_bin {
                     let k = ix + iy * nx_bin;
-                    let xx = x_binning as f32 * (ix as f32 + 0.5 - nx_bin as f32 / 2.);
-                    let yy = y_binning as f32 * (iy as f32 + 0.5 - ny_bin as f32 / 2.);
+                    let xx = (x_binning as f64 * (ix as f64 + 0.5 - bin_xcen as f64)) as f32;
+                    let yy = (y_binning as f64 * (iy as f64 + 0.5 - bin_ycen as f64)) as f32;
                     let mut col = 0_i32;
                     for ind in 1..=order {
                         for py in 0..=ind {
                             let px = ind - py;
-                            x_mat[(col * dim + k) as usize] = xx.powi(px) * yy.powi(py);
+                            // `processing.cpp:2698`: pow() is the double version.
+                            x_mat[(col * dim + k) as usize] =
+                                ((xx as f64).powf(px as f64) * (yy as f64).powf(py as f64)) as f32;
                             col += 1;
                         }
                     }
@@ -3297,7 +3361,9 @@ pub unsafe fn clip_planar_fit(
                         c"%d  %d  %.9f\n".as_ptr(),
                         px,
                         py,
-                        (sol[col] * x_center.powi(px) * y_center.powi(py)) as f64,
+                        sol[col] as f64
+                            * (x_center as f64).powf(px as f64)
+                            * (y_center as f64).powf(py as f64),
                     );
                     col += 1;
                 }
@@ -3306,13 +3372,17 @@ pub unsafe fn clip_planar_fit(
             for iy in 0..ny_bin {
                 for ix in 0..nx_bin {
                     let k = (ix + iy * nx_bin) as usize;
-                    let xx = x_binning as f32 * (ix as f32 + 0.5 - nx_bin as f32 / 2.);
-                    let yy = y_binning as f32 * (iy as f32 + 0.5 - ny_bin as f32 / 2.);
+                    let xx = (x_binning as f64 * (ix as f64 + 0.5 - bin_xcen as f64)) as f32;
+                    let yy = (y_binning as f64 * (iy as f64 + 0.5 - bin_ycen as f64)) as f32;
                     let mut residual = bin_sum[k] - cons;
                     let mut col = 0_usize;
                     for ind in 1..=order {
                         for py in 0..=ind {
-                            residual -= sol[col] * xx.powi(ind - py) * yy.powi(py);
+                            residual = (residual as f64
+                                - sol[col] as f64
+                                    * (xx as f64).powf((ind - py) as f64)
+                                    * (yy as f64).powf(py as f64))
+                                as f32;
                             col += 1;
                         }
                     }
@@ -3321,7 +3391,7 @@ pub unsafe fn clip_planar_fit(
             }
             libc::printf(
                 c"Root-mean-squared residual = %.3f\n".as_ptr(),
-                (residual_sum / (nx_bin * ny_bin) as f32).sqrt() as f64,
+                ((residual_sum / (nx_bin * ny_bin) as f32) as f64).sqrt(),
             );
             for iy in 0..(*hin).ny {
                 for ix in 0..(*hin).nx {
@@ -3329,68 +3399,79 @@ pub unsafe fn clip_planar_fit(
                     let mut col = 0_usize;
                     for ind in 1..=order {
                         for py in 0..=ind {
-                            residual += sol[col]
-                                * (ix as f32 - x_center).powi(ind - py)
-                                * (iy as f32 - y_center).powi(py);
+                            residual = (residual as f64
+                                + sol[col] as f64
+                                    * ((ix as f32 - x_center) as f64).powf((ind - py) as f64)
+                                    * ((iy as f32 - y_center) as f64).powf(py as f64))
+                                as f32;
                             col += 1;
                         }
                     }
                     sum[(ix + (*hin).nx * iy) as usize] = 1. / residual;
                 }
             }
-        } else if fitting {
-            for y in 0..(*opt).iy {
-                for x in 0..(*opt).ix {
-                    let xx = x as f64 - (nx - 1.) / 2.;
-                    let yy = y as f64 - (ny - 1.) / 2.;
-                    sum[(x + y * (*opt).ix) as usize] = (1. / (1. + aa * xx + bb * yy)) as f32;
-                }
-            }
         } else {
-            let mut minimum = f32::INFINITY;
-            let mut maximum = f32::NEG_INFINITY;
-            for value in &sum {
-                minimum = minimum.min(*value);
-                maximum = maximum.max(*value);
-            }
-            let mean = sz / n as f64;
+            // C `processing.cpp:2769-2777` takes min/max/mean through
+            // `fullArrayMinMaxMean`, so `dmean` is rounded to float before it is
+            // used; `0.05 * dmean` then promotes the comparison and the divide
+            // to double, and the quotient is rounded to float exactly once.
+            let mut dmin = 0_f32;
+            let mut dmax = 0_f32;
+            let mut dmean = 0_f32;
+            crate::imod::libiimod::mrcslice::full_array_min_max_mean(
+                sum.as_mut_ptr().cast(),
+                crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
+                (*opt).ix,
+                (*opt).iy,
+                &mut dmin,
+                &mut dmax,
+                &mut dmean,
+            );
             libc::printf(
                 c"Averaged image min = %.5g, max = %.5g, mean = %.5g\n".as_ptr(),
-                minimum as f64 / count as f64,
-                maximum as f64 / count as f64,
-                mean / count as f64,
+                (dmin / count as f32) as f64,
+                (dmax / count as f32) as f64,
+                (dmean / count as f32) as f64,
             );
-            if minimum < 0. {
+            if dmin < 0. {
                 crate::imod::clip::clip::show_warning(
                     "Some summed values are negative; you must set a base value to subtract with the -l option",
                 );
             }
             for value in &mut sum {
-                *value = (mean / (0.05 * mean).max(*value as f64)) as f32;
+                *value = (dmean as f64 / (0.05 * dmean as f64).max(*value as f64)) as f32;
             }
         }
         if (*opt).process == IP_FLATFIELD {
-            let out = crate::imod::libcfshr::islice::slice_create((*opt).ix, (*opt).iy, 2);
-            if out.is_null() {
-                return -1;
-            }
-            core::ptr::copy_nonoverlapping(sum.as_ptr(), (*out).data.f, n);
-            crate::imod::libcfshr::islice::slice_min_max(out);
-            (*hout).amin = (*out).min;
-            (*hout).amax = (*out).max;
-            (*hout).amean = (*out).mean;
+            // `processing.cpp:2779-2785` takes min/max/mean straight from
+            // sumBuf with `fullArrayMinMaxMean` and writes sumBuf itself.  The
+            // intermediate slice that used to stand in here was filled by
+            // `sliceMinMax`, which never sets `mean`, so the output header
+            // carried a stale value rather than the flatfield mean.
+            crate::imod::libiimod::mrcslice::full_array_min_max_mean(
+                sum.as_mut_ptr().cast(),
+                crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
+                (*opt).ix,
+                (*opt).iy,
+                &mut (*hout).amin,
+                &mut (*hout).amax,
+                &mut (*hout).amean,
+            );
             if crate::imod::libiimod::mrcfiles::mrc_head_write((*hout).fp.cast(), hout) != 0 {
-                return -1;
+                let message = std::ffi::CString::new(format!("{prefix} writing header")).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
             }
-            let e = crate::imod::libiimod::mrcfiles::mrc_write_slice(
-                (*out).data.b.cast(),
+            if crate::imod::libiimod::mrcfiles::mrc_write_slice(
+                sum.as_mut_ptr().cast(),
                 (*hout).fp.cast(),
                 hout,
                 0,
                 b'z' as i8,
-            );
-            slice_free(out);
-            return e;
+            ) != 0
+            {
+                let message = std::ffi::CString::new(format!("{prefix} writing image")).unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+            }
         }
         0
     }
@@ -3442,20 +3523,12 @@ pub unsafe fn clip_unpack(
         if antialias_eer {
             scale = 100.;
         }
-        if (*opt).val as i32 != IP_DEFAULT {
+        if (*opt).val != IP_DEFAULT as f32 {
             scale = (*opt).val;
         }
         let mut reference = core::ptr::null_mut();
         if do_ref {
-            reference = crate::imod::libiimod::mrcslice::slice_read_subm(
-                hin2,
-                0,
-                b'z' as i8,
-                (*hin2).nx,
-                (*hin2).ny,
-                (*hin2).nx / 2,
-                (*hin2).ny / 2,
-            );
+            reference = crate::imod::libiimod::mrcslice::slice_read_mrc(hin2, 0, b'z' as i8);
             if reference.is_null() {
                 return -1;
             }
@@ -3501,7 +3574,9 @@ pub unsafe fn clip_unpack(
             }
             (*reference).xsize = nx;
             (*reference).ysize = ny;
-            let super_fac = if nx > 0 { (*hin1).nx / nx } else { 0 };
+            // `processing.cpp:2881`: superFac comes from the reference file's
+            // own width, not from the possibly rotated slice width.
+            let super_fac = (*hin1).nx / (*hin2).nx;
             let use_fac = if antialias_eer { 4 } else { super_fac };
             if ((*hin1).ny / (*hin2).ny == super_fac
                 && super_fac * (*hin2).nx == (*hin1).nx
@@ -3510,6 +3585,19 @@ pub unsafe fn clip_unpack(
                 || antialias_eer
             {
                 if super_fac > 1 || antialias_eer {
+                    // `processing.cpp:2885-2889`.
+                    let ii_file2 =
+                        crate::imod::libiimod::iimage::ii_lookup_file_from_fp((*hin2).fp.cast());
+                    if !is_eer
+                        && !(!ii_file2.is_null()
+                            && (*ii_file2).file == crate::imod::libiimod::iimage::IIFILE_TIFF)
+                    {
+                        libc::printf(
+                            c"WARNING: clip - Expanding gain reference because image is exactly %d times as big as reference\n"
+                                .as_ptr(),
+                            super_fac,
+                        );
+                    }
                     let expanded = crate::imod::libcfshr::islice::slice_create(
                         (*hin1).nx * red_factor,
                         (*hin1).ny * red_factor,
@@ -3522,17 +3610,22 @@ pub unsafe fn clip_unpack(
                         );
                         return -1;
                     }
+                    // `processing.cpp:2896-2898`: the reference file's own
+                    // dimensions are expanded, and nxGain/nyGain are multiplied
+                    // by useFac rather than reset from the input file size.
                     crate::imod::clip::correct_defects::cor_def_expand_gain_reference(
                         (*reference).data.f,
-                        nx,
-                        ny,
+                        (*hin2).nx,
+                        (*hin2).ny,
                         use_fac,
                         (*expanded).data.f,
                     );
                     slice_free(reference);
                     reference = expanded;
-                    nx = (*hin1).nx * red_factor;
-                    ny = (*hin1).ny * red_factor;
+                    nx *= use_fac;
+                    ny *= use_fac;
+                    (*reference).xsize = nx;
+                    (*reference).ysize = ny;
                     if !(*opt).super_gain_name.is_null() {
                         let mut biases = Vec::new();
                         let (mut num_in_x, mut x_start, mut x_interval) = (0, 0, 0);
@@ -3551,10 +3644,11 @@ pub unsafe fn clip_unpack(
                             &mut y_interval,
                         );
                         if error != 0 {
-                            crate::imod::clip::clip::show_error(&format!(
+                            let message = std::ffi::CString::new(format!(
                                 "Reading file with super-resolution gain adjustments (error {error})"
-                            ));
-                            return -1;
+                            ))
+                            .unwrap();
+                            crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
                         }
                         crate::imod::clip::correct_defects::cor_def_refine_super_res_ref(
                             core::slice::from_raw_parts_mut(
@@ -3619,7 +3713,7 @@ pub unsafe fn clip_unpack(
         if antialias_eer {
             do_ref = false;
         }
-        let threshold = if (*opt).high as i32 == IP_DEFAULT {
+        let threshold = if (*opt).high == IP_DEFAULT as f32 {
             f32::INFINITY
         } else {
             (*opt).high
@@ -3653,7 +3747,7 @@ pub unsafe fn clip_unpack(
                 k + 1,
                 (*opt).nofsecs,
             );
-            libc::fflush(core::ptr::null_mut());
+            libc::fflush(stdout);
             let input = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin1,
                 *(*opt).secs.add(k as usize),
@@ -3678,7 +3772,7 @@ pub unsafe fn clip_unpack(
                     };
                     v[0] = v[0] * gain + offset;
                     if v[0] > threshold {
-                        v[0] = if (*opt).low as i32 == IP_DEFAULT {
+                        v[0] = if (*opt).low == IP_DEFAULT as f32 {
                             crate::imod::clip::correct_defects::cor_def_surrounding_mean(
                                 (*input).data.b.cast(),
                                 (*input).mode,
@@ -3885,8 +3979,9 @@ pub unsafe fn clip_super_gain(
         if out_fp.is_null() {
             return -1;
         }
-        let subdivisions = (*opt).val as i32;
-        let divisions = 2 * subdivisions;
+        // `processing.cpp:3179`: numDiv = 2 * opt->val truncates the float
+        // product, so -n 2.7 gives 5, not 4.
+        let divisions = (2. * (*opt).val) as i32;
         let n = ((*h1).nx * (*h1).ny) as usize;
         let mut image = vec![0_f64; n];
         let mut input = vec![0_u8; n];
@@ -4071,11 +4166,13 @@ pub unsafe fn combine_area_sums(area_sum: *mut f64) -> f32 {
             *area_sum.add(8) + *area_sum.add(9) + *area_sum.add(12) + *area_sum.add(13);
         *area_sum.add(3) =
             *area_sum.add(10) + *area_sum.add(11) + *area_sum.add(14) + *area_sum.add(15);
-        let mut bsum = 0.;
+        // `processing.cpp:3317`: bsum is a float, so each term is rounded to
+        // single precision as it is added.
+        let mut bsum = 0_f32;
         for index in 0..4 {
-            bsum += *area_sum.add(index) / 4.;
+            bsum += (*area_sum.add(index) / 4.) as f32;
         }
-        bsum as f32
+        bsum
     }
 }
 /// Matches C++ `clip_parxyz`.
@@ -4198,7 +4295,9 @@ pub unsafe fn clip_get_stat3d(
         let first = *(*v).vol;
         let (nx, ny, nz) = ((*first).xsize, (*first).ysize, (*v).zsize);
         let mut min = 1e36_f32;
-        let mut max = f32::MIN_POSITIVE;
+        // `processing.cpp:22-23` redefines FLT_MIN as INT_MIN for this file and
+        // <float.h> is not in its include set, so `max = FLT_MIN` seeds -2^31.
+        let mut max = i32::MIN as f32;
         let mut sum = 0_f64;
         let (mut xmax, mut ymax, mut zmax) = (0, 0, 0);
         for k in 0..nz {
@@ -4330,6 +4429,9 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
         let mut total_sum = 0_f64;
         let mut total_sq = 0_f64;
         let mut total_n = 0_i64;
+        // `processing.cpp:3480` float ptnum, `:3481` double vmean/vsumsq.
+        let mut ptnum = 0_f32;
+        let mut vmean = 0_f64;
         let mut all_min = f32::INFINITY;
         let mut all_max = f32::NEG_INFINITY;
         let mut zmin = 0_i32;
@@ -4445,14 +4547,26 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                     sd,
                 );
             }
-            if min < all_min {
+            // `processing.cpp:3660-3676`: the first selected section seeds the
+            // extrema, and its zmax is set to 0 rather than to iz.
+            if k == 0 {
                 all_min = min;
-                zmin = iz;
-            }
-            if max > all_max {
                 all_max = max;
-                zmax = iz;
+                vmean = 0.;
+                zmin = iz;
+                zmax = 0;
+            } else {
+                if min < all_min {
+                    all_min = min;
+                    zmin = iz;
+                }
+                if max > all_max {
+                    all_max = max;
+                    zmax = iz;
+                }
             }
+            vmean += mean;
+            ptnum = ((*s).xsize * (*s).ysize) as f32;
             total_sum += sum;
             total_sq += square;
             total_n += n as i64;
@@ -4461,18 +4575,20 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
             stat_rows.push((iz, xmin, ymin, peak_x, peak_y, mean, sd));
             slice_free(s);
         }
+        let mut flagged: Vec<bool> = Vec::new();
         if outliers {
             let mut length = (*opt).nofsecs;
             if (*opt).low != IP_DEFAULT as f32 {
                 length = (*opt).low.round() as i32;
             }
-            length = length.clamp(5, (*opt).nofsecs);
+            // `processing.cpp:3548`: B3DMIN(nofsecs, B3DMAX(5, length)).
+            length = (*opt).nofsecs.min(5.max(length));
             let kcrit = if (*opt).val != IP_DEFAULT as f32 {
                 (*opt).val
             } else {
                 2.24
             };
-            let mut flagged = vec![false; stat_rows.len()];
+            flagged = vec![false; stat_rows.len()];
             for kk in 0..stat_rows.len() {
                 let mut di = (kk as i32 - length / 2).max(0);
                 let mut dj = (di + length).min((*opt).nofsecs);
@@ -4504,7 +4620,10 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                 let starmin = if min_drops[index] < 0. { b'*' } else { b' ' };
                 let starmax = if max_drops[index] > 0. { b'*' } else { b' ' };
                 if !pcoords.is_empty() {
-                    let base = (3 * iz) as usize;
+                    // `processing.cpp:3723-3726` indexes the piece list with the
+                    // loop counter kk for X and Y, but with secs[kk] for Z.
+                    let base = 3 * kk;
+                    let zbase = (3 * iz + 2) as usize;
                     libc::printf(
                         c"%4d  %9.4f%c(%4d,%4d,%4d) %9.4f%c(%4d,%4d,%4d) %9.4f  %9.4f\n".as_ptr(),
                         iz + add,
@@ -4512,12 +4631,12 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                         starmin as i32,
                         xmin + pcoords[base] + add,
                         ymin + pcoords[base + 1] + add,
-                        pcoords[base + 2] + add,
+                        pcoords[zbase] + add,
                         allmaxes[kk] as f64,
                         starmax as i32,
                         peak_x.round() as i32 + pcoords[base] + add,
                         peak_y.round() as i32 + pcoords[base + 1] + add,
-                        pcoords[base + 2] + add,
+                        pcoords[zbase] + add,
                         mean,
                         sd,
                     );
@@ -4538,6 +4657,40 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                     );
                 }
             }
+        }
+        // `processing.cpp:3742-3758`: the overall line is computed and printed
+        // before the extreme-value list, pooling the per-section statistics.
+        vmean /= (*opt).nofsecs as f64;
+        let mut vsumsq = 0_f64;
+        for row in &stat_rows {
+            vsumsq += ptnum as f64 * (row.5 * row.5 - vmean * vmean)
+                + (ptnum as f64 - 1.) * row.6 * row.6;
+        }
+        ptnum *= (*opt).nofsecs as f32;
+        let mut std = vsumsq / 1_f64.max(ptnum as f64 - 1.);
+        std = 0_f64.max(std).sqrt();
+        if !pcoords.is_empty() {
+            libc::printf(
+                c" all  %9.4f (@ piece =%5d) %9.4f (@ piece =%5d) %9.4f  %9.4f\n".as_ptr(),
+                all_min as f64,
+                zmin + 1,
+                all_max as f64,
+                zmax + 1,
+                vmean,
+                std,
+            );
+        } else {
+            libc::printf(
+                c" all  %9.4f (@ z=%5d) %9.4f (@ z=%5d      ) %9.4f  %9.4f\n".as_ptr(),
+                all_min as f64,
+                zmin + add,
+                all_max as f64,
+                zmax + add,
+                vmean,
+                std,
+            );
+        }
+        if outliers {
             libc::printf(
                 c"\n%s with %sextreme values:".as_ptr(),
                 if pcoords.is_empty() {
@@ -4556,9 +4709,21 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                 },
             );
             let mut number = 0;
+            // `processing.cpp:3766-3775`.
+            let mut line_length = 28
+                + if (*opt).low != IP_DEFAULT as f32 {
+                    8
+                } else {
+                    0
+                };
             for (index, row) in stat_rows.iter().enumerate() {
                 if flagged[index] {
                     libc::printf(c" %3d".as_ptr(), row.0 + add);
+                    line_length += 4;
+                    if line_length > 74 {
+                        libc::printf(c"\n".as_ptr());
+                        line_length = 0;
+                    }
                     number += 1;
                 }
             }
@@ -4566,33 +4731,6 @@ pub unsafe fn clip_stat(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
                 libc::printf(c" None".as_ptr());
             }
             libc::printf(c"\n".as_ptr());
-        }
-        if total_n > 0 {
-            let mean = total_sum / total_n as f64;
-            let sd = ((total_sq - total_n as f64 * mean * mean) / 1_f64.max(total_n as f64 - 1.))
-                .max(0.)
-                .sqrt();
-            if !pcoords.is_empty() {
-                libc::printf(
-                    c" all  %9.4f (@ piece =%5d) %9.4f (@ piece =%5d) %9.4f  %9.4f\n".as_ptr(),
-                    all_min as f64,
-                    zmin + 1,
-                    all_max as f64,
-                    zmax + 1,
-                    mean,
-                    sd,
-                );
-            } else {
-                libc::printf(
-                    c" all  %9.4f (@ z=%5d) %9.4f (@ z=%5d      ) %9.4f  %9.4f\n".as_ptr(),
-                    all_min as f64,
-                    zmin + add,
-                    all_max as f64,
-                    zmax + add,
-                    mean,
-                    sd,
-                );
-            }
         }
         0
     }
@@ -4607,12 +4745,12 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
         }
         let floating = matches!((*hin).mode, 2 | 4);
         let (hist_min, hist_max, delta, bins_len, offset) = if floating {
-            let lo = if (*opt).low as i32 == IP_DEFAULT {
+            let lo = if (*opt).low == IP_DEFAULT as f32 {
                 (*hin).amin
             } else {
                 (*opt).low
             };
-            let hi = if (*opt).high as i32 == IP_DEFAULT {
+            let hi = if (*opt).high == IP_DEFAULT as f32 {
                 (*hin).amax
             } else {
                 (*opt).high
@@ -4626,7 +4764,7 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                 );
                 return -1;
             }
-            let d = if (*opt).val as i32 == IP_DEFAULT {
+            let d = if (*opt).val == IP_DEFAULT as f32 {
                 (hi - lo) / 256.
             } else {
                 (*opt).val
@@ -4688,12 +4826,37 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
             }
             slice_free(s);
         }
+        // `processing.cpp:3880-3894` computes the percentile threshold in its
+        // own pass over the raw, uncombined bin array, before minBin/maxBin are
+        // found and before any bin combining.  Folding it into the combined
+        // print loop uses combined counts and a stepped index instead, which
+        // only agrees when the combining factor is 1.
+        let mut threshold_value = 0_f32;
+        let mut got_threshold = false;
+        if (*opt).thresh != IP_DEFAULT as f32 {
+            let thresh_counts =
+                (((*opt).thresh * (*opt).nofsecs as f32) as f64 * nx as f64) * ny as f64;
+            let mut cumul_counts = 0_f64;
+            for ind in 0..bins.len() {
+                cumul_counts += bins[ind] as f64;
+                if cumul_counts >= thresh_counts {
+                    let frac = ((cumul_counts - thresh_counts) / bins[ind] as f64) as f32;
+                    threshold_value = if floating {
+                        hist_min + (ind as f32 - frac) * delta
+                    } else {
+                        (ind as f32 - frac) - offset as f32
+                    };
+                    got_threshold = true;
+                    break;
+                }
+            }
+        }
         let first = bins.iter().position(|&n| n != 0);
         let last = bins.iter().rposition(|&n| n != 0);
         if let (Some(mut a), Some(mut b)) = (first, last) {
             if !floating {
-                if (*opt).low as i32 != IP_DEFAULT
-                    && (*opt).high as i32 != IP_DEFAULT
+                if (*opt).low != IP_DEFAULT as f32
+                    && (*opt).high != IP_DEFAULT as f32
                     && (*opt).low > (*opt).high
                 {
                     libc::printf(
@@ -4704,10 +4867,10 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                     );
                     return -1;
                 }
-                if (*opt).low as i32 != IP_DEFAULT {
+                if (*opt).low != IP_DEFAULT as f32 {
                     a = a.max(((*opt).low + offset as f32).round() as usize);
                 }
-                if (*opt).high as i32 != IP_DEFAULT {
+                if (*opt).high != IP_DEFAULT as f32 {
                     b = b.min(((*opt).high + offset as f32).round() as usize);
                 }
                 if a > b {
@@ -4716,19 +4879,26 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
             }
             let combine = if floating {
                 1
-            } else if (*opt).val as i32 == IP_DEFAULT {
-                1.max((b - a) / 256)
+            } else if (*opt).val == IP_DEFAULT as f32 {
+                // `processing.cpp:3949` is B3DNINT((maxBin - minBin) / 256.),
+                // i.e. floor(x + 0.5) on a double quotient.  Integer division
+                // truncates instead and picks the bin width one too small
+                // whenever the quotient's fraction is at least a half.
+                1.max((((b - a) as f64) / 256. + 0.5).floor() as usize)
             } else {
-                (*opt).val.round().max(1.) as usize
+                // `processing.cpp:3942-3947`.
+                let entered = ((*opt).val as f64 + 0.5).floor() as i32;
+                if entered < 1 {
+                    let message = std::ffi::CString::new(format!(
+                        "clip histogram - Entered bin size ({:.6}) must be > 0.5",
+                        (*opt).val
+                    ))
+                    .unwrap();
+                    crate::imod::clip::clip::show_error(message.to_str().unwrap());
+                    return -1;
+                }
+                entered as usize
             };
-            let mut cumulative = 0_f64;
-            let threshold = if (*opt).thresh as i32 == IP_DEFAULT {
-                None
-            } else {
-                Some((*opt).thresh * (*opt).nofsecs as f32 * nx as f32 * ny as f32)
-            };
-            let mut threshold_value = 0_f32;
-            let mut got_threshold = false;
             if floating {
                 libc::printf(
                     c" Bin midpoint   counts    (bin interval is %f)\n".as_ptr(),
@@ -4746,35 +4916,36 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                 );
             }
             for i in (a..=b).step_by(combine) {
-                let count: (i64) = (i..(i + combine).min(b + 1)).map(|n| bins[n]).sum();
+                // `processing.cpp:3966-3968` clamps each contributing index to
+                // maxBin rather than stopping at it, so a final partial group
+                // re-adds bins[maxBin] once per missing slot.  Truncating the
+                // range instead undercounts that last group.
+                let count: (i64) = (0..combine).map(|n| bins[(i + n).min(b)]).sum();
+                // `processing.cpp:3932` and `:3963` evaluate the midpoint in
+                // double: the integer bin index promotes against the `0.5`
+                // literal, and the float `delta`/`histMin` widen into the same
+                // expression.  Computing it in f32 and widening afterwards
+                // changes the sixth significant digit that `%13.6g` prints.
                 let middle = if floating {
-                    hist_min + (i as f32 + 0.5) * delta
+                    hist_min as f64 + (i as f64 + 0.5) * delta as f64
                 } else if combine > 1 {
-                    i as f32 - offset as f32 + combine as f32 * 0.5
+                    i as f64 - offset as f64 + combine as f64 * 0.5
                 } else {
-                    i as f32 - offset as f32
+                    i as f64 - offset as f64
                 };
                 if floating {
-                    libc::printf(c"%13.6g %8d\n".as_ptr(), middle as f64, count as i32);
+                    libc::printf(c"%13.6g %8d\n".as_ptr(), middle, count as i32);
                 } else if combine > 1 {
-                    libc::printf(c"%12.1f %8d\n".as_ptr(), middle as f64, count as i32);
+                    libc::printf(c"%12.1f %8d\n".as_ptr(), middle, count as i32);
                 } else {
                     libc::printf(c"%6d %8d\n".as_ptr(), middle as i32, count as i32);
                 }
-                cumulative += count as f64;
-                if let Some(t) = threshold {
-                    if !got_threshold && cumulative >= t as f64 {
-                        let frac = ((cumulative - t as f64) / count as f64) as f32;
-                        threshold_value = if floating {
-                            hist_min + (i as f32 - frac) * delta
-                        } else {
-                            i as f32 - frac - offset as f32
-                        };
-                        got_threshold = true;
-                    }
-                }
             }
-            if got_threshold {
+            // `processing.cpp:3981-3982` prints unconditionally; when the
+            // percentile is never reached, C's `thresh` is still uninitialised
+            // stack storage.  Zero is used here for that indeterminate value.
+            let _ = got_threshold;
+            if (*opt).thresh != IP_DEFAULT as f32 {
                 libc::printf(
                     c"Threshold value for reaching %g of counts = %g\n".as_ptr(),
                     (*opt).thresh as f64,
@@ -4784,8 +4955,8 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
             let mut combo_bins = Vec::new();
             for i in (a..=b).step_by(combine) {
                 combo_bins.push(
-                    (i..(i + combine).min(b + 1))
-                        .map(|index| bins[index])
+                    (0..combine)
+                        .map(|index| bins[(i + index).min(b)])
                         .sum::<i64>(),
                 );
             }
@@ -4801,7 +4972,7 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                 .enumerate()
                 .max_by_key(|(_, count)| *count)
                 .map_or(0, |(index, _)| index as i32);
-            if (*opt).falloff_frac as i32 != IP_DEFAULT {
+            if (*opt).falloff_frac != IP_DEFAULT as f32 {
                 let (dir, mut ind) = if (*opt).falloff_frac > 0. {
                     (1_i32, 1_i32)
                 } else {
@@ -4809,6 +4980,8 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                 };
                 let mut diff_ind = -1_i32;
                 let mut max_diff = 0_f32;
+                // `processing.cpp:3797`: numFit is a function-scope int seeded 7.
+                let mut num_fit_state = 7_i32;
                 let mut cumulative_counts = 0_f64;
                 let threshold_counts = (*opt).falloff_frac.abs() as f64
                     * (*opt).nofsecs as f64
@@ -4821,17 +4994,25 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                     let frac = if current > 3000 && previous > 3000 {
                         previous as f32 / current as f32
                     } else {
-                        let num_fit = if current > 1000 && previous > 1000 {
-                            3
-                        } else if current > 300 && previous > 300 {
-                            5
-                        } else if current > 100 && previous > 100 {
-                            7
-                        } else if current > 30 && previous > 30 {
-                            9
+                        // `processing.cpp:4006-4015` is four separate `if`
+                        // statements with a single `else` on the last, so the
+                        // first three assignments are always overwritten.
+                        let mut num_fit = num_fit_state;
+                        if current > 1000 && previous > 1000 {
+                            num_fit = 3;
+                        }
+                        if current > 300 && previous > 300 {
+                            num_fit = 5;
+                        }
+                        if current > 100 && previous > 100 {
+                            num_fit = 7;
+                        }
+                        if current > 30 && previous > 30 {
+                            num_fit = 9;
                         } else {
-                            11
-                        };
+                            num_fit = 11;
+                        }
+                        num_fit_state = num_fit;
                         let mut start = 0.max(ind - num_fit / 2);
                         let end = (num_bins - 1).min(start + num_fit - 1);
                         start = 0.max(end + 1 - num_fit);
@@ -4851,8 +5032,11 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                             &mut intercept,
                             &mut ro,
                         );
-                        (slope * (ind - dir - start) as f32 + intercept)
-                            / 1_f32.max(slope * (ind - start) as f32 + intercept)
+                        // `processing.cpp:4020`: B3DMAX(1., ...) makes the
+                        // denominator a double, so the division is in double.
+                        (((slope * (ind - dir - start) as f32 + intercept) as f64)
+                            / 1.0_f64.max((slope * (ind - start) as f32 + intercept) as f64))
+                            as f32
                     };
                     if current > 100 && frac > max_diff && cumulative_counts > threshold_counts {
                         max_diff = frac;
@@ -4872,21 +5056,33 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                     (combo_left + diff_ind as f32 * bin_delta) as f64,
                 );
             }
-            if (*opt).pctl_frac as i32 == IP_DEFAULT {
+            if (*opt).pctl_frac == IP_DEFAULT as f32 {
                 return 0;
             }
             if peak_ind as f32 > 0.8 * num_bins as f32 || (peak_ind as f32) < 0.2 * num_bins as f32
             {
                 libc::printf(
                     c"ERROR: CLIP - Peak is at %f, too close to end of range to analyze for extra counts\n".as_ptr(),
-                    (combo_left + (peak_ind as f32 + 0.5) * bin_delta) as f64,
+                    combo_left as f64 + (peak_ind as f64 + 0.5) * bin_delta as f64,
                 );
                 return -1;
             }
+            // `processing.cpp:4052` indexes `bins`, not `comboBins`.  For the
+            // float path and for combine == 1, `comboBins` is `&bins[minBin]`,
+            // so these three reads land minBin elements too low; only when
+            // combine > 1 (where C sets `comboBins = bins` and writes the sums
+            // back into bins[0..numBins]) do they coincide.
+            let fit_at = |index: i32| -> f32 {
+                if combine > 1 {
+                    combo_bins[index as usize] as f32
+                } else {
+                    bins[index as usize] as f32
+                }
+            };
             let frac = crate::imod::libcfshr::filtxcorr::parabolic_fit_position(
-                combo_bins[(peak_ind - 1) as usize] as f32,
-                combo_bins[peak_ind as usize] as f32,
-                combo_bins[(peak_ind + 1) as usize] as f32,
+                fit_at(peak_ind - 1),
+                fit_at(peak_ind),
+                fit_at(peak_ind + 1),
             ) as f32;
             let (dir, mut ind) = if (*opt).pctl_frac > 0. {
                 (1_i32, num_bins - 1)
@@ -4895,7 +5091,7 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
             };
             libc::printf(
                 c"Interpolated peak position %13.6g\n".as_ptr(),
-                (combo_left + (peak_ind as f32 + frac + 0.5) * bin_delta) as f64,
+                combo_left as f64 + (peak_ind as f64 + frac as f64 + 0.5) * bin_delta as f64,
             );
             libc::printf(
                 c"Bins %s peak minus bins %s peak:\n".as_ptr(),
@@ -4908,12 +5104,15 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
                 let j = r_ind.floor() as i32;
                 let ff = r_ind - j as f32;
                 if j >= 0 && j < num_bins - 1 {
-                    let value = (1. - ff) * combo_bins[j as usize] as f32
-                        + ff * combo_bins[(j + 1) as usize] as f32;
-                    let difference = combo_bins[ind as usize] - value.round() as i64;
+                    // `processing.cpp:4076`: (1. - ff) makes the first product
+                    // a double; the sum is narrowed back into the float `val`.
+                    let value = ((1. - ff as f64) * combo_bins[j as usize] as f64
+                        + (ff * combo_bins[(j + 1) as usize] as f32) as f64)
+                        as f32;
+                    let difference = combo_bins[ind as usize] - (value as f64 + 0.5).floor() as i64;
                     libc::printf(
                         c"%13.6g %8d\n".as_ptr(),
-                        (combo_left + (ind as f32 + 0.5) * bin_delta) as f64,
+                        combo_left as f64 + (ind as f64 + 0.5) * bin_delta as f64,
                         difference as i32,
                     );
                     combo_bins[ind as usize] = difference;
@@ -4987,9 +5186,9 @@ pub unsafe fn clip_histogram(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 
 pub unsafe fn histogram_peaks_and_dip(hin: *mut MrcHeader, opt: *mut ClipOptions) -> i32 {
     unsafe {
         use crate::imod::clip::clip::IP_DEFAULT;
-        if (*opt).low as i32 != IP_DEFAULT
-            || (*opt).high as i32 != IP_DEFAULT
-            || (*opt).val as i32 != IP_DEFAULT
+        if (*opt).low != IP_DEFAULT as f32
+            || (*opt).high != IP_DEFAULT as f32
+            || (*opt).val != IP_DEFAULT as f32
         {
             libc::printf(
                 c"ERROR: CLIP - The -n, -l, and -h options have no effect when doing a histogram with -s\n"

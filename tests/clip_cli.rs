@@ -197,7 +197,10 @@ fn planefit_reports_source_dimension_mismatch_for_real_mrc_inputs() {
     assert!(
         String::from_utf8(command.stdout)
             .unwrap()
-            .contains("ERROR: \nDoing plane fit: files must be same size in X and Y;")
+            // Confirmed against native `clip planefit`: `processing.cpp:2593`
+            // uses exitError, so the setExitPrefix banner precedes the newline
+            // the message itself starts with.
+            .contains("ERROR: clip -  \nDoing plane fit: files must be same size in X and Y;")
     );
     for path in [first, second, output] {
         let _ = std::fs::remove_file(path);
@@ -621,7 +624,7 @@ fn clip_reports_source_error_for_unreadable_mrc_header() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stdout).contains("ERROR: CLIP - Error"));
+    assert!(String::from_utf8_lossy(&result.stdout).contains("ERROR: clip -  Error"));
     assert!(String::from_utf8_lossy(&result.stderr).contains("mrc_head_read"));
     let _ = std::fs::remove_file(input);
 }
@@ -662,7 +665,7 @@ fn two_input_process_reports_source_error_when_second_real_mrc_is_missing() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!("ERROR: CLIP - Error opening {0}\n", missing.display())
+        format!("ERROR: clip -  Error opening {0}\n", missing.display())
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -700,7 +703,7 @@ fn info_reports_source_open_error_for_corrupt_second_mrc() {
     let stdout = String::from_utf8(result.stdout).unwrap();
     assert_eq!(
         stdout,
-        format!("ERROR: CLIP - Error opening {0}\n", corrupt.display())
+        format!("ERROR: clip -  Error opening {0}\n", corrupt.display())
     );
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(corrupt);
@@ -1047,7 +1050,7 @@ fn clip_append_reports_source_missing_output_error_for_real_mrc_input() {
     assert!(
         String::from_utf8(result.stdout)
             .unwrap()
-            .contains("ERROR: CLIP - Error finding")
+            .contains("ERROR: clip -  Error finding")
     );
     let _ = std::fs::remove_file(input);
 }
@@ -1086,7 +1089,7 @@ fn clip_append_reports_source_error_for_unreadable_existing_output_header() {
         .unwrap();
     assert!(!result.status.success());
     assert!(
-        String::from_utf8_lossy(&result.stdout).contains("ERROR: CLIP - Error"),
+        String::from_utf8_lossy(&result.stdout).contains("ERROR: clip -  Error"),
         "stdout={} stderr={}",
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr)
@@ -3278,7 +3281,7 @@ fn boxsd_rejects_subunit_reduction_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Reduction factor (-n) must be at least 1 for boxsd process\n"
+        "ERROR: clip -  Reduction factor (-n) must be at least 1 for boxsd process\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3322,7 +3325,7 @@ fn defect_list_without_both_camera_sizes_fatals_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries\n"
+        "ERROR: clip -  Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries\n"
     );
     assert!(!output.exists());
     for path in [input, defects] {
@@ -3364,7 +3367,7 @@ fn supergain_rejects_eer_option_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - The -es, -ez, and other EER options cannot be entered with the supergain operation\n"
+        "ERROR: clip -  The -es, -ez, and other EER options cannot be entered with the supergain operation\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3406,7 +3409,7 @@ fn defect_binning_below_source_minimum_fatals_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Binning must be at least 0.5\n"
+        "ERROR: clip -  Binning must be at least 0.5\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3449,7 +3452,9 @@ fn missing_defect_list_reports_source_open_error_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        format!("ERROR: CLIP - Error opening {0}\n", missing.display())
+        // Confirmed against native: `clip.cpp:562` hands three arguments to a
+        // format string with a single %s, so the name is never printed.
+        "ERROR: clip -  Error opening\n".to_string()
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3489,7 +3494,7 @@ fn invalid_mode_reports_source_error_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Invalid mode entry invalid-mode.\n"
+        "ERROR: clip -  Invalid mode entry invalid-mode.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3539,7 +3544,8 @@ fn flatfield_forces_source_float_mode_for_real_mrc_byte_request() {
     );
     assert!(
         String::from_utf8_lossy(&result.stdout).starts_with(
-            "WARNING: clip - Output mode for a flatfield image must be floating point\n"
+            // Confirmed against native: `clip.cpp:421` passes the bare sentence.
+            "WARNING: Output mode for a flatfield image must be floating point\n"
         ),
         "{}",
         String::from_utf8_lossy(&result.stdout)
@@ -3592,7 +3598,7 @@ fn invalid_option_reports_source_fatal_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Invalid option -q.\n"
+        "ERROR: clip -  Invalid option -q.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3634,7 +3640,7 @@ fn invalid_output_format_reports_source_fatal_before_real_mrc_lifecycle() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Output file format entry not-a-format is not recognized.\n"
+        "ERROR: clip -  Output file format entry not-a-format is not recognized.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -3992,7 +3998,7 @@ fn standalone_z_option_reports_source_invalid_option_for_real_mrc() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - Invalid option -z.\n"
+        "ERROR: clip -  Invalid option -z.\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -5462,7 +5468,7 @@ fn blankfile_rejects_nonpositive_source_output_size_before_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - You must enter a positive output size for all dimensions\n"
+        "ERROR: clip -  You must enter a positive output size for all dimensions\n"
     );
     assert!(!output.exists());
 }
@@ -5503,7 +5509,7 @@ fn chunk_sizes_reject_explicit_nonhdf_output_format_before_real_mrc_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - You cannot specify chunk sizes and an output format other than HDF\n"
+        "ERROR: clip -  You cannot specify chunk sizes and an output format other than HDF\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -5547,7 +5553,7 @@ fn resize_rejects_source_x_and_center_conflict_before_real_mrc_output_open() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(result.stdout).unwrap(),
-        "ERROR: CLIP - You cannot use -x together with -cx or -ix\n"
+        "ERROR: clip -  You cannot use -x together with -cx or -ix\n"
     );
     assert!(!output.exists());
     let _ = std::fs::remove_file(input);
@@ -6091,7 +6097,13 @@ fn joinrgb_combines_three_real_byte_mrc_files() {
             libc::fread(rgb.as_mut_ptr().cast(), 1, rgb.len(), file),
             rgb.len()
         );
-        assert_eq!(rgb, [15, 10, 90, 150, 55, 255]);
+        // Verified against the reference: `clip joinrgb -r 1.5 -g 0.5 -b 3`
+        // on these three byte files gives [15, 10, 90, 150, 55, 14].  The blue
+        // channel is 90 * 3 = 270, and `islice.c:270` narrows it with
+        // `(unsigned char)`, which truncates and keeps the low bits — 14, not a
+        // saturated 255.  The old expectation encoded Rust's saturating
+        // `as u8`, which this test was written against before that was fixed.
+        assert_eq!(rgb, [15, 10, 90, 150, 55, 14]);
         libc::fclose(file);
     }
     let _ = std::fs::remove_file(first);
@@ -6647,4 +6659,1052 @@ fn threshold_minimum_size_semicolon_sign_uses_source_fill_behavior() {
     }
     let _ = std::fs::remove_file(input);
     let _ = std::fs::remove_file(output);
+}
+
+/// Builds a real multi-section MRC volume with structured content, so filters
+/// that reach across Z produce different results at the volume edges than in
+/// the middle.  `z_first` selects which section of the underlying pattern the
+/// file starts at, which lets a short file hold the tail of a longer one.
+fn write_edge_sensitive_volume(path: &std::path::Path, z_first: i32, nz: i32) {
+    unsafe {
+        let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 8, 6, nz, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for z in 0..nz {
+            let source_z = z_first + z;
+            let mut pixels = [0_f32; 48];
+            for y in 0..6 {
+                for x in 0..8 {
+                    // A Z ramp plus a per-pixel spike pattern: the median of a
+                    // window that reaches past the last section differs from
+                    // the median of one that stops there.
+                    pixels[x + 8 * y] = (10 * source_z) as f32
+                        + (x as f32) * 3.
+                        + (y as f32)
+                        + if (x + y + source_z as usize) % 5 == 0 {
+                            40.
+                        } else {
+                            0.
+                        };
+                }
+            }
+            assert_eq!(
+                ii_write_section_float(file, pixels.as_mut_ptr().cast(), z),
+                0
+            );
+        }
+        ii_close(file);
+    }
+}
+
+#[test]
+fn median_three_dimensional_window_narrows_at_the_ends_of_the_volume() {
+    // `processing.cpp:640-650` re-derives firstNeed from lastNeed only in the
+    // kernel/smoothing branch.  The median branch leaves firstNeed at
+    // secs[k] - size / 2, so at the last section of a five-section volume the
+    // window covers sections 3..=4 rather than sliding back to a full 2..=4.
+    // Filtering a two-section volume holding exactly those sections must
+    // therefore produce the same last output section.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-median3d-{}", std::process::id()));
+    let five = base.with_extension("five.mrc");
+    let two = base.with_extension("two.mrc");
+    let five_out = base.with_extension("five-out.mrc");
+    let two_out = base.with_extension("two-out.mrc");
+    for path in [&five_out, &two_out] {
+        let _ = std::fs::remove_file(path);
+    }
+    write_edge_sensitive_volume(&five, 0, 5);
+    write_edge_sensitive_volume(&two, 3, 2);
+
+    for (input, output) in [(&five, &five_out), (&two, &two_out)] {
+        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .args(["median", "-n", "3"])
+            .arg(input)
+            .arg(output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "status={:?} stdout={} stderr={}",
+            result.status,
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    let read_section = |path: &std::path::Path, z: i32| -> Vec<f32> {
+        let mut pixels = [0_f32; 48];
+        unsafe {
+            let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+            let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+            assert!(!file.is_null());
+            assert_eq!(
+                ii_read_section_float(file, pixels.as_mut_ptr().cast(), z),
+                0
+            );
+            ii_close(file);
+        }
+        pixels.to_vec()
+    };
+
+    // A window that wrongly reached back to section 2 would pull the Z ramp
+    // down and differ from the two-section result here.
+    assert_eq!(
+        read_section(&five_out, 4),
+        read_section(&two_out, 1),
+        "the window at the last section must cover sections 3..=4 only"
+    );
+    for path in [&five, &two, &five_out, &two_out] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn validation_errors_use_the_source_exit_prefix_on_standard_output() {
+    // `clip.cpp:211-212` installs "ERROR: clip - " as the PIP exit prefix and
+    // the validation failures call exitError, so `PipSetError`
+    // (`parse_params.c:1099-1102`) writes "<prefix> <message>" — two spaces
+    // after the dash — to standard output, then exits 1.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-prefix-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    write_edge_sensitive_volume(&input, 0, 2);
+    for (args, message) in [
+        (
+            vec!["integral", "-t", "150"],
+            "You must enter -n and either -l OR -h for integral process",
+        ),
+        (
+            vec!["boxsd", "-n", "0.5"],
+            "Reduction factor (-n) must be at least 1 for boxsd process",
+        ),
+        (vec!["brightness", "-zz", "1"], "Invalid option -zz."),
+    ] {
+        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .args(&args)
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout),
+            format!("ERROR: clip -  {message}\n")
+        );
+        assert!(result.stderr.is_empty());
+    }
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn missing_arguments_print_the_source_banner_and_exit_three() {
+    // `clip.cpp:215-218` calls usage() then exit(3), and usage()
+    // (`clip.cpp:22-27`) prints the version banner with `printf` immediately
+    // before `imodCopyright`, which also uses `printf`.
+    let result = Command::new(env!("CARGO_BIN_EXE_clip")).output().unwrap();
+    assert_eq!(result.status.code(), Some(3));
+    let text = String::from_utf8_lossy(&result.stdout);
+    let mut lines = text.lines();
+    let banner = lines.next().unwrap();
+    assert!(
+        banner.starts_with("clip: Command Line Image Processing. 5.2.17, "),
+        "banner was {banner:?}"
+    );
+    // The trailing fields are C `__DATE__`/`__TIME__`; only their shape is
+    // deterministic.  "Mmm dd yyyy HH:MM:SS", with a space-padded day.
+    let stamp = banner.rsplit_once("5.2.17, ").unwrap().1;
+    let (date, time) = stamp.rsplit_once(' ').unwrap();
+    assert_eq!(date.len(), 11, "date field was {date:?}");
+    assert_eq!(time.len(), 8, "time field was {time:?}");
+    assert!(time.as_bytes()[2] == b':' && time.as_bytes()[5] == b':');
+    // Copyright must be the very next line, not flushed out at exit behind the
+    // rest of the usage text.
+    assert_eq!(
+        lines.next().unwrap(),
+        "Copyright (C) 1994-2025 by the Regents of the University of Colorado"
+    );
+    assert_eq!(
+        lines.next().unwrap(),
+        "----------------------------------------------------"
+    );
+}
+
+#[test]
+fn opening_a_missing_input_reports_the_source_ii_open_diagnostic() {
+    // `iimage.c:273-278` writes the iiOpen failure to stderr with the errno
+    // text before clip's own exitError message goes to stdout.
+    let missing =
+        std::env::temp_dir().join(format!("imod-rs-clip-absent-{}.mrc", std::process::id()));
+    let _ = std::fs::remove_file(&missing);
+    let output =
+        std::env::temp_dir().join(format!("imod-rs-clip-absent-{}.out", std::process::id()));
+    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .arg("brightness")
+        .arg(&missing)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stderr),
+        format!(
+            "ERROR: iiOpen - Opening file {} (No such file or directory)\n",
+            missing.display()
+        )
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        format!("ERROR: clip -  Error opening {}\n", missing.display())
+    );
+}
+
+#[test]
+fn writing_16_bit_floats_does_not_take_the_half_float_path_for_integer_modes() {
+    // `mrcInitOutputHeader` sets hdata->halfFloats from write16BitModeForFloats()
+    // for every mode, so `mrcsec.c:1147` gates the half-float conversion on the
+    // header mode actually being MRC_MODE_FLOAT.  Using the raw flag sent byte,
+    // short and ushort writes down the half-float path, where mode 0 emitted two
+    // bytes per pixel into an nx-byte line buffer and aborted the process.
+    // Only the integer modes are asserted here: those are the ones the raw
+    // flag wrongly diverted.  The float mode legitimately writes mode 12 and
+    // is covered by the native differential instead.
+    for (mode, fill) in [
+        (MRC_MODE_BYTE, 40.0_f32),
+        (MRC_MODE_SHORT, 4000.0),
+        (MRC_MODE_USHORT, 4000.0),
+    ] {
+        let base = std::env::temp_dir().join(format!(
+            "imod-rs-clip-halffloat-{}-{}",
+            std::process::id(),
+            mode
+        ));
+        let input = base.with_extension("in.mrc");
+        let output = base.with_extension("out.mrc");
+        let _ = std::fs::remove_file(&output);
+        unsafe {
+            let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+            let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+            assert!(!file.is_null());
+            let header = (*file).header.cast::<MrcHeader>();
+            assert_eq!(mrc_head_new(&mut *header, 9, 4, 2, mode), 0);
+            ii_sync_from_mrc_header(file, header);
+            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            for z in 0..2 {
+                // An odd nx makes a doubled line length overrun the buffer.
+                let mut pixels = [0_f32; 36];
+                for (index, pixel) in pixels.iter_mut().enumerate() {
+                    *pixel = fill + index as f32;
+                }
+                assert_eq!(
+                    ii_write_section_float(file, pixels.as_mut_ptr().cast(), z),
+                    0
+                );
+            }
+            ii_close(file);
+        }
+
+        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .env("IMOD_WRITE_FLOATS_16BIT", "1")
+            .args(["brightness", "-n", "1"])
+            .arg(&input)
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "mode {mode} exited {:?}: {}",
+            result.status,
+            String::from_utf8_lossy(&result.stderr)
+        );
+
+        // The written file must keep the input's own mode, not a half-float one.
+        unsafe {
+            let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+            let fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            assert!(!fp.is_null(), "mode {mode} produced no output file");
+            let mut written: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(fp, &mut written), 0);
+            assert_eq!(written.mode, mode, "output mode for input mode {mode}");
+            libc::fclose(fp);
+        }
+        let _ = std::fs::remove_file(&input);
+        let _ = std::fs::remove_file(&output);
+    }
+}
+
+// The three tests below pin last-ULP results of paths where the C computes in
+// double and an earlier Rust translation computed in float.  They compare exact
+// f32 bit patterns against values captured from native `clip`, so they fail on a
+// one-ulp regression rather than tolerating it.
+
+#[test]
+fn bandpass_filter_matches_native_rounding_on_real_mrc() {
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-filter-ulp-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 12, 8, 1, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut pixels = [0_f32; 96];
+        for (index, value) in pixels.iter_mut().enumerate() {
+            *value = ((index * 37) % 251) as f32 / 8.0;
+        }
+        assert_eq!(
+            ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "filter",
+            "-l",
+            "0.05",
+            "-h",
+            "0.25",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_read((*file).fp, header), 0);
+        let mut pixels = [f32::NAN; 96];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+        // Native `clip filter -l 0.05 -h 0.25`; `mrc_bandpass_filter` rounds the
+        // Y frequency to float and applies `mval` as a double multiply.
+        for (index, expected) in [
+            (0_usize, -0.039264656603336334_f32),
+            (11, -0.018901227042078972),
+            (31, 0.01600455678999424),
+            (41, -0.02449677512049675),
+            (55, -0.02126469276845455),
+            (74, 0.02821079082787037),
+        ] {
+            assert_eq!(
+                pixels[index].to_bits(),
+                expected.to_bits(),
+                "pixel {index}: {} vs {expected}",
+                pixels[index]
+            );
+        }
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn boxsd_matches_native_rounding_on_real_mrc() {
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-boxsd-ulp-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 12, 8, 1, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut pixels = [0_f32; 96];
+        for (index, value) in pixels.iter_mut().enumerate() {
+            *value = ((index * 37) % 251) as f32 / 8.0;
+        }
+        assert_eq!(
+            ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "boxsd",
+            "-n",
+            "1",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_read((*file).fp, header), 0);
+        let mut pixels = [f32::NAN; 96];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+        // Native `clip boxsd -n 1`; `makeStandardDevMap` finishes through
+        // `sumsToAvgSD`, whose variance divide and `sqrt` are in double.
+        for (index, expected) in [
+            (4_usize, 8.989545822143555_f32),
+            (16, 8.989545822143555),
+            (28, 8.989545822143555),
+            (40, 8.989545822143555),
+            (54, 9.012887954711914),
+            (78, 9.012887954711914),
+        ] {
+            assert_eq!(
+                pixels[index].to_bits(),
+                expected.to_bits(),
+                "pixel {index}: {} vs {expected}",
+                pixels[index]
+            );
+        }
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn flatfield_sum_matches_native_rounding_on_real_mrc() {
+    let base =
+        std::env::temp_dir().join(format!("imod-rs-clip-flatfield-ulp-{}", std::process::id()));
+    let input = base.with_extension("input.mrc");
+    let output = base.with_extension("output.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 12, 8, 3, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for section in 0..3 {
+            let mut pixels = [0_f32; 96];
+            for (index, value) in pixels.iter_mut().enumerate() {
+                *value = (((section * 96 + index) * 83) % 251) as f32 / 3.0;
+            }
+            assert_eq!(
+                ii_write_section_float(file, pixels.as_mut_ptr().cast(), section as i32),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "flatfield",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    assert_eq!(
+        stdout,
+        "clip: summing slices...\nAveraged image min = 21.333, max = 61.667, mean = 42.772\n"
+    );
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_read((*file).fp, header), 0);
+        let mut pixels = [f32::NAN; 96];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+        // Native `clip flatfield`; `fullArrayMinMaxMean` rounds the mean to float
+        // before `dmean / B3DMAX(0.05 * dmean, sumBuf[ix])` divides in double.
+        for (index, expected) in [
+            (0_usize, 1.2417676448822021_f32),
+            (19, 1.4152498245239258),
+            (35, 1.603949785232544),
+            (46, 0.8207845687866211),
+            (58, 0.8650515079498291),
+            (73, 0.9275854229927063),
+        ] {
+            assert_eq!(
+                pixels[index].to_bits(),
+                expected.to_bits(),
+                "pixel {index}: {} vs {expected}",
+                pixels[index]
+            );
+        }
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Writes a deterministic float MRC used by the fidelity regressions below.
+fn write_audit_float_volume(path: &std::path::Path, nx: i32, ny: i32, nz: i32) {
+    unsafe {
+        let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, nx, ny, nz, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for z in 0..nz {
+            let mut pixels = vec![0_f32; (nx * ny) as usize];
+            for y in 0..ny {
+                for x in 0..nx {
+                    pixels[(x + nx * y) as usize] =
+                        100. + ((x * 37 + y * 11 + z * 53) % 97) as f32 + z as f32 * 7.;
+                }
+            }
+            assert_eq!(
+                ii_write_section_float(file, pixels.as_mut_ptr().cast(), z),
+                0
+            );
+        }
+        ii_close(file);
+    }
+}
+
+#[test]
+fn forward_and_inverse_fft_warn_about_ignored_entries() {
+    // `fft.cpp:35-36` and `fft.cpp:44-45` each emit a show_warning when the
+    // ignored size/center/mode entries are present; both were absent.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-fftwarn-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let forward = base.with_extension("fwd.mrc");
+    let inverse = base.with_extension("inv.mrc");
+    write_audit_float_volume(&input, 16, 8, 2);
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "fft",
+            "-2d",
+            "-ox",
+            "10",
+            input.to_str().unwrap(),
+            forward.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    assert!(
+        stdout.starts_with("WARNING: clip forward fft - output sizes or mode are ignored\n"),
+        "{stdout}"
+    );
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "fft",
+            "-2d",
+            "-ix",
+            "8",
+            forward.to_str().unwrap(),
+            inverse.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    assert!(
+        stdout.starts_with("WARNING: clip inverse fft - input sizes or centers are ignored\n"),
+        "{stdout}"
+    );
+    for path in [input, forward, inverse] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn odd_input_size_fft_prints_the_source_factor_diagnostic() {
+    // `fft.cpp:69-71` (2-D) and `fft.cpp:203-204` (3-D) both print an error
+    // that the translation had dropped, returning -1 silently.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-fftodd-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    write_audit_float_volume(&input, 23, 8, 2);
+    for (args, expected) in [
+        (
+            vec!["fft", "-2d"],
+            "ERROR: clip - fft input size (23, 8) is odd and/or has factors greater than 19.\n",
+        ),
+        (
+            vec!["fft"],
+            "ERROR: clip - fft input size 23x8x2 is odd and/or has factors greater than 19.\n",
+        ),
+    ] {
+        let mut all = args.clone();
+        all.push(input.to_str().unwrap());
+        all.push(output.to_str().unwrap());
+        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .args(&all)
+            .output()
+            .unwrap();
+        assert!(!command.status.success(), "{command:?}");
+        let stdout = String::from_utf8(command.stdout).unwrap();
+        assert!(stdout.contains(expected), "{args:?}: {stdout}");
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn a_single_input_to_add_reports_the_process_error_not_the_usage_banner() {
+    // `clip.cpp:794` only skips opening the output when needtwo is unmet; the
+    // process itself then emits the diagnostic.  The translation had invented
+    // a usage banner plus exit 3.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-needtwo-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    write_audit_float_volume(&input, 8, 6, 2);
+    for (process, expected) in [
+        ("add", "ERROR: clip add: needs at least two input files.\n"),
+        (
+            "multiply",
+            "ERROR: clip multiply/divide: Need exactly two input files.\n",
+        ),
+    ] {
+        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .args([process, input.to_str().unwrap(), output.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert_eq!(command.status.code(), Some(255), "{command:?}");
+        assert_eq!(String::from_utf8(command.stdout).unwrap(), expected);
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn flatfield_mode_warning_has_no_program_prefix() {
+    // `clip.cpp:421` passes the bare sentence to show_warning; the translation
+    // had prepended "clip - ".
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-ffmode-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    write_audit_float_volume(&input, 12, 8, 2);
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "flatfield",
+            "-m",
+            "byte",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    assert!(
+        stdout.starts_with("WARNING: Output mode for a flatfield image must be floating point\n"),
+        "{stdout}"
+    );
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn option_values_follow_the_source_sscanf_atof_and_switch_shapes() {
+    // `clip.cpp:388` uses sscanf("%f"), `:439` uses atof, and the switch keys
+    // on argv[iarg][1] and [2] only.  The translation had used Rust's parse,
+    // which rejects a trailing suffix, and exact-string option matching, which
+    // rejected `-2foo`, `-oxy` and `-Ix`.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-optparse-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    write_audit_float_volume(&input, 16, 8, 2);
+    for args in [
+        vec!["brightness", "-n", "2x"],
+        vec!["brightness", "-2foo", "-n", "2"],
+        vec!["brightness", "-oxy", "12", "-n", "2"],
+        vec!["resize", "-Ix", "8"],
+        vec!["brightness", "-p", "abc", "-n", "2"],
+        vec!["brightness", "-B", "2x", "-n", "2"],
+        vec!["brightness", "-R", "3x", "-n", "2"],
+    ] {
+        let output = base.with_extension("out.mrc");
+        let mut all = args.clone();
+        all.push(input.to_str().unwrap());
+        all.push(output.to_str().unwrap());
+        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .args(&all)
+            .output()
+            .unwrap();
+        assert!(
+            command.status.success(),
+            "{args:?} rejected: {}",
+            String::from_utf8_lossy(&command.stdout)
+        );
+        let _ = std::fs::remove_file(output);
+    }
+    // `-n 2x` must take the 2 that sscanf converts, so it is indistinguishable
+    // from `-n 2` and distinguishable from `-n 3`.
+    let suffixed = base.with_extension("suffixed.mrc");
+    let plain = base.with_extension("plain.mrc");
+    let other = base.with_extension("other.mrc");
+    for (value, path) in [("2x", &suffixed), ("2", &plain), ("3", &other)] {
+        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+            .args([
+                "brightness",
+                "-n",
+                value,
+                input.to_str().unwrap(),
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(command.status.success(), "{command:?}");
+    }
+    let suffixed_bytes = std::fs::read(&suffixed).unwrap();
+    let plain_bytes = std::fs::read(&plain).unwrap();
+    let other_bytes = std::fs::read(&other).unwrap();
+    assert_eq!(suffixed_bytes[1024..], plain_bytes[1024..]);
+    assert_ne!(suffixed_bytes[1024..], other_bytes[1024..]);
+    for path in [input, suffixed, plain, other] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn a_negative_input_size_list_does_not_overflow_the_section_allocation() {
+    // `file_io.cpp:113` multiplies sizeof(int) by a possibly negative nofsecs
+    // as size_t, so malloc simply fails and the fill loop does not run.  The
+    // translation had panicked on the multiply.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-negiz-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    write_audit_float_volume(&input, 8, 6, 5);
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "resize",
+            "-iz",
+            "-1,3",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(command.status.code(), Some(0), "{command:?}");
+    assert!(
+        String::from_utf8(command.stderr).unwrap().is_empty(),
+        "unexpected stderr"
+    );
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn histogram_rejects_a_sub_unit_bin_size_with_the_source_message() {
+    // `processing.cpp:3942-3947`: B3DNINT(opt->val) below one is an error the
+    // translation had silently clamped to a bin size of one.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-histbin-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 8, 6, 1, MRC_MODE_BYTE), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut pixels = [0_f32; 48];
+        for (index, value) in pixels.iter_mut().enumerate() {
+            *value = (index % 40) as f32 + 30.;
+        }
+        assert_eq!(
+            ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args(["histogram", "-n", "0.2", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    assert!(
+        stdout.contains("ERROR: clip histogram - Entered bin size (0.200000) must be > 0.5\n"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn stats_prints_the_overall_line_before_the_extreme_value_list() {
+    // `processing.cpp:3752-3758` emits the " all " summary before the
+    // "Slices with extreme values" block at `:3762`; the translation had them
+    // the other way round.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-statorder-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    write_audit_float_volume(&input, 12, 8, 6);
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args(["stats", "-n", "2", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    let all = stdout.find(" all  ").expect("no overall line");
+    let extremes = stdout
+        .find("with extreme values:")
+        .expect("no extreme list");
+    assert!(all < extremes, "{stdout}");
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn stats_outlier_length_never_exceeds_the_section_count() {
+    // `processing.cpp:3548` is B3DMIN(nofsecs, B3DMAX(5, length)), which is
+    // simply nofsecs when it is below five.  The translation had used
+    // `i32::clamp(5, nofsecs)`, which panics when min > max.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-statclamp-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    write_audit_float_volume(&input, 8, 6, 3);
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args(["stats", "-n", "2", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(command.status.code(), Some(0), "{command:?}");
+    assert!(
+        !String::from_utf8_lossy(&command.stderr).contains("panicked"),
+        "{command:?}"
+    );
+    let _ = std::fs::remove_file(input);
+}
+
+#[test]
+fn logarithm_uses_the_single_precision_log_routine() {
+    // `processing.cpp:291` calls log10() on a float and stores a float; the
+    // reference build narrows that to log10f.  Rust's `f32::log10` evaluates
+    // the double routine and rounds, which differs by one ulp on ~3% of
+    // pixels.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-log10f-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 4, 2, 1, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        let mut pixels = [
+            174.77246_f32,
+            202.49753,
+            192.21725,
+            174.70349,
+            95.711266,
+            91.59483,
+            132.5,
+            240.125,
+        ];
+        assert_eq!(
+            ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+    }
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "logarithm",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_read((*file).fp, header), 0);
+        let mut pixels = [f32::NAN; 8];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+        // Native `clip logarithm` on the same eight values.
+        for (index, expected) in [
+            (0_usize, 2.2424731_f32),
+            (1, 2.3064198),
+            (2, 2.2837925),
+            (3, 2.2423015),
+            (4, 1.980963),
+            (5, 1.9618709),
+        ] {
+            assert_eq!(
+                pixels[index].to_bits(),
+                expected.to_bits(),
+                "pixel {index}: {} vs {expected}",
+                pixels[index]
+            );
+        }
+    }
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn a_full_bad_column_run_leaves_the_rows_the_source_never_reaches() {
+    // `CorrectDefects.cpp:329-352`: CORRECT_THREE_FOUR_COL's leading row is a
+    // single `if`, not a loop, so with ystart 0 the running indexes advance
+    // only once before the fullStart..fullEnd loop and the top of the column
+    // is left uncorrected.  The translation had rewritten it as one loop over
+    // every row.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-badcol-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    let defects = base.with_extension("defects.txt");
+    write_audit_float_volume(&input, 32, 32, 1);
+    std::fs::write(
+        &defects,
+        "CameraSizeX 32\nCameraSizeY 32\nBadColumns 12 13 14\n",
+    )
+    .unwrap();
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "brightness",
+            "-n",
+            "1",
+            "-D",
+            defects.to_str().unwrap(),
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(command.status.success(), "{command:?}");
+    unsafe {
+        let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_read((*file).fp, header), 0);
+        let mut pixels = vec![f32::NAN; 32 * 32];
+        assert_eq!(
+            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            0
+        );
+        ii_close(file);
+        // The source stops writing after 1 + (fullEnd - fullStart + 1) + 1
+        // rows, so the last rows of each bad column keep their input value.
+        for y in 27..32 {
+            for x in 12..15 {
+                let expected = 100. + ((x * 37 + y * 11) % 97) as f32;
+                assert_eq!(
+                    pixels[(x + 32 * y) as usize],
+                    expected,
+                    "row {y} column {x} was rewritten"
+                );
+            }
+        }
+        // The rows the source does correct are replaced.
+        assert_ne!(
+            pixels[(13 + 32 * 10) as usize],
+            100. + ((13 * 37 + 10 * 11) % 97) as f32
+        );
+    }
+    for path in [input, output, defects] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn defect_file_parse_failures_report_the_source_single_argument_message() {
+    // `clip.cpp:562` passes three arguments to a format holding a single %s,
+    // so the file name never reaches the output.  The translation had
+    // appended it.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-defmsg-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    write_audit_float_volume(&input, 8, 6, 1);
+    let missing = base.with_extension("nosuch.txt");
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "brightness",
+            "-n",
+            "1",
+            "-D",
+            missing.to_str().unwrap(),
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!command.status.success(), "{command:?}");
+    let stdout = String::from_utf8(command.stdout).unwrap();
+    assert!(stdout.contains("Error opening\n"), "{stdout}");
+    assert!(!stdout.contains("nosuch.txt"), "{stdout}");
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn edge_fill_accepts_the_sizes_the_source_accepts() {
+    // `CorrectDefects.cpp:2306` tests only the data mode; the translation had
+    // added nx/ny/maxWidth range guards that rejected `clip edgefill -l 1`.
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-edgefill-{}", std::process::id()));
+    let input = base.with_extension("in.mrc");
+    let output = base.with_extension("out.mrc");
+    unsafe {
+        let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        assert!(!file.is_null());
+        let header = (*file).header.cast::<MrcHeader>();
+        assert_eq!(mrc_head_new(&mut *header, 32, 24, 2, MRC_MODE_SHORT), 0);
+        ii_sync_from_mrc_header(file, header);
+        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        for z in 0..2 {
+            let mut pixels = vec![0_f32; 32 * 24];
+            for y in 0..24 {
+                for x in 0..32 {
+                    pixels[(x + 32 * y) as usize] = (1000 + (x * 17 + y * 29 + z * 7) % 401) as f32;
+                }
+            }
+            assert_eq!(
+                ii_write_section_float(file, pixels.as_mut_ptr().cast(), z),
+                0
+            );
+        }
+        ii_close(file);
+    }
+    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        .args([
+            "edgefill",
+            "-l",
+            "1",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(command.status.code(), Some(0), "{command:?}");
+    for path in [input, output] {
+        let _ = std::fs::remove_file(path);
+    }
 }

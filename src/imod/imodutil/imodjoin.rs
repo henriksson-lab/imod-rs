@@ -7,13 +7,15 @@ use std::io::Write;
 use crate::imod::libcfshr::b3dutil::{
     imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
 };
+use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::parselist::parselist;
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_read};
 use crate::imod::libimod::imodel::{
     IMODF_FLIPYZ, IMODF_OTRANS_ORIGIN, IMODF_TILTOK, Iobj, Iobjview, Ipoint, Iref_image,
-    imod_flip_yz, imod_trans_from_ref_image,
+    imod_flip_yz, imod_new_object, imod_trans_from_ref_image, imodel_maxpt,
 };
 use crate::imod::libimod::imodel_files::{imod_file_write, imod_read};
+use crate::imod::libimod::iview::imod_view_use;
 
 /// Original: `usage` (`imodjoin.c:18`).
 pub fn usage() -> ! {
@@ -54,18 +56,44 @@ pub fn doublerr() -> ! {
 }
 /// Original: `readerr` (`imodjoin.c:59`).
 pub fn readerr(mod_number: i32) -> ! {
-    eprintln!("ERROR: imodjoin - Error reading file for model {mod_number}");
+    let mut message = [0_i8; 512];
+    unsafe {
+        libc::sprintf(
+            message.as_mut_ptr(),
+            c"Error reading file for model %d".as_ptr(),
+            mod_number,
+        );
+        exit_error(message.as_ptr());
+    }
     std::process::exit(1)
 }
 /// Original: `objerr` (`imodjoin.c:63`).
 pub fn objerr(object_number: i32, mod_number: i32) -> ! {
-    eprintln!("ERROR: imodjoin - Invalid object number {object_number} for model {mod_number}");
+    let mut message = [0_i8; 512];
+    unsafe {
+        libc::sprintf(
+            message.as_mut_ptr(),
+            c"Invalid object number %d for model %d".as_ptr(),
+            object_number,
+            mod_number,
+        );
+        exit_error(message.as_ptr());
+    }
     std::process::exit(1)
 }
 
 /// Original: `main` (`imodjoin.c:68`).
 pub fn imodjoin() {
     let argv: Vec<String> = env::args().collect();
+    let mut prefix = [0_i8; 100];
+    unsafe {
+        libc::sprintf(
+            prefix.as_mut_ptr(),
+            c"ERROR: %s - ".as_ptr(),
+            c"imodjoin".as_ptr(),
+        );
+        setExitPrefix(prefix.as_ptr());
+    }
     if argv.len() < 3 {
         usage();
     }
@@ -118,14 +146,28 @@ pub fn imodjoin() {
                 let image_name = CString::new(image.as_str()).unwrap_or_else(|_| optionerr(1));
                 let fin = unsafe { libc::fopen(image_name.as_ptr(), c"rb".as_ptr()) };
                 if fin.is_null() {
-                    eprintln!("ERROR: imodjoin - Couldn't open {image}");
-                    std::process::exit(1);
+                    let mut message = [0_i8; 512];
+                    unsafe {
+                        libc::sprintf(
+                            message.as_mut_ptr(),
+                            c"Couldn't open %s".as_ptr(),
+                            image_name.as_ptr(),
+                        );
+                        exit_error(message.as_ptr());
+                    }
                 }
                 let mut hdata = unsafe { std::mem::zeroed::<MrcHeader>() };
                 if unsafe { mrc_head_read(fin, &mut hdata) } != 0 {
                     unsafe { libc::fclose(fin) };
-                    eprintln!("ERROR: imodjoin - Reading header from {image}");
-                    std::process::exit(1);
+                    let mut message = [0_i8; 512];
+                    unsafe {
+                        libc::sprintf(
+                            message.as_mut_ptr(),
+                            c"Reading header from %s".as_ptr(),
+                            image_name.as_ptr(),
+                        );
+                        exit_error(message.as_ptr());
+                    }
                 }
                 unsafe { libc::fclose(fin) };
                 let mut reference = Iref_image::default();
@@ -212,9 +254,7 @@ pub fn imodjoin() {
             z: 1.,
         };
         in_model.ref_image = Some(reference);
-        println!(
-            "WARNING: imodjoin - Model 1 has no image reference data; transformations may be wrong"
-        );
+        println!("WARNING: Model 1 has no image reference data; transformations may be wrong");
         in_model.flags |= IMODF_OTRANS_ORIGIN;
     }
     let mut use_ref = Iref_image::default();
@@ -305,8 +345,9 @@ pub fn imodjoin() {
         }
         njoin += 1;
         if njoin > 2 && replace {
-            eprintln!("ERROR: imodjoin - You cannot use -r with more than 2 input models");
-            std::process::exit(1);
+            unsafe {
+                exit_error(c"You cannot use -r with more than 2 input models".as_ptr());
+            }
         }
         let mut list2 = Vec::<usize>::new();
         if argv[iarg].starts_with('-') {
@@ -345,13 +386,15 @@ pub fn imodjoin() {
                     use_ref.otrans.y = join_ref.ctrans.y - join_ref.otrans.y;
                     use_ref.otrans.z = join_ref.ctrans.z - join_ref.otrans.z;
                     use_ref.oscale = join_ref.cscale;
+                    // The source applies -s only in its different-volumes
+                    // branch (`imodjoin.c:365`).
+                    if keep_scale {
+                        use_ref.cscale = use_ref.oscale;
+                    }
                 } else {
                     use_ref.otrans = join_ref.ctrans;
                     use_ref.orot = join_ref.crot;
                     use_ref.oscale = join_ref.cscale;
-                }
-                if keep_scale {
-                    use_ref.cscale = use_ref.oscale;
                 }
                 let _ = imod_trans_from_ref_image(
                     &mut join_model,
@@ -364,7 +407,7 @@ pub fn imodjoin() {
                 );
             } else {
                 println!(
-                    "WARNING: imodjoin - Model {njoin} has no image reference data and will not be transformed"
+                    "WARNING: Model {njoin} has no image reference data and will not be transformed"
                 );
             }
         }
@@ -426,7 +469,9 @@ pub fn imodjoin() {
                 }
                 index
             } else {
-                in_model.obj.push(Iobj::default());
+                // `imodjoin.c:427` calls `imodNewObject`, so the new object
+                // carries the stock colour that the block below saves.
+                imod_new_object(&mut in_model);
                 in_model.obj.len() - 1
             };
             let (red, green, blue) = (
@@ -518,76 +563,39 @@ pub fn imodjoin() {
             break;
         }
     }
+    /* Synchronize object data to current view values if there are any
+    real views*/
     if in_model.cview == 0 && in_model.view.len() > 1 {
         in_model.cview = 1;
     }
-    if in_model.cview > 0 && (in_model.cview as usize) < in_model.view.len() {
-        let label = in_model.view[0].label;
-        let default_object_views = in_model.view[0].objview.clone();
-        let current_view = in_model.view[in_model.cview as usize].clone();
-        in_model.view[0] = current_view.clone();
-        in_model.view[0].label = label;
-        in_model.view[0].objview = default_object_views;
-        for object_number in 0..in_model.obj.len().min(current_view.objview.len()) {
-            let object_view = &current_view.objview[object_number];
-            let object = &mut in_model.obj[object_number];
-            object.flags = object_view.flags;
-            object.red = object_view.red;
-            object.green = object_view.green;
-            object.blue = object_view.blue;
-            object.pdrawsize = object_view.pdrawsize;
-            object.linewidth = object_view.linewidth;
-            object.linesty = object_view.linesty;
-            object.trans = object_view.trans;
-            object.clips = object_view.clips.clone();
-            object.ambient = object_view.ambient;
-            object.diffuse = object_view.diffuse;
-            object.specular = object_view.specular;
-            object.shininess = object_view.shininess;
-            object.fillred = object_view.fillred;
-            object.fillgreen = object_view.fillgreen;
-            object.fillblue = object_view.fillblue;
-            object.quality = object_view.quality;
-            object.mat2 = object_view.mat2;
-            object.valblack = object_view.valblack;
-            object.valwhite = object_view.valwhite;
-            object.matflags2 = object_view.matflags2;
-            object.mesh_thickness = object_view.mesh_thickness;
-        }
+    if in_model.cview != 0 {
+        imod_view_use(&mut in_model);
     }
+
+    /* set current indexes to -1 to avoid problems */
     in_model.cindex.point = -1;
     in_model.cindex.contour = -1;
     in_model.cindex.object = 0;
-    let mut max = Ipoint::default();
-    for object in &in_model.obj {
-        for contour in &object.cont {
-            for point in &contour.pts {
-                max.x = max.x.max(point.x);
-                max.y = max.y.max(point.y);
-                max.z = max.z.max(point.z);
-            }
-        }
-        for mesh in &object.mesh {
-            for point in &mesh.vert {
-                max.x = max.x.max(point.x);
-                max.y = max.y.max(point.y);
-                max.z = max.z.max(point.z);
-            }
-        }
-    }
-    in_model.xmax = in_model.xmax.max(max.x as i32);
-    in_model.ymax = in_model.ymax.max(max.y as i32);
-    in_model.zmax = in_model.zmax.max(max.z as i32);
+    /* Set max of model big enough to long the whole thing */
+    // `imodel_maxpt` (`imodel.c:224`) scans contour points only -- mesh
+    // vertices are deliberately not included.  `B3DMAX` compares the int
+    // member against the float in float, so the max is taken before the
+    // truncation back to int.
+    let mut newmax = Ipoint::default();
+    imodel_maxpt(&in_model, &mut newmax);
+    in_model.xmax = (in_model.xmax as f32).max(newmax.x) as i32;
+    in_model.ymax = (in_model.ymax as f32).max(newmax.y) as i32;
+    in_model.zmax = (in_model.zmax as f32).max(newmax.z) as i32;
     let output = &argv[argv.len() - 1];
-    let output_name = CString::new(output.as_str()).unwrap_or_else(|_| {
-        eprintln!("ERROR: imodjoin - Fatal error opening new model");
+    let output_name = CString::new(output.as_str()).unwrap_or_else(|_| unsafe {
+        exit_error(c"Fatal error opening new model".as_ptr());
         std::process::exit(1)
     });
     unsafe {
         imod_backup_file(output_name.as_ptr());
     }
-    imod_file_write(&in_model, output).unwrap_or_else(|_| {
-        eprintln!("ERROR: imodjoin - Fatal error opening new model");
+    imod_file_write(&in_model, output).unwrap_or_else(|_| unsafe {
+        exit_error(c"Fatal error opening new model".as_ptr());
         std::process::exit(1)
     });
 }

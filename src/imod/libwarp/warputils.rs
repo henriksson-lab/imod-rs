@@ -425,22 +425,31 @@ pub unsafe fn extrapolate_grid(
             S_IND_NEIGH_START = Some(vec![0; N_IN_LIST as usize]);
             S_NEIGHBORS = Some(Vec::new());
         }
+        // `warputils.c:401-406`.  Every one of these is a `float` variable
+        // assigned a **double** expression -- `3.` and `2.` are double
+        // literals, so the division happens in double and only the store
+        // narrows.  Dividing an `f32` by 3 in single precision rounds once
+        // instead of twice and lands an ulp away, which moves the block
+        // centres the neighbour search measures from.  Index 0 is never read:
+        // `blockType` 0 means no block.
         let xf_ofs_x = [
-            0.,
-            2. * x_interval / 3.,
-            x_interval / 3.,
-            x_interval / 3.,
-            2. * x_interval / 3.,
-            x_interval / 2.,
+            0.0_f32,
+            (2. * f64::from(x_interval) / 3.) as f32,
+            (f64::from(x_interval) / 3.) as f32,
+            (f64::from(x_interval) / 3.) as f32,
+            (2. * f64::from(x_interval) / 3.) as f32,
+            (f64::from(x_interval) / 2.) as f32,
         ];
         let xf_ofs_y = [
-            0.,
-            2. * y_interval / 3.,
-            2. * y_interval / 3.,
-            y_interval / 3.,
-            y_interval / 3.,
-            y_interval / 2.,
+            0.0_f32,
+            (2. * f64::from(y_interval) / 3.) as f32,
+            (2. * f64::from(y_interval) / 3.) as f32,
+            (f64::from(y_interval) / 3.) as f32,
+            (f64::from(y_interval) / 3.) as f32,
+            (f64::from(y_interval) / 2.) as f32,
         ];
+        // `float range = 2.;` (`warputils.c:322`).
+        const RANGE: f32 = 2.;
         let xyint = x_interval.min(y_interval);
         for lind in 0..N_IN_LIST as usize {
             let ixyind = ind_list.add(lind).read_unaligned();
@@ -455,7 +464,17 @@ pub unsafe fn extrapolate_grid(
                 let mut dmin = 1.0e30_f32;
                 let (mut minx, mut miny) = (0, 0);
                 for delta in 1..nx_grid.max(ny_grid) {
-                    if (delta as f32 - 0.7).powi(2) * xyint * xyint > dmin {
+                    // `warputils.c:436`: `delta` is an `int` and `0.7` a
+                    // double literal, so the whole comparison is evaluated in
+                    // double with `xyint` and `dmin` promoted -- doing it in
+                    // `f32` breaks the search a delta early or late and
+                    // changes which block ends up nearest.
+                    if (delta as f64 - 0.7)
+                        * (delta as f64 - 0.7)
+                        * f64::from(xyint)
+                        * f64::from(xyint)
+                        > f64::from(dmin)
+                    {
                         break;
                     }
                     for dir in 0..4_usize {
@@ -497,11 +516,17 @@ pub unsafe fn extrapolate_grid(
                         }
                     }
                 }
-                let dist = 2. * dmin.sqrt();
-                let mut dlook = dist / x_interval.max(1.) + 1.;
+                // `warputils.c:489-495`.  `sqrt` takes and returns a double
+                // and the result is cast back to `float` before the
+                // multiplication; `B3DMAX(xInterval, 1.)` compares a `float`
+                // with a double literal, so its value -- and the division and
+                // the `+ 1.` after it -- are double, narrowed only by the
+                // store into `dlook`.
+                let dist = RANGE * (f64::from(dmin).sqrt() as f32);
+                let mut dlook = (f64::from(dist) / f64::from(x_interval).max(1.) + 1.) as f32;
                 let jxmin = ((ix as f32 - dlook - 1.).round() as i32).clamp(0, nx_grid - 2);
                 let jxmax = ((ix as f32 + dlook).round() as i32).clamp(0, nx_grid - 2);
-                dlook = dist / y_interval.max(1.) + 1.;
+                dlook = (f64::from(dist) / f64::from(y_interval).max(1.) + 1.) as f32;
                 let jymin = ((iy as f32 - dlook - 1.).round() as i32).clamp(0, ny_grid - 2);
                 let jymax = ((iy as f32 + dlook).round() as i32).clamp(0, ny_grid - 2);
                 let distcrit = dist * dist;
@@ -513,11 +538,18 @@ pub unsafe fn extrapolate_grid(
                             let dycen = (jy - iy) as f32 * y_interval + xf_ofs_y[btype as usize];
                             let dd = dxcen * dxcen + dycen * dycen;
                             if dd <= distcrit {
-                                let mut angle = dycen.atan2(dxcen) / 0.017453293 + 157.5;
+                                // `warputils.c:511-515`: `atan2` is the
+                                // double routine, its arguments promoted, and
+                                // the division and offset stay in double until
+                                // the store into the `float` `angle`.
+                                let mut angle = (f64::from(dycen).atan2(f64::from(dxcen))
+                                    / 0.017453293
+                                    + 157.5) as f32;
                                 if angle < 0. {
                                     angle += 360.;
                                 }
-                                let ind_dom = (angle / 45.) as i32;
+                                // `warputils.c:516`.
+                                let ind_dom = ((angle / 45.) as i32).clamp(0, 7);
                                 let mut boundary = false;
                                 for is in ind_dom..=ind_dom + 4 {
                                     let nayx = jx + ixstep[is as usize];
@@ -613,7 +645,10 @@ pub unsafe fn extrapolate_grid(
                 dy = dy + dycen - a21 * dxcen - a22 * dycen;
                 *dx_grid.add(ixyind as usize) += dx / dist;
                 *dy_grid.add(ixyind as usize) += dy / dist;
-                wsum += 1. / dist;
+                // `warputils.c:583`: `1.` is a double literal, so the
+                // reciprocal is formed in double and the sum narrows only on
+                // the store into the `float` `wsum`.
+                wsum = (f64::from(wsum) + 1. / f64::from(dist)) as f32;
             }
             *dx_grid.add(ixyind as usize) /= wsum;
             *dy_grid.add(ixyind as usize) /= wsum;
@@ -810,19 +845,25 @@ pub unsafe fn find_max_grid_size(
     len_string: i32,
 ) -> i32 {
     unsafe {
+        // `ERR_RETURN` copies the message and returns -2 on every failure
+        // exit, so the caller always has something to print.
+        let err_return = |message: &[u8]| {
+            if len_string > 0 {
+                core::ptr::copy_nonoverlapping(
+                    message.as_ptr().cast(),
+                    err_string,
+                    message.len().min((len_string - 1) as usize),
+                );
+                *err_string.add(message.len().min((len_string - 1) as usize)) = 0;
+            }
+            -2
+        };
         let mut nxwarp = 0;
         let mut nywarp = 0;
         let mut nzwarp = 0;
         let mut control = 0;
         if get_warp_file_size(&mut nxwarp, &mut nywarp, &mut nzwarp, &mut control) != 0 {
-            core::ptr::copy_nonoverlapping(
-                b"GETTING MAX GRID SIZE - THERE IS NO CURRENT WARP FILE"
-                    .as_ptr()
-                    .cast(),
-                err_string,
-                55.min((len_string - 1) as usize),
-            );
-            return -2;
+            return err_return(b"GETTING MAX GRID SIZE - THERE IS NO CURRENT WARP FILE");
         }
         let (mut x_min, mut y_min) = (1.0e20_f32, 1.0e20_f32);
         *max_nxg = 0;
@@ -830,27 +871,38 @@ pub unsafe fn find_max_grid_size(
         for iz in 0..nzwarp {
             *n_control.add(iz as usize) = 4;
             if control != 0 && get_num_warp_points(iz, n_control.add(iz as usize)) != 0 {
-                return -2;
+                return err_return(b"GETTING NUMBER OF CONTROL POINTS");
             }
             if *n_control.add(iz as usize) >= 3 {
                 if control != 0 && grid_size_from_spacing(iz, -1., -1., 1) != 0 {
-                    return -2;
+                    return err_return(b"SETTING GRID SIZE FROM SPACING OF CONTROL POINTS");
                 }
                 let (mut nxg, mut nyg, mut xs, mut ys, mut xi, mut yi) = (0, 0, 0., 0., 0., 0.);
                 if get_grid_parameters(iz, &mut nxg, &mut nyg, &mut xs, &mut ys, &mut xi, &mut yi)
                     != 0
                 {
-                    return -2;
+                    return err_return(b"GETTING GRID PARAMETERS");
                 }
                 x_min = x_min.min(xi);
                 y_min = y_min.min(yi);
             }
         }
+        //
+        // Allow the grid to be expanded to fit the actual image, at the
+        // minimum interval.  Allow an extra position by adding 2.
+        //
+        // `B3DMIN(0., xmin)` compares a double against a float, so the
+        // subtraction is a double one, and `B3DNINT` is
+        // `(int)floor(x + 0.5)`, not a round-half-away-from-zero.  The
+        // quotient is then `int / float`.
+        //
         if x_min < 1.0e19 {
-            let ix = (nxwarp as f32).max(xmax) - 0_f32.min(xmin);
-            let iy = (nywarp as f32).max(ymax) - 0_f32.min(ymin);
-            *max_nxg = (ix.round() / x_min).ceil() as i32 + 2;
-            *max_nyg = (iy.round() / y_min).ceil() as i32 + 2;
+            let ix =
+                ((nxwarp as f32).max(xmax) as f64 - 0_f64.min(xmin as f64) + 0.5).floor() as i32;
+            let iy =
+                ((nywarp as f32).max(ymax) as f64 - 0_f64.min(ymin as f64) + 0.5).floor() as i32;
+            *max_nxg = (ix as f32 / x_min).ceil() as i32 + 2;
+            *max_nyg = (iy as f32 / y_min).ceil() as i32 + 2;
         }
         0
     }
@@ -880,35 +932,42 @@ pub unsafe fn get_size_adjusted_grid(
     len_string: i32,
 ) -> i32 {
     unsafe {
-        let (mut nxwarp, mut nywarp, mut nzwarp, mut control_points) = (0, 0, 0, 0);
-        if get_warp_file_size(&mut nxwarp, &mut nywarp, &mut nzwarp, &mut control_points) != 0 {
-            let message = b"GETTING SIZE-ADJUSTED GRID - THERE IS NO CURRENT WARP FILE";
+        // `ERR_RETURN` copies the message into `errString` and returns -2;
+        // every failure exit of the source does that, so the caller always has
+        // something to print.
+        let err_return = |message: &[u8]| {
             if len_string > 0 {
                 core::ptr::copy_nonoverlapping(
                     message.as_ptr().cast(),
                     err_string,
                     message.len().min((len_string - 1) as usize),
                 );
+                *err_string.add(message.len().min((len_string - 1) as usize)) = 0;
             }
-            return -2;
+            -2
+        };
+        let (mut nxwarp, mut nywarp, mut nzwarp, mut control_points) = (0, 0, 0, 0);
+        if get_warp_file_size(&mut nxwarp, &mut nywarp, &mut nzwarp, &mut control_points) != 0 {
+            return err_return(b"GETTING SIZE-ADJUSTED GRID - THERE IS NO CURRENT WARP FILE");
         }
         if control_points != 0 {
-            if grid_size_from_spacing(iz, -1., -1., 1) != 0
-                || get_grid_parameters(
-                    iz,
-                    nx_grid,
-                    ny_grid,
-                    x_grid_start,
-                    y_grid_start,
-                    x_grid_interval,
-                    y_grid_interval,
-                ) != 0
-            {
-                return -2;
-            }
-            let xmin = nxwarp as f32 / 2. - xnbig / 2. + x_offset;
+            // `warputils.c:915-917` assigns both results to `ierr` and never
+            // tests it, so neither call can fail the routine.
+            let _ = grid_size_from_spacing(iz, -1., -1., 1);
+            let _ = get_grid_parameters(
+                iz,
+                nx_grid,
+                ny_grid,
+                x_grid_start,
+                y_grid_start,
+                x_grid_interval,
+                y_grid_interval,
+            );
+            // The area actually needed.  `nxwarp / 2.` and `xnbig / 2.` are
+            // double quotients in the source.
+            let xmin = (nxwarp as f64 / 2. - xnbig as f64 / 2. + x_offset as f64) as f32;
             let xmax = xmin + xnbig;
-            let ymin = nywarp as f32 / 2. - ynbig / 2. + y_offset;
+            let ymin = (nywarp as f64 / 2. - ynbig as f64 / 2. + y_offset as f64) as f32;
             let ymax = ymin + ynbig;
             if xmax > nxwarp as f32 || xmin < 0. || ymax > nywarp as f32 || ymin < 0. {
                 *nx_grid = adjust_size_and_start(
@@ -927,7 +986,8 @@ pub unsafe fn get_size_adjusted_grid(
                     *y_grid_interval,
                     y_grid_start,
                 );
-                if set_grid_size_to_make(
+                // `warputils.c:931` also assigns to `ierr` without testing.
+                let _ = set_grid_size_to_make(
                     iz,
                     *nx_grid,
                     *ny_grid,
@@ -935,10 +995,7 @@ pub unsafe fn get_size_adjusted_grid(
                     *y_grid_start,
                     *x_grid_interval,
                     *y_grid_interval,
-                ) != 0
-                {
-                    return -2;
-                }
+                );
             }
         }
         if get_warp_grid(
@@ -954,12 +1011,15 @@ pub unsafe fn get_size_adjusted_grid(
             ixgdim,
         ) != 0
         {
-            return -2;
+            return err_return(b"GETTING WARP GRID OR DISTORTION FIELD");
         }
         let (mut x_add, mut y_add) = (0., 0.);
         if adjust_start != 0 {
-            *x_grid_start += (xnbig - nxwarp as f32) / 2. - x_offset;
-            *y_grid_start += (ynbig - nywarp as f32) / 2. - y_offset;
+            // `(xnbig - nxwarp) / 2.` is a double quotient.
+            *x_grid_start = (*x_grid_start as f64 + (xnbig - nxwarp as f32) as f64 / 2.
+                - x_offset as f64) as f32;
+            *y_grid_start = (*y_grid_start as f64 + (ynbig - nywarp as f32) as f64 / 2.
+                - y_offset as f64) as f32;
             x_add = x_offset;
             y_add = y_offset;
         }
@@ -985,7 +1045,7 @@ pub unsafe fn get_size_adjusted_grid(
                 (ynbig + y_offset).round() as i32,
             ) != 0
         {
-            return -2;
+            return err_return(b"EXTRAPOLATING WARPING/DISTORTION GRID TO FULL AREA");
         }
         let bin_ratio = warp_scale / i_binning as f32;
         *x_grid_start *= bin_ratio;

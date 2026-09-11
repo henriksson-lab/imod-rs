@@ -2,11 +2,20 @@
 #![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::imod_prog_name;
+use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libcfshr::parse_params::setExitPrefix;
 use crate::imod::libiimod::mrcfiles::MrcHeader;
 
+unsafe extern "C" {
+    static mut stdout: *mut libc::FILE;
+}
+
 pub const IP_NONE: i32 = 0;
 pub const IP_DEFAULT: i32 = -99_999;
+/// `mrcslice.h:29-31`.
+pub const SLICE_MODE_UNDEFINED: i32 = -1;
+pub const SLICE_MODE_SBYTE: i32 = -2;
+pub const SLICE_MODE_UBYTE: i32 = -3;
 pub const IP_APPEND_FALSE: i32 = 0;
 pub const IP_APPEND_OVERWRITE: i32 = 1;
 pub const IP_APPEND_ADD: i32 = 2;
@@ -173,12 +182,23 @@ pub struct Zstats {
 /// The complete usage text is intentionally kept with the binary entry point,
 /// as in the source this routine writes directly to standard output.
 pub fn usage() {
-    // `__DATE__` and `__TIME__` are C compilation properties; retain the source
-    // IMOD release identifier while the Rust build has no corresponding pair.
-    println!("clip: Command Line Image Processing. 4.8.16");
+    // The source writes every line of this routine with C `printf`.  Keep the
+    // same stream so the interleaving with `imodCopyright`, which also uses
+    // `printf`, matches the reference when standard output is redirected and
+    // therefore fully buffered.
+    unsafe {
+        libc::printf(
+            c"%s: Command Line Image Processing. %s, %s %s\n".as_ptr(),
+            c"clip".as_ptr(),
+            c"5.2.17".as_ptr(),
+            crate::imod::libcfshr::b3dutil::IMOD_BUILD_DATE.as_ptr(),
+            crate::imod::libcfshr::b3dutil::IMOD_BUILD_TIME.as_ptr(),
+        );
+    }
     crate::imod::libcfshr::b3dutil::imod_copyright();
-    print!(
-        "----------------------------------------------------\n\
+    unsafe {
+        libc::printf(
+            c"----------------------------------------------------\n\
 clip usage:\n\
 clip [process] [options] [input files...] [output file]\n\
 \n\
@@ -265,19 +285,34 @@ options:\n\
 \t[-ep #] Set padding of defects from gain reference for EER file.\n\
 \t[-ed file] Write defects from EER gain reference to file.\n\
 \t[-eg file] File for adjusting super-resolution gain reference.\n\n"
-    );
+                .as_ptr(),
+        );
+    }
 }
 /// Original: `show_error` (`clip.cpp:124`).
 pub fn show_error(message: &str) {
-    println!("ERROR: {message}");
+    // `clip.cpp:124-131` writes to standard output with C `printf`.  Keeping
+    // the same stream matters when output is redirected, because the C-derived
+    // modules on this path are block-buffered by libc.
+    unsafe {
+        let text = std::ffi::CString::new(message).unwrap();
+        libc::printf(c"ERROR: %s\n".as_ptr(), text.as_ptr());
+    }
 }
 /// Original: `show_warning` (`clip.cpp:133`).
 pub fn show_warning(reason: &str) {
-    println!("WARNING: {reason}");
+    unsafe {
+        let text = std::ffi::CString::new(reason).unwrap();
+        libc::printf(c"WARNING: %s\n".as_ptr(), text.as_ptr());
+    }
 }
 /// Original: `show_status` (`clip.cpp:138`).
 pub fn show_status(info: &str) {
-    print!("{info}");
+    unsafe {
+        let text = std::ffi::CString::new(info).unwrap();
+        libc::printf(c"%s".as_ptr(), text.as_ptr());
+        libc::fflush(stdout);
+    }
 }
 /// C++ `default_options` (`clip.cpp:144`).
 pub fn default_options(options: &mut ClipOptions) {
@@ -355,7 +390,7 @@ pub fn clip() {
         setExitPrefix(prefix.as_ptr());
         if raw.len() < 3 {
             usage();
-            return;
+            std::process::exit(3);
         }
         let command = &raw[1];
         let command_string = std::ffi::CString::new(command.as_bytes()).unwrap();
@@ -573,243 +608,306 @@ pub fn clip() {
         let mut eer_group = 1_i32;
         let mut eer_flags = 0_i32;
         let mut fei_def_pad = 1_i32;
-        let mut dump_defect_name: Option<std::path::PathBuf> = None;
-        let mut format_set: Option<String> = None;
+        let mut fei_pad_entered = 0_i32;
+        let mut dump_defect_name: Option<std::ffi::CString> = None;
+        let mut format_set = -2_i32;
         let mut view = false;
+        // `clip.cpp:199` declares `int itemp;` without an initializer and reuses
+        // it for -E, -F and -M; `sscanf` leaves it untouched when the second
+        // conversion fails, so its value carries across option entries.  The
+        // uninitialized first read is source-level indeterminate; zero is used.
+        let mut itemp = 0_i32;
         iimage::get_dflt_eersumming_from_env(&mut eer_super, &mut eer_group);
+        options.pname = imod_prog_name(program.as_ptr());
         if process == IP_SUPERGAIN {
-            eer_super = 2;
             eer_group = 250;
+            eer_super = 2;
+            options.val = 4.;
         }
-        while position < raw.len() && raw[position].starts_with('-') {
-            let flag = &raw[position];
-            if process == IP_SUPERGAIN && flag.starts_with("-e") {
-                show_error(
-                    "CLIP - The -es, -ez, and other EER options cannot be entered with the supergain operation",
-                );
-                std::process::exit(1);
+        // `clip.cpp:366-618`: the option loop switches on the second character of
+        // the argument and, for several letters, on the third.
+        while position < raw.len() {
+            let flag = raw[position].clone();
+            let bytes = flag.as_bytes();
+            if bytes.first() != Some(&b'-') {
+                break;
             }
+            let second = *bytes.get(2).unwrap_or(&0);
+            // `clip.cpp:391` inspects argv[iarg + 1] before advancing.
+            let next_arg = raw.get(position + 1).cloned().unwrap_or_default();
             let mut need = || {
                 position += 1;
                 raw.get(position).cloned().unwrap_or_default()
             };
-            match flag.as_str() {
-                "-2" | "-2d" => options.dim = 2,
-                "-3" | "-3d" => {
+            match *bytes.get(1).unwrap_or(&0) {
+                b'a' => options.add2file = IP_APPEND_ADD,
+                b'3' => {
                     if process != IP_QUADRANT {
                         options.dim = 3;
                     }
                 }
-                flag if flag.starts_with("-a") => options.add2file = IP_APPEND_ADD,
-                flag if flag.starts_with("-s") => options.sano = 1,
-                flag if flag.starts_with("-1") => options.from_one = 1,
-                flag if flag.starts_with("-n") => {
-                    options.val = need().parse().unwrap_or(IP_DEFAULT as f32)
+                b'2' => options.dim = 2,
+                b'1' => options.from_one = 1,
+                b's' => options.sano = 1,
+                b'n' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.val);
                 }
-                flag if flag.starts_with("-E") => {
-                    let value = need();
-                    let mut terms = value.splitn(2, |ch: char| {
-                        !ch.is_ascii_digit() && !matches!(ch, '.' | '+' | '-' | 'e' | 'E')
-                    });
-                    options.pctl_frac = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT as f32);
-                    if terms
-                        .next()
-                        .and_then(|x| x.parse::<i32>().ok())
-                        .unwrap_or(0)
-                        < 0
-                    {
-                        options.pctl_frac = -options.pctl_frac;
-                    }
-                }
-                flag if flag.starts_with("-F") => {
-                    let value = need();
-                    let mut terms = value.splitn(2, |ch: char| {
-                        !ch.is_ascii_digit() && !matches!(ch, '.' | '+' | '-' | 'e' | 'E')
-                    });
-                    options.falloff_frac = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT as f32);
-                    if terms
-                        .next()
-                        .and_then(|x| x.parse::<i32>().ok())
-                        .unwrap_or(0)
-                        < 0
-                    {
-                        options.falloff_frac = -options.falloff_frac;
-                    }
-                }
-                flag if flag.starts_with("-M") => {
-                    let value = need();
-                    let mut terms = value.splitn(2, |ch: char| {
-                        !ch.is_ascii_digit() && !matches!(ch, '.' | '+' | '-' | 'e' | 'E')
-                    });
-                    options.min_size = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
-                    if terms
-                        .next()
-                        .and_then(|x| x.parse::<i32>().ok())
-                        .unwrap_or(0)
-                        < 0
-                    {
-                        options.min_size = -options.min_size;
-                    }
-                }
-                flag if flag.starts_with("-k") || flag.starts_with("-w") => {
-                    options.weight = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-l") => {
-                    options.low = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-h") => {
-                    options.high = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-t") => {
-                    options.thresh = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-p") => {
-                    options.pad = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-r") => {
-                    options.red = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-g") => {
-                    options.green = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                flag if flag.starts_with("-b") => {
-                    options.blue = need().parse().unwrap_or(IP_DEFAULT as f32)
-                }
-                "-ix" | "-iX" => options.ix = need().parse().unwrap_or(IP_DEFAULT),
-                "-iy" | "-iY" => options.iy = need().parse().unwrap_or(IP_DEFAULT),
-                flag if flag.starts_with("-x") || flag.starts_with("-X") => {
-                    let value = need();
-                    let mut terms = value.splitn(2, |ch: char| {
-                        !ch.is_ascii_digit() && !matches!(ch, '+' | '-')
-                    });
-                    options.x = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
-                    options.x2 = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
-                }
-                flag if flag.starts_with("-y") || flag.starts_with("-Y") => {
-                    let value = need();
-                    let mut terms = value.splitn(2, |ch: char| {
-                        !ch.is_ascii_digit() && !matches!(ch, '+' | '-')
-                    });
-                    options.y = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
-                    options.y2 = terms
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
-                }
-                "-ox" | "-oX" => options.ox = need().parse().unwrap_or(IP_DEFAULT),
-                "-oy" | "-oY" => options.oy = need().parse().unwrap_or(IP_DEFAULT),
-                "-oz" | "-oZ" => options.oz = need().parse().unwrap_or(IP_DEFAULT),
-                "-op" => {
-                    let value = need();
-                    options.point_out_name = std::ffi::CString::new(value).unwrap().into_raw();
-                }
-                "-cx" => options.cx = need().parse().unwrap_or(IP_DEFAULT as f32),
-                "-cy" => options.cy = need().parse().unwrap_or(IP_DEFAULT as f32),
-                "-cz" => options.cz = need().parse().unwrap_or(IP_DEFAULT as f32),
-                "-cc" => options.thresh = need().parse().unwrap_or(IP_DEFAULT as f32),
-                "-CX" => options.chunk_x = need().parse().unwrap_or(IP_DEFAULT),
-                "-CY" => options.chunk_y = need().parse().unwrap_or(IP_DEFAULT),
-                "-CZ" => options.chunk_z = need().parse().unwrap_or(IP_DEFAULT),
-                flag if flag.starts_with("-m") => {
-                    let value = need();
-                    if value == "4-bit" || value == "101" {
+                b'm' => {
+                    if next_arg == "4-bit" || next_arg == "101" {
                         crate::imod::libcfshr::b3dutil::set_4_bit_output_mode(1);
-                        options.mode = crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
-                    } else if value == "float16" || value == "12" {
-                        crate::imod::libcfshr::b3dutil::set_float_16_output_mode(1, 1);
-                        options.mode = crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
+                        options.mode = mrcfiles::MRC_MODE_BYTE;
+                        need();
+                    } else if next_arg == "float16" || next_arg == "12" {
+                        options.mode = mrcfiles::MRC_MODE_HALF_FLOAT;
+                        need();
                     } else {
-                        let mode = std::ffi::CString::new(value.as_bytes()).unwrap();
-                        options.mode = crate::imod::libcfshr::islice::slice_mode(mode.as_ptr());
-                        if options.mode == -2 || options.mode == -3 {
-                            crate::imod::libcfshr::b3dutil::override_write_bytes(
-                                if options.mode == -2 { 1 } else { 0 },
-                            );
-                            options.mode = crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
-                        }
-                        if options.mode < 0 {
-                            show_error(&format!("CLIP - Invalid mode entry {value}."));
-                            std::process::exit(1);
-                        }
-                        if options.mode == crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT {
-                            crate::imod::libcfshr::b3dutil::set_float_16_output_mode(0, 0);
-                        }
+                        let text = std::ffi::CString::new(need()).unwrap();
+                        options.mode = crate::imod::libcfshr::islice::slice_mode(text.as_ptr());
                     }
-                    if process == IP_FLATFIELD
-                        && (options.mode != crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT
-                            || value == "float16"
-                            || value == "12")
-                    {
-                        show_warning(
-                            "clip - Output mode for a flatfield image must be floating point",
+                    if options.mode == SLICE_MODE_UNDEFINED {
+                        let message =
+                            std::ffi::CString::new(format!("Invalid mode entry {next_arg}."))
+                                .unwrap();
+                        exit_error(message.as_ptr());
+                    }
+                    if options.mode == SLICE_MODE_SBYTE || options.mode == SLICE_MODE_UBYTE {
+                        crate::imod::libcfshr::b3dutil::override_write_bytes(
+                            if options.mode == SLICE_MODE_SBYTE {
+                                1
+                            } else {
+                                0
+                            },
                         );
-                        options.mode = crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
+                        options.mode = 0;
+                    }
+                    if options.process == IP_FLATFIELD && options.mode != mrcfiles::MRC_MODE_FLOAT {
+                        show_warning("Output mode for a flatfield image must be floating point");
+                        options.mode = 2;
+                    }
+                    if options.mode == mrcfiles::MRC_MODE_FLOAT {
                         crate::imod::libcfshr::b3dutil::set_float_16_output_mode(0, 0);
                     }
                 }
-                flag if flag.starts_with("-f") => {
+                b'f' => {
                     let value = need();
-                    let output_type =
+                    format_set =
                         crate::imod::libcfshr::b3dutil::set_output_type_from_string(&value);
-                    if output_type < 0 {
-                        show_error(&format!(
-                            "CLIP - Output file format entry {value} is not {}.",
-                            if output_type == -1 {
+                    if format_set < 0 {
+                        let message = std::ffi::CString::new(format!(
+                            "Output file format entry {} is not {}.",
+                            value,
+                            if format_set == -1 {
                                 "recognized"
                             } else {
                                 "available in this copy of IMOD"
                             }
-                        ));
-                        std::process::exit(1);
+                        ))
+                        .unwrap();
+                        exit_error(message.as_ptr());
                     }
-                    format_set = Some(value);
                 }
-                flag if flag.starts_with("-v") => view = true,
-                "-or" => {
-                    options.add2file = IP_APPEND_OVERWRITE;
-                    options.isec = need().parse().unwrap_or(0);
+                b'v' => view = true,
+                b'p' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    options.pad = libc::atof(value.as_ptr()) as f32;
                 }
-                "-o" | "-ov" => {
-                    options.add2file = IP_APPEND_TRUNCATE;
-                    options.isec = need().parse().unwrap_or(0);
+                b't' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.thresh);
                 }
-                flag if flag.starts_with("-P") => {
-                    let value = need();
-                    options.plname = std::ffi::CString::new(value).unwrap().into_raw();
+                b'E' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(
+                        value.as_ptr(),
+                        c"%f%*c%d".as_ptr(),
+                        &raw mut options.pctl_frac,
+                        &raw mut itemp,
+                    );
+                    if itemp < 0 {
+                        options.pctl_frac = -options.pctl_frac;
+                    }
                 }
-                flag if flag.starts_with("-O") => {
-                    let value = need();
-                    let mut parts = value.splitn(2, |ch: char| {
-                        !ch.is_ascii_digit() && !matches!(ch, '+' | '-')
-                    });
-                    options.new_xoverlap = parts
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
-                    options.new_yoverlap = parts
-                        .next()
-                        .and_then(|x| x.parse().ok())
-                        .unwrap_or(IP_DEFAULT);
+                b'F' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(
+                        value.as_ptr(),
+                        c"%f%*c%d".as_ptr(),
+                        &raw mut options.falloff_frac,
+                        &raw mut itemp,
+                    );
+                    if itemp < 0 {
+                        options.falloff_frac = -options.falloff_frac;
+                    }
                 }
-                flag if flag.starts_with("-D") => {
+                b'M' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(
+                        value.as_ptr(),
+                        c"%d%*c%d".as_ptr(),
+                        &raw mut options.min_size,
+                        &raw mut itemp,
+                    );
+                    if itemp < 0 {
+                        options.min_size = -options.min_size;
+                    }
+                }
+                b'k' | b'w' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.weight);
+                }
+                b'r' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.red);
+                }
+                b'g' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.green);
+                }
+                b'b' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.blue);
+                }
+                b'l' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.low);
+                }
+                b'h' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.high);
+                }
+                b'x' | b'X' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(
+                        value.as_ptr(),
+                        c"%d%*c%d".as_ptr(),
+                        &raw mut options.x,
+                        &raw mut options.x2,
+                    );
+                }
+                b'y' | b'Y' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(
+                        value.as_ptr(),
+                        c"%d%*c%d".as_ptr(),
+                        &raw mut options.y,
+                        &raw mut options.y2,
+                    );
+                }
+                b'o' => match second {
+                    0x00 | b' ' | b'v' => {
+                        options.add2file = IP_APPEND_TRUNCATE;
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.isec);
+                    }
+                    b'r' => {
+                        options.add2file = IP_APPEND_OVERWRITE;
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.isec);
+                    }
+                    b'x' | b'X' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.ox);
+                    }
+                    b'y' | b'Y' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.oy);
+                    }
+                    b'z' | b'Z' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.oz);
+                    }
+                    b'p' => {
+                        options.point_out_name =
+                            libc::strdup(std::ffi::CString::new(need()).unwrap().as_ptr());
+                    }
+                    _ => {
+                        let message =
+                            std::ffi::CString::new(format!("Invalid option {flag}.")).unwrap();
+                        exit_error(message.as_ptr());
+                    }
+                },
+                b'i' | b'I' => match second {
+                    b'x' | b'X' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.ix);
+                    }
+                    b'y' | b'Y' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.iy);
+                    }
+                    b'z' | b'Z' => {
+                        let text = need();
+                        let value = std::ffi::CString::new(text.clone()).unwrap();
+                        libc::sscanf(
+                            value.as_ptr(),
+                            c"%d%*c%d".as_ptr(),
+                            &raw mut options.iz,
+                            &raw mut options.iz2,
+                        );
+                        sections = clip_make_sec_list(&text);
+                    }
+                    _ => {
+                        let message =
+                            std::ffi::CString::new(format!("Invalid option {flag}.")).unwrap();
+                        exit_error(message.as_ptr());
+                    }
+                },
+                b'c' => match second {
+                    b'x' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%g".as_ptr(), &raw mut options.cx);
+                    }
+                    b'y' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%g".as_ptr(), &raw mut options.cy);
+                    }
+                    b'z' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%g".as_ptr(), &raw mut options.cz);
+                    }
+                    b'c' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &raw mut options.thresh);
+                    }
+                    _ => {
+                        let message =
+                            std::ffi::CString::new(format!("Invalid option {flag}.")).unwrap();
+                        exit_error(message.as_ptr());
+                    }
+                },
+                b'C' => match second {
+                    b'X' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.chunk_x);
+                    }
+                    b'Y' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.chunk_y);
+                    }
+                    b'Z' => {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        libc::sscanf(value.as_ptr(), c"%d".as_ptr(), &raw mut options.chunk_z);
+                    }
+                    _ => {
+                        let message =
+                            std::ffi::CString::new(format!("Invalid option {flag}.")).unwrap();
+                        exit_error(message.as_ptr());
+                    }
+                },
+                b'P' => {
+                    options.plname = libc::strdup(std::ffi::CString::new(need()).unwrap().as_ptr());
+                }
+                b'O' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    libc::sscanf(
+                        value.as_ptr(),
+                        c"%d%*c%d".as_ptr(),
+                        &raw mut options.new_xoverlap,
+                        &raw mut options.new_yoverlap,
+                    );
+                }
+                b'D' => {
                     let name = need();
                     let defect_error = crate::imod::clip::correct_defects::cor_def_parse_defects(
                         &name,
@@ -819,92 +917,107 @@ pub fn clip() {
                         &mut options.cam_size_y,
                     );
                     if defect_error != 0 {
-                        show_error(&format!(
-                            "CLIP - Error {} {}",
+                        // `clip.cpp:562` passes argv[iarg] to a format holding a
+                        // single %s, so the file name never reaches the output.
+                        let message = std::ffi::CString::new(format!(
+                            "Error {}",
                             if defect_error == 1 {
                                 "opening"
                             } else {
                                 "reading or parsing lines in"
-                            },
-                            name
-                        ));
-                        std::process::exit(1);
+                            }
+                        ))
+                        .unwrap();
+                        exit_error(message.as_ptr());
                     }
                     options.read_defects = 1;
                 }
-                flag if flag.starts_with("-B") => {
-                    options.binning = need().parse().unwrap_or(0.);
+                b'B' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    options.binning = libc::atof(value.as_ptr()) as f32;
                     if options.binning <= 0.49 {
-                        show_error("CLIP - Binning must be at least 0.5");
-                        std::process::exit(1);
+                        exit_error(c"Binning must be at least 0.5".as_ptr());
                     }
                 }
-                flag if flag.starts_with("-S") => options.scale_defects = 1,
-                flag if flag.starts_with("-R") => {
-                    options.rotation_flip = need().parse().unwrap_or(0)
+                b'S' => options.scale_defects = 1,
+                b'R' => {
+                    let value = std::ffi::CString::new(need()).unwrap();
+                    options.rotation_flip = libc::atoi(value.as_ptr());
                 }
-                "-es" => {
+                b'e' => {
                     if process == IP_SUPERGAIN {
-                        show_error(
-                            "CLIP - The -es, -ez, and other EER options cannot be entered with the supergain operation",
-                        );
-                        std::process::exit(1);
+                        exit_error(c"The -es, -ez, and other EER options cannot be entered with the supergain operation".as_ptr());
                     }
-                    eer_super = need().parse().unwrap_or(eer_super).clamp(
-                        crate::imod::libiimod::iitif::tiff_get_min_eer_super_res(),
-                        crate::imod::libiimod::iitif::tiff_get_max_eer_super_res(),
-                    );
-                }
-                "-ez" => eer_group = need().parse().unwrap_or(eer_group),
-                "-et" => eer_flags |= crate::imod::libiimod::iitif::IIFLAG_SKIP_EER_DIRS,
-                "-ep" => {
-                    fei_def_pad = need().parse().unwrap_or(0).max(0);
-                }
-                "-ed" => {
-                    dump_defect_name = Some(std::path::PathBuf::from(need()));
-                }
-                "-eg" => {
-                    let value = need();
-                    options.super_gain_name = std::ffi::CString::new(value).unwrap().into_raw();
-                }
-                "-ea" => {
-                    let value: i32 = need().parse().unwrap_or(0);
-                    if value != 0 {
-                        eer_flags |= crate::imod::libiimod::iitif::IIFLAG_ANTIALIAS_EER;
+                    if second == b's' {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        eer_super = libc::atoi(value.as_ptr());
+                        let low = crate::imod::libiimod::iitif::tiff_get_min_eer_super_res();
+                        let high = crate::imod::libiimod::iitif::tiff_get_max_eer_super_res();
+                        if eer_super < low {
+                            eer_super = low;
+                        }
+                        if eer_super > high {
+                            eer_super = high;
+                        }
+                    } else if second == b'z' {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        eer_group = libc::atoi(value.as_ptr());
+                    } else if second == b't' {
+                        eer_flags = crate::imod::libiimod::iitif::IIFLAG_SKIP_EER_DIRS;
+                    } else if second == b'p' {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        fei_def_pad = libc::atoi(value.as_ptr());
+                        fei_def_pad = fei_def_pad.max(0);
+                        fei_pad_entered = 1;
+                    } else if second == b'd' {
+                        dump_defect_name = Some(std::ffi::CString::new(need()).unwrap());
+                    } else if second == b'g' {
+                        options.super_gain_name =
+                            libc::strdup(std::ffi::CString::new(need()).unwrap().as_ptr());
+                    } else if second == b'a' {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        let j = libc::atoi(value.as_ptr());
+                        if j != 0 {
+                            eer_flags |= crate::imod::libiimod::iitif::IIFLAG_ANTIALIAS_EER;
+                        }
+                        if j == 1 {
+                            eer_flags |= crate::imod::libiimod::iitif::IIFLAG_EER_USE_LANCZOS;
+                        }
+                    } else if second == b'c' {
+                        let value = std::ffi::CString::new(need()).unwrap();
+                        let mut j = libc::atoi(value.as_ptr()) - 1;
+                        if j < 0 {
+                            j = 0;
+                        }
+                        if j > crate::imod::libiimod::iitif::EER_AA_SCALING_MASK {
+                            j = crate::imod::libiimod::iitif::EER_AA_SCALING_MASK;
+                        }
+                        eer_flags |= j << crate::imod::libiimod::iitif::EER_AA_SCALING_BIT_SHIFT;
+                    } else {
+                        let message =
+                            std::ffi::CString::new(format!("Invalid option {flag}.")).unwrap();
+                        exit_error(message.as_ptr());
                     }
-                    if value == 1 {
-                        eer_flags |= crate::imod::libiimod::iitif::IIFLAG_EER_USE_LANCZOS;
-                    }
-                }
-                "-ec" => {
-                    let value = (need().parse::<i32>().unwrap_or(1) - 1)
-                        .clamp(0, crate::imod::libiimod::iitif::EER_AA_SCALING_MASK);
-                    eer_flags |= value << crate::imod::libiimod::iitif::EER_AA_SCALING_BIT_SHIFT;
-                }
-                "-iz" | "-iZ" => {
-                    let value = need();
-                    let value_c = std::ffi::CString::new(value.as_bytes()).unwrap();
-                    libc::sscanf(
-                        value_c.as_ptr(),
-                        c"%d%*c%d".as_ptr(),
-                        &mut options.iz,
-                        &mut options.iz2,
-                    );
-                    sections = clip_make_sec_list(&value);
                 }
                 _ => {
-                    show_error(&format!("CLIP - Invalid option {flag}."));
-                    std::process::exit(1);
+                    let message =
+                        std::ffi::CString::new(format!("Invalid option {flag}.")).unwrap();
+                    exit_error(message.as_ptr());
                 }
             }
             position += 1;
+        }
+        // `clip.cpp:621`: replaceFileArgVec expands wild cards only on Windows;
+        // on this platform expandArgList returns the vector unchanged.
+        if options.mode == mrcfiles::MRC_MODE_HALF_FLOAT {
+            crate::imod::libcfshr::b3dutil::set_float_16_output_mode(1, 1);
+            options.mode = mrcfiles::MRC_MODE_FLOAT;
         }
         if !sections.is_empty() {
             options.nofsecs = sections.len() as i32;
             options.secs = libc::malloc(core::mem::size_of_val(sections.as_slice())).cast();
             if options.secs.is_null() {
-                show_error("CLIP - Memory allocation error.");
-                std::process::exit(1);
+                exit_error(c"Memory allocation error.".as_ptr());
             }
             libc::memcpy(
                 options.secs.cast(),
@@ -912,31 +1025,35 @@ pub fn clip() {
                 core::mem::size_of_val(sections.as_slice()),
             );
         }
-        if process == IP_SUPERGAIN {
-            options.val = 4.;
+        // `clip.cpp:625-633`: EER antialiasing defaults are settled after the
+        // option loop and before tiffSetEERreadProperties.
+        if eer_super < 0 && (eer_flags & crate::imod::libiimod::iitif::IIFLAG_ANTIALIAS_EER) == 0 {
+            libc::printf(c"Using antialiasing for the EER reduction\n".as_ptr());
+            eer_flags |= crate::imod::libiimod::iitif::IIFLAG_ANTIALIAS_EER
+                | crate::imod::libiimod::iitif::IIFLAG_EER_USE_LANCZOS;
+        }
+        if fei_pad_entered == 0
+            && (eer_flags & crate::imod::libiimod::iitif::IIFLAG_ANTIALIAS_EER) != 0
+            && eer_super < 2
+        {
+            fei_def_pad = if eer_super < -2 { 40 } else { 20 };
         }
         if options.chunk_x != IP_DEFAULT
             || options.chunk_y != IP_DEFAULT
             || options.chunk_z != IP_DEFAULT
         {
-            if format_set
-                .as_deref()
-                .is_some_and(|value| !value.eq_ignore_ascii_case("hdf"))
-            {
-                show_error(
-                    "CLIP - You cannot specify chunk sizes and an output format other than HDF",
+            // `b3dutil.h:60` OUTPUT_TYPE_HDF is 5, the same value as IIFILE_HDF.
+            if format_set >= 0 && format_set != iimage::IIFILE_HDF {
+                exit_error(
+                    c"You cannot specify chunk sizes and an output format other than HDF".as_ptr(),
                 );
-                std::process::exit(1);
             }
             crate::imod::libcfshr::b3dutil::override_output_type(iimage::IIFILE_HDF);
         }
         crate::imod::libiimod::iitif::tiff_set_eer_read_properties(eer_super, eer_group, eer_flags);
         if options.read_defects != 0 {
             if options.cam_size_x == 0 || options.cam_size_y == 0 {
-                show_error(
-                    "CLIP - Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries",
-                );
-                std::process::exit(1);
+                exit_error(c"Problem with defect correction - Defect list file must have CameraSizeX and CameraSizeY entries".as_ptr());
             }
             crate::imod::clip::correct_defects::cor_def_flip_defects_in_y(
                 &mut options.defects,
@@ -956,72 +1073,62 @@ pub fn clip() {
         {
             crate::imod::libcfshr::b3dutil::set_tiff_compression_type(3, 0);
         }
-        if options.x != IP_DEFAULT && (options.cx as i32 != IP_DEFAULT || options.ix != IP_DEFAULT)
+        if options.x != IP_DEFAULT && (options.cx != IP_DEFAULT as f32 || options.ix != IP_DEFAULT)
         {
-            show_error("CLIP - You cannot use -x together with -cx or -ix");
-            std::process::exit(1);
+            exit_error(c"You cannot use -x together with -cx or -ix".as_ptr());
         }
-        if options.y != IP_DEFAULT && (options.cy as i32 != IP_DEFAULT || options.iy != IP_DEFAULT)
+        if options.y != IP_DEFAULT && (options.cy != IP_DEFAULT as f32 || options.iy != IP_DEFAULT)
         {
-            show_error("CLIP - You cannot use -y together with -cy or -iy");
-            std::process::exit(1);
+            exit_error(c"You cannot use -y together with -cy or -iy".as_ptr());
         }
         if process == IP_FLATFIELD
             && (options.x != IP_DEFAULT
-                || options.cx as i32 != IP_DEFAULT
+                || options.cx != IP_DEFAULT as f32
                 || options.ix != IP_DEFAULT
                 || options.y != IP_DEFAULT
-                || options.cy as i32 != IP_DEFAULT
+                || options.cy != IP_DEFAULT as f32
                 || options.iy != IP_DEFAULT)
         {
-            show_error("CLIP - You cannot change the input size for flatfield process");
-            std::process::exit(1);
+            exit_error(c"You cannot change the input size for flatfield process".as_ptr());
         }
         if process == IP_INTEGRAL
-            && options.val as i32 == IP_DEFAULT
-            && ((options.low as i32 != IP_DEFAULT) as i32
-                + (options.high as i32 != IP_DEFAULT) as i32
+            && options.val == IP_DEFAULT as f32
+            && ((options.low != IP_DEFAULT as f32) as i32
+                + (options.high != IP_DEFAULT as f32) as i32
                 != 1)
         {
-            show_error("CLIP - You must enter -n and either -l OR -h for integral process");
-            std::process::exit(1);
+            exit_error(c"You must enter -n and either -l OR -h for integral process".as_ptr());
         }
         if process == IP_BOXSD {
-            if options.val as i32 == IP_DEFAULT {
+            if options.val == IP_DEFAULT as f32 {
                 options.val = -2.;
             } else if options.val.abs() < 0.9 {
-                show_error("CLIP - Reduction factor (-n) must be at least 1 for boxsd process");
-                std::process::exit(1);
+                exit_error(c"Reduction factor (-n) must be at least 1 for boxsd process".as_ptr());
             }
-            if options.low as i32 == IP_DEFAULT {
+            if options.low == IP_DEFAULT as f32 {
                 options.low = 6. * options.val.abs().round();
             } else if options.low / options.val.abs() < 4. {
-                show_error(
-                    "CLIP - Box size (-l) must be at least 4 times reduction factor (-n) for boxsd process",
-                );
-                std::process::exit(1);
+                exit_error(c"Box size (-l) must be at least 4 times reduction factor (-n) for boxsd process".as_ptr());
             }
         }
         let data = &raw[position..];
-        let output_needed = !matches!(process, IP_INFO | IP_STAT | IP_HISTOGRAM | IP_SPLITRGB);
-        if data.is_empty()
-            || ((output_needed || process == IP_SPLITRGB)
-                && process != IP_BLANKFILE
-                && data.len() < 2)
-        {
-            usage();
-            std::process::exit(3);
-        }
-        let input_count = if (output_needed || process == IP_SPLITRGB) && process != IP_BLANKFILE {
-            data.len() - 1
-        } else {
-            data.len()
-        };
+        // `clip.cpp:186`: procout is cleared only by info, histogram and stats.
+        let procout = !matches!(process, IP_INFO | IP_STAT | IP_HISTOGRAM);
+        // `clip.cpp:187`: needtwo is set by add, multiply, subtract and divide.
         let need_two = matches!(process, IP_ADD | IP_MULTIPLY | IP_SUBTRACT | IP_DIVIDE);
-        if need_two && input_count < 2 {
-            usage();
-            std::process::exit(3);
-        }
+        let input_count = if !procout || process == IP_BLANKFILE {
+            if data.is_empty() {
+                usage();
+                std::process::exit(3);
+            }
+            data.len()
+        } else {
+            if data.len() < 2 {
+                usage();
+                std::process::exit(3);
+            }
+            data.len() - 1
+        };
         options.infiles = input_count as i32;
         let mut strings: Vec<std::ffi::CString> = data
             .iter()
@@ -1034,32 +1141,37 @@ pub fn clip() {
         let mut input: MrcHeader = core::mem::zeroed();
         let mut second: MrcHeader = core::mem::zeroed();
         let mut output: MrcHeader = core::mem::zeroed();
+        // `clip.cpp` advances iarg past each opened input file; a later
+        // diagnostic reports argv[iarg].
+        let mut file_index = position;
         if process == IP_BLANKFILE {
             if options.ox == IP_DEFAULT
                 || options.oy == IP_DEFAULT
                 || options.oz == IP_DEFAULT
-                || options.pad as i32 == IP_DEFAULT
+                || options.pad == IP_DEFAULT as f32
                 || options.mode == IP_DEFAULT
             {
-                show_error("CLIP - You must enter -ox, -oy, -oz, -m, and -p for blankfile process");
-                std::process::exit(1);
+                exit_error(
+                    c"You must enter -ox, -oy, -oz, -m, and -p for blankfile process".as_ptr(),
+                );
             }
             if options.ox < 1 || options.oy < 1 || options.oz < 1 {
-                show_error("CLIP - You must enter a positive output size for all dimensions");
-                std::process::exit(1);
+                exit_error(c"You must enter a positive output size for all dimensions".as_ptr());
             }
             mrcfiles::mrc_head_new(&mut input, options.ox, options.oy, options.oz, options.mode);
             crate::imod::libcfshr::b3dutil::override_all_big_tiff(1);
         } else {
             input.fp = iimage::ii_fopen(strings[0].as_ptr(), c"rb".as_ptr()).cast();
             if input.fp.is_null() {
-                show_error(&format!("CLIP - Error opening {}", data[0]));
-                std::process::exit(1);
+                let message = std::ffi::CString::new(format!("Error opening {}", data[0])).unwrap();
+                exit_error(message.as_ptr());
             }
             if mrcfiles::mrc_head_read(input.fp.cast(), &mut input) != 0 {
-                show_error(&format!("CLIP - Error reading {}", data[0]));
-                std::process::exit(1);
+                let message = std::ffi::CString::new(format!("Error reading {}", data[0])).unwrap();
+                exit_error(message.as_ptr());
             }
+            input.pathname = strings[0].as_ptr().cast_mut();
+            file_index += 1;
         }
         if options.add2file == IP_APPEND_FALSE {
             iimage::ii_use_tiff_threads_for_fp(input.fp.cast(), 0);
@@ -1069,8 +1181,8 @@ pub fn clip() {
         if input_count > 1 {
             second.fp = iimage::ii_fopen(strings[1].as_ptr(), c"rb".as_ptr()).cast();
             if second.fp.is_null() {
-                show_error(&format!("CLIP - Error opening {}", data[1]));
-                std::process::exit(1);
+                let message = std::ffi::CString::new(format!("Error opening {}", data[1])).unwrap();
+                exit_error(message.as_ptr());
             }
             if mrcfiles::mrc_head_read(second.fp.cast(), &mut second) != 0 {
                 if process == IP_INFO {
@@ -1079,9 +1191,11 @@ pub fn clip() {
                     libc::printf(c"WARNING: This file is not a readable MRC file.\n".as_ptr());
                     libc::printf(c"**********************************************\n".as_ptr());
                 }
-                show_error(&format!("CLIP - Error reading {}", data[1]));
-                std::process::exit(1);
+                let message = std::ffi::CString::new(format!("Error reading {}", data[1])).unwrap();
+                exit_error(message.as_ptr());
             }
+            second.pathname = strings[1].as_ptr().cast_mut();
+            file_index += 1;
         }
         if matches!(process, IP_NORMALIZE | IP_UNPACK | IP_DEFECTMAP)
             && input_count == 2
@@ -1106,7 +1220,12 @@ pub fn clip() {
                         || factor * second.ny != input.ny
                         || !matches!(factor, 1 | 2 | 4)
                     {
-                        return;
+                        let message = std::ffi::CString::new(format!(
+                            "Image file size ({} x {}) must be exactly the same, twice, or 4 times the gain reference size ({} x {})",
+                            input.nx, input.ny, second.nx, second.ny
+                        ))
+                        .unwrap();
+                        exit_error(message.as_ptr());
                     }
                     factor
                 } else {
@@ -1116,13 +1235,15 @@ pub fn clip() {
                         || second.ny / input.ny * input.ny != second.ny
                         || !matches!(-factor, 2 | 4 | 8)
                     {
-                        return;
+                        let message = std::ffi::CString::new(format!(
+                            "Image file size ({} x {}) must be exactly the 1/2, 1/4, or 1/8 times the gain reference size ({} x {})",
+                            input.nx, input.ny, second.nx, second.ny
+                        ))
+                        .unwrap();
+                        exit_error(message.as_ptr());
                     }
                     factor
                 };
-                let dump_name = dump_defect_name.as_ref().and_then(|path| {
-                    std::ffi::CString::new(path.to_string_lossy().as_bytes()).ok()
-                });
                 let mut message = [0_i8; 1024];
                 if crate::imod::clip::correct_defects::cor_def_process_fei_defects(
                     image_file,
@@ -1132,28 +1253,28 @@ pub fn clip() {
                     true,
                     super_fac,
                     fei_def_pad,
-                    dump_name
+                    dump_defect_name
                         .as_ref()
                         .map_or(core::ptr::null(), |name| name.as_ptr()),
                     message.as_mut_ptr(),
-                    message.len() as i32,
+                    1000,
                 ) != 0
                 {
-                    return;
+                    exit_error(message.as_ptr());
                 }
                 options.read_defects = 1;
                 options.cam_size_x = input.nx;
                 options.cam_size_y = input.ny;
             }
         }
-        if output_needed {
+        if procout && (!need_two || input_count > 1) {
             options.ofname = strings.last().unwrap().as_ptr().cast_mut();
             output.fp = if matches!(process, IP_SUPERGAIN | IP_PLANARFIT) {
                 crate::imod::libcfshr::b3dutil::imod_backup_file(strings.last().unwrap().as_ptr());
                 libc::fopen(strings.last().unwrap().as_ptr(), c"w".as_ptr()).cast()
             } else if options.add2file != IP_APPEND_FALSE {
                 iimage::ii_fopen(strings.last().unwrap().as_ptr(), c"rb+".as_ptr()).cast()
-            } else {
+            } else if process != IP_SPLITRGB {
                 if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null() {
                     crate::imod::libcfshr::b3dutil::imod_backup_file(
                         strings.last().unwrap().as_ptr(),
@@ -1173,23 +1294,35 @@ pub fn clip() {
                     crate::imod::libcfshr::b3dutil::override_output_type(iimage::IIFILE_MRC);
                 }
                 iimage::ii_fopen(strings.last().unwrap().as_ptr(), c"wb+".as_ptr()).cast()
+            } else {
+                // `clip.cpp:817`: splitrgb leaves hout.fp as the copy of hin.fp.
+                output.fp
             };
-            if output.fp.is_null() {
-                if options.add2file != IP_APPEND_FALSE {
-                    show_error(&format!("CLIP - Error finding {}", data.last().unwrap()));
-                } else {
-                    show_error(&format!(
-                        "CLIP - Error opening output file {}",
-                        data.last().unwrap()
-                    ));
+            if options.add2file != IP_APPEND_FALSE {
+                if output.fp.is_null() {
+                    let message =
+                        std::ffi::CString::new(format!("Error finding {}", data.last().unwrap()))
+                            .unwrap();
+                    exit_error(message.as_ptr());
                 }
-                std::process::exit(1);
+                if mrcfiles::mrc_head_read(output.fp.cast(), &mut output) != 0 {
+                    // `clip.cpp:812` reports argv[iarg], the next unconsumed
+                    // argument, not the output file name.
+                    let message = std::ffi::CString::new(format!(
+                        "Error reading {}",
+                        raw.get(file_index).cloned().unwrap_or_default()
+                    ))
+                    .unwrap();
+                    exit_error(message.as_ptr());
+                }
             }
-            if options.add2file != IP_APPEND_FALSE
-                && mrcfiles::mrc_head_read(output.fp.cast(), &mut output) != 0
-            {
-                show_error(&format!("CLIP - Error reading {}", data.last().unwrap()));
-                std::process::exit(1);
+            if output.fp.is_null() {
+                let message = std::ffi::CString::new(format!(
+                    "Error opening output file {}",
+                    data.last().unwrap()
+                ))
+                .unwrap();
+                exit_error(message.as_ptr());
             }
         }
         options.hin = &mut input;
@@ -1282,7 +1415,7 @@ pub fn clip() {
             iimage::ii_close_tiff_copies_for_fp(input.fp.cast());
             iimage::ii_fclose(input.fp.cast());
         }
-        if output_needed && process != IP_SUPERGAIN && !output.fp.is_null() {
+        if procout && process != IP_SPLITRGB && process != IP_SUPERGAIN && !output.fp.is_null() {
             iimage::ii_fclose(output.fp.cast());
         }
         if view {

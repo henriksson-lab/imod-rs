@@ -2,15 +2,41 @@
 //!
 //! IMOD binary chunks are big-endian irrespective of the host byte order.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::imodel::{
-    IMOD_ERROR_CORRUPT, IMOD_ERROR_FORMAT, IMOD_ERROR_READ, IMOD_ERROR_WRITE, Icont, Imesh, Imod,
-    Iobj, Iobjview, Ipoint, Iref_image, Iview,
+    IMOD_CLIPSIZE, IMOD_ERROR_CORRUPT, IMOD_ERROR_FORMAT, IMOD_ERROR_MEMORY, IMOD_ERROR_READ,
+    IMOD_ERROR_WRITE, IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT,
+    IMOD_STRSIZE, IMOD_UNIT_MM, IMOD_UNIT_NM, IMOD_UNIT_UM, IMODF_FLIPYZ, IMODF_OTRANS_ORIGIN,
+    IMODF_TILTOK, IOBJ_STRSIZE, Iclip_planes, Icont, Imesh, Imod, Iobj, Iobjview, Ipoint,
+    Iref_image, Iview, Slicer_angles, imod_clean_surf,
 };
-use super::istore::{imod_read_store, imod_write_store};
+
+/// Original: `IMODF_HAS_MESH_THICK` (`imodel.h:122`).
+pub const IMODF_HAS_MESH_THICK: u32 = 1 << 9;
+/// Original: `IMODF_MAT1_IS_BYTES` (`imodel.h:118`).
+pub const IMODF_MAT1_IS_BYTES: u32 = 1 << 13;
+use super::icont::imod_contours_new;
+use super::imesh::imod_meshes_new;
+use super::imodel_from::substr;
+use super::iobj::{
+    IMOD_OBJFLAG_ANTI_ALIAS, IMOD_OBJFLAG_FCOLOR, IMOD_OBJFLAG_FCOLOR_PNT, IMOD_OBJFLAG_FILL,
+    IMOD_OBJFLAG_MCOLOR, IMOD_OBJFLAG_MESH, IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_PNT_ON_SEC,
+    IMOD_OBJFLAG_TIME, IMOD_OBJFLAG_TWO_SIDE, IMOD_OBJFLAG_USE_VALUE, imod_objects_new,
+};
+use super::ipoint::imod_point_set_size;
+use super::istore::{
+    Istore, imod_read_store, imod_write_store, istore_add_min_max, istore_end_change,
+    istore_insert, istore_insert_change,
+};
+use super::iview::{VIEW_STRSIZE, imod_imnx_new, imod_view_model_new};
+use crate::imod::libcfshr::b3dutil::b3d_error;
+
+unsafe extern "C" {
+    static mut stderr: *mut libc::FILE;
+}
 use super::objgroup::{obj_group_list_write, obj_group_read};
 
 const ID_IMOD: u32 = u32::from_be_bytes(*b"IMOD");
@@ -28,289 +54,516 @@ const ID_MOST: u32 = u32::from_be_bytes(*b"MOST");
 const ID_OBST: u32 = u32::from_be_bytes(*b"OBST");
 const ID_COST: u32 = u32::from_be_bytes(*b"COST");
 const ID_MEST: u32 = u32::from_be_bytes(*b"MEST");
+const ID_PNTS: u32 = u32::from_be_bytes(*b"PNTS");
+const ID_SLAN: u32 = u32::from_be_bytes(*b"SLAN");
+const ID_MEPA: u32 = u32::from_be_bytes(*b"MEPA");
+const ID_SKLI: u32 = u32::from_be_bytes(*b"SKLI");
+const ID_OLBL: u32 = u32::from_be_bytes(*b"OLBL");
+const ID_LABL: u32 = u32::from_be_bytes(*b"LABL");
+/// Original: `IMOD_01` (`imodel.h:69`).
+const IMOD_01: u32 = u32::from_be_bytes(*b"V0.1");
+/// Original: `SIZE_SLAN` (`imodel.h:100`).
+const SIZE_SLAN: i32 = 60;
+/// Original: `ANGLE_STRSIZE` (`imodel.h:35`).
+const ANGLE_STRSIZE: usize = 32;
+/// Original: `MAXLINE` (`imodel_files.c:28`).
+const MAXLINE: i32 = 81;
 
 /// Original: `writeAsciiClips` (`imodel_files.c:1834`).
 pub fn write_ascii_clips(
-    file: &mut dyn Write,
+    file: *mut libc::FILE,
     clips: &super::imodel::Iclip_planes,
-    prefix: &str,
-) -> Result<(), i32> {
+    prefix: *const std::ffi::c_char,
+) {
     if clips.count != 0 {
-        writeln!(
-            file,
-            "{prefix} {} {} {} {}",
-            clips.count, clips.flags, clips.trans, clips.plane
-        )
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-        for index in 0..clips.count.min(7) as usize {
-            let normal = clips.normal[index];
-            let point = clips.point[index];
-            writeln!(
+        unsafe {
+            libc::fprintf(
                 file,
-                "{} {} {} {} {} {}",
-                normal.x, normal.y, normal.z, point.x, point.y, point.z
-            )
-            .map_err(|_| IMOD_ERROR_WRITE)?;
+                c"%s %d %d %d %d\n".as_ptr(),
+                prefix,
+                clips.count as std::ffi::c_int,
+                clips.flags as std::ffi::c_int,
+                clips.trans as std::ffi::c_int,
+                clips.plane as std::ffi::c_int,
+            );
+            // `IMOD_CLIPSIZE` bounds the source arrays.
+            for i in 0..(clips.count as usize).min(clips.normal.len()) {
+                libc::fprintf(
+                    file,
+                    c"%g %g %g %g %g %g\n".as_ptr(),
+                    clips.normal[i].x as std::ffi::c_double,
+                    clips.normal[i].y as std::ffi::c_double,
+                    clips.normal[i].z as std::ffi::c_double,
+                    clips.point[i].x as std::ffi::c_double,
+                    clips.point[i].y as std::ffi::c_double,
+                    clips.point[i].z as std::ffi::c_double,
+                );
+            }
         }
     }
-    Ok(())
 }
 
 /// Original: `imodWriteAscii` (`imodel_files.c:1631`).
-pub fn imod_write_ascii(imod: &Imod, file: &mut dyn Write) -> Result<(), i32> {
-    writeln!(file, "# imod ascii file version 2.0\n").map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(file, "imod {}", imod.obj.len()).map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(file, "max {} {} {}", imod.xmax, imod.ymax, imod.zmax)
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(
-        file,
-        "offsets {} {} {}",
-        imod.xoffset, imod.yoffset, imod.zoffset
-    )
-    .map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(file, "angles {} {} {}", imod.alpha, imod.beta, imod.gamma)
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(
-        file,
-        "scale {} {} {}",
-        imod.xscale, imod.yscale, imod.zscale
-    )
-    .map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(file, "mousemode  {}\ndrawmode   {}\nb&w_level  {},{}\nresolution {}\nthreshold  {}\npixsize    {}", imod.mousemode, imod.drawmode, imod.blacklevel, imod.whitelevel, imod.res, imod.thresh, imod.pixsize).map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(
-        file,
-        "units      {}",
-        match imod.units {
-            -10 => "um",
-            -9 => "nm",
-            -6 => "mm",
-            -3 => "m",
-            0 => "pixels",
-            1 => "km",
-            2 => "unknown units",
-            _ => "unknown units",
-        }
-    )
-    .map_err(|_| IMOD_ERROR_WRITE)?;
-    writeln!(
-        file,
-        "flipped    {}",
-        if imod.flags & super::imodel::IMODF_FLIPYZ != 0 {
-            1
-        } else {
-            0
-        }
-    )
-    .map_err(|_| IMOD_ERROR_WRITE)?;
-    if let Some(reference) = imod.ref_image {
-        writeln!(
+pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
+    unsafe {
+        libc::rewind(file);
+        libc::fprintf(file, c"# imod ascii file version 2.0\n\n".as_ptr());
+        libc::fprintf(
             file,
-            "refcurscale {} {} {}",
-            reference.cscale.x, reference.cscale.y, reference.cscale.z
-        )
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-        writeln!(
+            c"imod %d\n".as_ptr(),
+            imod.obj.len() as std::ffi::c_int,
+        );
+        libc::fprintf(
             file,
-            "refcurtrans {} {} {}",
-            reference.ctrans.x, reference.ctrans.y, reference.ctrans.z
-        )
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-        if imod.flags & super::imodel::IMODF_TILTOK != 0 {
-            writeln!(
-                file,
-                "refcurrot {} {} {}",
-                reference.crot.x, reference.crot.y, reference.crot.z
-            )
-            .map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        if imod.flags & super::imodel::IMODF_OTRANS_ORIGIN != 0 {
-            writeln!(
-                file,
-                "refoldtrans {} {} {}",
-                reference.otrans.x, reference.otrans.y, reference.otrans.z
-            )
-            .map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-    }
-    for angle in &imod.slicer_ang {
-        let label_text = String::from_utf8_lossy(&angle.label);
-        let label = label_text.trim_end_matches('\0');
-        writeln!(
+            c"max %d %d %d\n".as_ptr(),
+            imod.xmax,
+            imod.ymax,
+            imod.zmax,
+        );
+        libc::fprintf(
             file,
-            "slicerAngle {} {} {} {} {} {} {} {}",
-            angle.time,
-            angle.angles[0],
-            angle.angles[1],
-            angle.angles[2],
-            angle.center.x,
-            angle.center.y,
-            angle.center.z,
-            label
-        )
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-    }
-    writeln!(file, "currentview  {}", imod.cview).map_err(|_| IMOD_ERROR_WRITE)?;
-    for (iv, view) in imod.view.iter().enumerate().skip(1) {
-        writeln!(file, "view {}\nviewfovy  {}\nviewcnear {}\nviewcfar  {}\nviewflags {}\nviewtrans {} {} {}\nviewrot {} {} {}\nviewlight {} {}\ndepthcue {} {}\nviewlabel {}", iv, view.fovy, view.cnear, view.cfar, view.world, view.trans.x, view.trans.y, view.trans.z, view.rot.x, view.rot.y, view.rot.z, view.lightx, view.lighty, view.dcstart, view.dcend, String::from_utf8_lossy(&view.label).trim_end_matches('\0')).map_err(|_| IMOD_ERROR_WRITE)?;
-        write_ascii_clips(file, &view.clips, "globalclips")?;
-    }
-    for (ob, obj) in imod.obj.iter().enumerate() {
-        let real_meshes = obj
-            .mesh
-            .iter()
-            .filter(|mesh| (mesh.flag >> 24) & 0x3f == 0)
-            .count();
-        writeln!(
+            c"offsets %g %g %g\n".as_ptr(),
+            imod.xoffset as std::ffi::c_double,
+            imod.yoffset as std::ffi::c_double,
+            imod.zoffset as std::ffi::c_double,
+        );
+        libc::fprintf(
             file,
-            "\nobject {} {} {}\nname {}\ncolor {} {} {} {}",
-            ob,
-            obj.cont.len(),
-            real_meshes,
-            obj.name,
-            obj.red,
-            obj.green,
-            obj.blue,
-            obj.trans
-        )
-        .map_err(|_| IMOD_ERROR_WRITE)?;
-        if obj.fillred != 0 || obj.fillgreen != 0 || obj.fillblue != 0 {
-            writeln!(
-                file,
-                "Fillcolor {} {} {}",
-                obj.fillred, obj.fillgreen, obj.fillblue
-            )
-            .map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        for (flag, line) in [
-            (super::imodel::IMOD_OBJFLAG_OPEN, "open"),
-            (super::imodel::IMOD_OBJFLAG_SCAT, "scattered"),
-            (super::imodel::IMOD_OBJFLAG_OFF, "nodraw"),
-            (super::imodel::IMOD_OBJFLAG_OUT, "insideout"),
-            (1 << 8, "fill"),
-            (1 << 10, "drawmesh"),
-            (1 << 11, "nolines"),
-            (1 << 19, "bothsides"),
-            (1 << 14, "usefill"),
-            (1 << 6, "pntusefill"),
-            (1 << 7, "pntonsec"),
-            (1 << 15, "antialias"),
-            (1 << 18, "hastimes"),
-            (1 << 12, "usevalue"),
-            (1 << 17, "valcolor"),
-        ] {
-            if obj.flags & flag != 0 {
-                writeln!(file, "{line}").map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-        }
-        writeln!(file, "linewidth {}\nsurfsize  {}\npointsize {}\naxis      {}\ndrawmode  {}\nwidth2D   {}\nsymbol    {}\nsymsize   {}\nsymflags  {}", obj.linewidth, obj.surfsize, obj.pdrawsize, obj.axis, obj.drawmode, obj.linewidth2, obj.symbol, obj.symsize, obj.symflags).map_err(|_| IMOD_ERROR_WRITE)?;
-        writeln!(file, "ambient   {}\ndiffuse   {}\nspecular  {}\nshininess {}\nobquality {}\nvalblack  {}\nvalwhite  {}\nmeshthick {}\nmatflags2 {}", obj.ambient, obj.diffuse, obj.specular, obj.shininess, obj.quality, obj.valblack, obj.valwhite, obj.mesh_thickness, obj.matflags2).map_err(|_| IMOD_ERROR_WRITE)?;
-        write_ascii_clips(file, &obj.clips, "objclips")?;
-        let mut valmin = 0.;
-        let mut valmax = 0.;
-        if super::istore::istore_get_min_max(&obj.store, 11, &mut valmin, &mut valmax) != 0 {
-            writeln!(file, "valminmax {} {}", valmin, valmax).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        for (co, cont) in obj.cont.iter().enumerate() {
-            let mut def_props = super::istore::DrawProps::default();
-            let mut cont_props = super::istore::DrawProps::default();
-            let mut cont_state = 0;
-            let mut surf_state = 0;
-            super::istore::istore_default_draw_props(obj, &mut def_props);
-            super::istore::istore_cont_surf_draw_props(
-                &obj.store,
-                &def_props,
-                &mut cont_props,
-                co as i32,
-                cont.surf,
-                &mut cont_state,
-                &mut surf_state,
-            );
-            if cont_state & (1 << 9) != 0 {
-                writeln!(
-                    file,
-                    "contour {} {} {} {}",
-                    co,
-                    cont.surf,
-                    cont.pts.len(),
-                    cont_props.value1
-                )
-                .map_err(|_| IMOD_ERROR_WRITE)?;
+            c"angles %g %g %g\n".as_ptr(),
+            imod.alpha as std::ffi::c_double,
+            imod.beta as std::ffi::c_double,
+            imod.gamma as std::ffi::c_double,
+        );
+        libc::fprintf(
+            file,
+            c"scale %g %g %g\n".as_ptr(),
+            imod.xscale as std::ffi::c_double,
+            imod.yscale as std::ffi::c_double,
+            imod.zscale as std::ffi::c_double,
+        );
+        libc::fprintf(file, c"mousemode  %d\n".as_ptr(), imod.mousemode);
+        libc::fprintf(file, c"drawmode   %d\n".as_ptr(), imod.drawmode);
+        libc::fprintf(
+            file,
+            c"b&w_level  %d,%d\n".as_ptr(),
+            imod.blacklevel,
+            imod.whitelevel,
+        );
+        libc::fprintf(file, c"resolution %d\n".as_ptr(), imod.res);
+        libc::fprintf(file, c"threshold  %d\n".as_ptr(), imod.thresh);
+        libc::fprintf(
+            file,
+            c"pixsize    %g\n".as_ptr(),
+            imod.pixsize as std::ffi::c_double,
+        );
+        // `imodUnits` (`imodel.c:1360`) selects the name from the IMOD_UNIT_*
+        // codes in `imodel.h:39-47`.
+        libc::fprintf(
+            file,
+            c"units      %s\n".as_ptr(),
+            match imod.units {
+                0 => c"pixels".as_ptr(),
+                3 => c"km".as_ptr(),
+                1 => c"m".as_ptr(),
+                -2 => c"cm".as_ptr(),
+                -3 => c"mm".as_ptr(),
+                -6 => c"um".as_ptr(),
+                -9 => c"nm".as_ptr(),
+                -10 => c"A".as_ptr(),
+                -12 => c"pm".as_ptr(),
+                _ => c"unknown units".as_ptr(),
+            },
+        );
+        libc::fprintf(
+            file,
+            c"flipped    %d\n".as_ptr(),
+            if imod.flags & super::imodel::IMODF_FLIPYZ != 0 {
+                1
             } else {
-                writeln!(file, "contour {} {} {}", co, cont.surf, cont.pts.len())
-                    .map_err(|_| IMOD_ERROR_WRITE)?;
+                0
+            } as std::ffi::c_int,
+        );
+        if let Some(reference) = imod.ref_image {
+            libc::fprintf(
+                file,
+                c"refcurscale %g %g %g\n".as_ptr(),
+                reference.cscale.x as std::ffi::c_double,
+                reference.cscale.y as std::ffi::c_double,
+                reference.cscale.z as std::ffi::c_double,
+            );
+            libc::fprintf(
+                file,
+                c"refcurtrans %g %g %g\n".as_ptr(),
+                reference.ctrans.x as std::ffi::c_double,
+                reference.ctrans.y as std::ffi::c_double,
+                reference.ctrans.z as std::ffi::c_double,
+            );
+            if imod.flags & super::imodel::IMODF_TILTOK != 0 {
+                libc::fprintf(
+                    file,
+                    c"refcurrot %g %g %g\n".as_ptr(),
+                    reference.crot.x as std::ffi::c_double,
+                    reference.crot.y as std::ffi::c_double,
+                    reference.crot.z as std::ffi::c_double,
+                );
             }
-            let mut cursor = 0;
-            let mut state = 0;
-            let mut changes = 0;
-            let mut props = super::istore::DrawProps::default();
-            let mut next = super::istore::istore_first_change_index(&cont.store);
-            for (pt, point) in cont.pts.iter().enumerate() {
-                if pt as i32 == next {
-                    next = super::istore::istore_next_change(
-                        &cont.store,
-                        &mut cursor,
-                        &cont_props,
-                        &mut props,
-                        &mut state,
-                        &mut changes,
+            if imod.flags & super::imodel::IMODF_OTRANS_ORIGIN != 0 {
+                libc::fprintf(
+                    file,
+                    c"refoldtrans %g %g %g\n".as_ptr(),
+                    reference.otrans.x as std::ffi::c_double,
+                    reference.otrans.y as std::ffi::c_double,
+                    reference.otrans.z as std::ffi::c_double,
+                );
+            }
+        }
+        for angle in &imod.slicer_ang {
+            let label_text = String::from_utf8_lossy(
+                &angle.label[..angle
+                    .label
+                    .iter()
+                    .position(|byte| *byte == 0)
+                    .unwrap_or(angle.label.len())],
+            )
+            .into_owned();
+            let label = std::ffi::CString::new(label_text).unwrap_or_default();
+            libc::fprintf(
+                file,
+                c"slicerAngle %d %g %g %g %g %g %g %s\n".as_ptr(),
+                angle.time,
+                angle.angles[0] as std::ffi::c_double,
+                angle.angles[1] as std::ffi::c_double,
+                angle.angles[2] as std::ffi::c_double,
+                angle.center.x as std::ffi::c_double,
+                angle.center.y as std::ffi::c_double,
+                angle.center.z as std::ffi::c_double,
+                label.as_ptr(),
+            );
+        }
+        libc::fprintf(file, c"currentview  %d\n".as_ptr(), imod.cview);
+        for (iv, view) in imod.view.iter().enumerate().skip(1) {
+            libc::fprintf(file, c"view %d\n".as_ptr(), iv as std::ffi::c_int);
+            libc::fprintf(
+                file,
+                c"viewfovy  %g\n".as_ptr(),
+                view.fovy as std::ffi::c_double,
+            );
+            libc::fprintf(
+                file,
+                c"viewcnear %g\n".as_ptr(),
+                view.cnear as std::ffi::c_double,
+            );
+            libc::fprintf(
+                file,
+                c"viewcfar  %g\n".as_ptr(),
+                view.cfar as std::ffi::c_double,
+            );
+            libc::fprintf(file, c"viewflags %u\n".as_ptr(), view.world);
+            libc::fprintf(
+                file,
+                c"viewtrans %g %g %g\n".as_ptr(),
+                view.trans.x as std::ffi::c_double,
+                view.trans.y as std::ffi::c_double,
+                view.trans.z as std::ffi::c_double,
+            );
+            libc::fprintf(
+                file,
+                c"viewrot %g %g %g\n".as_ptr(),
+                view.rot.x as std::ffi::c_double,
+                view.rot.y as std::ffi::c_double,
+                view.rot.z as std::ffi::c_double,
+            );
+            libc::fprintf(
+                file,
+                c"viewlight %g %g\n".as_ptr(),
+                view.lightx as std::ffi::c_double,
+                view.lighty as std::ffi::c_double,
+            );
+            libc::fprintf(
+                file,
+                c"depthcue %g %g\n".as_ptr(),
+                view.dcstart as std::ffi::c_double,
+                view.dcend as std::ffi::c_double,
+            );
+            let label_text = String::from_utf8_lossy(
+                &view.label[..view
+                    .label
+                    .iter()
+                    .position(|byte| *byte == 0)
+                    .unwrap_or(view.label.len())],
+            )
+            .into_owned();
+            let label = std::ffi::CString::new(label_text).unwrap_or_default();
+            libc::fprintf(file, c"viewlabel %s\n".as_ptr(), label.as_ptr());
+            write_ascii_clips(file, &view.clips, c"globalclips".as_ptr());
+        }
+        for (ob, obj) in imod.obj.iter().enumerate() {
+            let num_real = obj
+                .mesh
+                .iter()
+                .filter(|mesh| (mesh.flag >> 24) & 0x3f == 0)
+                .count();
+            libc::fprintf(
+                file,
+                c"\nobject %d %d %d\n".as_ptr(),
+                ob as std::ffi::c_int,
+                obj.cont.len() as std::ffi::c_int,
+                num_real as std::ffi::c_int,
+            );
+            libc::fprintf(file, c"name %s\n".as_ptr(), obj.name.as_ptr());
+            libc::fprintf(
+                file,
+                c"color %g %g %g %d\n".as_ptr(),
+                obj.red as std::ffi::c_double,
+                obj.green as std::ffi::c_double,
+                obj.blue as std::ffi::c_double,
+                obj.trans as std::ffi::c_int,
+            );
+            if obj.fillred != 0 || obj.fillgreen != 0 || obj.fillblue != 0 {
+                libc::fprintf(
+                    file,
+                    c"Fillcolor %d %d %d\n".as_ptr(),
+                    obj.fillred as std::ffi::c_int,
+                    obj.fillgreen as std::ffi::c_int,
+                    obj.fillblue as std::ffi::c_int,
+                );
+            }
+            for (flag, line) in [
+                (super::imodel::IMOD_OBJFLAG_OPEN, c"open\n"),
+                (super::imodel::IMOD_OBJFLAG_SCAT, c"scattered\n"),
+                (super::imodel::IMOD_OBJFLAG_OFF, c"nodraw\n"),
+                (super::imodel::IMOD_OBJFLAG_OUT, c"insideout\n"),
+                (1 << 8, c"fill\n"),
+                (1 << 10, c"drawmesh\n"),
+                (1 << 11, c"nolines\n"),
+                (1 << 19, c"bothsides\n"),
+                (1 << 14, c"usefill\n"),
+                (1 << 6, c"pntusefill\n"),
+                (1 << 7, c"pntonsec\n"),
+                (1 << 15, c"antialias\n"),
+                (1 << 18, c"hastimes\n"),
+                (1 << 12, c"usevalue\n"),
+                (1 << 17, c"valcolor\n"),
+            ] {
+                if obj.flags & flag != 0 {
+                    libc::fprintf(file, line.as_ptr());
+                }
+            }
+            libc::fprintf(
+                file,
+                c"linewidth %d\n".as_ptr(),
+                obj.linewidth as std::ffi::c_int,
+            );
+            libc::fprintf(file, c"surfsize  %d\n".as_ptr(), obj.surfsize);
+            libc::fprintf(file, c"pointsize %d\n".as_ptr(), obj.pdrawsize);
+            libc::fprintf(file, c"axis      %d\n".as_ptr(), obj.axis);
+            libc::fprintf(file, c"drawmode  %d\n".as_ptr(), obj.drawmode);
+            libc::fprintf(
+                file,
+                c"width2D   %d\n".as_ptr(),
+                obj.linewidth2 as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"symbol    %d\n".as_ptr(),
+                obj.symbol as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"symsize   %d\n".as_ptr(),
+                obj.symsize as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"symflags  %d\n".as_ptr(),
+                obj.symflags as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"ambient   %d\n".as_ptr(),
+                obj.ambient as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"diffuse   %d\n".as_ptr(),
+                obj.diffuse as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"specular  %d\n".as_ptr(),
+                obj.specular as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"shininess %d\n".as_ptr(),
+                obj.shininess as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"obquality %d\n".as_ptr(),
+                obj.quality as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"valblack  %d\n".as_ptr(),
+                obj.valblack as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"valwhite  %d\n".as_ptr(),
+                obj.valwhite as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"meshthick %d\n".as_ptr(),
+                obj.mesh_thickness as std::ffi::c_int,
+            );
+            libc::fprintf(
+                file,
+                c"matflags2 %d\n".as_ptr(),
+                obj.matflags2 as std::ffi::c_int,
+            );
+            write_ascii_clips(file, &obj.clips, c"objclips".as_ptr());
+            let mut valmin = 0.;
+            let mut valmax = 0.;
+            if super::istore::istore_get_min_max(
+                &obj.store,
+                obj.cont.len() as i32,
+                11,
+                &mut valmin,
+                &mut valmax,
+            ) != 0
+            {
+                libc::fprintf(
+                    file,
+                    c"valminmax %g %g\n".as_ptr(),
+                    valmin as std::ffi::c_double,
+                    valmax as std::ffi::c_double,
+                );
+            }
+            let mut def_props = super::istore::DrawProps::default();
+            super::istore::istore_default_draw_props(obj, &mut def_props);
+            for (co, cont) in obj.cont.iter().enumerate() {
+                let mut cont_props = super::istore::DrawProps::default();
+                let mut cont_state = 0;
+                let mut surf_state = 0;
+                super::istore::istore_cont_surf_draw_props(
+                    &obj.store,
+                    &def_props,
+                    &mut cont_props,
+                    co as i32,
+                    cont.surf,
+                    &mut cont_state,
+                    &mut surf_state,
+                );
+                libc::fprintf(
+                    file,
+                    c"contour %d %d %d".as_ptr(),
+                    co as std::ffi::c_int,
+                    cont.surf,
+                    cont.pts.len() as std::ffi::c_int,
+                );
+                if cont_state & (1 << 9) != 0 {
+                    libc::fprintf(
+                        file,
+                        c" %g".as_ptr(),
+                        cont_props.value1 as std::ffi::c_double,
                     );
                 }
-                let size = cont.sizes.get(pt).copied().unwrap_or(-1.);
-                if state & (1 << 9) != 0 {
-                    writeln!(
+                libc::fprintf(file, c"\n".as_ptr());
+                let mut cursor = 0;
+                let mut state = 0;
+                let mut changes = 0;
+                let mut props = super::istore::DrawProps::default();
+                let mut next = super::istore::istore_first_change_index(&cont.store);
+                for (pt, point) in cont.pts.iter().enumerate() {
+                    libc::fprintf(
                         file,
-                        "{} {} {} {} {}",
-                        point.x, point.y, point.z, size, props.value1
-                    )
-                    .map_err(|_| IMOD_ERROR_WRITE)?;
-                } else if size >= 0. {
-                    writeln!(file, "{} {} {} {}", point.x, point.y, point.z, size)
-                        .map_err(|_| IMOD_ERROR_WRITE)?;
-                } else {
-                    writeln!(file, "{} {} {}", point.x, point.y, point.z)
-                        .map_err(|_| IMOD_ERROR_WRITE)?;
+                        c"%g %g %g".as_ptr(),
+                        point.x as std::ffi::c_double,
+                        point.y as std::ffi::c_double,
+                        point.z as std::ffi::c_double,
+                    );
+                    if pt as i32 == next {
+                        next = super::istore::istore_next_change(
+                            &cont.store,
+                            &mut cursor,
+                            &cont_props,
+                            &mut props,
+                            &mut state,
+                            &mut changes,
+                        );
+                    }
+                    let mut size = -1.0_f32;
+                    if cont.sizes.get(pt).is_some_and(|value| *value >= 0.) {
+                        size = cont.sizes[pt];
+                    }
+                    if size >= 0. && state & (1 << 9) == 0 {
+                        libc::fprintf(file, c" %g".as_ptr(), size as std::ffi::c_double);
+                    } else if state & (1 << 9) != 0 {
+                        libc::fprintf(
+                            file,
+                            c" %g %g".as_ptr(),
+                            size as std::ffi::c_double,
+                            props.value1 as std::ffi::c_double,
+                        );
+                    }
+                    libc::fprintf(file, c"\n".as_ptr());
+                }
+                if cont.flags != 0 {
+                    libc::fprintf(file, c"contflags %u\n".as_ptr(), cont.flags);
+                }
+                if cont.time != 0 {
+                    libc::fprintf(file, c"conttime %d\n".as_ptr(), cont.time);
                 }
             }
-            if cont.flags != 0 {
-                writeln!(file, "contflags {}", cont.flags).map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-            if cont.time != 0 {
-                writeln!(file, "conttime {}", cont.time).map_err(|_| IMOD_ERROR_WRITE)?;
+            let mut num_real = 0;
+            for mesh in &obj.mesh {
+                if (mesh.flag >> 24) & 0x3f != 0 {
+                    continue;
+                }
+                libc::fprintf(
+                    file,
+                    c"mesh %d %d %d\n".as_ptr(),
+                    num_real as std::ffi::c_int,
+                    mesh.vert.len() as std::ffi::c_int,
+                    mesh.list.len() as std::ffi::c_int,
+                );
+                num_real += 1;
+                for point in &mesh.vert {
+                    libc::fprintf(
+                        file,
+                        c"%g %g %g\n".as_ptr(),
+                        point.x as std::ffi::c_double,
+                        point.y as std::ffi::c_double,
+                        point.z as std::ffi::c_double,
+                    );
+                }
+                for index in &mesh.list {
+                    libc::fprintf(file, c"%d\n".as_ptr(), *index);
+                }
+                if mesh.flag != 0 {
+                    libc::fprintf(file, c"Meshflags %u\n".as_ptr(), mesh.flag);
+                }
+                if mesh.time != 0 {
+                    libc::fprintf(
+                        file,
+                        c"Meshtime %d\n".as_ptr(),
+                        mesh.time as std::ffi::c_int,
+                    );
+                }
+                if mesh.surf != 0 {
+                    libc::fprintf(
+                        file,
+                        c"Meshsurf %d\n".as_ptr(),
+                        mesh.surf as std::ffi::c_int,
+                    );
+                }
             }
         }
-        let mut real_mesh = 0;
-        for mesh in &obj.mesh {
-            if (mesh.flag >> 24) & 0x3f != 0 {
-                continue;
-            }
-            writeln!(
-                file,
-                "mesh {} {} {}",
-                real_mesh,
-                mesh.vert.len(),
-                mesh.list.len()
-            )
-            .map_err(|_| IMOD_ERROR_WRITE)?;
-            real_mesh += 1;
-            for point in &mesh.vert {
-                writeln!(file, "{} {} {}", point.x, point.y, point.z)
-                    .map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-            for index in &mesh.list {
-                writeln!(file, "{index}").map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-            if mesh.flag != 0 {
-                writeln!(file, "Meshflags {}", mesh.flag).map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-            if mesh.time != 0 {
-                writeln!(file, "Meshtime {}", mesh.time).map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-            if mesh.surf != 0 {
-                writeln!(file, "Meshsurf {}", mesh.surf).map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-        }
+        libc::fprintf(file, c"# end of IMOD model\n".as_ptr());
     }
-    writeln!(file, "# end of IMOD model").map_err(|_| IMOD_ERROR_WRITE)
+    0
 }
 const ID_IMNX: u32 = u32::from_be_bytes(*b"MINX");
 const ID_IEOF: u32 = u32::from_be_bytes(*b"IEOF");
@@ -363,18 +616,310 @@ pub fn imod_put_byte(file: &mut File, value: u8) -> io::Result<()> {
     file.write_all(&[value])
 }
 
+/// Original: `byteswap` (`imodel_files.c:1893`).
+///
+/// Compiled only under `IMOD_DATA_SWAP`, which `imodel_files.c:25` defines for
+/// every little-endian host.
+pub fn byteswap(iptr: &mut [u8], mut size: u32) {
+    if (size % 2) != 0 {
+        size -= 1;
+    }
+
+    let mut begin = 0usize;
+    let mut end = size.wrapping_sub(1) as usize;
+
+    for _ in 0..(size / 2) {
+        iptr.swap(begin, end);
+
+        begin += 1;
+        end -= 1;
+    }
+}
+
+/// Original: `swap_longs` (`imodel_files.c:1918`).
+pub fn swap_longs(data: &mut [u8], amt: i32) {
+    let ldata = (amt * 4) as usize;
+    let mut ptr = 0usize;
+    while ptr < ldata {
+        data.swap(ptr, ptr + 3);
+        ptr += 1;
+        data.swap(ptr, ptr + 1);
+        ptr += 3;
+    }
+}
+
+/// Original: `BUF_SIZE` (`imodel_files.c:1934`).
+const BUF_SIZE: usize = 256;
+
+/// Original: `convert_write` (`imodel_files.c:1938`).
+///
+/// The source's scratch array is a file-level `static int buf[BUF_SIZE]`; a
+/// local array of the same size is used here.
+pub fn convert_write(convert_func: fn(&mut [u8], i32), fp: &mut File, data: &[u8], mut size: i32) {
+    let mut buf = [0u8; 4 * BUF_SIZE];
+    let mut chunk;
+    let mut base = 0usize;
+    while size != 0 {
+        chunk = if (size as usize) < BUF_SIZE {
+            size as usize
+        } else {
+            BUF_SIZE
+        };
+        buf[..4 * chunk].copy_from_slice(&data[base..base + 4 * chunk]);
+        convert_func(&mut buf, chunk as i32);
+        let _ = fp.write_all(&buf[..4 * chunk]);
+        size -= chunk as i32;
+        base += 4 * chunk;
+    }
+}
+
+/// Original: `tovmsfloat` (`imodel_files.c:1956`).
+///
+/// Compiled only under `IMOD_FLOAT_CONVERT`, which `imodel_files.c:20` defines
+/// for VMS hosts alone; it is never reached on this platform.
+pub fn tovmsfloat(data: &mut [u8], amt: i32) {
+    let mut ptr = 0usize;
+    let maxptr = (amt * 4) as usize;
+
+    while ptr < maxptr {
+        let exp = (data[ptr] << 1) | (data[ptr + 1] >> 7 & 0x01);
+        if exp < 253 && exp != 0 {
+            data[ptr] = data[ptr].wrapping_add(1);
+        } else if exp >= 253
+        /*must also max out the exp & mantissa*/
+        {
+            /*we want manitssa all 1 & exponent 255*/
+            data[ptr] |= 0x7F;
+            data[ptr + 1] = 0xFF;
+            data[ptr + 3] = 0xFF;
+            data[ptr + 2] = data[ptr + 3];
+        }
+
+        data.swap(ptr, ptr + 1);
+        data.swap(ptr + 2, ptr + 3);
+        ptr += 4;
+    }
+}
+
+/// Original: `imodFromVmsFloats` (`imodel_files.c:1987`).
+pub fn imod_from_vms_floats(data: &mut [u8], amt: i32) {
+    let mut ptr = 0usize;
+    let maxptr = (amt * 4) as usize;
+
+    while ptr < maxptr {
+        let exp = (data[ptr + 1] << 1) | (data[ptr] >> 7 & 0x01);
+        if exp > 3 && exp != 0 {
+            data[ptr + 1] = data[ptr + 1].wrapping_sub(1);
+        } else if exp <= 3 && exp != 0 {
+            /*we want manitssa 0 & exponent 1*/
+            data[ptr] = 0x80;
+            data[ptr + 1] &= 0x80;
+            data[ptr + 3] = 0;
+            data[ptr + 2] = data[ptr + 3];
+        }
+
+        data.swap(ptr, ptr + 1);
+        data.swap(ptr + 2, ptr + 3);
+        ptr += 4;
+    }
+}
+
+/// Original: `imodGetFloats` (`imodel_files.c:2025`).
+pub fn imod_get_floats(fp: &mut File, buf: &mut [f32], size: i32) -> io::Result<()> {
+    let mut bytes = vec![0u8; 4 * size.max(0) as usize];
+    fp.read_exact(&mut bytes)?;
+    swap_longs(&mut bytes, size);
+    for i in 0..size.max(0) as usize {
+        buf[i] = f32::from_ne_bytes([
+            bytes[4 * i],
+            bytes[4 * i + 1],
+            bytes[4 * i + 2],
+            bytes[4 * i + 3],
+        ]);
+    }
+    Ok(())
+}
+
+/// Original: `imodPutFloats` (`imodel_files.c:2044`).
+pub fn imod_put_floats(fp: &mut File, buf: &[f32], size: i32) -> io::Result<()> {
+    let mut bytes = Vec::with_capacity(4 * size.max(0) as usize);
+    for value in buf.iter().take(size.max(0) as usize) {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+    convert_write(swap_longs, fp, &bytes, size);
+    Ok(())
+}
+
+/// Original: `imodPutScaledPoints` (`imodel_files.c:2058`).
+pub fn imod_put_scaled_points(
+    fp: &mut File,
+    buf: &[Ipoint],
+    size: i32,
+    scale: &Ipoint,
+) -> io::Result<()> {
+    let mut xyz = [0f32; 3];
+    for i in 0..size.max(0) as usize {
+        xyz[0] = buf[i].x * scale.x;
+        xyz[1] = buf[i].y * scale.y;
+        xyz[2] = buf[i].z * scale.z;
+        imod_put_floats(fp, &xyz, 3)?;
+    }
+    Ok(())
+}
+
+/// Original: `imodGetInts` (`imodel_files.c:2081`).
+pub fn imod_get_ints(fp: &mut File, buf: &mut [i32], size: i32) -> io::Result<()> {
+    let mut bytes = vec![0u8; 4 * size.max(0) as usize];
+    fp.read_exact(&mut bytes)?;
+    swap_longs(&mut bytes, size);
+    for i in 0..size.max(0) as usize {
+        buf[i] = i32::from_ne_bytes([
+            bytes[4 * i],
+            bytes[4 * i + 1],
+            bytes[4 * i + 2],
+            bytes[4 * i + 3],
+        ]);
+    }
+    Ok(())
+}
+
+/// Original: `imodPutInts` (`imodel_files.c:2095`).
+pub fn imod_put_ints(fp: &mut File, buf: &[i32], size: i32) -> io::Result<()> {
+    let mut bytes = Vec::with_capacity(4 * size.max(0) as usize);
+    for value in buf.iter().take(size.max(0) as usize) {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+    convert_write(swap_longs, fp, &bytes, size);
+    Ok(())
+}
+
+/// Original: `imodGetBytes` (`imodel_files.c:2135`).
+pub fn imod_get_bytes(fp: &mut File, buf: &mut [u8], size: i32) -> io::Result<()> {
+    fp.read_exact(&mut buf[..size.max(0) as usize])
+}
+
+/// Original: `imodPutBytes` (`imodel_files.c:2141`).
+pub fn imod_put_bytes(fp: &mut File, buf: &[u8], size: i32) -> io::Result<()> {
+    fp.write_all(&buf[..size.max(0) as usize])
+}
+
+/// Original: `imodFgetline` (`imodel_files.c:1847`).
+pub fn imod_fgetline(fp: &mut File, s: &mut [u8], limit: i32) -> i32 {
+    let mut c: i32;
+    let i: i32;
+
+    if limit < 3 {
+        return -1;
+    }
+
+    let mut idx = 0usize;
+    loop {
+        let mut byte = [0u8; 1];
+        c = match fp.read(&mut byte) {
+            Ok(1) => byte[0] as i32,
+            _ => -1,
+        };
+        if c != b'\r' as i32 {
+            s[idx] = c as u8;
+            idx += 1;
+        }
+        if !((c != -1) && ((idx as i32) < (limit - 1)) && (c != b'\n' as i32)) {
+            break;
+        }
+    }
+    i = idx as i32;
+
+    if i == 1 {
+        if c == -1 {
+            return 0;
+        }
+        if c == b'\n' as i32 {
+            idx += 1;
+            s[idx] = b'\0';
+            return imod_fgetline(fp, s, limit);
+        }
+    }
+
+    if s[0] == b'#' {
+        return imod_fgetline(fp, s, limit);
+    }
+
+    s[idx] = b'\0';
+    let length = idx as i32;
+
+    if c == -1 { -1 * length } else { length }
+}
+
+/// Original: `readAsciiClips` (`imodel_files.c:1611`).
+///
+/// The source reads the four counts with `sscanf` into uninitialised locals, so
+/// a short line leaves them holding stack garbage; they are zeroed here.  The
+/// `imod->file` argument is passed explicitly because the translated `Imod`
+/// carries no `file` member.
+pub fn read_ascii_clips(fp: &mut File, line: &mut [u8], clips: &mut Iclip_planes, prefix: &str) {
+    let mut idata = 0i32;
+    let mut idata2 = 0i32;
+    let mut idata3 = 0i32;
+    let mut idata4 = 0i32;
+    let text = String::from_utf8_lossy(&line[prefix.len()..]).to_string();
+    let mut fields = text
+        .split('\0')
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .map(|word| word.parse::<i32>().ok());
+    for slot in [&mut idata, &mut idata2, &mut idata3, &mut idata4] {
+        match fields.next().flatten() {
+            Some(value) => *slot = value,
+            None => break,
+        }
+    }
+    clips.count = idata as u8;
+    clips.flags = idata2 as u8;
+    clips.trans = idata3 as u8;
+    clips.plane = idata4 as u8;
+    // `IMOD_CLIPSIZE` bounds the source arrays.
+    for i in 0..(clips.count as usize).min(clips.normal.len()) {
+        imod_fgetline(fp, line, MAXLINE);
+        let text = String::from_utf8_lossy(line).to_string();
+        let values: Vec<f32> = text
+            .split('\0')
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .map(|word| word.parse::<f32>().unwrap_or(0.))
+            .collect();
+        for (index, value) in values.iter().enumerate().take(6) {
+            match index {
+                0 => clips.normal[i].x = *value,
+                1 => clips.normal[i].y = *value,
+                2 => clips.normal[i].z = *value,
+                3 => clips.point[i].x = *value,
+                4 => clips.point[i].y = *value,
+                _ => clips.point[i].z = *value,
+            }
+        }
+    }
+}
+
 /// Original: `imodel_read_header` (`imodel_files.c:835`).
-pub fn imodel_read_header(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
-    let mut name = [0_u8; 128];
-    file.read_exact(&mut name).map_err(|_| IMOD_ERROR_READ)?;
-    imod.name = String::from_utf8_lossy(&name)
-        .trim_end_matches('\0')
-        .to_owned();
+///
+/// The translated `Imod` has no `objsize` member — the object array is the
+/// `obj` vector — so the object count read from the header is returned to the
+/// caller instead of being stored.
+pub fn imodel_read_header(imod: &mut Imod, file: &mut File) -> Result<i32, i32> {
+    // `imodel_files.c:837` reads IMOD_STRSIZE bytes into the fixed `char name[]`
+    // array and keeps every one of them; `%s` output stops at the first NUL but
+    // the bytes past it are written back out verbatim by `imodel_write`.
+    file.read_exact(unsafe {
+        std::slice::from_raw_parts_mut(imod.name.as_mut_ptr() as *mut u8, IMOD_STRSIZE)
+    })
+    .map_err(|_| IMOD_ERROR_READ)?;
     imod.xmax = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.ymax = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.zmax = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    imod.obj
-        .reserve(imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?.max(0) as usize);
+    let objsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    imod.obj.reserve(objsize.max(0) as usize);
     imod.flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
     imod.drawmode = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.mousemode = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
@@ -393,88 +938,193 @@ pub fn imodel_read_header(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
     imod.thresh = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.pixsize = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.units = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let _ = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    // `imodel_files.c:845` stores the checksum field; `imodel_files.c:307`
+    // writes it back out unchanged.
+    imod.csum = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.alpha = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.beta = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.gamma = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    Ok(())
+    Ok(objsize)
 }
 
 /// Original: `imodel_read_object` (`imodel_files.c:860`).
-pub fn imodel_read_object(file: &mut File) -> Result<Iobj, i32> {
-    let mut name = [0_u8; 64];
-    file.read_exact(&mut name).map_err(|_| IMOD_ERROR_READ)?;
-    let mut extra = [0_u32; 16];
-    for value in &mut extra {
+///
+/// The translated `Iobj` has no `contsize`/`meshsize` members — the contour and
+/// mesh arrays are vectors — so those two counts are returned to the caller,
+/// which allocates the arrays exactly as `imodel_read` does in the source.
+pub fn imodel_read_object(obj: &mut Iobj, file: &mut File) -> Result<(i32, i32), i32> {
+    // `imodel_files.c:862` reads IOBJ_STRSIZE bytes into `char name[]` and keeps
+    // all of them; `%s` output stops at the first NUL but `imodel_write_object`
+    // writes the whole array back out.
+    file.read_exact(unsafe {
+        std::slice::from_raw_parts_mut(obj.name.as_mut_ptr() as *mut u8, IOBJ_STRSIZE)
+    })
+    .map_err(|_| IMOD_ERROR_READ)?;
+    for value in &mut obj.extra {
         *value = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
     }
     let contsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
-    let axis = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let drawmode = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let red = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    let green = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    let blue = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    let pdrawsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let symbol = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    let mut symsize = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    if symsize == 0 {
-        symsize = 3;
+    obj.flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+    obj.axis = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.drawmode = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.red = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.green = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.blue = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.pdrawsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.symbol = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.symsize = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    if obj.symsize == 0 {
+        obj.symsize = 3;
     }
-    let mut linewidth2 = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    if linewidth2 == 0 {
-        linewidth2 = 1;
+    obj.linewidth2 = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    if obj.linewidth2 == 0 {
+        obj.linewidth2 = 1;
     }
-    let linewidth = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    let linesty = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    let symflags = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    let sympad = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
-    let trans = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.linewidth = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.linesty = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.symflags = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.sympad = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.trans = imod_get_byte(file).map_err(|_| IMOD_ERROR_READ)?;
     let meshsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let surfsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let mut object = Iobj {
-        name: String::from_utf8_lossy(&name)
-            .trim_end_matches('\0')
-            .to_owned(),
-        extra,
-        flags,
-        axis,
-        drawmode,
-        red,
-        green,
-        blue,
-        pdrawsize,
-        symbol,
-        symsize,
-        linewidth2,
-        linewidth,
-        linesty,
-        symflags,
-        sympad,
-        trans,
-        surfsize,
-        ..Iobj::default()
-    };
-    object.cont.reserve(contsize.max(0) as usize);
-    object.mesh.reserve(meshsize.max(0) as usize);
-    Ok(object)
+    obj.surfsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    Ok((contsize, meshsize))
+}
+
+/// Original: `imodel_read_object_v01` (`imodel_files.c:892`).
+///
+/// The source reads `IMOD_STRSIZE` (128) bytes into the object's 64-byte `name`
+/// array, overrunning it into the following struct members, which the reads
+/// that follow then overwrite.  Shipping that overrun is not possible here, so
+/// the 128 bytes are read and only the first `IOBJ_STRSIZE` are kept.
+///
+/// Returns the contour count, which the translated `Iobj` does not carry.
+pub fn imodel_read_object_v01(obj: &mut Iobj, file: &mut File) -> Result<i32, i32> {
+    loop {
+        /* allow for extra chunks after model data */
+        let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+        if id == ID_OBJT {
+            break;
+        }
+        let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+        if file.seek(SeekFrom::Current(id as i64)).is_err() {
+            return Err(-1);
+        }
+    }
+
+    let mut name = [0u8; IMOD_STRSIZE];
+    imod_get_bytes(file, &mut name, IMOD_STRSIZE as i32).map_err(|_| IMOD_ERROR_READ)?;
+    for i in 0..IOBJ_STRSIZE {
+        obj.name[i] = name[i] as std::ffi::c_char;
+    }
+    obj.name[IOBJ_STRSIZE - 1] = 0x00;
+    for i in 0..obj.extra.len() {
+        obj.extra[i] = 0;
+    }
+
+    let mut counts = [0i32; 4];
+    imod_get_ints(file, &mut counts, 4).map_err(|_| IMOD_ERROR_READ)?;
+    let contsize = counts[0];
+    obj.flags = counts[1] as u32;
+    obj.axis = counts[2];
+    obj.drawmode = counts[3];
+    let mut rgb = [0f32; 3];
+    imod_get_floats(file, &mut rgb, 3).map_err(|_| IMOD_ERROR_READ)?;
+    obj.red = rgb[0];
+    obj.green = rgb[1];
+    obj.blue = rgb[2];
+    obj.pdrawsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+
+    /* Combatibility with old imod files. */
+    if obj.pdrawsize < 1 {
+        obj.pdrawsize = 1;
+    }
+
+    let mut tmp = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.linewidth = tmp as u8;
+    if obj.linewidth < 1 {
+        obj.linewidth = 1;
+    }
+    obj.linewidth2 = 1;
+    obj.symbol = 0;
+    obj.symsize = 3;
+
+    obj.linesty = 0;
+    obj.symflags = 0;
+    obj.sympad = 0;
+
+    tmp = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    obj.trans = tmp as u8;
+
+    let meshsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    let _ = meshsize;
+
+    if contsize > 0 {
+        let Some(cont) = super::icont::imod_contours_new(contsize) else {
+            return Err(IMOD_ERROR_MEMORY);
+        };
+        obj.cont = cont;
+    }
+
+    for i in 0..contsize.max(0) as usize {
+        imodel_read_contour_v01(&mut obj.cont[i], file)?;
+    }
+
+    Ok(contsize)
+}
+
+/// Original: `imodel_read_contour_v01` (`imodel_files.c:952`).
+pub fn imodel_read_contour_v01(cont: &mut Icont, file: &mut File) -> Result<(), i32> {
+    loop {
+        /* allow for extra chunks after object data */
+        let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+        if id == ID_CONT {
+            break;
+        }
+        let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+        if file.seek(SeekFrom::Current(id as i64)).is_err() {
+            return Err(-1);
+        }
+    }
+    let mut head = [0i32; 4];
+    imod_get_ints(file, &mut head, 4).map_err(|_| IMOD_ERROR_READ)?;
+    let psize = head[0];
+    cont.flags = head[1] as u32;
+    cont.time = head[2];
+    cont.surf = head[3];
+    let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+    if id != ID_PNTS {
+        unsafe { b3d_error(stderr, format_args!("IMOD: Error Reading Points.\n")) };
+        return Err(-1);
+    }
+    if psize < 0 {
+        unsafe {
+            b3d_error(
+                stderr,
+                format_args!("IMOD: Error getting memory for points.\n"),
+            )
+        };
+        return Err(-1);
+    }
+    cont.pts = vec![Ipoint::default(); psize as usize];
+    let mut xyz = vec![0f32; 3 * psize as usize];
+    imod_get_floats(file, &mut xyz, psize * 3).map_err(|_| IMOD_ERROR_READ)?;
+    for i in 0..psize as usize {
+        cont.pts[i].x = xyz[3 * i];
+        cont.pts[i].y = xyz[3 * i + 1];
+        cont.pts[i].z = xyz[3 * i + 2];
+    }
+    Ok(())
 }
 
 /// Original: `imodel_read_contour` (`imodel_files.c:984`).
-pub fn imodel_read_contour(file: &mut File) -> Result<Icont, i32> {
+pub fn imodel_read_contour(cont: &mut Icont, file: &mut File) -> Result<(), i32> {
     let size = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
-    let time = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let surf = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    cont.flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+    cont.time = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+    cont.surf = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     if size < 0 {
         return Err(IMOD_ERROR_CORRUPT);
     }
-    let mut cont = Icont {
-        flags,
-        time,
-        surf,
-        ..Icont::default()
-    };
     for _ in 0..size {
         cont.pts.push(Ipoint {
             x: imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?,
@@ -482,7 +1132,7 @@ pub fn imodel_read_contour(file: &mut File) -> Result<Icont, i32> {
             z: imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?,
         });
     }
-    Ok(cont)
+    Ok(())
 }
 
 /// Original: `imodel_read_ptsizes` (`imodel_files.c:1022`).
@@ -499,21 +1149,15 @@ pub fn imodel_read_ptsizes(cont: &mut Icont, file: &mut File) -> Result<(), i32>
 }
 
 /// Original: `imodel_read_mesh` (`imodel_files.c:1043`).
-pub fn imodel_read_mesh(file: &mut File) -> Result<Imesh, i32> {
+pub fn imodel_read_mesh(mesh: &mut Imesh, file: &mut File) -> Result<(), i32> {
     let vertices = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     let lists = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    let flag = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
-    let time = imod_get_short(file).map_err(|_| IMOD_ERROR_READ)?;
-    let surf = imod_get_short(file).map_err(|_| IMOD_ERROR_READ)?;
+    mesh.flag = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+    mesh.time = imod_get_short(file).map_err(|_| IMOD_ERROR_READ)?;
+    mesh.surf = imod_get_short(file).map_err(|_| IMOD_ERROR_READ)?;
     if vertices < 0 || lists < 0 {
         return Err(IMOD_ERROR_CORRUPT);
     }
-    let mut mesh = Imesh {
-        flag,
-        time,
-        surf,
-        ..Imesh::default()
-    };
     for _ in 0..vertices {
         mesh.vert.push(Ipoint {
             x: imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?,
@@ -525,7 +1169,7 @@ pub fn imodel_read_mesh(file: &mut File) -> Result<Imesh, i32> {
         mesh.list
             .push(imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?);
     }
-    Ok(mesh)
+    Ok(())
 }
 
 /// Original: `imodel_read_imat` (`imodel_files.c:1106`).
@@ -568,219 +1212,261 @@ pub fn imodel_read_imat(object: &mut Iobj, file: &mut File, flags: u32) -> Resul
 }
 
 /// Original: `imodel_read_clip` (`imodel_files.c:1099`).
-pub fn imodel_read_clip(object: &mut Iobj, file: &mut File, _flags: u32) -> Result<(), i32> {
-    let size = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    if size < 4 {
-        return Err(IMOD_ERROR_CORRUPT);
+///
+/// The source delegates to `imodClipsRead` (`iplane.c:166`), which sizes the
+/// read from the chunk length and reads all the normals before all the points,
+/// then to `imodClipsFixCount` (`iplane.c:186`).  Its return value is the read
+/// error, which `imodel_read` discards.
+pub fn imodel_read_clip(object: &mut Iobj, file: &mut File, flags: u32) -> i32 {
+    let error = crate::imod::libimod::iplane::imod_clips_read(&mut object.clips, file);
+    crate::imod::libimod::iplane::imod_clips_fix_count(&mut object.clips, flags);
+    error
+}
+
+/// Original: `imodel_read_meshparm` (`imodel_files.c:1126`).
+///
+/// The translated `Iobj` has no `meshParam` member (`MeshParams`, `imodel.h:335`,
+/// belongs to the untranslated `imesh.c` unit), so the nine integers and ten
+/// floats of the chunk are read and discarded.  `capSkipNz` is returned because
+/// `imodel_read_meshskip` validates its chunk size against it.
+pub fn imodel_read_meshparm(_obj: &mut Iobj, fin: &mut File) -> Result<i32, i32> {
+    let _ = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
+    let mut ints = [0i32; 9];
+    imod_get_ints(fin, &mut ints, 9).map_err(|_| IMOD_ERROR_READ)?;
+    let mut floats = [0f32; 10];
+    imod_get_floats(fin, &mut floats, 10).map_err(|_| IMOD_ERROR_READ)?;
+    Ok(ints[3])
+}
+
+/// Original: `imodel_read_meshskip` (`imodel_files.c:1140`).
+///
+/// `capSkipNz` comes from the caller for the reason given on
+/// `imodel_read_meshparm`; the Z list itself is read and discarded.
+pub fn imodel_read_meshskip(
+    _obj: &mut Iobj,
+    fin: &mut File,
+    cap_skip_nz: Option<i32>,
+) -> Result<(), i32> {
+    let size = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)? / 4;
+    if cap_skip_nz != Some(size) {
+        return Err(IMOD_ERROR_FORMAT);
     }
-    let mut head = [0; 4];
-    file.read_exact(&mut head).map_err(|_| IMOD_ERROR_READ)?;
-    object.clips.count = head[0];
-    object.clips.flags = head[1];
-    object.clips.trans = head[2];
-    object.clips.plane = head[3];
-    if object.clips.count > 7 || size != 4 + 24 * object.clips.count as i32 {
-        return Err(IMOD_ERROR_CORRUPT);
-    }
-    for index in 0..object.clips.count as usize {
-        for point in [
-            &mut object.clips.normal[index],
-            &mut object.clips.point[index],
-        ] {
-            point.x = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            point.y = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            point.z = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-        }
-    }
+    let mut list = vec![0i32; size.max(0) as usize];
+    imod_get_ints(fin, &mut list, size).map_err(|_| IMOD_ERROR_READ)?;
     Ok(())
 }
 
-/// Original: `imodIMNXRead` (`iview.c:598`).
-pub fn imod_imnx_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
-    if imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? != 72 {
-        return Err(IMOD_ERROR_CORRUPT);
-    }
-    let mut reference = Iref_image::default();
-    for point in [
-        &mut reference.oscale,
-        &mut reference.otrans,
-        &mut reference.orot,
-        &mut reference.cscale,
-        &mut reference.ctrans,
-        &mut reference.crot,
-    ] {
-        point.x = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-        point.y = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-        point.z = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    }
-    imod.ref_image = Some(reference);
+/// Original: `imodel_read_sliceang` (`imodel_files.c:1155`).
+pub fn imodel_read_sliceang(imod: &mut Imod, fin: &mut File) -> Result<(), i32> {
+    let mut slan = Slicer_angles::default();
+    let _ = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
+    slan.time = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
+    let mut angles = [0f32; 6];
+    imod_get_floats(fin, &mut angles, 6).map_err(|_| IMOD_ERROR_READ)?;
+    slan.angles[0] = angles[0];
+    slan.angles[1] = angles[1];
+    slan.angles[2] = angles[2];
+    slan.center.x = angles[3];
+    slan.center.y = angles[4];
+    slan.center.z = angles[5];
+    imod_get_bytes(fin, &mut slan.label, ANGLE_STRSIZE as i32).map_err(|_| IMOD_ERROR_READ)?;
+    imod.slicer_ang.push(slan);
     Ok(())
 }
 
-/// Original: `imodViewModelRead` (`iview.c:254`), retaining native view values and object views.
-pub fn imod_view_model_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
-    let bytes = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    if bytes == 4 {
-        imod.cview = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-        return Ok(());
+/// Original: `imodel_read_v01` (`imodel_files.c:512`).
+pub fn imodel_read_v01(imod: &mut Imod, fin: &mut File) -> Result<(), i32> {
+    fin.seek(SeekFrom::Start(0)).map_err(|_| IMOD_ERROR_READ)?;
+    let id = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)? as u32;
+    if id != ID_IMOD {
+        unsafe { b3d_error(stderr, format_args!("Read Imod: Not an imod file.\n")) };
+        return Err(-1);
     }
-    if bytes < 176 {
-        return Err(IMOD_ERROR_CORRUPT);
+    let id = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)? as u32;
+    if id != IMOD_01 {
+        unsafe {
+            b3d_error(
+                stderr,
+                format_args!("Read Imod: Imod file version unknown.\n"),
+            )
+        };
+        return Err(-1);
     }
-    let start = file.stream_position().map_err(|_| IMOD_ERROR_READ)?;
-    let mut view = Iview::default();
-    view.fovy = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.rad = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.aspect = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.cnear = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.cfar = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    for point in [&mut view.rot, &mut view.trans, &mut view.scale] {
-        point.x = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-        point.y = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-        point.z = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    }
-    for value in &mut view.mat {
-        *value = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    }
-    view.world = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
-    file.read_exact(&mut view.label)
-        .map_err(|_| IMOD_ERROR_READ)?;
-    view.dcstart = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.dcend = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.lightx = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.lighty = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    view.plax = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-    if bytes >= 180 {
-        let count = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-        let total = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-        if count < 0 || total < 0 || count > 0 && total / count < 67 {
-            return Err(IMOD_ERROR_CORRUPT);
-        }
-        for _ in 0..count {
-            let mut object = Iobjview::default();
-            object.flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
-            object.red = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            object.green = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            object.blue = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            object.pdrawsize = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-            let mut head = [0; 3];
-            file.read_exact(&mut head).map_err(|_| IMOD_ERROR_READ)?;
-            object.linewidth = head[0];
-            object.linesty = head[1];
-            object.trans = head[2];
-            let mut clip = [0; 4];
-            file.read_exact(&mut clip).map_err(|_| IMOD_ERROR_READ)?;
-            object.clips.count = clip[0];
-            object.clips.flags = clip[1];
-            object.clips.trans = clip[2];
-            object.clips.plane = clip[3];
-            for point in [&mut object.clips.normal[0], &mut object.clips.point[0]] {
-                point.x = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-                point.y = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-                point.z = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            }
-            let mut material = [0; 4];
-            file.read_exact(&mut material)
-                .map_err(|_| IMOD_ERROR_READ)?;
-            object.ambient = material[0];
-            object.diffuse = material[1];
-            object.specular = material[2];
-            object.shininess = material[3];
-            file.read_exact(&mut material)
-                .map_err(|_| IMOD_ERROR_READ)?;
-            object.fillred = material[0];
-            object.fillgreen = material[1];
-            object.fillblue = material[2];
-            object.quality = material[3];
-            object.mat2 = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
-            file.read_exact(&mut material)
-                .map_err(|_| IMOD_ERROR_READ)?;
-            object.valblack = material[0];
-            object.valwhite = material[1];
-            object.matflags2 = material[2];
-            object.mesh_thickness = material[3];
-            if count > 0 && total / count >= 43 + 24 * 7 {
-                for index in 1..7 {
-                    for point in [
-                        &mut object.clips.normal[index],
-                        &mut object.clips.point[index],
-                    ] {
-                        point.x = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-                        point.y = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-                        point.z = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-                    }
-                }
-            }
-            view.objview.push(object);
-        }
-    }
-    file.seek(SeekFrom::Start(start + bytes as u64))
-        .map_err(|_| IMOD_ERROR_READ)?;
-    imod.view.push(view);
-    Ok(())
-}
 
-/// Original: `imodViewClipRead` (`iview.c:386`).
-pub fn imod_view_clip_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
-    let size = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
-    if size < 4 || imod.view.is_empty() {
-        return Err(IMOD_ERROR_CORRUPT);
-    }
-    let mut head = [0; 4];
-    file.read_exact(&mut head).map_err(|_| IMOD_ERROR_READ)?;
-    let clips = &mut imod.view.last_mut().unwrap().clips;
-    clips.count = head[0];
-    clips.flags = head[1];
-    clips.trans = head[2];
-    clips.plane = head[3];
-    if clips.count > 7 || size != 4 + clips.count as i32 * 24 {
-        return Err(IMOD_ERROR_CORRUPT);
-    }
-    for index in 0..clips.count as usize {
-        for point in [&mut clips.normal[index], &mut clips.point[index]] {
-            point.x = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            point.y = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
-            point.z = imod_get_float(file).map_err(|_| IMOD_ERROR_READ)?;
+    let objsize = imodel_read_header(imod, fin)?;
+
+    imod.obj = super::iobj::imod_objects_new(objsize).ok_or(IMOD_ERROR_MEMORY)?;
+
+    for i in 0..objsize.max(0) as usize {
+        if imodel_read_object_v01(&mut imod.obj[i], fin).is_err() {
+            return Err(-1);
         }
     }
+
     Ok(())
 }
 
 /// Original: `imodel_read` (`imodel_files.c:555`).
+///
+/// The source's loop is `while (!feof(fin) && !ieof)` and relies on a failed
+/// `imodGetInt` leaving an indeterminate chunk id behind; a failed read of the
+/// chunk id is reported as `IMOD_ERROR_READ` here instead.
 pub fn imodel_read(imod: &mut Imod, file: &mut File, version: u32) -> Result<(), i32> {
-    if version != IMOD_V12 {
+    let mut obj_ind: i32 = -1;
+    let mut cont_ind: i32 = -1;
+    let mut mesh_ind: i32 = -1;
+    let mut cap_skip_nz: Option<i32> = None;
+
+    if version == IMOD_01 {
+        imodel_read_v01(imod, file)?;
+        imod_clean_surf(imod);
+        return Ok(());
+    }
+
+    file.seek(SeekFrom::Start(0)).map_err(|_| IMOD_ERROR_READ)?;
+
+    let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
+    if id != ID_IMOD {
         return Err(IMOD_ERROR_FORMAT);
     }
-    imodel_read_header(imod, file)?;
-    let mut object = None::<usize>;
-    let mut contour = None::<usize>;
+
+    let _ = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
+
+    let objsize = imodel_read_header(imod, file)?;
+
+    if objsize != 0 {
+        imod.obj = super::iobj::imod_objects_new(objsize).ok_or(IMOD_ERROR_MEMORY)?;
+    } else {
+        imod.obj = Vec::new();
+    }
+
+    obj_ind = -1;
+
     loop {
         let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
         match id {
             ID_OBJT => {
-                imod.obj.push(imodel_read_object(file)?);
-                object = Some(imod.obj.len() - 1);
-                contour = None;
+                obj_ind += 1;
+                if obj_ind < 0 || obj_ind >= objsize {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                let (contsize, meshsize) =
+                    imodel_read_object(&mut imod.obj[obj_ind as usize], file)?;
+                if contsize != 0 {
+                    imod.obj[obj_ind as usize].cont =
+                        super::icont::imod_contours_new(contsize).ok_or(IMOD_ERROR_MEMORY)?;
+                } else {
+                    imod.obj[obj_ind as usize].cont = Vec::new();
+                }
+                cont_ind = -1;
+                if meshsize != 0 {
+                    if meshsize < 0 {
+                        return Err(IMOD_ERROR_MEMORY);
+                    }
+                    // `imodMeshesNew` (`imesh.c:106`) zeroes every member.
+                    imod.obj[obj_ind as usize].mesh = vec![Imesh::default(); meshsize as usize];
+                }
+                mesh_ind = -1;
             }
+
+            ID_OLBL => {
+                if obj_ind < 0 || obj_ind >= objsize {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                let mut error = 0;
+                imod.obj[obj_ind as usize].label =
+                    crate::imod::libimod::ilabel::imod_label_read(file, &mut error);
+                if error != 0 {
+                    return Err(error);
+                }
+            }
+
             ID_CONT => {
-                let Some(index) = object else {
+                cont_ind += 1;
+                if obj_ind < 0
+                    || obj_ind >= objsize
+                    || cont_ind < 0
+                    || cont_ind >= imod.obj[obj_ind as usize].cont.len() as i32
+                {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                imod.obj[index].cont.push(imodel_read_contour(file)?);
-                contour = Some(imod.obj[index].cont.len() - 1);
+                }
+                imodel_read_contour(
+                    &mut imod.obj[obj_ind as usize].cont[cont_ind as usize],
+                    file,
+                )?;
             }
+
+            ID_LABL => {
+                if obj_ind < 0
+                    || obj_ind >= objsize
+                    || cont_ind < 0
+                    || cont_ind >= imod.obj[obj_ind as usize].cont.len() as i32
+                {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                let mut error = 0;
+                imod.obj[obj_ind as usize].cont[cont_ind as usize].label =
+                    crate::imod::libimod::ilabel::imod_label_read(file, &mut error);
+                if error != 0 {
+                    return Err(error);
+                }
+            }
+
             ID_SIZE => {
-                let (Some(object), Some(contour)) = (object, contour) else {
+                if obj_ind < 0
+                    || obj_ind >= objsize
+                    || cont_ind < 0
+                    || cont_ind >= imod.obj[obj_ind as usize].cont.len() as i32
+                {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                imodel_read_ptsizes(&mut imod.obj[object].cont[contour], file)?;
+                }
+                imodel_read_ptsizes(
+                    &mut imod.obj[obj_ind as usize].cont[cont_ind as usize],
+                    file,
+                )?;
             }
+
             ID_MESH => {
-                let Some(index) = object else {
+                mesh_ind += 1;
+                if obj_ind < 0
+                    || obj_ind >= objsize
+                    || mesh_ind < 0
+                    || mesh_ind >= imod.obj[obj_ind as usize].mesh.len() as i32
+                {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                imod.obj[index].mesh.push(imodel_read_mesh(file)?);
+                }
+                imodel_read_mesh(
+                    &mut imod.obj[obj_ind as usize].mesh[mesh_ind as usize],
+                    file,
+                )?;
             }
+
+            ID_IEOF => break,
+
+            ID_CLIP => {
+                if obj_ind < 0 || obj_ind >= objsize {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                imodel_read_clip(&mut imod.obj[obj_ind as usize], file, imod.flags);
+            }
+
+            /* DNM 9/4/02: pass flags so mat1 & mat3 can be read two ways */
+            ID_IMAT => {
+                if obj_ind < 0 || obj_ind >= objsize {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                let flags = imod.flags;
+                imodel_read_imat(&mut imod.obj[obj_ind as usize], file, flags)?;
+            }
+
+            ID_VIEW => super::iview::imod_view_model_read(imod, file)?,
+
+            ID_MCLP => super::iview::imod_view_clip_read(imod, file)?,
+
+            /* image nat. transform */
+            ID_IMNX => super::iview::imod_imnx_read(imod, file)?,
+
+            /* Model general storage */
             ID_MOST => {
                 let mut error = 0;
                 imod.store = imod_read_store(file, &mut error).ok_or(IMOD_ERROR_READ)?;
@@ -788,57 +1474,71 @@ pub fn imodel_read(imod: &mut Imod, file: &mut File, version: u32) -> Result<(),
                     return Err(error);
                 }
             }
+
+            /* Object general storage */
             ID_OBST => {
-                let Some(index) = object else {
+                if obj_ind < 0 || obj_ind >= objsize {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                let mut error = 0;
-                imod.obj[index].store = imod_read_store(file, &mut error).ok_or(IMOD_ERROR_READ)?;
-                if error != 0 {
-                    return Err(error);
                 }
-            }
-            ID_COST => {
-                let (Some(object), Some(contour)) = (object, contour) else {
-                    return Err(IMOD_ERROR_CORRUPT);
-                };
                 let mut error = 0;
-                imod.obj[object].cont[contour].store =
+                imod.obj[obj_ind as usize].store =
                     imod_read_store(file, &mut error).ok_or(IMOD_ERROR_READ)?;
                 if error != 0 {
                     return Err(error);
                 }
             }
-            ID_MEST => {
-                let Some(index) = object else {
+
+            /* Contour general storage */
+            ID_COST => {
+                if obj_ind < 0
+                    || obj_ind >= objsize
+                    || cont_ind < 0
+                    || cont_ind >= imod.obj[obj_ind as usize].cont.len() as i32
+                {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                let Some(mesh) = imod.obj[index].mesh.last_mut() else {
-                    return Err(IMOD_ERROR_CORRUPT);
-                };
+                }
                 let mut error = 0;
-                mesh.store = imod_read_store(file, &mut error).ok_or(IMOD_ERROR_READ)?;
+                imod.obj[obj_ind as usize].cont[cont_ind as usize].store =
+                    imod_read_store(file, &mut error).ok_or(IMOD_ERROR_READ)?;
                 if error != 0 {
                     return Err(error);
                 }
             }
-            ID_IMAT => {
-                let Some(index) = object else {
+
+            /* Mesh general storage */
+            ID_MEST => {
+                if obj_ind < 0 || obj_ind >= objsize {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                imodel_read_imat(&mut imod.obj[index], file, imod.flags)?;
-            }
-            ID_CLIP => {
-                let Some(index) = object else {
+                }
+                if mesh_ind < 0 || mesh_ind >= imod.obj[obj_ind as usize].mesh.len() as i32 {
                     return Err(IMOD_ERROR_CORRUPT);
-                };
-                imodel_read_clip(&mut imod.obj[index], file, imod.flags)?;
+                }
+                let mut error = 0;
+                imod.obj[obj_ind as usize].mesh[mesh_ind as usize].store =
+                    imod_read_store(file, &mut error).ok_or(IMOD_ERROR_READ)?;
+                if error != 0 {
+                    return Err(error);
+                }
             }
-            ID_VIEW => imod_view_model_read(imod, file)?,
-            ID_MCLP => imod_view_clip_read(imod, file)?,
+
+            ID_MEPA => {
+                if obj_ind < 0 || obj_ind >= objsize {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                cap_skip_nz = Some(imodel_read_meshparm(&mut imod.obj[obj_ind as usize], file)?);
+            }
+
+            ID_SKLI => {
+                if obj_ind < 0 || obj_ind >= objsize {
+                    return Err(IMOD_ERROR_CORRUPT);
+                }
+                imodel_read_meshskip(&mut imod.obj[obj_ind as usize], file, cap_skip_nz)?;
+            }
+
+            ID_SLAN => imodel_read_sliceang(imod, file)?,
+
             ID_OGRP => obj_group_read(&mut imod.group_list, file)?,
-            ID_IMNX => imod_imnx_read(imod, file)?,
-            ID_IEOF => return Ok(()),
+
             _ => {
                 let size = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
                 if size < 0 || file.seek(SeekFrom::Current(size as i64)).is_err() {
@@ -847,6 +1547,43 @@ pub fn imodel_read(imod: &mut Imod, file: &mut File, version: u32) -> Result<(),
             }
         }
     }
+
+    if version < IMOD_V12 {
+        imod_clean_surf(imod);
+    }
+
+    /* Make sure the current index is valid */
+    if !imod.obj.is_empty() {
+        imod.cindex.object = imod.cindex.object.max(0).min(imod.obj.len() as i32 - 1);
+    } else {
+        imod.cindex.object = -1;
+    }
+    if imod.cindex.object < 0 {
+        imod.cindex.point = -1;
+        imod.cindex.contour = -1;
+    } else {
+        imod.cindex.contour = imod
+            .cindex
+            .contour
+            .min(imod.obj[imod.cindex.object as usize].cont.len() as i32 - 1)
+            .max(-1);
+    }
+    if imod.cindex.contour < 0 {
+        imod.cindex.point = -1;
+    } else {
+        imod.cindex.point = imod
+            .cindex
+            .point
+            .min(
+                imod.obj[imod.cindex.object as usize].cont[imod.cindex.contour as usize]
+                    .pts
+                    .len() as i32
+                    - 1,
+            )
+            .max(-1);
+    }
+
+    Ok(())
 }
 
 /// Original: `imodReadFile` (`imodel_files.c:131`).
@@ -859,315 +1596,838 @@ pub fn imod_read_file(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
     imodel_read(imod, file, version)
 }
 
-/// Original: `imodReadAscii` (`imodel_files.c:1183`).
+/// Original: `imodReadAscii` (`imodel_files.c:1181`).
+///
+/// The source reads with `imodFgetline`, which drops `\r`, skips blank lines
+/// and skips comment lines beginning with `#`, so the ASCII a model writer
+/// emits (which opens with a `#` banner and a blank line) parses only through
+/// that routine.  Each keyword is matched with `substr` -- a bare prefix
+/// compare, so `drawmode` matches both the model and the object line -- and
+/// the value is taken with `sscanf`/`atoi`/`atof` at a fixed byte offset.
+///
+/// `sscanf` leaves an output untouched when its field fails to convert and
+/// reports how many converted; the `parse` closures below do the same, and
+/// `atoi`/`atof` return 0 for text they cannot read, as the C library does.
+///
+/// The translated `Imod` has no `objsize`, `slicerAng` or `fileName` member;
+/// the object count read from the header sizes `imod.obj` directly, and
+/// `slicerAngle` records append to `imod.slicer_ang`.
 pub fn imod_read_ascii(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
+    let mut line = [0u8; MAXLINE as usize];
+    let mut ob: i32 = -1;
+    let mut co: i32 = -1;
+    let mut mh: i32 = -1;
+    let mut valmin: f32 = 1.0e30;
+    let mut valmax: f32 = -1.0e30;
+    let mut objvmin: f32 = 0.;
+    let mut objvmax: f32 = 0.;
+    let mut got_obj_mm = 0;
+    let mut view_ind: usize = 0;
+    let mut obj_ind: usize = 0;
+
+    // `atoi(&line[n])`: leading blanks, optional sign, digits; 0 if none.
+    let atoi = |text: &str| -> i32 {
+        let text = text.trim_start();
+        let mut end = 0;
+        for (i, ch) in text.char_indices() {
+            if i == 0 && (ch == '+' || ch == '-') {
+                end = i + ch.len_utf8();
+                continue;
+            }
+            if ch.is_ascii_digit() {
+                end = i + ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        text[..end].parse::<i32>().unwrap_or(0)
+    };
+    // `atof(&line[n])`: the longest leading prefix that is a number; 0 if none.
+    let atof = |text: &str| -> f64 {
+        let text = text.trim_start();
+        let mut best = 0.;
+        let mut end = text.len();
+        while end > 0 {
+            if let Ok(value) = text[..end].parse::<f64>() {
+                best = value;
+                break;
+            }
+            end -= 1;
+        }
+        best
+    };
+    // `sscanf(line, "<keyword> %g %g ...", ...)`: split on whitespace after
+    // the keyword and convert until one fails, reporting the values converted.
+    let scan = |text: &str, skip: usize| -> Vec<f64> {
+        let mut out = Vec::new();
+        for word in text.split_whitespace().skip(skip) {
+            match word.parse::<f64>() {
+                Ok(value) => out.push(value),
+                Err(_) => break,
+            }
+        }
+        out
+    };
+
+    imod.cindex.object = -1;
+    imod.cindex.contour = -1;
+    imod.cindex.point = -1;
+
     file.seek(SeekFrom::Start(0)).map_err(|_| IMOD_ERROR_READ)?;
-    let mut lines = BufReader::new(file).lines();
-    let first = lines
-        .next()
-        .ok_or(IMOD_ERROR_FORMAT)
-        .and_then(|line| line.map_err(|_| IMOD_ERROR_READ))?;
-    let mut first_words = first.split_whitespace();
-    if first_words.next() != Some("imod") {
-        return Err(IMOD_ERROR_FORMAT);
+    let len = imod_fgetline(file, &mut line, MAXLINE);
+    if len < 1 {
+        return Err(-2);
     }
-    let count = first_words
-        .next()
-        .ok_or(IMOD_ERROR_FORMAT)?
-        .parse::<usize>()
-        .map_err(|_| IMOD_ERROR_FORMAT)?;
-    imod.obj = vec![Iobj::default(); count];
-    let mut current = None::<usize>;
-    while let Some(line) = lines.next() {
-        let line = line.map_err(|_| IMOD_ERROR_READ)?;
-        let words: Vec<_> = line.split_whitespace().collect();
-        if words.is_empty() {
-            continue;
+    if substr(&line, b"imod ") == 0 {
+        return Err(-2);
+    }
+
+    let objsize = scan(&String::from_utf8_lossy(&line[..len as usize]), 1)
+        .first()
+        .copied()
+        .unwrap_or(0.) as i32;
+    imod.obj = imod_objects_new(objsize).unwrap_or_default();
+    if objsize > 0 {
+        imod.cindex.object = 0;
+    }
+
+    /* store.type = GEN_STORE_VALUE1; store.flags = GEN_STORE_FLOAT << 2 */
+    let store_type: i16 = 10;
+    let store_flags: u16 = 1 << 2;
+
+    loop {
+        let len = imod_fgetline(file, &mut line, MAXLINE);
+        if len <= 0 {
+            break;
         }
-        if words[0] == "object" {
-            let index = words
-                .get(1)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let contours = words
-                .get(2)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let meshes = words
-                .get(3)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            if index >= imod.obj.len() {
-                return Err(IMOD_ERROR_CORRUPT);
+        let text = String::from_utf8_lossy(&line[..len as usize]).to_string();
+
+        if substr(&line, b"contour ") != 0 {
+            let vals = scan(&text, 1);
+            co = vals.first().copied().unwrap_or(0.) as i32;
+            let surf = vals.get(1).copied().unwrap_or(0.) as i32;
+            let pts = vals.get(2).copied().unwrap_or(0.) as i32;
+            if obj_ind >= imod.obj.len() || co < 0 || co >= imod.obj[obj_ind].cont.len() as i32 {
+                return Err(-1);
             }
-            imod.obj[index].cont = vec![Icont::default(); contours];
-            imod.obj[index].mesh = vec![Imesh::default(); meshes];
-            current = Some(index);
-            continue;
-        }
-        if words[0] == "contour" {
-            let object = current.ok_or(IMOD_ERROR_CORRUPT)?;
-            let index = words
-                .get(1)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let surf = words
-                .get(2)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<i32>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let points = words
-                .get(3)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let contour = imod.obj[object]
-                .cont
-                .get_mut(index)
-                .ok_or(IMOD_ERROR_CORRUPT)?;
-            contour.surf = surf;
-            for _ in 0..points {
-                let line = lines
-                    .next()
-                    .ok_or(IMOD_ERROR_READ)
-                    .and_then(|line| line.map_err(|_| IMOD_ERROR_READ))?;
-                let values: Vec<f32> = line
-                    .split_whitespace()
-                    .map(str::parse)
-                    .collect::<Result<_, _>>()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
-                if values.len() < 3 {
-                    return Err(IMOD_ERROR_FORMAT);
-                }
-                contour.pts.push(Ipoint {
-                    x: values[0],
-                    y: values[1],
-                    z: values[2],
-                });
-                if values.len() > 3 && values[3] >= 0. {
-                    contour.sizes.push(values[3]);
+            {
+                let cont = &mut imod.obj[obj_ind].cont[co as usize];
+                cont.surf = surf;
+                cont.pts = vec![Ipoint::default(); pts.max(0) as usize];
+                cont.flags = 0;
+                cont.time = 0;
+            }
+            if vals.len() > 3 {
+                let value = vals[3] as f32;
+                valmin = if valmin < value { valmin } else { value };
+                valmax = if valmax > value { valmax } else { value };
+                let mut store = Istore::default();
+                store.type_ = store_type;
+                store.flags = store_flags;
+                store.index.i = co;
+                store.value.f = value;
+                if istore_insert(&mut imod.obj[obj_ind].store, store) != 0 {
+                    return Err(-1);
                 }
             }
+            let mut active_val = 0;
+            for pt in 0..pts.max(0) {
+                let len = imod_fgetline(file, &mut line, MAXLINE);
+                let text = String::from_utf8_lossy(&line[..len.max(0) as usize]).to_string();
+                let vals = scan(&text, 0);
+                let cont = &mut imod.obj[obj_ind].cont[co as usize];
+                if let Some(value) = vals.first() {
+                    cont.pts[pt as usize].x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    cont.pts[pt as usize].y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    cont.pts[pt as usize].z = *value as f32;
+                }
+                let size = vals.get(3).copied().unwrap_or(0.) as f32;
+                if vals.len() > 3 && size >= 0. {
+                    imod_point_set_size(&mut imod.obj[obj_ind].cont[co as usize], pt, size);
+                }
+                if vals.len() > 4 {
+                    let value = vals[4] as f32;
+                    let mut store = Istore::default();
+                    store.type_ = store_type;
+                    store.flags = store_flags;
+                    store.index.i = pt;
+                    store.value.f = value;
+                    if istore_insert_change(&mut imod.obj[obj_ind].cont[co as usize].store, store)
+                        != 0
+                    {
+                        return Err(-1);
+                    }
+                    active_val = 1;
+                    valmin = if valmin < value { valmin } else { value };
+                    valmax = if valmax > value { valmax } else { value };
+                } else if active_val != 0 {
+                    istore_end_change(
+                        &mut imod.obj[obj_ind].cont[co as usize].store,
+                        store_type,
+                        pt,
+                    );
+                    active_val = 0;
+                }
+            }
             continue;
         }
-        if words[0] == "mesh" {
-            let object = current.ok_or(IMOD_ERROR_CORRUPT)?;
-            let index = words
-                .get(1)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let vertices = words
-                .get(2)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let lists = words
-                .get(3)
-                .ok_or(IMOD_ERROR_FORMAT)?
-                .parse::<usize>()
-                .map_err(|_| IMOD_ERROR_FORMAT)?;
-            let mesh = imod.obj[object]
-                .mesh
-                .get_mut(index)
-                .ok_or(IMOD_ERROR_CORRUPT)?;
-            for _ in 0..vertices {
-                let line = lines
-                    .next()
-                    .ok_or(IMOD_ERROR_READ)
-                    .and_then(|line| line.map_err(|_| IMOD_ERROR_READ))?;
-                let values: Vec<f32> = line
-                    .split_whitespace()
-                    .map(str::parse)
-                    .collect::<Result<_, _>>()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
-                if values.len() < 3 {
-                    return Err(IMOD_ERROR_FORMAT);
-                }
-                mesh.vert.push(Ipoint {
-                    x: values[0],
-                    y: values[1],
-                    z: values[2],
-                });
+
+        if substr(&line, b"mesh ") != 0 {
+            let vals = scan(&text, 1);
+            mh = vals.first().copied().unwrap_or(0.) as i32;
+            let vsize = vals.get(1).copied().unwrap_or(0.) as i32;
+            let lsize = vals.get(2).copied().unwrap_or(0.) as i32;
+            if obj_ind >= imod.obj.len() || mh < 0 || mh >= imod.obj[obj_ind].mesh.len() as i32 {
+                return Err(-1);
             }
-            for _ in 0..lists {
-                mesh.list.push(
-                    lines
-                        .next()
-                        .ok_or(IMOD_ERROR_READ)
-                        .and_then(|line| line.map_err(|_| IMOD_ERROR_READ))?
-                        .trim()
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?,
+            {
+                let mesh = &mut imod.obj[obj_ind].mesh[mh as usize];
+                mesh.flag = 0;
+                mesh.time = 0;
+                mesh.surf = 0;
+                mesh.vert = vec![Ipoint::default(); vsize.max(0) as usize];
+                mesh.list = vec![0; lsize.max(0) as usize];
+            }
+            for pt in 0..vsize.max(0) {
+                let len = imod_fgetline(file, &mut line, MAXLINE);
+                let text = String::from_utf8_lossy(&line[..len.max(0) as usize]).to_string();
+                let vals = scan(&text, 0);
+                let mesh = &mut imod.obj[obj_ind].mesh[mh as usize];
+                if let Some(value) = vals.first() {
+                    mesh.vert[pt as usize].x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    mesh.vert[pt as usize].y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    mesh.vert[pt as usize].z = *value as f32;
+                }
+            }
+            for i in 0..lsize.max(0) {
+                let len = imod_fgetline(file, &mut line, MAXLINE);
+                let text = String::from_utf8_lossy(&line[..len.max(0) as usize]).to_string();
+                if let Some(value) = scan(&text, 0).first() {
+                    imod.obj[obj_ind].mesh[mh as usize].list[i as usize] = *value as i32;
+                }
+            }
+            continue;
+        }
+
+        if substr(&line, b"object ") != 0 {
+            /* new object: put out min/max for last one if any */
+            if ob >= 0 && (got_obj_mm != 0 || valmin <= valmax) && obj_ind < imod.obj.len() {
+                istore_add_min_max(
+                    &mut imod.obj[obj_ind].store,
+                    11,
+                    if got_obj_mm != 0 { objvmin } else { valmin },
+                    if got_obj_mm != 0 { objvmax } else { valmax },
                 );
             }
+            let vals = scan(&text, 1);
+            ob = vals.first().copied().unwrap_or(0.) as i32;
+            let conts = vals.get(1).copied().unwrap_or(0.) as i32;
+            let meshes = vals.get(2).copied().unwrap_or(0.) as i32;
+
+            if ob < 0 {
+                return Err(-1);
+            }
+            if ob > imod.obj.len() as i32 {
+                return Err(-1);
+            }
+            // `imodel_files.c:1307` tests `ob > imod->objsize`, so `ob` equal to
+            // the count indexes one past the array in the source.
+            if ob >= imod.obj.len() as i32 {
+                return Err(-1);
+            }
+            obj_ind = ob as usize;
+            if conts != 0 {
+                imod.obj[obj_ind].cont = imod_contours_new(conts).unwrap_or_default();
+            }
+            if meshes != 0 {
+                imod.obj[obj_ind].mesh = imod_meshes_new(meshes).unwrap_or_default();
+            }
+            mh = -1;
+            co = -1;
+            valmin = 1.0e30;
+            valmax = -1.0e30;
+            got_obj_mm = 0;
             continue;
         }
-        match words[0] {
-            "name" => {
-                if let Some(object) = current {
-                    imod.obj[object].name = words[1..].join(" ");
+
+        if substr(&line, b"color ") != 0 {
+            let vals = scan(&text, 1);
+            if obj_ind < imod.obj.len() {
+                let obj = &mut imod.obj[obj_ind];
+                if let Some(value) = vals.first() {
+                    obj.red = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    obj.green = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    obj.blue = *value as f32;
+                }
+                if let Some(value) = vals.get(3) {
+                    obj.trans = *value as i32 as u8;
                 }
             }
-            "color" => {
-                if let Some(object) = current {
-                    let o = &mut imod.obj[object];
-                    o.red = words
-                        .get(1)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?;
-                    o.green = words
-                        .get(2)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?;
-                    o.blue = words
-                        .get(3)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?;
-                    o.trans = words.get(4).and_then(|v| v.parse().ok()).unwrap_or(0);
+        }
+        if substr(&line, b"Fillcolor ") != 0 {
+            let vals = scan(&text, 1);
+            if obj_ind < imod.obj.len() {
+                let obj = &mut imod.obj[obj_ind];
+                if let Some(value) = vals.first() {
+                    obj.fillred = *value as i32 as u8;
+                }
+                if let Some(value) = vals.get(1) {
+                    obj.fillgreen = *value as i32 as u8;
+                }
+                if let Some(value) = vals.get(2) {
+                    obj.fillblue = *value as i32 as u8;
                 }
             }
-            "max" => {
-                imod.xmax = words
-                    .get(1)
-                    .ok_or(IMOD_ERROR_FORMAT)?
-                    .parse()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
-                imod.ymax = words
-                    .get(2)
-                    .ok_or(IMOD_ERROR_FORMAT)?
-                    .parse()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
-                imod.zmax = words
-                    .get(3)
-                    .ok_or(IMOD_ERROR_FORMAT)?
-                    .parse()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
+        }
+
+        if obj_ind < imod.obj.len() {
+            let obj = &mut imod.obj[obj_ind];
+            if substr(&line, b"open") != 0 {
+                obj.flags |= IMOD_OBJFLAG_OPEN;
             }
-            "scale" => {
-                imod.xscale = words
-                    .get(1)
-                    .ok_or(IMOD_ERROR_FORMAT)?
-                    .parse()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
-                imod.yscale = words
-                    .get(2)
-                    .ok_or(IMOD_ERROR_FORMAT)?
-                    .parse()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
-                imod.zscale = words
-                    .get(3)
-                    .ok_or(IMOD_ERROR_FORMAT)?
-                    .parse()
-                    .map_err(|_| IMOD_ERROR_FORMAT)?;
+            if substr(&line, b"closed") != 0 {
+                obj.flags &= !IMOD_OBJFLAG_OPEN;
             }
-            "refcurscale" | "refcurtrans" | "refcurrot" | "refoldtrans" => {
-                let mut reference = imod.ref_image.unwrap_or_default();
-                let point = Ipoint {
-                    x: words
-                        .get(1)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?,
-                    y: words
-                        .get(2)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?,
-                    z: words
-                        .get(3)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?,
+            if substr(&line, b"fill") != 0 {
+                obj.flags |= IMOD_OBJFLAG_FILL;
+            }
+            if substr(&line, b"scattered") != 0 {
+                obj.flags |= IMOD_OBJFLAG_SCAT;
+            }
+            if substr(&line, b"insideout") != 0 {
+                obj.flags |= IMOD_OBJFLAG_OUT;
+            }
+            if substr(&line, b"drawmesh") != 0 {
+                obj.flags |= IMOD_OBJFLAG_MESH;
+            }
+            if substr(&line, b"nolines") != 0 {
+                obj.flags |= IMOD_OBJFLAG_NOLINE;
+            }
+            if substr(&line, b"bothsides") != 0 {
+                obj.flags |= IMOD_OBJFLAG_TWO_SIDE;
+            }
+            if substr(&line, b"usefill") != 0 {
+                obj.flags |= IMOD_OBJFLAG_FCOLOR;
+            }
+            if substr(&line, b"pntusefill") != 0 {
+                obj.flags |= IMOD_OBJFLAG_FCOLOR_PNT;
+            }
+            if substr(&line, b"pntonsec") != 0 {
+                obj.flags |= IMOD_OBJFLAG_PNT_ON_SEC;
+            }
+            if substr(&line, b"antialias") != 0 {
+                obj.flags |= IMOD_OBJFLAG_ANTI_ALIAS;
+            }
+            if substr(&line, b"hastimes") != 0 {
+                obj.flags |= IMOD_OBJFLAG_TIME;
+            }
+            if substr(&line, b"usevalue") != 0 {
+                obj.flags |= IMOD_OBJFLAG_USE_VALUE;
+            }
+            if substr(&line, b"valcolor") != 0 {
+                obj.flags |= IMOD_OBJFLAG_MCOLOR;
+            }
+        }
+
+        if substr(&line, b"offsets ") != 0 {
+            let vals = scan(&text, 1);
+            if let Some(value) = vals.first() {
+                imod.xoffset = *value as f32;
+            }
+            if let Some(value) = vals.get(1) {
+                imod.yoffset = *value as f32;
+            }
+            if let Some(value) = vals.get(2) {
+                imod.zoffset = *value as f32;
+            }
+        }
+
+        if substr(&line, b"angles ") != 0 {
+            let vals = scan(&text, 1);
+            if let Some(value) = vals.first() {
+                imod.alpha = *value as f32;
+            }
+            if let Some(value) = vals.get(1) {
+                imod.beta = *value as f32;
+            }
+            if let Some(value) = vals.get(2) {
+                imod.gamma = *value as f32;
+            }
+        }
+
+        if substr(&line, b"refcurscale ") != 0 {
+            if imod.ref_image.is_none() {
+                imod.ref_image = imod_imnx_new();
+            }
+            let vals = scan(&text, 1);
+            if let Some(reference) = imod.ref_image.as_mut() {
+                if let Some(value) = vals.first() {
+                    reference.cscale.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    reference.cscale.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    reference.cscale.z = *value as f32;
+                }
+            }
+        }
+        if substr(&line, b"refcurtrans ") != 0 {
+            if imod.ref_image.is_none() {
+                imod.ref_image = imod_imnx_new();
+            }
+            let vals = scan(&text, 1);
+            if let Some(reference) = imod.ref_image.as_mut() {
+                if let Some(value) = vals.first() {
+                    reference.ctrans.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    reference.ctrans.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    reference.ctrans.z = *value as f32;
+                }
+            }
+        }
+        if substr(&line, b"refcurrot ") != 0 {
+            if imod.ref_image.is_none() {
+                imod.ref_image = imod_imnx_new();
+            }
+            imod.flags |= IMODF_TILTOK;
+            let vals = scan(&text, 1);
+            if let Some(reference) = imod.ref_image.as_mut() {
+                if let Some(value) = vals.first() {
+                    reference.crot.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    reference.crot.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    reference.crot.z = *value as f32;
+                }
+            }
+        }
+        if substr(&line, b"refoldtrans ") != 0 {
+            if imod.ref_image.is_none() {
+                imod.ref_image = imod_imnx_new();
+            }
+            imod.flags |= IMODF_OTRANS_ORIGIN;
+            let vals = scan(&text, 1);
+            if let Some(reference) = imod.ref_image.as_mut() {
+                if let Some(value) = vals.first() {
+                    reference.otrans.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    reference.otrans.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    reference.otrans.z = *value as f32;
+                }
+            }
+        }
+
+        if substr(&line, b"nodraw") != 0 && obj_ind < imod.obj.len() {
+            imod.obj[obj_ind].flags |= IMOD_OBJFLAG_OFF;
+        }
+
+        if substr(&line, b"scale ") != 0 {
+            let vals = scan(&text, 1);
+            if let Some(value) = vals.first() {
+                imod.xscale = *value as f32;
+            }
+            if let Some(value) = vals.get(1) {
+                imod.yscale = *value as f32;
+            }
+            if let Some(value) = vals.get(2) {
+                imod.zscale = *value as f32;
+            }
+        }
+
+        if substr(&line, b"max ") != 0 {
+            let vals = scan(&text, 1);
+            if let Some(value) = vals.first() {
+                imod.xmax = *value as i32;
+            }
+            if let Some(value) = vals.get(1) {
+                imod.ymax = *value as i32;
+            }
+            if let Some(value) = vals.get(2) {
+                imod.zmax = *value as i32;
+            }
+        }
+
+        if substr(&line, b"mousemode") != 0 {
+            imod.mousemode = atoi(&text[9.min(text.len())..]);
+        }
+
+        if substr(&line, b"drawmode") != 0 {
+            imod.drawmode = atoi(&text[8.min(text.len())..]);
+        }
+
+        /* substr(line, "") is vacuously true, so every line is scanned for
+        the b&w levels; only a line that starts with them converts. */
+        {
+            let vals = text
+                .split(|c: char| c.is_whitespace() || c == ',')
+                .filter(|word| !word.is_empty())
+                .skip(1)
+                .take_while(|word| word.parse::<f64>().is_ok())
+                .map(|word| word.parse::<f64>().unwrap())
+                .collect::<Vec<_>>();
+            if substr(&line, b"b&w_level ") != 0 {
+                if let Some(value) = vals.first() {
+                    imod.blacklevel = *value as i32;
+                }
+                if let Some(value) = vals.get(1) {
+                    imod.whitelevel = *value as i32;
+                }
+            }
+        }
+
+        if substr(&line, b"resolution") != 0 {
+            imod.res = atof(&text[10.min(text.len())..]) as f32 as i32;
+        }
+
+        if substr(&line, b"threshold") != 0 {
+            imod.thresh = atoi(&text[9.min(text.len())..]);
+        }
+
+        if substr(&line, b"pixsize") != 0 {
+            imod.pixsize = atof(&text[7.min(text.len())..]) as f32;
+        }
+
+        if substr(&line, b"flipped") != 0 && atoi(&text[7.min(text.len())..]) != 0 {
+            imod.flags |= IMODF_FLIPYZ;
+        }
+
+        if substr(&line, b"units") != 0 {
+            if text.contains("mm") {
+                imod.units = IMOD_UNIT_MM;
+            }
+            if text.contains("um") {
+                imod.units = IMOD_UNIT_UM;
+            }
+            if text.contains("nm") {
+                imod.units = IMOD_UNIT_NM;
+            }
+        }
+
+        if substr(&line, b"currentview") != 0 {
+            imod.cview = atoi(&text[11.min(text.len())..]);
+        }
+
+        if substr(&line, b"slicerAngle") != 0 {
+            let mut slan = Slicer_angles::default();
+            let vals = scan(&text, 1);
+            if let Some(value) = vals.first() {
+                slan.time = *value as i32;
+            }
+            for i in 0..3 {
+                if let Some(value) = vals.get(1 + i) {
+                    slan.angles[i] = *value as f32;
+                }
+            }
+            if let Some(value) = vals.get(4) {
+                slan.center.x = *value as f32;
+            }
+            if let Some(value) = vals.get(5) {
+                slan.center.y = *value as f32;
+            }
+            if let Some(value) = vals.get(6) {
+                slan.center.z = *value as f32;
+            }
+            /* Skip eight blanks, then copy at most ANGLE_STRSIZE bytes. */
+            let bytes = text.as_bytes();
+            let mut strptr: Option<usize> = Some(0);
+            for _ in 0..8 {
+                strptr = match strptr {
+                    Some(at) if at + 1 <= bytes.len() => bytes[at + 1..]
+                        .iter()
+                        .position(|&b| b == b' ')
+                        .map(|off| at + 1 + off),
+                    _ => None,
                 };
-                if words[0] == "refcurscale" {
-                    reference.cscale = point;
-                } else if words[0] == "refcurtrans" {
-                    reference.ctrans = point;
-                } else if words[0] == "refcurrot" {
-                    reference.crot = point;
-                    imod.flags |= 1 << 15;
-                } else {
-                    reference.otrans = point;
-                    imod.flags |= 1 << 14;
-                }
-                imod.ref_image = Some(reference);
-            }
-            "view" => imod.view.push(Iview::default()),
-            "viewfovy" => {
-                if let Some(view) = imod.view.last_mut() {
-                    view.fovy = words
-                        .get(1)
-                        .ok_or(IMOD_ERROR_FORMAT)?
-                        .parse()
-                        .map_err(|_| IMOD_ERROR_FORMAT)?;
+                if strptr.is_none() {
+                    break;
                 }
             }
-            "viewtrans" => {
-                if let Some(view) = imod.view.last_mut() {
-                    view.trans = Ipoint {
-                        x: words
-                            .get(1)
-                            .ok_or(IMOD_ERROR_FORMAT)?
-                            .parse()
-                            .map_err(|_| IMOD_ERROR_FORMAT)?,
-                        y: words
-                            .get(2)
-                            .ok_or(IMOD_ERROR_FORMAT)?
-                            .parse()
-                            .map_err(|_| IMOD_ERROR_FORMAT)?,
-                        z: words
-                            .get(3)
-                            .ok_or(IMOD_ERROR_FORMAT)?
-                            .parse()
-                            .map_err(|_| IMOD_ERROR_FORMAT)?,
-                    };
+            if let Some(at) = strptr {
+                let src = &bytes[(at + 1).min(bytes.len())..];
+                let take = src.len().min(ANGLE_STRSIZE);
+                slan.label[..take].copy_from_slice(&src[..take]);
+            }
+            slan.label[ANGLE_STRSIZE - 1] = 0;
+            imod.slicer_ang.push(slan);
+        }
+
+        if substr(&line, b"name") != 0 && obj_ind < imod.obj.len() {
+            let bytes = text.as_bytes();
+            let obj = &mut imod.obj[obj_ind];
+            let mut i = 0;
+            while i + 5 < bytes.len()
+                && i < IOBJ_STRSIZE
+                && bytes[i + 5] != b'\r'
+                && bytes[i + 5] != b'\n'
+            {
+                obj.name[i] = bytes[i + 5] as std::ffi::c_char;
+                i += 1;
+            }
+            if i < IOBJ_STRSIZE {
+                obj.name[i] = 0;
+            }
+        }
+
+        if obj_ind < imod.obj.len() {
+            let obj = &mut imod.obj[obj_ind];
+            if substr(&line, b"linewidth") != 0 {
+                obj.linewidth = atoi(&text[9.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"surfsize") != 0 {
+                obj.surfsize = atoi(&text[8.min(text.len())..]);
+            }
+            if substr(&line, b"pointsize") != 0 {
+                obj.pdrawsize = atoi(&text[9.min(text.len())..]);
+            }
+            if substr(&line, b"axis") != 0 {
+                obj.axis = atoi(&text[4.min(text.len())..]);
+            }
+            if substr(&line, b"drawmode") != 0 {
+                obj.drawmode = atoi(&text[8.min(text.len())..]);
+            }
+            if substr(&line, b"width2D") != 0 {
+                obj.linewidth2 = atoi(&text[7.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"symbol") != 0 {
+                obj.symbol = atoi(&text[6.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"symsize") != 0 {
+                obj.symsize = atoi(&text[7.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"symflags") != 0 {
+                obj.symflags = atoi(&text[8.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"ambient") != 0 {
+                obj.ambient = atoi(&text[7.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"diffuse") != 0 {
+                obj.diffuse = atoi(&text[7.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"specular") != 0 {
+                obj.specular = atoi(&text[8.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"shininess") != 0 {
+                obj.shininess = atoi(&text[9.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"obquality") != 0 {
+                obj.quality = atoi(&text[9.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"valblack") != 0 {
+                obj.valblack = atoi(&text[8.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"valwhite") != 0 {
+                obj.valwhite = atoi(&text[8.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"meshthick") != 0 {
+                obj.mesh_thickness = atoi(&text[9.min(text.len())..]) as u8;
+            }
+            if substr(&line, b"matflags2") != 0 {
+                obj.matflags2 = atoi(&text[9.min(text.len())..]) as u8;
+            }
+        }
+
+        if substr(&line, b"valminmax") != 0 {
+            let vals = scan(&text, 1);
+            if let Some(value) = vals.first() {
+                objvmin = *value as f32;
+            }
+            if let Some(value) = vals.get(1) {
+                objvmax = *value as f32;
+            }
+            got_obj_mm = 1;
+        }
+
+        if substr(&line, b"objclips") != 0 && obj_ind < imod.obj.len() {
+            let mut clips = imod.obj[obj_ind].clips.clone();
+            read_ascii_clips(file, &mut line, &mut clips, "objclips");
+            imod.obj[obj_ind].clips = clips;
+        }
+
+        if substr(&line, b"contflags") != 0
+            && co >= 0
+            && obj_ind < imod.obj.len()
+            && co < imod.obj[obj_ind].cont.len() as i32
+        {
+            imod.obj[obj_ind].cont[co as usize].flags =
+                atof(&text[9.min(text.len())..]) as f32 as u32;
+        }
+
+        if substr(&line, b"conttime") != 0
+            && co >= 0
+            && obj_ind < imod.obj.len()
+            && co < imod.obj[obj_ind].cont.len() as i32
+        {
+            imod.obj[obj_ind].cont[co as usize].time = atoi(&text[8.min(text.len())..]);
+        }
+
+        if substr(&line, b"Meshflags") != 0
+            && mh >= 0
+            && obj_ind < imod.obj.len()
+            && mh < imod.obj[obj_ind].mesh.len() as i32
+        {
+            imod.obj[obj_ind].mesh[mh as usize].flag =
+                atof(&text[9.min(text.len())..]) as f32 as u32;
+        }
+
+        if substr(&line, b"Meshtime") != 0
+            && mh >= 0
+            && obj_ind < imod.obj.len()
+            && mh < imod.obj[obj_ind].mesh.len() as i32
+        {
+            imod.obj[obj_ind].mesh[mh as usize].time = atoi(&text[8.min(text.len())..]) as i16;
+        }
+
+        if substr(&line, b"Meshsurf") != 0
+            && mh >= 0
+            && obj_ind < imod.obj.len()
+            && mh < imod.obj[obj_ind].mesh.len() as i32
+        {
+            imod.obj[obj_ind].mesh[mh as usize].surf = atoi(&text[8.min(text.len())..]) as i16;
+        }
+
+        if substr(&line, b"view ") != 0 {
+            if imod_view_model_new(imod) != 0 {
+                return Err(-1);
+            }
+            view_ind = imod.view.len() - 1;
+        }
+
+        if substr(&line, b"globalclips") != 0 && view_ind < imod.view.len() {
+            let mut clips = imod.view[view_ind].clips.clone();
+            read_ascii_clips(file, &mut line, &mut clips, "globalclips");
+            imod.view[view_ind].clips = clips;
+        }
+
+        if view_ind < imod.view.len() {
+            if substr(&line, b"viewfovy") != 0 {
+                imod.view[view_ind].fovy = atof(&text[8.min(text.len())..]) as f32;
+            }
+            if substr(&line, b"viewcnear") != 0 {
+                imod.view[view_ind].cnear = atof(&text[9.min(text.len())..]) as f32;
+            }
+            if substr(&line, b"viewcfar") != 0 {
+                imod.view[view_ind].cfar = atof(&text[8.min(text.len())..]) as f32;
+            }
+            if substr(&line, b"viewflags") != 0 {
+                imod.view[view_ind].world = atof(&text[9.min(text.len())..]) as f32 as u32;
+            }
+            if substr(&line, b"viewscale ") != 0 {
+                let vals = scan(&text, 1);
+                if let Some(value) = vals.first() {
+                    imod.view[view_ind].scale.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    imod.view[view_ind].scale.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    imod.view[view_ind].scale.z = *value as f32;
                 }
             }
-            "viewrot" => {
-                if let Some(view) = imod.view.last_mut() {
-                    view.rot = Ipoint {
-                        x: words
-                            .get(1)
-                            .ok_or(IMOD_ERROR_FORMAT)?
-                            .parse()
-                            .map_err(|_| IMOD_ERROR_FORMAT)?,
-                        y: words
-                            .get(2)
-                            .ok_or(IMOD_ERROR_FORMAT)?
-                            .parse()
-                            .map_err(|_| IMOD_ERROR_FORMAT)?,
-                        z: words
-                            .get(3)
-                            .ok_or(IMOD_ERROR_FORMAT)?
-                            .parse()
-                            .map_err(|_| IMOD_ERROR_FORMAT)?,
-                    };
+            if substr(&line, b"viewtrans ") != 0 {
+                let vals = scan(&text, 1);
+                if let Some(value) = vals.first() {
+                    imod.view[view_ind].trans.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    imod.view[view_ind].trans.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    imod.view[view_ind].trans.z = *value as f32;
                 }
             }
-            "currentview" => {
-                imod.cview = words
-                    .get(1)
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or(0)
+            if substr(&line, b"viewrot ") != 0 {
+                let vals = scan(&text, 1);
+                if let Some(value) = vals.first() {
+                    imod.view[view_ind].rot.x = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    imod.view[view_ind].rot.y = *value as f32;
+                }
+                if let Some(value) = vals.get(2) {
+                    imod.view[view_ind].rot.z = *value as f32;
+                }
             }
-            _ => {}
+            if substr(&line, b"viewlight ") != 0 {
+                let vals = scan(&text, 1);
+                if let Some(value) = vals.first() {
+                    imod.view[view_ind].lightx = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    imod.view[view_ind].lighty = *value as f32;
+                }
+            }
+            if substr(&line, b"depthcue ") != 0 {
+                let vals = scan(&text, 1);
+                if let Some(value) = vals.first() {
+                    imod.view[view_ind].dcstart = *value as f32;
+                }
+                if let Some(value) = vals.get(1) {
+                    imod.view[view_ind].dcend = *value as f32;
+                }
+            }
+            if substr(&line, b"viewlabel") != 0 {
+                let bytes = text.as_bytes();
+                let view = &mut imod.view[view_ind];
+                let mut i = 0;
+                while i + 10 < bytes.len()
+                    && i < VIEW_STRSIZE
+                    && bytes[i + 10] != b'\r'
+                    && bytes[i + 10] != b'\n'
+                {
+                    view.label[i] = bytes[i + 10];
+                    i += 1;
+                }
+                if i < VIEW_STRSIZE {
+                    view.label[i] = 0;
+                }
+            }
         }
     }
+
+    if ob >= 0 && (got_obj_mm != 0 || valmin <= valmax) && obj_ind < imod.obj.len() {
+        istore_add_min_max(
+            &mut imod.obj[obj_ind].store,
+            11,
+            if got_obj_mm != 0 { objvmin } else { valmin },
+            if got_obj_mm != 0 { objvmax } else { valmax },
+        );
+    }
+    imod.cview = imod.cview.clamp(0, imod.view.len() as i32 - 1);
     Ok(())
 }
 
 /// Original: `imodRead` (`imodel_files.c:171`).
 pub fn imod_read(path: impl AsRef<Path>) -> Result<Imod, i32> {
+    // `imodel_files.c:173` builds the model with `imodNew`, so the defaults
+    // `imodDefault` sets -- the "IMOD-NewModel" name, the initial view, the
+    // pixel size -- are in place before the file is read over them.  A binary
+    // model overwrites all of them; an ASCII one leaves whatever it omits.
+    let mut imod = match crate::imod::libimod::imodel::imod_new() {
+        Some(imod) => imod,
+        None => return Err(IMOD_ERROR_MEMORY),
+    };
     let mut file = File::open(path).map_err(|_| IMOD_ERROR_READ)?;
-    let mut imod = Imod::default();
     imod_read_file(&mut imod, &mut file)?;
     Ok(imod)
 }
@@ -1184,6 +2444,9 @@ pub fn imodel_write_contour(cont: &Icont, file: &mut File) -> Result<(), i32> {
         imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
         imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
     }
+    if cont.label.is_some() {
+        crate::imod::libimod::ilabel::imod_label_write(cont.label.as_ref(), ID_LABL, file);
+    }
     if !cont.sizes.is_empty() {
         imod_put_int(file, ID_SIZE as i32).map_err(|_| IMOD_ERROR_WRITE)?;
         imod_put_int(file, (cont.sizes.len() * 4) as i32).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -1199,6 +2462,10 @@ pub fn imodel_write_contour(cont: &Icont, file: &mut File) -> Result<(), i32> {
 
 /// Original: `imodel_write_mesh` (`imodel_files.c:480`).
 pub fn imodel_write_mesh(mesh: &Imesh, file: &mut File) -> Result<(), i32> {
+    // imeshThickness (`imesh.h:54`): paired thickness meshes are not written.
+    if (mesh.flag & (63 << 24)) >> 24 != 0 {
+        return Ok(());
+    }
     imod_put_int(file, ID_MESH as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, mesh.vert.len() as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, mesh.list.len() as i32).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -1220,12 +2487,23 @@ pub fn imodel_write_mesh(mesh: &Imesh, file: &mut File) -> Result<(), i32> {
 }
 
 /// Original: `imodel_write_object` (`imodel_files.c:345`).
-pub fn imodel_write_object(object: &Iobj, file: &mut File) -> Result<(), i32> {
+pub fn imodel_write_object(object: &Iobj, file: &mut File, skip_mesh: i32) -> Result<(), i32> {
+    // `imodel_files.c:352` writes the number of meshes that have no thickness
+    // in their flag word, not the size of the mesh array.
+    let mut num_real = 0;
+    for mesh in &object.mesh {
+        // imeshThickness (`imesh.h:54`)
+        if (mesh.flag & (63 << 24)) >> 24 == 0 {
+            num_real += 1;
+        }
+    }
     imod_put_int(file, ID_OBJT as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-    let mut name = [0_u8; 64];
-    let source = object.name.as_bytes();
-    name[..source.len().min(63)].copy_from_slice(&source[..source.len().min(63)]);
-    file.write_all(&name).map_err(|_| IMOD_ERROR_WRITE)?;
+    // `imodel_files.c:352` writes the whole IOBJ_STRSIZE array, including any
+    // bytes past the terminating NUL.
+    file.write_all(unsafe {
+        std::slice::from_raw_parts(object.name.as_ptr() as *const u8, IOBJ_STRSIZE)
+    })
+    .map_err(|_| IMOD_ERROR_WRITE)?;
     for value in object.extra {
         imod_put_int(file, value as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     }
@@ -1249,13 +2527,20 @@ pub fn imodel_write_object(object: &Iobj, file: &mut File) -> Result<(), i32> {
         imod_put_byte(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
     }
     imod_put_byte(file, object.trans).map_err(|_| IMOD_ERROR_WRITE)?;
-    imod_put_int(file, object.mesh.len() as i32).map_err(|_| IMOD_ERROR_WRITE)?;
+    imod_put_int(file, num_real).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, object.surfsize).map_err(|_| IMOD_ERROR_WRITE)?;
+    if object.label.is_some() {
+        crate::imod::libimod::ilabel::imod_label_write(object.label.as_ref(), ID_OLBL, file);
+    }
     for contour in &object.cont {
         imodel_write_contour(contour, file)?;
     }
-    for mesh in &object.mesh {
-        imodel_write_mesh(mesh, file)?;
+    if (!object.cont.is_empty() && (skip_mesh & 1) == 0)
+        || (object.cont.is_empty() && (skip_mesh & 2) == 0)
+    {
+        for mesh in &object.mesh {
+            imodel_write_mesh(mesh, file)?;
+        }
     }
     if object.clips.count > 0 {
         imod_put_int(file, ID_CLIP as i32).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -1267,12 +2552,24 @@ pub fn imodel_write_object(object: &Iobj, file: &mut File) -> Result<(), i32> {
             object.clips.plane,
         ])
         .map_err(|_| IMOD_ERROR_WRITE)?;
-        for index in 0..object.clips.count.min(7) as usize {
-            for point in [object.clips.normal[index], object.clips.point[index]] {
-                imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
-                imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
-                imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
-            }
+        // `imodel_files.c:406-408` makes two `imodPutScaledPoints` calls, so
+        // all `count` normals precede all `count` points; they are not
+        // interleaved.  The scale is `(mod->xybin, mod->xybin, mod->zbin)`,
+        // which only `3dmod` ever moves off 1, and `Imod` here has no such
+        // member (see the deviation note on `imodDefault`), so the normals'
+        // `1/scale` and the points' `scale` are both the identity.
+        let count = (object.clips.count as usize).min(object.clips.normal.len());
+        for index in 0..count {
+            let point = object.clips.normal[index];
+            imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
+            imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
+            imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
+        }
+        for index in 0..count {
+            let point = object.clips.point[index];
+            imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
+            imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
+            imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
         }
     }
     imod_put_int(file, ID_IMAT as i32).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -1305,157 +2602,18 @@ pub fn imodel_write_object(object: &Iobj, file: &mut File) -> Result<(), i32> {
     Ok(())
 }
 
-/// Original: `imodViewModelWrite` / `imodViewWrite` (`iview.c:230`, `iview.c:136`).
-pub fn imod_view_model_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
-    if imod.view.len() < 2 {
-        return Ok(());
-    }
-    imod_put_int(file, ID_VIEW as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-    imod_put_int(file, 4).map_err(|_| IMOD_ERROR_WRITE)?;
-    imod_put_int(file, imod.cview).map_err(|_| IMOD_ERROR_WRITE)?;
-    for view in imod.view.iter().skip(1) {
-        imod_put_int(file, ID_VIEW as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-        let object_bytes = view.objview.len() * (43 + 24 * 7);
-        let size = 176
-            + if view.objview.is_empty() {
-                0
-            } else {
-                8 + object_bytes
-            };
-        imod_put_int(file, size as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-        for value in [
-            view.fovy,
-            view.rad,
-            view.aspect,
-            view.cnear,
-            view.cfar,
-            view.rot.x,
-            view.rot.y,
-            view.rot.z,
-            view.trans.x,
-            view.trans.y,
-            view.trans.z,
-            view.scale.x,
-            view.scale.y,
-            view.scale.z,
-        ] {
-            imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        for value in view.mat {
-            imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        imod_put_int(file, view.world as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-        file.write_all(&view.label).map_err(|_| IMOD_ERROR_WRITE)?;
-        for value in [
-            view.dcstart,
-            view.dcend,
-            view.lightx,
-            view.lighty,
-            view.plax,
-        ] {
-            imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        if !view.objview.is_empty() {
-            imod_put_int(file, view.objview.len() as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-            imod_put_int(file, object_bytes as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-            for object in &view.objview {
-                imod_put_int(file, object.flags as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-                for value in [object.red, object.green, object.blue] {
-                    imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
-                }
-                imod_put_int(file, object.pdrawsize).map_err(|_| IMOD_ERROR_WRITE)?;
-                file.write_all(&[
-                    object.linewidth,
-                    object.linesty,
-                    object.trans,
-                    object.clips.count,
-                    object.clips.flags,
-                    object.clips.trans,
-                    object.clips.plane,
-                ])
-                .map_err(|_| IMOD_ERROR_WRITE)?;
-                for index in 0..7 {
-                    for point in [object.clips.normal[index], object.clips.point[index]] {
-                        imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
-                        imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
-                        imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
-                    }
-                }
-                file.write_all(&[
-                    object.ambient,
-                    object.diffuse,
-                    object.specular,
-                    object.shininess,
-                    object.fillred,
-                    object.fillgreen,
-                    object.fillblue,
-                    object.quality,
-                ])
-                .map_err(|_| IMOD_ERROR_WRITE)?;
-                imod_put_int(file, object.mat2 as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-                file.write_all(&[
-                    object.valblack,
-                    object.valwhite,
-                    object.matflags2,
-                    object.mesh_thickness,
-                ])
-                .map_err(|_| IMOD_ERROR_WRITE)?;
-            }
-        }
-        if view.clips.count > 0 {
-            imod_put_int(file, ID_MCLP as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-            imod_put_int(file, 4 + 24 * view.clips.count as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-            file.write_all(&[
-                view.clips.count,
-                view.clips.flags,
-                view.clips.trans,
-                view.clips.plane,
-            ])
-            .map_err(|_| IMOD_ERROR_WRITE)?;
-            for index in 0..view.clips.count as usize {
-                for point in [view.clips.normal[index], view.clips.point[index]] {
-                    imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
-                    imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
-                    imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Original: `imodIMNXWrite` (`iview.c:625`).
-pub fn imod_imnx_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
-    let Some(reference) = imod.ref_image else {
-        return Ok(());
-    };
-    imod_put_int(file, ID_IMNX as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-    imod_put_int(file, 72).map_err(|_| IMOD_ERROR_WRITE)?;
-    for point in [
-        reference.oscale,
-        reference.otrans,
-        reference.orot,
-        reference.cscale,
-        reference.ctrans,
-        reference.crot,
-    ] {
-        for value in [point.x, point.y, point.z] {
-            imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-    }
-    Ok(())
-}
-
 /// Original: `imodel_write` (`imodel_files.c:276`).
-pub fn imodel_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
+pub fn imodel_write(imod: &Imod, file: &mut File, skip_mesh: i32) -> Result<(), i32> {
     file.seek(SeekFrom::Start(0))
         .map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, ID_IMOD as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, IMOD_V12 as i32).map_err(|_| IMOD_ERROR_WRITE)?;
-    let mut name = [0_u8; 128];
-    let source = imod.name.as_bytes();
-    name[..source.len().min(127)].copy_from_slice(&source[..source.len().min(127)]);
-    file.write_all(&name).map_err(|_| IMOD_ERROR_WRITE)?;
+    // `imodel_files.c:300` writes the whole IMOD_STRSIZE array, including any
+    // bytes past the terminating NUL.
+    file.write_all(unsafe {
+        std::slice::from_raw_parts(imod.name.as_ptr() as *const u8, IMOD_STRSIZE)
+    })
+    .map_err(|_| IMOD_ERROR_WRITE)?;
     // `imodel_files.c:286` sets these bits before serializing the header.
     // They declare the byte material fields, multiple clip-plane support, and
     // mesh-thickness field emitted by this writer.
@@ -1494,15 +2652,15 @@ pub fn imodel_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
     }
     imod_put_float(file, imod.pixsize).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, imod.units).map_err(|_| IMOD_ERROR_WRITE)?;
-    imod_put_int(file, 0).map_err(|_| IMOD_ERROR_WRITE)?;
+    imod_put_int(file, imod.csum).map_err(|_| IMOD_ERROR_WRITE)?;
     for value in [imod.alpha, imod.beta, imod.gamma] {
         imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
     }
     for object in &imod.obj {
-        imodel_write_object(object, file)?;
+        imodel_write_object(object, file, skip_mesh)?;
     }
-    imod_view_model_write(imod, file)?;
-    imod_imnx_write(imod, file)?;
+    super::iview::imod_view_model_write(imod, file)?;
+    super::iview::imod_imnx_write(imod, file)?;
     obj_group_list_write(&imod.group_list, file)?;
     if imod_write_store(&imod.store, ID_MOST as i32, file) != 0 {
         return Err(IMOD_ERROR_WRITE);
@@ -1513,7 +2671,26 @@ pub fn imodel_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
 
 /// Original: `imodWrite` (`imodel_files.c:249`).
 pub fn imod_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
-    imodel_write(imod, file)
+    imod_write_skip_mesh(imod, file, 0)
+}
+
+/// Original: `imodWriteSkipMesh` (`imodel_files.c:259`).
+///
+/// The source saves and restores `imod->file` around the write; the translated
+/// `Imod` carries no `file` member, so there is nothing to save.
+pub fn imod_write_skip_mesh(imod: &Imod, fout: &mut File, which_skip: i32) -> Result<(), i32> {
+    if imodel_write(imod, fout, which_skip).is_err() {
+        return Err(-1);
+    }
+    Ok(())
+}
+
+/// Original: `imodWriteFile` (`imodel_files.c:236`).
+///
+/// The source writes to the `FILE *` stored in `imod->file`; that member has no
+/// counterpart here, so the destination is passed explicitly.
+pub fn imod_write_file(imod: &Imod, file: &mut File) -> Result<(), i32> {
+    imodel_write(imod, file, 0)
 }
 
 /// Original: `imodFileWrite` (`imodel_files.c:77`).
@@ -1522,9 +2699,95 @@ pub fn imod_file_write(imod: &Imod, path: impl AsRef<Path>) -> Result<(), i32> {
     imod_write(imod, &mut file)
 }
 
+/// Original: `imodFileRead` (`imodel_files.c:68`).
+pub fn imod_file_read(filename: impl AsRef<Path>) -> Result<Imod, i32> {
+    imod_read(filename)
+}
+
+/// Original: `imodOpenFile` (`imodel_files.c:93`).
+///
+/// The source stores the opened `FILE *` in `imod->file` and a copy of the path
+/// in `imod->fileName`; the translated `Imod` (`imodel.rs`) carries neither
+/// member, so the opened handle is returned to the caller and `imod` is left
+/// alone.  `mode` is the `fopen` mode string: the first character selects read,
+/// write or append and a `+` adds the other direction.
+pub fn imod_open_file(filename: &str, mode: &str, _imod: &mut Imod) -> Result<File, i32> {
+    let update = mode.contains('+');
+    let mut options = OpenOptions::new();
+    match mode.as_bytes().first() {
+        Some(b'r') => {
+            options.read(true).write(update);
+        }
+        Some(b'w') => {
+            options.write(true).read(update).create(true).truncate(true);
+        }
+        Some(b'a') => {
+            options.append(true).read(update).create(true);
+        }
+        _ => return Err(-1),
+    }
+    options.open(filename).map_err(|_| -1)
+}
+
+/// Original: `imodCloseFile` (`imodel_files.c:115`).
+///
+/// The source closes `imod->file`; that member has no counterpart here, so the
+/// handle opened by `imod_open_file` is passed back in.
+pub fn imod_close_file(file: Option<File>) -> i32 {
+    let Some(file) = file else {
+        return -1;
+    };
+    drop(file);
+    0
+}
+
+/// Original: `imodTestIfModelFile` (`imodel_files.c:212`).
+///
+/// `substr` (`imodel_from.c:207`) compares the first `strlen(ls)` characters of
+/// the two strings; `imodel_from.c` has no translated module, so the comparison
+/// is done in place.
+pub fn imod_test_if_model_file(filename: impl AsRef<Path>) -> i32 {
+    let mut ret = 0;
+    let mut line = [0u8; MAXLINE as usize];
+    let Ok(mut fp) = File::open(filename) else {
+        return 1;
+    };
+    let id = imod_get_int(&mut fp).unwrap_or(0) as u32;
+    if id != ID_IMOD {
+        if fp.seek(SeekFrom::Start(0)).is_err() {
+            return 1;
+        }
+        let len = imod_fgetline(&mut fp, &mut line, MAXLINE);
+        /* substr(line, "imod ") */
+        let prefix = b"imod ";
+        let mut matched = 1;
+        for i in 0..prefix.len() {
+            if line[i] != prefix[i] {
+                matched = 0;
+                break;
+            }
+        }
+        if len < 1 || matched == 0 {
+            ret = 2;
+        } else {
+            ret = -1;
+        }
+    }
+    ret
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test-only: builds a fixed-size NUL-padded model/object name array.
+    fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+        let mut name = [0; N];
+        for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
+            *slot = *byte as std::ffi::c_char;
+        }
+        name
+    }
 
     #[test]
     fn object_group_ogrp_chunk_round_trips_in_a_real_binary_model() {
@@ -1549,7 +2812,7 @@ mod tests {
             std::process::id()
         ));
         let mut file = File::create(&path).unwrap();
-        imodel_write(&Imod::default(), &mut file).unwrap();
+        imodel_write(&Imod::default(), &mut file, 0).unwrap();
         drop(file);
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(
@@ -1566,7 +2829,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("imod-rs-imodel-files-{}", std::process::id()));
         let imod = Imod {
-            name: "binary fixture".into(),
+            name: name_array("binary fixture"),
             xmax: 10,
             ymax: 20,
             zmax: 30,
@@ -1576,7 +2839,7 @@ mod tests {
             pixsize: 1.5,
             units: -9,
             obj: vec![Iobj {
-                name: "object".into(),
+                name: name_array("object"),
                 red: 1.0,
                 surfsize: 2,
                 cont: vec![Icont {
@@ -1729,7 +2992,10 @@ mod tests {
         std::fs::write(&path, "imod 1\nmax 10 20 30\nscale 1 2 3\nrefcurscale 2 3 4\nrefcurtrans 5 6 7\nobject 0 1 0\nname old model object\ncolor 0.1 0.2 0.3 4\ncontour 0 2 2\n1 2 3 4\n5 6 7 8\nview 1\nviewfovy 33\nviewtrans 2 3 4\ncurrentview 1\n").unwrap();
         let output = imod_read(&path).unwrap();
         std::fs::remove_file(path).unwrap();
-        assert_eq!(output.obj[0].name, "old model object");
+        assert_eq!(
+            unsafe { std::ffi::CStr::from_ptr(output.obj[0].name.as_ptr()) },
+            c"old model object"
+        );
         assert_eq!(output.obj[0].cont[0].pts.len(), 2);
         assert_eq!(output.obj[0].cont[0].sizes, vec![4., 8.]);
         assert_eq!(output.view.len(), 2);

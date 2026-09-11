@@ -22,6 +22,7 @@ pub struct HullIo {
 /// Original `hull_triangulate` (`hullwrap.c:38`).
 pub unsafe fn hull_triangulate(hio: *mut HullIo) -> i32 {
     unsafe {
+        crate::imod::libwarp::hull_io::DFILE = stderr;
         if (*hio).verbose != 0 {
             libc::fprintf(
                 stderr,

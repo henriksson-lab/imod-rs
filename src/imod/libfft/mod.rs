@@ -10,6 +10,7 @@ pub mod hermft;
 pub mod mdftkd;
 pub mod odfft;
 pub mod realft;
+pub mod rustfft_backend;
 pub mod srfp;
 pub mod thrdfft;
 pub mod todfft;

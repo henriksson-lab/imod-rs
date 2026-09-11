@@ -17,11 +17,11 @@ fn group_option_falls_through_to_source_chart_mode_for_binary_ogrp_chunk() {
     let model = Imod {
         obj: vec![
             Iobj {
-                name: "not selected".into(),
+                name: name_array("not selected"),
                 ..Iobj::default()
             },
             Iobj {
-                name: "selected".into(),
+                name: name_array("selected"),
                 ..Iobj::default()
             },
         ],
@@ -62,7 +62,7 @@ fn standard_report_emits_source_object_drawing_and_color_preamble() {
     imod_file_write(
         &Imod {
             obj: vec![Iobj {
-                name: "preamble".into(),
+                name: name_array("preamble"),
                 flags: IMOD_OBJFLAG_OFF | IMOD_OBJFLAG_OPEN | IMOD_OBJFLAG_OUT,
                 red: 0.1,
                 green: 0.2,
@@ -165,7 +165,7 @@ fn file_option_writes_cli_report_and_backs_up_existing_output() {
     imod_file_write(
         &Imod {
             obj: vec![Iobj {
-                name: "written to file".into(),
+                name: name_array("written to file"),
                 ..Iobj::default()
             }],
             ..Imod::default()
@@ -228,9 +228,12 @@ fn list_and_group_conflict_backs_up_source_output_before_error_for_binary_model(
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(1));
+    // `exitError` reports through `PipSetError`, which writes the exit prefix
+    // and the message to stdout; verified against the native imodinfo.
+    assert!(result.stderr.is_empty());
     assert_eq!(
-        String::from_utf8(result.stderr).unwrap(),
-        "ERROR: imodinfo - You cannot enter both an object list and an object group\n"
+        String::from_utf8(result.stdout).unwrap(),
+        "ERROR: imodinfo -  You cannot enter both an object list and an object group\n"
     );
     assert_eq!(
         std::fs::read_to_string(&backup).unwrap(),
@@ -254,11 +257,13 @@ fn malformed_h_option_uses_source_help_diagnostic_before_binary_model_read() {
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(1));
+    // Same `exitError` stdout route as above; verified against the native
+    // imodinfo, which prints nothing on stderr here.
+    assert!(result.stderr.is_empty());
     assert_eq!(
-        String::from_utf8(result.stderr).unwrap(),
-        "ERROR: imodinfo - Unknown option -huh; enter -help for help\n"
+        String::from_utf8(result.stdout).unwrap(),
+        "ERROR: imodinfo -  Unknown option -huh; enter -help for help\n"
     );
-    assert!(result.stdout.is_empty());
     let _ = std::fs::remove_file(input);
 }
 
@@ -276,7 +281,7 @@ fn malformed_model_reports_and_continues_to_next_binary_model() {
     imod_file_write(
         &Imod {
             obj: vec![Iobj {
-                name: "valid second model".into(),
+                name: name_array("valid second model"),
                 ..Iobj::default()
             }],
             ..Imod::default()
@@ -355,7 +360,7 @@ fn full_report_uses_source_cylinder_volume_and_surface_scaling() {
             pixsize: 2.,
             zscale: 3.,
             obj: vec![Iobj {
-                name: "scaled triangle".into(),
+                name: name_array("scaled triangle"),
                 cont: vec![Icont {
                     pts: vec![
                         Ipoint {
@@ -440,7 +445,7 @@ fn full_report_emits_source_clip_and_secondary_values_block() {
         std::process::id()
     ));
     let mut object = Iobj {
-        name: "clipped open line".into(),
+        name: name_array("clipped open line"),
         flags: IMOD_OBJFLAG_OPEN,
         cont: vec![Icont {
             pts: vec![
@@ -600,7 +605,7 @@ fn point_mode_emits_source_object_header_for_sized_binary_contour() {
     imod_file_write(
         &Imod {
             obj: vec![Iobj {
-                name: "sized".into(),
+                name: name_array("sized"),
                 cont: vec![Icont {
                     pts: vec![Ipoint::default()],
                     sizes: vec![2.],
@@ -651,7 +656,8 @@ fn ratio_mode_keeps_source_row_for_zero_length_binary_contour() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert!(String::from_utf8(output.stdout).unwrap().contains("1 NaN"));
+    // `%g` of the 0/0 ratio; the native imodinfo prints "-nan" here.
+    assert!(String::from_utf8(output.stdout).unwrap().contains("1 -nan"));
     let _ = std::fs::remove_file(input);
 }
 
@@ -666,7 +672,7 @@ fn ellipse_mode_emits_source_heading_units_and_contour_row() {
             units: -9,
             pixsize: 1.,
             obj: vec![Iobj {
-                name: "ellipse".into(),
+                name: name_array("ellipse"),
                 cont: vec![Icont {
                     pts: vec![
                         Ipoint {
@@ -740,7 +746,7 @@ fn ascii_file_mode_writes_implemented_binary_model_categories_and_backup() {
         }),
         view: vec![Default::default(), view],
         obj: vec![Iobj {
-            name: "ascii object".into(),
+            name: name_array("ascii object"),
             fillred: 1,
             flags: 1 << 8,
             ambient: 2,
@@ -831,4 +837,122 @@ fn ascii_file_mode_writes_implemented_binary_model_categories_and_backup() {
     for path in [input, output, backup] {
         let _ = std::fs::remove_file(path);
     }
+}
+
+#[test]
+fn source_g_format_and_nul_terminated_names_match_the_native_report() {
+    // `BBa_erase.fid` carries 115 bytes of raw record data after the NUL that
+    // ends "IMOD-NewModel", and its refImage translation is 383.80002 in
+    // binary32.  The native imodinfo prints the name up to the NUL and every
+    // float through `%g`; both were compared against
+    // /tmp/imod-reference-build/imodutil/imodinfo.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
+    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(stdout.contains("# NAME  IMOD-NewModel\n"), "{stdout:.400}");
+    assert!(stdout.contains("#      OFFSET = ( 383.8, 383.8, 0)\n"));
+    assert!(stdout.contains("#      SCALE  = ( 20.2, 20.2, 20.2)\n"));
+    // %g, not Rust's shortest round-trip 377.39789897253235.
+    assert!(stdout.contains("\tCONTOUR #1,1,0  61 points\tlength = 377.398 pixels\n"));
+    // print_units writes with no newline of its own.
+    assert!(stdout.contains("# UNITS: pixels\n# Model to Image index coords:\n"));
+}
+
+#[test]
+fn verbose_contour_statistics_match_the_native_icont_report() {
+    // `imodinfo.cpp:1509-1543` prints centre of mass, bounding box,
+    // circularity, orientation, the ellipse ratio, length x width and aspect
+    // ratio for every contour under -v.  The block below is contour #55 of
+    // `BBa_erase.fid` verbatim from
+    // AUTODOC_DIR=... LD_LIBRARY_PATH=... /tmp/imod-reference-build/imodutil/imodinfo -v
+    // (whose whole 602-line -v report this crate now reproduces exactly).
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
+    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .args(["-v"])
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        stdout.contains(concat!(
+            "\tCONTOUR #55,1,0  61 points.\n",
+            "\t\tClosed/Open length = 798.317 / 536.081\n",
+            "\t\tEnclosed Area      = 10252.1\n",
+            "\t\tCenter of Mass     = (104.725, 149.665, 4.17754e-32) in pixel coords.\n",
+            "\t\tBounding Box        = {(4.17754e-32, 8.82818e-44), (191.773, 223.881)}\n",
+            "\t\tCircularity        = 2.81709\n",
+            "\t\tOrientation        = 50 degrees.\n",
+            "\t\tEllipse            = 0.387295\n",
+            "\t\tLength X Width     = 294.557 x 114.423\n",
+            "\t\tAspect Ratio       = 2.57428\n",
+        )),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn chart_mode_uses_source_column_format_and_contour_centroid() {
+    // Native chart row for the single open object of BBa_erase.fid:
+    //    1              0             0             0             0     160.51    192.99      9.66
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
+    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .args(["-c"])
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        stdout.contains(
+            "   1              0             0             0             0     160.51    192.99      9.66\n"
+        ),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn ascii_mode_rewinds_over_the_preliminary_report_and_formats_with_g() {
+    // `imodWriteAscii` rewinds `imod->file`, so with stdout redirected to a
+    // file the header written before it is overwritten, exactly as the native
+    // imodinfo does.  `valminmax` and the contour value1 both use `%g`.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
+    let report =
+        std::env::temp_dir().join(format!("imod-rs-imodinfo-ascii-{}.txt", std::process::id()));
+    let file = std::fs::File::create(&report).unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        .args(["-a"])
+        .arg(&fixture)
+        .stdout(file)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let text = std::fs::read_to_string(&report).unwrap();
+    assert!(
+        text.starts_with("# imod ascii file version 2.0\n"),
+        "{:.200}",
+        text
+    );
+    assert!(text.contains("\nvalminmax 0.632298 1\n"));
+    assert!(text.contains("\nrefcurtrans 383.8 383.8 0\n"));
+    assert!(text.contains("\ncontour 1 0 61 0.993284\n"));
+    assert!(text.contains("\nunits      pixels\n"));
+    let _ = std::fs::remove_file(report);
+}
+
+/// Test-only: builds a fixed-size NUL-padded model/object name array.
+fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+    let mut name = [0; N];
+    for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
+        *slot = *byte as std::ffi::c_char;
+    }
+    name
 }

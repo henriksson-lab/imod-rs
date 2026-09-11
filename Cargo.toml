@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "gui/*"]
+
 [package]
 name = "imod-rs"
 version = "0.0.0"
@@ -13,10 +16,20 @@ default = ["qt"]
 # Enables the direct C++/Qt QImage boundary used by mrc2tif JPEG/PNG output.
 # The workspace builds `mrc2tif_qimage_save` against the system Qt installation.
 qt = []
+# Default-off Rust-native experimental backends.  They are selected at runtime
+# only when the matching IMOD_RS_*_BACKEND environment variable requests them.
+rust-tiff = ["dep:tiff"]
+rust-image-encoder = ["dep:image"]
+rustfft-backend = ["dep:rustfft", "dep:num-complex"]
+rust-native-backends = ["rust-tiff", "rust-image-encoder", "rustfft-backend"]
 
 [dependencies]
 libc = "0.2"
 regex = "1"
+tiff = { version = "0.11", optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
+rustfft = { version = "6.2", optional = true }
+num-complex = { version = "0.4", optional = true }
 
 [[bin]]
 name = "newstack"

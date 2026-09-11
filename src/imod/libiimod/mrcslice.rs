@@ -7,8 +7,44 @@ use crate::imod::libcfshr::islice::{
 use crate::imod::libiimod::mrcfiles::{
     LoadInfo, MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT,
     MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_head_new, mrc_head_write,
-    mrc_write_slice,
+    mrc_mread_slice, mrc_write_slice,
 };
+use core::ffi::c_char;
+
+/// `sliceReadMRC` from `mrcslice.c:945`.
+///
+/// Returns a slice holding one plane of `hin` at coordinate `sno` along
+/// `axis`, using the file pointer in `hin`.  Calls `mrc_mread_slice`, which
+/// swaps bytes if needed.  Returns null on error.
+pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: c_char) -> *mut Islice {
+    unsafe {
+        let slice = libc::malloc(core::mem::size_of::<Islice>()).cast::<Islice>();
+        if slice.is_null() {
+            return core::ptr::null_mut();
+        }
+        (*slice).mean = (*hin).amean;
+        let buf = mrc_mread_slice((*hin).fp.cast(), hin, sno, axis);
+        if buf.is_null() {
+            libc::free(slice.cast());
+            return core::ptr::null_mut();
+        }
+        // `mrcslice.c:960-978`: the switch has no assignment in its `default`
+        // arm, so an unrecognised axis leaves nx and ny indeterminate in C.
+        // Rust cannot reproduce an indeterminate local; zero is used and the
+        // deviation is confined to an axis the callers never pass.
+        let (nx, ny) = match axis as u8 {
+            b'x' | b'X' => ((*hin).nx, (*hin).nz),
+            b'y' | b'Y' => ((*hin).ny, (*hin).nz),
+            b'z' | b'Z' => ((*hin).nx, (*hin).ny),
+            _ => (0, 0),
+        };
+        if slice_init(slice, nx, ny, (*hin).mode, buf) != 0 {
+            libc::free(slice.cast());
+            return core::ptr::null_mut();
+        }
+        slice
+    }
+}
 
 /// `sliceReadSubm` from mrcslice.c:996.
 ///
@@ -396,17 +432,67 @@ pub unsafe fn slice_add_const(slice: *mut Islice, c: [f32; 4]) -> i32 {
         0
     }
 }
+/// `sliceMultConst` (`mrcslice.c:553`).
+///
+/// The source is a `switch` on `csize` in which **`case 2` has no `break`**
+/// (`mrcslice.c:575`), so a two-channel slice runs the two-channel loop and
+/// then falls through and runs the three-channel loop as well — its first two
+/// channels are scaled twice, by `c[i]` squared.  A generic loop over `csize`
+/// scales them once, which diverges for complex data.
+///
+/// Structurally faithful but **execution-unverified**: no command-line input
+/// has been found that reaches this function with `csize == 2`.  A complex
+/// float MRC authored by the reference `clip fft`, run through
+/// `clip average -l 2`, produces identical output whether or not the
+/// fall-through is present, so that case does not exercise it.
 pub unsafe fn slice_mult_const(slice: *mut Islice, c: [f32; 4]) -> i32 {
     unsafe {
-        for j in 0..(*slice).ysize {
-            for i in 0..(*slice).xsize {
-                let mut v = [0.; 4];
-                slice_get_val(slice, i, j, &mut v);
-                for q in 0..(*slice).csize.min(3) as usize {
-                    v[q] *= c[q];
+        match (*slice).csize {
+            1 => {
+                for j in 0..(*slice).ysize {
+                    for i in 0..(*slice).xsize {
+                        let mut v = [0.; 4];
+                        slice_get_val(slice, i, j, &mut v);
+                        v[0] *= c[0];
+                        slice_put_val(slice, i, j, v);
+                    }
                 }
-                slice_put_val(slice, i, j, v);
             }
+            2 => {
+                for j in 0..(*slice).ysize {
+                    for i in 0..(*slice).xsize {
+                        let mut v = [0.; 4];
+                        slice_get_val(slice, i, j, &mut v);
+                        v[0] *= c[0];
+                        v[1] *= c[1];
+                        slice_put_val(slice, i, j, v);
+                    }
+                }
+                // No `break` at `mrcslice.c:575`: control falls into case 3.
+                for j in 0..(*slice).ysize {
+                    for i in 0..(*slice).xsize {
+                        let mut v = [0.; 4];
+                        slice_get_val(slice, i, j, &mut v);
+                        v[0] *= c[0];
+                        v[1] *= c[1];
+                        v[2] *= c[2];
+                        slice_put_val(slice, i, j, v);
+                    }
+                }
+            }
+            3 => {
+                for j in 0..(*slice).ysize {
+                    for i in 0..(*slice).xsize {
+                        let mut v = [0.; 4];
+                        slice_get_val(slice, i, j, &mut v);
+                        v[0] *= c[0];
+                        v[1] *= c[1];
+                        v[2] *= c[2];
+                        slice_put_val(slice, i, j, v);
+                    }
+                }
+            }
+            _ => {}
         }
         0
     }
@@ -703,24 +789,29 @@ pub unsafe fn mrc_bandpass_filter(sin: *mut Islice, low: f64, high: f64) -> i32 
         for j in 0..(*sin).ysize {
             for i in 0..(*sin).xsize {
                 let dx = xscale * i as f64;
-                let dy = j as f64 / (*sin).ysize as f64 - 0.5;
+                // C `mrcslice.c:1183`: `dy = (float)j / sin->ysize - 0.5;` divides
+                // in float (both operands convert to float) and only then widens
+                // for the `- 0.5`, so the quotient is rounded to float first.
+                let dy = (j as f32 / (*sin).ysize as f32) as f64 - 0.5;
                 let dist = (dx * dx + dy * dy).sqrt();
                 let mut m = if low > 0. {
                     if dist < 0.00001 {
                         0.
                     } else {
-                        1. / (1. + (low / dist).powi(3))
+                        1. / (1. + (low / dist).powf(3.))
                     }
                 } else {
                     1.
                 };
                 if high > 0. {
-                    m *= 1. / (1. + (dist / high).powi(3));
+                    m *= 1. / (1. + (dist / high).powf(3.));
                 }
                 let mut v = [0.; 4];
                 slice_get_val(sin, i, j, &mut v);
-                v[0] *= m as f32;
-                v[1] *= m as f32;
+                // C `mrcslice.c:1197-1198`: `val[0] *= mval;` with `mval` double
+                // multiplies in double and rounds to float once on the store.
+                v[0] = (v[0] as f64 * m) as f32;
+                v[1] = (v[1] as f64 * m) as f32;
                 slice_put_val(sin, i, j, v);
             }
         }

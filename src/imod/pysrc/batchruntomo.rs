@@ -2783,6 +2783,112 @@ pub fn send_email(
     ))
 }
 
+/// Matches `runFindSection` (`IMOD/pysrc/batchruntomo:1547`).
+///
+/// The source's `global suppressAbort` is a module-level flag that
+/// `abortSet` reads; it is set to `failureOK` around the one
+/// `runOneProcess` call and cleared afterwards, so it is threaded through
+/// the two places that read it rather than kept as a Rust global.
+///
+/// `topBots` is the source's in/out list of six Z limits.
+#[allow(clippy::too_many_arguments)]
+pub fn run_find_section(
+    filename: &str,
+    num_scales: i32,
+    box_size: i32,
+    pitch_mod: Option<&str>,
+    top_bots: Option<&mut [i32; 6]>,
+    block: Option<i32>,
+    failure_ok: bool,
+    com_root: &str,
+    com_extension: &str,
+    options: &ProcessRunOptions,
+    renaming_only: bool,
+    exit_on_error: bool,
+) -> Result<i32, String> {
+    let limit_keys = ["Median Z values", "autopatchfit combine", "Absolute limits"];
+    let mut com_lines = vec![
+        "$findsection -StandardInput".to_owned(),
+        format!("TomogramFile {filename}"),
+        format!("NumberOfDefaultScales {num_scales}"),
+        // `fmtstr('SizeOfBoxesInXYZ {0},1,{0}', boxSize)`.
+        format!("SizeOfBoxesInXYZ {box_size},1,{box_size}"),
+    ];
+    if let Some(pitch_mod) = pitch_mod {
+        com_lines.push(format!("TomoPitchModel {pitch_mod}"));
+        com_lines.push("NumberOfSamples 5".to_owned());
+        if let Some(block) = block {
+            com_lines.push(format!("BlockSize {block}"));
+        }
+    }
+    if write_text_file_report_err(&format!("{com_root}{com_extension}"), &com_lines).is_err() {
+        return Ok(1);
+    }
+    let mut mess = "Finding Z limits of the material in the tomogram";
+    if pitch_mod.is_some() {
+        mess = "Getting a model for tomogram positioning";
+    }
+    // `suppressAbort = failureOK` around this call only.
+    let err = run_one_process(
+        &format!("{com_root}{com_extension}"),
+        false,
+        false,
+        mess,
+        options,
+    );
+    let err = match err {
+        Ok(code) => code,
+        Err(error) => {
+            if failure_ok {
+                return Ok(-1);
+            }
+            return Err(error);
+        }
+    };
+    if err != 0 {
+        return Ok(-1);
+    }
+    if let Some(top_bots) = top_bots {
+        let Ok(loglines) = read_text_file_report_err(&format!("{com_root}.log"), None) else {
+            return Ok(1);
+        };
+        if loglines.is_empty() {
+            return Ok(1);
+        }
+        for line in &loglines {
+            for ind in 0..3 {
+                if line
+                    .to_lowercase()
+                    .contains(&limit_keys[ind].to_lowercase())
+                {
+                    let lsplit: Vec<&str> = line.split_whitespace().collect();
+                    let parsed = lsplit
+                        .len()
+                        .checked_sub(2)
+                        .and_then(|i| lsplit[i].parse::<i32>().ok())
+                        .zip(lsplit.last().and_then(|v| v.parse::<i32>().ok()));
+                    match parsed {
+                        Some((first, second)) => {
+                            top_bots[2 * ind] = first;
+                            top_bots[2 * ind + 1] = second;
+                        }
+                        None => {
+                            abort_set(
+                                &format!("Error converting Z limits in: {line}"),
+                                false,
+                                renaming_only,
+                                exit_on_error,
+                            )?;
+                            return Ok(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(0)
+}
+
 /// Matches `abortSet` (`IMOD/pysrc/batchruntomo:95`).
 pub fn abort_set(
     error: &str,

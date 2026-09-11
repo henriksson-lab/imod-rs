@@ -846,8 +846,14 @@ pub unsafe fn iiu_ret_extended_data(i: i32, n: *mut i32, e: *mut i32) -> i32 {
         }
     }
 }
+unsafe extern "C" {
+    #[link_name = "stdout"]
+    static mut imod_stdout: *mut libc::FILE;
+}
+
 pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
-    let h = unsafe { iiu_mrc_header(i, c"iiAltExtendedData".as_ptr(), iiu_get_exit_on_error(), 2) };
+    let do_exit = unsafe { iiu_get_exit_on_error() };
+    let h = unsafe { iiu_mrc_header(i, c"iiAltExtendedData".as_ptr(), do_exit, 2) };
     if h.is_null() {
         return -1;
     }
@@ -856,9 +862,28 @@ pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
             return 0;
         }
         if (*h).swapped != 0 {
+            libc::fprintf(
+                imod_stdout,
+                c"\nERROR: iiuAltExtendedData - Cannot write extra header data to a byte-swapped file (unit %d).\n"
+                    .as_ptr(),
+                i,
+            );
+            if do_exit != 0 {
+                libc::exit(1);
+            }
             return -2;
         }
         if mrc_write_extra_header(h, e.cast(), n) != 0 {
+            libc::fprintf(
+                imod_stdout,
+                c"\nERROR: iiAltExtendedData - Writing %d bytes of extended header data for unit %d.\n"
+                    .as_ptr(),
+                n,
+                i,
+            );
+            if do_exit != 0 {
+                libc::exit(1);
+            }
             2
         } else {
             0

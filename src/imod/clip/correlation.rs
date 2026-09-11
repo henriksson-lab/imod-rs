@@ -72,7 +72,7 @@ pub unsafe fn clip_padcorr(slice: *mut Islice, pad: i32) {
     unsafe {
         if slice.is_null() || pad == 0 || (*slice).mode == MRC_MODE_COMPLEX_FLOAT {
             if !slice.is_null() && pad == 0 {
-                println!("no padding");
+                libc::printf(c"no padding\n".as_ptr());
             }
             return;
         }
@@ -187,9 +187,19 @@ pub unsafe fn clip_corr3d(
         crate::imod::clip::processing::clip_get_stat3d(
             first, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
         );
-        println!("stats on vol 1:");
-        println!("max = {max}, min = {min}, mean = {mean}");
-        println!("location of max pixel = ({xmax}, {ymax} {zmax})");
+        libc::printf(c"stats on vol 1:\n".as_ptr());
+        libc::printf(
+            c"max = %g, min = %g, mean = %g\n".as_ptr(),
+            max as core::ffi::c_double,
+            min as core::ffi::c_double,
+            mean as core::ffi::c_double,
+        );
+        libc::printf(
+            c"location of max pixel = (%d, %d %d)\n".as_ptr(),
+            xmax,
+            ymax,
+            zmax,
+        );
         if (*options).val as i32 == crate::imod::clip::clip::IP_DEFAULT {
             (*options).val = 1.;
         }
@@ -197,13 +207,13 @@ pub unsafe fn clip_corr3d(
             crate::imod::clip::file_io::grap_volume_free(first);
             return -1;
         }
-        println!();
+        libc::printf(c"\n".as_ptr());
         let autocorrelation = (*options).infiles != 2;
         let second = if autocorrelation {
-            println!("Auto-Correlation");
+            libc::printf(c"Auto-Correlation\n".as_ptr());
             first
         } else {
-            println!("Cross-Correlation");
+            libc::printf(c"Cross-Correlation\n".as_ptr());
             let v = crate::imod::clip::file_io::grap_volume_read(input2, &mut *second_options);
             if v.is_null() {
                 crate::imod::clip::file_io::grap_volume_free(first);
@@ -212,18 +222,28 @@ pub unsafe fn clip_corr3d(
             crate::imod::clip::processing::clip_get_stat3d(
                 v, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
             );
-            println!("stats on vol 2:");
-            println!("max = {max}, min = {min}, mean = {mean}");
-            println!("location of max pixel = ({xmax}, {ymax} {zmax})");
+            libc::printf(c"stats on vol 2:\n".as_ptr());
+            libc::printf(
+                c"max = %g, min = %g, mean = %g\n".as_ptr(),
+                max as core::ffi::c_double,
+                min as core::ffi::c_double,
+                mean as core::ffi::c_double,
+            );
+            libc::printf(
+                c"location of max pixel = (%d, %d %d)\n".as_ptr(),
+                xmax,
+                ymax,
+                zmax,
+            );
             if (*options).val == 1. && padfloat_volume(v, mean) != 0 {
                 crate::imod::clip::file_io::grap_volume_free(v);
                 crate::imod::clip::file_io::grap_volume_free(first);
                 return -1;
             }
-            println!();
+            libc::printf(c"\n".as_ptr());
             v
         };
-        print!("Calculating fft 1");
+        libc::printf(c"Calculating fft 1".as_ptr());
         if crate::imod::clip::fft::clip_fftvol(first) != 0 {
             return -1;
         }
@@ -237,7 +257,7 @@ pub unsafe fn clip_corr3d(
         );
         (*output).fp = fp;
         if !autocorrelation {
-            print!("\rCalculating fft 2");
+            libc::printf(c"\rCalculating fft 2".as_ptr());
             if crate::imod::clip::fft::clip_fftvol(second) != 0 {
                 return -1;
             }
@@ -250,11 +270,11 @@ pub unsafe fn clip_corr3d(
                 size,
             );
         }
-        print!("\rCalculating inverse fft");
+        libc::printf(c"\rCalculating inverse fft".as_ptr());
         if crate::imod::clip::fft::clip_fftvol(first) != 0 || clip_cor_scalevol(first) != 0 {
             return -1;
         }
-        println!();
+        libc::printf(c"\n".as_ptr());
         crate::imod::clip::processing::clip_get_stat3d(
             first, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
         );
@@ -279,9 +299,24 @@ pub unsafe fn clip_corr3d(
         if peak_z > ((*first).zsize / 2) as f32 {
             peak_z -= (*first).zsize as f32;
         }
-        println!("max = {max}  min = {min}  mean = {mean}");
-        println!("location of max pixel ( {xmax}, {ymax}, {zmax}) is ");
-        println!("( {peak_x:.2}, {peak_y:.2}, {peak_z:.2})");
+        libc::printf(
+            c"max = %g  min = %g  mean = %g\n".as_ptr(),
+            max as core::ffi::c_double,
+            min as core::ffi::c_double,
+            mean as core::ffi::c_double,
+        );
+        libc::printf(
+            c"location of max pixel ( %d, %d, %d) is \n".as_ptr(),
+            xmax,
+            ymax,
+            zmax,
+        );
+        libc::printf(
+            c"( %.2f, %.2f, %.2f)\n".as_ptr(),
+            peak_x as core::ffi::c_double,
+            peak_y as core::ffi::c_double,
+            peak_z as core::ffi::c_double,
+        );
         mrc_head_new(
             &mut *output,
             (*(*(*first).vol)).xsize,
@@ -434,7 +469,7 @@ pub unsafe fn grap_corr(
             autocorrelation = false;
             z2 = *(*options).secs.add(1);
         }
-        if (*options).val as i32 == IP_DEFAULT {
+        if (*options).val == IP_DEFAULT as f32 {
             (*options).val = 1.;
         }
         if (*input1).mode == MRC_MODE_COMPLEX_FLOAT || (*input1).mode == MRC_MODE_COMPLEX_FLOAT {
@@ -485,10 +520,10 @@ pub unsafe fn grap_corr(
         if (*options).iy == IP_DEFAULT {
             (*options).iy = (*input1).ny;
         }
-        if (*options).cx as i32 == IP_DEFAULT {
+        if (*options).cx == IP_DEFAULT as f32 {
             (*options).cx = (*input1).nx as f32 / 2.;
         }
-        if (*options).cy as i32 == IP_DEFAULT {
+        if (*options).cy == IP_DEFAULT as f32 {
             (*options).cy = (*input1).ny as f32 / 2.;
         }
         let (llx, lly) = (
@@ -535,14 +570,22 @@ pub unsafe fn grap_corr(
         slice_mmm(&mut second);
         slice_box_in(&mut second, llx, lly, urx, ury);
         slice_mmm(&mut second);
-        if (*options).pad as i32 != IP_DEFAULT {
+        if (*options).pad != IP_DEFAULT as f32 {
             first.mean = (*options).pad;
             second.mean = (*options).pad;
         }
         clip_padcorr(&mut first, (*options).val as i32);
         clip_padcorr(&mut second, (*options).val as i32);
-        println!("image 1 size {} by {}", first.xsize, first.ysize);
-        println!("image 2 size {} by {}", second.xsize, second.ysize);
+        libc::printf(
+            c"image 1 size %d by %d\n".as_ptr(),
+            first.xsize,
+            first.ysize,
+        );
+        libc::printf(
+            c"image 2 size %d by %d\n".as_ptr(),
+            second.xsize,
+            second.ysize,
+        );
         let correlation = clip_slice_corr(&mut first, &mut second);
         if correlation.is_null() {
             libc::free(first.data.b.cast());
@@ -559,10 +602,10 @@ pub unsafe fn grap_corr(
             crop_y + (*correlation).ysize / 2,
         );
         slice_mmm(correlation);
-        println!(
-            "image c size {} by {}",
+        libc::printf(
+            c"image c size %d by %d\n".as_ptr(),
             (*correlation).xsize,
-            (*correlation).ysize
+            (*correlation).ysize,
         );
         if (*options).add2file == IP_APPEND_ADD {
             slice_resize_in(correlation, (*output).nx, (*output).ny);
@@ -640,7 +683,7 @@ pub unsafe fn grap_corr(
                 }
             }
         }
-        println!("pixel max at ( {xmax}, {ymax})");
+        libc::printf(c"pixel max at ( %d, %d)\n".as_ptr(), xmax, ymax);
         let mut patch = [[0_f64; 3]; 3];
         for dy in -1..=1 {
             for dx in -1..=1 {
@@ -648,13 +691,24 @@ pub unsafe fn grap_corr(
                     slice_get_pixel_magnitude(correlation, xmax + dx, ymax + dy) as f64;
             }
         }
-        let (mut x, mut y) = (0_f64, 0_f64);
-        parabolic_fit(&mut x, &mut y, &patch);
-        x += xmax as f64 - (*correlation).xsize as f64 * 0.5 - 1.;
-        y += ymax as f64 - (*correlation).ysize as f64 * 0.5;
-        println!(
-            "Maximum at ( {x:.2}, {y:.2}), transformation ( {:.2}, {:.2})",
-            -x, -y
+        let (mut cx, mut cy) = (0_f64, 0_f64);
+        parabolic_fit(&mut cx, &mut cy, &patch);
+        // `correlation.cpp:401` declares `float x, y`, so `x = cx + xmax`
+        // rounds the double result to f32, and `correlation.cpp:613-615` then
+        // subtracts in three separate float steps with a float `0.5f`.
+        // Evaluating the whole thing in f64 as one expression rounds
+        // differently.
+        let mut x = (cx + xmax as f64) as f32;
+        let mut y = (cy + ymax as f64) as f32;
+        x -= (*correlation).xsize as f32 * 0.5;
+        x -= 1.0;
+        y -= (*correlation).ysize as f32 * 0.5;
+        libc::printf(
+            c"Maximum at ( %.2f, %.2f), transformation ( %.2f, %.2f)\n".as_ptr(),
+            x as core::ffi::c_double,
+            y as core::ffi::c_double,
+            -x as core::ffi::c_double,
+            -y as core::ffi::c_double,
         );
         slice_free(correlation);
         libc::free(first.data.b.cast());

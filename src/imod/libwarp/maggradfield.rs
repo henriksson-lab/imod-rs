@@ -20,20 +20,35 @@ pub unsafe fn mag_gradient_shift(
     dy: *mut f32,
 ) {
     unsafe {
-        let dtor = 0.017453293_f32;
-        let cosphi = (dtor * axis_rot).cos() * pixel_size / 10000.;
-        let sinphi = (dtor * axis_rot).sin() * pixel_size / 10000.;
-        let tantheta = (dtor * tilt).tan();
+        // `#define DTOR 0.017453293` (`maggradfield.c:88`) is a **double**
+        // literal and `cos`/`sin`/`tan` are the double libm functions, so
+        // every trig value here is computed in double and rounded once on
+        // store; `imageNx / 2.` is likewise a double.
+        let dtor = 0.017453293_f64;
+        // get trig values for the rotation to axis and tilt angle
+        let cosphi = ((dtor * axis_rot as f64).cos() * pixel_size as f64 / 10000.) as f32;
+        let sinphi = ((dtor * axis_rot as f64).sin() * pixel_size as f64 / 10000.) as f32;
+        let tantheta = (dtor * tilt as f64).tan() as f32;
+        //
+        // compute the location of this point relative to the mag center and
+        // its vertical height and thus rotation and mag
+        //
         let mut xrel = xx - xcen;
         let mut yrel = yy - ycen;
         let zh = tantheta * (xrel * cosphi + yrel * sinphi);
-        let sinrz = (dtor * rot_per_um * zh).sin();
-        let cosrz = (dtor * rot_per_um * zh).cos();
-        let gmag = 1. + 0.01 * dmag_per_um * zh;
-        xrel = xx - image_nx as f32 / 2.;
-        yrel = yy - image_ny as f32 / 2.;
-        *dx = (xrel * cosrz - yrel * sinrz) * gmag + image_nx as f32 / 2. - xx;
-        *dy = (xrel * sinrz + yrel * cosrz) * gmag + image_ny as f32 / 2. - yy;
+        let sinrz = (dtor * rot_per_um as f64 * zh as f64).sin() as f32;
+        let cosrz = (dtor * rot_per_um as f64 * zh as f64).cos() as f32;
+        let gmag = (1. + 0.01 * dmag_per_um as f64 * zh as f64) as f32;
+        //
+        // have to mag around the center of this picture so do transform
+        // relative to that to get dx, dy
+        //
+        xrel = (xx as f64 - image_nx as f64 / 2.) as f32;
+        yrel = (yy as f64 - image_ny as f64 / 2.) as f32;
+        *dx = (((xrel * cosrz - yrel * sinrz) * gmag) as f64 + image_nx as f64 / 2. - xx as f64)
+            as f32;
+        *dy = (((xrel * sinrz + yrel * cosrz) * gmag) as f64 + image_ny as f64 / 2. - yy as f64)
+            as f32;
     }
 }
 
@@ -134,8 +149,9 @@ pub unsafe fn make_mag_grad_field(
         *ny_grid = lm_grid;
         *x_grid_start = 1.;
         *y_grid_start = 1.;
-        *x_grid_interval = (image_nx as f32 - 1.) / (lm_grid as f32 - 1.);
-        *y_grid_interval = (image_ny as f32 - 1.) / (lm_grid as f32 - 1.);
+        // `(imageNx - 1.) / (lmGrid - 1.)` is a double quotient.
+        *x_grid_interval = ((image_nx as f64 - 1.) / (lm_grid as f64 - 1.)) as f32;
+        *y_grid_interval = ((image_ny as f64 - 1.) / (lm_grid as f64 - 1.)) as f32;
         for index in 0..lm_grid * lm_grid {
             *idf_dx.add(index as usize) = 0.;
             *idf_dy.add(index as usize) = 0.;

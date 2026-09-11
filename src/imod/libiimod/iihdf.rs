@@ -28,8 +28,9 @@ use crate::imod::libiimod::iimage::{
     IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_HDF, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE,
     IIFORMAT_RGB, IISTATE_NOTINIT, IISTATE_UNUSED, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_SHORT,
     IITYPE_UBYTE, IITYPE_USHORT, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_USHORT,
-    ii_default_min_max_mean, ii_delete, ii_fill_mrc_header, ii_new, ii_sync_from_mrc_header,
+    ii_default_min_max_mean, ii_delete, ii_new, ii_sync_from_mrc_header,
 };
+use crate::imod::libiimod::iimrc::ii_mrc_fill_header;
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT, MRC_MODE_RGB, MRC_MODE_SHORT,
     MRC_MODE_USHORT, MrcHeader, fix_title_padding, mrc_head_new, mrc_set_scale,
@@ -2016,7 +2017,7 @@ unsafe fn set_io_funcs_plus(
     f.close = Some(hdf_close);
     f.clean_up = Some(hdf_delete);
     f.reopen = Some(hdf_reopen);
-    f.fill_mrc_header = Some(ii_fill_mrc_header);
+    f.fill_mrc_header = Some(ii_mrc_fill_header);
     f.sync_from_mrc_header = Some(hdf_sync_from_mrc_header);
     if writable != 0 && hdf_source == IIHDF_IMOD {
         f.write_section = Some(hdf_write_section);

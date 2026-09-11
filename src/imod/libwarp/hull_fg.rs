@@ -441,10 +441,15 @@ pub unsafe fn p_fg(tree: *mut Tree, depth: i32, _: i32) {
     unsafe {
         static mut INDICES: [i32; 8] = [0; 8];
         static mut MULTIPLIERS: [f64; 8] = [0.; 8];
+        /* `hull-fg.c:400` indexes the multiplier table by `pdim`, not by the
+        traversal depth, and scales each step by `mult_up` (`hull-io.c:30`,
+        always 1.0). */
         if MULTIPLIERS[0] == 0. {
-            MULTIPLIERS[depth as usize] = 1.;
-            for index in (0..depth).rev() {
-                MULTIPLIERS[index as usize] = MULTIPLIERS[(index + 1) as usize];
+            let pdim = *(&raw const crate::imod::libwarp::pointops::PDIM);
+            MULTIPLIERS[pdim as usize] = 1.;
+            for index in (0..pdim).rev() {
+                MULTIPLIERS[index as usize] =
+                    crate::imod::libwarp::hull_io::MULT_UP * MULTIPLIERS[(index + 1) as usize];
             }
         }
         INDICES[depth as usize] = SITE_NUM.unwrap()((*tree).key);

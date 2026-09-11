@@ -1,9 +1,10 @@
 //! `IMOD/imodutil/wmod2imod.c`: convert a legacy ASCII WIMP model to IMOD.
 
 use std::env;
+use std::ffi::CString;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 
+use crate::imod::libcfshr::b3dutil::fgetline;
 use crate::imod::libimod::imodel::{
     IMOD_OBJFLAG_OPEN, Imod, Ipoint, imod_new_contour, imod_new_object,
 };
@@ -28,24 +29,21 @@ pub fn wmod2imod() {
             match option {
                 Some(b'x') => {
                     i += 1;
-                    xscale = argv
-                        .get(i)
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or(xscale)
+                    let value =
+                        CString::new(argv.get(i).map(String::as_str).unwrap_or("")).unwrap();
+                    unsafe { libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &mut xscale) };
                 }
                 Some(b'y') => {
                     i += 1;
-                    yscale = argv
-                        .get(i)
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or(yscale)
+                    let value =
+                        CString::new(argv.get(i).map(String::as_str).unwrap_or("")).unwrap();
+                    unsafe { libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &mut yscale) };
                 }
                 Some(b'z') => {
                     i += 1;
-                    zscale = argv
-                        .get(i)
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or(zscale)
+                    let value =
+                        CString::new(argv.get(i).map(String::as_str).unwrap_or("")).unwrap();
+                    unsafe { libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &mut zscale) };
                 }
                 _ => {}
             }
@@ -60,19 +58,23 @@ pub fn wmod2imod() {
         println!("wmod2imod [-z scale] [wmod filename] [imod filename]");
         std::process::exit(1);
     }
-    let input = &argv[i];
-    let mut fin = File::open(input).unwrap_or_else(|_| {
+    let input = CString::new(argv[i].as_str()).unwrap_or_default();
+    let fin = unsafe { libc::fopen(input.as_ptr(), c"r".as_ptr()) };
+    if fin.is_null() {
         // C increments i before this diagnostic, so it prints the output name.
-        eprintln!("Couldn't open {}", argv.get(i + 1).unwrap_or(input));
+        eprintln!(
+            "Couldn't open {}",
+            argv.get(i + 1).unwrap_or(&argv[i]).as_str()
+        );
         std::process::exit(3)
-    });
+    }
     i += 1;
     let output = &argv[i];
     let mut fout = File::create(output).unwrap_or_else(|_| {
         eprintln!("Couldn't open {output}");
         std::process::exit(3)
     });
-    let mut model = imod_from_wmod(&mut fin).unwrap_or_else(|| {
+    let mut model = imod_from_wmod(fin).unwrap_or_else(|| {
         eprintln!("Error reading imod file.");
         std::process::exit(3)
     });
@@ -84,7 +86,10 @@ pub fn wmod2imod() {
 }
 
 /// Original: `imod_from_wmod` (`wmod2imod.c:122`).
-pub fn imod_from_wmod(fin: &mut File) -> Option<Imod> {
+pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
+    const MAXLINE: i32 = 128;
+    const MAXOBJ: usize = 256;
+    /// Original: `Wmod_Colors` (`wmod2imod.c:100`).
     const WMOD_COLORS: [[f32; 3]; 9] = [
         [0.90, 0.82, 0.37],
         [0.54, 0.51, 0.01],
@@ -96,41 +101,59 @@ pub fn imod_from_wmod(fin: &mut File) -> Option<Imod> {
         [1.0, 0.0, 1.0],
         [0.0, 1.0, 1.0],
     ];
-    let mut text = String::new();
-    fin.seek(SeekFrom::Start(0)).ok()?;
-    fin.read_to_string(&mut text).ok()?;
-    let lines: Vec<&str> = text.lines().collect();
-    let mut objlookup = [-1_i32; 256];
-    let mut used = [false; 256];
-    let mut line_index = 0_usize;
-    // First source pass: make the WIMP display-switch-to-object lookup.
-    while line_index < lines.len() {
-        let line = lines[line_index];
-        let Some(offset) = line.find('O') else {
-            line_index += 1;
-            continue;
-        };
-        if !line[offset..].starts_with("Object #:") {
-            line_index += 1;
-            continue;
+    let cont_string = c"Object #:";
+    let mut line = [0_i8; MAXLINE as usize];
+    let mut objlookup = [0_i32; MAXOBJ];
+    let mut nobj = 0_i32;
+    let mut display_switch = 0_i32;
+    let mut points = 0_i32;
+    // `struct Mod_Point point` has function scope in the source, so a point
+    // line that fails to scan re-adds the previously scanned coordinates.
+    let mut point = Ipoint::default();
+    unsafe {
+        loop {
+            let len = fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            if len < 0 {
+                break;
+            }
+            if len == 0 {
+                continue;
+            }
+            let mut tline = std::ptr::null::<std::ffi::c_char>();
+            let mut i = 0_usize;
+            while line[i] != 0 {
+                if line[i] == b'O' as i8 {
+                    tline = line.as_ptr().add(i);
+                    break;
+                }
+                i += 1;
+            }
+            if tline.is_null() {
+                continue;
+            }
+            // `substr` (`imodel_from.c:207`) compares the first strlen(ls) bytes.
+            if libc::strncmp(tline, cont_string.as_ptr(), cont_string.count_bytes()) != 0 {
+                continue;
+            }
+            fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            libc::sscanf(line.as_ptr(), c"%*s %*s %*s %d".as_ptr(), &mut points);
+            fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            libc::sscanf(line.as_ptr(), c"%*s %*s %d".as_ptr(), &mut display_switch);
+            if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
+                objlookup[display_switch as usize] = 1;
+            }
         }
-        let points_line = *lines.get(line_index + 1)?;
-        let switch_line = *lines.get(line_index + 2)?;
-        let _points = points_line
-            .split_whitespace()
-            .nth(3)?
-            .parse::<usize>()
-            .ok()?;
-        let display_switch = switch_line.split_whitespace().nth(2)?.parse::<i32>().ok()?;
-        if (0..256).contains(&display_switch) {
-            used[display_switch as usize] = true;
-        }
-        line_index += 3;
     }
     let mut model = Imod::default();
     // `wmod2imod.c:171` obtains this through `imodNew`, whose `imodDefault`
     // state is written into the resulting binary model.
-    model.name = "IMOD-NewModel".to_owned();
+    // `imodel.c:48-54` copies 13 bytes of the literal and terminates at [13],
+    // leaving the rest of the IMOD_STRSIZE array as allocated.
+    let newmodname = b"IMOD-NewModel";
+    for i in 0..13 {
+        model.name[i] = newmodname[i] as std::ffi::c_char;
+    }
+    model.name[13] = 0x00;
     model.flags = (1 << 11) | (1 << 10);
     model.drawmode = 1;
     model.mousemode = 2;
@@ -144,94 +167,111 @@ pub fn imod_from_wmod(fin: &mut File) -> Option<Imod> {
     model.xmax = 1;
     model.ymax = 1;
     model.zmax = 1;
-    for wimp_number in 0..256_usize {
-        if !used[wimp_number] {
-            continue;
-        }
-        objlookup[wimp_number] = model.obj.len() as i32;
-        let (red, green, blue) = if wimp_number >= 247 {
-            let color = WMOD_COLORS[wimp_number - 247];
-            (color[0], color[1], color[2])
+    for wimp_number in 0..MAXOBJ {
+        if objlookup[wimp_number] != 0 {
+            objlookup[wimp_number] = nobj;
+            if imod_new_object(&mut model) != 0 {
+                return None;
+            }
+            let object = model.obj.get_mut(nobj as usize)?;
+            if wimp_number >= 247 {
+                object.red = WMOD_COLORS[wimp_number - 247][0];
+                object.green = WMOD_COLORS[wimp_number - 247][1];
+                object.blue = WMOD_COLORS[wimp_number - 247][2];
+            } else {
+                object.red = wimp_number as f32 / 255.0_f32;
+                object.green = wimp_number as f32 / 255.0_f32;
+                object.blue = wimp_number as f32 / 255.0_f32;
+            }
+            // `wmod2imod.c:184`: `sprintf(mod->obj[nobj].name, "Wimp no. %d", i)`.
+            unsafe {
+                libc::sprintf(
+                    object.name.as_mut_ptr(),
+                    c"Wimp no. %d".as_ptr(),
+                    wimp_number as std::ffi::c_int,
+                );
+            }
+            nobj += 1;
         } else {
-            let color = wimp_number as f32 / 255.0;
-            (color, color, color)
-        };
-        if imod_new_object(&mut model) != 0 {
-            return None;
+            objlookup[wimp_number] = -1;
         }
-        let object = model.obj.last_mut()?;
-        object.name = format!("Wimp no. {wimp_number}");
-        object.red = red;
-        object.green = green;
-        object.blue = blue;
     }
-    line_index = 0;
-    // Second source pass: turn each WIMP object record into one IMOD contour.
-    while line_index < lines.len() {
-        let line = lines[line_index];
-        let Some(offset) = line.find('O') else {
-            line_index += 1;
-            continue;
-        };
-        if !line[offset..].starts_with("Object #:") {
-            line_index += 1;
-            continue;
-        }
-        let points = lines
-            .get(line_index + 1)?
-            .split_whitespace()
-            .nth(3)?
-            .parse::<usize>()
-            .ok()?;
-        let display_switch = lines
-            .get(line_index + 2)?
-            .split_whitespace()
-            .nth(2)?
-            .parse::<i32>()
-            .ok()?;
-        let object_index =
-            if (0..256).contains(&display_switch) && objlookup[display_switch as usize] >= 0 {
-                objlookup[display_switch as usize] as usize
+    unsafe {
+        libc::rewind(fin);
+        loop {
+            let len = fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            if len < 0 {
+                break;
+            }
+            if len == 0 {
+                continue;
+            }
+            let mut tline = std::ptr::null::<std::ffi::c_char>();
+            let mut i = 0_usize;
+            while line[i] != 0 {
+                if line[i] == b'O' as i8 {
+                    tline = line.as_ptr().add(i);
+                    break;
+                }
+                i += 1;
+            }
+            if tline.is_null() {
+                continue;
+            }
+            if libc::strncmp(tline, cont_string.as_ptr(), cont_string.count_bytes()) != 0 {
+                continue;
+            }
+            fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            libc::sscanf(line.as_ptr(), c"%*s %*s %*s %d".as_ptr(), &mut points);
+            fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            libc::sscanf(line.as_ptr(), c"%*s %*s %d".as_ptr(), &mut display_switch);
+            fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            model.cindex.object = if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
+                objlookup[display_switch as usize]
             } else {
                 0
             };
-        // `wmod2imod.c` sets the current contour to the previous one and
-        // creates the next contour with `imodNewContour`; that routine updates
-        // the persisted current index and inherits its source contour state.
-        model.cindex.object = object_index as i32;
-        model.cindex.contour = model.obj.get(object_index)?.cont.len() as i32 - 1;
-        if imod_new_contour(&mut model) != 0 {
-            return None;
-        }
-        let contour_index = model.cindex.contour as usize;
-        let contour = model
-            .obj
-            .get_mut(object_index)?
-            .cont
-            .get_mut(contour_index)?;
-        for point_index in 0..points {
-            let point_line = *lines.get(line_index + 4 + point_index)?;
-            let mut values = point_line.split_whitespace();
-            let _number = values.next()?;
-            if imod_point_add(
-                contour,
-                Some(Ipoint {
-                    x: values.next()?.parse().ok()?,
-                    y: values.next()?.parse().ok()?,
-                    z: values.next()?.parse().ok()?,
-                }),
-                point_index as i32,
-            ) == 0
-            {
+            if model.cindex.object < 0 {
+                model.cindex.object = 0;
+            }
+            let object_index = model.cindex.object as usize;
+            model.cindex.contour = model.obj.get(object_index)?.cont.len() as i32 - 1;
+            if imod_new_contour(&mut model) != 0 {
                 return None;
             }
+            let contour_index = model.cindex.contour as usize;
+            for i in 0..points {
+                fgetline(fin, line.as_mut_ptr(), MAXLINE);
+                libc::sscanf(
+                    line.as_ptr(),
+                    c"%*d %f %f %f".as_ptr(),
+                    &mut point.x,
+                    &mut point.y,
+                    &mut point.z,
+                );
+                let contour = model
+                    .obj
+                    .get_mut(object_index)?
+                    .cont
+                    .get_mut(contour_index)?;
+                if imod_point_add(contour, Some(point), i) == 0 {
+                    return None;
+                }
+            }
+            // `wmod2imod.c:246` re-asserts the contour size, which the
+            // `points` calls to `imodPointAdd` above have already produced.
+            for object in &mut model.obj {
+                if !object.cont.is_empty() {
+                    if object.cont[0].pts.len() < 2
+                        || object.cont[0].pts[0].z != object.cont[0].pts[1].z
+                    {
+                        object.flags |= IMOD_OBJFLAG_OPEN;
+                    }
+                }
+            }
         }
-        let object = model.obj.get_mut(object_index)?;
-        if object.cont[0].pts.len() < 2 || object.cont[0].pts[0].z != object.cont[0].pts[1].z {
-            object.flags |= IMOD_OBJFLAG_OPEN;
-        }
-        line_index += 4 + points;
     }
+    // `imodDeleteObject` (`imodel.c`) drops every object that got no contour.
     model.obj.retain(|object| !object.cont.is_empty());
     Some(model)
 }
@@ -274,10 +314,15 @@ mod tests {
         let mut wimp_file = File::create(&wimp).unwrap();
         imod_to_wmod(&source, &mut wimp_file, "fixture.wimp").unwrap();
         wimp_file.flush().unwrap();
-        let mut wimp_file = File::open(&wimp).unwrap();
-        let converted = imod_from_wmod(&mut wimp_file).unwrap();
+        let wimp_name = CString::new(wimp.to_str().unwrap()).unwrap();
+        let wimp_file = unsafe { libc::fopen(wimp_name.as_ptr(), c"r".as_ptr()) };
+        let converted = imod_from_wmod(wimp_file).unwrap();
+        unsafe { libc::fclose(wimp_file) };
         assert_eq!(converted.obj.len(), 1);
-        assert_eq!(converted.obj[0].name, "Wimp no. 247");
+        assert_eq!(
+            unsafe { std::ffi::CStr::from_ptr(converted.obj[0].name.as_ptr()) },
+            c"Wimp no. 247"
+        );
         assert_eq!(
             (
                 converted.obj[0].red,

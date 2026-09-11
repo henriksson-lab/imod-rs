@@ -1,6 +1,6 @@
 //! `IMOD/Etomo/src/etomo/storage/DataFileFilter.java`.
 
-use crate::imod::etomo::etomo_type::DataFileType;
+use crate::imod::etomo::r#type::data_file_type::DataFileType;
 use std::path::Path;
 
 pub struct DataFileFilter {

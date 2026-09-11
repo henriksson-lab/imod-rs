@@ -1,28 +1,34 @@
 //! `IMOD/Etomo/src/etomo/storage/autodoc/ReadOnlyAttribute.java`.
+#![allow(dead_code)]
 
-use super::read_only_attribute_list::ReadOnlyAttributeList;
+use super::attribute::Attribute;
+use super::attribute_list::AttributeList;
 
-/// Source read-only Autodoc attribute interface.  The associated mutable type
-/// directly models Java's package-private `Attribute`; it is deliberately not
-/// replaced with a parser-specific compatibility object.
-pub trait ReadOnlyAttribute: Sized {
-    type MutableAttribute;
-    type Children: ReadOnlyAttributeList<Self>;
-
+/// Source read-only Autodoc attribute interface.  `getAttribute(String)` and
+/// `getChildren()` are declared as `ReadOnlyAttribute`/`ReadOnlyAttributeList`, whose
+/// only implementations in the package are `Attribute` and `AttributeList`, so those
+/// are the concrete pointers here; `getAttribute(int)` already returns `Attribute`.
+pub trait ReadOnlyAttribute {
     /// Java `getValue()`.
-    fn get_value(&self) -> String;
+    fn get_value(&self) -> Option<String>;
     /// Java `getMultiLineValue()`.
-    fn get_multi_line_value(&self) -> String;
+    fn get_multi_line_value(&self) -> Option<String>;
     /// Java `getAttribute(String)`.
-    fn get_attribute_by_name(&self, name: &str) -> Option<&Self>;
+    ///
+    /// # Safety
+    /// The attribute's children must be live.
+    unsafe fn get_attribute_by_name(&self, name: Option<&str>) -> *mut Attribute;
     /// Java `getAttribute(int)`.
-    fn get_attribute_by_index(&self, name: i32) -> Option<&Self::MutableAttribute>;
+    ///
+    /// # Safety
+    /// See `get_attribute_by_name`.
+    unsafe fn get_attribute_by_index(&self, name: i32) -> *mut Attribute;
     /// Java `getName()`.
     fn get_name(&self) -> String;
     /// Java `toString()`.
     fn to_string(&self) -> String;
     /// Java `getChildren()`.
-    fn get_children(&self) -> Option<&Self::Children>;
+    fn get_children(&self) -> *mut AttributeList;
     /// Java `getLineNum()`.
     fn get_line_num(&self) -> i32;
 }
@@ -30,72 +36,31 @@ pub trait ReadOnlyAttribute: Sized {
 #[cfg(test)]
 mod tests {
     use super::ReadOnlyAttribute;
-    use crate::imod::etomo::storage::autodoc::read_only_attribute_iterator::ReadOnlyAttributeIterator;
-    use crate::imod::etomo::storage::autodoc::read_only_attribute_list::ReadOnlyAttributeList;
+    use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+    use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+    use crate::imod::etomo::storage::autodoc::writable_autodoc::WritableAutodoc;
 
-    struct Attribute {
-        name: String,
-        value: String,
-        line_num: i32,
-        children: Vec<Attribute>,
-    }
-    impl ReadOnlyAttributeList<Attribute> for Vec<Attribute> {
-        fn iterator(&self) -> ReadOnlyAttributeIterator<'_, Attribute> {
-            ReadOnlyAttributeIterator::new(self)
-        }
-    }
-    impl ReadOnlyAttribute for Attribute {
-        type MutableAttribute = Attribute;
-        type Children = Vec<Attribute>;
-        fn get_value(&self) -> String {
-            self.value.clone()
-        }
-        fn get_multi_line_value(&self) -> String {
-            self.value.clone()
-        }
-        fn get_attribute_by_name(&self, name: &str) -> Option<&Self> {
-            self.children.iter().find(|child| child.name == name)
-        }
-        fn get_attribute_by_index(&self, index: i32) -> Option<&Self::MutableAttribute> {
-            self.children.get(index as usize)
-        }
-        fn get_name(&self) -> String {
-            self.name.clone()
-        }
-        fn to_string(&self) -> String {
-            format!("{}={}", self.name, self.value)
-        }
-        fn get_children(&self) -> Option<&Self::Children> {
-            Some(&self.children)
-        }
-        fn get_line_num(&self) -> i32 {
-            self.line_num
-        }
-    }
+    /// A duplicate attribute reports the *last* value, as `Autodoc`'s version 1.3 note
+    /// describes, and a non-leaf attribute has no value of its own.
     #[test]
-    fn exposes_all_source_attribute_views() {
-        let attribute = Attribute {
-            name: "Root".into(),
-            value: "value".into(),
-            line_num: 7,
-            children: vec![Attribute {
-                name: "Child".into(),
-                value: "child-value".into(),
-                line_num: 8,
-                children: vec![],
-            }],
-        };
-        assert_eq!(
-            attribute
-                .get_attribute_by_name("Child")
-                .unwrap()
-                .get_value(),
-            "child-value"
-        );
-        assert_eq!(
-            attribute.get_attribute_by_index(0).unwrap().get_line_num(),
-            8
-        );
-        assert_eq!(attribute.to_string(), "Root=value");
+    fn attribute_views_follow_the_source_value_rules() {
+        unsafe {
+            let autodoc = Autodoc::new(Some("views"), std::ptr::null_mut());
+            (*autodoc).add_name_value_pair_attribute_with_line_num(Some("Version"), Some("1.2"), 3);
+            (*autodoc).add_name_value_pair_attribute_with_line_num(Some("Version"), Some("1.3"), 8);
+            (*autodoc).add_name_value_pair_attribute_with_line_num(Some("a.b"), Some("deep"), 9);
+            let version = (*autodoc).get_attribute(Some("VERSION"));
+            assert_eq!(
+                ReadOnlyAttribute::get_value(&*version).as_deref(),
+                Some("1.3")
+            );
+            assert_eq!(ReadOnlyAttribute::get_line_num(&*version), 3);
+            assert!(ReadOnlyAttribute::get_children(&*version).is_null());
+            let a = (*autodoc).get_attribute(Some("a"));
+            assert_eq!(ReadOnlyAttribute::get_value(&*a), None);
+            let b = ReadOnlyAttribute::get_attribute_by_name(&*a, Some("b"));
+            assert_eq!(ReadOnlyAttribute::get_value(&*b).as_deref(), Some("deep"));
+            assert!(ReadOnlyAttribute::get_attribute_by_index(&*a, 0).is_null());
+        }
     }
 }

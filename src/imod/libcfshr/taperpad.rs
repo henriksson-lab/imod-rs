@@ -1,5 +1,8 @@
 //! Translation of `IMOD/libcfshr/taperpad.c`.
 #![allow(dead_code)]
+use crate::imod::libcfshr::b3dutil::{b3d_i_min, balanced_group_limits, num_omp_threads};
+use crate::imod::libcfshr::robuststat::rs_fast_median_in_place;
+use crate::imod::libcfshr::simplestat::sums_to_avg_sd_dbl;
 
 use core::ffi::c_void;
 
@@ -415,76 +418,141 @@ pub unsafe fn smoothoutpad(
     unsafe { slice_smooth_out_pad(array, FLOAT, *nxbox, *nybox, out, *nxdim, *nx, *ny) }
 }
 
-/// C static `getRunningMeanSD`.
+/// C static `getRunningMeanSD` (`taperpad.c:838`).
+///
+/// Function to get mean and SD in a smaple box and compute it all along an edge
 unsafe fn get_running_mean_sd(
     box_start: *mut f32,
-    rows: i32,
-    len: i32,
-    rowstride: i32,
-    lenstride: i32,
+    noise_rows: i32,
+    noise_length: i32,
+    row_stride: i32,
+    len_stride: i32,
     nbox: i32,
-    mean: f32,
+    dmean: f32,
     samples: *mut f32,
-    squares: *mut f32,
-    num: i32,
+    sample_sq: *mut f32,
+    num_sample: i32,
     means: *mut f32,
     sds: *mut f32,
 ) {
     unsafe {
-        let mut sum = 0_f64;
-        let mut sq = 0_f64;
-        let mut si = 0;
-        for l in 0..len {
-            for r in 0..rows {
-                let v = *box_start.add((l * lenstride + r * rowstride) as usize) - mean;
-                *samples.add(si as usize) = v;
-                *squares.add(si as usize) = v * v;
-                sum += v as f64;
-                sq += (v * v) as f64;
-                si += 1;
+        let mut samp_sum = 0.0_f64;
+        let mut samp_sq_sum = 0.0_f64;
+        let mut val: f32;
+        let mut val_sq: f32;
+        let mut tmp_mean: f32 = 0.;
+        let mut tmp_sd: f32 = 0.;
+        let mut sample_ind: i32;
+        let mut len: i32;
+        let mut mean_ind: i32;
+        let mut mean_base = noise_length / 2;
+
+        // Load the box and get first mean/SD
+        sample_ind = 0;
+        len = 0;
+        while len < noise_length {
+            for row in 0..noise_rows {
+                val = *box_start.offset((len * len_stride + row * row_stride) as isize) - dmean;
+                val_sq = val * val;
+                *samples.offset(sample_ind as isize) = val;
+                *sample_sq.offset(sample_ind as isize) = val_sq;
+                sample_ind += 1;
+                samp_sum += val as f64;
+                samp_sq_sum += val_sq as f64;
             }
+            len += 1;
         }
-        let base = len / 2;
-        let mut av = sum / num as f64;
-        *means.add(base as usize) = mean + av as f32;
-        *sds.add(base as usize) = ((sq / num as f64 - av * av).max(0.)).sqrt() as f32;
-        let mut at = base + 1;
-        si = 0;
-        for l in len..nbox - len {
-            for r in 0..rows {
-                let v = *samples.add(si as usize);
-                sum -= v as f64;
-                sq -= *squares.add(si as usize) as f64;
-                let nv = *box_start.add((l * lenstride + r * rowstride) as usize) - mean;
-                *samples.add(si as usize) = nv;
-                *squares.add(si as usize) = nv * nv;
-                sum += nv as f64;
-                sq += (nv * nv) as f64;
-                si = (si + 1) % num;
+        sums_to_avg_sd_dbl(
+            samp_sum,
+            samp_sq_sum,
+            num_sample,
+            1,
+            &mut tmp_mean,
+            &mut tmp_sd,
+        );
+        *means.offset(mean_base as isize) = dmean + tmp_mean;
+        *sds.offset(mean_base as isize) = tmp_sd;
+
+        // Loop along the length, pulling samples out of sum then adding new ones in
+        sample_ind = 0;
+        mean_ind = mean_base + 1;
+        while len < nbox - noise_length {
+            for row in 0..noise_rows {
+                samp_sum -= *samples.offset(sample_ind as isize) as f64;
+                samp_sq_sum -= *sample_sq.offset(sample_ind as isize) as f64;
+                val = *box_start.offset((len * len_stride + row * row_stride) as isize) - dmean;
+                val_sq = val * val;
+                *samples.offset(sample_ind as isize) = val;
+                *sample_sq.offset(sample_ind as isize) = val_sq;
+                sample_ind += 1;
+                samp_sum += val as f64;
+                samp_sq_sum += val_sq as f64;
             }
-            av = sum / num as f64;
-            *means.add(at as usize) = mean + av as f32;
-            *sds.add(at as usize) = ((sq / num as f64 - av * av).max(0.)).sqrt() as f32;
-            at += 1;
+            sample_ind %= num_sample;
+            sums_to_avg_sd_dbl(
+                samp_sum,
+                samp_sq_sum,
+                num_sample,
+                1,
+                &mut tmp_mean,
+                &mut tmp_sd,
+            );
+            *means.offset(mean_ind as isize) = dmean + tmp_mean;
+            *sds.offset(mean_ind as isize) = tmp_sd;
+            mean_ind += 1;
+            len += 1;
         }
-        for i in 0..base {
-            *means.add(i as usize) = *means.add(base as usize);
-            *sds.add(i as usize) = *sds.add(base as usize)
+
+        // Copy the endpoints to complete the arrays
+        for l in 0..mean_base {
+            *means.offset(l as isize) = *means.offset(mean_base as isize);
+            *sds.offset(l as isize) = *sds.offset(mean_base as isize);
         }
-        for i in at..nbox {
-            *means.add(i as usize) = *means.add((at - 1) as usize);
-            *sds.add(i as usize) = *sds.add((at - 1) as usize)
+        mean_base = mean_ind - 1;
+        for l in mean_ind..nbox {
+            *means.offset(l as isize) = *means.offset(mean_base as isize);
+            *sds.offset(l as isize) = *sds.offset(mean_base as isize);
         }
     }
 }
 
-/// C `sliceNoiseTaperPad` (the deterministic sequential equivalent of the C OpenMP loops).
+const MAX_NOISE_ROWS: i32 = 5;
+const MAX_NOISE_LENGTH: i32 = 120;
+const MAX_SAMPLES: i32 = MAX_NOISE_ROWS * MAX_NOISE_LENGTH;
+const SNTP_MAX_THREADS: i32 = 16;
+
+/// C file-scope `static int pseudoVals[SNTP_MAX_THREADS]` (`taperpad.c:580`).
+///
+/// It is `static`, so the generator state carries over from one
+/// `sliceNoiseTaperPad` call to the next within a process.
+static mut PSEUDO_VALS: [i32; SNTP_MAX_THREADS as usize] = [
+    123456, 654321, 368341, 789234, 234561, 543216, 683413, 892347, 345612, 432165, 834136, 923478,
+    456123, 321654, 341368, 234789,
+];
+
+/// C `sliceNoiseTaperPad` (`taperpad.c:569`).
+///
+/// The `#pragma omp parallel for` loops are run sequentially here: every thread
+/// owns a disjoint Y range (`balancedGroupLimits`) and its own generator seed
+/// `pseudoVals[thread]`, so running the thread loop in order reproduces the
+/// parallel result exactly.  `numThreads` still comes from `numOMPthreads`,
+/// which is what selects both the Y partition and the set of seeds used.
+///
+/// Deviation, deliberate and the only one: the six scratch arrays are carved
+/// out of a locally allocated buffer laid out exactly as the source lays out
+/// `temp` (`fracx`, `meanXpart`, `fracy`, `meanYpart`, `means`, `SDs`) instead
+/// of out of the caller's `temp`.  The source needs
+/// `2 * ixlo + 2 * iylo + 2 * max(nxbox, nybox)` floats there; the Rust
+/// `newstack` caller (`newstack.rs:2600`) currently passes a buffer sized only
+/// `2 * (nxFSpad / 2 + 2)`, so writing through `temp` would run off the end of
+/// its `Vec`.  Nothing the caller does reads `temp` back, so the values are
+/// unaffected.
 pub unsafe fn slice_noise_taper_pad(
     array: *mut c_void,
     typ: i32,
     nxbox: i32,
     nybox: i32,
-    out: *mut f32,
+    brray: *mut f32,
     nxdim: i32,
     nx: i32,
     ny: i32,
@@ -493,217 +561,460 @@ pub unsafe fn slice_noise_taper_pad(
     temp: *mut f32,
 ) {
     unsafe {
-        let mut rows = noise_rows.min(3).min(nxbox / 2).min(nybox / 2);
-        if rows < 1 {
-            rows = 1
-        };
-        let len = 2 * (noise_length.min(600 / rows).min(nxbox).min(nybox) / 2);
-        if len < 2 {
-            slice_taper_out_pad(array, typ, nxbox, nybox, out, nxdim, nx, ny, 0, 0.);
-            return;
-        }
-        let (mut xl, mut xh, mut yl, mut yh) = (0, 0, 0, 0);
+        let (mut ixlo, mut ixhi, mut iylo, mut iyhi) = (0, 0, 0, 0);
+        let mut nxtop: i32;
+        let mut nytop: i32;
+        let num_samples: i32;
+        let mut ix_base: i32;
+        let mut pseudo: i32;
+        let mut edge_xadd: i32 = 0;
+        let mut edge_yadd: i32 = 0;
+        let dmean: f32;
+        let ran_fac: f32;
+        let mut frac_min: f32;
+        let mut corn_mean: f32;
+        let mut corn_sd: f32;
+        let max_sds: f32 = 1.73f32;
+        let mut corn_xmean: f32;
+        let mut corn_ymean: f32;
+        let mut corn_xsd: f32;
+        let mut corn_ysd: f32;
+        let save_corn_mean: f32;
+        let save_corn_sd: f32;
+        let mut wgt_sum: f32;
+        let mut samples = [0.0f32; MAX_SAMPLES as usize];
+        let mut sample_sq = [0.0f32; MAX_SAMPLES as usize];
+        let fracx: *mut f32;
+        let fracy: *mut f32;
+        let mean_xpart: *mut f32;
+        let mean_ypart: *mut f32;
+        let means: *mut f32;
+        let sds: *mut f32;
+        let mut max_threads: i32 = 4;
+        let num_threads: i32;
+        let mut iy_start = [0i32; SNTP_MAX_THREADS as usize];
+        let mut iy_end = [0i32; SNTP_MAX_THREADS as usize];
+
+        // Do not enforce those defined limits, take the given number of rows
+        // and limit the length of the sample by the product
+        let noise_rows = b3d_i_min(&[noise_rows, nxbox / 2, nybox / 2]);
+        let noise_length =
+            2 * (b3d_i_min(&[noise_length, MAX_SAMPLES / noise_rows, nxbox, nybox]) / 2);
+        num_samples = noise_rows * noise_length;
+
         copy_to_center(
-            array, typ, nxbox, nybox, out, nxdim, nx, ny, &mut xl, &mut xh, &mut yl, &mut yh,
+            array, typ, nxbox, nybox, brray, nxdim, nx, ny, &mut ixlo, &mut ixhi, &mut iylo,
+            &mut iyhi,
         );
+
+        // Do the taper if there is any padding
         if nxbox == nx && nybox == ny {
             return;
         }
-        let mean = slice_edge_mean(out, nxdim, xl, xh - 1, yl, yh - 1) as f32;
-        let mut fracx = vec![0.; xl as usize];
-        let mut fracy = vec![0.; yl as usize];
-        let mut xpart = vec![0.; xl as usize];
-        let mut ypart = vec![0.; yl as usize];
-        for i in 0..xl {
-            fracx[i as usize] = i as f32 / xl as f32;
-            xpart[i as usize] = (1. - fracx[i as usize]) * mean;
+
+        // Need a mean from which to compute deviations
+        if nxbox > 400 {
+            edge_xadd = 1 + nxbox / 2048;
         }
-        for i in 0..yl {
-            fracy[i as usize] = i as f32 / yl as f32;
-            ypart[i as usize] = (1. - fracy[i as usize]) * mean;
+        if nybox > 400 {
+            edge_yadd = 1 + nybox / 2048;
         }
-        let mut samples = vec![0.; (rows * len) as usize];
-        let mut squares = vec![0.; (rows * len) as usize];
-        let mut means = vec![0.; nxbox.max(nybox) as usize];
-        let mut sds = means.clone();
-        let mut pseudo = 123456_i32;
-        get_running_mean_sd(
-            out.add((xl + yl * nxdim) as usize),
-            rows,
-            len,
+        dmean = slice_edge_mean(
+            brray,
             nxdim,
-            1,
-            nxbox,
-            mean,
-            samples.as_mut_ptr(),
-            squares.as_mut_ptr(),
-            rows * len,
-            means.as_mut_ptr(),
-            sds.as_mut_ptr(),
-        );
-        for iy in 0..yl {
-            for ix in 0..nxbox {
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((xl + ix + iy * nxdim) as usize) = (means[ix as usize]
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * sds[ix as usize])
-                    * fracy[iy as usize]
-                    + ypart[iy as usize];
-            }
-        }
-        let save_corn_mean = means[0];
-        let save_corn_sd = sds[0];
-        let mut corn_x_mean = means[(nxbox - 1) as usize];
-        let mut corn_x_sd = sds[(nxbox - 1) as usize];
-        get_running_mean_sd(
-            out.add((xl + nxbox - rows + yl * nxdim) as usize),
-            rows,
-            len,
-            1,
-            nxdim,
-            nybox,
-            mean,
-            samples.as_mut_ptr(),
-            squares.as_mut_ptr(),
-            rows * len,
-            means.as_mut_ptr(),
-            sds.as_mut_ptr(),
-        );
-        let mut corn_y_mean = means[0];
-        let mut corn_y_sd = sds[0];
-        for iy in 0..yl {
-            for ix in 0..xl {
-                let frac_min = fracx[ix as usize].min(fracy[iy as usize]);
-                let weight_sum = 0.01_f32.max(fracx[ix as usize] + fracy[iy as usize]);
-                let corn_mean = (corn_x_mean * fracx[ix as usize]
-                    + corn_y_mean * fracy[iy as usize])
-                    / weight_sum;
-                let corn_sd =
-                    (corn_x_sd * fracx[ix as usize] + corn_y_sd * fracy[iy as usize]) / weight_sum;
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((nx - 1 - ix + iy * nxdim) as usize) = (corn_mean
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * corn_sd)
-                    * frac_min
-                    + mean * (1. - frac_min);
-            }
-        }
-        for iy in 0..nybox {
-            for ix in 0..xl {
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((nx - 1 - ix + (iy + yl) * nxdim) as usize) = (means[iy as usize]
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * sds[iy as usize])
-                    * fracx[ix as usize]
-                    + xpart[ix as usize];
-            }
-        }
-        corn_y_mean = means[(nybox - 1) as usize];
-        corn_y_sd = sds[(nybox - 1) as usize];
-        get_running_mean_sd(
-            out.add((xl + (yl + nybox - rows) * nxdim) as usize),
-            rows,
-            len,
-            nxdim,
-            1,
-            nxbox,
-            mean,
-            samples.as_mut_ptr(),
-            squares.as_mut_ptr(),
-            rows * len,
-            means.as_mut_ptr(),
-            sds.as_mut_ptr(),
-        );
-        corn_x_mean = means[(nxbox - 1) as usize];
-        corn_x_sd = sds[(nxbox - 1) as usize];
-        for iy in 0..yl {
-            for ix in 0..xl {
-                let frac_min = fracx[ix as usize].min(fracy[iy as usize]);
-                let weight_sum = 0.01_f32.max(fracx[ix as usize] + fracy[iy as usize]);
-                let corn_mean = (corn_x_mean * fracx[ix as usize]
-                    + corn_y_mean * fracy[iy as usize])
-                    / weight_sum;
-                let corn_sd =
-                    (corn_x_sd * fracx[ix as usize] + corn_y_sd * fracy[iy as usize]) / weight_sum;
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((nx - 1 - ix + (ny - 1 - iy) * nxdim) as usize) = (corn_mean
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * corn_sd)
-                    * frac_min
-                    + mean * (1. - frac_min);
-            }
-        }
-        for iy in 0..yl {
-            for ix in 0..nxbox {
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((xl + ix + (ny - 1 - iy) * nxdim) as usize) = (means[ix as usize]
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * sds[ix as usize])
-                    * fracy[iy as usize]
-                    + ypart[iy as usize];
-            }
-        }
-        corn_x_mean = means[0];
-        corn_x_sd = sds[0];
-        get_running_mean_sd(
-            out.add((xl + yl * nxdim) as usize),
-            rows,
-            len,
-            1,
-            nxdim,
-            nybox,
-            mean,
-            samples.as_mut_ptr(),
-            squares.as_mut_ptr(),
-            rows * len,
-            means.as_mut_ptr(),
-            sds.as_mut_ptr(),
-        );
-        corn_y_mean = means[(nybox - 1) as usize];
-        corn_y_sd = sds[(nybox - 1) as usize];
-        for iy in 0..yl {
-            for ix in 0..xl {
-                let frac_min = fracx[ix as usize].min(fracy[iy as usize]);
-                let weight_sum = 0.01_f32.max(fracx[ix as usize] + fracy[iy as usize]);
-                let corn_mean = (corn_x_mean * fracx[ix as usize]
-                    + corn_y_mean * fracy[iy as usize])
-                    / weight_sum;
-                let corn_sd =
-                    (corn_x_sd * fracx[ix as usize] + corn_y_sd * fracy[iy as usize]) / weight_sum;
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((ix + (ny - 1 - iy) * nxdim) as usize) = (corn_mean
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * corn_sd)
-                    * frac_min
-                    + mean * (1. - frac_min);
-            }
-        }
-        for iy in 0..nybox {
-            for ix in 0..xl {
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((ix + (iy + yl) * nxdim) as usize) = (means[iy as usize]
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * sds[iy as usize])
-                    * fracx[ix as usize]
-                    + xpart[ix as usize];
-            }
-        }
-        corn_y_mean = means[0];
-        corn_y_sd = sds[0];
-        corn_x_mean = save_corn_mean;
-        corn_x_sd = save_corn_sd;
-        for iy in 0..yl {
-            for ix in 0..xl {
-                let frac_min = fracx[ix as usize].min(fracy[iy as usize]);
-                let weight_sum = 0.01_f32.max(fracx[ix as usize] + fracy[iy as usize]);
-                let corn_mean = (corn_x_mean * fracx[ix as usize]
-                    + corn_y_mean * fracy[iy as usize])
-                    / weight_sum;
-                let corn_sd =
-                    (corn_x_sd * fracx[ix as usize] + corn_y_sd * fracy[iy as usize]) / weight_sum;
-                pseudo = (197 * (pseudo + 1)) & 0xfffff;
-                *out.add((ix + iy * nxdim) as usize) = (corn_mean
-                    + (pseudo as f32 * 1.73 / 0x7ffff as f32 - 1.73) * corn_sd)
-                    * frac_min
-                    + mean * (1. - frac_min);
-            }
-        }
+            ixlo + edge_xadd,
+            (ixhi - 1) - edge_xadd,
+            iylo + edge_yadd,
+            (iyhi - 1) - edge_yadd,
+        ) as f32;
+        nxtop = nx - 1;
+        nytop = ny - 1;
+
+        // Set up fractions and mean components.  See the note above: this is
+        // the source's `temp` layout, backed by a local buffer.
         let _ = temp;
+        let mut scratch = vec![
+            0.0f32;
+            (2 * ixlo + 2 * iylo + 2 * if nxbox > nybox { nxbox } else { nybox })
+                as usize
+        ];
+        fracx = scratch.as_mut_ptr();
+        mean_xpart = fracx.offset(ixlo as isize);
+        fracy = mean_xpart.offset(ixlo as isize);
+        mean_ypart = fracy.offset(iylo as isize);
+        means = mean_ypart.offset(iylo as isize);
+        sds = means.offset(if nxbox > nybox { nxbox } else { nybox } as isize);
+        for iy in 0..iylo {
+            *fracy.offset(iy as isize) = iy as f32 / iylo as f32;
+            *mean_ypart.offset(iy as isize) =
+                ((1. - *fracy.offset(iy as isize) as f64) * dmean as f64) as f32;
+        }
+        for ix in 0..ixlo {
+            *fracx.offset(ix as isize) = ix as f32 / ixlo as f32;
+            *mean_xpart.offset(ix as isize) =
+                ((1. - *fracx.offset(ix as isize) as f64) * dmean as f64) as f32;
+        }
+
+        //  if there is a mismatch between left and right, add a column on
+        //  right; similarly for bottom versus top, add a row on top
+        if nx - ixhi > ixlo {
+            nxtop -= 1;
+            for iy in 0..ny {
+                *brray.offset((nx - 1 + iy * nxdim) as isize) = dmean;
+            }
+        }
+        if ny - iyhi > iylo {
+            nytop -= 1;
+            for ix in 0..nx {
+                *brray.offset((ix + (ny - 1) * nxdim) as isize) = dmean;
+            }
+        }
+
+        // Multiply 20-bit random numbers by this factor to get a range of 2 * maxSDs
+        ran_fac = max_sds / 0x7FFFF as f32;
+
+        // Set up the number of threads and divide the first Y range (iylo) into groups
+        max_threads = if iylo < max_threads {
+            iylo
+        } else {
+            max_threads
+        };
+        // The source computes a thread count from the image area and clamps
+        // it, then immediately overwrites it with `numOMPthreads(maxThreads)`.
+        // Both statements are kept so the arithmetic stays visible, but only
+        // the second one reaches `numThreads`.
+        let mut nthr = (((((ixlo + iylo) * (nx + ny)) as f64).sqrt() / 170.) + 0.5).floor() as i32;
+        nthr = {
+            let clamped = if max_threads < nthr {
+                max_threads
+            } else {
+                nthr
+            };
+            if 1 > clamped { 1 } else { clamped }
+        };
+        let _ = nthr;
+        nthr = num_omp_threads(max_threads);
+        nthr = if nthr < SNTP_MAX_THREADS {
+            nthr
+        } else {
+            SNTP_MAX_THREADS
+        };
+        num_threads = if iylo < nthr { iylo } else { nthr };
+        for thread in 0..num_threads {
+            balanced_group_limits(
+                iylo,
+                num_threads,
+                thread,
+                &mut iy_start[thread as usize],
+                &mut iy_end[thread as usize],
+            );
+        }
+
+        // Get mean/SD and fill bottom
+        get_running_mean_sd(
+            brray.offset((ixlo + iylo * nxdim) as isize),
+            noise_rows,
+            noise_length,
+            nxdim,
+            1,
+            nxbox,
+            dmean,
+            samples.as_mut_ptr(),
+            sample_sq.as_mut_ptr(),
+            num_samples,
+            means,
+            sds,
+        );
+
+        for thread in 0..num_threads {
+            pseudo = PSEUDO_VALS[thread as usize];
+            for iy in iy_start[thread as usize]..=iy_end[thread as usize] {
+                ix_base = ixlo + iy * nxdim;
+                for ix in 0..nxbox {
+                    // This is a linear (mixed?) congruential generator with a
+                    // period of 2^20 its deficiencies (small period of low
+                    // order bits) are of no concern here
+                    pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                    *brray.offset((ix + ix_base) as isize) = (*means.offset(ix as isize)
+                        + (pseudo as f32 * ran_fac - max_sds) * *sds.offset(ix as isize))
+                        * *fracy.offset(iy as isize)
+                        + *mean_ypart.offset(iy as isize);
+                }
+            }
+            PSEUDO_VALS[thread as usize] = pseudo;
+        }
+
+        // Save left-hand corner mean for the end, and right mean before getting new means
+        save_corn_mean = *means;
+        save_corn_sd = *sds;
+        corn_xmean = *means.offset((nxbox - 1) as isize);
+        corn_xsd = *sds.offset((nxbox - 1) as isize);
+
+        // Right side mean/SD, bottom right corner then right side
+        get_running_mean_sd(
+            brray.offset((ixlo + nxbox - noise_rows + iylo * nxdim) as isize),
+            noise_rows,
+            noise_length,
+            1,
+            nxdim,
+            nybox,
+            dmean,
+            samples.as_mut_ptr(),
+            sample_sq.as_mut_ptr(),
+            num_samples,
+            means,
+            sds,
+        );
+
+        corn_ymean = *means;
+        corn_ysd = *sds;
+        // FILL_CORNER(nxtop - ix, iy)
+        pseudo = PSEUDO_VALS[0];
+        for iy in 0..iylo {
+            for ix in 0..ixlo {
+                frac_min = if *fracx.offset(ix as isize) < *fracy.offset(iy as isize) {
+                    *fracx.offset(ix as isize)
+                } else {
+                    *fracy.offset(iy as isize)
+                };
+                wgt_sum = (if 0.01f64
+                    > (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                {
+                    0.01f64
+                } else {
+                    (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                }) as f32;
+                corn_mean = (corn_xmean * *fracx.offset(ix as isize)
+                    + corn_ymean * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                corn_sd = (corn_xsd * *fracx.offset(ix as isize)
+                    + corn_ysd * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                *brray.offset(((nxtop - ix) + (iy) * nxdim) as isize) =
+                    (((corn_mean + (pseudo as f32 * ran_fac - max_sds) * corn_sd) * frac_min)
+                        as f64
+                        + dmean as f64 * (1. - frac_min as f64)) as f32;
+            }
+        }
+        PSEUDO_VALS[0] = pseudo;
+
+        for thread in 0..num_threads {
+            balanced_group_limits(
+                nybox,
+                num_threads,
+                thread,
+                &mut iy_start[thread as usize],
+                &mut iy_end[thread as usize],
+            );
+        }
+
+        for thread in 0..num_threads {
+            pseudo = PSEUDO_VALS[thread as usize];
+            for iy in iy_start[thread as usize]..=iy_end[thread as usize] {
+                ix_base = nxtop + (iy + iylo) * nxdim;
+                for ix in 0..ixlo {
+                    pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                    *brray.offset((ix_base - ix) as isize) = (*means.offset(iy as isize)
+                        + (pseudo as f32 * ran_fac - max_sds) * *sds.offset(iy as isize))
+                        * *fracx.offset(ix as isize)
+                        + *mean_xpart.offset(ix as isize);
+                }
+            }
+            PSEUDO_VALS[thread as usize] = pseudo;
+        }
+
+        corn_ymean = *means.offset((nybox - 1) as isize);
+        corn_ysd = *sds.offset((nybox - 1) as isize);
+
+        // Top mean/SD, top right corner and top side
+        get_running_mean_sd(
+            brray.offset((ixlo + (iylo + nybox - noise_rows) * nxdim) as isize),
+            noise_rows,
+            noise_length,
+            nxdim,
+            1,
+            nxbox,
+            dmean,
+            samples.as_mut_ptr(),
+            sample_sq.as_mut_ptr(),
+            num_samples,
+            means,
+            sds,
+        );
+        corn_xmean = *means.offset((nxbox - 1) as isize);
+        corn_xsd = *sds.offset((nxbox - 1) as isize);
+        // FILL_CORNER(nxtop - ix, nytop - iy)
+        pseudo = PSEUDO_VALS[0];
+        for iy in 0..iylo {
+            for ix in 0..ixlo {
+                frac_min = if *fracx.offset(ix as isize) < *fracy.offset(iy as isize) {
+                    *fracx.offset(ix as isize)
+                } else {
+                    *fracy.offset(iy as isize)
+                };
+                wgt_sum = (if 0.01f64
+                    > (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                {
+                    0.01f64
+                } else {
+                    (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                }) as f32;
+                corn_mean = (corn_xmean * *fracx.offset(ix as isize)
+                    + corn_ymean * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                corn_sd = (corn_xsd * *fracx.offset(ix as isize)
+                    + corn_ysd * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                *brray.offset(((nxtop - ix) + (nytop - iy) * nxdim) as isize) =
+                    (((corn_mean + (pseudo as f32 * ran_fac - max_sds) * corn_sd) * frac_min)
+                        as f64
+                        + dmean as f64 * (1. - frac_min as f64)) as f32;
+            }
+        }
+        PSEUDO_VALS[0] = pseudo;
+
+        for thread in 0..num_threads {
+            balanced_group_limits(
+                iylo,
+                num_threads,
+                thread,
+                &mut iy_start[thread as usize],
+                &mut iy_end[thread as usize],
+            );
+        }
+
+        for thread in 0..num_threads {
+            pseudo = PSEUDO_VALS[thread as usize];
+            for iy in iy_start[thread as usize]..=iy_end[thread as usize] {
+                ix_base = ixlo + (nytop - iy) * nxdim;
+                for ix in 0..nxbox {
+                    pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                    *brray.offset((ix + ix_base) as isize) = (*means.offset(ix as isize)
+                        + (pseudo as f32 * ran_fac - max_sds) * *sds.offset(ix as isize))
+                        * *fracy.offset(iy as isize)
+                        + *mean_ypart.offset(iy as isize);
+                }
+            }
+            PSEUDO_VALS[thread as usize] = pseudo;
+        }
+
+        corn_xmean = *means;
+        corn_xsd = *sds;
+
+        // Left side mean, then top left corner, then left side
+        get_running_mean_sd(
+            brray.offset((ixlo + iylo * nxdim) as isize),
+            noise_rows,
+            noise_length,
+            1,
+            nxdim,
+            nybox,
+            dmean,
+            samples.as_mut_ptr(),
+            sample_sq.as_mut_ptr(),
+            num_samples,
+            means,
+            sds,
+        );
+        corn_ymean = *means.offset((nybox - 1) as isize);
+        corn_ysd = *sds.offset((nybox - 1) as isize);
+        // FILL_CORNER(ix, nytop - iy)
+        pseudo = PSEUDO_VALS[0];
+        for iy in 0..iylo {
+            for ix in 0..ixlo {
+                frac_min = if *fracx.offset(ix as isize) < *fracy.offset(iy as isize) {
+                    *fracx.offset(ix as isize)
+                } else {
+                    *fracy.offset(iy as isize)
+                };
+                wgt_sum = (if 0.01f64
+                    > (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                {
+                    0.01f64
+                } else {
+                    (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                }) as f32;
+                corn_mean = (corn_xmean * *fracx.offset(ix as isize)
+                    + corn_ymean * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                corn_sd = (corn_xsd * *fracx.offset(ix as isize)
+                    + corn_ysd * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                *brray.offset(((ix) + (nytop - iy) * nxdim) as isize) =
+                    (((corn_mean + (pseudo as f32 * ran_fac - max_sds) * corn_sd) * frac_min)
+                        as f64
+                        + dmean as f64 * (1. - frac_min as f64)) as f32;
+            }
+        }
+        PSEUDO_VALS[0] = pseudo;
+
+        for thread in 0..num_threads {
+            balanced_group_limits(
+                nybox,
+                num_threads,
+                thread,
+                &mut iy_start[thread as usize],
+                &mut iy_end[thread as usize],
+            );
+        }
+
+        for thread in 0..num_threads {
+            pseudo = PSEUDO_VALS[thread as usize];
+            for iy in iy_start[thread as usize]..=iy_end[thread as usize] {
+                ix_base = (iy + iylo) * nxdim;
+                for ix in 0..ixlo {
+                    pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                    *brray.offset((ix_base + ix) as isize) = (*means.offset(iy as isize)
+                        + (pseudo as f32 * ran_fac - max_sds) * *sds.offset(iy as isize))
+                        * *fracx.offset(ix as isize)
+                        + *mean_xpart.offset(ix as isize);
+                }
+            }
+            PSEUDO_VALS[thread as usize] = pseudo;
+        }
+
+        // Finish up with bottom left corner
+        corn_ymean = *means;
+        corn_ysd = *sds;
+        corn_xmean = save_corn_mean;
+        corn_xsd = save_corn_sd;
+
+        // FILL_CORNER(ix, iy)
+        pseudo = PSEUDO_VALS[0];
+        for iy in 0..iylo {
+            for ix in 0..ixlo {
+                frac_min = if *fracx.offset(ix as isize) < *fracy.offset(iy as isize) {
+                    *fracx.offset(ix as isize)
+                } else {
+                    *fracy.offset(iy as isize)
+                };
+                wgt_sum = (if 0.01f64
+                    > (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                {
+                    0.01f64
+                } else {
+                    (*fracx.offset(ix as isize) + *fracy.offset(iy as isize)) as f64
+                }) as f32;
+                corn_mean = (corn_xmean * *fracx.offset(ix as isize)
+                    + corn_ymean * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                corn_sd = (corn_xsd * *fracx.offset(ix as isize)
+                    + corn_ysd * *fracy.offset(iy as isize))
+                    / wgt_sum;
+                pseudo = (197i32.wrapping_mul(pseudo.wrapping_add(1))) & 0xFFFFF;
+                *brray.offset(((ix) + (iy) * nxdim) as isize) =
+                    (((corn_mean + (pseudo as f32 * ran_fac - max_sds) * corn_sd) * frac_min)
+                        as f64
+                        + dmean as f64 * (1. - frac_min as f64)) as f32;
+            }
+        }
+        PSEUDO_VALS[0] = pseudo;
     }
 }
+
 pub unsafe fn slicenoisetaperpad(
     array: *mut f32,
     nxbox: *mut i32,
@@ -798,42 +1109,79 @@ pub unsafe fn image_edge_mean(
     }
 }
 /// C `sliceEdgeMedian`.
+/// `sliceEdgeMedian` (`taperpad.c:1002`).
+///
+/// Translated statement by statement.  The previous version took
+/// `q[q.len() / 2]` as each side's median, which differs from the source two
+/// ways: `rsFastMedianInPlace` (`robuststat.c:187-192`) uses the 1-based
+/// `percentileFloat((n+1)/2)` and, for an **even** count, averages it with
+/// `percentileFloat(n/2+1)` and rounds back to float; and `percentileFloat`
+/// returns 0 for a non-positive count, so a side with no samples contributes
+/// zero rather than indexing an empty slice.  On a 64x48 image every edge has
+/// an even sample count, so the old form returned 129.78 where the reference
+/// gives 129.38, and a 2-line region aborted the process.
+///
+/// Note the source reuses one `samples` buffer: with `meanOfSides` clear, the
+/// four loops append into it and only `median4` — the median of everything
+/// collected — is returned.
 pub unsafe fn slice_edge_median(
-    a: *mut f32,
-    n: i32,
-    xl: i32,
-    xh: i32,
-    yl: i32,
-    yh: i32,
-    mean_sides: i32,
+    array: *mut f32,
+    nxdim: i32,
+    ixlo: i32,
+    ixhi: i32,
+    iylo: i32,
+    iyhi: i32,
+    mean_of_sides: i32,
 ) -> f64 {
     unsafe {
-        let interval = ((2 * ((xh - xl) + (yh + 1 - yl)) + 9999) / 10000).max(1);
-        let mut all: Vec<f32> = Vec::new();
-        let mut med = Vec::new();
-        for side in 0..4 {
-            let mut q = Vec::new();
-            if side < 2 {
-                let y = if side == 0 { yl } else { yh };
-                for x in (xl..=xh).step_by(interval as usize) {
-                    q.push(*a.add((x + y * n) as usize));
-                }
-            } else {
-                let x = if side == 2 { xl } else { xh };
-                for y in (yl + 1..yh).step_by(interval as usize) {
-                    q.push(*a.add((x + y * n) as usize));
-                }
-            }
-            all.extend(q.iter());
-            q.sort_by(|x, y| x.total_cmp(y));
-            med.push(q[q.len() / 2] as f64);
+        const MAX_MED_SAMPLE: i32 = 10000;
+        let mut samples = vec![0.0_f32; MAX_MED_SAMPLE as usize];
+        let mut num_sample = 0_i32;
+        let (mut median1, mut median2, mut median3, mut median4) = (0.0_f32, 0.0, 0.0, 0.0);
+        let num_on_edge = 2 * ((ixhi - ixlo) + (iyhi + 1 - iylo));
+        let samp_interval = (num_on_edge + MAX_MED_SAMPLE - 1) / MAX_MED_SAMPLE;
+
+        let mut ix = ixlo;
+        while ix <= ixhi {
+            samples[num_sample as usize] = *array.add((ix + iylo * nxdim) as usize);
+            num_sample += 1;
+            ix += samp_interval;
         }
-        if mean_sides != 0 {
-            med.iter().sum::<f64>() / 4.
-        } else {
-            all.sort_by(|x, y| x.total_cmp(y));
-            all[all.len() / 2] as f64
+        if mean_of_sides != 0 {
+            rs_fast_median_in_place(samples.as_mut_ptr(), num_sample, &mut median1);
+            num_sample = 0;
         }
+        let mut ix = ixlo;
+        while ix <= ixhi {
+            samples[num_sample as usize] = *array.add((ix + iyhi * nxdim) as usize);
+            num_sample += 1;
+            ix += samp_interval;
+        }
+        if mean_of_sides != 0 {
+            rs_fast_median_in_place(samples.as_mut_ptr(), num_sample, &mut median2);
+            num_sample = 0;
+        }
+        let mut iy = iylo + 1;
+        while iy < iyhi {
+            samples[num_sample as usize] = *array.add((ixlo + iy * nxdim) as usize);
+            num_sample += 1;
+            iy += samp_interval;
+        }
+        if mean_of_sides != 0 {
+            rs_fast_median_in_place(samples.as_mut_ptr(), num_sample, &mut median3);
+            num_sample = 0;
+        }
+        let mut iy = iylo + 1;
+        while iy < iyhi {
+            samples[num_sample as usize] = *array.add((ixhi + iy * nxdim) as usize);
+            num_sample += 1;
+            iy += samp_interval;
+        }
+        rs_fast_median_in_place(samples.as_mut_ptr(), num_sample, &mut median4);
+        if mean_of_sides != 0 {
+            return ((median1 + median2 + median3 + median4) / 4.) as f64;
+        }
+        median4 as f64
     }
 }
 pub unsafe fn sliceedgemedian(
@@ -910,6 +1258,224 @@ pub unsafe fn splitfill(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const GOLD_PAD_FIRST: [u32; 165] = [
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0xc640e400,
+        0xc640e400, 0x419d0000, 0x41526c9c, 0xc105b166, 0x40e7c7bc, 0xc0d1e86c, 0xc1152c90,
+        0x427e4dc9, 0xc1ab9804, 0x41a5f9eb, 0x427334da, 0xc1b67e44, 0x419d0000, 0x419d0000,
+        0xc640e400, 0xc640e400, 0x419d0000, 0x4286db64, 0xc2c80000, 0xc2740000, 0xc1b00000,
+        0x41880000, 0x42460000, 0x42b10000, 0x42ff0000, 0xc2b60000, 0xc0bba6c0, 0x419d0000,
+        0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x42715836, 0xc2500000, 0xc1500000,
+        0x419c0000, 0x426a0000, 0x42c30000, 0x43020000, 0xc2a40000, 0xc22c0000, 0xc19ce810,
+        0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x4260079e, 0xc0800000,
+        0x41e40000, 0x42870000, 0x42d50000, 0x430b0000, 0xc2920000, 0xc2080000, 0xbfc00000,
+        0x42493f03, 0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0xc22a39aa,
+        0x42160000, 0x42990000, 0x42da0000, 0x43140000, 0xc2800000, 0xc1c80000, 0x40f00000,
+        0x423a0000, 0x429be874, 0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000,
+        0x4280a09f, 0x42ab0000, 0x42ec0000, 0xc2bc0000, 0xc25c0000, 0xc1b40000, 0x41840000,
+        0x425e0000, 0x42b00000, 0x428a05c7, 0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400,
+        0x419d0000, 0x4127272d, 0x42fe0000, 0xc2aa0000, 0xc2380000, 0xc1580000, 0x41cc0000,
+        0x42810000, 0x42c20000, 0x43080000, 0xc12cf890, 0x419d0000, 0x419d0000, 0xc640e400,
+        0xc640e400, 0x419d0000, 0x42636b1d, 0xc2323ab4, 0x42320da0, 0xc1898be9, 0xc2087b50,
+        0xc2072d2a, 0x41f3ebfa, 0x41ad0cfa, 0x4129d00d, 0x41df7f0b, 0x419d0000, 0x419d0000,
+        0xc640e400, 0xc640e400, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400,
+    ];
+    const GOLD_PAD_SECOND: [u32; 165] = [
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0xc640e400,
+        0xc640e400, 0x419d0000, 0x42239ad2, 0x41b9087e, 0x4210c4cd, 0x4185a0a1, 0x40a162a4,
+        0x4257d5f2, 0x426e2d51, 0x42426daf, 0xc0dfb1fc, 0x42769650, 0x419d0000, 0x419d0000,
+        0xc640e400, 0xc640e400, 0x419d0000, 0xc1d6922e, 0xc2c80000, 0xc2740000, 0xc1b00000,
+        0x41880000, 0x42460000, 0x42b10000, 0x42ff0000, 0xc2b60000, 0x426d09b1, 0x419d0000,
+        0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x429dce74, 0xc2500000, 0xc1500000,
+        0x419c0000, 0x426a0000, 0x42c30000, 0x43020000, 0xc2a40000, 0xc22c0000, 0xc1f12e7c,
+        0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x4226e8ba, 0xc0800000,
+        0x41e40000, 0x42870000, 0x42d50000, 0x430b0000, 0xc2920000, 0xc2080000, 0xbfc00000,
+        0x42a237f8, 0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x40864f85,
+        0x42160000, 0x42990000, 0x42da0000, 0x43140000, 0xc2800000, 0xc1c80000, 0x40f00000,
+        0x423a0000, 0x42718ec5, 0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000,
+        0xc2054ab9, 0x42ab0000, 0x42ec0000, 0xc2bc0000, 0xc25c0000, 0xc1b40000, 0x41840000,
+        0x425e0000, 0x42b00000, 0x41366636, 0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400,
+        0x419d0000, 0x4256f046, 0x42fe0000, 0xc2aa0000, 0xc2380000, 0xc1580000, 0x41cc0000,
+        0x42810000, 0x42c20000, 0x43080000, 0x429617c4, 0x419d0000, 0x419d0000, 0xc640e400,
+        0xc640e400, 0x419d0000, 0x4270c9cd, 0x427ff6ac, 0x42a9759f, 0x420bb0cd, 0xc21be14a,
+        0x429c0ded, 0x42420bd0, 0xc1ef76d0, 0xc1144354, 0x41b743a0, 0x419d0000, 0x419d0000,
+        0xc640e400, 0xc640e400, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0xc640e400, 0xc640e400, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000, 0x419d0000,
+        0x419d0000, 0x419d0000, 0xc640e400, 0xc640e400,
+    ];
+    const GOLD_BIG_PAD_FNV: u64 = 0x02d9ca3252a752a7;
+    const GOLD_BIG_PAD_SPOT: [u32; 8] = [
+        0x41e47dc1, 0xc2b80000, 0xc0200000, 0x42d70000, 0xc2580000, 0xc1500000, 0x42990000,
+        0xc640e400,
+    ];
+
+    /// Deterministic input shared with the C golden generator.
+    fn pad_src(i: i32) -> f32 {
+        ((i * 37) % 251) as f32 - 100.0f32 + 0.5f32 * ((i * 17) % 13) as f32
+    }
+
+    /// `pseudoVals` is `static` in the source, so a test that pins exact
+    /// values has to start from the declared state.
+    fn reset_pseudo_vals() {
+        unsafe {
+            PSEUDO_VALS = [
+                123456, 654321, 368341, 789234, 234561, 543216, 683413, 892347, 345612, 432165,
+                834136, 923478, 456123, 321654, 341368, 234789,
+            ];
+        }
+    }
+
+    fn assert_pad_bits(got: &[f32], want: &[u32], what: &str) {
+        let bad = (0..want.len())
+            .filter(|i| got[*i].to_bits() != want[*i])
+            .collect::<Vec<_>>();
+        assert!(
+            bad.is_empty(),
+            "{what}: {} of {} values differ from the native sliceNoiseTaperPad, first at {:?} \
+             (got {:#010x} = {}, want {:#010x} = {})",
+            bad.len(),
+            want.len(),
+            bad.first(),
+            got[bad[0]].to_bits(),
+            got[bad[0]],
+            want[bad[0]],
+            f32::from_bits(want[bad[0]])
+        );
+    }
+
+    /// Every value written by `sliceNoiseTaperPad` must match the reference
+    /// `libcfshr` bit for bit.  The 8x6 -> 13x11 geometry is chosen so that
+    /// `nx - ixhi > ixlo` and `ny - iyhi > iylo` both hold, which is what
+    /// makes the source drop `nxtop`/`nytop` by one and fill the extra column
+    /// and row with `dmean` (`taperpad.c:634-644`); indexing the sides off
+    /// `nx - 1` / `ny - 1` instead misplaces every side and corner pixel.
+    /// The same data pins `b3dIMin`'s leading argument being a **count**
+    /// (`taperpad.c:590-592` asks for the min of 3 and of 4 values, not of 4
+    /// and 5), `getRunningMeanSD` going through `sumsToAvgSDdbl` with its
+    /// `n - 1` denominator, and the exact congruential sequence.
+    ///
+    /// The second call re-runs the identical arguments: it must produce
+    /// *different* values, because `pseudoVals` is static and carries the
+    /// generator state over between calls.
+    #[test]
+    fn noise_taper_pad_matches_the_native_routine_bit_for_bit() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
+        reset_pseudo_vals();
+        let mut input = (0..8 * 6).map(pad_src).collect::<Vec<f32>>();
+        let mut temp = vec![0.0f32; 4096];
+        let mut first = vec![-12345.0f32; 15 * 11];
+        let mut second = vec![-12345.0f32; 15 * 11];
+        unsafe {
+            slice_noise_taper_pad(
+                input.as_mut_ptr().cast(),
+                FLOAT,
+                8,
+                6,
+                first.as_mut_ptr(),
+                15,
+                13,
+                11,
+                20,
+                4,
+                temp.as_mut_ptr(),
+            );
+            slice_noise_taper_pad(
+                input.as_mut_ptr().cast(),
+                FLOAT,
+                8,
+                6,
+                second.as_mut_ptr(),
+                15,
+                13,
+                11,
+                20,
+                4,
+                temp.as_mut_ptr(),
+            );
+        }
+        assert_pad_bits(&first, &GOLD_PAD_FIRST, "first call");
+        assert_pad_bits(
+            &second,
+            &GOLD_PAD_SECOND,
+            "second call (static pseudoVals carried over)",
+        );
+        assert_ne!(
+            first, second,
+            "static pseudoVals must carry over between calls"
+        );
+        // The extra column and row the source adds when the padding is
+        // lopsided are plain `dmean`, and columns past `nx` are never written.
+        for iy in 0..11 {
+            assert_eq!(first[14 + iy * 15].to_bits(), (-12345.0f32).to_bits());
+            assert_eq!(first[13 + iy * 15].to_bits(), (-12345.0f32).to_bits());
+        }
+    }
+
+    /// `taperpad.c:611-616` insets the edge-mean rectangle by
+    /// `edgeXadd`/`edgeYadd` once the box passes 400 pixels, which changes
+    /// `dmean` and therefore every padded value.  401 x 403 is the smallest
+    /// size that turns both insets on.
+    #[test]
+    fn noise_taper_pad_insets_the_edge_mean_for_boxes_over_400() {
+        // These expectations were captured from the reference with a single
+        // thread.  `numOMPthreads` now returns the reference's OpenMP count
+        // rather than a hard-coded 1, and that count selects work partitions
+        // and pseudo-random seeds — so pin it here, otherwise the result
+        // depends on the core count of whatever machine runs the suite.
+        unsafe { std::env::set_var("OMP_NUM_THREADS", "1") };
+        reset_pseudo_vals();
+        let (nxbox, nybox, nx, ny, nxdim) = (401, 403, 420, 424, 422);
+        let mut input = (0..nxbox * nybox).map(pad_src).collect::<Vec<f32>>();
+        let mut temp = vec![0.0f32; 1 << 20];
+        let mut out = vec![-12345.0f32; (nxdim * ny) as usize];
+        unsafe {
+            slice_noise_taper_pad(
+                input.as_mut_ptr().cast(),
+                FLOAT,
+                nxbox,
+                nybox,
+                out.as_mut_ptr(),
+                nxdim,
+                nx,
+                ny,
+                20,
+                4,
+                temp.as_mut_ptr(),
+            );
+        }
+        let mut hash: u64 = 1469598103934665603;
+        for value in &out {
+            for byte in value.to_bits().to_le_bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(1099511628211);
+            }
+        }
+        let spot = (0..8)
+            .map(|i| out[(i * 37799) % (nxdim * ny) as usize].to_bits())
+            .collect::<Vec<u32>>();
+        assert_eq!(
+            spot.as_slice(),
+            GOLD_BIG_PAD_SPOT.as_slice(),
+            "sampled values differ from the native sliceNoiseTaperPad"
+        );
+        assert_eq!(
+            hash, GOLD_BIG_PAD_FNV,
+            "FNV-1a over the whole padded array differs from the native sliceNoiseTaperPad"
+        );
+    }
+
     #[test]
     fn taper_and_split() {
         unsafe {

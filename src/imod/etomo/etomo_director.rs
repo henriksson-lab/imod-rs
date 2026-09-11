@@ -19,6 +19,28 @@ pub const NEW_MESSAGE_PARSER: bool = true;
 pub const MIN_AVAILABLE_MEMORY_REQUIRED: f64 = 2. * 1024. * 1024.;
 pub const NUMBER_STORABLES: i32 = 2;
 
+/// Java `INSTANCE` (`EtomoDirector.java:80`):
+/// `public static final EtomoDirector INSTANCE = new EtomoDirector();`.
+///
+/// Java initialises the singleton in a class initialiser; Rust needs a lock because the
+/// director's fields are mutable and `Arguments::is_debug` takes `&mut self`.  The Java
+/// field is not synchronised either, so the lock is a Rust representation requirement,
+/// not added behaviour.
+pub static INSTANCE: std::sync::LazyLock<std::sync::Mutex<EtomoDirector>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(EtomoDirector::new()));
+
+/// Java `ARGUMENTS` (`EtomoDirector.java:81`):
+/// `public static final Arguments ARGUMENTS = new Arguments();`.  This is the object
+/// `EtomoDirector.INSTANCE.getArguments()` returns (`EtomoDirector.java:1415`).
+pub static ARGUMENTS: std::sync::LazyLock<std::sync::Mutex<Arguments>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Arguments::new()));
+
+/// Java `FILE_INFO_DIAGNOSTICS` (`EtomoDirector.java:97`).
+pub const FILE_INFO_DIAGNOSTICS: bool = false;
+
+/// Java `FILE_INFO_CLEAN_PRINT_LABEL` (`EtomoDirector.java:94`).
+pub const FILE_INFO_CLEAN_PRINT_LABEL: &str = "File Info";
+
 /// Non-GUI fields of Java `EtomoDirector` (`EtomoDirector.java:76`).
 #[derive(Clone, Debug, Default)]
 pub struct EtomoDirector {
@@ -66,6 +88,12 @@ impl EtomoDirector {
         }
         eprintln!("\n");
         if self.headless { self.setup() } else { Ok(()) }
+    }
+
+    /// Java `getArguments()` (`EtomoDirector.java:1415`).  Java returns the
+    /// `ARGUMENTS` static; a caller that needs to mutate it locks the static directly.
+    pub fn get_arguments(&self) -> std::sync::MutexGuard<'static, Arguments> {
+        ARGUMENTS.lock().unwrap()
     }
 
     /// Matches Java `isSimulateWindows()` (`EtomoDirector.java:167`).

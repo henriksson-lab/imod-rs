@@ -76,11 +76,22 @@ pub fn parselist2(
         }
         return Ok(());
     }
-    // Source exits for a positive LIMLIST; its negative form returns the
-    // classified error (1 too many, 3 allocation, 4 bad character).
-    if *lim_list <= 0 {
-        *lim_list = ierr + 2;
+    // `rdlist.f90:71-79` prints the classified message before it decides
+    // what to do with it, so the message appears whichever form the caller
+    // used, and a positive LIMLIST then exits.
+    if ierr < 0 {
+        println!("\nERROR: PARSELIST - TOO MANY LIST VALUES FOR ARRAY");
+    } else if ierr == 1 {
+        println!("\nERROR: PARSELIST - FAILED TO ALLOCATE MEMORY FOR LIST");
+    } else {
+        println!("\nERROR: PARSELIST - BAD CHARACTER IN ENTRY");
     }
+    if *lim_list > 0 {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        std::process::exit(1);
+    }
+    *lim_list = ierr + 2;
     Err(ierr)
 }
 

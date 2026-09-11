@@ -125,7 +125,10 @@ pub unsafe fn get_extra_header_tilts_fortran(
         iz_piece,
     ) != 0
     {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
 }
 
@@ -320,7 +323,10 @@ pub unsafe fn get_extra_header_items_fortran(
         iz_piece,
     ) != 0
     {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
 }
 
@@ -423,7 +429,10 @@ pub unsafe fn get_metadata_items_fortran(
         iz_piece,
     ) != 0
     {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
 }
 
@@ -597,7 +606,10 @@ pub unsafe fn get_metadata_by_key_fortran(
         iz_piece,
     ) != 0
     {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
     if *value_type == 0 {
         for ind in 0..*num_found {
@@ -685,7 +697,10 @@ pub unsafe fn get_extra_header_pieces_fortran(
         *max_piece,
     ) != 0
     {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
 }
 
@@ -766,7 +781,10 @@ pub unsafe fn get_metadata_pieces_fortran(
         num_found,
     ) != 0
     {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
 }
 
@@ -979,7 +997,10 @@ pub unsafe fn get_metadata_weighting_doses_fortran(
         sec_dose,
     );
     if error > 0 {
-        panic!("ERROR: {:?}", CStr::from_ptr(b3d_get_error()));
+        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
+        // writes through libc stdout and exits, it does not unwind.
+        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        libc::exit(1);
     }
     error
 }

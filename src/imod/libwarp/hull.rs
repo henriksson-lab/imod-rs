@@ -237,37 +237,53 @@ pub unsafe fn free_fg_storage() {
 }
 
 /// Original `visit_triang_gen` (`hull.c:58`).
+/// `hull.c:43-44`.  The comment there records that these were deliberately
+/// moved out of `visit_triang_gen` and `search` to file scope, and individual
+/// push/pop macros provided, specifically so `hullCleanup` can free them
+/// before exit.  Keeping them as function-local statics makes that impossible.
+static mut S_VTGST: *mut *mut Simplex = core::ptr::null_mut();
+static mut S_SST: *mut *mut Simplex = core::ptr::null_mut();
+
+/// Original `hullCleanup` (`hull.c:51`).  Called by `warpfiles.c:975`.
+pub unsafe fn hull_cleanup() {
+    unsafe {
+        libc::free(S_VTGST.cast());
+        S_VTGST = core::ptr::null_mut();
+        libc::free(S_SST.cast());
+        S_SST = core::ptr::null_mut();
+    }
+}
+
 pub unsafe fn visit_triang_gen(
     simplex: *mut Simplex,
     visit: VisitFunc,
     test: TestFunc,
 ) -> *mut c_void {
     unsafe {
-        static mut STACK: *mut *mut Simplex = core::ptr::null_mut();
         static mut VNUM: i32 = -1;
         static mut SIZE: i32 = 2000;
         let mut top = 0;
         VNUM -= 1;
-        if STACK.is_null() {
-            STACK =
+        if S_VTGST.is_null() {
+            S_VTGST =
                 libc::malloc((SIZE as usize + MAXDIM + 1) * core::mem::size_of::<*mut Simplex>())
                     .cast();
         }
         if !simplex.is_null() {
-            *STACK.add(top) = simplex;
+            *S_VTGST.add(top) = simplex;
             top += 1;
         }
         while top != 0 {
             if top > SIZE as usize {
                 SIZE += SIZE;
-                STACK = libc::realloc(
-                    STACK.cast(),
+                S_VTGST = libc::realloc(
+                    S_VTGST.cast(),
                     (SIZE as usize + MAXDIM + 1) * core::mem::size_of::<*mut Simplex>(),
                 )
                 .cast();
             }
             top -= 1;
-            let current = *STACK.add(top);
+            let current = *S_VTGST.add(top);
             if current.is_null() || (*current).visit == VNUM {
                 continue;
             }
@@ -282,7 +298,7 @@ pub unsafe fn visit_triang_gen(
                     && (*(*neighbour).simp).visit != VNUM
                     && test(current, index, core::ptr::null_mut()) != 0
                 {
-                    *STACK.add(top) = (*neighbour).simp;
+                    *S_VTGST.add(top) = (*neighbour).simp;
                     top += 1;
                 }
             }
@@ -327,6 +343,24 @@ pub unsafe fn op_simp(simplex: *mut Simplex, other: *mut Simplex) -> *mut Neighb
                 return neighbour;
             }
         }
+        /* The `lookup` macro's failure arm (`hull.c:119-127`).  `DEBTR(-10)`
+        is taken because `DEBUG` is -7 (`hull.h:30`). */
+        let dfile = crate::imod::libwarp::hull_io::DFILE;
+        libc::fprintf(dfile, c"adjacency failure,op_simp:\n".as_ptr());
+        libc::fprintf(dfile, c"hull.c line %d \n".as_ptr(), 121);
+        libc::fflush(dfile);
+        crate::imod::libwarp::hull_io::print_simplex_f(
+            simplex,
+            dfile,
+            Some(crate::imod::libwarp::hull_io::print_neighbor_full),
+        );
+        crate::imod::libwarp::hull_io::print_simplex(other, dfile.cast());
+        libc::fprintf(dfile, c"---------------------\n".as_ptr());
+        crate::imod::libwarp::hull_io::print_triang(
+            simplex,
+            dfile,
+            Some(crate::imod::libwarp::hull_io::print_neighbor_full),
+        );
         libc::exit(1)
     }
 }
@@ -340,6 +374,24 @@ pub unsafe fn op_vert(simplex: *mut Simplex, vertex: Site) -> *mut Neighbor {
                 return neighbour;
             }
         }
+        /* The `lookup` macro's failure arm (`hull.c:119-127`), with
+        `print_site` for the `whatt` = `site` expansion. */
+        let dfile = crate::imod::libwarp::hull_io::DFILE;
+        libc::fprintf(dfile, c"adjacency failure,op_vert:\n".as_ptr());
+        libc::fprintf(dfile, c"hull.c line %d \n".as_ptr(), 121);
+        libc::fflush(dfile);
+        crate::imod::libwarp::hull_io::print_simplex_f(
+            simplex,
+            dfile,
+            Some(crate::imod::libwarp::hull_io::print_neighbor_full),
+        );
+        crate::imod::libwarp::hull_ch::print_site(vertex, dfile);
+        libc::fprintf(dfile, c"---------------------\n".as_ptr());
+        crate::imod::libwarp::hull_io::print_triang(
+            simplex,
+            dfile,
+            Some(crate::imod::libwarp::hull_io::print_neighbor_full),
+        );
         libc::exit(1)
     }
 }
@@ -511,34 +563,33 @@ unsafe fn extend_simplices(simplex: *mut Simplex) -> *mut Simplex {
 /// Original static `search` (`hull.c:252`).
 unsafe fn search(root: *mut Simplex) -> *mut Simplex {
     unsafe {
-        static mut STACK: *mut *mut Simplex = core::ptr::null_mut();
         static mut SIZE: i32 = MAXDIM as i32;
         let mut top = 0_usize;
-        if STACK.is_null() {
-            STACK =
+        if S_SST.is_null() {
+            S_SST =
                 libc::malloc((SIZE as usize + MAXDIM + 1) * core::mem::size_of::<*mut Simplex>())
                     .cast();
         }
-        *STACK.add(top) = (*root).peak.simp;
+        *S_SST.add(top) = (*root).peak.simp;
         top += 1;
         (*root).visit = PNUM;
         if sees(P, root) == 0 {
             for index in 0..CDIM {
-                *STACK.add(top) = (*root).neigh.as_mut_ptr().add(index as usize).read().simp;
+                *S_SST.add(top) = (*root).neigh.as_mut_ptr().add(index as usize).read().simp;
                 top += 1;
             }
         }
         while top != 0 {
             if top > SIZE as usize {
                 SIZE += SIZE;
-                STACK = libc::realloc(
-                    STACK.cast(),
+                S_SST = libc::realloc(
+                    S_SST.cast(),
                     (SIZE as usize + MAXDIM + 1) * core::mem::size_of::<*mut Simplex>(),
                 )
                 .cast();
             }
             top -= 1;
-            let simplex = *STACK.add(top);
+            let simplex = *S_SST.add(top);
             if (*simplex).visit == PNUM {
                 continue;
             }
@@ -550,7 +601,7 @@ unsafe fn search(root: *mut Simplex) -> *mut Simplex {
                 return simplex;
             }
             for index in 0..CDIM {
-                *STACK.add(top) = (*simplex)
+                *S_SST.add(top) = (*simplex)
                     .neigh
                     .as_mut_ptr()
                     .add(index as usize)

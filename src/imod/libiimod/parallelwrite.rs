@@ -605,7 +605,7 @@ pub unsafe extern "C" fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void
     );
     if ierr != 0 {
         libc::printf(
-            b"\nERROR: par_wrt_sec - Finding parallel write boundary region sec %d err %d\n\0"
+            b"\nERROR: parWrtSec - Finding parallel write boundary region sec %d err %d\n\0"
                 as *const u8 as *const ::core::ffi::c_char,
             s_iz_cur[s_cur_info as usize],
             ierr,
@@ -705,7 +705,7 @@ pub unsafe extern "C" fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void
         );
         if ierr != 0 {
             libc::printf(
-                b"\nERROR: par_wrt_sec - Finding parallel write boundary region at %d, %d  err %d\n\0"
+                b"\nERROR: parWrtSec - Finding parallel write boundary region at %d, %d  err %d\n\0"
                     as *const u8 as *const ::core::ffi::c_char,
                 s_iz_cur[s_cur_info as usize],
                 s_iy_cur[s_cur_info as usize],

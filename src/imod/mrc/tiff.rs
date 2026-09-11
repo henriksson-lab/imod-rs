@@ -4,7 +4,8 @@
 //! The complete reader half of this historical source is a separate lower
 //! dependency of `tif2mrc`; this module supplies the paired writer used by
 //! `mrc2tif -o` and preserves its deliberately uncompressed classic-TIFF
-//! layout.
+//! layout.  Its default reader is source-compatible; the optional Rust reader
+//! is selected only through `IMOD_RS_TIFF_BACKEND=rust`.
 #![allow(dead_code)]
 
 use crate::imod::libiimod::mrcfiles::{
@@ -305,6 +306,10 @@ pub unsafe fn read_tiffentries(fp: *mut libc::FILE, tif: *mut TfInfo) -> i32 {
 /// C `tiff_read_section` (`tiff.c:112`).
 pub unsafe fn tiff_read_section(fp: *mut libc::FILE, tif: *mut TfInfo, section: i32) -> *mut u8 {
     unsafe {
+        if crate::imod::mrc::rust_tiff::contains(tif) {
+            return crate::imod::mrc::rust_tiff::read_section(tif, section)
+                .unwrap_or(core::ptr::null_mut());
+        }
         if (*tif).iifile.is_null() {
             (*tif).header.first_ifd_offset = tiff_ifd(fp, section) as i32;
             if (*tif).header.first_ifd_offset == 0 || read_tiffentries(fp, tif) == 0 {
@@ -313,15 +318,25 @@ pub unsafe fn tiff_read_section(fp: *mut libc::FILE, tif: *mut TfInfo, section: 
         }
         let x = (*tif).directory[1].value;
         let y = (*tif).directory[2].value;
-        let pixel = if (*tif).photometric_interpretation == 2 {
-            3
+        let data_size = x as usize * y as usize;
+        // `tiff.c:141-145`: the pixel size comes from BitsPerSample and is then
+        // overridden for RGB.  Sub-byte data therefore leaves `pixSize` at 0.
+        let mut pixel = (*tif).bits_per_sample / 8;
+        if (*tif).photometric_interpretation == 2 {
+            pixel = 3;
+        }
+        // `tiff.c:148-152` allocates `(data_size + xsize + ysize) * pixSize`.
+        // With `pixSize` 0 that is a zero-byte block which the C then reads and
+        // writes far beyond (see the 1-bit branch below), so native `tif2mrc`
+        // has no defined output for sub-byte data.  Allocate the block the
+        // caller will actually consume, cleared, rather than reproducing the
+        // out-of-bounds access.
+        let allocated = (data_size + x as usize + y as usize) * pixel.max(1) as usize;
+        (*tif).data = if pixel > 0 {
+            libc::malloc(allocated)
         } else {
-            (*tif).bits_per_sample / 8
-        };
-        let bytes = x as usize * y as usize * pixel.max(1) as usize;
-        (*tif).data = libc::malloc(
-            (x as usize * y as usize + x as usize + y as usize) * pixel.max(1) as usize,
-        )
+            libc::calloc(allocated, 1)
+        }
         .cast();
         if (*tif).data.is_null() {
             return core::ptr::null_mut();
@@ -340,67 +355,93 @@ pub unsafe fn tiff_read_section(fp: *mut libc::FILE, tif: *mut TfInfo, section: 
             }
             return (*tif).data;
         }
+        /* binary image. */
         if (*tif).bits_per_sample == 1 {
-            let packed_len = ((x as usize * y as usize) + 7) / 8;
-            let packed = libc::malloc(packed_len).cast::<u8>();
-            if packed.is_null() {
+            // `tiff.c:167-189`.  `pixSize` is 0 on this path, so the C's
+            // `fread(&bitdata[dpos], pixSize, tiff->stripsize[i], fp)`
+            // transfers nothing and the expansion below runs over the
+            // uninitialized `malloc(data_size)` block, writing `data_size`
+            // bytes into a zero-byte `tiff->data`.  Native `tif2mrc` therefore
+            // aborts in `free()` for any 1-bit TIFF that declares
+            // BitsPerSample = 1 (verified: SIGABRT, "free(): invalid pointer").
+            // The zero-length reads are kept; `bitdata` is cleared so this
+            // produces a deterministic all-zero image instead of a crash.
+            let bitdata = libc::calloc(data_size, 1).cast::<u8>();
+            if bitdata.is_null() {
                 libc::free((*tif).data.cast());
+                (*tif).data = core::ptr::null_mut();
                 return core::ptr::null_mut();
             }
-            let mut at = 0usize;
+            let mut dpos = 0_i32;
             for i in 0..(*tif).nstrip {
-                let size = (*tif).stripsize.add(i as usize).read().max(0) as usize;
                 libc::fseek(
                     fp,
                     (*tif).stripoff.add(i as usize).read() as i64,
                     libc::SEEK_SET,
                 );
-                let take = size.min(packed_len - at);
-                if libc::fread(packed.add(at).cast(), 1, take, fp) != take {
-                    libc::free(packed.cast());
-                    libc::free((*tif).data.cast());
-                    return core::ptr::null_mut();
-                }
-                at += take;
+                libc::fread(
+                    bitdata.wrapping_add(dpos as usize).cast(),
+                    pixel as usize,
+                    (*tif).stripsize.add(i as usize).read().max(0) as usize,
+                    fp,
+                );
+                dpos += (*tif).stripsize.add(i as usize).read();
             }
-            for i in 0..x as usize * y as usize {
-                *(*tif).data.add(i) = if *packed.add(i / 8) & (1 << (7 - i % 8)) != 0 {
-                    255
+            for i in 0..data_size {
+                // C reads through `char *bitdata` into an `int cbyte`, so the
+                // byte is sign extended before the mask is applied.
+                let cbyte = *bitdata.add(i / 8) as i8 as i32;
+                let cbit = (i % 8) as i32;
+                *(*tif).data.add(i) = if cbyte & ((1 << 7) >> cbit) != 0 {
+                    0xff
                 } else {
-                    0
+                    0x00
                 };
             }
-            libc::free(packed.cast());
+            libc::free(bitdata.cast());
             (*tif).bits_per_sample = 8;
         } else {
-            let mut at = 0usize;
+            // `tiff.c:190-211`.
+            let mut nleft = x * y * pixel;
+            let mut dpos = 0_i32;
             for i in 0..(*tif).nstrip {
-                let size = (*tif).stripsize.add(i as usize).read().max(0) as usize;
                 libc::fseek(
                     fp,
                     (*tif).stripoff.add(i as usize).read() as i64,
                     libc::SEEK_SET,
                 );
-                let take = size.min(bytes - at);
-                if libc::fread((*tif).data.add(at).cast(), 1, take, fp) != take {
-                    return core::ptr::null_mut();
+                /* DNM 11/17/01: Gatan image did not limit size of last strip */
+                // The `max(0)` has no counterpart in the C, which would pass a
+                // negative count straight to `fread`.
+                let mut realsize = (*tif).stripsize.add(i as usize).read().max(0);
+                if realsize > nleft {
+                    realsize = nleft;
                 }
-                at += take;
-                if at == bytes {
-                    break;
+                /* DNM 12/10/00: was pixSize, needed to be 1 because stripsize
+                is in bytes regardless of pixel size */
+                libc::fread(
+                    (*tif).data.add(dpos as usize).cast(),
+                    1,
+                    realsize as usize,
+                    fp,
+                );
+                /* DNM: swap the bytes if necessary */
+                if (*tif).header.byteorder as u16
+                    != if cfg!(target_endian = "little") {
+                        0x4949
+                    } else {
+                        0x4d4d
+                    }
+                    && (pixel == 2 || pixel == 4)
+                {
+                    let mut at = 0;
+                    while at + pixel <= realsize {
+                        swap((*tif).data.add((dpos + at) as usize).cast(), pixel as u32);
+                        at += pixel;
+                    }
                 }
-            }
-            if (*tif).header.byteorder as u16
-                != if cfg!(target_endian = "little") {
-                    0x4949
-                } else {
-                    0x4d4d
-                }
-                && (pixel == 2 || pixel == 4)
-            {
-                for i in (0..bytes).step_by(pixel as usize) {
-                    swap((*tif).data.add(i).cast(), pixel as u32);
-                }
+                dpos += realsize;
+                nleft -= realsize;
             }
         }
         for row in 0..y as usize / 2 {
@@ -464,6 +505,22 @@ pub unsafe fn tiff_open_file(
     unsafe {
         if tif.is_null() {
             return 1;
+        }
+        match crate::imod::backends::tiff_backend() {
+            Ok(crate::imod::backends::TiffBackend::Rust) => {
+                let result = crate::imod::mrc::rust_tiff::open_file(filename, tif, any_tif_pixel);
+                if result != 0 {
+                    eprintln!(
+                        "ERROR: Rust-native backend - Rust TIFF reader could not open or decode requested TIFF"
+                    );
+                }
+                return result;
+            }
+            Ok(crate::imod::backends::TiffBackend::Parity) => {}
+            Err(error) => {
+                eprintln!("{error}");
+                return 1;
+            }
         }
         (*tif).fp = libc::fopen(filename, mode);
         if (*tif).fp.is_null() {
@@ -541,6 +598,7 @@ pub unsafe fn tiff_close_file(tif: *mut TfInfo) {
         if tif.is_null() {
             return;
         }
+        let _ = crate::imod::mrc::rust_tiff::close_file(tif);
         if !(*tif).iifile.is_null() {
             crate::imod::libiimod::iimage::ii_delete((*tif).iifile);
             if !(*tif).fp.is_null() {
@@ -793,12 +851,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_reader_expands_msb_first_packed_one_bit_strips() {
+    fn legacy_reader_transfers_nothing_for_one_bit_strips() {
         unsafe {
             let file = libc::tmpfile();
             assert!(!file.is_null());
             // Little-endian classic TIFF: 8 by 1, a one-bit grayscale strip
-            // at byte 126.  The bit order is 10110010, as required by tiff.c.
+            // at byte 126 holding 10110010, with BitsPerSample = 1.
             let bytes: [u8; 127] = [
                 b'I',
                 b'I',
@@ -936,10 +994,17 @@ mod tests {
             let mut tif: TfInfo = core::mem::zeroed();
             let result = tiff_read_file(file, &mut tif);
             assert!(!result.is_null());
-            assert_eq!(
-                core::slice::from_raw_parts(result, 8),
-                &[255, 0, 255, 255, 0, 0, 255, 0]
-            );
+            // `tiff.c:141` sets `pixSize = BitsPerSample / 8`, which is 0 here,
+            // so the strip read at `tiff.c:174` is `fread(ptr, 0, stripsize,
+            // fp)` and transfers nothing: the packed 0b1011_0010 byte never
+            // reaches the expansion loop and every output pixel is 0.  Native
+            // `tif2mrc` cannot get this far - the expansion writes xsize*ysize
+            // bytes into the zero-byte `malloc` from `tiff.c:150`, and the
+            // binary aborts in `free()` ("free(): invalid pointer", exit 134)
+            // on every 1-bit TIFF that declares BitsPerSample = 1.  There is no
+            // defined native output to match, so this only pins the C's
+            // zero-length reads.
+            assert_eq!(core::slice::from_raw_parts(result, 8), &[0; 8]);
             libc::free(result.cast());
             libc::free(tif.stripoff.cast());
             libc::free(tif.stripsize.cast());

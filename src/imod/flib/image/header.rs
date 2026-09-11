@@ -6,6 +6,9 @@
 //! interface; no second unit-file registry is introduced here.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::flib::subrs::hvem::parse_input_params::{
+    exit_error, memory_error, pip_get_logical, pip_read_or_parse_options,
+};
 use crate::imod::flib::subrs::imsubs::irdhdr::irdhdr;
 use crate::imod::flib::subrs::imsubs::wrap_iiunit::imopen;
 use crate::imod::libcfshr::autodoc::{
@@ -14,16 +17,16 @@ use crate::imod::libcfshr::autodoc::{
 };
 use crate::imod::libcfshr::b3dutil::extra_is_nbytes_and_flags;
 use crate::imod::libcfshr::extraheader::{
-    get_extra_header_items, get_extra_header_value, get_fei_ext_head_angle_scale,
+    get_extra_header_items_fortran, get_extra_header_value, get_fei_ext_head_angle_scale,
 };
-use crate::imod::libiimod::iimage::{
-    ImodImageFile, ii_allow_multi_volume, ii_delete, ii_fill_mrc_header, ii_fopen_volume,
-    ii_lookup_file_from_fp, ii_open,
+use crate::imod::libcfshr::parse_params::pip_enable_entry_output;
+use crate::imod::libcfshr::pip_fwrap::{
+    pipgetinteger_, pipgetnonoptionarg_, pipgetstring_, pipnumberofentries_,
 };
+use crate::imod::libiimod::iimage::ii_allow_multi_volume;
 use crate::imod::libiimod::iitif::{
     tiff_get_max_eer_super_res, tiff_set_eer_read_properties, tiff_set_string_tag_to_print,
 };
-use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_get_scale, mrc_read_extra_header};
 use crate::imod::libiimod::unit_fileio::{
     ialbrief_, iiu_close, iiu_file_info, iiu_ret_num_volumes, iiu_volume_open, iiualtprint_,
 };
@@ -33,6 +36,19 @@ use crate::imod::libiimod::unit_header::{
 };
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
+
+/// `parameter (ntypes = 6)` (`header.f90:12`).
+const NTYPES: usize = 6;
+
+/// `parameter (numOptions = 14)` (`header.f90:51`).
+const NUM_OPTIONS: i32 = 14;
+
+/// The `options(1)` fallback PIP table (`header.f90:54`), kept as the single
+/// `@`-separated Fortran string that `PipReadOrParseOptions` splits.
+const HEADER_OPTIONS: &str = "input:InputFile:FNM:@size:Size:B:@mode:Mode:B:@pixel:PixelSize:B:@\
+origin:Origin:B:@minimum:Minimum:B:@maximum:Maximum:B:@mean:Mean:B:@\
+rms:RootMeanSquare:B:@volume:VolumeNumber:I:@brief:Brief:B:@\
+eer:FullSizeOfEERFile:B:@tag:TiffStringTagToPrint:I:@help:usage:B:";
 
 /// Original program `header` (`header.f90:9`).
 ///
@@ -74,87 +90,86 @@ pub fn header() {
     let mut do_origin = false;
     let mut do_rms = false;
     let mut do_full_eer = false;
+    let mut num_file_in = 1_i32;
+    let mut num_input_files = 0_i32;
     let mut if_brief = 0_i32;
     let mut i_volume = -1_i32;
     let mut tag_to_print = 0_i32;
-    let mut input_files = Vec::<String>::new();
-    let mut args = std::env::args().skip(1).peekable();
-    let mut pip_input = false;
-
-    while let Some(argument) = args.next() {
-        pip_input = true;
-        let option = argument.trim_start_matches('-').to_ascii_lowercase();
-        match option.as_str() {
-            "size" => do_size = true,
-            "mode" => do_mode = true,
-            "minimum" | "min" => do_min = true,
-            "maximum" | "max" => do_max = true,
-            "mean" => do_mean = true,
-            "rootsquaremean" | "rootmeansquare" | "rms" => do_rms = true,
-            "pixelsize" | "pixel" => do_pixel = true,
-            "origin" => do_origin = true,
-            "fullsizeofeerfile" | "eer" => do_full_eer = true,
-            "input" | "inputfile" => match args.next() {
-                Some(value) => input_files.push(value),
-                None => {
-                    eprintln!("ERROR: HEADER - No value supplied for InputFile");
-                    std::process::exit(3);
-                }
-            },
-            "brief" => if_brief = 1,
-            "vol" | "volumenumber" | "volume" => {
-                match args.next().and_then(|value| value.parse::<i32>().ok()) {
-                    Some(value) => i_volume = value,
-                    None => {
-                        eprintln!("ERROR: HEADER - Invalid value for VolumeNumber");
-                        std::process::exit(3);
-                    }
-                }
-            }
-            "tag" | "tiffstringtagtoprint" => {
-                match args.next().and_then(|value| value.parse::<i32>().ok()) {
-                    Some(value) => tag_to_print = value,
-                    None => {
-                        eprintln!("ERROR: HEADER - Invalid value for TiffStringTagToPrint");
-                        std::process::exit(3);
-                    }
-                }
-            }
-            "help" | "usage" => {
-                println!("Usage: header [options] input_file ...");
-                println!("  -size -mode -pixel -origin -minimum -maximum -mean -rms");
-                println!("  -volume # -brief # -eer -tag # -input file");
-                return;
-            }
-            _ if argument.starts_with('-') => {
-                eprintln!("ERROR: HEADER - Unknown option: {argument}");
-                std::process::exit(3);
-            }
-            _ => input_files.push(argument),
-        }
+    let mut num_opt_arg = 0_i32;
+    let mut num_non_opt_arg = 0_i32;
+    //
+    // Pip startup: set error, parse options, check help, set flag if used
+    // But turn off the entry printing first!
+    unsafe {
+        pip_enable_entry_output(0);
     }
-
-    if input_files.is_empty() {
+    pip_read_or_parse_options(
+        &[HEADER_OPTIONS],
+        NUM_OPTIONS,
+        "header",
+        "ERROR: HEADER - ",
+        true,
+        1,
+        2,
+        0,
+        &mut num_opt_arg,
+        &mut num_non_opt_arg,
+    );
+    let pip_input = num_opt_arg + num_non_opt_arg > 0;
+    //
+    unsafe {
         if pip_input {
-            eprintln!("ERROR: HEADER - No input file specified");
-            std::process::exit(3);
+            pip_get_logical("Size", &mut do_size);
+            pip_get_logical("Mode", &mut do_mode);
+            pip_get_logical("Max", &mut do_max);
+            pip_get_logical("Min", &mut do_min);
+            pip_get_logical("Mean", &mut do_mean);
+            pip_get_logical("RootMeanSquare", &mut do_rms);
+            pip_get_logical("PixelSize", &mut do_pixel);
+            pip_get_logical("Origin", &mut do_origin);
+            let mut option = *b"Brief";
+            pipgetinteger_(
+                option.as_mut_ptr().cast(),
+                &raw mut if_brief,
+                option.len() as i32,
+            );
+            pip_get_logical("FullSizeOfEERFile", &mut do_full_eer);
+            let mut option = *b"VolumeNumber";
+            pipgetinteger_(
+                option.as_mut_ptr().cast(),
+                &raw mut i_volume,
+                option.len() as i32,
+            );
+            let mut option = *b"TiffStringTagToPrint";
+            if pipgetinteger_(
+                option.as_mut_ptr().cast(),
+                &raw mut tag_to_print,
+                option.len() as i32,
+            ) == 0
+            {
+                // `iiSetTiffTagToPrint` (`unit_fileio.c:941`) is declared
+                // `int` but falls off its end without returning, so the
+                // translated `iisettifftagtoprint_` traps on that source-level
+                // UB; the Fortran only ever `call`s it, so its one statement,
+                // `tiffSetStringTagToPrint(*tag)`, is invoked directly.
+                tiff_set_string_tag_to_print(tag_to_print);
+            }
+            let mut option = *b"InputFile";
+            pipnumberofentries_(
+                option.as_mut_ptr().cast(),
+                &raw mut num_input_files,
+                option.len() as i32,
+            );
+            num_file_in = num_input_files + num_non_opt_arg;
+            if num_file_in == 0 {
+                exit_error("No input file specified");
+            }
+            if do_full_eer {
+                tiff_set_eer_read_properties(tiff_get_max_eer_super_res(), 1, 0);
+            }
         }
-        print!(" Name of input file: ");
-        let _ = io::stdout().flush();
-        let mut in_file = String::new();
-        if io::stdin().read_line(&mut in_file).is_err() || in_file.trim().is_empty() {
-            eprintln!("ERROR: HEADER - No input file specified");
-            std::process::exit(3);
-        }
-        input_files.push(in_file.trim_end_matches(['\r', '\n']).to_owned());
     }
 
-    if do_full_eer {
-        tiff_set_eer_read_properties(tiff_get_max_eer_super_res(), 1, 0);
-    }
-    if tag_to_print != 0 {
-        tiff_set_string_tag_to_print(tag_to_print);
-    }
     let silent =
         do_size || do_mode || do_min || do_max || do_mean || do_rms || do_pixel || do_origin;
     unsafe {
@@ -166,70 +181,143 @@ pub fn header() {
         ialbrief_(&mut value);
     }
 
-    for in_file in input_files {
+    // Fortran `Gw.d` edit descriptor, as used by every `g11.4`, `g13.5` and
+    // `g15.5` field written by `header.f90` (FORMAT 102/104 and the
+    // `write(*, '(3g15.5)')` / `write(*, '(g13.5,a)')` statements at lines
+    // 153-168).  With no `Ee` part, a magnitude that rounds to `d` significant
+    // digits within [0.1, 10**d) is written as `F(w-4).(d-k)` followed by four
+    // blanks; anything else is written as `Ew.d` with the default scale factor.
+    let g_edit = |value: f32, w: usize, d: i32| -> String {
+        let magnitude = value.abs();
+        let mut digits = String::new();
+        let mut exponent = 1_i32;
+        if magnitude != 0.0 {
+            let scientific = format!("{:.*e}", (d - 1) as usize, magnitude);
+            let (mantissa, power) = scientific.split_once('e').unwrap();
+            digits = mantissa.replace('.', "");
+            exponent = power.parse::<i32>().unwrap() + 1;
+        }
+        if (0..=d).contains(&exponent) {
+            let mut text = format!("{:.*}", (d - exponent) as usize, value);
+            if exponent == d {
+                text.push('.');
+            }
+            format!("{:>1$}    ", text, w - 4)
+        } else {
+            format!(
+                "{:>1$}",
+                format!(
+                    "{}0.{}E{}{:02}",
+                    if value < 0.0 { "-" } else { "" },
+                    digits,
+                    if exponent < 0 { '-' } else { '+' },
+                    exponent.abs()
+                ),
+                w
+            )
+        }
+    };
+
+    // `computed`, `briefSep`, `foundPixel` and `foundAxisRot` are declared once
+    // for the whole program in `header.f90:29,30,72,73`, so their state carries
+    // from one input file to the next inside the loop below.
+    let mut computed = "(not computed)";
+    let mut brief_sep = "  Contains:";
+    let mut found_pixel = false;
+    let mut found_axis_rot = false;
+
+    for i in 1..=num_file_in {
+        //
+        // get the next filename
+        //
+        // `character*320 inFile` (`header.f90:19`), so the Fortran PIP wrappers
+        // fill a fixed 320-character record and blank-pad it.
+        let mut in_file_record = [b' '; 320];
+        unsafe {
+            if pip_input {
+                if i <= num_input_files {
+                    let mut option = *b"InputFile";
+                    pipgetstring_(
+                        option.as_mut_ptr().cast(),
+                        in_file_record.as_mut_ptr().cast(),
+                        option.len() as i32,
+                        in_file_record.len() as i32,
+                    );
+                } else {
+                    let mut arg_number = i - num_input_files;
+                    pipgetnonoptionarg_(
+                        &raw mut arg_number,
+                        in_file_record.as_mut_ptr().cast(),
+                        in_file_record.len() as i32,
+                    );
+                }
+            } else {
+                print!(" {}", "Name of input file: ");
+                let _ = io::stdout().flush();
+                let mut line = String::new();
+                let _ = io::stdin().read_line(&mut line);
+                let bytes = line.trim_end_matches(['\r', '\n']).as_bytes();
+                let count = bytes.len().min(in_file_record.len());
+                in_file_record[..count].copy_from_slice(&bytes[..count]);
+            }
+        }
+        let mut length = in_file_record.len();
+        while length > 0 && in_file_record[length - 1] == b' ' {
+            length -= 1;
+        }
+        let in_file = String::from_utf8_lossy(&in_file_record[..length]).into_owned();
         let filename = match CString::new(in_file.as_bytes()) {
             Ok(value) => value,
             Err(_) => {
-                eprintln!("ERROR: HEADER - Input file contains a NUL byte");
-                std::process::exit(3);
+                println!();
+                println!("ERROR: HEADER - Input file contains a NUL byte");
+                std::process::exit(1);
             }
         };
-        // The source opens every image through iiunit before calling irdhdr,
-        // including the machine-readable switches.  Keep that path separate
-        // from the retained old native code below so no adapter supplies the
-        // silent fields.
-        if silent {
-            unsafe {
-                ii_allow_multi_volume(1);
-                imopen(1, &in_file, "RO");
-                let num_volumes = iiu_ret_num_volumes(1);
-                let mut im_unit = 1;
-                if i_volume > num_volumes.max(1) {
-                    eprintln!(
-                        "ERROR: HEADER - The volume number entered is higher than the number of volumes in the file"
+        unsafe {
+            ii_allow_multi_volume(1);
+            imopen(1, &in_file, "RO");
+            let num_volumes = iiu_ret_num_volumes(1);
+            let mut im_unit = 1;
+            if i_volume > num_volumes.max(1) {
+                exit_error(
+                    "The volume number entered is higher than the number of volumes in the file",
+                );
+            }
+            if num_volumes > 1 {
+                if i_volume < 0 {
+                    println!(
+                        "This is the header for the first of{:4} volumes, use -vol # to see others",
+                        num_volumes
                     );
-                    iiu_close(1);
-                    std::process::exit(3);
-                }
-                if num_volumes > 1 {
-                    if i_volume < 0 {
-                        println!(
-                            "This is the header for the first of{:4} volumes, use -vol # to see others",
-                            num_volumes
-                        );
-                    } else if i_volume > 1 {
-                        im_unit = 11;
-                        if iiu_volume_open(im_unit, 1, i_volume - 1) != 0 {
-                            eprintln!("ERROR: HEADER - Opening additional volume in file");
-                            iiu_close(1);
-                            std::process::exit(3);
-                        }
+                } else if i_volume > 1 {
+                    im_unit = 11;
+                    if iiu_volume_open(im_unit, 1, i_volume - 1) != 0 {
+                        exit_error("Opening additional volume in file");
                     }
                 }
-                let mut nxyz = [0_i32; 3];
-                let mut mxyz = [0_i32; 3];
-                let mut mode = 0_i32;
-                let mut dmin = 0.0_f32;
-                let mut dmax = 0.0_f32;
-                let mut dmean = 0.0_f32;
-                irdhdr(
-                    im_unit,
-                    nxyz.as_mut_ptr(),
-                    mxyz.as_mut_ptr(),
-                    &mut mode,
-                    &mut dmin,
-                    &mut dmax,
-                    &mut dmean,
-                );
-                let mut unused_file_size = 0;
-                let mut unused_file_type = 0;
+            }
+
+            let mut nxyz = [0_i32; 3];
+            let mut mxyz = [0_i32; 3];
+            let mut mode = 0_i32;
+            let mut dmin = 0.0_f32;
+            let mut dmax = 0.0_f32;
+            let mut dmean = 0.0_f32;
+            irdhdr(
+                im_unit,
+                nxyz.as_mut_ptr(),
+                mxyz.as_mut_ptr(),
+                &mut mode,
+                &mut dmin,
+                &mut dmax,
+                &mut dmean,
+            );
+            if silent {
+                let mut idum = 0;
+                let mut ifile_type = 0;
                 let mut iflags = 0;
-                iiu_file_info(
-                    im_unit,
-                    &mut unused_file_size,
-                    &mut unused_file_type,
-                    &mut iflags,
-                );
+                iiu_file_info(im_unit, &mut idum, &mut ifile_type, &mut iflags);
                 if do_size {
                     println!("{:8}{:8}{:8}", nxyz[0], nxyz[1], nxyz[2]);
                 }
@@ -242,692 +330,387 @@ pub fn header() {
                 if do_pixel {
                     let mut delta = [0.0_f32; 3];
                     iiu_ret_delta(im_unit, delta.as_mut_ptr());
-                    let precision0 = if delta[0] == 0.0 {
-                        4
-                    } else {
-                        (4 - delta[0].abs().log10().floor() as i32).max(0) as usize
-                    };
-                    let precision1 = if delta[1] == 0.0 {
-                        4
-                    } else {
-                        (4 - delta[1].abs().log10().floor() as i32).max(0) as usize
-                    };
-                    let precision2 = if delta[2] == 0.0 {
-                        4
-                    } else {
-                        (4 - delta[2].abs().log10().floor() as i32).max(0) as usize
-                    };
                     println!(
-                        "{:>11}    {:>11}    {:>11}    ",
-                        format!("{:.precision0$}", delta[0]),
-                        format!("{:.precision1$}", delta[1]),
-                        format!("{:.precision2$}", delta[2])
+                        "{}{}{}",
+                        g_edit(delta[0], 15, 5),
+                        g_edit(delta[1], 15, 5),
+                        g_edit(delta[2], 15, 5)
                     );
                 }
                 if do_origin {
-                    let mut origin = [0.0_f32; 3];
-                    iiu_ret_origin(im_unit, &mut origin[0], &mut origin[1], &mut origin[2]);
-                    let precision0 = if origin[0] == 0.0 {
-                        4
-                    } else {
-                        (4 - origin[0].abs().log10().floor() as i32).max(0) as usize
-                    };
-                    let precision1 = if origin[1] == 0.0 {
-                        4
-                    } else {
-                        (4 - origin[1].abs().log10().floor() as i32).max(0) as usize
-                    };
-                    let precision2 = if origin[2] == 0.0 {
-                        4
-                    } else {
-                        (4 - origin[2].abs().log10().floor() as i32).max(0) as usize
-                    };
+                    let mut delta = [0.0_f32; 3];
+                    iiu_ret_origin(im_unit, &mut delta[0], &mut delta[1], &mut delta[2]);
                     println!(
-                        "{:>11}    {:>11}    {:>11}    ",
-                        format!("{:.precision0$}", origin[0]),
-                        format!("{:.precision1$}", origin[1]),
-                        format!("{:.precision2$}", origin[2])
+                        "{}{}{}",
+                        g_edit(delta[0], 15, 5),
+                        g_edit(delta[1], 15, 5),
+                        g_edit(delta[2], 15, 5)
                     );
                 }
                 if do_min {
-                    let precision = if dmin == 0.0 {
-                        4
-                    } else {
-                        (4 - dmin.abs().log10().floor() as i32).max(0) as usize
-                    };
-                    println!("{:>9}    ", format!("{:.precision$}", dmin));
+                    println!("{}", g_edit(dmin, 13, 5));
                 }
                 if do_max {
-                    let precision = if dmax == 0.0 {
-                        4
-                    } else {
-                        (4 - dmax.abs().log10().floor() as i32).max(0) as usize
-                    };
-                    println!("{:>9}    ", format!("{:.precision$}", dmax));
+                    println!("{}", g_edit(dmax, 13, 5));
                 }
                 if do_mean {
-                    let precision = if dmean == 0.0 {
-                        4
-                    } else {
-                        (4 - dmean.abs().log10().floor() as i32).max(0) as usize
-                    };
-                    println!("{:>9}    ", format!("{:.precision$}", dmean));
+                    println!("{}", g_edit(dmean, 13, 5));
                 }
                 if do_rms {
-                    let mut imod_flags = 0;
-                    let mut is_imod = 0;
-                    let mut version = 0;
+                    let mut iflags = 0;
+                    let mut if_imod = 0;
+                    let mut j = 0;
                     let mut rms = 0.0_f32;
-                    iiu_ret_imod_flags(im_unit, &mut imod_flags, &mut is_imod);
-                    iiu_ret_mrc_version(im_unit, &mut version);
+                    iiu_ret_imod_flags(im_unit, &mut iflags, &mut if_imod);
+                    iiu_ret_mrc_version(im_unit, &mut j);
                     iiu_ret_rms(im_unit, &mut rms);
-                    let computed = if rms > 0.0
-                        || (rms == 0.0 && (version > 0 || (is_imod != 0 && imod_flags & 8 != 0)))
+                    if rms > 0.0
+                        || (rms == 0.0 && (j > 0 || (if_imod != 0 && iflags & (1 << 3) != 0)))
                     {
-                        ""
-                    } else {
-                        "(not computed)"
-                    };
-                    let precision = if rms == 0.0 {
-                        4
-                    } else {
-                        (4 - rms.abs().log10().floor() as i32).max(0) as usize
-                    };
-                    println!("{:>9}    {computed}", format!("{:.precision$}", rms));
-                }
-                iiu_close(im_unit);
-                if im_unit > 1 {
-                    iiu_close(1);
-                }
-            }
-            continue;
-        }
-        // Source routes the normal and brief presentation through `imopen` /
-        // `irdhdr` on the iiunit registry.  Keep that presentation in the
-        // directly translated lower source unit; only the machine-readable
-        // switches use the native image view below after `iiuAltPrint(0)`.
-        if !silent {
-            let mut nxyz = [0_i32; 3];
-            let mut mxyz = [0_i32; 3];
-            let mut mode = 0_i32;
-            let mut dmin = 0.0_f32;
-            let mut dmax = 0.0_f32;
-            let mut dmean = 0.0_f32;
-            unsafe {
-                ii_allow_multi_volume(1);
-                imopen(1, &in_file, "RO");
-                let num_volumes = iiu_ret_num_volumes(1);
-                let mut im_unit = 1;
-                if i_volume > num_volumes.max(1) {
-                    eprintln!(
-                        "ERROR: HEADER - The volume number entered is higher than the number of volumes in the file"
-                    );
-                    iiu_close(1);
-                    std::process::exit(3);
-                }
-                if num_volumes > 1 {
-                    if i_volume < 0 {
-                        println!(
-                            "This is the header for the first of{:4} volumes, use -vol # to see others",
-                            num_volumes
-                        );
-                    } else if i_volume > 1 {
-                        im_unit = 11;
-                        if iiu_volume_open(im_unit, 1, i_volume - 1) != 0 {
-                            eprintln!("ERROR: HEADER - Opening additional volume in file");
-                            iiu_close(1);
-                            std::process::exit(3);
-                        }
+                        computed = "";
                     }
+                    println!("{}{}", g_edit(rms, 13, 5), computed);
                 }
-                irdhdr(
-                    im_unit,
-                    nxyz.as_mut_ptr(),
-                    mxyz.as_mut_ptr(),
-                    &mut mode,
-                    &mut dmin,
-                    &mut dmax,
-                    &mut dmean,
-                );
-                let mut found_pixel = false;
-                let mut found_axis_rot = false;
-                // Source SerialEM extended-header inventory.
-                let mut extra_bytes = 0;
-                iiu_ret_num_extended(im_unit, &mut extra_bytes);
-                if extra_bytes > 0 {
-                    let mut words = vec![0_f32; extra_bytes as usize / 4 + 10];
-                    if iiu_ret_extended_data(im_unit, &mut extra_bytes, words.as_mut_ptr().cast())
-                        == 0
-                    {
-                        let mut num_int = 0;
-                        let mut num_real = 0;
-                        iiu_ret_extended_type(im_unit, &mut num_int, &mut num_real);
-                        // Agard/old FEI type: header.f90 indexes the raw
-                        // extended-header words directly after `numInt`.
-                        if extra_is_nbytes_and_flags(num_int, num_real) == 0 && num_real >= 12 {
-                            let tilt_axis = words[num_int as usize + 10];
-                            if (-360.0..=360.0).contains(&tilt_axis) {
-                                let mut tilt_axis = tilt_axis;
-                                if tilt_axis < -180.0 {
-                                    tilt_axis += 360.0;
-                                }
-                                if tilt_axis > 180.0 {
-                                    tilt_axis -= 360.0;
-                                }
-                                let mut labels = [[0_u8; 81]; 10];
-                                let mut num_labels = 0;
-                                iiu_ret_labels(
-                                    im_unit,
-                                    labels.as_mut_ptr().cast(),
-                                    &mut num_labels,
-                                );
-                                if labels[0][..4] == *b"Fei " {
-                                    println!(
-                                        "          Tilt axis rotation angle = {:7.1} (Corrected sign)",
-                                        -tilt_axis
-                                    );
-                                } else {
-                                    println!(
-                                        "          Tilt axis rotation angle = {:7.1}",
-                                        tilt_axis
-                                    );
-                                }
-                                found_axis_rot = true;
+            } else {
+                let mut nbsym = 0;
+                iiu_ret_num_extended(im_unit, &mut nbsym);
+                if nbsym > 0 {
+                    // `allocate(array(nbsym / 4 + 10), stat=ierr)` followed by
+                    // `call memoryError(ierr, 'array for extended header')`
+                    // (`header.f90:174`).
+                    let mut array = Vec::<f32>::new();
+                    let ierr = i32::from(array.try_reserve_exact(nbsym as usize / 4 + 10).is_err());
+                    memory_error(ierr, "array for extended header");
+                    array.resize(nbsym as usize / 4 + 10, 0.0);
+                    iiu_ret_extended_data(im_unit, &mut nbsym, array.as_mut_ptr().cast());
+                    let mut num_int = 0;
+                    let mut num_real = 0;
+                    iiu_ret_extended_type(im_unit, &mut num_int, &mut num_real);
+                    if extra_is_nbytes_and_flags(num_int, num_real) == 0 && num_real >= 12 {
+                        //
+                        // Agard/old FEI type
+                        let mut tiltaxis = array[(num_int + 10) as usize];
+                        if (-360.0..=360.0).contains(&tiltaxis) {
+                            if tiltaxis < -180.0 {
+                                tiltaxis += 360.0;
                             }
-                            let mut pixel = words[num_int as usize + 11];
-                            if pixel > 0.05 && pixel < 100000.0 {
-                                pixel /= 10.0;
+                            if tiltaxis > 180.0 {
+                                tiltaxis -= 360.0;
+                            }
+                            let mut labels = [[0_u8; 80]; 10];
+                            let mut nlabel = 0;
+                            iiu_ret_labels(im_unit, labels.as_mut_ptr().cast(), &mut nlabel);
+                            if labels[0][..4] == *b"Fei " {
+                                println!(
+                                    "          Tilt axis rotation angle = {:7.1}{}",
+                                    -tiltaxis, " (Corrected sign)"
+                                );
                             } else {
-                                pixel *= 1.0e9;
+                                println!("          Tilt axis rotation angle = {:7.1}", tiltaxis);
                             }
-                            let mut delta = [0.0_f32; 3];
-                            let mut imod_flags = 0;
-                            let mut is_imod = 0;
-                            iiu_ret_delta(im_unit, delta.as_mut_ptr());
-                            iiu_ret_imod_flags(im_unit, &mut imod_flags, &mut is_imod);
-                            if pixel > 0.005 && pixel < 10000.0 && imod_flags & 2 == 0 {
-                                let mut binning = 0_i32;
-                                for index in (0..3).rev() {
-                                    binning = delta[index].round() as i32;
-                                    if (delta[index] - binning as f32).abs() > 1.0e-6
-                                        || binning <= 0
-                                        || binning > 4
-                                    {
-                                        binning = 0;
-                                        break;
-                                    }
-                                }
-                                if binning == 1 {
-                                    println!("          Pixel size in nanometers ={:11.4}", pixel);
-                                } else if (2..5).contains(&binning) {
-                                    println!(
-                                        "          Pixel size in nanometers ={:11.4} (Assumed binning of{:2})",
-                                        pixel * binning as f32,
-                                        binning
-                                    );
-                                } else {
-                                    println!(
-                                        "          Original/extended header pixel size in nanometers ={:11.4}",
-                                        pixel
-                                    );
-                                }
-                                found_pixel = true;
-                            }
-                        }
-                        // New FEI type.  The calls and raw offsets are the
-                        // direct `getExtraHeaderValue` sequence in header.f90.
-                        if num_int == -3 {
-                            let mut byte_value = 0_u8;
-                            let mut short_value = 0_i16;
-                            let mut mask = 0_i32;
-                            let mut tilt_axis = 0.0_f32;
-                            let mut axis8 = 0.0_f64;
-                            if get_extra_header_value(
-                                words.as_mut_ptr().cast(),
-                                8,
-                                3,
-                                &mut byte_value,
-                                &mut short_value,
-                                &mut mask,
-                                &mut tilt_axis,
-                                &mut axis8,
-                            ) == 0
-                                && get_extra_header_value(
-                                    words.as_mut_ptr().cast(),
-                                    140,
-                                    4,
-                                    &mut byte_value,
-                                    &mut short_value,
-                                    &mut mask,
-                                    &mut tilt_axis,
-                                    &mut axis8,
-                                ) == 0
-                                && mask & (1 << 12) != 0
-                            {
-                                tilt_axis = (axis8
-                                    * get_fei_ext_head_angle_scale(words.as_mut_ptr().cast()))
-                                    as f32;
-                                if (-360.0..=360.0).contains(&tilt_axis) {
-                                    if tilt_axis < -180.0 {
-                                        tilt_axis += 360.0;
-                                    }
-                                    if tilt_axis > 180.0 {
-                                        tilt_axis -= 360.0;
-                                    }
-                                    println!(
-                                        "          Tilt axis rotation angle = {:7.1} (Corrected sign)",
-                                        -tilt_axis
-                                    );
-                                    found_axis_rot = true;
-                                }
-                            }
-                        }
-                        if extra_is_nbytes_and_flags(num_int, num_real) != 0 {
-                            if if_brief == 0 {
-                                println!("\nExtended header from SerialEM contains:");
-                            }
-                            let mut brief_separator = "  Contains:";
-                            let mut found = 0;
-                            for index in 0..6 {
-                                if (num_real / (1 << index)) % 2 != 0 {
-                                    if if_brief == 0 {
-                                        println!(
-                                            "  {} - Extract with \"{}\"",
-                                            type_name[index], extract_com[index]
-                                        );
-                                    } else {
-                                        print!("{} {}", brief_separator, brief_name[index]);
-                                        brief_separator = " -";
-                                        found += 1;
-                                    }
-                                }
-                            }
-                            if found > 0 {
-                                println!();
-                            }
-                        } else {
-                            let mut tilts = vec![0.0_f32; nxyz[2] as usize + 9];
-                            let mut iz_piece = (0..nxyz[2]).collect::<Vec<_>>();
-                            let mut num_tilts = 0;
-                            if get_extra_header_items(
-                                words.as_mut_ptr().cast(),
-                                extra_bytes,
-                                num_int,
-                                num_real,
-                                nxyz[2],
-                                1,
-                                tilts.as_mut_ptr(),
-                                tilts.as_mut_ptr(),
-                                &mut num_tilts,
-                                nxyz[2] + 9,
-                                iz_piece.as_mut_ptr(),
-                            ) > 0
-                            {
-                                println!(
-                                    "Extended header has tilt angles - extract with \"extracttilts\""
-                                );
-                            }
-                        }
-                    }
-                }
-                // `header.f90` treats a title mentioning this angle as an
-                // already-present axis value, without producing a second line.
-                if !found_axis_rot {
-                    let mut labels = [[0_u8; 81]; 10];
-                    let mut num_labels = 0;
-                    iiu_ret_labels(im_unit, labels.as_mut_ptr().cast(), &mut num_labels);
-                    for label in labels.iter().take(num_labels as usize) {
-                        if String::from_utf8_lossy(&label[..20]).contains("Tilt axis angle") {
                             found_axis_rot = true;
-                            break;
                         }
-                    }
-                }
-                if !found_pixel {
-                    let mut delta = [0.0_f32; 3];
-                    iiu_ret_delta(im_unit, delta.as_mut_ptr());
-                    found_pixel = delta[0] != 1.0 || delta[1] != 1.0 || delta[2] != 1.0;
-                }
-                // Direct mdoc fallback in the original: global PixelSpacing,
-                // then `T` title sections and (for TFS titles) ZValue 1's
-                // RotationAngle.
-                if !found_pixel || !found_axis_rot {
-                    let mut montage = 0;
-                    let mut num_sections = 0;
-                    let mut section_type = 0;
-                    if adoc_open_image_metadata(
-                        filename.as_ptr(),
-                        1,
-                        &mut montage,
-                        &mut num_sections,
-                        &mut section_type,
-                    ) >= 0
-                    {
-                        if !found_pixel {
-                            let mut pixel = 0.0_f32;
-                            if adoc_get_float(
-                                ADOC_GLOBAL_NAME.as_ptr(),
-                                0,
-                                c"PixelSpacing".as_ptr(),
-                                &mut pixel,
-                            ) == 0
-                            {
-                                println!(
-                                    "          Pixel size in nanometers ={:11.4}  , from mdoc",
-                                    pixel / 10.0
-                                );
-                            }
-                        }
-                        if !found_axis_rot {
-                            let num_labels = adoc_get_number_of_sections(c"T".as_ptr());
-                            for index in 0..num_labels {
-                                let mut title = core::ptr::null_mut();
-                                if adoc_get_section_name(c"T".as_ptr(), index, &mut title) == 0 {
-                                    let title_text = CStr::from_ptr(title).to_string_lossy();
-                                    let fei_label = title_text.contains("TiltAxisAngle");
-                                    if (fei_label || title_text.contains("Tilt axis angle"))
-                                        && let Some((_, value)) = title_text.split_once('=')
-                                        && let Ok(mut tilt_axis) = value.trim().parse::<f32>()
-                                    {
-                                        if fei_label {
-                                            let mut rotation_angle = 0.0_f32;
-                                            if adoc_get_float(
-                                                ADOC_ZVALUE_NAME.as_ptr(),
-                                                0,
-                                                c"RotationAngle".as_ptr(),
-                                                &mut rotation_angle,
-                                            ) == 0
-                                            {
-                                                if (-(rotation_angle + 90.0) - tilt_axis).abs()
-                                                    < 0.11
-                                                {
-                                                    println!(
-                                                        "          Tilt axis rotation angle = {:7.1}  (from RotationAngle in mdoc)",
-                                                        rotation_angle
-                                                    );
-                                                } else if ((rotation_angle - 90.0) - tilt_axis)
-                                                    .abs()
-                                                    < 0.11
-                                                {
-                                                    println!(
-                                                        "          Tilt axis rotation angle = {:7.1}  (from mdoc)",
-                                                        tilt_axis
-                                                    );
-                                                } else if (-(rotation_angle - 90.0) - tilt_axis)
-                                                    .abs()
-                                                    < 0.11
-                                                {
-                                                    tilt_axis = -tilt_axis;
-                                                    println!(
-                                                        "          Tilt axis rotation angle = {:7.1}  (corrected sign, from mdoc)",
-                                                        tilt_axis
-                                                    );
-                                                }
-                                            }
-                                        } else {
-                                            println!(
-                                                "          Tilt axis rotation angle = {:7.1}  (from mdoc)",
-                                                tilt_axis
-                                            );
-                                        }
-                                        libc::free(title.cast());
-                                        break;
-                                    }
-                                    libc::free(title.cast());
-                                }
-                            }
-                        }
-                    }
-                }
-                iiu_close(im_unit);
-                if im_unit > 1 {
-                    iiu_close(1);
-                }
-            }
-            continue;
-        }
-        ii_allow_multi_volume(1);
-        let root_image = unsafe { ii_open(filename.as_ptr(), c"rb".as_ptr()) };
-        if root_image.is_null() {
-            eprintln!("ERROR: HEADER - Opening input file: {in_file}");
-            std::process::exit(3);
-        }
-        let mut image = root_image;
-        let num_volumes = unsafe { (*root_image).num_volumes };
-        if i_volume > num_volumes.max(1) {
-            eprintln!(
-                "ERROR: HEADER - The volume number entered is higher than the number of volumes in the file"
-            );
-            unsafe { ii_delete(root_image) };
-            std::process::exit(3);
-        }
-        if num_volumes > 1 && i_volume < 0 {
-            println!(
-                "This is the header for the first of{:4} volumes, use -vol # to see others",
-                num_volumes
-            );
-        } else if num_volumes > 1 && i_volume > 1 {
-            let volume_fp = unsafe { ii_fopen_volume(root_image, i_volume - 1) };
-            image = unsafe { ii_lookup_file_from_fp(volume_fp) };
-            if image.is_null() {
-                eprintln!("ERROR: HEADER - Opening additional volume in file");
-                unsafe { ii_delete(root_image) };
-                std::process::exit(3);
-            }
-        }
-
-        // `irdhdr` gets this data from its unit table.  `iiFillMrcHeader`
-        // supplies the same normalized MRC view for every supported format.
-        let mut hdata = std::mem::MaybeUninit::<MrcHeader>::zeroed();
-        if unsafe { ii_fill_mrc_header(image, hdata.as_mut_ptr()) } != 0 {
-            eprintln!("ERROR: HEADER - Reading header from input file: {in_file}");
-            unsafe {
-                ii_delete(image);
-                if image != root_image {
-                    ii_delete(root_image);
-                }
-            };
-            std::process::exit(3);
-        }
-        let mut hdata = unsafe { hdata.assume_init() };
-        let image_data: &ImodImageFile = unsafe { &*image };
-        let mut mode = image_data.mode;
-        let (delta_x, delta_y, delta_z) = mrc_get_scale(&hdata);
-
-        if silent {
-            if (image_data.user_flags & (1_u32 << 8)) != 0 {
-                mode = 12;
-            }
-            if do_size {
-                println!("{:8}{:8}{:8}", image_data.nx, image_data.ny, image_data.nz);
-            }
-            if do_mode {
-                println!("{:4}", mode);
-            }
-            if do_pixel {
-                println!("{:15.5}{:15.5}{:15.5}", delta_x, delta_y, delta_z);
-            }
-            if do_origin {
-                println!(
-                    "{:15.5}{:15.5}{:15.5}",
-                    image_data.xtrans, image_data.ytrans, image_data.ztrans
-                );
-            }
-            if do_min {
-                println!("{:13.5}", image_data.amin);
-            }
-            if do_max {
-                println!("{:13.5}", image_data.amax);
-            }
-            if do_mean {
-                println!("{:13.5}", image_data.amean);
-            }
-            if do_rms {
-                let computed = if image_data.rms > 0.0
-                    || (image_data.rms == 0.0
-                        && (hdata.nversion > 0
-                            || (hdata.imod_stamp != 0 && (hdata.imod_flags & 8) != 0)))
-                {
-                    ""
-                } else {
-                    "(not computed)"
-                };
-                println!("{:13.5}{computed}", image_data.rms);
-            }
-        } else if if_brief > 0 {
-            println!(
-                " Dimensions:{:7}{:7}{:7}   Pixel size:{:11.4}{:11.4}{:11.4}",
-                image_data.nx, image_data.ny, image_data.nz, delta_x, delta_y, delta_z
-            );
-            println!(
-                " Mode:{:3}               Min, max, mean:{:13.5}{:13.5}{:13.5}",
-                mode, image_data.amin, image_data.amax, image_data.amean
-            );
-            if hdata.nlabl > 0 {
-                println!("{}", String::from_utf8_lossy(&hdata.labels[0][..80]));
-            }
-            if hdata.nlabl > 1 {
-                println!(
-                    "{}",
-                    String::from_utf8_lossy(
-                        &hdata.labels[(hdata.nlabl - 1).clamp(0, 9) as usize][..80]
-                    )
-                );
-            }
-        } else {
-            let mode_name = match mode {
-                0 => "(byte)",
-                1 => "(16-bit integer)",
-                2 => "(32-bit float)",
-                3 => "(complex integer)",
-                4 => "(complex)",
-                6 => "(unsigned 16-bit integer)",
-                12 => "(16-bit float)",
-                16 => "RGB color",
-                _ => "(unknown)",
-            };
-            println!();
-            println!(
-                " Number of columns, rows, sections .....{:8}{:8}{:8}",
-                image_data.nx, image_data.ny, image_data.nz
-            );
-            println!(
-                " Map mode ..............................{:5}   {mode_name}",
-                mode
-            );
-            println!(
-                " Pixel spacing (Angstroms).............. {:11.4}{:11.4}{:11.4}",
-                delta_x, delta_y, delta_z
-            );
-            println!(
-                " Origin on x,y,z ....................... {:12.4}{:12.4}{:12.4}",
-                image_data.xtrans, image_data.ytrans, image_data.ztrans
-            );
-            println!(
-                " Minimum density ........................{:13.5}",
-                image_data.amin
-            );
-            println!(
-                " Maximum density ........................{:13.5}",
-                image_data.amax
-            );
-            println!(
-                " Mean density ...........................{:13.5}",
-                image_data.amean
-            );
-            if image_data.rms > 0.0 || (image_data.rms == 0.0 && hdata.nversion > 0) {
-                println!(
-                    " RMS deviation from mean................{:13.5}",
-                    image_data.rms
-                );
-            }
-            println!(
-                " tilt angles (original,current) ........{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}{:6.1}",
-                hdata.tiltangles[0],
-                hdata.tiltangles[1],
-                hdata.tiltangles[2],
-                hdata.tiltangles[3],
-                hdata.tiltangles[4],
-                hdata.tiltangles[5]
-            );
-            println!(
-                " Space group,# extra bytes,idtype,lens .{:9}{:9}{:9}{:9}",
-                hdata.ispg, hdata.next, hdata.idtype, hdata.lens
-            );
-            println!();
-            println!("{:5} Titles :", hdata.nlabl);
-            for label in hdata.labels.iter().take(hdata.nlabl.clamp(0, 10) as usize) {
-                println!("{}", String::from_utf8_lossy(&label[..80]));
-            }
-
-            if hdata.next > 0 {
-                let mut ext_data = std::ptr::null_mut();
-                if unsafe { mrc_read_extra_header(&mut hdata, &mut ext_data) } == 0
-                    && !ext_data.is_null()
-                {
-                    let ext_words = unsafe {
-                        std::slice::from_raw_parts(ext_data.cast::<f32>(), hdata.next as usize / 4)
-                    };
-                    if extra_is_nbytes_and_flags(hdata.nint as i32, hdata.nreal as i32) != 0 {
-                        let mut contains = Vec::new();
-                        for index in 0..6 {
-                            if ((hdata.nreal as i32 >> index) & 1) != 0 {
-                                if if_brief == 0 {
-                                    println!(
-                                        "  {} - Extract with \"{}\"",
-                                        type_name[index], extract_com[index]
-                                    );
-                                } else {
-                                    contains.push(brief_name[index]);
-                                }
-                            }
-                        }
-                        if !contains.is_empty() {
-                            println!("  Contains: {}", contains.join(" - "));
-                        }
-                    } else if hdata.nreal >= 12
-                        && ext_words.len() >= hdata.nint.max(0) as usize + 12
-                    {
-                        let mut tilt_axis = ext_words[hdata.nint.max(0) as usize + 10];
-                        if (-360.0..=360.0).contains(&tilt_axis) {
-                            if tilt_axis < -180.0 {
-                                tilt_axis += 360.0;
-                            }
-                            if tilt_axis > 180.0 {
-                                tilt_axis -= 360.0;
-                            }
-                            let fei = hdata.labels[0][..4] == *b"Fei ";
-                            println!(
-                                "          Tilt axis rotation angle = {:7.1}{}",
-                                if fei { -tilt_axis } else { tilt_axis },
-                                if fei { " (Corrected sign)" } else { "" }
-                            );
-                        }
-                        let mut pixel = ext_words[hdata.nint.max(0) as usize + 11];
-                        if pixel > 0.05 && pixel < 100000.0 {
+                        //
+                        // The pixel size is supposed to be in meters but UCSF frame file has it
+                        // in Angstroms.  So see if A is reasonable and scale to nm, or scale m
+                        // to nm
+                        let mut pixel = array[(num_int + 11) as usize];
+                        if array[(num_int + 11) as usize] > 0.05
+                            && array[(num_int + 11) as usize] < 100000.0
+                        {
                             pixel /= 10.0;
                         } else {
                             pixel *= 1.0e9;
                         }
-                        if pixel > 0.005 && pixel < 10000.0 && (hdata.imod_flags & 2) == 0 {
+                        let mut delta = [0.0_f32; 3];
+                        let mut iflags = 0;
+                        let mut if_imod = 0;
+                        iiu_ret_delta(im_unit, delta.as_mut_ptr());
+                        iiu_ret_imod_flags(im_unit, &mut iflags, &mut if_imod);
+                        if pixel > 0.005 && pixel < 10000.0 && iflags & 2 == 0 {
+                            let mut i_binning = 0_i32;
+                            for j in (0..3).rev() {
+                                i_binning = delta[j].round() as i32;
+                                if (delta[j] - i_binning as f32).abs() > 1.0e-6
+                                    || i_binning <= 0
+                                    || i_binning > 4
+                                {
+                                    i_binning = 0;
+                                    break;
+                                }
+                            }
+                            if i_binning == 1 {
+                                println!(
+                                    "          Pixel size in nanometers ={}",
+                                    g_edit(pixel, 11, 4)
+                                );
+                            } else if i_binning > 1 && i_binning < 5 {
+                                println!(
+                                    "          Pixel size in nanometers ={}{}{:2}{}",
+                                    g_edit(pixel * i_binning as f32, 11, 4),
+                                    " (Assumed binning of",
+                                    i_binning,
+                                    ")"
+                                );
+                            } else {
+                                println!(
+                                    "          Original/extended header pixel size in nanometers ={}",
+                                    g_edit(pixel, 11, 4)
+                                );
+                            }
+                            found_pixel = true;
+                        }
+                    }
+                    //
+                    // New FEI type
+                    if num_int == -3 {
+                        let mut byte_value = 0_u8;
+                        let mut short_value = 0_i16;
+                        let mut mask = 0_i32;
+                        let mut j = 0_i32;
+                        let mut tiltaxis = 0.0_f32;
+                        let mut axis8 = 0.0_f64;
+                        if get_extra_header_value(
+                            array.as_mut_ptr().cast(),
+                            8,
+                            3,
+                            &mut byte_value,
+                            &mut short_value,
+                            &mut mask,
+                            &mut tiltaxis,
+                            &mut axis8,
+                        ) == 0
+                            && get_extra_header_value(
+                                array.as_mut_ptr().cast(),
+                                140,
+                                4,
+                                &mut byte_value,
+                                &mut short_value,
+                                &mut j,
+                                &mut tiltaxis,
+                                &mut axis8,
+                            ) == 0
+                            && mask & (1 << 12) != 0
+                        {
+                            tiltaxis = (axis8
+                                * get_fei_ext_head_angle_scale(array.as_mut_ptr().cast()))
+                                as f32;
+                            if (-360.0..=360.0).contains(&tiltaxis) {
+                                if tiltaxis < -180.0 {
+                                    tiltaxis += 360.0;
+                                }
+                                if tiltaxis > 180.0 {
+                                    tiltaxis -= 360.0;
+                                }
+                                println!(
+                                    "          Tilt axis rotation angle = {:7.1}{}",
+                                    -tiltaxis, " (Corrected sign)"
+                                );
+                                found_axis_rot = true;
+                            }
+                        }
+                    }
+                    //
+                    // SerialEM type
+                    if extra_is_nbytes_and_flags(num_int, num_real) != 0 {
+                        if if_brief == 0 {
+                            println!();
+                            println!("Extended header from SerialEM contains:");
+                        }
+                        num_int = 0;
+                        for j in 0..NTYPES {
+                            if (num_real / (1 << j)) % 2 != 0 {
+                                if if_brief == 0 {
+                                    // FORMAT 103 writes `typeName` from its full
+                                    // `character*17` field, blank padded.
+                                    println!(
+                                        "  {:17} - Extract with \"{}\"",
+                                        type_name[j], extract_com[j]
+                                    );
+                                } else {
+                                    print!("{} {}", brief_sep, brief_name[j]);
+                                    let _ = io::stdout().flush();
+                                    brief_sep = " -";
+                                    num_int += 1;
+                                }
+                            }
+                        }
+                        if num_int > 0 {
+                            println!();
+                        }
+                    } else if nbsym > 0 {
+                        let mut tilts = vec![0.0_f32; nxyz[2] as usize + 9];
+                        let mut iz_piece = vec![0_i32; nxyz[2] as usize + 9];
+                        for j in 0..nxyz[2] as usize {
+                            iz_piece[j] = j as i32;
+                        }
+                        let mut ierr = 0;
+                        let mut one = 1;
+                        let mut max_vals = nxyz[2] + 9;
+                        let mut nz = nxyz[2];
+                        get_extra_header_items_fortran(
+                            array.as_mut_ptr().cast(),
+                            &mut nbsym,
+                            &mut num_int,
+                            &mut num_real,
+                            &mut nz,
+                            &mut one,
+                            tilts.as_mut_ptr(),
+                            tilts.as_mut_ptr(),
+                            &mut ierr,
+                            &mut max_vals,
+                            iz_piece.as_mut_ptr(),
+                        );
+                        if ierr > 0 {
                             println!(
-                                "          Original/extended header pixel size in nanometers ={:11.4}",
-                                pixel
+                                "Extended header has tilt angles - extract with \"extracttilts\""
                             );
                         }
                     }
-                    unsafe { libc::free(ext_data.cast()) };
                 }
             }
-        }
-        if if_brief > 0 && !silent {
-            println!();
-        }
-        unsafe {
-            ii_delete(image);
-            if image != root_image {
-                ii_delete(root_image);
+
+            // If no axis rotation in extended header, look for it in labels
+            if !found_axis_rot {
+                let mut all_labels = [[0_u8; 80]; 10];
+                let mut num_labels = 0;
+                iiu_ret_labels(1, all_labels.as_mut_ptr().cast(), &mut num_labels);
+                for j in 0..num_labels.clamp(0, 10) as usize {
+                    let temp_label_str = String::from_utf8_lossy(&all_labels[j][..80]);
+                    if temp_label_str.contains("Tilt axis angle") {
+                        found_axis_rot = true;
+                        break;
+                    }
+                }
             }
-        };
+
+            // if no pixel in extended header,
+            if !found_pixel {
+                let mut delta = [0.0_f32; 3];
+                iiu_ret_delta(1, delta.as_mut_ptr());
+                found_pixel = delta[0] != 1.0 || delta[1] != 1.0 || delta[2] != 1.0;
+            }
+
+            // Look for mdoc file in either case
+            if !found_pixel || !found_axis_rot {
+                let mut montage = 0;
+                let mut num_sect = 0;
+                let mut i_type_adoc = 0;
+                let ind_adoc = adoc_open_image_metadata(
+                    filename.as_ptr(),
+                    1,
+                    &mut montage,
+                    &mut num_sect,
+                    &mut i_type_adoc,
+                );
+                if ind_adoc >= 0 {
+                    if !found_pixel {
+                        // Etomo needed a comma before text, or no text.  Copytomocoms now
+                        // wants "from mdoc" to know that pixel spacing was 1
+                        let mut pixel = 0.0_f32;
+                        if adoc_get_float(
+                            ADOC_GLOBAL_NAME.as_ptr(),
+                            0,
+                            c"PixelSpacing".as_ptr(),
+                            &mut pixel,
+                        ) == 0
+                        {
+                            println!(
+                                "          Pixel size in nanometers ={}{}",
+                                g_edit(pixel / 10.0, 11, 4),
+                                "  , from mdoc"
+                            );
+                        }
+                    }
+
+                    if !found_axis_rot {
+                        // Look in titles
+                        let num_labels = adoc_get_number_of_sections(c"T".as_ptr());
+                        for j in 0..num_labels {
+                            let mut name = core::ptr::null_mut();
+                            if adoc_get_section_name(c"T".as_ptr(), j, &mut name) == 0 {
+                                let temp_label_str = CStr::from_ptr(name).to_string_lossy();
+                                let fei_label = temp_label_str.contains("TiltAxisAngle");
+                                if fei_label || temp_label_str.contains("Tilt axis angle") {
+                                    if let Some((_, rest)) = temp_label_str.split_once('=') {
+                                        // Fortran list-directed `read(extract, *)`
+                                        // stops at the first value separator.
+                                        let extract = rest.trim_start();
+                                        let end = extract
+                                            .find([',', ' ', '\t', '/'])
+                                            .unwrap_or(extract.len());
+                                        if let Ok(mut tilt_axis) = extract[..end].parse::<f32>() {
+                                            // If it is from TFS software, make sure there is a
+                                            // RotationAngle entry too and that values make some
+                                            // kind of sense
+                                            if fei_label {
+                                                let mut rot_angle = 0.0_f32;
+                                                if adoc_get_float(
+                                                    ADOC_ZVALUE_NAME.as_ptr(),
+                                                    0,
+                                                    c"RotationAngle".as_ptr(),
+                                                    &mut rot_angle,
+                                                ) == 0
+                                                {
+                                                    // Do what alignframes does:
+                                                    // The current wrong FEI implementation
+                                                    if (-(rot_angle + 90.0) - tilt_axis).abs()
+                                                        < 0.11
+                                                    {
+                                                        println!(
+                                                            "          Tilt axis rotation angle = {:7.1}{}",
+                                                            rot_angle,
+                                                            "  (from RotationAngle in mdoc)"
+                                                        );
+                                                    // If they corrected it to match SerialEM
+                                                    } else if ((rot_angle - 90.0) - tilt_axis).abs()
+                                                        < 0.11
+                                                    {
+                                                        println!(
+                                                            "          Tilt axis rotation angle = {:7.1}{}",
+                                                            tilt_axis, "  (from mdoc)"
+                                                        );
+                                                    // If they sorta corrected it but kept it
+                                                    // inverted as in TS file
+                                                    } else if (-(rot_angle - 90.0) - tilt_axis)
+                                                        .abs()
+                                                        < 0.11
+                                                    {
+                                                        println!(
+                                                            "          Tilt axis rotation angle = {:7.1}{}",
+                                                            -tilt_axis,
+                                                            "  (corrected sign, from mdoc)"
+                                                        );
+                                                        tilt_axis = -tilt_axis;
+                                                        let _ = tilt_axis;
+                                                    }
+                                                }
+                                            } else {
+                                                println!(
+                                                    "          Tilt axis rotation angle = {:7.1}{}",
+                                                    tilt_axis, "  (from mdoc)"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    libc::free(name.cast());
+                                    break;
+                                }
+                                libc::free(name.cast());
+                            }
+                        }
+                    }
+                }
+            }
+
+            if if_brief > 0 {
+                println!();
+            }
+
+            iiu_close(im_unit);
+            if im_unit > 1 {
+                iiu_close(1);
+            }
+        }
     }
 }

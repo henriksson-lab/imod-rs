@@ -1,8 +1,20 @@
 //! Source-mirrored non-GUI command line model from `etomo/Arguments.java`.
 #![allow(dead_code)]
 
-use super::etomo_type::{AxisType, DebugLevel, ImageFilenameStyle, ViewType};
+use super::storage::autodoc::autodoc_factory;
+use super::storage::autodoc::read_only_attribute::ReadOnlyAttribute;
+use super::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use super::storage::autodoc::read_only_section::ReadOnlySection;
+use super::storage::autodoc::read_only_section_list::ReadOnlySectionList;
+use super::storage::autodoc::section::Section;
 use super::storage::data_file_filter::DataFileFilter;
+use super::storage::log_file::LogFileError;
+use super::r#type::axis_id::AxisID;
+use super::r#type::axis_type::AxisType;
+use super::r#type::debug_level::DebugLevel;
+use super::r#type::etomo_autodoc;
+use super::r#type::image_filename_style::ImageFilenameStyle;
+use super::r#type::view_type::ViewType;
 use std::path::{Path, PathBuf};
 
 pub const DIRECTIVE_TAG: &str = "-directive";
@@ -211,9 +223,171 @@ impl Arguments {
     pub fn new() -> Self {
         Self::default()
     }
-    /// `printHelpMessage`; autodoc reading remains an explicit JVM/autodoc boundary.
+    /// Java package-private static `printHelpMessage()`.
+    ///
+    /// Walks the sections of `IMOD/autodoc/etomo.adoc` in *file* order, across
+    /// collection types - which is what `autodoc.getSectionLocation()` plus
+    /// `autodoc.nextSection(sectionLocation)` do and what the C `libcfshr` autodoc
+    /// cannot.
     pub fn print_help_message() {
-        println!("\nFor more information run 'man etomo'.");
+        // Java's `ReadOnlyAutodoc autodoc = null` and the try/catch around the body.
+        let autodoc = unsafe {
+            autodoc_factory::get_instance(None, Some(autodoc_factory::ETOMO), AxisID::Only, false)
+        };
+        let autodoc = match autodoc {
+            Ok(autodoc) => autodoc,
+            Err(e) => {
+                match e {
+                    // `catch (final LockException except) {}`.
+                    LogFileError::Lock(_) => {}
+                    _ => {
+                        // `except.printStackTrace()`; see etomo/util/stack_trace.rs.
+                        eprintln!("{}", e);
+                        println!("\nFor more information run 'man etomo'.");
+                    }
+                }
+                return;
+            }
+        };
+        if !autodoc.is_null() {
+            let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
+            let mut dash = "-";
+            if !unsafe { autodoc.get_attribute(Some(etomo_autodoc::DOUBLE_DASH_ATTRIBUTE_NAME)) }
+                .is_null()
+            {
+                dash = "--";
+            }
+            // Get this information in order
+            let section_location = autodoc.get_section_location();
+            if let Some(mut section_location) = section_location {
+                let mut section;
+                let mut attribute;
+                let mut attribute_value;
+                loop {
+                    section = unsafe { autodoc.next_section(Some(&mut section_location)) };
+                    if section.is_null() {
+                        break;
+                    }
+                    let section: &Section = unsafe { &*section };
+                    let section_type = ReadOnlySection::get_type(section);
+                    if section_type == etomo_autodoc::HEADER_SECTION_NAME {
+                        attribute = unsafe {
+                            ReadOnlySection::get_attribute(
+                                section,
+                                Some(etomo_autodoc::USAGE_ATTRIBUTE_NAME),
+                            )
+                        };
+                        if !attribute.is_null() {
+                            attribute_value = unsafe { (*attribute).get_value() };
+                            if let Some(attribute_value) = attribute_value {
+                                // Print section header
+                                println!("\n{}", attribute_value);
+                            }
+                        }
+                    } else if section_type == etomo_autodoc::FIELD_SECTION_NAME {
+                        // Print parameter
+                        print!(
+                            "{}{}",
+                            dash,
+                            ReadOnlySectionList::get_name(section).unwrap_or("null".to_string())
+                        );
+                        // Look for short parameter name
+                        attribute = unsafe {
+                            ReadOnlySection::get_attribute(
+                                section,
+                                Some(etomo_autodoc::SHORT_ATTRIBUTE_NAME),
+                            )
+                        };
+                        if !attribute.is_null() {
+                            attribute_value = unsafe { (*attribute).get_value() };
+                            if let Some(attribute_value) = attribute_value {
+                                print!(" OR {}{}", dash, attribute_value);
+                                if ReadOnlySectionList::get_name(section)
+                                    == Some("help".to_string())
+                                {
+                                    if dash == "--" {
+                                        print!(" OR -{}", attribute_value);
+                                    } else {
+                                        print!(" OR --{}", attribute_value);
+                                    }
+                                }
+                            }
+                        }
+                        // Look for value description
+                        attribute = unsafe {
+                            ReadOnlySection::get_attribute(
+                                section,
+                                Some(etomo_autodoc::FORMAT_ATTRIBUTE_NAME),
+                            )
+                        };
+                        attribute_value = if attribute.is_null() {
+                            None
+                        } else {
+                            unsafe { (*attribute).get_value() }
+                        };
+                        if let Some(attribute_value) = attribute_value {
+                            println!(
+                                "   {}",
+                                Arguments::strip_manpage_formatting(&attribute_value)
+                            );
+                        } else {
+                            attribute = unsafe {
+                                ReadOnlySection::get_attribute(
+                                    section,
+                                    Some(etomo_autodoc::TYPE_ATTRIBUTE_NAME),
+                                )
+                            };
+                            if !attribute.is_null() {
+                                attribute_value = unsafe { (*attribute).get_value() };
+                                if let Some(attribute_value) = attribute_value {
+                                    if attribute_value == etomo_autodoc::BOOLEAN_TYPE {
+                                        println!();
+                                    }
+                                    if attribute_value == etomo_autodoc::FLOAT_TYPE {
+                                        println!("   {}", "Floating point");
+                                    }
+                                    if attribute_value == etomo_autodoc::INTEGER_TYPE {
+                                        println!("   {}", "Integer");
+                                    }
+                                }
+                            }
+                        }
+                        // Look for parameter description
+                        attribute = unsafe {
+                            ReadOnlySection::get_attribute(
+                                section,
+                                Some(etomo_autodoc::USAGE_ATTRIBUTE_NAME),
+                            )
+                        };
+                        attribute_value = if attribute.is_null() {
+                            None
+                        } else {
+                            unsafe { (*attribute).get_value() }
+                        };
+                        if let Some(attribute_value) = attribute_value {
+                            println!("     {}", attribute_value);
+                        } else {
+                            attribute = unsafe {
+                                ReadOnlySection::get_attribute(
+                                    section,
+                                    Some(etomo_autodoc::MANPAGE_ATTRIBUTE_NAME),
+                                )
+                            };
+                            if !attribute.is_null() {
+                                attribute_value = unsafe { (*attribute).get_value() };
+                                if let Some(attribute_value) = attribute_value {
+                                    println!(
+                                        "     {}",
+                                        Arguments::strip_manpage_formatting(&attribute_value)
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+        }
     }
     pub fn strip_manpage_formatting(input: &str) -> String {
         if input.contains("\\f") {

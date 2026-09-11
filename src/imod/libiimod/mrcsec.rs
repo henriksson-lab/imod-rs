@@ -222,7 +222,16 @@ pub unsafe fn mrc_read_section_any(
     let pad_left = unsafe { (*li).pad_left.max(0) };
     let pad_right = unsafe { (*li).pad_right.max(0) };
     d.x_dimension = d.xsize + pad_left + pad_right;
-    let pix_size_buf = [0, 1, 4, 2];
+    let mut pix_size_buf = [0, 1, 4, 2];
+    // `mrcsec.c:230`: entry 0 (MRSA_NOPROC) is filled in from the pixel size of
+    // the data actually in the buffer.  Leaving it at 0 makes the inverted-Y
+    // setup below fail to advance `bufp` to the last line, so the first line is
+    // written before the start of the caller's buffer.
+    pix_size_buf[0] = d.pix_size;
+    // `mrcsec.c:241-242`: need to buffer if there is padding in X.
+    if d.x_dimension > d.xsize {
+        d.need_data = 1;
+    }
     if unsafe { (*hdata).y_inverted } != 0 {
         if unsafe { (*li).mirror_fft } != 0 {
             // `mrcsec.c:264-267`: this combination has no source transform.
@@ -306,7 +315,15 @@ pub unsafe fn mrc_read_section_any(
     } else {
         (nx - d.x_end - 1).max(0)
     };
+    // `mrcsec.c:320-332`: seekEndY is set for the axis being read before the
+    // loop; iiProcessReadLine may then retarget it for FFT mirroring.
+    let seek_skip = if read_y != 0 {
+        unsafe { (*hdata).section_skip }
+    } else {
+        0
+    };
     let seek_error = if read_y != 0 {
+        d.seek_end_y = ny - 1;
         unsafe {
             mrc_huge_seek(
                 fin,
@@ -321,6 +338,7 @@ pub unsafe fn mrc_read_section_any(
             )
         }
     } else {
+        d.seek_end_y = 0;
         unsafe {
             mrc_huge_seek(
                 fin,
@@ -363,6 +381,11 @@ pub unsafe fn mrc_read_section_any(
                 )
             } != (lines * nx_seek) as usize
             {
+                // `mrcsec.c:367`.
+                b3d_error(
+                    unsafe { stderr },
+                    format_args!("ERROR: mrcReadSectionAny - reading data from file.\n"),
+                );
                 if !temporary.is_null() {
                     unsafe { libc::free(temporary.cast()) }
                 }
@@ -412,6 +435,11 @@ pub unsafe fn mrc_read_section_any(
             d.xsize as usize
         };
         if unsafe { libc::fread(bdata.cast(), d.pix_size as usize, count, fin) } != count {
+            // `mrcsec.c:367`.
+            b3d_error(
+                unsafe { stderr },
+                format_args!("ERROR: mrcReadSectionAny - reading data from file.\n"),
+            );
             if !temporary.is_null() {
                 unsafe { libc::free(temporary.cast()) }
             };
@@ -439,23 +467,21 @@ pub unsafe fn mrc_read_section_any(
             };
             return IIERR_QUITTING;
         }
-        if unsafe {
-            mrc_huge_seek(
-                fin,
-                if read_y != 0 {
-                    (*hdata).section_skip
-                } else {
-                    0
-                },
-                seek_end_x,
-                d.seek_end_y,
-                0,
-                nx_seek,
-                ny,
-                d.pix_size,
-                libc::SEEK_CUR,
-            )
-        } != 0
+        // `mrcsec.c:384-386`: only seek when there is something to skip.
+        if (seek_end_x != 0 || d.seek_end_y != 0 || seek_skip != 0)
+            && unsafe {
+                mrc_huge_seek(
+                    fin,
+                    seek_skip,
+                    seek_end_x,
+                    d.seek_end_y,
+                    0,
+                    nx_seek,
+                    ny,
+                    d.pix_size,
+                    libc::SEEK_CUR,
+                )
+            } != 0
         {
             if !temporary.is_null() {
                 libc::free(temporary.cast());
@@ -1017,8 +1043,30 @@ pub unsafe fn ii_process_read_line(
                 core::ptr::copy_nonoverlapping(bdata, bufp, n * d.pix_size as usize);
             }
         }
+        // `mrcsec.c` advances the output pointer separately in each of its three
+        // top-level branches, in units of the *output* pixel: every case of the
+        // conversion switch (`mrcsec.c:701-996`) steps `bufp` or `usbufp` by
+        // `xDimension * deltaYsign`, the conversion-to-float branch
+        // (`mrcsec.c:1035-1036`) steps `fbufp` by the same, and only the raw
+        // branch (`mrcsec.c:1061`) multiplies by `d->pixSize`.  Sharing the raw
+        // branch's `* pixSize` with the conversion branch walked `bufp` past the
+        // end of a byte output buffer by the input pixel size (4x for a float
+        // file), corrupting the heap beyond it.
         let advance = d.x_dimension * d.delta_y_sign;
-        if d.type_ == MRSA_FLOAT {
+        if d.convert != 0 {
+            if h.mode == MRC_MODE_COMPLEX_FLOAT {
+                // `mrcsec.c:883-996`: complex output is placed through fft/pixIndex
+                // and no buffer pointer is advanced.
+            } else if d.type_ == MRSA_FLOAT {
+                fbufp = fbufp.offset(advance as isize);
+                bufp = fbufp.cast();
+            } else if d.to_short != 0 {
+                usbufp = usbufp.offset(advance as isize);
+                bufp = usbufp.cast();
+            } else {
+                bufp = bufp.offset(advance as isize);
+            }
+        } else if d.type_ == MRSA_FLOAT {
             fbufp = fbufp.offset(advance as isize);
             bufp = fbufp.cast();
         } else if d.to_short != 0 {
@@ -1112,11 +1160,21 @@ pub unsafe fn mrc_write_section_any(
     let l = unsafe { &*li };
     let fin = h.fp.cast::<libc::FILE>();
     if l.xmin != 0 || l.xmax != h.nx - 1 {
+        // `mrcsec.c:1174-1176`
+        b3d_error(
+            unsafe { stderr },
+            format_args!("ERROR: mrcWriteSectionAny - only full lines can be written\n"),
+        );
         return 1;
     }
     let mut bytes_chan = 0;
     let mut channels = 0;
     if mrc_getdcsize(h.mode, &mut bytes_chan, &mut channels) != 0 {
+        // `mrcsec.c:1179-1181`
+        b3d_error(
+            unsafe { stderr },
+            format_args!("ERROR: mrcWriteSectionAny - unknown mode.\n"),
+        );
         return -1;
     }
     if h.half_floats != 0 && h.mode == MRC_MODE_FLOAT {
@@ -1135,14 +1193,27 @@ pub unsafe fn mrc_write_section_any(
             MRC_MODE_BYTE | MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT
         )
     {
+        // `mrcsec.c:1189-1192`
+        b3d_error(
+            unsafe { stderr },
+            format_args!(
+                "ERROR: mrcWriteSectionAny - floating point data can only be converted to byte/integer modes\n"
+            ),
+        );
         return 1;
     }
     let pack = h.mode == MRC_MODE_BYTE && h.packed4bits != 0;
     let signed = h.mode == MRC_MODE_BYTE && h.bytes_signed != 0 && !pack;
+    // `mrcsec.c:1147` gates halfFloats on the header mode actually being
+    // MRC_MODE_FLOAT.  `mrcInitOutputHeader` sets hdata->halfFloats from
+    // write16BitModeForFloats() for every mode, so using the raw flag sends
+    // byte/short/ushort writes down the half-float conversion path: mode 0
+    // then writes two bytes per pixel into an nx-byte line buffer.
+    let half_floats = h.mode == MRC_MODE_FLOAT && h.half_floats != 0;
     let nx_seek = if pack { (h.nx + 1) / 2 } else { h.nx };
     let bytes_line = nx_seek * pix_out;
     let need = h.mode != buf_mode
-        || h.half_floats != 0
+        || half_floats
         || h.swapped != 0 && bytes_chan > 1
         || signed
         || pack
@@ -1160,6 +1231,11 @@ pub unsafe fn mrc_write_section_any(
         core::ptr::null_mut()
     };
     if need && temp.is_null() {
+        // `mrcsec.c:1210-1213`
+        b3d_error(
+            unsafe { stderr },
+            format_args!("ERROR: mrcWriteSectionAny - getting memory for temporary array.\n"),
+        );
         return 2;
     }
     if unsafe {
@@ -1176,6 +1252,11 @@ pub unsafe fn mrc_write_section_any(
         )
     } != 0
     {
+        // `mrcsec.c:1218-1220`
+        b3d_error(
+            unsafe { stderr },
+            format_args!("ERROR: mrcWriteSectionAny - seeking to write location.\n"),
+        );
         if !temp.is_null() {
             unsafe { libc::free(temp.cast()) }
         };
@@ -1202,12 +1283,12 @@ pub unsafe fn mrc_write_section_any(
             chunk_write_ptr = out;
         }
         unsafe {
-            if h.mode != buf_mode || h.half_floats != 0 {
+            if h.mode != buf_mode || half_floats {
                 crate::imod::libiimod::iimage::ii_convert_line_of_floats(
                     src.cast(),
                     out,
                     h.nx,
-                    if h.half_floats != 0 {
+                    if half_floats {
                         crate::imod::libiimod::mrcfiles::MRC_MODE_HALF_FLOAT
                     } else {
                         h.mode
@@ -1251,15 +1332,23 @@ pub unsafe fn mrc_write_section_any(
             line + step < l.ymin
         };
         if lines_in_chunk == chunk_lines || last_line {
-            if unsafe {
-                libc::fwrite(
-                    chunk_write_ptr.cast(),
-                    pix_out as usize,
-                    (nx_seek * lines_in_chunk) as usize,
-                    fin,
-                )
-            } != (nx_seek * lines_in_chunk) as usize
+            let data_size = (nx_seek * lines_in_chunk) as usize;
+            unsafe { *libc::__errno_location() = 0 };
+            if unsafe { libc::fwrite(chunk_write_ptr.cast(), pix_out as usize, data_size, fin) }
+                != data_size
             {
+                // `mrcsec.c:1303-1305`
+                b3d_error(
+                    unsafe { stderr },
+                    format_args!(
+                        "ERROR: mrcWriteSectionAny - writing data ({} bytes) to file (system message: {})\n",
+                        data_size,
+                        unsafe {
+                            core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location()))
+                                .to_string_lossy()
+                        }
+                    ),
+                );
                 if !temp.is_null() {
                     unsafe { libc::free(temp.cast()) }
                 }
@@ -1608,6 +1697,344 @@ mod tests {
             );
             b3d_set_store_error(0);
             libc::fclose(file);
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn inverted_y_write_section_stores_rows_in_reverse() {
+        unsafe {
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-inverted-write-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb+".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, 4, 3, 1, MRC_MODE_FLOAT), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            header.y_inverted = 1;
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            let mut values = [0.0_f32; 12];
+            for line in 0..3 {
+                for column in 0..4 {
+                    values[line * 4 + column] = (10 * line + column) as f32;
+                }
+            }
+            assert_eq!(
+                mrc_write_z(&mut header, &mut load, values.as_mut_ptr().cast(), 0),
+                0
+            );
+            libc::fflush(file);
+            let mut stored = [0.0_f32; 12];
+            assert_eq!(libc::fseek(file, 1024, libc::SEEK_SET), 0);
+            assert_eq!(
+                libc::fread(stored.as_mut_ptr().cast(), 4, stored.len(), file),
+                stored.len()
+            );
+            libc::fclose(file);
+            // `mrcsec.c:1223-1229`: an inverted-Y header writes the last buffer
+            // line into the first file line.
+            assert_eq!(
+                stored,
+                [
+                    20.0, 21.0, 22.0, 23.0, 10.0, 11.0, 12.0, 13.0, 0.0, 1.0, 2.0, 3.0
+                ]
+            );
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn inverted_y_write_section_spans_several_chunks() {
+        unsafe {
+            // 1024 float pixels per line puts `chunkLines` (`mrcsec.c:1204-1206`)
+            // at 488, so 600 lines are written as three descending chunks.
+            let nx = 1024_i32;
+            let ny = 600_i32;
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-inverted-chunk-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb+".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            header.y_inverted = 1;
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            let mut values = vec![0.0_f32; (nx * ny) as usize];
+            for line in 0..ny {
+                for column in 0..nx {
+                    values[(line * nx + column) as usize] = line as f32;
+                }
+            }
+            assert_eq!(
+                mrc_write_z(&mut header, &mut load, values.as_mut_ptr().cast(), 0),
+                0
+            );
+            libc::fflush(file);
+            let mut stored = vec![0.0_f32; (nx * ny) as usize];
+            assert_eq!(libc::fseek(file, 1024, libc::SEEK_SET), 0);
+            assert_eq!(
+                libc::fread(stored.as_mut_ptr().cast(), 4, stored.len(), file),
+                stored.len()
+            );
+            libc::fclose(file);
+            for line in [0, 111, 112, 487, 488, 599] {
+                assert_eq!(
+                    stored[(line * nx) as usize],
+                    (ny - 1 - line) as f32,
+                    "file line {line}"
+                );
+                assert_eq!(
+                    stored[(line * nx + nx - 1) as usize],
+                    (ny - 1 - line) as f32
+                );
+            }
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn padded_write_section_spans_several_chunks() {
+        unsafe {
+            // Left padding forces the temporary-buffer path (`mrcsec.c:1201`) on a
+            // non-inverted write, so the ascending chunk loop is exercised too.
+            let nx = 1024_i32;
+            let ny = 600_i32;
+            let pad = 2_i32;
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-padded-chunk-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb+".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            load.pad_left = pad;
+            let xdim = nx + pad;
+            let mut values = vec![-1.0_f32; (xdim * ny) as usize];
+            for line in 0..ny {
+                for column in 0..nx {
+                    values[(line * xdim + pad + column) as usize] = line as f32;
+                }
+            }
+            assert_eq!(
+                mrc_write_z(&mut header, &mut load, values.as_mut_ptr().cast(), 0),
+                0
+            );
+            libc::fflush(file);
+            let mut stored = vec![0.0_f32; (nx * ny) as usize];
+            assert_eq!(libc::fseek(file, 1024, libc::SEEK_SET), 0);
+            assert_eq!(
+                libc::fread(stored.as_mut_ptr().cast(), 4, stored.len(), file),
+                stored.len()
+            );
+            libc::fclose(file);
+            for line in [0, 111, 112, 487, 488, 599] {
+                assert_eq!(
+                    stored[(line * nx) as usize],
+                    line as f32,
+                    "file line {line}"
+                );
+                assert_eq!(stored[(line * nx + nx - 1) as usize], line as f32);
+            }
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn inverted_y_raw_read_fills_the_buffer_backwards_without_underrun() {
+        unsafe {
+            // `mrcsec.c:230` fills pixSizeBuf[MRSA_NOPROC] with the file pixel
+            // size; with a zero there the inverted-Y setup leaves `bufp` at the
+            // start of the buffer and the first line lands in front of it.
+            let nx = 4_i32;
+            let ny = 3_i32;
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-inverted-raw-read-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let mut values = [0.0_f32; 12];
+            for line in 0..3 {
+                for column in 0..4 {
+                    values[line * 4 + column] = (10 * line + column) as f32;
+                }
+            }
+            assert_eq!(
+                libc::fwrite(values.as_ptr().cast(), 4, values.len(), file),
+                values.len()
+            );
+            libc::fclose(file);
+
+            let file = libc::fopen(path.as_ptr(), c"rb".as_ptr());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut header), 0);
+            header.fp = file.cast();
+            header.y_inverted = 1;
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            let guard = 16_usize;
+            let mut arena = vec![0xAA_u8; 2 * guard + (nx * ny) as usize * 4];
+            let target = arena.as_mut_ptr().add(guard);
+            assert_eq!(mrc_read_z(&mut header, &mut load, target, 0), 0);
+            libc::fclose(file);
+            assert!(arena[..guard].iter().all(|&byte| byte == 0xAA));
+            assert!(arena[arena.len() - guard..].iter().all(|&b| b == 0xAA));
+            let mut got = [0.0_f32; 12];
+            core::ptr::copy_nonoverlapping(target.cast::<f32>(), got.as_mut_ptr(), got.len());
+            assert_eq!(
+                got,
+                [
+                    20.0, 21.0, 22.0, 23.0, 10.0, 11.0, 12.0, 13.0, 0.0, 1.0, 2.0, 3.0
+                ]
+            );
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn float_section_read_as_bytes_stays_inside_the_byte_buffer() {
+        unsafe {
+            // The conversion cases of `mrcsec.c:701-996` step the output pointer
+            // by `xDimension` bytes, not by the file's pixel size; multiplying by
+            // `d->pixSize` here wrote four bytes per pixel of stride and ran off
+            // the end of the caller's byte buffer.
+            let nx = 8_i32;
+            let ny = 5_i32;
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-mrcsec-float-to-byte-{}.mrc",
+                std::process::id()
+            ));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let values: Vec<f32> = (0..nx * ny).map(|index| index as f32).collect();
+            assert_eq!(
+                libc::fwrite(values.as_ptr().cast(), 4, values.len(), file),
+                values.len()
+            );
+            libc::fclose(file);
+
+            let file = libc::fopen(path.as_ptr(), c"rb".as_ptr());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut header), 0);
+            header.fp = file.cast();
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            load.slope = 1.0;
+            load.offset = 0.0;
+            load.outmin = 0;
+            load.outmax = 255;
+            let guard = 16_usize;
+            let mut arena = vec![0xAA_u8; 2 * guard + (nx * ny) as usize];
+            let target = arena.as_mut_ptr().add(guard);
+            assert_eq!(mrc_read_z_byte(&mut header, &mut load, target, 0), 0);
+            libc::fclose(file);
+            assert!(arena[..guard].iter().all(|&byte| byte == 0xAA));
+            assert!(arena[arena.len() - guard..].iter().all(|&b| b == 0xAA));
+            for index in 0..(nx * ny) as usize {
+                assert_eq!(arena[guard + index], index as u8, "pixel {index}");
+            }
+            std::fs::remove_file(std::path::Path::new(
+                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
+            ))
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn y_slice_read_steps_a_whole_section_between_lines() {
+        unsafe {
+            // `mrcsec.c:321` sets seekEndY to ny - 1 when reading in Y, so the
+            // per-line seek advances to the same row of the next section.
+            let nx = 3_i32;
+            let ny = 2_i32;
+            let nz = 3_i32;
+            let path = std::env::temp_dir()
+                .join(format!("imod-rs-mrcsec-read-y-{}.mrc", std::process::id()));
+            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(path.as_ptr(), c"wb".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, nx, ny, nz, MRC_MODE_FLOAT), 0);
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let mut values = Vec::new();
+            for section in 0..nz {
+                for line in 0..ny {
+                    for column in 0..nx {
+                        values.push((100 * section + 10 * line + column) as f32);
+                    }
+                }
+            }
+            assert_eq!(
+                libc::fwrite(values.as_ptr().cast(), 4, values.len(), file),
+                values.len()
+            );
+            libc::fclose(file);
+
+            let file = libc::fopen(path.as_ptr(), c"rb".as_ptr());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_read(file, &mut header), 0);
+            header.fp = file.cast();
+            let mut load: LoadInfo = core::mem::zeroed();
+            assert_eq!(mrc_init_li(Some(&mut load), None), 0);
+            assert_eq!(mrc_init_li(Some(&mut load), Some(&header)), 0);
+            load.axis = 2;
+            let mut got = [0.0_f32; 9];
+            assert_eq!(
+                mrc_read_y(&mut header, &mut load, got.as_mut_ptr().cast(), 1),
+                0
+            );
+            libc::fclose(file);
+            assert_eq!(
+                got,
+                [10.0, 11.0, 12.0, 110.0, 111.0, 112.0, 210.0, 211.0, 212.0]
+            );
             std::fs::remove_file(std::path::Path::new(
                 std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
             ))

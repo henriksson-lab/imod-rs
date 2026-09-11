@@ -1,72 +1,40 @@
 //! `IMOD/Etomo/src/etomo/storage/autodoc/ReadOnlyStatement.java`.
+#![allow(dead_code)]
 
-/// `Statement.Type` from the direct statement implementation unit.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StatementType {
-    NameValuePair,
-    Subsection,
-    Comment,
-    EmptyLine,
-}
-impl std::fmt::Display for StatementType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::NameValuePair => "NAME_VALUE_PAIR",
-            Self::Subsection => "SUBSECTION",
-            Self::Comment => "COMMENT",
-            Self::EmptyLine => "EMPTY_LINE",
-        })
-    }
-}
+use super::section::Section;
+use super::statement::Type;
 
-/// Complete `ReadOnlyStatement` source interface.
+/// Complete `ReadOnlyStatement` source interface.  `getSubsection` is declared as
+/// `ReadOnlySection`, whose only implementation in the package is `Section`, so it is
+/// the concrete pointer here; `Statement`'s `getType` returns the nested
+/// `Statement.Type`, translated in `statement.rs`.
 pub trait ReadOnlyStatement {
-    type Section;
-    fn get_type(&self) -> StatementType;
+    /// Java `getType()`.
+    fn get_type(&self) -> Type;
+    /// Java `getString()`.
     fn get_string(&self) -> String;
+    /// Java `sizeLeftSide()`.
     fn size_left_side(&self) -> i32;
+    /// Java `getLeftSide()`.
     fn get_left_side(&self) -> Option<String>;
+    /// Java `getLeftSide(int)`.
     fn get_left_side_at(&self, index: i32) -> Option<String>;
+    /// Java `getRightSide()`.
     fn get_right_side(&self) -> Option<String>;
-    fn get_subsection(&self) -> Option<&Self::Section>;
+    /// Java `getSubsection()`.
+    fn get_subsection(&self) -> *mut Section;
+    /// Java `getLineNum()`.
     fn get_line_num(&self) -> i32;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ReadOnlyStatement, StatementType};
-    struct Statement;
-    impl ReadOnlyStatement for Statement {
-        type Section = ();
-        fn get_type(&self) -> StatementType {
-            StatementType::Comment
-        }
-        fn get_string(&self) -> String {
-            "# x".into()
-        }
-        fn size_left_side(&self) -> i32 {
-            0
-        }
-        fn get_left_side(&self) -> Option<String> {
-            None
-        }
-        fn get_left_side_at(&self, _: i32) -> Option<String> {
-            None
-        }
-        fn get_right_side(&self) -> Option<String> {
-            Some("# x".into())
-        }
-        fn get_subsection(&self) -> Option<&()> {
-            None
-        }
-        fn get_line_num(&self) -> i32 {
-            2
-        }
-    }
+    use super::super::statement::Type;
     #[test]
-    fn statement_contract_preserves_comment_view() {
-        let s = Statement;
-        assert_eq!(s.get_type(), StatementType::Comment);
-        assert_eq!(s.get_right_side().as_deref(), Some("# x"));
+    fn statement_type_renders_the_source_strings() {
+        assert_eq!(Type::NameValuePair.to_string(), "NAME_VALUE_PAIR");
+        assert_eq!(Type::Subsection.to_string(), "SUBSECTION");
+        assert_eq!(Type::Comment.to_string(), "COMMENT");
+        assert_eq!(Type::EmptyLine.to_string(), "EMPTY_LINE");
     }
 }

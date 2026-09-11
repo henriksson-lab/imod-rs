@@ -314,22 +314,44 @@ pub fn imod_getpid() -> i32 {
     unsafe { libc::getpid() }
 }
 /// Matches C `imodVersion` (`b3dutil.c:148`).
+///
+/// `VERSION`, `VERSION_NAME`, and `COPYRIGHT_YEARS` are generated into
+/// `imodconfig.h` by `IMOD/setup2:411-419` from `IMOD/.version` ("5.2.17") and
+/// `IMOD/setup2:10` ("1994-2025") for the pinned revision.  The stale 4.8.16 /
+/// 1994-2014 pair in `IMOD/sysdep/win/VC-imodconfig.h` is a checked-in Visual
+/// Studio config, not the configuration this revision builds with.
 pub unsafe fn imod_version(program_name: *const c_char) -> i32 {
     if !program_name.is_null() {
         libc::printf(
-            c"%s Version %s\n".as_ptr(),
+            c"%s Version %s %s %s\n".as_ptr(),
             program_name,
-            c"4.8.16".as_ptr(),
+            c"5.2.17".as_ptr(),
+            IMOD_BUILD_DATE.as_ptr(),
+            IMOD_BUILD_TIME.as_ptr(),
         );
     }
-    4816
+    5217
 }
+/// C `__DATE__` and `__TIME__` for this build, in the identical C field
+/// formats.  They are compilation metadata rather than input-dependent output,
+/// so the deterministic part compared against the reference is the field
+/// layout, not the timestamp value.
+pub const IMOD_BUILD_DATE: &core::ffi::CStr =
+    match core::ffi::CStr::from_bytes_with_nul(concat!(env!("IMOD_BUILD_DATE"), "\0").as_bytes()) {
+        Ok(value) => value,
+        Err(_) => panic!("build date"),
+    };
+pub const IMOD_BUILD_TIME: &core::ffi::CStr =
+    match core::ffi::CStr::from_bytes_with_nul(concat!(env!("IMOD_BUILD_TIME"), "\0").as_bytes()) {
+        Ok(value) => value,
+        Err(_) => panic!("build time"),
+    };
 /// Matches C `imodCopyright` (`b3dutil.c:157`).
 pub fn imod_copyright() {
     unsafe {
         libc::printf(
             c"Copyright (C) %s by the %s\n".as_ptr(),
-            c"1994-2014".as_ptr(),
+            c"1994-2025".as_ptr(),
             c"Regents of the University of Colorado".as_ptr(),
         );
     }
@@ -1189,10 +1211,116 @@ pub fn b3d_cpu_is_amd() -> i32 {
         .map(|text| if text.contains("AuthenticAMD") { 1 } else { 0 })
         .unwrap_or(0)
 }
-/// Matches C `numOMPthreads` from included `coresprocsthreads.c` for the no-OpenMP build.
+/// Matches C `numOMPthreads` (`coresprocsthreads.c:193`), the `_OPENMP` branch.
+///
+/// The reference build links OpenMP (`libcfshr.so` imports `GOMP_parallel`), so
+/// this is the branch it compiles.  Returning 1 unconditionally — the `#else`
+/// at `coresprocsthreads.c:281` — is not merely a performance difference: the
+/// count selects the `balancedGroupLimits` partition and, in
+/// `sliceNoiseTaperPad`, which of the 16 static `pseudoVals` seeds are used, so
+/// a different count yields a different noise field.
+///
+/// `omp_get_num_procs()` is the number of processors available to the process;
+/// `std::thread::available_parallelism` is its closest counterpart.  The
+/// Apple/M1 arm is not translated: this is a Linux target.
 #[unsafe(no_mangle)]
-pub extern "C" fn num_omp_threads(_optimal_threads: i32) -> i32 {
-    1
+pub extern "C" fn num_omp_threads(optimal_threads: i32) -> i32 {
+    static NUM_PROCS: AtomicI32 = AtomicI32::new(-1);
+    static OMP_NUM_PROCS: AtomicI32 = AtomicI32::new(-1);
+    let mut num_threads = optimal_threads;
+
+    // One-time determination of the number of physical and logical cores.
+    if NUM_PROCS.load(Ordering::SeqCst) < 0 {
+        let omp_num_procs = std::thread::available_parallelism()
+            .map(|value| value.get() as i32)
+            .unwrap_or(1);
+        OMP_NUM_PROCS.store(omp_num_procs, Ordering::SeqCst);
+        let mut num_procs = omp_num_procs;
+        let mut processor_core_count = 0_i32;
+        let mut logical_processor_count = 0_i32;
+        let mut physical_procs = 0_i32;
+        if unsafe {
+            num_cores_and_logical_procs(&mut processor_core_count, &mut logical_processor_count)
+        } == 0
+            && processor_core_count > 0
+            && logical_processor_count == num_procs
+        {
+            physical_procs = processor_core_count;
+        }
+        if std::env::var_os("IMOD_REPORT_CORES").is_some() {
+            unsafe {
+                libc::printf(
+                    c"core count = %d  logical processors = %d  OMP num = %d => physical processors = %d\n"
+                        .as_ptr(),
+                    processor_core_count,
+                    logical_processor_count,
+                    num_procs,
+                    physical_procs,
+                );
+                libc::fflush(stdout);
+            }
+        }
+        if physical_procs > 0 {
+            num_procs = num_procs.min(physical_procs);
+        }
+        NUM_PROCS.store(num_procs, Ordering::SeqCst);
+    }
+    let num_procs = NUM_PROCS.load(Ordering::SeqCst);
+
+    // Limit by number of real cores.
+    num_threads = 1.max(num_procs.min(num_threads));
+
+    // `coresprocsthreads.c:236-241` caches this in a `static`.  Here it is
+    // re-read each call, a deliberate and documented deviation: the only
+    // observable difference is that a change to the environment mid-process is
+    // honoured rather than ignored, which no IMOD command does, and it lets a
+    // test pin the count deterministically instead of inheriting the machine's
+    // core count.
+    let lim_threads = 0.max(
+        std::env::var("OMP_NUM_THREADS")
+            .ok()
+            .map(|value| value.trim().parse::<i32>().unwrap_or(0))
+            .unwrap_or(0),
+    );
+    if lim_threads > 0 {
+        num_threads = lim_threads.min(num_threads);
+    }
+
+    // Same deviation as above (`coresprocsthreads.c:254-270` caches this).
+    let force_threads = {
+        let mut force = 0_i32;
+        if let Ok(value) = std::env::var("IMOD_FORCE_OMP_THREADS") {
+            if value == "ALL_CORES" {
+                if num_procs > 0 {
+                    force = num_procs;
+                }
+            } else if value == "ALL_HYPER" {
+                let omp_num_procs = OMP_NUM_PROCS.load(Ordering::SeqCst);
+                if omp_num_procs > 0 {
+                    force = omp_num_procs;
+                }
+            } else {
+                force = 0.max(value.trim().parse::<i32>().unwrap_or(0));
+            }
+        }
+        force
+    };
+    if force_threads > 0 {
+        num_threads = force_threads;
+    }
+
+    if std::env::var_os("IMOD_REPORT_CORES").is_some() {
+        unsafe {
+            libc::printf(
+                c"numProcs %d  limThreads %d  numThreads %d\n".as_ptr(),
+                num_procs,
+                lim_threads,
+                num_threads,
+            );
+            libc::fflush(stdout);
+        }
+    }
+    num_threads
 }
 /// Matches C `numompthreads` (`b3dutil.c:1407`).
 pub unsafe fn numompthreads(optimal_threads: *const i32) -> i32 {
@@ -1219,7 +1347,61 @@ pub fn b3daddressablememory() -> f64 {
 pub unsafe fn standardmemorylimitmb(half_point: *const i32) -> f64 {
     standard_memory_limit_mb(*half_point)
 }
-/// Matches C `expandArgList` (`b3dutil.c:1579`) on Unix.
+/// Matches C `addToArgVector` (`b3dutil.c:1542`), a file-static helper.
+///
+/// Its only call sites are inside `expandArgList`'s `#ifdef _WIN32` branch, so
+/// nothing reaches it on this platform; it is translated because the
+/// definition itself is not conditionally compiled.
+unsafe fn add_to_arg_vector(
+    arg: *const c_char,
+    arg_vec: *mut *mut *mut c_char,
+    vec_size: *mut i32,
+    num_in_vec: *mut i32,
+    pattern: *const c_char,
+    num_prefix: i32,
+) -> i32 {
+    unsafe {
+        let quantum = 8;
+        if *num_in_vec >= *vec_size {
+            if *vec_size != 0 {
+                let grown = libc::realloc(
+                    (*arg_vec).cast(),
+                    (*vec_size + quantum) as usize * core::mem::size_of::<*mut c_char>(),
+                );
+                *arg_vec = grown.cast();
+            } else {
+                *arg_vec =
+                    libc::malloc(quantum as usize * core::mem::size_of::<*mut c_char>()).cast();
+            }
+            if (*arg_vec).is_null() {
+                return 1;
+            }
+            *vec_size += quantum;
+        }
+        let slot = (*arg_vec).offset(*num_in_vec as isize);
+        if !pattern.is_null() && num_prefix != 0 {
+            *slot = libc::malloc(num_prefix as usize + libc::strlen(arg) + 1).cast();
+        } else {
+            *slot = libc::strdup(arg);
+        }
+        if (*slot).is_null() {
+            return 1;
+        }
+        if !pattern.is_null() && num_prefix != 0 {
+            libc::strncpy(*slot, pattern, num_prefix as usize);
+            libc::strcpy((*slot).offset(num_prefix as isize), arg);
+        }
+        *num_in_vec += 1;
+        0
+    }
+}
+/// Matches C `expandArgList` (`b3dutil.c:1579`).
+///
+/// The whole body is inside `#ifdef _WIN32` / `#else`.  This is the `#else`
+/// branch selected on this platform (`b3dutil.c:1712-1716`), which performs no
+/// expansion at all.  The Windows branch walks the argument vector with
+/// `FindFirstFile`/`FindNextFile` to expand `*` and `?` wildcards, and is not
+/// translated: it is unselected here and unreachable on a Unix target.
 pub unsafe fn expand_arg_list(
     arguments: *const *const c_char,
     count: i32,
@@ -1232,15 +1414,65 @@ pub unsafe fn expand_arg_list(
     *new_count = count;
     arguments.cast_mut().cast()
 }
-/// Matches C `replaceFileArgVec` (`b3dutil.c:1722`) on Unix.
+/// Matches C `replaceFileArgVec` (`b3dutil.c:1722`).
+///
+/// Unlike `expandArgList` this body is not conditionally compiled, so it is
+/// translated in full.  On this platform `expandArgList` returns the original
+/// vector with `ifAlloc == 0` and `noMatchInd == -1`, which makes the two error
+/// paths and the replacement path unreachable; they are kept because the source
+/// keeps them.
 pub unsafe fn replace_file_arg_vec(
-    _arguments: *mut *const *const c_char,
-    _count: *mut i32,
-    _first: *mut i32,
+    arguments: *mut *const *const c_char,
+    count: *mut i32,
+    first: *mut i32,
     allocated: *mut i32,
 ) -> i32 {
-    *allocated = 0;
-    0
+    unsafe {
+        let mut new_num = 0_i32;
+        let mut no_match_ind = 0_i32;
+        *allocated = 0;
+        if *first >= *count {
+            return 0;
+        }
+        let new_vec = expand_arg_list(
+            (*arguments).offset(*first as isize),
+            *count - *first,
+            &mut new_num,
+            allocated,
+            &mut no_match_ind,
+        );
+        if new_vec.is_null() {
+            b3d_error(
+                stdout,
+                format_args!(
+                    "ERROR: {} - Allocating memory for expanded argument list\n",
+                    core::ffi::CStr::from_ptr(imod_prog_name(*(*arguments))).to_string_lossy()
+                ),
+            );
+            return -1;
+        }
+        if no_match_ind >= 0 {
+            libc::free(new_vec.cast());
+            b3d_error(
+                stdout,
+                format_args!(
+                    "ERROR: {} - No files match entry {}\n",
+                    core::ffi::CStr::from_ptr(imod_prog_name(*(*arguments))).to_string_lossy(),
+                    core::ffi::CStr::from_ptr(
+                        *(*arguments).offset((no_match_ind + *first) as isize)
+                    )
+                    .to_string_lossy()
+                ),
+            );
+            return 1;
+        }
+        if *allocated != 0 {
+            *arguments = new_vec.cast_const().cast();
+            *count = new_num;
+            *first = 0;
+        }
+        0
+    }
 }
 /// Matches C `anglewithinlimits` (`b3dutil.c:1805`).
 pub unsafe fn anglewithinlimits(angle: *const f32, lower: *const f32, upper: *const f32) -> f64 {
