@@ -26,12 +26,6 @@ pub fn save(
     if width <= 0 || height <= 0 {
         return Err("Rust encoder requires positive image dimensions".into());
     }
-    if resolution != 0 {
-        return Err(
-            "Rust encoder does not yet support mrc2tif resolution metadata; use parity encoder"
-                .into(),
-        );
-    }
     let channels = if rgb { 3usize } else { 1usize };
     let row_bytes = width as usize * channels;
     if bytes_per_line < row_bytes as i32 || data.len() < bytes_per_line as usize * height as usize {
@@ -53,13 +47,68 @@ pub fn save(
             } else {
                 quality.clamp(1, 100) as u8
             };
-            image::codecs::jpeg::JpegEncoder::new_with_quality(file, jpeg_quality)
+            let mut encoder =
+                image::codecs::jpeg::JpegEncoder::new_with_quality(file, jpeg_quality);
+            if resolution != 0 {
+                let density = resolution.unsigned_abs();
+                let Ok(density) = u16::try_from(density) else {
+                    return Err(format!(
+                        "Rust JPEG encoder cannot represent mrc2tif resolution {resolution}: JFIF density is limited to 65535"
+                    ));
+                };
+                // The QImage shim converts a negative `-r` value from DPI
+                // and leaves positive `-P`/`-m` values as pixels/cm.  JFIF
+                // has those same two explicit units, so preserve them rather
+                // than converting the value through a rounded dots/meter
+                // intermediate.
+                encoder.set_pixel_density(image::codecs::jpeg::PixelDensity {
+                    density: (density, density),
+                    unit: if resolution < 0 {
+                        image::codecs::jpeg::PixelDensityUnit::Inches
+                    } else {
+                        image::codecs::jpeg::PixelDensityUnit::Centimeters
+                    },
+                });
+            }
+            encoder
                 .write_image(&pixels, width as u32, height as u32, color.into())
                 .map_err(|error| format!("Rust JPEG encoder failed: {error}"))
         }
-        "PNG" => image::codecs::png::PngEncoder::new(file)
-            .write_image(&pixels, width as u32, height as u32, color.into())
-            .map_err(|error| format!("Rust PNG encoder failed: {error}")),
+        "PNG" => {
+            let mut encoder = png::Encoder::new(file, width as u32, height as u32);
+            encoder.set_color(if rgb {
+                png::ColorType::Rgb
+            } else {
+                png::ColorType::Grayscale
+            });
+            encoder.set_depth(png::BitDepth::Eight);
+            if resolution != 0 {
+                // QImage stores dots per metre.  Its source calculation is
+                // `resolution / (resolution > 0 ? .01 : -.0254)`, then the
+                // floating result is narrowed to its integer DPM field.
+                let dots_per_meter =
+                    (resolution as f64 / if resolution > 0 { 0.01 } else { -0.0254 }) as u64;
+                let Ok(dots_per_meter) = u32::try_from(dots_per_meter) else {
+                    return Err(format!(
+                        "Rust PNG encoder cannot represent mrc2tif resolution {resolution} as dots per meter"
+                    ));
+                };
+                if dots_per_meter == 0 {
+                    return Err(format!(
+                        "Rust PNG encoder cannot represent mrc2tif resolution {resolution} as dots per meter"
+                    ));
+                }
+                encoder.set_pixel_dims(Some(png::PixelDimensions {
+                    xppu: dots_per_meter,
+                    yppu: dots_per_meter,
+                    unit: png::Unit::Meter,
+                }));
+            }
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&pixels))
+                .map_err(|error| format!("Rust PNG encoder failed: {error}"))
+        }
         _ => Err(format!("Rust encoder does not support {format}")),
     }
 }
@@ -109,5 +158,53 @@ mod tests {
         assert_eq!(decoded.dimensions(), (2, 2));
         assert_eq!(decoded.into_raw(), vec![4, 9, 16, 25]);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn resolution_values_outside_jfif_and_png_limits_fail_explicitly() {
+        let jpeg = std::env::temp_dir().join(format!(
+            "imod-rs-rust-encoder-density-{}-{}.jpg",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let png = std::env::temp_dir().join(format!(
+            "imod-rs-rust-encoder-density-{}-{}.png",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = std::fs::remove_file(&jpeg);
+        let _ = std::fs::remove_file(&png);
+        assert!(
+            save(
+                &[1],
+                1,
+                1,
+                1,
+                false,
+                -65_536,
+                jpeg.to_str().unwrap(),
+                "JPEG",
+                -1,
+            )
+            .unwrap_err()
+            .contains("JFIF density is limited to 65535")
+        );
+        assert!(
+            save(
+                &[1],
+                1,
+                1,
+                1,
+                false,
+                i32::MAX,
+                png.to_str().unwrap(),
+                "PNG",
+                -1,
+            )
+            .unwrap_err()
+            .contains("cannot represent mrc2tif resolution")
+        );
+        std::fs::remove_file(jpeg).unwrap();
+        std::fs::remove_file(png).unwrap();
     }
 }

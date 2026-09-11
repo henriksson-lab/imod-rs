@@ -9,6 +9,9 @@ pub mod libiimod;
 pub mod libimod;
 pub mod libwarp;
 pub mod libxml;
+pub mod midas;
 pub mod mrc;
 pub mod pysrc;
 pub mod qttools;
+#[path = "3dmod/mod.rs"]
+pub mod three_dmod;

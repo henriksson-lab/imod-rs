@@ -33,7 +33,10 @@
 //   * `setIconImage(images/etomo.png)` (`EtomoFrame.java:56-58`) sets the
 //     window-manager icon, which is not part of the drawn page.
 //
-// Appearance only: no callbacks, no state, static defaults everywhere.
+// Menu activation is routed as a named action to `UIHarness`, matching the
+// Java `EtomoMenu.addListeners` boundary.  It deliberately stops there: the
+// Java `AbstractFrame`/manager methods are not yet translated, so this file
+// must not pretend to save, open a manager, or launch a process itself.
 
 import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
 import {
@@ -44,12 +47,16 @@ import {
 export component MainFrame inherits Rectangle {
     // Which menu's drop-down is open; -1 (none) is the state a freshly built
     // `JMenuBar` is in.  0 File, 1 Tools, 2 View, 3 Options, 4 Help.
-    in property <int> open-menu: -1;
+    in-out property <int> open-menu: -1;
     // `menuNew` / `menuRecentProjects` / `menuTemplate` are nested `JMenu`s;
     // Swing opens them on hover.
-    in property <bool> open-new-submenu: false;
-    in property <bool> open-recent-projects-submenu: false;
-    in property <bool> open-templates-submenu: false;
+    in-out property <bool> open-new-submenu: false;
+    in-out property <bool> open-recent-projects-submenu: false;
+    in-out property <bool> open-templates-submenu: false;
+    // `EtomoMenu` listeners call an `AbstractFrame` method.  This is the
+    // direct Rust replacement for that listener hand-off.
+    callback menu-command(string);
+    callback menu-toggled(string, bool);
     // `peetAvailable` (`EtomoMenu.java:127-129`):
     // `EnvironmentVariable.INSTANCE.exists(null, originalUserDir,
     // EnvironmentVariable.PARTICLE_DIR, AxisID.ONLY)`, evaluated once when the
@@ -80,6 +87,10 @@ export component MainFrame inherits Rectangle {
                 title: "File";
                 mnemonic: "F";
                 open: root.open-menu == 0;
+                activated => {
+                    root.open-menu = root.open-menu == 0 ? -1 : 0;
+                    root.menu-toggled("menu.file", root.open-menu == 0);
+                }
 
                 // `menuFile.add(menuNew)` (`:218`).  "New", mnemonic N (`:69`, `:164`).
                 Menu {
@@ -87,17 +98,21 @@ export component MainFrame inherits Rectangle {
                     mnemonic: "N";
                     submenu: true;
                     open: root.open-new-submenu;
+                    activated => {
+                        root.open-new-submenu = !root.open-new-submenu;
+                        root.menu-toggled("menu.file.new", root.open-new-submenu);
+                    }
                     // `menuNew.add(...)` in this order (`:199-205`).  The
                     // labels are `EtomoMenu`'s own constants (`:38-47`).
-                    MenuItem { text: "Build Tomogram"; mnemonic: "T"; }
-                    MenuItem { text: "Join Serial Tomograms"; mnemonic: "J"; }
-                    MenuItem { text: "Subvolume Averaging (PEET)"; mnemonic: "P"; }
-                    MenuItem { text: "Align Serial Sections / Blend Montages"; mnemonic: "R"; }
-                    MenuItem { text: "Nonlinear Anisotropic Diffusion"; mnemonic: "D"; }
-                    MenuItem { text: "Generic Parallel Process"; mnemonic: "G"; }
-                    MenuItem { text: "Batch Tomograms"; mnemonic: "H"; }
+                    MenuItem { text: "Build Tomogram"; mnemonic: "T"; command: "file.new.tomogram"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Join Serial Tomograms"; mnemonic: "J"; command: "file.new.join"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Subvolume Averaging (PEET)"; mnemonic: "P"; command: "file.new.peet"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Align Serial Sections / Blend Montages"; mnemonic: "R"; command: "file.new.serial-sections"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Nonlinear Anisotropic Diffusion"; mnemonic: "D"; command: "file.new.anisotropic-diffusion"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Generic Parallel Process"; mnemonic: "G"; command: "file.new.generic-parallel"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Batch Tomograms"; mnemonic: "H"; command: "file.new.batch-runtomo"; activated(command) => { root.menu-command(command); } }
                 }
-                MenuItem { text: "Open..."; mnemonic: "O"; }
+                MenuItem { text: "Open..."; mnemonic: "O"; command: "file.open"; activated(command) => { root.menu-command(command); } }
                 // `menuFile.add(menuRecentProjects)` appears twice (`:220` and
                 // `:222`) with a separator between.  Swing's `add` moves an
                 // already-added component rather than duplicating it, so the
@@ -108,6 +123,10 @@ export component MainFrame inherits Rectangle {
                     title: "Recent Projects";
                     submenu: true;
                     open: root.open-recent-projects-submenu;
+                    activated => {
+                        root.open-recent-projects-submenu = !root.open-recent-projects-submenu;
+                        root.menu-toggled("menu.file.recent-projects", root.open-recent-projects-submenu);
+                    }
                     // `menuMRUList` (`:64`): ten `MenuItem`s created with no
                     // text and `setVisible(false)` (`:328-332`), filled in by
                     // `setMRUFileLabels` at run time.  Drawn as ten hidden
@@ -125,16 +144,16 @@ export component MainFrame inherits Rectangle {
                 }
                 MenuSeparator { }
                 // `:225-227`.
-                MenuItem { text: "Close"; mnemonic: "C"; }
-                MenuItem { text: "Save"; mnemonic: "S"; }
-                MenuItem { text: "Save As..."; mnemonic: "A"; }
+                MenuItem { text: "Close"; mnemonic: "C"; command: "file.close"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Save"; mnemonic: "S"; command: "file.save"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Save As..."; mnemonic: "A"; command: "file.save-as"; activated(command) => { root.menu-command(command); } }
                 // The `!dataset` branch (`:228-232`).
                 if root.show-cancel-item: MenuSeparator { }
-                if root.show-cancel-item: MenuItem { text: "Cancel"; }
+                if root.show-cancel-item: MenuItem { text: "Cancel"; command: "file.cancel"; activated(command) => { root.menu-command(command); } }
                 // The `dataset` branch (`:233-240`).
                 MenuSeparator { }
-                MenuItem { text: "Run Tomosnapshot"; mnemonic: "T"; }
-                MenuItem { text: "Export Batch Directive File"; mnemonic: "B"; }
+                MenuItem { text: "Run Tomosnapshot"; mnemonic: "T"; command: "file.tomosnapshot"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Export Batch Directive File"; mnemonic: "B"; command: "file.export-batch"; activated(command) => { root.menu-command(command); } }
                 MenuSeparator { }
                 // `menuTemplate`, "Templates", mnemonic M (`:67`, `:175`).
                 Menu {
@@ -142,13 +161,17 @@ export component MainFrame inherits Rectangle {
                     mnemonic: "M";
                     submenu: true;
                     open: root.open-templates-submenu;
+                    activated => {
+                        root.open-templates-submenu = !root.open-templates-submenu;
+                        root.menu-toggled("menu.file.templates", root.open-templates-submenu);
+                    }
                     // `:207-209`.
-                    MenuItem { text: "Save Scope Template"; mnemonic: "C"; }
-                    MenuItem { text: "Save System Template"; mnemonic: "Y"; }
-                    MenuItem { text: "Save User Template"; mnemonic: "U"; }
+                    MenuItem { text: "Save Scope Template"; mnemonic: "C"; command: "file.save-scope-template"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Save System Template"; mnemonic: "Y"; command: "file.save-system-template"; activated(command) => { root.menu-command(command); } }
+                    MenuItem { text: "Save User Template"; mnemonic: "U"; command: "file.save-user-template"; activated(command) => { root.menu-command(command); } }
                 }
                 MenuSeparator { }
-                MenuItem { text: "Exit"; mnemonic: "X"; }
+                MenuItem { text: "Exit"; mnemonic: "X"; command: "file.exit"; activated(command) => { root.menu-command(command); } }
             }
 
             // ---- menuTools, "Tools", mnemonic T (`:89`, `:158`) ----------
@@ -156,11 +179,15 @@ export component MainFrame inherits Rectangle {
                 title: "Tools";
                 mnemonic: "T";
                 open: root.open-menu == 1;
+                activated => {
+                    root.open-menu = root.open-menu == 1 ? -1 : 1;
+                    root.menu-toggled("menu.tools", root.open-menu == 1);
+                }
                 // `:251-253`; labels from `FLATTEN_VOLUME_LABEL`,
                 // `GPU_TILT_TEST_LABEL`, `ALIGN_FRAMES_LABEL` (`:44-46`).
-                MenuItem { text: "Flatten Volume"; mnemonic: "F"; }
-                MenuItem { text: "Test GPU"; mnemonic: "U"; }
-                MenuItem { text: "Align Frames"; mnemonic: "A"; }
+                MenuItem { text: "Flatten Volume"; mnemonic: "F"; command: "tools.flatten-volume"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Test GPU"; mnemonic: "U"; command: "tools.gpu-tilt-test"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Align Frames"; mnemonic: "A"; command: "tools.align-frames"; activated(command) => { root.menu-command(command); } }
             }
 
             // ---- menuView, "View", mnemonic V (`:97`, `:159`) ------------
@@ -168,16 +195,20 @@ export component MainFrame inherits Rectangle {
                 title: "View";
                 mnemonic: "V";
                 open: root.open-menu == 2;
+                activated => {
+                    root.open-menu = root.open-menu == 2 ? -1 : 2;
+                    root.menu-toggled("menu.view", root.open-menu == 2);
+                }
                 // `:211-214`, all four accelerated in the `dataset` branch
                 // (`:176-185`).  "Axis B" is `TomogramProcessPanel.AXIS_B_LABEL`
                 // (`TomogramProcessPanel.java:168`).
-                MenuItem { text: "Show/Hide Log Window"; mnemonic: "L"; accelerator: "Ctrl+L"; }
-                MenuItem { text: "Axis A"; mnemonic: "A"; accelerator: "Ctrl+A"; }
-                MenuItem { text: "Axis B"; mnemonic: "B"; accelerator: "Ctrl+B"; }
-                MenuItem { text: "Both Axes"; mnemonic: "2"; accelerator: "Ctrl+2"; }
+                MenuItem { text: "Show/Hide Log Window"; mnemonic: "L"; accelerator: "Ctrl+L"; command: "view.log-window"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Axis A"; mnemonic: "A"; accelerator: "Ctrl+A"; command: "view.axis-a"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Axis B"; mnemonic: "B"; accelerator: "Ctrl+B"; command: "view.axis-b"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Both Axes"; mnemonic: "2"; accelerator: "Ctrl+2"; command: "view.both-axes"; activated(command) => { root.menu-command(command); } }
                 // `menuView.add(menuFitWindow)` comes after the menu-bar adds
                 // (`:249`), so it is last.
-                MenuItem { text: "Fit Window"; mnemonic: "F"; accelerator: "Ctrl+F"; }
+                MenuItem { text: "Fit Window"; mnemonic: "F"; accelerator: "Ctrl+F"; command: "view.fit-window"; activated(command) => { root.menu-command(command); } }
             }
 
             // ---- menuOptions, "Options", mnemonic O (`:106`, `:160`) -----
@@ -185,15 +216,19 @@ export component MainFrame inherits Rectangle {
                 title: "Options";
                 mnemonic: "O";
                 open: root.open-menu == 3;
+                activated => {
+                    root.open-menu = root.open-menu == 3 ? -1 : 3;
+                    root.menu-toggled("menu.options", root.open-menu == 3);
+                }
                 // `menuOptions.add(menuSettings)` (`:188`) runs before the
                 // `dataset` block, so Settings is first.
-                MenuItem { text: "Settings"; mnemonic: "S"; accelerator: "Ctrl+S"; }
+                MenuItem { text: "Settings"; mnemonic: "S"; accelerator: "Ctrl+S"; command: "options.settings"; activated(command) => { root.menu-command(command); } }
                 // `:196-197`.  Both are `CheckBoxMenuItem`s and start
                 // unchecked; `setMenu3dmodStartupWindow` /
                 // `setMenu3dmodBinBy2` (`EtomoFrame.java:94-101`) set them
                 // from the user configuration at run time.
-                CheckBoxMenuItem { text: "Open 3dmod with Startup Window"; }
-                CheckBoxMenuItem { text: "Open 3dmod Binned by 2"; }
+                CheckBoxMenuItem { text: "Open 3dmod with Startup Window"; command: "options.3dmod-startup-window"; activated(command, checked) => { root.menu-toggled(command, checked); } }
+                CheckBoxMenuItem { text: "Open 3dmod Binned by 2"; command: "options.3dmod-bin-by-2"; activated(command, checked) => { root.menu-toggled(command, checked); } }
             }
 
             // ---- menuHelp, "Help", mnemonic H (`:113`, `:161`) -----------
@@ -201,16 +236,20 @@ export component MainFrame inherits Rectangle {
                 title: "Help";
                 mnemonic: "H";
                 open: root.open-menu == 4;
+                activated => {
+                    root.open-menu = root.open-menu == 4 ? -1 : 4;
+                    root.menu-toggled("menu.help", root.open-menu == 4);
+                }
                 // `:255-265`.
-                MenuItem { text: "Tomography Guide"; mnemonic: "T"; }
-                MenuItem { text: "Imod Users Guide"; mnemonic: "I"; }
-                MenuItem { text: "3dmod Users Guide"; mnemonic: "3"; }
-                MenuItem { text: "Etomo Users Guide"; mnemonic: "E"; }
-                MenuItem { text: "Join Users Guide"; mnemonic: "J"; }
-                if root.peet-available: MenuItem { text: "PEET Users Guide"; mnemonic: "P"; }
-                if root.peet-available: MenuItem { text: "PEET Help"; }
-                MenuItem { text: "Batch Interface Guide"; mnemonic: "B"; }
-                MenuItem { text: "About"; mnemonic: "A"; }
+                MenuItem { text: "Tomography Guide"; mnemonic: "T"; command: "help.tomography-guide"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Imod Users Guide"; mnemonic: "I"; command: "help.imod-guide"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "3dmod Users Guide"; mnemonic: "3"; command: "help.3dmod-guide"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Etomo Users Guide"; mnemonic: "E"; command: "help.etomo-guide"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Join Users Guide"; mnemonic: "J"; command: "help.join-guide"; activated(command) => { root.menu-command(command); } }
+                if root.peet-available: MenuItem { text: "PEET Users Guide"; mnemonic: "P"; command: "help.peet-guide"; activated(command) => { root.menu-command(command); } }
+                if root.peet-available: MenuItem { text: "PEET Help"; command: "help.peet-help"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "Batch Interface Guide"; mnemonic: "B"; command: "help.batch-guide"; activated(command) => { root.menu-command(command); } }
+                MenuItem { text: "About"; mnemonic: "A"; command: "help.about"; activated(command) => { root.menu-command(command); } }
             }
         }
 
@@ -269,5 +308,12 @@ export component MainFrameWindow inherits Window {
     preferred-width: 1000px;
     preferred-height: 820px;
     background: EtomoStyle.background;
-    MainFrame { }
+    // Expose the MainFrame listener boundary through the actual top-level
+    // component, which is what `UIHarness.createMainFrame` owns.
+    callback menu-command(string);
+    callback menu-toggled(string, bool);
+    MainFrame {
+        menu-command(command) => { root.menu-command(command); }
+        menu-toggled(command, checked) => { root.menu-toggled(command, checked); }
+    }
 }

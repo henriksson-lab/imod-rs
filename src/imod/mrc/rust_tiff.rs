@@ -20,6 +20,7 @@ mod implementation {
     use std::collections::HashMap;
     use std::ffi::CStr;
     use std::fs::File;
+    use std::io::Cursor;
     use std::sync::{LazyLock, Mutex};
     use tiff::ColorType;
     use tiff::decoder::{Decoder, DecodingResult};
@@ -99,10 +100,127 @@ mod implementation {
         let Ok(path) = unsafe { CStr::from_ptr(filename) }.to_str() else {
             return 1;
         };
-        let Ok(file) = File::open(path) else {
+        let Ok(mut file_bytes) = std::fs::read(path) else {
             return 1;
         };
-        let Ok(mut decoder) = Decoder::new(file) else {
+        // `tiff` deliberately exposes Palette in ColorType but refuses to
+        // construct a readout for it because it does not expand ColorMap.
+        // `tif2mrc`'s libtiff boundary does the opposite: it keeps the stored
+        // one-byte palette indices (the source records photometric 1, so its
+        // later color-map expansion is not entered).  Normalize only that
+        // in-memory tag to MINISBLACK.  This leaves the crate responsible for
+        // every strip/tile, compression, predictor, and endian decode; it
+        // neither changes the input file nor interprets ColorMap values.
+        if file_bytes.len() >= 8 && (&file_bytes[..2] == b"II" || &file_bytes[..2] == b"MM") {
+            let little_endian = &file_bytes[..2] == b"II";
+            let read_u16 = |data: &[u8], offset: usize| -> Option<u16> {
+                let bytes: [u8; 2] = data.get(offset..offset + 2)?.try_into().ok()?;
+                Some(if little_endian {
+                    u16::from_le_bytes(bytes)
+                } else {
+                    u16::from_be_bytes(bytes)
+                })
+            };
+            let read_u32 = |data: &[u8], offset: usize| -> Option<u32> {
+                let bytes: [u8; 4] = data.get(offset..offset + 4)?.try_into().ok()?;
+                Some(if little_endian {
+                    u32::from_le_bytes(bytes)
+                } else {
+                    u32::from_be_bytes(bytes)
+                })
+            };
+            let read_u64 = |data: &[u8], offset: usize| -> Option<u64> {
+                let bytes: [u8; 8] = data.get(offset..offset + 8)?.try_into().ok()?;
+                Some(if little_endian {
+                    u64::from_le_bytes(bytes)
+                } else {
+                    u64::from_be_bytes(bytes)
+                })
+            };
+            let Some(version) = read_u16(&file_bytes, 2) else {
+                return 1;
+            };
+            let (mut ifd_offset, count_bytes, entry_bytes, next_bytes, value_offset) =
+                if version == 42 {
+                    let Some(offset) = read_u32(&file_bytes, 4) else {
+                        return 1;
+                    };
+                    (offset as usize, 2_usize, 12_usize, 4_usize, 8_usize)
+                } else if version == 43 {
+                    if read_u16(&file_bytes, 4) != Some(8) || read_u16(&file_bytes, 6) != Some(0) {
+                        return 1;
+                    }
+                    let Some(offset) =
+                        read_u64(&file_bytes, 8).and_then(|value| usize::try_from(value).ok())
+                    else {
+                        return 1;
+                    };
+                    (offset, 8_usize, 20_usize, 8_usize, 12_usize)
+                } else {
+                    return 1;
+                };
+            let mut seen_ifds = std::collections::HashSet::new();
+            while ifd_offset != 0 {
+                if !seen_ifds.insert(ifd_offset) {
+                    return 1;
+                }
+                let entry_count = if count_bytes == 2 {
+                    let Some(value) = read_u16(&file_bytes, ifd_offset) else {
+                        return 1;
+                    };
+                    value as usize
+                } else {
+                    let Some(value) = read_u64(&file_bytes, ifd_offset)
+                        .and_then(|value| usize::try_from(value).ok())
+                    else {
+                        return 1;
+                    };
+                    value
+                };
+                let Some(entries_end) = ifd_offset
+                    .checked_add(count_bytes)
+                    .and_then(|value| value.checked_add(entry_count.checked_mul(entry_bytes)?))
+                    .and_then(|value| value.checked_add(next_bytes))
+                else {
+                    return 1;
+                };
+                if entries_end > file_bytes.len() {
+                    return 1;
+                }
+                for index in 0..entry_count {
+                    let entry = ifd_offset + count_bytes + index * entry_bytes;
+                    if read_u16(&file_bytes, entry) == Some(262)
+                        && read_u16(&file_bytes, entry + 2) == Some(3)
+                        && if count_bytes == 2 {
+                            read_u32(&file_bytes, entry + 4) == Some(1)
+                        } else {
+                            read_u64(&file_bytes, entry + 4) == Some(1)
+                        }
+                        && read_u16(&file_bytes, entry + value_offset) == Some(3)
+                    {
+                        let value = if little_endian {
+                            1_u16.to_le_bytes()
+                        } else {
+                            1_u16.to_be_bytes()
+                        };
+                        file_bytes[entry + value_offset..entry + value_offset + 2]
+                            .copy_from_slice(&value);
+                    }
+                }
+                let next_ifd = if next_bytes == 4 {
+                    read_u32(&file_bytes, entries_end - next_bytes)
+                        .and_then(|value| usize::try_from(value).ok())
+                } else {
+                    read_u64(&file_bytes, entries_end - next_bytes)
+                        .and_then(|value| usize::try_from(value).ok())
+                };
+                let Some(next_ifd) = next_ifd else {
+                    return 1;
+                };
+                ifd_offset = next_ifd;
+            }
+        }
+        let Ok(mut decoder) = Decoder::new(Cursor::new(file_bytes)) else {
             return 1;
         };
         let mut images = Vec::new();
@@ -114,27 +232,84 @@ mod implementation {
             let Ok(color) = decoder.colortype() else {
                 return 1;
             };
-            // IMOD's libtiff reader drops alpha samples and, for indexed
-            // files, keeps the indices unless the caller explicitly expands
-            // the palette.  Preserve those boundary semantics here.
+            // IMOD's libtiff reader drops alpha samples. Indexed palette
+            // tags were normalized to their stored byte indices above.
             let rgb = matches!(color, ColorType::RGB(8) | ColorType::RGBA(8));
             let discard_alpha = matches!(color, ColorType::RGBA(8) | ColorType::GrayA(8));
             let palette = matches!(color, ColorType::Palette(8));
+            // `iiTIFFCheck` explicitly accepts one-plane, unsigned 4-bit
+            // grayscale and marks it `PACKED_4BIT_MODE`; `tiffReadSection`
+            // then expands its two nibbles to two byte samples.  The Rust
+            // crate correctly decodes the enclosing TIFF layout but retains
+            // those nibbles packed in its U8 result, so do the one source
+            // mandated expansion at this boundary.
+            let packed_four_bit = matches!(color, ColorType::Gray(4));
+            let planar_separate = decoder
+                .get_tag_unsigned::<u16>(Tag::PlanarConfiguration)
+                .is_ok_and(|value| value == 2);
+            let fill_order_lsb = decoder
+                .get_tag_unsigned::<u16>(Tag::FillOrder)
+                .is_ok_and(|value| value == 2);
             let min_is_white = decoder
                 .get_tag_unsigned::<u16>(Tag::PhotometricInterpretation)
                 .is_ok_and(|value| value == 0);
             if !rgb
                 && !palette
+                && !packed_four_bit
                 && !matches!(color, ColorType::Gray(8 | 16 | 32) | ColorType::GrayA(8))
             {
                 return 1;
             }
-            let Ok(result) = decoder.read_image() else {
+            // `Decoder::read_image` intentionally reads only the first plane
+            // of a planar-separate image.  `read_image_to_buffer` is the
+            // crate's all-plane API; it returns R, G, B (and alpha, where
+            // present) as consecutive planes, which IMOD's RGB path needs
+            // interleaved before it drops alpha and flips rows.
+            let mut result = DecodingResult::U8(Vec::new());
+            let Ok(_) = decoder.read_image_to_buffer(&mut result) else {
                 return 1;
             };
             let (mut data, bits, type_, mode) = bytes(result);
             if data.is_empty() {
                 return 1;
+            }
+            if packed_four_bit {
+                let pixels = width as usize * height as usize;
+                if data.len() != pixels.div_ceil(2) {
+                    return 1;
+                }
+                let packed = data;
+                data = Vec::with_capacity(pixels);
+                for byte in packed {
+                    if fill_order_lsb {
+                        // TIFFReadEncodedStrip normalizes FillOrder 2 by
+                        // reversing each source byte.  IMOD then swaps its
+                        // first/second nibble maps for LSB order
+                        // (`iitif.c:1124-1131`), hence low then high after
+                        // the per-byte reversal.
+                        let byte = byte.reverse_bits();
+                        data.push(byte & 15);
+                        data.push(byte >> 4);
+                    } else {
+                        data.push(byte >> 4);
+                        data.push(byte & 15);
+                    }
+                }
+                data.truncate(pixels);
+            }
+            if planar_separate && rgb {
+                let samples = if discard_alpha { 4 } else { 3 };
+                let pixels = width as usize * height as usize;
+                if bits != 8 || data.len() != pixels * samples {
+                    return 1;
+                }
+                let planar_data = data;
+                data = Vec::with_capacity(planar_data.len());
+                for pixel in 0..pixels {
+                    for sample in 0..samples {
+                        data.push(planar_data[pixel + sample * pixels]);
+                    }
+                }
             }
             if discard_alpha {
                 let source_samples = if rgb { 4 } else { 2 };
@@ -153,6 +328,7 @@ mod implementation {
             // established tif2mrc observable behavior.
             if min_is_white && !rgb && !palette {
                 match bits {
+                    8 if packed_four_bit => data.iter_mut().for_each(|value| *value = 15 - *value),
                     8 => data.iter_mut().for_each(|value| *value = 255 - *value),
                     16 => data.chunks_exact_mut(2).for_each(|value| {
                         let sample = u16::from_ne_bytes([value[0], value[1]]);
@@ -228,10 +404,12 @@ mod implementation {
         compression: i32,
         quality: i32,
         images: &[Vec<u8>],
+        resolutions: &[i32],
     ) -> Result<(), String> {
-        use tiff::encoder::{Compression, DeflateLevel, TiffEncoder, colortype};
+        use tiff::encoder::{Compression, DeflateLevel, Rational, TiffEncoder, colortype};
+        use tiff::tags::ResolutionUnit;
 
-        if width <= 0 || height <= 0 || images.is_empty() {
+        if width <= 0 || height <= 0 || images.is_empty() || images.len() != resolutions.len() {
             return Err("Rust TIFF writer requires at least one non-empty image".into());
         }
         let row_bytes = match mode {
@@ -263,7 +441,7 @@ mod implementation {
             format!("Rust TIFF writer could not initialize {filename}: {error}")
         })?;
         encoder = encoder.with_compression(compression);
-        for image in images {
+        for (image, &resolution) in images.iter().zip(resolutions) {
             if image.len() != row_bytes * height as usize {
                 return Err("Rust TIFF writer received an invalid image buffer".into());
             }
@@ -278,35 +456,111 @@ mod implementation {
             );
             match mode {
                 MRC_MODE_BYTE => {
-                    encoder.write_image::<colortype::Gray8>(width as u32, height as u32, &oriented)
+                    let mut page = encoder
+                        .new_image::<colortype::Gray8>(width as u32, height as u32)
+                        .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
+                    if resolution != 0 {
+                        page.resolution(
+                            if resolution < 0 {
+                                ResolutionUnit::Inch
+                            } else {
+                                ResolutionUnit::Centimeter
+                            },
+                            Rational {
+                                n: resolution.unsigned_abs(),
+                                d: 1,
+                            },
+                        );
+                    }
+                    page.write_data(&oriented)
                 }
                 MRC_MODE_SHORT => {
                     let values = oriented
                         .chunks_exact(2)
                         .map(|value| i16::from_ne_bytes([value[0], value[1]]))
                         .collect::<Vec<_>>();
-                    encoder.write_image::<colortype::GrayI16>(width as u32, height as u32, &values)
+                    let mut page = encoder
+                        .new_image::<colortype::GrayI16>(width as u32, height as u32)
+                        .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
+                    if resolution != 0 {
+                        page.resolution(
+                            if resolution < 0 {
+                                ResolutionUnit::Inch
+                            } else {
+                                ResolutionUnit::Centimeter
+                            },
+                            Rational {
+                                n: resolution.unsigned_abs(),
+                                d: 1,
+                            },
+                        );
+                    }
+                    page.write_data(&values)
                 }
                 MRC_MODE_USHORT => {
                     let values = oriented
                         .chunks_exact(2)
                         .map(|value| u16::from_ne_bytes([value[0], value[1]]))
                         .collect::<Vec<_>>();
-                    encoder.write_image::<colortype::Gray16>(width as u32, height as u32, &values)
+                    let mut page = encoder
+                        .new_image::<colortype::Gray16>(width as u32, height as u32)
+                        .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
+                    if resolution != 0 {
+                        page.resolution(
+                            if resolution < 0 {
+                                ResolutionUnit::Inch
+                            } else {
+                                ResolutionUnit::Centimeter
+                            },
+                            Rational {
+                                n: resolution.unsigned_abs(),
+                                d: 1,
+                            },
+                        );
+                    }
+                    page.write_data(&values)
                 }
                 MRC_MODE_FLOAT => {
                     let values = oriented
                         .chunks_exact(4)
                         .map(|value| f32::from_ne_bytes([value[0], value[1], value[2], value[3]]))
                         .collect::<Vec<_>>();
-                    encoder.write_image::<colortype::Gray32Float>(
-                        width as u32,
-                        height as u32,
-                        &values,
-                    )
+                    let mut page = encoder
+                        .new_image::<colortype::Gray32Float>(width as u32, height as u32)
+                        .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
+                    if resolution != 0 {
+                        page.resolution(
+                            if resolution < 0 {
+                                ResolutionUnit::Inch
+                            } else {
+                                ResolutionUnit::Centimeter
+                            },
+                            Rational {
+                                n: resolution.unsigned_abs(),
+                                d: 1,
+                            },
+                        );
+                    }
+                    page.write_data(&values)
                 }
                 MRC_MODE_RGB => {
-                    encoder.write_image::<colortype::RGB8>(width as u32, height as u32, &oriented)
+                    let mut page = encoder
+                        .new_image::<colortype::RGB8>(width as u32, height as u32)
+                        .map_err(|error| format!("Rust TIFF writer failed: {error}"))?;
+                    if resolution != 0 {
+                        page.resolution(
+                            if resolution < 0 {
+                                ResolutionUnit::Inch
+                            } else {
+                                ResolutionUnit::Centimeter
+                            },
+                            Rational {
+                                n: resolution.unsigned_abs(),
+                                d: 1,
+                            },
+                        );
+                    }
+                    page.write_data(&oriented)
                 }
                 _ => unreachable!(),
             }
@@ -323,6 +577,7 @@ mod implementation {
         mode: i32,
         compression: i32,
         quality: i32,
+        resolution: i32,
         data: *const u8,
         byte_len: usize,
     ) -> Result<(), String> {
@@ -338,6 +593,7 @@ mod implementation {
             compression,
             quality,
             &[image],
+            &[resolution],
         )
     }
 
@@ -381,6 +637,7 @@ mod implementation {
         use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB, MRC_MODE_SHORT};
         use std::fs::File;
         use tiff::decoder::{Decoder, DecodingResult};
+        use tiff::tags::Tag;
 
         #[test]
         fn writer_keeps_mrc_row_orientation_for_short_and_rgb_images() {
@@ -396,6 +653,7 @@ mod implementation {
                     MRC_MODE_SHORT,
                     IICOMPRESSION_NONE,
                     -1,
+                    0,
                     shorts.as_ptr().cast(),
                     core::mem::size_of_val(&shorts),
                 )
@@ -416,6 +674,7 @@ mod implementation {
                     MRC_MODE_RGB,
                     IICOMPRESSION_NONE,
                     -1,
+                    0,
                     rgb.as_ptr(),
                     rgb.len(),
                 )
@@ -446,15 +705,37 @@ mod implementation {
                 IICOMPRESSION_NONE,
                 -1,
                 &[vec![1, 2, 3, 4], vec![5, 6, 7, 8]],
+                &[-300, 20_000_000],
             )
             .unwrap();
             let mut decoder = Decoder::new(File::open(&path).unwrap()).unwrap();
+            assert_eq!(
+                decoder
+                    .get_tag(Tag::ResolutionUnit)
+                    .unwrap()
+                    .into_u16()
+                    .unwrap(),
+                2
+            );
+            assert_eq!(decoder.get_tag_u32_vec(Tag::XResolution).unwrap(), [300, 1]);
             match decoder.read_image().unwrap() {
                 DecodingResult::U8(values) => assert_eq!(values, vec![3, 4, 1, 2]),
                 _ => panic!("Rust TIFF writer did not emit byte grayscale"),
             }
             assert!(decoder.more_images());
             decoder.next_image().unwrap();
+            assert_eq!(
+                decoder
+                    .get_tag(Tag::ResolutionUnit)
+                    .unwrap()
+                    .into_u16()
+                    .unwrap(),
+                3
+            );
+            assert_eq!(
+                decoder.get_tag_u32_vec(Tag::XResolution).unwrap(),
+                [20_000_000, 1]
+            );
             match decoder.read_image().unwrap() {
                 DecodingResult::U8(values) => assert_eq!(values, vec![7, 8, 5, 6]),
                 _ => panic!("Rust TIFF writer did not emit second byte grayscale page"),
@@ -498,6 +779,7 @@ pub unsafe fn write_image(
     _mode: i32,
     _compression: i32,
     _quality: i32,
+    _resolution: i32,
     _data: *const u8,
     _byte_len: usize,
 ) -> Result<(), String> {
@@ -513,6 +795,7 @@ pub fn write_stack(
     _compression: i32,
     _quality: i32,
     _images: &[Vec<u8>],
+    _resolutions: &[i32],
 ) -> Result<(), String> {
     Err("Rust TIFF backend requires Cargo feature rust-tiff".into())
 }

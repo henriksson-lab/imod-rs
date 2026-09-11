@@ -3,7 +3,9 @@
 // the common crate: one component per Swing widget class in
 // `IMOD/Etomo/src/etomo/ui/swing`, named after that class.
 //
-// Appearance only: no callbacks, no state, static defaults everywhere.
+// `MenuItem` and `Menu` expose the same action boundary that Swing exposes
+// through `ActionListener`.  The owning frame decides what a named action
+// means; these widgets neither launch processes nor mutate manager state.
 
 import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
 
@@ -229,6 +231,11 @@ export component MenuItem inherits Rectangle {
     in property <string> accelerator;
     in property <bool> enabled: true;
     in property <bool> visible-item: true;
+    // The Java action command is normally the item text.  The Rust frame uses
+    // a stable source-mapped command name instead, so labels can remain
+    // presentation data while `UIHarness` receives an auditable event.
+    in property <string> command;
+    callback activated(string);
     height: root.visible-item ? 20px : 0px;
     background: transparent;
     if root.visible-item: HorizontalLayout {
@@ -255,14 +262,23 @@ export component MenuItem inherits Rectangle {
             font-size: (EtomoStyle.font-size-pt - 1) * 1px;
         }
     }
+    TouchArea {
+        clicked => {
+            if root.enabled && root.visible-item {
+                root.activated(root.command);
+            }
+        }
+    }
 }
 
 // `CheckBoxMenuItem` (`CheckBoxMenuItem.java`): a `JCheckBoxMenuItem`.  Used
 // for the two 3dmod options and for `WindowSwitch`'s window list.
 export component CheckBoxMenuItem inherits Rectangle {
     in property <string> text;
-    in property <bool> checked: false;
+    in-out property <bool> checked: false;
     in property <bool> enabled: true;
+    in property <string> command;
+    callback activated(string, bool);
     height: 20px;
     background: transparent;
     HorizontalLayout {
@@ -285,6 +301,14 @@ export component CheckBoxMenuItem inherits Rectangle {
             font-size: EtomoStyle.font-size-pt * 1px;
         }
         Rectangle { horizontal-stretch: 1; }
+    }
+    TouchArea {
+        clicked => {
+            if root.enabled {
+                root.checked = !root.checked;
+                root.activated(root.command, root.checked);
+            }
+        }
     }
 }
 
@@ -314,6 +338,7 @@ export component Menu inherits Rectangle {
     in property <bool> open: false;
     in property <bool> enabled: true;
     in property <bool> submenu: false;
+    callback activated();
     background: transparent;
     VerticalLayout {
         alignment: start;
@@ -341,6 +366,15 @@ export component Menu inherits Rectangle {
                     text: ">";
                     vertical-alignment: center;
                     color: EtomoStyle.text;
+                }
+            }
+            // Only the JMenu header receives this pointer target; placing it
+            // over the whole `Menu` would swallow its child JMenuItem events.
+            TouchArea {
+                clicked => {
+                    if root.enabled {
+                        root.activated();
+                    }
                 }
             }
         }

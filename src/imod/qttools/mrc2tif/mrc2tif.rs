@@ -442,17 +442,24 @@ pub fn mrc2tif() {
                 }
             }
         };
-        if native_tiff_writer
-            && (oldcode
-                || do_chunks
-                || !matches!(compression, 1 | 5 | 8)
-                || resolution != 0
-                || use_pixel
-                || use_mdoc)
-        {
+        if native_tiff_writer && compression == 7 {
+            // `tiff` 0.11.x can decode modern JPEG TIFF, but its encoder has
+            // no JPEG compression variant.  Reject this source-accepted
+            // request before opening the input, rather than emitting a TIFF
+            // with a false compression tag or falling back to libtiff.
             {
                 let message = std::ffi::CString::new(format!(
-                "Rust TIFF writer currently supports only non-tiled images with no/LZW/ZIP compression and without resolution or old-writer options"
+                    "Rust TIFF writer does not support JPEG compression; use the parity backend"
+                ))
+                .unwrap();
+                crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
+                unreachable!()
+            }
+        }
+        if native_tiff_writer && (oldcode || do_chunks || !matches!(compression, 1 | 5 | 8)) {
+            {
+                let message = std::ffi::CString::new(format!(
+                "Rust TIFF writer currently supports only non-tiled images with no/LZW/ZIP compression and without old-writer options"
             )).unwrap();
                 crate::imod::libcfshr::parse_params::exit_error(message.as_ptr());
                 unreachable!()
@@ -686,6 +693,7 @@ pub fn mrc2tif() {
             4
         };
         let mut rust_tiff_stack = Vec::new();
+        let mut rust_tiff_resolutions = Vec::new();
         if stack && !native_tiff_writer {
             let name = CString::new(output_root.as_bytes()).unwrap();
             let pn = CString::new(progname).unwrap();
@@ -984,6 +992,7 @@ pub fn mrc2tif() {
                     if stack {
                         rust_tiff_stack
                             .push(core::slice::from_raw_parts(write_buffer, rust_bytes).to_vec());
+                        rust_tiff_resolutions.push(use_resol);
                         0
                     } else {
                         match crate::imod::mrc::rust_tiff::write_image(
@@ -993,6 +1002,7 @@ pub fn mrc2tif() {
                             rust_output_mode,
                             compression,
                             quality,
+                            use_resol,
                             write_buffer,
                             rust_bytes,
                         ) {
@@ -1085,6 +1095,7 @@ pub fn mrc2tif() {
                     compression,
                     quality,
                     &rust_tiff_stack,
+                    &rust_tiff_resolutions,
                 ) {
                     // The Rust TIFF writer's own failure has no source
                     // counterpart; report it through the same `exitError`

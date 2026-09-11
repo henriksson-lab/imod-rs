@@ -8,6 +8,26 @@ use imod_rs::imod::mrc::tiff::tiff_ifd_number;
 use std::ffi::CString;
 use std::process::Command;
 
+/// Backend selection is evaluated before PIP option parsing.  In particular,
+/// a typo must not turn into an ordinary usage error or silently run the Qt
+/// encoder, because that would make an experimental invocation impossible to
+/// audit.
+#[test]
+fn mrc2tif_rejects_an_unknown_native_encoder_before_argument_parsing() {
+    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        .env("IMOD_RS_MRC2TIF_ENCODER", "not-a-backend")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        stdout.contains(
+            "ERROR: Rust-native backend - IMOD_RS_MRC2TIF_ENCODER must be parity or rust"
+        ),
+        "stdout was: {stdout}"
+    );
+}
+
 #[cfg(feature = "rust-image-encoder")]
 #[test]
 fn mrc2tif_rust_png_encoder_writes_a_decodable_image() {
@@ -50,6 +70,320 @@ fn mrc2tif_rust_png_encoder_writes_a_decodable_image() {
     }
 }
 
+/// The source QImage block in `mrc2tif.cpp:567-596` selects `Format_RGB888`,
+/// flips MRC rows, and gives its padded rows to the PNG writer.  Exercise the
+/// same command boundary through both the retained Qt implementation and the
+/// explicitly selected Rust implementation.  PNG is lossless, so decoded
+/// RGB samples must agree exactly; ImageMagick's independent PNG decoder also
+/// checks the emitted container's colour model and dimensions.
+#[cfg(feature = "rust-image-encoder")]
+#[test]
+fn mrc2tif_rust_png_encoder_matches_qimage_for_rgb_and_row_orientation() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-png-rgb-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let parity_output = std::env::temp_dir().join(format!("{stamp}-parity.png"));
+        let rust_output = std::env::temp_dir().join(format!("{stamp}-rust.png"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(
+            mrc_head_new(
+                &mut header,
+                2,
+                2,
+                1,
+                imod_rs::imod::libiimod::mrcfiles::MRC_MODE_RGB
+            ),
+            0
+        );
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        // MRC row 0 is the bottom row.  mrc2tif.cpp:577-580 flips it for
+        // the top-down PNG coordinate system.
+        let pixels = [
+            10_u8, 20, 30, 40, 50, 60, // MRC bottom row
+            70, 80, 90, 100, 110, 120, // MRC top row
+        ];
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            pixels.len()
+        );
+        libc::fclose(file);
+
+        let parity = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_MRC2TIF_ENCODER", "parity")
+            .arg("-p")
+            .arg(&input)
+            .arg(&parity_output)
+            .output()
+            .unwrap();
+        assert!(
+            parity.status.success(),
+            "{}",
+            String::from_utf8_lossy(&parity.stderr)
+        );
+        let rust = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_MRC2TIF_ENCODER", "rust")
+            .arg("-p")
+            .arg(&input)
+            .arg(&rust_output)
+            .output()
+            .unwrap();
+        assert!(
+            rust.status.success(),
+            "{}",
+            String::from_utf8_lossy(&rust.stderr)
+        );
+
+        let expected = vec![70, 80, 90, 100, 110, 120, 10, 20, 30, 40, 50, 60];
+        let parity_decoded = image::open(&parity_output).unwrap().to_rgb8();
+        let rust_decoded = image::open(&rust_output).unwrap().to_rgb8();
+        assert_eq!(parity_decoded.dimensions(), (2, 2));
+        assert_eq!(rust_decoded.dimensions(), (2, 2));
+        assert_eq!(parity_decoded.into_raw(), expected);
+        assert_eq!(rust_decoded.into_raw(), expected);
+
+        for output in [&parity_output, &rust_output] {
+            let identify = Command::new("identify")
+                .args(["-format", "%m %w %h %[channels]"])
+                .arg(output)
+                .output()
+                .unwrap();
+            assert!(
+                identify.status.success(),
+                "ImageMagick could not decode {}: {}",
+                output.display(),
+                String::from_utf8_lossy(&identify.stderr)
+            );
+            assert_eq!(String::from_utf8(identify.stdout).unwrap(), "PNG 2 2 srgb");
+        }
+        for path in [input, parity_output, rust_output] {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+/// The Qt boundary receives a signed `resolution`: `-r` is DPI (negative
+/// internally), while `-P`/`-m` pass positive pixels/cm.  Check both actual
+/// output formats through ImageMagick rather than by inspecting encoder
+/// internals.  This also keeps the experimental backend tied to the retained
+/// QImage result while it remains the default.
+#[cfg(feature = "rust-image-encoder")]
+#[test]
+fn mrc2tif_rust_jpeg_and_png_preserve_qimage_resolution_units() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-image-resolution-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 2, 1, 1, MRC_MODE_BYTE), 0);
+        // Two five-million-Angstrom pixels: -P derives 20 pixels/cm, a
+        // comfortably representable JFIF density that exercises the positive
+        // source resolution convention.
+        header.xlen = 10_000_000.0;
+        header.ylen = 5_000_000.0;
+        header.zlen = 5_000_000.0;
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        assert_eq!(libc::fwrite([10_u8, 20].as_ptr().cast(), 1, 2, file), 2);
+        libc::fclose(file);
+
+        for (format_option, extension, expected_dpi_unit, expected_dpi_density) in [
+            ("-j", "jpg", "PixelsPerInch", 300.0),
+            ("-p", "png", "PixelsPerCentimeter", 118.11),
+        ] {
+            for (resolution_option, suffix, expected_unit, expected_density) in [
+                (
+                    vec!["-r", "300"],
+                    "dpi",
+                    expected_dpi_unit,
+                    expected_dpi_density,
+                ),
+                (vec!["-P"], "pixels-cm", "PixelsPerCentimeter", 20.0),
+            ] {
+                let parity = std::env::temp_dir()
+                    .join(format!("{stamp}-{extension}-{suffix}-parity.{extension}"));
+                let rust = std::env::temp_dir()
+                    .join(format!("{stamp}-{extension}-{suffix}-rust.{extension}"));
+                for (backend, output) in [("parity", &parity), ("rust", &rust)] {
+                    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+                        .env("IMOD_RS_MRC2TIF_ENCODER", backend)
+                        .arg(format_option)
+                        .args(&resolution_option)
+                        .arg(&input)
+                        .arg(output)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        result.status.success(),
+                        "{format_option}/{suffix}/{backend}: {}",
+                        String::from_utf8_lossy(&result.stderr)
+                    );
+                }
+                for output in [&parity, &rust] {
+                    let identify = Command::new("identify")
+                        .args(["-format", "%x|%y|%U"])
+                        .arg(output)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        identify.status.success(),
+                        "ImageMagick could not read resolution metadata from {}: {}",
+                        output.display(),
+                        String::from_utf8_lossy(&identify.stderr)
+                    );
+                    let metadata = String::from_utf8(identify.stdout).unwrap();
+                    let mut fields = metadata.split('|');
+                    let x = fields.next().unwrap().parse::<f64>().unwrap();
+                    let y = fields.next().unwrap().parse::<f64>().unwrap();
+                    let unit = fields.next().unwrap();
+                    assert_eq!(unit, expected_unit, "{}", output.display());
+                    assert!((x - expected_density).abs() < 0.02, "{metadata}");
+                    assert!((y - expected_density).abs() < 0.02, "{metadata}");
+                }
+                std::fs::remove_file(parity).unwrap();
+                std::fs::remove_file(rust).unwrap();
+            }
+        }
+        std::fs::remove_file(input).unwrap();
+    }
+}
+
+/// JPEG is intentionally compared after independent decoding, not by file
+/// bytes: Qt and the Rust `image` encoder are allowed to choose different
+/// legal JPEG marker/order encodings.  This is a command-boundary test of two
+/// valid MRC inputs (gray and RGB), including the source-owned conversion and
+/// MRC bottom-up to image top-down row reversal before the encoder boundary.
+///
+/// The bounds below are a measured cross-decoder tolerance at quality 95,
+/// rather than a claim that either JPEG is lossless.  Keeping separate max and
+/// mean-error limits makes a future gross scaling/channel-order regression
+/// visible even if an individual quantized sample happens to be near a bin
+/// boundary.
+#[cfg(feature = "rust-image-encoder")]
+#[test]
+fn mrc2tif_rust_jpeg_encoder_matches_qimage_after_decoding_gray_and_rgb() {
+    unsafe {
+        let stamp = format!("imod-rs-rust-jpeg-differential-{}", std::process::id());
+        for (kind, mode, channels) in [
+            ("gray", MRC_MODE_BYTE, 1_usize),
+            (
+                "rgb",
+                imod_rs::imod::libiimod::mrcfiles::MRC_MODE_RGB,
+                3_usize,
+            ),
+        ] {
+            // An odd width exercises QImage RGB888 row padding.  Several
+            // changing directions avoid a test that could pass with swapped
+            // rows or channels merely because its fixture is symmetric.
+            let width = 17_i32;
+            let height = 13_i32;
+            let input = std::env::temp_dir().join(format!("{stamp}-{kind}.mrc"));
+            let parity_output = std::env::temp_dir().join(format!("{stamp}-{kind}-parity.jpg"));
+            let rust_output = std::env::temp_dir().join(format!("{stamp}-{kind}-rust.jpg"));
+            let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+            let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+            assert!(!file.is_null());
+            let mut header: MrcHeader = core::mem::zeroed();
+            assert_eq!(mrc_head_new(&mut header, width, height, 1, mode), 0);
+            header.amin = 0.0;
+            header.amax = 255.0;
+            header.amean = 127.5;
+            header.fp = file.cast();
+            assert_eq!(mrc_head_write(file, &mut header), 0);
+            let mut pixels = Vec::with_capacity(width as usize * height as usize * channels);
+            for y in 0..height as usize {
+                for x in 0..width as usize {
+                    // Deliberately smooth, microscopy-like ramps.  JPEG's
+                    // lossy differential should measure encoder variation,
+                    // not dominate the assertion with a checkerboard's
+                    // intentionally unrecoverable high-frequency energy.
+                    let base = (x * 8 + y * 5) as u8;
+                    if channels == 1 {
+                        pixels.push(base);
+                    } else {
+                        pixels.extend_from_slice(&[
+                            base,
+                            (x * 4 + y * 11) as u8,
+                            (x * 9 + y * 3) as u8,
+                        ]);
+                    }
+                }
+            }
+            assert_eq!(
+                libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+                pixels.len()
+            );
+            libc::fclose(file);
+
+            for (backend, output) in [("parity", &parity_output), ("rust", &rust_output)] {
+                let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+                    .env("IMOD_RS_MRC2TIF_ENCODER", backend)
+                    .args(["-j", "-q", "95"])
+                    .arg(&input)
+                    .arg(output)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{kind}/{backend}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
+
+            let parity_decoded = if channels == 1 {
+                image::open(&parity_output).unwrap().to_luma8().into_raw()
+            } else {
+                image::open(&parity_output).unwrap().to_rgb8().into_raw()
+            };
+            let rust_decoded = if channels == 1 {
+                image::open(&rust_output).unwrap().to_luma8().into_raw()
+            } else {
+                image::open(&rust_output).unwrap().to_rgb8().into_raw()
+            };
+            assert_eq!(parity_decoded.len(), rust_decoded.len());
+            let differences: Vec<u8> = parity_decoded
+                .iter()
+                .zip(&rust_decoded)
+                .map(|(&left, &right)| left.abs_diff(right))
+                .collect();
+            let maximum = *differences.iter().max().unwrap();
+            let mean = differences.iter().map(|&value| value as f64).sum::<f64>()
+                / differences.len() as f64;
+            assert!(
+                maximum <= 6 && mean <= 1.25,
+                "{kind} quality-95 JPEG decoder differential: max={maximum}, mean={mean}"
+            );
+
+            for output in [&parity_output, &rust_output] {
+                let identify = Command::new("identify")
+                    .args(["-format", "%m %w %h %[channels] %Q"])
+                    .arg(output)
+                    .output()
+                    .unwrap();
+                assert!(
+                    identify.status.success(),
+                    "ImageMagick could not decode {}: {}",
+                    output.display(),
+                    String::from_utf8_lossy(&identify.stderr)
+                );
+                let expected_channels = if channels == 1 { "gray" } else { "srgb" };
+                assert_eq!(
+                    String::from_utf8(identify.stdout).unwrap(),
+                    format!("JPEG 17 13 {expected_channels} 95")
+                );
+            }
+            for path in [input, parity_output, rust_output] {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+}
+
 #[cfg(feature = "rust-tiff")]
 #[test]
 fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
@@ -85,7 +419,11 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
             String::from_utf8_lossy(&result.stderr)
         );
         let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
-            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            // The new Rust TIFF writer must produce a standard TIFF file
+            // that the default IMOD/libtiff reader accepts; using the Rust
+            // reader here would only test one experimental backend against
+            // itself.
+            .env_remove("IMOD_RS_TIFF_BACKEND")
             .arg(&tiff)
             .arg(&output)
             .output()
@@ -106,6 +444,134 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
         libc::fclose(file);
         assert_eq!(written, pixels);
         for path in [input, tiff, output] {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
+    use tiff::decoder::Decoder;
+    use tiff::tags::Tag;
+
+    unsafe {
+        let stamp = format!("imod-rs-rust-tiff-resolution-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let inches_tiff = std::env::temp_dir().join(format!("{stamp}-inches.tif"));
+        let centimeters_tiff = std::env::temp_dir().join(format!("{stamp}-centimeters.tif"));
+        let inches_mrc = std::env::temp_dir().join(format!("{stamp}-inches.mrc"));
+        let centimeters_mrc = std::env::temp_dir().join(format!("{stamp}-centimeters.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        assert!(!file.is_null());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 2, 1, 1, MRC_MODE_BYTE), 0);
+        // Two samples across ten Angstroms: -P must write 20,000,000 pixels/cm.
+        header.xlen = 10.0;
+        header.ylen = 5.0;
+        header.zlen = 5.0;
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        assert_eq!(libc::fwrite([11_u8, 22].as_ptr().cast(), 1, 2, file), 2);
+        libc::fclose(file);
+
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .args(["-r", "300"])
+            .arg(&input)
+            .arg(&inches_tiff)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let mut decoder = Decoder::new(std::fs::File::open(&inches_tiff).unwrap()).unwrap();
+        assert_eq!(
+            decoder
+                .get_tag(Tag::ResolutionUnit)
+                .unwrap()
+                .into_u16()
+                .unwrap(),
+            2
+        );
+        assert_eq!(decoder.get_tag_u32_vec(Tag::XResolution).unwrap(), [300, 1]);
+        assert_eq!(decoder.get_tag_u32_vec(Tag::YResolution).unwrap(), [300, 1]);
+        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            .env_remove("IMOD_RS_TIFF_BACKEND")
+            .arg("-P")
+            .arg(&inches_tiff)
+            .arg(&inches_mrc)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let inches_c = CString::new(inches_mrc.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(inches_c.as_ptr(), c"rb".as_ptr());
+        let mut read_header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_read(file, &mut read_header), 0);
+        libc::fclose(file);
+        assert!((mrc_get_scale(&read_header).0 - 2.54e8 / 300.0).abs() < 1.0);
+
+        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .arg("-P")
+            .arg(&input)
+            .arg(&centimeters_tiff)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let mut decoder = Decoder::new(std::fs::File::open(&centimeters_tiff).unwrap()).unwrap();
+        assert_eq!(
+            decoder
+                .get_tag(Tag::ResolutionUnit)
+                .unwrap()
+                .into_u16()
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            decoder.get_tag_u32_vec(Tag::XResolution).unwrap(),
+            [20_000_000, 1]
+        );
+        assert_eq!(
+            decoder.get_tag_u32_vec(Tag::YResolution).unwrap(),
+            [20_000_000, 1]
+        );
+        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            .env_remove("IMOD_RS_TIFF_BACKEND")
+            .arg("-P")
+            .arg(&centimeters_tiff)
+            .arg(&centimeters_mrc)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let centimeters_c = CString::new(centimeters_mrc.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(centimeters_c.as_ptr(), c"rb".as_ptr());
+        assert_eq!(mrc_head_read(file, &mut read_header), 0);
+        libc::fclose(file);
+        assert!((mrc_get_scale(&read_header).0 - 5.0).abs() < 0.001);
+
+        for path in [
+            input,
+            inches_tiff,
+            centimeters_tiff,
+            inches_mrc,
+            centimeters_mrc,
+        ] {
             std::fs::remove_file(path).unwrap();
         }
     }
@@ -148,7 +614,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_lzw_and_zip_images() {
                 String::from_utf8_lossy(&result.stderr)
             );
             let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
-                .env("IMOD_RS_TIFF_BACKEND", "rust")
+                .env_remove("IMOD_RS_TIFF_BACKEND")
                 .arg(&tiff)
                 .arg(&output)
                 .output()
@@ -210,7 +676,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_two_page_stack() {
             String::from_utf8_lossy(&result.stderr)
         );
         let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
-            .env("IMOD_RS_TIFF_BACKEND", "rust")
+            .env_remove("IMOD_RS_TIFF_BACKEND")
             .arg(&tiff)
             .arg(&output)
             .output()
@@ -256,6 +722,25 @@ fn mrc2tif_rejects_source_illegal_compression_before_opening_input() {
     // `PipSetError` (`parse_params.c:2049`) writes it plus one more space to
     // **stdout**, not stderr.  These assertions had encoded the wrong stream.
     assert!(String::from_utf8_lossy(&result.stdout).contains("Compression value 42 not allowed"));
+}
+
+/// `mrc2tif.cpp` accepts TIFF JPEG compression (`-c jpeg`), but the selected
+/// Rust `tiff` encoder has no JPEG write implementation.  The opt-in backend
+/// must fail before attempting input I/O, rather than silently use libtiff or
+/// write a mismarked TIFF.
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn mrc2tif_rust_tiff_writer_rejects_jpeg_compression_before_opening_input() {
+    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        .env("IMOD_RS_TIFF_BACKEND", "rust")
+        .args(["-c", "jpeg", "not-opened.mrc", "not-written.tif"])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&result.stdout),
+        "\nERROR: mrc2tif -  Rust TIFF writer does not support JPEG compression; use the parity backend\n"
+    );
 }
 
 #[test]

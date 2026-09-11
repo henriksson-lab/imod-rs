@@ -3,18 +3,12 @@
 //! The 3dmod launcher: it names every kind of file eTomo can open in 3dmod, maps each
 //! to a key, and builds the `ImodState` that describes how to open it.
 //!
-//! **Representation.**  `ImodManager extends BaseImodManager`, and that superclass has
-//! no module, so there is no `base` field here - only the two fields this class declares
-//! plus the one non-static private key, `combinedTomogramKey`.  Every member that reads
-//! the superclass (`manager`, `setAxisType`, `equalsAxisType`, `getAxisTypeString`) or
-//! returns an `ImodState` carries a `// TODO(unit):` marker naming the file, and a
-//! return type with no module is `Option<std::convert::Infallible>` - the Rust type with
-//! exactly the one inhabitant Java's `null` has, as `etomo/process/emergency_monitor.rs`
-//! does - so no stub type is invented.
+//! **Representation.**  `ImodManager extends BaseImodManager`; Rust represents the
+//! superclass state explicitly in `base`, followed by this class's fields.  The private
+//! `new*` factory dispatch now produces translated [`ImodState`] values directly.
 //!
-//! **Frontier.**  `etomo/process/BaseImodManager.java`, `etomo/process/ImodState.java`
-//! and `etomo/process/ImodProcess.java` are the 3dmod process boundary this project
-//! deliberately keeps external, and the five `setMetaData` overloads additionally name
+//! **Frontier.**  `ImodState` retains the 3dmod process boundary as an explicit launch
+//! error, and the five `setMetaData` overloads additionally name
 //! metadata classes that have no module.  What this module *does* carry in full is the
 //! key vocabulary - every `public static final String *_KEY` and every private key field
 //! - which is what `etomo/type/FileType.java`'s singletons are declared with.
@@ -22,6 +16,8 @@
 
 use std::convert::Infallible;
 
+use crate::imod::etomo::process::base_imod_manager::BaseImodManager;
+use crate::imod::etomo::process::imod_state::{ImodState, MODEL_MODE, MODEL_VIEW, MODV};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
@@ -249,6 +245,8 @@ const SUBTOMO_SETUP_KEY_FIELD: &str = SUBTOMO_SETUP_KEY;
 
 /// Java `ImodManager`.
 pub struct ImodManager {
+    /// Java superclass `BaseImodManager` state.
+    base: BaseImodManager,
     /// Java private field `datasetName`, which defaults to "".
     dataset_name: String,
     /// Java private field `metaDataSet`, which defaults to false.
@@ -260,13 +258,11 @@ pub struct ImodManager {
 
 impl ImodManager {
     /// Java `ImodManager(BaseManager)`.
-    // TODO(unit): needs etomo/process/BaseImodManager.java - the constructor body is
-    // `super(manager)`, which stores the manager and builds the superclass's imod map.
     pub fn new(
         manager: Option<&'static dyn crate::imod::etomo::base_manager::BaseManager>,
     ) -> ImodManager {
-        let _ = manager;
         ImodManager {
+            base: BaseImodManager::new(manager),
             dataset_name: String::new(),
             meta_data_set: false,
             combined_tomogram_key: None,
@@ -278,9 +274,7 @@ impl ImodManager {
         if self.meta_data_set {
             return;
         }
-        // TODO(unit): needs etomo/process/BaseImodManager.java - `setAxisType(AxisType)`
-        // is the superclass's, and nothing here can record it.
-        let _: AxisType = meta_data.base().get_axis_type();
+        self.base.set_axis_type(meta_data.base().get_axis_type());
         self.dataset_name = meta_data.get_dataset_name().unwrap_or_default();
         self.create_private_keys();
     }
@@ -329,9 +323,8 @@ impl ImodManager {
 
     /// Java protected `newImodState(String, String, AxisID, String, File, String[],
     /// String, File[])`, overriding `BaseImodManager.newImodState`.
-    // TODO(unit): needs etomo/process/ImodState.java and
-    // etomo/process/BaseImodManager.java - the return type, and the `equalsAxisType` and
-    // `getAxisTypeString` the dispatch chain and its final IllegalArgumentException test.
+    // `FileType`-resolved filenames remain at that source boundary; all directly
+    // represented ImodState configuration is retained in the factory values.
     #[allow(clippy::too_many_arguments)]
     fn new_imod_state(
         &self,
@@ -343,27 +336,195 @@ impl ImodManager {
         file_name_array: Option<&[Option<String>]>,
         subdir_name: Option<&str>,
         file_list: Option<&[std::path::PathBuf]>,
-    ) -> Option<Infallible> {
-        let _ = (
-            key,
-            file_extension,
-            axis_id,
-            dataset_name,
-            file,
-            file_name_array,
-            subdir_name,
-            file_list,
+    ) -> ImodState {
+        let key = key.expect("Java newImodState dereferences key");
+        if key == RAW_STACK_KEY && axis_id.is_some() {
+            return self.new_raw_stack(axis_id, file);
+        }
+        if key == ERASED_STACK_KEY && axis_id.is_some() {
+            return self.new_erased_stack(axis_id);
+        }
+        if key == COARSE_ALIGNED_KEY && axis_id.is_some() {
+            return self.new_coarse_aligned(axis_id);
+        }
+        if key == FINE_ALIGNED_KEY && axis_id.is_some() {
+            return self.new_fine_aligned(axis_id);
+        }
+        if key == SAMPLE_KEY && axis_id.is_some() {
+            return self.new_sample(axis_id);
+        }
+        if key == FULL_VOLUME_KEY && axis_id.is_some() {
+            return self.new_full_volume(axis_id);
+        }
+        if key == COMBINED_TOMOGRAM_KEY && self.base.equals_axis_type(AxisType::DualAxis) {
+            return self.new_combined_tomogram();
+        }
+        if key == PATCH_VECTOR_MODEL_KEY && self.base.equals_axis_type(AxisType::DualAxis) {
+            return self.new_patch_vector_model();
+        }
+        if key == MATCH_CHECK_KEY && self.base.equals_axis_type(AxisType::DualAxis) {
+            return self.new_match_check();
+        }
+        if key == FIDUCIAL_MODEL_KEY && axis_id.is_some() {
+            return self.new_fiducial_model(axis_id);
+        }
+        if key == SORTED_MODELS_KEY && axis_id.is_some() {
+            return self.new_sorted_models(axis_id);
+        }
+        if key == TRIMMED_VOLUME_KEY {
+            return self.new_trimmed_volume();
+        }
+        if key == TRIAL_TOMOGRAM_KEY && axis_id.is_some() && dataset_name.is_some() {
+            return self.new_trial_tomogram(axis_id, dataset_name);
+        }
+        if key == MTF_FILTER_KEY && axis_id.is_some() {
+            return self.new_mtf_filter(axis_id);
+        }
+        if key == PREVIEW_KEY && axis_id.is_some() {
+            return self.new_preview(axis_id, file_extension);
+        }
+        if key == TOMOGRAM_KEY {
+            return self.new_tomogram(file, axis_id);
+        }
+        if key == JOIN_SAMPLES_KEY {
+            return self.new_join_samples();
+        }
+        if key == JOIN_SAMPLE_AVERAGES_KEY {
+            return self.new_join_sample_averages();
+        }
+        if key == JOIN_KEY {
+            return self.new_join();
+        }
+        if key == ROT_TOMOGRAM_KEY {
+            return self.new_rot_tomogram(file);
+        }
+        if key == TRIAL_JOIN_KEY {
+            return self.new_trial_join();
+        }
+        if key == MODELED_JOIN_KEY {
+            return self.new_modeled_join();
+        }
+        if key == SQUEEZED_VOLUME_KEY {
+            return self.new_squeezed_volume();
+        }
+        if key == REDUCED_FILTERED_VOLUME_KEY {
+            return self.new_reduced_filtered_volume(file);
+        }
+        if key == FLATTEN_REDUCE_FILT_VOL_KEY {
+            return self.new_flatten_reduce_filt_vol_output(file);
+        }
+        if key == PATCH_VECTOR_CCC_MODEL_KEY && self.base.equals_axis_type(AxisType::DualAxis) {
+            return self.new_patch_vector_c_c_c_model();
+        }
+        if key == TRANSFORMED_MODEL_KEY {
+            return self.new_transformed_model();
+        }
+        if key == AVG_VOL_KEY {
+            return self.new_avg_vol(file_name_array);
+        }
+        if key == REF_KEY {
+            return self.new_ref(file_name_array);
+        }
+        if key == VOLUME_KEY {
+            return self.new_volume(file);
+        }
+        if key == TEST_VOLUME_KEY {
+            return self.new_test_volume(file);
+        }
+        if key == VARYING_K_TEST_KEY {
+            return self.new_varying_k_test(file_name_array, subdir_name);
+        }
+        if key == VARYING_ITERATION_TEST_KEY {
+            return self.new_varying_iteration_test(file_name_array, subdir_name);
+        }
+        if key == ANISOTROPIC_DIFFUSION_VOLUME_KEY {
+            return self.new_anisotropic_diffusion_volume(file);
+        }
+        if key == CTF_CORRECTION_KEY && axis_id.is_some() {
+            return self.new_ctf_correction(axis_id);
+        }
+        if key == ERASED_FIDUCIALS_KEY && axis_id.is_some() {
+            return self.new_erased_fiducials(axis_id);
+        }
+        if key == FLAT_VOLUME_KEY && axis_id.is_some() {
+            return self.new_flat_volume(axis_id);
+        }
+        if key == FINE_ALIGNED_3D_FIND_KEY && axis_id.is_some() {
+            return self.new_fine_aligned3d_find(axis_id);
+        }
+        if key == FULL_VOLUME_3D_FIND_KEY && axis_id.is_some() {
+            return self.new_full_volume3d_find(axis_id);
+        }
+        if key == SMOOTHING_ASSESSMENT_KEY && axis_id.is_some() {
+            return self.new_smoothing_assessment(axis_id);
+        }
+        if key == FLATTEN_INPUT_KEY {
+            return self.new_flatten_input(file);
+        }
+        if key == FLATTEN_TOOL_OUTPUT_KEY && axis_id.is_some() {
+            return self.new_flatten_tool_output(axis_id);
+        }
+        if key == SIRT_KEY && axis_id.is_some() {
+            return self.new_sirt(file_list, axis_id);
+        }
+        if key == PREBLEND_KEY && axis_id.is_some() {
+            return self.new_preblend(axis_id);
+        }
+        if key == ALIGNED_STACK_KEY && axis_id.is_some() {
+            return self.new_aligned_stack(axis_id);
+        }
+        if key == BATCH_RUN_TOMO_STACK_KEY {
+            return self.new_batch_run_tomo_stack(file);
+        }
+        if key == BATCH_RUN_TOMO_REC_KEY {
+            return self.new_batch_run_tomo_rec(file);
+        }
+        if key == BATCH_RUN_TOMO_TRIMMED_VOLUME_KEY {
+            return self.new_batch_run_tomo_trimmed_volume(file);
+        }
+        if key == MULTIFILT_KEY && axis_id.is_some() {
+            return self.new_multi_filt(file_list, axis_id);
+        }
+        if key == CTF_3D_KEY && axis_id.is_some() {
+            return self.new_ctf3d(axis_id);
+        }
+        if key == OPEN_OUTPUT_TILT_SERIES_KEY && axis_id.is_some() {
+            return self.new_open_output_tilt_series(file, axis_id);
+        }
+        if key == SUBTOMO_SETUP_KEY {
+            return self.new_subtomo_setup(file_name_array, subdir_name);
+        }
+        if key == ALT_TOMO_SETUP_TOMOGRAM_KEY {
+            return self.new_alt_tomo_setup(file, axis_id);
+        }
+        if key == ALT_TOMO_SETUP_EVEN_ODD_TOMOGRAM_KEY {
+            return self.new_alt_tomo_setup_even_odd(axis_id);
+        }
+        if key == ALT_TOMO_SETUP_EVEN_ODD_FULL_TOMOGRAM_KEY {
+            return self.new_alt_tomo_setup_even_odd_full(axis_id);
+        }
+        if key == GENERIC_PARALLEL_PROCESS_OUTPUT_FILE_KEY {
+            return self.new_generic_parallel_process_output_file(file);
+        }
+        if key == GENERIC_PARALLEL_PROCESS_OUTPUT_UNKNOWN_FILE_KEY {
+            return self.new_generic_parallel_process_output_unknown_file();
+        }
+        panic!(
+            "{key} cannot be created in {} with axisID={axis_id:?}",
+            self.base.get_axis_type_string()
         );
-        None
     }
 
     /// Java private `createPrivateKeys`.
     fn create_private_keys(&mut self) {
-        // TODO(unit): needs etomo/process/BaseImodManager.java - `equalsAxisType(AxisType
-        // .SINGLE_AXIS)` reads the superclass's axis type, so neither arm can be
-        // selected here.
-        let _ = (AxisType::SingleAxis, FULL_VOLUME_KEY, COMBINED_TOMOGRAM_KEY);
-        let _ = &mut self.combined_tomogram_key;
+        self.combined_tomogram_key = Some(
+            if self.base.equals_axis_type(AxisType::SingleAxis) {
+                FULL_VOLUME_KEY
+            } else {
+                COMBINED_TOMOGRAM_KEY
+            }
+            .to_string(),
+        );
     }
 
     /// Java protected `getPrivateKey`, overriding `BaseImodManager.getPrivateKey`.
@@ -375,445 +536,501 @@ impl ImodManager {
         }
     }
     /// Java private `newRawStack(final AxisID axisID, final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_raw_stack(
-        &self,
-        axis_id: Option<AxisID>,
-        file: Option<&std::path::Path>,
-    ) -> Option<Infallible> {
-        let _ = (axis_id, file);
-        None
+    fn new_raw_stack(&self, axis_id: Option<AxisID>, file: Option<&std::path::Path>) -> ImodState {
+        let axis_id = axis_id.expect("Java newRawStack dereferences axisID");
+        if let Some(file) = file {
+            return ImodState::new_with_axis_file_name_file_type(
+                None,
+                axis_id,
+                Some(&file.to_string_lossy()),
+                None,
+            );
+        }
+        let mut state = ImodState::new(None, axis_id);
+        state.set_load_as_integers();
+        state
     }
 
     /// Java private `newErasedStack(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_erased_stack(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_erased_stack(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newErasedStack dereferences axisID"),
+        )
     }
 
     /// Java private `newCoarseAligned(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_coarse_aligned(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_coarse_aligned(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newCoarseAligned dereferences axisID"),
+        )
     }
 
     /// Java private `newFineAligned(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_fine_aligned(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_fine_aligned(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newFineAligned dereferences axisID"),
+        )
     }
 
     /// Java private `newSample(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_sample(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_sample(&self, axis_id: Option<AxisID>) -> ImodState {
+        let mut state = ImodState::new(None, axis_id.expect("Java newSample dereferences axisID"));
+        state.set_initial_mode(MODEL_MODE);
+        state
     }
 
     /// Java private `newFullVolume(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_full_volume(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_full_volume(&self, axis_id: Option<AxisID>) -> ImodState {
+        let mut state = ImodState::new(
+            None,
+            axis_id.expect("Java newFullVolume dereferences axisID"),
+        );
+        state.set_allow_menu_binning_in_z(true);
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newCombinedTomogram()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_combined_tomogram(&self) -> Option<Infallible> {
-        None
+    fn new_combined_tomogram(&self) -> ImodState {
+        let mut state = ImodState::new(None, AxisID::Only);
+        state.set_allow_menu_binning_in_z(true);
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newPatchVectorModel()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_patch_vector_model(&self) -> Option<Infallible> {
-        None
+    fn new_patch_vector_model(&self) -> ImodState {
+        let mut state = ImodState::new_with_model_view_type(None, MODEL_VIEW, AxisID::Only);
+        state.set_initial_mode(MODEL_MODE);
+        state.set_no_menu_options(true);
+        state
     }
 
     /// Java private `newPatchVectorCCCModel()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_patch_vector_c_c_c_model(&self) -> Option<Infallible> {
-        None
+    fn new_patch_vector_c_c_c_model(&self) -> ImodState {
+        let mut state = ImodState::new_with_model_view_type(None, MODV, AxisID::Only);
+        state.set_no_menu_options(true);
+        state
     }
 
     /// Java private `newTransformedModel()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_transformed_model(&self) -> Option<Infallible> {
-        None
+    fn new_transformed_model(&self) -> ImodState {
+        let mut state = ImodState::new_with_model_view_type(None, MODV, AxisID::Only);
+        state.set_no_menu_options(true);
+        state
     }
 
     /// Java private `newMatchCheck()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_match_check(&self) -> Option<Infallible> {
-        None
+    fn new_match_check(&self) -> ImodState {
+        let mut state = ImodState::new_with_dataset_model(
+            None,
+            Some("matchcheck.mat"),
+            Some("matchcheck.rec"),
+            AxisID::Only,
+        );
+        state.set_allow_menu_binning_in_z(true);
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newFiducialModel(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_fiducial_model(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_fiducial_model(&self, axis_id: Option<AxisID>) -> ImodState {
+        let mut state = ImodState::new_with_model_view_type(
+            None,
+            MODV,
+            axis_id.expect("Java newFiducialModel dereferences axisID"),
+        );
+        state.set_no_menu_options(true);
+        state
     }
 
     /// Java private `newSortedModels(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_sorted_models(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_sorted_models(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new_with_model_view_type(
+            None,
+            MODV,
+            axis_id.expect("Java newSortedModels dereferences axisID"),
+        )
     }
 
     /// Java private `newTrimmedVolume()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_trimmed_volume(&self) -> Option<Infallible> {
-        None
+    fn new_trimmed_volume(&self) -> ImodState {
+        let mut state = ImodState::new(None, AxisID::Only);
+        state.set_allow_menu_binning_in_z(true);
+        state
     }
 
     /// Java private `newTrialTomogram(final AxisID axisID, final String fileName)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_trial_tomogram(
-        &self,
-        axis_id: Option<AxisID>,
-        file_name: Option<&str>,
-    ) -> Option<Infallible> {
-        let _ = (axis_id, file_name);
-        None
+    fn new_trial_tomogram(&self, axis_id: Option<AxisID>, file_name: Option<&str>) -> ImodState {
+        let mut state = ImodState::new_with_file_name(
+            None,
+            Some(file_name.expect("Java newTrialTomogram dereferences fileName")),
+            axis_id.expect("Java newTrialTomogram dereferences axisID"),
+        );
+        state.set_allow_menu_binning_in_z(true);
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newMtfFilter(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_mtf_filter(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_mtf_filter(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newMtfFilter dereferences axisID"),
+        )
     }
 
     /// Java private `newCtfCorrection(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_ctf_correction(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_ctf_correction(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newCtfCorrection dereferences axisID"),
+        )
     }
 
     /// Java private `newErasedFiducials(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_erased_fiducials(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_erased_fiducials(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newErasedFiducials dereferences axisID"),
+        )
     }
 
     /// Java private `newFlatVolume(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_flat_volume(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_flat_volume(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newFlatVolume dereferences axisID"),
+        )
     }
 
     /// Java private `newFlattenToolOutput(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_flatten_tool_output(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_flatten_tool_output(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newFlattenToolOutput dereferences axisID"),
+        )
     }
 
     /// Java private `newPreblend(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_preblend(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_preblend(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(None, axis_id.expect("Java newPreblend dereferences axisID"))
     }
 
     /// Java private `newAlignedStack(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_aligned_stack(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_aligned_stack(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newAlignedStack dereferences axisID"),
+        )
     }
 
     /// Java private `newPreview(final AxisID axisID, final String fileExtension)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_preview(
-        &self,
-        axis_id: Option<AxisID>,
-        file_extension: Option<&str>,
-    ) -> Option<Infallible> {
-        let _ = (axis_id, file_extension);
-        None
+    fn new_preview(&self, axis_id: Option<AxisID>, file_extension: Option<&str>) -> ImodState {
+        let axis_id = axis_id.expect("Java newPreview dereferences axisID");
+        let name = format!(
+            "{}{}{}",
+            self.dataset_name,
+            axis_id.get_extension(),
+            file_extension.unwrap_or_default()
+        );
+        let mut state = ImodState::new_with_file_name(None, Some(&name), axis_id);
+        state.set_load_as_integers();
+        state.set_suppress_save_query();
+        state
     }
 
     /// Java private `newTomogram(final File file, final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_tomogram(
-        &self,
-        file: Option<&std::path::Path>,
-        axis_id: Option<AxisID>,
-    ) -> Option<Infallible> {
-        let _ = (file, axis_id);
-        None
+    fn new_tomogram(&self, file: Option<&std::path::Path>, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new_with_file(
+            None,
+            file,
+            axis_id.expect("Java newTomogram dereferences axisID"),
+        )
     }
 
     /// Java private `newJoinSamples()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_join_samples(&self) -> Option<Infallible> {
-        None
+    fn new_join_samples(&self) -> ImodState {
+        ImodState::new(None, AxisID::Only)
     }
 
     /// Java private `newJoinSampleAverages()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_join_sample_averages(&self) -> Option<Infallible> {
-        None
+    fn new_join_sample_averages(&self) -> ImodState {
+        ImodState::new(None, AxisID::Only)
     }
 
     /// Java private `newJoin()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_join(&self) -> Option<Infallible> {
-        None
+    fn new_join(&self) -> ImodState {
+        ImodState::new(None, AxisID::Only)
     }
 
     /// Java private `newRotTomogram(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_rot_tomogram(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_rot_tomogram(&self, file: Option<&std::path::Path>) -> ImodState {
+        ImodState::new_with_file(None, file, AxisID::Only)
     }
 
     /// Java private `newAvgVol(final String[] fileNameArray)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_avg_vol(&self, file_name_array: Option<&[Option<String>]>) -> Option<Infallible> {
-        let _ = (file_name_array,);
-        None
+    fn new_avg_vol(&self, file_name_array: Option<&[Option<String>]>) -> ImodState {
+        let values = file_name_array.map(|files| files.iter().filter_map(Clone::clone).collect());
+        let mut state = ImodState::new_with_file_name_array(None, values, AxisID::Only);
+        state.set_model_view_type(MODEL_VIEW);
+        state.set_open_zap();
+        state
     }
 
     /// Java private `newRef(final String[] fileNameArray)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_ref(&self, file_name_array: Option<&[Option<String>]>) -> Option<Infallible> {
-        let _ = (file_name_array,);
-        None
+    fn new_ref(&self, file_name_array: Option<&[Option<String>]>) -> ImodState {
+        ImodState::new_with_file_name_array(
+            None,
+            file_name_array.map(|files| files.iter().filter_map(Clone::clone).collect()),
+            AxisID::Only,
+        )
     }
 
     /// Java private `newVolume(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_volume(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_volume(&self, file: Option<&std::path::Path>) -> ImodState {
+        ImodState::new_with_file(None, file, AxisID::Only)
     }
 
     /// Java private `newTestVolume(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_test_volume(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_test_volume(&self, file: Option<&std::path::Path>) -> ImodState {
+        ImodState::new_with_file(None, file, AxisID::Only)
     }
 
     /// Java private `newVaryingKTest(final String[] fileNameArray, final String subdirName)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_varying_k_test(
         &self,
         file_name_array: Option<&[Option<String>]>,
         subdir_name: Option<&str>,
-    ) -> Option<Infallible> {
-        let _ = (file_name_array, subdir_name);
-        None
+    ) -> ImodState {
+        ImodState::new_with_file_name_array_subdir(
+            None,
+            file_name_array.map(|files| files.iter().filter_map(Clone::clone).collect()),
+            AxisID::Only,
+            subdir_name,
+        )
     }
 
     /// Java private `newSirt(final File[] fileList, final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_sirt(
         &self,
         file_list: Option<&[std::path::PathBuf]>,
         axis_id: Option<AxisID>,
-    ) -> Option<Infallible> {
-        let _ = (file_list, axis_id);
-        None
+    ) -> ImodState {
+        let mut state = ImodState::new_with_file_list(
+            None,
+            file_list.map(|files| files.to_vec()),
+            axis_id.expect("Java newSirt dereferences axisID"),
+        );
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newMultiFilt(final File[] fileList, final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_multi_filt(
         &self,
         file_list: Option<&[std::path::PathBuf]>,
         axis_id: Option<AxisID>,
-    ) -> Option<Infallible> {
-        let _ = (file_list, axis_id);
-        None
+    ) -> ImodState {
+        let mut state = ImodState::new_with_file_list(
+            None,
+            file_list.map(|files| files.to_vec()),
+            axis_id.expect("Java newMultiFilt dereferences axisID"),
+        );
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newCtf3d(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_ctf3d(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_ctf3d(&self, axis_id: Option<AxisID>) -> ImodState {
+        let mut state = ImodState::new(None, axis_id.expect("Java newCtf3d dereferences axisID"));
+        state.set_allow_menu_binning_in_z(true);
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newVaryingIterationTest(final String[] fileNameArray, final String subdirName)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_varying_iteration_test(
         &self,
         file_name_array: Option<&[Option<String>]>,
         subdir_name: Option<&str>,
-    ) -> Option<Infallible> {
-        let _ = (file_name_array, subdir_name);
-        None
+    ) -> ImodState {
+        ImodState::new_with_file_name_array_subdir(
+            None,
+            file_name_array.map(|files| files.iter().filter_map(Clone::clone).collect()),
+            AxisID::Only,
+            subdir_name,
+        )
     }
 
     /// Java private `newAnisotropicDiffusionVolume(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_anisotropic_diffusion_volume(
-        &self,
-        file: Option<&std::path::Path>,
-    ) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_anisotropic_diffusion_volume(&self, file: Option<&std::path::Path>) -> ImodState {
+        ImodState::new_with_file(None, file, AxisID::Only)
     }
 
     /// Java private `newModeledJoin()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_modeled_join(&self) -> Option<Infallible> {
-        None
+    fn new_modeled_join(&self) -> ImodState {
+        let mut state = ImodState::new(None, AxisID::Only);
+        state.set_initial_mode(MODEL_MODE);
+        state.set_open_contours(true);
+        state
     }
 
     /// Java private `newTrialJoin()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_trial_join(&self) -> Option<Infallible> {
-        None
+    fn new_trial_join(&self) -> ImodState {
+        ImodState::new(None, AxisID::Only)
     }
 
     /// Java private `newSqueezedVolume()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_squeezed_volume(&self) -> Option<Infallible> {
-        None
+    fn new_squeezed_volume(&self) -> ImodState {
+        let mut state = ImodState::new(None, AxisID::Only);
+        state.set_allow_menu_binning_in_z(true);
+        state
     }
 
     /// Java private `newReducedFilteredVolume(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_reduced_filtered_volume(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_reduced_filtered_volume(&self, file: Option<&std::path::Path>) -> ImodState {
+        let mut state = ImodState::new_with_file(None, file, AxisID::Only);
+        state.set_allow_menu_binning_in_z(true);
+        state
     }
 
     /// Java private `newFlattenReduceFiltVolOutput(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_flatten_reduce_filt_vol_output(
-        &self,
-        file: Option<&std::path::Path>,
-    ) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_flatten_reduce_filt_vol_output(&self, file: Option<&std::path::Path>) -> ImodState {
+        let mut state = ImodState::new_with_file(None, file, AxisID::Only);
+        state.set_allow_menu_binning_in_z(true);
+        state
     }
 
     /// Java private `newFineAligned3dFind(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_fine_aligned3d_find(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_fine_aligned3d_find(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newFineAligned3dFind dereferences axisID"),
+        )
     }
 
     /// Java private `newFullVolume3dFind(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_full_volume3d_find(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_full_volume3d_find(&self, axis_id: Option<AxisID>) -> ImodState {
+        let mut state = ImodState::new(
+            None,
+            axis_id.expect("Java newFullVolume3dFind dereferences axisID"),
+        );
+        state.set_allow_menu_binning_in_z(true);
+        state.set_initial_swap_yz(true);
+        state
     }
 
     /// Java private `newSmoothingAssessment(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_smoothing_assessment(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_smoothing_assessment(&self, axis_id: Option<AxisID>) -> ImodState {
+        let mut state = ImodState::new_with_model_view_type(
+            None,
+            MODV,
+            axis_id.expect("Java newSmoothingAssessment dereferences axisID"),
+        );
+        state.set_no_menu_options(true);
+        state
     }
 
     /// Java private `newFlattenInput(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_flatten_input(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_flatten_input(&self, file: Option<&std::path::Path>) -> ImodState {
+        ImodState::new_with_file(None, file, AxisID::Only)
     }
 
     /// Java private `newBatchRunTomoStack(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_batch_run_tomo_stack(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_batch_run_tomo_stack(&self, file: Option<&std::path::Path>) -> ImodState {
+        let mut state = ImodState::new_with_file(None, file, AxisID::Only);
+        state.set_load_as_integers();
+        state
     }
 
     /// Java private `newBatchRunTomoRec(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_batch_run_tomo_rec(&self, file: Option<&std::path::Path>) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_batch_run_tomo_rec(&self, file: Option<&std::path::Path>) -> ImodState {
+        let mut state = ImodState::new_with_file(None, file, AxisID::Only);
+        state.set_load_as_integers();
+        state.set_swap_yz(true);
+        state
     }
 
     /// Java private `newBatchRunTomoTrimmedVolume(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_batch_run_tomo_trimmed_volume(
-        &self,
-        file: Option<&std::path::Path>,
-    ) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    fn new_batch_run_tomo_trimmed_volume(&self, file: Option<&std::path::Path>) -> ImodState {
+        let mut state = ImodState::new_with_file(None, file, AxisID::Only);
+        state.set_load_as_integers();
+        state
     }
 
     /// Java private `newOpenOutputTiltSeries(final File file, final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_open_output_tilt_series(
         &self,
         file: Option<&std::path::Path>,
         axis_id: Option<AxisID>,
-    ) -> Option<Infallible> {
-        let _ = (file, axis_id);
-        None
+    ) -> ImodState {
+        let mut state = ImodState::new_with_file(
+            None,
+            file,
+            axis_id.expect("Java newOpenOutputTiltSeries dereferences axisID"),
+        );
+        state.set_load_as_integers();
+        state
     }
 
     /// Java private `newSubtomoSetup(final String[] fileNameArray, final String subdirName)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_subtomo_setup(
         &self,
         file_name_array: Option<&[Option<String>]>,
         subdir_name: Option<&str>,
-    ) -> Option<Infallible> {
-        let _ = (file_name_array, subdir_name);
-        None
+    ) -> ImodState {
+        ImodState::new_with_file_name_array_subdir(
+            None,
+            file_name_array.map(|files| files.iter().filter_map(Clone::clone).collect()),
+            AxisID::Only,
+            subdir_name,
+        )
     }
 
     /// Java private `newAltTomoSetup(final File file, final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_alt_tomo_setup(
         &self,
         file: Option<&std::path::Path>,
         axis_id: Option<AxisID>,
-    ) -> Option<Infallible> {
-        let _ = (file, axis_id);
-        None
+    ) -> ImodState {
+        ImodState::new_with_file(
+            None,
+            file,
+            axis_id.expect("Java newAltTomoSetup dereferences axisID"),
+        )
     }
 
     /// Java private `newAltTomoSetupEvenOdd(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_alt_tomo_setup_even_odd(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_alt_tomo_setup_even_odd(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newAltTomoSetupEvenOdd dereferences axisID"),
+        )
     }
 
     /// Java private `newAltTomoSetupEvenOddFull(final AxisID axisID)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_alt_tomo_setup_even_odd_full(&self, axis_id: Option<AxisID>) -> Option<Infallible> {
-        let _ = (axis_id,);
-        None
+    fn new_alt_tomo_setup_even_odd_full(&self, axis_id: Option<AxisID>) -> ImodState {
+        ImodState::new(
+            None,
+            axis_id.expect("Java newAltTomoSetupEvenOddFull dereferences axisID"),
+        )
     }
 
     /// Java private `newGenericParallelProcessOutputFile(final File file)`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
     fn new_generic_parallel_process_output_file(
         &self,
         file: Option<&std::path::Path>,
-    ) -> Option<Infallible> {
-        let _ = (file,);
-        None
+    ) -> ImodState {
+        ImodState::new_with_file(None, file, AxisID::Only)
     }
 
     /// Java private `newGenericParallelProcessOutputUnknownFile()`.
-    // TODO(unit): needs etomo/process/ImodState.java - the method's return type.
-    fn new_generic_parallel_process_output_unknown_file(&self) -> Option<Infallible> {
-        None
+    fn new_generic_parallel_process_output_unknown_file(&self) -> ImodState {
+        ImodState::new(None, AxisID::Only)
     }
 
     /// Java package-private `isPerAxis`, overriding `BaseImodManager.isPerAxis`.
@@ -835,5 +1052,62 @@ impl ImodManager {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn new_imod_state_routes_raw_stack_to_translated_state() {
+        let manager = ImodManager::new(None);
+        let state = manager.new_imod_state(
+            Some(RAW_STACK_KEY),
+            None,
+            Some(AxisID::First),
+            None,
+            Some(Path::new("rawa.st")),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(state.get_axis_id(), AxisID::First);
+        assert_eq!(state.get_dataset_name(), Some("rawa.st".to_string()));
+    }
+
+    #[test]
+    fn full_volume_factory_keeps_source_view_configuration() {
+        let manager = ImodManager::new(None);
+        let state = manager.new_imod_state(
+            Some(FULL_VOLUME_KEY),
+            None,
+            Some(AxisID::Second),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(state.is_swap_yz());
+        assert!(state.is_initial_swap_yz());
+    }
+
+    #[test]
+    fn batch_rec_factory_keeps_file_and_integer_swap_configuration() {
+        let manager = ImodManager::new(None);
+        let state = manager.new_imod_state(
+            Some(BATCH_RUN_TOMO_REC_KEY),
+            None,
+            None,
+            None,
+            Some(Path::new("rec.mrc")),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(state.get_dataset_name(), Some("rec.mrc".to_string()));
+        assert!(state.is_swap_yz());
     }
 }

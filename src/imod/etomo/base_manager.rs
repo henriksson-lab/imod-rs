@@ -30,6 +30,7 @@
 #![allow(dead_code)]
 
 use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::manager_key::ManagerKey;
 use crate::imod::etomo::process::emergency_monitor::EmergencyMonitor;
 use crate::imod::etomo::process::imod_manager::ImodManager;
 use crate::imod::etomo::process::tomosetexts_output::TomosetextsOutput;
@@ -44,6 +45,7 @@ use crate::imod::etomo::r#type::interface_type::InterfaceType;
 use crate::imod::etomo::r#type::view_type::ViewType;
 use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
 use crate::imod::etomo::ui::log_properties::LogProperties;
+use crate::imod::etomo::util::unique_key::UniqueKey;
 use crate::imod::etomo::util::utilities;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -249,8 +251,11 @@ pub struct BaseManagerBase {
     // TODO(unit): needs etomo/ProcessingMethodMediator.java - the field's declared type.
     processing_method_mediator_b: Option<Infallible>,
     /// Java field `managerKey`, `new ManagerKey()`.
-    // TODO(unit): needs etomo/ManagerKey.java - the field's declared type.
-    manager_key: Option<Infallible>,
+    ///
+    /// `ManagerKey` is mutable in Java, and a director and manager retain the
+    /// same holder.  The `Arc` preserves that object identity while the mutex
+    /// represents Java's shared mutable object across process/UI threads.
+    manager_key: Arc<Mutex<ManagerKey>>,
     /// Java field `axisProcessData`, `new AxisProcessData(this)`.
     // TODO(unit): needs etomo/process/AxisProcessData.java - the field's declared type.
     axis_process_data: Option<Infallible>,
@@ -293,7 +298,7 @@ impl BaseManagerBase {
             reconnect_run_b: Mutex::new(false),
             processing_method_mediator_a: None,
             processing_method_mediator_b: None,
-            manager_key: None,
+            manager_key: Arc::new(Mutex::new(ManagerKey::default())),
             axis_process_data: None,
             resume_data_a: ResumeData::new(),
             resume_data_b: ResumeData::new(),
@@ -1149,16 +1154,13 @@ pub trait BaseManager: Send + Sync {
     }
 
     /// Java package-private `setManagerKey`.
-    fn set_manager_key(&self, unique_key: Option<Infallible>) {
-        // TODO(unit): needs etomo/ManagerKey.java and etomo/util/UniqueKey.java -
-        // `managerKey.setKey(uniqueKey)`.
-        let _ = unique_key;
+    fn set_manager_key(&self, unique_key: Option<UniqueKey>) {
+        self.base().manager_key.lock().unwrap().set_key(unique_key);
     }
 
     /// Java package-private `getManagerKey`.
-    fn get_manager_key(&self) -> Option<Infallible> {
-        // TODO(unit): needs etomo/ManagerKey.java - the return type.
-        self.base().manager_key
+    fn get_manager_key(&self) -> Arc<Mutex<ManagerKey>> {
+        Arc::clone(&self.base().manager_key)
     }
 
     /// Java `getFocusComponent`.

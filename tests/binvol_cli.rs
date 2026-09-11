@@ -421,6 +421,130 @@ fn binvol_runs_source_fourier_reduce_and_expand_on_real_mrc_volumes() {
     }
 }
 
+/// The experimental backend replaces only the execution at `thrdfft`'s
+/// `todfft`/`odfft` boundaries.  Keep this process-isolated differential
+/// fixture so the command still exercises source-owned Fourier cropping,
+/// packed MRC storage, normalization, and output statistics.
+#[cfg(feature = "rustfft-backend")]
+#[test]
+fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
+    unsafe {
+        let stamp = format!("imod-rs-binvol-rustfft-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let parity_output = std::env::temp_dir().join(format!("{stamp}-parity.mrc"));
+        let rustfft_output = std::env::temp_dir().join(format!("{stamp}-rustfft.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 16, 16, 16, MRC_MODE_FLOAT), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels: Vec<f32> = (0..16 * 16 * 16)
+            .map(|index| {
+                let x = index % 16;
+                let y = (index / 16) % 16;
+                let z = index / (16 * 16);
+                (x * x + 3 * y + 5 * z + (x * y + z) % 7) as f32
+            })
+            .collect();
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 4, pixels.len(), file),
+            pixels.len()
+        );
+        libc::fclose(file);
+
+        for (backend, output) in [("parity", &parity_output), ("rustfft", &rustfft_output)] {
+            let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+                .env(
+                    "AUTODOC_DIR",
+                    concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+                )
+                .env("IMOD_RS_FFT_BACKEND", backend)
+                .args([
+                    "-input",
+                    input.to_str().unwrap(),
+                    "-output",
+                    output.to_str().unwrap(),
+                    "-binning",
+                    "2",
+                    "-ftreduce",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{backend}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+
+        let parity_c = CString::new(parity_output.as_os_str().as_encoded_bytes()).unwrap();
+        let rustfft_c = CString::new(rustfft_output.as_os_str().as_encoded_bytes()).unwrap();
+        let parity_file = libc::fopen(parity_c.as_ptr(), c"rb".as_ptr());
+        let rustfft_file = libc::fopen(rustfft_c.as_ptr(), c"rb".as_ptr());
+        let mut parity_header: MrcHeader = core::mem::zeroed();
+        let mut rustfft_header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_read(parity_file, &mut parity_header), 0);
+        assert_eq!(mrc_head_read(rustfft_file, &mut rustfft_header), 0);
+        assert_eq!(
+            (
+                rustfft_header.nx,
+                rustfft_header.ny,
+                rustfft_header.nz,
+                rustfft_header.mode
+            ),
+            (
+                parity_header.nx,
+                parity_header.ny,
+                parity_header.nz,
+                parity_header.mode
+            )
+        );
+        let count = (parity_header.nx * parity_header.ny * parity_header.nz) as usize;
+        let mut parity_pixels = vec![0_f32; count];
+        let mut rustfft_pixels = vec![0_f32; count];
+        libc::fseek(
+            parity_file,
+            parity_header.header_size as i64,
+            libc::SEEK_SET,
+        );
+        libc::fseek(
+            rustfft_file,
+            rustfft_header.header_size as i64,
+            libc::SEEK_SET,
+        );
+        assert_eq!(
+            libc::fread(parity_pixels.as_mut_ptr().cast(), 4, count, parity_file),
+            count
+        );
+        assert_eq!(
+            libc::fread(rustfft_pixels.as_mut_ptr().cast(), 4, count, rustfft_file),
+            count
+        );
+        libc::fclose(parity_file);
+        libc::fclose(rustfft_file);
+        let max_error = parity_pixels
+            .iter()
+            .zip(&rustfft_pixels)
+            .map(|(parity, rustfft)| (parity - rustfft).abs())
+            .fold(0_f32, f32::max);
+        let rms_error = (parity_pixels
+            .iter()
+            .zip(&rustfft_pixels)
+            .map(|(parity, rustfft)| (parity - rustfft).powi(2))
+            .sum::<f32>()
+            / count as f32)
+            .sqrt();
+        assert!(
+            max_error < 2.0e-3 && rms_error < 3.0e-4,
+            "max error {max_error}, RMS error {rms_error}"
+        );
+        std::fs::remove_file(input).unwrap();
+        std::fs::remove_file(parity_output).unwrap();
+        std::fs::remove_file(rustfft_output).unwrap();
+    }
+}
+
 #[test]
 fn binvol_accepts_source_permitted_noninteger_fourier_binning() {
     unsafe {

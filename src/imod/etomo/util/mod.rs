@@ -7,4 +7,6 @@ pub mod mrc_header;
 pub mod primative_tokenizer;
 pub mod regression_test_failed_error;
 pub mod stack_trace;
+pub mod unique_hashed_array;
+pub mod unique_key;
 pub mod utilities;

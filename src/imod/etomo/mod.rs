@@ -2,11 +2,15 @@
 
 pub mod arguments;
 pub mod base_manager;
+pub mod batch_run_tomo_manager;
 pub mod comscript;
+pub mod directive_editor_manager;
 pub mod etomo_director;
 pub mod join_manager;
 pub mod logic;
+pub mod manager_key;
 pub mod process;
+pub mod serial_sections_manager;
 pub mod storage;
 pub mod task_interface;
 pub mod r#type;

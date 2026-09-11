@@ -558,15 +558,27 @@ fn write_tiff_fixture(stamp: &str, hex: &str) -> std::path::PathBuf {
 
 /// Run `tif2mrc` on one fixture and return (stdout, MRC header, MRC data bytes).
 fn convert_one_fixture(stamp: &str, hex: &str, args: &[&str]) -> (String, MrcHeader, Vec<u8>) {
+    convert_one_fixture_with_environment(stamp, hex, args, &[])
+}
+
+/// As `convert_one_fixture`, with an isolated backend selection for its child
+/// process.  Do not mutate the test process environment: integration tests
+/// may run concurrently and the selected TIFF backend is process-global.
+fn convert_one_fixture_with_environment(
+    stamp: &str,
+    hex: &str,
+    args: &[&str],
+    environment: &[(&str, &str)],
+) -> (String, MrcHeader, Vec<u8>) {
     let tiff = write_tiff_fixture(stamp, hex);
     let output = std::env::temp_dir().join(format!("imod-rs-tif2mrc-{stamp}-out.mrc"));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
-        .args(args)
-        .arg(&tiff)
-        .arg(&output)
-        .output()
-        .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tif2mrc"));
+    command.args(args).arg(&tiff).arg(&output);
+    for &(key, value) in environment {
+        command.env(key, value);
+    }
+    let result = command.output().unwrap();
     assert!(
         result.status.success(),
         "stdout {} stderr {}",
@@ -786,6 +798,98 @@ fn tif2mrc_drops_the_alpha_sample_of_an_rgba_tiff() {
     assert_eq!(data, expected);
 }
 
+/// `t_graya16.tif`, written by tifffile 2026.3.3 from a uint16 `(2, 4, 2)`
+/// array with `photometric="minisblack"` and `extrasamples="unassalpha"`.
+/// This is deliberately grayscale plus alpha rather than RGBA: IMOD accepts
+/// it as two 16-bit grayscale sections (`iitif.c:493-498`), while 16-bit RGB
+/// and RGBA are rejected by its source type check.
+const GRAYA16: &str = concat!(
+    "49492a00080000000f00000104000100000004000000010104000100000002000000",
+    "02010300020000001000100003010300010000000100000006010300010000000100",
+    "00001101040001000000e00000001501030001000000020000001601040001000000",
+    "020000001701040001000000200000001a01050001000000c20000001b0105000100",
+    "0000ca0000001c010300010000000100000028010300010000000100000031010200",
+    "0c000000d20000005201030001000000020000000000000001000000010000000100",
+    "0000010000007469666666696c652e7079000000e80360ead00750c3b80b409ca00f",
+    "30758813204e70171027581b8813401f0000"
+);
+
+#[test]
+fn tif2mrc_libtiff_exposes_16_bit_grayscale_alpha_as_two_sections() {
+    let (stdout, header, data) = convert_one_fixture("graya16-parity", GRAYA16, &[]);
+    assert!(
+        stdout.contains("Converting 2 images size 4 x 2"),
+        "{stdout}"
+    );
+    assert_eq!((header.nx, header.ny, header.nz, header.mode), (4, 2, 2, 6));
+    let expected = [
+        5000_u16, 6000, 7000, 8000, 1000, 2000, 3000, 4000, 20000, 10000, 5000, 0, 60000, 50000,
+        40000, 30000,
+    ]
+    .into_iter()
+    .flat_map(u16::to_ne_bytes)
+    .collect::<Vec<_>>();
+    assert_eq!(data, expected);
+}
+
+/// `tiff` 0.11.3 exposes `ColorType::GrayA(16)` but rejects it in
+/// `Image::expand_chunk` before yielding pixels.  The opt-in reader must not
+/// silently drop the alpha channel, because that would differ from the two
+/// sections that IMOD/libtiff produces above.  Keep this explicit rejection
+/// until the dependency supports GrayA samples or a complete source-shaped
+/// replacement handles contiguous and planar strips/tiles/compression.
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn tif2mrc_rust_reader_explicitly_rejects_16_bit_grayscale_alpha() {
+    let tiff = write_tiff_fixture("graya16-rust-unsupported", GRAYA16);
+    let output = std::env::temp_dir().join("imod-rs-tif2mrc-graya16-rust-unsupported.mrc");
+    let _ = std::fs::remove_file(&output);
+    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        .env("IMOD_RS_TIFF_BACKEND", "rust")
+        .arg(&tiff)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("Rust TIFF reader could not open or decode requested TIFF"),
+        "stdout {} stderr {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!output.exists());
+    std::fs::remove_file(tiff).unwrap();
+}
+
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn tif2mrc_rust_backend_reads_planar_separate_rgb_tiff() {
+    let (stdout, header, data) = convert_one_fixture_with_environment(
+        "planar-rgb-rust",
+        RGB8_PLANAR_SEPARATE,
+        &[],
+        &[("IMOD_RS_TIFF_BACKEND", "rust")],
+    );
+    assert!(!stdout.contains("Min ="), "{stdout}");
+    assert_eq!(
+        (header.nx, header.ny, header.nz, header.mode),
+        (16, 12, 1, 16)
+    );
+    let mut expected = Vec::new();
+    for row in (0..12_usize).rev() {
+        for col in 0..16_usize {
+            let i = row * 16 + col;
+            expected.extend([
+                ((3 * i) % 256) as u8,
+                ((5 * i) % 256) as u8,
+                ((7 * i) % 256) as u8,
+            ]);
+        }
+    }
+    assert_eq!(data, expected);
+}
+
 #[test]
 fn tif2mrc_converts_rgba_tiff_to_grayscale_with_dash_g() {
     let (stdout, header, data) = convert_one_fixture("rgba-gray", RGBA8, &["-g"]);
@@ -832,6 +936,82 @@ fn tif2mrc_reads_palette_tiff_through_the_library_index_path() {
         }
     }
     assert_eq!(data, expected);
+}
+
+/// The Rust TIFF crate does not itself expand indexed palettes. IMOD's
+/// `tif2mrc` library path keeps the original indices instead, so compare that
+/// observable MRC result directly with the opt-in Rust reader.
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn tif2mrc_rust_reader_preserves_palette_indices_like_libtiff() {
+    let tiff = write_tiff_fixture("palette-rust-cross-read", PALETTE8);
+    let parity_output = std::env::temp_dir().join("imod-rs-tif2mrc-palette-rust-parity.mrc");
+    let rust_output = std::env::temp_dir().join("imod-rs-tif2mrc-palette-rust.mrc");
+    let _ = std::fs::remove_file(&parity_output);
+    let _ = std::fs::remove_file(&rust_output);
+    for (backend, output) in [("parity", &parity_output), ("rust", &rust_output)] {
+        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            .env("IMOD_RS_TIFF_BACKEND", backend)
+            .arg(&tiff)
+            .arg(output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{backend}: stdout {} stderr {}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    assert_eq!(
+        std::fs::read(&rust_output).unwrap(),
+        std::fs::read(&parity_output).unwrap(),
+        "the Rust reader must preserve the library reader's palette-index output"
+    );
+    std::fs::remove_file(tiff).unwrap();
+    std::fs::remove_file(parity_output).unwrap();
+    std::fs::remove_file(rust_output).unwrap();
+}
+
+/// IMOD's `iiTIFFCheck` specifically accepts true unsigned 4-bit grayscale
+/// (`iitif.c:420-426`) and its section reader expands each nibble to a byte.
+/// Cross-check the full executable result because the `tiff` crate intentionally
+/// leaves sub-byte samples packed in its U8 decoding buffer.
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn tif2mrc_rust_reader_expands_four_bit_grayscale_like_libtiff() {
+    for (name, fixture) in [
+        ("four-bit-msb", GRAY4_MINISBLACK),
+        ("four-bit-lsb", GRAY4_MINISBLACK_LSB),
+    ] {
+        let tiff = write_tiff_fixture(&format!("{name}-rust-cross-read"), fixture);
+        let parity_output = std::env::temp_dir().join(format!("imod-rs-tif2mrc-{name}-parity.mrc"));
+        let rust_output = std::env::temp_dir().join(format!("imod-rs-tif2mrc-{name}-rust.mrc"));
+        let _ = std::fs::remove_file(&parity_output);
+        let _ = std::fs::remove_file(&rust_output);
+        for (backend, output) in [("parity", &parity_output), ("rust", &rust_output)] {
+            let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+                .env("IMOD_RS_TIFF_BACKEND", backend)
+                .arg(&tiff)
+                .arg(output)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{name}/{backend}: stdout {} stderr {}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        assert_eq!(
+            std::fs::read(&rust_output).unwrap(),
+            std::fs::read(&parity_output).unwrap(),
+            "the Rust reader must expand {name} samples in the same fill order as libtiff"
+        );
+        std::fs::remove_file(tiff).unwrap();
+        std::fs::remove_file(parity_output).unwrap();
+        std::fs::remove_file(rust_output).unwrap();
+    }
 }
 
 #[test]
@@ -969,6 +1149,35 @@ fn tif2mrc_reads_a_bilevel_tiff_through_the_zero_pixel_size_legacy_path() {
     }
 }
 
+/// `iiTIFFCheck` does not admit 1-bit input (`iitif.c:417-426`), so this is
+/// deliberately outside the opt-in reader rather than a place to invent a
+/// byte-expansion result.  The default route retains the historic legacy
+/// fallback tested above; the explicitly selected Rust route must reject it,
+/// never silently re-enter that parity path.
+#[cfg(feature = "rust-tiff")]
+#[test]
+fn tif2mrc_rust_reader_explicitly_rejects_bilevel_tiff() {
+    let tiff = write_tiff_fixture("bilevel-rust-reject", BILEVEL1);
+    let output = std::env::temp_dir().join(format!(
+        "imod-rs-tif2mrc-bilevel-rust-reject-{}.mrc",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&output);
+    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        .env("IMOD_RS_TIFF_BACKEND", "rust")
+        .arg(&tiff)
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&result.stderr),
+        "ERROR: Rust-native backend - Rust TIFF reader could not open or decode requested TIFF\n"
+    );
+    assert!(!output.exists());
+    std::fs::remove_file(tiff).unwrap();
+}
+
 /// `t_gray8.tif`, produced as described in the module comment above.
 const GRAY8_MINISBLACK: &str = concat!(
     "49492a0008000000090000010400010000001000000001010400010000000c0000000201030001000000080000000301",
@@ -1076,6 +1285,49 @@ const USHORT16_PLAIN: &str = concat!(
     "27c078c1c9c21ac46bc5bcc60dc85ec9afca00cc51cda2cef3cf44d195d2e6d337d588d6d9d72ad97bdaccdb1ddd6ede",
     "bfdf10e161e2b2e303e554e6a5e7f6e847ea98ebe9ec3aee8befdcf02df27ef3cff420f671f7c2f813fa64fbb5fc06fe",
     "57ff"
+);
+
+/// Two uncompressed 8-pixel rows, packed MSB-first as 0..7 and 8..15.
+/// This is a classic TIFF IFD made with the same baseline tag layout libtiff
+/// accepts for its true 4-bit grayscale path.
+const GRAY4_MINISBLACK: &str = concat!(
+    "49492a00080000000900000104000100000008000000010104000100000002000000",
+    "02010300010000000400000003010300010000000100000006010300010000000100",
+    "000011010400010000007a0000001501030001000000010000001601040001000000",
+    "02000000170104000100000008000000000000000123456789abcdef"
+);
+
+/// The same pixels as `GRAY4_MINISBLACK`, with TIFF FillOrder 2 and each
+/// pair reversed in storage so the low nibble is the first sample.
+const GRAY4_MINISBLACK_LSB: &str = concat!(
+    "49492a00080000000a00000104000100000008000000010104000100000002000000",
+    "02010300010000000400000003010300010000000100000006010300010000000100",
+    "00000a01030001000000020000001101040001000000860000001501030001000000",
+    "01000000160104000100000002000000170104000100000008000000000000001032",
+    "547698badcfe"
+);
+
+/// `t_planar_rgb8.tif`, generated as an 8-bit RGB TIFF with Pillow 12.3 and
+/// converted by libtiff 4.5.1 `tiffcp -p separate -s`.  It contains the same
+/// 16x12 RGB sample formula documented above, but its three strip planes are
+/// deliberately separate rather than TIFF's ordinary RGBRGB... layout.
+const RGB8_PLANAR_SEPARATE: &str = concat!(
+    "49492a0048020000000306090c0f1215181b1e2124272a2d303336393c3f4245484b4e5154575a5d606366696c6f7275",
+    "787b7e8184878a8d909396999c9fa2a5a8abaeb1b4b7babdc0c3c6c9cccfd2d5d8dbdee1e4e7eaedf0f3f6f9fcff0205",
+    "080b0e1114171a1d202326292c2f3235383b3e4144474a4d505356595c5f6265686b6e7174777a7d808386898c8f9295",
+    "989b9ea1a4a7aaadb0b3b6b9bcbfc2c5c8cbced1d4d7dadde0e3e6e9eceff2f5f8fbfe0104070a0d101316191c1f2225",
+    "282b2e3134373a3d00050a0f14191e23282d32373c41464b50555a5f64696e73787d82878c91969ba0a5aaafb4b9bec3",
+    "c8cdd2d7dce1e6ebf0f5faff04090e13181d22272c31363b40454a4f54595e63686d72777c81868b90959a9fa4a9aeb3",
+    "b8bdc2c7ccd1d6dbe0e5eaeff4f9fe03080d12171c21262b30353a3f44494e53585d62676c71767b80858a8f94999ea3",
+    "a8adb2b7bcc1c6cbd0d5dadfe4e9eef3f8fd02070c11161b20252a2f34393e43484d52575c61666b70757a7f84898e93",
+    "989da2a7acb1b6bb00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a11",
+    "181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61",
+    "686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1",
+    "b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01",
+    "080f161d242b32390b0000010300010000001000000001010300010000000c0000000201030003000000d20200000301",
+    "030001000000010000000601030001000000020000001101040003000000de0200001201030001000000010000001501",
+    "0300010000000300000016010300010000000c0000001701030003000000d80200001c01030001000000020000000000",
+    "0000080008000800c000c000c00008000000c800000088010000"
 );
 
 /// `t_rgba8.tif`, produced as described in the module comment above.

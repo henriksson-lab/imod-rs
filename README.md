@@ -18,8 +18,12 @@ translation and verification rules are in [TODO.md](TODO.md).
 The command set is `newstack`, `header`, `binvol`, `alterheader`, `clip`,
 `tif2mrc`, `mrc2tif`, `imodinfo`, `imodjoin`, `wmod2imod`, `convertmod`,
 `trimvol`, `submfg`, and `batchruntomo`. Rust command names intentionally
-match IMOD's installed binary names. `etomo` remains an external batch-process
-boundary; GUI applications are out of scope. The default `mrc2tif` path uses
+match IMOD's installed binary names. The optional `etomo-gui` launcher renders
+the translated Slint presentation of eTomo's `MainFrame`; it is not yet the
+source-equivalent `EtomoDirector`/manager/process GUI path. Its source-mapped
+wiring order and the separate 3dmod, midas, and processchunks boundaries are
+tracked in [GUI_WIRING.md](GUI_WIRING.md). Build that experimental launcher
+with `cargo run --features gui --bin etomo-gui`. The default `mrc2tif` path uses
 the source-shaped Qt/libtiff boundaries. Default-off experimental pure-Rust
 TIFF, JPEG/PNG, and FFT paths are documented in
 [RUST_NATIVE_BACKENDS_PLAN.md](RUST_NATIVE_BACKENDS_PLAN.md); they are selected
