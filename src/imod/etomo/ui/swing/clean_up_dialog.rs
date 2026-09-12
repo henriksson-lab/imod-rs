@@ -8,11 +8,13 @@
 use super::{
     beveled_border::BeveledBorder,
     cleanup_panel::{CleanupApplicationManager, CleanupPanel},
+    context_menu::ContextMenu,
     context_popup::{ContextPopup, MouseEvent},
     etomo_frame::ActionEvent,
     multi_line_button::MultiLineButton,
     process_dialog::{ProcessDialog, ProcessDialogApplicationManager},
 };
+use crate::imod::etomo::process::process_series::ProcessSeries;
 use crate::imod::etomo::r#type::{axis_id::AxisID, axis_type::AxisType, dialog_type::DialogType};
 
 /// Source-visible state sent to Java `JLabel` at the Swing boundary.
@@ -40,7 +42,11 @@ pub trait CleanUpDialogApplicationManager:
 {
     fn archive_info(&self, axis_id: AxisID) -> Option<String>;
     fn done_clean_up(&mut self);
-    fn archive_original_stack(&mut self, process_series: Option<()>, dialog_type: DialogType);
+    fn archive_original_stack(
+        &mut self,
+        process_series: Option<ProcessSeries>,
+        dialog_type: DialogType,
+    );
     fn pack(&mut self, axis_id: AxisID);
 }
 
@@ -73,6 +79,7 @@ impl<'a> CleanUpDialog<'a> {
             DialogType::CleanUp,
             Box::new(|| {}),
         );
+        process_dialog.add_exit_buttons();
         process_dialog.btn_execute.set_text("Done");
         let mut btn_archive_stack = MultiLineButton::new();
         let mut archive_info_b = ArchiveInfoLabel::default();
@@ -105,6 +112,7 @@ impl<'a> CleanUpDialog<'a> {
             context_popup: None,
         };
         dialog.set_archive_fields(application_manager);
+        dialog.process_dialog.btn_advanced.set_visible(false);
         dialog.set_tool_tip_text();
         dialog
     }
@@ -188,6 +196,13 @@ impl<'a> CleanUpDialog<'a> {
     }
 }
 
+impl ContextMenu for CleanUpDialog<'_> {
+    /// Java `ContextMenu.popUpContextMenu(MouseEvent)`.
+    fn pop_up_context_menu(&mut self, mouse_event: MouseEvent) {
+        CleanUpDialog::pop_up_context_menu(self, mouse_event);
+    }
+}
+
 /// Java private `ButtonActionListener`; frontend event delivery remains a GUI
 /// boundary and delegates only to `CleanUpDialog.buttonAction`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -258,7 +273,7 @@ mod tests {
         fn done_clean_up(&mut self) {
             self.done.set(self.done.get() + 1);
         }
-        fn archive_original_stack(&mut self, _: Option<()>, _: DialogType) {
+        fn archive_original_stack(&mut self, _: Option<ProcessSeries>, _: DialogType) {
             self.archive_calls.set(self.archive_calls.get() + 1);
         }
         fn pack(&mut self, axis_id: AxisID) {
@@ -295,6 +310,8 @@ mod tests {
         assert!(dialog.archive_info_a.visible && dialog.archive_info_b.visible);
         assert!(!dialog.process_dialog.btn_advanced.expanded);
         assert!(!dialog.advanced_button_visible);
+        assert!(!dialog.process_dialog.btn_advanced.get_component().visible);
+        assert_eq!(dialog.process_dialog.root_panel.children.len(), 3);
         assert_eq!(
             dialog
                 .process_dialog
@@ -335,12 +352,46 @@ mod tests {
         assert_eq!(action_manager.done.get(), 1);
         assert!(!dialog.process_dialog.is_displayed());
         assert_eq!(action_manager.packed.get(), Some(AxisID::Only));
-        dialog.pop_up_context_menu(MouseEvent { x: 2, y: 3 });
+        dialog.pop_up_context_menu(MouseEvent {
+            x: 2,
+            y: 3,
+            right_mouse_button: false,
+        });
         let popup = dialog.context_popup.unwrap();
         assert_eq!(popup.anchor.as_deref(), Some("Cleaning Up"));
         assert_eq!(
             popup.guide_to_anchor.as_deref(),
             Some(super::super::context_popup::TOMO_GUIDE)
         );
+    }
+
+    #[test]
+    fn button_action_listener_delegates_the_archive_button_action() {
+        let mut action_manager = manager(AxisType::DualAxis);
+        let manager_ref: &'static Manager = Box::leak(Box::new(manager(AxisType::DualAxis)));
+        let mut dialog = CleanUpDialog::new(manager_ref);
+
+        ButtonActionListener::new().action_performed(
+            &mut dialog,
+            &ActionEvent::new("Archive Original Stacks"),
+            &mut action_manager,
+        );
+
+        assert_eq!(action_manager.archive_calls.get(), 1);
+    }
+
+    #[test]
+    fn context_menu_interface_forwards_the_exact_mouse_event() {
+        let manager_ref: &'static Manager = Box::leak(Box::new(manager(AxisType::SingleAxis)));
+        let mut dialog = CleanUpDialog::new(manager_ref);
+        let event = MouseEvent {
+            x: 13,
+            y: 17,
+            right_mouse_button: true,
+        };
+
+        ContextMenu::pop_up_context_menu(&mut dialog, event);
+
+        assert_eq!(dialog.context_popup.as_ref().unwrap().mouse_event, event);
     }
 }

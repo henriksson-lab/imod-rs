@@ -8,8 +8,8 @@
 
 use super::find_beads3d_panel::{
     FindBeads3dPanel, FindBeads3dPanelApplicationManager, FindBeads3dParam,
-    NewstackOrBlendmont3dFindParent,
 };
+use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
 
 /// Java `FindBeads3dDisplay`.
 pub trait FindBeads3dDisplay<P, M, T>

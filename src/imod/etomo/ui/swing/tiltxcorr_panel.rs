@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use super::check_box::CheckBox;
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
+use super::radio_text_field::RadioTextField;
 
 pub const PANEL_ID_CROSS_CORRELATION: &str = "Cross Correlation";
 pub const PANEL_ID_PATCH_TRACKING: &str = "Patch Tracking";
@@ -26,36 +27,6 @@ pub const ITERATE_CORRELATIONS_MAX: i32 = 20;
 pub enum PanelId {
     CrossCorrelation,
     PatchTracking,
-}
-
-/// The source-owned state of `RadioTextField` at this file's dependency boundary.
-#[derive(Clone, Debug)]
-pub struct RadioTextField {
-    pub selected: bool,
-    pub field: LabeledTextField,
-}
-impl RadioTextField {
-    pub fn new(field_type: FieldType, label: &str) -> Self {
-        Self {
-            selected: false,
-            field: LabeledTextField::new(field_type, label),
-        }
-    }
-    pub fn set_selected(&mut self, value: bool) {
-        self.selected = value;
-    }
-    pub fn is_selected(&self) -> bool {
-        self.selected
-    }
-    pub fn set_text(&mut self, value: &str) {
-        self.field.set_text(value);
-    }
-    pub fn get_text(&self, validation: bool) -> Result<String, FieldValidationFailedException> {
-        self.field.get_text_validated(validation)
-    }
-    pub fn set_enabled(&mut self, value: bool) {
-        self.field.set_enabled(value);
-    }
 }
 
 /// Java `CheckTextField` source-visible state used by `TiltxcorrPanel`.
@@ -551,17 +522,17 @@ impl TiltxcorrPanel {
             metadata.set_value(
                 "TrackOverlapOfPatchesXAndY",
                 self.axis_id,
-                self.rtf_overlap_of_patches_x_and_y.field.get_text(),
+                self.rtf_overlap_of_patches_x_and_y.get_text_unvalidated(),
             );
             metadata.set_value(
                 "TrackNumberOfPatchesXAndY",
                 self.axis_id,
-                self.rtf_number_of_patches_x_and_y.field.get_text(),
+                self.rtf_number_of_patches_x_and_y.get_text_unvalidated(),
             );
             metadata.set_value(
                 "LengthOfPieces",
                 self.axis_id,
-                self.rtf_length_of_pieces.field.get_text(),
+                self.rtf_length_of_pieces.get_text_unvalidated(),
             );
         }
     }

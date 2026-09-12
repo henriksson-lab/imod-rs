@@ -6,13 +6,18 @@
 //! rules) testable without making a second GUI toolkit part of eTomo.
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{LazyLock, Mutex};
 
 use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
 use crate::imod::etomo::util::utilities;
 
 use super::panel::Dimension;
+use super::{
+    file_chooser::{FileChooser, FileChooserReturnValue},
+    file_text_field_interface::FileFilter,
+};
 
 pub const ESTIMATED_MENU_HEIGHT: i32 = 60;
 pub const DEFAULT_TEXT_FIELD_HEIGHT: i32 = 17;
@@ -137,6 +142,16 @@ pub struct Container {
     pub maximum_size: Option<Dimension>,
 }
 
+/// Direct `UIParameters.getFileChooserDimension()` boundary.
+pub trait UiParametersBoundary {
+    fn get_file_chooser_dimension(&self) -> Dimension;
+}
+
+/// Direct `Toolkit.getDefaultToolkit().getScreenSize()` boundary.
+pub trait ToolkitBoundary {
+    fn get_screen_size(&self) -> Dimension;
+}
+
 static SCREEN_SIZE: LazyLock<Mutex<Option<Dimension>>> = LazyLock::new(|| Mutex::new(None));
 static FOLDER_BUTTON_DIMENSION: LazyLock<Mutex<Option<Dimension>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -148,16 +163,34 @@ impl UiUtilities {
     /// Java `chooseFile(Component, File, BrowsingDirectory, FileFilter)`.
     ///
     /// `JFileChooser.showOpenDialog` is a native Swing interaction.  The Rust
-    /// renderer supplies a selected file through its file-dialog boundary; no
-    /// selection is the Java `CANCEL_OPTION` path.
-    pub fn choose_file(
-        selected_file: Option<PathBuf>,
+    /// renderer supplies its result through `selected_file`; no selection is
+    /// the Java `CANCEL_OPTION` path.
+    pub fn choose_file<P: UiParametersBoundary>(
+        component: Option<&Component>,
+        dir: Option<&Path>,
         browsing_directory: Option<&dyn BrowsingDirectory>,
+        file_filter: Option<Rc<dyn FileFilter>>,
+        ui_parameters: &P,
+        selected_file: Option<&Path>,
     ) -> Option<PathBuf> {
-        if let (Some(directory), Some(file)) = (browsing_directory, selected_file.as_ref()) {
-            directory.set_browsing_dir(file.parent());
+        let mut chooser = FileChooser::new_with_manager(
+            None,
+            None,
+            dir.and_then(Path::to_str),
+            browsing_directory,
+        );
+        chooser.set_dialog_title(Some(" File Chooser"));
+        chooser.set_preferred_size(ui_parameters.get_file_chooser_dimension());
+        chooser.set_file_filter(file_filter);
+        let _ = component;
+        if chooser.show_open_dialog(selected_file) == FileChooserReturnValue::ApproveOption {
+            let file = chooser.get_selected_file();
+            if let (Some(directory), Some(file)) = (browsing_directory, file.as_ref()) {
+                directory.set_browsing_dir(file.parent());
+            }
+            return file;
         }
-        selected_file
+        None
     }
 
     /// Java `scaleByFontSize(Dimension)`.
@@ -535,15 +568,16 @@ impl UiUtilities {
         None
     }
 
-    /// Java `getScreenSize()`.  The renderer records Toolkit's screen size via
-    /// `set_screen_size`; subtracting the menu estimate and caching is source behavior.
-    pub fn get_screen_size() -> Option<Dimension> {
-        *SCREEN_SIZE.lock().unwrap()
-    }
-    /// Native Toolkit boundary used before Java `getScreenSize()` is called.
-    pub fn set_screen_size(mut screen_size: Dimension) {
-        screen_size.height -= ESTIMATED_MENU_HEIGHT;
-        *SCREEN_SIZE.lock().unwrap() = Some(screen_size);
+    /// Java `getScreenSize()`.
+    pub fn get_screen_size<T: ToolkitBoundary>(toolkit: &T) -> Dimension {
+        let mut screen_size = SCREEN_SIZE.lock().unwrap();
+        if let Some(value) = *screen_size {
+            return value;
+        }
+        let mut value = toolkit.get_screen_size();
+        value.height -= ESTIMATED_MENU_HEIGHT;
+        *screen_size = Some(value);
+        value
     }
 
     /// Java recursive `highlightJTextComponents(boolean, Container)`.
@@ -573,13 +607,13 @@ impl UiUtilities {
         }
     }
 
-    /// Java `printComponents(Container)`.  Java writes class names to stdout;
-    /// returning the exact traversal lines keeps that output boundary at the caller.
-    pub fn print_components(container: &Container) -> Vec<String> {
+    /// Java `printComponents(Container)`.
+    pub fn print_components(container: &Container) {
         if container.children.is_empty() {
-            return vec![String::new()];
+            println!();
+            return;
         }
-        let mut output = vec![":".into()];
+        println!(":");
         for component in &container.children {
             let class = match component {
                 Component::Button(_) => "class javax.swing.AbstractButton",
@@ -589,12 +623,13 @@ impl UiUtilities {
                 Component::RigidArea(_) => "class javax.swing.Box$Filler",
                 Component::Other(name) => name,
             };
-            output.push(class.into());
+            print!("{class}");
             if let Component::Container(container) = component {
-                output.extend(Self::print_components(container));
+                Self::print_components(container);
+            } else {
+                println!();
             }
         }
-        output
     }
 
     /// Java `divideColor(Color, int)`.
@@ -619,6 +654,31 @@ impl UiUtilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    struct Parameters;
+
+    impl UiParametersBoundary for Parameters {
+        fn get_file_chooser_dimension(&self) -> Dimension {
+            Dimension {
+                width: 300,
+                height: 200,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct Directory(RefCell<Option<PathBuf>>);
+
+    impl BrowsingDirectory for Directory {
+        fn get_browsing_dir(&self) -> Option<PathBuf> {
+            self.0.borrow().clone()
+        }
+
+        fn set_browsing_dir(&self, file: Option<&Path>) {
+            *self.0.borrow_mut() = file.map(Path::to_path_buf);
+        }
+    }
 
     #[test]
     fn source_font_scaling_has_its_two_different_threshold_policies() {
@@ -723,5 +783,33 @@ mod tests {
             })
         );
         assert_eq!(first.alignment_x, 0.5);
+    }
+
+    #[test]
+    fn choose_file_updates_browsing_directory_only_after_approval() {
+        let directory = Directory::default();
+        assert_eq!(
+            UiUtilities::choose_file(
+                None,
+                Some(Path::new("/tmp")),
+                Some(&directory),
+                None,
+                &Parameters,
+                Some(Path::new("/tmp/etomo/example.rec")),
+            ),
+            Some(PathBuf::from("/tmp/etomo/example.rec"))
+        );
+        assert_eq!(
+            directory.get_browsing_dir(),
+            Some(PathBuf::from("/tmp/etomo"))
+        );
+        assert_eq!(
+            UiUtilities::choose_file(None, None, Some(&directory), None, &Parameters, None),
+            None
+        );
+        assert_eq!(
+            directory.get_browsing_dir(),
+            Some(PathBuf::from("/tmp/etomo"))
+        );
     }
 }

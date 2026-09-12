@@ -13,7 +13,8 @@ use crate::imod::etomo::ui::field_type::FieldType;
 use super::check_box::CheckBox;
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::radio_button::RadioButton;
-use super::tiltxcorr_panel::{CheckTextField, RadioTextField};
+use super::radio_text_field::RadioTextField;
+use super::tiltxcorr_panel::CheckTextField;
 
 pub const MIN_LOCAL_PATCH_SIZE_LABEL: &str = "Min. local patch size or overlap factor (x,y): ";
 pub const MIN_LOCAL_PATCH_SIZE_OVERLAP_ONLY_LABEL: &str = "Overlap factor (x,y): ";
@@ -873,11 +874,11 @@ impl TiltalignPanel {
     }
     pub fn is_valid(&mut self) -> bool {
         if self.rtf_fixed_beam_tilt.is_selected()
-            && self.rtf_fixed_beam_tilt.field.get_text().is_empty()
+            && self.rtf_fixed_beam_tilt.get_text_unvalidated().is_empty()
         {
             self.last_validation_message = Some(format!(
                 "{} can not be empty when it is selected.",
-                self.rtf_fixed_beam_tilt.field.label
+                self.rtf_fixed_beam_tilt.get_label()
             ));
             return false;
         }
@@ -1049,7 +1050,7 @@ mod tests {
         panel.cb_local_alignments.set_selected(true);
         panel.enable_fields();
         assert!(panel.local_tab_enabled);
-        assert!(panel.rtf_target_patch_size_x_and_y.field.is_enabled());
+        assert!(panel.rtf_target_patch_size_x_and_y.text_field.is_enabled());
     }
     #[test]
     fn fixed_beam_tilt_requires_value() {

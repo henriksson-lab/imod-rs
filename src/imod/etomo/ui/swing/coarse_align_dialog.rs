@@ -8,6 +8,7 @@
 use super::{
     check_box::CheckBox,
     context_popup::{ContextPopup, GraphTask, MouseEvent},
+    fiducialess_params::FiducialessParams,
     labeled_text_field::{FieldValidationFailedException, LabeledTextField},
     multi_line_button::MultiLineButton,
     spinner::Spinner,
@@ -367,6 +368,19 @@ pub trait CoarseAlignMidasParam {
     fn set_binning(&mut self, binning: i32);
 }
 
+impl<P: CoarseAlignPrenewstPanel> FiducialessParams for CoarseAlignDialog<P> {
+    fn is_fiducialess(&self) -> bool {
+        Self::is_fiducialess(self)
+    }
+
+    fn get_image_rotation(
+        &self,
+        do_validation: bool,
+    ) -> Result<String, FieldValidationFailedException> {
+        Self::get_image_rotation(self, do_validation)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,5 +499,21 @@ mod tests {
         assert!(!dialog.displayed);
         assert!(dialog.pnl_prenewst.done);
         assert_eq!(manager.calls, ["done"]);
+    }
+
+    #[test]
+    fn implements_canonical_fiducialess_params() {
+        let manager = Manager {
+            montage: false,
+            dc: true,
+            file: false,
+            calls: vec![],
+        };
+        let mut dialog = dialog(&manager);
+        dialog.set_fiducialess_alignment(true);
+        dialog.set_image_rotation("4.25");
+        let params: &dyn FiducialessParams = &dialog;
+        assert!(params.is_fiducialess());
+        assert_eq!(params.get_image_rotation(true).unwrap(), "4.25");
     }
 }

@@ -8,6 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
+use super::batch_run_tomo_table::{
+    DATASET_LABEL1, DATASET_LABEL2, LOG_LABEL1, LOG_LABEL2, REC_LABEL1, REC_LABEL2,
+};
+use super::minibutton_cell::MinibuttonCell;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 
@@ -143,14 +147,14 @@ pub struct BatchRunTomoRow {
     pub fc_ending_step: BatchRunTomoRowCell,
     pub fc_cur_axis_letter: BatchRunTomoRowCell,
     pub cbc_run: BatchRunTomoRowCell,
-    pub mbc_open_dataset: BatchRunTomoRowCell,
-    pub mbc_image_stack_a: BatchRunTomoRowCell,
-    pub mbc_image_stack_b: BatchRunTomoRowCell,
+    pub mbc_open_dataset: MinibuttonCell,
+    pub mbc_image_stack_a: MinibuttonCell,
+    pub mbc_image_stack_b: MinibuttonCell,
     pub hc_number: BatchRunTomoRowCell,
     pub bc_edit_dataset: BatchRunTomoRowCell,
-    pub mbc_tomogram: BatchRunTomoRowCell,
-    pub mbc_proj_log: BatchRunTomoRowCell,
-    pub mbc_brt_log: BatchRunTomoRowCell,
+    pub mbc_tomogram: MinibuttonCell,
+    pub mbc_proj_log: MinibuttonCell,
+    pub mbc_brt_log: MinibuttonCell,
     pub first_steps: [bool; STEP_PAIRS],
     pub stack_id: Option<String>,
     pub stack: Option<PathBuf>,
@@ -204,14 +208,26 @@ impl BatchRunTomoRow {
             fc_ending_step: Default::default(),
             fc_cur_axis_letter: Default::default(),
             cbc_run: Default::default(),
-            mbc_open_dataset: Default::default(),
-            mbc_image_stack_a: Default::default(),
-            mbc_image_stack_b: Default::default(),
+            mbc_open_dataset: MinibuttonCell::get_named_etomo_instance(
+                Some(DATASET_LABEL1),
+                Some(DATASET_LABEL2),
+            ),
+            mbc_image_stack_a: MinibuttonCell::get_run_3dmod_instance(),
+            mbc_image_stack_b: MinibuttonCell::get_run_3dmod_instance(),
             hc_number: Default::default(),
             bc_edit_dataset: Default::default(),
-            mbc_tomogram: Default::default(),
-            mbc_proj_log: Default::default(),
-            mbc_brt_log: Default::default(),
+            mbc_tomogram: MinibuttonCell::get_named_run_3dmod_instance(
+                Some(REC_LABEL1),
+                Some(REC_LABEL2),
+            ),
+            mbc_proj_log: MinibuttonCell::get_named_etomo_log_instance(
+                Some("Proj"),
+                Some(LOG_LABEL2),
+            ),
+            mbc_brt_log: MinibuttonCell::get_named_brt_log_instance(
+                Some(LOG_LABEL1),
+                Some(LOG_LABEL2),
+            ),
             first_steps: [false; STEP_PAIRS],
             stack_id,
             stack,
@@ -243,10 +259,10 @@ impl BatchRunTomoRow {
             value.cbc_dual.selected = true;
         }
         if new_row {
-            value.mbc_open_dataset.editable = false;
-            value.mbc_tomogram.editable = false;
-            value.mbc_proj_log.editable = false;
-            value.mbc_brt_log.editable = false;
+            value.mbc_open_dataset.set_editable(false);
+            value.mbc_tomogram.set_editable(false);
+            value.mbc_proj_log.set_editable(false);
+            value.mbc_brt_log.set_editable(false);
         }
         value.set_log();
         value.set_tooltips();
@@ -261,11 +277,15 @@ impl BatchRunTomoRow {
         axis_type: Option<AxisType>,
         new_row: bool,
     ) -> Self {
-        Self::new(number, Some(stack), Some(stack_id), axis_type, new_row)
+        let mut value = Self::new(number, Some(stack), Some(stack_id), axis_type, new_row);
+        value.add_listeners();
+        value
     }
     /// Java `getDefaultsInstance`.
     pub fn get_defaults_instance() -> Self {
-        Self::new(-1, None, None, None, false)
+        let mut value = Self::new(-1, None, None, None, false);
+        value.add_listeners();
+        value
     }
     /// Java `getSeriesWatcherInstance`.
     pub fn get_series_watcher_instance(
@@ -275,10 +295,35 @@ impl BatchRunTomoRow {
         surfaces_to_analyze2: Option<bool>,
     ) -> Self {
         let mut row = Self::new(number, None, Some(stack_id), Some(axis_type), true);
+        row.add_listeners();
         if let Some(selected) = surfaces_to_analyze2 {
             row.cbc_surfaces_to_analyze2.selected = selected;
         }
         row
+    }
+
+    /// Java private `addListeners`; non-Mini controls remain their respective
+    /// translated widget boundaries, while each Minibutton receives the same
+    /// unique command and action listener setup here.
+    fn add_listeners(&mut self) {
+        self.mbc_image_stack_a
+            .set_action_command(Some(&self.mbc_image_stack_a.get_unique_action_command()));
+        self.mbc_image_stack_b
+            .set_action_command(Some(&self.mbc_image_stack_b.get_unique_action_command()));
+        self.mbc_open_dataset
+            .set_action_command(Some(&self.mbc_open_dataset.get_unique_action_command()));
+        self.mbc_tomogram
+            .set_action_command(Some(&self.mbc_tomogram.get_unique_action_command()));
+        self.mbc_proj_log
+            .set_action_command(Some(&self.mbc_proj_log.get_unique_action_command()));
+        self.mbc_brt_log
+            .set_action_command(Some(&self.mbc_brt_log.get_unique_action_command()));
+        self.mbc_image_stack_a.add_action_listener();
+        self.mbc_image_stack_b.add_action_listener();
+        self.mbc_open_dataset.add_action_listener();
+        self.mbc_tomogram.add_action_listener();
+        self.mbc_proj_log.add_action_listener();
+        self.mbc_brt_log.add_action_listener();
     }
     /// Java `copy(BatchRunTomoRow)`.
     pub fn copy(&mut self, previous: Option<&Self>) {
@@ -402,8 +447,8 @@ impl BatchRunTomoRow {
     }
     pub fn remove(&mut self) {
         self.cbc_run.enabled = false;
-        self.mbc_open_dataset.enabled = false;
-        self.mbc_tomogram.enabled = false;
+        self.mbc_open_dataset.set_enabled(false);
+        self.mbc_tomogram.set_enabled(false);
     }
     pub fn delete(&mut self) {
         self.delete_dataset();
@@ -423,7 +468,7 @@ impl BatchRunTomoRow {
     pub fn update_display(&mut self, run_type: Option<RunType>, validate_only: Option<bool>) {
         let dual = self.is_dual();
         self.fc_bskip.enabled = dual;
-        self.mbc_image_stack_b.enabled = dual;
+        self.mbc_image_stack_b.set_enabled(dual);
         self.cbc_run.editable =
             !self.table_series_watcher_on && !self.row_state.processchunk_resume_enabled;
         self.fc_dataset_state.value = self
@@ -446,36 +491,39 @@ impl BatchRunTomoRow {
             && validate_only == Some(false)
             && !directory_set
         {
-            if self.mbc_image_stack_a.editable {
-                self.mbc_image_stack_a.editable = false;
+            if self.mbc_image_stack_a.is_editable() {
+                self.mbc_image_stack_a.set_editable(false);
                 self.actions
                     .close_stack
                     .push(if dual { AxisID::First } else { AxisID::Only });
             }
-            if dual && self.mbc_image_stack_b.editable {
-                self.mbc_image_stack_b.editable = false;
+            if dual && self.mbc_image_stack_b.is_editable() {
+                self.mbc_image_stack_b.set_editable(false);
                 self.actions.close_stack.push(AxisID::Second);
             }
         } else {
-            self.mbc_image_stack_a.editable = true;
-            self.mbc_image_stack_b.editable = true;
+            self.mbc_image_stack_a.set_editable(true);
+            self.mbc_image_stack_b.set_editable(true);
         }
-        self.mbc_open_dataset.editable = directory_set;
+        self.mbc_open_dataset.set_editable(directory_set);
         let running_without_directory =
             !directory_set && self.dataset_state == Some(BatchRunTomoDatasetState::Running);
-        self.mbc_proj_log.editable = !running_without_directory && directory_set;
-        self.mbc_brt_log.editable = self.mbc_proj_log.editable;
-        self.mbc_tomogram.editable = self.row_state.cur_recon_step.as_deref()
-            == Some("RECONSTRUCTION")
-            && (!dual || self.tomogram_done)
-            || matches!(
-                self.row_state.cur_recon_step.as_deref(),
-                Some("VOLCOMBINE") | Some("TRIMVOL")
-            );
+        self.mbc_proj_log
+            .set_editable(!running_without_directory && directory_set);
+        self.mbc_brt_log
+            .set_editable(self.mbc_proj_log.is_editable());
+        self.mbc_tomogram.set_editable(
+            self.row_state.cur_recon_step.as_deref() == Some("RECONSTRUCTION")
+                && (!dual || self.tomogram_done)
+                || matches!(
+                    self.row_state.cur_recon_step.as_deref(),
+                    Some("VOLCOMBINE") | Some("TRIMVOL")
+                ),
+        );
+        self.mbc_open_dataset.set_locked(self.row_state.active);
+        self.mbc_tomogram.set_locked(self.row_state.active);
         for cell in [
             &mut self.cbc_dual,
-            &mut self.mbc_open_dataset,
-            &mut self.mbc_tomogram,
             &mut self.cbc_run,
             &mut self.cbc_boundary_model,
             &mut self.cbc_montage,
@@ -554,10 +602,10 @@ impl BatchRunTomoRow {
                 self.update_display(None, None);
             }
             BatchRunTomoRowEvent::Setup => {
-                self.mbc_open_dataset.enabled = true;
-                self.mbc_tomogram.enabled = true;
-                self.mbc_proj_log.enabled = true;
-                self.mbc_brt_log.enabled = true;
+                self.mbc_open_dataset.set_enabled(true);
+                self.mbc_tomogram.set_enabled(true);
+                self.mbc_proj_log.set_enabled(true);
+                self.mbc_brt_log.set_enabled(true);
             }
             BatchRunTomoRowEvent::Reconstruction if !self.is_dual() => self.tomogram_done = true,
             BatchRunTomoRowEvent::Volcombine => {
@@ -857,7 +905,7 @@ mod tests {
         );
         assert!(row.is_dual());
         assert!(row.is_run());
-        assert!(!row.mbc_open_dataset.editable);
+        assert!(!row.mbc_open_dataset.is_editable());
         assert_eq!(row.hc_number.value, "3");
     }
     #[test]

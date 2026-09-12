@@ -97,6 +97,41 @@ pub trait IsosurfaceNativeBoundary {
     fn redraw(&mut self);
     fn save_object(&mut self, sort_surfaces: bool);
     fn fill_cache(&mut self);
+    /// `ImodPrefs->getRoundedStyle()`.
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    /// `DialogFrame::changeEvent`.
+    fn dialog_change_event(&mut self) {}
+    /// `ivwCheckAndSetMacMenu`.
+    fn check_and_set_mac_menu(&mut self) {}
+    /// `diaSetButtonWidth` for a source-named dialog button.
+    fn set_button_width(&mut self, _button: &str, _rounded: bool, _factor: f32, _label: &str) {}
+    /// `diaLimitEditStretch` for the paint-object list edit/layout.
+    fn limit_edit_stretch(&mut self, _edit: &str, _layout: &str, _stretch: i32) {}
+    /// `imodvDialogManager.remove(sTopWin)`, `iisData.dia = NULL`, and
+    /// `sTopWin = NULL`.
+    fn remove_isosurface_dialog(&mut self) {}
+    /// `QCloseEvent::accept`.
+    fn accept_close_event(&mut self) {}
+    /// `ivwFreeExtraObject`.
+    fn free_extra_object(&mut self, _object_number: i32) {}
+    /// `imodvObjedNewView`.
+    fn object_editor_new_view(&mut self) {}
+    /// `iisData.a->drawExtraOnly = 0`.
+    fn enable_user_model_drawing(&mut self) {}
+    /// `imodDraw(mVi, IMOD_DRAW_MOD)`.
+    fn draw_model(&mut self) {}
+    /// `imodMeshDelete(mOrigMesh)` and, when present,
+    /// `imodMeshDelete(mFilteredMesh)` plus `delete mSurfPieces`.
+    fn release_isosurface_meshes(&mut self) {}
+}
+
+/// The portion of `QEvent` relevant to `ImodvIsosurface::topChangeEvent`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IsosurfaceChangeEvent {
+    Other,
+    FontChange,
 }
 
 /// `setCoordLimits`.
@@ -611,11 +646,40 @@ impl ImodvIsosurface {
         (best, other)
     }
     pub fn show_defined_area(&mut self, _x0: f32, _x1: f32, _y0: f32, _y1: f32, _draw: bool) {}
-    pub fn top_change_event(&mut self) {}
-    /// `ImodvIsosurface::setFontDependentWidths`; Qt font/layout adjustment is
-    /// performed by the native dialog boundary.
-    pub fn set_font_dependent_widths(&mut self) {}
-    pub fn top_close_event(&mut self) {}
+    /// `ImodvIsosurface::topChangeEvent`.
+    pub fn top_change_event(
+        &mut self,
+        event: IsosurfaceChangeEvent,
+        native: &mut dyn IsosurfaceNativeBoundary,
+    ) {
+        self.m_rounded_style = native.rounded_style();
+        native.dialog_change_event();
+        native.check_and_set_mac_menu();
+        if event == IsosurfaceChangeEvent::FontChange {
+            self.set_font_dependent_widths(native);
+        }
+    }
+    /// `ImodvIsosurface::setFontDependentWidths`.
+    pub fn set_font_dependent_widths(&mut self, native: &mut dyn IsosurfaceNativeBoundary) {
+        native.set_button_width("use_rubber", self.m_rounded_style, 1.2, "Rubberband");
+        native.set_button_width("size_contours", self.m_rounded_style, 1.2, "Contour");
+        native.limit_edit_stretch("paint_list_edit", "paint_layout", 4);
+    }
+    /// `ImodvIsosurface::topCloseEvent`.
+    pub fn top_close_event(&mut self, native: &mut dyn IsosurfaceNativeBoundary) {
+        native.remove_isosurface_dialog();
+        self.m_top_window_open = false;
+        native.accept_close_event();
+        native.free_extra_object(self.m_box_obj_num);
+        native.free_extra_object(self.m_extra_obj_num);
+        native.object_editor_new_view();
+        native.enable_user_model_drawing();
+        native.draw_model();
+        self.m_volume.clear();
+        self.m_true_bin_vol.clear();
+        self.m_paint_vol.clear();
+        native.release_isosurface_meshes();
+    }
     pub fn key_press_event(&mut self, key: i32, hot_key: i32) {
         if key == hot_key {
             self.m_ctrl_pressed = true
@@ -687,6 +751,81 @@ mod tests {
         fn save_object(&mut self, _: bool) {}
         fn fill_cache(&mut self) {}
     }
+    #[derive(Default)]
+    struct EventBoundary {
+        rounded: bool,
+        calls: Vec<String>,
+    }
+    impl EventBoundary {
+        fn call(&mut self, value: impl Into<String>) {
+            self.calls.push(value.into());
+        }
+    }
+    impl IsosurfaceNativeBoundary for EventBoundary {
+        fn open_dialog(&mut self) -> bool {
+            true
+        }
+        fn raise_dialog(&mut self) {}
+        fn close_dialog(&mut self) {}
+        fn image_size(&self) -> [i32; 3] {
+            [0; 3]
+        }
+        fn cursor_xyz(&self) -> [i32; 3] {
+            [0; 3]
+        }
+        fn time_index(&self) -> i32 {
+            0
+        }
+        fn time_count(&self) -> i32 {
+            0
+        }
+        fn voxel(&self, _: i32, _: i32, _: i32) -> u8 {
+            0
+        }
+        fn set_cursor_xyz(&mut self, _: [i32; 3]) {}
+        fn set_bounding_box(&mut self, _: [i32; 3], _: [i32; 3]) {}
+        fn set_view_center(&mut self, _: [i32; 3]) {}
+        fn set_iso_mesh(&mut self, _: &[u8], _: [i32; 3], _: f32, _: i32) {}
+        fn redraw(&mut self) {}
+        fn save_object(&mut self, _: bool) {}
+        fn fill_cache(&mut self) {}
+        fn rounded_style(&self) -> bool {
+            self.rounded
+        }
+        fn dialog_change_event(&mut self) {
+            self.call("base_change")
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.call("mac_menu")
+        }
+        fn set_button_width(&mut self, button: &str, rounded: bool, factor: f32, label: &str) {
+            self.call(format!("width:{button}:{rounded}:{factor}:{label}"))
+        }
+        fn limit_edit_stretch(&mut self, edit: &str, layout: &str, stretch: i32) {
+            self.call(format!("stretch:{edit}:{layout}:{stretch}"))
+        }
+        fn remove_isosurface_dialog(&mut self) {
+            self.call("remove_dialog")
+        }
+        fn accept_close_event(&mut self) {
+            self.call("accept_close")
+        }
+        fn free_extra_object(&mut self, object: i32) {
+            self.call(format!("free:{object}"))
+        }
+        fn object_editor_new_view(&mut self) {
+            self.call("new_view")
+        }
+        fn enable_user_model_drawing(&mut self) {
+            self.call("enable_model")
+        }
+        fn draw_model(&mut self) {
+            self.call("draw_model")
+        }
+        fn release_isosurface_meshes(&mut self) {
+            self.call("release_meshes")
+        }
+    }
     #[test]
     fn binned_volume_is_source_average() {
         let mut i = ImodvIsosurface::default();
@@ -710,5 +849,45 @@ mod tests {
         i.m_vol_max = 255;
         i.remove_outer_pixels();
         assert!(i.m_bin_volume.iter().all(|&v| v < 200));
+    }
+    #[test]
+    fn lifecycle_events_follow_source_order_and_release_owned_buffers() {
+        let mut iso = ImodvIsosurface::default();
+        iso.m_box_obj_num = 3;
+        iso.m_extra_obj_num = 7;
+        iso.m_volume = vec![1];
+        iso.m_true_bin_vol = vec![2];
+        iso.m_paint_vol = vec![3];
+        let mut native = EventBoundary {
+            rounded: true,
+            ..Default::default()
+        };
+
+        iso.top_change_event(IsosurfaceChangeEvent::FontChange, &mut native);
+        iso.top_close_event(&mut native);
+
+        assert!(iso.m_rounded_style);
+        assert!(!iso.m_top_window_open);
+        assert!(iso.m_volume.is_empty());
+        assert!(iso.m_true_bin_vol.is_empty());
+        assert!(iso.m_paint_vol.is_empty());
+        assert_eq!(
+            native.calls,
+            [
+                "base_change",
+                "mac_menu",
+                "width:use_rubber:true:1.2:Rubberband",
+                "width:size_contours:true:1.2:Contour",
+                "stretch:paint_list_edit:paint_layout:4",
+                "remove_dialog",
+                "accept_close",
+                "free:3",
+                "free:7",
+                "new_view",
+                "enable_model",
+                "draw_model",
+                "release_meshes",
+            ]
+        );
     }
 }

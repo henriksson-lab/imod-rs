@@ -957,7 +957,14 @@ pub fn newstack() {
             if ii_file.is_null() {
                 exit_error("Opening input file");
             }
-            let header = std::ptr::read((*ii_file).header.cast::<MrcHeader>());
+            // The unit's MRC header, not `ImodImageFile.header`.  For MRC,
+            // RAW, HDF and shared-memory files `iiuOpen` copies the pointer
+            // (`unit_fileio.c:269`) and the two are the same, but for every
+            // other type it allocates its own `MrcHeader` and fills it through
+            // `iiFillMrcHeader` (`unit_fileio.c:256-265`) -- a TIFF file's
+            // `ImodImageFile.header` is the libtiff `TIFF *`
+            // (`iitif.c:204, 687`), so reading it as an `MrcHeader` is garbage.
+            let header = std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
             // `newstack.f90:449-464`: retain the first input file's volume
             // structure in the output if the output is already HDF, and adopt
             // its chunk sizes unless the user entered them.
@@ -1857,7 +1864,10 @@ pub fn newstack() {
                     if scan_file.is_null() {
                         exit_error("Opening input file");
                     }
-                    let scan_header = std::ptr::read((*scan_file).header.cast::<MrcHeader>());
+                    // `unit_fileio.c:256-265`: the unit's own `MrcHeader`,
+                    // which is the only one a non-MRC input has.
+                    let scan_header =
+                        std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
                     scan_nx = scan_header.nx;
                     scan_ny = scan_header.ny;
                     // Source `mode` after `call irdhdr(1, ...)`
@@ -3004,7 +3014,8 @@ pub fn newstack() {
                     // below -- the output header it transfers, the rescaling
                     // decision and the section reads -- uses this file's
                     // header and not the first input file's.
-                    header = std::ptr::read((*active_input_file).header.cast::<MrcHeader>());
+                    // `unit_fileio.c:256-265`: the unit's own `MrcHeader`.
+                    header = std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
                     // `newstack.f90:1570-1571`: the binned size to read is
                     // this file's, so inputs of different sizes each read
                     // their own extent into the common output size.
@@ -3500,7 +3511,10 @@ pub fn newstack() {
                         );
                     }
                 }
-                let chunk_header = (*chunk_file).header.cast::<MrcHeader>();
+                // `unit_fileio.c:256-269`: the output unit's own `MrcHeader`,
+                // which for a non-MRC output is not `ImodImageFile.header`.
+                let chunk_header =
+                    iiu_mrc_header(2, c"iiuTransHeader".as_ptr(), iiu_get_exit_on_error(), 2);
                 // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
                 // the destination `fp` around the whole-header copy, so the
                 // output header keeps its own stream and not the input's.
@@ -4171,7 +4185,9 @@ pub fn newstack() {
                     active_input_file = iiu_get_ii_file(1);
                     if !active_input_file.is_null() {
                         active_input_index = input_index;
-                        header = std::ptr::read((*active_input_file).header.cast::<MrcHeader>());
+                        // `unit_fileio.c:256-265`: the unit's own `MrcHeader`.
+                        header =
+                            std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
                         // `newstack.f90:1570-1571`: the binned size to read is
                         // this file's, so inputs of different sizes each read
                         // their own extent into the common output size.

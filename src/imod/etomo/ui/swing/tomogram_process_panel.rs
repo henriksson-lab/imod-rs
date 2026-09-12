@@ -9,6 +9,8 @@
 use super::axis_process_panel::AxisProcessPanel;
 use super::axis_progress_panel::AxisProgressPanel;
 use super::process_control_panel::ProcessControlPanel;
+use super::simple_button::SimpleButton;
+use super::ui_utilities::UiUtilities;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::process::process_state::ProcessState;
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -43,15 +45,6 @@ pub trait TomogramProcessPanelApplicationManager {
     fn open_clean_up_dialog(&mut self);
 }
 
-/// Java `SimpleButton` fields, including their Swing-visible state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SimpleButtonState {
-    pub text: String,
-    pub tool_tip_text: Option<String>,
-    pub preferred_width_label: Option<String>,
-    pub action_listener_present: bool,
-}
-
 /// Java `JPanel axisButtonPanel` fields used by this unit.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AxisButtonPanelState {
@@ -74,8 +67,8 @@ pub struct TomogramProcessPanel {
     pub proc_ctl_tomogram_combination: ProcessControlPanel,
     pub proc_ctl_post_processing: ProcessControlPanel,
     pub proc_ctl_clean_up: ProcessControlPanel,
-    pub axis_button_1: SimpleButtonState,
-    pub axis_button_2: SimpleButtonState,
+    pub axis_button_1: SimpleButton,
+    pub axis_button_2: SimpleButton,
     pub axis_button_panel: AxisButtonPanelState,
     pub both_axis_tooltip: Option<String>,
     pub axis_a_tooltip: Option<String>,
@@ -141,8 +134,8 @@ impl TomogramProcessPanel {
                 compact_display,
             ),
             proc_ctl_clean_up: ProcessControlPanel::new(DialogType::CleanUp, compact_display),
-            axis_button_1: SimpleButtonState::default(),
-            axis_button_2: SimpleButtonState::default(),
+            axis_button_1: SimpleButton::new(),
+            axis_button_2: SimpleButton::new(),
             axis_button_panel: AxisButtonPanelState::default(),
             both_axis_tooltip: None,
             axis_a_tooltip: None,
@@ -335,19 +328,30 @@ impl TomogramProcessPanel {
         self.axis_button_panel.background = Some(color);
     }
     /// Java private `setButton(SimpleButton, String, String)`.
-    pub fn set_button(button: &mut SimpleButtonState, label: &str, tooltip: Option<String>) {
-        button.text = label.into();
-        button.tool_tip_text = tooltip;
+    pub fn set_button(button: &mut SimpleButton, label: &str, tooltip: Option<String>) {
+        button.set_text(Some(label));
+        button.button.tooltip = tooltip;
     }
 
     /// Override `createProcessControlPanel()`.
     pub fn create_process_control_panel(&mut self, compact_display: bool) {
         self.axis_process_panel.create_process_control_panel();
-        let widest_label = AXIS_B_LABEL;
-        self.axis_button_1.text = widest_label.into();
-        self.axis_button_1.preferred_width_label = Some(widest_label.into());
-        self.axis_button_2.text = widest_label.into();
-        self.axis_button_2.preferred_width_label = Some(widest_label.into());
+        let labels = [
+            AXIS_B_LABEL.to_owned(),
+            AXIS_A_LABEL.to_owned(),
+            BOTH_AXIS_LABEL.to_owned(),
+        ];
+        let index = UiUtilities::get_max_width_index(
+            &self.axis_button_1.button.abstract_button,
+            Some(&labels),
+        );
+        let widest_label = (index != -1)
+            .then(|| labels[index as usize].as_str())
+            .unwrap_or(AXIS_B_LABEL);
+        self.axis_button_1.set_text(Some(widest_label));
+        self.axis_button_1.set_to_preferred_size();
+        self.axis_button_2.set_text(Some(widest_label));
+        self.axis_button_2.set_to_preferred_size();
         self.set_tool_tip_text();
         self.process_select_component_order
             .push("rigid:x0_y5".into());
@@ -355,8 +359,8 @@ impl TomogramProcessPanel {
         if self.axis_process_panel.axis_id == AxisID::Only {
             self.show_axis_only();
         } else {
-            self.axis_button_1.action_listener_present = true;
-            self.axis_button_2.action_listener_present = true;
+            self.axis_button_1.button.action_listener_count += 1;
+            self.axis_button_2.button.action_listener_count += 1;
             self.axis_button_panel
                 .component_order
                 .push("axisButton1".into());
@@ -603,9 +607,9 @@ mod tests {
             p.process_select_component_order
                 .contains(&"procCtlTomogramCombination".into())
         );
-        assert_eq!(p.axis_button_1.text, AXIS_B_LABEL);
+        assert_eq!(p.axis_button_1.button.text.as_deref(), Some(AXIS_B_LABEL));
         p.show_both_axis();
-        assert_eq!(p.axis_button_1.text, AXIS_A_LABEL);
+        assert_eq!(p.axis_button_1.button.text.as_deref(), Some(AXIS_A_LABEL));
     }
     #[test]
     fn second_axis_hides_buttons_when_both_axes_show() {
@@ -622,8 +626,8 @@ mod tests {
         let mut p = panel(AxisID::Only);
         let command = p.proc_ctl_fine_alignment.get_command();
         p.select_button(&command);
-        assert!(p.proc_ctl_fine_alignment.button_selected);
-        assert!(!p.proc_ctl_pre_proc.button_selected);
+        assert!(p.proc_ctl_fine_alignment.button_run.button.selected);
+        assert!(!p.proc_ctl_pre_proc.button_run.button.selected);
     }
     #[test]
     fn process_dispatch_saves_then_opens_and_moves_non_b_axis_frame() {

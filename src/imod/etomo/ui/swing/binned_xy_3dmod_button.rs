@@ -7,63 +7,8 @@
 #![allow(dead_code)]
 
 use super::labeled_spinner::LabeledSpinner;
-use super::multi_line_button::MultiLineButton;
-
-/// Java `Run3dmodButtonContainer`, which is called by the unported right-click
-/// 3dmod menu adapter owned by `Run3dmodButton`.
-pub trait Run3dmodButtonContainer {}
-
-/// Java `Run3dmodButton` state used directly by this source unit.  The
-/// context-menu and manager dispatch remain the explicit GUI/application
-/// boundary of the separately translated `Run3dmodButton.java` source unit.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Run3dmodButton {
-    pub multi_line_button: MultiLineButton,
-    pub deferred: bool,
-    pub container_attached: bool,
-    pub mouse_listener_count: usize,
-}
-
-impl Run3dmodButton {
-    /// Java `Run3dmodButton.get3dmodInstance(String, Run3dmodButtonContainer)`.
-    pub fn get_3dmod_instance<C: Run3dmodButtonContainer>(label: &str, _container: &C) -> Self {
-        let mut multi_line_button = MultiLineButton::new_with_label(Some(label));
-        // Java `AbstractButton` defaults its action command to the button text.
-        multi_line_button.set_action_command(Some(label));
-        multi_line_button.add_mouse_listener();
-        Self {
-            multi_line_button,
-            deferred: false,
-            container_attached: true,
-            mouse_listener_count: 1,
-        }
-    }
-
-    /// Java inherited `getComponent`.
-    pub fn get_component(&self) -> &MultiLineButton {
-        &self.multi_line_button
-    }
-
-    /// Java inherited `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self, text: &str) {
-        self.multi_line_button.set_tool_tip_text(Some(text));
-    }
-
-    /// Java inherited `addActionListener`.
-    pub fn add_action_listener(&mut self) {
-        self.multi_line_button.add_action_listener();
-    }
-
-    /// Java inherited `getActionCommand`.
-    pub fn get_action_command(&self) -> Option<&str> {
-        self.multi_line_button.get_action_command()
-    }
-
-    /// Java inherited `setEnabled`.
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.multi_line_button.set_enabled(enabled);
-    }
-}
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
 
 /// Source-visible, lazily-created Swing panel tree returned by `getContainer`.
 #[derive(Clone, Debug, PartialEq)]
@@ -94,11 +39,11 @@ pub struct BinnedXY3dmodButton {
 
 impl BinnedXY3dmodButton {
     /// Java package-private constructor.
-    pub fn new<C: Run3dmodButtonContainer>(label: &str, container: &C) -> Self {
+    pub fn new<C: Run3dmodButtonContainer>(label: &str, _container: &C) -> Self {
         Self {
             sp_binning_xy: LabeledSpinner::get_instance("Open binned by ", 1, 1, 50, 1),
             label: " in X and Y".into(),
-            button: Run3dmodButton::get_3dmod_instance(label, container),
+            button: Run3dmodButton::get_3dmod_instance(label, true),
             label_enabled: true,
             label_tooltip: None,
             panel: None,
@@ -171,7 +116,17 @@ mod tests {
     use super::*;
 
     struct Container;
-    impl Run3dmodButtonContainer for Container {}
+    impl Run3dmodButtonContainer for Container {
+        fn action(
+            &mut self,
+            _: &str,
+            _: Option<
+                &mut dyn crate::imod::etomo::ui::swing::deferred_3dmod_button::Deferred3dmodButton,
+            >,
+            _: crate::imod::etomo::process::imod_process::Run3dmodMenuOptions,
+        ) {
+        }
+    }
 
     #[test]
     fn source_constructor_and_lazy_container_preserve_widget_state() {

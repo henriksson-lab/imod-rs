@@ -16,6 +16,43 @@ pub const MAX_DIAMETER: i32 = 100;
 pub const MAX_OVERLAY: i32 = 20;
 pub const ERROR_NO_IMOD_DIR: i32 = -64352;
 
+/// `QEvent` types inspected by `BeadFixer::topChangeEvent`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BeadFixerChangeEvent {
+    FontChange,
+    Other,
+}
+
+/// Widgets whose width is set together by `setFontDependentWidths`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BeadFixerWidthWidget {
+    TopBox,
+    DiameterHBox,
+    CenterLightHBox,
+    NextGapButton,
+    PreviousGapButton,
+    ResetStartButton,
+    ResetCurrentButton,
+    OpenFileButton,
+    RunAlignButton,
+    RereadButton,
+    NextLocalButton,
+    NextResidualButton,
+    MovePointButton,
+    UndoMoveButton,
+    BackUpButton,
+    NextContourButton,
+    BackContourButton,
+    DeleteContourButton,
+    MoveAllButton,
+    MoveAllAllButton,
+    ClearListButton,
+    ReattachButton,
+    IgnoreSkipButton,
+    SkipEdit,
+    WeightHBox,
+}
+
 /// `ResidPt`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResidPt {
@@ -121,6 +158,33 @@ pub trait BeadFixerBoundary {
         Ok(())
     }
     fn model_update(&mut self) {}
+    /// `diaGetButtonWidth`.
+    fn button_width(&mut self, _rounded_style: bool, _factor: f64, _text: &str) -> i32 {
+        0
+    }
+    /// `topBox->sizeHint().width()`.
+    fn top_box_hint_width(&self) -> i32 {
+        0
+    }
+    fn set_fixed_width(&mut self, _widget: BeadFixerWidthWidget, _width: i32) {}
+    /// `BeadFixer`'s content width, used by `fixSize`.
+    fn content_width(&self) -> i32 {
+        0
+    }
+    /// `(mTopWin->width(), mTopWin->height())`.
+    fn top_window_size(&self) -> (i32, i32) {
+        (0, 0)
+    }
+    fn top_window_size_hint(&self) -> (i32, i32) {
+        (0, 0)
+    }
+    fn resize_top_window(&mut self, _width: i32, _height: i32) {}
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn dialog_change_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
+    fn raise_window(&mut self) {}
 }
 
 /// `BeadFixerModule`; plugin callbacks are registered by the 3dmod bridge.
@@ -177,6 +241,7 @@ pub struct BeadFixer {
     pub skip_secs: Vec<i32>,
     pub extra_obj: i32,
     pub stay_on_top: bool,
+    pub rounded_style: bool,
     pub running_align: bool,
     pub shift_down: bool,
     pub top_timer_id: i32,
@@ -236,6 +301,7 @@ impl BeadFixer {
             skip_secs: vec![],
             extra_obj: 0,
             stay_on_top: false,
+            rounded_style: false,
             running_align: false,
             shift_down: false,
             top_timer_id: 0,
@@ -662,7 +728,12 @@ impl BeadFixer {
     pub fn keep_on_top(&mut self, state: bool) {
         self.stay_on_top = state
     }
-    pub fn timer_event(&mut self) {}
+    /// `BeadFixer::timerEvent`.
+    pub fn timer_event<B: BeadFixerBoundary>(&mut self, boundary: &mut B) {
+        if self.stay_on_top {
+            boundary.raise_window();
+        }
+    }
     pub fn run_align<B: BeadFixerBoundary>(&mut self, b: &mut B) -> Result<(), String> {
         let Some(file) = self.globals.filename.clone() else {
             return Ok(());
@@ -689,9 +760,65 @@ impl BeadFixer {
         self.resid_list.clear();
         self.area_list.clear()
     }
-    pub fn set_font_dependent_widths(&mut self) {}
-    pub fn fix_size(&mut self) {}
-    pub fn top_change_event(&mut self) {}
+    /// `BeadFixer::setFontDependentWidths`.
+    pub fn set_font_dependent_widths<B: BeadFixerBoundary>(&mut self, boundary: &mut B) {
+        let mut width = boundary.button_width(self.rounded_style, 1.15, "Move Point by Residual");
+        width =
+            width.max(boundary.button_width(self.rounded_style, 1.15, "Open Tiltalign Log File"));
+        width = width.max(boundary.top_box_hint_width() - 4);
+        for widget in [
+            BeadFixerWidthWidget::TopBox,
+            BeadFixerWidthWidget::DiameterHBox,
+            BeadFixerWidthWidget::CenterLightHBox,
+            BeadFixerWidthWidget::NextGapButton,
+            BeadFixerWidthWidget::PreviousGapButton,
+            BeadFixerWidthWidget::ResetStartButton,
+            BeadFixerWidthWidget::ResetCurrentButton,
+            BeadFixerWidthWidget::OpenFileButton,
+            BeadFixerWidthWidget::RunAlignButton,
+            BeadFixerWidthWidget::RereadButton,
+            BeadFixerWidthWidget::NextLocalButton,
+            BeadFixerWidthWidget::NextResidualButton,
+            BeadFixerWidthWidget::MovePointButton,
+            BeadFixerWidthWidget::UndoMoveButton,
+            BeadFixerWidthWidget::BackUpButton,
+            BeadFixerWidthWidget::NextContourButton,
+            BeadFixerWidthWidget::BackContourButton,
+            BeadFixerWidthWidget::DeleteContourButton,
+            BeadFixerWidthWidget::MoveAllButton,
+            BeadFixerWidthWidget::MoveAllAllButton,
+            BeadFixerWidthWidget::ClearListButton,
+            BeadFixerWidthWidget::ReattachButton,
+            BeadFixerWidthWidget::IgnoreSkipButton,
+            BeadFixerWidthWidget::SkipEdit,
+            BeadFixerWidthWidget::WeightHBox,
+        ] {
+            boundary.set_fixed_width(widget, width);
+        }
+    }
+    /// `BeadFixer::fixSize`.
+    pub fn fix_size<B: BeadFixerBoundary>(&mut self, boundary: &mut B) {
+        let (_, height) = boundary.top_window_size();
+        let (hint_width, hint_height) = boundary.top_window_size_hint();
+        boundary.resize_top_window(
+            boundary.content_width().min(hint_width),
+            height.min(hint_height),
+        );
+    }
+    /// `BeadFixer::topChangeEvent`.
+    pub fn top_change_event<B: BeadFixerBoundary>(
+        &mut self,
+        event: BeadFixerChangeEvent,
+        boundary: &mut B,
+    ) {
+        self.rounded_style = boundary.rounded_style();
+        boundary.dialog_change_event();
+        boundary.check_and_set_mac_menu();
+        if event == BeadFixerChangeEvent::FontChange {
+            self.set_font_dependent_widths(boundary);
+            self.fix_size(boundary);
+        }
+    }
     pub fn key_press_event(&mut self, shift: bool) {
         self.shift_down = shift
     }
@@ -729,6 +856,61 @@ pub fn imod_plug_execute_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct GuiBoundary {
+        calls: Vec<String>,
+    }
+    impl BeadFixerBoundary for GuiBoundary {
+        fn print(&mut self, _: &str) {}
+        fn redraw(&mut self) {}
+        fn draw_model(&mut self) {}
+        fn set_overlay_mode(&mut self, _: i32, _: i32, _: i32) {}
+        fn location(&mut self) -> (i32, i32, i32) {
+            (0, 0, 0)
+        }
+        fn image_size(&mut self) -> (i32, i32, i32) {
+            (0, 0, 0)
+        }
+        fn set_index(&mut self, _: i32, _: i32, _: i32) {}
+        fn button_width(&mut self, _: bool, _: f64, text: &str) -> i32 {
+            match text {
+                "Move Point by Residual" => 90,
+                "Open Tiltalign Log File" => 120,
+                _ => unreachable!(),
+            }
+        }
+        fn top_box_hint_width(&self) -> i32 {
+            144
+        }
+        fn set_fixed_width(&mut self, widget: BeadFixerWidthWidget, width: i32) {
+            self.calls.push(format!("width:{widget:?}:{width}"));
+        }
+        fn content_width(&self) -> i32 {
+            180
+        }
+        fn top_window_size(&self) -> (i32, i32) {
+            (200, 100)
+        }
+        fn top_window_size_hint(&self) -> (i32, i32) {
+            (160, 80)
+        }
+        fn resize_top_window(&mut self, width: i32, height: i32) {
+            self.calls.push(format!("resize:{width}:{height}"));
+        }
+        fn rounded_style(&self) -> bool {
+            true
+        }
+        fn dialog_change_event(&mut self) {
+            self.calls.push("change".into());
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("menu".into());
+        }
+        fn raise_window(&mut self) {
+            self.calls.push("raise".into());
+        }
+    }
     #[test]
     fn skip_list_is_one_based_like_source() {
         let mut f = BeadFixer::new();
@@ -766,5 +948,32 @@ mod tests {
         assert_eq!(f.next_res().unwrap().view, 1);
         assert_eq!(f.next_res().unwrap().view, 2);
         assert_eq!(f.done_label, "Progress:  100%");
+    }
+    #[test]
+    fn source_font_change_reflows_every_fixed_width_widget_and_window() {
+        let mut f = BeadFixer::new();
+        let mut native = GuiBoundary::default();
+        f.top_change_event(BeadFixerChangeEvent::FontChange, &mut native);
+        assert!(f.rounded_style);
+        assert_eq!(&native.calls[..2], ["change", "menu"]);
+        assert_eq!(
+            native
+                .calls
+                .iter()
+                .filter(|call| call.starts_with("width:"))
+                .count(),
+            25
+        );
+        assert!(native.calls.contains(&"width:TopBox:140".to_owned()));
+        assert_eq!(native.calls.last(), Some(&"resize:160:80".to_owned()));
+    }
+    #[test]
+    fn source_timer_raises_only_while_staying_on_top() {
+        let mut f = BeadFixer::new();
+        let mut native = GuiBoundary::default();
+        f.timer_event(&mut native);
+        f.keep_on_top(true);
+        f.timer_event(&mut native);
+        assert_eq!(native.calls, ["raise"]);
     }
 }

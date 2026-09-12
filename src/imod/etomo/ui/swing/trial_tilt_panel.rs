@@ -15,6 +15,7 @@ use super::{
     beads3d_find_panel::Deferred3dmodButton,
     multi_line_button::MultiLineButton,
     panel_header::{ExpandButton, Expandable, PanelHeader, PanelHeaderState},
+    trial_tilt_parent::TrialTiltParent,
 };
 
 pub const TRIAL_TILT_LABEL: &str = "Trial Tilt";
@@ -77,13 +78,6 @@ pub struct TrialTiltScreenState {
 pub trait TrialTiltMetaData {
     fn get_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID) -> IntKeyList;
     fn set_tomo_gen_trial_tomogram_name_list(&mut self, axis_id: AxisID, list: IntKeyList);
-}
-
-/// Java `TrialTiltParent` calls made by this class.
-pub trait TrialTiltParent {
-    fn get_parameters_tilt(&self, tilt_param: &mut TrialTiltParam, do_validation: bool) -> bool;
-    fn get_parameters_splittilt(&self, param: &mut SplittiltParam, do_validation: bool) -> bool;
-    fn get_processing_method(&self) -> ProcessingMethod;
 }
 
 /// Direct `ApplicationManager` / `ProcessingMethodMediator` calls.

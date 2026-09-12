@@ -20,6 +20,13 @@ pub const BORDER_FRAC: f32 = 0.1;
 pub const BORDER_MIN: i32 = 50;
 pub const BORDER_MIN_MULTIZ: i32 = 20;
 pub const BORDER_MAX: i32 = 125;
+/// Qt key values used by `ZapFuncs::keyRelease`.
+pub const ZAP_KEY_INSERT: i32 = 0x0100_0006;
+pub const ZAP_KEY_0: i32 = b'0' as i32;
+/// Qt event types consumed by `ZapFuncs::generalEvent`.
+pub const ZAP_EVENT_ENTER: i32 = 10;
+pub const ZAP_EVENT_LEAVE: i32 = 11;
+pub const ZAP_EVENT_WHEEL: i32 = 31;
 
 /// Qt/OpenGL/cache/model crossings made by `xzap.cpp`.
 pub trait ZapNativeBoundary {
@@ -66,6 +73,30 @@ pub trait ZapNativeBoundary {
     fn end_contour_drag(&mut self) {}
     fn set_extra_lasso(&mut self, _on: bool) {}
     fn draw_overlay(&mut self) {}
+    /// The current cursor position converted to ZaP device coordinates; this
+    /// is `mGfx->mapFromGlobal(QCursor::pos())` plus `XY_PIXEL_TO_DEVICE`.
+    fn cursor_device_position(&self) -> (i32, i32) {
+        (0, 0)
+    }
+    /// `imodPlugHandleEvent`; return bits have the source meanings (1 =
+    /// consumed, 2 = needs a ZaP redraw).
+    fn plug_handle_event(&mut self, _event: i32, _imx: f32, _imy: f32, _source: i32) -> i32 {
+        0
+    }
+    fn app_closing(&self) -> bool {
+        false
+    }
+    fn need_set_cursor_on_enter(&self) -> bool {
+        false
+    }
+    fn wheel_for_point_size(&self) -> bool {
+        false
+    }
+    fn wheel_change_point_size(&mut self, _zoom: f32, _event: i32) {}
+    fn release_keyboard(&mut self) {}
+    fn release_mouse(&mut self) {}
+    /// `imodDraw(vi, IMOD_DRAW_MOD | IMOD_DRAW_XYZ)`.
+    fn draw_mod_and_xyz(&mut self) {}
 }
 
 /// Source state from `ZapFuncs`; raw Qt/OpenGL image pointers are represented
@@ -159,6 +190,10 @@ pub struct ZapFuncs {
     pub tool_size_x: i32,
     pub tool_size_y: i32,
     pub insertmode: i16,
+    /// Source file-static `sInsertDown`.  The Rust core owns one event stream
+    /// per ZaP instance, so retaining it here prevents a release in one view
+    /// from terminating another view's keypad-insert drag.
+    pub insert_down: bool,
     pub showed_slice: i32,
     pub doing_draw: bool,
     pub doing_montage: bool,
@@ -278,6 +313,7 @@ impl ZapFuncs {
             tool_size_x: 0,
             tool_size_y: 0,
             insertmode: 0,
+            insert_down: false,
             showed_slice: 0,
             doing_draw: false,
             doing_montage: false,
@@ -433,8 +469,51 @@ impl ZapFuncs {
             }
         }
     }
-    pub fn key_release(&mut self, _key: i32, _control: bool, _n: &mut dyn ZapNativeBoundary) {}
-    pub fn general_event(&mut self, _event: i32) {}
+    /// `ZapFuncs::keyRelease`.
+    ///
+    /// `keypad` is the Qt `KeypadModifier`, not the Control modifier.  ZaP
+    /// only owns a release after its keypad Insert/0 path has set
+    /// `insert_down`.
+    pub fn key_release(&mut self, key: i32, keypad: bool, n: &mut dyn ZapNativeBoundary) {
+        if !self.insert_down || !keypad || (key != ZAP_KEY_INSERT && key != ZAP_KEY_0) {
+            return;
+        }
+        self.insert_down = false;
+        self.register_drag_additions();
+        self.set_mouse_tracking(n);
+        n.release_keyboard();
+        n.release_mouse();
+        if self.draw_current_only != 0 {
+            self.set_draw_current_only(0);
+            n.draw_mod_and_xyz();
+        }
+    }
+    /// `ZapFuncs::generalEvent`.
+    ///
+    /// The Qt cursor lookup and plugin ABI are native crossings, represented
+    /// by the boundary; coordinate conversion and source return-bit ordering
+    /// remain here.
+    pub fn general_event(&mut self, event: i32, n: &mut dyn ZapNativeBoundary) {
+        if self.num_xpanels != 0 || self.popup == 0 || n.app_closing() {
+            return;
+        }
+        let (ix, iy) = n.cursor_device_position();
+        let (imx, imy, _) = self.getixy(ix, iy);
+        if n.need_set_cursor_on_enter() && event == ZAP_EVENT_ENTER {
+            self.last_shape = self.mousemode;
+            n.set_cursor(self.mousemode);
+        }
+        let ifdraw = n.plug_handle_event(event, imx, imy, ZAP_WINDOW_TYPE);
+        if ifdraw & 2 != 0 || (self.drew_extra_cursor && event == ZAP_EVENT_LEAVE) {
+            self.draw(n);
+        }
+        if ifdraw != 0 {
+            return;
+        }
+        if event == ZAP_EVENT_WHEEL && n.wheel_for_point_size() {
+            n.wheel_change_point_size(self.zoom, event);
+        }
+    }
     pub fn mouse_press(
         &mut self,
         x: i32,
@@ -1068,8 +1147,54 @@ pub fn zap_set_image_or_band_center(zap: &mut ZapFuncs, x: f32, y: f32, incremen
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct N;
-    impl ZapNativeBoundary for N {}
+    #[derive(Default)]
+    struct N {
+        calls: Vec<&'static str>,
+        cursor: (i32, i32),
+        plug_result: i32,
+        closing: bool,
+        cursor_on_enter: bool,
+        wheel_for_size: bool,
+    }
+    impl ZapNativeBoundary for N {
+        fn draw_image(&mut self, _: i32, _: i32, _: f32, _: i32, _: i32) {
+            self.calls.push("draw")
+        }
+        fn set_mouse_tracking(&mut self, _: bool) {
+            self.calls.push("tracking")
+        }
+        fn release_keyboard(&mut self) {
+            self.calls.push("release-keyboard")
+        }
+        fn release_mouse(&mut self) {
+            self.calls.push("release-mouse")
+        }
+        fn draw_mod_and_xyz(&mut self) {
+            self.calls.push("draw-mod-xyz")
+        }
+        fn cursor_device_position(&self) -> (i32, i32) {
+            self.cursor
+        }
+        fn plug_handle_event(&mut self, _: i32, _: f32, _: f32, _: i32) -> i32 {
+            self.calls.push("plugin");
+            self.plug_result
+        }
+        fn app_closing(&self) -> bool {
+            self.closing
+        }
+        fn need_set_cursor_on_enter(&self) -> bool {
+            self.cursor_on_enter
+        }
+        fn set_cursor(&mut self, _: i32) {
+            self.calls.push("cursor")
+        }
+        fn wheel_for_point_size(&self) -> bool {
+            self.wheel_for_size
+        }
+        fn wheel_change_point_size(&mut self, _: f32, _: i32) {
+            self.calls.push("wheel-size")
+        }
+    }
     #[test]
     fn band_round_trip_and_center_are_source_shaped() {
         let mut view = ImodView::default();
@@ -1088,7 +1213,7 @@ mod tests {
         assert!((z.rb_image_x1 - z.rb_image_x0 - 30.).abs() < 0.01);
         z.shift_rubberband(-99., 99.);
         assert!(z.rb_image_x0 >= 0.);
-        let mut n = N;
+        let mut n = N::default();
         z.toggle_arrow(true, &mut n);
         assert_eq!(z.arrow_head.len(), 1);
         z.clear_arrows(&mut n);
@@ -1098,8 +1223,58 @@ mod tests {
     fn multiz_layout_has_source_gutters() {
         let mut z = ZapFuncs::new(core::ptr::null_mut(), 1);
         z.resize(500, 300);
-        z.set_multi_z_panels(5, 3, &mut N);
+        z.set_multi_z_panels(5, 3, &mut N::default());
         assert!(z.panel_xsize > 0 && z.panel_ysize > 0);
         assert_eq!(z.setup_panels(), 0);
+    }
+    #[test]
+    fn keypad_insert_release_ends_capture_and_restores_full_draw() {
+        let mut z = ZapFuncs::new(core::ptr::null_mut(), 0);
+        z.insert_down = true;
+        z.draw_current_only = 1;
+        let mut n = N::default();
+        z.key_release(ZAP_KEY_INSERT, true, &mut n);
+        assert!(!z.insert_down);
+        assert_eq!(z.draw_current_only, 0);
+        assert_eq!(
+            n.calls,
+            [
+                "tracking",
+                "release-keyboard",
+                "release-mouse",
+                "draw-mod-xyz"
+            ]
+        );
+
+        n.calls.clear();
+        z.insert_down = true;
+        z.key_release(ZAP_KEY_INSERT, false, &mut n);
+        assert!(z.insert_down);
+        assert!(n.calls.is_empty());
+    }
+    #[test]
+    fn general_event_preserves_plugin_return_bit_ordering() {
+        let mut z = ZapFuncs::new(core::ptr::null_mut(), 0);
+        z.popup = 1;
+        z.winx = 100;
+        z.winy = 100;
+        let mut n = N {
+            cursor: (25, 50),
+            plug_result: 2,
+            ..N::default()
+        };
+        z.general_event(ZAP_EVENT_LEAVE, &mut n);
+        assert_eq!(n.calls, ["plugin", "draw"]);
+
+        n.calls.clear();
+        n.plug_result = 1;
+        n.wheel_for_size = true;
+        z.general_event(ZAP_EVENT_WHEEL, &mut n);
+        assert_eq!(n.calls, ["plugin"]);
+
+        n.calls.clear();
+        n.plug_result = 0;
+        z.general_event(ZAP_EVENT_WHEEL, &mut n);
+        assert_eq!(n.calls, ["plugin", "wheel-size"]);
     }
 }

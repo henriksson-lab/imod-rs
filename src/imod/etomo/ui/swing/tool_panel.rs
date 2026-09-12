@@ -1,10 +1,7 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ToolPanel.java`.
+//!
+//! Its one source signature is identical to `SwingComponent.java`, so this
+//! source-unit name re-exports the canonical Rust interface.
 #![allow(dead_code)]
 
-use super::abstract_frame::ComponentState;
-
-/// Java package-private `ToolPanel` interface.
-pub trait ToolPanel {
-    /// Java `getComponent()`.
-    fn get_component(&self) -> &ComponentState;
-}
+pub use super::swing_component::SwingComponent as ToolPanel;

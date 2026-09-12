@@ -74,6 +74,10 @@ pub struct BatchRunTomoDatasetDialog {
     pub cb_scale_to_integer: CheckBox,
     pub cb_sample_type: CheckBox,
     pub cb_do_trimvol: CheckBox,
+    /// Java `ctfFindSecAddThickness` check-box half.
+    pub cb_find_sec_add_thickness: CheckBox,
+    /// Java `ctfScaleFromZ` check-box half.
+    pub cb_scale_from_z: CheckBox,
     pub cb_erase_gold: CheckBox,
     pub cb_has_gold_beads: CheckBox,
     pub cb_tune_fitting_and_sampling: CheckBox,
@@ -105,6 +109,13 @@ pub struct BatchRunTomoDatasetDialog {
     pub ltf_extra_thickness: LabeledTextField,
     pub ltf_fallback_thickness: LabeledTextField,
     pub ltf_model_file: LabeledTextField,
+    /// Java `ftfDistort`; filesystem browsing is an explicit GUI boundary.
+    pub ltf_distort: Option<LabeledTextField>,
+    /// Java `ftfGradient`; filesystem browsing is an explicit GUI boundary.
+    pub ltf_gradient: Option<LabeledTextField>,
+    /// Java `lsBinByFactor`; the spinner widget is a GUI boundary and its
+    /// source-visible integer text is retained here.
+    pub ltf_bin_by_factor: LabeledTextField,
     pub ltf_prenewst_bin_by_factor: LabeledTextField,
     pub ltf_preblend_bin_by_factor: LabeledTextField,
     pub ctf_find_sec_add_thickness: LabeledTextField,
@@ -165,6 +176,10 @@ impl BatchRunTomoDatasetDialog {
             cb_scale_to_integer: CheckBox::new_with_text("Scale to integers"),
             cb_sample_type: CheckBox::new_with_text("Do positioning for:"),
             cb_do_trimvol: CheckBox::new_with_text("Postprocess with trimvol"),
+            cb_find_sec_add_thickness: CheckBox::new_with_text(
+                "Find plastic section limits and add: ",
+            ),
+            cb_scale_from_z: CheckBox::new_with_text("Fraction of Z slices to analyze:"),
             cb_erase_gold: CheckBox::new_with_text("Erase gold"),
             cb_has_gold_beads: CheckBox::new_with_text("Sample has gold beads"),
             cb_tune_fitting_and_sampling: CheckBox::new_with_text("Autotune"),
@@ -247,6 +262,9 @@ impl BatchRunTomoDatasetDialog {
                 "          With fallback: ",
             ),
             ltf_model_file: LabeledTextField::new(FieldType::String, "Manual replacement model: "),
+            ltf_distort: None,
+            ltf_gradient: None,
+            ltf_bin_by_factor: LabeledTextField::new(FieldType::Integer, "Aligned stack binning: "),
             ltf_prenewst_bin_by_factor: LabeledTextField::new(
                 FieldType::Integer,
                 "Coarse aligned stack binning - single frame: ",
@@ -314,10 +332,10 @@ impl BatchRunTomoDatasetDialog {
     }
 
     pub fn is_find_sec_add_thickness_set(&self) -> bool {
-        self.cb_do_trimvol.is_selected() && !self.ctf_find_sec_add_thickness.is_empty()
+        self.cb_find_sec_add_thickness.is_selected() && !self.ctf_find_sec_add_thickness.is_empty()
     }
     pub fn is_scale_from_z_set(&self) -> bool {
-        self.cb_do_trimvol.is_selected() && !self.ctf_scale_from_z.is_empty()
+        self.cb_scale_from_z.is_selected() && !self.ctf_scale_from_z.is_empty()
     }
     pub fn has_dual(&self) -> bool {
         self.row_dual
@@ -534,7 +552,9 @@ impl BatchRunTomoDatasetDialog {
         self.ltf_extra_thickness.set_enabled(fallback);
         self.ltf_fallback_thickness.set_enabled(fallback);
         let trimvol = self.cb_do_trimvol.is_selected();
+        self.cb_find_sec_add_thickness.set_enabled(trimvol);
         self.ctf_find_sec_add_thickness.set_enabled(trimvol);
+        self.cb_scale_from_z.set_enabled(trimvol);
         self.ctf_scale_from_z.set_enabled(trimvol);
         let erase = self.cb_erase_gold.is_selected();
         self.rb_erase_gold_fid
@@ -565,6 +585,8 @@ impl BatchRunTomoDatasetDialog {
             &mut self.cb_scale_to_integer,
             &mut self.cb_sample_type,
             &mut self.cb_do_trimvol,
+            &mut self.cb_find_sec_add_thickness,
+            &mut self.cb_scale_from_z,
             &mut self.cb_erase_gold,
             &mut self.cb_has_gold_beads,
             &mut self.cb_tune_fitting_and_sampling,
@@ -625,12 +647,35 @@ impl BatchRunTomoDatasetDialog {
     pub fn set_parameters(&mut self, metadata: &BatchRunTomoDatasetMetaData) {
         for (name, text) in &metadata.values {
             match name.as_str() {
+                "distort" => {
+                    if let Some(field) = &mut self.ltf_distort {
+                        field.set_text(text);
+                    }
+                }
+                "gradient" => {
+                    if let Some(field) = &mut self.ltf_gradient {
+                        field.set_text(text);
+                    }
+                }
                 "gold" => self.ltf_gold.set_text(text),
+                "targetNumberOfBeads" => self.ltf_target_number_of_beads.set_text(text),
+                "numberOfMarkers" => self.ltf_number_of_markers.set_text(text),
+                "sizeOfPatchesXAndY" => self.ltf_size_of_patches_x_and_y.set_text(text),
                 "positioningGold" => self.ltf_positioning_gold.set_text(text),
                 "positioningThickness" => self.ltf_positioning_thickness.set_text(text),
                 "modelFile" => self.ltf_model_file.set_text(text),
                 "scanDefocusRange" => self.ltf_scan_defocus_range.set_text(text),
                 "defocus" => self.ltf_defocus.set_text(text),
+                "autoFitRange" => self.ltf_auto_fit_range_and_step.set_text(text),
+                "autoFitStep" => self.ltf_auto_fit_step.set_text(text),
+                "fakeSIRTiterations" => self.ltf_fake_sirt_iterations.set_text(text),
+                "leaveIterations" => self.ltf_leave_iterations.set_text(text),
+                "thickness" => self.ltf_thickness.set_text(text),
+                "binnedThickness" => self.ltf_binned_thickness.set_text(text),
+                "extraThickness" => self.ltf_extra_thickness.set_text(text),
+                "fallbackThickness" => self.ltf_fallback_thickness.set_text(text),
+                "findSecAddThickness" => self.ctf_find_sec_add_thickness.set_text(text),
+                "scaleFromZ" => self.ctf_scale_from_z.set_text(text),
                 "goldErasingThickness" => self.ltf_gold_erasing_thickness.set_text(text),
                 _ => {}
             }
@@ -638,9 +683,35 @@ impl BatchRunTomoDatasetDialog {
         for (name, selected) in &metadata.booleans {
             match name.as_str() {
                 "removeXrays" => self.cb_remove_xrays.set_selected(*selected),
+                "enableStretching" => self.cb_enable_stretching.set_selected(*selected),
+                "localAlignments" => self.cb_local_alignments.set_selected(*selected),
+                "lengthOfPieces" => self.cb_length_of_pieces.set_selected(*selected),
                 "correctCTF" => self.cb_correct_ctf.set_selected(*selected),
+                "autoFitRangeAndStep" => self.rtf_auto_fit_range_and_step.set_selected(*selected),
+                "fitEveryImage" => self.rb_fit_every_image.set_selected(*selected),
+                "useFakeSIRTiterations" => self.cb_fake_sirt_iterations.set_selected(*selected),
+                "useSirt" => self.cb_use_sirt.set_selected(*selected),
+                "scaleToInteger" => self.cb_scale_to_integer.set_selected(*selected),
+                "doBackprojAlso" => self.cb_do_backproj_also.set_selected(*selected),
+                "thickness" => self.rtf_thickness.set_selected(*selected),
+                "binnedThickness" => self.rtf_binned_thickness.set_selected(*selected),
+                "fallbackAndExtraThickness" => {
+                    self.rb_fallback_and_extra_thickness.set_selected(*selected)
+                }
+                "useFindSecAddThickness" => self.cb_find_sec_add_thickness.set_selected(*selected),
+                "useScaleFromZ" => self.cb_scale_from_z.set_selected(*selected),
                 "eraseGold" => self.cb_erase_gold.set_selected(*selected),
+                "eraseGoldFid" => self.rb_erase_gold_fid.set_selected(*selected),
+                "eraseGold3d" => self.rb_erase_gold_3d.set_selected(*selected),
                 "sampleType" => self.cb_sample_type.set_selected(*selected),
+                "sampleTypePlasticSection" => {
+                    self.rb_sample_type_plastic_section.set_selected(*selected)
+                }
+                "sampleTypeCryo" => self.rb_sample_type_cryo.set_selected(*selected),
+                "hasGoldBeads" => self.cb_has_gold_beads.set_selected(*selected),
+                "tuneFittingAndSampling" => {
+                    self.cb_tune_fitting_and_sampling.set_selected(*selected)
+                }
                 _ => {}
             }
         }
@@ -652,9 +723,27 @@ impl BatchRunTomoDatasetDialog {
         self.status_changed(self.status);
     }
     pub fn get_parameters(&self, metadata: &mut BatchRunTomoDatasetMetaData) {
+        if let Some(field) = &self.ltf_distort {
+            metadata.values.insert("distort".into(), field.get_text());
+        }
+        if let Some(field) = &self.ltf_gradient {
+            metadata.values.insert("gradient".into(), field.get_text());
+        }
         metadata
             .values
             .insert("gold".into(), self.ltf_gold.get_text());
+        metadata.values.insert(
+            "targetNumberOfBeads".into(),
+            self.ltf_target_number_of_beads.get_text(),
+        );
+        metadata.values.insert(
+            "numberOfMarkers".into(),
+            self.ltf_number_of_markers.get_text(),
+        );
+        metadata.values.insert(
+            "sizeOfPatchesXAndY".into(),
+            self.ltf_size_of_patches_x_and_y.get_text(),
+        );
         metadata.values.insert(
             "positioningGold".into(),
             self.ltf_positioning_gold.get_text(),
@@ -674,21 +763,131 @@ impl BatchRunTomoDatasetDialog {
             .values
             .insert("defocus".into(), self.ltf_defocus.get_text());
         metadata.values.insert(
+            "autoFitRange".into(),
+            self.ltf_auto_fit_range_and_step.get_text(),
+        );
+        metadata
+            .values
+            .insert("autoFitStep".into(), self.ltf_auto_fit_step.get_text());
+        metadata.values.insert(
+            "fakeSIRTiterations".into(),
+            self.ltf_fake_sirt_iterations.get_text(),
+        );
+        metadata.values.insert(
+            "leaveIterations".into(),
+            self.ltf_leave_iterations.get_text(),
+        );
+        metadata
+            .values
+            .insert("thickness".into(), self.ltf_thickness.get_text());
+        metadata.values.insert(
+            "binnedThickness".into(),
+            self.ltf_binned_thickness.get_text(),
+        );
+        metadata
+            .values
+            .insert("extraThickness".into(), self.ltf_extra_thickness.get_text());
+        metadata.values.insert(
+            "fallbackThickness".into(),
+            self.ltf_fallback_thickness.get_text(),
+        );
+        metadata.values.insert(
+            "findSecAddThickness".into(),
+            self.ctf_find_sec_add_thickness.get_text(),
+        );
+        metadata
+            .values
+            .insert("scaleFromZ".into(), self.ctf_scale_from_z.get_text());
+        metadata.values.insert(
             "goldErasingThickness".into(),
             self.ltf_gold_erasing_thickness.get_text(),
         );
         metadata
             .booleans
             .insert("removeXrays".into(), self.cb_remove_xrays.is_selected());
+        metadata.booleans.insert(
+            "enableStretching".into(),
+            self.cb_enable_stretching.is_selected(),
+        );
+        metadata.booleans.insert(
+            "localAlignments".into(),
+            self.cb_local_alignments.is_selected(),
+        );
+        metadata.booleans.insert(
+            "lengthOfPieces".into(),
+            self.cb_length_of_pieces.is_selected(),
+        );
         metadata
             .booleans
             .insert("correctCTF".into(), self.cb_correct_ctf.is_selected());
+        metadata.booleans.insert(
+            "autoFitRangeAndStep".into(),
+            self.rtf_auto_fit_range_and_step.is_selected(),
+        );
+        metadata.booleans.insert(
+            "fitEveryImage".into(),
+            self.rb_fit_every_image.is_selected(),
+        );
+        metadata.booleans.insert(
+            "useFakeSIRTiterations".into(),
+            self.cb_fake_sirt_iterations.is_selected(),
+        );
+        metadata
+            .booleans
+            .insert("useSirt".into(), self.cb_use_sirt.is_selected());
+        metadata.booleans.insert(
+            "scaleToInteger".into(),
+            self.cb_scale_to_integer.is_selected(),
+        );
+        metadata.booleans.insert(
+            "doBackprojAlso".into(),
+            self.cb_do_backproj_also.is_selected(),
+        );
+        metadata
+            .booleans
+            .insert("thickness".into(), self.rtf_thickness.is_selected());
+        metadata.booleans.insert(
+            "binnedThickness".into(),
+            self.rtf_binned_thickness.is_selected(),
+        );
+        metadata.booleans.insert(
+            "fallbackAndExtraThickness".into(),
+            self.rb_fallback_and_extra_thickness.is_selected(),
+        );
+        metadata.booleans.insert(
+            "useFindSecAddThickness".into(),
+            self.cb_find_sec_add_thickness.is_selected(),
+        );
+        metadata
+            .booleans
+            .insert("useScaleFromZ".into(), self.cb_scale_from_z.is_selected());
         metadata
             .booleans
             .insert("eraseGold".into(), self.cb_erase_gold.is_selected());
         metadata
             .booleans
+            .insert("eraseGoldFid".into(), self.rb_erase_gold_fid.is_selected());
+        metadata
+            .booleans
+            .insert("eraseGold3d".into(), self.rb_erase_gold_3d.is_selected());
+        metadata
+            .booleans
             .insert("sampleType".into(), self.cb_sample_type.is_selected());
+        metadata.booleans.insert(
+            "sampleTypePlasticSection".into(),
+            self.rb_sample_type_plastic_section.is_selected(),
+        );
+        metadata.booleans.insert(
+            "sampleTypeCryo".into(),
+            self.rb_sample_type_cryo.is_selected(),
+        );
+        metadata
+            .booleans
+            .insert("hasGoldBeads".into(), self.cb_has_gold_beads.is_selected());
+        metadata.booleans.insert(
+            "tuneFittingAndSampling".into(),
+            self.cb_tune_fitting_and_sampling.is_selected(),
+        );
         metadata.prenewst_bin_by_factor = self
             .ltf_prenewst_bin_by_factor
             .get_text()
@@ -745,11 +944,30 @@ impl BatchRunTomoDatasetDialog {
         } else {
             "0".into()
         };
-        let mut values = BTreeMap::new();
-        self.get_parameters(&mut BatchRunTomoDatasetMetaData {
-            values: values.clone(),
-            ..Default::default()
-        });
+        let mut metadata = BatchRunTomoDatasetMetaData::default();
+        self.get_parameters(&mut metadata);
+        let mut values = metadata.values;
+        for (name, selected) in metadata.booleans {
+            values.insert(name, if selected { "1".into() } else { "0".into() });
+        }
+        values.insert(
+            "BIN_BY_FACTOR_FOR_ALIGNED_STACK".into(),
+            self.ltf_bin_by_factor.get_text(),
+        );
+        values.insert(
+            "BIN_BY_FACTOR_FOR_PRENEWST".into(),
+            self.ltf_prenewst_bin_by_factor.get_text(),
+        );
+        values.insert(
+            "BIN_BY_FACTOR_FOR_PREBLEND".into(),
+            self.ltf_preblend_bin_by_factor.get_text(),
+        );
+        if let Some(field) = &self.ltf_distort {
+            values.insert("DISTORT".into(), field.get_text());
+        }
+        if let Some(field) = &self.ltf_gradient {
+            values.insert("GRADIENT".into(), field.get_text());
+        }
         values.insert("GOLD".into(), gold);
         values.insert(
             "LENGTH_OF_PIECES".into(),
@@ -806,6 +1024,34 @@ impl BatchRunTomoDatasetDialog {
         if only_advanced_dataset_dialog {
             return;
         }
+        if let Some(value) = directive_files.get("DISTORT") {
+            if let Some(field) = &mut self.ltf_distort {
+                field.set_text(value);
+            }
+        }
+        if let Some(value) = directive_files.get("GRADIENT") {
+            if let Some(field) = &mut self.ltf_gradient {
+                field.set_text(value);
+            }
+        }
+        if let Some(value) = directive_files.get("REMOVE_XRAYS") {
+            self.cb_remove_xrays.set_selected(value != "0");
+        }
+        if let Some(value) = directive_files.get("MODEL_FILE") {
+            self.ltf_model_file.set_text(value);
+        }
+        if let Some(value) = directive_files.get("BIN_BY_FACTOR_FOR_ALIGNED_STACK") {
+            self.ltf_bin_by_factor.set_text(value);
+        }
+        if let Some(value) = directive_files.get("BIN_BY_FACTOR_FOR_PRENEWST") {
+            self.ltf_prenewst_bin_by_factor.set_text(value);
+        }
+        if let Some(value) = directive_files.get("BIN_BY_FACTOR_FOR_PREBLEND") {
+            self.ltf_preblend_bin_by_factor.set_text(value);
+        }
+        if let Some(value) = directive_files.get("FIDUCIALLESS") {
+            self.rb_fiducialless.set_selected(value != "0");
+        }
         if let Some(value) = directive_files.get("GOLD") {
             self.ltf_gold.set_text(value);
             self.ltf_positioning_gold.set_text(value);
@@ -814,6 +1060,27 @@ impl BatchRunTomoDatasetDialog {
             self.length_of_pieces = (!set_field_highlight_value).then(|| value.clone());
             self.cb_length_of_pieces
                 .set_selected(!value.trim().is_empty() && value.trim() != "0");
+        }
+        if let Some(value) = directive_files.get("TARGET_NUMBER_OF_BEADS") {
+            self.ltf_target_number_of_beads.set_text(value);
+        }
+        if let Some(value) = directive_files.get("NUMBER_OF_MARKERS") {
+            self.ltf_number_of_markers.set_text(value);
+        }
+        if let Some(value) = directive_files.get("SIZE_OF_PATCHES_X_AND_Y") {
+            self.ltf_size_of_patches_x_and_y.set_text(value);
+        }
+        if let Some(value) = directive_files.get("ENABLE_STRETCHING") {
+            self.cb_enable_stretching.set_selected(value != "0");
+        }
+        if let Some(value) = directive_files.get("LOCAL_ALIGNMENTS") {
+            self.cb_local_alignments.set_selected(value != "0");
+        }
+        if let Some(value) = directive_files.get("CORRECT_CTF") {
+            self.cb_correct_ctf.set_selected(value != "0");
+        }
+        if let Some(value) = directive_files.get("TUNE_FITTING_AND_SAMPLING") {
+            self.cb_tune_fitting_and_sampling.set_selected(value != "0");
         }
         if let Some(value) = directive_files.get("TRACKING_METHOD") {
             self.rb_tracking_method_seed.set_selected(value == "seed");
@@ -850,10 +1117,82 @@ impl BatchRunTomoDatasetDialog {
                 self.rb_fit_every_image.set_selected(true);
             }
         }
+        if let Some(value) = directive_files.get("FAKE_SIRT_ITERATIONS") {
+            self.cb_fake_sirt_iterations
+                .set_selected(!value.is_empty() && value != "0");
+            self.ltf_fake_sirt_iterations.set_text(value);
+        }
+        if let Some(value) = directive_files.get("USE_SIRT") {
+            self.cb_use_sirt.set_selected(value != "0");
+        }
+        if let Some(value) = directive_files.get("DO_BACKPROJ_ALSO") {
+            self.cb_do_backproj_also.set_selected(value != "0");
+        }
+        if !self.cb_fake_sirt_iterations.is_selected() && !self.cb_use_sirt.is_selected() {
+            self.cb_do_backproj_also.set_selected(true);
+        }
+        if let Some(value) = directive_files.get("LEAVE_ITERATIONS") {
+            self.ltf_leave_iterations.set_text(value);
+        }
+        if let Some(value) = directive_files.get("SCALE_TO_INTEGER") {
+            self.cb_scale_to_integer
+                .set_selected(!value.is_empty() && value != "0");
+        }
+        if let Some(value) = directive_files.get("FALLBACK_THICKNESS") {
+            self.rb_fallback_and_extra_thickness.set_selected(true);
+            self.ltf_fallback_thickness.set_text(value);
+        }
+        if let Some(value) = directive_files.get("EXTRA_THICKNESS") {
+            self.rb_fallback_and_extra_thickness.set_selected(true);
+            self.ltf_extra_thickness.set_text(value);
+        }
+        if let Some(value) = directive_files.get("BINNED_THICKNESS") {
+            self.rtf_binned_thickness.set_selected(true);
+            self.ltf_binned_thickness.set_text(value);
+        }
+        if let Some(value) = directive_files.get("THICKNESS_FOR_TILT") {
+            self.rtf_thickness.set_selected(true);
+            self.ltf_thickness.set_text(value);
+        }
         if directive_files.contains_key("SCALE_FROM_X")
             || directive_files.contains_key("SCALE_FROM_Y")
         {
             self.cb_do_trimvol.set_selected(true);
+            self.cb_scale_from_z.set_selected(true);
+        }
+        if let Some(value) = directive_files.get("SCALE_FROM_Z") {
+            self.cb_scale_from_z
+                .set_selected(!value.is_empty() && value != "0");
+            self.ctf_scale_from_z.set_text(value);
+        }
+        if let Some(value) = directive_files.get("DO_TRIMVOL") {
+            self.cb_do_trimvol.set_selected(value != "0");
+        }
+        if let Some(value) = directive_files.get("FIND_SEC_ADD_THICKNESS") {
+            self.cb_find_sec_add_thickness
+                .set_selected(!value.is_empty() && value != "0");
+            self.ctf_find_sec_add_thickness.set_text(value);
+        }
+        if let Some(value) = directive_files.get("ERASE_GOLD") {
+            self.cb_erase_gold
+                .set_selected(!value.is_empty() && value != "0");
+            self.rb_erase_gold_fid.set_selected(value == "fid");
+            self.rb_erase_gold_3d.set_selected(value == "find3d");
+        }
+        if let Some(value) = directive_files.get("THICKNESS_FOR_GOLD_ERASING") {
+            self.ltf_gold_erasing_thickness.set_text(value);
+        }
+        if let Some(value) = directive_files.get("SAMPLE_TYPE") {
+            self.cb_sample_type.set_selected(value != "0");
+            self.rb_sample_type_plastic_section
+                .set_selected(value == "plasticSection");
+            self.rb_sample_type_cryo.set_selected(value == "cryo");
+        }
+        if let Some(value) = directive_files.get("THICKNESS_FOR_POSITIONING") {
+            self.ltf_positioning_thickness.set_text(value);
+        }
+        if let Some(value) = directive_files.get("HAS_GOLD_BEADS") {
+            self.cb_has_gold_beads.set_selected(value != "0");
         }
         self.update_display();
     }

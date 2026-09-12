@@ -7,6 +7,8 @@
 
 use std::path::PathBuf;
 
+pub use super::header_cell::HeaderCell;
+
 pub const STACK_TITLE: &str = "Stack";
 pub const STATUS_LABEL: &str = "Status";
 pub const STEP_LABEL: &str = "Reached";
@@ -47,19 +49,6 @@ pub enum BatchRunTomoTableAction {
     CopyDown,
     Delete,
     RunToggle,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct HeaderCell {
-    pub text: String,
-    pub visible: bool,
-}
-impl HeaderCell {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            visible: true,
-        }
-    }
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PreferredTableSize {

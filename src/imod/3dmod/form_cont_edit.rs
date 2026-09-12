@@ -1,8 +1,3 @@
-//! Translation of `IMOD/3dmod/form_cont_edit.cpp` and `form_cont_edit.h`.
-//!
-//! The generated Qt form and the `ice*`/`ivw*` application calls remain an
-//! explicit boundary.  The state changes and call ordering are the source
-//! implementation, rather than a replacement contour-editing UI.
 #![allow(dead_code)]
 
 use crate::imod::three_dmod::mv_window::{Key, KeyEvent};
@@ -22,9 +17,9 @@ pub enum ContSurfPointChangeEvent {
     Other,
 }
 
-/// Qt widgets, the `cont_edit.cpp` callbacks, preferences, and DockingDialog
-/// operations called by `ContSurfPoint`.
 pub trait ContSurfPointNativeBoundary {
+    fn setup_ui(&mut self);
+    fn retranslate_ui(&mut self);
     fn set_delete_on_close(&mut self);
     fn set_always_show_tool_tips(&mut self);
     fn connect_cont_surf_point_signals(&mut self);
@@ -76,6 +71,7 @@ pub trait ContSurfPointNativeBoundary {
     fn release_keyboard(&mut self);
     fn ivw_control_key(&mut self, release: i32, event: KeyEvent);
     fn check_and_set_mac_menu(&mut self, event: ContSurfPointChangeEvent);
+    fn widget_change_event(&mut self, event: ContSurfPointChangeEvent);
 }
 
 pub const USE_LENGTH_BUTTON: i32 = 0;
@@ -97,25 +93,26 @@ pub const SURFACE_LABEL_EDIT: i32 = 15;
 pub const CONTOUR_EDIT: i32 = 16;
 pub const POINT_LABEL_EDIT: i32 = 17;
 
-/// `ContSurfPoint` (`form_cont_edit.h`).
 #[derive(Clone, Debug, Default)]
 pub struct ContSurfPoint {
+    pub m_top_win: bool,
     pub m_size_displayed: f32,
     pub m_slider_pressed: bool,
     pub m_ctrl_pressed: bool,
 }
 
 impl ContSurfPoint {
-    /// `ContSurfPoint::ContSurfPoint`.
     pub fn new(native: &mut dyn ContSurfPointNativeBoundary) -> Self {
         let mut form = Self::default();
+        form.m_top_win = true;
+        native.setup_ui();
         form.init(native);
         form
     }
-    /// `ContSurfPoint::~ContSurfPoint`.
     pub fn destroy(&mut self) {}
-    /// `ContSurfPoint::languageChange`.
-    pub fn language_change(&mut self) {}
+    pub fn language_change(&mut self, n: &mut dyn ContSurfPointNativeBoundary) {
+        n.retranslate_ui()
+    }
     /// `ContSurfPoint::init`.
     pub fn init(&mut self, n: &mut dyn ContSurfPointNativeBoundary) {
         n.set_delete_on_close();
@@ -416,6 +413,7 @@ impl ContSurfPoint {
         event: ContSurfPointChangeEvent,
         n: &mut dyn ContSurfPointNativeBoundary,
     ) {
+        n.widget_change_event(event);
         n.check_and_set_mac_menu(event);
         if event == ContSurfPointChangeEvent::FontChange {
             self.set_font_dependent_widths(n)
@@ -433,6 +431,8 @@ mod tests {
         slider_max: i32,
     }
     impl ContSurfPointNativeBoundary for Native {
+        fn setup_ui(&mut self) {}
+        fn retranslate_ui(&mut self) {}
         fn set_delete_on_close(&mut self) {}
         fn set_always_show_tool_tips(&mut self) {}
         fn connect_cont_surf_point_signals(&mut self) {}
@@ -508,6 +508,7 @@ mod tests {
         fn release_keyboard(&mut self) {}
         fn ivw_control_key(&mut self, _: i32, _: KeyEvent) {}
         fn check_and_set_mac_menu(&mut self, _: ContSurfPointChangeEvent) {}
+        fn widget_change_event(&mut self, _: ContSurfPointChangeEvent) {}
     }
     #[test]
     fn ghost_mode_maps_each_upstream_flag() {

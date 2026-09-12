@@ -6,10 +6,9 @@
 //! singleton is first constructed.
 #![allow(dead_code)]
 
+pub use super::button_style_extension::ImageObserverBoundary;
+use super::button_style_extension::{ButtonStyleExtension, CompleteIconBoundary};
 use std::sync::{Arc, LazyLock, Mutex};
-
-/// Boundary for Java `java.awt.image.ImageObserver`.
-pub trait ImageObserverBoundary: Send + Sync {}
 
 /// Java `ScaledImage` constants passed to `CompleteIcon` by this source unit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,30 +21,12 @@ pub enum EtomoLogScaledImage {
     EtomoLogRollover,
 }
 
-/// GUI-bound `CompleteIcon` construction made by this source unit.
-pub struct EtomoLogCompleteIconBoundary {
-    pub image: EtomoLogScaledImage,
-    pub selected_image: Option<EtomoLogScaledImage>,
-    pub pressed_image: Option<EtomoLogScaledImage>,
-    pub rollover_image: Option<EtomoLogScaledImage>,
-    pub image_observer: Option<Arc<dyn ImageObserverBoundary>>,
-    pub debug: bool,
-}
-
-/// GUI-bound `ButtonStyleExtension` superclass constructor state.
-pub struct ButtonStyleExtensionBoundary {
-    pub text_gap: bool,
-    pub icon: EtomoLogCompleteIconBoundary,
-    pub template_icon: Option<()>,
-    pub error_icon: Option<()>,
-    pub preferred_size: Option<()>,
-    pub size_from_image: bool,
-}
+pub type EtomoLogCompleteIconBoundary = CompleteIconBoundary<EtomoLogScaledImage>;
 
 /// Java package-private final `EtomoLogButtonStyleExtension`.
 pub struct EtomoLogButtonStyleExtension {
     /// Java superclass `ButtonStyleExtension` state.
-    pub button_style_extension: ButtonStyleExtensionBoundary,
+    pub button_style_extension: ButtonStyleExtension<EtomoLogScaledImage>,
 }
 
 /// Java private static `EtomoLogButtonStyleExtension.INSTANCE`.
@@ -56,21 +37,22 @@ impl EtomoLogButtonStyleExtension {
     /// Java private `EtomoLogButtonStyleExtension(ImageObserver)`.
     fn new(image_observer: Option<Arc<dyn ImageObserverBoundary>>) -> Self {
         Self {
-            button_style_extension: ButtonStyleExtensionBoundary {
-                text_gap: false,
-                icon: EtomoLogCompleteIconBoundary {
+            button_style_extension: ButtonStyleExtension::new(
+                false,
+                Some(EtomoLogCompleteIconBoundary {
                     image: EtomoLogScaledImage::EtomoLog,
                     selected_image: None,
                     pressed_image: Some(EtomoLogScaledImage::EtomoLogPressed),
                     rollover_image: Some(EtomoLogScaledImage::EtomoLogRollover),
                     image_observer,
                     debug: false,
-                },
-                template_icon: None,
-                error_icon: None,
-                preferred_size: None,
-                size_from_image: true,
-            },
+                    icon_size: None,
+                }),
+                None,
+                None,
+                None,
+                true,
+            ),
         }
     }
 
@@ -103,18 +85,21 @@ mod tests {
         let style = &instance.button_style_extension;
 
         assert!(!style.text_gap);
-        assert_eq!(style.icon.image, EtomoLogScaledImage::EtomoLog);
-        assert_eq!(style.icon.selected_image, None);
         assert_eq!(
-            style.icon.pressed_image,
+            style.icon.as_ref().unwrap().image,
+            EtomoLogScaledImage::EtomoLog
+        );
+        assert_eq!(style.icon.as_ref().unwrap().selected_image, None);
+        assert_eq!(
+            style.icon.as_ref().unwrap().pressed_image,
             Some(EtomoLogScaledImage::EtomoLogPressed)
         );
         assert_eq!(
-            style.icon.rollover_image,
+            style.icon.as_ref().unwrap().rollover_image,
             Some(EtomoLogScaledImage::EtomoLogRollover)
         );
-        assert!(style.icon.image_observer.is_some());
-        assert!(!style.icon.debug);
+        assert!(style.icon.as_ref().unwrap().image_observer.is_some());
+        assert!(!style.icon.as_ref().unwrap().debug);
         assert!(style.template_icon.is_none());
         assert!(style.error_icon.is_none());
         assert!(style.preferred_size.is_none());

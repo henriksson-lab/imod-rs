@@ -8,8 +8,8 @@
 #![allow(dead_code)]
 
 use super::beads3d_find_panel::{Deferred3dmodButton, ProcessResultDisplay, ProcessSeries};
-use super::find_beads3d_panel::NewstackOrBlendmont3dFindParent;
 use super::labeled_spinner::LabeledSpinner;
+use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;

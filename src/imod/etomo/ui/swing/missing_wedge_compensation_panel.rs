@@ -10,6 +10,7 @@ use std::{cell::RefCell, rc::Rc};
 use super::{
     check_box::CheckBox,
     labeled_text_field::{FieldValidationFailedException, LabeledTextField},
+    missing_wedge_compensation_parent::MissingWedgeCompensationParent,
     radio_button::{RadioButton, RadioButtonGroup},
     spinner::Spinner,
 };
@@ -24,13 +25,6 @@ pub const N_WEIGHT_GROUP_DEFAULT: i32 = 8;
 pub const N_WEIGHT_GROUP_OFF: i32 = 0;
 pub const N_WEIGHT_GROUP_MIN: i32 = 0;
 pub const N_WEIGHT_GROUP_MAX: i32 = 32;
-
-/// `MissingWedgeCompensationParent` calls owned by the enclosing PEET panel.
-pub trait MissingWedgeCompensationParent {
-    fn is_reference_particle_selected(&self) -> bool;
-    fn is_volume_table_empty(&self) -> bool;
-    fn update_display(&mut self, init: bool);
-}
 
 /// `PeetMetaData` fields accessed by this source unit.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

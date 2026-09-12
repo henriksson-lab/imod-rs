@@ -35,7 +35,11 @@ mod tests {
 
     #[test]
     fn popup_request_passes_the_swing_event_unchanged() {
-        let mouse_event = MouseEvent { x: 17, y: 29 };
+        let mouse_event = MouseEvent {
+            x: 17,
+            y: 29,
+            right_mouse_button: false,
+        };
         let mut menu = TestContextMenu::default();
 
         menu.pop_up_context_menu(mouse_event);

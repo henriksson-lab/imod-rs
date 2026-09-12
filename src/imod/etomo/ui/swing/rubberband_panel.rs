@@ -7,10 +7,7 @@ use crate::imod::etomo::process::imod_process::RUBBERBAND_RESULTS_STRING;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::ui::field_type::FieldType;
 
-pub trait RubberbandContainer {
-    fn set_rubberband_container_z_min(&mut self, value: &str);
-    fn set_rubberband_container_z_max(&mut self, value: &str);
-}
+pub use super::rubberband_container::RubberbandContainer;
 pub trait RubberbandPanelManager {
     fn imod_get_rubberband_coordinates(&mut self, key: &str, axis: AxisID) -> Option<Vec<String>>;
 }

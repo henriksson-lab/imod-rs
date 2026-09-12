@@ -308,7 +308,11 @@ mod tests {
     #[test]
     fn context_popup_keeps_the_source_manual_and_log_file() {
         let mut panel = GpuTiltTestPanel::get_instance(AxisID::Only);
-        panel.pop_up_context_menu(MouseEvent { x: 3, y: 4 });
+        panel.pop_up_context_menu(MouseEvent {
+            x: 3,
+            y: 4,
+            right_mouse_button: false,
+        });
         let popup = panel.last_context_popup.as_ref().unwrap();
         assert_eq!(popup.anchor.as_deref(), Some("GPU Test"));
         assert_eq!(

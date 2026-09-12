@@ -5,6 +5,8 @@
 //! explicit `MvOglBoundary` operations until those paired source units land.
 #![allow(dead_code, unused_variables)]
 
+use std::sync::{LazyLock, Mutex};
+
 use crate::imod::libimod::icont::imod_contour_get_points;
 use crate::imod::libimod::imesh::{imesh_resol, imesh_thickness};
 use crate::imod::libimod::imodel::IMOD_OBJFLAG_OFF;
@@ -29,6 +31,38 @@ pub const SUBSET_PNT_OTHER: i32 = 6;
 pub const MAX_QUALITY: usize = 5;
 pub const MAX_LOOKUP: usize = 120;
 pub const VIEW_WORLD_DEPTH_CUE: u32 = 1 << 2;
+
+/// Opaque stand-in for the Qt font cached by label drawing.
+#[derive(Clone, Debug, Default)]
+pub struct LabelFont;
+
+/// Opaque stand-in for the Qt painter cached by label drawing.
+#[derive(Clone, Debug, Default)]
+pub struct LabelPainter;
+
+/// Static label-drawing state (`sLabelFont`, `sLabelPainter`, and `sFontSize`).
+///
+/// The concrete Qt resources remain at the GUI boundary, but their lifetime and
+/// cached font-size state are retained here so cleanup follows the C++ source.
+#[derive(Clone, Debug)]
+pub struct LabelFontState {
+    pub label_font: Option<LabelFont>,
+    pub label_painter: Option<LabelPainter>,
+    pub font_size: i32,
+}
+
+impl Default for LabelFontState {
+    fn default() -> Self {
+        Self {
+            label_font: None,
+            label_painter: None,
+            font_size: -1,
+        }
+    }
+}
+
+pub static LABEL_FONT_STATE: LazyLock<Mutex<LabelFontState>> =
+    LazyLock::new(|| Mutex::new(LabelFontState::default()));
 
 /// Static data in `mv_ogl.cpp`, gathered without changing ownership.
 #[derive(Clone, Debug)]
@@ -398,6 +432,7 @@ pub fn imodv_draw_model(
         gl.depth_mask(false);
     }
     gl.depth_mask(true);
+    imodv_cleanup_label_font();
     if app.draw_clip != 0 && app.read_pix_for_pick == 0 {
         gl.draw_clip_plane(app, 0);
     }
@@ -563,7 +598,12 @@ pub fn imod_draw_setup_label_draw(win_size_y: i32, device_pixel_ratio: f32, font
     let _ = (win_size_y, device_pixel_ratio, font_height);
 }
 /// `imodvCleanupLabelFont`.
-pub fn imodv_cleanup_label_font() {}
+pub fn imodv_cleanup_label_font() {
+    let mut state = LABEL_FONT_STATE.lock().expect("label font state poisoned");
+    state.label_font = None;
+    state.font_size = -1;
+    state.label_painter = None;
+}
 /// `imodvUnprojectPickedPoint`; GL unprojection depends on the current selection buffer.
 pub fn imodv_unproject_picked_point(app: &mut ImodvApp, model: i32) {
     let _ = (app, model);
@@ -733,6 +773,24 @@ pub fn find_clicked_cont_point(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleanup_label_font_discards_cached_font_and_painter() {
+        {
+            let mut state = LABEL_FONT_STATE.lock().unwrap();
+            state.label_font = Some(LabelFont);
+            state.label_painter = Some(LabelPainter);
+            state.font_size = 14;
+        }
+
+        imodv_cleanup_label_font();
+
+        let state = LABEL_FONT_STATE.lock().unwrap();
+        assert!(state.label_font.is_none());
+        assert!(state.label_painter.is_none());
+        assert_eq!(state.font_size, -1);
+    }
+
     #[test]
     fn sphere_lookup_matches_source_table() {
         let mut s = MvOglState::default();

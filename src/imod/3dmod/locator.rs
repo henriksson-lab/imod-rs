@@ -28,6 +28,10 @@ pub struct LocatorSubset {
 
 /// Native Qt/OpenGL/image-cache/ZaP boundary used by the paired source unit.
 pub trait LocatorNativeBoundary {
+    fn widget_change_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
+    fn set_button_width(&mut self, rounded: bool, factor: f32, text: &str) -> i32;
+    fn rounded_style(&self) -> bool;
     fn raise_window(&mut self);
     fn create_window(&mut self) -> bool;
     fn set_window_title(&mut self, title: &str);
@@ -105,11 +109,15 @@ impl LocatorWindow {
         }
     }
     /// `LocatorWindow::setFontDependentWidths`.
-    pub fn set_font_dependent_widths(&mut self) {}
+    pub fn set_font_dependent_widths(&mut self, n: &mut dyn LocatorNativeBoundary) {
+        n.set_button_width(n.rounded_style(), 1.2, "Help");
+    }
     /// `LocatorWindow::changeEvent`.
-    pub fn change_event(&mut self, font_change: bool) {
+    pub fn change_event(&mut self, font_change: bool, n: &mut dyn LocatorNativeBoundary) {
+        n.widget_change_event();
+        n.check_and_set_mac_menu();
         if font_change {
-            self.set_font_dependent_widths()
+            self.set_font_dependent_widths(n)
         }
     }
     /// `LocatorWindow::closeEvent`.
@@ -550,6 +558,13 @@ mod tests {
         subset: LocatorSubset,
     }
     impl LocatorNativeBoundary for N {
+        fn set_button_width(&mut self, _: bool, _: f32, text: &str) -> i32 {
+            self.calls.push(format!("width:{text}"));
+            42
+        }
+        fn rounded_style(&self) -> bool {
+            true
+        }
         fn raise_window(&mut self) {
             self.calls.push("raise".into())
         }
@@ -696,5 +711,12 @@ mod tests {
             &mut n,
         );
         assert_eq!(n.calls.last().unwrap(), "2.0,1.0,true")
+    }
+    #[test]
+    fn font_change_uses_source_help_button_width_boundary() {
+        let mut window = LocatorWindow::new(1.);
+        let mut native = N::default();
+        window.change_event(true, &mut native);
+        assert!(native.calls.iter().any(|call| call == "width:Help"));
     }
 }

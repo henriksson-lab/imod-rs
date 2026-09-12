@@ -1,8 +1,3 @@
-//! Translation of `IMOD/3dmod/form_object_edit.cpp` and `form_object_edit.h`.
-//!
-//! `ObjectEditForm` retains the generated Qt form's widget state.  The
-//! `ObjectEditFormNativeBoundary` calls are the direct Qt docking, key-routing,
-//! and preferences boundary from the source unit.
 #![allow(dead_code)]
 
 use crate::imod::libimod::imodel::Imod;
@@ -14,7 +9,6 @@ use crate::imod::three_dmod::object_edit::{
     ioew_symbol, ioew_symsize, ioew_time,
 };
 
-/// Qt `DockingDialog`, keyboard routing, and `ImodPrefs` source boundary.
 pub trait ObjectEditFormNativeBoundary {
     fn setup_ui(&mut self);
     fn set_delete_on_close(&mut self);
@@ -27,13 +21,16 @@ pub trait ObjectEditFormNativeBoundary {
     fn ivw_control_key(&mut self, release: bool);
     fn accept_close(&mut self);
     fn check_and_set_mac_menu(&mut self);
+    fn widget_change_event(&mut self);
     fn is_font_change(&self) -> bool;
     fn retranslate_ui(&mut self);
 }
 
-/// `objectEditForm`, including the value and visibility state owned by its `.ui` form.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ObjectEditForm {
+    pub m_top_win: bool,
+    pub type_button_group: bool,
+    pub surface_button_group: bool,
     pub object_name: String,
     pub object_num_text: String,
     pub draw: bool,
@@ -76,6 +73,9 @@ impl ObjectEditForm {
         native.set_always_show_tool_tips();
         native.connect_signals();
         Self {
+            m_top_win: true,
+            type_button_group: true,
+            surface_button_group: true,
             copy_color: ioew_get_copy_color_name(edit) & 1 != 0,
             copy_name: ioew_get_copy_color_name(edit) & 2 != 0,
             copy_object: 1,
@@ -365,6 +365,7 @@ impl ObjectEditForm {
     }
     /// `objectEditForm::topChangeEvent`.
     pub fn top_change_event(&mut self, native: &mut dyn ObjectEditFormNativeBoundary) {
+        native.widget_change_event();
         native.check_and_set_mac_menu();
         if !native.is_font_change() {
             return;
@@ -406,6 +407,7 @@ mod tests {
             self.accepted = true
         }
         fn check_and_set_mac_menu(&mut self) {}
+        fn widget_change_event(&mut self) {}
         fn is_font_change(&self) -> bool {
             false
         }

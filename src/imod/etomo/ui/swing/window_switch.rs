@@ -601,6 +601,9 @@ impl<P: WindowMainPanel> Default for WindowSwitch<P> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use super::{WindowMainPanel, WindowManager, WindowPanel, WindowSwitch};
     use crate::imod::etomo::r#type::axis_id::AxisID;
     use crate::imod::etomo::util::unique_hashed_array::UniqueHashedArray;
@@ -672,5 +675,45 @@ mod tests {
             window_switch.get_menu().items()[0].borrow().text(),
             "1: two.edf"
         );
+    }
+
+    #[test]
+    fn source_rename_menu_and_tab_paths_select_the_director_key() {
+        let mut keys = UniqueHashedArray::<()>::new();
+        let first = keys.add_with_name("one.edf".to_owned(), ());
+        let second = keys.add_with_name("two.edf".to_owned(), ());
+        let renamed = keys.add_with_name("two-renamed.edf".to_owned(), ());
+        let selected = Rc::new(RefCell::new(Vec::new()));
+        let mut window_switch = WindowSwitch::new();
+        let selected_listener = Rc::clone(&selected);
+        window_switch.set_current_manager_listener(Box::new(move |key| {
+            selected_listener
+                .borrow_mut()
+                .push(key.get_name().to_owned());
+        }));
+        window_switch.add(
+            &mut Manager(Some(Panel(0))),
+            AxisID::Only,
+            Some(first.clone()),
+        );
+        window_switch.add(
+            &mut Manager(Some(Panel(0))),
+            AxisID::Second,
+            Some(second.clone()),
+        );
+
+        window_switch.rename(Some(&second), Some(renamed.clone()));
+        window_switch.menu_action("1: one.edf");
+        window_switch.tab_changed(Some(1));
+
+        assert_eq!(
+            selected.borrow().as_slice(),
+            ["two-renamed.edf", "one.edf", "two-renamed.edf"]
+        );
+        assert_eq!(
+            window_switch.get_menu().items()[1].borrow().text(),
+            "2: two-renamed.edf"
+        );
+        assert!(window_switch.get_menu().items()[1].borrow().selected());
     }
 }

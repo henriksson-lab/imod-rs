@@ -12,6 +12,7 @@ use std::rc::Rc;
 use super::check_box::CheckBox;
 use super::final_combine_fields::FinalCombineFields;
 use super::final_combine_panel::{NO_VOLCOMBINE_TITLE, VOLCOMBINE_PARALLEL_PROCESSING_TOOL_TIP};
+use super::initial_combine_fields::InitialCombineFields;
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::multi_line_button::MultiLineButton;
 use super::patch_size_panel::{
@@ -20,6 +21,7 @@ use super::patch_size_panel::{
 };
 use super::radio_button::{RadioButton, RadioButtonGroup};
 use super::solvematch_panel::{CombineParameters, FiducialMatch, SolvematchPanel};
+pub use crate::imod::etomo::r#type::match_mode::MatchMode;
 use crate::imod::etomo::r#type::{
     axis_id::AxisID, dialog_type::DialogType, processing_method::ProcessingMethod,
 };
@@ -27,13 +29,6 @@ use crate::imod::etomo::ui::field_type::FieldType;
 
 pub const TOMOGRAM_SIZE_CHANGED_STRING: &str =
     "THE TOMOGRAM HAS CHANGED - check min and max values";
-
-/// Java `MatchMode`, whose original typesafe enum is only consumed by this unit.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MatchMode {
-    AToB,
-    BToA,
-}
 
 /// Java `TomogramState` calls made by `isChanged`.
 pub trait SetupCombineTomogramState {
@@ -775,6 +770,97 @@ impl FinalCombineFields for SetupCombinePanel {
     }
     fn is_enabled(&self) -> bool {
         SetupCombinePanel::is_enabled(self)
+    }
+}
+
+impl InitialCombineFields for SetupCombinePanel {
+    fn set_surfaces_or_models(&mut self, use_matching_models: FiducialMatch) {
+        SetupCombinePanel::set_surfaces_or_models(self, use_matching_models);
+    }
+
+    fn get_surfaces_or_models(&self) -> FiducialMatch {
+        SetupCombinePanel::get_surfaces_or_models(self)
+    }
+
+    fn set_bin_by_2(&mut self, bin_by_2: bool) {
+        SetupCombinePanel::set_bin_by_2(self, bin_by_2);
+    }
+
+    fn is_bin_by_2(&self) -> bool {
+        SetupCombinePanel::is_bin_by_2(self)
+    }
+
+    fn set_fiducial_match_list_a(&mut self, fiducial_match_list_a: &str) {
+        SetupCombinePanel::set_fiducial_match_list_a(self, fiducial_match_list_a);
+    }
+
+    fn get_fiducial_match_list_a(
+        &self,
+        do_validation: bool,
+    ) -> Result<String, FieldValidationFailedException> {
+        SetupCombinePanel::get_fiducial_match_list_a(self, do_validation)
+    }
+
+    fn get_fiducial_match_list_a_unvalidated(&self) -> String {
+        SetupCombinePanel::get_fiducial_match_list_a(self, false)
+            .expect("the source nonvalidating getter cannot reject a field")
+    }
+
+    fn set_fiducial_match_list_b(&mut self, fiducial_match_list_b: &str) {
+        SetupCombinePanel::set_fiducial_match_list_b(self, fiducial_match_list_b);
+    }
+
+    fn get_fiducial_match_list_b(
+        &self,
+        do_validation: bool,
+    ) -> Result<String, FieldValidationFailedException> {
+        SetupCombinePanel::get_fiducial_match_list_b(self, do_validation)
+    }
+
+    fn get_fiducial_match_list_b_unvalidated(&self) -> String {
+        SetupCombinePanel::get_fiducial_match_list_b(self, false)
+            .expect("the source nonvalidating getter cannot reject a field")
+    }
+
+    fn is_enabled(&self) -> bool {
+        SetupCombinePanel::is_enabled(self)
+    }
+
+    fn is_use_corresponding_points(&self) -> bool {
+        SetupCombinePanel::is_use_corresponding_points(self)
+    }
+
+    fn set_use_corresponding_points(&mut self, use_points: bool) {
+        SetupCombinePanel::set_use_corresponding_points(self, use_points);
+    }
+
+    fn set_use_list(&mut self, use_list: &str) {
+        SetupCombinePanel::set_use_list(self, use_list);
+    }
+
+    fn get_use_list(&self, do_validation: bool) -> Result<String, FieldValidationFailedException> {
+        SetupCombinePanel::get_use_list(self, do_validation)
+    }
+
+    fn get_use_list_unvalidated(&self) -> String {
+        SetupCombinePanel::get_use_list(self, false)
+            .expect("the source nonvalidating getter cannot reject a field")
+    }
+
+    fn get_match_mode(&self) -> Option<MatchMode> {
+        Some(SetupCombinePanel::get_match_mode(self))
+    }
+
+    fn set_match_mode(&mut self, match_mode: Option<MatchMode>) {
+        SetupCombinePanel::set_match_mode(self, match_mode);
+    }
+
+    fn set_initial_volume_matching(&mut self, input: bool) {
+        SetupCombinePanel::set_initial_volume_matching(self, input);
+    }
+
+    fn is_initial_volume_matching(&self) -> bool {
+        SetupCombinePanel::is_initial_volume_matching(self)
     }
 }
 

@@ -4,6 +4,8 @@
 //! selectors are deliberately small and explicit: a requested experimental
 //! backend is never silently redirected to the parity implementation.
 
+use std::sync::OnceLock;
+
 /// Runtime choice for libtiff-backed TIFF operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TiffBackend {
@@ -43,35 +45,56 @@ fn value(name: &str) -> Result<Option<String>, String> {
 
 /// Parses `IMOD_RS_TIFF_BACKEND`; unset selects the parity boundary.
 pub fn tiff_backend() -> Result<TiffBackend, String> {
-    match value("IMOD_RS_TIFF_BACKEND")?.as_deref() {
-        None | Some("parity") => Ok(TiffBackend::Parity),
-        Some("rust") => Ok(TiffBackend::Rust),
-        Some(_) => {
-            Err("ERROR: Rust-native backend - IMOD_RS_TIFF_BACKEND must be parity or rust".into())
-        }
-    }
+    static BACKEND: OnceLock<Result<TiffBackend, String>> = OnceLock::new();
+    BACKEND
+        .get_or_init(|| match value("IMOD_RS_TIFF_BACKEND") {
+            Ok(value) => match value.as_deref() {
+                None | Some("parity") => Ok(TiffBackend::Parity),
+                Some("rust") => Ok(TiffBackend::Rust),
+                Some(_) => Err(
+                    "ERROR: Rust-native backend - IMOD_RS_TIFF_BACKEND must be parity or rust"
+                        .into(),
+                ),
+            },
+            Err(error) => Err(error),
+        })
+        .clone()
 }
 
 /// Parses `IMOD_RS_MRC2TIF_ENCODER`; unset selects the Qt parity boundary.
 pub fn mrc2tif_encoder() -> Result<Mrc2TifEncoder, String> {
-    match value("IMOD_RS_MRC2TIF_ENCODER")?.as_deref() {
-        None | Some("parity") => Ok(Mrc2TifEncoder::Parity),
-        Some("rust") => Ok(Mrc2TifEncoder::Rust),
-        Some(_) => Err(
-            "ERROR: Rust-native backend - IMOD_RS_MRC2TIF_ENCODER must be parity or rust".into(),
-        ),
-    }
+    static BACKEND: OnceLock<Result<Mrc2TifEncoder, String>> = OnceLock::new();
+    BACKEND
+        .get_or_init(|| match value("IMOD_RS_MRC2TIF_ENCODER") {
+            Ok(value) => match value.as_deref() {
+                None | Some("parity") => Ok(Mrc2TifEncoder::Parity),
+                Some("rust") => Ok(Mrc2TifEncoder::Rust),
+                Some(_) => Err(
+                    "ERROR: Rust-native backend - IMOD_RS_MRC2TIF_ENCODER must be parity or rust"
+                        .into(),
+                ),
+            },
+            Err(error) => Err(error),
+        })
+        .clone()
 }
 
 /// Parses `IMOD_RS_FFT_BACKEND`; unset selects the translated IMOD FFT path.
 pub fn fft_backend() -> Result<FftBackend, String> {
-    match value("IMOD_RS_FFT_BACKEND")?.as_deref() {
-        None | Some("parity") => Ok(FftBackend::Parity),
-        Some("rustfft") => Ok(FftBackend::Rustfft),
-        Some(_) => {
-            Err("ERROR: Rust-native backend - IMOD_RS_FFT_BACKEND must be parity or rustfft".into())
-        }
-    }
+    static BACKEND: OnceLock<Result<FftBackend, String>> = OnceLock::new();
+    BACKEND
+        .get_or_init(|| match value("IMOD_RS_FFT_BACKEND") {
+            Ok(value) => match value.as_deref() {
+                None | Some("parity") => Ok(FftBackend::Parity),
+                Some("rustfft") => Ok(FftBackend::Rustfft),
+                Some(_) => Err(
+                    "ERROR: Rust-native backend - IMOD_RS_FFT_BACKEND must be parity or rustfft"
+                        .into(),
+                ),
+            },
+            Err(error) => Err(error),
+        })
+        .clone()
 }
 
 #[cfg(test)]

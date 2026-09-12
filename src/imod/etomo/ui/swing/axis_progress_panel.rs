@@ -1,11 +1,10 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/AxisProgressPanel.java`.
 //!
-//! `ProgressPanel`, `SimpleButton`, and `BusyStatusMediator` remain their own
-//! untranslated source units.  This module keeps exactly the state and call
-//! ordering AxisProgressPanel contributes around those widget boundaries.
+//! `ProgressPanel` and `BusyStatusMediator` remain their own source boundaries.
 #![allow(dead_code)]
 
 use super::progress_panel::ProgressPanel;
+use super::simple_button::SimpleButton;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
@@ -22,8 +21,7 @@ pub const BUSY_STATUS_MEDIATOR_DELAY_BOUNDARY: &str = "BusyStatusMediator.DELAY"
 /// Fields of Java's final `AxisProgressPanel`.
 pub struct AxisProgressPanel {
     pub pnl_root_visible: bool,
-    pub button_kill_process_enabled: bool,
-    pub button_kill_process_tooltip: Option<String>,
+    pub button_kill_process: SimpleButton,
     pub manager: &'static dyn BaseManager,
     pub progress_panel: ProgressPanel,
     /// The exact messages passed to absent BusyStatusMediator.
@@ -37,8 +35,7 @@ impl AxisProgressPanel {
     fn new(axis_id: Option<AxisID>, manager: &'static dyn BaseManager) -> Self {
         Self {
             pnl_root_visible: true,
-            button_kill_process_enabled: true,
-            button_kill_process_tooltip: None,
+            button_kill_process: SimpleButton::new_with_text(Some(KILL_BUTTON_LABEL)),
             manager,
             progress_panel: ProgressPanel::get_instance(
                 Some("No process"),
@@ -76,7 +73,8 @@ impl AxisProgressPanel {
     }
     /// `createPanel()`.
     fn create_panel(&mut self) {
-        self.button_kill_process_enabled = false;
+        self.button_kill_process.button.enabled = false;
+        self.button_kill_process.button.alignment_y = 1.0;
         self.busy_status_kill_button_messages
             .push((self.axis_id, false));
     }
@@ -91,10 +89,12 @@ impl AxisProgressPanel {
     }
     /// `setTooltips()`.
     fn set_tooltips(&mut self) {
-        self.button_kill_process_tooltip = Some("Press to end the current process.".into());
+        self.button_kill_process.button.tooltip = Some("Press to end the current process.".into());
     }
     /// `addListeners()`; `action_performed` is the direct Rust event endpoint.
-    fn add_listeners(&mut self) {}
+    fn add_listeners(&mut self) {
+        self.button_kill_process.button.action_listener_count += 1;
+    }
     /// `setBackground(Color)`; Color is a native widget type, retained as its CSS/RGB presentation string.
     pub fn set_background(&mut self, color: impl Into<String>) {
         let color = color.into();
@@ -117,7 +117,7 @@ impl AxisProgressPanel {
             self.busy_status_kill_button_messages
                 .push((self.axis_id, true));
         }
-        self.button_kill_process_enabled = enabled;
+        self.button_kill_process.button.enabled = enabled;
         if !enabled {
             self.busy_status_kill_button_messages
                 .push((self.axis_id, false));

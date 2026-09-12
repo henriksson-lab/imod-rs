@@ -453,6 +453,39 @@ as scratch MRC files with `raw2mrc` plus a Python header patch and compared
 byte for byte against the reference `newstack` for `-secs`, `-strip`, `-tilt`,
 `-reorder` with and without `-angle`, `-mdoc`, `-numout` and multi-input runs.
 
+## Real cryo-EM movies — not vendored, opt-in through `IMOD_RS_RAWEM_DIR`
+
+Every TIFF fixture elsewhere in this manifest is small and synthetic.  Two real
+acquisition movies exercise code paths none of them reach, so they drive
+`tests/rawem_movies.rs`.  They are **429 MB together and are not vendored**:
+they live outside the repository, read-only, and the test suite skips itself
+cleanly when `IMOD_RS_RAWEM_DIR` is unset or does not hold both files.
+
+| bytes | file | what it is |
+|---:|---|---|
+| 125 571 686 | `FoilHole_7751092_Data_7746149_27_20260608_205700_Fractions.tiff` | a 45-frame counting-mode movie, 4096 x 4096, 8-bit unsigned, LZW-compressed, written in strips of 512 rows, `Subfile Type: multi-page document`, `Page Number: 0-45`.  Native `header` reports `4096 4096 45`, mode 0, and prints ` This is a TIFF file (in strips of   4096 x    512).` |
+| 323 618 458 | `Position_1_9_001_0.00_20250909_165844_EER.eer` | an EER movie: BigTIFF (magic `II+\0`, version 43) whose 7-bit electron-event directories `iitif.c` decodes onto the 4x super-resolution grid.  Native reads it as `16384 16384 522`, mode 0 |
+
+Provenance: copied by the dataset owner from a Kebnekaise acquisition
+directory; `readme.md` beside them describes them as raw movies and notes that
+summing the frames approximates the averaged image that a data-collection
+program would otherwise store as a separate MRC.  Both files were used exactly
+as delivered; nothing in this repository writes to them.
+
+To run the suite:
+
+```
+IMOD_RS_RAWEM_DIR=/husky/otherdataset/teresa/rawEM \
+  RUSTFLAGS=-Awarnings cargo test -q --test rawem_movies -- --test-threads=1
+```
+
+It takes about seven minutes and writes up to 755 MB of intermediate output
+into the process temp directory, removing each output as soon as it is hashed.
+Every expectation in it was captured from the reference build at
+`<scratchpad>/imod-abi-src`, each side in its own directory with stdout through
+a pipe.  `tif2mrc` is not built by default in that tree; `make tif2mrc` in its
+`mrc` subdirectory builds it.
+
 ## Fields that must be masked before byte comparison
 
 Recorded here because comparing without masking produces false regressions, and

@@ -1,7 +1,10 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ProcessControlPanel.java`.
-//! Native `SimpleToggleButton`/`ColoredStateText` controls are represented by
-//! their source-visible text, selection, color, and listener boundaries.
+//! `SimpleToggleButton` and `ColoredStateText` retain their source-visible
+//! control state at the native Swing boundary.
 #![allow(dead_code)]
+use super::simple_toggle_button::SimpleToggleButton;
+use super::tooltip_formatter::TooltipFormatter;
+use super::ui_utilities::Color;
 use crate::imod::etomo::process::process_state::ProcessState;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 pub const TEXT_STATES: [&str; 3] = ["Not Started", "In Progress", "Complete"];
@@ -14,13 +17,8 @@ pub struct ProcessControlPanel {
     pub dialog_type: DialogType,
     pub compact_display: bool,
     pub selected_state: usize,
-    pub button_selected: bool,
-    pub button_action_command: String,
-    pub button_text: String,
-    pub button_foreground: (u8, u8, u8),
-    pub tooltip: Option<String>,
-    pub action_listener_present: bool,
-    pub mouse_listener_present: bool,
+    pub button_run: SimpleToggleButton,
+    pub panel_root_tooltip: Option<String>,
 }
 impl ProcessControlPanel {
     pub fn new(dialog_type: DialogType, compact_display: bool) -> Self {
@@ -34,13 +32,12 @@ impl ProcessControlPanel {
             dialog_type,
             compact_display,
             selected_state: 0,
-            button_selected: false,
-            button_action_command: dialog_type.to_string(),
-            button_text: String::new(),
-            button_foreground: COLOR_NOT_STARTED,
-            tooltip: None,
-            action_listener_present: false,
-            mouse_listener_present: false,
+            button_run: {
+                let mut button = SimpleToggleButton::new();
+                button.button.action_command = Some(dialog_type.to_string());
+                button
+            },
+            panel_root_tooltip: None,
         };
         panel.update_label();
         panel
@@ -52,7 +49,7 @@ impl ProcessControlPanel {
         self.dialog_type
     }
     pub fn set_button_action_listener(&mut self) {
-        self.action_listener_present = true;
+        self.button_run.button.action_listener_count += 1;
     }
     pub fn get_container(&self) -> bool {
         true
@@ -66,7 +63,7 @@ impl ProcessControlPanel {
         self.update_label();
     }
     pub fn set_selected(&mut self, state: bool) {
-        self.button_selected = state;
+        self.button_run.button.selected = state;
     }
     fn update_label(&mut self) {
         let state = if self.compact_display {
@@ -74,18 +71,26 @@ impl ProcessControlPanel {
         } else {
             TEXT_STATES[self.selected_state]
         };
-        self.button_text = if state.is_empty() {
+        self.button_run.set_text(Some(&if state.is_empty() {
             format!("<HTML><CENTER>{}</CENTER>", self.command)
         } else {
             format!("<HTML><CENTER>{}<br>{}</CENTER>", self.command, state)
-        };
-        self.button_foreground = COLOR_STATE[self.selected_state];
+        }));
+        let color = COLOR_STATE[self.selected_state];
+        self.button_run.button.foreground = Some(Color {
+            red: color.0 as i32,
+            green: color.1 as i32,
+            blue: color.2 as i32,
+        });
     }
     pub fn add_mouse_listener(&mut self) {
-        self.mouse_listener_present = true;
+        self.button_run.button.mouse_listener_count += 1;
     }
     pub fn set_tool_tip_text(&mut self, text: impl Into<String>) {
-        self.tooltip = Some(text.into());
+        let text = text.into();
+        let tooltip = TooltipFormatter::instance().format(Some(&text));
+        self.panel_root_tooltip = tooltip.clone();
+        self.button_run.button.tooltip = tooltip;
     }
 }
 #[cfg(test)]
@@ -96,13 +101,34 @@ mod tests {
     fn state_controls_html_label_and_color() {
         let mut p = ProcessControlPanel::new(DialogType::SetupRecon, false);
         p.set_state(ProcessState::Complete);
-        assert!(p.button_text.contains("Complete"));
-        assert_eq!(p.button_foreground, COLOR_COMPLETE);
+        assert!(
+            p.button_run
+                .button
+                .text
+                .as_deref()
+                .unwrap()
+                .contains("Complete")
+        );
+        assert_eq!(
+            p.button_run.button.foreground,
+            Some(Color {
+                red: 0,
+                green: 153,
+                blue: 0,
+            })
+        );
     }
     #[test]
     fn compact_display_omits_state() {
         let mut p = ProcessControlPanel::new(DialogType::SetupRecon, true);
         p.set_state(ProcessState::InProgress);
-        assert!(!p.button_text.contains("In Progress"));
+        assert!(
+            !p.button_run
+                .button
+                .text
+                .as_deref()
+                .unwrap()
+                .contains("In Progress")
+        );
     }
 }

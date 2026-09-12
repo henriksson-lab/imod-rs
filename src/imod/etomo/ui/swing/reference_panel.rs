@@ -14,6 +14,7 @@ use super::file_text_field2::FileTextField2;
 use super::labeled_spinner::LabeledSpinner;
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::radio_button::{RadioButton, RadioButtonGroup};
+use super::radio_text_field::RadioTextField;
 use super::reference_parent::ReferenceParent;
 use crate::imod::etomo::ui::field_type::FieldType;
 
@@ -24,40 +25,6 @@ pub const VOLUME_LABEL: &str = "In Volume";
 
 pub trait ReferencePanelManager {
     fn property_user_dir(&self) -> &Path;
-}
-
-/// Java `RadioTextField` state observed by `ReferencePanel`.
-#[derive(Clone, Debug)]
-pub struct RadioTextField {
-    pub radio_button: RadioButton,
-    pub field: LabeledTextField,
-}
-impl RadioTextField {
-    pub fn set_selected(&mut self, value: bool) {
-        self.radio_button.set_selected(value);
-    }
-    pub fn is_selected(&self) -> bool {
-        self.radio_button.is_selected()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.field.is_empty()
-    }
-    pub fn set_text(&mut self, text: &str) {
-        self.field.set_text(text);
-    }
-    pub fn get_text(&self, validate: bool) -> Result<String, FieldValidationFailedException> {
-        self.field.get_text_validated(validate)
-    }
-    pub fn set_enabled(&mut self, value: bool) {
-        self.radio_button.set_enabled(value);
-        self.field.set_enabled(value);
-    }
-    pub fn action_command(&self) -> &str {
-        self.radio_button.get_action_command()
-    }
-    pub fn label(&self) -> &str {
-        self.radio_button.get_text()
-    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -138,10 +105,11 @@ impl ReferencePanel {
     pub fn get_instance<M: ReferencePanelManager>(manager: &M, april_fools: bool) -> Self {
         let group = Rc::new(RefCell::new(RadioButtonGroup::new()));
         let mut result = Self {
-            rtf_particle: RadioTextField {
-                radio_button: RadioButton::new_in_group("Particle ", group.clone()),
-                field: LabeledTextField::new(FieldType::Integer, "Particle "),
-            },
+            rtf_particle: RadioTextField::get_instance(
+                FieldType::Integer,
+                "Particle ",
+                Some(group.clone()),
+            ),
             s_volume: LabeledSpinner::get_instance("In Volume: ", 1, 1, i32::MAX, 1),
             rb_file: RadioButton::new_in_group(REFERENCE_FILE_LABEL, group.clone()),
             ftf_file: FileTextField2 {
@@ -221,7 +189,7 @@ impl ReferencePanel {
         } else {
             self.ltf_volume.get_text()
         };
-        meta.reference_particle = self.rtf_particle.field.get_text();
+        meta.reference_particle = self.rtf_particle.get_text_unvalidated();
         meta.reference_file = self.ftf_file.text.clone();
         meta.reference_multiparticle_level =
             MultiparticleReference::convert_index_to_level(self.cmb_multiparticle.selected_index);
@@ -308,7 +276,7 @@ impl ReferencePanel {
         self.ltf_volume.set_visible(on);
     }
     pub fn action<P: ReferenceParent>(&mut self, parent: &mut P, command: &str) {
-        if command == self.rtf_particle.action_command()
+        if command == self.rtf_particle.get_action_command()
             || command == self.rb_file.get_action_command()
             || command == self.rb_multiparticle.get_action_command()
         {
@@ -319,7 +287,7 @@ impl ReferencePanel {
         if self.rtf_particle.is_selected() && self.rtf_particle.is_empty() {
             return Some(format!(
                 "In {TITLE}, {} is required when {} is selected.",
-                self.rtf_particle.label(),
+                self.rtf_particle.get_label(),
                 self.s_volume.get_label()
             ));
         }
@@ -411,7 +379,7 @@ mod tests {
         let mut matlab = MatlabParam::default();
         assert!(panel.get_matlab_parameters(&mut matlab, true));
         assert_eq!(matlab.reference_particle, "4");
-        let action_command = panel.rtf_particle.action_command().to_owned();
+        let action_command = panel.rtf_particle.get_action_command().to_owned();
         panel.action(&mut parent, &action_command);
         assert_eq!(parent.updates, 1);
     }

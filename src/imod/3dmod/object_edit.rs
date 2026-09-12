@@ -19,6 +19,11 @@ pub const SYM_TABLE: [i32; MAX_SYMBOLS] = [
     IOBJ_SYM_SQUARE,
     IOBJ_SYM_TRIANGLE,
 ];
+
+/// Viewer keyboard forwarding used by `ImodObjColor`'s selector slots.
+pub trait ObjectEditNativeBoundary {
+    fn control_key(&mut self, release: bool, key: i32);
+}
 /// Form-equivalent source state for the static `Ioew_dialog` and selectors.
 #[derive(Clone, Debug, Default)]
 pub struct ObjectEdit {
@@ -280,12 +285,23 @@ impl ImodObjColor {
     pub fn closing_slot(&mut self) {
         self.selector_open = false
     }
-    pub fn key_press_slot(&mut self, _key: i32) {}
-    pub fn key_release_slot(&mut self, _key: i32) {}
+    pub fn key_press_slot(&mut self, key: i32, n: &mut dyn ObjectEditNativeBoundary) {
+        n.control_key(false, key);
+    }
+    pub fn key_release_slot(&mut self, key: i32, n: &mut dyn ObjectEditNativeBoundary) {
+        n.control_key(true, key);
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Default)]
+    struct Native(Vec<(bool, i32)>);
+    impl ObjectEditNativeBoundary for Native {
+        fn control_key(&mut self, release: bool, key: i32) {
+            self.0.push((release, key));
+        }
+    }
     #[test]
     fn object_slots_preserve_source_flags() {
         let mut m = Imod::default();
@@ -301,5 +317,13 @@ mod tests {
         );
         ioew_fill(&mut m, &mut e, 1);
         assert_ne!(m.obj[0].symflags & IOBJ_SYMF_FILL as u8, 0);
+    }
+    #[test]
+    fn color_selector_forwards_key_press_and_release() {
+        let mut selector = ImodObjColor::default();
+        let mut native = Native::default();
+        selector.key_press_slot(65, &mut native);
+        selector.key_release_slot(65, &mut native);
+        assert_eq!(native.0, vec![(false, 65), (true, 65)]);
     }
 }

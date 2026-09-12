@@ -24,6 +24,15 @@ pub struct Directive {
 pub struct DirectiveDescrSection {
     pub title: String,
     pub names: Vec<String>,
+    /// Java `containsEditableDirectives`.
+    pub contains_editable_directives: bool,
+}
+
+impl DirectiveDescrSection {
+    /// Java `isContainsEditableDirectives()`.
+    pub fn is_contains_editable_directives(&self) -> bool {
+        self.contains_editable_directives
+    }
 }
 
 impl std::fmt::Display for DirectiveDescrSection {
@@ -382,6 +391,7 @@ mod tests {
                     "missing".to_owned(),
                     "included".to_owned(),
                 ],
+                contains_editable_directives: true,
             },
             DirectiveMap {
                 directives: HashMap::from([

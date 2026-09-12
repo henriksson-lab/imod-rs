@@ -151,6 +151,8 @@ pub mod preferences;
 pub mod pyramidcache;
 /// Translation of `IMOD/3dmod/rescale.cpp` and `rescale.h`.
 pub mod rescale;
+pub mod resizetool;
+pub mod rotationtool;
 /// Translation of `IMOD/3dmod/scalebar.cpp` and `scalebar.h`.
 pub mod scalebar;
 /// Translation of `IMOD/3dmod/slicer.cpp` and `sslice.h`.

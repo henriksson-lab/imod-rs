@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 
 use super::processor_table::{ProcessorTable, ProcessorTableHooks, ProcessorTableRow};
-use super::processor_table_row::{BatchruntomoParameters, ProcessorNode};
+use super::processor_table_row::{BatchruntomoParameters, ProcesschunksParameters, ProcessorNode};
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
 
 const PREPEND: &str = ".Cpu";
@@ -18,6 +18,7 @@ const PREPEND: &str = ".Cpu";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProcessorType {
     Cpu,
+    Gpu,
 }
 
 /// Java `LoadAverageParam.getInstance(computer, manager)` boundary.
@@ -136,6 +137,9 @@ impl ProcessorTableHooks for CpuTableHooks {
 pub struct CpuTable {
     pub table: ProcessorTable<CpuTableHooks>,
     pub users_column: bool,
+    /// Java `BaseManager.isAddGPUMachineToProcessChunks()` boundary read by
+    /// the inherited `ProcessorTable.getParameters(ProcesschunksParam)`.
+    pub add_gpu_machine_to_processchunks: bool,
 }
 
 impl CpuTable {
@@ -162,6 +166,7 @@ impl CpuTable {
                 no_load,
             ),
             users_column,
+            add_gpu_machine_to_processchunks: false,
         }
     }
 
@@ -227,6 +232,22 @@ impl CpuTable {
             }
         }
         true
+    }
+
+    /// Java inherited `ProcessorTable.getParameters(ProcesschunksParam)`.
+    pub fn get_processchunks_parameters(&self, param: &mut ProcesschunksParameters) {
+        if self.add_gpu_machine_to_processchunks {
+            param.gpu_machines.clear();
+        }
+        for row in &self.table.row_list.list {
+            row.get_processchunks_parameters(
+                param,
+                self.add_gpu_machine_to_processchunks,
+                self.table.is_secondary(),
+                false,
+                false,
+            );
+        }
     }
 
     /// Java `getButtonGroup`; CPU tables do not own a Swing `ButtonGroup`.
@@ -344,6 +365,35 @@ mod tests {
         assert_eq!(param.cpu_machines, vec![("old".into(), 1)]);
         assert!(table.get_parameters(ProcessingMethod::PpCpu, &mut param, true));
         assert_eq!(param.cpu_machines, vec![("node-a".into(), 1)]);
+    }
+
+    #[test]
+    fn inherited_processchunks_path_keeps_cpu_rows_out_of_gpu_machine_list() {
+        let mut table = CpuTable::new(
+            "group",
+            vec![ProcessorNode {
+                name: "node-a".into(),
+                num_cpus: 4,
+                gpu_device_array: vec!["0".into()],
+                ..ProcessorNode::default()
+            }],
+            false,
+            BTreeSet::new(),
+            true,
+            true,
+        );
+        table.table.create_table();
+        table.add_gpu_machine_to_processchunks = true;
+        let mut param = ProcesschunksParameters {
+            gpu_machines: vec![("old".into(), 1, vec![])],
+            ..ProcesschunksParameters::default()
+        };
+        table.get_processchunks_parameters(&mut param);
+        assert_eq!(
+            param.machine_names,
+            vec![("node-a".into(), 1, vec!["0".into()])]
+        );
+        assert!(param.gpu_machines.is_empty());
     }
 
     #[test]

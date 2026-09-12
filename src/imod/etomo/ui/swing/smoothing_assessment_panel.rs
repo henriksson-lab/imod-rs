@@ -13,6 +13,7 @@ use crate::imod::etomo::ui::field_type::FieldType;
 
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::multi_line_button::MultiLineButton;
+use super::smoothing_assessment_parent::SmoothingAssessmentParent;
 use super::tilt_panel::Deferred3dmodButton;
 
 pub const LAMBDA_FOR_SMOOTHING_LABEL: &str = "Smoothing factors to try";
@@ -25,19 +26,6 @@ pub const SMOOTHING_ASSESSMENT_OUTPUT_MODEL: &str = "_checkflat.mod";
 pub enum SmoothingAssessmentPanelId {
     PostFlattenVolume,
     ToolsFlattenVolume,
-}
-
-/// Java `SmoothingAssessmentParent`.
-pub trait SmoothingAssessmentParent {
-    fn is_one_surface(&self) -> bool;
-    fn get_warp_spacing_x(
-        &self,
-        do_validation: bool,
-    ) -> Result<String, FieldValidationFailedException>;
-    fn get_warp_spacing_y(
-        &self,
-        do_validation: bool,
-    ) -> Result<String, FieldValidationFailedException>;
 }
 
 /// The `FlattenWarpParam` methods used by this source unit.  Its command-line

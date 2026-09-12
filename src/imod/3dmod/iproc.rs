@@ -18,6 +18,16 @@ pub const TOGGLE_BUT: usize = 4;
 pub const RESET_BUT: usize = 5;
 pub const SAVE_BUT: usize = 6;
 pub const LIST_BUT: usize = 7;
+/// The source's final two actions are Done and Help.  `timerEvent` enables
+/// every action except Help, so retain their count even though Done has no
+/// standalone Rust action handler yet.
+
+/// `QEvent` types inspected by `IProcWindow::topChangeEvent`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IprocChangeEvent {
+    FontChange,
+    Other,
+}
 
 /// `IProcParam`.
 #[derive(Clone, Debug, PartialEq)]
@@ -122,6 +132,14 @@ pub trait IprocBoundary {
     fn apply_median(&mut self, _data: &mut [u8], _volume: &[Vec<u8>], _p: &IprocParam) {}
     fn apply_aniso_diffusion(&mut self, _data: &mut [u8], _p: &mut IprocParam) {}
     fn dialog_message(&mut self, _message: &str) {}
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn dialog_change_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
+    fn manage_list_stack_sizes(&mut self) {}
+    /// `ivwControlKey(1, e)` from `keyReleaseEvent`.
+    fn control_key(&mut self, _release: bool) {}
 }
 
 /// `IProcWindow` sans Qt's generated widget ownership.
@@ -139,6 +157,7 @@ pub struct IprocWindow {
     pub saved_param: IprocParam,
     pub data_modes: Vec<i32>,
     pub selected_filter: i32,
+    pub rounded_style: bool,
 }
 impl Default for IprocWindow {
     fn default() -> Self {
@@ -155,6 +174,7 @@ impl Default for IprocWindow {
             saved_param: IprocParam::default(),
             data_modes: vec![],
             selected_filter: 0,
+            rounded_style: false,
         }
     }
 }
@@ -675,8 +695,19 @@ impl IprocWindow {
             boundary.redraw_image();
         }
     }
+    /// The C++ timer polls its separately-owned `QThread`.  Rust currently
+    /// executes filters synchronously in `start_process`, so there is no
+    /// independent worker or timer lifecycle to poll here.
     pub fn timer_event(&mut self) {}
-    pub fn top_change_event(&mut self) {}
+    /// `IProcWindow::topChangeEvent`.
+    pub fn top_change_event(&mut self, event: IprocChangeEvent, boundary: &mut dyn IprocBoundary) {
+        self.rounded_style = boundary.rounded_style();
+        boundary.dialog_change_event();
+        boundary.check_and_set_mac_menu();
+        if event == IprocChangeEvent::FontChange {
+            boundary.manage_list_stack_sizes();
+        }
+    }
     pub fn top_close_event(&mut self, proc: &mut ImodIproc, boundary: &mut dyn IprocBoundary) {
         if !self.running_proc {
             clearsec(proc, boundary);
@@ -697,7 +728,10 @@ impl IprocWindow {
             self.button_clicked(MORE_BUT, proc, param, boundary);
         }
     }
-    pub fn key_release_event(&mut self) {}
+    /// `IProcWindow::keyReleaseEvent`.
+    pub fn key_release_event(&mut self, boundary: &mut dyn IprocBoundary) {
+        boundary.control_key(true);
+    }
 }
 
 /// `iprocRethink`.
@@ -991,6 +1025,53 @@ fn gaussian_kernel(sigma: f32, dim: usize) -> Vec<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct LifecycleBoundary {
+        calls: Vec<String>,
+        rounded: bool,
+    }
+    impl IprocBoundary for LifecycleBoundary {
+        fn dimensions(&self) -> (usize, usize, usize) {
+            (1, 1, 1)
+        }
+        fn current_section_time(&self) -> (i32, i32) {
+            (0, 0)
+        }
+        fn image_mode(&self) -> i32 {
+            0
+        }
+        fn image_range(&self) -> (f32, f32) {
+            (0., 255.)
+        }
+        fn display_range(&self) -> (i32, i32) {
+            (0, 255)
+        }
+        fn image_bytes(&mut self, _: i32, _: i32) -> Option<Vec<u8>> {
+            Some(vec![0])
+        }
+        fn replace_image_bytes(&mut self, _: i32, _: i32, _: &[u8]) {
+            self.calls.push("replace".into());
+        }
+        fn redraw_image(&mut self) {
+            self.calls.push("redraw".into());
+        }
+        fn rounded_style(&self) -> bool {
+            self.rounded
+        }
+        fn dialog_change_event(&mut self) {
+            self.calls.push("change".into());
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("menu".into());
+        }
+        fn manage_list_stack_sizes(&mut self) {
+            self.calls.push("sizes".into());
+        }
+        fn control_key(&mut self, release: bool) {
+            self.calls.push(format!("key:{release}"));
+        }
+    }
     #[test]
     fn byte_kernel_clamps_edges_as_source() {
         let a = [1, 2, 3, 4];
@@ -1013,5 +1094,17 @@ mod tests {
         assert_eq!(w.sigma1_scale, 10000.);
         w.set_sigma1_slider(&mut p, 0.01);
         assert_eq!(w.sigma1_scale, 1000.);
+    }
+    #[test]
+    fn change_and_key_release_route_native_lifecycle_calls() {
+        let mut window = IprocWindow::default();
+        let mut native = LifecycleBoundary {
+            rounded: true,
+            ..LifecycleBoundary::default()
+        };
+        window.top_change_event(IprocChangeEvent::FontChange, &mut native);
+        window.key_release_event(&mut native);
+        assert!(window.rounded_style);
+        assert_eq!(native.calls, ["change", "menu", "sizes", "key:true"]);
     }
 }

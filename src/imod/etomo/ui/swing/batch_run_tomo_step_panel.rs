@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use super::check_box::CheckBox;
 use super::radio_button::{EnumeratedTypeBoundary, RadioButton, RadioButtonGroup};
+use super::series_watcher_parent::SeriesWatcherParent;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 
@@ -193,12 +194,6 @@ impl BatchRunTomoTableBoundary {
     pub fn add_status_change_listener_to_rows(&mut self) {
         self.rows_status_listener_count += 1;
     }
-}
-
-/// Narrow `SeriesWatcherParent` boundary used by this source unit.
-pub trait SeriesWatcherParent {
-    fn is_series_watcher_on(&self) -> bool;
-    fn equals_series_watcher_action_command(&self, action_command: &str) -> bool;
 }
 
 /// `BatchRunTomoMetaData` fields read/written by this source unit.

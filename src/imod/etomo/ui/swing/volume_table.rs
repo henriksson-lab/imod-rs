@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use super::volume_row::VolumeRow;
+
 pub const FN_VOLUME_HEADER1: &str = "Volume";
 pub const FN_MOD_PARTICLE_HEADER1: &str = "Model";
 pub const INIT_MOTL_FILE_HEADER1: &str = "Initial";
@@ -49,121 +51,6 @@ pub struct PeetMetaData {
     pub tilt_range_multi_axes_file: Vec<String>,
 }
 
-/// Values from `VolumeRow.java` which are directly observed by `VolumeTable`.
-/// The full field/widget implementation belongs to that separate source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct VolumeRow {
-    pub index: usize,
-    pub highlighted: bool,
-    pub fn_volume: String,
-    pub fn_mod_particle: String,
-    pub init_motl_file: String,
-    pub tilt_range_min: String,
-    pub tilt_range_max: String,
-    pub tilt_range_multi_axes: String,
-    pub fn_volume_expanded: bool,
-    pub fn_mod_particle_expanded: bool,
-    pub init_motl_file_expanded: bool,
-    pub tilt_range_multi_axes_expanded: bool,
-    pub displayed: bool,
-}
-impl VolumeRow {
-    pub fn get_text_size(&self, tilt_range_multi_axes: bool) -> usize {
-        self.fn_volume.len().max(6)
-            + self.fn_mod_particle.len().max(5)
-            + self.init_motl_file.len().max(5)
-            + if tilt_range_multi_axes {
-                self.tilt_range_multi_axes.len().max(5)
-            } else {
-                0
-            }
-    }
-    pub fn validate_run(
-        &self,
-        tilt_range_required: bool,
-        tilt_range_multi_axes: bool,
-    ) -> Option<String> {
-        if self.fn_volume.trim().is_empty() {
-            return Some(format!("Volume is required in row {}", self.index + 1));
-        }
-        if tilt_range_required
-            && if tilt_range_multi_axes {
-                self.tilt_range_multi_axes.trim().is_empty()
-            } else {
-                self.tilt_range_min.trim().is_empty() || self.tilt_range_max.trim().is_empty()
-            }
-        {
-            return Some(format!("Tilt range is required in row {}", self.index + 1));
-        }
-        None
-    }
-    pub fn is_incorrect_paths(&self, root: &Path) -> bool {
-        [
-            self.fn_volume.as_str(),
-            self.fn_mod_particle.as_str(),
-            self.init_motl_file.as_str(),
-            self.tilt_range_multi_axes.as_str(),
-        ]
-        .into_iter()
-        .any(|value| !value.is_empty() && !root.join(value).exists())
-    }
-    pub fn get_parameters(&self, meta_data: &mut PeetMetaData) {
-        meta_data.init_motl_file.push(self.init_motl_file.clone());
-        meta_data.tilt_range_min.push(self.tilt_range_min.clone());
-        meta_data.tilt_range_max.push(self.tilt_range_max.clone());
-        meta_data
-            .tilt_range_multi_axes_file
-            .push(self.tilt_range_multi_axes.clone());
-    }
-    pub fn set_parameters(&mut self, meta_data: &PeetMetaData) {
-        if let Some(value) = meta_data.init_motl_file.get(self.index) {
-            self.init_motl_file = value.clone();
-        }
-        if let Some(value) = meta_data.tilt_range_min.get(self.index) {
-            self.tilt_range_min = value.clone();
-        }
-        if let Some(value) = meta_data.tilt_range_max.get(self.index) {
-            self.tilt_range_max = value.clone();
-        }
-        if let Some(value) = meta_data.tilt_range_multi_axes_file.get(self.index) {
-            self.tilt_range_multi_axes = value.clone();
-        }
-    }
-    pub fn get_matlab_parameters(&self, multi_axes: bool) -> MatlabVolume {
-        MatlabVolume {
-            fn_volume: self.fn_volume.clone(),
-            fn_mod_particle: self.fn_mod_particle.clone(),
-            init_motl: self.init_motl_file.clone(),
-            tilt_range_start: (!multi_axes)
-                .then(|| self.tilt_range_min.clone())
-                .unwrap_or_default(),
-            tilt_range_end: (!multi_axes)
-                .then(|| self.tilt_range_max.clone())
-                .unwrap_or_default(),
-            tilt_range_multi_axes: multi_axes
-                .then(|| self.tilt_range_multi_axes.clone())
-                .unwrap_or_default(),
-        }
-    }
-    pub fn set_matlab_parameters(
-        &mut self,
-        volume: &MatlabVolume,
-        use_init_motl: bool,
-        use_tilt_range: bool,
-        multi_axes: bool,
-    ) {
-        if use_init_motl {
-            self.init_motl_file = volume.init_motl.clone();
-        }
-        if use_tilt_range && !multi_axes {
-            self.tilt_range_min = volume.tilt_range_start.clone();
-            self.tilt_range_max = volume.tilt_range_end.clone();
-        } else if use_tilt_range {
-            self.tilt_range_multi_axes = volume.tilt_range_multi_axes.clone();
-        }
-    }
-}
-
 /// Java private final inner `RowList`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RowList {
@@ -194,21 +81,12 @@ impl RowList {
     }
     pub fn add(&mut self) -> &mut VolumeRow {
         let index = self.list.len();
-        self.list.push(VolumeRow {
-            index,
-            ..Default::default()
-        });
+        self.list.push(VolumeRow::get_instance(index));
         self.list.last_mut().unwrap()
     }
     pub fn add_at(&mut self, index: usize) -> &mut VolumeRow {
         let index = index.min(self.list.len());
-        self.list.insert(
-            index,
-            VolumeRow {
-                index,
-                ..Default::default()
-            },
-        );
+        self.list.insert(index, VolumeRow::get_instance(index));
         self.reindex(index);
         &mut self.list[index]
     }
@@ -218,23 +96,22 @@ impl RowList {
         fn_mod_particle: impl Into<String>,
         tilt_range_multi_axes: impl Into<String>,
     ) -> &mut VolumeRow {
-        let row = self.add();
-        row.fn_volume = fn_volume.into();
-        row.fn_mod_particle = fn_mod_particle.into();
-        row.tilt_range_multi_axes = tilt_range_multi_axes.into();
-        row
+        let index = self.list.len();
+        self.list.push(VolumeRow::get_instance_with_values(
+            Some(&fn_volume.into()),
+            Some(&fn_mod_particle.into()),
+            Some(&tilt_range_multi_axes.into()),
+            index,
+        ));
+        self.list
+            .last_mut()
+            .expect("Java ArrayList.add retained its row")
     }
     pub fn add_copy(&mut self, from_index: usize) -> Option<&mut VolumeRow> {
         let row = self.list.get(from_index)?.clone();
         let index = from_index + 1;
-        self.list.insert(
-            index,
-            VolumeRow {
-                index,
-                highlighted: false,
-                ..row
-            },
-        );
+        self.list
+            .insert(index, VolumeRow::get_instance_copy(&row, index));
         self.reindex(index);
         Some(&mut self.list[index])
     }
@@ -869,7 +746,7 @@ mod tests {
         assert!(table.is_incorrect_paths());
         table.volume_names_are_templates = true;
         assert!(!table.is_incorrect_paths());
-        assert!(table.validate_run(false).is_none());
+        assert!(table.validate_run(false).is_some());
         assert!(table.validate_run(true).is_some());
     }
 }

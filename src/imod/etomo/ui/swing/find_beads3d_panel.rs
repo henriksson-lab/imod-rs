@@ -15,18 +15,14 @@ use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::ui::field_type::FieldType;
 
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
+use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
 use super::panel_header::{ExpandButton, PanelHeader, PanelHeaderState};
 use super::radio_button::{EnumeratedTypeBoundary, RadioButton, RadioButtonGroup};
+use super::radio_text_field::RadioTextField;
 
 pub const BEAD_SIZE_LABEL: &str = "Bead diameter";
 pub const SOME_BELOW_STORAGE_THRESHOLD: i32 = 0;
 pub const ONLY_ABOVE_STORAGE_THRESHOLD: i32 = -1;
-
-/// Java `NewstackOrBlendmont3dFindParent` calls from this source unit.
-pub trait NewstackOrBlendmont3dFindParent {
-    fn get_bead_size(&self) -> String;
-    fn is_fiducialess(&self) -> bool;
-}
 
 /// Java `ConstFindBeads3dParam` reads.
 pub trait ConstFindBeads3dParam {
@@ -118,34 +114,6 @@ impl Default for FindBeads3dViewButton {
             action_listener_count: 0,
             tooltip: None,
         }
-    }
-}
-
-/// Java `RadioTextField` state used by this source unit.
-#[derive(Clone, Debug)]
-pub struct RadioTextField {
-    pub selected: bool,
-    pub field: LabeledTextField,
-}
-
-impl RadioTextField {
-    pub fn new(field_type: FieldType, label: &str) -> Self {
-        Self {
-            selected: false,
-            field: LabeledTextField::new(field_type, label),
-        }
-    }
-    pub fn is_selected(&self) -> bool {
-        self.selected
-    }
-    pub fn set_text_number(&mut self, value: impl std::fmt::Display) {
-        self.field.set_text_number(value);
-    }
-    pub fn get_text(&self, validation: bool) -> Result<String, FieldValidationFailedException> {
-        self.field.get_text_validated(validation)
-    }
-    pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.field.set_tool_tip_text(text);
     }
 }
 

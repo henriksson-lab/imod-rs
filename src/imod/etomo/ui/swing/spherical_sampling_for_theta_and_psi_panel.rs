@@ -13,6 +13,7 @@ use crate::imod::etomo::ui::field_type::FieldType;
 
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::radio_button::{EnumeratedTypeBoundary, RadioButton, RadioButtonGroup};
+use super::spherical_sampling_for_theta_and_psi_parent::SphericalSamplingForThetaAndPsiParent;
 
 pub const SAMPLE_INTERVAL_LABEL: &str = "Sample interval";
 pub const SAMPLE_SPHERE_LABEL: &str = "Sample sphere";
@@ -34,11 +35,6 @@ impl SampleSphere {
             Self::Half => "half",
         }
     }
-}
-
-/// Java `SphericalSamplingForThetaAndPsiParent`.
-pub trait SphericalSamplingForThetaAndPsiParent {
-    fn update_display(&mut self, init: bool);
 }
 
 /// The `MatlabParam` calls made by this source unit.

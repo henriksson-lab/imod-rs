@@ -24,6 +24,7 @@ pub enum DepthcueChangeEvent {
 /// A GUI implementation must bind these calls to its actual widget/event
 /// system.  No in-memory dialog is used as a rendering substitute.
 pub trait DepthcueNativeBoundary {
+    fn setup_ui(&mut self);
     fn set_delete_on_close(&mut self);
     fn set_always_show_tool_tips(&mut self);
     fn connect_depthcue_signals(&mut self);
@@ -40,6 +41,7 @@ pub trait DepthcueNativeBoundary {
     fn release_keyboard(&mut self);
     fn retranslate_ui(&mut self);
     fn check_and_set_mac_menu(&mut self);
+    fn widget_change_event(&mut self);
     fn hot_slider_active(&self, control_pressed: bool) -> bool;
     fn hot_slider_enabled(&self) -> bool;
     fn hot_slider_key(&self, key: Key) -> bool;
@@ -67,6 +69,7 @@ pub struct ImodvDepthcueForm {
 impl ImodvDepthcueForm {
     /// `imodvDepthcueForm::imodvDepthcueForm`.
     pub fn new(native: &mut dyn DepthcueNativeBoundary) -> Self {
+        native.setup_ui();
         let mut form = Self {
             m_end_pressed: false,
             m_str: String::new(),
@@ -214,6 +217,7 @@ impl ImodvDepthcueForm {
         event: DepthcueChangeEvent,
         native: &mut dyn DepthcueNativeBoundary,
     ) {
+        native.widget_change_event();
         native.check_and_set_mac_menu();
         if event != DepthcueChangeEvent::FontChange {
             return;
@@ -231,6 +235,9 @@ mod tests {
         hot: bool,
     }
     impl DepthcueNativeBoundary for Native {
+        fn setup_ui(&mut self) {
+            self.calls.push("setup".into())
+        }
         fn set_delete_on_close(&mut self) {
             self.calls.push("delete".into())
         }
@@ -280,6 +287,9 @@ mod tests {
         }
         fn check_and_set_mac_menu(&mut self) {
             self.calls.push("mac-menu".into())
+        }
+        fn widget_change_event(&mut self) {
+            self.calls.push("change".into())
         }
         fn hot_slider_active(&self, _: bool) -> bool {
             self.hot
@@ -363,6 +373,19 @@ mod tests {
                 "end-label:90",
                 "end-slider:90"
             ]
+        );
+    }
+
+    #[test]
+    fn change_event_calls_base_before_mac_menu() {
+        let mut native = Native::default();
+        let mut form = ImodvDepthcueForm::new(&mut native);
+        form.change_event(DepthcueChangeEvent::Other, &mut native);
+        assert!(
+            native
+                .calls
+                .windows(2)
+                .any(|calls| calls == ["change", "mac-menu"])
         );
     }
 }

@@ -1,7 +1,7 @@
 //! Translation of `MainFrame.java` using the existing `WindowSwitch` state.
 #![allow(dead_code)]
 use super::etomo_frame::{ActionEvent, EtomoFrame, FrameType};
-use super::sub_frame::SubFrame;
+use super::sub_frame::{SubFrame, SubFrameMainFrameBoundary};
 use super::window_switch::{WindowMainPanel, WindowManager, WindowSwitch};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::util::unique_key::UniqueKey;
@@ -47,6 +47,7 @@ impl MainFrame {
     pub fn new() -> Self {
         let mut frame = EtomoFrame::new();
         frame.main = true;
+        frame.main_frame_registered = true;
         frame.initialize();
         Self {
             frame,
@@ -84,12 +85,35 @@ impl MainFrame {
     ) {
         self.frame.current_manager_present = panel.is_some();
         self.main_panel = panel;
+        self.frame.main_panel_present = self.main_panel.is_some();
+        self.frame.main_panel_axis_type = self.main_panel.as_ref().map(|panel| {
+            if panel.dual_axis {
+                crate::imod::etomo::r#type::axis_type::AxisType::DualAxis
+            } else {
+                crate::imod::etomo::r#type::axis_type::AxisType::SingleAxis
+            }
+        });
+        self.frame.main_panel_showing_setup = false;
+        self.frame.main_panel_showing_axis_a =
+            self.main_panel.as_ref().is_some_and(|panel| panel.axis_a);
+        self.frame.main_panel_showing_both_axis = self
+            .main_panel
+            .as_ref()
+            .is_some_and(|panel| panel.axis_a && panel.axis_b);
         if self.main_panel.is_none() {
             self.title = ETOMO_TITLE.into();
             self.hide_axis_b();
             return;
         }
         self.title = format!("dataset - {ETOMO_TITLE}");
+        if let Some(sub_frame) = &mut self.sub_frame {
+            sub_frame.frame.current_manager_present = self.frame.current_manager_present;
+            sub_frame.set_main_panel(
+                format!("B Axis - {} ", self.title),
+                None,
+                self.main_panel.clone(),
+            );
+        }
         if let Some(key) = manager_key {
             let _ = self.window_switch.get_panel(Some(key));
             self.select_window_menu_item(key, new_window);
@@ -260,6 +284,8 @@ impl MainFrame {
             panel.axis_a = true;
             panel.axis_b = false;
         }
+        self.frame.main_panel_showing_axis_a = true;
+        self.frame.main_panel_showing_both_axis = false;
         if let Some(sub) = &mut self.sub_frame {
             sub.set_visible(false);
         }
@@ -272,6 +298,8 @@ impl MainFrame {
             panel.axis_a = false;
             panel.axis_b = true;
         }
+        self.frame.main_panel_showing_axis_a = false;
+        self.frame.main_panel_showing_both_axis = false;
         if let Some(sub) = &mut self.sub_frame {
             sub.set_visible(false);
         }
@@ -284,11 +312,25 @@ impl MainFrame {
             panel.axis_a = true;
             panel.axis_b = true;
         }
+        self.frame.main_panel_showing_axis_a = true;
+        self.frame.main_panel_showing_both_axis = true;
         if self.sub_frame.is_none() {
             self.sub_frame = Some(SubFrame::new());
+            self.frame.sub_frame_registered = true;
         }
+        let main_panel = self.main_panel.clone();
+        let mru_list = self.mru_list.clone();
+        let main_menu = self.frame.menu.clone();
+        let current_manager_present = self.frame.current_manager_present;
         if let Some(sub) = &mut self.sub_frame {
-            sub.initialize(format!("B Axis - {} ", self.title), &self.mru_list);
+            sub.frame.current_manager_present = current_manager_present;
+            sub.initialize(
+                format!("B Axis - {} ", self.title),
+                None,
+                main_panel,
+                &mru_list,
+                &main_menu,
+            );
             sub.set_visible(true);
         }
         self.frame.axis_id = Some(AxisID::First);
@@ -304,6 +346,16 @@ impl MainFrame {
         } else {
             None
         }
+    }
+}
+
+impl SubFrameMainFrameBoundary for MainFrame {
+    fn show_axis_a(&mut self) {
+        Self::show_axis_a(self);
+    }
+
+    fn menu_view_action(&mut self, event: &ActionEvent) -> Result<(), String> {
+        Self::menu_view_action(self, event)
     }
 }
 #[cfg(test)]

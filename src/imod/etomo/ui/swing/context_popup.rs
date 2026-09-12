@@ -7,7 +7,7 @@
 //! make a selected help item disappear or change its target.
 #![allow(dead_code)]
 
-use super::etomo_menu::MenuItem;
+use super::menu_item::MenuItem;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use std::path::PathBuf;
@@ -25,6 +25,8 @@ const TOP_ANCHOR: &str = "#TOP";
 pub struct MouseEvent {
     pub x: i32,
     pub y: i32,
+    /// Java `SwingUtilities.isRightMouseButton(event)` state.
+    pub right_mouse_button: bool,
 }
 
 /// A task supplied by `TomodataplotsParam.Task[]`.  Availability has already been
@@ -709,7 +711,11 @@ mod tests {
     #[test]
     fn guide_target_adds_top_anchor_and_hides_menu() {
         let mut popup = ContextPopup::new_guide(
-            MouseEvent { x: 4, y: 9 },
+            MouseEvent {
+                x: 4,
+                y: 9,
+                right_mouse_button: false,
+            },
             Some("setup"),
             TOMO_GUIDE,
             AxisID::Only,

@@ -228,10 +228,9 @@ pub trait LineTrackNativeBoundary {
     fn remove_window(&mut self);
     fn free_tile_cached_section(&mut self);
     fn accept_close(&mut self);
-    fn rounded_style(&mut self);
+    fn rounded_style(&mut self) -> bool;
     fn dialog_change_event(&mut self);
     fn check_and_set_mac_menu(&mut self);
-    fn font_change_event(&mut self) -> bool;
     fn close_key(&mut self) -> bool;
     fn close_window(&mut self);
     fn control_key(&mut self, release: bool);
@@ -316,10 +315,13 @@ pub fn imod_plug_execute(state: &mut LineTrackState, native: &mut dyn LineTrackN
     plug.closecont = 0;
     plug.docopy = 0;
     plug.copiedco = -1;
-    let values = native.load_settings("LineTracker");
-    if state.first {
+    let first = state.first;
+    let mut have_settings = false;
+    if first {
         set_defaults(plug);
+        let values = native.load_settings("LineTracker");
         if values.len() > 12 {
+            have_settings = true;
             plug.left = values[0] as i32;
             plug.top = values[1] as i32;
             plug.ksize = values[2] as i32;
@@ -338,7 +340,7 @@ pub fn imod_plug_execute(state: &mut LineTrackState, native: &mut dyn LineTrackN
     native.create_window("Line Tracker", "lineTracker.html#TOP", 'T');
     plug.window_open = true;
     state.top_window_open = true;
-    if !state.first || values.len() > 12 {
+    if !first || have_settings {
         native.set_window_position(plug.left, plug.top);
     }
     state.first = false;
@@ -610,12 +612,11 @@ impl LineTrack {
             plug.idata_sec = -1;
         }
         let flipped = native.model_flipped();
-        if curz != plug.idata_sec
-            || flipped != plug.idata_flipped
-                && native.copy_image_to_byte_buffer(&image, &mut plug.idata)
-        {
-            native.print("\x07Line Track failed to get memory for short to byte map.\n");
-            return;
+        if curz != plug.idata_sec || flipped != plug.idata_flipped {
+            if native.copy_image_to_byte_buffer(&image, &mut plug.idata) {
+                native.print("\x07Line Track failed to get memory for short to byte map.\n");
+                return;
+            }
         }
         plug.idata_sec = curz;
         plug.idata_flipped = flipped;
@@ -776,12 +777,9 @@ impl LineTrack {
 
     /// `LineTrack::topChangeEvent`.
     pub fn top_change_event(&mut self, native: &mut dyn LineTrackNativeBoundary) {
-        native.rounded_style();
+        self.m_rounded_style = native.rounded_style();
         native.dialog_change_event();
         native.check_and_set_mac_menu();
-        if native.font_change_event() {
-            return;
-        }
     }
     /// `LineTrack::keyPressEvent`.
     pub fn key_press_event(&mut self, native: &mut dyn LineTrackNativeBoundary) {

@@ -345,7 +345,7 @@ pub fn imodv_auto_snapshot(
     }
     sink.draw();
     sink.set_current_size(a.winx, a.winy);
-    let error = if format_type == SNAP_SHOT_TIF {
+    let _error = if format_type == SNAP_SHOT_TIF {
         sink.snapshot_tif(&fname)
     } else if format_type == SNAP_SHOT_RGB && sink.preference_snap_format() != "RGB" {
         sink.snapshot_non_tif(&fname)
@@ -358,7 +358,8 @@ pub fn imodv_auto_snapshot(
         sink.set_buffer_swap_auto(true);
     }
     sink.restore_snapshot_changes();
-    Ok(error)
+    // The C++ source reports `error` to stderr but deliberately returns zero.
+    Ok(0)
 }
 
 #[cfg(test)]

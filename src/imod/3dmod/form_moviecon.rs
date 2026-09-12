@@ -23,6 +23,14 @@ pub trait MovieConOperations {
     fn reset_pressed(&mut self);
     fn closing(&mut self);
     fn control_key(&mut self, release: bool, key: i32);
+    fn close_top_window(&mut self) {}
+    fn accept_close_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
+    fn widget_change_event(&mut self) {}
+    fn font_width(&self, _: &str) -> i32 {
+        0
+    }
+    fn set_rate_box_maximum_width(&mut self, _: i32) {}
 }
 /// Original `MovieController` form.
 #[derive(Clone, Debug, Default)]
@@ -43,6 +51,11 @@ pub struct MovieController {
     pub montage: bool,
     pub montage_factor: i32,
     pub montage_spin_enabled: bool,
+    pub scale_spin_enabled: bool,
+    pub scale_check_enabled: bool,
+    pub montage_radio_enabled: bool,
+    pub whole_radio_enabled: bool,
+    pub subarea_radio_enabled: bool,
     pub whole_image: i32,
     pub scale_sizes: bool,
     pub size_scaling: i32,
@@ -50,15 +63,21 @@ pub struct MovieController {
     pub slicer_montage_factor: i32,
     pub scale_thicks: bool,
     pub thick_scaling: i32,
+    pub slicer_montage_spin_enabled: bool,
+    pub slicer_scale_spin_enabled: bool,
+    pub slicer_scale_check_enabled: bool,
     pub rgb_label: String,
+    pub png_label: String,
     pub png_enabled: bool,
+    pub close_event_accepted: bool,
+    pub mac_menu_checked: bool,
 }
-pub fn movie_controller_new() -> MovieController {
+pub fn movie_controller_new(ops: &mut dyn MovieConOperations) -> MovieController {
     let mut c = MovieController {
         top_window_open: true,
         ..Default::default()
     };
-    c.init();
+    c.init(ops);
     c
 }
 impl MovieController {
@@ -66,16 +85,19 @@ impl MovieController {
         self.top_window_open = false
     }
     pub fn language_change(&mut self) {}
-    pub fn init(&mut self) {
+    pub fn init(&mut self, ops: &mut dyn MovieConOperations) {
         self.delete_on_close = true;
         self.always_show_tooltips = true;
         self.snapshot = 0;
         self.extent = 0;
         self.start_here = 0;
         self.axis = 2;
-        self.set_font_dependent_widths();
+        self.set_font_dependent_widths(ops);
     }
-    pub fn set_font_dependent_widths(&mut self) {}
+    pub fn set_font_dependent_widths(&mut self, ops: &mut dyn MovieConOperations) {
+        let width = ops.font_width("8888.888");
+        ops.set_rate_box_maximum_width(width);
+    }
     pub fn set_non_tif_label(
         &mut self,
         first: &str,
@@ -87,6 +109,8 @@ impl MovieController {
         if !self.png_enabled && self.snapshot > 2 {
             self.snapshot = 2;
             ops.snap_selected(2);
+        } else if self.png_enabled {
+            self.png_label = second.unwrap().into();
         }
     }
     pub fn axis_selected(&mut self, ops: &mut dyn MovieConOperations, v: i32) {
@@ -106,9 +130,7 @@ impl MovieController {
         ops.increment_rate(1)
     }
     pub fn rate_entered(&mut self, ops: &mut dyn MovieConOperations) {
-        if let Ok(v) = self.rate_box.trim().parse() {
-            ops.rate_entered(v)
-        }
+        ops.rate_entered(self.rate_box.trim().parse().unwrap_or(0.0))
     }
     pub fn snapshot_selected(&mut self, ops: &mut dyn MovieConOperations, v: i32) {
         self.snapshot = v;
@@ -125,6 +147,11 @@ impl MovieController {
     pub fn montage_toggled(&mut self, ops: &mut dyn MovieConOperations, state: bool) {
         self.montage = state;
         self.montage_spin_enabled = state && self.whole_image == 0;
+        self.scale_spin_enabled = state && self.scale_sizes;
+        self.scale_check_enabled = state;
+        self.montage_radio_enabled = state;
+        self.whole_radio_enabled = state;
+        self.subarea_radio_enabled = state;
         ops.set_snap_montage(state)
     }
     pub fn new_montage_value(&mut self, ops: &mut dyn MovieConOperations, v: i32) {
@@ -138,6 +165,7 @@ impl MovieController {
     }
     pub fn scale_thick_toggled(&mut self, ops: &mut dyn MovieConOperations, state: bool) {
         self.scale_sizes = state;
+        self.scale_spin_enabled = state;
         ops.set_scale_sizes(state)
     }
     pub fn scaling_changed(&mut self, ops: &mut dyn MovieConOperations, v: i32) {
@@ -146,6 +174,9 @@ impl MovieController {
     }
     pub fn slicer_mont_toggled(&mut self, ops: &mut dyn MovieConOperations, state: bool) {
         self.slicer_montage = state;
+        self.slicer_montage_spin_enabled = state;
+        self.slicer_scale_spin_enabled = state && self.scale_thicks;
+        self.slicer_scale_check_enabled = state;
         ops.set_slicer_montage(state)
     }
     pub fn new_slicer_mont_value(&mut self, ops: &mut dyn MovieConOperations, v: i32) {
@@ -154,6 +185,7 @@ impl MovieController {
     }
     pub fn scale_slicer_thick_toggled(&mut self, ops: &mut dyn MovieConOperations, state: bool) {
         self.scale_thicks = state;
+        self.slicer_scale_spin_enabled = state;
         ops.set_scale_thicks(state)
     }
     pub fn scale_thick_changed(&mut self, ops: &mut dyn MovieConOperations, v: i32) {
@@ -192,10 +224,13 @@ impl MovieController {
     }
     pub fn top_close_event(&mut self, ops: &mut dyn MovieConOperations) {
         ops.closing();
+        ops.accept_close_event();
+        self.close_event_accepted = true;
         self.top_window_open = false
     }
     pub fn key_press_event(&mut self, ops: &mut dyn MovieConOperations, key: i32, close: bool) {
         if close {
+            ops.close_top_window();
             self.top_window_open = false
         } else {
             ops.control_key(false, key)
@@ -204,9 +239,12 @@ impl MovieController {
     pub fn key_release_event(&mut self, ops: &mut dyn MovieConOperations, key: i32) {
         ops.control_key(true, key)
     }
-    pub fn top_change_event(&mut self, font: bool) {
+    pub fn top_change_event(&mut self, ops: &mut dyn MovieConOperations, font: bool) {
+        ops.widget_change_event();
+        ops.check_and_set_mac_menu();
+        self.mac_menu_checked = true;
         if font {
-            self.set_font_dependent_widths()
+            self.set_font_dependent_widths(ops)
         }
     }
 }
@@ -216,6 +254,7 @@ mod tests {
     #[derive(Default)]
     struct Ops {
         v: Vec<String>,
+        rate_widths: Vec<i32>,
     }
     impl MovieConOperations for Ops {
         fn axis_selected(&mut self, x: i32) {
@@ -223,7 +262,9 @@ mod tests {
         }
         fn slider_changed(&mut self, _: i32, _: i32) {}
         fn increment_rate(&mut self, _: i32) {}
-        fn rate_entered(&mut self, _: f32) {}
+        fn rate_entered(&mut self, x: f32) {
+            self.v.push(format!("rate{x}"))
+        }
         fn snap_selected(&mut self, _: i32) {}
         fn extent_selected(&mut self, _: i32) {}
         fn start_here_selected(&mut self, _: i32) {}
@@ -237,16 +278,53 @@ mod tests {
         fn set_scale_thicks(&mut self, _: bool) {}
         fn set_thick_scaling(&mut self, _: i32) {}
         fn reset_pressed(&mut self) {}
-        fn closing(&mut self) {}
+        fn closing(&mut self) {
+            self.v.push("closing".into())
+        }
         fn control_key(&mut self, _: bool, _: i32) {}
+        fn accept_close_event(&mut self) {
+            self.v.push("accept".into())
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.v.push("mac-menu".into())
+        }
+        fn widget_change_event(&mut self) {
+            self.v.push("change-event".into())
+        }
+        fn font_width(&self, text: &str) -> i32 {
+            text.len() as i32
+        }
+        fn set_rate_box_maximum_width(&mut self, width: i32) {
+            self.rate_widths.push(width)
+        }
     }
     #[test]
     fn source_control_slots_forward() {
-        let mut c = movie_controller_new();
         let mut o = Ops::default();
+        let mut c = movie_controller_new(&mut o);
         c.axis_selected(&mut o, 1);
         assert_eq!(o.v, ["axis1"]);
         c.set_rate_box(3.5);
         assert_eq!(c.rate_box, " 3.50");
+    }
+
+    #[test]
+    fn source_numeric_conversion_enablement_and_close_event_branches() {
+        let mut o = Ops::default();
+        let mut c = movie_controller_new(&mut o);
+        c.rate_box = "invalid".into();
+        c.rate_entered(&mut o);
+        assert!(o.v.iter().any(|value| value == "rate0"));
+        c.whole_image = 1;
+        c.scale_sizes = true;
+        c.montage_toggled(&mut o, true);
+        assert!(!c.montage_spin_enabled);
+        assert!(c.scale_spin_enabled && c.montage_radio_enabled && c.subarea_radio_enabled);
+        c.top_close_event(&mut o);
+        assert!(c.close_event_accepted);
+        c.top_change_event(&mut o, true);
+        assert!(c.mac_menu_checked);
+        assert_eq!(o.rate_widths, [8, 8]);
+        assert!(o.v.ends_with(&["change-event".into(), "mac-menu".into()]));
     }
 }

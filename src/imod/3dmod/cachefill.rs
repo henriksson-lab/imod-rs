@@ -76,6 +76,15 @@ pub trait CacheFillBoundary {
     fn read_z(&mut self, cache_data: &mut [u8], z: i32);
     fn read_binned_section(&mut self, buffer: &mut [u8], adjusted_z: i32);
     fn draw(&mut self, flags: i32);
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn dialog_change_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
+    fn remove_dialog(&mut self) {}
+    fn accept_close_event(&mut self) {}
+    fn close_dialog(&mut self) {}
+    fn control_key(&mut self, _: bool) {}
 }
 
 /// File-static `imodCacheFillData`.
@@ -101,6 +110,7 @@ pub struct ImodCacheFill {
     pub overlap_radio: [bool; 3],
     pub auto_checked: bool,
     pub overlap_box_enabled: bool,
+    pub rounded_style: bool,
 }
 
 /// `walk_in_z`.
@@ -564,6 +574,7 @@ pub fn imod_cache_fill_dialog(data: &mut ImodCacheFillData) -> ImodCacheFill {
         overlap_radio: [false; 3],
         auto_checked: data.autofill != 0,
         overlap_box_enabled: data.autofill != 0,
+        rounded_style: false,
     }
 }
 
@@ -608,20 +619,39 @@ impl ImodCacheFill {
         self.overlap_box_enabled = state;
     }
     /// `ImodCacheFill::topChangeEvent`.
-    pub fn top_change_event(&mut self) {}
+    pub fn top_change_event(&mut self, native: &mut dyn CacheFillBoundary) {
+        self.rounded_style = native.rounded_style();
+        native.dialog_change_event();
+        native.check_and_set_mac_menu();
+    }
     /// `ImodCacheFill::topCloseEvent`.
-    pub fn top_close_event(&mut self, data: &mut ImodCacheFillData) {
+    pub fn top_close_event(
+        &mut self,
+        data: &mut ImodCacheFillData,
+        native: &mut dyn CacheFillBoundary,
+    ) {
+        native.remove_dialog();
         data.dialog_open = false;
         self.top_window_open = false;
+        native.accept_close_event();
     }
     /// `ImodCacheFill::keyPressEvent`.
-    pub fn key_press_event(&mut self, close_key: bool, data: &mut ImodCacheFillData) {
+    pub fn key_press_event(
+        &mut self,
+        close_key: bool,
+        _: &mut ImodCacheFillData,
+        native: &mut dyn CacheFillBoundary,
+    ) {
         if close_key {
-            self.top_close_event(data);
+            native.close_dialog();
+        } else {
+            native.control_key(false);
         }
     }
     /// `ImodCacheFill::keyReleaseEvent`.
-    pub fn key_release_event(&mut self) {}
+    pub fn key_release_event(&mut self, native: &mut dyn CacheFillBoundary) {
+        native.control_key(true);
+    }
 }
 
 #[cfg(test)]
@@ -631,6 +661,7 @@ mod tests {
     struct Native {
         reads: Vec<i32>,
         draws: Vec<i32>,
+        events: Vec<&'static str>,
     }
     impl CacheFillBoundary for Native {
         fn pyramid_fill_cache_for_area(&mut self, _: i32, _: i32) {}
@@ -647,6 +678,21 @@ mod tests {
         fn read_binned_section(&mut self, _: &mut [u8], _: i32) {}
         fn draw(&mut self, flags: i32) {
             self.draws.push(flags);
+        }
+        fn rounded_style(&self) -> bool {
+            true
+        }
+        fn dialog_change_event(&mut self) {
+            self.events.push("change");
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.events.push("menu");
+        }
+        fn close_dialog(&mut self) {
+            self.events.push("close");
+        }
+        fn control_key(&mut self, release: bool) {
+            self.events.push(if release { "release" } else { "press" });
         }
     }
     fn view() -> CacheFillView {
@@ -701,5 +747,20 @@ mod tests {
         assert_eq!(n.reads, vec![1, 2, 3]);
         assert_eq!(n.draws, vec![IMOD_DRAW_IMAGE]);
         assert!(v.vm_cache.iter().all(|s| s.used > 0));
+    }
+    #[test]
+    fn dialog_change_and_key_routes_match_source() {
+        let mut dialog = ImodCacheFill::default();
+        let mut data = ImodCacheFillData::default();
+        let mut native = Native::default();
+        dialog.top_change_event(&mut native);
+        dialog.key_press_event(false, &mut data, &mut native);
+        dialog.key_release_event(&mut native);
+        dialog.key_press_event(true, &mut data, &mut native);
+        assert!(dialog.rounded_style);
+        assert_eq!(
+            native.events,
+            ["change", "menu", "press", "release", "close"]
+        );
     }
 }

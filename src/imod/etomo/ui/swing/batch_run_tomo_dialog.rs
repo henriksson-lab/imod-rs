@@ -122,6 +122,49 @@ pub struct BatchRunTomoDialogMetaData {
     pub status: BatchRunTomoStatus,
 }
 
+/// Java `UserConfiguration` fields owned by this dialog.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BatchRunTomoUserConfiguration {
+    pub use_email_address: bool,
+    pub email_address: String,
+}
+
+/// Java `BatchruntomoParam` exchange at the command-file boundary.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BatchruntomoParamBoundary {
+    pub deliver_to_directory: Option<PathBuf>,
+    pub make_sub_directory: bool,
+    pub cpu_machine_list: Option<String>,
+    pub gpu_machine_list: Option<String>,
+    pub email_address: Option<String>,
+    pub multi_proc: i32,
+    pub max_gpus_for_one_job: Option<i32>,
+}
+
+/// Java `SeriesWatcherParam` exchange at the command-file boundary.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SeriesWatcherParamBoundary {
+    pub watch_directory: Option<PathBuf>,
+    pub etomo_project_root: String,
+    pub parallel_runs: Option<i32>,
+}
+
+/// The source's deferred Swing layout and listener registrations.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BatchRunTomoDialogLayout {
+    pub root_created: bool,
+    pub batch_created: bool,
+    pub stacks_created: bool,
+    pub dataset_created: bool,
+    pub run_created: bool,
+    pub listeners_added: bool,
+    pub dataset_table_body_visible: bool,
+    pub run_table_body_visible: bool,
+    pub pack_count: usize,
+    pub context_anchor: Option<String>,
+    pub tooltip_count: usize,
+}
+
 impl Default for BatchRunTomoDialogMetaData {
     fn default() -> Self {
         Self {
@@ -148,6 +191,7 @@ impl Default for BatchRunTomoDialogMetaData {
 /// by their model values.
 #[derive(Clone, Debug)]
 pub struct BatchRunTomoDialog {
+    pub layout: BatchRunTomoDialogLayout,
     pub root_name: String,
     pub root_dir: Option<PathBuf>,
     pub input_directive_file: Option<PathBuf>,
@@ -198,6 +242,11 @@ pub struct BatchRunTomoDialog {
     pub finish_series_watcher_enabled: bool,
     pub input_directive_file_checkpoint: Option<PathBuf>,
     pub queue_table_events: Vec<QueueTableEvent>,
+    pub root_fields_editable: bool,
+    pub delivery_fields_editable: bool,
+    pub advanced_starting_batch: Option<Vec<(String, String)>>,
+    pub status_listener_count: usize,
+    pub queue_table_listener_count: usize,
 }
 
 impl BatchRunTomoDialog {
@@ -211,6 +260,7 @@ impl BatchRunTomoDialog {
         let mut rb_gpu_machine_list = RadioButton::new_in_group("Parallel GPUs", gpu.clone());
         rb_gpu_machine_list.set_selected(true);
         let mut value = Self {
+            layout: BatchRunTomoDialogLayout::default(),
             root_name: String::new(),
             root_dir: None,
             input_directive_file: None,
@@ -267,6 +317,11 @@ impl BatchRunTomoDialog {
             finish_series_watcher_enabled: false,
             input_directive_file_checkpoint: None,
             queue_table_events: Vec::new(),
+            root_fields_editable: true,
+            delivery_fields_editable: true,
+            advanced_starting_batch: None,
+            status_listener_count: 0,
+            queue_table_listener_count: 0,
         };
         value.cb_cpu_machine_list.set_selected(true);
         value.create_panel();
@@ -277,6 +332,11 @@ impl BatchRunTomoDialog {
         "BATCH_RUN_TOMO"
     }
     pub fn create_panel(&mut self) {
+        self.layout.root_created = true;
+        self.layout.batch_created = true;
+        self.layout.stacks_created = true;
+        self.layout.dataset_created = true;
+        self.layout.run_created = true;
         self.state_changed(None);
         self.update_display(false);
     }
@@ -292,6 +352,34 @@ impl BatchRunTomoDialog {
         self.run_buttons_visible = !self.series_watcher_run_buttons_visible;
     }
     pub fn add_listeners(&mut self) {}
+    pub fn add_status_change_listener(&mut self, listener_present: bool) {
+        if listener_present {
+            self.status_listener_count += 1;
+        }
+    }
+    pub fn pop_up_context_menu(&mut self) {
+        self.layout.context_anchor = self.cur_tab.map(|tab| match tab {
+            BatchRunTomoTab::Batch => "BatchSetup".into(),
+            BatchRunTomoTab::Stacks => "Stacks".into(),
+            BatchRunTomoTab::Dataset => "SetValues".into(),
+            BatchRunTomoTab::Run => "Run".into(),
+        });
+    }
+    pub fn get_global_directives_dialog(&self) -> bool {
+        true
+    }
+    pub fn msg_status_changer_started(&mut self, table_only: bool) {
+        if !table_only {
+            self.status_listener_count += 2;
+        }
+    }
+    pub fn get_container(&self) -> &BatchRunTomoDialogLayout {
+        &self.layout
+    }
+    pub fn msg_load_done(&mut self) {
+        self.add_listeners();
+        self.layout.listeners_added = true;
+    }
     pub fn get_browsing_dir(&self) -> Option<PathBuf> {
         if self.rb_deliver_off.is_selected() {
             self.root_dir
@@ -303,6 +391,11 @@ impl BatchRunTomoDialog {
     }
     pub fn set_browsing_dir(&mut self, input: Option<PathBuf>) {
         self.root_dir = input;
+    }
+    pub fn set_browsing_dir_string(&mut self, input: Option<&str>) {
+        if let Some(input) = input.filter(|input| !input.trim().is_empty()) {
+            self.root_dir = Some(PathBuf::from(input));
+        }
     }
     pub fn set_parameters(&mut self, metadata: &BatchRunTomoDialogMetaData) {
         self.root_name = metadata.root_name.clone();
@@ -371,16 +464,152 @@ impl BatchRunTomoDialog {
             status: self.status,
         }
     }
+    pub fn is_param_file_modifiable(&self) -> bool {
+        self.root_fields_editable
+    }
+    pub fn is_param_file_empty(&self) -> bool {
+        self.root_name.is_empty() || self.root_dir.is_none()
+    }
+    pub fn disable_root_fields(&mut self) {
+        self.root_fields_editable = false;
+    }
+    pub fn disable_delivery_fields(&mut self) {
+        self.delivery_fields_editable = false;
+    }
+    pub fn get_parameters_user_configuration(
+        &self,
+        user_configuration: &mut BatchRunTomoUserConfiguration,
+    ) {
+        user_configuration.use_email_address = !self.email_address.is_empty();
+        user_configuration.email_address = self.email_address.clone();
+    }
+    pub fn set_parameters_environment(&mut self, parallel: bool, gpu: bool) {
+        self.cb_cpu_machine_list.set_selected(parallel);
+        self.rb_gpu_machine_list_local.set_selected(gpu);
+        self.rb_gpu_machine_list_off.set_selected(!gpu);
+    }
+    pub fn set_parameters_user_configuration(
+        &mut self,
+        user_configuration: &BatchRunTomoUserConfiguration,
+    ) {
+        self.email_address = if user_configuration.use_email_address {
+            user_configuration.email_address.clone()
+        } else {
+            String::new()
+        };
+    }
+    pub fn get_parameters_parallel(&self, param: &mut BatchruntomoParamBoundary) {
+        param.multi_proc = if self.cb_split_batch.is_selected() {
+            if self.queue_table_displayed {
+                self.queue_number_of_jobs_to_make
+            } else {
+                self.number_of_jobs_to_make
+            }
+        } else {
+            1
+        };
+        param.gpu_machine_list = if self.rb_gpu_machine_list_off.is_selected() {
+            None
+        } else if self.rb_gpu_machine_list_local.is_selected() {
+            Some("local".into())
+        } else {
+            param.gpu_machine_list.clone()
+        };
+    }
+    pub fn get_parameters_split_batch(&self, param: &mut BatchruntomoParamBoundary) {
+        param.max_gpus_for_one_job = if self.rb_gpu_machine_list.is_selected() {
+            Some(self.max_gpus_for_one_job)
+        } else if self.rb_gpu_machine_list_local.is_selected() {
+            Some(1)
+        } else {
+            None
+        };
+    }
+    pub fn set_parameters_batchruntomo(&mut self, param: &BatchruntomoParamBoundary) {
+        self.rb_deliver_off.set_selected(true);
+        self.rb_deliver_to_directory
+            .set_selected(param.deliver_to_directory.is_some());
+        self.deliver_to_directory = param.deliver_to_directory.clone();
+        self.rb_deliver_make_sub_directory
+            .set_selected(param.make_sub_directory);
+        self.cb_cpu_machine_list
+            .set_selected(param.cpu_machine_list.is_none());
+        self.rb_gpu_machine_list_off
+            .set_selected(param.gpu_machine_list.is_none());
+        self.rb_gpu_machine_list_local
+            .set_selected(param.gpu_machine_list.as_deref() == Some("local"));
+        self.rb_gpu_machine_list.set_selected(
+            param
+                .gpu_machine_list
+                .as_deref()
+                .is_some_and(|value| value != "local"),
+        );
+        self.email_address = param.email_address.clone().unwrap_or_default();
+        self.update_display(false);
+    }
+    pub fn set_parameters_series_watcher(&mut self, param: &SeriesWatcherParamBoundary) {
+        self.watch_directory = param.watch_directory.clone();
+    }
     pub fn is_parallel_processing(&self) -> bool {
         self.cb_split_batch.is_selected() && self.total_cpus > 1
     }
     pub fn validate_batch_run_tomo_param(&self) -> bool {
-        (!self.rb_deliver_to_directory.is_selected() || self.deliver_to_directory.is_some())
-            && self.email_address.trim().is_empty()
-            || !self.email_address.trim().is_empty()
+        !self.rb_deliver_to_directory.is_selected() || self.deliver_to_directory.is_some()
     }
     pub fn validate(&self) -> bool {
         self.validate_batch_run_tomo_param()
+    }
+    pub fn get_parameters_batchruntomo(
+        &mut self,
+        param: &mut BatchruntomoParamBoundary,
+        do_validation: bool,
+        for_update: bool,
+        validate_only: bool,
+    ) -> bool {
+        if do_validation && !self.validate_batch_run_tomo_param() {
+            return false;
+        }
+        if !for_update {
+            param.deliver_to_directory = if self.rb_deliver_to_directory.is_selected() {
+                self.deliver_to_directory.clone()
+            } else {
+                None
+            };
+            param.make_sub_directory = self.rb_deliver_make_sub_directory.is_selected();
+            param.email_address =
+                (!self.email_address.is_empty()).then(|| self.email_address.clone());
+        }
+        if !self.cb_cpu_machine_list.is_selected() {
+            param.cpu_machine_list = Some("local".into());
+        }
+        if self.rb_gpu_machine_list_off.is_selected() {
+            param.gpu_machine_list = None;
+        } else if self.rb_gpu_machine_list_local.is_selected() {
+            param.gpu_machine_list = Some("local".into());
+        }
+        if do_validation && !validate_only {
+            self.disable_delivery_fields();
+        }
+        true
+    }
+    pub fn get_parameters_series_watcher(
+        &self,
+        param: &mut SeriesWatcherParamBoundary,
+        do_validation: bool,
+    ) -> bool {
+        if do_validation && self.watch_directory.is_none() {
+            return false;
+        }
+        param.watch_directory = self.watch_directory.clone();
+        param.etomo_project_root = self.root_name.clone();
+        param.parallel_runs = (self.cb_use_series_watcher.is_selected()
+            && self.cb_split_batch.is_selected())
+        .then_some(if self.queue_table_displayed {
+            self.queue_number_of_jobs_to_make
+        } else {
+            self.number_of_jobs_to_make
+        });
+        true
     }
     pub fn load_templates(&mut self) {}
     pub fn load_autodocs(
@@ -399,6 +628,22 @@ impl BatchRunTomoDialog {
     ) -> bool {
         true
     }
+    pub fn get_input_directive_autodoc(&self) -> Option<&PathBuf> {
+        self.input_directive_file
+            .as_ref()
+            .filter(|file| file.exists())
+    }
+    pub fn validate_input_directive_file(&self) -> bool {
+        self.input_directive_file
+            .as_ref()
+            .is_none_or(|file| file.exists())
+    }
+    pub fn get_advanced_starting_batch(&self) -> Option<&Vec<(String, String)>> {
+        self.advanced_starting_batch.as_ref()
+    }
+    pub fn get_dataset_image_filename_style(&self) -> Option<&'static str> {
+        None
+    }
     pub fn update_directives<B: BatchRunTomoDialogBoundary>(
         &mut self,
         boundary: &mut B,
@@ -414,7 +659,10 @@ impl BatchRunTomoDialog {
     ) {
         match action_command {
             "Run" => {
-                if self.validate() {
+                if self.validate()
+                    && boundary.validate_dataset_dialog()
+                    && boundary.validate_table()
+                {
                     if self.is_parallel_processing() {
                         boundary.split_batch();
                     } else {
@@ -515,6 +763,18 @@ impl BatchRunTomoDialog {
     pub fn start_over(&mut self) {
         self.status_changed(BatchRunTomoStatus::Open);
     }
+    pub fn create_run_list(&self, run_type: Option<&str>) -> Vec<String> {
+        run_type
+            .map(|value| vec![value.to_owned()])
+            .unwrap_or_default()
+    }
+    pub fn find_row(&self, _location: &str, _root_name: &str) -> Option<String> {
+        None
+    }
+    pub fn get_stack(&self, _stack_id: &str) -> Option<PathBuf> {
+        None
+    }
+    pub fn lock_processing_method(&mut self, _lock: bool) {}
     pub fn get_processing_method(&self) -> ProcessingMethod {
         if self.queue_table_displayed {
             ProcessingMethod::Queue
@@ -548,6 +808,9 @@ impl BatchRunTomoDialog {
     pub fn get_root_name(&self) -> &str {
         &self.root_name
     }
+    pub fn get_dataset_name(&self) -> &str {
+        &self.root_name
+    }
     pub fn get_root_dir(&self) -> Option<&PathBuf> {
         self.root_dir.as_ref()
     }
@@ -562,6 +825,7 @@ impl BatchRunTomoDialog {
     pub fn process_result(&mut self, input_directive_changed: bool) {
         if input_directive_changed
             && self.input_directive_file != self.input_directive_file_checkpoint
+            && self.validate_input_directive_file()
         {
             self.input_directive_file_checkpoint = self.input_directive_file.clone();
         }
@@ -577,6 +841,25 @@ impl BatchRunTomoDialog {
     }
     pub fn set_dataset_table_visible(&mut self, visible: bool) {
         self.dataset_table_visible = visible;
+    }
+    pub fn expand_dataset_table(&mut self, expanded: bool) {
+        self.layout.dataset_table_body_visible = expanded;
+    }
+    pub fn expand_run_table(&mut self, expanded: bool) {
+        self.layout.run_table_body_visible = expanded;
+    }
+    pub fn pack(&mut self) {
+        self.layout.pack_count += 1;
+    }
+    pub fn expand_global(&mut self) {}
+    pub fn display_component(&mut self) {
+        self.display();
+    }
+    pub fn focus_gained(&mut self) {}
+    pub fn focus_lost(&mut self, queue_spinner: bool) {
+        if queue_spinner {
+            self.send_queue_table_event(Some(self.get_number_jobs_changed_queue_table_event()));
+        }
     }
     pub fn state_changed(&mut self, spinner_changed: Option<bool>) {
         if spinner_changed == Some(true) {
@@ -655,9 +938,49 @@ impl BatchRunTomoDialog {
         }
         self.update_display(false);
     }
+    pub fn status_changed_event(&mut self, status: Option<BatchRunTomoStatus>) {
+        if let Some(status) = status {
+            self.status_changed(status);
+        }
+    }
+    pub fn send_status_changed(&mut self, status: BatchRunTomoStatus) {
+        self.status_changed(status);
+    }
+    pub fn set_tooltips(&mut self) {
+        self.layout.tooltip_count = 17;
+    }
+    pub fn set_method<B: BatchRunTomoDialogBoundary>(
+        &self,
+        boundary: &mut B,
+        processing_method: ProcessingMethod,
+    ) {
+        boundary.set_processing_method(processing_method, None, false);
+    }
     pub fn is_use_gpu(&self) -> bool {
         true
     }
+    pub fn set_use_queue_check_box(&mut self, _use_queue_check_box_present: bool) {}
+    pub fn add_queue_table_listener(&mut self, listener_present: bool) {
+        if listener_present {
+            self.queue_table_listener_count += 1;
+            self.send_queue_table_event(Some(self.get_split_batch_queue_table_event()));
+            self.send_queue_table_event(self.get_only_queue_type_queue_table_event());
+            self.send_queue_table_event(self.get_secondary_queue_table_event());
+            self.send_queue_table_event(Some(self.get_number_jobs_changed_queue_table_event()));
+        }
+    }
+    pub fn send_queue_table_events(&mut self) {
+        self.send_queue_table_event(Some(self.get_split_batch_queue_table_event()));
+        self.send_queue_table_event(self.get_only_queue_type_queue_table_event());
+        self.send_queue_table_event(self.get_secondary_queue_table_event());
+        self.send_queue_table_event(Some(self.get_number_jobs_changed_queue_table_event()));
+    }
+    pub fn remove_queue_table_listener(&mut self, listener_present: bool) {
+        if listener_present {
+            self.queue_table_listener_count = self.queue_table_listener_count.saturating_sub(1);
+        }
+    }
+    pub fn update_gpu(&mut self, _disable_gpu: bool) {}
 }
 
 #[cfg(test)]
@@ -712,5 +1035,30 @@ mod tests {
         assert!(dialog.pause_enabled);
         dialog.status_changed(BatchRunTomoStatus::KilledOrPaused);
         assert!(dialog.resume_enabled);
+    }
+    #[test]
+    fn command_parameter_exchange_preserves_delivery_and_parallel_gpu_rules() {
+        let mut dialog = BatchRunTomoDialog::new(8, 4, false);
+        dialog.rb_deliver_to_directory.set_selected(true);
+        dialog.deliver_to_directory = Some(PathBuf::from("/data/delivered"));
+        dialog.rb_gpu_machine_list_local.set_selected(true);
+        let mut param = BatchruntomoParamBoundary::default();
+        assert!(dialog.get_parameters_batchruntomo(&mut param, true, false, false));
+        dialog.get_parameters_parallel(&mut param);
+        dialog.get_parameters_split_batch(&mut param);
+        assert_eq!(
+            param.deliver_to_directory,
+            Some(PathBuf::from("/data/delivered"))
+        );
+        assert_eq!(param.gpu_machine_list.as_deref(), Some("local"));
+        assert_eq!(param.max_gpus_for_one_job, Some(1));
+    }
+    #[test]
+    fn run_does_not_cross_manager_boundary_when_source_validation_fails() {
+        let mut dialog = BatchRunTomoDialog::new(8, 0, false);
+        let mut boundary = Boundary::default();
+        dialog.rb_deliver_to_directory.set_selected(true);
+        dialog.action_performed(&mut boundary, "Run");
+        assert!(boundary.calls.is_empty());
     }
 }

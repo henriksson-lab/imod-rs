@@ -12,7 +12,7 @@ use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
 use crate::imod::etomo::r#type::view_type::ViewType;
 
-use super::find_beads3d_panel::NewstackOrBlendmont3dFindParent;
+use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
 pub use super::newstack_or_blendmont_panel::MetaData;
 use super::newstack_or_blendmont_panel::{
     BlendmontParam, GlobalExpandButton, NewstParam, ReconScreenState,

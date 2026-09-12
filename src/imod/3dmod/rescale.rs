@@ -55,6 +55,9 @@ pub struct ImageScaleView {
     pub keep_cache_full: bool,
     pub num_read_threads: i32,
     pub image_is_first_copy: bool,
+    /// Whether `image` is already `imageList[cz]`; this preserves the source
+    /// pointer comparison before closing and reopening a multi-file image.
+    pub image_is_selected_file: bool,
     pub depth: i32,
 }
 
@@ -72,9 +75,11 @@ pub trait ImageScaleNativeBoundary {
     fn start_timer(&mut self, milliseconds: i32) -> i32;
     fn kill_timer(&mut self, timer_id: i32);
     fn close_dialog(&mut self);
+    fn set_focus(&mut self);
     fn control_key(&mut self, release: bool);
+    fn rounded_style(&self) -> bool;
+    fn dialog_change_event(&mut self);
     fn check_and_set_mac_menu(&mut self);
-    fn font_change(&self) -> bool;
     fn set_ushort_sliders(
         &mut self,
         range_low: i32,
@@ -170,6 +175,7 @@ impl ImageScaleWindow {
         data: &mut ImageScaleData,
         native: &mut dyn ImageScaleNativeBoundary,
     ) {
+        native.set_focus();
         self.m_just_reload = false;
         match which {
             2 => {
@@ -227,11 +233,12 @@ impl ImageScaleWindow {
                 return;
             }
             let cz = (view.zmouse + 0.5 + view.zmin as f32) as i32;
-            if cz >= 0 && cz < view.zsize {
+            if cz >= 0 && cz < view.zsize && !view.image_is_selected_file {
                 if let Some(image) = view.image_list.get_mut(cz as usize) {
                     native.close_image(&mut view.image);
                     view.image = image.clone();
                     native.reopen_image(&mut view.image);
+                    view.image_is_selected_file = true;
                 }
             }
         }
@@ -253,9 +260,6 @@ impl ImageScaleWindow {
         let slidecur = (view.white - view.black) as f32;
         let rangecur = smax - smin;
         let slidenew = (data.white_new - data.black_new) as f32;
-        if slidecur == 0. || slidenew == 0. {
-            return;
-        }
         let rangenew = slidecur * rangecur / slidenew;
         let slide_max = if view.ushort_store { 65535. } else { 255. };
         data.min = smin
@@ -359,7 +363,8 @@ impl ImageScaleWindow {
 
     /// `ImageScaleWindow::topChangeEvent`.
     pub fn top_change_event(&mut self, native: &mut dyn ImageScaleNativeBoundary) {
-        self.rounded_style = native.font_change();
+        self.rounded_style = native.rounded_style();
+        native.dialog_change_event();
         native.check_and_set_mac_menu();
     }
 
@@ -396,6 +401,9 @@ mod tests {
         texts: [String; 2],
         draws: i32,
         mm: i32,
+        closes: i32,
+        reopens: i32,
+        focuses: i32,
     }
     impl ImageScaleNativeBoundary for Native {
         fn raise_dialog(&mut self) {}
@@ -416,19 +424,27 @@ mod tests {
         }
         fn kill_timer(&mut self, _: i32) {}
         fn close_dialog(&mut self) {}
+        fn set_focus(&mut self) {
+            self.focuses += 1
+        }
         fn control_key(&mut self, _: bool) {}
-        fn check_and_set_mac_menu(&mut self) {}
-        fn font_change(&self) -> bool {
+        fn rounded_style(&self) -> bool {
             false
         }
+        fn dialog_change_event(&mut self) {}
+        fn check_and_set_mac_menu(&mut self) {}
         fn set_ushort_sliders(&mut self, _: i32, _: i32, _: f32, _: f32, _: bool) {}
         fn set_image_mm(&mut self, i: &mut ImageScaleImage, a: f32, b: f32, _: f32) {
             i.smin = a;
             i.smax = b;
             self.mm += 1
         }
-        fn close_image(&mut self, _: &mut ImageScaleImage) {}
-        fn reopen_image(&mut self, _: &mut ImageScaleImage) {}
+        fn close_image(&mut self, _: &mut ImageScaleImage) {
+            self.closes += 1
+        }
+        fn reopen_image(&mut self, _: &mut ImageScaleImage) {
+            self.reopens += 1
+        }
         fn flip(&mut self, _: &mut ImageScaleView) {}
         fn flush_cache(&mut self, _: &mut ImageScaleView, _: i32) {}
         fn cache_fill(&mut self, _: &mut ImageScaleView) -> Result<(), String> {
@@ -474,6 +490,7 @@ mod tests {
         w.button_pressed(0, &mut d, &mut n);
         assert_eq!((d.vi.image.smin, d.vi.image.smax), (10., 20.));
         assert_eq!(n.draws, 1);
+        assert_eq!(n.focuses, 2);
     }
     #[test]
     fn complex_scale_round_trips_source_formula() {
@@ -495,5 +512,25 @@ mod tests {
         };
         ImageScaleWindow::default().compute_scale(&mut d);
         assert!(d.max > d.min);
+    }
+
+    #[test]
+    fn current_multifile_image_is_not_closed_or_reopened() {
+        let mut data = ImageScaleData {
+            vi: ImageScaleView {
+                multi_file_z: 1,
+                zsize: 1,
+                image_is_selected_file: true,
+                image_list: vec![ImageScaleImage {
+                    filename: "section.mrc".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut native = Native::default();
+        ImageScaleWindow::default().show_file_and_mmm(&mut data, &mut native);
+        assert_eq!((native.closes, native.reopens), (0, 0));
     }
 }

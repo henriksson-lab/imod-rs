@@ -1,10 +1,9 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FileOpenButtonStyleExtension.java`.
 #![allow(dead_code)]
 
+pub use super::button_style_extension::ImageObserverBoundary;
+use super::button_style_extension::{ButtonStyleExtension, CompleteIconBoundary};
 use std::sync::{Arc, LazyLock, Mutex};
-
-/// Boundary for Java `java.awt.image.ImageObserver`.
-pub trait ImageObserverBoundary: Send + Sync {}
 
 /// Java `ScaledImage` constants passed to `CompleteIcon` by this source unit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,29 +14,12 @@ pub enum FileOpenScaledImage {
     OpenFileRed,
 }
 
-/// GUI-bound `CompleteIcon` construction made by this source unit.
-pub struct FileOpenCompleteIconBoundary {
-    pub image: FileOpenScaledImage,
-    pub selected_image: Option<FileOpenScaledImage>,
-    pub pressed_image: Option<FileOpenScaledImage>,
-    pub rollover_image: Option<FileOpenScaledImage>,
-    pub image_observer: Option<Arc<dyn ImageObserverBoundary>>,
-    pub debug: bool,
-}
-
-/// GUI-bound `ButtonStyleExtension` superclass constructor state.
-pub struct ButtonStyleExtensionBoundary {
-    pub text_gap: bool,
-    pub icon: FileOpenCompleteIconBoundary,
-    pub template_icon: Option<FileOpenCompleteIconBoundary>,
-    pub error_icon: Option<FileOpenCompleteIconBoundary>,
-    pub preferred_size: Option<()>,
-    pub size_from_image: bool,
-}
+/// This source's distinct `CompleteIcon` image type using the canonical slot record.
+pub type FileOpenCompleteIconBoundary = CompleteIconBoundary<FileOpenScaledImage>;
 
 /// Java final `FileOpenButtonStyleExtension`.
 pub struct FileOpenButtonStyleExtension {
-    pub button_style_extension: ButtonStyleExtensionBoundary,
+    pub button_style_extension: ButtonStyleExtension<FileOpenScaledImage>,
 }
 
 static INSTANCE: LazyLock<Mutex<Option<Arc<FileOpenButtonStyleExtension>>>> =
@@ -47,35 +29,38 @@ impl FileOpenButtonStyleExtension {
     /// Java private `FileOpenButtonStyleExtension(ImageObserver, boolean)`.
     fn new(image_observer: Option<Arc<dyn ImageObserverBoundary>>, _debug: bool) -> Self {
         Self {
-            button_style_extension: ButtonStyleExtensionBoundary {
-                text_gap: false,
-                icon: FileOpenCompleteIconBoundary {
+            button_style_extension: ButtonStyleExtension::new(
+                false,
+                Some(FileOpenCompleteIconBoundary {
                     image: FileOpenScaledImage::OpenFile,
                     selected_image: None,
                     pressed_image: None,
                     rollover_image: Some(FileOpenScaledImage::OpenFileFool),
                     image_observer: image_observer.clone(),
                     debug: false,
-                },
-                template_icon: Some(FileOpenCompleteIconBoundary {
+                    icon_size: None,
+                }),
+                Some(FileOpenCompleteIconBoundary {
                     image: FileOpenScaledImage::OpenFilePeet,
                     selected_image: None,
                     pressed_image: None,
                     rollover_image: None,
                     image_observer: image_observer.clone(),
                     debug: false,
+                    icon_size: None,
                 }),
-                error_icon: Some(FileOpenCompleteIconBoundary {
+                Some(FileOpenCompleteIconBoundary {
                     image: FileOpenScaledImage::OpenFileRed,
                     selected_image: None,
                     pressed_image: None,
                     rollover_image: None,
                     image_observer,
                     debug: false,
+                    icon_size: None,
                 }),
-                preferred_size: None,
-                size_from_image: true,
-            },
+                None,
+                true,
+            ),
         }
     }
 
@@ -105,9 +90,12 @@ mod tests {
         let instance = FileOpenButtonStyleExtension::new(Some(Arc::new(Observer)), true);
         let style = &instance.button_style_extension;
         assert!(!style.text_gap);
-        assert_eq!(style.icon.image, FileOpenScaledImage::OpenFile);
         assert_eq!(
-            style.icon.rollover_image,
+            style.icon.as_ref().unwrap().image,
+            FileOpenScaledImage::OpenFile
+        );
+        assert_eq!(
+            style.icon.as_ref().unwrap().rollover_image,
             Some(FileOpenScaledImage::OpenFileFool)
         );
         assert_eq!(

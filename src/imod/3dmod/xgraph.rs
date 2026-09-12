@@ -47,6 +47,10 @@ pub struct GraphImageState {
 
 /// Native viewer, Qt, cache and OpenGL endpoints called by `xgraph.cpp`.
 pub trait XGraphNativeBoundary {
+    /// `QMainWindow::changeEvent` for the native graph window.
+    fn main_window_change_event(&mut self);
+    /// `ivwCheckAndSetMacMenu` for the native graph window.
+    fn check_and_set_mac_menu(&mut self);
     fn image_state(&self) -> GraphImageState;
     fn subset_limits(&self) -> (i32, i32, i32, i32);
     fn contour(&self) -> Option<Icont>;
@@ -243,8 +247,14 @@ impl GraphWindow {
         self.m_data_size = 0;
         n.close_window();
     }
-    /// `GraphWindow::changeEvent`; Mac menu management is native boundary.
-    pub fn change_event(&mut self, _font_change: bool) {}
+    /// `GraphWindow::changeEvent`.
+    ///
+    /// The source delegates to `QMainWindow`, then updates the Mac menu for
+    /// every event.  Its `FontChange` branch has no graph-owned work.
+    pub fn change_event(&mut self, _font_change: bool, n: &mut dyn XGraphNativeBoundary) {
+        n.main_window_change_event();
+        n.check_and_set_mac_menu();
+    }
     /// `GraphWindow::draw`.
     pub fn draw(&self, n: &mut dyn XGraphNativeBoundary) {
         n.update_gl();
@@ -822,8 +832,15 @@ mod tests {
         s: GraphImageState,
         p: Vec<Vec<u8>>,
         loc: (i32, i32, i32),
+        change_calls: Vec<&'static str>,
     }
     impl XGraphNativeBoundary for N {
+        fn main_window_change_event(&mut self) {
+            self.change_calls.push("base");
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.change_calls.push("menu");
+        }
         fn image_state(&self) -> GraphImageState {
             self.s
         }
@@ -932,5 +949,13 @@ mod tests {
         assert_eq!(g.draw_plot().points.len(), 3);
         GraphGl::default().setxyz(&mut g, 17, &mut n);
         assert_eq!(n.loc.0, 2);
+    }
+    #[test]
+    fn change_event_delegates_to_base_then_mac_menu_for_all_event_types() {
+        let mut n = N::default();
+        let mut g = GraphWindow::default();
+        g.change_event(false, &mut n);
+        g.change_event(true, &mut n);
+        assert_eq!(n.change_calls, ["base", "menu", "base", "menu"]);
     }
 }

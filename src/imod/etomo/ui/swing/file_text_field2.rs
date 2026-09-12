@@ -1,18 +1,15 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FileTextField2.java`.
 #![allow(dead_code)]
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::file_chooser::{FileChooser, FileChooserReturnValue, FileChooserSelectionMode};
 use super::file_text_field_interface::{FileFilter, FileTextFieldInterface};
 use super::panel::Dimension;
+use super::result_listener::ResultListener;
 use crate::imod::etomo::base_manager::BaseManager;
-
-/// Java `ResultListener` callback at the native event boundary.
-pub trait ResultListener {
-    fn process_result(&mut self, source: &FileTextField2, cancelled: bool);
-}
 
 /// Java public final `FileTextField2`.  Swing component objects are recorded as
 /// source-observable layout/event state; filesystem paths keep Java nullability.
@@ -49,6 +46,7 @@ pub struct FileTextField2 {
     pub required: bool,
     pub debug: bool,
     pub result_listener_count: usize,
+    pub result_listener_list: Vec<Rc<RefCell<dyn ResultListener>>>,
     pub focus_listener_count: usize,
     pub directive_def: Option<String>,
     pub default_value: Option<String>,
@@ -105,6 +103,7 @@ impl FileTextField2 {
             required: false,
             debug: false,
             result_listener_count: 0,
+            result_listener_list: Vec::new(),
             focus_listener_count: 0,
             directive_def: None,
             default_value: None,
@@ -158,10 +157,10 @@ impl FileTextField2 {
     pub fn add_listeners(&mut self) {
         self.result_listener_count = self.result_listener_count.max(1);
     }
-    pub fn add_result_listener(&mut self, listener_present: bool) {
-        if listener_present {
-            self.result_listener_count += 1;
-        }
+    pub fn add_result_listener(&mut self, listener: Option<Rc<RefCell<dyn ResultListener>>>) {
+        let Some(listener) = listener else { return };
+        self.result_listener_list.push(listener);
+        self.result_listener_count = self.result_listener_list.len();
     }
     pub fn add_focus_listener(&mut self) {
         self.focus_listener_count += 1;
@@ -197,6 +196,11 @@ impl FileTextField2 {
                 self.browsing_directory = file.parent().map(Path::to_path_buf);
             }
         }
+        let result_listener_list = std::mem::take(&mut self.result_listener_list);
+        for listener in &result_listener_list {
+            listener.borrow_mut().process_result(self, false);
+        }
+        self.result_listener_list = result_listener_list;
         result
     }
     pub fn set_adjusted_field_width(&mut self, width: f64) {
@@ -500,6 +504,18 @@ impl FileTextFieldInterface for FileTextField2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::any::Any;
+
+    struct Listener {
+        origin_is_file_text_field: bool,
+        init: bool,
+    }
+    impl ResultListener for Listener {
+        fn process_result(&mut self, result_origin: &dyn Any, init: bool) {
+            self.origin_is_file_text_field = result_origin.is::<FileTextField2>();
+            self.init = init;
+        }
+    }
     #[test]
     fn relative_file_and_origin_follow_source_rule() {
         let mut field = FileTextField2::default();
@@ -516,5 +532,18 @@ mod tests {
         field.set_text_entry_policy(false);
         field.set_editable(true);
         assert!(!field.editable);
+    }
+    #[test]
+    fn chooser_notifies_each_result_listener_with_source_and_false_init() {
+        let listener = Rc::new(RefCell::new(Listener {
+            origin_is_file_text_field: false,
+            init: true,
+        }));
+        let mut field = FileTextField2::default();
+        field.add_result_listener(Some(listener.clone()));
+        field.action_performed(None);
+        assert_eq!(field.result_listener_count, 1);
+        assert!(listener.borrow().origin_is_file_text_field);
+        assert!(!listener.borrow().init);
     }
 }

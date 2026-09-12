@@ -7,6 +7,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::parallel_progress_display::ParallelProgressDisplay;
+
 pub use super::processor_table_row::ProcessorTableRow;
 
 pub const RUNNABLE_KEY: &str = "ProcessorTable";
@@ -47,17 +49,7 @@ impl std::fmt::Display for ColumnName {
     }
 }
 
-/// `etomo.ui.QueueTableEvent`, consumed by ProcessorTable and its rows.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum QueueTableEvent {
-    AllowDisplay,
-    Display,
-    Displayed,
-    DisableSecondaryQueue,
-    EnableSecondaryQueue,
-    Hidden,
-    PreventDisplay,
-}
+pub use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
 
 /// Java private final inner `RowList`.
 #[derive(Clone, Debug, Default)]
@@ -68,7 +60,7 @@ pub struct RowList {
 impl RowList {
     pub fn queue_table_event_action(&mut self, event: QueueTableEvent) {
         for row in &mut self.list {
-            row.queue_table_event_action(event);
+            row.queue_table_event_action(event.clone());
         }
     }
     pub fn secondary_queue_selected_action(&mut self) {
@@ -693,6 +685,54 @@ impl<H: ProcessorTableHooks> ProcessorTable<H> {
         self.row_list.enable_selection_field(name, enable);
     }
     pub fn enable_gpu_queue_rows(&mut self) {}
+}
+
+impl<H: ProcessorTableHooks> ParallelProgressDisplay for ProcessorTable<H> {
+    fn action_performed(&mut self) {
+        self.action_performed();
+    }
+    fn msg_dropped(&mut self, computer: &str, reason: &str) {
+        self.msg_dropped(computer, reason);
+    }
+    fn add_success(&mut self, computer: &str) {
+        self.add_success(computer);
+    }
+    fn add_restart(&mut self, computer: &str) {
+        self.add_restart(computer);
+    }
+    fn msg_killing_process(&mut self) {
+        self.msg_killing_process();
+    }
+    fn msg_pausing_process(&mut self) {
+        self.msg_pausing_process();
+    }
+    fn msg_starting_process_on_selected_computers(&mut self) {
+        self.row_list.clear_failure_reason(true);
+    }
+    fn msg_ending_process(&mut self) {
+        self.msg_ending_process();
+    }
+    fn reset_results(&mut self) {
+        self.reset_results();
+    }
+    fn set_computer_map(&mut self, computer_map: &BTreeMap<String, String>) {
+        self.set_computer_map(computer_map);
+    }
+    fn set_secondary_queue(&mut self, secondary_queue: Option<&str>) {
+        self.set_secondary_queue(secondary_queue);
+    }
+    fn msg_process_started(&mut self) {
+        self.msg_process_started();
+    }
+    fn is_secondary(&self) -> bool {
+        self.is_secondary()
+    }
+    fn is_runnable(&self) -> bool {
+        self.is_runnable()
+    }
+    fn is_limited(&self) -> bool {
+        self.is_limited()
+    }
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ pub const IMOD_ARROW: i32 = 226;
 /// Form-used subset of upstream `imod_pref_struct`.
 #[derive(Clone, Debug)]
 pub struct ImodPrefStruct {
+    pub font: String,
     pub min_im_pt_size: i32,
     pub min_im_pt_size_chgd: bool,
     pub min_mod_pt_size: i32,
@@ -41,6 +42,7 @@ pub struct ImodPrefStruct {
 impl Default for ImodPrefStruct {
     fn default() -> Self {
         Self {
+            font: String::new(),
             min_im_pt_size: 1,
             min_im_pt_size_chgd: false,
             min_mod_pt_size: 1,
@@ -78,8 +80,11 @@ pub trait AppearanceNativeBoundary {
     fn set_style_index(&mut self, index: i32);
     fn font_width(&self, text: &str) -> i32;
     fn set_zoom_edit_maximum_width(&mut self, width: i32);
-    fn choose_font(&mut self) -> bool;
-    fn change_font(&mut self);
+    fn set_boost_cursor_maximum(&mut self, maximum: i32);
+    fn set_boost_size_label_enabled(&mut self, enabled: bool);
+    fn set_boost_steps_label_enabled(&mut self, enabled: bool);
+    fn choose_font(&mut self, font: &str) -> Option<String>;
+    fn change_font(&mut self, font: &str);
     fn point_size_changed(&mut self);
     fn current_color_index(&self) -> i32;
     fn choose_color(&mut self, color: u32) -> Option<u32>;
@@ -148,11 +153,11 @@ impl AppearanceForm {
             ind += 1;
         }
         if max_steps > 0 {
-            native.set_spin_box(BOOST_CURSOR, max_steps)
+            native.set_boost_cursor_maximum(max_steps)
         } else {
             native.set_enabled(BOOST_CURSOR, false);
-            native.set_enabled(8, false);
-            native.set_enabled(9, false)
+            native.set_boost_size_label_enabled(false);
+            native.set_boost_steps_label_enabled(false)
         };
         self.set_font_dependent_widths(native);
     }
@@ -175,11 +180,12 @@ impl AppearanceForm {
     }
     /// `AppearanceForm::fontPressed`.
     pub fn font_pressed(&mut self, native: &mut dyn AppearanceNativeBoundary) {
-        if !native.choose_font() {
+        let Some(font) = native.choose_font(&self.m_prefs.font) else {
             return;
         };
+        self.m_prefs.font = font;
         self.m_prefs.font_chgd = true;
-        native.change_font();
+        native.change_font(&self.m_prefs.font);
     }
     /// `AppearanceForm::imagePtChanged`.
     pub fn image_pt_changed(&mut self, value: i32, native: &mut dyn AppearanceNativeBoundary) {
@@ -205,7 +211,7 @@ impl AppearanceForm {
             IMOD_SHADOW,
             IMOD_ARROW,
         ];
-        let item = indexes[native.current_color_index().clamp(0, 7) as usize];
+        let item = indexes[native.current_color_index() as usize];
         let mut which = 0;
         for i in 0..MAX_NAMED_COLORS {
             if self.m_prefs.named_index[i] == item {
@@ -256,7 +262,7 @@ impl AppearanceForm {
     /// `AppearanceForm::newZoomIndex`.
     pub fn new_zoom_index(&mut self, value: i32, native: &mut dyn AppearanceNativeBoundary) {
         self.unload_zoom_value(native);
-        self.m_zoom_index = (value - 1).clamp(0, MAX_ZOOMS as i32 - 1) as usize;
+        self.m_zoom_index = (value - 1) as usize;
         self.display_current_zoom(native);
     }
     /// `AppearanceForm::unloadZoomValue`.
@@ -306,11 +312,13 @@ mod tests {
     struct N {
         zoom: String,
         calls: Vec<String>,
+        max_steps: i32,
+        boost_disabled: usize,
     }
     impl AppearanceNativeBoundary for N {
         fn connect_appearance_signals(&mut self) {}
         fn max_cursor_steps(&self) -> i32 {
-            1
+            self.max_steps
         }
         fn set_zoom_index_maximum(&mut self, _: i32) {}
         fn set_spin_box(&mut self, _: i32, _: i32) {}
@@ -328,10 +336,21 @@ mod tests {
             12
         }
         fn set_zoom_edit_maximum_width(&mut self, _: i32) {}
-        fn choose_font(&mut self) -> bool {
-            true
+        fn set_boost_cursor_maximum(&mut self, _: i32) {}
+        fn set_boost_size_label_enabled(&mut self, enabled: bool) {
+            if !enabled {
+                self.boost_disabled += 1;
+            }
         }
-        fn change_font(&mut self) {}
+        fn set_boost_steps_label_enabled(&mut self, enabled: bool) {
+            if !enabled {
+                self.boost_disabled += 1;
+            }
+        }
+        fn choose_font(&mut self, _: &str) -> Option<String> {
+            Some("font".into())
+        }
+        fn change_font(&mut self, _: &str) {}
         fn point_size_changed(&mut self) {
             self.calls.push("points".into())
         }
@@ -386,5 +405,17 @@ mod tests {
         f.image_pt_changed(7, &mut n);
         assert!(f.m_prefs.min_im_pt_size_chgd);
         assert_eq!(n.calls, ["points"]);
+    }
+
+    #[test]
+    fn font_and_zero_cursor_step_branches_transfer_source_state() {
+        let mut n = N::default();
+        let mut f = AppearanceForm::new(ImodPrefStruct::default(), &mut n);
+        f.font_pressed(&mut n);
+        assert!(f.m_prefs.font_chgd);
+        assert_eq!(f.m_prefs.font, "font");
+        let mut n = N::default();
+        let _f = AppearanceForm::new(ImodPrefStruct::default(), &mut n);
+        assert_eq!(n.boost_disabled, 2);
     }
 }

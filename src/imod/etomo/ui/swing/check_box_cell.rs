@@ -14,6 +14,7 @@ use crate::imod::etomo::util::utilities;
 
 use super::check_box::{BLACK, BooleanFieldSetting, Color, FIELD_HIGHLIGHT, GRAY};
 use super::field_lock_controller::{FieldLockController, JToggleButton};
+use super::toggle_coordinator::{ToggleButtonBoundary, ToggleCoordinator};
 
 static NEXT_CHECK_BOX_CELL_IDENTITY_HASH_CODE: AtomicUsize = AtomicUsize::new(1);
 const CHECK_BOX: &str = "CheckBox";
@@ -69,8 +70,9 @@ impl Default for CheckBoxCellJCheckBox {
 pub struct CheckBoxCell {
     pub check_box: CheckBoxCellJCheckBox,
     pub field_lock_controller: FieldLockController,
-    /// Java `ToggleCoordinator`; its target-object dispatch remains a GUI boundary.
-    pub toggle_coordinator_targets: Option<Vec<usize>>,
+    /// Java final `ToggleCoordinator`; actual Swing button handles remain at
+    /// the explicit coordinator boundary.
+    pub toggle_coordinator: Option<ToggleCoordinator>,
     pub header_background: bool,
     pub debug: bool,
     pub unformatted_label: String,
@@ -100,7 +102,7 @@ impl CheckBoxCell {
                 },
                 debug,
             ),
-            toggle_coordinator_targets: header_background.then(Vec::new),
+            toggle_coordinator: None,
             header_background,
             debug,
             unformatted_label: String::new(),
@@ -117,6 +119,15 @@ impl CheckBoxCell {
         };
         value.set_background();
         value.set_foreground();
+        if header_background {
+            value.toggle_coordinator = Some(ToggleCoordinator::new(Some(ToggleButtonBoundary {
+                identity_hash_code: value.identity_hash_code,
+                enabled: value.check_box.enabled,
+                selected: value.check_box.selected,
+                action_listener_registered: false,
+                enabled_property_listener_registered: false,
+            })));
+        }
         if let Some(header_label) = header_label {
             value.set_name(header_label);
         }
@@ -147,13 +158,25 @@ impl CheckBoxCell {
         Self::new(label.as_deref(), false, false)
     }
     pub fn add_target(&mut self, target: &Self) {
-        if let Some(targets) = &mut self.toggle_coordinator_targets {
-            targets.push(target.identity_hash_code);
+        if let Some(coordinator) = &mut self.toggle_coordinator {
+            coordinator.add_target(Some(ToggleButtonBoundary {
+                identity_hash_code: target.identity_hash_code,
+                enabled: target.is_enabled(),
+                selected: target.is_selected(),
+                action_listener_registered: false,
+                enabled_property_listener_registered: false,
+            }));
         }
     }
     pub fn delete_target(&mut self, target: &Self) {
-        if let Some(targets) = &mut self.toggle_coordinator_targets {
-            targets.retain(|id| *id != target.identity_hash_code);
+        if let Some(coordinator) = &mut self.toggle_coordinator {
+            coordinator.delete_target(Some(&ToggleButtonBoundary {
+                identity_hash_code: target.identity_hash_code,
+                enabled: target.is_enabled(),
+                selected: target.is_selected(),
+                action_listener_registered: false,
+                enabled_property_listener_registered: false,
+            }));
         }
     }
     pub fn set_name_three(
@@ -286,6 +309,13 @@ impl CheckBoxCell {
             self.background_refresh_count += 1;
             self.set_background();
         }
+        if let Some(coordinator) = &mut self.toggle_coordinator {
+            coordinator.property_change(
+                self.identity_hash_code,
+                true,
+                Some(self.check_box.enabled),
+            );
+        }
     }
     pub fn is_locked(&self) -> bool {
         self.field_lock_controller.is_locked()
@@ -334,6 +364,11 @@ impl CheckBoxCell {
             .as_mut()
             .unwrap()
             .selected = selected;
+        if let Some(coordinator) = &mut self.toggle_coordinator {
+            if let Some(toggler) = &mut coordinator.tb_toggler {
+                toggler.selected = selected;
+            }
+        }
     }
     pub fn set_selected_number(&mut self, selected: Option<&ConstEtomoNumber>, allow_empty: bool) {
         if let Some(selected) = selected.filter(|x| !x.is_null()) {
@@ -437,6 +472,13 @@ impl CheckBoxCell {
             .as_ref()
             .unwrap()
             .enabled;
+        if let Some(coordinator) = &mut self.toggle_coordinator {
+            if let Some(toggler) = &mut coordinator.tb_toggler {
+                toggler.enabled = self.check_box.enabled;
+                toggler.selected = self.check_box.selected;
+            }
+            coordinator.action_performed(Some(self.identity_hash_code));
+        }
     }
     pub fn update_field_highlight(&mut self) {
         if let Some(highlight) = &self.field_highlight {
@@ -533,7 +575,7 @@ mod tests {
     fn factories_name_checkbox_and_header_coordinator() {
         let header = CheckBoxCell::get_header_background_named_instance(Some("A"), Some("B"));
         let named = CheckBoxCell::get_named_instance(Some("Use item"));
-        assert!(header.toggle_coordinator_targets.is_some());
+        assert!(header.toggle_coordinator.is_some());
         assert_eq!(header.get_name(), Some("CheckBox.a-b"));
         assert_eq!(named.get_name(), Some("CheckBox.use-item"));
         assert!(named.check_box.border_painted);

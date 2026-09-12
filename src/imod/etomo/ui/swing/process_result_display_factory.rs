@@ -5,18 +5,20 @@
 //! boundary.  This unit retains the factory's permanent process-display graph.
 #![allow(dead_code)]
 
+use crate::imod::etomo::process::process_result_display_factory_interface::ProcessResultDisplayFactoryInterface;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 
+use super::abstract_process_result_display_factory::AbstractProcessResultDisplayFactory;
 use super::multi_line_button::{BaseScreenState, MultiLineButton};
 
 /// Java `ProcessResultDisplayFactory`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessResultDisplayFactory {
-    pub factory_id: String,
+    /// Java superclass `AbstractProcessResultDisplayFactory`.
+    pub abstract_process_result_display_factory: AbstractProcessResultDisplayFactory,
     pub screen_state: BaseScreenState,
-    pub dependency_order: Vec<i32>,
     pub find_x_rays: MultiLineButton,
     pub create_fixed_stack: MultiLineButton,
     pub use_fixed_stack: MultiLineButton,
@@ -85,9 +87,10 @@ impl ProcessResultDisplayFactory {
             }
         );
         Self {
-            factory_id,
+            abstract_process_result_display_factory: AbstractProcessResultDisplayFactory::new(
+                factory_id,
+            ),
             screen_state,
-            dependency_order: Vec::new(),
             find_x_rays: Self::deferred("Find X-rays (Trial Mode)", DialogType::PreProcessing),
             create_fixed_stack: Self::deferred("Create Fixed Stack", DialogType::PreProcessing),
             use_fixed_stack: Self::toggle("Use Fixed Stack", DialogType::PreProcessing),
@@ -223,9 +226,15 @@ impl ProcessResultDisplayFactory {
     pub fn initialize(&mut self) {
         macro_rules! dependency {
             ($display:ident) => {{
-                let id = self.dependency_order.len() as i32;
-                self.$display.set_id(id, Some(&self.factory_id));
-                self.dependency_order.push(id);
+                let id = self
+                    .abstract_process_result_display_factory
+                    .dependency_order
+                    .len() as i32;
+                self.abstract_process_result_display_factory.add_dependency(
+                    Some(&mut self.$display),
+                    id,
+                    None,
+                );
             }};
         }
         dependency!(find_x_rays);
@@ -448,9 +457,8 @@ impl ProcessResultDisplayFactory {
         display_id: i32,
         factory_id: Option<&str>,
     ) -> Option<&MultiLineButton> {
-        self.all_displays()
-            .into_iter()
-            .find(|display| display.equals_id(display_id, factory_id))
+        self.abstract_process_result_display_factory
+            .get_process_result_display(self.all_displays(), display_id, factory_id)
     }
     /// Java `getTiltxcorr`.
     pub fn get_tiltxcorr(&self, dialog_type: DialogType) -> Option<&MultiLineButton> {
@@ -681,6 +689,18 @@ impl ProcessResultDisplayFactory {
     }
 }
 
+impl ProcessResultDisplayFactoryInterface for ProcessResultDisplayFactory {
+    type ProcessResultDisplay = MultiLineButton;
+
+    fn get_process_result_display(
+        &self,
+        display_id: i32,
+        factory_id: Option<&str>,
+    ) -> Option<&Self::ProcessResultDisplay> {
+        ProcessResultDisplayFactory::get_process_result_display(self, display_id, factory_id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,14 +712,22 @@ mod tests {
             AxisType::DualAxis,
         );
         assert_eq!(
-            f.factory_id,
+            f.abstract_process_result_display_factory.factory_id,
             "etomo.ui.swing.ProcessResultDisplayFactoryFirst"
         );
-        assert_eq!(f.dependency_order.len(), 53);
         assert_eq!(
-            f.get_process_result_display(0, Some(&f.factory_id))
-                .unwrap()
-                .get_text(),
+            f.abstract_process_result_display_factory
+                .dependency_order
+                .len(),
+            53
+        );
+        assert_eq!(
+            f.get_process_result_display(
+                0,
+                Some(&f.abstract_process_result_display_factory.factory_id)
+            )
+            .unwrap()
+            .get_text(),
             Some("Find X-rays (Trial Mode)")
         );
         assert!(

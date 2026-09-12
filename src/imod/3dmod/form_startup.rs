@@ -1,8 +1,3 @@
-//! Translation of `IMOD/3dmod/form_startup.cpp` and `form_startup.h`.
-//!
-//! Qt controls, file dialogs, preferences, and global `App` access remain a
-//! direct boundary.  The form state and argument construction are retained in
-//! this module so a native frontend can call the original slots one-for-one.
 #![allow(dead_code)]
 
 pub const HUGE_CACHE: i32 = 2_000_000_000;
@@ -39,6 +34,9 @@ pub struct StartupViewValues {
 
 /// Native Qt, `imodplug`, preference, and application-global boundary.
 pub trait StartupNativeBoundary {
+    fn setup_ui(&mut self) {}
+    fn set_modal(&mut self, _: bool) {}
+    fn retranslate_ui(&mut self) {}
     fn use_prev_browser_dir(&self) -> bool;
     fn set_use_prev_browser_dir(&mut self, state: bool);
     fn browser_dir(&self) -> String;
@@ -218,6 +216,8 @@ pub struct StartupForm {
 impl StartupForm {
     /// `StartupForm::StartupForm`.
     pub fn new(modal: bool, native: &mut dyn StartupNativeBoundary) -> Self {
+        native.setup_ui();
+        native.set_modal(modal);
         let mut form = Self {
             modal,
             ..Self::default()
@@ -227,8 +227,9 @@ impl StartupForm {
     }
     /// `StartupForm::~StartupForm`.
     pub fn destroy(&mut self) {}
-    /// `StartupForm::languageChange`.
-    pub fn language_change(&mut self) {}
+    pub fn language_change(&mut self, native: &mut dyn StartupNativeBoundary) {
+        native.retranslate_ui()
+    }
     /// `StartupForm::init`.
     pub fn init(&mut self, native: &mut dyn StartupNativeBoundary) {
         self.always_show_tool_tips = true;

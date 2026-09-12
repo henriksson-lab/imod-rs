@@ -27,6 +27,11 @@ pub trait ModelEditNativeBoundary {
     fn set_model_scales_from_image(&mut self, model: &mut Imod, use_z_scale: bool);
     fn draw_model(&mut self);
     fn cleanup_vertex_buffers(&mut self, model: &Imod);
+    fn rounded_style(&mut self) -> bool;
+    fn dialog_change_event(&mut self);
+    fn check_and_set_mac_menu(&mut self);
+    fn close_dialog(&mut self);
+    fn control_key(&mut self, release: bool);
 }
 
 /// `ModelHeaderWindow` (`model_edit.h`), including values held by its widgets.
@@ -38,6 +43,7 @@ pub struct ModelHeaderWindow {
     pub set_incremental_checked: bool,
     pub edit_box: [String; 4],
     pub edit_enabled: [bool; 4],
+    pub rounded_style: bool,
     pub closed: bool,
 }
 
@@ -56,6 +62,7 @@ impl ModelHeaderWindow {
             set_incremental_checked: false,
             edit_box: std::array::from_fn(|_| String::new()),
             edit_enabled: [false, true, true, true],
+            rounded_style: false,
             closed: false,
         };
         window.update(model);
@@ -134,7 +141,11 @@ impl ModelHeaderWindow {
     }
 
     /// `ModelHeaderWindow::topChangeEvent`.
-    pub fn top_change_event(&mut self) {}
+    pub fn top_change_event(&mut self, n: &mut dyn ModelEditNativeBoundary) {
+        self.rounded_style = n.rounded_style();
+        n.dialog_change_event();
+        n.check_and_set_mac_menu();
+    }
 
     /// `ModelHeaderWindow::topCloseEvent`.
     pub fn top_close_event(&mut self, model: &mut Imod, n: &mut dyn ModelEditNativeBoundary) {
@@ -144,12 +155,18 @@ impl ModelHeaderWindow {
     }
 
     /// `ModelHeaderWindow::keyPressEvent`.
-    pub fn key_press_event(&mut self, close_key: bool) -> bool {
-        close_key
+    pub fn key_press_event(&mut self, close_key: bool, n: &mut dyn ModelEditNativeBoundary) {
+        if close_key {
+            n.close_dialog();
+        } else {
+            n.control_key(false);
+        }
     }
 
     /// `ModelHeaderWindow::keyReleaseEvent`.
-    pub fn key_release_event(&mut self) {}
+    pub fn key_release_event(&mut self, n: &mut dyn ModelEditNativeBoundary) {
+        n.control_key(true);
+    }
 }
 
 /// Rust state for static `sData` in `model_edit.cpp`.
@@ -252,6 +269,7 @@ pub struct ModelOffsetWindow {
     pub m_base_label: [String; 3],
     pub m_edit_box: [String; 3],
     pub m_applied_label: String,
+    pub rounded_style: bool,
     pub closed: bool,
 }
 
@@ -261,6 +279,7 @@ impl Default for ModelOffsetWindow {
             m_base_label: std::array::from_fn(|_| String::new()),
             m_edit_box: std::array::from_fn(|_| String::new()),
             m_applied_label: String::new(),
+            rounded_style: false,
             closed: false,
         }
     }
@@ -405,7 +424,11 @@ impl ModelOffsetWindow {
     }
 
     /// `ModelOffsetWindow::topChangeEvent`.
-    pub fn top_change_event(&mut self) {}
+    pub fn top_change_event(&mut self, n: &mut dyn ModelEditNativeBoundary) {
+        self.rounded_style = n.rounded_style();
+        n.dialog_change_event();
+        n.check_and_set_mac_menu();
+    }
 
     /// `ModelOffsetWindow::topCloseEvent`.
     pub fn top_close_event(&mut self, n: &mut dyn ModelEditNativeBoundary) {
@@ -414,12 +437,18 @@ impl ModelOffsetWindow {
     }
 
     /// `ModelOffsetWindow::keyPressEvent`.
-    pub fn key_press_event(&mut self, close_key: bool) -> bool {
-        close_key
+    pub fn key_press_event(&mut self, close_key: bool, n: &mut dyn ModelEditNativeBoundary) {
+        if close_key {
+            n.close_dialog();
+        } else {
+            n.control_key(false);
+        }
     }
 
     /// `ModelOffsetWindow::keyReleaseEvent`.
-    pub fn key_release_event(&mut self) {}
+    pub fn key_release_event(&mut self, n: &mut dyn ModelEditNativeBoundary) {
+        n.control_key(true);
+    }
 }
 
 /// `imodModelEditNewModel` (`model_edit.cpp:530`).
@@ -489,6 +518,22 @@ mod tests {
         fn cleanup_vertex_buffers(&mut self, _: &Imod) {
             self.calls.push("cleanup".into());
         }
+        fn rounded_style(&mut self) -> bool {
+            true
+        }
+        fn dialog_change_event(&mut self) {
+            self.calls.push("change-event".into());
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("mac-menu".into());
+        }
+        fn close_dialog(&mut self) {
+            self.calls.push("close".into());
+        }
+        fn control_key(&mut self, release: bool) {
+            self.calls
+                .push(if release { "release" } else { "press" }.into());
+        }
     }
 
     #[test]
@@ -499,6 +544,32 @@ mod tests {
         assert_eq!(model.units, IMOD_UNIT_NM);
         set_pixsize_and_units(&mut model, "3 km");
         assert_eq!(model.units, IMOD_UNIT_METER);
+    }
+
+    #[test]
+    fn both_dialogs_route_source_change_and_key_events() {
+        let model = Imod::default();
+        let mut native = Native::default();
+        let mut header = ModelHeaderWindow::new(true, 0., 0., &model);
+        header.top_change_event(&mut native);
+        header.key_press_event(false, &mut native);
+        header.key_release_event(&mut native);
+        let mut offset = ModelOffsetWindow::default();
+        offset.top_change_event(&mut native);
+        offset.key_press_event(true, &mut native);
+        assert!(header.rounded_style && offset.rounded_style);
+        assert_eq!(
+            native.calls,
+            [
+                "change-event",
+                "mac-menu",
+                "press",
+                "release",
+                "change-event",
+                "mac-menu",
+                "close"
+            ]
+        );
     }
 
     #[test]

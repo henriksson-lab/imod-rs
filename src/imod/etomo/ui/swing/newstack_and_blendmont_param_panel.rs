@@ -6,8 +6,9 @@
 #![allow(dead_code)]
 
 use super::check_box::CheckBox;
+use super::fiducialess_params::FiducialessParams;
 use super::labeled_spinner::LabeledSpinner;
-use super::labeled_text_field::LabeledTextField;
+use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::newstack_or_blendmont_panel::{BlendmontParam, MetaData, NewstParam};
 use super::spaced_panel::{SpacedPanel, Y_AXIS};
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -44,9 +45,6 @@ pub struct NewstackAndBlendmontParamPanel {
     pub l_ctf3d2: Ctf3dLabel,
     pub axis_id: AxisID,
     pub dialog_type: DialogType,
-    /// Compatibility-visible interface value, synchronized by the source's
-    /// `setFiducialessAlignment` and action paths.
-    pub fiducialess: bool,
     /// The sole state exposed by Java `updateAdvanced`.
     pub advanced: bool,
     /// Absent precisely for montage data, as in the Java constructor.
@@ -60,7 +58,6 @@ impl PartialEq for NewstackAndBlendmontParamPanel {
     fn eq(&self, other: &Self) -> bool {
         self.axis_id == other.axis_id
             && self.dialog_type == other.dialog_type
-            && self.fiducialess == other.fiducialess
             && self.advanced == other.advanced
             && self.spin_binning.get_value() == other.spin_binning.get_value()
             && self.ltf_size_to_output_in_x_and_y.get_text()
@@ -103,7 +100,6 @@ impl NewstackAndBlendmontParamPanel {
             },
             axis_id,
             dialog_type,
-            fiducialess: false,
             advanced: false,
             cb_antialias_filter: (view_type != ViewType::Montage)
                 .then(|| CheckBox::new_with_text("Reduce size with antialiasing filter")),
@@ -239,7 +235,6 @@ impl NewstackAndBlendmontParamPanel {
     /// Java `setFiducialessAlignment`.
     pub fn set_fiducialess_alignment(&mut self, input: bool) {
         self.cb_fiducialess.set_selected(input);
-        self.fiducialess = input;
         self.update_fiducialess();
     }
 
@@ -277,13 +272,6 @@ impl NewstackAndBlendmontParamPanel {
             .set_enabled(self.cb_fiducialess.is_selected());
     }
 
-    /// Java interface `getImageRotation(boolean)`.
-    pub fn get_image_rotation(&self, do_validation: bool) -> Result<String, String> {
-        self.ltf_rotation
-            .get_text_validated(do_validation)
-            .map_err(|error| error.to_string())
-    }
-
     /// Java `updateAdvanced`.
     pub fn update_advanced(&mut self, advanced: bool) {
         self.advanced = advanced;
@@ -294,7 +282,6 @@ impl NewstackAndBlendmontParamPanel {
     pub fn action(&mut self, command: &str) {
         if self.cb_fiducialess.get_action_command() == Some(command) {
             self.update_fiducialess();
-            self.fiducialess = self.cb_fiducialess.is_selected();
         }
     }
 
@@ -315,6 +302,19 @@ impl NewstackAndBlendmontParamPanel {
         if let Some(check_box) = &mut self.cb_antialias_filter {
             check_box.set_tool_tip_text(Some("Use antialiased image reduction instead binning with the default filter in Newstack; useful for data from direct detection cameras."));
         }
+    }
+}
+
+impl FiducialessParams for NewstackAndBlendmontParamPanel {
+    fn is_fiducialess(&self) -> bool {
+        Self::is_fiducialess(self)
+    }
+
+    fn get_image_rotation(
+        &self,
+        do_validation: bool,
+    ) -> Result<String, FieldValidationFailedException> {
+        self.ltf_rotation.get_text_validated(do_validation)
     }
 }
 
@@ -370,5 +370,19 @@ mod tests {
                 .as_ref()
                 .is_some_and(|value| value.check_box.enabled)
         );
+    }
+
+    #[test]
+    fn implements_canonical_fiducialess_params_without_duplicate_state() {
+        let mut panel = NewstackAndBlendmontParamPanel::new(
+            AxisID::First,
+            DialogType::FinalAlignedStack,
+            ViewType::SingleView,
+        );
+        panel.set_fiducialess_alignment(true);
+        panel.set_image_rotation("-3.5");
+        let params: &dyn FiducialessParams = &panel;
+        assert!(params.is_fiducialess());
+        assert_eq!(params.get_image_rotation(true).unwrap(), "-3.5");
     }
 }

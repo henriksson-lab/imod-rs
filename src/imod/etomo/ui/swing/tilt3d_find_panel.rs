@@ -12,6 +12,7 @@ use super::beads3d_find_panel::{
     TiltParam as BeadsTiltParam, TiltalignParam as BeadsTiltalignParam, TomogramState,
 };
 use super::newstack_or_blendmont_panel::MetaData as BeadsMetaData;
+use super::tilt3d_find_parent::Tilt3dFindParent;
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
@@ -92,17 +93,6 @@ pub trait Tilt3dFindApplicationManager {
         &mut self,
         axis_id: AxisID,
         run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-    );
-}
-
-/// Java `Tilt3dFindParent` / `TomogramGenerationParent` callback.
-pub trait Tilt3dFindParent {
-    fn tilt_3d_find_action(
-        &mut self,
-        process_result_display: &ProcessResultDisplay,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        processing_method: ProcessingMethod,
     );
 }
 
@@ -403,6 +393,7 @@ impl ConstTilt3dFindTiltalignParam for BeadsTiltalignParam {}
 mod tests {
     use super::*;
     use crate::imod::etomo::r#type::dialog_type::DialogType;
+    use crate::imod::etomo::ui::swing::tomogram_generation_parent::TomogramGenerationParent;
 
     #[derive(Default)]
     struct Log;
@@ -458,6 +449,23 @@ mod tests {
     #[derive(Default)]
     struct Parent {
         calls: u32,
+    }
+    impl TomogramGenerationParent for Parent {
+        fn is_ctf3d(&self) -> bool {
+            false
+        }
+        fn is_method_plugin(&self) -> bool {
+            false
+        }
+        fn is_multifilt(&self) -> bool {
+            false
+        }
+        fn is_back_projection(&self) -> bool {
+            true
+        }
+        fn is_sirt(&self) -> bool {
+            false
+        }
     }
     impl Tilt3dFindParent for Parent {
         fn tilt_3d_find_action(

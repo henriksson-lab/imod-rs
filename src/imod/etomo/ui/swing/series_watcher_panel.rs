@@ -19,16 +19,12 @@ use super::{
     labeled_text_field::{FieldValidationFailedException, LabeledTextField},
     panel_header::{ExpandButton, Expandable, PanelHeader, PanelHeaderState},
     radio_button::{RadioButton, RadioButtonGroup},
+    series_watcher_parent::SeriesWatcherParent,
 };
 
 pub const MINIMUM_TILT_RANGE_DEFAULT: &str = "40";
 pub const MINIMUM_NUMBER_OF_VIEWS_DEFAULT: &str = "12";
 pub const MINUMUM_AGE_OF_STACKS_DEFAULT: &str = "300";
-
-/// Java `SeriesWatcherParent` boundary.
-pub trait SeriesWatcherParent {
-    fn is_series_watcher_on(&self) -> bool;
-}
 
 /// Java `BatchRunTomoMetaData` members used by this source unit.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -604,6 +600,9 @@ mod tests {
     impl SeriesWatcherParent for Parent {
         fn is_series_watcher_on(&self) -> bool {
             self.0
+        }
+        fn equals_series_watcher_action_command(&self, _: &str) -> bool {
+            false
         }
     }
     #[test]

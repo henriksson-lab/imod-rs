@@ -5,11 +5,28 @@
 //! `info_setup.cpp`, `xzap.cpp`, and `slicer.cpp`).  It deliberately reports
 //! that boundary rather than pretending to be a viewer.
 
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use crate::imod::libiimod::iimage::ii_add_check_function;
+
+/// Direct calls from `imod.cpp` into translated viewer subsystems that retain
+/// Qt/OpenGL-owned view state at the native host boundary.
+pub trait ImodNativeBoundary {
+    fn start_viewer(&mut self, launch: &ImodLaunch) -> Result<i32, String>;
+    fn imod_draw_model(&mut self) -> Result<(), String>;
+    fn imod_default_keys(&mut self) -> Result<(), String>;
+    fn imod_show_help_page(&mut self, page: &str) -> Result<(), String>;
+}
+
+thread_local! {
+    /// The source resolves these calls through process-global `App`/viewer state.
+    /// The Rust Qt/OpenGL host supplies the same UI-thread ownership boundary.
+    pub static IMOD_NATIVE_BOUNDARY: RefCell<Option<Box<dyn ImodNativeBoundary>>> =
+        RefCell::new(None);
+}
 
 pub const IMOD_DRAW_IMAGE: i32 = 1;
 pub const IMOD_DRAW_XYZ: i32 = 1 << 1;
@@ -447,14 +464,22 @@ pub fn imod_main(arguments: &[String]) -> Result<i32, String> {
             .map(|argument| argument.as_ptr())
             .collect::<Vec<_>>();
         let status = unsafe { super::imodv::imodv_main(pointers.len() as i32, pointers.as_ptr()) };
+        if status == 0 {
+            return Ok(0);
+        }
         return Err(format!(
             "3dmodv boundary after imod.cpp dispatched imodv_main: status {status}; IMOD/3dmod/mv_window.cpp Qt/OpenGL window closure is not translated yet"
         ));
     }
-    Err(format!(
-        "3dmod viewer boundary after imod.cpp argument processing: display.cpp, info_setup.cpp, imodview.cpp, xzap.cpp, slicer.cpp, imod_io.cpp, preferences.cpp, imodplug.cpp, cachefill.cpp, pyramidcache.cpp, and client_message.cpp require translation; requested images: {:?}; model: {:?}",
-        launch.image_files, launch.model_file
-    ))
+    IMOD_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut().as_deref_mut().map_or_else(
+            || Err(format!(
+                "3dmod viewer boundary after imod.cpp argument processing: no native viewer host is attached; requested images: {:?}; model: {:?}",
+                launch.image_files, launch.model_file
+            )),
+            |boundary| boundary.start_viewer(&launch),
+        )
+    })
 }
 
 pub fn imod_loop_started() -> bool {
@@ -489,7 +514,12 @@ pub fn imod_initial_zoom() -> f32 {
     *INITIAL_ZOOM.lock().unwrap()
 }
 pub fn imod_draw_model() -> Result<(), String> {
-    Err("3dmod OpenGL boundary: model_draw.cpp is not translated yet".to_owned())
+    IMOD_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut().as_deref_mut().map_or_else(
+            || Err("3dmod OpenGL boundary: no native model-draw host is attached".to_owned()),
+            |boundary| boundary.imod_draw_model(),
+        )
+    })
 }
 pub fn imod_depth() -> i32 {
     APP.lock().unwrap().as_ref().map_or(0, |app| app.rgba * 24)
@@ -532,15 +562,81 @@ pub fn imod_print_info(message: &str) {
     println!("{message}");
 }
 pub fn imod_default_keys() -> Result<(), String> {
-    Err("3dmod input boundary: imod_input.cpp is not translated yet".to_owned())
+    IMOD_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut().as_deref_mut().map_or_else(
+            || Err("3dmod input boundary: no native default-key host is attached".to_owned()),
+            |boundary| boundary.imod_default_keys(),
+        )
+    })
 }
-pub fn imod_show_help_page(_page: &str) -> Result<(), String> {
-    Err("3dmod help boundary: imod_assistant Qt integration is not translated yet".to_owned())
+pub fn imod_show_help_page(page: &str) -> Result<(), String> {
+    IMOD_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut().as_deref_mut().map_or_else(
+            || Err("3dmod help boundary: no native assistant host is attached".to_owned()),
+            |boundary| boundary.imod_show_help_page(page),
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
+
+    struct NativeHost(Rc<RefCell<Vec<String>>>);
+
+    impl ImodNativeBoundary for NativeHost {
+        fn start_viewer(&mut self, launch: &ImodLaunch) -> Result<i32, String> {
+            self.0
+                .borrow_mut()
+                .push(format!("start:{}", launch.image_files.join(",")));
+            Ok(0)
+        }
+        fn imod_draw_model(&mut self) -> Result<(), String> {
+            self.0.borrow_mut().push("draw".to_owned());
+            Ok(())
+        }
+        fn imod_default_keys(&mut self) -> Result<(), String> {
+            self.0.borrow_mut().push("keys".to_owned());
+            Ok(())
+        }
+        fn imod_show_help_page(&mut self, page: &str) -> Result<(), String> {
+            self.0.borrow_mut().push(format!("help:{page}"));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn source_terminal_calls_route_to_the_native_viewer_host() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMOD_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(NativeHost(calls.clone())));
+        });
+        assert_eq!(imod_draw_model(), Ok(()));
+        assert_eq!(imod_default_keys(), Ok(()));
+        assert_eq!(imod_show_help_page("3dmod.html"), Ok(()));
+        assert_eq!(
+            calls.borrow().as_slice(),
+            ["draw", "keys", "help:3dmod.html"]
+        );
+        IMOD_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    #[test]
+    fn parsed_normal_viewer_launch_reaches_the_native_host() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMOD_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(NativeHost(calls.clone())));
+        });
+        let args = ["3dmod", "image.mrc", "model.mod"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert_eq!(imod_main(&args), Ok(0));
+        assert_eq!(calls.borrow().as_slice(), ["start:image.mrc"]);
+        IMOD_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+    }
+
     #[test]
     fn parse_and_stop_at_viewer_boundary() {
         let args = [

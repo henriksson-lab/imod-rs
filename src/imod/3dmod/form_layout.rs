@@ -18,30 +18,67 @@ pub trait LayoutOperations {
 #[derive(Clone, Debug, Default)]
 pub struct LayoutForm {
     pub prefs: ImodPrefStruct,
+    pub geom_check_box: bool,
+    pub image_iconify_box: bool,
+    pub imod_dlg_iconify_box: bool,
+    pub imodv_dlg_iconify_box: bool,
+    pub dock_imod_dlgs_box: bool,
+    pub raise_imod_stack_box: bool,
+    pub keep_stack_on_top_box: bool,
+    pub dock_imodv_dlgs_box: bool,
+    pub raise_imodv_stack_box: bool,
+    pub frame_adj_spin_box: i32,
+    pub frame_adj_listener_count: usize,
+    pub ui_setup: bool,
+    pub ui_retranslated: bool,
     pub initialized: bool,
 }
-pub fn layout_form_new(prefs: &ImodPrefStruct) -> LayoutForm {
-    let mut f = LayoutForm {
-        prefs: prefs.clone(),
-        ..Default::default()
-    };
-    f.init();
-    f
-}
 impl LayoutForm {
+    pub fn new(prefs: &ImodPrefStruct) -> LayoutForm {
+        let mut f = LayoutForm {
+            prefs: prefs.clone(),
+            ..Default::default()
+        };
+        f.init();
+        f
+    }
     pub fn destroy(&mut self) {}
-    pub fn language_change(&mut self) {}
+    pub fn language_change(&mut self) {
+        self.ui_retranslated = true;
+    }
     pub fn init(&mut self) {
         self.initialized = true;
+        self.ui_setup = true;
+        self.frame_adj_listener_count += 1;
         self.update()
     }
     pub fn border_adj_changed(&mut self, ops: &mut dyn LayoutOperations, value: i32) {
         self.prefs.dlg_frame_adjustment = value;
         ops.dlg_frame_adj_changed()
     }
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        self.geom_check_box = self.prefs.remember_geom;
+        self.image_iconify_box = self.prefs.iconify_image_win;
+        self.imod_dlg_iconify_box = self.prefs.iconify_imod_dlg;
+        self.imodv_dlg_iconify_box = self.prefs.iconify_imodv_dlg;
+        self.dock_imod_dlgs_box = self.prefs.stack_imod_dlgs;
+        self.raise_imod_stack_box = self.prefs.raise_imod_dlg_stack;
+        self.keep_stack_on_top_box = self.prefs.keep_dlg_stack_on_top;
+        self.dock_imodv_dlgs_box = self.prefs.stack_imodv_dlgs;
+        self.raise_imodv_stack_box = self.prefs.raise_imodv_dlg_stack;
+        self.frame_adj_spin_box = self.prefs.dlg_frame_adjustment;
+    }
     pub fn unload(&self, prefs: &mut ImodPrefStruct) {
-        *prefs = self.prefs.clone()
+        prefs.remember_geom = self.geom_check_box;
+        prefs.iconify_image_win = self.image_iconify_box;
+        prefs.iconify_imod_dlg = self.imod_dlg_iconify_box;
+        prefs.iconify_imodv_dlg = self.imodv_dlg_iconify_box;
+        prefs.stack_imod_dlgs = self.dock_imod_dlgs_box;
+        prefs.raise_imod_dlg_stack = self.raise_imod_stack_box;
+        prefs.keep_dlg_stack_on_top = self.keep_stack_on_top_box;
+        prefs.stack_imodv_dlgs = self.dock_imodv_dlgs_box;
+        prefs.raise_imodv_dlg_stack = self.raise_imodv_stack_box;
+        prefs.dlg_frame_adjustment = self.frame_adj_spin_box
     }
 }
 #[cfg(test)]
@@ -60,7 +97,7 @@ mod tests {
             remember_geom: true,
             ..Default::default()
         };
-        let mut f = layout_form_new(&p);
+        let mut f = LayoutForm::new(&p);
         let mut o = Ops::default();
         f.border_adj_changed(&mut o, 3);
         let mut out = ImodPrefStruct::default();

@@ -16,6 +16,7 @@ use super::multi_line_button::MultiLineButton;
 use super::panel::Dimension;
 use super::panel_header::PanelHeader;
 use super::radio_button::RadioButton;
+use super::spaced_text_field::SpacedTextField;
 use super::ui_utilities::{Color, X0_Y5, X5_Y0};
 
 /// Java `BoxLayout.X_AXIS`.
@@ -91,10 +92,6 @@ pub struct FileTextField {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spinner {
-    pub alignment_x: f32,
-}
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SpacedTextField {
     pub alignment_x: f32,
 }
 /// GUI boundary for Java's separate package-private `TextField` source unit.
@@ -400,7 +397,7 @@ impl SpacedPanel {
     /// Java overloaded `add(SpacedTextField)`.
     pub fn add_spaced_text_field(&mut self, mut spaced_text_field: SpacedTextField) {
         if let Some(alignment) = self.component_alignment_x {
-            spaced_text_field.alignment_x = alignment;
+            spaced_text_field.set_alignment_x(alignment);
         }
         self.panel_children
             .push(SpacedPanelChild::SpacedTextField(spaced_text_field));
@@ -545,7 +542,10 @@ mod tests {
     fn y_spacing_skips_once_after_spaced_child() {
         let mut panel = SpacedPanel::get_instance();
         panel.set_box_layout(Y_AXIS);
-        panel.add_spaced_text_field(SpacedTextField::default());
+        panel.add_spaced_text_field(SpacedTextField::new(
+            crate::imod::etomo::ui::field_type::FieldType::String,
+            "Field",
+        ));
         assert!(panel.previous_component_was_spaced);
         panel.add_j_label(JLabel::default());
         assert!(!panel.previous_component_was_spaced);

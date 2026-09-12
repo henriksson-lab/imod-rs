@@ -5,6 +5,9 @@
 //! forwards every source slot/event to that boundary.
 #![allow(dead_code)]
 
+use crate::imod::three_dmod::imod_input::{INPUT_CTRL, INPUT_SHIFT};
+use crate::imod::three_dmod::utilities::{PopupEntry, util_lookup_popup_hit};
+
 pub const NUM_TOOLBUTTONS: usize = 8;
 pub const NUM_TIMEBUTTONS: usize = 1;
 pub const ZAP_TOGGLE_RESOL: usize = 0;
@@ -18,6 +21,87 @@ pub const ZAP_TOGGLE_TIMELOCK: usize = 7;
 pub const MULTIZ_MAX_PANELS: i32 = 20;
 pub const MIN_SLIDER_WIDTH: i32 = 20;
 pub const MAX_SLIDER_WIDTH: i32 = 100;
+
+/// `sPopupTable` in `zap_classes.cpp`, excluding its C sentinel row.
+const ZAP_POPUP_TABLE: &[PopupEntry] = &[
+    PopupEntry {
+        text: "Toggle automatic section advance",
+        key: 'Z' as i32,
+        ctrl: false,
+        shift: true,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Toggle modeling direction",
+        key: 'I' as i32,
+        ctrl: false,
+        shift: false,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Toggle centering mode",
+        key: 'K' as i32,
+        ctrl: false,
+        shift: false,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Print area information, raise Info window",
+        key: 'I' as i32,
+        ctrl: false,
+        shift: true,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Toggle rubber band",
+        key: 'B' as i32,
+        ctrl: false,
+        shift: true,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Report distance from current point to cursor",
+        key: 'Q' as i32,
+        ctrl: false,
+        shift: false,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Toggle adjusting contour with mouse",
+        key: 'P' as i32,
+        ctrl: false,
+        shift: true,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Add contours on section to selection list",
+        key: 'A' as i32,
+        ctrl: true,
+        shift: false,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Add contours from all objects to selection",
+        key: 'A' as i32,
+        ctrl: true,
+        shift: true,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Resize window to image or rubber band",
+        key: 'R' as i32,
+        ctrl: false,
+        shift: true,
+        main_index: 0,
+    },
+    PopupEntry {
+        text: "Resize area within rubber band to fit window",
+        key: 'R' as i32,
+        ctrl: true,
+        shift: true,
+        main_index: 0,
+    },
+];
 
 /// Native Qt, OpenGL, image-view, and `ZapFuncs` boundary.
 pub trait ZapNativeBoundary {
@@ -58,6 +142,26 @@ pub trait ZapNativeBoundary {
     fn set_draw_in_others(&mut self, value: i32);
     fn wall_time_msec(&self) -> i32;
     fn process_events(&mut self);
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn info_button_exists(&self) -> bool {
+        false
+    }
+    fn low_section_button_exists(&self) -> bool {
+        false
+    }
+    fn high_section_button_exists(&self) -> bool {
+        false
+    }
+    fn button_width(&self, _: bool, _: f32, _: &str) -> i32 {
+        0
+    }
+    fn set_button_fixed_width(&mut self, _: &str, _: i32) {}
+    fn widget_change_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
+    /// `ZapFuncs::screenChanged`, called with the new device-pixel ratio.
+    fn screen_changed(&mut self, _: f32) {}
 }
 
 /// `ZapWindow` state formerly held in the paired Qt header.
@@ -131,13 +235,32 @@ impl ZapWindow {
         if !time_label.is_empty() {
             s.set_time_label(n.time(), time_label);
         }
+        s.set_font_dependent_widths(n);
         s
     }
     pub fn destroy(&mut self) {}
-    pub fn set_font_dependent_widths(&mut self) {}
-    pub fn change_event(&mut self, font_change: bool) {
+    pub fn set_font_dependent_widths(&mut self, n: &mut dyn ZapNativeBoundary) {
+        let rounded = n.rounded_style();
+        if n.info_button_exists() {
+            let width = n.button_width(rounded, 1., "I");
+            n.set_button_fixed_width("mInfoButton", 10 + width);
+        }
+        let width = n.button_width(rounded, 1.2, "Help");
+        n.set_button_fixed_width("mHelpButton", width);
+        if n.low_section_button_exists() {
+            let width = n.button_width(rounded, 1., "Lo");
+            n.set_button_fixed_width("mLowSectionButton", 8 + width);
+        }
+        if n.high_section_button_exists() {
+            let width = n.button_width(rounded, 1., "Hi");
+            n.set_button_fixed_width("mHighSectionButton", 8 + width);
+        }
+    }
+    pub fn change_event(&mut self, font_change: bool, n: &mut dyn ZapNativeBoundary) {
+        n.widget_change_event();
+        n.check_and_set_mac_menu();
         if font_change {
-            self.set_font_dependent_widths()
+            self.set_font_dependent_widths(n)
         }
     }
     pub fn zoom_up(&mut self, n: &mut dyn ZapNativeBoundary) {
@@ -271,7 +394,10 @@ impl ZapWindow {
         n.set_draw_in_others(i32::from(state));
         n.update_gl()
     }
-    pub fn screen_changed(&mut self, _: f32) {}
+    /// `ZapWindow::screenChanged`.
+    pub fn screen_changed(&mut self, device_pixel_ratio: f32, n: &mut dyn ZapNativeBoundary) {
+        n.screen_changed(device_pixel_ratio)
+    }
     pub fn key_press_event(&mut self, key: i32, modifiers: i32, n: &mut dyn ZapNativeBoundary) {
         if n.hot_slider_key(key) {
             self.m_ctrl_pressed = true
@@ -291,7 +417,20 @@ impl ZapWindow {
         n.closing();
         self.m_closed = true
     }
-    pub fn toolbar_menu_event(&mut self, _: i32) {}
+    /// `ZapWindow::toolbarMenuEvent` followed by its mapped `contextMenuHit` slot.
+    ///
+    /// Native Qt popup construction is the boundary; `index` is the selected mapped
+    /// action.  `utilLookupPopupHit` appends the shared default actions after this
+    /// source-specific table, exactly as the C++ call with `-1` does.
+    pub fn toolbar_menu_event(&mut self, index: i32, n: &mut dyn ZapNativeBoundary) {
+        let Some((key, ctrl, shift)) =
+            util_lookup_popup_hit(index.max(0) as usize, ZAP_POPUP_TABLE, -1)
+        else {
+            return;
+        };
+        let modifiers = (if ctrl { INPUT_CTRL } else { 0 }) | (if shift { INPUT_SHIFT } else { 0 });
+        self.context_menu_hit(key, modifiers as i32, n)
+    }
     pub fn context_menu_hit(&mut self, key: i32, modifiers: i32, n: &mut dyn ZapNativeBoundary) {
         n.key_input(key, modifiers)
     }
@@ -422,6 +561,7 @@ mod tests {
         x: i32,
         y: i32,
         z: i32,
+        widths: Vec<(String, i32)>,
     }
     impl ZapNativeBoundary for N {
         fn step_zoom(&mut self, s: i32) {
@@ -445,7 +585,9 @@ mod tests {
         fn update_gl(&mut self) {
             self.calls.push("gl".into())
         }
-        fn key_input(&mut self, _: i32, _: i32) {}
+        fn key_input(&mut self, key: i32, modifiers: i32) {
+            self.calls.push(format!("key{key}:{modifiers}"))
+        }
         fn key_release(&mut self, _: i32, _: i32) {}
         fn general_event(&mut self, _: i32) {}
         fn mouse_press(&mut self, _: i32) {}
@@ -505,6 +647,33 @@ mod tests {
             7
         }
         fn process_events(&mut self) {}
+        fn rounded_style(&self) -> bool {
+            true
+        }
+        fn info_button_exists(&self) -> bool {
+            true
+        }
+        fn low_section_button_exists(&self) -> bool {
+            true
+        }
+        fn high_section_button_exists(&self) -> bool {
+            true
+        }
+        fn button_width(&self, _: bool, _: f32, text: &str) -> i32 {
+            text.len() as i32
+        }
+        fn set_button_fixed_width(&mut self, button: &str, width: i32) {
+            self.widths.push((button.into(), width));
+        }
+        fn widget_change_event(&mut self) {
+            self.calls.push("change".into());
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("menu".into());
+        }
+        fn screen_changed(&mut self, dpr: f32) {
+            self.calls.push(format!("screen{dpr}"));
+        }
     }
     #[test]
     fn window_slots_forward_and_preserve_fields() {
@@ -517,6 +686,40 @@ mod tests {
         assert_eq!(w.m_sec_slider_max, 20);
         assert_eq!(n.x, 3);
         assert!(n.calls.contains(&"toggle1:1".into()));
+    }
+    #[test]
+    fn font_change_uses_source_optional_button_widths() {
+        let mut native = N::default();
+        let mut window = ZapWindow::new("", false, &mut native);
+        assert_eq!(
+            native.widths,
+            [
+                ("mInfoButton".into(), 11),
+                ("mHelpButton".into(), 4),
+                ("mLowSectionButton".into(), 10),
+                ("mHighSectionButton".into(), 10),
+            ]
+        );
+        window.change_event(true, &mut native);
+        assert_eq!(native.widths.len(), 8);
+        assert!(native.calls.ends_with(&["change".into(), "menu".into()]));
+    }
+    #[test]
+    fn screen_and_toolbar_events_follow_source_routes() {
+        let mut native = N::default();
+        let mut window = ZapWindow::new("", false, &mut native);
+        window.screen_changed(1.5, &mut native);
+        // Row 8 is Ctrl+A in `zap_classes.cpp`'s `sPopupTable`.
+        window.toolbar_menu_event(7, &mut native);
+        // The first shared default row follows the eleven source-specific rows.
+        window.toolbar_menu_event(11, &mut native);
+        assert!(native.calls.contains(&"screen1.5".into()));
+        assert!(
+            native
+                .calls
+                .contains(&format!("key{}:{}", 'A' as i32, INPUT_CTRL))
+        );
+        assert!(native.calls.contains(&format!("key{}:0", 'O' as i32)));
     }
     #[test]
     fn gl_mouse_and_timers_follow_source_state() {

@@ -18,45 +18,15 @@ use crate::imod::etomo::{
 use super::{
     appearance_extension::{AppearanceExtension, ComponentBoundary, FlagDisplay, FlagType},
     button_component::ActionListenerBoundary,
-    button_control_text_efield::{FileFilter, SelectFileExtension},
+    button_style_extension::ButtonStyleExtensionBoundary,
     control_mediator::ControlMediator,
     control_mode::{CLEAR, ControlMode, SELECT_FILE, SELECT_MULTIPLE_FILES},
     control_target::ControlTarget,
     controller::Controller,
+    file_text_field_interface::FileFilter,
+    grid_bag_extension::GridBagExtension,
+    select_file_extension::SelectFileExtension,
 };
-
-/// GUI-bound `ButtonStyleExtension` calls made by `Ebutton`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ButtonStyleExtensionBoundary {
-    pub style_name: &'static str,
-    pub label: Option<String>,
-    pub debug: bool,
-    pub update_count: usize,
-    pub last_flag_type: Option<FlagType>,
-    pub last_implement_toggle: bool,
-    pub last_selected: bool,
-}
-
-impl ButtonStyleExtensionBoundary {
-    /// Java `ButtonStyleExtension.setup(JButton, String, boolean)`.
-    fn setup(&mut self, label: Option<&str>, debug: bool) {
-        self.label = label.map(str::to_owned);
-        self.debug = debug;
-    }
-
-    /// Java `ButtonStyleExtension.updateAppearance(JButton, FlagType, boolean, boolean)`.
-    fn update_appearance(
-        &mut self,
-        flag_type: Option<FlagType>,
-        implement_toggle: bool,
-        selected: bool,
-    ) {
-        self.update_count += 1;
-        self.last_flag_type = flag_type;
-        self.last_implement_toggle = implement_toggle;
-        self.last_selected = selected;
-    }
-}
 
 /// Java `JButton` state read or changed by this source unit.
 #[derive(Clone, Debug)]
@@ -92,28 +62,6 @@ impl Default for JButtonBoundary {
     }
 }
 
-/// Java `GridBagExtension` state and toolkit calls reached by this class.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct GridBagExtensionBoundary {
-    pub added: bool,
-    pub removed: bool,
-    pub constraints: Option<(i32, i32)>,
-}
-
-impl GridBagExtensionBoundary {
-    /// Java `GridBagExtension.remove(Component)`.
-    fn remove(&mut self) {
-        self.removed = true;
-    }
-
-    /// Java `GridBagExtension.add(Component, JPanel, GridBagLayout, GridBagConstraints)`.
-    fn add(&mut self, constraints: (i32, i32)) {
-        self.added = true;
-        self.removed = false;
-        self.constraints = Some(constraints);
-    }
-}
-
 /// Java package-private final `Ebutton`.
 pub struct Ebutton {
     /// Java final `button`.
@@ -129,7 +77,7 @@ pub struct Ebutton {
     /// Java `buttonStyle`.
     pub button_style: Option<ButtonStyleExtensionBoundary>,
     /// Java `gridBagExtension`.
-    pub grid_bag_extension: Option<GridBagExtensionBoundary>,
+    pub grid_bag_extension: Option<GridBagExtension>,
     /// Java `selected`.
     pub selected: bool,
     /// Java `appearanceExtension`.
@@ -202,15 +150,7 @@ impl Ebutton {
 
     /// Java private `setButtonStyle(ButtonStyleExtension, String)`.
     fn set_button_style(&mut self, style_name: &'static str, label: Option<&str>) {
-        let mut button_style = ButtonStyleExtensionBoundary {
-            style_name,
-            label: None,
-            debug: false,
-            update_count: 0,
-            last_flag_type: None,
-            last_implement_toggle: false,
-            last_selected: false,
-        };
+        let mut button_style = ButtonStyleExtensionBoundary::new(style_name);
         button_style.setup(label, self.debug);
         self.button_style = Some(button_style);
     }
@@ -642,12 +582,12 @@ impl Ebutton {
     /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.
     pub fn add(&mut self, constraints: (i32, i32)) {
         if self.grid_bag_extension.is_none() {
-            self.grid_bag_extension = Some(GridBagExtensionBoundary::default());
+            self.grid_bag_extension = Some(GridBagExtension::new());
         }
         self.grid_bag_extension
             .as_mut()
             .expect("created above")
-            .add(constraints);
+            .add(0, constraints);
     }
 
     /// Java `setAltBrowsingDirectory(BrowsingDirectory)`.

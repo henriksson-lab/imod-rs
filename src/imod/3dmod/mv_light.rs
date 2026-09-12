@@ -32,6 +32,7 @@ impl Default for LightState {
 }
 pub trait LightGl {
     fn light_attenuation(&mut self, light: i32, constant: f32, linear: f32, quadratic: f32);
+    fn light_ambient(&mut self, light: i32, ambient: [f32; 4]);
     fn light_position(&mut self, light: i32, position: [f32; 4], local_viewer: bool);
     fn light_model(&mut self, ambient: [f32; 4], local_viewer: bool);
     fn material(
@@ -42,6 +43,10 @@ pub trait LightGl {
         shininess: f32,
     );
     fn lighting(&mut self, enabled: bool);
+    fn push_load_identity(&mut self);
+    fn model_scale(&mut self, x: f32, y: f32, z: f32);
+    fn pop_matrix(&mut self);
+    fn color_material(&mut self, enabled: bool);
 }
 /// `imodvSetLight`.
 pub fn imodv_set_light(state: &mut LightState, view: &mut Iview, gl: &mut dyn LightGl) {
@@ -60,7 +65,11 @@ pub fn light_getparam(state: &LightState, param: i32, out_value: &mut f32) {
 pub fn light_setparam(state: &mut LightState, param: i32, value: f64, gl: &mut dyn LightGl) {
     match param {
         1..=3 => state.position[(param - 1) as usize] = value as f32,
-        4..=6 => state.att[(param - 4) as usize] = value as f32,
+        4..=6 => {
+            state.att[(param - 4) as usize] = value as f32;
+            gl.light_attenuation(0, state.att[0], state.att[1], state.att[2]);
+            return;
+        }
         7 => state.dist = value as f32,
         _ => return,
     };
@@ -88,6 +97,7 @@ pub fn light_init(state: &mut LightState, view: &Iview, lighting: &mut i32, gl: 
         state.first = false;
     }
     *lighting = ((view.world & VIEW_WORLD_LIGHT) != 0) as i32;
+    gl.light_ambient(0, [0.1, 0.1, 0.1, 1.]);
     gl.light_model([0.7, 0.7, 0.7, 1.], false);
 }
 /// `light_moveby`.
@@ -163,6 +173,7 @@ pub fn light_on(
     let diffuse = object.diffuse as f32 / 255.;
     let spec = object.specular as f32 / 255.;
     let shine = (255 - object.shininess) as f32 / 50. + 1.;
+    gl.push_load_identity();
     gl.material(
         [r * ambient, g * ambient, b * ambient, alpha],
         [r * diffuse, g * diffuse, b * diffuse, alpha],
@@ -171,30 +182,76 @@ pub fn light_on(
     );
     let _ = (view.scale.x, view.scale.y, view.scale.z * model_zscale);
     gl.lighting(true);
+    gl.model_scale(view.scale.x, view.scale.y, view.scale.z * model_zscale);
     light_update(state, gl);
+    gl.pop_matrix();
 }
 /// `light_off`.
 pub fn light_off(gl: &mut dyn LightGl) {
     gl.lighting(false);
+    gl.color_material(false);
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct Gl;
+    #[derive(Default)]
+    struct Gl {
+        calls: Vec<String>,
+    }
     impl LightGl for Gl {
-        fn light_attenuation(&mut self, _: i32, _: f32, _: f32, _: f32) {}
+        fn light_attenuation(&mut self, light: i32, constant: f32, linear: f32, quadratic: f32) {
+            self.calls.push(format!(
+                "attenuation:{light}:{constant}:{linear}:{quadratic}"
+            ));
+        }
+        fn light_ambient(&mut self, _: i32, _: [f32; 4]) {
+            self.calls.push("light-ambient".into());
+        }
         fn light_position(&mut self, _: i32, _: [f32; 4], _: bool) {}
         fn light_model(&mut self, _: [f32; 4], _: bool) {}
         fn material(&mut self, _: [f32; 4], _: [f32; 4], _: [f32; 4], _: f32) {}
-        fn lighting(&mut self, _: bool) {}
+        fn lighting(&mut self, enabled: bool) {
+            self.calls.push(format!("lighting:{enabled}"));
+        }
+        fn push_load_identity(&mut self) {
+            self.calls.push("push".into());
+        }
+        fn model_scale(&mut self, x: f32, y: f32, z: f32) {
+            self.calls.push(format!("scale:{x}:{y}:{z}"));
+        }
+        fn pop_matrix(&mut self) {
+            self.calls.push("pop".into());
+        }
+        fn color_material(&mut self, enabled: bool) {
+            self.calls.push(format!("color-material:{enabled}"));
+        }
     }
     #[test]
     fn move_clamps_and_sets_infinite_position() {
         let mut s = LightState::default();
-        let mut g = Gl;
+        let mut g = Gl::default();
         let (mut x, mut y) = (1000, -1000);
         light_move(&mut s, &mut x, &mut y, &mut g);
         assert_eq!((x, y), (800, -800));
         assert_eq!(s.position[3], 0.);
+    }
+    #[test]
+    fn compatibility_gl_sequence_keeps_source_light_operations() {
+        let mut state = LightState::default();
+        let mut gl = Gl::default();
+        let view = Iview::default();
+        let mut lighting = 0;
+        light_init(&mut state, &view, &mut lighting, &mut gl);
+        light_setparam(&mut state, 5, 0.25, &mut gl);
+        light_off(&mut gl);
+        assert_eq!(
+            gl.calls,
+            [
+                "light-ambient",
+                "attenuation:0:1:0.25:0",
+                "lighting:false",
+                "color-material:false"
+            ]
+        );
     }
 }

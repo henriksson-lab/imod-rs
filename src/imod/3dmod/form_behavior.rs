@@ -1,12 +1,8 @@
-//! Translation of `IMOD/3dmod/form_behavior.cpp` together with its header.
-//!
-//! The native Qt group/buttons and platform environment are direct boundary
-//! operations.  The preference fields and form algorithms retain source order.
+//! Translation of `IMOD/3dmod/form_behavior.cpp` and `form_behavior.h`.
 #![allow(dead_code)]
 
 use core::ffi::c_void;
 
-/// Form-used fields of upstream `imod_pref_struct`.
 #[derive(Clone, Debug, Default)]
 pub struct ImodPrefStruct {
     pub allow_ctrl_on_mac: bool,
@@ -30,54 +26,70 @@ pub struct ImodPrefStruct {
     pub exit_when_all_closed: i32,
 }
 
-/// Native Qt widgets and path conversion called directly from this unit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExitButton {
+    AskExitRadio,
+    NeverExitRadio,
+    AlwaysExitRadio,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BehaviorCheckBox {
+    AllowCtrlOnMacBox,
+    SilenceBox,
+    ClassicBox,
+    StartInHqBox,
+    ArrowsScrollZapBox,
+    StartAtMidZBox,
+    SelectOnCheckBox,
+    SlicerNewSurfBox,
+    AutosaveEnabledBox,
+    OmitContMeshBox,
+    OmitIsosurfMeshBox,
+    KeyHwStereoBox,
+    NoVbForContBox,
+    NoVbForSphereBox,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BehaviorSpinBox {
+    F1f8StepSpinBox,
+    PageStepSpinBox,
+    AutosaveSpinBox,
+}
+
 pub trait BehaviorNativeBoundary {
+    fn setup_ui(&mut self);
     fn create_exit_group(&mut self) -> *mut c_void;
-    fn exit_group_add_button(&mut self, group: *mut c_void, id: i32);
+    fn exit_group_add_button(&mut self, group: *mut c_void, button: ExitButton, id: i32);
     fn hide_allow_ctrl_on_mac(&mut self);
     fn set_allow_ctrl_enabled(&mut self, enabled: bool);
     fn macos(&self) -> bool;
     fn mac_ctrl_environment_set(&self) -> bool;
-    fn connect_exit_group(&mut self);
+    fn qt_version_6_or_later(&self) -> bool;
+    fn connect_exit_group_button_clicked(&mut self, group: *mut c_void);
+    fn connect_exit_group_id_clicked(&mut self, group: *mut c_void);
     fn font_width(&self, text: &str) -> i32;
     fn set_autosave_spin_maximum_width(&mut self, width: i32);
-    fn set_checked(&mut self, which: i32, value: bool);
-    fn set_spin_box(&mut self, which: i32, value: i32);
-    fn set_autosave_dir(&mut self, path: &str);
+    fn set_checked(&mut self, control: BehaviorCheckBox, value: bool);
+    fn set_spin_box(&mut self, control: BehaviorSpinBox, value: i32);
+    fn set_autosave_dir(&mut self, path: String);
+    fn to_native_separators(&self, path: &str) -> String;
     fn set_exit_group(&mut self, group: *mut c_void, id: i32);
-    fn checked(&self, which: i32) -> bool;
-    fn spin_box_value(&self, which: i32) -> i32;
+    fn checked(&self, control: BehaviorCheckBox) -> bool;
+    fn spin_box_value(&self, control: BehaviorSpinBox) -> i32;
     fn autosave_dir(&self) -> String;
     fn clean_path(&self, path: &str) -> String;
     fn retranslate_ui(&mut self);
 }
-pub const ALLOW_CTRL: i32 = 0;
-pub const SILENCE: i32 = 1;
-pub const CLASSIC: i32 = 2;
-pub const START_HQ: i32 = 3;
-pub const ARROWS: i32 = 4;
-pub const MID_Z: i32 = 5;
-pub const SELECT_ON: i32 = 6;
-pub const SLICER_SURF: i32 = 7;
-pub const AUTOSAVE: i32 = 8;
-pub const OMIT_CONT: i32 = 9;
-pub const OMIT_ISO: i32 = 10;
-pub const KEY_HW: i32 = 11;
-pub const NO_VB_CONT: i32 = 12;
-pub const NO_VB_SPHERE: i32 = 13;
-pub const BW_STEP: i32 = 0;
-pub const PAGE_STEP: i32 = 1;
-pub const AUTOSAVE_INTERVAL: i32 = 2;
 
-/// `BehaviorForm` (`form_behavior.h`).
 #[derive(Debug)]
 pub struct BehaviorForm {
     pub m_prefs: ImodPrefStruct,
     pub exit_group: *mut c_void,
 }
+
 impl BehaviorForm {
-    /// `BehaviorForm::BehaviorForm`.
     pub fn new(prefs: ImodPrefStruct, native: &mut dyn BehaviorNativeBoundary) -> Self {
+        native.setup_ui();
         let mut form = Self {
             m_prefs: prefs,
             exit_group: core::ptr::null_mut(),
@@ -85,103 +97,104 @@ impl BehaviorForm {
         form.init(native);
         form
     }
-    /// `BehaviorForm::~BehaviorForm`.
     pub fn destroy(&mut self) {}
-    /// `BehaviorForm::languageChange`.
     pub fn language_change(&mut self, native: &mut dyn BehaviorNativeBoundary) {
-        native.retranslate_ui()
+        native.retranslate_ui();
     }
-    /// `BehaviorForm::init`.
     pub fn init(&mut self, native: &mut dyn BehaviorNativeBoundary) {
         self.exit_group = native.create_exit_group();
-        native.exit_group_add_button(self.exit_group, 0);
-        native.exit_group_add_button(self.exit_group, 1);
-        native.exit_group_add_button(self.exit_group, 2);
+        native.exit_group_add_button(self.exit_group, ExitButton::AskExitRadio, 0);
+        native.exit_group_add_button(self.exit_group, ExitButton::NeverExitRadio, 1);
+        native.exit_group_add_button(self.exit_group, ExitButton::AlwaysExitRadio, 2);
         if !native.macos() {
-            native.hide_allow_ctrl_on_mac()
+            native.hide_allow_ctrl_on_mac();
         }
         native.set_allow_ctrl_enabled(!native.mac_ctrl_environment_set());
-        native.connect_exit_group();
+        if native.qt_version_6_or_later() {
+            native.connect_exit_group_id_clicked(self.exit_group);
+        } else {
+            native.connect_exit_group_button_clicked(self.exit_group);
+        }
         self.set_font_dependent_widths(native);
         self.update(native);
     }
-    /// `BehaviorForm::setFontDependentWidths`.
     pub fn set_font_dependent_widths(&mut self, native: &mut dyn BehaviorNativeBoundary) {
         native.set_autosave_spin_maximum_width((6 * 2 + 3) * native.font_width("999999") / (6 * 2));
     }
-    /// `BehaviorForm::exitTypeChanged`.
     pub fn exit_type_changed(&mut self, value: i32) {
         self.m_prefs.exit_when_all_closed = value - 1;
     }
-    /// `BehaviorForm::update`.
-    pub fn update(&mut self, native: &mut dyn BehaviorNativeBoundary) {
+    pub fn update(&mut self, n: &mut dyn BehaviorNativeBoundary) {
         let p = &self.m_prefs;
-        native.set_checked(ALLOW_CTRL, p.allow_ctrl_on_mac);
-        native.set_checked(SILENCE, p.silent_beep);
-        native.set_checked(CLASSIC, p.classic_slicer);
-        native.set_checked(START_HQ, p.start_in_hq);
-        native.set_checked(ARROWS, p.arrows_scroll_zap);
-        native.set_checked(MID_Z, p.start_at_mid_z);
-        native.set_checked(SELECT_ON, p.attach_to_on_obj);
-        native.set_checked(SLICER_SURF, p.slicer_new_surf);
-        native.set_spin_box(BW_STEP, p.bw_step);
-        native.set_spin_box(PAGE_STEP, p.page_step);
-        native.set_checked(AUTOSAVE, p.autosave_on);
-        native.set_checked(OMIT_CONT, p.autosave_no_cont_mesh);
-        native.set_checked(OMIT_ISO, p.autosave_no_iso_mesh);
-        native.set_spin_box(AUTOSAVE_INTERVAL, p.autosave_interval);
-        native.set_autosave_dir(&p.autosave_dir);
-        native.set_checked(KEY_HW, p.key_sets_hw_stereo);
-        native.set_checked(NO_VB_CONT, p.no_vert_buf_for_cont);
-        native.set_checked(NO_VB_SPHERE, p.no_vbo_for_sphere);
-        native.set_exit_group(self.exit_group, p.exit_when_all_closed + 1);
+        n.set_checked(BehaviorCheckBox::AllowCtrlOnMacBox, p.allow_ctrl_on_mac);
+        n.set_checked(BehaviorCheckBox::SilenceBox, p.silent_beep);
+        n.set_checked(BehaviorCheckBox::ClassicBox, p.classic_slicer);
+        n.set_checked(BehaviorCheckBox::StartInHqBox, p.start_in_hq);
+        n.set_checked(BehaviorCheckBox::ArrowsScrollZapBox, p.arrows_scroll_zap);
+        n.set_checked(BehaviorCheckBox::StartAtMidZBox, p.start_at_mid_z);
+        n.set_checked(BehaviorCheckBox::SelectOnCheckBox, p.attach_to_on_obj);
+        n.set_checked(BehaviorCheckBox::SlicerNewSurfBox, p.slicer_new_surf);
+        n.set_spin_box(BehaviorSpinBox::F1f8StepSpinBox, p.bw_step);
+        n.set_spin_box(BehaviorSpinBox::PageStepSpinBox, p.page_step);
+        n.set_checked(BehaviorCheckBox::AutosaveEnabledBox, p.autosave_on);
+        n.set_checked(BehaviorCheckBox::OmitContMeshBox, p.autosave_no_cont_mesh);
+        n.set_checked(BehaviorCheckBox::OmitIsosurfMeshBox, p.autosave_no_iso_mesh);
+        n.set_spin_box(BehaviorSpinBox::AutosaveSpinBox, p.autosave_interval);
+        n.set_autosave_dir(n.to_native_separators(&p.autosave_dir));
+        n.set_checked(BehaviorCheckBox::KeyHwStereoBox, p.key_sets_hw_stereo);
+        n.set_checked(BehaviorCheckBox::NoVbForContBox, p.no_vert_buf_for_cont);
+        n.set_checked(BehaviorCheckBox::NoVbForSphereBox, p.no_vbo_for_sphere);
+        n.set_exit_group(self.exit_group, p.exit_when_all_closed + 1);
     }
-    /// `BehaviorForm::unload`.
-    pub fn unload(&mut self, native: &mut dyn BehaviorNativeBoundary) {
+    pub fn unload(&mut self, n: &mut dyn BehaviorNativeBoundary) {
         let p = &mut self.m_prefs;
-        p.allow_ctrl_on_mac = native.checked(ALLOW_CTRL);
-        p.silent_beep = native.checked(SILENCE);
-        p.classic_slicer = native.checked(CLASSIC);
-        p.start_in_hq = native.checked(START_HQ);
-        p.arrows_scroll_zap = native.checked(ARROWS);
-        p.start_at_mid_z = native.checked(MID_Z);
-        p.attach_to_on_obj = native.checked(SELECT_ON);
-        p.slicer_new_surf = native.checked(SLICER_SURF);
-        p.bw_step = native.spin_box_value(BW_STEP);
-        p.page_step = native.spin_box_value(PAGE_STEP);
-        p.autosave_on = native.checked(AUTOSAVE);
-        p.autosave_no_cont_mesh = native.checked(OMIT_CONT);
-        p.autosave_no_iso_mesh = native.checked(OMIT_ISO);
-        p.autosave_interval = native.spin_box_value(AUTOSAVE_INTERVAL);
-        p.key_sets_hw_stereo = native.checked(KEY_HW);
-        p.no_vert_buf_for_cont = native.checked(NO_VB_CONT);
-        p.no_vbo_for_sphere = native.checked(NO_VB_SPHERE);
-        p.autosave_dir = native.clean_path(&native.autosave_dir());
+        p.allow_ctrl_on_mac = n.checked(BehaviorCheckBox::AllowCtrlOnMacBox);
+        p.silent_beep = n.checked(BehaviorCheckBox::SilenceBox);
+        p.classic_slicer = n.checked(BehaviorCheckBox::ClassicBox);
+        p.start_in_hq = n.checked(BehaviorCheckBox::StartInHqBox);
+        p.arrows_scroll_zap = n.checked(BehaviorCheckBox::ArrowsScrollZapBox);
+        p.start_at_mid_z = n.checked(BehaviorCheckBox::StartAtMidZBox);
+        p.attach_to_on_obj = n.checked(BehaviorCheckBox::SelectOnCheckBox);
+        p.slicer_new_surf = n.checked(BehaviorCheckBox::SlicerNewSurfBox);
+        p.bw_step = n.spin_box_value(BehaviorSpinBox::F1f8StepSpinBox);
+        p.page_step = n.spin_box_value(BehaviorSpinBox::PageStepSpinBox);
+        p.autosave_on = n.checked(BehaviorCheckBox::AutosaveEnabledBox);
+        p.autosave_no_cont_mesh = n.checked(BehaviorCheckBox::OmitContMeshBox);
+        p.autosave_no_iso_mesh = n.checked(BehaviorCheckBox::OmitIsosurfMeshBox);
+        p.autosave_interval = n.spin_box_value(BehaviorSpinBox::AutosaveSpinBox);
+        p.key_sets_hw_stereo = n.checked(BehaviorCheckBox::KeyHwStereoBox);
+        p.no_vert_buf_for_cont = n.checked(BehaviorCheckBox::NoVbForContBox);
+        p.no_vbo_for_sphere = n.checked(BehaviorCheckBox::NoVbForSphereBox);
+        p.autosave_dir = n.clean_path(&n.autosave_dir());
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[derive(Default)]
-    struct N {
+    struct Native {
         checks: [bool; 14],
         spins: [i32; 3],
         path: String,
-        calls: Vec<String>,
         group: u8,
+        qt6: bool,
+        old_connect: usize,
+        new_connect: usize,
+        hidden: bool,
+        enabled: bool,
     }
-    impl BehaviorNativeBoundary for N {
+    impl BehaviorNativeBoundary for Native {
+        fn setup_ui(&mut self) {}
         fn create_exit_group(&mut self) -> *mut c_void {
             &mut self.group as *mut u8 as *mut c_void
         }
-        fn exit_group_add_button(&mut self, _: *mut c_void, id: i32) {
-            self.calls.push(format!("button:{id}"))
-        }
+        fn exit_group_add_button(&mut self, _: *mut c_void, _: ExitButton, _: i32) {}
         fn hide_allow_ctrl_on_mac(&mut self) {
-            self.calls.push("hide".into())
+            self.hidden = true;
         }
         fn set_allow_ctrl_enabled(&mut self, x: bool) {
-            self.calls.push(format!("enabled:{x}"))
+            self.enabled = x;
         }
         fn macos(&self) -> bool {
             false
@@ -189,28 +202,37 @@ mod tests {
         fn mac_ctrl_environment_set(&self) -> bool {
             false
         }
-        fn connect_exit_group(&mut self) {}
+        fn qt_version_6_or_later(&self) -> bool {
+            self.qt6
+        }
+        fn connect_exit_group_button_clicked(&mut self, _: *mut c_void) {
+            self.old_connect += 1;
+        }
+        fn connect_exit_group_id_clicked(&mut self, _: *mut c_void) {
+            self.new_connect += 1;
+        }
         fn font_width(&self, _: &str) -> i32 {
             12
         }
         fn set_autosave_spin_maximum_width(&mut self, _: i32) {}
-        fn set_checked(&mut self, x: i32, y: bool) {
-            self.checks[x as usize] = y
+        fn set_checked(&mut self, c: BehaviorCheckBox, v: bool) {
+            self.checks[c as usize] = v;
         }
-        fn set_spin_box(&mut self, x: i32, y: i32) {
-            self.spins[x as usize] = y
+        fn set_spin_box(&mut self, c: BehaviorSpinBox, v: i32) {
+            self.spins[c as usize] = v;
         }
-        fn set_autosave_dir(&mut self, x: &str) {
-            self.path = x.into()
+        fn set_autosave_dir(&mut self, x: String) {
+            self.path = x;
         }
-        fn set_exit_group(&mut self, _: *mut c_void, x: i32) {
-            self.calls.push(format!("group:{x}"))
+        fn to_native_separators(&self, x: &str) -> String {
+            x.replace('/', "\\")
         }
-        fn checked(&self, x: i32) -> bool {
-            self.checks[x as usize]
+        fn set_exit_group(&mut self, _: *mut c_void, _: i32) {}
+        fn checked(&self, c: BehaviorCheckBox) -> bool {
+            self.checks[c as usize]
         }
-        fn spin_box_value(&self, x: i32) -> i32 {
-            self.spins[x as usize]
+        fn spin_box_value(&self, c: BehaviorSpinBox) -> i32 {
+            self.spins[c as usize]
         }
         fn autosave_dir(&self) -> String {
             self.path.clone()
@@ -221,20 +243,36 @@ mod tests {
         fn retranslate_ui(&mut self) {}
     }
     #[test]
-    fn exit_mapping_matches_source() {
-        let mut n = N::default();
-        let mut f = BehaviorForm::new(ImodPrefStruct::default(), &mut n);
-        f.exit_type_changed(0);
-        assert_eq!(f.m_prefs.exit_when_all_closed, -1);
-        f.exit_type_changed(2);
-        assert_eq!(f.m_prefs.exit_when_all_closed, 1);
+    fn init_selects_the_source_qt_signal_branch_and_platform_controls() {
+        let mut n = Native {
+            qt6: true,
+            ..Default::default()
+        };
+        let _f = BehaviorForm::new(ImodPrefStruct::default(), &mut n);
+        assert_eq!((n.old_connect, n.new_connect), (0, 1));
+        assert!(n.hidden);
+        assert!(n.enabled);
     }
     #[test]
-    fn unload_uses_native_clean_path() {
-        let mut n = N::default();
+    fn exit_mapping_and_native_separator_update_match_source() {
+        let mut n = Native::default();
+        let mut f = BehaviorForm::new(
+            ImodPrefStruct {
+                autosave_dir: "a/b".into(),
+                ..Default::default()
+            },
+            &mut n,
+        );
+        assert_eq!(n.path, "a\\b");
+        f.exit_type_changed(0);
+        assert_eq!(f.m_prefs.exit_when_all_closed, -1);
+    }
+    #[test]
+    fn unload_reads_all_reached_autosave_fields_and_cleans_path() {
+        let mut n = Native::default();
         let mut f = BehaviorForm::new(ImodPrefStruct::default(), &mut n);
-        n.checks[AUTOSAVE as usize] = true;
-        n.spins[AUTOSAVE_INTERVAL as usize] = 15;
+        n.checks[BehaviorCheckBox::AutosaveEnabledBox as usize] = true;
+        n.spins[BehaviorSpinBox::AutosaveSpinBox as usize] = 15;
         n.path = "a//b".into();
         f.unload(&mut n);
         assert!(f.m_prefs.autosave_on);

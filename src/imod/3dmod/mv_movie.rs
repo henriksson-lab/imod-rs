@@ -103,6 +103,8 @@ impl Default for MovieSegment {
 /// Original static variables in `mv_movie.cpp`.
 #[derive(Clone, Debug)]
 pub struct MvMovieState {
+    pub movie_dialog_open: bool,
+    pub sequence_dialog_open: bool,
     pub saved: i32,
     pub reverse: i32,
     pub longway: i32,
@@ -124,6 +126,8 @@ pub struct MvMovieState {
 impl Default for MvMovieState {
     fn default() -> Self {
         Self {
+            movie_dialog_open: false,
+            sequence_dialog_open: false,
             saved: 0,
             reverse: 0,
             longway: 0,
@@ -148,6 +152,16 @@ impl Default for MvMovieState {
 /// Direct counterpart of the Qt, imodv, image, snapshot, and GL calls made
 /// by this source file.  The production bridge must make these actual calls.
 pub trait MvMovieNativeBoundary {
+    fn close_movie_dialog(&mut self);
+    fn remove_movie_dialog(&mut self);
+    fn raise_movie_dialog(&mut self);
+    fn create_movie_dialog(&mut self) -> bool;
+    fn set_sequence_open(&mut self, open: bool);
+    fn close_sequence_dialog(&mut self);
+    fn remove_sequence_dialog(&mut self);
+    fn raise_sequence_dialog(&mut self);
+    fn create_sequence_dialog(&mut self) -> bool;
+    fn sequence_set_for_four_rows(&mut self);
     fn read_start_end(&mut self, index: usize) -> (f32, f32);
     fn set_start(&mut self, index: usize, value: f32);
     fn set_end(&mut self, index: usize, value: f32);
@@ -292,10 +306,12 @@ pub fn mv_movie_mont_selection(
     mont: i32,
 ) {
     state.montage = mont;
-    n.sequence_update_enables(mont == 0, state.abort == 0)
+    n.sequence_update_enables(mont != 0, state.abort == 0)
 }
-/// Original: `mvMovieQuit` (the DockingDialog close is a UI boundary).
-pub fn mv_movie_quit(_state: &mut MvMovieState, _n: &mut dyn MvMovieNativeBoundary) {}
+/// Original: `mvMovieQuit`.
+pub fn mv_movie_quit(_state: &mut MvMovieState, n: &mut dyn MvMovieNativeBoundary) {
+    n.close_movie_dialog()
+}
 /// Original: `mvMovieClosing`.
 pub fn mv_movie_closing(state: &mut MvMovieState, n: &mut dyn MvMovieNativeBoundary) {
     (
@@ -307,6 +323,8 @@ pub fn mv_movie_closing(state: &mut MvMovieState, n: &mut dyn MvMovieNativeBound
         state.trial_fps,
     ) = n.get_button_states();
     (state.frames, state.mont_frames) = n.get_frame_boxes();
+    n.remove_movie_dialog();
+    state.movie_dialog_open = false;
     state.abort = 1;
     n.sequence_update_enables(false, false)
 }
@@ -603,13 +621,24 @@ pub fn mv_movie_make(
         0
     }
 }
-/// Original: `mvMovieDialog` (creation/raising DockingDialog stays at UI boundary).
+/// Original: `mvMovieDialog`.
 pub fn mv_movie_dialog(state: &mut MvMovieState, n: &mut dyn MvMovieNativeBoundary, state_on: i32) {
     if state_on == 0 {
+        if state.movie_dialog_open {
+            n.close_movie_dialog();
+        }
+        return;
+    }
+    if state.movie_dialog_open {
+        n.raise_movie_dialog();
         return;
     }
     state.saved = 0;
     state.abort = 1;
+    if !n.create_movie_dialog() {
+        return;
+    }
+    state.movie_dialog_open = true;
     mv_movie_set_start(state, n);
     mv_movie_set_end(state, n);
     n.set_button_states(
@@ -620,20 +649,49 @@ pub fn mv_movie_dialog(state: &mut MvMovieState, n: &mut dyn MvMovieNativeBounda
         state.saved,
         state.trial_fps,
     );
-    n.set_frame_boxes(state.frames, state.mont_frames)
+    n.set_frame_boxes(state.frames, state.mont_frames);
+    n.set_sequence_open(state.sequence_dialog_open);
+    if state.sequence_dialog_open {
+        n.sequence_update_enables(state.montage == 0, false);
+    }
 }
-/// Original: `mvMovieSequenceDialog` (creation/raising DockingDialog stays at UI boundary).
+/// Original: `mvMovieSequenceDialog`.
 pub fn mv_movie_sequence_dialog(
     state: &mut MvMovieState,
     n: &mut dyn MvMovieNativeBoundary,
     state_on: i32,
 ) {
-    if state_on != 0 {
-        n.sequence_update_enables(state.montage == 0, state.abort == 0)
+    if state_on == 0 {
+        if state.sequence_dialog_open {
+            n.close_sequence_dialog();
+        }
+        return;
+    }
+    if state.sequence_dialog_open {
+        n.raise_sequence_dialog();
+        return;
+    }
+    if !n.create_sequence_dialog() {
+        return;
+    }
+    state.sequence_dialog_open = true;
+    n.sequence_set_for_four_rows();
+    n.sequence_update_enables(
+        state.movie_dialog_open && state.montage == 0,
+        state.abort == 0,
+    );
+    if state.movie_dialog_open {
+        n.set_sequence_open(true);
     }
 }
 /// Original: `mvMovieSequenceClosing`.
-pub fn mv_movie_sequence_closing(_state: &mut MvMovieState, _n: &mut dyn MvMovieNativeBoundary) {}
+pub fn mv_movie_sequence_closing(state: &mut MvMovieState, n: &mut dyn MvMovieNativeBoundary) {
+    n.remove_sequence_dialog();
+    state.sequence_dialog_open = false;
+    if state.movie_dialog_open {
+        n.set_sequence_open(false);
+    }
+}
 /// Original: `mvMovieGetSegment`.
 pub fn mv_movie_get_segment(
     state: &mut MvMovieState,
@@ -898,8 +956,40 @@ mod tests {
         objects: Vec<MovieObject>,
         draws: i32,
         asked: i32,
+        movie_create: bool,
+        sequence_create: bool,
+        movie_closes: usize,
+        movie_raises: usize,
+        sequence_closes: usize,
+        sequence_raises: usize,
+        sequence_open: Vec<bool>,
+        sequence_enables: Vec<(bool, bool)>,
     }
     impl MvMovieNativeBoundary for N {
+        fn close_movie_dialog(&mut self) {
+            self.movie_closes += 1;
+        }
+        fn remove_movie_dialog(&mut self) {}
+        fn raise_movie_dialog(&mut self) {
+            self.movie_raises += 1;
+        }
+        fn create_movie_dialog(&mut self) -> bool {
+            self.movie_create
+        }
+        fn set_sequence_open(&mut self, open: bool) {
+            self.sequence_open.push(open);
+        }
+        fn close_sequence_dialog(&mut self) {
+            self.sequence_closes += 1;
+        }
+        fn remove_sequence_dialog(&mut self) {}
+        fn raise_sequence_dialog(&mut self) {
+            self.sequence_raises += 1;
+        }
+        fn create_sequence_dialog(&mut self) -> bool {
+            self.sequence_create
+        }
+        fn sequence_set_for_four_rows(&mut self) {}
         fn read_start_end(&mut self, i: usize) -> (f32, f32) {
             (self.start[i], self.end[i])
         }
@@ -917,7 +1007,9 @@ mod tests {
             (3, 2)
         }
         fn set_frame_boxes(&mut self, _: i32, _: i32) {}
-        fn sequence_update_enables(&mut self, _: bool, _: bool) {}
+        fn sequence_update_enables(&mut self, movie: bool, making: bool) {
+            self.sequence_enables.push((movie, making));
+        }
         fn set_non_tif_label(&mut self) {}
         fn image_movie_state(&mut self, _: &mut MovieSegment) {}
         fn image_set_movie_draw_state(&mut self, _: &MovieSegment) {}
@@ -988,5 +1080,41 @@ mod tests {
         assert_eq!(mv_movie_make(&mut s, &mut n, false), 0);
         assert_eq!(n.draws, 3);
         assert!((n.view.rot.x - 10.).abs() < 0.001);
+    }
+    #[test]
+    fn movie_and_sequence_dialog_lifecycles_follow_source_branches() {
+        let mut s = MvMovieState::default();
+        let mut n = N {
+            movie_create: true,
+            sequence_create: true,
+            ..Default::default()
+        };
+        mv_movie_dialog(&mut s, &mut n, 1);
+        assert!(s.movie_dialog_open);
+        assert_eq!(n.sequence_open, vec![false]);
+        mv_movie_dialog(&mut s, &mut n, 1);
+        assert_eq!(n.movie_raises, 1);
+        mv_movie_sequence_dialog(&mut s, &mut n, 1);
+        assert!(s.sequence_dialog_open);
+        assert_eq!(n.sequence_enables, vec![(true, false)]);
+        assert_eq!(n.sequence_open, vec![false, true]);
+        mv_movie_sequence_dialog(&mut s, &mut n, 1);
+        assert_eq!(n.sequence_raises, 1);
+        mv_movie_sequence_closing(&mut s, &mut n);
+        assert!(!s.sequence_dialog_open);
+        assert_eq!(n.sequence_open, vec![false, true, false]);
+        mv_movie_dialog(&mut s, &mut n, 0);
+        assert_eq!(n.movie_closes, 1);
+    }
+    #[test]
+    fn montage_selection_uses_the_source_sequence_enable_predicate() {
+        let mut s = MvMovieState {
+            abort: 0,
+            ..Default::default()
+        };
+        let mut n = N::default();
+        mv_movie_mont_selection(&mut s, &mut n, 1);
+        mv_movie_mont_selection(&mut s, &mut n, 0);
+        assert_eq!(n.sequence_enables, vec![(true, true), (false, true)]);
     }
 }

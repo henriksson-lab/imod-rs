@@ -14,6 +14,7 @@ use super::appearance_extension::FlagType;
 use super::batch_run_tomo_step_panel::BatchRunTomoStatus;
 use super::cell::{CellGridBagConstraintsBoundary, CellGridBagLayoutBoundary, CellPanelBoundary};
 use super::directives_row::DirectivesRow;
+use super::toggle_ebutton::ToggleEbutton;
 
 /// Java `DirectiveValueType` as read from a directive-description row.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,29 +75,6 @@ impl EbuttonBoundary {
             enabled: true,
             ..Default::default()
         }
-    }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-    pub fn remove(&mut self) {
-        self.removed = true;
-    }
-}
-
-/// Java `ToggleEbutton` state reached by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToggleEbuttonBoundary {
-    pub enabled: bool,
-    pub selected: bool,
-    pub visible: bool,
-    pub removed: bool,
-}
-impl ToggleEbuttonBoundary {
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-    pub fn set_selected(&mut self, selected: bool) {
-        self.selected = selected;
     }
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
@@ -172,7 +150,7 @@ pub struct DirectivesDirectiveRow {
     pub description_available: bool,
     pub manager: Option<&'static dyn BaseManager>,
     pub h_empty: Option<EbuttonBoundary>,
-    pub tbtn_override_toggle: Option<ToggleEbuttonBoundary>,
+    pub tbtn_override_toggle: Option<ToggleEbutton>,
     pub open: bool,
     pub show_for_template_only: bool,
     pub show_included_only: bool,
@@ -218,30 +196,21 @@ impl DirectivesDirectiveRow {
             row.h_empty = Some(EbuttonBoundary::get_header_instance(""));
         } else if is_choice_list {
             row.cb_value = Some(DirectiveFieldBoundary::new());
-            row.tbtn_override_toggle = Some(ToggleEbuttonBoundary {
-                enabled: false,
-                visible: true,
-                ..Default::default()
-            });
+            row.tbtn_override_toggle = Some(ToggleEbutton::get_override_instance(None));
         } else if value_type == DirectiveValueType::File {
             let mut field = DirectiveFieldBoundary::new();
             field.location_descr = Some(section_title);
             row.bctf_value = Some(field);
-            row.tbtn_override_toggle = Some(ToggleEbuttonBoundary {
-                enabled: false,
-                visible: true,
-                ..Default::default()
-            });
+            row.tbtn_override_toggle = Some(ToggleEbutton::get_override_instance(None));
         } else {
             let mut field = DirectiveFieldBoundary::new();
             field.location_descr = Some(section_title);
             field.flag_errors = true;
             row.tf_value = Some(field);
-            row.tbtn_override_toggle = Some(ToggleEbuttonBoundary {
-                enabled: false,
-                visible: true,
-                ..Default::default()
-            });
+            row.tbtn_override_toggle = Some(ToggleEbutton::get_override_instance(None));
+        }
+        if let Some(toggle) = &mut row.tbtn_override_toggle {
+            toggle.set_enabled(false);
         }
         row
     }
@@ -346,13 +315,13 @@ impl DirectivesDirectiveRow {
             return;
         };
         if set_field_highlight_value && !value.override_value {
-            toggle.enabled = true;
+            toggle.set_enabled(true);
         } else if value.batch {
             if value.override_value {
-                toggle.enabled = true;
+                toggle.set_enabled(true);
             }
-            if toggle.enabled {
-                toggle.selected = value.override_value;
+            if toggle.is_enabled() {
+                toggle.set_selected(value.override_value);
             }
         }
     }
@@ -635,7 +604,7 @@ mod tests {
             }),
             true,
         );
-        assert!(row.tbtn_override_toggle.as_ref().unwrap().enabled);
+        assert!(row.tbtn_override_toggle.as_ref().unwrap().is_enabled());
         row.set_value_from_directive_value(
             Some(DirectiveValue {
                 override_value: true,
@@ -643,7 +612,7 @@ mod tests {
             }),
             false,
         );
-        assert!(row.tbtn_override_toggle.as_ref().unwrap().selected);
+        assert!(row.tbtn_override_toggle.as_ref().unwrap().is_selected());
     }
     #[test]
     fn constructors_preserve_the_four_java_value_widget_branches() {

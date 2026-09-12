@@ -645,8 +645,56 @@ impl AutoAlignmentPanel {
         self.sigma_low_frequency.set_tool_tip_text(Some("Sigma of an inverted gaussian for filtering out low frequencies before searching for transformation.  Filter is applied to binned image."));
         self.cutoff_high_frequency.set_tool_tip_text(Some("Starting radius of a gaussian for filtering out high frequencies before searching for transformation.  Filter is applied to binned image."));
         self.sigma_high_frequency.set_tool_tip_text(Some("Sigma of gaussian for filtering out high frequencies before searching for transformation.  Filter is applied to binned image."));
+        self.initial_auto_alignment.set_tool_tip_text(Some("OPTIONAL:  Run xfalign.  Find preliminary translational alignments with tiltxcorr rather then using an existing .xf file."));
+        self.midas.set_tool_tip_text(Some("Open Midas to check the output of the auto alignment and to make transformations by hand."));
+        self.refine_auto_alignment.set_tool_tip_text(Some("OPTIONAL:  Run xfalign using preliminary alignments created by the most recent use of Midas or xfalign."));
+        self.revert_to_midas.set_tool_tip_text(Some("Use to ignore xfalign changes.  Returns transformations to the state created by the most recent save done in Midas."));
+        self.revert_to_empty
+            .set_tool_tip_text(Some("Use to remove all transformations."));
         self.midas_binning
             .set_tool_tip_text(Some("Binning used by Midas."));
+        if let Some(sobel_filter) = &mut self.sobel_filter {
+            sobel_filter.set_tool_tip_text(Some(
+                "Apply edge-detecting Sobel filter after image reduction and filtering, if any.",
+            ));
+        }
+        if let Some(find_warping) = &mut self.find_warping {
+            find_warping.set_tool_tip_text(Some(
+                "Align with non-linear warping by cross-correlating overlapping patches.",
+            ));
+            let text = "Size of patches to correlate in X and Y, in unbinned pixels.";
+            self.warp_patch_size_x
+                .as_mut()
+                .unwrap()
+                .set_tool_tip_text(Some(text));
+            self.warp_patch_size_y
+                .as_mut()
+                .unwrap()
+                .set_tool_tip_text(Some(text));
+            self.boundary_model
+                .as_mut()
+                .unwrap()
+                .set_tool_tip_text(Some(
+                    "Use model with contours around areas where patches should be correlated.",
+                ));
+            self.boundary_model_button
+                .as_mut()
+                .unwrap()
+                .set_tool_tip_text(Some(
+                    "Open 3dmod to draw or see contours around areas to use for correlation.",
+                ));
+            let text = "Maximum pixels of shift for each patch.  If both fields are blank there are no limits; otherwise there must be a value in both fields.";
+            self.shift_limits_for_warp_x
+                .as_mut()
+                .unwrap()
+                .set_tool_tip_text(Some(text));
+            self.shift_limits_for_warp_y
+                .as_mut()
+                .unwrap()
+                .set_tool_tip_text(Some(text));
+        }
+        // `AutodocFactory.getInstance` and `EtomoAutodoc.getTooltip` are a
+        // storage boundary until the XFALIGN autodoc source unit is translated.
     }
 }
 

@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use super::section_table_panel::{HeaderCell, SectionTableRowData, Tab, Viewport};
+use super::spinner_cell::SpinnerCell as BoundaryRowSpinnerCell;
 
 pub const INVERTED_TOOLTIP: &str = "This value comes from an inverted section.";
 pub const EMPTY_SLICE_WARNING: &str = "Empty slices will be added to the section.";
@@ -37,58 +38,6 @@ impl BoundaryRowFieldCell {
     pub fn set_warning(&mut self, warning: bool, tooltip: Option<&str>) {
         self.warning = warning;
         self.warning_tooltip = tooltip.map(str::to_owned);
-    }
-    pub fn remove(&mut self) {
-        self.displayed = false;
-    }
-}
-
-/// `SpinnerCell` state and listener registration at the native widget boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BoundaryRowSpinnerCell {
-    pub value: i32,
-    pub minimum: i32,
-    pub maximum: i32,
-    pub warning: bool,
-    pub warning_tooltip: Option<String>,
-    pub displayed: bool,
-    pub change_listener_count: usize,
-    pub headers: Option<(String, String, String)>,
-}
-impl BoundaryRowSpinnerCell {
-    pub fn get_int_instance(minimum: i32, maximum: i32) -> Self {
-        Self {
-            value: minimum,
-            minimum,
-            maximum,
-            warning: false,
-            warning_tooltip: None,
-            displayed: false,
-            change_listener_count: 0,
-            headers: None,
-        }
-    }
-    pub fn set_value(&mut self, value: i32) {
-        self.value = value;
-    }
-    pub fn get_int_value(&self) -> i32 {
-        self.value
-    }
-    pub fn get_string_value(&self) -> String {
-        self.value.to_string()
-    }
-    pub fn set_warning(&mut self, warning: bool, tooltip: Option<&str>) {
-        self.warning = warning;
-        self.warning_tooltip = tooltip.map(str::to_owned);
-    }
-    pub fn add_change_listener(&mut self) {
-        self.change_listener_count += 1;
-    }
-    pub fn remove_change_listener(&mut self) {
-        self.change_listener_count = self.change_listener_count.saturating_sub(1);
-    }
-    pub fn set_headers(&mut self, table: &str, sections: &HeaderCell, adjusted: &HeaderCell) {
-        self.headers = Some((table.into(), sections.text.clone(), adjusted.text.clone()));
     }
     pub fn remove(&mut self) {
         self.displayed = false;
@@ -360,8 +309,8 @@ impl BoundaryRow {
         self.orig_end.displayed = true;
         self.orig_start.displayed = true;
         self.best_gap.displayed = true;
-        self.adjusted_end.displayed = true;
-        self.adjusted_start.displayed = true;
+        self.adjusted_end.spinner.visible = true;
+        self.adjusted_start.spinner.visible = true;
     }
     pub fn remove_display(&mut self) {
         self.boundary_displayed = false;
@@ -617,14 +566,20 @@ mod tests {
     #[test]
     fn positive_gap_is_shared_between_boundaries() {
         let row = row(3.0);
-        assert_eq!((row.adjusted_end.value, row.adjusted_start.value), (7, 3));
+        assert_eq!(
+            (
+                row.adjusted_end.get_int_value(),
+                row.adjusted_start.get_int_value()
+            ),
+            (7, 3)
+        );
     }
     #[test]
     fn edited_left_boundary_preserves_gap_by_moving_right() {
         let mut row = row(4.0);
         row.adjusted_end.set_value(8);
         row.adjusted_end_state_changed();
-        assert_eq!(row.adjusted_start.value, 3);
+        assert_eq!(row.adjusted_start.get_int_value(), 3);
     }
     #[test]
     fn metadata_and_screen_state_round_trip() {
@@ -642,6 +597,6 @@ mod tests {
         row.display(1, &Viewport::new(1), Tab::Model);
         assert!(!row.model_displayed);
         row.display(0, &Viewport::new(1), Tab::Rejoin);
-        assert!(row.rejoin_displayed && row.adjusted_end.displayed);
+        assert!(row.rejoin_displayed && row.adjusted_end.spinner.visible);
     }
 }

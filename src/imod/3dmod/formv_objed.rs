@@ -63,6 +63,7 @@ pub trait ImodvObjedFormNativeBoundary {
     fn set_name_text(&mut self, name: &str);
     fn set_color_box(&mut self, color: ObjedColor);
     fn set_one_all_index(&mut self, item: i32);
+    fn widget_change_event(&mut self);
     fn check_and_set_mac_menu(&mut self);
     fn ignore_close_event(&mut self);
     fn accept_close_event(&mut self);
@@ -185,6 +186,7 @@ impl ImodvObjedForm {
         event: ObjedChangeEvent,
         native: &mut dyn ImodvObjedFormNativeBoundary,
     ) {
+        native.widget_change_event();
         native.check_and_set_mac_menu();
         if event != ObjedChangeEvent::FontChange {
             return;
@@ -372,6 +374,7 @@ mod tests {
         accepted: bool,
         ignored: bool,
         grabbed: bool,
+        change_called: bool,
     }
     impl ImodvObjedFormNativeBoundary for Native {
         fn setup_ui(&mut self) {}
@@ -417,6 +420,9 @@ mod tests {
             self.color = color
         }
         fn set_one_all_index(&mut self, _: i32) {}
+        fn widget_change_event(&mut self) {
+            self.change_called = true;
+        }
         fn check_and_set_mac_menu(&mut self) {}
         fn ignore_close_event(&mut self) {
             self.ignored = true
@@ -511,5 +517,14 @@ mod tests {
         editor.mesh_busy = true;
         form.top_close_event(&mut editor, &mut native);
         assert!(native.ignored && editor.dialog_open);
+    }
+
+    #[test]
+    fn source_change_event_calls_base_widget_boundary() {
+        let app = ImodvApp::default();
+        let mut native = Native::default();
+        let mut form = ImodvObjedForm::new(&app, &mut native);
+        form.top_change_event(ObjedChangeEvent::Other, &mut native);
+        assert!(native.change_called);
     }
 }

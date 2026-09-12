@@ -1,14 +1,17 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/IterationTable.java`.
 //!
 //! Swing panel/layout construction, `UIHarness`, autodoc tooltips, and the owning
-//! `PeetDialog` remain explicit boundaries.  The table's complete row-list and action
-//! state live here; `IterationRow.java` is represented by its direct table-facing
-//! state until that separate source unit is translated.
+//! `PeetDialog` remain explicit boundaries.  `IterationRow.java` lives in its
+//! matching canonical module; this source owns the table and its `RowList` only.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
 
+pub use super::header_cell::HeaderCell;
+use super::highlightable::Highlightable;
+use super::highlightable_table::{HighlightFocusableParent, HighlightableTable};
 use super::iteration_parent::IterationParent;
+pub use super::iteration_row::IterationRow;
 
 pub const D_PHI_D_THETA_D_PSI_HEADER1: &str = "Angular Search Range";
 pub const INCR_HEADER3: &str = "Step";
@@ -33,119 +36,13 @@ pub const DUPLICATE_ANGULAR_TOLERANCE_HEADER3: &str = "Angle";
 pub const LOW_CUTOFF_DEFAULT: &str = "0";
 pub const LOW_CUTOFF_SIGMA_DEFAULT: &str = "0.05";
 
-/// Java `HeaderCell`; Swing component creation is a boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct HeaderCell {
-    pub text: String,
-    pub width: Option<usize>,
-    pub visible: bool,
-    pub tooltip: Option<String>,
-}
-impl HeaderCell {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            visible: true,
-            ..Self::default()
-        }
-    }
-    pub fn with_width(text: impl Into<String>, width: usize) -> Self {
-        Self {
-            text: text.into(),
-            width: Some(width),
-            visible: true,
-            tooltip: None,
-        }
-    }
-}
-
-/// The fields `IterationRow.java` exposes directly to this table.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct IterationRow {
-    pub index: usize,
-    pub highlighted: bool,
-    pub displayed: bool,
-    pub low_cutoff_rows_visible: bool,
-    pub d_theta_enabled: bool,
-    pub d_psi_enabled: bool,
-    pub duplicate_tolerance_enabled: bool,
-    pub values: BTreeMap<String, String>,
-}
-impl IterationRow {
-    pub fn new(index: usize, is_low_cutoff: bool) -> Self {
-        Self {
-            index,
-            low_cutoff_rows_visible: is_low_cutoff,
-            d_theta_enabled: true,
-            d_psi_enabled: true,
-            duplicate_tolerance_enabled: false,
-            ..Self::default()
-        }
-    }
-    pub fn set_low_cutoff_sigma(&mut self, value: impl Into<String>) {
-        self.values.insert("lowCutoffSigma".into(), value.into());
-    }
-    pub fn set_visible_low_cutoff_rows(&mut self, input: bool) {
-        self.low_cutoff_rows_visible = input;
-    }
-    pub fn update_display(&mut self, sample_sphere: bool, remove_duplicates: bool) {
-        if self.index == 0 {
-            self.d_theta_enabled = !sample_sphere;
-            self.d_psi_enabled = !sample_sphere;
-        }
-        self.duplicate_tolerance_enabled = remove_duplicates;
-    }
-    pub fn check_low_cutoff_backwards_compatibility(&self) -> bool {
-        self.values
-            .get("lowCutoffCutoff")
-            .is_some_and(|v| v == LOW_CUTOFF_DEFAULT)
-            && self
-                .values
-                .get("lowCutoffSigma")
-                .is_some_and(|v| v == LOW_CUTOFF_SIGMA_DEFAULT)
-    }
-    pub fn set_index(&mut self, index: usize) {
-        self.index = index;
-    }
-    pub fn remove(&mut self) {
-        self.displayed = false;
-    }
-    pub fn display(&mut self) {
-        self.displayed = true;
-    }
-    pub fn validate_run(&self, low_cutoff: bool) -> bool {
-        let required = [
-            "dPhiMax",
-            "dPhiIncrement",
-            "searchRadius",
-            "hiCutoff",
-            "hiCutoffSigma",
-            "refThreshold",
-        ];
-        if required
-            .into_iter()
-            .any(|key| self.values.get(key).is_none_or(|v| v.trim().is_empty()))
-        {
-            return false;
-        }
-        if low_cutoff
-            && ["lowCutoff", "lowCutoffSigma"]
-                .into_iter()
-                .any(|key| self.values.get(key).is_none_or(|v| v.trim().is_empty()))
-        {
-            return false;
-        }
-        true
-    }
-}
-
 /// Java `MatlabParam.Iteration` data touched by this unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct Iteration {
     pub values: BTreeMap<String, String>,
 }
 /// Java `MatlabParam`, restricted to direct `IterationTable` accesses.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct MatlabParam {
     pub iterations: Vec<Iteration>,
     pub flg_remove_duplicates: bool,
@@ -160,7 +57,7 @@ impl MatlabParam {
     }
 }
 /// Java `PeetMetaData` / `ConstPeetMetaData` fields reached by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct PeetMetaData {
     pub low_cutoff: bool,
     pub low_cutoff_values: Vec<BTreeMap<String, String>>,
@@ -168,33 +65,34 @@ pub struct PeetMetaData {
 pub type ConstPeetMetaData = PeetMetaData;
 
 /// Java private static inner `RowList`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct RowList {
     pub list: Vec<IterationRow>,
     pub meta_data: Option<ConstPeetMetaData>,
+    /// Direct `UIHarness.openMessageDialog` result from Java
+    /// `getHighlightedRow()` when no selected highlighter exists.
+    pub last_message: Option<(String, String)>,
 }
 impl RowList {
     pub fn add(&mut self, is_low_cutoff: bool) -> &mut IterationRow {
         let index = self.list.len();
-        self.list.push(IterationRow::new(index, is_low_cutoff));
+        let mut row = IterationRow::new(index, is_low_cutoff);
+        row.set_visible_low_cutoff_rows(is_low_cutoff);
+        row.set_names();
+        self.list.push(row);
         self.list.last_mut().unwrap()
     }
     pub fn get_parameters(&self, matlab: &mut MatlabParam, low_cutoff: bool) {
         matlab.set_iteration_list_size(self.list.len());
         for (index, row) in self.list.iter().enumerate() {
-            matlab.iterations[index].values = row.values.clone();
-            if !low_cutoff {
-                matlab.iterations[index]
-                    .values
-                    .insert("lowCutoffCutoff".into(), LOW_CUTOFF_DEFAULT.into());
-                matlab.iterations[index]
-                    .values
-                    .insert("lowCutoffSigma".into(), LOW_CUTOFF_SIGMA_DEFAULT.into());
-            }
+            row.get_parameters_matlab(&mut matlab.iterations[index], low_cutoff);
         }
     }
     pub fn get_peet_parameters(&self, meta_data: &mut PeetMetaData) {
-        meta_data.low_cutoff_values = self.list.iter().map(|row| row.values.clone()).collect();
+        meta_data.low_cutoff_values.clear();
+        for row in &self.list {
+            row.get_parameters_peet(meta_data);
+        }
     }
     pub fn set_parameters(&mut self, meta_data: &ConstPeetMetaData) {
         self.meta_data = Some(meta_data.clone());
@@ -206,8 +104,12 @@ impl RowList {
         }
         row_index
     }
-    pub fn validate_run(&self, is_low_cutoff: bool) -> bool {
-        !self.list.is_empty() && self.list.iter().all(|row| row.validate_run(is_low_cutoff))
+    pub fn validate_run(&mut self, is_low_cutoff: bool) -> bool {
+        !self.list.is_empty()
+            && self
+                .list
+                .iter_mut()
+                .all(|row| row.validate_run(is_low_cutoff))
     }
     pub fn update_display(&mut self, sample_sphere: bool, remove_duplicates: bool) {
         for row in &mut self.list {
@@ -220,11 +122,11 @@ impl RowList {
         }
     }
     pub fn copy(&mut self, row_index: usize, is_low_cutoff: bool) {
-        let mut copy = self.list[row_index].clone();
-        copy.index = self.list.len();
-        copy.highlighted = false;
-        copy.low_cutoff_rows_visible = is_low_cutoff;
-        self.list.push(copy);
+        self.list
+            .push(IterationRow::copy(self.list.len(), &self.list[row_index]));
+        let copy = self.list.last_mut().unwrap();
+        copy.set_visible_low_cutoff_rows(is_low_cutoff);
+        copy.set_names();
     }
     pub fn size(&self) -> usize {
         self.list.len()
@@ -240,8 +142,12 @@ impl RowList {
     pub fn get_row_mut(&mut self, index: usize) -> Option<&mut IterationRow> {
         self.list.get_mut(index)
     }
-    pub fn get_highlighted_row(&self) -> Option<usize> {
-        self.list.iter().position(|row| row.highlighted)
+    pub fn get_highlighted_row(&mut self) -> Option<usize> {
+        let value = self.list.iter().position(IterationRow::is_highlighted);
+        if value.is_none() {
+            self.last_message = Some(("Please highlight a row.".into(), "Entry Error".into()));
+        }
+        value
     }
     pub fn highlight_down(&mut self) {
         let Some(mut index) = self.get_highlight_index() else {
@@ -265,11 +171,11 @@ impl RowList {
         self.highlight(index);
     }
     pub fn get_highlight_index(&self) -> Option<usize> {
-        self.get_highlighted_row()
+        self.list.iter().position(IterationRow::is_highlighted)
     }
     pub fn highlight(&mut self, row_index: usize) {
         if let Some(row) = self.list.get_mut(row_index) {
-            row.highlighted = true;
+            row.set_highlighter_selected(true);
         }
     }
     pub fn move_row_up(&mut self, row_index: usize) {
@@ -299,6 +205,39 @@ impl Button {
             enabled: true,
             tooltip: None,
         }
+    }
+}
+
+/// The native `JPanel`, `GridBagLayout`, `GridBagConstraints`, `BoxLayout`,
+/// `Box`, `LineBorder`, and `EtchedBorder` graph created by Java `createTable`.
+/// It is deliberately data rather than a replacement widget toolkit.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IterationTableLayoutBoundary {
+    pub table_grid_bag_layout: bool,
+    pub table_black_line_border: bool,
+    pub button_box_y_axis: bool,
+    pub table_and_checkbox_box_y_axis: bool,
+    pub root_box_x_axis: bool,
+    pub root_etched_border_label: Option<String>,
+    pub button_order: Vec<String>,
+    pub checkbox_order: Vec<String>,
+    pub table_and_checkbox_has_vertical_padding: bool,
+    pub table_and_checkbox_has_checkbox_panel: bool,
+}
+
+/// Java private inner `ITActionListener`.  Native `ActionEvent` construction is
+/// a Swing boundary; its source dispatch is retained directly.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ItActionListener;
+impl ItActionListener {
+    /// Java `ITActionListener.actionPerformed(ActionEvent)`.
+    pub fn action_performed<P: IterationParent>(
+        &self,
+        iteration_table: &mut IterationTable,
+        action_command: &str,
+        parent: &mut P,
+    ) {
+        iteration_table.action(action_command, parent);
     }
 }
 
@@ -345,6 +284,17 @@ pub struct IterationTable {
     pub flg_remove_duplicates: bool,
     pub low_cutoff: bool,
     pub flg_strict_search_limits: bool,
+    pub layout: IterationTableLayoutBoundary,
+    /// Java `focusableParents = new JComponent[] { rootPanel }`.  Native Swing
+    /// input/action-map installation is represented by `HighlightableTable`.
+    pub focusable_parents: Vec<HighlightFocusableParent>,
+    /// Java private `addListeners` installs the single `ITActionListener` on five
+    /// buttons and the two source check boxes (not strict-search-limits).
+    pub action_listener_count: usize,
+    /// Results of the direct `AutodocFactory` / `EtomoAutodoc.getTooltip` manager
+    /// boundary used only by Java `setToolTipText`.
+    pub duplicate_shift_tolerance_autodoc_tooltip: Option<String>,
+    pub duplicate_angular_tolerance_autodoc_tooltip: Option<String>,
     pub table_visible: bool,
     pub vertical_padding_height: usize,
     pub pack_count: usize,
@@ -362,23 +312,23 @@ impl IterationTable {
             header2_d_phi: HeaderCell::new("Phi"),
             header2_d_theta: HeaderCell::new("Theta"),
             header2_d_psi: HeaderCell::new("Psi"),
-            header3_d_phi_max: HeaderCell::new(MAX_HEADER3),
-            header3_d_phi_increment: HeaderCell::new(INCR_HEADER3),
-            header3_d_theta_max: HeaderCell::new(MAX_HEADER3),
-            header3_d_theta_increment: HeaderCell::new(INCR_HEADER3),
-            header3_d_psi_max: HeaderCell::new(MAX_HEADER3),
-            header3_d_psi_increment: HeaderCell::new(INCR_HEADER3),
+            header3_d_phi_max: HeaderCell::new_with_text_width(MAX_HEADER3, 40),
+            header3_d_phi_increment: HeaderCell::new_with_text_width(INCR_HEADER3, 40),
+            header3_d_theta_max: HeaderCell::new_with_text_width(MAX_HEADER3, 40),
+            header3_d_theta_increment: HeaderCell::new_with_text_width(INCR_HEADER3, 40),
+            header3_d_psi_max: HeaderCell::new_with_text_width(MAX_HEADER3, 40),
+            header3_d_psi_increment: HeaderCell::new_with_text_width(INCR_HEADER3, 40),
             header1_search_radius: HeaderCell::new(SEARCH_RADIUS_HEADER1),
             header2_search_radius: HeaderCell::new(SEARCH_RADIUS_HEADER2),
-            header3_search_radius: HeaderCell::default(),
+            header3_search_radius: HeaderCell::new_with_width(75),
             header1_hi_cutoff: HeaderCell::new(HICUTOFF_HEADER1),
             header2_hi_cutoff: HeaderCell::new(HICUTOFF_HEADER2),
-            header3_hi_cutoff: HeaderCell::new(HICUTOFF_CUTOFF_HEADER3),
-            header3_hi_cutoff_sigma: HeaderCell::new(HICUTOFF_SIGMA_HEADER3),
+            header3_hi_cutoff: HeaderCell::new_with_text_width(HICUTOFF_CUTOFF_HEADER3, 50),
+            header3_hi_cutoff_sigma: HeaderCell::new_with_text_width(HICUTOFF_SIGMA_HEADER3, 50),
             header1_low_cutoff: HeaderCell::new(LOWCUTOFF_HEADER1),
             header2_low_cutoff: HeaderCell::new(LOWCUTOFF_HEADER2),
-            header3_low_cutoff: HeaderCell::new(LOWCUTOFF_CUTOFF_HEADER3),
-            header3_low_cutoff_sigma: HeaderCell::new(LOWCUTOFF_SIGMA_HEADER3),
+            header3_low_cutoff: HeaderCell::new_with_text_width(LOWCUTOFF_CUTOFF_HEADER3, 50),
+            header3_low_cutoff_sigma: HeaderCell::new_with_text_width(LOWCUTOFF_SIGMA_HEADER3, 50),
             header1_ref_threshold: HeaderCell::new(REF_THRESHOLD_HEADER1),
             header2_ref_threshold: HeaderCell::new(REF_THRESHOLD_HEADER2),
             header3_ref_threshold: HeaderCell::default(),
@@ -396,6 +346,11 @@ impl IterationTable {
             flg_remove_duplicates: false,
             low_cutoff: false,
             flg_strict_search_limits: false,
+            layout: IterationTableLayoutBoundary::default(),
+            focusable_parents: vec![HighlightFocusableParent::default()],
+            action_listener_count: 0,
+            duplicate_shift_tolerance_autodoc_tooltip: None,
+            duplicate_angular_tolerance_autodoc_tooltip: None,
             table_visible: true,
             vertical_padding_height: 0,
             pack_count: 0,
@@ -404,10 +359,18 @@ impl IterationTable {
         };
         table.create_table();
         table.add_row(true, false, parent);
+        table.display();
         table.update_display();
         table.refresh_vertical_padding();
         table.set_tool_tip_text();
         table
+    }
+    /// Java static `getInstance(BaseManager, IterationParent)`.
+    pub fn get_instance<P: IterationParent>(parent: &mut P) -> Self {
+        let mut value = Self::new(parent);
+        value.add_listeners();
+        value.init_highlight_hotkeys();
+        value
     }
     pub fn highlight(&mut self, _highlight: bool) {
         self.update_display();
@@ -418,11 +381,6 @@ impl IterationTable {
     pub fn highlight_down_action_performed(&mut self) {
         self.row_list.highlight_down();
     }
-    /// Java `getFocusableParents`; the sole Swing root component is retained as
-    /// the table's focusable-root identity at the UI boundary.
-    pub fn get_focusable_parents(&self) -> usize {
-        1
-    }
     pub fn validate_run(&mut self) -> bool {
         let valid = self.row_list.validate_run(self.low_cutoff);
         if !valid && self.row_list.size() == 0 {
@@ -430,6 +388,13 @@ impl IterationTable {
                 format!("Must enter at least one row in {LABEL}"),
                 "Entry Error".into(),
             ));
+        }
+        if !valid && self.row_list.size() > 0 {
+            self.last_message = self
+                .row_list
+                .list
+                .iter()
+                .find_map(|row| row.last_message.clone());
         }
         valid
     }
@@ -457,37 +422,33 @@ impl IterationTable {
     pub fn set_peet_parameters(&mut self, meta_data: &ConstPeetMetaData) {
         self.low_cutoff = meta_data.low_cutoff;
         self.row_list.set_parameters(meta_data);
-        for (index, row) in self.row_list.list.iter_mut().enumerate() {
-            if let Some(values) = meta_data.low_cutoff_values.get(index) {
-                row.values.extend(values.clone());
-            }
+        for row in &mut self.row_list.list {
+            row.set_parameters_peet(Some(meta_data));
         }
     }
     pub fn update_rows_display(&mut self, sample_sphere: bool) {
         self.row_list
             .update_display(sample_sphere, self.flg_remove_duplicates);
     }
-    pub fn check_low_cutoff_backwards_compatibility(&mut self) {
+    pub fn check_low_cutoff_backwards_compatibility(&mut self, matlab: &MatlabParam) {
         if self
             .row_list
             .list
             .iter()
-            .any(|row| !row.check_low_cutoff_backwards_compatibility())
+            .any(|row| !row.check_low_cutoff_backwards_compatibility(matlab))
         {
             self.low_cutoff = true;
         }
         if !self.low_cutoff {
             for row in &mut self.row_list.list {
-                row.set_low_cutoff_sigma(LOW_CUTOFF_SIGMA_DEFAULT);
+                row.set_low_cutoff_sigma(Some(LOW_CUTOFF_SIGMA_DEFAULT));
             }
         }
     }
     pub fn set_parameters(&mut self, matlab: &MatlabParam) {
         self.set_visible_high_pass_filter_column(self.low_cutoff);
-        for (index, row) in self.row_list.list.iter_mut().enumerate() {
-            if let Some(iteration) = matlab.iterations.get(index) {
-                row.values = iteration.values.clone();
-            }
+        for row in &mut self.row_list.list {
+            row.set_parameters_matlab(matlab, self.low_cutoff);
             row.set_visible_low_cutoff_rows(self.low_cutoff);
         }
         self.flg_remove_duplicates = matlab.flg_remove_duplicates;
@@ -497,8 +458,9 @@ impl IterationTable {
     }
     pub fn add_iteration_rows<P: IterationParent>(&mut self, matlab: &MatlabParam, parent: &mut P) {
         for index in self.row_list.size()..matlab.get_iteration_list_size() {
+            let low_cutoff = self.low_cutoff;
             let row = self.add_row(true, false, parent);
-            row.values = matlab.iterations[index].values.clone();
+            row.set_parameters_matlab(matlab, low_cutoff);
         }
     }
     pub fn add_row<P: IterationParent>(
@@ -511,7 +473,7 @@ impl IterationTable {
         let index = self.row_list.size();
         let row = self.row_list.add(low_cutoff);
         if action_insert_btn {
-            row.set_low_cutoff_sigma(LOW_CUTOFF_SIGMA_DEFAULT);
+            row.set_low_cutoff_sigma(Some(LOW_CUTOFF_SIGMA_DEFAULT));
         }
         row.display();
         parent.update_display(init);
@@ -522,12 +484,27 @@ impl IterationTable {
         self.row_list.size()
     }
     pub fn set_tool_tip_text(&mut self) {
+        self.header3_duplicate_shift_tolerance.set_tool_tip_text(
+            self.duplicate_shift_tolerance_autodoc_tooltip
+                .as_deref()
+                .unwrap_or_default(),
+        );
+        self.header3_duplicate_angular_tolerance.set_tool_tip_text(
+            self.duplicate_angular_tolerance_autodoc_tooltip
+                .as_deref()
+                .unwrap_or_default(),
+        );
         self.btn_add_row.tooltip = Some("Add a new iteration row to the table.".into());
         self.btn_copy_row.tooltip =
             Some("Create a new row that is a duplicate of the highlighted row.".into());
         self.btn_move_up.tooltip = Some("Move highlighted row up in the table.".into());
         self.btn_move_down.tooltip = Some("Move highlighted row down in the table".into());
         self.btn_delete_row.tooltip = Some("Remove highlighted row from table.".into());
+    }
+    /// Java private `addListeners`; actual listener objects and Swing dispatch stay
+    /// at the GUI boundary, while the source attachment cardinality is retained.
+    pub fn add_listeners(&mut self) {
+        self.action_listener_count += 7;
     }
     pub fn action<P: IterationParent>(&mut self, action_command: &str, parent: &mut P) {
         if action_command == self.btn_add_row.action_command {
@@ -536,10 +513,14 @@ impl IterationTable {
         } else if action_command == self.btn_copy_row.action_command {
             if let Some(row) = self.row_list.get_highlighted_row() {
                 self.copy_row(row, parent);
+            } else {
+                self.last_message = self.row_list.last_message.clone();
             }
         } else if action_command == self.btn_delete_row.action_command {
             if let Some(row) = self.row_list.get_highlighted_row() {
                 self.delete_row(row);
+            } else {
+                self.last_message = self.row_list.last_message.clone();
             }
         } else if action_command == self.btn_move_up.action_command {
             self.move_row_up();
@@ -612,12 +593,63 @@ impl IterationTable {
     }
     pub fn create_table(&mut self) {
         self.set_visible_high_pass_filter_column(self.low_cutoff);
+        self.layout.table_grid_bag_layout = true;
+        self.layout.table_black_line_border = true;
+        self.layout.button_box_y_axis = true;
+        self.layout.table_and_checkbox_box_y_axis = true;
+        self.layout.root_box_x_axis = true;
+        self.layout.root_etched_border_label = Some(LABEL.into());
+        self.layout.button_order = vec![
+            "Up".into(),
+            "Down".into(),
+            "Insert".into(),
+            "Delete".into(),
+            "Dup".into(),
+        ];
+        self.layout.checkbox_order = vec![
+            "Remove duplicates".into(),
+            "Bandpass filtering".into(),
+            "Strict search limit checking".into(),
+        ];
         self.pack_count += 1;
     }
     pub fn refresh_vertical_padding(&mut self) {
         self.vertical_padding_height = 3usize.saturating_sub(self.row_list.size()) * 22;
+        self.layout.table_and_checkbox_has_vertical_padding = true;
+        self.layout.table_and_checkbox_has_checkbox_panel = true;
     }
     pub fn display(&mut self) {
+        self.header1_iteration_number.add();
+        self.header2_iteration_number.add();
+        self.header3_iteration_number.add();
+        self.header1_d_phi_d_theta_d_psi.add();
+        self.header2_d_phi.add();
+        self.header2_d_theta.add();
+        self.header2_d_psi.add();
+        self.header3_d_phi_max.add();
+        self.header3_d_phi_increment.add();
+        self.header3_d_theta_max.add();
+        self.header3_d_theta_increment.add();
+        self.header3_d_psi_max.add();
+        self.header3_d_psi_increment.add();
+        self.header1_search_radius.add();
+        self.header2_search_radius.add();
+        self.header3_search_radius.add();
+        self.header1_hi_cutoff.add();
+        self.header2_hi_cutoff.add();
+        self.header3_hi_cutoff.add();
+        self.header3_hi_cutoff_sigma.add();
+        self.header1_low_cutoff.add();
+        self.header2_low_cutoff.add();
+        self.header3_low_cutoff.add();
+        self.header3_low_cutoff_sigma.add();
+        self.header1_ref_threshold.add();
+        self.header2_ref_threshold.add();
+        self.header3_ref_threshold.add();
+        self.header1_duplicate_tolerance.add();
+        self.header2_duplicate_tolerance.add();
+        self.header3_duplicate_shift_tolerance.add();
+        self.header3_duplicate_angular_tolerance.add();
         self.row_list.display();
     }
     pub fn get_d_phi_d_theta_d_psi_header_cell(&self) -> &HeaderCell {
@@ -642,13 +674,34 @@ impl IterationTable {
         &self.header1_iteration_number
     }
     pub fn set_visible_high_pass_filter_column(&mut self, input: bool) {
-        self.header1_low_cutoff.visible = input;
-        self.header2_low_cutoff.visible = input;
-        self.header3_low_cutoff.visible = input;
-        self.header3_low_cutoff_sigma.visible = input;
+        self.header1_low_cutoff.set_visible(input);
+        self.header2_low_cutoff.set_visible(input);
+        self.header3_low_cutoff.set_visible(input);
+        self.header3_low_cutoff_sigma.set_visible(input);
         for row in &mut self.row_list.list {
             row.set_visible_low_cutoff_rows(input);
         }
+    }
+}
+
+impl Highlightable for IterationTable {
+    fn highlight(&mut self, highlight: bool) {
+        IterationTable::highlight(self, highlight);
+    }
+}
+
+impl HighlightableTable for IterationTable {
+    fn highlight_up_action_performed(&mut self) {
+        IterationTable::highlight_up_action_performed(self);
+    }
+    fn highlight_down_action_performed(&mut self) {
+        IterationTable::highlight_down_action_performed(self);
+    }
+    fn get_focusable_parents(&mut self) -> Option<&mut [HighlightFocusableParent]> {
+        Some(&mut self.focusable_parents)
+    }
+    fn unique_key(&self) -> &str {
+        "Interation"
     }
 }
 #[cfg(test)]
@@ -668,16 +721,17 @@ mod tests {
         }
     }
     fn populated_row(table: &mut IterationTable) {
-        for key in [
-            "dPhiMax",
-            "dPhiIncrement",
-            "searchRadius",
-            "hiCutoff",
-            "hiCutoffSigma",
-            "refThreshold",
-        ] {
-            table.row_list.list[0].values.insert(key.into(), "1".into());
-        }
+        let row = &mut table.row_list.list[0];
+        row.d_phi_max.set_value("1");
+        row.d_phi_increment.set_value("1");
+        row.d_theta_max.set_value("1");
+        row.d_theta_increment.set_value("1");
+        row.d_psi_max.set_value("1");
+        row.d_psi_increment.set_value("1");
+        row.search_radius.set_value("1");
+        row.hi_cutoff.set_value("1");
+        row.hi_cutoff_sigma.set_value("1");
+        row.ref_threshold.set_value("1");
     }
     #[test]
     fn insert_copy_move_and_delete_follow_source_row_order() {
@@ -697,14 +751,15 @@ mod tests {
         let mut parent = Parent::default();
         let mut table = IterationTable::new(&mut parent);
         populated_row(&mut table);
-        assert!(table.validate_run());
+        table.update_rows_display(true);
+        assert!(
+            table.validate_run(),
+            "{:?}",
+            table.row_list.list[0].last_message
+        );
         table.low_cutoff = true;
-        table.row_list.list[0]
-            .values
-            .insert("lowCutoff".into(), "0".into());
-        table.row_list.list[0]
-            .values
-            .insert("lowCutoffSigma".into(), "0.05".into());
+        table.row_list.list[0].low_cutoff.set_value("0");
+        table.row_list.list[0].low_cutoff_sigma.set_value("0.05");
         let mut matlab = MatlabParam::default();
         table.get_parameters(&mut matlab);
         assert_eq!(matlab.get_iteration_list_size(), 1);
@@ -714,12 +769,86 @@ mod tests {
     fn high_pass_visibility_and_highlight_buttons_update() {
         let mut parent = Parent::default();
         let mut table = IterationTable::new(&mut parent);
-        assert!(!table.header1_low_cutoff.visible);
+        assert!(!table.header1_low_cutoff.cell.visible);
         table.set_visible_high_pass_filter_column(true);
-        assert!(table.row_list.list[0].low_cutoff_rows_visible);
+        assert!(table.row_list.list[0].low_cutoff.text_field.visible);
         table.row_list.highlight(0);
         table.update_display();
         assert!(table.btn_copy_row.enabled);
         assert!(!table.btn_move_up.enabled);
+    }
+    #[test]
+    fn source_factory_installs_listener_and_all_three_hotkey_maps() {
+        let mut parent = Parent::default();
+        let table = IterationTable::get_instance(&mut parent);
+        assert_eq!(table.action_listener_count, 7);
+        let root = &table.focusable_parents[0];
+        assert!(root.focusable);
+        assert_eq!(root.actions, ["InterationALT_UP", "InterationALT_DOWN"]);
+        assert_eq!(root.focused_keys, ["ALT+UP", "ALT+DOWN"]);
+        assert_eq!(root.window_keys, ["ALT+UP", "ALT+DOWN"]);
+        assert_eq!(root.ancestor_keys, ["ALT+UP", "ALT+DOWN"]);
+    }
+    #[test]
+    fn display_places_all_three_header_rows_and_unselected_actions_report_source_error() {
+        let mut parent = Parent::default();
+        let mut table = IterationTable::new(&mut parent);
+        assert!(table.header1_iteration_number.jpanel_container);
+        assert!(table.header3_duplicate_angular_tolerance.jpanel_container);
+        table.action("Dup", &mut parent);
+        assert_eq!(
+            table.last_message,
+            Some(("Please highlight a row.".into(), "Entry Error".into()))
+        );
+        assert!(table.layout.table_grid_bag_layout);
+        assert!(table.layout.table_black_line_border);
+        assert_eq!(
+            table.layout.root_etched_border_label.as_deref(),
+            Some(LABEL)
+        );
+        assert_eq!(
+            table.layout.button_order,
+            ["Up", "Down", "Insert", "Delete", "Dup"]
+        );
+        assert!(table.layout.table_and_checkbox_has_vertical_padding);
+    }
+    #[test]
+    fn insertion_and_backwards_compatibility_follow_default_low_cutoff_rules() {
+        let mut parent = Parent::default();
+        let mut table = IterationTable::new(&mut parent);
+        table.action("Insert", &mut parent);
+        assert_eq!(
+            table.row_list.list[1].low_cutoff_sigma.get_value(),
+            LOW_CUTOFF_SIGMA_DEFAULT
+        );
+        let mut matlab = MatlabParam::default();
+        matlab.set_iteration_list_size(2);
+        for iteration in &mut matlab.iterations {
+            iteration
+                .values
+                .insert("lowCutoffCutoff".into(), LOW_CUTOFF_DEFAULT.into());
+            iteration
+                .values
+                .insert("lowCutoffSigma".into(), LOW_CUTOFF_SIGMA_DEFAULT.into());
+        }
+        table.check_low_cutoff_backwards_compatibility(&matlab);
+        assert!(!table.low_cutoff);
+        assert_eq!(
+            table.row_list.list[0].low_cutoff_sigma.get_value(),
+            LOW_CUTOFF_SIGMA_DEFAULT
+        );
+        matlab.iterations[1]
+            .values
+            .insert("lowCutoffCutoff".into(), "0.1".into());
+        table.check_low_cutoff_backwards_compatibility(&matlab);
+        assert!(table.low_cutoff);
+    }
+    #[test]
+    fn inner_listener_dispatches_to_the_table_action() {
+        let mut parent = Parent::default();
+        let mut table = IterationTable::get_instance(&mut parent);
+        ItActionListener.action_performed(&mut table, "Insert", &mut parent);
+        assert_eq!(table.size(), 2);
+        assert_eq!(parent.display_updates, [true, false]);
     }
 }

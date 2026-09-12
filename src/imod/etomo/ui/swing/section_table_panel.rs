@@ -3,11 +3,14 @@
 //! Swing layout, file selection, MRC-header reading, `JoinDialog`, `JoinManager`,
 //! and 3dmod calls are presentation/application boundaries.  The Java source's table
 //! ownership, row ordering, paging, mode transitions, action dispatch, and metadata
-//! rules are retained here.  `SectionTableRow.java` is represented by precisely the
-//! state and operations observed by this source unit until that source unit is ported.
+//! rules are retained here.  The separate `SectionTableRow.java` source unit owns its
+//! canonical row state in `section_table_row.rs`.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+
+pub use super::header_cell::HeaderCell;
+pub use super::section_table_row::SectionTableRow;
 
 pub const HEADER1_SECTIONS_LABEL: &str = "Sections";
 pub const LABEL: &str = "Section Table";
@@ -32,42 +35,23 @@ pub enum Tab {
     Model,
 }
 
-/// Java `HeaderCell`; component creation/layout remains at the GUI boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct HeaderCell {
-    pub text: String,
-    pub width: Option<usize>,
-    pub tooltip: String,
-}
-impl HeaderCell {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            ..Self::default()
-        }
-    }
-    pub fn with_width(text: impl Into<String>, width: usize) -> Self {
-        Self {
-            text: text.into(),
-            width: Some(width),
-            tooltip: String::new(),
-        }
-    }
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        self.text = text.into();
-    }
-    pub fn set_tool_tip_text(&mut self, text: impl Into<String>) {
-        self.tooltip = text.into();
-    }
-}
-
 /// `ConstSectionTableRowData` and `SectionTableRowData` fields reached here.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SectionTableRowData {
     pub row_index: usize,
     pub setup_section: PathBuf,
+    pub join_section: Option<PathBuf>,
+    pub sample_bottom_start: Option<i32>,
+    pub sample_bottom_end: Option<i32>,
+    pub sample_top_start: Option<i32>,
+    pub sample_top_end: Option<i32>,
+    pub setup_final_start: Option<i32>,
+    pub setup_final_end: Option<i32>,
     pub join_final_start: i32,
     pub join_final_end: i32,
+    pub rotation_angle_x: String,
+    pub rotation_angle_y: String,
+    pub rotation_angle_z: String,
     pub x_max: i32,
     pub y_max: i32,
     pub z_max: i32,
@@ -84,125 +68,8 @@ pub struct JoinMetaData {
     pub section_table_data: Option<Vec<SectionTableRowData>>,
 }
 
-/// Direct source-facing representation of the separate `SectionTableRow.java` unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SectionTableRow {
-    pub data: SectionTableRowData,
-    pub highlighted: bool,
-    pub displayed: bool,
-    pub expanded: bool,
-    pub mode: i32,
-    pub setup_to_join_synchronized: bool,
-    pub join_to_setup_synchronized: bool,
-    pub imod_opened: Option<(bool, i32)>,
-    pub imod_removed: bool,
-    pub angles_retrieved: bool,
-}
-impl SectionTableRow {
-    pub fn new(row_number: usize, section: impl Into<PathBuf>, expanded: bool) -> Self {
-        Self {
-            data: SectionTableRowData {
-                row_index: row_number - 1,
-                setup_section: section.into(),
-                valid: true,
-                ..Default::default()
-            },
-            expanded,
-            ..Default::default()
-        }
-    }
-    pub fn set_mode(&mut self, mode: i32) {
-        self.mode = mode;
-    }
-    pub fn set_names(&mut self) {}
-    pub fn is_rotated(&self) -> bool {
-        self.data.rotated
-    }
-    pub fn setup_cur_tab(&mut self, _previous: Option<&SectionTableRow>, _size: usize) {}
-    pub fn display(&mut self, _index: usize, viewport: &Viewport) {
-        self.displayed = viewport.in_viewport(self.data.row_index);
-    }
-    pub fn is_highlighted(&self) -> bool {
-        self.highlighted
-    }
-    pub fn select_highlight_button(&mut self) {
-        self.highlighted = true;
-    }
-    pub fn set_inverted(&mut self, inverted: bool) {
-        self.data.inverted = inverted;
-    }
-    pub fn set_join_final_start_highlight(&mut self, _highlight: bool) {}
-    pub fn set_join_final_end_highlight(&mut self, _highlight: bool) {}
-    pub fn expand_section(&mut self, expand: bool) {
-        self.expanded = expand;
-    }
-    pub fn equals(&self, data: &ConstSectionTableRowData) -> bool {
-        self.data == *data
-    }
-    pub fn equals_sample(&self, data: &ConstSectionTableRowData) -> bool {
-        self.data.setup_section == data.setup_section
-    }
-    pub fn equals_setup_section(&self, section: &Path) -> bool {
-        self.data.setup_section == section
-    }
-    pub fn remove(&mut self) {
-        self.displayed = false;
-    }
-    pub fn remove_imod(&mut self) {
-        self.imod_removed = true;
-    }
-    pub fn set_row_number(&mut self, row_number: usize) {
-        self.data.row_index = row_number - 1;
-    }
-    pub fn swap_bottom_top(&mut self) {}
-    pub fn is_valid(&self) -> bool {
-        self.data.valid
-    }
-    pub fn get_data(&self) -> &ConstSectionTableRowData {
-        &self.data
-    }
-    pub fn validate_makejoincom(&self, _max_row: &str) -> bool {
-        self.data.valid
-    }
-    pub fn validate_finishjoin(&self) -> bool {
-        self.data.valid
-    }
-    pub fn set_in_use(&mut self) {}
-    pub fn get_invalid_reason(&self) -> Option<&str> {
-        self.data.invalid_reason.as_deref()
-    }
-    pub fn get_x_max(&self) -> i32 {
-        self.data.x_max
-    }
-    pub fn get_y_max(&self) -> i32 {
-        self.data.y_max
-    }
-    pub fn get_z_max(&self) -> i32 {
-        self.data.z_max
-    }
-    pub fn get_setup_section_text(&self) -> String {
-        self.data.setup_section.display().to_string()
-    }
-    pub fn synchronize_setup_to_join(&mut self) {
-        self.setup_to_join_synchronized = true;
-    }
-    pub fn synchronize_join_to_setup(&mut self) {
-        self.join_to_setup_synchronized = true;
-    }
-    pub fn imod_open_setup_section_file(&mut self, binning: i32) {
-        self.imod_opened = Some((true, binning));
-    }
-    pub fn imod_open_join_section_file(&mut self, binning: i32) {
-        self.imod_opened = Some((false, binning));
-    }
-    pub fn imod_get_angles(&mut self) -> bool {
-        self.angles_retrieved = true;
-        true
-    }
-}
-
 /// Java private final inner `RowList`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct RowList {
     pub list: Vec<SectionTableRow>,
 }
@@ -213,7 +80,8 @@ impl RowList {
     pub fn display_cur_tab(&mut self, viewport: &Viewport) {
         let size = self.list.len();
         for index in 0..size {
-            self.list[index].setup_cur_tab(None, size);
+            let previous = index.checked_sub(1).map(|index| self.list[index].clone());
+            self.list[index].setup_cur_tab(previous.as_ref(), size);
             self.list[index].display(index, viewport);
         }
     }
@@ -361,32 +229,45 @@ impl RowList {
             row.swap_bottom_top();
         }
     }
-    pub fn get_meta_data(&self, meta_data: &mut JoinMetaData) -> bool {
-        meta_data.section_table_data = Some(self.list.iter().map(|row| row.data.clone()).collect());
-        self.list.iter().all(SectionTableRow::is_valid)
+    pub fn get_meta_data(&mut self, meta_data: &mut JoinMetaData) -> bool {
+        let mut valid = true;
+        let mut data = Vec::with_capacity(self.list.len());
+        for row in &mut self.list {
+            data.push(row.get_data().clone());
+            valid &= row.is_valid();
+        }
+        meta_data.section_table_data = Some(data);
+        valid
     }
     pub fn set_meta_data(&mut self, data: &[SectionTableRowData], mode: i32, viewport: &Viewport) {
         for data in data {
-            let mut row = SectionTableRow {
-                data: data.clone(),
-                ..Default::default()
-            };
+            let mut row = SectionTableRow::from_data(data.clone(), false);
             row.set_names();
             row.set_mode(mode);
             row.display(data.row_index, viewport);
             self.list.insert(data.row_index.min(self.list.len()), row);
         }
     }
-    pub fn validate_makejoincom(&self) -> bool {
+    pub fn validate_makejoincom(&mut self) -> bool {
         let max = self.list.len().to_string();
-        self.list.iter().all(|row| row.validate_makejoincom(&max))
+        self.list
+            .iter_mut()
+            .all(|row| row.validate_makejoincom(&max))
     }
-    pub fn validate_finishjoin(&self) -> bool {
-        self.list.iter().all(SectionTableRow::validate_finishjoin)
+    pub fn validate_finishjoin(&mut self) -> bool {
+        self.list
+            .iter_mut()
+            .all(SectionTableRow::validate_finishjoin)
     }
     pub fn configure_rows(&mut self) {
         for row in &mut self.list {
             row.set_in_use();
+        }
+    }
+    pub fn configure_rows_for(&mut self, tab: Tab) {
+        let size = self.list.len();
+        for row in &mut self.list {
+            row.set_in_use_for(tab, size);
         }
     }
     pub fn get_invalid_reason(&self) -> Option<String> {
@@ -514,7 +395,7 @@ impl SectionTableActionListener {
 
 /// Java final `SectionTablePanel`.  Notifications record calls that cross into the
 /// unported manager/dialog/UI harness rather than replacing them with unrelated logic.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SectionTablePanel {
     pub row_list: RowList,
     pub viewport: Viewport,
@@ -953,13 +834,13 @@ impl SectionTablePanel {
         self.dialog_row_changed = true;
         self.manager_repainted = true;
     }
-    pub fn get_meta_data(&self, metadata: &mut JoinMetaData) -> bool {
+    pub fn get_meta_data(&mut self, metadata: &mut JoinMetaData) -> bool {
         self.row_list.get_meta_data(metadata)
     }
-    pub fn validate_makejoincom(&self) -> bool {
+    pub fn validate_makejoincom(&mut self) -> bool {
         self.row_list.validate_makejoincom()
     }
-    pub fn validate_finishjoin(&self) -> bool {
+    pub fn validate_finishjoin(&mut self) -> bool {
         self.row_list.validate_finishjoin()
     }
     pub fn set_meta_data(&mut self, metadata: &JoinMetaData) {
@@ -967,7 +848,7 @@ impl SectionTablePanel {
             return;
         };
         self.row_list.set_meta_data(data, self.mode, &self.viewport);
-        self.row_list.configure_rows();
+        self.row_list.configure_rows_for(self.current_tab);
         self.dialog_num_sections = Some((self.row_list.size(), true));
         self.manager_repainted = true;
     }
@@ -1044,7 +925,7 @@ mod tests {
         let mut table = panel();
         table.row_list.add(file("a"), false, SETUP_MODE);
         table.row_list.add(file("b"), false, SETUP_MODE);
-        table.row_list.list[0].highlighted = true;
+        table.row_list.list[0].select_highlight_button();
         table.row_list.list[0].data.join_final_start = 1;
         table.row_list.list[0].data.join_final_end = 3;
         table.row_list.list[1].data.join_final_start = 4;
@@ -1061,7 +942,7 @@ mod tests {
         table.set_mode_to(SAMPLE_PRODUCED_MODE);
         assert!(!table.controls.add);
         table.row_list.add(file("a"), false, SETUP_MODE);
-        table.row_list.list[0].highlighted = true;
+        table.row_list.list[0].select_highlight_button();
         table.set_mode_to(SETUP_MODE);
         assert!(table.controls.add);
         assert!(table.controls.open_3dmod);

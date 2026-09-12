@@ -494,7 +494,7 @@ impl InfoWindow {
         if !font_change {
             return;
         }
-        self.info_controls.set_font_dependent_widths();
+        self.info_controls.set_font_dependent_widths(native);
         self.set_font_dependent_widths();
         native.info_input();
         let (widget_height, hint_height) = (native.control_size().1, native.control_size_hint().1);

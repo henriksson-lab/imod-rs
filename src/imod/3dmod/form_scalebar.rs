@@ -1,11 +1,10 @@
-//! Translation of `IMOD/3dmod/form_scalebar.cpp` and `form_scalebar.h`.
 #![allow(dead_code)]
 
-/// The paired lower translation owns the source `ScaleBar` declaration.
 pub use crate::imod::three_dmod::scalebar::ScaleBar;
 pub const MIN_LABEL_SIZE: i32 = 1;
-/// Native Qt, scale-bar, renderer, and key-routing boundary.
 pub trait ScaleBarNativeBoundary {
+    fn setup_ui(&mut self);
+    fn retranslate_ui(&mut self);
     fn units(&self) -> String;
     fn standalone(&self) -> bool;
     fn set_attributes_and_signals(&mut self);
@@ -15,12 +14,15 @@ pub trait ScaleBarNativeBoundary {
     fn set_position(&mut self, value: i32);
     fn set_units(&mut self, units: &str);
     fn set_exact_text(&mut self, text: &str);
+    fn set_focus(&mut self);
+    fn format_general(&self, value: f32) -> String;
     fn exact_text(&self) -> String;
     fn hide_nonstandalone_values(&mut self);
     fn set_value_text(&mut self, which: i32, text: &str);
     fn kill_timer(&mut self, id: i32);
     fn start_timer(&mut self, msec: i32) -> i32;
     fn redraw(&mut self);
+    fn update(&mut self);
     fn image_cleanup(&mut self);
     fn new_qt_opengl(&self) -> bool;
     fn close_key(&self) -> bool;
@@ -32,6 +34,7 @@ pub trait ScaleBarNativeBoundary {
     fn accept_close(&mut self);
     fn check_and_set_mac_menu(&mut self);
     fn font_change(&self) -> bool;
+    fn widget_change_event(&mut self);
 }
 pub const DRAW: i32 = 0;
 pub const DRAW_SNAPS: i32 = 1;
@@ -42,6 +45,7 @@ pub const INVERT: i32 = 5;
 pub const CUSTOM: i32 = 6;
 pub const EXACT: i32 = 7;
 pub const LABELS: i32 = 8;
+pub const EXACT_VALUE_EDIT: i32 = 9;
 pub const LENGTH: i32 = 0;
 pub const THICKNESS: i32 = 1;
 pub const INDENT_X: i32 = 2;
@@ -50,27 +54,28 @@ pub const CUSTOM_VALUE: i32 = 4;
 pub const LABEL_SIZE: i32 = 5;
 pub const LABEL_OFFSET: i32 = 6;
 
-/// `ScaleBarForm`.
 #[derive(Clone, Debug, Default)]
 pub struct ScaleBarForm {
+    pub m_top_win: bool,
     pub m_params: ScaleBar,
     pub m_timer_id: i32,
 }
 impl ScaleBarForm {
     /// `ScaleBarForm::ScaleBarForm`.
     pub fn new(params: ScaleBar, native: &mut dyn ScaleBarNativeBoundary) -> Self {
+        native.setup_ui();
         let mut f = Self {
+            m_top_win: true,
             m_params: params,
             ..Default::default()
         };
         f.init(native);
         f
     }
-    /// `ScaleBarForm::~ScaleBarForm`.
     pub fn destroy(&mut self) {}
-    /// `ScaleBarForm::languageChange`.
-    pub fn language_change(&mut self) {}
-    /// `ScaleBarForm::init`.
+    pub fn language_change(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
+        n.retranslate_ui()
+    }
     pub fn init(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         n.set_attributes_and_signals();
         let p = &self.m_params;
@@ -97,7 +102,7 @@ impl ScaleBarForm {
         }
         n.set_enabled(CUSTOM_VALUE, p.use_custom && !p.use_exact);
         n.set_enabled(CUSTOM, !p.use_exact);
-        n.set_enabled(EXACT, p.use_exact);
+        n.set_enabled(EXACT_VALUE_EDIT, p.use_exact);
         let units = n.units();
         n.set_units(&units);
         let draw_labels = p.draw_labels;
@@ -105,76 +110,62 @@ impl ScaleBarForm {
         n.set_enabled(LABEL_SIZE, draw_labels);
         n.set_enabled(LABEL_OFFSET, draw_labels);
     }
-    /// `ScaleBarForm::drawToggled`.
     pub fn draw_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.draw = state;
         n.set_enabled(DRAW_SNAPS, state);
         n.redraw()
     }
-    /// `ScaleBarForm::drawOnSnapsToggled`.
     pub fn draw_on_snaps_toggled(&mut self, state: bool) {
         self.m_params.draw_on_snapshots = state
     }
-    /// `ScaleBarForm::whiteToggled`.
     pub fn white_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.white = state;
         n.redraw()
     }
-    /// `ScaleBarForm::verticalToggled`.
     pub fn vertical_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.vertical = state;
         n.redraw()
     }
-    /// `ScaleBarForm::colorToggled`.
     pub fn color_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.color_ramp = state;
         n.redraw()
     }
-    /// `ScaleBarForm::invertToggled`.
     pub fn invert_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.invert_ramp = state;
         n.redraw()
     }
-    /// `ScaleBarForm::lengthChanged`.
     pub fn length_changed(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.min_length = value;
         n.redraw()
     }
-    /// `ScaleBarForm::thicknessChanged`.
     pub fn thickness_changed(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.thickness = value;
         n.redraw()
     }
-    /// `ScaleBarForm::positionChanged`.
     pub fn position_changed(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.position = value;
         n.redraw()
     }
-    /// `ScaleBarForm::indentXchanged`.
     pub fn indent_xchanged(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.indent_x = value;
         n.redraw()
     }
-    /// `ScaleBarForm::indentYchanged`.
     pub fn indent_ychanged(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.indent_y = value;
         n.redraw()
     }
-    /// `ScaleBarForm::customToggled`.
     pub fn custom_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.use_custom = state;
         n.set_enabled(CUSTOM_VALUE, state);
         n.redraw()
     }
-    /// `ScaleBarForm::customValChanged`.
     pub fn custom_val_changed(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.custom_val = value;
         n.redraw()
     }
-    /// `ScaleBarForm::exactToggled`.
     pub fn exact_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.use_exact = state;
-        n.set_enabled(EXACT, state);
+        n.set_enabled(EXACT_VALUE_EDIT, state);
         n.set_enabled(CUSTOM, !state);
         n.set_enabled(CUSTOM_VALUE, !state && self.m_params.use_custom);
         if state && self.m_params.exact_val <= 0. {
@@ -183,18 +174,16 @@ impl ScaleBarForm {
         }
         n.redraw()
     }
-    /// `ScaleBarForm::setExactValText`.
     pub fn set_exact_val_text(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
-        n.set_exact_text(&format!("{}", self.m_params.exact_val))
+        n.set_exact_text(&n.format_general(self.m_params.exact_val))
     }
-    /// `ScaleBarForm::exactValChanged`.
     pub fn exact_val_changed(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         let value = n.exact_text().parse::<f32>().unwrap_or(0.).max(0.00001);
         self.m_params.exact_val = value;
         self.set_exact_val_text(n);
+        n.set_focus();
         n.redraw()
     }
-    /// `ScaleBarForm::drawLabelsToggled`.
     pub fn draw_labels_toggled(&mut self, state: bool, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.draw_labels = state;
         n.set_enabled(LABEL_SIZE, state);
@@ -204,7 +193,6 @@ impl ScaleBarForm {
         }
         n.redraw()
     }
-    /// `ScaleBarForm::labelSizeChanged`.
     pub fn label_size_changed(&mut self, mut value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         if value < MIN_LABEL_SIZE {
             value = 0
@@ -217,14 +205,12 @@ impl ScaleBarForm {
             n.redraw()
         }
     }
-    /// `ScaleBarForm::labelOffsetChanged`.
     pub fn label_offset_changed(&mut self, value: i32, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_params.label_yoffset = value;
         if self.m_params.draw_labels {
             n.redraw()
         }
     }
-    /// `ScaleBarForm::updateValues`.
     pub fn update_values(
         &mut self,
         zapv: f32,
@@ -242,7 +228,7 @@ impl ScaleBarForm {
         if !n.standalone() {
             for (which, v) in [(0, zapv), (1, multizv), (2, slicerv), (3, xyzv)] {
                 let text = if v > 0. {
-                    format!("{v} {units}")
+                    format!("{} {units}", n.format_general(v))
                 } else {
                     String::new()
                 };
@@ -250,25 +236,22 @@ impl ScaleBarForm {
             }
         }
         let text = if modvv > 0. {
-            format!("{modvv} {units}")
+            format!("{} {units}", n.format_general(modvv))
         } else {
             String::new()
         };
         n.set_value_text(4, &text)
     }
-    /// `ScaleBarForm::startUpdateTimer`.
     pub fn start_update_timer(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         if self.m_timer_id != 0 {
             n.kill_timer(self.m_timer_id)
         }
         self.m_timer_id = n.start_timer(100)
     }
-    /// `ScaleBarForm::timerEvent`.
     pub fn timer_event(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         self.m_timer_id = 0;
-        n.redraw()
+        n.update()
     }
-    /// `ScaleBarForm::keyPressEvent`.
     pub fn key_press_event(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         if n.close_key() {
             n.close()
@@ -278,7 +261,6 @@ impl ScaleBarForm {
             n.ivw_control_key(false)
         }
     }
-    /// `ScaleBarForm::keyReleaseEvent`.
     pub fn key_release_event(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         if n.standalone() {
             n.imodv_key_release()
@@ -286,13 +268,12 @@ impl ScaleBarForm {
             n.ivw_control_key(true)
         }
     }
-    /// `ScaleBarForm::topCloseEvent`.
     pub fn top_close_event(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
         n.scale_bar_closing();
         n.accept_close()
     }
-    /// `ScaleBarForm::topChangeEvent`.
     pub fn top_change_event(&mut self, n: &mut dyn ScaleBarNativeBoundary) {
+        n.widget_change_event();
         n.check_and_set_mac_menu();
         if !n.font_change() {
             return;
@@ -306,9 +287,12 @@ mod tests {
     struct N {
         p: ScaleBar,
         redraws: i32,
+        updates: i32,
         text: String,
     }
     impl ScaleBarNativeBoundary for N {
+        fn setup_ui(&mut self) {}
+        fn retranslate_ui(&mut self) {}
         fn units(&self) -> String {
             "nm".into()
         }
@@ -324,6 +308,10 @@ mod tests {
         fn set_exact_text(&mut self, t: &str) {
             self.text = t.into()
         }
+        fn set_focus(&mut self) {}
+        fn format_general(&self, value: f32) -> String {
+            value.to_string()
+        }
         fn exact_text(&self) -> String {
             self.text.clone()
         }
@@ -335,6 +323,9 @@ mod tests {
         }
         fn redraw(&mut self) {
             self.redraws += 1
+        }
+        fn update(&mut self) {
+            self.updates += 1
         }
         fn image_cleanup(&mut self) {}
         fn new_qt_opengl(&self) -> bool {
@@ -353,6 +344,7 @@ mod tests {
         fn font_change(&self) -> bool {
             false
         }
+        fn widget_change_event(&mut self) {}
     }
     #[test]
     fn exact_is_clamped_and_redrawn() {
@@ -362,5 +354,15 @@ mod tests {
         f.exact_val_changed(&mut n);
         assert_eq!(f.m_params.exact_val, 0.00001);
         assert!(n.redraws > 0)
+    }
+    #[test]
+    fn timer_event_runs_source_update_instead_of_redrawing() {
+        let mut n = N::default();
+        let mut f = ScaleBarForm::new(ScaleBar::default(), &mut n);
+        f.start_update_timer(&mut n);
+        assert_eq!(f.m_timer_id, 1);
+        f.timer_event(&mut n);
+        assert_eq!(f.m_timer_id, 0);
+        assert_eq!(n.updates, 1);
     }
 }

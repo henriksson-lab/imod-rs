@@ -3,8 +3,10 @@
 pub trait UiComponent: std::any::Any {}
 
 pub mod browsing_directory;
+pub mod directive_display_settings;
 pub mod field_type;
 pub mod log_properties;
+pub mod queue_table_data_event;
 pub mod queue_table_event;
 pub mod queue_table_listener;
 pub mod shared_strings;

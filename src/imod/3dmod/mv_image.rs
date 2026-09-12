@@ -131,6 +131,23 @@ pub trait MvImageSource {
     }
 }
 
+/// Native viewer and Qt calls made by `ImodvImage` event handlers.  These
+/// retain the source ownership of the image cache and docking-dialog manager.
+pub trait MvImageNativeBoundary {
+    /// `imodCacheFill(Imodv->vi, -1)`.
+    fn cache_fill(&mut self, section: i32);
+    /// `ImodPrefs->getRoundedStyle()`.
+    fn rounded_style(&self) -> bool;
+    /// `DialogFrame::changeEvent`.
+    fn dialog_change_event(&mut self);
+    /// `ivwCheckAndSetMacMenu` for the model-view dialog.
+    fn check_and_set_mac_menu(&mut self);
+    /// `imodvDialogManager.remove(sTopWin)`.
+    fn remove_dialog(&mut self);
+    /// `QCloseEvent::accept`.
+    fn accept_close_event(&mut self);
+}
+
 /// Static variables in `mv_image.cpp`, collected without changing their lifetime.
 #[derive(Clone, Debug)]
 pub struct MvImageState {
@@ -204,6 +221,10 @@ impl Default for MvImageState {
 #[derive(Clone, Debug, Default)]
 pub struct ImodvImage {
     pub ctrl_pressed: bool,
+    pub rounded_style: bool,
+    /// Mirrors the source clearing `sDia`/`sTopWin` after unregistering the
+    /// docking dialog.  The actual dialog pointer remains native-owned.
+    pub closed: bool,
     pub view_x: bool,
     pub view_y: bool,
     pub view_z: bool,
@@ -1125,9 +1146,22 @@ impl ImodvImage {
         s.white_level = white;
         make_color_map(s, false)
     }
-    pub fn button_pressed(&mut self) {}
-    pub fn top_change_event(&mut self) {}
-    pub fn top_close_event(&mut self) {}
+    /// `ImodvImage::buttonPressed`.
+    pub fn button_pressed(&mut self, native: &mut dyn MvImageNativeBoundary) {
+        native.cache_fill(-1)
+    }
+    /// `ImodvImage::topChangeEvent`.
+    pub fn top_change_event(&mut self, native: &mut dyn MvImageNativeBoundary) {
+        self.rounded_style = native.rounded_style();
+        native.dialog_change_event();
+        native.check_and_set_mac_menu();
+    }
+    /// `ImodvImage::topCloseEvent`.
+    pub fn top_close_event(&mut self, native: &mut dyn MvImageNativeBoundary) {
+        native.remove_dialog();
+        self.closed = true;
+        native.accept_close_event();
+    }
     pub fn key_press_event(&mut self, control: bool) {
         self.ctrl_pressed = control
     }
@@ -1173,6 +1207,33 @@ mod tests {
             self.quads += 1;
         }
         fn flush(&mut self) {}
+    }
+    #[derive(Default)]
+    struct EventBoundary {
+        calls: Vec<&'static str>,
+        cache_section: Option<i32>,
+        rounded: bool,
+    }
+    impl MvImageNativeBoundary for EventBoundary {
+        fn cache_fill(&mut self, section: i32) {
+            self.calls.push("cache_fill");
+            self.cache_section = Some(section);
+        }
+        fn rounded_style(&self) -> bool {
+            self.rounded
+        }
+        fn dialog_change_event(&mut self) {
+            self.calls.push("base_change");
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("mac_menu");
+        }
+        fn remove_dialog(&mut self) {
+            self.calls.push("remove_dialog");
+        }
+        fn accept_close_event(&mut self) {
+            self.calls.push("accept_close");
+        }
     }
     #[test]
     fn limits_match_source() {
@@ -1230,5 +1291,31 @@ mod tests {
             Some(&vec![9; 11]),
         );
         assert_eq!(state.tdata[3], 255);
+    }
+    #[test]
+    fn image_dialog_event_handlers_follow_native_event_order() {
+        let mut dialog = ImodvImage::new();
+        let mut native = EventBoundary {
+            rounded: true,
+            ..Default::default()
+        };
+
+        dialog.button_pressed(&mut native);
+        dialog.top_change_event(&mut native);
+        dialog.top_close_event(&mut native);
+
+        assert_eq!(native.cache_section, Some(-1));
+        assert!(dialog.rounded_style);
+        assert!(dialog.closed);
+        assert_eq!(
+            native.calls,
+            [
+                "cache_fill",
+                "base_change",
+                "mac_menu",
+                "remove_dialog",
+                "accept_close"
+            ]
+        );
     }
 }

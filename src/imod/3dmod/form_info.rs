@@ -13,6 +13,26 @@ pub struct InfoImageState {
 
 /// Native Qt/info callback boundary used directly by this source unit.
 pub trait InfoNativeBoundary {
+    fn setup_ui(&mut self) {}
+    fn set_delete_on_close(&mut self) {}
+    fn set_always_show_tool_tips(&mut self) {}
+    fn connect_info_signals(&mut self) {}
+    fn set_mode_group(&mut self, _: i32) {}
+    fn set_info_tool_tips(&mut self) {}
+    fn set_keep_on_top_icons(&mut self) {}
+    fn set_info_button_fixed_widths(&mut self) {}
+    fn hide_big_model_label(&mut self) {}
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn set_auto_button_width(&mut self, _: bool, _: f32, _: &str) {}
+    fn font_width(&self, _: &str) -> i32 {
+        0
+    }
+    fn font_height(&self) -> i32 {
+        0
+    }
+    fn set_ocp_xyz_minimum_sizes(&mut self, _: i32, _: i32, _: i32, _: i32) {}
     fn image_state(&self) -> InfoImageState;
     fn get_float_flags(&self) -> (i32, i32, i32);
     fn info_new_xyz(&mut self, value: [i32; 3]);
@@ -128,6 +148,7 @@ impl Default for InfoControls {
 impl InfoControls {
     /// `InfoControls::InfoControls`.
     pub fn new(native: &mut dyn InfoNativeBoundary) -> Self {
+        native.setup_ui();
         let mut out = Self::default();
         out.init(native);
         out
@@ -143,6 +164,9 @@ impl InfoControls {
     }
     /// `InfoControls::init`.
     pub fn init(&mut self, native: &mut dyn InfoNativeBoundary) {
+        native.set_delete_on_close();
+        native.set_always_show_tool_tips();
+        native.connect_info_signals();
         self.m_ctrl_pressed = false;
         self.m_black_pressed = false;
         self.m_white_pressed = false;
@@ -154,13 +178,18 @@ impl InfoControls {
         self.subarea_checked = subarea != 0;
         self.t_ramps_checked = t_ramps != 0;
         self.show_or_hide_ramps(native);
+        native.set_info_tool_tips();
+        native.set_mode_group(0);
         self.m_last_ocpval = [-2; 3];
         self.m_last_ocpmax = [-2; 3];
         self.m_last_xyzval = [-2; 3];
         self.m_last_xyzmax = [-2; 3];
-        self.set_font_dependent_widths();
+        self.set_font_dependent_widths(native);
+        native.set_keep_on_top_icons();
+        native.set_info_button_fixed_widths();
         self.set_undo_redo(false, false);
         self.big_model_visible = false;
+        native.hide_big_model_label();
     }
     /// `InfoControls::showOrHideRamps`.
     pub fn show_or_hide_ramps(&mut self, native: &mut dyn InfoNativeBoundary) {
@@ -173,7 +202,15 @@ impl InfoControls {
         self.height_hint -= 20;
     }
     /// `InfoControls::setFontDependentWidths`.
-    pub fn set_font_dependent_widths(&mut self) {}
+    pub fn set_font_dependent_widths(&mut self, native: &mut dyn InfoNativeBoundary) {
+        native.set_auto_button_width(native.rounded_style(), 1.35, "Auto");
+        let width = native.font_width("88888888");
+        let label_width = native.font_width("/ 8888");
+        let height = (1.45 * native.font_height() as f32).round() as i32;
+        for index in 0..3 {
+            native.set_ocp_xyz_minimum_sizes(index, width, height, label_width);
+        }
+    }
     /// `InfoControls::adjustedHeightHint`.
     pub fn adjusted_height_hint(&mut self) -> i32 {
         if self.low_high_visible {
@@ -440,6 +477,26 @@ mod tests {
     #[derive(Default)]
     struct N(Vec<String>);
     impl InfoNativeBoundary for N {
+        fn setup_ui(&mut self) {}
+        fn set_delete_on_close(&mut self) {}
+        fn set_always_show_tool_tips(&mut self) {}
+        fn connect_info_signals(&mut self) {}
+        fn set_mode_group(&mut self, _: i32) {}
+        fn set_info_tool_tips(&mut self) {}
+        fn set_keep_on_top_icons(&mut self) {}
+        fn set_info_button_fixed_widths(&mut self) {}
+        fn hide_big_model_label(&mut self) {}
+        fn rounded_style(&self) -> bool {
+            false
+        }
+        fn set_auto_button_width(&mut self, _: bool, _: f32, _: &str) {}
+        fn font_width(&self, _: &str) -> i32 {
+            0
+        }
+        fn font_height(&self) -> i32 {
+            0
+        }
+        fn set_ocp_xyz_minimum_sizes(&mut self, _: i32, _: i32, _: i32, _: i32) {}
         fn image_state(&self) -> InfoImageState {
             InfoImageState::default()
         }

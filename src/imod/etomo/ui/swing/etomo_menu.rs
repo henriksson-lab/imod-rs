@@ -6,6 +6,8 @@
 //! `UnportedTarget`, never silently executed.
 #![allow(dead_code)]
 
+pub use super::menu_item::MenuItem;
+
 pub const RECON_LABEL: &str = "Build Tomogram";
 pub const JOIN_LABEL: &str = "Join Serial Tomograms";
 pub const GENERIC_LABEL: &str = "Generic Parallel Process";
@@ -19,23 +21,6 @@ pub const SERIAL_SECTIONS_LABEL: &str = "Align Serial Sections / Blend Montages"
 pub const N_MRU_FILE_MAX: usize = 10;
 pub const TOP_ANCHOR: &str = "#TOP";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MenuItem {
-    pub action_command: String,
-    pub enabled: bool,
-    pub visible: bool,
-    pub selected: bool,
-}
-impl MenuItem {
-    pub fn new(command: &str) -> Self {
-        Self {
-            action_command: command.into(),
-            enabled: true,
-            visible: true,
-            selected: false,
-        }
-    }
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectiveFileType {
     Scope,
@@ -90,6 +75,7 @@ pub struct EtomoMenu {
     pub menu_exit: MenuItem,
     pub menu_tomosnapshot: MenuItem,
     pub menu_export_batch: MenuItem,
+    pub menu_template: MenuItem,
     pub menu_new_tomogram: MenuItem,
     pub menu_new_join: MenuItem,
     pub menu_new_peet: MenuItem,
@@ -145,6 +131,7 @@ impl EtomoMenu {
             menu_exit: MenuItem::new("Exit"),
             menu_tomosnapshot: MenuItem::new("Run Tomosnapshot"),
             menu_export_batch: MenuItem::new("Export Batch Directive File"),
+            menu_template: MenuItem::new("Templates"),
             menu_new_tomogram: MenuItem::new(RECON_LABEL),
             menu_new_join: MenuItem::new(JOIN_LABEL),
             menu_new_peet: MenuItem::new(PEET_LABEL),
@@ -218,6 +205,7 @@ impl EtomoMenu {
                 &mut self.menu_axis_b,
                 &mut self.menu_axis_both,
                 &mut self.menu_export_batch,
+                &mut self.menu_template,
                 &mut self.menu_save_scope,
                 &mut self.menu_save_system,
                 &mut self.menu_save_user,
@@ -238,6 +226,7 @@ impl EtomoMenu {
         }
         for i in [
             &mut self.menu_export_batch,
+            &mut self.menu_template,
             &mut self.menu_save_scope,
             &mut self.menu_save_system,
             &mut self.menu_save_user,
@@ -357,6 +346,102 @@ impl EtomoMenu {
     }
     pub fn equals(&self, item: &MenuItem, command: &str) -> bool {
         item.action_command == command
+    }
+    pub fn equals_new_tomogram(&self, command: &str) -> bool {
+        self.equals(&self.menu_new_tomogram, command)
+    }
+    pub fn equals_new_join(&self, command: &str) -> bool {
+        self.equals(&self.menu_new_join, command)
+    }
+    pub fn equals_new_generic_parallel(&self, command: &str) -> bool {
+        self.equals(&self.menu_new_generic_parallel, command)
+    }
+    pub fn equals_new_anisotropic_diffusion(&self, command: &str) -> bool {
+        self.equals(&self.menu_new_anisotropic_diffusion, command)
+    }
+    pub fn equals_new_batch_run_tomo(&self, command: &str) -> bool {
+        self.equals(&self.menu_new_batch_run_tomo, command)
+    }
+    pub fn equals_new_peet(&self, command: &str) -> bool {
+        self.equals(&self.menu_new_peet, command)
+    }
+    pub fn equals_new_serial_sections(&self, command: &str) -> bool {
+        self.equals(&self.menu_serial_sections, command)
+    }
+    pub fn equals_open(&self, command: &str) -> bool {
+        self.equals(&self.menu_open, command)
+    }
+    pub fn equals_exit(&self, command: &str) -> bool {
+        self.equals(&self.menu_exit, command)
+    }
+    pub fn equals_tomosnapshot(&self, command: &str) -> bool {
+        self.equals(&self.menu_tomosnapshot, command)
+    }
+    pub fn equals_flatten_volume(&self, command: &str) -> bool {
+        self.equals(&self.menu_flatten_volume, command)
+    }
+    pub fn equals_gpu_tilt_test(&self, command: &str) -> bool {
+        self.equals(&self.menu_gpu_tilt_test, command)
+    }
+    pub fn equals_align_frames(&self, command: &str) -> bool {
+        self.equals(&self.menu_align_frames, command)
+    }
+    pub fn equals_settings(&self, command: &str) -> bool {
+        self.equals(&self.menu_settings, command)
+    }
+    pub fn equals_axis_a(&self, command: &str) -> bool {
+        self.equals(&self.menu_axis_a, command)
+    }
+    pub fn equals_axis_b(&self, command: &str) -> bool {
+        self.equals(&self.menu_axis_b, command)
+    }
+    pub fn equals_axis_both(&self, command: &str) -> bool {
+        self.equals(&self.menu_axis_both, command)
+    }
+    pub fn equals_3dmod_start_up_window(&self, command: &str) -> bool {
+        self.equals(&self.menu_3dmod_startup_window, command)
+    }
+    pub fn equals_3dmod_bin_by_2(&self, command: &str) -> bool {
+        self.equals(&self.menu_3dmod_bin_by_2, command)
+    }
+    pub fn equals_log_window(&self, command: &str) -> bool {
+        self.equals(&self.menu_log_window, command)
+    }
+    pub fn equals_fit_window(&self, command: &str) -> bool {
+        self.equals(&self.menu_fit_window, command)
+    }
+    pub fn equals_tomo_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_tomo_guide, command)
+    }
+    pub fn equals_imod_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_imod_guide, command)
+    }
+    pub fn equals_3dmod_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_3dmod_guide, command)
+    }
+    pub fn equals_etomo_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_etomo_guide, command)
+    }
+    pub fn equals_join_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_join_guide, command)
+    }
+    pub fn equals_peet_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_peet_guide, command)
+    }
+    pub fn equals_batch_guide(&self, command: &str) -> bool {
+        self.equals(&self.menu_batch_guide, command)
+    }
+    pub fn equals_peet_help(&self, command: &str) -> bool {
+        self.equals(&self.peet_help_item, command)
+    }
+    pub fn equals_help_about(&self, command: &str) -> bool {
+        self.equals(&self.menu_help_about, command)
+    }
+    pub fn equals_directive_file_editor(&self, command: &str) -> bool {
+        self.equals(&self.menu_save_scope, command)
+            || self.equals(&self.menu_save_system, command)
+            || self.equals(&self.menu_save_user, command)
+            || self.equals(&self.menu_export_batch, command)
     }
     pub fn get_directive_file_type(&self, command: &str) -> Option<DirectiveFileType> {
         match command {

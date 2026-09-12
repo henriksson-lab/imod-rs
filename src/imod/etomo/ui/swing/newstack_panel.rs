@@ -5,10 +5,9 @@
 //! both mutually-exclusive calls and every source argument.
 #![allow(dead_code)]
 
+use super::fiducialess_params::FiducialessParams;
 use super::multi_line_button::MultiLineButton;
-use super::newstack_or_blendmont_panel::{
-    FiducialessParams, GlobalExpandButton, NewstackOrBlendmontPanel,
-};
+use super::newstack_or_blendmont_panel::{GlobalExpandButton, NewstackOrBlendmontPanel};
 use super::tilt_panel::Deferred3dmodButton;
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -27,7 +26,7 @@ pub trait NewstackPanelApplicationManager {
         axis_id: AxisID,
         run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
         dialog_type: DialogType,
-        fiducialess_params: &FiducialessParams,
+        fiducialess_params: &dyn FiducialessParams,
         display: &NewstackPanel,
         process_name: ProcessName,
     );
@@ -138,11 +137,16 @@ mod tests {
             axis_id: AxisID,
             _options: Option<Run3dmodMenuOptions>,
             dialog_type: DialogType,
-            fiducialess: &FiducialessParams,
+            fiducialess: &dyn FiducialessParams,
             _panel: &NewstackPanel,
             process_name: ProcessName,
         ) {
-            self.newst = Some((axis_id, dialog_type, process_name, fiducialess.fiducialess));
+            self.newst = Some((
+                axis_id,
+                dialog_type,
+                process_name,
+                fiducialess.is_fiducialess(),
+            ));
         }
 
         fn imod_fine_align(&mut self, axis_id: AxisID, options: Option<Run3dmodMenuOptions>) {

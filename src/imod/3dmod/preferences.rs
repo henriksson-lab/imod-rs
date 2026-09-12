@@ -244,6 +244,22 @@ pub trait PreferencesNativeBoundary {
     fn restack_dialogs(&mut self) {}
     fn update_dialog(&mut self) {}
     fn update_movie(&mut self) {}
+    fn set_current_panel(&mut self, _: i32) {}
+    fn cancel_button_exists(&self) -> bool {
+        false
+    }
+    fn defaults_button_exists(&self) -> bool {
+        false
+    }
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn set_button_width(&mut self, _: &str, _: bool, _: f32, _: &str) -> i32 {
+        0
+    }
+    fn set_button_fixed_width(&mut self, _: &str, _: i32) {}
+    fn manage_list_stack_sizes(&mut self) {}
+    fn accept_close_event(&mut self) {}
 }
 
 /// `ImodPreferences` (`preferences.h`).
@@ -1323,15 +1339,32 @@ impl PrefsDialog {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn panel_selected(&mut self, which: i32) {
+    pub fn panel_selected(&mut self, which: i32, native: &mut dyn PreferencesNativeBoundary) {
         self.selected_panel = which;
+        native.set_current_panel(which);
     }
-    pub fn set_font_dependent_widths(&mut self) {}
-    pub fn close_event(&mut self, prefs: &mut ImodPreferences) {
+    pub fn set_font_dependent_widths(&mut self, native: &mut dyn PreferencesNativeBoundary) {
+        if !native.cancel_button_exists() || !native.defaults_button_exists() {
+            return;
+        }
+        let rounded = native.rounded_style();
+        let width = native.set_button_width("mCancelBut", rounded, 1.8, "Cancel");
+        native.set_button_fixed_width("mDoneBut", width);
+        native.set_button_width("mDefaultsBut", rounded, 1.2, "Defaults for Panel");
+    }
+    pub fn close_event(
+        &mut self,
+        prefs: &mut ImodPreferences,
+        native: &mut dyn PreferencesNativeBoundary,
+    ) {
         prefs.user_canceled();
+        native.accept_close_event();
     }
-    pub fn change_event(&mut self) {
-        self.set_font_dependent_widths();
+    pub fn change_event(&mut self, font_change: bool, native: &mut dyn PreferencesNativeBoundary) {
+        if font_change {
+            native.manage_list_stack_sizes();
+            self.set_font_dependent_widths(native);
+        }
     }
 }
 
@@ -1342,6 +1375,7 @@ mod tests {
     struct N {
         draws: i32,
         styles: Vec<String>,
+        dialog: Vec<String>,
     }
     impl PreferencesNativeBoundary for N {
         fn set_style(&mut self, x: &str) {
@@ -1349,6 +1383,31 @@ mod tests {
         }
         fn map_named_colors_and_draw(&mut self) {
             self.draws += 1
+        }
+        fn set_current_panel(&mut self, which: i32) {
+            self.dialog.push(format!("panel:{which}"));
+        }
+        fn cancel_button_exists(&self) -> bool {
+            true
+        }
+        fn defaults_button_exists(&self) -> bool {
+            true
+        }
+        fn rounded_style(&self) -> bool {
+            true
+        }
+        fn set_button_width(&mut self, button: &str, _: bool, factor: f32, text: &str) -> i32 {
+            self.dialog.push(format!("width:{button}:{factor}:{text}"));
+            text.len() as i32
+        }
+        fn set_button_fixed_width(&mut self, button: &str, width: i32) {
+            self.dialog.push(format!("fixed:{button}:{width}"));
+        }
+        fn manage_list_stack_sizes(&mut self) {
+            self.dialog.push("manage".into());
+        }
+        fn accept_close_event(&mut self) {
+            self.dialog.push("accept".into());
         }
     }
     #[test]
@@ -1363,6 +1422,27 @@ mod tests {
         p.current_prefs.autosave_on.chgd = true;
         p.current_prefs.autosave_on.value = false;
         assert_eq!(p.autosave_sec(Some("-12")), 0)
+    }
+    #[test]
+    fn preferences_dialog_routes_source_panel_font_and_close_events() {
+        let mut native = N::default();
+        let mut prefs = ImodPreferences::new(None, &PreferencesSettings::default(), &mut native);
+        let mut dialog = PrefsDialog::new();
+        dialog.panel_selected(3, &mut native);
+        dialog.change_event(false, &mut native);
+        dialog.change_event(true, &mut native);
+        dialog.close_event(&mut prefs, &mut native);
+        assert_eq!(
+            native.dialog,
+            [
+                "panel:3",
+                "manage",
+                "width:mCancelBut:1.8:Cancel",
+                "fixed:mDoneBut:6",
+                "width:mDefaultsBut:1.2:Defaults for Panel",
+                "accept",
+            ]
+        );
     }
     #[test]
     fn snapshot_and_generic_settings_follow_source() {

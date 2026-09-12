@@ -6,6 +6,7 @@
 //! the same call sequence as eTomo.
 #![allow(dead_code)]
 
+use super::fiducialess_params::FiducialessParams;
 pub use super::global_expand_button::GlobalExpandButton;
 use super::multi_line_button::MultiLineButton;
 use super::newstack_and_blendmont_param_panel::NewstackAndBlendmontParamPanel;
@@ -82,10 +83,6 @@ impl MetaData {
     }
 }
 
-/// Compatibility name for the Java `FiducialessParams` interface implemented
-/// by this exact source unit.
-pub type FiducialessParams = NewstackAndBlendmontParamPanel;
-
 /// Java `ReconScreenState` members accessed by this source unit.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ReconScreenState {
@@ -128,7 +125,7 @@ pub struct NewstackOrBlendmontPanel {
     pub pnl_buttons_contains_run: bool,
     pub pnl_buttons_contains_3dmod_full: bool,
     pub btn_3dmod_full: MultiLineButton,
-    pub newstack_and_blendmont_param_panel: FiducialessParams,
+    pub newstack_and_blendmont_param_panel: NewstackAndBlendmontParamPanel,
     pub btn_run_process: MultiLineButton,
     pub axis_id: AxisID,
     pub dialog_type: DialogType,
@@ -217,7 +214,7 @@ impl NewstackOrBlendmontPanel {
     }
 
     /// Java `getFiducialessParams`.
-    pub fn get_fiducialess_params(&self) -> &FiducialessParams {
+    pub fn get_fiducialess_params(&self) -> &dyn FiducialessParams {
         &self.newstack_and_blendmont_param_panel
     }
 

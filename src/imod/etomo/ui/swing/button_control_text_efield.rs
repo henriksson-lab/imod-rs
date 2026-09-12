@@ -11,58 +11,10 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use crate::imod::etomo::ui::{browsing_directory::BrowsingDirectory, field_type::FieldType};
 
-use super::text_efield::TextEfield;
-
-/// Java `javax.swing.filechooser.FileFilter`, whose selection predicate stays
-/// at the Swing boundary.
-pub trait FileFilter {}
-
-/// State from the separately sourced Java `SelectFileExtension` consumed by
-/// this source unit.
-pub struct SelectFileExtension {
-    pub dir: Option<String>,
-    pub alt_browsing_directory: Option<Rc<dyn BrowsingDirectory>>,
-    pub file_filter: Option<Rc<dyn FileFilter>>,
-    pub file_selection_mode: i32,
-}
-
-impl Default for SelectFileExtension {
-    fn default() -> Self {
-        Self {
-            dir: None,
-            alt_browsing_directory: None,
-            file_filter: None,
-            file_selection_mode: -1,
-        }
-    }
-}
-
-impl SelectFileExtension {
-    /// Java package-private `SelectFileExtension()`.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Java `setDir(String)`.
-    pub fn set_dir(&mut self, dir: impl Into<String>) {
-        self.dir = Some(dir.into());
-    }
-
-    /// Java `setAltBrowsingDirectory(BrowsingDirectory)`.
-    pub fn set_alt_browsing_directory(&mut self, browsing_directory: Rc<dyn BrowsingDirectory>) {
-        self.alt_browsing_directory = Some(browsing_directory);
-    }
-
-    /// Java `setFileFilter(FileFilter)`.
-    pub fn set_file_filter(&mut self, file_filter: Rc<dyn FileFilter>) {
-        self.file_filter = Some(file_filter);
-    }
-
-    /// Java `setFileSelectionMode(int)`.
-    pub fn set_file_selection_mode(&mut self, file_selection_mode: i32) {
-        self.file_selection_mode = file_selection_mode;
-    }
-}
+use super::{
+    file_text_field_interface::FileFilter, select_file_extension::SelectFileExtension,
+    text_efield::TextEfield,
+};
 
 /// The subset of Java `Ebutton` reached by this source unit.  The physical
 /// `JButton` and its file chooser are GUI boundaries.
@@ -598,7 +550,7 @@ mod tests {
 
         assert_eq!(
             field.text_efield.text_field.tooltip.as_deref(),
-            Some("Field help")
+            Some("<html>Field help")
         );
         let select = field.select_file_button.as_ref().unwrap().borrow();
         assert_eq!(select.tooltip.as_deref(), Some("Choose a file"));

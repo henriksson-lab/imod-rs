@@ -1,10 +1,8 @@
-//! Translation of `IMOD/3dmod/formv_control.cpp` and `formv_control.h`.
-//! Native Qt form display is explicit; all source-slot state and paired
-//! `mv_control` operations remain direct boundary calls.
 #![allow(dead_code)]
 use crate::imod::three_dmod::mv_control::*;
 use crate::imod::three_dmod::mv_window::{Key, KeyEvent};
 pub trait ImodvControlNativeBoundary {
+    fn setup_ui(&mut self);
     fn set_delete_on_close(&mut self);
     fn set_always_show_tool_tips(&mut self);
     fn connect_control_signals(&mut self);
@@ -14,6 +12,10 @@ pub trait ImodvControlNativeBoundary {
     fn set_slider(&mut self, which: i32, value: i32);
     fn set_checked(&mut self, which: i32, value: bool);
     fn set_enabled(&mut self, which: i32, value: bool);
+    fn edit_font_width(&self, which: i32, text: &str) -> i32;
+    fn set_edit_fixed_width(&mut self, which: i32, width: i32);
+    fn set_focus(&mut self);
+    fn format_general_4(&self, value: f32) -> String;
     fn hot_slider_active(&self, ctrl: bool) -> bool;
     fn hot_slider_enabled(&self) -> bool;
     fn hot_slider_key(&self, key: Key) -> bool;
@@ -23,6 +25,7 @@ pub trait ImodvControlNativeBoundary {
     fn accept_close(&mut self);
     fn retranslate_ui(&mut self);
     fn check_and_set_mac_menu(&mut self);
+    fn widget_change_event(&mut self);
     fn imodv_control_zoom(&mut self, value: i32);
     fn imodv_control_scale(&mut self, value: f32);
     fn imodv_control_kick_clips(&mut self, value: bool);
@@ -60,9 +63,9 @@ pub const FAR_SLIDER: i32 = 1;
 pub const PERSPECTIVE_SLIDER: i32 = 2;
 pub const ZSCALE_SLIDER: i32 = 3;
 pub const RATE_SLIDER: i32 = 4;
-/// `imodvControlForm` fields.
 #[derive(Debug, Default)]
 pub struct ImodvControlForm {
+    pub m_top_win: bool,
     pub m_rate_displayed: i32,
     pub m_ctrl_pressed: bool,
     pub m_zscale_displayed: i32,
@@ -89,12 +92,14 @@ impl ImodvControlForm {
         n: &mut dyn ImodvControlNativeBoundary,
     ) -> Self {
         let mut f = Self {
+            m_top_win: true,
             standalone,
             link_to_slicer: link,
             link_slicer_center: center,
             draw_slicer_plane: plane,
             ..Default::default()
         };
+        n.setup_ui();
         f.init(n);
         f
     }
@@ -108,6 +113,12 @@ impl ImodvControlForm {
         n.set_delete_on_close();
         n.set_always_show_tool_tips();
         n.connect_control_signals();
+        self.m_near_pressed = false;
+        self.m_far_pressed = false;
+        self.m_perspective_pressed = false;
+        self.m_zscale_pressed = false;
+        self.m_rate_pressed = false;
+        self.m_ctrl_pressed = false;
         if self.standalone != 0 {
             n.set_enabled(LINK, false);
             n.set_enabled(DRAW_PLANE, false)
@@ -127,7 +138,15 @@ impl ImodvControlForm {
         );
         self.set_font_dependent_widths(n)
     }
-    pub fn set_font_dependent_widths(&mut self, _: &mut dyn ImodvControlNativeBoundary) {}
+    pub fn set_font_dependent_widths(&mut self, n: &mut dyn ImodvControlNativeBoundary) {
+        let mut width = (15 * n.edit_font_width(SCALE_EDIT, "888888")) / 12;
+        n.set_edit_fixed_width(SCALE_EDIT, width);
+        n.set_edit_fixed_width(SPEED_EDIT, width);
+        width = (17 * n.edit_font_width(X_EDIT, "8888888")) / 14;
+        n.set_edit_fixed_width(X_EDIT, width);
+        n.set_edit_fixed_width(Y_EDIT, width);
+        n.set_edit_fixed_width(Z_EDIT, width)
+    }
     pub fn display_far_label(&mut self, v: i32, n: &mut dyn ImodvControlNativeBoundary) {
         n.set_label(FAR_LABEL, &v.to_string());
         self.m_far_displayed = v
@@ -156,7 +175,6 @@ impl ImodvControlForm {
         self.m_zscale_displayed = v
     }
     pub fn update_slicer_link(&mut self, v: i32, n: &mut dyn ImodvControlNativeBoundary) {
-        self.link_to_slicer = v;
         n.set_checked(LINK, v != 0);
         n.set_enabled(LINK_CENTER, v != 0)
     }
@@ -173,6 +191,7 @@ impl ImodvControlForm {
             .unwrap_or(0.)
             .max(0.001);
         self.set_scale_text(value, n);
+        n.set_focus();
         n.imodv_control_scale(value)
     }
     pub fn kick_box_toggled(&mut self, state: bool, n: &mut dyn ImodvControlNativeBoundary) {
@@ -217,18 +236,21 @@ impl ImodvControlForm {
         n.imodv_control_axis_button(IMODV_CONTROL_ZAXIS)
     }
     pub fn new_xrotation(&mut self, n: &mut dyn ImodvControlNativeBoundary) {
+        n.set_focus();
         n.imodv_control_axis_text(
             IMODV_CONTROL_XAXIS,
             n.edit_text(X_EDIT).parse().unwrap_or(0.),
         )
     }
     pub fn new_yrotation(&mut self, n: &mut dyn ImodvControlNativeBoundary) {
+        n.set_focus();
         n.imodv_control_axis_text(
             IMODV_CONTROL_YAXIS,
             n.edit_text(Y_EDIT).parse().unwrap_or(0.),
         )
     }
     pub fn new_zrotation(&mut self, n: &mut dyn ImodvControlNativeBoundary) {
+        n.set_focus();
         n.imodv_control_axis_text(
             IMODV_CONTROL_ZAXIS,
             n.edit_text(Z_EDIT).parse().unwrap_or(0.),
@@ -273,6 +295,7 @@ impl ImodvControlForm {
             .unwrap_or(0.)
             .max(0.1);
         self.set_speed_text(v, n);
+        n.set_focus();
         n.imodv_control_speed(v)
     }
     pub fn increase_speed(&mut self, n: &mut dyn ImodvControlNativeBoundary) {
@@ -294,7 +317,7 @@ impl ImodvControlForm {
         )
     }
     pub fn set_scale_text(&mut self, v: f32, n: &mut dyn ImodvControlNativeBoundary) {
-        n.set_edit_text(SCALE_EDIT, &format!("{v:.4}"))
+        n.set_edit_text(SCALE_EDIT, &n.format_general_4(v))
     }
     pub fn set_kick_box(&mut self, state: bool, n: &mut dyn ImodvControlNativeBoundary) {
         n.set_checked(KICK, state)
@@ -325,7 +348,7 @@ impl ImodvControlForm {
         self.display_rate_label(v, n)
     }
     pub fn set_speed_text(&mut self, v: f32, n: &mut dyn ImodvControlNativeBoundary) {
-        n.set_edit_text(SPEED_EDIT, &format!("{v:.4}"))
+        n.set_edit_text(SPEED_EDIT, &n.format_general_4(v))
     }
     pub fn top_close_event(&mut self, n: &mut dyn ImodvControlNativeBoundary) {
         n.imodv_control_closing();
@@ -385,6 +408,7 @@ impl ImodvControlForm {
         n.imodv_key_release(event)
     }
     pub fn top_change_event(&mut self, font: bool, n: &mut dyn ImodvControlNativeBoundary) {
+        n.widget_change_event();
         n.check_and_set_mac_menu();
         if font {
             self.set_font_dependent_widths(n)
@@ -398,8 +422,10 @@ mod tests {
     struct N {
         calls: Vec<String>,
         edits: [String; 5],
+        widths: Vec<(i32, i32)>,
     }
     impl ImodvControlNativeBoundary for N {
+        fn setup_ui(&mut self) {}
         fn set_delete_on_close(&mut self) {}
         fn set_always_show_tool_tips(&mut self) {}
         fn connect_control_signals(&mut self) {}
@@ -413,6 +439,18 @@ mod tests {
         fn set_slider(&mut self, _: i32, _: i32) {}
         fn set_checked(&mut self, _: i32, _: bool) {}
         fn set_enabled(&mut self, _: i32, _: bool) {}
+        fn edit_font_width(&self, _: i32, _: &str) -> i32 {
+            8
+        }
+        fn set_edit_fixed_width(&mut self, which: i32, width: i32) {
+            self.widths.push((which, width))
+        }
+        fn set_focus(&mut self) {
+            self.calls.push("focus".into())
+        }
+        fn format_general_4(&self, value: f32) -> String {
+            format!("{value:.4}")
+        }
         fn hot_slider_active(&self, _: bool) -> bool {
             false
         }
@@ -432,6 +470,7 @@ mod tests {
         fn accept_close(&mut self) {}
         fn retranslate_ui(&mut self) {}
         fn check_and_set_mac_menu(&mut self) {}
+        fn widget_change_event(&mut self) {}
         fn imodv_control_zoom(&mut self, a: i32) {
             self.calls.push(format!("zoom:{a}"))
         }
@@ -475,5 +514,16 @@ mod tests {
         assert_eq!(f.draw_slicer_plane, 3);
         f.slicer_plane_toggled(false, &mut n);
         assert_eq!(f.draw_slicer_plane, 2);
+    }
+    #[test]
+    fn source_font_widths_and_scale_focus_are_applied() {
+        let mut n = N::default();
+        n.edits[SCALE_EDIT as usize] = "0".into();
+        let mut f = ImodvControlForm::new(0, 0, 0, 0, &mut n);
+        assert!(n.widths.contains(&(SCALE_EDIT, 10)));
+        assert!(n.widths.contains(&(X_EDIT, 9)));
+        f.new_scale(&mut n);
+        assert_eq!(n.edits[SCALE_EDIT as usize], "0.0010");
+        assert!(n.calls.iter().any(|call| call == "focus"));
     }
 }

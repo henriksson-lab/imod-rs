@@ -14,6 +14,7 @@ use crate::imod::etomo::r#type::debug_level::DebugLevel;
 use crate::imod::etomo::ui::field_type::FieldType;
 
 use super::check_box::CheckBox;
+use super::simple_button::SimpleButton;
 use super::text_efield::TextEfield;
 
 /// Java `DirectiveValueType` values used by `DirectivePanel`.
@@ -209,31 +210,6 @@ impl ComboBox {
     }
 }
 
-/// Java `SimpleButton` state reached here.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SimpleButton {
-    pub image: String,
-    pub enabled: bool,
-    pub tooltip: Option<String>,
-    pub preferred_size: Option<(i32, i32)>,
-    pub maximum_size: Option<(i32, i32)>,
-    pub action_listener_count: usize,
-}
-
-impl SimpleButton {
-    /// Java `SimpleButton(ScaledImage)`.
-    pub fn new(image: impl Into<String>) -> Self {
-        Self {
-            image: image.into(),
-            enabled: true,
-            tooltip: None,
-            preferred_size: None,
-            maximum_size: None,
-            action_listener_count: 0,
-        }
-    }
-}
-
 /// Native state corresponding to the root `JPanel` and its X-axis `BoxLayout`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JPanelBoundary {
@@ -333,7 +309,7 @@ impl DirectivePanel {
             } else {
                 let tf_value = TextEfield::get_instance(title, field_type);
                 let sb_file_value = (directive.value_type == DirectiveValueType::File)
-                    .then(|| SimpleButton::new("OPEN_FILE"));
+                    .then(|| SimpleButton::new_with_scaled_image(Some("OPEN_FILE")));
                 (None, Some(tf_value), sb_file_value, None)
             };
         Self {
@@ -375,8 +351,14 @@ impl DirectivePanel {
     pub fn create_panel(&mut self) {
         if let Some(button) = &mut self.sb_file_value {
             let size = (24, 24); // Java UIUtilities.getScaledFolderButtonDimension boundary.
-            button.preferred_size = Some(size);
-            button.maximum_size = Some(size);
+            button.button.abstract_button.preferred_size = Some(super::panel::Dimension {
+                width: size.0,
+                height: size.1,
+            });
+            button.button.abstract_button.maximum_size = Some(super::panel::Dimension {
+                width: size.0,
+                height: size.1,
+            });
         }
         self.pnl_root.x_axis_layout = true;
         self.pnl_root.children.push("cbInclude".into());
@@ -401,7 +383,7 @@ impl DirectivePanel {
     pub fn add_listeners(&mut self) {
         self.cb_include.add_action_listener();
         if let Some(button) = &mut self.sb_file_value {
-            button.action_listener_count += 1;
+            button.button.action_listener_count += 1;
         }
     }
 
@@ -550,7 +532,7 @@ impl DirectivePanel {
                 .expect("DirectivePanel.tfValue is null")
                 .set_enabled(enable);
             if let Some(button) = &mut self.sb_file_value {
-                button.enabled = enable;
+                button.button.enabled = enable;
             }
         }
     }
@@ -730,7 +712,7 @@ impl DirectivePanel {
         } else {
             self.tf_value.as_mut().unwrap().set_tooltip(tooltip.clone());
             if let Some(button) = &mut self.sb_file_value {
-                button.tooltip = Some(tooltip);
+                button.button.tooltip = Some(tooltip);
             }
         }
     }

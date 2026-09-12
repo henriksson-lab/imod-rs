@@ -16,6 +16,11 @@ pub trait ViewsOperations {
     fn done(&mut self);
     fn key_press(&mut self, key: i32);
     fn key_release(&mut self, key: i32);
+    fn info_input(&mut self) {}
+    fn adjust_size(&mut self) {}
+    fn accept_close_event(&mut self) {}
+    fn widget_change_event(&mut self) {}
+    fn check_and_set_mac_menu(&mut self) {}
 }
 /// Original `imodvViewsForm`.
 #[derive(Clone, Debug, Default)]
@@ -30,6 +35,9 @@ pub struct ImodvViewsForm {
     pub delete_enabled: bool,
     pub list_width: i32,
     pub font_height: i32,
+    pub close_event_accepted: bool,
+    pub base_change_event_called: bool,
+    pub mac_menu_checked: bool,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ViewsKeyEvent {
@@ -66,7 +74,7 @@ impl ImodvViewsForm {
     pub fn set_font_dependent_widths(&mut self) {
         self.list_width = "A very long string fits here".len() as i32;
     }
-    pub fn manage_list_width(&mut self) {
+    pub fn manage_list_width(&mut self, ops: &mut dyn ViewsOperations) {
         let maximum = self
             .items
             .iter()
@@ -76,6 +84,8 @@ impl ImodvViewsForm {
             .max(124);
         if maximum < self.list_width - 40 || maximum > self.list_width {
             self.list_width = maximum;
+            ops.info_input();
+            ops.adjust_size();
         }
     }
     pub fn store_pressed(&mut self, ops: &mut dyn ViewsOperations) {
@@ -108,7 +118,7 @@ impl ImodvViewsForm {
         }
         ops.delete(item, self.current_item);
         self.delete_enabled = self.items.len() > 1;
-        self.manage_list_width();
+        self.manage_list_width(ops);
     }
     pub fn save_pressed(&mut self, ops: &mut dyn ViewsOperations) {
         ops.save()
@@ -137,11 +147,20 @@ impl ImodvViewsForm {
         }
         self.items[item as usize] = label.clone();
         ops.label(&label, item);
-        self.manage_list_width();
+        self.manage_list_width(ops);
     }
     pub fn set_autostore(&mut self, state: i32) {
         self.autostore = state != 0;
-        self.manage_list_width()
+        let maximum = self
+            .items
+            .iter()
+            .map(|item| item.len() as i32 + 30)
+            .max()
+            .unwrap_or(124)
+            .max(124);
+        if maximum < self.list_width - 40 || maximum > self.list_width {
+            self.list_width = maximum;
+        }
     }
     pub fn add_item(&mut self, label: &str) {
         self.items.push(label.into());
@@ -163,6 +182,8 @@ impl ImodvViewsForm {
     }
     pub fn top_close_event(&mut self, ops: &mut dyn ViewsOperations) {
         ops.closing();
+        ops.accept_close_event();
+        self.close_event_accepted = true;
         self.top_window_open = false;
     }
     pub fn key_press_event(&mut self, ops: &mut dyn ViewsOperations, event: ViewsKeyEvent) {
@@ -187,7 +208,11 @@ impl ImodvViewsForm {
     pub fn key_release_event(&mut self, ops: &mut dyn ViewsOperations, event: ViewsKeyEvent) {
         ops.key_release(event.key)
     }
-    pub fn top_change_event(&mut self, font_changed: bool) {
+    pub fn top_change_event(&mut self, ops: &mut dyn ViewsOperations, font_changed: bool) {
+        ops.widget_change_event();
+        ops.check_and_set_mac_menu();
+        self.base_change_event_called = true;
+        self.mac_menu_checked = true;
         if font_changed {
             self.set_font_dependent_widths()
         }
@@ -218,6 +243,21 @@ mod tests {
         fn done(&mut self) {}
         fn key_press(&mut self, _: i32) {}
         fn key_release(&mut self, _: i32) {}
+        fn info_input(&mut self) {
+            self.calls.push("info".into())
+        }
+        fn adjust_size(&mut self) {
+            self.calls.push("adjust".into())
+        }
+        fn accept_close_event(&mut self) {
+            self.calls.push("accept".into())
+        }
+        fn widget_change_event(&mut self) {
+            self.calls.push("change".into())
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("menu".into())
+        }
     }
     #[test]
     fn new_and_navigation_use_direct_boundary() {
@@ -228,5 +268,18 @@ mod tests {
         assert_eq!(o.calls, ["view 2"]);
         f.view_selected(&mut o, 0);
         assert_eq!(o.calls[1], "goto0");
+    }
+
+    #[test]
+    fn close_change_and_width_paths_follow_source_callbacks() {
+        let mut f = imodv_views_form_new();
+        let mut o = Ops::default();
+        f.add_item("a very long view label that widens the list");
+        f.manage_list_width(&mut o);
+        assert!(o.calls.iter().any(|call| call == "info"));
+        f.top_close_event(&mut o);
+        assert!(f.close_event_accepted);
+        f.top_change_event(&mut o, true);
+        assert!(f.base_change_event_called && f.mac_menu_checked);
     }
 }

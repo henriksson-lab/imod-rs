@@ -8,7 +8,8 @@
 
 use std::collections::BTreeMap;
 
-use super::processor_table::{ColumnName, QueueTableEvent};
+use super::processor_table::ColumnName;
+use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
 
 pub const SECONDARY_QUEUE: &str = "SecondaryQueue";
 pub const STORE_SELECTED: &str = "Selected";
@@ -28,6 +29,11 @@ pub struct ProcessorNode {
     pub os: Option<String>,
     pub gpu_device_array: Vec<String>,
     pub is_gpu: bool,
+    /// Java `Node.isGpuLocal()` value.
+    pub is_gpu_local: bool,
+    /// Result of Java `Node.isLocalHost(manager, axisID, propertyUserDir)` at
+    /// the storage/manager boundary used by `GpuTable.isExcludeNode`.
+    pub is_local_host: bool,
     pub gpus_per_cluster_job: Option<String>,
     pub cpu_type: Option<String>,
     pub speed: Option<String>,
@@ -71,7 +77,9 @@ pub enum QueueType {
 /// boundary.  Capturing them preserves their order and values for its adapter.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProcesschunksParameters {
+    pub gpu_processing: bool,
     pub queue_mode: Option<QueueMode>,
+    pub queue: Option<String>,
     pub machine_names: Vec<(String, i32, Vec<String>)>,
     pub gpu_machines: Vec<(String, i32, Vec<String>)>,
     pub secondary_number: Option<String>,
@@ -290,12 +298,15 @@ impl ProcessorTableRow {
         }
     }
 
-    /// Java `queueTableEventAction`.  Data-bearing `QueueTableDataEvent` is
-    /// delivered by `queue_table_data_event_action`; the legacy enum has no data.
+    /// Java `queueTableEventAction`, including inherited `QueueTableDataEvent`.
     pub fn queue_table_event_action(&mut self, event: QueueTableEvent) {
         match event {
             QueueTableEvent::EnableSecondaryQueue => self.enable_secondary_queue = true,
             QueueTableEvent::DisableSecondaryQueue => self.enable_secondary_queue = false,
+            QueueTableEvent::OnlyQueueType(queue_type) => {
+                self.queue_type = Some(queue_type);
+                self.set_header1_number_cpus_title(Some(queue_type));
+            }
             _ => {}
         }
         self.update_display();

@@ -5,19 +5,29 @@
 //! they can be driven by either that form or the native event loop.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libimod::imodel::{IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_SCAT, Imod, Iobj, Ipoint};
+use crate::imod::libimod::imodel::{
+    IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, Imod, Iobj, Ipoint,
+};
 use crate::imod::libimod::iobj::{
-    IMOD_OBJFLAG_ANTI_ALIAS, IMOD_OBJFLAG_FILL, IMOD_OBJFLAG_MESH, IMOD_OBJFLAG_NOLINE,
-    IMOD_OBJFLAG_SCALE_WDTH, IMOD_OBJFLAG_TWO_SIDE,
+    IMOD_OBJFLAG_ANTI_ALIAS, IMOD_OBJFLAG_FCOLOR_PNT, IMOD_OBJFLAG_FILL, IMOD_OBJFLAG_MESH,
+    IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_PLANAR, IMOD_OBJFLAG_SCALE_WDTH, IMOD_OBJFLAG_THICK_CONT,
+    IMOD_OBJFLAG_TWO_SIDE, iobj_close, iobj_open, iobj_scat,
 };
 use crate::imod::three_dmod::imodv::{
-    ImodvApp, imodv_draw, imodv_finish_chg_unit, imodv_register_object_chg,
+    ImodvApp, imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg,
+    imodv_register_object_chg,
 };
 
 pub const STYLE_POINTS: i32 = 0;
 pub const STYLE_LINES: i32 = 1;
 pub const STYLE_FILL: i32 = 2;
 pub const STYLE_FILL_OUTLINE: i32 = 3;
+
+const OBJTYPE_CLOSED: i32 = 1;
+const OBJTYPE_OPEN: i32 = 2;
+const OBJTYPE_SCAT: i32 = 4;
+const WORLD_QUALITY_SHIFT: u32 = 8;
+const WORLD_QUALITY_BITS: u32 = 7 << WORLD_QUALITY_SHIFT;
 
 /// Original `ObjectEditField`; widget callbacks are the paired Qt form boundary.
 pub struct ObjectEditField {
@@ -80,6 +90,7 @@ pub struct ImodvObjed {
     pub edit_all: i32,
     pub collect_changes: bool,
     pub ctrl_pressed: bool,
+    pub multiple_color_ok: bool,
     pub dialog_open: bool,
     pub meshing_object: i32,
     pub mesh_busy: bool,
@@ -133,6 +144,9 @@ pub fn set_obj_flag(
     registered: bool,
     extra_flag: bool,
 ) {
+    if a.imod.is_null() || objed_object(a).is_none() {
+        return;
+    }
     let (mut first, mut last) = (0, 0);
     set_start_end_model(a, true, &mut first, &mut last);
     for m in first..=last {
@@ -140,6 +154,14 @@ pub fn set_obj_flag(
         for ob in 0..count {
             if change_model_object(a, m, ob, true) {
                 if let Some(obj) = editable_object(a, m, ob) {
+                    let object_flags = obj.flags;
+                    if types != 0
+                        && !((types & OBJTYPE_CLOSED != 0 && iobj_close(object_flags) != 0)
+                            || (types & OBJTYPE_OPEN != 0 && iobj_open(object_flags) != 0)
+                            || (types & OBJTYPE_SCAT != 0 && iobj_scat(object_flags) != 0))
+                    {
+                        continue;
+                    }
                     if state != 0 {
                         obj.flags |= flag;
                     } else {
@@ -392,14 +414,19 @@ impl ImodvObjed {
         }
     }
     /// Original `ImodvObjed::multipleColorSlot`.
-    pub fn multiple_color_slot(&mut self, _state: bool) {}
+    pub fn multiple_color_slot(&mut self, state: bool) {
+        self.multiple_color_ok = state;
+    }
     /// Original `ImodvObjed::fillToggleSlot`.
     pub fn fill_toggle_slot(&mut self, a: &mut ImodvApp, state: bool) {
         set_obj_flag(a, IMOD_OBJFLAG_FILL, state as i32, 0, false, false);
         finish_change_and_draw(a, false, false);
     }
     /// Original `ImodvObjed::fillPntToggleSlot`.
-    pub fn fill_pnt_toggle_slot(&mut self, _state: bool) {}
+    pub fn fill_pnt_toggle_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_obj_flag(a, IMOD_OBJFLAG_FCOLOR_PNT, state as i32, 0, false, false);
+        finish_change_and_draw(a, true, false);
+    }
     /// Original `ImodvObjed::fillColorSlot`.
     pub fn fill_color_slot(&mut self, a: &mut ImodvApp, color: i32, value: i32, dragging: bool) {
         if let Some(o) = objed_object(a) {
@@ -449,7 +476,26 @@ impl ImodvObjed {
         finish_change_and_draw(a, false, true);
     }
     /// Original `ImodvObjed::globalQualitySlot`.
-    pub fn global_quality_slot(&mut self, _a: &mut ImodvApp, _value: i32) {}
+    pub fn global_quality_slot(&mut self, a: &mut ImodvApp, value: i32) {
+        if a.imod.is_null() {
+            return;
+        }
+        imodv_register_model_chg();
+        let (mut first, mut last) = (0, 0);
+        set_start_end_model(a, true, &mut first, &mut last);
+        let quality = (value - 1) as u32;
+        for model in first..=last {
+            if let Some(view) = unsafe {
+                a.mod_
+                    .get(model.max(0) as usize)
+                    .and_then(|m| m.as_mut())
+                    .and_then(|m| m.view.first_mut())
+            } {
+                view.world = (view.world & !WORLD_QUALITY_BITS) | (quality << WORLD_QUALITY_SHIFT);
+            }
+        }
+        finish_change_and_draw(a, false, false);
+    }
     /// Original `ImodvObjed::pointNoDrawSlot`.
     pub fn point_no_draw_slot(&mut self, a: &mut ImodvApp, state: bool) {
         set_obj_flag(a, IMOD_OBJFLAG_SCAT, state as i32, 0, false, false);
@@ -479,11 +525,34 @@ impl ImodvObjed {
         finish_change_and_draw(a, false, true);
     }
     /// Original `ImodvObjed::lineThickenSlot`.
-    pub fn line_thicken_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn line_thicken_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_obj_flag(a, IMOD_OBJFLAG_THICK_CONT, state as i32, 0, false, false);
+        finish_change_and_draw(a, true, false);
+    }
     /// Original `ImodvObjed::openObjectSlot`.
-    pub fn open_object_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn open_object_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_obj_flag(
+            a,
+            IMOD_OBJFLAG_OPEN,
+            state as i32,
+            OBJTYPE_OPEN | OBJTYPE_CLOSED,
+            false,
+            false,
+        );
+        finish_change_and_draw(a, true, true);
+    }
     /// Original `ImodvObjed::autoNewContSlot`.
-    pub fn auto_new_cont_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn auto_new_cont_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_obj_flag(
+            a,
+            IMOD_OBJFLAG_PLANAR,
+            state as i32,
+            OBJTYPE_OPEN,
+            false,
+            false,
+        );
+        finish_change_and_draw(a, true, true);
+    }
     /// Original `ImodvObjed::meshShowSlot`.
     pub fn mesh_show_slot(&mut self, a: &mut ImodvApp, value: i32) {
         if let Some(o) = objed_object(a) {
@@ -614,5 +683,61 @@ mod tests {
         a.num_mods = 1;
         objed_toggle_obj(&mut a, 0, false);
         assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_OFF, 0);
+    }
+
+    #[test]
+    fn simple_slots_update_their_state_and_object_flags() {
+        let mut m = Box::new(Imod::default());
+        m.obj
+            .extend([Iobj::default(), Iobj::default(), Iobj::default()]);
+        m.obj[1].flags |= IMOD_OBJFLAG_OPEN;
+        m.obj[2].flags |= IMOD_OBJFLAG_SCAT;
+        let mut a = ImodvApp::default();
+        a.imod = &mut *m;
+        a.mod_.push(&mut *m);
+        a.num_mods = 1;
+        let mut editor = ImodvObjed {
+            edit_all: 1,
+            ..Default::default()
+        };
+
+        editor.multiple_color_slot(true);
+        assert!(editor.multiple_color_ok);
+        editor.fill_pnt_toggle_slot(&mut a, true);
+        editor.line_thicken_slot(&mut a, true);
+        assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_FCOLOR_PNT, 0);
+        assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_THICK_CONT, 0);
+
+        editor.auto_new_cont_slot(&mut a, true);
+        assert_eq!(m.obj[0].flags & IMOD_OBJFLAG_PLANAR, 0);
+        assert_ne!(m.obj[1].flags & IMOD_OBJFLAG_PLANAR, 0);
+        assert_eq!(m.obj[2].flags & IMOD_OBJFLAG_PLANAR, 0);
+
+        editor.open_object_slot(&mut a, true);
+        assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_OPEN, 0);
+        assert_ne!(m.obj[1].flags & IMOD_OBJFLAG_OPEN, 0);
+        assert_eq!(m.obj[2].flags & IMOD_OBJFLAG_OPEN, 0);
+    }
+
+    #[test]
+    fn global_quality_slot_updates_quality_bits_in_selected_models() {
+        let mut current = Box::new(Imod::default());
+        let mut other = Box::new(Imod::default());
+        current.obj.push(Iobj::default());
+        other.obj.push(Iobj::default());
+        current.view[0].world = 1 << 2;
+        other.view[0].world = 1 << 3;
+        let mut a = ImodvApp::default();
+        a.imod = &mut *current;
+        a.mod_.push(&mut *current);
+        a.mod_.push(&mut *other);
+        a.num_mods = 2;
+        a.crosset = 1;
+        let mut editor = ImodvObjed::default();
+
+        editor.global_quality_slot(&mut a, 4);
+
+        assert_eq!(current.view[0].world, (1 << 2) | (3 << WORLD_QUALITY_SHIFT));
+        assert_eq!(other.view[0].world, (1 << 3) | (3 << WORLD_QUALITY_SHIFT));
     }
 }

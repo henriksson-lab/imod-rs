@@ -20,6 +20,7 @@ pub enum AutoxChangeEvent {
 /// Direct Qt and `autox.cpp` calls performed by this source unit. Implementors
 /// own real widgets/signals and paired image-view state.
 pub trait AutoxNativeBoundary {
+    fn setup_ui(&mut self);
     fn set_delete_on_close(&mut self);
     fn set_always_show_tool_tips(&mut self);
     fn connect_autox_signals(&mut self);
@@ -48,6 +49,7 @@ pub trait AutoxNativeBoundary {
     fn release_keyboard(&mut self);
     fn retranslate_ui(&mut self);
     fn check_and_set_mac_menu(&mut self);
+    fn widget_change_event(&mut self);
     fn hot_slider_active(&self, control_pressed: bool) -> bool;
     fn hot_slider_enabled(&self) -> bool;
     fn hot_slider_key(&self, key: Key) -> bool;
@@ -80,6 +82,7 @@ pub struct AutoxWindow {
 impl AutoxWindow {
     /// `AutoxWindow::AutoxWindow`.
     pub fn new(m_top_win: *mut c_void, native: &mut dyn AutoxNativeBoundary) -> Self {
+        native.setup_ui();
         let mut window = Self {
             m_top_win,
             m_ctrl_pressed: false,
@@ -221,6 +224,7 @@ impl AutoxWindow {
         event: AutoxChangeEvent,
         native: &mut dyn AutoxNativeBoundary,
     ) {
+        native.widget_change_event();
         native.check_and_set_mac_menu();
         if event == AutoxChangeEvent::FontChange {
             self.set_font_dependent_widths(native);
@@ -238,6 +242,9 @@ mod tests {
         marker: u8,
     }
     impl AutoxNativeBoundary for Native {
+        fn setup_ui(&mut self) {
+            self.calls.push("setup".into())
+        }
         fn set_delete_on_close(&mut self) {
             self.calls.push("delete".into())
         }
@@ -303,6 +310,9 @@ mod tests {
         }
         fn check_and_set_mac_menu(&mut self) {
             self.calls.push("menu".into())
+        }
+        fn widget_change_event(&mut self) {
+            self.calls.push("change".into())
         }
         fn hot_slider_active(&self, _: bool) -> bool {
             self.hot
@@ -398,5 +408,14 @@ mod tests {
                 "diag:false"
             ]
         );
+    }
+
+    #[test]
+    fn change_event_calls_base_then_mac_menu_and_font_width_path() {
+        let mut n = Native::default();
+        let mut f = AutoxWindow::new(core::ptr::null_mut(), &mut n);
+        f.top_change_event(AutoxChangeEvent::FontChange, &mut n);
+        assert!(n.calls.windows(2).any(|calls| calls == ["change", "menu"]));
+        assert!(n.calls.iter().any(|call| call == "width:0:40"));
     }
 }

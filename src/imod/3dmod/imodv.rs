@@ -13,6 +13,7 @@ use crate::imod::libimod::imat::{Imat, imod_mat_new};
 use crate::imod::libimod::imodel::{Imod, Iobj, Ipoint, Iview};
 use crate::imod::libimod::imodel_files::imod_read;
 use crate::imod::libimod::iview::{imod_view_default, imod_view_default_scale};
+use crate::imod::three_dmod::control::Rect;
 use crate::imod::three_dmod::imodview::ImodView;
 
 /// Original: `MAX_MOVIE_TIMES` (`imodv.h:27`).
@@ -240,9 +241,68 @@ impl Default for ImodvApp {
     }
 }
 
+/// Direct native operations called by source `imodv.cpp` entry points.
+pub trait ImodvNativeBoundary {
+    fn current_model_view(&mut self) -> *mut ImodView;
+    fn model_view_icon(&mut self) -> *mut QPixmap;
+    fn raise_model_view(&mut self, window: *mut ImodvWindow);
+    fn get_visuals(&mut self, app: &mut ImodvApp, once_opened: bool) -> i32;
+    fn open_model_view(
+        &mut self,
+        app: &mut ImodvApp,
+        once_opened: bool,
+        last_geometry: Rect,
+    ) -> i32;
+    fn imod_draw(&mut self, view: *mut ImodView, flags: i32);
+    fn object_edit_draw(&mut self);
+    fn info_set_object_color(&mut self);
+    fn set_modv_dialog_title(&mut self, window: *mut ImodvWindow, title: &str);
+    fn undo_model_change(&mut self, view: *mut ImodView);
+    fn undo_object_prop_change(&mut self, view: *mut ImodView, object: i32);
+    fn undo_finish_unit(&mut self, view: *mut ImodView);
+    fn close_model_view(&mut self, window: *mut ImodvWindow);
+    fn imodv_draw(&mut self, app: &mut ImodvApp);
+    fn restorable_geometry(&mut self, window: *mut ImodvWindow) -> Rect;
+    fn record_mod_view_geometry(&mut self, geometry: Rect);
+    fn vb_cleanup_vbd(&mut self, imod: *mut Imod);
+    fn mv_image_cleanup(&mut self);
+    fn free_extra_object(&mut self, view: *mut ImodView, object: i32);
+    fn start_clip_disconnect(&mut self);
+    fn stereo_hw_off(&mut self);
+    fn close_model_view_dialogs(&mut self);
+    fn save_settings(&mut self);
+    fn delete_imod_help(&mut self);
+    fn wait_for_clip_disconnect(&mut self);
+    fn exit_application(&mut self);
+    fn check_for_exit_on_close(&mut self);
+    fn set_app_exiting(&mut self);
+    fn run_application(&mut self) -> i32;
+    fn print_window_id(&mut self, window: *mut ImodvWindow);
+    fn create_clipboard(&mut self, use_stdin: bool);
+    fn open_selected_windows(&mut self, window_keys: Option<&str>);
+    fn show_usage(&mut self, usage: &str);
+    fn show_error(&mut self, message: &str);
+}
+
+/// Native top-slicer operation reached by `imodvNewModelAngles`.
+///
+/// This stays a single boundary because `setTopSlicerFromModelView` owns the
+/// top-window lookup, center linking, widget updates, synchronization, and
+/// drawing in the paired `slicer.cpp` translation.
+pub trait ImodvSlicerAngleBoundary {
+    fn set_top_slicer_from_model_view(&mut self, rot: &Ipoint);
+}
+
 thread_local! {
     /// Original globals: `ImodvStruct`, `Imodv`, and `ImodvClosed`.
-    static IMODV_STATE: RefCell<(ImodvApp, i32, bool)> = RefCell::new((ImodvApp::default(), 1, false));
+    static IMODV_STATE: RefCell<(ImodvApp, i32, bool, Rect)> =
+        RefCell::new((ImodvApp::default(), 1, false, Rect::default()));
+    /// The C++ call resolves the top slicer through the UI-thread global.
+    /// The attached Rust/Qt host supplies the equivalent thread-local route.
+    pub static IMODV_SLICER_ANGLE_BOUNDARY: RefCell<Option<Box<dyn ImodvSlicerAngleBoundary>>> =
+        RefCell::new(None);
+    pub static IMODV_NATIVE_BOUNDARY: RefCell<Option<Box<dyn ImodvNativeBoundary>>> =
+        RefCell::new(None);
 }
 
 /// Original static: `usage` (`imodv.cpp:90`).
@@ -396,80 +456,179 @@ pub unsafe fn load_models(n: i32, fname: *const *const c_char, a: &mut ImodvApp)
 ///
 /// Visual selection needs the actual Qt/OpenGL probe in `mv_window.cpp`.
 /// It deliberately reports unsupported instead of claiming a fake visual.
-pub fn get_visuals(_a: &mut ImodvApp) -> i32 {
-    1
+pub fn get_visuals(a: &mut ImodvApp) -> i32 {
+    let once_opened = IMODV_STATE.with(|state| state.borrow().2);
+    IMODV_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut()
+            .as_deref_mut()
+            .map_or(1, |boundary| boundary.get_visuals(a, once_opened))
+    })
 }
 
 /// Original static: `openWindow` (`imodv.cpp:398`).
 /// The actual OpenGL/QWidget constructor is retained as an unported boundary.
-pub fn open_window(_a: &mut ImodvApp) -> i32 {
-    1
+pub fn open_window(a: &mut ImodvApp) -> i32 {
+    let (once_opened, last_geometry) = IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        (state.2, state.3)
+    });
+    IMODV_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut().as_deref_mut().map_or(1, |boundary| {
+            boundary.open_model_view(a, once_opened, last_geometry)
+        })
+    })
 }
 
 /// Original: `imodvMain` (`imodv.cpp:536`).
 pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
-    IMODV_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let a = &mut state.0;
-        a.standalone = 1;
-        imodv_init(a);
-        let mut i = 1;
-        let mut use_stdin = false;
-        while i < argc {
-            let argument = CStr::from_ptr(*argv.add(i as usize)).to_bytes();
-            if !argument.starts_with(b"-") {
-                break;
-            }
-            match argument {
-                b"-b" => {
-                    i += 1;
-                    if i >= argc {
-                        return 1;
-                    }
-                    a.rbgname = CStr::from_ptr(*argv.add(i as usize))
-                        .to_string_lossy()
-                        .into_owned();
-                }
-                b"-D" => {}
-                b"-f" => a.fullscreen = 1,
-                b"-s" => {
-                    i += 1;
-                    if i >= argc {
-                        return 1;
-                    }
-                    let text = CStr::from_ptr(*argv.add(i as usize)).to_string_lossy();
-                    let mut values = text.split(|c| c == ',' || c == 'x');
-                    a.want_winx = values.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-                    a.want_winy = values.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-                }
-                b"-W" => {}
-                b"-E" => {
-                    i += 1;
-                }
-                b"-L" => use_stdin = true,
-                b"-h" => return 1,
-                b"-modv" | b"-view" => {}
-                _ => return 1,
-            }
-            i += 1;
-        }
-        a.dbl_buf = 1;
-        if argc - i < 1 || load_models(argc - i, argv.add(i as usize), a) != 0 {
+    IMODV_NATIVE_BOUNDARY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(boundary) = slot.as_deref_mut() else {
             return 3;
-        }
-        // The source calls getVisuals/openWindow/qApp->exec here.  Do not replace that
-        // OpenGL/QApplication execution with a fabricated static viewer.
-        let _ = use_stdin;
-        3
+        };
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            let once_opened = state.2;
+            let last_geometry = state.3;
+            let a = &mut state.0;
+            a.standalone = 1;
+            imodv_init(a);
+            let mut i = 1;
+            let mut use_stdin = false;
+            let mut print_id = false;
+            let mut window_keys = None;
+            while i < argc {
+                let argument = CStr::from_ptr(*argv.add(i as usize)).to_bytes();
+                if !argument.starts_with(b"-") {
+                    break;
+                }
+                match argument {
+                    b"-b" => {
+                        i += 1;
+                        if i >= argc {
+                            return 1;
+                        }
+                        a.rbgname = CStr::from_ptr(*argv.add(i as usize))
+                            .to_string_lossy()
+                            .into_owned();
+                    }
+                    b"-D" => crate::imod::three_dmod::imod::IMOD_DEBUG
+                        .store(true, std::sync::atomic::Ordering::Relaxed),
+                    b"-f" => a.fullscreen = 1,
+                    b"-s" => {
+                        i += 1;
+                        if i >= argc {
+                            return 1;
+                        }
+                        let text = CStr::from_ptr(*argv.add(i as usize)).to_string_lossy();
+                        let mut values = text.split(|c| c == ',' || c == 'x');
+                        a.want_winx = values.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                        a.want_winy = values.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                    }
+                    b"-W" => print_id = true,
+                    b"-E" => {
+                        i += 1;
+                        if i >= argc {
+                            return 1;
+                        }
+                        window_keys = Some(
+                            CStr::from_ptr(*argv.add(i as usize))
+                                .to_string_lossy()
+                                .into_owned(),
+                        );
+                    }
+                    b"-L" => use_stdin = true,
+                    b"-h" => {
+                        boundary.show_usage(&usage(&CStr::from_ptr(*argv).to_string_lossy()));
+                        return 1;
+                    }
+                    b"-modv" | b"-view" => {}
+                    _ => {
+                        boundary.show_error(&format!(
+                            "3dmodv error: illegal option {}\n",
+                            String::from_utf8_lossy(argument)
+                        ));
+                        return 1;
+                    }
+                }
+                i += 1;
+            }
+            a.dbl_buf = 1;
+            a.vi = Box::into_raw(Box::new(ImodView::default())) as *mut c_void;
+            if boundary.get_visuals(a, once_opened) != 0 {
+                return 3;
+            }
+            if argc - i < 1 || load_models(argc - i, argv.add(i as usize), a) != 0 {
+                return 3;
+            }
+            unsafe { (*(a.vi as *mut ImodView)).imod = a.imod };
+            a.icon_pixmap = boundary.model_view_icon();
+            if boundary.open_model_view(a, once_opened, last_geometry) != 0 {
+                return 3;
+            }
+            let main_window = a.main_win;
+            state.1 = 0;
+            if print_id {
+                boundary.print_window_id(main_window);
+            }
+            if print_id || use_stdin {
+                boundary.create_clipboard(use_stdin);
+            }
+            boundary.open_selected_windows(window_keys.as_deref());
+            boundary.run_application()
+        })
     })
 }
 
 /// Original: `imodv_open` (`imodv.cpp:653`).
-pub fn imodv_open() {}
+pub fn imodv_open() {
+    IMODV_NATIVE_BOUNDARY.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(boundary) = slot.as_deref_mut() else {
+            return;
+        };
+        let vw = boundary.current_model_view();
+        if vw.is_null() || unsafe { (*vw).imod.is_null() } {
+            return;
+        }
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if state.1 == 0 {
+                boundary.raise_model_view(state.0.main_win);
+                return;
+            }
+            let once_opened = state.2;
+            let old_trans_bkgd = state.0.trans_bkgd;
+            unsafe { initstruct(&mut *vw, &mut state.0) };
+            if once_opened {
+                state.0.trans_bkgd = old_trans_bkgd;
+            }
+            state.0.icon_pixmap = boundary.model_view_icon();
+            if boundary.get_visuals(&mut state.0, once_opened) != 0 {
+                state.0.mat = None;
+                state.0.rmat = None;
+                return;
+            }
+            let last_geometry = state.3;
+            if boundary.open_model_view(&mut state.0, once_opened, last_geometry) == 0 {
+                state.1 = 0;
+            }
+        });
+    });
+}
 /// Original: `imodv_close` (`imodv.cpp:696`).
 pub fn imodv_close() {
-    // The source delegates this to `ImodvWindow::close`; final state changes
-    // occur in the close callback, `imodv_quit` below.
+    IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        if state.1 != 0 {
+            return;
+        }
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.close_model_view(state.0.main_win);
+            }
+        });
+    });
 }
 /// Original: `imodv_draw` (`imodv.cpp:703`).
 pub unsafe fn imodv_draw() {
@@ -488,7 +647,11 @@ pub unsafe fn imodv_draw() {
             state.0.obj_num = imod.cindex.object;
             state.0.obj = &mut imod.obj[imod.cindex.object as usize];
         }
-        // `imodvDraw` is the actual OpenGL rendering boundary in `mv_gfx.cpp`.
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.imodv_draw(&mut state.0);
+            }
+        });
     });
 }
 /// Original: `imodv_new_model` (`imodv.cpp:715`).
@@ -561,11 +724,61 @@ pub fn imodv_standalone() -> i32 {
     })
 }
 /// Original: `imodvNewModelAngles` (`imodv.cpp:769`).
-pub fn imodv_new_model_angles(_rot: &Ipoint) {}
+pub fn imodv_new_model_angles(rot: &Ipoint) {
+    let linked = IMODV_STATE.with(|state| state.borrow().0.link_to_slicer != 0);
+    if linked {
+        IMODV_SLICER_ANGLE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.set_top_slicer_from_model_view(rot);
+            }
+        });
+    }
+}
 /// Original: `imodvSetCaption` (`imodv.cpp:775`).
-pub fn imodv_set_caption() {}
+pub fn imodv_set_caption() {
+    IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        if state.1 != 0 {
+            return;
+        }
+        let a = &state.0;
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.set_modv_dialog_title(
+                    a.main_win,
+                    if a.standalone != 0 {
+                        "3dmodv:"
+                    } else {
+                        "3dmod Model View: "
+                    },
+                );
+            }
+        });
+    });
+}
 /// Original: `imodvDrawImodImages` (`imodv.cpp:786`).
-pub fn imodv_draw_imod_images(_skip_draw: i32) {}
+pub fn imodv_draw_imod_images(skip_draw: i32) {
+    IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        let a = &state.0;
+        if a.standalone != 0 {
+            return;
+        }
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                if skip_draw == 0 {
+                    boundary.imod_draw(
+                        a.vi as *mut ImodView,
+                        crate::imod::three_dmod::imod::IMOD_DRAW_MOD
+                            | crate::imod::three_dmod::imod::IMOD_DRAW_SKIPMODV,
+                    );
+                }
+                boundary.object_edit_draw();
+                boundary.info_set_object_color();
+            }
+        });
+    });
+}
 /// Original: `imodvByteImagesExist` (`imodv.cpp:797`).
 pub fn imodv_byte_images_exist() -> i32 {
     IMODV_STATE.with(|state| {
@@ -578,19 +791,84 @@ pub fn imodv_byte_images_exist() -> i32 {
     })
 }
 /// Original: `imodvRegisterModelChg` (`imodv.cpp:807`).
-pub fn imodv_register_model_chg() {}
+pub fn imodv_register_model_chg() {
+    IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.undo_model_change(state.0.vi as *mut ImodView);
+            }
+        });
+    });
+}
 /// Original: `imodvRegisterObjectChg` (`imodv.cpp:814`).
-pub fn imodv_register_object_chg(_object: i32) {}
+pub fn imodv_register_object_chg(object: i32) {
+    IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        if state.0.imod.is_null() || object >= unsafe { (*state.0.imod).obj.len() as i32 } {
+            return;
+        }
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.undo_object_prop_change(state.0.vi as *mut ImodView, object);
+            }
+        });
+    });
+}
 /// Original: `imodvFinishChgUnit` (`imodv.cpp:821`).
-pub fn imodv_finish_chg_unit() {}
+pub fn imodv_finish_chg_unit() {
+    IMODV_STATE.with(|state| {
+        let state = state.borrow();
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                boundary.undo_finish_unit(state.0.vi as *mut ImodView);
+            }
+        });
+    });
+}
 /// Original: `imodvQuit` (`imodv.cpp:829`).
 pub fn imodv_quit() {
     IMODV_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.1 = 1;
         state.2 = true;
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
+                if state.0.standalone != 0 {
+                    boundary.set_app_exiting();
+                }
+                let geometry = boundary.restorable_geometry(state.0.main_win);
+                state.3 = geometry;
+                if state.0.standalone == 0 {
+                    boundary.record_mod_view_geometry(geometry);
+                }
+                let a = &mut state.0;
+                boundary.vb_cleanup_vbd(a.imod);
+                boundary.mv_image_cleanup();
+                if a.bound_box_extra_obj > 0 {
+                    boundary.free_extra_object(a.vi as *mut ImodView, a.bound_box_extra_obj);
+                }
+                if a.cur_point_extra_obj > 0 {
+                    boundary.free_extra_object(a.vi as *mut ImodView, a.cur_point_extra_obj);
+                }
+                if a.standalone != 0 {
+                    boundary.start_clip_disconnect();
+                }
+                boundary.stereo_hw_off();
+                boundary.close_model_view_dialogs();
+                if a.standalone != 0 {
+                    boundary.save_settings();
+                    boundary.delete_imod_help();
+                    boundary.wait_for_clip_disconnect();
+                    boundary.exit_application();
+                } else {
+                    boundary.check_for_exit_on_close();
+                }
+            }
+        });
         state.0.mat = None;
         state.0.rmat = None;
+        state.0.rbgcolor = std::ptr::null_mut();
         state.0.main_win = std::ptr::null_mut();
     });
 }
@@ -598,6 +876,400 @@ pub fn imodv_quit() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
+
+    struct ImodvHost {
+        calls: Rc<RefCell<Vec<&'static str>>>,
+        current_view: *mut ImodView,
+        visual_status: i32,
+        window_status: i32,
+    }
+
+    impl ImodvNativeBoundary for ImodvHost {
+        fn current_model_view(&mut self) -> *mut ImodView {
+            self.current_view
+        }
+        fn model_view_icon(&mut self) -> *mut QPixmap {
+            std::ptr::null_mut()
+        }
+        fn raise_model_view(&mut self, _: *mut ImodvWindow) {
+            self.calls.borrow_mut().push("raise");
+        }
+        fn get_visuals(&mut self, _: &mut ImodvApp, _: bool) -> i32 {
+            self.calls.borrow_mut().push("visuals");
+            self.visual_status
+        }
+        fn open_model_view(&mut self, _: &mut ImodvApp, _: bool, _: Rect) -> i32 {
+            self.calls.borrow_mut().push("open");
+            self.window_status
+        }
+        fn imod_draw(&mut self, _: *mut ImodView, _: i32) {
+            self.calls.borrow_mut().push("draw");
+        }
+        fn object_edit_draw(&mut self) {
+            self.calls.borrow_mut().push("object_edit");
+        }
+        fn info_set_object_color(&mut self) {
+            self.calls.borrow_mut().push("info_color");
+        }
+        fn set_modv_dialog_title(&mut self, _: *mut ImodvWindow, title: &str) {
+            self.calls.borrow_mut().push(match title {
+                "3dmodv:" => "standalone_title",
+                "3dmod Model View: " => "model_view_title",
+                _ => "unexpected_title",
+            });
+        }
+        fn undo_model_change(&mut self, _: *mut ImodView) {
+            self.calls.borrow_mut().push("model_change");
+        }
+        fn undo_object_prop_change(&mut self, _: *mut ImodView, object: i32) {
+            self.calls.borrow_mut().push(match object {
+                0 => "object_change_0",
+                _ => "unexpected_object",
+            });
+        }
+        fn undo_finish_unit(&mut self, _: *mut ImodView) {
+            self.calls.borrow_mut().push("finish_unit");
+        }
+        fn close_model_view(&mut self, _: *mut ImodvWindow) {
+            self.calls.borrow_mut().push("close");
+        }
+        fn imodv_draw(&mut self, _: &mut ImodvApp) {
+            self.calls.borrow_mut().push("draw_model_view");
+        }
+        fn restorable_geometry(&mut self, _: *mut ImodvWindow) -> Rect {
+            self.calls.borrow_mut().push("geometry");
+            Rect {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            }
+        }
+        fn record_mod_view_geometry(&mut self, _: Rect) {
+            self.calls.borrow_mut().push("record_geometry");
+        }
+        fn vb_cleanup_vbd(&mut self, _: *mut Imod) {
+            self.calls.borrow_mut().push("vb_cleanup");
+        }
+        fn mv_image_cleanup(&mut self) {
+            self.calls.borrow_mut().push("image_cleanup");
+        }
+        fn free_extra_object(&mut self, _: *mut ImodView, object: i32) {
+            self.calls.borrow_mut().push(match object {
+                1 => "free_box",
+                2 => "free_point",
+                _ => "unexpected_extra",
+            });
+        }
+        fn start_clip_disconnect(&mut self) {
+            self.calls.borrow_mut().push("start_disconnect");
+        }
+        fn stereo_hw_off(&mut self) {
+            self.calls.borrow_mut().push("stereo_off");
+        }
+        fn close_model_view_dialogs(&mut self) {
+            self.calls.borrow_mut().push("close_dialogs");
+        }
+        fn save_settings(&mut self) {
+            self.calls.borrow_mut().push("save_settings");
+        }
+        fn delete_imod_help(&mut self) {
+            self.calls.borrow_mut().push("delete_help");
+        }
+        fn wait_for_clip_disconnect(&mut self) {
+            self.calls.borrow_mut().push("wait_disconnect");
+        }
+        fn exit_application(&mut self) {
+            self.calls.borrow_mut().push("exit");
+        }
+        fn check_for_exit_on_close(&mut self) {
+            self.calls.borrow_mut().push("check_exit");
+        }
+        fn set_app_exiting(&mut self) {
+            self.calls.borrow_mut().push("set_exiting");
+        }
+        fn run_application(&mut self) -> i32 {
+            self.calls.borrow_mut().push("run");
+            0
+        }
+        fn print_window_id(&mut self, _: *mut ImodvWindow) {
+            self.calls.borrow_mut().push("window_id");
+        }
+        fn create_clipboard(&mut self, use_stdin: bool) {
+            self.calls.borrow_mut().push(if use_stdin {
+                "clipboard_stdin"
+            } else {
+                "clipboard"
+            });
+        }
+        fn open_selected_windows(&mut self, window_keys: Option<&str>) {
+            self.calls.borrow_mut().push(match window_keys {
+                Some("ZS") => "selected_zs",
+                Some(_) => "unexpected_selected",
+                None => "selected_none",
+            });
+        }
+        fn show_usage(&mut self, _: &str) {
+            self.calls.borrow_mut().push("usage");
+        }
+        fn show_error(&mut self, _: &str) {
+            self.calls.borrow_mut().push("error");
+        }
+    }
+
+    #[test]
+    fn draw_imod_images_preserves_skip_and_standalone_source_branches() {
+        let mut view = ImodView::default();
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.0.standalone = 0;
+            state.0.vi = &mut view as *mut ImodView as *mut c_void;
+        });
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls: calls.clone(),
+                current_view: std::ptr::null_mut(),
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+        imodv_draw_imod_images(0);
+        assert_eq!(
+            calls.borrow().as_slice(),
+            ["draw", "object_edit", "info_color"]
+        );
+        calls.borrow_mut().clear();
+        imodv_draw_imod_images(1);
+        assert_eq!(calls.borrow().as_slice(), ["object_edit", "info_color"]);
+
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.0.standalone = 1;
+        });
+        calls.borrow_mut().clear();
+        imodv_draw_imod_images(0);
+        assert!(calls.borrow().is_empty());
+        IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    #[test]
+    fn caption_and_change_callbacks_preserve_imodv_source_routes() {
+        let mut view = ImodView::default();
+        let mut model = Imod::default();
+        model.obj.push(Iobj::default());
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.1 = 0;
+            state.0.standalone = 0;
+            state.0.vi = &mut view as *mut ImodView as *mut c_void;
+            state.0.imod = &mut model;
+        });
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls: calls.clone(),
+                current_view: std::ptr::null_mut(),
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+
+        imodv_set_caption();
+        imodv_register_model_chg();
+        imodv_register_object_chg(0);
+        imodv_register_object_chg(1);
+        imodv_finish_chg_unit();
+        assert_eq!(
+            calls.borrow().as_slice(),
+            [
+                "model_view_title",
+                "model_change",
+                "object_change_0",
+                "finish_unit"
+            ]
+        );
+
+        calls.borrow_mut().clear();
+        IMODV_STATE.with(|state| state.borrow_mut().0.standalone = 1);
+        imodv_set_caption();
+        assert_eq!(calls.borrow().as_slice(), ["standalone_title"]);
+        IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    #[test]
+    fn close_and_draw_route_to_the_source_model_view_window() {
+        let mut view = ImodView::default();
+        let mut model = Imod::default();
+        model.obj.push(Iobj::default());
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.1 = 0;
+            state.0.imod = &mut model;
+            state.0.vi = &mut view as *mut ImodView as *mut c_void;
+            state.0.sync_objed_to_cur_obj = 0;
+        });
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls: calls.clone(),
+                current_view: std::ptr::null_mut(),
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+
+        imodv_close();
+        unsafe { imodv_draw() };
+        assert_eq!(calls.borrow().as_slice(), ["close", "draw_model_view"]);
+
+        IMODV_STATE.with(|state| state.borrow_mut().1 = 1);
+        calls.borrow_mut().clear();
+        imodv_close();
+        unsafe { imodv_draw() };
+        assert!(calls.borrow().is_empty());
+        IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    #[test]
+    fn open_preserves_model_view_lifecycle_and_existing_window_raise() {
+        let mut view = ImodView::default();
+        let mut model = Imod::default();
+        model.obj.push(Iobj::default());
+        view.imod = &mut model;
+        view.xsize = 100;
+        view.ysize = 80;
+        view.zsize = 20;
+        view.xybin = 1;
+        view.zbin = 1;
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMODV_STATE.with(|state| state.borrow_mut().1 = 1);
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls: calls.clone(),
+                current_view: &mut view,
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+
+        imodv_open();
+        assert_eq!(calls.borrow().as_slice(), ["visuals", "open"]);
+        assert_eq!(imodv_standalone(), 0);
+        calls.borrow_mut().clear();
+        imodv_open();
+        assert_eq!(calls.borrow().as_slice(), ["raise"]);
+        IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+        IMODV_STATE.with(|state| state.borrow_mut().1 = 1);
+    }
+
+    #[test]
+    fn standalone_main_loads_a_real_model_then_enters_the_native_event_loop() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let arguments = [
+            "3dmodv",
+            "-W",
+            "-L",
+            "-E",
+            "ZS",
+            "fixtures/model-empty-seed.mod",
+        ]
+        .into_iter()
+        .map(|argument| std::ffi::CString::new(argument).unwrap())
+        .collect::<Vec<_>>();
+        let pointers = arguments
+            .iter()
+            .map(|argument| argument.as_ptr())
+            .collect::<Vec<_>>();
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.1 = 1;
+            state.2 = false;
+        });
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls: calls.clone(),
+                current_view: std::ptr::null_mut(),
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+        assert_eq!(
+            unsafe { imodv_main(pointers.len() as i32, pointers.as_ptr()) },
+            0
+        );
+        assert_eq!(
+            calls.borrow().as_slice(),
+            [
+                "visuals",
+                "open",
+                "window_id",
+                "clipboard_stdin",
+                "selected_zs",
+                "run"
+            ]
+        );
+        IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+        IMODV_STATE.with(|state| state.borrow_mut().1 = 1);
+    }
+
+    #[test]
+    fn quit_preserves_source_cleanup_order_for_embedded_and_standalone_viewers() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMODV_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.0.standalone = 0;
+            state.0.bound_box_extra_obj = 1;
+            state.0.cur_point_extra_obj = 2;
+            state.0.rbgcolor = 1 as *mut QColor;
+        });
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls: calls.clone(),
+                current_view: std::ptr::null_mut(),
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+        imodv_quit();
+        assert_eq!(
+            calls.borrow().as_slice(),
+            [
+                "geometry",
+                "record_geometry",
+                "vb_cleanup",
+                "image_cleanup",
+                "free_box",
+                "free_point",
+                "stereo_off",
+                "close_dialogs",
+                "check_exit"
+            ]
+        );
+        calls.borrow_mut().clear();
+        IMODV_STATE.with(|state| state.borrow_mut().0.standalone = 1);
+        imodv_quit();
+        assert_eq!(
+            calls.borrow().as_slice(),
+            [
+                "set_exiting",
+                "geometry",
+                "vb_cleanup",
+                "image_cleanup",
+                "free_box",
+                "free_point",
+                "start_disconnect",
+                "stereo_off",
+                "close_dialogs",
+                "save_settings",
+                "delete_help",
+                "wait_disconnect",
+                "exit"
+            ]
+        );
+        IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+    }
 
     #[test]
     fn initstruct_selects_the_existing_current_object() {
@@ -617,5 +1289,75 @@ mod tests {
         assert_eq!(app.obj_num, 0);
         assert!(std::ptr::eq(app.imod, &*model));
         assert!(!app.obj.is_null());
+    }
+
+    #[derive(Clone)]
+    struct SlicerAngleBoundary {
+        rotations: Rc<RefCell<Vec<Ipoint>>>,
+    }
+
+    impl ImodvSlicerAngleBoundary for SlicerAngleBoundary {
+        fn set_top_slicer_from_model_view(&mut self, rot: &Ipoint) {
+            self.rotations.borrow_mut().push(*rot);
+        }
+    }
+
+    #[test]
+    fn standalone_debug_option_sets_the_source_global_before_host_startup() {
+        crate::imod::three_dmod::imod::IMOD_DEBUG
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let arguments = ["3dmodv", "-D"]
+            .into_iter()
+            .map(|argument| std::ffi::CString::new(argument).unwrap())
+            .collect::<Vec<_>>();
+        let pointers = arguments
+            .iter()
+            .map(|argument| argument.as_ptr())
+            .collect::<Vec<_>>();
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        IMODV_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(ImodvHost {
+                calls,
+                current_view: std::ptr::null_mut(),
+                visual_status: 0,
+                window_status: 0,
+            }));
+        });
+        assert_eq!(
+            unsafe { imodv_main(pointers.len() as i32, pointers.as_ptr()) },
+            3
+        );
+        assert!(
+            crate::imod::three_dmod::imod::IMOD_DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+        );
+        crate::imod::three_dmod::imod::IMOD_DEBUG
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[test]
+    fn new_model_angles_only_routes_linked_rotations_to_the_top_slicer() {
+        let rotations = Rc::new(RefCell::new(Vec::new()));
+        IMODV_SLICER_ANGLE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(SlicerAngleBoundary {
+                rotations: rotations.clone(),
+            }));
+        });
+        IMODV_STATE.with(|state| state.borrow_mut().0.link_to_slicer = 1);
+
+        let linked = Ipoint {
+            x: 12.5,
+            y: -43.,
+            z: 90.,
+        };
+        imodv_new_model_angles(&linked);
+        IMODV_STATE.with(|state| state.borrow_mut().0.link_to_slicer = 0);
+        imodv_new_model_angles(&Ipoint {
+            x: 1.,
+            y: 2.,
+            z: 3.,
+        });
+
+        assert_eq!(&*rotations.borrow(), &[linked]);
+        IMODV_SLICER_ANGLE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
     }
 }

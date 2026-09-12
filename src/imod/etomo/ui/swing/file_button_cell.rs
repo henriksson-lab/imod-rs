@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::etomo_director::ARGUMENTS;
-use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
 use crate::imod::etomo::util::utilities;
 
@@ -16,26 +14,8 @@ use super::field_lock_controller::{FieldLockController, JButton};
 use super::file_chooser::{FileChooser, FileChooserReturnValue, FileChooserSelectionMode};
 use super::file_text_field_interface::FileFilter;
 use super::panel::Dimension;
-
-/// Java `ScaledImage` choice used by this source unit's `SimpleButton`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FileButtonScaledImage {
-    OpenFilePeet,
-    OpenFileFool,
-}
-
-/// `SimpleButton` state and native Swing boundary used by `FileButtonCell`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileButtonBoundary {
-    pub image: FileButtonScaledImage,
-    pub border: Option<String>,
-    pub preferred_size: Dimension,
-    pub size: Dimension,
-    pub name: Option<String>,
-    pub tooltip: Option<String>,
-    pub enabled: bool,
-    pub action_listener_count: usize,
-}
+use super::simple_button::SimpleButton;
+use super::tooltip_formatter::TooltipFormatter;
 
 /// Java final package-private `FileButtonCell`.
 pub struct FileButtonCell {
@@ -48,7 +28,7 @@ pub struct FileButtonCell {
     pub label: Option<String>,
     pub file_filter: Option<Rc<dyn FileFilter>>,
     pub browsing_dir: Option<Rc<dyn BrowsingDirectory>>,
-    pub button: FileButtonBoundary,
+    pub button: SimpleButton,
     pub field_lock_controller: FieldLockController,
     pub background_refresh_count: usize,
     pub table_header: Option<String>,
@@ -60,9 +40,9 @@ impl FileButtonCell {
     /// Java private `FileButtonCell(BaseManager)`.
     fn new(manager: &dyn BaseManager) -> Self {
         let image = if *utilities::APRIL_FOOLS {
-            FileButtonScaledImage::OpenFileFool
+            "OPEN_FILE_FOOL"
         } else {
-            FileButtonScaledImage::OpenFilePeet
+            "OPEN_FILE_PEET"
         };
         let preferred_size = Dimension {
             width: 22,
@@ -78,15 +58,13 @@ impl FileButtonCell {
             label: None,
             file_filter: None,
             browsing_dir: None,
-            button: FileButtonBoundary {
-                image,
-                border: Some("BevelBorder.RAISED".to_owned()),
-                preferred_size,
-                size,
-                name: None,
-                tooltip: None,
-                enabled: true,
-                action_listener_count: 0,
+            button: {
+                let mut button = SimpleButton::new_with_scaled_image(Some(image));
+                button.button.border = Some("BevelBorder.RAISED".to_owned());
+                button.button.abstract_button.preferred_size = Some(preferred_size);
+                button.button.width = size.width;
+                button.button.height = size.height;
+                button
             },
             field_lock_controller: FieldLockController::get_button_instance(JButton {
                 enabled: true,
@@ -133,7 +111,7 @@ impl FileButtonCell {
 
     /// Java private `addListeners`.
     fn add_listeners(&mut self) {
-        self.button.action_listener_count += 1;
+        self.button.button.action_listener_count += 1;
     }
 
     /// Java `setActionTarget(ActionTarget)`.
@@ -169,19 +147,12 @@ impl FileButtonCell {
     /// Java overridden `setName()`.
     pub fn set_name(&mut self) {
         let name = utilities::convert_label_to_name(self.label.as_deref(), true);
-        self.button.name = name.map(|name| format!("bn{SEPARATOR_CHAR}{name}"));
-        if ARGUMENTS.lock().unwrap().is_print_names() {
-            println!(
-                "{} {} ",
-                self.button.name.as_deref().unwrap_or_default(),
-                DEFAULT_DELIMITER
-            );
-        }
+        self.button.set_name(name.as_deref());
     }
 
     /// Java `getName`.
     pub fn get_name(&self) -> Option<&str> {
-        self.button.name.as_deref()
+        self.button.button.name.as_deref()
     }
 
     /// Java `setLabel(String)`.
@@ -200,7 +171,7 @@ impl FileButtonCell {
     }
 
     /// Java overridden `getComponent`.
-    pub fn get_component(&self) -> &FileButtonBoundary {
+    pub fn get_component(&self) -> &SimpleButton {
         &self.button
     }
 
@@ -211,13 +182,13 @@ impl FileButtonCell {
 
     /// Java overridden `getWidth`.
     pub fn get_width(&self) -> i32 {
-        self.button.size.width
+        self.button.button.width
     }
 
     /// Java overridden `setLocked`.
     pub fn set_locked(&mut self, locked: bool) {
         if self.field_lock_controller.set_locked(locked) {
-            self.button.enabled = self
+            self.button.button.enabled = self
                 .field_lock_controller
                 .button
                 .as_ref()
@@ -230,7 +201,7 @@ impl FileButtonCell {
     /// Java overridden `setEditable`.
     pub fn set_editable(&mut self, editable: bool) {
         if self.field_lock_controller.set_editable(editable) {
-            self.button.enabled = self
+            self.button.button.enabled = self
                 .field_lock_controller
                 .button
                 .as_ref()
@@ -243,7 +214,7 @@ impl FileButtonCell {
     /// Java overridden `setEnabled`.
     pub fn set_enabled(&mut self, enabled: bool) {
         self.field_lock_controller.set_enabled(enabled);
-        self.button.enabled = self
+        self.button.button.enabled = self
             .field_lock_controller
             .button
             .as_ref()
@@ -311,7 +282,7 @@ impl FileButtonCell {
     /// Java overridden `setToolTipText(String)`; formatter rendering remains
     /// the native presentation boundary.
     pub fn set_tool_tip_text(&mut self, text: Option<&str>) {
-        self.button.tooltip = text.map(str::to_owned);
+        self.button.button.tooltip = TooltipFormatter::instance().format(text);
     }
 }
 
@@ -381,8 +352,11 @@ mod tests {
         let mut cell = FileButtonCell::get_instance_with_base_manager(&manager);
         cell.set_headers(Some("Table"), Some("Row"), Some("Column"));
         cell.set_name();
-        assert_eq!(cell.button.action_listener_count, 1);
-        assert_eq!(cell.button.border.as_deref(), Some("BevelBorder.RAISED"));
+        assert_eq!(cell.button.button.action_listener_count, 1);
+        assert_eq!(
+            cell.button.button.border.as_deref(),
+            Some("BevelBorder.RAISED")
+        );
         assert_eq!(cell.label.as_deref(), Some("Column"));
         assert_eq!(cell.get_name(), Some("bn.column"));
         assert_eq!(cell.get_text(), None);
@@ -416,10 +390,10 @@ mod tests {
         let mut cell = FileButtonCell::get_instance_with_base_manager(&manager);
         cell.set_locked(true);
         assert!(cell.is_locked());
-        assert!(!cell.button.enabled);
+        assert!(!cell.button.button.enabled);
         assert_eq!(cell.background_refresh_count, 1);
         cell.set_enabled(false);
         assert!(!cell.is_enabled());
-        assert!(!cell.button.enabled);
+        assert!(!cell.button.button.enabled);
     }
 }

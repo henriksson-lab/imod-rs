@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
 use super::radio_button::{RadioButton, RadioButtonGroup};
+use super::radio_ebutton::RadioEbutton;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::extension::{self, Extension};
@@ -90,61 +91,6 @@ pub struct MetaDataBoundary {
     pub raw_image_stack_extension: &'static Extension,
 }
 
-/// Java `RadioEbutton` state particular to its warning flag extension.
-#[derive(Clone, Debug)]
-pub struct RadioEbuttonBoundary {
-    pub radio_button: RadioButton,
-    pub warning_enabled: Option<bool>,
-    pub action_listener_count: usize,
-}
-impl RadioEbuttonBoundary {
-    pub fn get_instance(label: &str, group: Rc<RefCell<RadioButtonGroup>>) -> Self {
-        Self {
-            radio_button: RadioButton::new_in_group(label, group),
-            warning_enabled: None,
-            action_listener_count: 0,
-        }
-    }
-    pub fn set_label(&mut self, label: &str) {
-        self.radio_button.set_text(label);
-    }
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-    pub fn is_selected(&self) -> bool {
-        self.radio_button.is_selected()
-    }
-    pub fn set_selected(&mut self, selected: bool) {
-        self.radio_button.set_selected(selected);
-    }
-    pub fn is_enabled(&self) -> bool {
-        self.radio_button.is_enabled()
-    }
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.radio_button.set_enabled(enabled);
-    }
-    pub fn get_label(&self) -> &str {
-        self.radio_button.get_text()
-    }
-    pub fn checkpoint(&mut self) {
-        self.radio_button.checkpoint();
-    }
-    pub fn is_checkpoint_value(&self) -> bool {
-        self.radio_button.is_checkpoint_value()
-    }
-    pub fn enable_warning(&mut self, value: bool) {
-        self.warning_enabled = Some(value);
-    }
-    pub fn disable_warning(&mut self) {
-        if self.warning_enabled.is_some() {
-            self.warning_enabled = Some(false);
-        }
-    }
-    pub fn set_tooltip(&mut self, tooltip: &str) {
-        self.radio_button.set_tooltip(Some(tooltip));
-    }
-}
-
 /// Java `TiltAnglePanelExpert` action target.
 pub trait TiltAnglePanelExpert {
     fn set_radio_button_state(&mut self, event: TiltAnglePanelActionEvent);
@@ -190,10 +136,10 @@ pub struct TiltAnglePanel {
     pub bg_source: Rc<RefCell<RadioButtonGroup>>,
     pub rb_extract: RadioButton,
     pub pnl_angle: TiltAnglePanelLayout,
-    pub rb_specify: RadioEbuttonBoundary,
+    pub rb_specify: RadioEbutton,
     pub ltf_min: LabeledTextField,
     pub ltf_step: LabeledTextField,
-    pub rb_file: RadioEbuttonBoundary,
+    pub rb_file: RadioEbutton,
     pub expert_listener_count: usize,
     pub axis_id: AxisID,
     /// Java `parent`, set by `setParent`.
@@ -209,9 +155,9 @@ impl TiltAnglePanel {
         let mut rb_extract =
             RadioButton::new_in_group(TiltAngleType::Extract.descr(), bg_source.clone());
         let mut rb_specify =
-            RadioEbuttonBoundary::get_instance(TiltAngleType::Range.descr(), bg_source.clone());
+            RadioEbutton::get_instance(TiltAngleType::Range.descr(), Some(bg_source.clone()));
         let mut rb_file =
-            RadioEbuttonBoundary::get_instance(TiltAngleType::File.descr(), bg_source.clone());
+            RadioEbutton::get_instance(TiltAngleType::File.descr(), Some(bg_source.clone()));
         rb_extract.add_action_listener();
         rb_specify.add_action_listener();
         rb_file.add_action_listener();

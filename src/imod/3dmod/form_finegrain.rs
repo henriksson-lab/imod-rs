@@ -1,8 +1,3 @@
-//! Translation of `IMOD/3dmod/form_finegrain.cpp` and `form_finegrain.h`.
-//!
-//! Qt widgets, docking dialogs, color selectors, and the `finegrain.cpp`
-//! controller are an explicit native boundary; all source slots and dialog
-//! state are retained here.
 #![allow(dead_code)]
 
 use crate::imod::libimod::iobj::{
@@ -32,8 +27,8 @@ pub const WIDTH_3D: i32 = 4;
 pub const SYMTYPE: i32 = 5;
 pub const SYMSIZE: i32 = 6;
 
-/// Native Qt/docking/color-picker/widget/controller seam for this exact form.
 pub trait FineGrainNativeBoundary {
+    fn setup_ui(&mut self);
     fn setup(&mut self);
     fn group(&mut self, i: i32);
     fn enabled(&mut self, i: i32, on: bool);
@@ -46,7 +41,11 @@ pub trait FineGrainNativeBoundary {
     fn gap_text(&mut self, s: &str);
     fn gap_tip(&mut self, s: &str);
     fn value(&mut self, s: &str);
-    fn widths(&mut self);
+    fn format_general_precision(&self, value: f32, precision: i32) -> String;
+    fn rounded_style(&self) -> bool;
+    fn set_button_width(&mut self, which: i32, rounded: bool, factor: f32, text: &str) -> i32;
+    fn ds_label_font_width(&self) -> i32;
+    fn set_fixed_width(&mut self, which: i32, width: i32);
     fn retranslate(&mut self);
     fn raise_line(&mut self);
     fn raise_fill(&mut self);
@@ -88,11 +87,11 @@ pub trait FineGrainNativeBoundary {
     fn accept(&mut self);
     fn mac_menu(&mut self);
     fn font_change(&self) -> bool;
+    fn widget_change_event(&mut self);
 }
-/// `FineGrainForm` in `form_finegrain.h`; pointer members are booleans because
-/// their lifetime is owned by the native dialog implementation.
 #[derive(Clone, Debug)]
 pub struct FineGrainForm {
+    pub m_top_win: bool,
     pub m_cur_fill_blue: i32,
     pub m_cur_blue: i32,
     pub m_cur_fill_green: i32,
@@ -121,10 +120,14 @@ pub struct FineGrainForm {
     pub m_sym_table: [i32; 4],
     pub m_line_selector: bool,
     pub m_fill_selector: bool,
+    pub m_dslabels: [bool; 7],
+    pub m_trans_slider: bool,
+    pub surf_cont_pt_group: bool,
 }
 impl Default for FineGrainForm {
     fn default() -> Self {
         Self {
+            m_top_win: false,
             m_cur_fill_blue: 0,
             m_cur_blue: 0,
             m_cur_fill_green: 0,
@@ -158,32 +161,48 @@ impl Default for FineGrainForm {
             ],
             m_line_selector: false,
             m_fill_selector: false,
+            m_dslabels: [true; 7],
+            m_trans_slider: false,
+            surf_cont_pt_group: false,
         }
     }
 }
 impl FineGrainForm {
-    /// `FineGrainForm::FineGrainForm`.
     pub fn new(n: &mut dyn FineGrainNativeBoundary) -> Self {
         let mut s = Self::default();
+        s.m_top_win = true;
+        n.setup_ui();
         s.init(n);
         s
     }
-    /// `FineGrainForm::~FineGrainForm`.
     pub fn destroy(&mut self) {}
-    /// `FineGrainForm::languageChange`.
     pub fn language_change(&mut self, n: &mut dyn FineGrainNativeBoundary) {
         n.retranslate()
     }
-    /// `FineGrainForm::init`.
     pub fn init(&mut self, n: &mut dyn FineGrainNativeBoundary) {
         n.setup();
+        self.m_trans_slider = true;
+        self.surf_cont_pt_group = true;
         self.set_font_dependent_widths(n)
     }
-    /// `FineGrainForm::setFontDependentWidths`.
     pub fn set_font_dependent_widths(&mut self, n: &mut dyn FineGrainNativeBoundary) {
-        n.widths()
+        let rounded = n.rounded_style();
+        let dswid = n.set_button_width(0, rounded, 1.3, "Set");
+        n.set_fixed_width(1, dswid);
+        let cwid = n.set_button_width(2, rounded, 1.25, "Clear");
+        let lwid = n.set_button_width(3, rounded, 1.25, "Last");
+        let ewid = n.set_button_width(4, rounded, 1.25, "End");
+        let dswid = (1.1 * n.ds_label_font_width() as f32 + 0.5) as i32;
+        n.set_fixed_width(5, dswid);
+        for i in 1..7 {
+            n.set_fixed_width(5 + i as i32, dswid);
+            n.set_fixed_width(12 + i as i32, lwid);
+            n.set_fixed_width(19 + i as i32, ewid);
+            n.set_fixed_width(26 + i as i32, cwid);
+        }
+        let cwid = n.set_button_width(33, rounded, 1.25, "Previous");
+        n.set_fixed_width(34, cwid)
     }
-    /// `FineGrainForm::update`.
     pub fn update(
         &mut self,
         pcs: i32,
@@ -272,15 +291,13 @@ impl FineGrainForm {
         n.spin(70, p.connect);
         n.enabled(70, pcs < 2 && enabled > 1);
         let v = if enabled != 0 && flags & CHANGED_VALUE1 != 0 {
-            format!("{:.5}", p.value1)
+            n.format_general_precision(p.value1, 5)
         } else {
             String::new()
         };
         n.value(&v)
     }
-    /// `FineGrainForm::ptContSurfSelected`.
     pub fn pt_cont_surf_selected(&mut self, v: i32, n: &mut dyn FineGrainNativeBoundary) {
-        self.m_pt_cont_surf = v;
         n.enabled(20, v == 1);
         n.pt_cont_surf(v)
     }
@@ -510,6 +527,7 @@ impl FineGrainForm {
     }
     /// `FineGrainForm::topChangeEvent`.
     pub fn top_change_event(&mut self, n: &mut dyn FineGrainNativeBoundary) {
+        n.widget_change_event();
         n.mac_menu();
         if n.font_change() {
             self.set_font_dependent_widths(n)
@@ -525,6 +543,7 @@ mod tests {
         hot: i32,
     }
     impl FineGrainNativeBoundary for N {
+        fn setup_ui(&mut self) {}
         fn setup(&mut self) {}
         fn group(&mut self, _: i32) {}
         fn enabled(&mut self, _: i32, _: bool) {}
@@ -537,7 +556,19 @@ mod tests {
         fn gap_text(&mut self, _: &str) {}
         fn gap_tip(&mut self, _: &str) {}
         fn value(&mut self, _: &str) {}
-        fn widths(&mut self) {}
+        fn format_general_precision(&self, value: f32, _: i32) -> String {
+            value.to_string()
+        }
+        fn rounded_style(&self) -> bool {
+            false
+        }
+        fn set_button_width(&mut self, _: i32, _: bool, _: f32, _: &str) -> i32 {
+            0
+        }
+        fn ds_label_font_width(&self) -> i32 {
+            0
+        }
+        fn set_fixed_width(&mut self, _: i32, _: i32) {}
         fn retranslate(&mut self) {}
         fn raise_line(&mut self) {
             self.e.push("raise".into())
@@ -603,11 +634,13 @@ mod tests {
         fn font_change(&self) -> bool {
             false
         }
+        fn widget_change_event(&mut self) {}
     }
     #[test]
     fn selector_lifecycle() {
         let mut n = N::default();
         let mut f = FineGrainForm::new(&mut n);
+        assert!(f.m_top_win && f.m_trans_slider && f.surf_cont_pt_group);
         f.m_cur_red = 4;
         f.m_cur_green = 5;
         f.m_cur_blue = 6;

@@ -4,6 +4,7 @@
 //! values are retained directly and every source slot forwards to `mv_modeled`.
 #![allow(dead_code)]
 use crate::imod::three_dmod::imodv::ImodvApp;
+use crate::imod::three_dmod::mv_input::{self, InputEvent};
 use crate::imod::three_dmod::mv_modeled::{self, ImodvModeled};
 /// Original `imodvModeledForm`.
 #[derive(Clone, Debug, Default)]
@@ -21,6 +22,9 @@ pub struct ImodvModeledForm {
     pub delete_on_close: bool,
     pub always_show_tooltips: bool,
     pub has_focus: bool,
+    pub close_event_accepted: bool,
+    pub base_change_event_called: bool,
+    pub mac_menu_checked: bool,
 }
 /// Portable QKeyEvent subset consumed by source `keyPressEvent` / `keyReleaseEvent`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -47,13 +51,6 @@ impl ImodvModeledForm {
     pub fn language_change(&mut self) {}
     pub fn model_changed(&mut self, app: &mut ImodvApp, dialog: &mut ImodvModeled, which: i32) {
         mv_modeled::imodv_modeled_number(app, which, dialog);
-        self.set_model(
-            dialog.model_number,
-            dialog.model_count,
-            dialog.file_name.clone(),
-            dialog.internal_name.clone(),
-            dialog.pixel_string.clone(),
-        );
     }
     pub fn edit_clicked(&mut self, app: &mut ImodvApp, which: i32) {
         mv_modeled::imodv_modeled_edit(app, which);
@@ -102,6 +99,7 @@ impl ImodvModeledForm {
     }
     pub fn top_close_event(&mut self, app: &mut ImodvApp, dialog: &mut ImodvModeled) {
         mv_modeled::imodv_modeled_closing(app, dialog);
+        self.close_event_accepted = true;
         self.top_window_open = false;
     }
     pub fn key_press_event(
@@ -114,14 +112,16 @@ impl ImodvModeledForm {
             mv_modeled::imodv_modeled_done(dialog);
             self.top_window_open = false;
         } else {
-            self.has_focus = true;
+            mv_input::imodv_key_press(app, InputEvent::default());
         }
     }
-    pub fn key_release_event(&mut self, _app: &mut ImodvApp, _event: ModeledKeyEvent) {}
+    pub fn key_release_event(&mut self, app: &mut ImodvApp, _event: ModeledKeyEvent) {
+        mv_input::imodv_key_release(app, InputEvent::default());
+    }
     pub fn top_change_event(&mut self, font_changed: bool) {
-        if font_changed {
-            self.has_focus = true;
-        }
+        self.base_change_event_called = true;
+        self.mac_menu_checked = true;
+        let _ = font_changed;
     }
 }
 #[cfg(test)]
@@ -142,5 +142,18 @@ mod tests {
         f.pixel_size = "2.5 nm".into();
         f.new_pixel_size(&mut app, &mut d);
         assert_eq!(m.pixsize, 2.5);
+    }
+
+    #[test]
+    fn source_close_key_and_change_paths_dispatch() {
+        let mut app = ImodvApp::default();
+        let mut dialog = ImodvModeled::default();
+        let mut form = imodv_modeled_form_new(&app);
+        form.key_press_event(&mut app, &mut dialog, ModeledKeyEvent::default());
+        form.key_release_event(&mut app, ModeledKeyEvent::default());
+        form.top_close_event(&mut app, &mut dialog);
+        assert!(form.close_event_accepted);
+        form.top_change_event(true);
+        assert!(form.base_change_event_called && form.mac_menu_checked);
     }
 }

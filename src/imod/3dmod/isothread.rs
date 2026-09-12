@@ -65,6 +65,10 @@ pub struct ImodvIsosurface {
     pub m_param_load_confirmed: i32,
     pub m_new_model_opened: bool,
     pub m_ctrl_pressed: bool,
+    /// `DialogFrame::mRoundedStyle`, refreshed by `topChangeEvent`.
+    pub m_rounded_style: bool,
+    /// The file-static top-window pointer is cleared by `topCloseEvent`.
+    pub m_top_window_open: bool,
     pub m_extra_obj_num: i32,
     pub m_box_obj_num: i32,
 }
@@ -109,6 +113,8 @@ impl Default for ImodvIsosurface {
             m_param_load_confirmed: 1,
             m_new_model_opened: false,
             m_ctrl_pressed: false,
+            m_rounded_style: false,
+            m_top_window_open: true,
             m_extra_obj_num: -1,
             m_box_obj_num: -1,
         }

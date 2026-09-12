@@ -3,10 +3,19 @@
 
 use super::etomo_menu::{EtomoMenu, ManagerMenuState, MenuTarget};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::axis_type::AxisType;
 
 /// Java `FrameType` values used by these three source units.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameType {
+    Main,
+    Sub,
+}
+/// The source `EtomoFrame` selected by private `getOtherFrame` or `getFrame`.
+/// The native MainFrame/SubFrame owners retain the corresponding Rust object.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EtomoFrameRoute {
+    This,
     Main,
     Sub,
 }
@@ -37,8 +46,14 @@ pub struct EtomoFrame {
     pub main: bool,
     pub menu: EtomoMenu,
     pub main_panel_present: bool,
+    pub main_panel_axis_type: Option<AxisType>,
+    pub main_panel_showing_setup: bool,
+    pub main_panel_showing_axis_a: bool,
+    pub main_panel_showing_both_axis: bool,
     pub current_manager_present: bool,
     pub single_frame: bool,
+    pub main_frame_registered: bool,
+    pub sub_frame_registered: bool,
     pub presentation: FramePresentation,
     pub axis_id: Option<AxisID>,
     pub saved_location: Option<(i32, i32)>,
@@ -54,8 +69,14 @@ impl EtomoFrame {
             main: false,
             menu: EtomoMenu::get_instance(false),
             main_panel_present: false,
+            main_panel_axis_type: None,
+            main_panel_showing_setup: false,
+            main_panel_showing_axis_a: false,
+            main_panel_showing_both_axis: false,
             current_manager_present: false,
             single_frame,
+            main_frame_registered: false,
+            sub_frame_registered: false,
             presentation: FramePresentation::default(),
             axis_id: None,
             saved_location: None,
@@ -296,13 +317,45 @@ impl EtomoFrame {
         Err("Etomo FileChooser.java is not yet translated".into())
     }
     pub fn get_axis_id(&self) -> Option<AxisID> {
-        self.axis_id
+        if !self.main {
+            return Some(AxisID::Second);
+        }
+        if !self.main_panel_present {
+            return None;
+        }
+        if self.main_panel_axis_type == Some(AxisType::SingleAxis) || self.main_panel_showing_setup
+        {
+            return Some(AxisID::Only);
+        }
+        if !self.main_panel_showing_axis_a {
+            return Some(AxisID::Second);
+        }
+        Some(AxisID::First)
     }
-    pub fn get_other_frame(&self) -> bool {
-        self.single_frame
+    pub fn get_other_frame(&self) -> Option<EtomoFrameRoute> {
+        if self.single_frame {
+            return Some(EtomoFrameRoute::This);
+        }
+        if self.main {
+            return self.sub_frame_registered.then_some(EtomoFrameRoute::Sub);
+        }
+        self.main_frame_registered.then_some(EtomoFrameRoute::Main)
     }
-    pub fn get_frame(&self, _axis_id: AxisID) -> &Self {
-        self
+    pub fn get_frame(&self, axis_id: AxisID) -> Result<EtomoFrameRoute, String> {
+        if self.single_frame {
+            return Ok(EtomoFrameRoute::This);
+        }
+        if !self.main_frame_registered {
+            return Err("MainFrame instance was not registered.".into());
+        }
+        if axis_id != AxisID::Second {
+            return Ok(EtomoFrameRoute::Main);
+        }
+        if self.main_panel_present && self.main_panel_showing_both_axis && self.sub_frame_registered
+        {
+            return Ok(EtomoFrameRoute::Sub);
+        }
+        Ok(EtomoFrameRoute::Main)
     }
 }
 
@@ -314,5 +367,29 @@ mod tests {
         let mut frame = EtomoFrame::new();
         frame.set_menu_3dmod_bin_by_2(true);
         assert!(frame.is_menu_3dmod_bin_by_2());
+    }
+
+    #[test]
+    fn source_axis_and_frame_routing_branches_are_preserved() {
+        let mut frame = EtomoFrame::new();
+        frame.main = true;
+        assert_eq!(frame.get_axis_id(), None);
+
+        frame.main_panel_present = true;
+        frame.main_panel_axis_type = Some(AxisType::SingleAxis);
+        assert_eq!(frame.get_axis_id(), Some(AxisID::Only));
+
+        frame.main_panel_axis_type = Some(AxisType::DualAxis);
+        frame.main_panel_showing_axis_a = false;
+        assert_eq!(frame.get_axis_id(), Some(AxisID::Second));
+
+        frame.main_panel_showing_axis_a = true;
+        frame.main_frame_registered = true;
+        frame.main_panel_showing_both_axis = true;
+        frame.sub_frame_registered = true;
+        assert_eq!(frame.get_axis_id(), Some(AxisID::First));
+        assert_eq!(frame.get_other_frame(), Some(EtomoFrameRoute::Sub));
+        assert_eq!(frame.get_frame(AxisID::Second), Ok(EtomoFrameRoute::Sub));
+        assert_eq!(frame.get_frame(AxisID::First), Ok(EtomoFrameRoute::Main));
     }
 }

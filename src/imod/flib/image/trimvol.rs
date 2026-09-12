@@ -9,8 +9,8 @@
 
 use crate::imod::flib::subrs::hvem::b3ddate::b3d_date;
 use crate::imod::libiimod::iimage::{
-    IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_read_section_float,
-    ii_sync_from_mrc_header,
+    IIFILE_DEFAULT, IIFILE_MRC, ii_close, ii_fill_mrc_header, ii_open, ii_open_new,
+    ii_read_section_float, ii_sync_from_mrc_header,
 };
 use crate::imod::libiimod::mrcfiles::{
     LoadInfo, MRC_MODE_FLOAT, MRC_NLABELS, MrcHeader, mrc_head_new, mrc_head_write,
@@ -299,6 +299,24 @@ pub fn trimvol() -> i32 {
         let output = ii_open_new(output_name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
         if output.is_null() {
             println!("ERROR: trimvol - Opening output file");
+            ii_close(input);
+            return 1;
+        }
+        // `iiOpenNew` resolves `IIFILE_DEFAULT` through `b3dOutputFileType`
+        // (`iimage.c`), so `IMOD_OUTPUT_FORMAT` or an earlier `-T` can make
+        // this a TIFF or JPEG file -- in which case `ImodImageFile.header` is
+        // the libtiff `TIFF *` (`iitif.c:204, 687`) or the JPEG state, not an
+        // `MrcHeader`, and everything below (`mrc_head_new`, `mrc_head_write`
+        // on `(*output).fp`, `mrc_write_section_any`) would write MRC bytes
+        // over it.  The source never reaches this: `trimvol:350-360` delegates
+        // to `newstack`, which writes through the unit layer and handles every
+        // output type.  This direct route is MRC-only, so refuse the
+        // combination by name rather than corrupt the file.
+        if (*output).file != IIFILE_MRC {
+            println!(
+                "ERROR: trimvol - This translation writes the trimmed volume directly and can only write MRC; unset IMOD_OUTPUT_FORMAT"
+            );
+            ii_close(output);
             ii_close(input);
             return 1;
         }

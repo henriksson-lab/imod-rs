@@ -436,6 +436,11 @@ impl MultiLineButton {
         }
         if text2.is_none() {
             self.button.text = text.map(str::to_owned);
+            // `JButton.getActionCommand()` defaults to its displayed text.
+            // Java's chooser relies on that default for one-line labels.
+            if !self.action_command_set {
+                self.button.action_command = text.map(str::to_owned);
+            }
             self.button.label1 = None;
             self.button.label2 = None;
             self.button.has_border_layout = false;

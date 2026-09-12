@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 use super::appearance_extension::FlagType;
+use super::grid_bag_extension::GridBagExtension;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
 use crate::imod::etomo::util::utilities;
 use std::path::{Path, PathBuf};
@@ -70,11 +71,6 @@ pub struct ControlComponentModuleBoundary {
     pub component_control_return: bool,
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct GridBagExtensionBoundary {
-    pub add_count: usize,
-    pub remove_count: usize,
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TextFlagExtensionBoundary {
     pub debug: bool,
     pub update_count: usize,
@@ -107,7 +103,7 @@ pub struct ComboBoxEfield {
     pub appearance_extension_editable: bool,
     pub appearance_extension_flag_type: Option<FlagType>,
     pub flag_extension: Option<TextFlagExtensionBoundary>,
-    pub grid_bag_extension: Option<GridBagExtensionBoundary>,
+    pub grid_bag_extension: Option<GridBagExtension>,
     pub choice_list_set: bool,
     pub debug: bool,
     pub value_manipulation_extension: Option<String>,
@@ -440,15 +436,15 @@ impl ComboBoxEfield {
     }
     pub fn remove(&mut self) {
         if let Some(v) = &mut self.grid_bag_extension {
-            v.remove_count += 1;
+            v.remove();
         }
     }
     pub fn add(&mut self) {
         if self.grid_bag_extension.is_none() {
-            self.grid_bag_extension = Some(GridBagExtensionBoundary::default());
+            self.grid_bag_extension = Some(GridBagExtension::new());
         }
         if let Some(v) = &mut self.grid_bag_extension {
-            v.add_count += 1;
+            v.add(0, (0, 0));
         }
     }
     pub fn set_text_files(&mut self, _files: Vec<PathBuf>) {}

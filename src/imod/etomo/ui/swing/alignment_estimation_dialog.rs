@@ -12,6 +12,7 @@ use crate::imod::etomo::process::imod_process::{BeadFixerMode, Run3dmodMenuOptio
 use crate::imod::etomo::r#type::axis_id::AxisID;
 
 use super::context_popup::{ContextPopup, GraphTask, MouseEvent};
+use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::multi_line_button::MultiLineButton;
 use super::tiltalign_panel::{TiltalignPanel, TiltalignParameter};
 
@@ -21,10 +22,17 @@ pub const VIEW_EDIT_FIDUCIAL_MODEL: &str = "View/Edit Fiducial Model";
 pub const VIEW_3D_MODEL: &str = "View 3D Model";
 pub const VIEW_RESIDUAL_VECTORS: &str = "View Residual Vectors";
 
+/// The one `FileType` singleton passed by this source unit.  Resolving its
+/// filename remains in `FileType.java`/the manager boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlignmentEstimationFileType {
+    Fiducial3dModel,
+}
+
 /// Direct `ApplicationManager` calls made by `AlignmentEstimationDialog`.
 pub trait AlignmentEstimationDialogApplicationManager {
     fn fine_alignment(&mut self, axis_id: AxisID, button: &MultiLineButton);
-    fn imod_view_model(&mut self, axis_id: AxisID);
+    fn imod_view_model(&mut self, axis_id: AxisID, file_type: AlignmentEstimationFileType);
     fn imod_fix_fiducials(
         &mut self,
         axis_id: AxisID,
@@ -34,6 +42,13 @@ pub trait AlignmentEstimationDialogApplicationManager {
     fn imod_view_residuals(&mut self, axis_id: AxisID, options: Option<Run3dmodMenuOptions>);
     fn done_alignment_estimation_dialog(&mut self, axis_id: AxisID);
     fn pack(&mut self, axis_id: AxisID);
+}
+
+/// The constructor's two direct `ApplicationManager` queries.  Keeping this
+/// separate avoids pretending that the dialog owns the process-result factory.
+pub trait AlignmentEstimationDialogFactory {
+    fn get_compute_alignment(&self, axis_id: AxisID) -> MultiLineButton;
+    fn is_advanced_fine_alignment(&self, axis_id: AxisID) -> bool;
 }
 
 /// `BaseScreenState` subset delegated unchanged to `TiltalignPanel`.
@@ -85,6 +100,10 @@ pub struct AlignmentEstimationDialogLayout {
     pub panel_button_order: Vec<String>,
     pub top_button_order: Vec<String>,
     pub bottom_button_order: Vec<String>,
+    pub alignment_panel_order: Vec<String>,
+    /// Java constructs this JScrollPane but adds `pnlAlignEst` directly.
+    pub scroll_pane_created: bool,
+    pub scroll_pane_viewport_view: Option<String>,
     pub mouse_listener_count: usize,
 }
 
@@ -133,6 +152,13 @@ impl AlignmentEstimationDialog {
                 ],
                 top_button_order: vec!["btnComputeAlignment".into(), "btnImod".into()],
                 bottom_button_order: vec!["btnView3DModel".into(), "btnViewResiduals".into()],
+                alignment_panel_order: vec![
+                    "pnlTiltalign".into(),
+                    "rigidArea(x5,y0)".into(),
+                    "panelButton".into(),
+                ],
+                scroll_pane_created: true,
+                scroll_pane_viewport_view: Some("pnlAlignEst".into()),
                 mouse_listener_count: 2,
             },
             btn_compute_alignment,
@@ -153,23 +179,39 @@ impl AlignmentEstimationDialog {
         dialog.btn_view_3d_model.add_action_listener();
         dialog.btn_view_residuals.add_action_listener();
         dialog.btn_imod.add_action_listener();
-        dialog.update_advanced_without_manager();
+        dialog.pnl_tiltalign.update_advanced(dialog.advanced);
         dialog.pnl_tiltalign.set_first_tab();
         dialog.set_tool_tip_text();
+        dialog
+    }
+
+    /// Source constructor including the `ApplicationManager` factory and
+    /// `UIHarness.INSTANCE.pack` boundary invoked by `updateAdvanced`.
+    pub fn get_instance<
+        M: AlignmentEstimationDialogApplicationManager + AlignmentEstimationDialogFactory,
+    >(
+        manager: &mut M,
+        axis_id: AxisID,
+    ) -> Self {
+        let button = manager.get_compute_alignment(axis_id);
+        let advanced = manager.is_advanced_fine_alignment(axis_id);
+        let mut dialog = Self::new(axis_id, button, advanced);
+        dialog.update_advanced(manager);
         dialog
     }
 
     pub fn set_parameters<P: AlignmentEstimationScreenState>(&mut self, screen_state: &P) {
         self.pnl_tiltalign.set_parameters(screen_state);
     }
+    /// Java `getParameters(RestrictalignParam, boolean)`.
     pub fn get_restrictalign_parameters<P: AlignmentEstimationParameter>(
         &mut self,
         param: &mut P,
         do_validation: bool,
-    ) -> Result<bool, FortranInputSyntaxException> {
+    ) -> bool {
         self.pnl_tiltalign
             .get_parameters(param, do_validation)
-            .map_err(|e| FortranInputSyntaxException::new(&e.to_string()))
+            .unwrap_or(false)
     }
     pub fn set_patch_tracking(&mut self, input: bool) {
         self.patch_tracking = input;
@@ -212,14 +254,15 @@ impl AlignmentEstimationDialog {
                 ))
             })
     }
+    /// Java `getParameters(MakecomfileParam, boolean)`.
     pub fn get_makecomfile_parameters<P: AlignmentEstimationParameter>(
         &mut self,
         param: &mut P,
         do_validation: bool,
-    ) -> Result<bool, FortranInputSyntaxException> {
+    ) -> bool {
         self.pnl_tiltalign
             .get_parameters(param, do_validation)
-            .map_err(|e| FortranInputSyntaxException::new(&e.to_string()))
+            .unwrap_or(false)
     }
     pub fn is_valid(&mut self) -> bool {
         self.pnl_tiltalign.is_valid()
@@ -280,12 +323,12 @@ impl AlignmentEstimationDialog {
             self.add_log_file_tab(name, label, &mut log_file_set, &mut align_labels, user_dir);
         }
         let graph = [
-            "Rotation",
-            "Tilt Skew",
-            "Magnification",
-            "X Stretch",
-            "Residuals",
-            "Average Residual",
+            "Plot rotation",
+            "Plot delta tilt and skew",
+            "Plot magnification",
+            "Plot X-stretch (dmag)",
+            "Plot global mean residual",
+            "Plot average of local mean residual",
         ]
         .into_iter()
         .map(|description| GraphTask {
@@ -315,26 +358,25 @@ impl AlignmentEstimationDialog {
         self.btn_compute_alignment.remove_action_listener();
         self.displayed = false;
     }
-    fn update_advanced_without_manager(&mut self) {
-        self.pnl_tiltalign.update_advanced(self.advanced);
-    }
+    /// Java private `updateAdvanced`.
     pub fn update_advanced<M: AlignmentEstimationDialogApplicationManager>(
         &mut self,
         manager: &mut M,
     ) {
-        self.update_advanced_without_manager();
+        self.pnl_tiltalign.update_advanced(self.advanced);
         manager.pack(self.axis_id);
     }
     pub fn action<M: AlignmentEstimationDialogApplicationManager>(
         &mut self,
         manager: &mut M,
         command: &str,
+        _deferred_3dmod_button: Option<&mut dyn Deferred3dmodButton>,
         options: Option<Run3dmodMenuOptions>,
     ) {
         if self.btn_compute_alignment.get_action_command() == Some(command) {
             manager.fine_alignment(self.axis_id, &self.btn_compute_alignment);
         } else if self.btn_view_3d_model.get_action_command() == Some(command) {
-            manager.imod_view_model(self.axis_id);
+            manager.imod_view_model(self.axis_id, AlignmentEstimationFileType::Fiducial3dModel);
         } else if self.btn_imod.action_command == command {
             manager.imod_fix_fiducials(
                 self.axis_id,
@@ -371,7 +413,7 @@ impl AlignmentEstimationActionListener {
         manager: &mut M,
         action_command: &str,
     ) {
-        dialog.action(manager, action_command, None);
+        dialog.action(manager, action_command, None, None);
     }
 }
 
@@ -387,8 +429,8 @@ mod tests {
         fn fine_alignment(&mut self, axis: AxisID, _: &MultiLineButton) {
             self.calls.push(format!("fine{}", axis.get_extension()));
         }
-        fn imod_view_model(&mut self, _: AxisID) {
-            self.calls.push("model".into());
+        fn imod_view_model(&mut self, _: AxisID, file_type: AlignmentEstimationFileType) {
+            self.calls.push(format!("model{:?}", file_type));
         }
         fn imod_fix_fiducials(
             &mut self,
@@ -406,6 +448,14 @@ mod tests {
         }
         fn pack(&mut self, _: AxisID) {
             self.calls.push("pack".into());
+        }
+    }
+    impl AlignmentEstimationDialogFactory for Manager {
+        fn get_compute_alignment(&self, _axis_id: AxisID) -> MultiLineButton {
+            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT))
+        }
+        fn is_advanced_fine_alignment(&self, _axis_id: AxisID) -> bool {
+            true
         }
     }
     #[test]
@@ -429,6 +479,19 @@ mod tests {
                 .unwrap()
                 .contains("fiducial")
         );
+        assert!(dialog.layout.scroll_pane_created);
+        assert_eq!(
+            dialog.layout.alignment_panel_order,
+            ["pnlTiltalign", "rigidArea(x5,y0)", "panelButton"]
+        );
+    }
+    #[test]
+    fn source_constructor_uses_factory_advanced_state_and_packs() {
+        let mut manager = Manager::default();
+        let dialog = AlignmentEstimationDialog::get_instance(&mut manager, AxisID::First);
+        assert!(dialog.advanced);
+        assert!(dialog.pnl_tiltalign.advanced);
+        assert_eq!(manager.calls, ["pack"]);
     }
     #[test]
     fn actions_preserve_source_routes_and_patch_tracking_mode() {
@@ -444,15 +507,15 @@ mod tests {
             VIEW_EDIT_FIDUCIAL_MODEL,
             VIEW_RESIDUAL_VECTORS,
         ] {
-            dialog.action(&mut manager, command, None);
+            dialog.action(&mut manager, command, None, None);
         }
         dialog.set_patch_tracking(true);
-        dialog.action(&mut manager, VIEW_EDIT_FIDUCIAL_MODEL, None);
+        dialog.action(&mut manager, VIEW_EDIT_FIDUCIAL_MODEL, None, None);
         assert_eq!(
             manager.calls,
             [
                 "fine",
-                "model",
+                "modelFiducial3dModel",
                 "fixResidualMode",
                 "residuals",
                 "fixPatchTrackingResidualMode"
@@ -478,5 +541,36 @@ mod tests {
         assert!(!dialog.displayed);
         assert_eq!(dialog.btn_compute_alignment.button.action_listener_count, 0);
         assert_eq!(manager.calls, ["pack", "done"]);
+    }
+    #[test]
+    fn context_popup_preserves_axis_window_label_graph_tasks_and_empty_log_filtering() {
+        let mut dialog = AlignmentEstimationDialog::new(
+            AxisID::Second,
+            MultiLineButton::new_with_label(Some(COMPUTE_ALIGNMENT)),
+            false,
+        );
+        dialog
+            .pop_up_context_menu(
+                MouseEvent::default(),
+                Path::new("/definitely-not-a-log-dir"),
+            )
+            .unwrap();
+        let popup = dialog.context_popup.as_ref().unwrap();
+        assert_eq!(
+            popup.log_file_set_window_label.as_ref().unwrap(),
+            &["Align Axis:b"]
+        );
+        assert_eq!(
+            popup.log_file_set.as_ref().unwrap(),
+            &[Vec::<String>::new()]
+        );
+        assert_eq!(
+            popup.graph_task.as_ref().unwrap()[0].description,
+            "Plot rotation"
+        );
+        assert_eq!(
+            popup.update_log_command_name.as_deref(),
+            Some("Align Axis:b")
+        );
     }
 }

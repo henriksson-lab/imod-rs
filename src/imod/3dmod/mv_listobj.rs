@@ -20,6 +20,27 @@ pub const OBJGRP_TURNON: i32 = 5;
 pub const OBJGRP_TURNOFF: i32 = 6;
 pub const OBJGRP_OTHERSON: i32 = 7;
 pub const OBJGRP_OTHERSOFF: i32 = 8;
+pub const OBJLIST_BUTTON_LABELS: [&str; OBJLIST_NUMBUTTONS] = [
+    "New", "Delete", "Clear", "Add All", "Swap", "ON", "OFF", "On", "Off",
+];
+
+/// Qt/docking and IMODV input operations that stay at the native boundary of
+/// `mv_listobj.cpp`.
+pub trait ImodvOlistNativeBoundary {
+    fn set_focus(&mut self);
+    fn info_input(&mut self);
+    fn adjust_frame_size(&mut self);
+    fn rounded_style(&mut self) -> bool;
+    fn button_width(&mut self, rounded: bool, factor: f32, text: &str) -> i32;
+    fn set_button_width(&mut self, button: usize, width: i32);
+    fn widget_change_event(&mut self);
+    fn check_and_set_mac_menu(&mut self);
+    fn remove_dialog(&mut self);
+    fn accept_close(&mut self);
+    fn close_window(&mut self);
+    fn key_press(&mut self);
+    fn key_release(&mut self);
+}
 /// Original `ImodvOlist` widget and static button/group variables.
 #[derive(Clone, Debug, Default)]
 pub struct ImodvOlist {
@@ -294,12 +315,20 @@ impl ImodvOlist {
             }
         }
     }
-    pub fn cur_group_changed(&mut self, model: &Imod, value: i32) {
+    pub fn cur_group_changed(
+        &mut self,
+        model: &Imod,
+        value: i32,
+        native: &mut dyn ImodvOlistNativeBoundary,
+    ) {
+        native.set_focus();
         self.current_group = value - 1;
         self.update_groups(model);
         self.last_but_toggled = -1;
     }
-    pub fn return_pressed(&mut self) {}
+    pub fn return_pressed(&mut self, native: &mut dyn ImodvOlistNativeBoundary) {
+        native.set_focus();
+    }
     /// Original `ImodvOlist::updateGroups`.
     pub fn update_groups(&mut self, model: &Imod) {
         if self.current_group < 0 || self.current_group as usize >= model.group_list.len() {
@@ -319,30 +348,101 @@ impl ImodvOlist {
             *value = g.obj_list.contains(&(ob as i32));
         }
     }
-    pub fn adjust_frame_size(&mut self) {}
-    pub fn set_font_dependent_widths(&mut self) {}
-    pub fn top_change_event(&mut self) {}
-    pub fn top_close_event(&mut self) {
+    pub fn adjust_frame_size(&mut self, native: &mut dyn ImodvOlistNativeBoundary) {
+        native.info_input();
+        native.adjust_frame_size();
+    }
+    pub fn set_font_dependent_widths(&mut self, native: &mut dyn ImodvOlistNativeBoundary) {
+        let rounded = native.rounded_style();
+        let min_width = native.button_width(rounded, 1.3, OBJLIST_BUTTON_LABELS[0]);
+        for (button, label) in OBJLIST_BUTTON_LABELS.iter().enumerate() {
+            let width = native.button_width(rounded, 1.3, label);
+            native.set_button_width(button, min_width.max(width));
+        }
+    }
+    pub fn top_change_event(
+        &mut self,
+        font_change: bool,
+        native: &mut dyn ImodvOlistNativeBoundary,
+    ) {
+        native.widget_change_event();
+        native.check_and_set_mac_menu();
+        if font_change {
+            self.set_font_dependent_widths(native);
+            self.adjust_frame_size(native);
+        }
+    }
+    pub fn top_close_event(&mut self, native: &mut dyn ImodvOlistNativeBoundary) {
+        native.remove_dialog();
         self.dialog_open = false;
         self.object_checked.clear();
         self.group_checked.clear();
         self.grouping = false;
+        native.accept_close();
     }
-    pub fn key_press_event(&mut self, key: i32) {
+    pub fn key_press_event(
+        &mut self,
+        key: i32,
+        close_key: bool,
+        native: &mut dyn ImodvOlistNativeBoundary,
+    ) {
         if key == 0x0100_0020 {
             self.shift_pressed = true
         }
+        if close_key {
+            native.close_window();
+        } else {
+            native.key_press();
+        }
     }
-    pub fn key_release_event(&mut self, key: i32) {
+    pub fn key_release_event(&mut self, key: i32, native: &mut dyn ImodvOlistNativeBoundary) {
         if key == 0x0100_0020 {
             self.shift_pressed = false
         }
+        native.key_release();
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::imod::libimod::imodel::Iobj;
+    #[derive(Default)]
+    struct Native {
+        focus: i32,
+        widths: Vec<(usize, i32)>,
+        resize: i32,
+        change: i32,
+        mac_menu: i32,
+    }
+    impl ImodvOlistNativeBoundary for Native {
+        fn set_focus(&mut self) {
+            self.focus += 1;
+        }
+        fn info_input(&mut self) {}
+        fn adjust_frame_size(&mut self) {
+            self.resize += 1;
+        }
+        fn rounded_style(&mut self) -> bool {
+            true
+        }
+        fn button_width(&mut self, _: bool, _: f32, text: &str) -> i32 {
+            text.len() as i32
+        }
+        fn set_button_width(&mut self, button: usize, width: i32) {
+            self.widths.push((button, width));
+        }
+        fn widget_change_event(&mut self) {
+            self.change += 1;
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.mac_menu += 1;
+        }
+        fn remove_dialog(&mut self) {}
+        fn accept_close(&mut self) {}
+        fn close_window(&mut self) {}
+        fn key_press(&mut self) {}
+        fn key_release(&mut self) {}
+    }
     #[test]
     fn groups_and_action_mutate_source_model() {
         let mut m = Imod::default();
@@ -354,5 +454,15 @@ mod tests {
         assert_eq!(m.group_list[0].obj_list, vec![0, 1]);
         l.action_button_clicked(&mut m, OBJGRP_TURNOFF);
         assert!(m.obj.iter().all(|o| o.flags & IMOD_OBJFLAG_OFF != 0));
+    }
+
+    #[test]
+    fn font_change_reapplies_source_button_widths_and_frame_size() {
+        let mut list = ImodvOlist::default();
+        let mut native = Native::default();
+        list.top_change_event(true, &mut native);
+        assert_eq!(native.widths.len(), OBJLIST_NUMBUTTONS);
+        assert!(native.widths.iter().all(|&(_, width)| width >= 3));
+        assert_eq!((native.change, native.mac_menu, native.resize), (1, 1, 1));
     }
 }

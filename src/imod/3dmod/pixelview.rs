@@ -1,9 +1,3 @@
-//! Translation of `IMOD/3dmod/pixelview.cpp` and `pixelview.h`.
-//!
-//! The Qt widgets, image-file reads, display controls, Zap/XYZ/Slicer state,
-//! and key dispatch remain direct viewer boundaries.  The source-owned pixel
-//! grid, labels, minimum/maximum highlighting, and callbacks are represented
-//! here without introducing a replacement image viewer.
 #![allow(dead_code)]
 
 pub const PV_ROWS: usize = 7;
@@ -45,6 +39,13 @@ pub struct PixelViewImageState {
 
 /// Native Qt/image/viewer boundary called by the paired source unit.
 pub trait PixelViewNativeBoundary {
+    fn rounded_style(&self) -> bool {
+        false
+    }
+    fn button_width(&self, _: bool, _: f32, _: &str) -> i32 {
+        0
+    }
+    fn widget_change_event(&mut self) {}
     fn image_state(&self) -> PixelViewImageState;
     fn image_list_file_is_jpeg(&self, iz: i32) -> bool;
     fn file_value(&mut self, x: i32, y: i32, z: i32) -> f32;
@@ -165,7 +166,12 @@ pub struct PixelView {
 }
 impl PixelView {
     /// `PixelView::PixelView`.
-    pub fn new(state: PixelViewImageState, runtime: &PixelViewRuntime, readable: bool) -> Self {
+    pub fn new(
+        state: PixelViewImageState,
+        runtime: &PixelViewRuntime,
+        readable: bool,
+        native: &dyn PixelViewNativeBoundary,
+    ) -> Self {
         let gray = PixelViewColor(239, 239, 239);
         let label = PixelViewButton {
             text: "88888".into(),
@@ -226,7 +232,7 @@ impl PixelView {
             width: 0,
             height: 0,
         };
-        out.set_button_widths();
+        out.set_button_widths(native);
         out
     }
 
@@ -234,20 +240,21 @@ impl PixelView {
     pub fn destroy(&mut self) {}
 
     /// `PixelView::setButtonWidths`.
-    pub fn set_button_widths(&mut self) {
+    pub fn set_button_widths(&mut self, native: &dyn PixelViewNativeBoundary) {
+        let width = native.button_width(native.rounded_style(), 1.2, "-88888");
         for row in &mut self.m_buttons {
             for button in row {
-                button.minimum_width = 50;
+                button.minimum_width = width;
             }
         }
-        self.m_help_button.minimum_width = 38;
     }
 
     /// `PixelView::changeEvent`.
     pub fn change_event(&mut self, font_change: bool, native: &mut dyn PixelViewNativeBoundary) {
+        native.widget_change_event();
         native.check_and_set_mac_menu();
         if font_change {
-            self.set_button_widths()
+            self.set_button_widths(native)
         }
     }
 
@@ -520,6 +527,7 @@ pub fn open_pixelview(
         state,
         runtime,
         file_readable(native, state.zmouse.round() as i32),
+        native,
     ));
     runtime.ctrl = native.new_control();
     native.adjust_geometry_and_show();

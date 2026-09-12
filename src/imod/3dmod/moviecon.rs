@@ -2,6 +2,11 @@
 #![allow(dead_code)]
 use crate::imod::three_dmod::imodview::ImodView;
 use std::time::Instant;
+
+/// `imcUpdateDialog`'s form operation at the native GUI boundary.
+pub trait MovieConNativeBoundary {
+    fn set_non_tif_label(&mut self);
+}
 pub const BASEINT: f32 = 50.;
 pub const RATEFAC: f32 = 1.25992;
 pub const MINRATE: f32 = 0.2;
@@ -108,7 +113,11 @@ pub fn imc_reset_all(s: &mut MovieConState, v: &ImodView) {
     s.autosnap = 0;
     s.firsttime = false;
 }
-pub fn imc_update_dialog(_s: &MovieConState) {}
+pub fn imc_update_dialog(s: &MovieConState, n: &mut dyn MovieConNativeBoundary) {
+    if s.dialog_open {
+        n.set_non_tif_label();
+    }
+}
 pub fn imc_get_increment(s: &mut MovieConState, v: &ImodView, axis: i32) -> i32 {
     if s.firsttime {
         imc_reset_all(s, v)
@@ -300,6 +309,13 @@ pub fn imc_increment_rate(s: &mut MovieConState, v: &mut ImodView, dir: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Default)]
+    struct Native(usize);
+    impl MovieConNativeBoundary for Native {
+        fn set_non_tif_label(&mut self) {
+            self.0 += 1;
+        }
+    }
     #[test]
     fn ranges_rates_and_special_limits_match_source() {
         let v = ImodView {
@@ -317,5 +333,18 @@ mod tests {
         let mut v = v;
         imc_set_movierate(&mut s, &mut v, 0);
         assert!((MINRATE..=MAXRATE).contains(&s.realrate));
+    }
+    #[test]
+    fn open_controller_refreshes_the_source_non_tif_label() {
+        let mut n = Native::default();
+        imc_update_dialog(&MovieConState::default(), &mut n);
+        imc_update_dialog(
+            &MovieConState {
+                dialog_open: true,
+                ..Default::default()
+            },
+            &mut n,
+        );
+        assert_eq!(n.0, 1);
     }
 }

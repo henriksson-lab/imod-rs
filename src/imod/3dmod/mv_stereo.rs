@@ -6,6 +6,20 @@ use crate::imod::three_dmod::mv_gfx::{IMODV_STEREO_HW, IMODV_STEREO_RL, IMODV_ST
 use std::env;
 use std::process::Command;
 
+/// Qt dialog-manager and IMODV input operations at the `ImodvStereo` event boundary.
+pub trait ImodvStereoNativeBoundary {
+    fn rounded_style(&self) -> bool;
+    fn dialog_change_event(&mut self);
+    fn check_and_set_mac_menu(&mut self);
+    fn remove_dialog(&mut self);
+    fn accept_close_event(&mut self);
+    fn close_dialog(&mut self);
+    fn grab_keyboard(&mut self);
+    fn release_keyboard(&mut self);
+    fn imodv_key_press(&mut self);
+    fn imodv_key_release(&mut self);
+}
+
 /// `imodvStereoData`.
 #[derive(Clone, Debug)]
 pub struct ImodvStereoData {
@@ -53,6 +67,7 @@ pub struct ImodvStereo {
     pub images_enabled: bool,
     pub ctrl_pressed: bool,
     pub closed: bool,
+    pub rounded_style: bool,
 }
 impl ImodvStereo {
     pub fn new(a: &ImodvApp, data: &ImodvStereoData) -> Self {
@@ -69,6 +84,7 @@ impl ImodvStereo {
             images_enabled: false,
             ctrl_pressed: false,
             closed: false,
+            rounded_style: false,
         }
     }
     pub fn new_option(&mut self, a: &mut ImodvApp, item: i32) {
@@ -132,22 +148,47 @@ impl ImodvStereo {
     ) -> bool {
         macos && hardware_ok && !key_sets_hw_stereo
     }
-    pub fn change_event(&mut self) {}
-    pub fn close_event(&mut self) {
-        self.closed = true;
+    pub fn change_event(&mut self, native: &mut dyn ImodvStereoNativeBoundary) {
+        self.rounded_style = native.rounded_style();
+        native.dialog_change_event();
+        native.check_and_set_mac_menu();
     }
-    pub fn key_press_event(&mut self, close_key: bool, hot_slider_key: bool) -> bool {
+    pub fn close_event(
+        &mut self,
+        data: &mut ImodvStereoData,
+        native: &mut dyn ImodvStereoNativeBoundary,
+    ) {
+        native.remove_dialog();
+        data.dialog_open = false;
+        self.closed = true;
+        native.accept_close_event();
+    }
+    pub fn key_press_event(
+        &mut self,
+        close_key: bool,
+        hot_slider_key: bool,
+        native: &mut dyn ImodvStereoNativeBoundary,
+    ) {
         if close_key {
-            self.closed = true;
+            native.close_dialog();
         } else if hot_slider_key {
             self.ctrl_pressed = true;
+            native.grab_keyboard();
         }
-        self.closed
+        if !close_key {
+            native.imodv_key_press();
+        }
     }
-    pub fn key_release_event(&mut self, hot_slider_key: bool) {
+    pub fn key_release_event(
+        &mut self,
+        hot_slider_key: bool,
+        native: &mut dyn ImodvStereoNativeBoundary,
+    ) {
         if hot_slider_key {
             self.ctrl_pressed = false;
+            native.release_keyboard();
         }
+        native.imodv_key_release();
     }
 }
 /// Static `hardwareOK`.
@@ -289,6 +330,42 @@ pub fn imodv_stereo_edit_dialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Default)]
+    struct Native {
+        calls: Vec<&'static str>,
+    }
+    impl ImodvStereoNativeBoundary for Native {
+        fn rounded_style(&self) -> bool {
+            true
+        }
+        fn dialog_change_event(&mut self) {
+            self.calls.push("change");
+        }
+        fn check_and_set_mac_menu(&mut self) {
+            self.calls.push("menu");
+        }
+        fn remove_dialog(&mut self) {
+            self.calls.push("remove");
+        }
+        fn accept_close_event(&mut self) {
+            self.calls.push("accept");
+        }
+        fn close_dialog(&mut self) {
+            self.calls.push("close");
+        }
+        fn grab_keyboard(&mut self) {
+            self.calls.push("grab");
+        }
+        fn release_keyboard(&mut self) {
+            self.calls.push("release");
+        }
+        fn imodv_key_press(&mut self) {
+            self.calls.push("press");
+        }
+        fn imodv_key_release(&mut self) {
+            self.calls.push("key-release");
+        }
+    }
     #[test]
     fn toggle_falls_back_to_side_by_side_without_hardware() {
         let mut a = ImodvApp::default();
@@ -309,5 +386,34 @@ mod tests {
         let mut s = ImodvStereo::new(&a, &d);
         s.update(&mut a, false, false);
         assert_eq!(a.plax, 10.);
+    }
+    #[test]
+    fn dialog_events_follow_source_manager_and_hot_key_routes() {
+        let app = ImodvApp::default();
+        let mut data = ImodvStereoData {
+            dialog_open: true,
+            ..Default::default()
+        };
+        let mut stereo = ImodvStereo::new(&app, &data);
+        let mut native = Native::default();
+        stereo.change_event(&mut native);
+        stereo.key_press_event(false, true, &mut native);
+        stereo.key_release_event(true, &mut native);
+        stereo.close_event(&mut data, &mut native);
+        assert!(stereo.rounded_style && stereo.closed);
+        assert!(!data.dialog_open);
+        assert_eq!(
+            native.calls,
+            [
+                "change",
+                "menu",
+                "grab",
+                "press",
+                "release",
+                "key-release",
+                "remove",
+                "accept"
+            ]
+        );
     }
 }

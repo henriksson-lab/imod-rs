@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+pub use crate::imod::etomo::r#type::fiducial_match::FiducialMatch;
 use crate::imod::etomo::ui::field_type::FieldType;
 
 use super::check_box::CheckBox;
@@ -20,17 +21,6 @@ use super::panel_header::{ExpandButton, PanelHeader};
 use super::radio_button::{RadioButton, RadioButtonGroup};
 
 pub const INITIAL_MATCH_LABEL: &str = "Initial Matching Parameters";
-
-/// Java `FiducialMatch` values selected by this source unit.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FiducialMatch {
-    BothSides,
-    OneSide,
-    OneSideInverted,
-    UseModel,
-    UseModelOnly,
-    NotSet,
-}
 
 /// `CombineParams` calls made by `SolvematchPanel.java`.
 pub trait CombineParameters {

@@ -14,6 +14,13 @@ use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER,
 use crate::imod::etomo::ui::field_type::FieldType;
 use crate::imod::etomo::util::utilities;
 
+use super::{
+    text_efield_interface::TextEfieldInterface,
+    tooltip_formatter::TooltipFormatter,
+    validation_extension::ValidationExtension,
+    value_manipulation_extension::{ValueManipulationExtension, ValueManipulationField},
+};
+
 /// Java `ControlState`; its concrete source unit remains an explicit boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlState {
@@ -62,23 +69,6 @@ impl Default for TextField {
     }
 }
 
-/// Java package-private `ValidationExtension` state used by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ValidationExtension {
-    pub required: bool,
-    pub location_descr: Option<String>,
-    pub file_must_exist: bool,
-    pub file_only: bool,
-    pub must_be_positive: bool,
-}
-impl ValidationExtension {
-    fn get_location_addon(&self) -> String {
-        self.location_descr
-            .as_ref()
-            .map_or_else(String::new, |value| format!(" in {value}"))
-    }
-}
-
 /// Java package-private `TextEfield`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextEfield {
@@ -96,16 +86,13 @@ pub struct TextEfield {
     pub enable_control_state: Option<ControlState>,
     pub control_listener_count: usize,
     pub validation_extension: Option<ValidationExtension>,
+    pub value_manipulation_extension: Option<ValueManipulationExtension>,
     pub backup: Option<String>,
     pub checkpoint: Option<String>,
     pub template_value: Option<String>,
     pub flag_errors: bool,
     /// Java nullable `flagExtension` presence.
     pub flag_extension_created: bool,
-    pub default_to_filename: bool,
-    pub limit_displayed_file_path: i32,
-    pub full_file_path: Option<String>,
-    pub prevent_blank_template: Option<String>,
     pub directive_def: Option<String>,
     pub in_grid_bag: bool,
 }
@@ -148,14 +135,21 @@ impl TextEfield {
             template_value: None,
             flag_errors: false,
             flag_extension_created: false,
-            default_to_filename: default_to_file_name,
-            limit_displayed_file_path: 0,
-            full_file_path: None,
-            prevent_blank_template: None,
+            value_manipulation_extension: None,
             directive_def: None,
             in_grid_bag: use_grid_bag,
         };
         field.set_name();
+        if default_to_file_name {
+            let debug = field.debug;
+            field.value_manipulation_extension =
+                Some(ValueManipulationExtension::new(&mut field, debug));
+            field
+                .value_manipulation_extension
+                .as_mut()
+                .unwrap()
+                .set_default_to_filename(default_to_file_name);
+        }
         field
     }
 
@@ -254,13 +248,10 @@ impl TextEfield {
         if self.is_override() {
             return String::new();
         }
-        if self.limit_displayed_file_path > 0 {
-            self.full_file_path
-                .clone()
-                .unwrap_or_else(|| self.text_field.text.clone())
-        } else {
-            self.text_field.text.clone()
-        }
+        self.value_manipulation_extension.as_ref().map_or_else(
+            || self.text_field.text.clone(),
+            |extension| extension.get_full_file_path(self.text_field.text.clone()),
+        )
     }
     pub fn is_empty(&self) -> bool {
         self.get_text().trim().is_empty()
@@ -283,9 +274,10 @@ impl TextEfield {
     }
     pub fn set_tooltip(&mut self, text: impl Into<String>) {
         let text = text.into();
-        self.text_field.tooltip = Some(text.clone());
+        let formatter = TooltipFormatter::instance();
+        self.text_field.tooltip = formatter.format(Some(&text));
         if self.use_label {
-            self.label_tooltip = Some(text);
+            self.label_tooltip = formatter.format(Some(&text));
         }
     }
     pub fn set_visible(&mut self, visible: bool) {
@@ -303,18 +295,27 @@ impl TextEfield {
     }
     /// Java overloaded `setText(File)`.
     pub fn set_text_file(&mut self, file: &Path) {
-        let text = if file.is_absolute() {
-            file.to_string_lossy().into_owned()
-        } else {
-            std::env::current_dir()
-                .map(|directory| directory.join(file).to_string_lossy().into_owned())
-                .unwrap_or_else(|_| {
-                    file.file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                })
-        };
-        self.set_text(text);
+        let text = self.value_manipulation_extension.as_mut().map_or_else(
+            || {
+                if file.is_absolute() {
+                    file.to_string_lossy().into_owned()
+                } else {
+                    std::env::current_dir()
+                        .map(|directory| directory.join(file).to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| {
+                            file.file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        })
+                }
+            },
+            |extension| {
+                extension
+                    .create_displayed_file_path_file(Some(file))
+                    .unwrap_or_default()
+            },
+        );
+        self.set_text_internal(Some(text));
     }
     /// Java overloaded `setText(int)`.
     pub fn set_text_int(&mut self, text: i32) {
@@ -323,41 +324,13 @@ impl TextEfield {
     /// Java overloaded `setText(String)`.
     pub fn set_text(&mut self, text: impl Into<String>) {
         let text = text.into();
-        // `ValueManipulationExtension.createDisplayedFilePath(String, FieldType)`:
-        // it acts only on FILE fields and truncates at a system file separator.
-        let displayed = if self.field_type != Some(FieldType::File)
-            || self.limit_displayed_file_path <= 0
-            || text.len() <= self.limit_displayed_file_path as usize
-            || !text.contains(std::path::MAIN_SEPARATOR)
-        {
-            self.full_file_path = None;
-            text
-        } else {
-            let is_local = self.default_to_filename
-                && Path::new(&text)
-                    .parent()
-                    .and_then(|path| path.canonicalize().ok())
-                    == std::env::current_dir().ok();
-            self.full_file_path = Some(text.clone());
-            if is_local {
-                Path::new(&text)
-                    .file_name()
-                    .map_or_else(|| text.clone(), |name| name.to_string_lossy().into_owned())
-            } else {
-                let start = text
-                    .len()
-                    .saturating_sub((self.limit_displayed_file_path - 3).max(0) as usize);
-                match text[start..]
-                    .find(std::path::MAIN_SEPARATOR)
-                    .map(|index| start + index)
-                    .or_else(|| text.rfind(std::path::MAIN_SEPARATOR))
-                {
-                    Some(index) => format!("...{}", &text[index..]),
-                    None => text,
-                }
-            }
-        };
-        self.set_text_internal(Some(displayed));
+        let displayed = self
+            .value_manipulation_extension
+            .as_mut()
+            .map_or(Some(text.clone()), |extension| {
+                extension.create_displayed_file_path(Some(&text), self.field_type)
+            });
+        self.set_text_internal(displayed);
     }
     /// Java private `setTextInternal`.
     pub fn set_text_internal(&mut self, text: Option<String>) {
@@ -403,9 +376,10 @@ impl TextEfield {
     /// Java `clear`.
     pub fn clear(&mut self) {
         self.text_field.text.clear();
-        self.full_file_path = None;
-        if let Some(template) = self.prevent_blank_template.clone() {
-            self.set_text(template);
+        if let Some(mut extension) = self.value_manipulation_extension.take() {
+            extension.clear_full_file_path();
+            extension.substitute(self);
+            self.value_manipulation_extension = Some(extension);
         }
         self.update_flag_extension();
     }
@@ -416,25 +390,44 @@ impl TextEfield {
         self.add_focus_listener();
     }
     pub fn set_required(&mut self, required: bool) {
-        self.validation_extension.get_or_insert_default().required = required;
+        if required && self.validation_extension.is_none() {
+            self.validation_extension = Some(ValidationExtension::new());
+        }
+        if let Some(extension) = &mut self.validation_extension {
+            extension.set_required(required);
+        }
     }
     pub fn set_location_descr(&mut self, location_descr: Option<String>) {
-        self.validation_extension
-            .get_or_insert_default()
-            .location_descr = location_descr;
+        if location_descr.is_some() && self.validation_extension.is_none() {
+            self.validation_extension = Some(ValidationExtension::new());
+        }
+        if let Some(extension) = &mut self.validation_extension {
+            extension.set_location_descr(location_descr);
+        }
     }
     pub fn set_file_must_exist(&mut self, file_must_exist: bool) {
-        self.validation_extension
-            .get_or_insert_default()
-            .file_must_exist = file_must_exist;
+        if file_must_exist && self.validation_extension.is_none() {
+            self.validation_extension = Some(ValidationExtension::new());
+        }
+        if let Some(extension) = &mut self.validation_extension {
+            extension.set_file_must_exist(file_must_exist);
+        }
     }
     pub fn set_file_only(&mut self, file_only: bool) {
-        self.validation_extension.get_or_insert_default().file_only = file_only;
+        if file_only && self.validation_extension.is_none() {
+            self.validation_extension = Some(ValidationExtension::new());
+        }
+        if let Some(extension) = &mut self.validation_extension {
+            extension.set_file_only(file_only);
+        }
     }
     pub fn set_must_be_positive(&mut self, must_be_positive: bool) {
-        self.validation_extension
-            .get_or_insert_default()
-            .must_be_positive = must_be_positive;
+        if must_be_positive && self.validation_extension.is_none() {
+            self.validation_extension = Some(ValidationExtension::new());
+        }
+        if let Some(extension) = &mut self.validation_extension {
+            extension.set_must_be_positive(must_be_positive);
+        }
     }
 
     /// Java overloaded validation `getText`; `FieldValidator` is a separate source unit.
@@ -449,22 +442,22 @@ impl TextEfield {
             self.label_text,
             extension.map_or_else(String::new, ValidationExtension::get_location_addon)
         );
-        if extension.is_some_and(|value| value.required) && text.trim().is_empty() {
+        if extension.is_some_and(ValidationExtension::is_required) && text.trim().is_empty() {
             return Err(format!("{prefix} is required"));
         }
-        if extension.is_some_and(|value| value.file_must_exist)
+        if extension.is_some_and(ValidationExtension::is_file_must_exist)
             && !text.trim().is_empty()
             && !Path::new(&text).exists()
         {
             return Err(format!("{prefix} does not exist"));
         }
-        if extension.is_some_and(|value| value.file_only)
+        if extension.is_some_and(ValidationExtension::is_file_only)
             && !text.trim().is_empty()
             && Path::new(&text).is_dir()
         {
             return Err(format!("{prefix} must be a file"));
         }
-        if extension.is_some_and(|value| value.must_be_positive)
+        if extension.is_some_and(ValidationExtension::is_must_be_positive)
             && text.trim().parse::<f64>().map_or(true, |value| value <= 0.)
         {
             return Err(format!("{prefix} must be positive"));
@@ -494,9 +487,17 @@ impl TextEfield {
         self.text_field.editable
     }
     pub fn set_limit_displayed_file_path(&mut self, max_file_path_size: i32) {
+        if max_file_path_size > 0 && self.value_manipulation_extension.is_none() {
+            let debug = self.debug;
+            self.value_manipulation_extension = Some(ValueManipulationExtension::new(self, debug));
+        }
         let text = self.get_text();
-        self.limit_displayed_file_path = max_file_path_size;
-        self.set_text(text);
+        if let Some(extension) = &mut self.value_manipulation_extension {
+            if extension.set_limit_displayed_file_path(max_file_path_size, self.field_type) {
+                let displayed = extension.create_displayed_file_path(Some(&text), self.field_type);
+                self.set_text_internal(displayed);
+            }
+        }
     }
 
     pub fn update_flag_extension(&mut self) {}
@@ -519,7 +520,14 @@ impl TextEfield {
     }
     pub fn flag_template(&mut self, template_value: impl Into<String>) {
         self.template_value = Some(template_value.into());
-        self.prevent_blank_template = self.template_value.clone();
+        if self.value_manipulation_extension.is_none() {
+            let debug = self.debug;
+            self.value_manipulation_extension = Some(ValueManipulationExtension::new(self, debug));
+        }
+        self.value_manipulation_extension
+            .as_mut()
+            .unwrap()
+            .set_prevent_blank(true, self.template_value.clone());
     }
     pub fn set_flag_errors(&mut self) {
         self.flag_errors = true;
@@ -527,7 +535,9 @@ impl TextEfield {
     pub fn clear_template_value(&mut self) {
         self.template_value = None;
         self.flag_errors = false;
-        self.prevent_blank_template = None;
+        if let Some(extension) = &mut self.value_manipulation_extension {
+            extension.clear_prevent_blank();
+        }
     }
     pub fn set_template_value(&mut self) {
         if let Some(value) = self.template_value.clone() {
@@ -580,6 +590,48 @@ impl TextEfield {
 impl std::fmt::Display for TextEfield {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.label_text)
+    }
+}
+
+impl TextEfieldInterface for TextEfield {
+    fn get_directive_def(&self) -> Option<&str> {
+        TextEfield::get_directive_def(self)
+    }
+    fn is_enabled(&self) -> bool {
+        TextEfield::is_enabled(self)
+    }
+    fn is_visible(&self) -> bool {
+        TextEfield::is_visible(self)
+    }
+    fn get_text(&self) -> String {
+        TextEfield::get_text(self)
+    }
+    fn set_text(&mut self, text: String) {
+        TextEfield::set_text(self, text);
+    }
+    fn set_field_highlight(&mut self, text: String) {
+        TextEfield::set_field_highlight(self, text);
+    }
+    fn set_template_value(&mut self) {
+        TextEfield::set_template_value(self);
+    }
+    fn equals(&self, string: Option<&str>) -> bool {
+        TextEfield::equals(self, string)
+    }
+    fn set_debug(&mut self, debug: bool) {
+        TextEfield::set_debug(self, debug);
+    }
+}
+
+impl ValueManipulationField for TextEfield {
+    fn is_empty(&self) -> bool {
+        TextEfield::is_empty(self)
+    }
+    fn set_text(&mut self, text: String) {
+        TextEfield::set_text(self, text);
+    }
+    fn add_value_manipulation_listener(&mut self) {
+        TextEfield::add_value_manipulation_listener(self);
     }
 }
 

@@ -12,9 +12,10 @@ use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 
 use super::beads3d_find_panel::{Deferred3dmodButton, ProcessResultDisplay, ProcessSeries};
-use super::find_beads3d_panel::NewstackOrBlendmont3dFindParent;
 use super::labeled_spinner::LabeledSpinner;
+use super::newstack_or_blendmont_3d_find_parent::NewstackOrBlendmont3dFindParent;
 use super::newstack_or_blendmont_panel::MetaData;
+use super::run_3dmod_button::Run3dmodButton;
 
 pub const BINNING_LABEL: &str = "Binning";
 pub const VIEW_FULL_ALIGNED_STACK_LABEL: &str = "View Full Aligned Stack";
@@ -28,47 +29,6 @@ pub const SMALL_BINNED_FIDUCIAL_WARNING: &str =
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NewstackOrBlendmont3dFindPanelRoot {
     pub component_order: Vec<String>,
-}
-
-/// Java `Run3dmodButton btn3dmodFull` state at the GUI boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Run3dmodButton {
-    pub label: String,
-    pub action_command: String,
-    pub action_listener_count: usize,
-    pub tooltip: Option<String>,
-}
-
-impl Run3dmodButton {
-    /// Java `Run3dmodButton.get3dmodInstance`.
-    pub fn get_3dmod_instance(label: &str) -> Self {
-        Self {
-            label: label.into(),
-            action_command: label.into(),
-            action_listener_count: 0,
-            tooltip: None,
-        }
-    }
-
-    /// Java `addActionListener`.
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-
-    /// Java `getComponent`; the native button is represented by its direct state.
-    pub fn get_component(&self) -> Deferred3dmodButton {
-        Deferred3dmodButton
-    }
-
-    /// Java `getActionCommand`.
-    pub fn get_action_command(&self) -> &str {
-        &self.action_command
-    }
-
-    /// Java `setToolTipText`.
-    pub fn set_tool_tip_text(&mut self, text: &str) {
-        self.tooltip = Some(text.into());
-    }
 }
 
 /// Direct `ApplicationManager` and `UIHarness` calls made by this source unit.
@@ -118,7 +78,10 @@ where
             pnl_root: NewstackOrBlendmont3dFindPanelRoot::default(),
             action_listener_present: false,
             spin_binning: LabeledSpinner::get_instance(BINNING_LABEL, 1, 1, 12, 1),
-            btn_3dmod_full: Run3dmodButton::get_3dmod_instance(VIEW_FULL_ALIGNED_STACK_LABEL),
+            btn_3dmod_full: Run3dmodButton::get_3dmod_instance(
+                VIEW_FULL_ALIGNED_STACK_LABEL,
+                false,
+            ),
             parent,
             axis_id,
             manager,
@@ -144,12 +107,12 @@ where
 
     /// Java `get3dmodButton`.
     pub fn get_3dmod_button(&self) -> Deferred3dmodButton {
-        self.btn_3dmod_full.get_component()
+        Deferred3dmodButton
     }
 
     /// Java `get3dmodFullButtonActionCommand`.
     pub fn get_3dmod_full_button_action_command(&self) -> &str {
-        self.btn_3dmod_full.get_action_command()
+        self.btn_3dmod_full.get_action_command().unwrap_or_default()
     }
 
     /// Java `getBinning`.
@@ -290,7 +253,14 @@ mod tests {
         panel.add_listeners();
         panel.set_tool_tip_text();
         assert_eq!(panel.pnl_root.component_order, ["spinBinning"]);
-        assert_eq!(panel.btn_3dmod_full.action_listener_count, 1);
+        assert_eq!(
+            panel
+                .btn_3dmod_full
+                .multi_line_button
+                .button
+                .action_listener_count,
+            1
+        );
         assert_eq!(panel.spin_binning.tooltip.as_deref(), Some(BINNING_TOOLTIP));
         assert!(panel.is_fiducialess());
     }

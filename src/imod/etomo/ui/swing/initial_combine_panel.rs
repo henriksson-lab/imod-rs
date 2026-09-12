@@ -13,6 +13,7 @@ use crate::imod::etomo::{
 };
 
 use super::{
+    initial_combine_fields::InitialCombineFields,
     labeled_text_field::{FieldValidationFailedException, LabeledTextField},
     multi_line_button::MultiLineButton,
     panel_header::{ExpandButton, PanelHeader},
@@ -21,13 +22,7 @@ use super::{
         SolvematchParameters,
     },
 };
-
-/// Java `MatchMode` used only to choose the two MRC headers.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MatchMode {
-    AToB,
-    BToA,
-}
+pub use crate::imod::etomo::r#type::match_mode::MatchMode;
 
 /// Java `MatchvolParam` calls from this source unit.
 pub trait MatchvolParameters {
@@ -80,6 +75,8 @@ pub struct InitialCombinePanelLayout {
     pub output_size_y_info_visible: bool,
     pub listener_count: usize,
     pub tooltip_initialized: bool,
+    /// `TomogramCombinationDialog.isTabEnabled(lblInitial)` at the GUI boundary.
+    pub initial_tab_enabled: bool,
     pub output_size_y_info: String,
     pub component_order: Vec<&'static str>,
 }
@@ -111,6 +108,7 @@ impl InitialCombinePanel {
         Self {
             pnl_root: InitialCombinePanelLayout {
                 root_visible: true,
+                initial_tab_enabled: true,
                 solvematch_present: true,
                 matchvol1_present: true,
                 matchvol1_body_visible: true,
@@ -174,7 +172,7 @@ impl InitialCombinePanel {
     }
 
     /// Java `setMatchMode`, with `MRCHeader` I/O supplied by its direct boundary.
-    pub fn set_match_mode<H: InitialCombineMrcHeaders>(
+    pub fn set_match_mode_with_mrc_headers<H: InitialCombineMrcHeaders>(
         &mut self,
         match_mode: MatchMode,
         headers: &mut H,
@@ -232,8 +230,8 @@ impl InitialCombinePanel {
     pub fn get_container(&self) -> &InitialCombinePanelLayout {
         &self.pnl_root
     }
-    pub fn is_enabled<P: InitialCombinePanelParent>(&self, parent: &P) -> bool {
-        parent.initial_tab_enabled()
+    pub fn is_enabled(&self) -> bool {
+        self.pnl_root.initial_tab_enabled
     }
     pub fn is_initial_volume_matching(&self) -> bool {
         self.pnl_solvematch.is_initial_volume_matching()
@@ -383,6 +381,100 @@ impl InitialCombinePanel {
     }
 }
 
+impl InitialCombineFields for InitialCombinePanel {
+    fn set_surfaces_or_models(&mut self, use_matching_models: FiducialMatch) {
+        InitialCombinePanel::set_surfaces_or_models(self, use_matching_models);
+    }
+
+    fn get_surfaces_or_models(&self) -> FiducialMatch {
+        InitialCombinePanel::get_surfaces_or_models(self)
+    }
+
+    fn set_bin_by_2(&mut self, bin_by_2: bool) {
+        InitialCombinePanel::set_bin_by_2(self, bin_by_2);
+    }
+
+    fn is_bin_by_2(&self) -> bool {
+        InitialCombinePanel::is_bin_by_2(self)
+    }
+
+    fn set_fiducial_match_list_a(&mut self, fiducial_match_list_a: &str) {
+        InitialCombinePanel::set_fiducial_match_list_a(self, fiducial_match_list_a);
+    }
+
+    fn get_fiducial_match_list_a(
+        &self,
+        do_validation: bool,
+    ) -> Result<String, FieldValidationFailedException> {
+        InitialCombinePanel::get_fiducial_match_list_a(self, do_validation)
+    }
+
+    fn get_fiducial_match_list_a_unvalidated(&self) -> String {
+        InitialCombinePanel::get_fiducial_match_list_a(self, false)
+            .expect("the source nonvalidating getter cannot reject a field")
+    }
+
+    fn set_fiducial_match_list_b(&mut self, fiducial_match_list_b: &str) {
+        InitialCombinePanel::set_fiducial_match_list_b(self, fiducial_match_list_b);
+    }
+
+    fn get_fiducial_match_list_b(
+        &self,
+        do_validation: bool,
+    ) -> Result<String, FieldValidationFailedException> {
+        InitialCombinePanel::get_fiducial_match_list_b(self, do_validation)
+    }
+
+    fn get_fiducial_match_list_b_unvalidated(&self) -> String {
+        InitialCombinePanel::get_fiducial_match_list_b(self, false)
+            .expect("the source nonvalidating getter cannot reject a field")
+    }
+
+    fn is_enabled(&self) -> bool {
+        InitialCombinePanel::is_enabled(self)
+    }
+
+    fn is_use_corresponding_points(&self) -> bool {
+        InitialCombinePanel::is_use_corresponding_points(self)
+    }
+
+    fn set_use_corresponding_points(&mut self, use_points: bool) {
+        InitialCombinePanel::set_use_corresponding_points(self, use_points);
+    }
+
+    fn set_use_list(&mut self, use_list: &str) {
+        InitialCombinePanel::set_use_list(self, use_list);
+    }
+
+    fn get_use_list(&self, do_validation: bool) -> Result<String, FieldValidationFailedException> {
+        InitialCombinePanel::get_use_list(self, do_validation)
+    }
+
+    fn get_use_list_unvalidated(&self) -> String {
+        InitialCombinePanel::get_use_list(self, false)
+            .expect("the source nonvalidating getter cannot reject a field")
+    }
+
+    fn get_match_mode(&self) -> Option<MatchMode> {
+        InitialCombinePanel::get_match_mode(self)
+    }
+
+    fn set_match_mode(&mut self, match_mode: Option<MatchMode>) {
+        if self.match_mode == match_mode {
+            return;
+        }
+        self.match_mode = match_mode;
+    }
+
+    fn set_initial_volume_matching(&mut self, input: bool) {
+        InitialCombinePanel::set_initial_volume_matching(self, input);
+    }
+
+    fn is_initial_volume_matching(&self) -> bool {
+        InitialCombinePanel::is_initial_volume_matching(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,7 +492,7 @@ mod tests {
         let mut headers = Headers {
             rows: [Some(200), Some(300)],
         };
-        panel.set_match_mode(MatchMode::BToA, &mut headers);
+        panel.set_match_mode_with_mrc_headers(MatchMode::BToA, &mut headers);
         assert_eq!(
             panel.pnl_root.output_size_y_info,
             "Original B size is 300.  Final size will be 200"
