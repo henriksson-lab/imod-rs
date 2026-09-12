@@ -7,7 +7,7 @@
 //! `iview.c`, so it is independent of both implementations' writers.  The
 //! golden text files are the reference `imodinfo`'s own output for it.
 
-use std::process::Command;
+mod common;
 
 use imod_rs::imod::libimod::imodel_files::{imod_file_write, imod_read};
 
@@ -212,7 +212,7 @@ fn imodinfo_ascii_and_verbose_match_the_reference_output() {
             root.join("fixtures/model-view-clip-label.x05s.txt"),
         ),
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        let out = common::imod_cmd("imodinfo")
             .current_dir(root.join("fixtures"))
             .args(&args)
             .arg("model-view-clip-label.mod")
@@ -257,7 +257,7 @@ fn reads_the_ascii_form_the_reference_writes() {
     );
 
     // The reference `imodinfo -c` reading the same ascii file is the golden.
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let out = common::imod_cmd("imodinfo")
         .current_dir(root.join("fixtures"))
         .args(["-c", "model-view-clip-label.ascii.txt"])
         .output()
@@ -288,7 +288,7 @@ fn imodjoin_reproduces_the_reference_output_byte_for_byte() {
     )
     .unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let status = common::imod_cmd("imodjoin")
         .current_dir(&dir)
         .args([
             "model-view-clip-label.mod",
@@ -330,7 +330,7 @@ fn imodinfo_closed_contour_modes_match_the_reference_output() {
         (vec!["-r"], "fixtures/model-closed-contours.r.txt"),
         (vec!["-c"], "fixtures/model-closed-contours.c.txt"),
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+        let out = common::imod_cmd("imodinfo")
             .current_dir(root.join("fixtures"))
             .args(&args)
             .arg("model-closed-contours.mod")

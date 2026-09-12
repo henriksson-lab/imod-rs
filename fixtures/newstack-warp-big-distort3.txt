@@ -1,0 +1,76 @@
+ reallocating array to   4.11987686      MB
+
+ RO image file on unit   1 : in.mrc     Size=      12657 K
+
+ Number of columns, rows, sections .....    1200     900       3
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0    1200    900      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   47.500    
+ Maximum density .......................   232.00    
+ Mean density ..........................   140.08    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack chunked warping fixture                                               
+
+ Size and offsets X:        1200   0.00000000     , Y:         900   0.00000000    
+
+ NEW image file on unit   2 : o.mrc
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           3           1
+           1           0         305           0         300
+           2         296         309         300         300
+           3         596         304         600         300
+ scanning for mean for fill           0         900           0           1
+ did iclden    25.7686787       247.165222       25.7686787       247.165222    
+ writing           1
+ moving data down                15600               355200
+ did iclden    21.3257008       251.816925       21.3257008       251.816925    
+ writing           2
+ moving data down                10800               360000
+ did iclden    15.1789360       258.438232       15.1789360       258.438232    
+ writing           3
+ section   input min&max       output min&max  &  mean
+       0     15.18    258.44     15.18    258.44    137.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           3           1
+           1           0         305           0         300
+           2         296         309         300         300
+           3         596         304         600         300
+ scanning for mean for fill           1         900           0           1
+ did iclden    28.6554413       251.652512       28.6554413       251.652512    
+ writing           1
+ moving data down                15600               355200
+ did iclden    23.2785072       256.152954       23.2785072       256.152954    
+ writing           2
+ moving data down                10800               360000
+ did iclden    24.6056232       255.794342       23.2785072       256.152954    
+ writing           3
+       1     23.28    256.15     23.28    256.15    140.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           3           1
+           1           0         305           0         300
+           2         296         309         300         300
+           3         596         304         600         300
+ scanning for mean for fill           2         900           0           1
+ did iclden    30.0584583       256.541840       30.0584583       256.541840    
+ writing           1
+ moving data down                15600               355200
+ did iclden    25.4098549       258.222107       25.4098549       258.222107    
+ writing           2
+ moving data down                10800               360000
+ did iclden    28.7512455       258.176697       25.4098549       258.222107    
+ writing           3
+       2     25.41    258.22     25.41    258.22    143.06
+loadtime MASKED

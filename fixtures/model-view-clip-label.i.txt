@@ -1,0 +1,21 @@
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+OBJECT 1
+NAME:  clipped object
+       2 contours
+       object uses scattered points.
+       color (red, green, blue) = (0.25, 0.5, 0.75)
+
+
+	Total cylinder volume = 47.25
+	Total volume inside mesh = 121.5
+	Total mesh surface area = 191.648
+
+
+

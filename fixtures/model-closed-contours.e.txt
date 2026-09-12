@@ -1,0 +1,20 @@
+# MODEL model-closed-contours.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+
+OBJECT 1
+NAME:  clipped object
+contour     center (pixels)                 axes (pixels)        eccen-   long
+   #      x        y        z       semi-major   semi-minor  tricity  angle
+   1     19.9     16.0      0.0         17.697       7.2562   0.9121  180.00
+   2     29.9     20.0      1.0          12.97       8.6228   0.7470   90.00
+Mean                                    15.334       7.9395   0.8295  135.00
+ SD                                     3.3429      0.96631   0.1167   63.64
+WARNING: The range of angles is 90 degrees and the mean may be inaccurate
+
+

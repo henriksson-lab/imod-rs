@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 use super::abstract_frame::ComponentState;
+use super::panel_header::PanelHeader;
 use super::tool_panel::ToolPanel;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
@@ -15,28 +16,6 @@ use crate::imod::etomo::util::utilities;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TitledBorder {
     pub title: String,
-}
-
-/// Direct source dependency used by `EtomoPanel.add(PanelHeader)`.
-///
-/// The complete `PanelHeader.java` unit owns expander controls and is translated
-/// separately.  These are exactly the two values this source unit reads.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PanelHeader {
-    pub container: ComponentState,
-    pub title: String,
-}
-
-impl PanelHeader {
-    /// Java `getContainer()`.
-    pub fn get_container(&self) -> &ComponentState {
-        &self.container
-    }
-
-    /// Java `getTitle()`.
-    pub fn get_title(&self) -> &str {
-        &self.title
-    }
 }
 
 /// Java package-private `EtomoPanel` fields and methods.
@@ -111,15 +90,19 @@ mod tests {
     #[test]
     fn panel_header_is_added_before_its_title_names_the_panel() {
         let mut panel = EtomoPanel::default();
-        let header = PanelHeader {
-            container: ComponentState {
-                height: 17,
-                ..Default::default()
-            },
-            title: "Header title".into(),
-        };
+        let header = PanelHeader::new(
+            "Header title",
+            false,
+            false,
+            crate::imod::etomo::r#type::dialog_type::DialogType::Tools,
+            true,
+            false,
+            true,
+            false,
+            true,
+        );
         panel.add_panel_header(&header);
-        assert_eq!(panel.children, vec![header.container]);
+        assert_eq!(panel.children, vec![header.root_panel]);
         assert_eq!(panel.name.as_deref(), Some("pnl.header-title"));
     }
 }

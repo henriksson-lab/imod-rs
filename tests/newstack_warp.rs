@@ -17,7 +17,7 @@
 //! `.txt` goldens its stdout.  Output mode 2 keeps every interpolated value
 //! rather than rounding it into a byte.
 
-use std::process::Command;
+mod common;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
@@ -71,7 +71,7 @@ fn distortion_and_gradient_corrections_match_the_reference_output() {
             vec!["-xform", "newstack-warp.xf", "-shrink", "2"],
         ),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let output = common::imod_cmd("newstack")
             .current_dir(&dir)
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)

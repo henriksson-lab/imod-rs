@@ -9,7 +9,7 @@
 //! The `.mrc` goldens beside it are the reference `newstack`'s own output with
 //! the label block (which carries a date stamp) zeroed.
 
-use std::process::Command;
+mod common;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
@@ -39,7 +39,7 @@ fn reduction_options_match_the_reference_output() {
         ("bin3origin", vec!["-bin", "3", "-origin"]),
     ] {
         let out_name = format!("{name}.mrc");
-        let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let output = common::imod_cmd("newstack")
             .current_dir(&dir)
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)

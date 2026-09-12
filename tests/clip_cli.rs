@@ -1,3 +1,5 @@
+mod common;
+
 use imod_rs::imod::clip::clip::{
     CameraDefects, ClipOptions, IP_APPEND_ADD, IP_APPEND_FALSE, IP_APPEND_OVERWRITE,
     IP_APPEND_TRUNCATE, IP_DEFAULT,
@@ -46,7 +48,7 @@ fn planefit_sums_each_real_mrc_input_before_fitting() {
             ii_close(file);
         }
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "pl",
             first.to_str().unwrap(),
@@ -107,7 +109,7 @@ fn flatfield_order_one_writes_polynomial_inverse_for_real_mrc() {
         );
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "fla",
             "-n",
@@ -184,7 +186,7 @@ fn planefit_reports_source_dimension_mismatch_for_real_mrc_inputs() {
             ii_close(file);
         }
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "planefit",
             first.to_str().unwrap(),
@@ -230,7 +232,7 @@ fn stat_reports_source_table_for_real_multisection_mrc() {
         );
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args(["stats", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -276,7 +278,7 @@ fn stat_uses_real_piece_list_coordinates_and_overlap_path() {
         ii_close(file);
     }
     std::fs::write(&pieces, "0 0 4\n3 0 5\n").unwrap();
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "stats",
             "-Pieces",
@@ -331,7 +333,7 @@ fn stat_marks_real_mrc_extreme_sections_with_mad_windows() {
         }
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args(["stats", "-n", "2.24", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -370,7 +372,7 @@ fn stat_marks_piece_coordinates_in_real_mrc_mad_outlier_rows() {
         ii_close(file);
     }
     std::fs::write(&pieces, "0 0 0\n0 0 1\n0 0 2\n0 0 3\n0 0 4\n").unwrap();
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "stats",
             "-n",
@@ -418,7 +420,7 @@ fn clip_accepts_source_two_letter_histogram_prefix_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["hi", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -452,7 +454,7 @@ fn resize_accepts_source_semicolon_coordinate_pairs_for_real_mrc() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "res",
                 "-xrange",
@@ -508,7 +510,7 @@ fn brightness_real_mrc_normalizes_reversed_source_x_range() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-x",
@@ -572,7 +574,7 @@ fn resize_keeps_a_nondefault_negative_fractional_center_for_real_mrc_coordinates
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "res",
             "-cx",
@@ -619,7 +621,7 @@ fn clip_reports_source_error_for_unreadable_mrc_header() {
     let input =
         std::env::temp_dir().join(format!("imod-rs-clip-bad-header-{}", std::process::id()));
     std::fs::write(&input, [0_u8, 1, 2, 3]).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["inf", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -653,7 +655,7 @@ fn two_input_process_reports_source_error_when_second_real_mrc_is_missing() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "add",
             input.to_str().unwrap(),
@@ -695,7 +697,7 @@ fn info_reports_source_open_error_for_corrupt_second_mrc() {
         ii_close(file);
     }
     std::fs::write(&corrupt, [0_u8, 1, 2, 3]).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap(), corrupt.to_str().unwrap()])
         .output()
         .unwrap();
@@ -761,7 +763,7 @@ fn info_real_mrc_prints_source_idtype_metadata_fields() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -832,7 +834,7 @@ fn info_real_byte_mrc_uses_source_byte_mode_report() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -864,7 +866,7 @@ fn info_real_rgb_mrc_uses_source_rgb_mode_report() {
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -899,7 +901,7 @@ fn info_real_complex_float_mrc_uses_source_complex_mode_report() {
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -931,7 +933,7 @@ fn info_real_unsigned_short_mrc_uses_source_ushort_mode_report() {
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -966,7 +968,7 @@ fn info_real_complex_short_mrc_uses_source_complex_short_mode_report() {
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -998,7 +1000,7 @@ fn info_real_short_mrc_uses_source_short_mode_report() {
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -1037,7 +1039,7 @@ fn clip_append_reports_source_missing_output_error_for_real_mrc_input() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "bri",
             "-a",
@@ -1078,7 +1080,7 @@ fn clip_append_reports_source_error_for_unreadable_existing_output_header() {
         ii_close(file);
     }
     std::fs::write(&output, [0_u8, 1, 2, 3]).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "bri",
             "-a",
@@ -1126,7 +1128,7 @@ fn threshold_process_error_exits_before_clip_main_finalization_for_real_mrc() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "threshold",
             input.to_str().unwrap(),
@@ -1177,7 +1179,7 @@ fn fft_with_tiff_output_environment_warns_and_writes_source_forced_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .env("IMOD_OUTPUT_FORMAT", "TIFF")
         .args(["fft", input.to_str().unwrap(), output.to_str().unwrap()])
         .output()
@@ -1242,7 +1244,7 @@ fn view_option_runs_source_3dmod_command_after_real_mrc_output_close() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .env("PATH", &bin)
         .env("CLIP_VIEW_MARKER", &marker)
         .args([
@@ -1294,7 +1296,7 @@ fn nonappend_real_mrc_output_is_renamed_to_source_backup_before_replacement() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["resize", input.to_str().unwrap(), output.to_str().unwrap()])
         .output()
         .unwrap();
@@ -1334,7 +1336,7 @@ fn average_2d_means_all_real_input_sections() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "average",
                 "-2d",
@@ -1381,7 +1383,7 @@ fn standev_2d_thresholds_real_mrc_pixels_before_source_variance() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "standev",
             "-2d",
@@ -1442,7 +1444,7 @@ fn append_real_mrc_keeps_existing_mode_with_source_file_io_warning() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "flatfield",
             "-a",
@@ -1505,7 +1507,7 @@ fn brightness_real_mrc_append_updates_source_weighted_header_mean() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-a",
@@ -1567,7 +1569,7 @@ fn brightness_real_mrc_preserves_source_input_header_label() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             input.to_str().unwrap(),
@@ -1627,7 +1629,7 @@ fn append_real_mrc_keeps_existing_size_and_resizes_the_written_slice() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-a",
@@ -1696,7 +1698,7 @@ fn brightness_real_mrc_truncate_replaces_at_source_section_and_updates_header() 
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-o",
@@ -1765,7 +1767,7 @@ fn brightness_real_mrc_overwrite_retains_tail_at_source_section() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-or",
@@ -1825,7 +1827,7 @@ fn brightness_expands_a_real_mrc_with_source_blank_slices_before_and_after() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-oz",
@@ -1889,7 +1891,7 @@ fn brightness_2d_real_mrc_keeps_only_source_centered_output_window() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-2d",
@@ -1947,7 +1949,7 @@ fn brightness_real_mrc_explicit_pad_overrides_source_default_for_blank_sections(
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-oz",
@@ -2008,7 +2010,7 @@ fn brightness_3d_real_mrc_places_source_boundary_pad_slices() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-oz",
@@ -2071,7 +2073,7 @@ fn brightness_3d_real_mrc_trims_input_to_source_center_section() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-oz",
@@ -2128,7 +2130,7 @@ fn brightness_3d_iz_sets_source_input_z_range_before_section_list_rebuild() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-1",
@@ -2190,7 +2192,7 @@ fn brightness_real_mrc_allows_requested_output_resize() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-ox",
@@ -2241,7 +2243,7 @@ fn brightness_real_mrc_converts_new_output_to_requested_source_mode() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-m",
@@ -2297,7 +2299,7 @@ fn flatfield_real_mrc_keeps_source_fixed_output_size_with_warning() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "flatfield",
             "-ox",
@@ -2558,7 +2560,7 @@ fn multifile_real_mrc_mismatch_reports_source_file_io_diagnostic() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             first.to_str().unwrap(),
@@ -2605,7 +2607,7 @@ fn multifile_real_mrc_combines_source_sections_into_output_depth() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             first.to_str().unwrap(),
@@ -2669,7 +2671,7 @@ fn multifile_real_mrc_append_is_rejected_before_output_lifecycle_setup() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-a",
@@ -2714,7 +2716,7 @@ fn multifile_real_mrc_rejects_source_blank_output_sections() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-oz",
@@ -2765,7 +2767,7 @@ fn divide_reuses_single_second_mrc_slice_and_rounds_integer_output() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "divide",
             first.to_str().unwrap(),
@@ -2836,7 +2838,7 @@ fn normalize_applies_real_float_gain_reference_to_real_mrc() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "normalize",
             "-m",
@@ -2927,7 +2929,7 @@ fn average_reads_all_rows_of_real_multifile_mrc_inputs() {
         }
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "average",
                 "-3d",
@@ -2985,7 +2987,7 @@ fn brightness_reads_and_writes_real_mrc_pixels() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "brightness",
                 "-n",
@@ -2998,7 +3000,7 @@ fn brightness_reads_and_writes_real_mrc_pixels() {
             .success()
     );
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "brightness",
                 "-a",
@@ -3061,7 +3063,7 @@ fn brightness_reads_each_real_multifile_mrc_header_and_slice() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-n",
@@ -3137,7 +3139,7 @@ fn unwrap_copies_a_real_default_selection_extended_header() {
         );
         libc::fclose(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "unwrap",
             "-n",
@@ -3200,7 +3202,7 @@ fn boxsd_keeps_source_output_scale_after_real_map_setup() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "boxsd",
             "-n",
@@ -3268,7 +3270,7 @@ fn boxsd_rejects_subunit_reduction_before_real_mrc_output_open() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "boxsd",
             "-n",
@@ -3312,7 +3314,7 @@ fn defect_list_without_both_camera_sizes_fatals_before_real_mrc_output_open() {
         ii_close(file);
     }
     std::fs::write(&defects, "CameraSizeX 1\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-Defects",
@@ -3354,7 +3356,7 @@ fn supergain_rejects_eer_option_before_real_mrc_lifecycle() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "supergain",
             "-es",
@@ -3396,7 +3398,7 @@ fn defect_binning_below_source_minimum_fatals_before_real_mrc_output_open() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-Binning",
@@ -3439,7 +3441,7 @@ fn missing_defect_list_reports_source_open_error_before_real_mrc_lifecycle() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-D",
@@ -3481,7 +3483,7 @@ fn invalid_mode_reports_source_error_before_real_mrc_output_open() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-mode",
@@ -3526,7 +3528,7 @@ fn flatfield_forces_source_float_mode_for_real_mrc_byte_request() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "flatfield",
             "-m",
@@ -3586,7 +3588,7 @@ fn invalid_option_reports_source_fatal_before_real_mrc_lifecycle() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-q",
@@ -3627,7 +3629,7 @@ fn invalid_output_format_reports_source_fatal_before_real_mrc_lifecycle() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-format",
@@ -3667,7 +3669,7 @@ fn average_accepts_source_short_2d_option_for_real_mrc() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "average",
             "-2",
@@ -3716,7 +3718,7 @@ fn append_accepts_source_second_character_option_spelling_for_real_mrc() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-append",
@@ -3772,7 +3774,7 @@ fn brightness_accepts_source_second_character_number_option_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-number",
@@ -3824,7 +3826,7 @@ fn threshold_accepts_source_second_character_sano_option_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "threshold",
             "-source-range",
@@ -3859,7 +3861,7 @@ fn blankfile_accepts_source_second_character_pad_option_for_real_mrc() {
         "imod-rs-clip-padding-prefix-{}.mrc",
         std::process::id()
     ));
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "blankfile",
             "-ox",
@@ -3910,7 +3912,7 @@ fn missing_output_for_real_mrc_exits_with_source_usage_status() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["brightness", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -3946,7 +3948,7 @@ fn unknown_command_exits_with_source_usage_status_before_real_mrc_open() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "no-such-process",
             input.to_str().unwrap(),
@@ -3985,7 +3987,7 @@ fn standalone_z_option_reports_source_invalid_option_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-z",
@@ -4033,7 +4035,7 @@ fn long_one_based_option_overwrites_source_first_section_in_real_mrc() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-2",
@@ -4091,7 +4093,7 @@ fn defectmap_writes_source_byte_map_for_real_mrc_defect_list() {
         ii_close(file);
     }
     std::fs::write(&defects, "CameraSizeX 2\nCameraSizeY 2\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "defectmap",
             "-Defects",
@@ -4154,7 +4156,7 @@ fn defectmap_writes_real_tiff_through_source_iimage_dispatch() {
         ii_close(file);
     }
     std::fs::write(&defects, "CameraSizeX 2\nCameraSizeY 2\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "defectmap",
             "-f",
@@ -4223,7 +4225,7 @@ fn brightness_forces_source_bigtiff_output_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .env("IMOD_ALL_BIG_TIFF", "1")
         .args([
             "brightness",
@@ -4283,7 +4285,7 @@ fn brightness_writes_source_serialemccd_tiff_description() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-f",
@@ -4346,7 +4348,7 @@ fn brightness_tiff_readback_strips_source_cr_before_description_newline() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-f",
@@ -4404,7 +4406,7 @@ fn threshold_accepts_source_second_character_lower_option_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "threshold",
             "-lower",
@@ -4455,7 +4457,7 @@ fn threshold_accepts_source_second_character_higher_option_for_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "threshold",
             "-higher",
@@ -4507,7 +4509,7 @@ fn integral_uses_a_real_immutable_float_reference_slice() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "integral",
             "-n",
@@ -4571,7 +4573,7 @@ fn integral_uses_source_x_extent_for_its_lower_y_border_on_non_square_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "integral",
             "-n",
@@ -4627,7 +4629,7 @@ fn logarithm_and_square_root_follow_single_precision_real_mrc_transforms() {
         ii_close(file);
     }
     for (command, output) in [("logarithm", &log_output), ("sqroot", &sqrt_output)] {
-        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+        let result = common::imod_cmd("clip")
             .args([
                 command,
                 "-n",
@@ -4716,7 +4718,7 @@ fn threshold_writes_source_formatted_points_for_real_mrc_pixels() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "threshold",
             "-t",
@@ -4751,7 +4753,7 @@ fn threshold_writes_source_formatted_points_for_real_mrc_pixels() {
     }
     let failed_output = base.with_extension("failed-output.mrc");
     let missing_points = base.join("missing-parent").join("points.txt");
-    let failed = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let failed = common::imod_cmd("clip")
         .args([
             "threshold",
             "-t",
@@ -4800,7 +4802,7 @@ fn brightness_keeps_a_nondefault_float_near_the_source_sentinel() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "brightness",
             "-n",
@@ -4857,7 +4859,7 @@ fn contrast_2d_uses_each_real_slice_mean_from_source_slice_mmm() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "contrast",
             "-2d",
@@ -4925,7 +4927,7 @@ fn sobel_uses_clip_edge_float_to_byte_and_real_mrc_header_path() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["sobel", input.to_str().unwrap(), output.to_str().unwrap()])
         .output()
         .unwrap();
@@ -4986,7 +4988,7 @@ fn color_3d_writes_source_scaled_rgb_bytes_to_real_mrc() {
         );
         libc::fclose(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "color",
             "-red",
@@ -5059,7 +5061,7 @@ fn color_2d_writes_source_rounded_rgb_bytes_to_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "color",
             "-2d",
@@ -5132,7 +5134,7 @@ fn laplacian_convolve_filters_a_real_mrc_slice() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "laplacian",
             input.to_str().unwrap(),
@@ -5202,7 +5204,7 @@ fn smooth_default_uses_the_source_3d_gaussian_route_on_real_mrc_data() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["smooth", input.to_str().unwrap(), output.to_str().unwrap()])
         .output()
         .unwrap();
@@ -5266,7 +5268,7 @@ fn median_2d_removes_a_real_mrc_salt_pixel() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "median",
             "-2d",
@@ -5341,7 +5343,7 @@ fn median_3d_uses_the_source_slice_window_on_real_mrc_data() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "median",
             "-3d",
@@ -5381,7 +5383,7 @@ fn median_3d_uses_the_source_slice_window_on_real_mrc_data() {
 fn blankfile_writes_a_real_constant_mrc_volume() {
     let output =
         std::env::temp_dir().join(format!("imod-rs-clip-blankfile-{}.mrc", std::process::id()));
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "blankfile",
             "-ox",
@@ -5448,7 +5450,7 @@ fn blankfile_rejects_nonpositive_source_output_size_before_output_open() {
         "imod-rs-clip-blankfile-nonpositive-{}.mrc",
         std::process::id()
     ));
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "blankfile",
             "-ox",
@@ -5494,7 +5496,7 @@ fn chunk_sizes_reject_explicit_nonhdf_output_format_before_real_mrc_open() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "resize",
             "-CX",
@@ -5538,7 +5540,7 @@ fn resize_rejects_source_x_and_center_conflict_before_real_mrc_output_open() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "resize",
             "-x",
@@ -5583,7 +5585,7 @@ fn diffusion_filters_a_real_mrc_slice_with_source_status_and_title() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "diffusion",
             "-n",
@@ -5663,7 +5665,7 @@ fn flipxy_transposes_each_real_mrc_volume_slice() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["flipxy", input.to_str().unwrap(), output.to_str().unwrap()])
         .output()
         .unwrap();
@@ -5731,7 +5733,7 @@ fn rotx_rotates_real_mrc_yz_planes_in_source_order() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["rotx", input.to_str().unwrap(), output.to_str().unwrap()])
         .output()
         .unwrap();
@@ -5811,7 +5813,7 @@ fn quadrant_corrects_real_mrc_quadrant_intensities() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "quadrant",
             "-h",
@@ -5895,7 +5897,7 @@ fn edgefill_processes_real_short_mrc_drift_edges() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "edgefill",
             "-l",
@@ -5970,7 +5972,7 @@ fn spectrum_writes_a_real_mrc_slice_with_source_header_scale() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "spectrum",
             "-l",
@@ -6050,7 +6052,7 @@ fn joinrgb_combines_three_real_byte_mrc_files() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "joinrgb",
             "-r",
@@ -6135,7 +6137,7 @@ fn splitrgb_writes_three_real_byte_mrc_files() {
         );
         libc::fclose(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "splitrgb",
             input.to_str().unwrap(),
@@ -6211,7 +6213,7 @@ fn fft_writes_real_complex_mrc_with_source_dimensions() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args(["fft", input.to_str().unwrap(), output.to_str().unwrap()])
             .status()
             .unwrap()
@@ -6256,7 +6258,7 @@ fn filter_reads_real_mrc_through_slice_read_subm() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "filter",
                 "-l",
@@ -6309,7 +6311,7 @@ fn info_prints_complete_real_mrc_header_path() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["info", path.to_str().unwrap()])
         .output()
         .unwrap();
@@ -6346,7 +6348,7 @@ fn correlate_auto_reads_and_writes_real_mrc() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "correlation",
                 "-2d",
@@ -6395,7 +6397,7 @@ fn defectmap_uses_correct_defects_header_layout_on_real_mrc() {
         ii_close(file);
     }
     std::fs::write(&defects, "CameraSizeX 4\nCameraSizeY 4\nBadColumns 1\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "defectmap",
             "-D",
@@ -6464,7 +6466,7 @@ fn supergain_rejects_a_real_non_eer_byte_mrc_with_source_diagnostic() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "supergain",
             input.to_str().unwrap(),
@@ -6501,7 +6503,7 @@ fn histogram_prints_source_integer_bins_for_real_byte_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args(["histogram", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -6539,14 +6541,14 @@ fn histogram_post_bin_options_report_source_failures_for_real_mrc() {
         );
         ii_close(file);
     }
-    let falloff = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let falloff = common::imod_cmd("clip")
         .args(["histogram", "-Falloff", "0.1;-1", input.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(!falloff.status.success());
     assert!(String::from_utf8_lossy(&falloff.stdout)
         .contains("ERROR: CLIP - No point of maximum falloff could be found past 0.100 of total cumulative counts"));
-    let extra = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let extra = common::imod_cmd("clip")
         .args(["histogram", "-Extra", "0.5;-1", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -6587,7 +6589,7 @@ fn correlation_3d_real_mrc_reports_source_parabolic_peak_location() {
             ii_close(file);
         }
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .args([
             "correlation",
             "-3d",
@@ -6631,7 +6633,7 @@ fn threshold_minimum_size_semicolon_sign_uses_source_fill_behavior() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_clip"))
+        common::imod_cmd("clip")
             .args([
                 "threshold",
                 "-t",
@@ -6721,7 +6723,7 @@ fn median_three_dimensional_window_narrows_at_the_ends_of_the_volume() {
     write_edge_sensitive_volume(&two, 3, 2);
 
     for (input, output) in [(&five, &five_out), (&two, &two_out)] {
-        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+        let result = common::imod_cmd("clip")
             .args(["median", "-n", "3"])
             .arg(input)
             .arg(output)
@@ -6784,7 +6786,7 @@ fn validation_errors_use_the_source_exit_prefix_on_standard_output() {
         ),
         (vec!["brightness", "-zz", "1"], "Invalid option -zz."),
     ] {
-        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+        let result = common::imod_cmd("clip")
             .args(&args)
             .arg(&input)
             .arg(&output)
@@ -6806,7 +6808,7 @@ fn missing_arguments_print_the_source_banner_and_exit_three() {
     // `clip.cpp:215-218` calls usage() then exit(3), and usage()
     // (`clip.cpp:22-27`) prints the version banner with `printf` immediately
     // before `imodCopyright`, which also uses `printf`.
-    let result = Command::new(env!("CARGO_BIN_EXE_clip")).output().unwrap();
+    let result = common::imod_cmd("clip").output().unwrap();
     assert_eq!(result.status.code(), Some(3));
     let text = String::from_utf8_lossy(&result.stdout);
     let mut lines = text.lines();
@@ -6843,7 +6845,7 @@ fn opening_a_missing_input_reports_the_source_ii_open_diagnostic() {
     let _ = std::fs::remove_file(&missing);
     let output =
         std::env::temp_dir().join(format!("imod-rs-clip-absent-{}.out", std::process::id()));
-    let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let result = common::imod_cmd("clip")
         .arg("brightness")
         .arg(&missing)
         .arg(&output)
@@ -6908,7 +6910,7 @@ fn writing_16_bit_floats_does_not_take_the_half_float_path_for_integer_modes() {
             ii_close(file);
         }
 
-        let result = Command::new(env!("CARGO_BIN_EXE_clip"))
+        let result = common::imod_cmd("clip")
             .env("IMOD_WRITE_FLOATS_16BIT", "1")
             .args(["brightness", "-n", "1"])
             .arg(&input)
@@ -6965,7 +6967,7 @@ fn bandpass_filter_matches_native_rounding_on_real_mrc() {
         );
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "filter",
             "-l",
@@ -7036,7 +7038,7 @@ fn boxsd_matches_native_rounding_on_real_mrc() {
         );
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "boxsd",
             "-n",
@@ -7108,7 +7110,7 @@ fn flatfield_sum_matches_native_rounding_on_real_mrc() {
         }
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "flatfield",
             input.to_str().unwrap(),
@@ -7193,7 +7195,7 @@ fn forward_and_inverse_fft_warn_about_ignored_entries() {
     let forward = base.with_extension("fwd.mrc");
     let inverse = base.with_extension("inv.mrc");
     write_audit_float_volume(&input, 16, 8, 2);
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "fft",
             "-2d",
@@ -7210,7 +7212,7 @@ fn forward_and_inverse_fft_warn_about_ignored_entries() {
         stdout.starts_with("WARNING: clip forward fft - output sizes or mode are ignored\n"),
         "{stdout}"
     );
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "fft",
             "-2d",
@@ -7253,10 +7255,7 @@ fn odd_input_size_fft_prints_the_source_factor_diagnostic() {
         let mut all = args.clone();
         all.push(input.to_str().unwrap());
         all.push(output.to_str().unwrap());
-        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
-            .args(&all)
-            .output()
-            .unwrap();
+        let command = common::imod_cmd("clip").args(&all).output().unwrap();
         assert!(!command.status.success(), "{command:?}");
         let stdout = String::from_utf8(command.stdout).unwrap();
         assert!(stdout.contains(expected), "{args:?}: {stdout}");
@@ -7282,7 +7281,7 @@ fn a_single_input_to_add_reports_the_process_error_not_the_usage_banner() {
             "ERROR: clip multiply/divide: Need exactly two input files.\n",
         ),
     ] {
-        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        let command = common::imod_cmd("clip")
             .args([process, input.to_str().unwrap(), output.to_str().unwrap()])
             .output()
             .unwrap();
@@ -7302,7 +7301,7 @@ fn flatfield_mode_warning_has_no_program_prefix() {
     let input = base.with_extension("in.mrc");
     let output = base.with_extension("out.mrc");
     write_audit_float_volume(&input, 12, 8, 2);
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "flatfield",
             "-m",
@@ -7345,10 +7344,7 @@ fn option_values_follow_the_source_sscanf_atof_and_switch_shapes() {
         let mut all = args.clone();
         all.push(input.to_str().unwrap());
         all.push(output.to_str().unwrap());
-        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
-            .args(&all)
-            .output()
-            .unwrap();
+        let command = common::imod_cmd("clip").args(&all).output().unwrap();
         assert!(
             command.status.success(),
             "{args:?} rejected: {}",
@@ -7362,7 +7358,7 @@ fn option_values_follow_the_source_sscanf_atof_and_switch_shapes() {
     let plain = base.with_extension("plain.mrc");
     let other = base.with_extension("other.mrc");
     for (value, path) in [("2x", &suffixed), ("2", &plain), ("3", &other)] {
-        let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+        let command = common::imod_cmd("clip")
             .args([
                 "brightness",
                 "-n",
@@ -7393,7 +7389,7 @@ fn a_negative_input_size_list_does_not_overflow_the_section_allocation() {
     let input = base.with_extension("in.mrc");
     let output = base.with_extension("out.mrc");
     write_audit_float_volume(&input, 8, 6, 5);
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "resize",
             "-iz",
@@ -7437,7 +7433,7 @@ fn histogram_rejects_a_sub_unit_bin_size_with_the_source_message() {
         );
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args(["histogram", "-n", "0.2", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -7458,7 +7454,7 @@ fn stats_prints_the_overall_line_before_the_extreme_value_list() {
     let base = std::env::temp_dir().join(format!("imod-rs-clip-statorder-{}", std::process::id()));
     let input = base.with_extension("in.mrc");
     write_audit_float_volume(&input, 12, 8, 6);
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args(["stats", "-n", "2", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -7480,7 +7476,7 @@ fn stats_outlier_length_never_exceeds_the_section_count() {
     let base = std::env::temp_dir().join(format!("imod-rs-clip-statclamp-{}", std::process::id()));
     let input = base.with_extension("in.mrc");
     write_audit_float_volume(&input, 8, 6, 3);
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args(["stats", "-n", "2", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -7525,7 +7521,7 @@ fn logarithm_uses_the_single_precision_log_routine() {
         );
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "logarithm",
             input.to_str().unwrap(),
@@ -7585,7 +7581,7 @@ fn a_full_bad_column_run_leaves_the_rows_the_source_never_reaches() {
         "CameraSizeX 32\nCameraSizeY 32\nBadColumns 12 13 14\n",
     )
     .unwrap();
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "brightness",
             "-n",
@@ -7643,7 +7639,7 @@ fn defect_file_parse_failures_report_the_source_single_argument_message() {
     let output = base.with_extension("out.mrc");
     write_audit_float_volume(&input, 8, 6, 1);
     let missing = base.with_extension("nosuch.txt");
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "brightness",
             "-n",
@@ -7693,7 +7689,7 @@ fn edge_fill_accepts_the_sizes_the_source_accepts() {
         }
         ii_close(file);
     }
-    let command = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let command = common::imod_cmd("clip")
         .args([
             "edgefill",
             "-l",

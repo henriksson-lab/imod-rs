@@ -1,8 +1,9 @@
+mod common;
+
 use imod_rs::imod::libiimod::mrcfiles::{
     MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write,
 };
 use std::ffi::CString;
-use std::process::Command;
 
 /// Every PIP-driven invocation needs an autodoc directory, exactly as a real
 /// IMOD install provides one through `AUTODOC_DIR` or `IMOD_DIR`.
@@ -10,7 +11,7 @@ const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
 #[test]
 fn alterheader_rejects_copy_combined_with_another_source_option_before_opening() {
-    let result = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+    let result = common::imod_cmd("alterheader")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-copy",
@@ -45,7 +46,7 @@ fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+        let result = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-org",
@@ -111,7 +112,7 @@ fn alterheader_inserts_title_at_source_one_based_position() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+        let result = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-position", "2", "-title", "inserted"])
             .arg(&input)
@@ -146,7 +147,7 @@ fn alterheader_modefix_reports_source_mode_conversion_and_range_warning() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+        let result = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-modefix", input.to_str().unwrap()])
             .output()
@@ -187,7 +188,7 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
 
-        let mut child = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+        let mut child = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&input)
             .stdin(std::process::Stdio::piped())
@@ -260,7 +261,7 @@ fn alterheader_interactive_rejects_an_unknown_keyword_and_reprompts() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let mut child = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+        let mut child = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&input)
             .stdin(std::process::Stdio::piped())
@@ -304,7 +305,7 @@ fn alterheader_falls_back_to_the_program_option_table_without_an_autodoc() {
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+    let result = common::imod_cmd("alterheader")
         .env_remove("AUTODOC_DIR")
         .env_remove("IMOD_DIR")
         .args(["-org", "1,2,3"])
@@ -335,7 +336,7 @@ fn alterheader_falls_back_to_the_program_option_table_without_an_autodoc() {
 fn alterheader_rejects_the_interactive_only_data_type_keyword_as_an_option() {
     // `DAT` has no PIP field in `alterheader.adoc`, so native reports it as an
     // illegal option before opening anything.
-    let result = Command::new(env!("CARGO_BIN_EXE_alterheader"))
+    let result = common::imod_cmd("alterheader")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-dat", "1,2,3,4,5,6", "no-such-file.mrc"])
         .output()

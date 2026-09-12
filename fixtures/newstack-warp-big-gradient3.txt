@@ -1,0 +1,81 @@
+ reallocating array to   3.81469727      MB
+
+ FORMATTED  ro  file opened: w.mgt
+
+ RO image file on unit   1 : in.mrc     Size=      12657 K
+
+ Number of columns, rows, sections .....    1200     900       3
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0    1200    900      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   47.500    
+ Maximum density .......................   232.00    
+ Mean density ..........................   140.08    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack chunked warping fixture                                               
+
+ Size and offsets X:        1200   0.00000000     , Y:         900   0.00000000    
+
+ NEW image file on unit   2 : o.mrc
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           3           1
+           1           0         304           0         300
+           2         297         307         300         300
+           3         597         303         600         300
+ scanning for mean for fill           0         900           0           1
+ loading whole region           0         303         304
+ did iclden    30.3378887       257.989929       30.3378887       257.989929    
+ writing           1
+ moving data down                 8400               356400
+ did iclden    32.8588600       253.860825       30.3378887       257.989929    
+ writing           2
+ moving data down                 8400               360000
+ did iclden    21.3817883       250.413101       21.3817883       257.989929    
+ writing           3
+ section   input min&max       output min&max  &  mean
+       0     21.38    257.99     21.38    257.99    137.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           3           1
+           1           0         303           0         300
+           2         298         305         300         300
+           3         598         302         600         300
+ scanning for mean for fill           1         900           0           1
+ loading whole region           0         302         303
+ did iclden    42.5103912       248.935410       42.5103912       248.935410    
+ writing           1
+ moving data down                 6000               357600
+ did iclden    48.9436836       251.283920       42.5103912       251.283920    
+ writing           2
+ moving data down                 6000               360000
+ did iclden    38.4084053       251.701614       38.4084053       251.701614    
+ writing           3
+       1     38.41    251.70     38.41    251.70    140.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           3           1
+           1           0         303           0         300
+           2         298         305         300         300
+           3         598         302         600         300
+ scanning for mean for fill           2         900           0           1
+ loading whole region           0         302         303
+ did iclden    54.5000000       231.000000       54.5000000       231.000000    
+ writing           1
+ moving data down                 6000               357600
+ did iclden    53.5000000       231.500000       53.5000000       231.500000    
+ writing           2
+ moving data down                 6000               360000
+ did iclden    54.0000000       232.000000       53.5000000       232.000000    
+ writing           3
+       2     53.50    232.00     53.50    232.00    143.04
+loadtime MASKED

@@ -1,8 +1,9 @@
+mod common;
+
 use imod_rs::imod::libiimod::mrcfiles::{
     MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write,
 };
 use std::ffi::CString;
-use std::process::Command;
 
 #[test]
 fn binvol_without_two_arguments_prints_source_help_and_exits_zero() {
@@ -10,7 +11,7 @@ fn binvol_without_two_arguments_prints_source_help_and_exits_zero() {
     // prints the autodoc help and calls `exit(0)` when fewer than `minArgs`
     // entries were given; verified against the native binary, which prints the
     // same block for no arguments and for `-input file` alone.
-    let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+    let result = common::imod_cmd("binvol")
         .env(
             "AUTODOC_DIR",
             concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -39,7 +40,7 @@ fn binvol_reports_no_input_file_when_only_options_name_the_output() {
     // With two entries present PIP reaches `PipGetInOutFile('InputFile', ...)`
     // (`binvol.f90:69`), whose failure path is `exitError`, which writes to
     // standard output after a blank record.
-    let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+    let result = common::imod_cmd("binvol")
         .env(
             "AUTODOC_DIR",
             concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -87,7 +88,7 @@ fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
         );
         libc::fclose(file);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -178,7 +179,7 @@ fn binvol_spread_keeps_the_source_sampled_extent_and_origin_shift() {
         );
         libc::fclose(file);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -250,7 +251,7 @@ fn binvol_applies_source_xy_antialias_through_unit_reduced() {
             pixels.len()
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -322,7 +323,7 @@ fn binvol_uses_source_strip_fallback_at_one_megabyte_limit() {
             pixels.len()
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -384,7 +385,7 @@ fn binvol_runs_source_fourier_reduce_and_expand_on_real_mrc_volumes() {
             ("-ftreduce", &reduced, (8, 8, 8)),
             ("-ftexpand", &expanded, (32, 32, 32)),
         ] {
-            let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+            let result = common::imod_cmd("binvol")
                 .env(
                     "AUTODOC_DIR",
                     concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -454,7 +455,7 @@ fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
         libc::fclose(file);
 
         for (backend, output) in [("parity", &parity_output), ("rustfft", &rustfft_output)] {
-            let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+            let result = common::imod_cmd("binvol")
                 .env(
                     "AUTODOC_DIR",
                     concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -564,7 +565,7 @@ fn binvol_accepts_source_permitted_noninteger_fourier_binning() {
             pixels.len()
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -608,7 +609,7 @@ fn binvol_rejects_simultaneous_fourier_directions_on_real_mrc() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -651,7 +652,7 @@ fn binvol_rejects_spread_with_fourier_on_real_mrc() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -696,7 +697,7 @@ fn binvol_rejects_noninteger_real_mrc_reduction_without_filter() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -744,7 +745,7 @@ fn binvol_rejects_unequal_noninteger_xy_real_mrc_reduction() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -791,7 +792,7 @@ fn binvol_rejects_invalid_output_mode_on_real_mrc() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -835,7 +836,7 @@ fn binvol_rejects_source_invalid_antialias_filter_on_real_mrc() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -899,7 +900,7 @@ fn binvol_takes_the_first_value_of_a_comma_separated_binning_entry() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
         write_tiny_float_stack(&input);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -949,7 +950,7 @@ fn binvol_opens_the_output_unit_before_the_antialias_notice() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
         write_tiny_float_stack(&input);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -995,7 +996,7 @@ fn binvol_reports_a_zero_reduction_factor_after_reading_the_header() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
         write_tiny_float_stack(&input);
-        let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+        let result = common::imod_cmd("binvol")
             .env(
                 "AUTODOC_DIR",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -1035,7 +1036,7 @@ fn binvol_help_option_prints_the_autodoc_block_and_exits_zero() {
     // `exit(0)` (`parse_input_params.f90:163`); the block comes from
     // `IMOD/autodoc/binvol.adoc`, which includes `-shifts`, an option missing
     // from the in-program fallback table.
-    let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+    let result = common::imod_cmd("binvol")
         .env(
             "AUTODOC_DIR",
             concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
@@ -1071,7 +1072,7 @@ fn binvol_reports_the_backend_read_diagnostic_before_its_own() {
     std::fs::create_dir_all(&dir).unwrap();
     let whole = std::fs::read(root.join("fixtures/newstack-mixed-byte.mrc")).unwrap();
     std::fs::write(dir.join("tr.mrc"), &whole[..1200]).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_binvol"))
+    let result = common::imod_cmd("binvol")
         .current_dir(&dir)
         .env(
             "AUTODOC_DIR",

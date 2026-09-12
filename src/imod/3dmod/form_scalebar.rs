@@ -1,28 +1,8 @@
 //! Translation of `IMOD/3dmod/form_scalebar.cpp` and `form_scalebar.h`.
 #![allow(dead_code)]
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ScaleBar {
-    pub draw: bool,
-    pub draw_on_snapshots: bool,
-    pub white: bool,
-    pub vertical: bool,
-    pub color_ramp: bool,
-    pub invert_ramp: bool,
-    pub min_length: i32,
-    pub thickness: i32,
-    pub position: i32,
-    pub indent_x: i32,
-    pub indent_y: i32,
-    pub use_custom: bool,
-    pub use_exact: bool,
-    pub custom_val: i32,
-    pub exact_val: f32,
-    pub last_length: f32,
-    pub draw_labels: bool,
-    pub label_size: i32,
-    pub label_yoffset: i32,
-}
+/// The paired lower translation owns the source `ScaleBar` declaration.
+pub use crate::imod::three_dmod::scalebar::ScaleBar;
 pub const MIN_LABEL_SIZE: i32 = 1;
 /// Native Qt, scale-bar, renderer, and key-routing boundary.
 pub trait ScaleBarNativeBoundary {

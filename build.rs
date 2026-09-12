@@ -64,28 +64,48 @@ fn main() {
         return;
     }
     println!("cargo:rerun-if-changed=src/imod/qttools/mrc2tif/mrc2tif_qimage.cpp");
+    println!("cargo:rerun-if-changed=src/imod/3dmod/iiqimage_qt.cpp");
     let flags = Command::new("pkg-config")
         .args(["--cflags", "Qt5Gui"])
         .output()
         .expect("Qt5 pkg-config is required for the source QImage boundary");
     assert!(flags.status.success(), "Qt5Gui pkg-config lookup failed");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let object = out.join("mrc2tif_qimage.o");
-    let mut compile = Command::new("c++");
-    compile.args(["-std=c++17", "-fPIC", "-c"]);
-    compile.args(String::from_utf8(flags.stdout).unwrap().split_whitespace());
-    compile.arg("src/imod/qttools/mrc2tif/mrc2tif_qimage.cpp");
-    compile.args(["-o", object.to_str().unwrap()]);
-    assert!(
-        compile
-            .status()
-            .expect("C++ compiler unavailable")
-            .success()
-    );
+    let mut objects = Vec::new();
+    for source in [
+        "src/imod/qttools/mrc2tif/mrc2tif_qimage.cpp",
+        "src/imod/3dmod/iiqimage_qt.cpp",
+    ] {
+        let object = out.join(format!(
+            "{}.o",
+            std::path::Path::new(source)
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+        ));
+        let mut compile = Command::new("c++");
+        compile.args(["-std=c++17", "-fPIC", "-c"]);
+        compile.args(
+            String::from_utf8(flags.stdout.clone())
+                .unwrap()
+                .split_whitespace(),
+        );
+        compile.arg(source);
+        compile.args(["-o", object.to_str().unwrap()]);
+        assert!(
+            compile
+                .status()
+                .expect("C++ compiler unavailable")
+                .success()
+        );
+        objects.push(object);
+    }
     let archive = out.join("libmrc2tif_qimage.a");
     assert!(
         Command::new("ar")
-            .args(["crs", archive.to_str().unwrap(), object.to_str().unwrap()])
+            .arg("crs")
+            .arg(archive.to_str().unwrap())
+            .args(&objects)
             .status()
             .expect("archiver unavailable")
             .success()

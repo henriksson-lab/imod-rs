@@ -1,7 +1,8 @@
 //! Conformance coverage for `IMOD/qttools/sourcedoc/sourcedoc.cpp`.
 
+mod common;
+
 use std::fs;
-use std::process::Command;
 
 #[test]
 fn sourcedoc_expands_c_documentation_and_special_codes() {
@@ -24,7 +25,7 @@ fn sourcedoc_expands_c_documentation_and_special_codes() {
         "Before\nLIST FUNCTIONS FROM source.c\nDESCRIBE FUNCTIONS FROM source.c\nAfter\n",
     )
     .unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_sourcedoc"))
+    let status = common::imod_cmd("sourcedoc")
         .arg("-d")
         .arg(&directory)
         .arg(directory.join("input.html"))
@@ -60,7 +61,7 @@ fn sourcedoc_expands_documented_code_and_escapes_code_html() {
         "LIST CODE FROM source.c\nDESCRIBE CODE FROM source.c\n",
     )
     .unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_sourcedoc"))
+    let status = common::imod_cmd("sourcedoc")
         .arg("-d")
         .arg(&directory)
         .arg(directory.join("input.html"))
@@ -96,7 +97,7 @@ fn sourcedoc_supports_fortran_documentation_continuations() {
         "LIST FUNCTIONS FROM source.f\nDESCRIBE FUNCTIONS FROM source.f\n",
     )
     .unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_sourcedoc"))
+    let status = common::imod_cmd("sourcedoc")
         .arg("-f")
         .arg("-d")
         .arg(&directory)

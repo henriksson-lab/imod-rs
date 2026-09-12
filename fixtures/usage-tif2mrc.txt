@@ -1,0 +1,20 @@
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+Usage: tif2mrc [options] <tiff files...> <mrcfile>
+Options:
+	-g      Convert 24-bit RGB to 8-bit grayscale
+	-G      Convert 24-bit RGB to 8-bit grayscale with NTSC scaling
+	-u      Convert unsigned 16-bit values by subtracting 32768
+	-d      Convert unsigned 16-bit values by dividing by 2
+	-k      Keep unsigned 16-bit values; store in unsigned integer mode
+	-s      Store 16-bit as signed (mode 1) even if data are unsigned
+	-B #    Write bytes as unsigned (for # 0) or signed (for # 1)
+	-i      Invert order of sections in output stack
+	-p  #   Set pixel spacing in MRC header to given #
+	-P      Set pixel spacing in MRC header from resolution in TIFF file
+	-T file Output tilt angles from TVIPS input files to given file
+	-f      Read only first image of multi-page file
+	-o x,y  Set output file size in X and Y
+	-F  #   Set value to fill areas with no image data to given #
+	-b file Background subtract image in given file
+	-t #    Set criterion in megabytes for reading files in chunks
+	-m      Turn off file-to-memory mapping in libtiff

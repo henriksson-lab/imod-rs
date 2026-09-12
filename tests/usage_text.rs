@@ -6,7 +6,7 @@
 //! pipe.  These goldens are the reference binaries' own output with the one
 //! line that carries compile metadata removed.
 
-use std::process::Command;
+mod common;
 
 fn golden(name: &str) -> String {
     std::fs::read_to_string(
@@ -19,7 +19,7 @@ fn golden(name: &str) -> String {
 fn mrc2tif_usage_matches_the_reference_text() {
     // `mrc2tif.cpp:30` prints the version on the first line; everything after
     // it is input-independent.
-    let out = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let out = common::imod_cmd("mrc2tif")
         .output()
         .expect("mrc2tif executable must start");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -29,7 +29,7 @@ fn mrc2tif_usage_matches_the_reference_text() {
 
 #[test]
 fn tif2mrc_usage_matches_the_reference_text() {
-    let out = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let out = common::imod_cmd("tif2mrc")
         .output()
         .expect("tif2mrc executable must start");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -44,7 +44,7 @@ fn tif2mrc_usage_matches_the_reference_text() {
 
 #[test]
 fn clip_usage_matches_the_reference_text() {
-    let out = Command::new(env!("CARGO_BIN_EXE_clip"))
+    let out = common::imod_cmd("clip")
         .output()
         .expect("clip executable must start");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -69,7 +69,7 @@ fn mrc2tif_scales_a_float_image_for_png_and_jpeg_output() {
         ("-p", "o", "fixtures/mrc2tif-float-scaled.png", "png"),
         ("-j", "j", "fixtures/mrc2tif-float-scaled.jpg", "jpg"),
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let out = common::imod_cmd("mrc2tif")
             .current_dir(&dir)
             .args([flag, "-z", "0,0", "in.mrc", root_name])
             .output()

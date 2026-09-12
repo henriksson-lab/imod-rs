@@ -1,9 +1,8 @@
-use std::process::Command;
+mod common;
 
 #[test]
 fn usage_and_missing_command_file_follow_source_contract() {
-    let binary = env!("CARGO_BIN_EXE_submfg");
-    let usage = Command::new(binary)
+    let usage = common::imod_cmd("submfg")
         .env("IMOD_DIR", "/fixture/imod")
         .output()
         .expect("run submfg");
@@ -14,7 +13,7 @@ fn usage_and_missing_command_file_follow_source_contract() {
             .contains("Keep backslashes instead of converting to forward slashes'")
     );
 
-    let missing = Command::new(binary)
+    let missing = common::imod_cmd("submfg")
         .env("IMOD_DIR", "/fixture/imod")
         .arg("does-not-exist")
         .output()
@@ -29,7 +28,7 @@ fn usage_and_missing_command_file_follow_source_contract() {
 
 #[test]
 fn option_value_error_has_submfg_prefix() {
-    let output = Command::new(env!("CARGO_BIN_EXE_submfg"))
+    let output = common::imod_cmd("submfg")
         .env("IMOD_DIR", "/fixture/imod")
         .args(["-n", "not-an-integer", "unused"])
         .output()
@@ -44,7 +43,7 @@ fn option_value_error_has_submfg_prefix() {
 
 #[test]
 fn submfg_missing_option_value_reports_source_no_command_error_on_stdout() {
-    let output = Command::new(env!("CARGO_BIN_EXE_submfg"))
+    let output = common::imod_cmd("submfg")
         .env("IMOD_DIR", "/fixture/imod")
         .arg("-n")
         .output()
@@ -59,7 +58,7 @@ fn submfg_missing_option_value_reports_source_no_command_error_on_stdout() {
 
 #[test]
 fn submfg_unrecognized_option_uses_source_pip_stdout_route() {
-    let output = Command::new(env!("CARGO_BIN_EXE_submfg"))
+    let output = common::imod_cmd("submfg")
         .env("IMOD_DIR", "/fixture/imod")
         .arg("-unknown")
         .output()
@@ -98,7 +97,7 @@ fn submfg_resolves_vmstopy_from_imod_bin_and_runs_generated_command() {
     let mut permissions = std::fs::metadata(&vmstopy).unwrap().permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&vmstopy, permissions).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_submfg"))
+    let result = common::imod_cmd("submfg")
         .current_dir(&root)
         .env("IMOD_DIR", &root)
         .env("PATH", "/usr/bin:/bin")
@@ -123,7 +122,7 @@ fn submfg_resolves_vmstopy_from_imod_bin_and_runs_generated_command() {
 
 #[test]
 fn subm_requires_imod_dir_before_launching_background_process() {
-    let output = Command::new(env!("CARGO_BIN_EXE_subm"))
+    let output = common::imod_cmd("subm")
         .env_remove("IMOD_DIR")
         .output()
         .expect("run subm");
@@ -151,7 +150,7 @@ fn subm_launches_imod_bin_submfg_and_routes_child_stderr_to_stdout() {
     let mut permissions = std::fs::metadata(&program).unwrap().permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&program, permissions).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_subm"))
+    let result = common::imod_cmd("subm")
         .env("IMOD_DIR", &root)
         .env("PATH", "/usr/bin:/bin")
         .arg("fixture.com")
@@ -175,7 +174,7 @@ fn real_imod_com_fixture_reaches_vmstopy_boundary() {
         fixture.is_file(),
         "bundled IMOD command fixture must be present"
     );
-    let output = Command::new(env!("CARGO_BIN_EXE_submfg"))
+    let output = common::imod_cmd("submfg")
         .env("IMOD_DIR", "/fixture/imod")
         .arg(&fixture)
         .output()
@@ -194,7 +193,7 @@ fn missing_com_and_pcm_root_uses_source_exiterror_stdout() {
     let root =
         std::env::temp_dir().join(format!("imod-rs-submfg-no-command-{}", std::process::id()));
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
-    let result = Command::new(env!("CARGO_BIN_EXE_submfg"))
+    let result = common::imod_cmd("submfg")
         .env("IMOD_DIR", source)
         .arg(&root)
         .output()

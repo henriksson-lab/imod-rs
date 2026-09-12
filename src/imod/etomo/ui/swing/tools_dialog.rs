@@ -25,7 +25,21 @@ pub struct ConstWarpVolParam;
 /// Direct declared-type boundary for `etomo.comscript.GpuTiltTestParam`.
 /// Its complete source unit owns validation and parameter fields.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct GpuTiltTestParam;
+pub struct GpuTiltTestParam {
+    /// Java `GpuTiltTestParam.nMinutes` at the declared-parameter boundary.
+    pub n_minutes: Option<String>,
+    /// Java `GpuTiltTestParam.gpuNumber` at the declared-parameter boundary.
+    pub gpu_number: Option<i32>,
+}
+
+impl super::gpu_tilt_test_panel::GpuTiltTestParameters for GpuTiltTestParam {
+    fn set_n_minutes(&mut self, input: String) {
+        self.n_minutes = Some(input);
+    }
+    fn set_gpu_number(&mut self, input: i32) {
+        self.gpu_number = Some(input);
+    }
+}
 
 /// Rust surface of the source's direct `FlattenVolumePanel` cast.
 pub trait FlattenVolumePanel: ToolPanel {
@@ -413,8 +427,8 @@ mod tests {
             ToolType::GpuTiltTest,
             &mut factory,
         );
-        assert!(dialog.get_parameters(&mut GpuTiltTestParam, true));
-        assert!(!dialog.get_parameters(&mut GpuTiltTestParam, false));
+        assert!(dialog.get_parameters(&mut GpuTiltTestParam::default(), true));
+        assert!(!dialog.get_parameters(&mut GpuTiltTestParam::default(), false));
     }
 
     #[test]

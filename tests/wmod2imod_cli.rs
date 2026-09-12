@@ -1,7 +1,8 @@
 //! Real legacy-WIMP command-line coverage for `wmod2imod`.
 
+mod common;
+
 use imod_rs::imod::libimod::imodel_files::imod_read;
-use std::process::Command;
 
 #[test]
 fn wmod2imod_preserves_imodnew_scale_defaults_and_source_x_option_typo() {
@@ -24,7 +25,7 @@ fn wmod2imod_preserves_imodnew_scale_defaults_and_source_x_option_typo() {
           \n  END\n",
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_wmod2imod"))
+    let result = common::imod_cmd("wmod2imod")
         .args([
             "-x",
             "2",
@@ -91,7 +92,7 @@ fn truncated_wimp_record_is_tolerated_the_way_the_source_fgetline_loop_is() {
               #    X       Y       Z\n      1 1.0 2.0 3.0\n",
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_wmod2imod"))
+    let result = common::imod_cmd("wmod2imod")
         .arg(&input)
         .arg(&output)
         .output()
@@ -117,7 +118,7 @@ fn non_wimp_text_produces_the_source_empty_model_rather_than_an_error() {
     let input = root.with_extension("wimp");
     let output = root.with_extension("mod");
     std::fs::write(&input, "garbage\nnot a wimp file\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_wmod2imod"))
+    let result = common::imod_cmd("wmod2imod")
         .arg(&input)
         .arg(&output)
         .output()

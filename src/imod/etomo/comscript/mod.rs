@@ -6,3 +6,4 @@ pub mod fortran_input_string;
 pub mod fortran_input_syntax_exception;
 pub mod invalid_parameter_exception;
 pub mod parallel_param;
+pub mod tools_com_script_manager;

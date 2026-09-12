@@ -1,0 +1,47 @@
+
+ RO image file on unit   1 : newstack-mixed-short.mrc     Size=          2 K
+
+ Number of columns, rows, sections .....      21      13       3
+ Map mode ..............................    1   (16-bit integer)           
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      21     13      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................  -496.00    
+ Maximum density .......................   23926.    
+ Mean density ..........................   11688.    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack mixed short fixture                                                   
+
+
+ NEW image file on unit   2 : shortbyte.mrc
+ section   input min&max       output min&max  &  mean
+       0   -496.00  22878.00   -496.00  22878.00  11087.87
+       1     38.00  22762.00     38.00  22762.00  11685.67
+       2    820.00  23926.00    820.00  23926.00  12291.53
+
+ RO image file on unit   1 : newstack-mixed-byte.mrc     Size=          1 K
+
+ Number of columns, rows, sections .....      21      13       3
+ Map mode ..............................    0   (bytes - signed in file)   
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      21     13      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   43.000     (  -85.000     in file)
+ Maximum density .......................   227.00     (   99.000     in file)
+ Mean density ..........................   131.61     (   3.6093     in file)
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack mixed byte fixture                                                    
+
+       3     43.00    214.00   5525.42  27498.58  16332.43
+       4     45.00    223.00   5782.41  28655.06  16917.50
+       5     53.00    227.00   6810.40  29169.05  17484.68

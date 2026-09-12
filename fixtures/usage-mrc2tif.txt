@@ -1,0 +1,24 @@
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+mrc2tif [options] <mrc file> <tiff name/root>
+
+ Without -s, a series of tiff files will be created with the
+ prefix [tiff root name] and with the suffix nnn.tif, where nnn is the z number. 
+  Options:
+    -s         Stack all images in the mrc file into a single tiff file
+    -c val     Compress data; val can be lzw, zip, jpeg, or numbers defined
+		 in libtiff
+    -q #       Quality for jpeg compression (0-100) or for zip compression (1-9)
+    -S min,max Initial scaling limits for conversion to bytes
+    -C b,w     Contrast black/white values for conversion to bytes
+    -a mn,sd   Scale to mean and SD for conversion to bytes (0,0 for default)
+    -z min,max Starting and ending Z (from 0) to output
+    -i #       Initial file number (default is starting Z)
+    -j         Output jpeg file instead of tiff
+    -p         Output png file instead of tiff
+    -r #       Resolution setting in dots per inch
+    -P         Use pixel spacing in MRC header for resolution setting
+    -m         Use pixel spacings in mdoc file for resolution setting
+    -T nx[,ny] Output data in tiles of size nx by ny (nx by nx if ny omitted)
+    -O #       Override default for parallel tiff compression on whole image
+    -t #       Criterion image size in megabytes for processing file in strips
+    -o         Write file with old IMOD code instead of libtiff

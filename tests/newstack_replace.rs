@@ -11,7 +11,7 @@
 //! that -- because `-replace` does not touch labels -- every golden beside it
 //! is byte-deterministic with no masking.
 
-use std::process::Command;
+mod common;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
@@ -42,7 +42,7 @@ fn replaced_sections_match_the_reference_output() {
             dir.join("o.mrc"),
         )
         .unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let output = common::imod_cmd("newstack")
             .current_dir(&dir)
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-input", "in.mrc"])

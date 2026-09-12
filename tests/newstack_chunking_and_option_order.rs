@@ -23,6 +23,8 @@
 //! built from the vendored `IMOD/` tree, each side run in its own directory
 //! with stdout taken through a pipe.
 
+mod common;
+
 use imod_rs::imod::libiimod::iimage::{
     IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_sync_from_mrc_header,
     ii_write_section_float,
@@ -31,7 +33,6 @@ use imod_rs::imod::libiimod::mrcfiles::{
     MrcHeader, mrc_head_new, mrc_head_write, mrc_write_extra_header,
 };
 use std::ffi::CString;
-use std::process::Command;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
@@ -94,7 +95,7 @@ fn write_input(dir: &std::path::Path, extra: Option<&[u8]>) {
 
 /// Runs the translated `newstack` in `dir` and returns (status, stdout, stderr).
 fn run(dir: &std::path::Path, args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let output = common::imod_cmd("newstack")
         .current_dir(dir)
         .env("AUTODOC_DIR", AUTODOC)
         .env("IMOD_NO_IMAGE_BACKUP", "1")

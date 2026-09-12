@@ -1,8 +1,9 @@
+mod common;
+
 use imod_rs::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_RGB, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write,
 };
 use std::ffi::CString;
-use std::process::Command;
 
 #[test]
 fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
@@ -29,7 +30,7 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
         );
         libc::fclose(file);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .arg("-o")
                 .arg(&input)
                 .arg(&tiff)
@@ -37,7 +38,7 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
                 .unwrap()
                 .success()
         );
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .arg(&tiff)
             .arg(&output)
             .output()
@@ -119,7 +120,7 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
         );
         libc::fclose(file);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-g")
                 .arg(&tiff)
                 .arg(&output)
@@ -185,7 +186,7 @@ fn tif2mrc_converts_signed_32_bit_tiff_through_the_source_float_path() {
     image[154..158].copy_from_slice(&(-300_000_000_i32).to_le_bytes());
     image[158..162].copy_from_slice(&(400_000_000_i32).to_le_bytes());
     std::fs::write(&tiff, image).unwrap();
-    let conversion = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let conversion = common::imod_cmd("tif2mrc")
         .arg(&tiff)
         .arg(&output)
         .output()
@@ -238,7 +239,7 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
         );
         libc::fclose(file);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .arg("-o")
                 .arg("-s")
                 .arg(&input)
@@ -248,7 +249,7 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
                 .success()
         );
         std::fs::write(&output, b"pre-existing multi-page output").unwrap();
-        let conversion = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let conversion = common::imod_cmd("tif2mrc")
             .args(["-o", "1,1"])
             .arg(&tiff)
             .arg(&output)
@@ -328,7 +329,7 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
             libc::fclose(file);
         }
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .arg("-o")
                 .arg(&input)
                 .arg(&input_tiff)
@@ -337,7 +338,7 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .arg("-o")
                 .arg(&background)
                 .arg(&background_tiff)
@@ -346,7 +347,7 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-b")
                 .arg(&background_tiff)
                 .arg(&input_tiff)
@@ -381,7 +382,7 @@ fn tif2mrc_reports_source_specific_pixel_spacing_conflict() {
     let stamp = format!("imod-rs-tif2mrc-pixel-conflict-{}", std::process::id());
     let missing_input = std::env::temp_dir().join(format!("{stamp}.tif"));
     let output = std::env::temp_dir().join(format!("{stamp}.mrc"));
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let result = common::imod_cmd("tif2mrc")
         .args([
             "-p",
             "1.5",
@@ -431,7 +432,7 @@ fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
             );
         }
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .args(["-b", tiff.to_str().unwrap()])
             .arg(&tiff)
             .arg(&output)
@@ -480,7 +481,7 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
             0
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .args(["-t", "-1"])
             .arg(&tiff)
             .arg(&output)
@@ -573,7 +574,7 @@ fn convert_one_fixture_with_environment(
     let tiff = write_tiff_fixture(stamp, hex);
     let output = std::env::temp_dir().join(format!("imod-rs-tif2mrc-{stamp}-out.mrc"));
     let _ = std::fs::remove_file(&output);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_tif2mrc"));
+    let mut command = common::imod_cmd("tif2mrc");
     command.args(args).arg(&tiff).arg(&output);
     for &(key, value) in environment {
         command.env(key, value);
@@ -844,7 +845,7 @@ fn tif2mrc_rust_reader_explicitly_rejects_16_bit_grayscale_alpha() {
     let tiff = write_tiff_fixture("graya16-rust-unsupported", GRAYA16);
     let output = std::env::temp_dir().join("imod-rs-tif2mrc-graya16-rust-unsupported.mrc");
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let result = common::imod_cmd("tif2mrc")
         .env("IMOD_RS_TIFF_BACKEND", "rust")
         .arg(&tiff)
         .arg(&output)
@@ -950,7 +951,7 @@ fn tif2mrc_rust_reader_preserves_palette_indices_like_libtiff() {
     let _ = std::fs::remove_file(&parity_output);
     let _ = std::fs::remove_file(&rust_output);
     for (backend, output) in [("parity", &parity_output), ("rust", &rust_output)] {
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .env("IMOD_RS_TIFF_BACKEND", backend)
             .arg(&tiff)
             .arg(output)
@@ -990,7 +991,7 @@ fn tif2mrc_rust_reader_expands_four_bit_grayscale_like_libtiff() {
         let _ = std::fs::remove_file(&parity_output);
         let _ = std::fs::remove_file(&rust_output);
         for (backend, output) in [("parity", &parity_output), ("rust", &rust_output)] {
-            let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            let result = common::imod_cmd("tif2mrc")
                 .env("IMOD_RS_TIFF_BACKEND", backend)
                 .arg(&tiff)
                 .arg(output)
@@ -1025,7 +1026,7 @@ fn tif2mrc_writes_the_pre_read_header_before_a_type_mismatch_exit() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let result = common::imod_cmd("tif2mrc")
         .arg(&byte_tiff)
         .arg(&short_tiff)
         .arg(&output)
@@ -1057,7 +1058,7 @@ fn tif2mrc_names_the_unopenable_file_in_its_error() {
         std::env::temp_dir().join(format!("imod-rs-tif2mrc-absent-{}.tif", std::process::id()));
     let output =
         std::env::temp_dir().join(format!("imod-rs-tif2mrc-absent-{}.mrc", std::process::id()));
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let result = common::imod_cmd("tif2mrc")
         .arg(&missing)
         .arg(&output)
         .output()
@@ -1123,7 +1124,7 @@ fn tif2mrc_reads_a_bilevel_tiff_through_the_zero_pixel_size_legacy_path() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let result = common::imod_cmd("tif2mrc")
         .arg(&tiff)
         .arg(&output)
         .output()
@@ -1163,7 +1164,7 @@ fn tif2mrc_rust_reader_explicitly_rejects_bilevel_tiff() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+    let result = common::imod_cmd("tif2mrc")
         .env("IMOD_RS_TIFF_BACKEND", "rust")
         .arg(&tiff)
         .arg(&output)

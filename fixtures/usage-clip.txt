@@ -1,0 +1,89 @@
+Copyright (C) 1994-2025 by the Regents of the University of Colorado
+----------------------------------------------------
+clip usage:
+clip [process] [options] [input files...] [output file]
+
+process:
+	add         - Add images together.
+	average     - Average files together.
+	boxsd       - Compute SD or SD/mean in local boxes around each pixel.
+	blankfile   - Make constant volume (enter -ox, -oy, -oz, -m, -p).
+	brightness  - Increase or decrease brightness.
+	color       - Add false color.
+	contrast    - Increase or decrease contrast.
+	correlation - Do a auto/cross correlation.
+	defectmap   - Output map of all pixels in defects entered with -B.
+	diffusion   - Do 2-D anisotropic diffusion on slices.
+	divide      - Divide one image volume by another.
+	flatfield   - MAKE a flatfielding image from sum of all slices.
+	gradient    - Compute gradient as in 3dmod.
+	graham      - Apply Graham filter as in 3dmod.
+	histogram   - Print histogram of values.
+	info        - Print information to stdout.
+	integral    - Compute local integral at points beyond threshold .
+	fft         - Do a fft or inverse fft transform.
+	filter      - Do a bandpass filter.
+	flip..      - Flip image about various axes.
+	joinrgb     - Join 3 byte files into an RGB file.
+	laplacian   - Apply Laplacian filter as in 3dmod.
+	median      - Do median filtering.
+	multiply    - Multiple one image volume by another.
+	normalize   - Multiply by gain ref., scale, remove big values.
+	planefit    - Fit plane to sum of all slices to get gradient.
+	prewitt     - Apply Prewitt filter as in 3dmod.
+	quadrant    - Correct quadrant disparities from 4-port camera.
+	resize      - Cut out and/or pad image data.
+	rotx        - Rotate volume by -90 about X axis.
+	shadow      - Increase or decrease image shadows.
+	sharpen     - Sharpen image as in 3dmod.
+	smooth      - Smooth image as in 3dmod.
+	sobel       - Apply Sobel filter as in 3dmod.
+	spectrum    - Compute scaled, reduced power spectrum.
+	splitrgb    - Split RGB image file into 3 byte files.
+	standev     - Compute standard deviation for averaged images.
+	stats       - Print some stats on image file.
+	subtract    - Subtract one image volume from another.
+	supergain   - Analyze EER file(s) .
+	threshold   - Apply threshold to make binary image.
+	truncate    - Limit image values at low or high end.
+	unwrap      - Undo a wraparound of integer intensity values.
+	unpack      - Unpack 4-bit data into bytes - same as normalize.
+	variance    - Compute variance for averaged images.
+
+options:
+	[-v]  view output data.
+	[-3d] or [-2d] treat image as 3d (default) or 2d.
+	[-s] Switch, [-n #] Amount; Depends on function.
+	[-n #] [-l #] Iterations and Gaussian sigma for smoothing.
+	[-h #] [-l #] [-t #] Values for filter, threshold, or truncate.
+	[-op file] Name of file for output of points above threshold.
+	[-cc #] [-l #] [-k #] values for anisotropic diffusion.
+	[-r #] [-g #] [-b #] red, green, blue values.
+	[-x #,#]  [-y #,#]  starting and ending input coords.
+	[-cx #]  [-cy #]  [-cz #]  center coords.
+	[-ix #]  [-iy #]  [-iz #]  input sizes.
+	[-ox #]  [-oy #]  [-oz #]  output sizes.
+	[-CX #]  [-CY #]  [-CZ #]  chunk sizes for tiled HDF output.
+	[-a] Append output to file.
+	[-ov #] Overwrite output starting at section # and truncate file
+	[-or #] Overwrite output starting at section # and retain to end
+	[-m (mode#)] Output data mode.
+	[-f format] Output file format (MRC, TIFF, HDF, JPEG).
+	[-p (pad#)] Pad empty data value.
+	[-1] Number Z values from 1 instead of 0.
+	[-P file] Name of piece list file for stats on a montage.
+	[-O #,#]  Overlaps in X and Y in displayed montage.
+	[-D file] Apply defect correction using defect list in given file.
+	[-B #] Binning value to use in defect correction.
+	[-S]   Scale defect list up by 2 if it is not already scaled.
+	[-R #] Rotation/flip to apply to gain reference, or -1 for r/f.
+	[-E #,#] Analyze histogram for extra counts on one side.
+	[-F #,#] Analyze histogram for fastest falloff point.
+	[-M #,#] Set minimum size of connected regions when thresholding.
+	[-es #] Set super-resolution factor when reading from EER files.
+	[-ez #] Set summing of frames when reading from EER files.
+	[-et]   Read thumbnail, not frames, from EER file.
+	[-ep #] Set padding of defects from gain reference for EER file.
+	[-ed file] Write defects from EER gain reference to file.
+	[-eg file] File for adjusting super-resolution gain reference.
+

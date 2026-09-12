@@ -14,7 +14,7 @@
 //! output and stdout, the former with the label block (which carries a date
 //! stamp) zeroed.
 
-use std::process::Command;
+mod common;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
@@ -79,7 +79,7 @@ fn inputs_of_differing_mode_and_size_match_the_reference_output() {
         ),
     ] {
         let out_name = format!("{name}.mrc");
-        let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let output = common::imod_cmd("newstack")
             .current_dir(&dir)
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)

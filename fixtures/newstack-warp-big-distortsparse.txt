@@ -1,0 +1,139 @@
+ reallocating array to   1.14440918      MB
+
+ RO image file on unit   1 : in.mrc     Size=      12657 K
+
+ Number of columns, rows, sections .....    1200     900       3
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0    1200    900      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   47.500    
+ Maximum density .......................   232.00    
+ Mean density ..........................   140.08    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack chunked warping fixture                                               
+
+ Size and offsets X:        1200   0.00000000     , Y:         900   0.00000000    
+
+ NEW image file on unit   2 : o.mrc
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           8           1
+           1           0         118           0         113
+           2         109         122         113         113
+           3         222         122         226         113
+           4         335         122         339         113
+           5         448         121         452         112
+           6         560         121         564         112
+           7         672         121         676         112
+           8         784         116         788         112
+ scanning for mean for fill           0         900           0           1
+ loading whole region           0         117         118
+ did iclden    25.7686787       245.983749       25.7686787       245.983749    
+ writing           1
+ moving data down                10800               130800
+ did iclden    28.1049309       242.992004       25.7686787       245.983749    
+ writing           2
+ moving data down                10800               135600
+ did iclden    26.2642517       241.345642       25.7686787       245.983749    
+ writing           3
+ moving data down                10800               135600
+ did iclden    21.7171116       244.635834       21.7171116       245.983749    
+ writing           4
+ moving data down                10800               135600
+ did iclden    23.9105892       248.137955       21.7171116       248.137955    
+ writing           5
+ moving data down                10800               134400
+ did iclden    23.1001415       253.358719       21.7171116       253.358719    
+ writing           6
+ moving data down                10800               134400
+ did iclden    29.0812492       252.550629       21.7171116       253.358719    
+ writing           7
+ moving data down                10800               134400
+ did iclden    33.2073135       243.770081       21.7171116       253.358719    
+ writing           8
+ section   input min&max       output min&max  &  mean
+       0     21.72    253.36     21.72    253.36    137.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           8           1
+           1           0         118           0         113
+           2         109         122         113         113
+           3         222         122         226         113
+           4         335         122         339         113
+           5         448         121         452         112
+           6         560         121         564         112
+           7         672         121         676         112
+           8         784         116         788         112
+ scanning for mean for fill           1         900           0           1
+ loading whole region           0         117         118
+ did iclden    30.9712601       249.658844       30.9712601       249.658844    
+ writing           1
+ moving data down                10800               130800
+ did iclden    31.5750751       246.789246       30.9712601       249.658844    
+ writing           2
+ moving data down                10800               135600
+ did iclden    27.5425186       245.768585       27.5425186       249.658844    
+ writing           3
+ moving data down                10800               135600
+ did iclden    23.3740768       249.405365       23.3740768       249.658844    
+ writing           4
+ moving data down                10800               135600
+ did iclden    25.8552074       253.120621       23.3740768       253.120621    
+ writing           5
+ moving data down                10800               134400
+ did iclden    27.8758450       255.032822       23.3740768       255.032822    
+ writing           6
+ moving data down                10800               134400
+ did iclden    32.5894928       255.469910       23.3740768       255.469910    
+ writing           7
+ moving data down                10800               134400
+ did iclden    36.2458954       248.933105       23.3740768       255.469910    
+ writing           8
+       1     23.37    255.47     23.37    255.47    140.07
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ number of chunks:           8           1
+           1           0         118           0         113
+           2         109         122         113         113
+           3         222         122         226         113
+           4         335         122         339         113
+           5         448         121         452         112
+           6         560         121         564         112
+           7         672         121         676         112
+           8         784         116         788         112
+ scanning for mean for fill           2         900           0           1
+ loading whole region           0         117         118
+ did iclden    36.7225113       252.905685       36.7225113       252.905685    
+ writing           1
+ moving data down                10800               130800
+ did iclden    39.8431282       251.140823       36.7225113       252.905685    
+ writing           2
+ moving data down                10800               135600
+ did iclden    28.5536518       250.558365       28.5536518       252.905685    
+ writing           3
+ moving data down                10800               135600
+ did iclden    25.5686703       250.453674       25.5686703       252.905685    
+ writing           4
+ moving data down                10800               135600
+ did iclden    27.8518181       257.504242       25.5686703       257.504242    
+ writing           5
+ moving data down                10800               134400
+ did iclden    29.3760757       256.379700       25.5686703       257.504242    
+ writing           6
+ moving data down                10800               134400
+ did iclden    36.1133690       257.823456       25.5686703       257.823456    
+ writing           7
+ moving data down                10800               134400
+ did iclden    38.8580246       254.183105       25.5686703       257.823456    
+ writing           8
+       2     25.57    257.82     25.57    257.82    143.07
+loadtime MASKED

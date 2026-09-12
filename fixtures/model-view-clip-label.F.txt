@@ -1,0 +1,32 @@
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+Object # 1:
+clipped object
+	Number of Contours = 2
+	Number of Contours with Data = 2
+	Number of Meshes   = 1
+	Number of Surfaces = 2
+	Color  = (Red, Green, Blue, Alpha) = (0.25, 0.5, 0.75, 0.04)
+	Ambient Light  = 102
+	Diffuse Light  = 255
+	Specular Light = 127
+	Shininess      = 4
+
+	Bounding Box   = { (1, 2, 0), (9, 7, 1)}
+	Center         = (5.21068, 3.78932, 0.00284697)
+	Cylinder Volume         = 47.25 pixels^3
+	Volume Inside Mesh      = 121.5 pixels^3
+	Mesh Surface Area       = 191.648 pixels^2
+	Clip 0 Normal    = (0, 0, -1)
+	Clip 0 Point     = (-1, -2, -3)
+	Clip 1 Normal    = (1, 0, 0)
+	Clip 1 Point     = (-4, -5, -6)
+
+
+

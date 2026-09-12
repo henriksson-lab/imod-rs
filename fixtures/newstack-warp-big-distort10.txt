@@ -1,0 +1,136 @@
+ reallocating array to   4.57763672      MB
+
+ RO image file on unit   1 : in.mrc     Size=      12657 K
+
+ Number of columns, rows, sections .....    1200     900       3
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0    1200    900      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   47.500    
+ Maximum density .......................   232.00    
+ Mean density ..........................   140.08    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack chunked warping fixture                                               
+
+ Size and offsets X:        1200   0.00000000     , Y:         900   0.00000000    
+
+ NEW image file on unit   2 : o.mrc
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ linesleft          99   nchunk          10
+ number of chunks:          10           1
+           1           0         900           0          90
+           2           0         900          90          90
+           3           0         900         180          90
+           4           0         900         270          90
+           5           0         900         360          90
+           6           0         900         450          90
+           7           0         900         540          90
+           8           0         900         630          90
+           9           0         900         720          90
+          10           0         900         810          90
+ scanning for mean for fill           0         900           0           1
+ did iclden    25.7686787       244.407852       25.7686787       244.407852    
+ writing           1
+ did iclden    28.9817123       246.232330       25.7686787       246.232330    
+ writing           2
+ did iclden    28.4907990       247.165222       25.7686787       247.165222    
+ writing           3
+ did iclden    21.3254566       242.073792       21.3254566       247.165222    
+ writing           4
+ did iclden    22.1203613       244.391602       21.3254566       247.165222    
+ writing           5
+ did iclden    22.0602131       250.833160       21.3254566       250.833160    
+ writing           6
+ did iclden    22.9951115       251.816071       21.3254566       251.816071    
+ writing           7
+ did iclden    15.1792049       248.096741       15.1792049       251.816071    
+ writing           8
+ did iclden    30.0493965       247.845642       15.1792049       251.816071    
+ writing           9
+ did iclden    34.1211205       258.438232       15.1792049       258.438232    
+ writing          10
+ section   input min&max       output min&max  &  mean
+       0     15.18    258.44     15.18    258.44    137.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ linesleft          99   nchunk          10
+ number of chunks:          10           1
+           1           0         900           0          90
+           2           0         900          90          90
+           3           0         900         180          90
+           4           0         900         270          90
+           5           0         900         360          90
+           6           0         900         450          90
+           7           0         900         540          90
+           8           0         900         630          90
+           9           0         900         720          90
+          10           0         900         810          90
+ scanning for mean for fill           1         900           0           1
+ did iclden    30.9712601       246.666199       30.9712601       246.666199    
+ writing           1
+ did iclden    30.3038597       251.652512       30.3038597       251.652512    
+ writing           2
+ did iclden    28.6554413       250.045410       28.6554413       251.652512    
+ writing           3
+ did iclden    23.2785072       246.113083       23.2785072       251.652512    
+ writing           4
+ did iclden    27.2532444       249.652283       23.2785072       251.652512    
+ writing           5
+ did iclden    23.4277172       256.152954       23.2785072       256.152954    
+ writing           6
+ did iclden    23.9063625       253.235489       23.2785072       256.152954    
+ writing           7
+ did iclden    24.6054020       249.945068       23.2785072       256.152954    
+ writing           8
+ did iclden    34.2989616       254.864655       23.2785072       256.152954    
+ writing           9
+ did iclden    33.0314026       255.794510       23.2785072       256.152954    
+ writing          10
+       1     23.28    256.15     23.28    256.15    140.06
+ rescale F
+ MB of physical memory   201153.719       limit   100576.859    
+ preSetScaling  T    processInPlace  F
+ linesleft          99   nchunk          10
+ number of chunks:          10           1
+           1           0         900           0          90
+           2           0         900          90          90
+           3           0         900         180          90
+           4           0         900         270          90
+           5           0         900         360          90
+           6           0         900         450          90
+           7           0         900         540          90
+           8           0         900         630          90
+           9           0         900         720          90
+          10           0         900         810          90
+ scanning for mean for fill           2         900           0           1
+ did iclden    33.8622322       252.107651       33.8622322       252.107651    
+ writing           1
+ did iclden    32.8924332       256.541840       32.8924332       256.541840    
+ writing           2
+ did iclden    30.0584583       251.305923       30.0584583       256.541840    
+ writing           3
+ did iclden    25.9888706       250.803772       25.9888706       256.541840    
+ writing           4
+ did iclden    30.9736023       254.103958       25.9888706       256.541840    
+ writing           5
+ did iclden    25.4098549       258.222443       25.4098549       258.222443    
+ writing           6
+ did iclden    28.5427628       254.644424       25.4098549       258.222443    
+ writing           7
+ did iclden    28.7512360       251.263077       25.4098549       258.222443    
+ writing           8
+ did iclden    38.5215569       258.176727       25.4098549       258.222443    
+ writing           9
+ did iclden    41.7719383       257.050140       25.4098549       258.222443    
+ writing          10
+       2     25.41    258.22     25.41    258.22    143.06
+loadtime MASKED

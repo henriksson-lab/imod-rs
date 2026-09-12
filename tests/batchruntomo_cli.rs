@@ -1,11 +1,13 @@
 //! End-to-end command fixture for `IMOD/pysrc/batchruntomo`.
+
+mod common;
+
 use imod_rs::imod::pysrc::comchanger::modify_for_change_list;
 use std::path::PathBuf;
-use std::process::Command;
 
 #[test]
 fn batchruntomo_requires_imod_dir_before_parsing_arguments() {
-    let result = Command::new(env!("CARGO_BIN_EXE_batchruntomo"))
+    let result = common::imod_cmd("batchruntomo")
         .env_remove("IMOD_DIR")
         .arg("-help")
         .output()
@@ -24,7 +26,7 @@ fn root_name_value_is_not_treated_as_an_unnamed_directive_file() {
     // RootName is consumed by PIP, leaving no directive file, and exitError
     // writes this diagnostic to stdout.
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
-    let result = Command::new(env!("CARGO_BIN_EXE_batchruntomo"))
+    let result = common::imod_cmd("batchruntomo")
         .env("IMOD_DIR", source)
         .args(["-root", "sample"])
         .output()
@@ -41,7 +43,7 @@ fn root_name_value_is_not_treated_as_an_unnamed_directive_file() {
 fn validates_the_bundled_batch_directive_file() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
     let directive = source.join("Etomo/tests/batch.adoc");
-    let result = Command::new(env!("CARGO_BIN_EXE_batchruntomo"))
+    let result = common::imod_cmd("batchruntomo")
         .env("IMOD_DIR", &source)
         .args(["-validation", "1", "-directive"])
         .arg(&directive)
@@ -59,7 +61,7 @@ fn validates_the_bundled_batch_directive_file() {
 fn batchruntomo_pid_option_reports_source_pid_before_validating_real_directive() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("IMOD");
     let directive = source.join("Etomo/tests/batch.adoc");
-    let result = Command::new(env!("CARGO_BIN_EXE_batchruntomo"))
+    let result = common::imod_cmd("batchruntomo")
         .env("IMOD_DIR", &source)
         .args(["-PID", "-validation", "1", "-directive"])
         .arg(&directive)
@@ -97,7 +99,7 @@ fn batchruntomo_validation_zero_uses_nonvalidation_launcher_branch() {
     let mut permissions = std::fs::metadata(&etomo).unwrap().permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&etomo, permissions).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_batchruntomo"))
+    let result = common::imod_cmd("batchruntomo")
         .env("IMOD_DIR", &root)
         .env("BRT_MARKER", &marker)
         .args(["-validation", "0", "-directive"])
@@ -137,7 +139,7 @@ fn batchruntomo_validation_zero_requires_source_directives_csv_before_etomo() {
     let mut permissions = std::fs::metadata(&etomo).unwrap().permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&etomo, permissions).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_batchruntomo"))
+    let result = common::imod_cmd("batchruntomo")
         .env("IMOD_DIR", &root)
         .env("BRT_MARKER", &marker)
         .args(["-validation", "0", "-directive"])

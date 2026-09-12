@@ -12,6 +12,7 @@ use core::ptr;
 use crate::imod::libiimod::iimage::ImodImageFile;
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_RGB, MRC_MODE_USHORT};
 use crate::imod::libimod::imodel::{Icont, Imod, Iobj, Ipoint};
+use crate::imod::three_dmod::control::ImodControlList;
 
 pub const IMOD_MM_TOGGLE: i32 = 0;
 pub const IMOD_MMOVIE: i32 = 0;
@@ -25,6 +26,8 @@ pub const IMOD_DRAW_ALL: i32 = IMOD_DRAW_IMAGE | IMOD_DRAW_XYZ | IMOD_DRAW_MOD;
 /// vectors.  Untranslated C++ service pointers are deliberately opaque.
 #[repr(C)]
 pub struct ImodView {
+    /// `ViewInfo::ctrlist`, owned by `control.cpp`.
+    pub ctrlist: Option<ImodControlList>,
     pub idata: *mut *mut u8,
     pub xsize: i32,
     pub ysize: i32,
@@ -66,6 +69,9 @@ pub struct ImodView {
     pub zmovie: i32,
     pub tmovie: i32,
     pub movie_running: i32,
+    /// `ViewInfo::doingSnapDraw`; keeps movie advancement suspended during a
+    /// Zap or Slicer snapshot draw (`workprocs.cpp`).
+    pub doing_snap_draw: i32,
     /// Original `ViewInfo::movierate`, consumed by `moviecon.cpp`.
     pub movierate: i32,
     pub imod: *mut Imod,
@@ -99,6 +105,7 @@ pub struct ImodView {
 impl Default for ImodView {
     fn default() -> Self {
         let mut view = Self {
+            ctrlist: None,
             idata: ptr::null_mut(),
             xsize: 0,
             ysize: 0,
@@ -140,6 +147,7 @@ impl Default for ImodView {
             zmovie: 0,
             tmovie: 0,
             movie_running: 0,
+            doing_snap_draw: 0,
             movierate: 0,
             imod: ptr::null_mut(),
             extra_obj: Vec::new(),

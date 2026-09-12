@@ -17,17 +17,52 @@ translation and verification rules are in [TODO.md](TODO.md).
 
 The command set is `newstack`, `header`, `binvol`, `alterheader`, `clip`,
 `tif2mrc`, `mrc2tif`, `imodinfo`, `imodjoin`, `wmod2imod`, `convertmod`,
-`trimvol`, `submfg`, and `batchruntomo`. Rust command names intentionally
-match IMOD's installed binary names. The optional `etomo-gui` launcher renders
+`trimvol`, `submfg`, and `batchruntomo`.
+
+All of them are built into a **single `imod` binary** rather than one
+executable per command (a deliberate deviation from upstream; see
+[Invocation](#invocation) below). The optional `etomo-gui` launcher renders
 the translated Slint presentation of eTomo's `MainFrame`; it is not yet the
 source-equivalent `EtomoDirector`/manager/process GUI path. Its source-mapped
 wiring order and the separate 3dmod, midas, and processchunks boundaries are
 tracked in [GUI_WIRING.md](GUI_WIRING.md). Build that experimental launcher
-with `cargo run --features gui --bin etomo-gui`. The default `mrc2tif` path uses
+with `cargo run --features gui --bin imod -- etomo-gui`. The default `mrc2tif`
+path uses
 the source-shaped Qt/libtiff boundaries. Default-off experimental pure-Rust
 TIFF, JPEG/PNG, and FFT paths are documented in
 [RUST_NATIVE_BACKENDS_PLAN.md](RUST_NATIVE_BACKENDS_PLAN.md); they are selected
 only with their corresponding `IMOD_RS_*_BACKEND` environment variables.
+
+## Invocation
+
+Upstream IMOD installs one executable per command.  This crate deliberately
+builds **one** binary, `imod`, which dispatches busybox-style:
+
+1. `basename(argv[0])` is checked first.  A link named after a command runs
+   that command with `argv` untouched, so an IMOD-style install can keep its
+   usual `$IMOD_DIR/bin/<command>` layout by linking every command name to
+   `imod`, and each program sees exactly the `argv` it always saw:
+
+   ```bash
+   ln -s /path/to/imod /usr/local/IMOD/bin/newstack
+   newstack -bin 2 in.mrc out.mrc
+   ```
+
+2. Otherwise `argv[1]` is the subcommand:
+
+   ```bash
+   imod header -size file.mrc
+   cargo run --bin imod -- newstack -bin 2 in.mrc out.mrc
+   ```
+
+   This form re-execs the binary with `argv[0]` rewritten to the command name,
+   so the translated program still observes `["<bindir>/header", "-size",
+   "file.mrc"]`.  That matters: `clip`, `mrc2tif` and `imodinfo` build their
+   exit prefixes from `imodProgName(argv[0])`, and PIP reports the program
+   name in its errors.  No translated unit knows the launcher exists.
+
+`imod` with no arguments, with `-h`/`--help`, or with an unrecognised
+subcommand prints the command listing on stderr and exits 1.
 
 ## Audit workflow
 

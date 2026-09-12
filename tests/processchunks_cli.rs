@@ -1,8 +1,9 @@
 //! End-to-end local scheduling coverage for `qttools/processchunks`.
 
+mod common;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -35,7 +36,7 @@ fn processchunks_runs_a_real_tiny_comfile_through_imod_vmstopy() {
     // conversion and emits `CHUNK DONE` because processchunks passes `-c`.
     fs::write(work.join("tiny-001.com"), "$echo processchunks-tiny\n").unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
-    let result = Command::new(env!("CARGO_BIN_EXE_processchunks"))
+    let result = common::imod_cmd("processchunks")
         .current_dir(&work)
         .args(["-g", "1", "tiny"])
         .env("PATH", path)

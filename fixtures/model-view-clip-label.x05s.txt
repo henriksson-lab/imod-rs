@@ -1,0 +1,16 @@
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+
+#Object 1 data, clipped object
+#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent
+      0          0              0             0             0             0             0
+      1          1         23.625             0         121.5             0       12.0934
+      2          1              0             0             0             0       10.0623
+
+

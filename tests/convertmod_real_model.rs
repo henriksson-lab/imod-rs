@@ -1,6 +1,6 @@
 //! Real bundled IMOD-model conformance for `convertmod`.
 
-use std::process::Command;
+mod common;
 
 use imod_rs::imod::libimod::imodel_files::imod_read;
 
@@ -19,7 +19,7 @@ fn converts_bundled_fiducial_model_to_source_wimp_text() {
     let output =
         std::env::temp_dir().join(format!("imod-rs-convertmod-{}.wimp", std::process::id()));
     let _ = std::fs::remove_file(&output);
-    let status = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let status = common::imod_cmd("convertmod")
         .arg(&fixture)
         .arg(&output)
         .status()
@@ -51,7 +51,7 @@ fn converts_bundled_fiducial_model_to_source_wimp_text() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&reread);
-    let status = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let status = common::imod_cmd("convertmod")
         .arg(&output)
         .arg(&reread)
         .status()
@@ -96,14 +96,14 @@ fn wimp_input_is_written_by_store_mod_with_fortran_field_widths() {
     std::fs::create_dir_all(&dir).unwrap();
     // Author the WIMP input with the binary path, which already matches the
     // reference build byte for byte.
-    let status = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let status = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg(&fixture)
         .arg("in.wimp")
         .status()
         .unwrap();
     assert!(status.success());
-    let result = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let result = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg("in.wimp")
         .arg("out.wimp")
@@ -149,7 +149,7 @@ fn wimp_point_labels_survive_the_store_mod_round_trip() {
     let dir = std::env::temp_dir().join(format!("imod-rs-convertmod-label-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let status = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg(&fixture)
         .arg("plain.wimp")
@@ -173,7 +173,7 @@ fn wimp_point_labels_survive_the_store_mod_round_trip() {
     labelled.pop();
     std::fs::write(dir.join("in.wimp"), &labelled).unwrap();
     assert_eq!(added, 4);
-    let result = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let result = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg("in.wimp")
         .arg("out.wimp")
@@ -213,7 +213,7 @@ fn rejects_format_incompatible_wimp_with_source_stdout_diagnostic_and_no_output(
          GARBAGE\n",
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let result = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg("in.wimp")
         .arg("out.wimp")
@@ -240,7 +240,7 @@ fn overwrites_existing_wimp_output_like_source_writeimod() {
         std::process::id()
     ));
     std::fs::write(&output, "preserve this existing WIMP output\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let result = common::imod_cmd("convertmod")
         .arg(&fixture)
         .arg(&output)
         .output()
@@ -265,7 +265,7 @@ fn wimp_input_refuses_an_existing_output_file() {
     let dir = std::env::temp_dir().join(format!("imod-rs-convertmod-new-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let status = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg(&fixture)
         .arg("in.wimp")
@@ -273,7 +273,7 @@ fn wimp_input_refuses_an_existing_output_file() {
         .unwrap();
     assert!(status.success());
     std::fs::write(dir.join("out.wimp"), "keep me\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_convertmod"))
+    let result = common::imod_cmd("convertmod")
         .current_dir(&dir)
         .arg("in.wimp")
         .arg("out.wimp")

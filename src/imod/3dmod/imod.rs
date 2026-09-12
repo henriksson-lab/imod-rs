@@ -9,6 +9,8 @@ use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
+use crate::imod::libiimod::iimage::ii_add_check_function;
+
 pub const IMOD_DRAW_IMAGE: i32 = 1;
 pub const IMOD_DRAW_XYZ: i32 = 1 << 1;
 pub const IMOD_DRAW_MOD: i32 = 1 << 2;
@@ -427,6 +429,9 @@ pub fn imod_main(arguments: &[String]) -> Result<i32, String> {
         return Err("3dmod: You cannot use -C, -L, -p, -py, raw options, subareas, or image files when reading data from stdin".to_owned());
     }
     *APP.lock().unwrap() = Some(app);
+    // `imod.cpp:814`: QImage is deliberately appended after the default
+    // image checks so registered plugins retain their source precedence.
+    unsafe { ii_add_check_function(Some(super::iiqimage::ii_q_image_check)) };
     if launch.imodv {
         // `imod.cpp` calls `imodv_main(argcHere, argv)` here.  `imodv.rs`
         // deliberately retains the source C-compatible entry signature.

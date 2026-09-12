@@ -20,14 +20,14 @@
 //! is the `dd-Mmm-yy  HH:MM:SS` stamp in the label, which is documented as not
 //! achievable.
 
-use std::process::Command;
+mod common;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
 /// Runs the translated `newstack` in `dir` and returns (status code, stdout,
 /// stderr).
 fn run(dir: &std::path::Path, args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let output = common::imod_cmd("newstack")
         .current_dir(dir)
         .env("AUTODOC_DIR", AUTODOC)
         .env("IMOD_NO_IMAGE_BACKUP", "1")

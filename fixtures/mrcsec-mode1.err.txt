@@ -1,0 +1,3 @@
+ERROR: mrcReadSectionAny - outmax (255) is not in right range for conversion to shorts
+ERROR: mrcReadSectionAny - outmax (255) is not in right range for conversion to shorts
+ERROR: mrcReadSectionAny - outmax (255) is not in right range for conversion to shorts

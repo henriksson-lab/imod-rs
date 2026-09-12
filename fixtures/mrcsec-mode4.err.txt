@@ -1,0 +1,8 @@
+ERROR: mrcReadSectionAny - outmax (255) is not in right range for conversion to shorts
+ERROR: mrcReadSectionAny - Only real modes can be read as floats
+ERROR: mrcReadSectionAny - outmax (255) is not in right range for conversion to shorts
+ERROR: mrcReadSectionAny - Only real modes can be read as floats
+ERROR: mrcReadSectionAny - outmax (255) is not in right range for conversion to shorts
+ERROR: mrcReadSectionAny - Only real modes can be read as floats
+ERROR: mrcReadSectionAny - Only real modes can be read as floats
+ERROR: mrcReadSectionAny - Only real modes can be read as floats

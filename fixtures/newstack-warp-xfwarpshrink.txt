@@ -1,0 +1,26 @@
+Warping file opened: newstack-warp.xf
+
+ RO image file on unit   1 : in.mrc     Size=         37 K
+
+ Number of columns, rows, sections .....      64      48       3
+ Map mode ..............................    2   (32-bit float)             
+ Start cols, rows, sects, grid x,y,z ...    0     0     0      64     48      3
+ Pixel spacing (Angstroms)..............   1.000      1.000      1.000    
+ Cell angles ...........................   90.000   90.000   90.000
+ Fast, medium, slow axes ...............    X    Y    Z
+ Origin on x,y,z .......................    0.000       0.000       0.000    
+ Minimum density .......................   35.000    
+ Maximum density .......................   207.96    
+ Mean density ..........................   123.82    
+ tilt angles (original,current) ........   0.0   0.0   0.0   0.0   0.0   0.0
+ Space group,# extra bytes,idtype,lens .        0        0        0        0
+
+     1 Titles :
+newstack warping fixture                                                       
+
+
+ NEW image file on unit   2 : o.mrc
+ section   input min&max       output min&max  &  mean
+       0     47.18    179.41     47.18    179.41    112.79
+       1     55.38    189.92     55.38    189.92    121.72
+       2     62.17    196.49     62.17    196.49    129.78

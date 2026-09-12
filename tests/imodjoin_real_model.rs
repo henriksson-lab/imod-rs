@@ -1,7 +1,8 @@
 //! Real bundled IMOD model conformance for `imodjoin`.
 
+mod common;
+
 use std::ffi::CString;
-use std::process::Command;
 
 use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
 use imod_rs::imod::libimod::imodel::{
@@ -18,7 +19,7 @@ fn joins_selected_objects_from_bundled_fid_model() {
     let input = imod_read(&fixture).expect("bundled model must decode");
     assert!(!input.obj.is_empty());
     let output = std::env::temp_dir().join(format!("imod-rs-imodjoin-{}.mod", std::process::id()));
-    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let status = common::imod_cmd("imodjoin")
         .args(["-o", "1"])
         .arg(&fixture)
         .args(["-objects", "1"])
@@ -42,7 +43,7 @@ fn source_rejects_both_first_model_replace_and_object_list_before_real_models() 
         "imod-rs-imodjoin-replace-list-conflict-{}.mod",
         std::process::id()
     ));
-    let result = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let result = common::imod_cmd("imodjoin")
         .args(["-r", "1", "-o", "1"])
         .arg(&fixture)
         .arg(&fixture)
@@ -71,7 +72,7 @@ fn changed_colors_restore_the_stock_cycle_color_of_a_newly_created_object() {
         "imod-rs-imodjoin-changecolor-{}.mod",
         std::process::id()
     ));
-    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let status = common::imod_cmd("imodjoin")
         .arg("-c")
         .arg(&fixture)
         .arg(&fixture)
@@ -106,7 +107,7 @@ fn one_input_model_is_rejected_before_the_requested_output_is_touched() {
     ));
     let original = b"must not be replaced";
     std::fs::write(&output, original).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let result = common::imod_cmd("imodjoin")
         .arg(&fixture)
         .arg(&output)
         .output()
@@ -181,7 +182,7 @@ fn replacement_keeps_colors_and_transfers_expanded_object_views() {
     }];
     imod_file_write(&second, &second_path).expect("second real model writes");
 
-    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let status = common::imod_cmd("imodjoin")
         .args(["-r", "1", "-c"])
         .arg(&first_path)
         .arg(&second_path)
@@ -260,7 +261,7 @@ fn same_volume_no_transform_and_different_volume_origin_paths_are_distinct() {
         (vec!["-n"], &suppress_path),
         (vec!["-d"], &different_path),
     ] {
-        let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+        let status = common::imod_cmd("imodjoin")
             .args(options)
             .arg(&first_path)
             .arg(&second_path)
@@ -312,7 +313,7 @@ fn absent_first_reference_uses_source_unit_scale_for_different_volumes() {
     )
     .unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+        common::imod_cmd("imodjoin")
             .arg("-d")
             .arg(&first_path)
             .arg(&second_path)
@@ -385,7 +386,7 @@ fn image_reference_header_scale_controls_different_volume_transform() {
     header.xlen = 20.;
     assert_eq!(unsafe { mrc_head_write(image_file, &mut header) }, 0);
     unsafe { libc::fclose(image_file) };
-    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let status = common::imod_cmd("imodjoin")
         .arg("-i")
         .arg(&image_path)
         .arg(&first_path)
@@ -457,7 +458,7 @@ fn keep_scale_and_keep_flip_preserve_their_source_transform_states() {
         (Vec::<&str>::new(), &flip_path),
         (vec!["-f"], &keep_flip_path),
     ] {
-        let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+        let status = common::imod_cmd("imodjoin")
             .args(options)
             .arg(&first_path)
             .arg(&second_path)
@@ -535,7 +536,7 @@ fn suppressing_transforms_still_reconciles_the_joined_model_flip_state() {
     )
     .unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+        common::imod_cmd("imodjoin")
             .arg("-n")
             .arg(&first_path)
             .arg(&second_path)
@@ -580,7 +581,7 @@ fn existing_output_is_backed_up_before_the_joined_model_is_written() {
         &backup,
     )
     .expect("stale backup writes");
-    let status = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let status = common::imod_cmd("imodjoin")
         .arg(&fixture)
         .arg(&fixture)
         .arg(&output)
@@ -607,7 +608,7 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
         std::process::id()
     ));
     std::fs::write(&malformed, [0_u8; 100]).unwrap();
-    let invalid_option = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let invalid_option = common::imod_cmd("imodjoin")
         .args(["-q", "model.mod", "out.mod"])
         .output()
         .unwrap();
@@ -616,7 +617,7 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
         String::from_utf8_lossy(&invalid_option.stdout).contains("Invalid option before model 1")
     );
     assert!(invalid_option.stderr.is_empty());
-    let bad_list = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let bad_list = common::imod_cmd("imodjoin")
         .args(["-o", "1x"])
         .output()
         .unwrap();
@@ -626,7 +627,7 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
             .contains("Error parsing object list before model 1")
     );
     assert!(bad_list.stderr.is_empty());
-    let read_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let read_error = common::imod_cmd("imodjoin")
         .arg(&missing)
         .arg("out.mod")
         .output()
@@ -638,7 +639,7 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
         String::from_utf8_lossy(&read_error.stdout)
             .contains("ERROR: imodjoin -  Error reading file for model 1")
     );
-    let image_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let image_error = common::imod_cmd("imodjoin")
         .arg("-i")
         .arg(&missing)
         .output()
@@ -647,7 +648,7 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
     assert!(
         String::from_utf8_lossy(&image_error.stdout).contains("ERROR: imodjoin -  Couldn't open")
     );
-    let header_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let header_error = common::imod_cmd("imodjoin")
         .arg("-i")
         .arg(&malformed)
         .output()
@@ -657,7 +658,7 @@ fn source_option_parse_read_object_and_image_errors_use_the_right_exit_and_strea
         String::from_utf8_lossy(&header_error.stdout)
             .contains("ERROR: imodjoin -  Reading header from")
     );
-    let object_error = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let object_error = common::imod_cmd("imodjoin")
         .args(["-o", "999"])
         .arg(&fixture)
         .arg(&fixture)
@@ -1030,7 +1031,7 @@ fn read_error_uses_the_source_exit_prefix_on_stdout() {
         "imod-rs-imodjoin-prefix-out-{}.mod",
         std::process::id()
     ));
-    let result = Command::new(env!("CARGO_BIN_EXE_imodjoin"))
+    let result = common::imod_cmd("imodjoin")
         .arg(&missing)
         .arg(&output)
         .output()

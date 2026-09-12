@@ -1,10 +1,11 @@
+mod common;
+
 use imod_rs::imod::libiimod::iihdf::ii_hdf_open_new;
 use imod_rs::imod::libiimod::iimage::{
     IIFILE_HDF, ii_delete, ii_open_new, ii_sync_from_mrc_header,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
-use std::process::Command;
 
 /// Every PIP-driven invocation needs an autodoc directory, exactly as a real
 /// IMOD install provides one through `AUTODOC_DIR` or `IMOD_DIR`.
@@ -33,7 +34,7 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
         mrc.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut mrc), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_header"))
+        let result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-size", "-mode", "-minimum", "-maximum", "-mean"])
             .arg(&input)
@@ -52,7 +53,7 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
                 3, 4, 2, 2, "-1.2500", "9.5000", "4.1250"
             )
         );
-        let ordinary = Command::new(env!("CARGO_BIN_EXE_header"))
+        let ordinary = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&input)
             .output()
@@ -77,7 +78,7 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
         // characters, despite an MRC label occupying 80 bytes.
         assert!(text.contains(&format!("\n     1 Titles :\n{}\n", "A".repeat(79))));
         assert!(!text.contains(&"A".repeat(80)));
-        let brief = Command::new(env!("CARGO_BIN_EXE_header"))
+        let brief = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-brief"])
             .arg(&input)
@@ -98,7 +99,7 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
 
 #[test]
 fn header_pip_option_without_an_input_file_exits_as_source_does() {
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-brief")
         .output()
@@ -135,7 +136,7 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
         extended[11] = 20.0;
         assert_eq!(libc::fwrite(extended.as_ptr().cast(), 4, 12, file), 12);
         libc::fclose(file);
-        let old_fei_result = Command::new(env!("CARGO_BIN_EXE_header"))
+        let old_fei_result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&old_fei)
             .output()
@@ -173,7 +174,7 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
         extended[140..148].copy_from_slice(&30.0_f64.to_ne_bytes());
         assert_eq!(libc::fwrite(extended.as_ptr().cast(), 1, 160, file), 160);
         libc::fclose(file);
-        let new_fei_result = Command::new(env!("CARGO_BIN_EXE_header"))
+        let new_fei_result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&new_fei)
             .output()
@@ -203,7 +204,7 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
             "PixelSpacing = 25.0\n[ZValue = 0]\nRotationAngle = 30.0\n[T = TiltAxisAngle = -120.0]\n",
         )
         .unwrap();
-        let mdoc_result = Command::new(env!("CARGO_BIN_EXE_header"))
+        let mdoc_result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&mdoc_input)
             .output()
@@ -252,7 +253,7 @@ fn header_opens_source_hdf_multivolume_and_selects_requested_volume() {
         assert_eq!((*second_volume).write_header.unwrap()(second_volume), 0);
         ii_delete(second_volume);
         ii_delete(image);
-        let result = Command::new(env!("CARGO_BIN_EXE_header"))
+        let result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-volume", "2", "-size"])
             .arg(&input)
@@ -293,7 +294,7 @@ fn header_machine_readable_fields_use_fortran_g_editing() {
     // magnitude that rounds to five significant digits inside [0.1, 1.e5) is
     // `F(w-4).(5-k)` plus four blanks, never a fixed number of decimals.
     let fei = copy_real_fixture("feiHeader.st", "gedit");
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-minimum", "-maximum", "-mean", "-rms"])
         .arg(&fei)
@@ -306,14 +307,14 @@ fn header_machine_readable_fields_use_fortran_g_editing() {
     );
 
     let binned = copy_real_fixture("newerHeaderBinned.st", "gedit");
-    let maximum = Command::new(env!("CARGO_BIN_EXE_header"))
+    let maximum = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-maximum"])
         .arg(&binned)
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&maximum.stdout), "   16521.    \n");
-    let spacing = Command::new(env!("CARGO_BIN_EXE_header"))
+    let spacing = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-pixel", "-origin"])
         .arg(&binned)
@@ -337,7 +338,7 @@ fn header_machine_readable_fields_fall_back_to_e_editing() {
     bytes[76..80].copy_from_slice(&1.0e-6_f32.to_le_bytes());
     bytes[80..84].copy_from_slice(&123456.0_f32.to_le_bytes());
     std::fs::write(&input, &bytes).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-minimum", "-maximum"])
         .arg(&input)
@@ -356,7 +357,7 @@ fn header_serialem_extended_header_pads_type_names_to_the_format_field() {
     // FORMAT 103 (`header.f90:252`) writes `typeName` from its declared
     // `character*17` field, so the names are blank padded to 17 characters.
     let input = copy_real_fixture("bidirSeries.st", "serialem");
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg(&input)
         .output()
@@ -383,7 +384,7 @@ fn header_agard_extended_header_reports_pixel_size_and_tilt_extraction() {
     // `g11.4`, and line 267 asks `get_extra_header_items` for the number of
     // tilt angles it recovered rather than for its error status.
     let input = copy_real_fixture("feiHeader.st", "agard");
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg(&input)
         .output()
@@ -406,7 +407,7 @@ fn header_brief_report_appends_the_program_blank_line() {
     // `header.f90:353` writes one more blank record per input file whenever
     // `-brief` was entered.
     let input = copy_real_fixture("headerTest.st", "briefblank");
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-brief")
         .arg(&input)
@@ -422,7 +423,7 @@ fn header_brief_report_appends_the_program_blank_line() {
 fn header_exit_error_writes_to_stdout_and_exits_with_status_one() {
     // `exitError` (`parse_input_params.f90:231`) writes a blank record, then
     // the exit prefix and message, on the standard output unit, and exits 1.
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-brief")
         .output()
@@ -435,7 +436,7 @@ fn header_exit_error_writes_to_stdout_and_exits_with_status_one() {
     assert!(result.stderr.is_empty());
 
     let input = copy_real_fixture("headerTest.st", "volerr");
-    let volume = Command::new(env!("CARGO_BIN_EXE_header"))
+    let volume = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-volume", "3", "-size"])
         .arg(&input)
@@ -469,7 +470,7 @@ fn header_option_parse_errors_match_the_pip_messages() {
             "ERROR: HEADER - Illegal character in value entry:  TiffStringTagToPrint  abc\n",
         ),
     ] {
-        let result = Command::new(env!("CARGO_BIN_EXE_header"))
+        let result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .args(&arguments)
             .arg(&input)
@@ -479,7 +480,7 @@ fn header_option_parse_errors_match_the_pip_messages() {
         assert_eq!(String::from_utf8_lossy(&result.stdout), message);
         assert!(result.stderr.is_empty());
     }
-    let missing = Command::new(env!("CARGO_BIN_EXE_header"))
+    let missing = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-input")
         .output()
@@ -513,7 +514,7 @@ fn header_machine_readable_switches_still_report_mdoc_values() {
         "PixelSpacing = 25.0\n[ZValue = 0]\nRotationAngle = 30.0\n[T = TiltAxisAngle = -120.0]\n",
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-size")
         .arg(&input)
@@ -535,7 +536,7 @@ fn header_machine_readable_switches_still_report_mdoc_values() {
 
     // `briefSep`, `foundPixel` and `foundAxisRot` are program-level variables
     // in `header.f90`, so their state carries into the next input file.
-    let repeated = Command::new(env!("CARGO_BIN_EXE_header"))
+    let repeated = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-brief")
         .arg(&input)
@@ -554,7 +555,7 @@ fn header_help_prints_the_pip_usage_block_and_exits_zero() {
     // `PipReadOrParseOptions(..., .true., 1, 2, 0, ...)`
     // (`parse_input_params.f90:171`) calls `PipPrintHelp('header', 0, 2, 0)`
     // and `exit(0)`.  Verified against the native binary.
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-help")
         .output()
@@ -584,7 +585,7 @@ fn header_accepts_pip_option_abbreviations() {
     // (`LookupOption`), so `-si -mo` is `-size -mode`.  Verified against the
     // native binary.
     let input = copy_real_fixture("headerTest.st", "abbrev");
-    let abbreviated = Command::new(env!("CARGO_BIN_EXE_header"))
+    let abbreviated = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-si", "-mo"])
         .arg(&input)
@@ -595,7 +596,7 @@ fn header_accepts_pip_option_abbreviations() {
         String::from_utf8_lossy(&abbreviated.stdout),
         "     512     512       1\n   1\n"
     );
-    let spelled = Command::new(env!("CARGO_BIN_EXE_header"))
+    let spelled = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-size", "-mode"])
         .arg(&input)
@@ -611,7 +612,7 @@ fn header_reports_an_ambiguous_option_abbreviation() {
     // through `PipSetError` and the exit prefix ends the run.  Verified against
     // the native binary.
     let input = copy_real_fixture("headerTest.st", "ambig");
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-m")
         .arg(&input)
@@ -636,7 +637,7 @@ fn header_brief_is_boolean_so_a_following_number_becomes_an_input_file() {
     // the program then fails to open.  Verified against the native binary,
     // which prints the same two `iiOpen`/`iiuOpen` records and exits 1.
     let input = copy_real_fixture("headerTest.st", "briefvalue");
-    let result = Command::new(env!("CARGO_BIN_EXE_header"))
+    let result = common::imod_cmd("header")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-brief", "2"])
         .arg(&input)

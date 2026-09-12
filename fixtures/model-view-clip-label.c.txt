@@ -1,0 +1,13 @@
+# MODEL model-view-clip-label.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center
+#--------------------------------------------------------------------------------------------
+   1              0             0         121.5             0       5.21      3.79      0.00
+
+

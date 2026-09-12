@@ -1,0 +1,13 @@
+# MODEL model-closed-contours.mod
+# NAME  view-fixture
+# PIX SCALE:  x = 1
+#             y = 1
+#             z = 1
+# PIX SIZE      = 1.5
+# UNITS: pixels
+
+#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center
+#--------------------------------------------------------------------------------------------
+   1        1143.12             0         121.5       191.648      24.72     18.02      0.50
+
+

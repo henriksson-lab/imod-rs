@@ -1,14 +1,15 @@
+mod common;
+
 use imod_rs::imod::libiimod::iimage::{
     IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_read_section_float,
     ii_sync_from_mrc_header, ii_write_section_float,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
-use std::process::Command;
 
 #[test]
 fn trimvol_requires_imod_dir_before_parsing_options() {
-    let output = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let output = common::imod_cmd("trimvol")
         .env_remove("IMOD_DIR")
         .arg("-s")
         .output()
@@ -23,7 +24,7 @@ fn trimvol_requires_imod_dir_before_parsing_options() {
 
 #[test]
 fn trimvol_removed_s_option_exits_as_the_python_command_does() {
-    let output = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let output = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .arg("-s")
         .output()
@@ -56,7 +57,7 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-mode",
@@ -101,7 +102,7 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
         ("-y", "-ny", "You cannot enter both -y and -ny options"),
         ("-z", "-nz", "You cannot enter both -z and -nz options"),
     ] {
-        let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        let result = common::imod_cmd("trimvol")
             .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
             .args([
                 limits,
@@ -126,7 +127,7 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
 
 #[test]
 fn trimvol_checks_missing_input_before_option_conflicts_as_python_does() {
-    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args(["-x", "1,2", "-nx", "2", "missing-input.mrc", "output.mrc"])
         .output()
@@ -168,7 +169,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-f",
@@ -239,7 +240,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-f",
@@ -298,7 +299,7 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-mm",
@@ -356,7 +357,7 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_trimvol"))
+    let result = common::imod_cmd("trimvol")
         .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
         .args([
             "-x",
@@ -433,7 +434,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        common::imod_cmd("trimvol")
             .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
             .args(["-yz", input.to_str().unwrap(), output.to_str().unwrap()])
             .status()
@@ -509,7 +510,7 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_trimvol"))
+        common::imod_cmd("trimvol")
             .env("IMOD_DIR", env!("CARGO_MANIFEST_DIR"))
             .args(["-rx", input.to_str().unwrap(), output.to_str().unwrap()])
             .status()

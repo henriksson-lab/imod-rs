@@ -1,3 +1,5 @@
+mod common;
+
 use imod_rs::imod::libiimod::iimage::{ii_delete, ii_new};
 use imod_rs::imod::libiimod::iitif::{IICOMPRESSION_ZIP, ii_tiff_check};
 use imod_rs::imod::libiimod::mrcfiles::{
@@ -14,7 +16,7 @@ use std::process::Command;
 /// audit.
 #[test]
 fn mrc2tif_rejects_an_unknown_native_encoder_before_argument_parsing() {
-    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let result = common::imod_cmd("mrc2tif")
         .env("IMOD_RS_MRC2TIF_ENCODER", "not-a-backend")
         .output()
         .unwrap();
@@ -49,7 +51,7 @@ fn mrc2tif_rust_png_encoder_writes_a_decodable_image() {
         );
         libc::fclose(file);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_MRC2TIF_ENCODER", "rust")
             .arg("-p")
             .arg(&input)
@@ -112,7 +114,7 @@ fn mrc2tif_rust_png_encoder_matches_qimage_for_rgb_and_row_orientation() {
         );
         libc::fclose(file);
 
-        let parity = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let parity = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_MRC2TIF_ENCODER", "parity")
             .arg("-p")
             .arg(&input)
@@ -124,7 +126,7 @@ fn mrc2tif_rust_png_encoder_matches_qimage_for_rgb_and_row_orientation() {
             "{}",
             String::from_utf8_lossy(&parity.stderr)
         );
-        let rust = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let rust = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_MRC2TIF_ENCODER", "rust")
             .arg("-p")
             .arg(&input)
@@ -210,7 +212,7 @@ fn mrc2tif_rust_jpeg_and_png_preserve_qimage_resolution_units() {
                 let rust = std::env::temp_dir()
                     .join(format!("{stamp}-{extension}-{suffix}-rust.{extension}"));
                 for (backend, output) in [("parity", &parity), ("rust", &rust)] {
-                    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+                    let result = common::imod_cmd("mrc2tif")
                         .env("IMOD_RS_MRC2TIF_ENCODER", backend)
                         .arg(format_option)
                         .args(&resolution_option)
@@ -321,7 +323,7 @@ fn mrc2tif_rust_jpeg_encoder_matches_qimage_after_decoding_gray_and_rgb() {
             libc::fclose(file);
 
             for (backend, output) in [("parity", &parity_output), ("rust", &rust_output)] {
-                let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+                let result = common::imod_cmd("mrc2tif")
                     .env("IMOD_RS_MRC2TIF_ENCODER", backend)
                     .args(["-j", "-q", "95"])
                     .arg(&input)
@@ -407,7 +409,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
         );
         libc::fclose(file);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_TIFF_BACKEND", "rust")
             .arg(&input)
             .arg(&tiff)
@@ -418,7 +420,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_basic_mrc_image() {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             // The new Rust TIFF writer must produce a standard TIFF file
             // that the default IMOD/libtiff reader accepts; using the Rust
             // reader here would only test one experimental backend against
@@ -476,7 +478,7 @@ fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
         assert_eq!(libc::fwrite([11_u8, 22].as_ptr().cast(), 1, 2, file), 2);
         libc::fclose(file);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_TIFF_BACKEND", "rust")
             .args(["-r", "300"])
             .arg(&input)
@@ -499,7 +501,7 @@ fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
         );
         assert_eq!(decoder.get_tag_u32_vec(Tag::XResolution).unwrap(), [300, 1]);
         assert_eq!(decoder.get_tag_u32_vec(Tag::YResolution).unwrap(), [300, 1]);
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .env_remove("IMOD_RS_TIFF_BACKEND")
             .arg("-P")
             .arg(&inches_tiff)
@@ -518,7 +520,7 @@ fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
         libc::fclose(file);
         assert!((mrc_get_scale(&read_header).0 - 2.54e8 / 300.0).abs() < 1.0);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_TIFF_BACKEND", "rust")
             .arg("-P")
             .arg(&input)
@@ -547,7 +549,7 @@ fn mrc2tif_rust_tiff_writer_preserves_imod_resolution_units() {
             decoder.get_tag_u32_vec(Tag::YResolution).unwrap(),
             [20_000_000, 1]
         );
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .env_remove("IMOD_RS_TIFF_BACKEND")
             .arg("-P")
             .arg(&centimeters_tiff)
@@ -601,7 +603,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_lzw_and_zip_images() {
             let tiff = std::env::temp_dir().join(format!("{stamp}-{compression}.tif"));
             let output = std::env::temp_dir().join(format!("{stamp}-{compression}.mrc"));
             let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-            let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            let result = common::imod_cmd("mrc2tif")
                 .env("IMOD_RS_TIFF_BACKEND", "rust")
                 .args(["-c", compression])
                 .arg(&input)
@@ -613,7 +615,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_lzw_and_zip_images() {
                 "{compression}: {}",
                 String::from_utf8_lossy(&result.stderr)
             );
-            let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            let result = common::imod_cmd("tif2mrc")
                 .env_remove("IMOD_RS_TIFF_BACKEND")
                 .arg(&tiff)
                 .arg(&output)
@@ -663,7 +665,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_two_page_stack() {
             8
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .env("IMOD_RS_TIFF_BACKEND", "rust")
             .arg("-s")
             .arg(&input)
@@ -675,7 +677,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_two_page_stack() {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .env_remove("IMOD_RS_TIFF_BACKEND")
             .arg(&tiff)
             .arg(&output)
@@ -710,7 +712,7 @@ fn mrc2tif_rust_tiff_writer_roundtrips_a_two_page_stack() {
 
 #[test]
 fn mrc2tif_rejects_source_illegal_compression_before_opening_input() {
-    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let result = common::imod_cmd("mrc2tif")
         .arg("-c")
         .arg("42")
         .arg("not-opened.mrc")
@@ -731,7 +733,7 @@ fn mrc2tif_rejects_source_illegal_compression_before_opening_input() {
 #[cfg(feature = "rust-tiff")]
 #[test]
 fn mrc2tif_rust_tiff_writer_rejects_jpeg_compression_before_opening_input() {
-    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let result = common::imod_cmd("mrc2tif")
         .env("IMOD_RS_TIFF_BACKEND", "rust")
         .args(["-c", "jpeg", "not-opened.mrc", "not-written.tif"])
         .output()
@@ -745,7 +747,7 @@ fn mrc2tif_rust_tiff_writer_rejects_jpeg_compression_before_opening_input() {
 
 #[test]
 fn mrc2tif_uses_source_validation_diagnostic_before_opening_input() {
-    let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let result = common::imod_cmd("mrc2tif")
         .args(["-o", "-P", "not-opened.mrc", "not-written.tif"])
         .output()
         .unwrap();
@@ -758,12 +760,12 @@ fn mrc2tif_uses_source_validation_diagnostic_before_opening_input() {
 
 #[test]
 fn mrc2tif_malformed_option_and_qimage_request_reaches_source_input_opening() {
-    let malformed = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let malformed = common::imod_cmd("mrc2tif")
         .args(["-r", "not-a-number", "not-opened.mrc", "not-written.tif"])
         .output()
         .unwrap();
     assert!(!malformed.status.success());
-    let qimage = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+    let qimage = common::imod_cmd("mrc2tif")
         .args(["-j", "not-opened.mrc", "not-written.jpg"])
         .output()
         .unwrap();
@@ -786,7 +788,7 @@ fn mrc2tif_rejects_source_out_of_range_z_after_reading_header() {
         header.fp = file.cast();
         assert_eq!(mrc_head_write(file, &mut header), 0);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .args(["-z", "1:1"])
             .arg(&input)
             .arg(input.with_extension("tif"))
@@ -821,7 +823,7 @@ fn mrc2tif_chunked_tiff_roundtrips_each_source_y_range() {
             pixels.len()
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .arg("-T")
             .arg("2:1")
             .arg(&input)
@@ -843,7 +845,7 @@ fn mrc2tif_chunked_tiff_roundtrips_each_source_y_range() {
             "{}",
             String::from_utf8_lossy(&result.stdout)
         );
-        let result = Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+        let result = common::imod_cmd("tif2mrc")
             .arg(&output)
             .arg(&roundtrip)
             .output()
@@ -907,7 +909,7 @@ fn mrc2tif_contrast_scales_a_real_short_mrc_before_tiff_writing() {
         );
         libc::fclose(file);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-C", "0:255"])
                 .arg(&input)
                 .arg(&tiff)
@@ -916,7 +918,7 @@ fn mrc2tif_contrast_scales_a_real_short_mrc_before_tiff_writing() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg(&tiff)
                 .arg(&output)
                 .status()
@@ -968,7 +970,7 @@ fn mrc2tif_old_writer_converts_real_mrc_pixels_to_classic_tiff() {
             pixels.len()
         );
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .arg("-o")
             .arg(&input)
             .arg(&output)
@@ -1003,7 +1005,7 @@ fn mrc2tif_new_libtiff_writer_uses_source_tm_mon_datetime_tag() {
         assert_eq!(mrc_head_write(file, &mut header), 0);
         assert_eq!(libc::fwrite([7_u8].as_ptr().cast(), 1, 1, file), 1);
         libc::fclose(file);
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .arg(&input)
             .arg(&output)
             .output()
@@ -1050,7 +1052,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
         libc::fclose(file);
 
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .arg("-P")
                 .arg(&input)
                 .arg(&from_header)
@@ -1059,7 +1061,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-P")
                 .arg(&from_header)
                 .arg(&header_mrc)
@@ -1075,7 +1077,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
         assert!((mrc_get_scale(&read_header).0 - 5.0).abs() < 0.001);
 
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-r", "300"])
                 .arg(&input)
                 .arg(&from_inches)
@@ -1084,7 +1086,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-P")
                 .arg(&from_inches)
                 .arg(&inches_mrc)
@@ -1098,7 +1100,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
         libc::fclose(file);
         assert!((mrc_get_scale(&read_header).0 - 2.54e8 / 300.0).abs() < 1.0);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-r", "not-a-number"])
                 .arg(&input)
                 .arg(&from_zero)
@@ -1107,7 +1109,7 @@ fn mrc2tif_writes_explicit_and_header_pixel_spacing_as_real_tiff_resolution() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-P")
                 .arg(&from_zero)
                 .arg(&zero_mrc)
@@ -1157,7 +1159,7 @@ fn mrc2tif_uses_each_mdoc_pixel_spacing_for_numbered_tiff_output() {
         )
         .unwrap();
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-m", "-i", "42"])
                 .arg(&input)
                 .arg(&root)
@@ -1168,7 +1170,7 @@ fn mrc2tif_uses_each_mdoc_pixel_spacing_for_numbered_tiff_output() {
         let first_tif = std::path::PathBuf::from(format!("{}.042.tif", root.display()));
         let second_tif = std::path::PathBuf::from(format!("{}.043.tif", root.display()));
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-P")
                 .arg(&first_tif)
                 .arg(&first_mrc)
@@ -1177,7 +1179,7 @@ fn mrc2tif_uses_each_mdoc_pixel_spacing_for_numbered_tiff_output() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg("-P")
                 .arg(&second_tif)
                 .arg(&second_mrc)
@@ -1243,7 +1245,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         // `zip` must select source IICOMPRESSION_ZIP (8), which in turn
         // accepts the 1..9 quality setting in `tiffWriteSetup`.
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-s", "-c", "zip", "-q", "9"])
                 .arg(&input)
                 .arg(&stack)
@@ -1266,7 +1268,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         assert_eq!((*reader).nz, 2);
         ii_delete(reader);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg(&stack)
                 .arg(&stack_mrc)
                 .status()
@@ -1298,7 +1300,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         // `-S`, unlike `-C`, gives explicit data min/max limits before the
         // source linear byte conversion.  Values below/above 100..200 clamp.
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-z", "0:0", "-S", "100:200"])
                 .arg(&input)
                 .arg(&scaled)
@@ -1307,7 +1309,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg(&scaled_tif)
                 .arg(&scaled_mrc)
                 .status()
@@ -1364,7 +1366,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         // Auto-contrast computes the source sample mean/SD per section and
         // converts the real slice to byte values before libtiff writing.
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-z", "0:0", "-a", "200:10"])
                 .arg(&auto_input)
                 .arg(&auto)
@@ -1373,7 +1375,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
                 .success()
         );
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg(&auto_tif)
                 .arg(&auto_mrc)
                 .status()
@@ -1398,7 +1400,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         assert_eq!(auto_pixels, [58, 63, 69, 74, 80, 85]);
 
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-O", "0", "-c", "32946"])
                 .arg(&auto_input)
                 .arg(&numeric)
@@ -1416,7 +1418,7 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         assert_eq!((*reader).tiff_compression, 32946);
         ii_delete(reader);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg(&numeric)
                 .arg(&numeric_mrc)
                 .status()
@@ -1485,7 +1487,7 @@ fn mrc2tif_jpeg_compression_uses_the_installed_libtiff_codec() {
         );
         libc::fclose(file);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+            common::imod_cmd("mrc2tif")
                 .args(["-O", "0", "-c", "jpeg", "-q", "100"])
                 .arg(&input)
                 .arg(&jpeg)
@@ -1503,7 +1505,7 @@ fn mrc2tif_jpeg_compression_uses_the_installed_libtiff_codec() {
         assert_eq!((*reader).tiff_compression, 7);
         ii_delete(reader);
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_tif2mrc"))
+            common::imod_cmd("tif2mrc")
                 .arg(&jpeg)
                 .arg(&output)
                 .status()
@@ -1619,7 +1621,7 @@ fn mrc2tif_stack_writes_running_min_max_on_every_directory_and_no_description() 
         );
         libc::fclose(file);
 
-        let result = Command::new(env!("CARGO_BIN_EXE_mrc2tif"))
+        let result = common::imod_cmd("mrc2tif")
             .arg("-s")
             .arg(&input)
             .arg(&output)

@@ -9,7 +9,9 @@
 pub use super::abstract_parallel_dialog::AbstractParallelDialog;
 use super::etomo_frame::ActionEvent;
 use super::etomo_panel::EtomoPanel;
+pub use super::global_expand_button::GlobalExpandButton;
 use super::parallel_panel::QueueTableEvent;
+pub use super::single_line_button::SingleLineButton;
 use crate::imod::etomo::comscript::parallel_param::ParallelParam;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
@@ -43,73 +45,6 @@ pub trait ProcessDialogApplicationManager {
 /// Direct `QueueTableListener` boundary.
 pub trait QueueTableListener {
     fn queue_table_event_action(&mut self, event: QueueTableEvent);
-}
-
-/// Source-visible state of a `SingleLineButton`; its native Swing component
-/// remains a presentation boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SingleLineButton {
-    pub label: String,
-    pub tool_tip_text: Option<String>,
-    pub action_listener_present: bool,
-}
-
-impl SingleLineButton {
-    pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-            tool_tip_text: None,
-            action_listener_present: false,
-        }
-    }
-    pub fn set_tool_tip_text(&mut self, text: impl Into<String>) {
-        self.tool_tip_text = Some(text.into());
-    }
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_present = true;
-    }
-}
-
-/// Source-visible `GlobalExpandButton` state used by `ProcessDialog`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GlobalExpandButton {
-    pub contracted_label: String,
-    pub expanded_label: String,
-    pub label: String,
-    pub expanded: bool,
-    pub tool_tip_text: Option<String>,
-    pub action_listener_present: bool,
-}
-
-impl GlobalExpandButton {
-    pub fn get_instance(
-        contracted_label: impl Into<String>,
-        expanded_label: impl Into<String>,
-    ) -> Self {
-        let contracted_label = contracted_label.into();
-        Self {
-            label: contracted_label.clone(),
-            contracted_label,
-            expanded_label: expanded_label.into(),
-            expanded: false,
-            tool_tip_text: None,
-            action_listener_present: true,
-        }
-    }
-    pub fn change_state(&mut self, expanded: bool) {
-        self.expanded = expanded;
-        self.label = if expanded {
-            self.expanded_label.clone()
-        } else {
-            self.contracted_label.clone()
-        };
-    }
-    pub fn is_expanded(&self) -> bool {
-        self.expanded
-    }
-    pub fn set_tool_tip_text(&mut self, text: impl Into<String>) {
-        self.tool_tip_text = Some(text.into());
-    }
 }
 
 /// Java `Box.create*` entries in the exact `pnlExitButtons` insertion order.
@@ -188,10 +123,10 @@ impl<'a> ProcessDialog<'a> {
                 ],
                 narrow_button_size_applied: true,
             },
-            btn_cancel: SingleLineButton::new("Cancel"),
-            btn_execute: SingleLineButton::new("Execute"),
+            btn_cancel: SingleLineButton::new_with_label(Some("Cancel")),
+            btn_execute: SingleLineButton::new_with_label(Some("Execute")),
             btn_advanced,
-            btn_postpone: use_postpone.then(|| SingleLineButton::new("Postpone")),
+            btn_postpone: use_postpone.then(|| SingleLineButton::new_with_label(Some("Postpone"))),
             exit_state: DialogExitState::Save,
             displayed: true,
             done,
@@ -286,17 +221,17 @@ impl<'a> ProcessDialog<'a> {
     }
     /// Java private `setToolTipText()`.
     fn set_tool_tip_text(&mut self) {
-        self.btn_cancel.set_tool_tip_text(
+        self.btn_cancel.set_tool_tip_text(Some(
             "This button will abort any changes to the parameters in this dialog box and return you to the main window.",
-        );
+        ));
         if let Some(button) = &mut self.btn_postpone {
-            button.set_tool_tip_text(
+            button.set_tool_tip_text(Some(
                 "This button will save any changes to the parameters in this dialog box and return you to the main window without executing any of the processing.  Any parameter changes will also be written to the com scripts.",
-            );
+            ));
         }
-        self.btn_execute.set_tool_tip_text(
+        self.btn_execute.set_tool_tip_text(Some(
             "This button will save any changes to the parameters in this dialog box and execute the specified operation on the data.  Any parameter changes will also be written to the com scripts.",
-        );
+        ));
         self.btn_advanced.set_tool_tip_text(
             "This button will present a more detailed set of options for each of the underlying processes.",
         );
@@ -381,20 +316,40 @@ mod tests {
                 ExitButtonLayoutItem::HorizontalGlue,
             ]
         );
-        assert!(dialog.btn_cancel.action_listener_present);
+        assert_eq!(
+            dialog
+                .btn_cancel
+                .multi_line_button
+                .button
+                .action_listener_count,
+            1
+        );
         assert!(
             dialog
                 .btn_postpone
                 .as_ref()
                 .unwrap()
-                .action_listener_present
+                .multi_line_button
+                .button
+                .action_listener_count
+                == 1
         );
-        assert!(dialog.btn_execute.action_listener_present);
+        assert_eq!(
+            dialog
+                .btn_execute
+                .multi_line_button
+                .button
+                .action_listener_count,
+            1
+        );
         assert!(
             dialog
                 .btn_advanced
-                .tool_tip_text
-                .as_ref()
+                .button
+                .multi_line_button
+                .button
+                .tooltip
+                .as_deref()
                 .unwrap()
                 .contains("detailed")
         );

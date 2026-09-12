@@ -1,8 +1,8 @@
-use std::process::Command;
+mod common;
 
 #[test]
 fn requires_imod_runtime_before_java_boundary() {
-    let output = Command::new(env!("CARGO_BIN_EXE_etomo"))
+    let output = common::imod_cmd("etomo")
         .env_remove("IMOD_DIR")
         .output()
         .expect("run etomo");
@@ -19,7 +19,7 @@ fn requires_imod_runtime_before_java_boundary() {
 /// the Python source's two `sys.stdout.write` lines (`pysrc/etomo:54-56`).
 #[test]
 fn launcher_reports_the_python_sources_own_imod_dir_message() {
-    let output = Command::new(env!("CARGO_BIN_EXE_etomo"))
+    let output = common::imod_cmd("etomo")
         .env_remove("IMOD_DIR")
         .output()
         .expect("run etomo");

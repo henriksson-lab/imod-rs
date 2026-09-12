@@ -4,6 +4,8 @@
 //! `:1766-1812` and `:3157-3174`.  Every expectation here was taken from an
 //! HDF-enabled native `newstack` first.
 
+mod common;
+
 use imod_rs::imod::libiimod::iihdf::ii_hdf_open_new;
 use imod_rs::imod::libiimod::iimage::{
     IIFILE_DEFAULT, IIFILE_HDF, ii_allow_multi_volume, ii_close, ii_delete, ii_open, ii_open_new,
@@ -11,7 +13,6 @@ use imod_rs::imod::libiimod::iimage::{
 };
 use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
-use std::process::Command;
 
 /// Every PIP-driven invocation needs an autodoc directory, exactly as a real
 /// IMOD install provides one through `AUTODOC_DIR` or `IMOD_DIR`.
@@ -71,7 +72,7 @@ fn newstack_3d_one_writes_a_single_hdf_volume() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-3d", "1", "-input"])
         .arg(&input)
@@ -111,7 +112,7 @@ fn newstack_3d_minus_one_leaves_the_default_output_type() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-3d", "-1", "-input"])
         .arg(&input)
@@ -144,7 +145,7 @@ fn newstack_chunk_reports_the_actual_tile_size() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-chunk", "4,4,2", "-input"])
         .arg(&input)
@@ -188,7 +189,7 @@ fn newstack_chunk_matching_the_image_prints_no_report() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-chunk", "8,6,4", "-input"])
         .arg(&input)
@@ -211,7 +212,7 @@ fn newstack_chunk_with_3d_minus_one_is_rejected() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-chunk", "4,4,2", "-3d", "-1", "-input"])
         .arg(&input)
@@ -245,7 +246,7 @@ fn newstack_compression_index_changes_only_the_stored_size() {
             std::process::id()
         ));
         let _ = std::fs::remove_file(&output);
-        let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let result = common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-3d", "1", "-compression", level, "-input"])
             .arg(&input)
@@ -324,7 +325,7 @@ fn newstack_volumes_reads_the_requested_volume() {
             std::process::id()
         ));
         let _ = std::fs::remove_file(&output);
-        let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let result = common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-volumes", volume, "-input"])
             .arg(&input)
@@ -355,7 +356,7 @@ fn newstack_volumes_out_of_range_reports_the_library_error() {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&output);
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-volumes", "3", "-input"])
         .arg(&input)
@@ -370,7 +371,7 @@ fn newstack_volumes_out_of_range_reports_the_library_error() {
         "stdout={}",
         String::from_utf8_lossy(&result.stdout)
     );
-    let no_option = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let no_option = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .arg("-input")
         .arg(&input)
@@ -396,7 +397,7 @@ fn newstack_volumes_out_of_range_reports_the_library_error() {
 fn newstack_3d_two_adds_a_volume_to_an_existing_file() {
     let input = write_input_mrc("append");
     let output = write_two_volume_hdf("append");
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-3d", "2", "-input"])
         .arg(&input)

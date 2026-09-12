@@ -1,5 +1,7 @@
 //! Real binary OGRP selection through the source-shaped imodinfo CLI.
 
+mod common;
+
 use std::process::Command;
 
 use imod_rs::imod::imodutil::imodinfo::imodinfo_special;
@@ -32,7 +34,7 @@ fn group_option_falls_through_to_source_chart_mode_for_binary_ogrp_chunk() {
         ..Imod::default()
     };
     imod_file_write(&model, &path).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-g", "1"])
         .arg(&path)
         .output()
@@ -42,10 +44,7 @@ fn group_option_falls_through_to_source_chart_mode_for_binary_ogrp_chunk() {
     assert!(stdout.contains("#Obj       Cyl. Vol"));
     assert!(stdout.contains("   2              0"));
     assert!(!stdout.contains("   1              0"));
-    let normal = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&path)
-        .output()
-        .unwrap();
+    let normal = common::imod_cmd("imodinfo").arg(&path).output().unwrap();
     assert!(normal.status.success());
     let normal = String::from_utf8(normal.stdout).unwrap();
     assert!(normal.contains("NAME:  selected"));
@@ -74,10 +73,7 @@ fn standard_report_emits_source_object_drawing_and_color_preamble() {
         &input,
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&input)
-        .output()
-        .unwrap();
+    let result = common::imod_cmd("imodinfo").arg(&input).output().unwrap();
     assert!(result.status.success(), "{result:?}");
     let stdout = String::from_utf8(result.stdout).unwrap();
     assert!(stdout.contains("object drawing is turned off"));
@@ -124,10 +120,7 @@ fn standard_report_scales_closed_contour_area_by_source_pixel_size_squared() {
         &input,
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&input)
-        .output()
-        .unwrap();
+    let result = common::imod_cmd("imodinfo").arg(&input).output().unwrap();
     assert!(result.status.success(), "{result:?}");
     assert!(
         String::from_utf8(result.stdout)
@@ -174,7 +167,7 @@ fn file_option_writes_cli_report_and_backs_up_existing_output() {
     )
     .unwrap();
     std::fs::write(&output, "old report").unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let status = common::imod_cmd("imodinfo")
         .args(["-f", output.to_str().unwrap()])
         .arg(&input)
         .status()
@@ -215,7 +208,7 @@ fn list_and_group_conflict_backs_up_source_output_before_error_for_binary_model(
     )
     .unwrap();
     std::fs::write(&output, "existing source report").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let result = common::imod_cmd("imodinfo")
         .args([
             "-f",
             output.to_str().unwrap(),
@@ -252,7 +245,7 @@ fn malformed_h_option_uses_source_help_diagnostic_before_binary_model_read() {
         std::process::id()
     ));
     imod_file_write(&Imod::default(), &input).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let result = common::imod_cmd("imodinfo")
         .args(["-huh", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -289,7 +282,7 @@ fn malformed_model_reports_and_continues_to_next_binary_model() {
         &good,
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let result = common::imod_cmd("imodinfo")
         .args([bad.to_str().unwrap(), good.to_str().unwrap()])
         .output()
         .unwrap();
@@ -336,10 +329,7 @@ fn standard_report_emits_source_ref_image_coordinates_for_binary_model() {
         &input,
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&input)
-        .output()
-        .unwrap();
+    let result = common::imod_cmd("imodinfo").arg(&input).output().unwrap();
     assert!(result.status.success(), "{result:?}");
     let stdout = String::from_utf8(result.stdout).unwrap();
     assert!(stdout.contains("# Model to Image index coords:"));
@@ -388,7 +378,7 @@ fn full_report_uses_source_cylinder_volume_and_surface_scaling() {
         &input,
     )
     .unwrap();
-    let rust = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let rust = common::imod_cmd("imodinfo")
         .args(["-F", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -485,7 +475,7 @@ fn full_report_emits_source_clip_and_secondary_values_block() {
         &input,
     )
     .unwrap();
-    let rust = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let rust = common::imod_cmd("imodinfo")
         .args(["-F", "-t", "1", input.to_str().unwrap()])
         .output()
         .unwrap();
@@ -527,10 +517,7 @@ fn standard_report_emits_source_empty_model_line_for_binary_model() {
         std::process::id()
     ));
     imod_file_write(&Imod::default(), &input).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&input)
-        .output()
-        .unwrap();
+    let result = common::imod_cmd("imodinfo").arg(&input).output().unwrap();
     assert!(result.status.success(), "{result:?}");
     assert!(
         String::from_utf8(result.stdout)
@@ -554,10 +541,7 @@ fn standard_report_ends_with_source_model_separator_for_binary_model() {
         &input,
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&input)
-        .output()
-        .unwrap();
+    let result = common::imod_cmd("imodinfo").arg(&input).output().unwrap();
     assert!(result.status.success(), "{result:?}");
     assert!(String::from_utf8(result.stdout).unwrap().ends_with("\n\n"));
     let _ = std::fs::remove_file(input);
@@ -584,7 +568,7 @@ fn length_mode_emits_source_units_header_for_binary_model() {
         &input,
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-l"])
         .arg(&input)
         .output()
@@ -618,7 +602,7 @@ fn point_mode_emits_source_object_header_for_sized_binary_contour() {
         &input,
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-p"])
         .arg(&input)
         .output()
@@ -650,7 +634,7 @@ fn ratio_mode_keeps_source_row_for_zero_length_binary_contour() {
         &input,
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-r"])
         .arg(&input)
         .output()
@@ -700,7 +684,7 @@ fn ellipse_mode_emits_source_heading_units_and_contour_row() {
         &input,
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-e"])
         .arg(&input)
         .output()
@@ -789,7 +773,7 @@ fn ascii_file_mode_writes_implemented_binary_model_categories_and_backup() {
     };
     imod_file_write(&model, &input).unwrap();
     std::fs::write(&output, "old ascii").unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let status = common::imod_cmd("imodinfo")
         .args(["-a", "-f", output.to_str().unwrap()])
         .arg(&input)
         .status()
@@ -823,7 +807,7 @@ fn ascii_file_mode_writes_implemented_binary_model_categories_and_backup() {
         assert!(text.contains(line), "missing {line}");
     }
     assert!(text.find("Fillcolor 1 0 0").unwrap() < text.find("fill\n").unwrap());
-    let stdout = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let stdout = common::imod_cmd("imodinfo")
         .args(["-a"])
         .arg(&input)
         .output()
@@ -848,10 +832,7 @@ fn source_g_format_and_nul_terminated_names_match_the_native_report() {
     // /tmp/imod-reference-build/imodutil/imodinfo.
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
-        .arg(&fixture)
-        .output()
-        .unwrap();
+    let output = common::imod_cmd("imodinfo").arg(&fixture).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(stdout.contains("# NAME  IMOD-NewModel\n"), "{stdout:.400}");
@@ -873,7 +854,7 @@ fn verbose_contour_statistics_match_the_native_icont_report() {
     // (whose whole 602-line -v report this crate now reproduces exactly).
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-v"])
         .arg(&fixture)
         .output()
@@ -903,7 +884,7 @@ fn chart_mode_uses_source_column_format_and_contour_centroid() {
     //    1              0             0             0             0     160.51    192.99      9.66
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
-    let output = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let output = common::imod_cmd("imodinfo")
         .args(["-c"])
         .arg(&fixture)
         .output()
@@ -928,7 +909,7 @@ fn ascii_mode_rewinds_over_the_preliminary_report_and_formats_with_g() {
     let report =
         std::env::temp_dir().join(format!("imod-rs-imodinfo-ascii-{}.txt", std::process::id()));
     let file = std::fs::File::create(&report).unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_imodinfo"))
+    let status = common::imod_cmd("imodinfo")
         .args(["-a"])
         .arg(&fixture)
         .stdout(file)

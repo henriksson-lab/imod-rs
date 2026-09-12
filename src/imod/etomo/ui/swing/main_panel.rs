@@ -336,6 +336,23 @@ impl MainPanel {
             self.status_bar = value.into();
         }
     }
+    /// Java `getProgressPanel(AxisID)`.  This is deliberately owned by the
+    /// MainPanel source unit: concrete main panels only decide whether they
+    /// expose the returned panel for a particular axis.
+    pub fn get_progress_panel(&mut self, axis_id: AxisID) -> &mut AxisProgressPanel {
+        if axis_id == AxisID::Second {
+            if self.axis_progress_panel_b.is_none() {
+                self.axis_progress_panel_b =
+                    Some(AxisProgressPanel::get_instance(Some(axis_id), self.manager));
+            }
+            return self.axis_progress_panel_b.as_mut().unwrap();
+        }
+        if self.axis_progress_panel_a.is_none() {
+            self.axis_progress_panel_a =
+                Some(AxisProgressPanel::get_instance(Some(axis_id), self.manager));
+        }
+        self.axis_progress_panel_a.as_mut().unwrap()
+    }
     pub fn set_divider_location(&mut self, _value: f64) {}
     pub fn map_progress_panel_state(&mut self, axis: AxisID) -> &mut ProgressPanelState {
         if axis == AxisID::Second {

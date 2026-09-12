@@ -1,3 +1,5 @@
+mod common;
+
 use imod_rs::imod::libcfshr::cubinterp::cubinterp;
 use imod_rs::imod::libcfshr::linearxforms::xfmult;
 use imod_rs::imod::libiimod::iimage::{
@@ -53,7 +55,7 @@ fn newstack_streams_real_mrc_sections() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -116,7 +118,7 @@ fn newstack_reorders_real_tilt_stack_from_explicit_angle_file() {
     }
     std::fs::write(&angles, "10\n-20\n0\n20\n").unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -182,7 +184,7 @@ fn newstack_inserts_tilts_as_generic_mrc_extended_header_reals() {
     }
     std::fs::write(&angles, "-30.5\n12.25\n").unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -280,7 +282,7 @@ fn newstack_replaces_generic_extended_header_tilts_for_selected_sections() {
         );
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -387,7 +389,7 @@ fn newstack_replaces_selected_serialem_extended_header_tilts() {
         );
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -446,7 +448,7 @@ fn newstack_format_of_output_file_writes_native_tiff() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -495,7 +497,7 @@ fn newstack_bytes_signed_output_option_controls_real_byte_mrc_header() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -560,7 +562,7 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -651,7 +653,7 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
         );
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -708,7 +710,7 @@ fn newstack_print_size_exits_after_real_mrc_header() {
         assert_eq!(mrc_head_write((*file).fp, header), 0);
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -730,7 +732,7 @@ fn newstack_print_size_exits_after_real_mrc_header() {
         "{}",
         String::from_utf8_lossy(&result.stdout)
     );
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -776,7 +778,7 @@ fn newstack_expand_derives_output_dimensions_from_real_mrc() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -825,7 +827,7 @@ fn newstack_rotate_transposes_default_real_mrc_dimensions() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -873,7 +875,7 @@ fn newstack_bin_averages_real_mrc_blocks() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -927,7 +929,7 @@ fn newstack_allow_odd_even_changes_binned_real_mrc_size() {
     }
     for (suffix, odd, expected) in [("normal", false, (3, 3)), ("odd", true, (2, 2))] {
         let output = base.with_extension(format!("{suffix}.mrc"));
-        let mut command = Command::new(env!("CARGO_BIN_EXE_newstack"));
+        let mut command = common::imod_cmd("newstack");
         command.env("AUTODOC_DIR", AUTODOC);
         command.args([
             "-input",
@@ -979,7 +981,7 @@ fn newstack_affine_bin_interpolates_binned_real_mrc() {
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1045,7 +1047,7 @@ fn newstack_routes_repeated_input_files_to_repeated_outputs() {
         }
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1137,7 +1139,7 @@ fn newstack_routes_source_shaped_input_and_output_list_files() {
     )
     .unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-FileOfInputs",
@@ -1205,7 +1207,7 @@ fn newstack_applies_identity_transform_file_to_real_mrc() {
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n1 0 0 1 1 0\n").unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1274,7 +1276,7 @@ fn newstack_applies_repeated_offsets_in_source_composition_order() {
     }
     std::fs::write(&xform, "2 0 0 2 0 0\n2 0 0 2 0 0\n").unwrap();
     for (output, apply_first) in [(&output_last, false), (&output_first, true)] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_newstack"));
+        let mut command = common::imod_cmd("newstack");
         command.env("AUTODOC_DIR", AUTODOC);
         command.args([
             "-input",
@@ -1390,7 +1392,7 @@ fn newstack_memory_limit_chunks_ordinary_affine_mrc() {
     // sets both halves directly, which is how the source's own test path
     // forces a small working array.
     for (output, memory_limit) in [(&output_full, None), (&output_chunks, Some("20000,100"))] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_newstack"));
+        let mut command = common::imod_cmd("newstack");
         command.env("AUTODOC_DIR", AUTODOC);
         command.args([
             "-input",
@@ -1470,7 +1472,7 @@ fn newstack_blank_accepts_out_of_range_sections_and_writes_zero_metadata() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1531,7 +1533,7 @@ fn newstack_multadd_uses_pip_factor_and_constant_on_real_mrc() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1582,7 +1584,7 @@ fn newstack_reports_source_truncations_for_scaled_byte_output() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -1617,7 +1619,7 @@ fn newstack_reports_source_truncations_for_scaled_byte_output() {
         "{stdout}"
     );
     let quiet_output = base.with_extension("quiet.mrc");
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -1685,7 +1687,7 @@ fn newstack_scale_maps_source_header_range_on_real_mrc() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1745,7 +1747,7 @@ fn newstack_contrast_converts_black_white_to_source_scale_range() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1804,7 +1806,7 @@ fn newstack_float_three_prescans_sections_then_shifts_to_shared_mean() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1865,7 +1867,7 @@ fn newstack_float_four_prescans_and_scales_shifted_global_range() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1931,7 +1933,7 @@ fn newstack_float_two_uses_mad_filtered_global_z_range() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -1994,7 +1996,7 @@ fn newstack_meansd_uses_float_two_section_statistics() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -2050,7 +2052,7 @@ fn newstack_float_one_maps_header_range_to_float_range() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -2104,7 +2106,7 @@ fn newstack_fixrange_retains_source_legality_errors_on_real_mrc() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -2124,7 +2126,7 @@ fn newstack_fixrange_retains_source_legality_errors_on_real_mrc() {
         "{}",
         String::from_utf8_lossy(&result.stdout)
     );
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -2177,7 +2179,7 @@ fn newstack_fixrange_scans_interpolated_real_mrc_and_scales_low_sd_values() {
         ii_close(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -2259,7 +2261,7 @@ fn newstack_fixrange_uses_source_signed_mode_shift_after_low_sd_scan() {
         ii_close(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -2369,7 +2371,7 @@ fn newstack_size_to_output_centres_real_mrc_crop_and_edge_median_padding() {
         ),
     ] {
         assert!(
-            Command::new(env!("CARGO_BIN_EXE_newstack"))
+            common::imod_cmd("newstack")
                 .env("AUTODOC_DIR", AUTODOC)
                 .args([
                     "-input",
@@ -2441,7 +2443,7 @@ fn newstack_prints_source_unit_and_header_reports_for_stream_copy() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -2533,7 +2535,7 @@ fn newstack_bin_streams_every_section_and_scales_cell_by_read_reduction() {
         }
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -2621,7 +2623,7 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -2676,7 +2678,7 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
 /// the reference binary.
 #[test]
 fn newstack_pip_and_section_errors_exit_one_on_stdout() {
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(["-nosuchoption"])
         .output()
@@ -2709,7 +2711,7 @@ fn newstack_pip_and_section_errors_exit_one_on_stdout() {
         ii_close(file);
     }
     // `write(*,'(/,a,i9,a,a)')` at `newstack.f90:525-526`.
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-secs",
@@ -2740,7 +2742,7 @@ fn newstack_pip_and_section_errors_exit_one_on_stdout() {
 #[test]
 fn newstack_help_prints_pip_usage_and_exits_zero() {
     for args in [vec!["-help"], vec!["-quiet"]] {
-        let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let result = common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)
             .output()
@@ -2787,7 +2789,7 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -2822,7 +2824,7 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
     }
     // `if (ifUseFill .ne. 0) tmpMin = fillVal` (`newstack.f90:2027`).
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -2882,7 +2884,7 @@ fn newstack_mode_change_rescales_input_mode_range_without_float() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -2950,7 +2952,7 @@ fn newstack_float_two_reports_extreme_range_note() {
         );
         ii_close(file);
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -3005,7 +3007,7 @@ fn newstack_dopen_announces_opened_transform_file() {
         ii_close(file);
     }
     std::fs::write(&xform, "1 0 0 1 0 0\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -3029,7 +3031,7 @@ fn newstack_dopen_announces_opened_transform_file() {
     );
     // A missing transform file is rejected by `readCheckWarpFile` before
     // `dopen` ever sees it (`newstack.f90:781-783`, `warputils.c:820`).
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -3087,7 +3089,7 @@ fn newstack_accepts_bin_triplet_onexform_and_numout() {
             output.to_str().unwrap().to_owned(),
         ];
         args.extend(extra.iter().map(|value| (*value).to_owned()));
-        let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let result = common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)
             .output()
@@ -3139,7 +3141,7 @@ fn newstack_rotate_90_resamples_pixels_as_native_does() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -3204,7 +3206,7 @@ fn newstack_rotate_180_reverses_both_axes_as_native_does() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -3274,7 +3276,7 @@ fn newstack_ftreduce_fourier_crops_as_native_does() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -3383,7 +3385,7 @@ fn newstack_ftexpand_fourier_expands_as_native_does() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -3518,7 +3520,7 @@ fn newstack_fill_outside_image_uses_edge_median_not_file_mean() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -3588,7 +3590,7 @@ fn newstack_phase_shifts_in_fourier_space_as_native_does() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -3708,7 +3710,7 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
             args.push(output.to_str().unwrap().to_owned());
         }
         args.extend(extra.iter().map(|value| (*value).to_owned()));
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)
             .output()
@@ -3861,7 +3863,7 @@ fn newstack_memory_limit_keeps_one_chunk_where_the_source_does() {
     // `lenTemp <= limToAlloc / 2` and `lenTemp` is still `MAXTEMP` when that
     // check runs (`newstack.f90:1035-1036`).
     for (output, memory) in [(&unlimited, None), (&limited, Some("39"))] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_newstack"));
+        let mut command = common::imod_cmd("newstack");
         command.env("AUTODOC_DIR", AUTODOC);
         command.args([
             "-input",
@@ -4019,7 +4021,7 @@ fn newstack_tiff_stack_repeats_description_and_min_max_on_every_directory() {
         libc::fclose(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-format",
@@ -4099,7 +4101,7 @@ fn newstack_copies_serialem_typed_extended_header_for_selected_sections() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -4167,7 +4169,7 @@ fn newstack_strip_keeps_serialem_type_fields_with_no_extended_data() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -4237,7 +4239,7 @@ fn newstack_tilt_replaces_serialem_tilt_short_and_keeps_the_rest() {
     }
     std::fs::write(&angles, "-60.25\n12.5\n").unwrap();
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -4306,7 +4308,7 @@ fn newstack_reorder_uses_extended_header_tilt_angles() {
         ii_close(file);
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_newstack"))
+        common::imod_cmd("newstack")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
                 "-input",
@@ -4384,7 +4386,7 @@ fn newstack_refuses_saving_tilt_angles_into_an_fei1_extended_header() {
         ii_close(file);
     }
     std::fs::write(&angles, "-60.0\n0.0\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -4444,7 +4446,7 @@ fn newstack_refuses_tilt_angles_for_a_serialem_header_without_the_tilt_flag() {
         ii_close(file);
     }
     std::fs::write(&angles, "-60.0\n0.0\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let result = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args([
             "-input",
@@ -4573,7 +4575,7 @@ fn newstack_float_two_and_three_scale_under_a_memory_limit() {
                 "out-{float}-{}.mrc",
                 limits.unwrap_or("none").replace(',', "-")
             ));
-            let mut command = Command::new(env!("CARGO_BIN_EXE_newstack"));
+            let mut command = common::imod_cmd("newstack");
             command.env("AUTODOC_DIR", AUTODOC);
             command.args([
                 "-input",
@@ -4764,7 +4766,7 @@ fn newstack_verbose_reports_use_fortran_list_directed_fields() {
             "1".to_owned(),
         ]
     };
-    let run = Command::new(env!("CARGO_BIN_EXE_newstack"))
+    let run = common::imod_cmd("newstack")
         .env("AUTODOC_DIR", AUTODOC)
         .args(arguments(&output))
         .output()
@@ -4978,7 +4980,7 @@ fn newstack_binned_chunks_load_their_own_window() {
     }
     std::fs::write(&input, &bytes).unwrap();
     let run = |output: &std::path::Path, limit: Option<&str>| -> String {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_newstack"));
+        let mut command = common::imod_cmd("newstack");
         command.env("AUTODOC_DIR", AUTODOC);
         command.args([
             "-input",

@@ -1,10 +1,10 @@
 //! Command-line parity probes for `qttools/sendevent/imodsendevent.cpp`.
 
-use std::process::Command;
+mod common;
 
 #[test]
 fn imodsendevent_rejects_non_numeric_action_before_opening_clipboard() {
-    let output = Command::new(env!("CARGO_BIN_EXE_imodsendevent"))
+    let output = common::imod_cmd("imodsendevent")
         .args(["42", "not-an-action"])
         .output()
         .unwrap();
@@ -19,7 +19,7 @@ fn imodsendevent_rejects_non_numeric_action_before_opening_clipboard() {
 fn imodsendevent_help_follows_the_original_option_parser() {
     // The C++ loop deliberately examines options only while a following token
     // exists, so `-h` needs a dummy token to reach its switch case.
-    let output = Command::new(env!("CARGO_BIN_EXE_imodsendevent"))
+    let output = common::imod_cmd("imodsendevent")
         .args(["-h", "dummy"])
         .output()
         .unwrap();

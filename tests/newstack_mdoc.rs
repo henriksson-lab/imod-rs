@@ -11,7 +11,7 @@
 //! The goldens are the reference `newstack`'s own `.mdoc` output and stdout.
 //! `.mdoc` files carry no timestamp, so they compare byte for byte.
 
-use std::process::Command;
+mod common;
 
 const AUTODOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc");
 
@@ -63,7 +63,7 @@ fn mdoc_metadata_transfer_matches_the_reference_output() {
     ] {
         let _ = std::fs::remove_file(dir.join("o.mrc"));
         let _ = std::fs::remove_file(dir.join("o.mrc.mdoc"));
-        let output = Command::new(env!("CARGO_BIN_EXE_newstack"))
+        let output = common::imod_cmd("newstack")
             .current_dir(&dir)
             .env("AUTODOC_DIR", AUTODOC)
             .args(&args)
