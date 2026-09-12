@@ -551,8 +551,17 @@ fn tiff_fixture_bytes(hex: &str) -> Vec<u8> {
 }
 
 /// Write one hex fixture to a uniquely named temporary file and return its path.
+///
+/// The name carries the process id as well as the caller's stamp: every caller
+/// passes a fixed literal (`"bilevel"`, `"mismatch-byte"`, ...), so without it
+/// two concurrent test processes write the same `/tmp` path and race.  That is
+/// not hypothetical -- it made three of this file's tests fail whenever a
+/// second gate ran alongside one, while passing 31/31 in isolation.
 fn write_tiff_fixture(stamp: &str, hex: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!("imod-rs-tif2mrc-{stamp}.tif"));
+    let path = std::env::temp_dir().join(format!(
+        "imod-rs-tif2mrc-{stamp}-{}.tif",
+        std::process::id()
+    ));
     std::fs::write(&path, tiff_fixture_bytes(hex)).unwrap();
     path
 }

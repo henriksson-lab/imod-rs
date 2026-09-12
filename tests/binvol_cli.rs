@@ -1100,3 +1100,106 @@ fn binvol_reports_the_backend_read_diagnostic_before_its_own() {
     assert_eq!(std::fs::metadata(dir.join("ob.mrc")).unwrap().len(), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The existing `binvol` differential above covers `-ftreduce` at 16 cubed,
+/// which is radix 2 in all three dimensions and the same length in each.  This
+/// one covers `-ftexpand` as well, on a 30 by 18 by 12 volume whose transforms
+/// take the radix-3 and radix-5 kernels and whose three axes differ, so an
+/// axis swapped inside `thrdfft`'s transposes could not produce a matching
+/// volume.
+///
+/// Intended backends: one `parity` process and one `rustfft` process per case,
+/// as the selector is a process-local `OnceLock`.
+///
+/// Tolerances: measured, then rounded up, relative to the largest magnitude in
+/// the parity volume.  The measured difference was 2.9e-7 of that magnitude
+/// with an RMS of 1.0e-7 for the reduction and 4.2e-7 / 1.0e-7 for the
+/// expansion; the bounds are 5.0e-6 and 1.5e-6, about twelve times the worst
+/// case.
+#[cfg(feature = "rustfft-backend")]
+#[test]
+fn binvol_rustfft_fourier_expansion_matches_parity_at_mixed_radix_sizes() {
+    unsafe {
+        let stamp = format!("imod-rs-binvol-rustfft-mixed-{}", std::process::id());
+        let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
+        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
+        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
+        let mut header: MrcHeader = core::mem::zeroed();
+        assert_eq!(mrc_head_new(&mut header, 30, 18, 12, MRC_MODE_FLOAT), 0);
+        header.fp = file.cast();
+        assert_eq!(mrc_head_write(file, &mut header), 0);
+        let pixels: Vec<f32> = (0..30 * 18 * 12)
+            .map(|index| {
+                let x = (index % 30) as f32;
+                let y = ((index / 30) % 18) as f32;
+                let z = (index / (30 * 18)) as f32;
+                100.0 + 30.0 * (x / 3.0).sin() * (y / 2.0 + z).cos() + x - y
+            })
+            .collect();
+        assert_eq!(
+            libc::fwrite(pixels.as_ptr().cast(), 4, pixels.len(), file),
+            pixels.len()
+        );
+        libc::fclose(file);
+
+        for option in ["-ftreduce", "-ftexpand"] {
+            let mut decoded = Vec::new();
+            let mut geometry = Vec::new();
+            for backend in ["parity", "rustfft"] {
+                let output = std::env::temp_dir().join(format!("{stamp}{option}-{backend}.mrc"));
+                let result = common::imod_cmd("binvol")
+                    .env(
+                        "AUTODOC_DIR",
+                        concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
+                    )
+                    .env("IMOD_RS_FFT_BACKEND", backend)
+                    .args(["-input", input.to_str().unwrap()])
+                    .args(["-output", output.to_str().unwrap()])
+                    .args(["-binning", "2", option])
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{option} {backend}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
+                let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
+                let mut written: MrcHeader = core::mem::zeroed();
+                assert_eq!(mrc_head_read(file, &mut written), 0);
+                let count = (written.nx * written.ny * written.nz) as usize;
+                let mut values = vec![0_f32; count];
+                libc::fseek(file, written.header_size as i64, libc::SEEK_SET);
+                assert_eq!(
+                    libc::fread(values.as_mut_ptr().cast(), 4, count, file),
+                    count
+                );
+                libc::fclose(file);
+                geometry.push((written.nx, written.ny, written.nz));
+                decoded.push(values);
+                std::fs::remove_file(output).unwrap();
+            }
+            assert_eq!(geometry[0], geometry[1], "{option} output geometry",);
+            let mut maximum = 0.0_f64;
+            let mut sum_squares = 0.0_f64;
+            let mut scale = 0.0_f64;
+            for (parity, rustfft) in decoded[0].iter().zip(decoded[1].iter()) {
+                let difference = (*parity as f64 - *rustfft as f64).abs();
+                maximum = maximum.max(difference);
+                sum_squares += difference * difference;
+                scale = scale.max((*parity as f64).abs());
+            }
+            let rms = (sum_squares / decoded[0].len() as f64).sqrt();
+            eprintln!("binvol {option}: max {maximum:.3e} rms {rms:.3e} scale {scale:.3e}");
+            assert!(
+                maximum < 5.0e-6 * scale,
+                "binvol {option} maximum difference {maximum} against scale {scale}"
+            );
+            assert!(
+                rms < 1.5e-6 * scale,
+                "binvol {option} RMS difference {rms} against scale {scale}"
+            );
+        }
+        std::fs::remove_file(input).unwrap();
+    }
+}

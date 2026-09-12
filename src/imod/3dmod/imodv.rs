@@ -481,7 +481,10 @@ pub fn open_window(a: &mut ImodvApp) -> i32 {
 
 /// Original: `imodvMain` (`imodv.cpp:536`).
 pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
-    IMODV_NATIVE_BOUNDARY.with(|slot| {
+    /// Not a status the source returns: it marks that everything before
+    /// `qApp->exec()` succeeded and the event loop is still to be entered.
+    const ENTER_EVENT_LOOP: i32 = -1;
+    let status = IMODV_NATIVE_BOUNDARY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(boundary) = slot.as_deref_mut() else {
             return 3;
@@ -575,9 +578,30 @@ pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
                 boundary.create_clipboard(use_stdin);
             }
             boundary.open_selected_windows(window_keys.as_deref());
-            boundary.run_application()
+            ENTER_EVENT_LOOP
         })
-    })
+    });
+    if status != ENTER_EVENT_LOOP {
+        return status;
+    }
+    // `return qApp->exec();` (`imodv.cpp:648`).
+    //
+    // The event loop re-enters this unit for the life of the window —
+    // `imodvDraw`, `imodvSetCaption`, `imodvQuit` — and each of those borrows
+    // `IMODV_STATE` and `IMODV_NATIVE_BOUNDARY` again, so neither may still be
+    // borrowed while the loop runs.  The host object stays installed, exactly
+    // as the one `QApplication` stays reachable through `qApp`, and is called
+    // through the pointer the cell holds rather than through a live borrow of
+    // it.
+    let host: Option<*mut dyn ImodvNativeBoundary> = IMODV_NATIVE_BOUNDARY.with(|slot| {
+        slot.borrow_mut()
+            .as_deref_mut()
+            .map(|boundary| boundary as *mut dyn ImodvNativeBoundary)
+    });
+    let Some(host) = host else {
+        return 3;
+    };
+    unsafe { (*host).run_application() }
 }
 
 /// Original: `imodv_open` (`imodv.cpp:653`).

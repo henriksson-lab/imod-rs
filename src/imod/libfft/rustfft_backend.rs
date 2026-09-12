@@ -140,7 +140,11 @@ pub unsafe fn todfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(),
                 data[row * stride + 2 * index + 1] = value.im;
             }
         }
-    } else if idir == 1 {
+    } else {
+        // `todfft.c:55` documents both `1` and `-1` as the inverse direction,
+        // and the C source's forward branch is the only one it tests for, so
+        // every other direction takes the inverse path.  `clip_fftvol`
+        // (`clip/fft.cpp:264`) is the caller that passes -1.
         let row_fft = planner.plan_fft_inverse(nx);
         let col_fft = planner.plan_fft_inverse(ny);
         let mut full = vec![Complex32::new(0.0, 0.0); nx * ny];

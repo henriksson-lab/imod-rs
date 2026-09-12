@@ -1050,7 +1050,27 @@ mod tests {
         panel.cb_local_alignments.set_selected(true);
         panel.enable_fields();
         assert!(panel.local_tab_enabled);
+        // `RadioTextField.setEnabled` enables the *radio*
+        // (`RadioTextField.java:437-441`), while `updateDisplay` gates the text
+        // field on `enabled && radioButton.isSelected()` (`:445`).  Selecting
+        // "local alignments" only enables the control; the text field stays
+        // disabled until this field's own radio is chosen.  This assertion used
+        // to expect the text field enabled immediately, which no state in the
+        // Java produces.
+        assert!(
+            panel
+                .rtf_target_patch_size_x_and_y
+                .radio_button
+                .is_enabled()
+        );
+        assert!(!panel.rtf_target_patch_size_x_and_y.text_field.is_enabled());
+        panel.rtf_target_patch_size_x_and_y.set_selected(true);
         assert!(panel.rtf_target_patch_size_x_and_y.text_field.is_enabled());
+        // And clearing local alignments disables both again (`:437-445`).
+        panel.cb_local_alignments.set_selected(false);
+        panel.enable_fields();
+        assert!(!panel.local_tab_enabled);
+        assert!(!panel.rtf_target_patch_size_x_and_y.text_field.is_enabled());
     }
     #[test]
     fn fixed_beam_tilt_requires_value() {

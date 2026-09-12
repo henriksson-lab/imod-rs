@@ -5055,3 +5055,118 @@ fn newstack_binned_chunks_load_their_own_window() {
         let _ = std::fs::remove_file(path);
     }
 }
+
+/// Cross-backend differential for every `newstack` option that reaches an FFT:
+/// `-ftreduce` and `-ftexpand` (`fourierReduceImage`/`fourierExpandImage`
+/// around a forward and inverse `todfft`, `newstack.f90:2455-2470`) and
+/// `-phase` (`fourierShiftImage` between the same pair,
+/// `newstack.f90:2456`).  Intended backends: the same command runs once on
+/// `parity` and once on `rustfft`, in separate processes because the selector
+/// is a process-local `OnceLock`.
+///
+/// `-phase` is the case a sign-convention error cannot survive: the shift is a
+/// phase ramp applied to the forward spectrum, so a conjugated transform moves
+/// the image the other way instead of differing in the last bits.  The input
+/// sizes are deliberately not powers of two -- `newstack` pads each to a
+/// `niceFrame` size, whose largest prime factor is `niceFFTlimit`'s 5
+/// (`odfft.c:212`), so these exercise the radix-3 and radix-5 kernels rather
+/// than radix 2 alone.  Lengths with larger prime factors are not reachable
+/// from this command and are covered directly in `tests/fft_backend_matrix.rs`.
+///
+/// Tolerances: measured, then rounded up, and expressed relative to the
+/// largest magnitude in the parity output so they do not depend on the
+/// fixture's contrast.  Over the five cases the measured
+/// parity-versus-RustFFT difference was at most 3.4e-7 of that magnitude with
+/// an RMS of 1.1e-7 -- `f32` round-off from a differently ordered transform,
+/// nothing structural -- and the bounds here are 4.0e-6 and 1.0e-6, about
+/// twelve times the worst case.
+#[cfg(feature = "rustfft-backend")]
+#[test]
+fn newstack_rustfft_fourier_options_match_the_parity_output() {
+    let base =
+        std::env::temp_dir().join(format!("imod-rs-newstack-rustfft-{}", std::process::id()));
+    for (case, nx, ny, options) in [
+        ("ftreduce", 100, 30, vec!["-ftreduce", "2"]),
+        ("ftexpand", 30, 18, vec!["-ftexpand", "2"]),
+        ("ftreduceodd", 54, 45, vec!["-ftreduce", "1.5"]),
+        ("phase", 38, 19, vec!["-phase", "-offset", "0.6,-0.35"]),
+        ("phaseprime", 100, 7, vec!["-phase", "-offset", "-1.25,0.4"]),
+    ] {
+        let input = base.with_extension(format!("{case}.input.mrc"));
+        unsafe {
+            let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+            let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+            assert!(!file.is_null());
+            let header = (*file).header.cast::<MrcHeader>();
+            assert_eq!(mrc_head_new(&mut *header, nx, ny, 1, 2), 0);
+            ii_sync_from_mrc_header(file, header);
+            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            let mut pixels = (0..nx * ny)
+                .map(|index| {
+                    let (x, y) = ((index % nx) as f32, (index / nx) as f32);
+                    100.0 + 30.0 * (x / 3.0).sin() * (y / 2.0).cos() + x - y
+                })
+                .collect::<Vec<f32>>();
+            assert_eq!(
+                ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
+                0
+            );
+            ii_close(file);
+        }
+        let mut decoded = Vec::new();
+        let mut sizes = Vec::new();
+        for backend in ["parity", "rustfft"] {
+            let output = base.with_extension(format!("{case}.{backend}.mrc"));
+            let result = common::imod_cmd("newstack")
+                .env("AUTODOC_DIR", AUTODOC)
+                .env("IMOD_RS_FFT_BACKEND", backend)
+                .args(["-input", input.to_str().unwrap()])
+                .args(["-output", output.to_str().unwrap()])
+                .args(&options)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{case} {backend}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            unsafe {
+                let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+                let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+                assert!(!file.is_null());
+                let mut header = std::mem::zeroed::<MrcHeader>();
+                assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
+                let mut pixels = vec![0.0_f32; (header.nx * header.ny) as usize];
+                assert_eq!(
+                    ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+                    0
+                );
+                ii_close(file);
+                sizes.push((header.nx, header.ny, header.mode));
+                decoded.push(pixels);
+            }
+            let _ = std::fs::remove_file(output);
+        }
+        let _ = std::fs::remove_file(input);
+        assert_eq!(sizes[0], sizes[1], "{case} output geometry");
+        let mut maximum = 0.0_f64;
+        let mut sum_squares = 0.0_f64;
+        let mut scale = 0.0_f64;
+        for (parity, rustfft) in decoded[0].iter().zip(decoded[1].iter()) {
+            let difference = (*parity as f64 - *rustfft as f64).abs();
+            maximum = maximum.max(difference);
+            sum_squares += difference * difference;
+            scale = scale.max((*parity as f64).abs());
+        }
+        let rms = (sum_squares / decoded[0].len() as f64).sqrt();
+        eprintln!("newstack {case}: max {maximum:.3e} rms {rms:.3e} scale {scale:.3e}");
+        assert!(
+            maximum < 4.0e-6 * scale,
+            "newstack {case} maximum difference {maximum} against scale {scale}"
+        );
+        assert!(
+            rms < 1.0e-6 * scale,
+            "newstack {case} RMS difference {rms} against scale {scale}"
+        );
+    }
+}

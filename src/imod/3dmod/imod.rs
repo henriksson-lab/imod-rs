@@ -559,7 +559,9 @@ pub fn imod_puts(message: &str) {
     eprintln!("{message}");
 }
 pub fn imod_print_info(message: &str) {
-    println!("{message}");
+    // `imodPrintInfo` (`utilities.cpp:1406`) is `printf("%s", message)`; the
+    // message carries its own newline.
+    print!("{message}");
 }
 pub fn imod_default_keys() -> Result<(), String> {
     IMOD_NATIVE_BOUNDARY.with(|slot| {
@@ -576,6 +578,80 @@ pub fn imod_show_help_page(page: &str) -> Result<(), String> {
             |boundary| boundary.imod_show_help_page(page),
         )
     })
+}
+
+/// The concrete `ImodNativeBoundary`: the Qt-owned objects `imod.cpp` reaches
+/// through its `App`/`ImodHelp` globals.
+///
+/// `3dmodv` and the `3dmod -V` dispatch never reach `startViewer`; that is the
+/// normal image display host, which is separate work.  The calls that do not
+/// depend on it are made here.
+pub struct ImodNativeHost {
+    /// `ImodAssistant *ImodHelp` (`imod.cpp:72`), created at `imod.cpp:343`.
+    help: Option<crate::imod::three_dmod::imod_assistant::ImodAssistant>,
+}
+
+impl Default for ImodNativeHost {
+    fn default() -> Self {
+        Self { help: None }
+    }
+}
+
+impl ImodNativeBoundary for ImodNativeHost {
+    /// Everything `imod.cpp::main` does after argument processing: open the
+    /// image files, build the `ImodView`, put up the info window and the
+    /// requested Zap/Slicer/XYZ windows, and enter the event loop.
+    fn start_viewer(&mut self, launch: &ImodLaunch) -> Result<i32, String> {
+        Err(format!(
+            "3dmod: the image display host is not built yet: opening {:?} (model {:?}) needs the \
+             native windows of imodview.cpp, info_setup.cpp, xzap.cpp, slicer.cpp and xyz.cpp. \
+             The model view alone is available as `3dmodv` or `3dmod -V`.",
+            launch.image_files, launch.model_file
+        ))
+    }
+    /// `imodDrawModel(vi, imod, drawCurrent, zscale)` (`model_draw.cpp:40`).
+    fn imod_draw_model(&mut self) -> Result<(), String> {
+        Err(
+            "3dmod: the model cannot be drawn into the image windows: imodDrawModel \
+             (model_draw.cpp:40) needs a ModelDrawBoundary host on an image window, which the \
+             image display host owns"
+                .to_owned(),
+        )
+    }
+    /// `imodDefaultKeys(event, vw)` (`imod_input.cpp`).
+    fn imod_default_keys(&mut self) -> Result<(), String> {
+        Err(
+            "3dmod: default key handling needs the current ImodView of the image display host \
+             (imod_input.cpp::imodDefaultKeys)"
+                .to_owned(),
+        )
+    }
+    /// `imodShowHelpPage(page)` (`utilities.cpp:1458`).
+    ///
+    /// `ImodHelp` is constructed in `imod.cpp:343` with exactly these
+    /// arguments; it is made on first use here because the translated
+    /// `imod_main` does not own the global.
+    fn imod_show_help_page(&mut self, page: &str) -> Result<(), String> {
+        if self.help.is_none() {
+            self.help = Some(crate::imod::three_dmod::imod_assistant::ImodAssistant::new(
+                "html",
+                Some("IMOD.qhc"),
+                Some("3dmod"),
+                false,
+                false,
+                Some("3dmodHelp"),
+                false,
+            ));
+        }
+        let help = self.help.as_mut().expect("assistant just created");
+        if help.show_page(page) > 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "3dmod: the help page {page} could not be shown by imodqtassist"
+            ))
+        }
+    }
 }
 
 #[cfg(test)]

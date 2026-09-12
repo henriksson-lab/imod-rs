@@ -99,9 +99,20 @@ mod tests {
         };
         let mut f = LayoutForm::new(&p);
         let mut o = Ops::default();
+        // `form_layout.cpp:52` connects `frameAdjSpinBox`'s `valueChanged(int)`
+        // to `borderAdjChanged(int)`, so Qt has already stored the new value in
+        // the spin box by the time the slot runs.  `unload` then reads the
+        // *widget* (`form_layout.cpp:89`, `frameAdjSpinBox->value()`), not the
+        // prefs field the slot wrote.  The test therefore has to set the box as
+        // `setValue(3)` would before invoking the slot -- it previously called
+        // the slot alone and expected `unload` to see 3, which no sequence in
+        // the source produces.  Same shape as `form_appearance.rs`'s tests.
+        f.frame_adj_spin_box = 3;
         f.border_adj_changed(&mut o, 3);
         let mut out = ImodPrefStruct::default();
         f.unload(&mut out);
         assert_eq!((out.dlg_frame_adjustment, o.0), (3, 1));
+        // The slot's own write (`form_layout.cpp:58`) lands on the form's prefs.
+        assert_eq!(f.prefs.dlg_frame_adjustment, 3);
     }
 }

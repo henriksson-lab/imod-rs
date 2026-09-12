@@ -4,7 +4,7 @@
 //! values are retained directly and every source slot forwards to `mv_modeled`.
 #![allow(dead_code)]
 use crate::imod::three_dmod::imodv::ImodvApp;
-use crate::imod::three_dmod::mv_input::{self, InputEvent};
+use crate::imod::three_dmod::mv_input::{self, InputEvent, MvInputNativeBoundary};
 use crate::imod::three_dmod::mv_modeled::{self, ImodvModeled};
 /// Original `imodvModeledForm`.
 #[derive(Clone, Debug, Default)]
@@ -107,16 +107,22 @@ impl ImodvModeledForm {
         app: &mut ImodvApp,
         dialog: &mut ImodvModeled,
         event: ModeledKeyEvent,
+        input: &mut dyn MvInputNativeBoundary,
     ) {
         if event.close {
             mv_modeled::imodv_modeled_done(dialog);
             self.top_window_open = false;
         } else {
-            mv_input::imodv_key_press(app, InputEvent::default());
+            mv_input::imodv_key_press(app, InputEvent::default(), input);
         }
     }
-    pub fn key_release_event(&mut self, app: &mut ImodvApp, _event: ModeledKeyEvent) {
-        mv_input::imodv_key_release(app, InputEvent::default());
+    pub fn key_release_event(
+        &mut self,
+        app: &mut ImodvApp,
+        _event: ModeledKeyEvent,
+        input: &mut dyn MvInputNativeBoundary,
+    ) {
+        mv_input::imodv_key_release(app, InputEvent::default(), input);
     }
     pub fn top_change_event(&mut self, font_changed: bool) {
         self.base_change_event_called = true;
@@ -149,8 +155,17 @@ mod tests {
         let mut app = ImodvApp::default();
         let mut dialog = ImodvModeled::default();
         let mut form = imodv_modeled_form_new(&app);
-        form.key_press_event(&mut app, &mut dialog, ModeledKeyEvent::default());
-        form.key_release_event(&mut app, ModeledKeyEvent::default());
+        struct NoInput;
+        impl crate::imod::three_dmod::imod_input::InputNativeBoundary for NoInput {}
+        impl MvInputNativeBoundary for NoInput {}
+        let mut input = NoInput;
+        form.key_press_event(
+            &mut app,
+            &mut dialog,
+            ModeledKeyEvent::default(),
+            &mut input,
+        );
+        form.key_release_event(&mut app, ModeledKeyEvent::default(), &mut input);
         form.top_close_event(&mut app, &mut dialog);
         assert!(form.close_event_accepted);
         form.top_change_event(true);

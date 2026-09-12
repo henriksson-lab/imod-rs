@@ -40,7 +40,9 @@ pub trait ImodvGfxGl {
     fn init_names(&mut self);
     fn multisample(&mut self, enabled: bool);
     fn draw_models(&mut self, app: &mut ImodvApp);
-    fn clear_temp_arrays(&mut self);
+    /// `a->vbManager->clearTempArrays()`; the manager is owned by the app, so
+    /// it is passed exactly as the source reaches it.
+    fn clear_temp_arrays(&mut self, app: &mut ImodvApp);
     fn resize_viewport_xy(&mut self, width: i32, height: i32);
     fn draw_light_vector(&mut self, app: &ImodvApp, light: Ipoint);
     fn draw_scale_bar(&mut self, app: &ImodvApp, scale: f32, color: i32) -> f32;
@@ -241,7 +243,7 @@ pub fn imodv_paint_gl(
         }
         _ => {}
     }
-    gl.clear_temp_arrays();
+    gl.clear_temp_arrays(a);
     gl.resize_viewport_xy(a.winx, a.winy);
     if a.draw_light != 0 {
         unsafe {
@@ -365,6 +367,103 @@ pub fn imodv_auto_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libimod::imodel::{Imod, Iview};
+
+    /// Records the boundary calls `imodvPaintGL` makes, in order.
+    #[derive(Default)]
+    struct RecordingGfxGl {
+        calls: Vec<&'static str>,
+    }
+    impl ImodvGfxGl for RecordingGfxGl {
+        fn make_current(&mut self) {
+            self.calls.push("make_current")
+        }
+        fn swap_buffers(&mut self) {
+            self.calls.push("swap_buffers")
+        }
+        fn flush(&mut self) {
+            self.calls.push("flush")
+        }
+        fn finish(&mut self) {
+            self.calls.push("finish")
+        }
+        fn clear(&mut self, _: f32, _: f32, _: f32, _: f32, _: bool) {
+            self.calls.push("clear")
+        }
+        fn draw_buffer(&mut self, _: bool, _: bool) {
+            self.calls.push("draw_buffer")
+        }
+        fn viewport(&mut self, _: i32, _: i32) {
+            self.calls.push("viewport")
+        }
+        fn initialize(&mut self, _: f32, _: bool) {
+            self.calls.push("initialize")
+        }
+        fn render_mode_select(&mut self) -> i32 {
+            self.calls.push("render_mode_select");
+            0
+        }
+        fn render_mode_render(&mut self) -> i32 {
+            self.calls.push("render_mode_render");
+            0
+        }
+        fn init_names(&mut self) {
+            self.calls.push("init_names")
+        }
+        fn multisample(&mut self, _: bool) {
+            self.calls.push("multisample")
+        }
+        fn draw_models(&mut self, _: &mut ImodvApp) {
+            self.calls.push("draw_models")
+        }
+        fn clear_temp_arrays(&mut self, _: &mut ImodvApp) {
+            self.calls.push("clear_temp_arrays")
+        }
+        fn resize_viewport_xy(&mut self, _: i32, _: i32) {
+            self.calls.push("resize_viewport_xy")
+        }
+        fn draw_light_vector(&mut self, _: &ImodvApp, _: Ipoint) {
+            self.calls.push("draw_light_vector")
+        }
+        fn draw_scale_bar(&mut self, _: &ImodvApp, _: f32, _: i32) -> f32 {
+            self.calls.push("draw_scale_bar");
+            1.
+        }
+        fn read_rgb_pixels(&mut self, _: i32, _: i32, _: i32) -> Vec<u8> {
+            self.calls.push("read_rgb_pixels");
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn imodv_paint_gl_issues_the_source_boundary_sequence() {
+        let mut model = Imod {
+            view: vec![Iview::default()],
+            ..Default::default()
+        };
+        let mut a = ImodvApp {
+            winx: 64,
+            winy: 48,
+            ..Default::default()
+        };
+        a.imod = &mut model;
+        let mut gl = RecordingGfxGl::default();
+        imodv_paint_gl(&mut a, [0, 0, 0], false, &mut gl);
+        assert_eq!(
+            gl.calls,
+            vec![
+                "make_current",
+                "make_current",
+                "clear",
+                "flush",
+                "draw_models",
+                "clear_temp_arrays",
+                "resize_viewport_xy",
+                "draw_scale_bar",
+            ]
+        );
+        assert_eq!(a.scale_bar_size, 1.);
+    }
     #[test]
     fn snapshot_has_sgi_header_and_planar_data() {
         let a = ImodvApp {

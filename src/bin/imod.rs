@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 /// them.  Kept sorted so the listing is stable.
 const COMMANDS: &[&str] = &[
     "3dmod",
+    "3dmodv",
     "alterheader",
     "batchruntomo",
     "binvol",
@@ -52,7 +53,24 @@ const COMMANDS: &[&str] = &[
 /// carry, unchanged.
 fn dispatch(name: &str) -> bool {
     match name {
-        "3dmod" => {
+        // `3dmodv` is the same program under the name `imod.cpp::main` tests
+        // with `imodv = program.ends_with('v')`, exactly as upstream links it.
+        "3dmod" | "3dmodv" => {
+            // `imod.cpp`'s `App`/`ImodHelp` globals and `imodv.cpp`'s Qt
+            // objects are what these two hosts stand for.  They are installed
+            // before `main` runs, as the C++ constructs them at file scope and
+            // in `main`.
+            imod_rs::imod::three_dmod::imod::IMOD_NATIVE_BOUNDARY.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(
+                    imod_rs::imod::three_dmod::imod::ImodNativeHost::default(),
+                ));
+            });
+            #[cfg(feature = "three-dmod-gl")]
+            imod_rs::imod::three_dmod::imodv::IMODV_NATIVE_BOUNDARY.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(
+                    imod_rs::imod::three_dmod::mv_window::ImodvNativeHost,
+                ));
+            });
             let arguments = std::env::args().collect::<Vec<_>>();
             match imod_rs::imod::three_dmod::imod::imod_main(&arguments) {
                 Ok(status) => std::process::exit(status),

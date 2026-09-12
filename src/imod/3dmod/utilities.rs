@@ -153,6 +153,13 @@ pub fn util_disable_stipple(boundary: &mut dyn UtilitiesBoundary, draw_stipple: 
         boundary.set_stipple(false);
     }
 }
+/// `utilCloseKey` (`utilities.cpp:502`); the `Q_OS_MACX` Ctrl-W arm is not
+/// compiled on this platform, so only Escape closes.  The Qt key code travels
+/// as the plain `int` the rest of the translated input path uses.
+pub fn util_close_key(key: i32) -> bool {
+    key == 0x0100_0000
+}
+
 /// `utilClearWindow`.
 pub fn util_clear_window(boundary: &mut dyn UtilitiesBoundary, index: i32) {
     boundary.clear_window(index)

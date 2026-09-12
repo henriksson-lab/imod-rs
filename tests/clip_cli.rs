@@ -7704,3 +7704,301 @@ fn edge_fill_accepts_the_sizes_the_source_accepts() {
         let _ = std::fs::remove_file(path);
     }
 }
+
+/// Cross-backend differential for `clip fft`, the caller that reaches the
+/// complex-to-complex `odfft` directions and the negative `todfft` direction.
+///
+/// `clip_fftvol` (`clip/fft.cpp:258`) transforms each Z section with
+/// `todfft(..., 0)` and then transforms along Z with `odfft(..., -1)`;
+/// the inverse runs `odfft(..., -2)` and `todfft(..., -1)` — the direction
+/// documented at `todfft.c:55` as the inverse and the one no other fixture
+/// exercises.  `-2d` takes the `slice_fft` path (`clip/fft.cpp:111`) instead.
+/// Intended backends: each case runs once on `parity` and once on `rustfft`,
+/// in separate processes because the selector is a process-local `OnceLock`.
+///
+/// Sizes are chosen from what `clip_nicesize` admits -- even in X with no
+/// prime factor above 19 -- and deliberately avoid powers of two, so that
+/// across the cases the radix-3, radix-5 and general prime-factor kernels each
+/// run: 38 is 2 * 19 in X, 7 is prime in Z, and no axis is the same length as
+/// another.
+///
+/// Tolerances: measured, then rounded up, and expressed relative to the
+/// largest magnitude in the buffer being compared, because a forward spectrum
+/// of this fixture peaks near 8.5e3 while the volume it came from peaks near
+/// 1.5e2.  Measured over the four cases, the parity-versus-RustFFT difference
+/// was at most 1.3e-7 of that magnitude in a forward transform and 7.5e-7 in
+/// the volume the inverse recovers, with RMS differences of 6.4e-9 and 2.4e-7;
+/// the bounds are 8.0e-6 and 2.5e-6 of the magnitude, about ten times the
+/// worst case.  A sign, normalization or axis error fails them by orders of
+/// magnitude.
+#[cfg(feature = "rustfft-backend")]
+#[test]
+fn fft_rustfft_transforms_match_the_parity_volume() {
+    let base =
+        std::env::temp_dir().join(format!("imod-rs-clip-fft-rustfft-{}", std::process::id()));
+    for (case, dimension, nx, ny, nz) in [
+        ("three", "-3d", 30, 18, 12),
+        ("threeprime", "-3d", 38, 5, 7),
+        ("two", "-2d", 100, 7, 2),
+        ("twoodd", "-2d", 54, 45, 1),
+    ] {
+        let input = base.with_extension(format!("{case}.input.mrc"));
+        unsafe {
+            let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+            let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+            assert!(!file.is_null());
+            let header = (*file).header.cast::<MrcHeader>();
+            assert_eq!(mrc_head_new(&mut *header, nx, ny, nz, MRC_MODE_FLOAT), 0);
+            ii_sync_from_mrc_header(file, header);
+            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            for z in 0..nz {
+                let mut pixels = (0..nx * ny)
+                    .map(|index| {
+                        let (x, y) = ((index % nx) as f32, (index / nx) as f32);
+                        100.0 + 30.0 * (x / 3.0).sin() * (y / 2.0 + z as f32).cos() + x - y
+                    })
+                    .collect::<Vec<f32>>();
+                assert_eq!(
+                    ii_write_section_float(file, pixels.as_mut_ptr().cast(), z),
+                    0
+                );
+            }
+            ii_close(file);
+        }
+        let mut transformed = Vec::new();
+        let mut recovered = Vec::new();
+        let mut geometry = Vec::new();
+        for backend in ["parity", "rustfft"] {
+            let forward = base.with_extension(format!("{case}.{backend}.fft.mrc"));
+            let inverse = base.with_extension(format!("{case}.{backend}.back.mrc"));
+            for (source, destination) in [(&input, &forward), (&forward, &inverse)] {
+                let result = common::imod_cmd("clip")
+                    .env("IMOD_RS_FFT_BACKEND", backend)
+                    .args([
+                        "fft",
+                        dimension,
+                        source.to_str().unwrap(),
+                        destination.to_str().unwrap(),
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{case} {backend} {}: {}",
+                    destination.display(),
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
+            for (path, into) in [(&forward, &mut transformed), (&inverse, &mut recovered)] {
+                unsafe {
+                    let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+                    let file = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+                    assert!(!file.is_null());
+                    let mut header = std::mem::zeroed::<MrcHeader>();
+                    assert_eq!(mrc_head_read(file, &mut header), 0);
+                    let count = (header.nx * header.ny * header.nz) as usize
+                        * if header.mode == MRC_MODE_COMPLEX_FLOAT {
+                            2
+                        } else {
+                            1
+                        };
+                    let mut values = vec![0.0_f32; count];
+                    libc::fseek(file, header.header_size as i64, libc::SEEK_SET);
+                    assert_eq!(
+                        libc::fread(values.as_mut_ptr().cast(), 4, count, file),
+                        count
+                    );
+                    libc::fclose(file);
+                    geometry.push((header.nx, header.ny, header.nz, header.mode));
+                    into.push(values);
+                }
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        let _ = std::fs::remove_file(input);
+        assert_eq!(geometry[0], geometry[2], "{case} forward geometry");
+        assert_eq!(geometry[1], geometry[3], "{case} inverse geometry");
+        for (stage, values) in [("forward", &transformed), ("inverse", &recovered)] {
+            let mut maximum = 0.0_f64;
+            let mut sum_squares = 0.0_f64;
+            let mut scale = 0.0_f64;
+            assert_eq!(values[0].len(), values[1].len(), "{case} {stage} length");
+            for (parity, rustfft) in values[0].iter().zip(values[1].iter()) {
+                let difference = (*parity as f64 - *rustfft as f64).abs();
+                maximum = maximum.max(difference);
+                sum_squares += difference * difference;
+                scale = scale.max((*parity as f64).abs());
+            }
+            let rms = (sum_squares / values[0].len() as f64).sqrt();
+            eprintln!("clip fft {case} {stage}: max {maximum:.3e} rms {rms:.3e} scale {scale:.3e}");
+            assert!(
+                maximum < 8.0e-6 * scale,
+                "clip fft {case} {stage} maximum difference {maximum} against scale {scale}"
+            );
+            assert!(
+                rms < 2.5e-6 * scale,
+                "clip fft {case} {stage} RMS difference {rms} against scale {scale}"
+            );
+        }
+    }
+}
+
+/// Cross-backend differential for the remaining `clip` processes that reach an
+/// FFT: `filter` (`slice_fft` per section, `clip/filter.cpp:103`),
+/// `correlation` in both its 2-D form (`mrc_to_dfft` forward, `corr_conj`,
+/// inverse, `clip/correlation.cpp:104-133`) and its 3-D form (`clip_fftvol`,
+/// so the complex-to-complex `odfft` directions again), and `spectrum`
+/// (`spectrumScaled`, which is handed `todfft` itself).  With `clip fft`
+/// covered separately this is every Fourier operation the command has.
+///
+/// Intended backends: one `parity` process and one `rustfft` process per case.
+/// The 30 by 18 by 12 fixture pads to 60 by 36 by 24 in correlation, so no
+/// dimension anywhere in this test is a power of two.
+///
+/// Tolerances: measured, then rounded up.  Relative to the largest magnitude
+/// in each output volume, the measured parity-versus-RustFFT difference was
+/// 3.0e-7 maximum for `filter`, 1.5e-7 for the 2-D correlation and 8.5e-7 for
+/// the 3-D one, with RMS differences of 8.4e-8, 6.8e-8 and 2.9e-7; the bounds
+/// here are 1.0e-5 and 2.5e-6 of that magnitude, roughly ten times the worst
+/// case.
+///
+/// `spectrum` needs a looser, separately derived bound and gets an absolute
+/// one, because it is not a transform comparison: `spectrumScaled` maps
+/// `scale * ln(logScale * value + 1)` onto 0 to 32000
+/// (`spectrumscaled.c:209,229`), and that logarithm's slope is steepest where
+/// the power is smallest, so the same `f32` round-off that is 1e-7 relative in
+/// a coefficient becomes several counts at the dark end of the image.  The
+/// measured difference was 13 counts of 32000, and every difference above two
+/// counts sat at the bottom of the value range; the bound is 40 counts with an
+/// RMS of 2.  Note that a power spectrum discards the sign of the transform,
+/// so this case cannot detect a conjugation error -- `newstack -phase` and the
+/// round trips in `fft_backend_matrix` are what cover that.
+#[cfg(feature = "rustfft-backend")]
+#[test]
+fn fourier_processes_rustfft_outputs_match_the_parity_outputs() {
+    let base = std::env::temp_dir().join(format!("imod-rs-clip-fourier-{}", std::process::id()));
+    for (case, nz, options, relative, relative_rms, counts, counts_rms) in [
+        (
+            "filter",
+            2,
+            vec!["filter", "-l", "1", "-h", "0"],
+            1.0e-5,
+            2.5e-6,
+            0.0,
+            0.0,
+        ),
+        (
+            "correlation2d",
+            1,
+            vec!["correlation", "-2d"],
+            1.0e-5,
+            2.5e-6,
+            0.0,
+            0.0,
+        ),
+        (
+            "correlation3d",
+            12,
+            vec!["correlation"],
+            1.0e-5,
+            2.5e-6,
+            0.0,
+            0.0,
+        ),
+        (
+            "spectrum",
+            2,
+            vec!["spectrum", "-l", "0"],
+            0.0,
+            0.0,
+            40.0,
+            2.0,
+        ),
+    ] {
+        let (nx, ny) = (30, 18);
+        let input = base.with_extension(format!("{case}.input.mrc"));
+        unsafe {
+            let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
+            let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+            assert!(!file.is_null());
+            let header = (*file).header.cast::<MrcHeader>();
+            assert_eq!(mrc_head_new(&mut *header, nx, ny, nz, MRC_MODE_FLOAT), 0);
+            ii_sync_from_mrc_header(file, header);
+            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            for z in 0..nz {
+                let mut pixels = (0..nx * ny)
+                    .map(|index| {
+                        let (x, y) = ((index % nx) as f32, (index / nx) as f32);
+                        100.0 + 30.0 * (x / 3.0).sin() * (y / 2.0 + z as f32).cos() + x - y
+                    })
+                    .collect::<Vec<f32>>();
+                assert_eq!(
+                    ii_write_section_float(file, pixels.as_mut_ptr().cast(), z),
+                    0
+                );
+            }
+            ii_close(file);
+        }
+        let mut decoded = Vec::new();
+        let mut geometry = Vec::new();
+        for backend in ["parity", "rustfft"] {
+            let output = base.with_extension(format!("{case}.{backend}.mrc"));
+            let result = common::imod_cmd("clip")
+                .env("IMOD_RS_FFT_BACKEND", backend)
+                .args(&options)
+                .args([input.to_str().unwrap(), output.to_str().unwrap()])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{case} {backend}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            unsafe {
+                let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
+                let file = ii_open(name.as_ptr(), c"rb".as_ptr());
+                assert!(!file.is_null());
+                let header = (*file).header.cast::<MrcHeader>();
+                assert_eq!(mrc_head_read((*file).fp, header), 0);
+                let mut values =
+                    vec![0.0_f32; ((*header).nx * (*header).ny * (*header).nz) as usize];
+                let section = ((*header).nx * (*header).ny) as usize;
+                for z in 0..(*header).nz {
+                    assert_eq!(
+                        ii_read_section_float(
+                            file,
+                            values[z as usize * section..].as_mut_ptr().cast(),
+                            z
+                        ),
+                        0
+                    );
+                }
+                geometry.push(((*header).nx, (*header).ny, (*header).nz, (*header).mode));
+                decoded.push(values);
+                ii_close(file);
+            }
+            let _ = std::fs::remove_file(output);
+        }
+        let _ = std::fs::remove_file(input);
+        assert_eq!(geometry[0], geometry[1], "{case} output geometry");
+        let mut maximum = 0.0_f64;
+        let mut sum_squares = 0.0_f64;
+        let mut scale = 0.0_f64;
+        for (parity, rustfft) in decoded[0].iter().zip(decoded[1].iter()) {
+            let difference = (*parity as f64 - *rustfft as f64).abs();
+            maximum = maximum.max(difference);
+            sum_squares += difference * difference;
+            scale = scale.max((*parity as f64).abs());
+        }
+        let rms = (sum_squares / decoded[0].len() as f64).sqrt();
+        eprintln!("clip {case}: max {maximum:.3e} rms {rms:.3e} scale {scale:.3e}");
+        assert!(
+            maximum <= relative * scale + counts,
+            "clip {case} maximum difference {maximum} against scale {scale}"
+        );
+        assert!(
+            rms <= relative_rms * scale + counts_rms,
+            "clip {case} RMS difference {rms} against scale {scale}"
+        );
+    }
+}

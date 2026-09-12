@@ -10,7 +10,7 @@ use crate::imod::three_dmod::imodv::{
     ImodvApp, imodv_draw, imodv_draw_imod_images, imodv_finish_chg_unit, imodv_new_model_angles,
     imodv_register_model_chg,
 };
-use crate::imod::three_dmod::mv_input::{imodv_rotate_model, imodv_zoomd};
+use crate::imod::three_dmod::mv_input::{MvInputNativeBoundary, imodv_rotate_model, imodv_zoomd};
 
 pub const IMODV_ROTATION_FACTOR: f32 = 1.26;
 pub const IMODV_CONTROL_NEAR: i32 = 1;
@@ -227,15 +227,19 @@ pub fn imodv_control_start(a: &mut ImodvApp, n: &mut dyn ImodvControlNativeBound
 }
 
 /// Original: `imodvControlAxisButton`.
-pub fn imodv_control_axis_button(a: &mut ImodvApp, axis_dir: i32) {
+pub fn imodv_control_axis_button(
+    a: &mut ImodvApp,
+    axis_dir: i32,
+    input: &mut dyn MvInputNativeBoundary,
+) {
     let d = a.delta_rot as i32;
     match axis_dir {
-        IMODV_CONTROL_XAXIS => imodv_rotate_model(a, d, 0, 0),
-        -1 => imodv_rotate_model(a, -d, 0, 0),
-        IMODV_CONTROL_YAXIS => imodv_rotate_model(a, 0, d, 0),
-        -2 => imodv_rotate_model(a, 0, -d, 0),
-        IMODV_CONTROL_ZAXIS => imodv_rotate_model(a, 0, 0, d),
-        -3 => imodv_rotate_model(a, 0, 0, -d),
+        IMODV_CONTROL_XAXIS => imodv_rotate_model(a, d, 0, 0, input),
+        -1 => imodv_rotate_model(a, -d, 0, 0, input),
+        IMODV_CONTROL_YAXIS => imodv_rotate_model(a, 0, d, 0, input),
+        -2 => imodv_rotate_model(a, 0, -d, 0, input),
+        IMODV_CONTROL_ZAXIS => imodv_rotate_model(a, 0, 0, d, input),
+        -3 => imodv_rotate_model(a, 0, 0, -d, input),
         _ => {}
     }
     unsafe { imodv_draw() };
