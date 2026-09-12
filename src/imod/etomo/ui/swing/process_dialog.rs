@@ -10,11 +10,12 @@ pub use super::abstract_parallel_dialog::AbstractParallelDialog;
 use super::etomo_frame::ActionEvent;
 use super::etomo_panel::EtomoPanel;
 pub use super::global_expand_button::GlobalExpandButton;
-use super::parallel_panel::QueueTableEvent;
 pub use super::single_line_button::SingleLineButton;
 use crate::imod::etomo::comscript::parallel_param::ParallelParam;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+pub use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
+pub use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
 use crate::imod::etomo::util::utilities;
 
 /// `DialogExitState.java`, a direct value dependency of `ProcessDialog`.
@@ -40,11 +41,6 @@ impl std::fmt::Display for DialogExitState {
 /// Direct `ApplicationManager.isAdvanced(DialogType, AxisID)` boundary.
 pub trait ProcessDialogApplicationManager {
     fn is_advanced(&self, dialog_type: DialogType, axis_id: AxisID) -> bool;
-}
-
-/// Direct `QueueTableListener` boundary.
-pub trait QueueTableListener {
-    fn queue_table_event_action(&mut self, event: QueueTableEvent);
 }
 
 /// Java `Box.create*` entries in the exact `pnlExitButtons` insertion order.

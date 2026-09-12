@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use super::check_box::CheckBox;
 use super::cpu_gpu_panel::ProcessingMethodMediatorBoundary;
+use super::process_interface::ProcessInterface;
 use super::radio_button::{RadioButton, RadioButtonGroup};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
@@ -32,11 +33,6 @@ pub trait SubtomoSetupCpuGpuApplicationManager {
     fn subtomo_setup_when_to_use_gpu_tooltips(&self) -> Option<[String; 3]>;
     /// Java `Network.isAnyQueueGpu()`.
     fn is_any_queue_gpu(&self) -> bool;
-}
-
-/// Java `ProcessInterface.setMethod` invoked by this panel.
-pub trait SubtomoSetupProcessInterface {
-    fn set_method(&mut self, method: ProcessingMethod);
 }
 
 /// Java `SubtomogramsPanel.isExtentOfZLevelsInNm` callback.
@@ -94,7 +90,7 @@ impl<M, S, P> SubtomoSetupCpuGpuPanel<M, S, P>
 where
     M: SubtomoSetupCpuGpuApplicationManager,
     S: SubtomoSetupSubtomogramsPanel,
-    P: SubtomoSetupProcessInterface,
+    P: ProcessInterface<QueueCheckBox = CheckBox>,
 {
     /// Java private constructor.
     pub fn new(subtomograms_panel: S, manager: M, axis_id: AxisID, process_interface: P) -> Self {
@@ -419,9 +415,39 @@ mod tests {
     struct Process {
         methods: Vec<ProcessingMethod>,
     }
-    impl SubtomoSetupProcessInterface for Process {
+    impl crate::imod::etomo::ui::queue_table_listener::QueueTableListener for Process {
+        fn queue_table_event_action(
+            &mut self,
+            _event: crate::imod::etomo::ui::queue_table_event::QueueTableEvent,
+        ) {
+        }
+    }
+    impl ProcessInterface for Process {
+        type QueueCheckBox = CheckBox;
+        fn update_gpu(&mut self, _disable_gpu: bool) {}
+        fn get_processing_method(&self) -> ProcessingMethod {
+            ProcessingMethod::PpCpu
+        }
+        fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+            None
+        }
+        fn lock_processing_method(&mut self, _lock: bool) {}
         fn set_method(&mut self, method: ProcessingMethod) {
             self.methods.push(method);
+        }
+        fn is_use_gpu(&self) -> bool {
+            false
+        }
+        fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
+        fn add_queue_table_listener(
+            &mut self,
+            _listener: &mut dyn crate::imod::etomo::ui::queue_table_listener::QueueTableListener,
+        ) {
+        }
+        fn remove_queue_table_listener(
+            &mut self,
+            _listener: &mut dyn crate::imod::etomo::ui::queue_table_listener::QueueTableListener,
+        ) {
         }
     }
     fn panel(

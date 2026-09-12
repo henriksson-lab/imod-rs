@@ -10,6 +10,7 @@ use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::interface_type::InterfaceType;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+pub use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
 use std::collections::BTreeMap;
 
 pub const STORE_PREPEND: &str = "ProcessorTable";
@@ -22,17 +23,6 @@ pub const MAX_CPUS_STRING: &str = ":  Maximum number of cores recommended is ";
 pub const CPUS_SELECTED_LABEL: &str = "Cores: ";
 pub const GPUS_SELECTED_LABEL: &str = "GPUs: ";
 
-/// Java `QueueTableEvent` direct dependency, used by ParallelPanel's listener protocol.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum QueueTableEvent {
-    AllowDisplay,
-    Display,
-    Displayed,
-    DisableSecondaryQueue,
-    EnableSecondaryQueue,
-    Hidden,
-    PreventDisplay,
-}
 /// Java private static `ParallelPanelActionListener`.
 pub struct ParallelPanelActionListener;
 impl ParallelPanelActionListener {

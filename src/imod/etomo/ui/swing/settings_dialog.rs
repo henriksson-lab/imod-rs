@@ -414,6 +414,23 @@ mod tests {
         assert!(d.set_parameters_from_network(true, Some(16), Some(2)));
         d.update_display();
         assert!(!d.parallel_enabled && d.parallel_processing);
-        assert!(!d.gpu_enabled);
+        // `dialog()` builds this with `cpuAdocViable == false`, and the network
+        // path only ever calls `cbGpuProcessing.setSelected(...)`
+        // (`SettingsDialog.java:275,281`) -- it never touches the *enabled*
+        // state.  That is decided solely by `updateDisplay`:
+        // `cbGpuProcessing.setEnabled(!cpuAdocViable && cbParallelProcessing
+        // .isSelected())` (`SettingsDialog.java:300`), which is `!false && true`
+        // here.  The Java comment on the line above it says why: "When
+        // IMOD_PROCESSORS is in use, the GPUs can still be set from this
+        // dialog."  This assertion used to read `!d.gpu_enabled`, which is the
+        // opposite of the source.
+        assert!(d.gpu_enabled);
+        // `ltfNumberOfLocalGPUs.setEnabled(cbParallelProcessing.isSelected()
+        // && cbGpuProcessing.isEnabled() && cbGpuProcessing.isSelected())`
+        // (`SettingsDialog.java:301-302`); `localHostGpus > 0` selected the box
+        // and set the count (`:275-276`).
+        assert!(d.gpu_processing && d.local_gpus_enabled);
+        assert_eq!(d.local_gpus, "2");
+        assert_eq!(d.cpus, "16");
     }
 }

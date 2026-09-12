@@ -324,6 +324,9 @@ impl FilterFullVolumePanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
+    use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
+    use crate::imod::etomo::ui::swing::process_interface::ProcessInterface;
 
     #[derive(Default)]
     struct Meta {
@@ -385,6 +388,27 @@ mod tests {
         cleaned: bool,
         flipping: bool,
     }
+    impl QueueTableListener for Parent {
+        fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
+    }
+    impl ProcessInterface for Parent {
+        type QueueCheckBox = CheckBox;
+        fn update_gpu(&mut self, _disable_gpu: bool) {}
+        fn get_processing_method(&self) -> ProcessingMethod {
+            ProcessingMethod::PpCpu
+        }
+        fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+            None
+        }
+        fn lock_processing_method(&mut self, _lock: bool) {}
+        fn set_method(&mut self, _processing_method: ProcessingMethod) {}
+        fn is_use_gpu(&self) -> bool {
+            false
+        }
+        fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
+        fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
+        fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
+    }
     impl FilterFullVolumeParent for Parent {
         fn clean_up(&mut self) {
             self.cleaned = true;
@@ -397,9 +421,6 @@ mod tests {
         }
         fn is_load_with_flipping(&self) -> bool {
             self.flipping
-        }
-        fn get_processing_method(&self) -> ProcessingMethod {
-            ProcessingMethod::PpCpu
         }
     }
     #[derive(Default)]

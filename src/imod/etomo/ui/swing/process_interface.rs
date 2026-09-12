@@ -51,11 +51,17 @@ mod tests {
     impl ProcessInterface for Interface {
         type QueueCheckBox = CheckBox;
         fn update_gpu(&mut self, _disable_gpu: bool) {}
-        fn get_processing_method(&self) -> ProcessingMethod { ProcessingMethod::PpCpu }
-        fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> { None }
+        fn get_processing_method(&self) -> ProcessingMethod {
+            ProcessingMethod::PpCpu
+        }
+        fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+            None
+        }
         fn lock_processing_method(&mut self, _lock: bool) {}
         fn set_method(&mut self, _processing_method: ProcessingMethod) {}
-        fn is_use_gpu(&self) -> bool { false }
+        fn is_use_gpu(&self) -> bool {
+            false
+        }
         fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
         fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
         fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}

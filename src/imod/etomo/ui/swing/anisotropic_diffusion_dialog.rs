@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::process_interface::ProcessInterface;
 use super::{
     check_box::CheckBox,
     filter_full_volume_panel::{self, FilterFullVolumePanel},
@@ -19,6 +20,8 @@ use crate::imod::etomo::r#type::{
     axis_id::AxisID, dialog_type::DialogType, processing_method::ProcessingMethod,
 };
 use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
+use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
 
 pub const CLEANUP_LABEL: &str = filter_full_volume_panel::CLEANUP_LABEL;
 pub const FILTER_FULL_VOLUME_LABEL: &str = filter_full_volume_panel::FILTER_FULL_VOLUME_LABEL;
@@ -353,11 +356,48 @@ impl<R> AnisotropicDiffusionDialog<R> {
     pub fn is_use_gpu(&self) -> bool {
         false
     }
-    pub fn queue_table_event_action(&mut self) {}
-    pub fn set_use_queue_check_box(&mut self) {}
-    pub fn add_queue_table_listener(&mut self) {}
-    pub fn remove_queue_table_listener(&mut self) {}
+    pub fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
+    pub fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
+    pub fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
+    pub fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
     pub fn update_gpu(&mut self, _disable_gpu: bool) {}
+}
+
+impl<R> QueueTableListener for AnisotropicDiffusionDialog<R> {
+    fn queue_table_event_action(&mut self, event: QueueTableEvent) {
+        Self::queue_table_event_action(self, event);
+    }
+}
+
+impl<R> ProcessInterface for AnisotropicDiffusionDialog<R> {
+    type QueueCheckBox = CheckBox;
+    fn update_gpu(&mut self, disable_gpu: bool) {
+        Self::update_gpu(self, disable_gpu);
+    }
+    fn get_processing_method(&self) -> ProcessingMethod {
+        Self::get_processing_method(self)
+    }
+    fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+        Self::get_secondary_processing_method(self)
+    }
+    fn lock_processing_method(&mut self, lock: bool) {
+        Self::lock_processing_method(self, lock);
+    }
+    fn set_method(&mut self, method: ProcessingMethod) {
+        Self::set_method(self, method);
+    }
+    fn is_use_gpu(&self) -> bool {
+        Self::is_use_gpu(self)
+    }
+    fn set_use_queue_check_box(&mut self, check_box: Option<CheckBox>) {
+        Self::set_use_queue_check_box(self, check_box);
+    }
+    fn add_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
+        Self::add_queue_table_listener(self, listener);
+    }
+    fn remove_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
+        Self::remove_queue_table_listener(self, listener);
+    }
 }
 impl<R: AnisotropicDiffusionDialogRubberband> AnisotropicDiffusionDialog<R> {
     pub fn get_initial_parameters<M: AnisotropicDiffusionDialogMetaData>(&self, meta: &mut M) {

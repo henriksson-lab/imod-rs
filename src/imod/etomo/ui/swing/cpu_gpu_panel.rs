@@ -8,8 +8,11 @@
 
 use super::check_box::CheckBox;
 use super::parallel_panel::{FIELD_LABEL, MAX_CPUS_STRING};
+use super::process_interface::ProcessInterface;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
+use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
 
 /// Java `PanelId` values examined by this source unit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -304,11 +307,11 @@ impl CpuGpuPanel {
         }
     }
     /// Java no-op `queueTableEventAction`.
-    pub fn queue_table_event_action(&mut self) {}
+    pub fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
     /// Java no-op `addQueueTableListener`.
-    pub fn add_queue_table_listener(&mut self) {}
+    pub fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
     /// Java no-op `removeQueueTableListener`.
-    pub fn remove_queue_table_listener(&mut self) {}
+    pub fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
     /// Java `getComponent`; Swing component identity is represented by root order.
     pub fn get_component(&self) -> &[&'static str] {
         &self.pnl_root_component_order
@@ -453,6 +456,52 @@ impl CpuGpuPanel {
     /// Java `setAltStackProcessInterface`.
     pub fn set_alt_stack_process_interface(&mut self, origin_present: bool) {
         self.alt_stack_process_interface = origin_present;
+    }
+}
+
+impl QueueTableListener for CpuGpuPanel {
+    fn queue_table_event_action(&mut self, event: QueueTableEvent) {
+        Self::queue_table_event_action(self, event);
+    }
+}
+
+impl ProcessInterface for CpuGpuPanel {
+    type QueueCheckBox = CheckBox;
+
+    fn update_gpu(&mut self, disable_gpu: bool) {
+        Self::update_gpu(self, disable_gpu);
+    }
+
+    fn get_processing_method(&self) -> ProcessingMethod {
+        Self::get_processing_method(self)
+    }
+
+    fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+        Self::get_secondary_processing_method(self)
+    }
+
+    fn lock_processing_method(&mut self, lock: bool) {
+        Self::lock_processing_method(self, lock);
+    }
+
+    fn set_method(&mut self, processing_method: ProcessingMethod) {
+        Self::set_method(self, processing_method);
+    }
+
+    fn is_use_gpu(&self) -> bool {
+        Self::is_use_gpu(self)
+    }
+
+    fn set_use_queue_check_box(&mut self, use_queue_checkbox: Option<CheckBox>) {
+        Self::set_use_queue_check_box(self, use_queue_checkbox);
+    }
+
+    fn add_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
+        Self::add_queue_table_listener(self, listener);
+    }
+
+    fn remove_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
+        Self::remove_queue_table_listener(self, listener);
     }
 }
 

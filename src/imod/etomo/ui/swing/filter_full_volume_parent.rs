@@ -1,16 +1,15 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FilterFullVolumeParent.java`.
 //!
-//! `ProcessInterface` has not yet become a separate Rust source unit.  Its
-//! source-used processing-method query is retained directly in this parent
-//! contract, rather than duplicating the interface inside its child panel.
+//! `FilterFullVolumeParent` extends the separately translated
+//! `ProcessInterface` exactly as its Java source does.
 #![allow(dead_code)]
 
+use super::check_box::CheckBox;
+use super::process_interface::ProcessInterface;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
 
-/// Java `FilterFullVolumeParent`, including its inherited
-/// `ProcessInterface.getProcessingMethod` call made by
-/// `FilterFullVolumePanel`.
-pub trait FilterFullVolumeParent {
+/// Java `FilterFullVolumeParent`.
+pub trait FilterFullVolumeParent: ProcessInterface<QueueCheckBox = CheckBox> {
     /// Java `cleanUp`.
     fn clean_up(&mut self);
 
@@ -22,9 +21,6 @@ pub trait FilterFullVolumeParent {
 
     /// Java `isLoadWithFlipping`.
     fn is_load_with_flipping(&self) -> bool;
-
-    /// Inherited Java `ProcessInterface.getProcessingMethod`.
-    fn get_processing_method(&self) -> ProcessingMethod;
 }
 
 #[cfg(test)]
@@ -32,6 +28,41 @@ mod tests {
     use super::*;
 
     struct Parent;
+
+    impl crate::imod::etomo::ui::queue_table_listener::QueueTableListener for Parent {
+        fn queue_table_event_action(
+            &mut self,
+            _event: crate::imod::etomo::ui::queue_table_event::QueueTableEvent,
+        ) {
+        }
+    }
+
+    impl ProcessInterface for Parent {
+        type QueueCheckBox = CheckBox;
+        fn update_gpu(&mut self, _disable_gpu: bool) {}
+        fn get_processing_method(&self) -> ProcessingMethod {
+            ProcessingMethod::PpCpu
+        }
+        fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+            None
+        }
+        fn lock_processing_method(&mut self, _lock: bool) {}
+        fn set_method(&mut self, _processing_method: ProcessingMethod) {}
+        fn is_use_gpu(&self) -> bool {
+            false
+        }
+        fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
+        fn add_queue_table_listener(
+            &mut self,
+            _listener: &mut dyn crate::imod::etomo::ui::queue_table_listener::QueueTableListener,
+        ) {
+        }
+        fn remove_queue_table_listener(
+            &mut self,
+            _listener: &mut dyn crate::imod::etomo::ui::queue_table_listener::QueueTableListener,
+        ) {
+        }
+    }
 
     impl FilterFullVolumeParent for Parent {
         fn clean_up(&mut self) {}
@@ -43,9 +74,6 @@ mod tests {
         }
         fn is_load_with_flipping(&self) -> bool {
             false
-        }
-        fn get_processing_method(&self) -> ProcessingMethod {
-            ProcessingMethod::PpCpu
         }
     }
 

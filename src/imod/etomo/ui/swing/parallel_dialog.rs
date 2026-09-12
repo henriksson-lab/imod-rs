@@ -8,12 +8,15 @@
 #![allow(dead_code)]
 
 use super::abstract_parallel_dialog::AbstractParallelDialog;
+use super::check_box::CheckBox;
 use super::parallel_panel::QueueTableEvent;
+use super::process_interface::ProcessInterface;
 use crate::imod::etomo::comscript::parallel_param::ParallelParam;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 use crate::imod::etomo::r#type::image_output_format::ImageOutputFormat;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
 use std::path::{Path, PathBuf};
 
 pub const PROCESS_NAME_LABEL: &str = "Process name: ";
@@ -438,8 +441,8 @@ impl ParallelDialog {
     }
 
     /// Java `setUseQueueCheckBox`.
-    pub fn set_use_queue_check_box(&mut self, present: bool) {
-        if present && !self.use_queue_checkbox_present {
+    pub fn set_use_queue_check_box(&mut self, use_queue_checkbox: Option<CheckBox>) {
+        if use_queue_checkbox.is_some() && !self.use_queue_checkbox_present {
             self.queue_listener_present = true;
             self.use_queue_checkbox_present = true;
         }
@@ -468,10 +471,47 @@ impl ParallelDialog {
     pub fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
 
     /// Java empty `addQueueTableListener`.
-    pub fn add_queue_table_listener(&mut self) {}
+    pub fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
 
     /// Java empty `removeQueueTableListener`.
-    pub fn remove_queue_table_listener(&mut self) {}
+    pub fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
+}
+
+impl QueueTableListener for ParallelDialog {
+    fn queue_table_event_action(&mut self, event: QueueTableEvent) {
+        Self::queue_table_event_action(self, event);
+    }
+}
+
+impl ProcessInterface for ParallelDialog {
+    type QueueCheckBox = CheckBox;
+    fn update_gpu(&mut self, disable_gpu: bool) {
+        Self::update_gpu(self, disable_gpu);
+    }
+    fn get_processing_method(&self) -> ProcessingMethod {
+        Self::get_processing_method(self)
+    }
+    fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+        Self::get_secondary_processing_method(self)
+    }
+    fn lock_processing_method(&mut self, lock: bool) {
+        Self::lock_processing_method(self, lock);
+    }
+    fn set_method(&mut self, method: ProcessingMethod) {
+        Self::set_method(self, method);
+    }
+    fn is_use_gpu(&self) -> bool {
+        Self::is_use_gpu(self)
+    }
+    fn set_use_queue_check_box(&mut self, check_box: Option<CheckBox>) {
+        Self::set_use_queue_check_box(self, check_box);
+    }
+    fn add_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
+        Self::add_queue_table_listener(self, listener);
+    }
+    fn remove_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
+        Self::remove_queue_table_listener(self, listener);
+    }
 }
 
 impl AbstractParallelDialog for ParallelDialog {
