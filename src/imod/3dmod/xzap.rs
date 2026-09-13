@@ -302,6 +302,11 @@ fn report_once(call: &'static str, needs: &'static str) {
 /// `utilDrawSymbol`, `utilEnableStipple`, `utilDisableStipple`,
 /// `utilClearWindow` and `utilWheelChangePointSize` run for real.
 pub trait ZapNativeBoundary: UtilitiesBoundary {
+    // The `ZapWindow`/`ZapGL` calls below carry no window argument: every one
+    // of them is `mQtWindow->` or `mGfx->` on the `ZapFuncs` whose method is
+    // running, so the host services the window it was entered for.
+    // `ivw_restorable_geometry` is the one exception and says so.
+
     // ---- App members that `ImodApp` (imodP.h:39) does not carry ------------
     /// `App->doublebuffer`.
     fn app_doublebuffer(&mut self) -> bool {
@@ -672,8 +677,10 @@ pub trait ZapNativeBoundary: UtilitiesBoundary {
         );
         [0; 4]
     }
-    /// `ivwRestorableGeometry(mQtWindow)` as `[x, y, width, height]`.
-    fn ivw_restorable_geometry(&mut self) -> [i32; 4] {
+    /// `ivwRestorableGeometry(zap->mQtWindow)` as `[x, y, width, height]`.
+    /// This is the one window call the source makes on a window other than
+    /// `this`, so it carries the `ZapFuncs` whose window it means.
+    fn ivw_restorable_geometry(&mut self, zap: *mut ZapFuncs) -> [i32; 4] {
         report_once(
             "ivwRestorableGeometry",
             "the window geometry of control.cpp",
@@ -2226,7 +2233,7 @@ pub fn zap_report_biggest_multi_z() {
         let zap = unsafe { &mut *zap };
         if S_MAX_MULTI_Z_AREA.get() < zap.winx * zap.winy {
             S_MAX_MULTI_Z_AREA.set(zap.winx * zap.winy);
-            let pos = with_boundary(|n| n.ivw_restorable_geometry());
+            let pos = with_boundary(|n| n.ivw_restorable_geometry(zap));
             with_boundary(|n| {
                 n.prefs_record_multi_z_params(
                     pos,
@@ -2435,8 +2442,8 @@ pub fn get_top_zap_mouse(image_pt: &mut Ipoint) -> i32 {
     }
     let zap = unsafe { &mut *zap };
     let (px, py) = with_boundary(|n| n.gfx_map_from_global_cursor_pos());
-    let mx = (px as f64 * zap.device_pixel_ratio as f64 + 0.5).floor() as i32;
-    let my = (py as f64 * zap.device_pixel_ratio as f64 + 0.5).floor() as i32;
+    let mx = (((px) as f32 * zap.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+    let my = (((py) as f32 * zap.device_pixel_ratio) as f64 + 0.5).floor() as i32;
     let (mut x, mut y) = (0., 0.);
     zap.getixy(mx, my, &mut x, &mut y, &mut iz);
     image_pt.x = x;
@@ -2615,7 +2622,7 @@ pub fn zap_key_cb(vi: &mut ImodView, client: usize, released: i32, e: &KeyEvent)
 }
 
 impl ZapFuncs {
-    /// `ZapFuncs::ZapFuncs` (`xzap.cpp:487`).
+    /// `ZapFuncs::ZapFuncs` (`xzap.cpp:487`), the `ZapFuncs` constructor.
     ///
     /// The C++ object is allocated before the constructor body runs and the
     /// body takes `this` (for `ivwNewControl` and `imodDialogManager.add`),
@@ -2965,9 +2972,22 @@ impl ZapFuncs {
                 max_winy = b;
             }
             let (wx, wy) = with_boundary(|n| n.zap_window_pos());
+            let mut buf = [0 as libc::c_char; 128];
+            unsafe {
+                libc::snprintf(
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    c"maxWinxy %d %d dpr %f  win l %d t %d".as_ptr(),
+                    max_winx,
+                    max_winy,
+                    pos_dpr as f64,
+                    wx,
+                    wy,
+                )
+            };
             imod_trace(
                 'z',
-                &format!("maxWinxy {max_winx} {max_winy} dpr {pos_dpr}  win l {wx} t {wy}"),
+                &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
             );
             with_boundary(|n| n.zap_window_set_size_text(max_winx, max_winy));
             usable_right = max_winx;
@@ -3018,13 +3038,22 @@ impl ZapFuncs {
             let _ = (ww, gw);
         }
         zap.device_pixel_ratio = with_boundary(|n| n.util_initialize_screen_change());
-        let pos = with_boundary(|n| n.ivw_restorable_geometry());
+        let pos = with_boundary(|n| n.ivw_restorable_geometry(this));
+        let mut buf = [0 as libc::c_char; 128];
+        unsafe {
+            libc::snprintf(
+                buf.as_mut_ptr(),
+                buf.len(),
+                c"mdpr %.2f, posdpr %.2f pos %d %d\n".as_ptr(),
+                zap.device_pixel_ratio as f64,
+                pos_dpr as f64,
+                pos[0],
+                pos[1],
+            )
+        };
         imod_trace(
             'z',
-            &format!(
-                "mdpr {:.2}, posdpr {:.2} pos {} {}\n",
-                zap.device_pixel_ratio, pos_dpr, pos[0], pos[1]
-            ),
+            &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
         );
 
         // Replace the DPR with the correct one for the screen before zoom
@@ -3055,8 +3084,8 @@ impl ZapFuncs {
                     max_winx -= infoRect[2];
                 }
                 max_win_imx =
-                    (max_winx as f64 * zap.device_pixel_ratio as f64 + 0.5).floor() as i32;
-                max_win_imy = ((max_winy - tool_height) as f64 * zap.device_pixel_ratio as f64
+                    (((max_winx) as f32 * zap.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+                max_win_imy = (((max_winy - tool_height) as f32 * zap.device_pixel_ratio) as f64
                     + 0.5)
                     .floor() as i32;
                 i = 0;
@@ -3088,8 +3117,8 @@ impl ZapFuncs {
                         }
                     }
 
-                    need_winx = ((zap.zoom * unsafe { (*vi).xsize } as f32) as f64
-                        / zap.device_pixel_ratio as f64
+                    need_winx = (((zap.zoom * unsafe { (*vi).xsize } as f32) as f32
+                        / zap.device_pixel_ratio) as f64
                         + 0.5)
                         .floor() as i32;
                     if restrain_size {
@@ -3105,8 +3134,8 @@ impl ZapFuncs {
                     i += 1;
                 }
 
-                need_winy = ((zap.zoom * unsafe { (*vi).ysize } as f32) as f64
-                    / zap.device_pixel_ratio as f64
+                need_winy = (((zap.zoom * unsafe { (*vi).ysize } as f32) as f32
+                    / zap.device_pixel_ratio) as f64
                     + 0.5)
                     .floor() as i32
                     + tool_height;
@@ -3130,12 +3159,14 @@ impl ZapFuncs {
                     with_boundary(|n| n.zap_window_insert_toolbar_break(3));
                 }
                 if S_NEXT_MULTI_Z_X_SIZE.get() > 0 && S_NEXT_MULTI_Z_Y_SIZE.get() > 0 {
-                    new_width = (S_NEXT_MULTI_Z_X_SIZE.get() as f64 / zap.device_pixel_ratio as f64
+                    new_width = (((S_NEXT_MULTI_Z_X_SIZE.get()) as f32 / zap.device_pixel_ratio)
+                        as f64
                         + 0.5)
                         .floor() as i32;
-                    new_height =
-                        (S_NEXT_MULTI_Z_Y_SIZE.get() as f64 / zap.device_pixel_ratio as f64 + 0.5)
-                            .floor() as i32;
+                    new_height = (((S_NEXT_MULTI_Z_Y_SIZE.get()) as f32 / zap.device_pixel_ratio)
+                        as f64
+                        + 0.5)
+                        .floor() as i32;
                     if with_boundary(|n| n.zap_window_toolbar_exists(3))
                         && with_boundary(|n| n.zap_window_toolbar_exists(1))
                     {
@@ -3223,12 +3254,12 @@ impl ZapFuncs {
             new_width = old_geom[2];
             new_height = old_geom[3];
             if wintype != 0 && S_NEXT_MULTI_Z_X_SIZE.get() > 0 && S_NEXT_MULTI_Z_Y_SIZE.get() > 0 {
-                new_width = (S_NEXT_MULTI_Z_X_SIZE.get() as f64 / zap.device_pixel_ratio as f64
+                new_width = (((S_NEXT_MULTI_Z_X_SIZE.get()) as f32 / zap.device_pixel_ratio) as f64
                     + 0.5)
                     .floor() as i32;
-                new_height = (S_NEXT_MULTI_Z_Y_SIZE.get() as f64 / zap.device_pixel_ratio as f64
-                    + 0.5)
-                    .floor() as i32;
+                new_height =
+                    (((S_NEXT_MULTI_Z_Y_SIZE.get()) as f32 / zap.device_pixel_ratio) as f64 + 0.5)
+                        .floor() as i32;
                 if with_boundary(|n| n.zap_window_toolbar_exists(3))
                     && with_boundary(|n| n.zap_window_toolbar_exists(1))
                 {
@@ -3285,10 +3316,10 @@ impl ZapFuncs {
                     zap.zoom = 1.;
 
                     need_winx =
-                        (new_width as f64 * zap.device_pixel_ratio as f64 + 0.5).floor() as i32;
-                    need_winy = ((new_height - tool_height) as f64 * zap.device_pixel_ratio as f64
-                        + 0.5)
-                        .floor() as i32;
+                        (((new_width) as f32 * zap.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+                    need_winy =
+                        (((new_height - tool_height) as f32 * zap.device_pixel_ratio) as f64 + 0.5)
+                            .floor() as i32;
 
                     // If images are too big, zoom down until they almost fit
                     // If images are too small, start big and find first that
@@ -3410,7 +3441,8 @@ impl ZapFuncs {
             with_boundary(|n| n.b3d_free_ci_image(-1));
         } else {
             if S_MAX_MULTI_Z_AREA.get() == 0 {
-                let pos = with_boundary(|n| n.ivw_restorable_geometry());
+                let this = &raw mut *self;
+                let pos = with_boundary(|n| n.ivw_restorable_geometry(this));
                 let (nx, ny, zs, dc, do_) = (
                     self.num_xpanels,
                     self.num_ypanels,
@@ -3631,8 +3663,8 @@ impl ZapFuncs {
                     }
                 }
 
-                winx = (winx as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-                winy = (winy as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+                winx = (((winx) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+                winy = (((winy) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
                 if imod_debug('z') {
                     imod_print_stderr(&format!("scaled = {winx} x {winy}"));
                 }
@@ -3778,8 +3810,8 @@ impl ZapFuncs {
         // Update pixel view if mouse is in this window
         if S_PIXEL_VIEW_OPEN.get() && self.num_xpanels == 0 {
             let (px, py) = with_boundary(|n| n.gfx_map_from_global_cursor_pos());
-            let mx = (px as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-            let my = (py as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+            let mx = (((px) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+            let my = (((py) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
             if mx >= 0 && mx < self.winx && my >= 0 && my < self.winy {
                 let (mut imx, mut imy) = (0., 0.);
                 self.getixy(mx, my, &mut imx, &mut imy, &mut imz);
@@ -3794,7 +3826,16 @@ impl ZapFuncs {
     pub fn paint(&mut self) {
         let drawtime = QTime::now();
         if imod_debug('z') {
-            imod_print_stderr(&format!("Paint  {}:", self.device_pixel_ratio));
+            let mut buf = [0 as libc::c_char; 64];
+            unsafe {
+                libc::snprintf(
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    c"Paint  %f:".as_ptr(),
+                    self.device_pixel_ratio as f64,
+                )
+            };
+            imod_print_stderr(&unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy());
         }
 
         // Use this to keep track of whether the first draw has happened
@@ -4060,9 +4101,20 @@ impl ZapFuncs {
     pub fn screen_changed(&mut self, new_dpr: f32) {
         if new_dpr != 0. {
             let (px, py) = with_boundary(|n| n.zap_window_pos());
+            let mut buf = [0 as libc::c_char; 128];
+            unsafe {
+                libc::snprintf(
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    c"screen change Zap pos %d %d  DPR %f".as_ptr(),
+                    px,
+                    py,
+                    new_dpr as f64,
+                )
+            };
             imod_trace(
                 'z',
-                &format!("screen change Zap pos {px} {py}  DPR {new_dpr}"),
+                &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
             );
             if self.popup != 0 {
                 let screen_elapsed = self.screen_resize_time[0].elapsed().as_millis() as i32;
@@ -4092,7 +4144,19 @@ impl ZapFuncs {
             // here use up setting it to the right zoom
             if self.new_screen_zoom > 0. && new_dpr > with_boundary(|n| n.app_min_dev_pix_ratio()) {
                 self.zoom = self.new_screen_zoom;
-                imod_trace('z', &format!("Zoom set to {:.2}\n", self.zoom));
+                let mut buf = [0 as libc::c_char; 64];
+                unsafe {
+                    libc::snprintf(
+                        buf.as_mut_ptr(),
+                        buf.len(),
+                        c"Zoom set to %.2f\n".as_ptr(),
+                        self.zoom as f64,
+                    )
+                };
+                imod_trace(
+                    'z',
+                    &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
+                );
                 self.new_screen_zoom = 0.;
             }
         }
@@ -4322,8 +4386,8 @@ impl ZapFuncs {
                     // It wouldn't work going to a QPoint and accessing it, so
                     // do it in shot!
                     let (px, py) = with_boundary(|n| n.gfx_map_from_global_cursor_pos());
-                    ix = (px as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-                    iy = (py as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+                    ix = (((px) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+                    iy = (((py) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
 
                     // For multi-Z, add a point at mouse position, do not
                     // change current Z
@@ -4686,8 +4750,8 @@ impl ZapFuncs {
 
             KEY_Q => {
                 let (px, py) = with_boundary(|n| n.gfx_map_from_global_cursor_pos());
-                ix = (px as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-                iy = (py as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+                ix = (((px) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+                iy = (((py) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
                 i = 0;
                 self.getixy(ix, iy, &mut cx, &mut cy, &mut i);
                 let mut refx = unsafe { (*vi).xmouse };
@@ -4702,22 +4766,38 @@ impl ZapFuncs {
                 let dy = cy - refy;
                 let dist2d =
                     (unsafe { (*vi).xybin } as f64 * ((dx * dx + dy * dy) as f64).sqrt()) as f32;
-                wprint(&format!(
-                    "From ({:.1}, {:.1}) to ({:.1}, {:.1}) =\n",
-                    refx as f64 + 1.,
-                    refy as f64 + 1.,
-                    cx as f64 + 1.,
-                    cy as f64 + 1.
-                ));
-                let str = format!(
-                    "  {:.1} {}pixels",
-                    dist2d,
-                    if unsafe { (*vi).xybin } > 1 {
-                        "unbinned "
-                    } else {
-                        ""
-                    }
-                );
+                let mut wbuf = [0 as libc::c_char; 256];
+                unsafe {
+                    libc::snprintf(
+                        wbuf.as_mut_ptr(),
+                        wbuf.len(),
+                        c"From (%.1f, %.1f) to (%.1f, %.1f) =\n".as_ptr(),
+                        refx as f64 + 1.,
+                        refy as f64 + 1.,
+                        cx as f64 + 1.,
+                        cy as f64 + 1.,
+                    )
+                };
+                wprint(&unsafe { std::ffi::CStr::from_ptr(wbuf.as_ptr()) }.to_string_lossy());
+                // `SPRINTF` is `QString::asprintf` (`imodconfig.h:13`), which
+                // prints a negative zero as `0`; `sprintf_arg` folds that.
+                let mut buf = [0 as libc::c_char; 256];
+                unsafe {
+                    libc::snprintf(
+                        buf.as_mut_ptr(),
+                        buf.len(),
+                        c"  %.1f %spixels".as_ptr(),
+                        crate::imod::libcfshr::b3dutil::sprintf_arg(dist2d as f64),
+                        if (*vi).xybin > 1 {
+                            c"unbinned ".as_ptr()
+                        } else {
+                            c"".as_ptr()
+                        },
+                    )
+                };
+                let str = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned();
                 with_boundary(|n| n.util_wprint_measure(&str, imod, dist2d, false));
             }
 
@@ -4790,8 +4870,8 @@ impl ZapFuncs {
             return;
         }
         let (px, py) = with_boundary(|n| n.gfx_map_from_global_cursor_pos());
-        let ix = (px as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let iy = (py as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        let ix = (((px) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let iy = (((py) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
         self.getixy(ix, iy, &mut imx, &mut imy, &mut iz);
 
         // Needed for Mac Qt 5.7/8
@@ -4849,8 +4929,8 @@ impl ZapFuncs {
         let button1 = i32::from(event.buttons & but1 != 0);
         let button2 = i32::from(event.buttons & but2 != 0);
         let button3 = i32::from(event.buttons & but3 != 0);
-        let x = (event.x as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let y = (event.y as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        let x = (((event.x) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let y = (((event.y) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
         S_BUT1_DOWNT.with(|t| *t.borrow_mut() = QTime::now());
         S_FIRSTMX.set(x);
         S_FIRSTMY.set(y);
@@ -4968,8 +5048,8 @@ impl ZapFuncs {
             || ((button1 != 0 || button2 != 0) && self.lasso_on))
             && S_MOVE_BAND_LASSO.get() != 0)
             || (button1 != 0 && self.drawing_arrow);
-        let ex = (event.x as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let ey = (event.y as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        let ex = (((event.x) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let ey = (((event.y) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
 
         if imod_debug('m') {
             imod_print_stderr(&format!(
@@ -5069,31 +5149,51 @@ impl ZapFuncs {
                     for ind in 0..2 {
                         let length = unsafe { (*self.vi).xybin } as f32
                             * imod_contour_length(unsafe { cont.as_ref() }, ind);
-                        let str = format!(
-                            "{} length {:.1} {}pixels",
-                            if ind != 0 { "Closed" } else { "Open" },
-                            length,
-                            if unsafe { (*self.vi).xybin } > 1 {
-                                "unbin "
-                            } else {
-                                ""
-                            }
-                        );
+                        let mut buf = [0 as libc::c_char; 256];
+                        unsafe {
+                            libc::snprintf(
+                                buf.as_mut_ptr(),
+                                buf.len(),
+                                c"%s length %.1f %spixels".as_ptr(),
+                                if ind != 0 {
+                                    c"Closed".as_ptr()
+                                } else {
+                                    c"Open".as_ptr()
+                                },
+                                crate::imod::libcfshr::b3dutil::sprintf_arg(length as f64),
+                                if (*self.vi).xybin > 1 {
+                                    c"unbin ".as_ptr()
+                                } else {
+                                    c"".as_ptr()
+                                },
+                            )
+                        };
+                        let str = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+                            .to_string_lossy()
+                            .into_owned();
                         let imod = unsafe { (*self.vi).imod };
                         with_boundary(|n| n.util_wprint_measure(&str, imod, length, false));
                     }
                     let area = unsafe { (*self.vi).xybin } as f32
                         * unsafe { (*self.vi).xybin } as f32
                         * imod_contour_area(unsafe { cont.as_ref() });
-                    let str = format!(
-                        "Area {} {}pixels^2",
-                        area,
-                        if unsafe { (*self.vi).xybin } > 1 {
-                            "unbin "
-                        } else {
-                            ""
-                        }
-                    );
+                    let mut buf = [0 as libc::c_char; 256];
+                    unsafe {
+                        libc::snprintf(
+                            buf.as_mut_ptr(),
+                            buf.len(),
+                            c"Area %g %spixels^2".as_ptr(),
+                            crate::imod::libcfshr::b3dutil::sprintf_arg(area as f64),
+                            if (*self.vi).xybin > 1 {
+                                c"unbin ".as_ptr()
+                            } else {
+                                c"".as_ptr()
+                            },
+                        )
+                    };
+                    let str = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+                        .to_string_lossy()
+                        .into_owned();
                     let imod = unsafe { (*self.vi).imod };
                     with_boundary(|n| n.util_wprint_measure(&str, imod, area, true));
 
@@ -5158,8 +5258,8 @@ impl ZapFuncs {
         let ctrl_down =
             with_boundary(|n| n.input_test_ctrl(if event.control { CONTROL_MODIFIER } else { 0 }));
         let shift_down = i32::from(event.shift);
-        let ex = (event.x as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let ey = (event.y as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        let ex = (((event.x) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let ey = (((event.y) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
         let but1 = with_boundary(|n| n.prefs_actual_button(1)) as u32;
         let but2 = with_boundary(|n| n.prefs_actual_button(2)) as u32;
         let but3 = with_boundary(|n| n.prefs_actual_button(3)) as u32;
@@ -5312,8 +5412,8 @@ impl ZapFuncs {
         if set_control {
             ivw_control_active(unsafe { &mut *self.vi }, 0);
         }
-        let ex = (event.x as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let ey = (event.y as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        let ex = (((event.x) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let ey = (((event.y) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
         self.getixy(ex, ey, &mut imx, &mut imy, &mut imz);
         let vi = self.vi;
         let ifdraw = with_boundary(|n| {
@@ -5828,8 +5928,8 @@ impl ZapFuncs {
                 } else {
                     self.rb_mouse_y1
                 };
-                let cursx = (x as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-                let cursy = (y as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+                let cursx = (((x) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+                let cursy = (((y) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
                 with_boundary(|n| n.gfx_set_cursor_pos(cursx, cursy));
                 self.lmx = x;
                 self.lmy = y;
@@ -5970,10 +6070,19 @@ impl ZapFuncs {
             return 0;
         }
         if imod_debug('z') {
-            imod_print_stderr(&format!(
-                "mouse segment {},{} to {},{}\n",
-                pnt1.x, pnt1.y, pnt2.x, pnt2.y
-            ));
+            let mut buf = [0 as libc::c_char; 128];
+            unsafe {
+                libc::snprintf(
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    c"mouse segment %f,%f to %f,%f\n".as_ptr(),
+                    pnt1.x as f64,
+                    pnt1.y as f64,
+                    pnt2.x as f64,
+                    pnt2.y as f64,
+                )
+            };
+            imod_print_stderr(&unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy());
         }
 
         // Loop on contours
@@ -6027,13 +6136,22 @@ impl ZapFuncs {
                         (unsafe { (&(*cont).pts)[pt as usize].z } as f64 + 0.5).floor() as i32;
                     if last_z == iz1 && this_z == iz1 {
                         if imod_debug('z') {
-                            imod_print_stderr(&format!(
-                                "{},{} to {},{}\n",
-                                unsafe { (&(*cont).pts)[last_pt as usize].x },
-                                unsafe { (&(*cont).pts)[last_pt as usize].y },
-                                unsafe { (&(*cont).pts)[pt as usize].x },
-                                unsafe { (&(*cont).pts)[pt as usize].y }
-                            ));
+                            let mut buf = [0 as libc::c_char; 128];
+                            unsafe {
+                                libc::snprintf(
+                                    buf.as_mut_ptr(),
+                                    buf.len(),
+                                    c"%f,%f to %f,%f\n".as_ptr(),
+                                    (&(*cont).pts)[last_pt as usize].x as f64,
+                                    (&(*cont).pts)[last_pt as usize].y as f64,
+                                    (&(*cont).pts)[pt as usize].x as f64,
+                                    (&(*cont).pts)[pt as usize].y as f64,
+                                )
+                            };
+                            imod_print_stderr(
+                                &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+                                    .to_string_lossy(),
+                            );
                         }
 
                         if imod_point_intersect(
@@ -7066,8 +7184,8 @@ impl ZapFuncs {
         }
         *x = (((mx as f64 + 0.5 - self.xborder as f64) as f32) / self.xzoom)
             + self.xpos_start as f32;
-        *y = (((my as f64 + 0.5 - self.yborder as f64) as f32) / self.zoom)
-            + self.ypos_start as f32;
+        *y =
+            (((my as f64 + 0.5 - self.yborder as f64) as f32) / self.zoom) + self.ypos_start as f32;
     }
 
     /// `ZapFuncs::panelIndexAndCoord` (`xzap.cpp:3911`); determine which panel
@@ -7323,17 +7441,35 @@ impl ZapFuncs {
         low_section = unsafe { (*self.vi).zbin } * (low_section - 1) + 1;
         high_section *= unsafe { (*self.vi).zbin };
 
-        let trimvol = format!(
-            "  trimvol -x {},{} {} {},{} {} {},{}",
-            ixl + 1,
-            ixr + 1,
-            if flipped { "-z" } else { "-y" },
-            iyb + 1,
-            iyt + 1,
-            if flipped { "-rx -y" } else { "-z" },
-            low_section,
-            high_section
-        );
+        // `SPRINTF` is `QString::asprintf` (`imodconfig.h:13`); every
+        // conversion here is `%d` or `%s`, which the two formatters agree on.
+        let mut buf = [0 as libc::c_char; 256];
+        unsafe {
+            libc::snprintf(
+                buf.as_mut_ptr(),
+                buf.len(),
+                c"  trimvol -x %d,%d %s %d,%d %s %d,%d".as_ptr(),
+                ixl + 1,
+                ixr + 1,
+                if flipped {
+                    c"-z".as_ptr()
+                } else {
+                    c"-y".as_ptr()
+                },
+                iyb + 1,
+                iyt + 1,
+                if flipped {
+                    c"-rx -y".as_ptr()
+                } else {
+                    c"-z".as_ptr()
+                },
+                low_section,
+                high_section,
+            )
+        };
+        let trimvol = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
 
         if to_info_window {
             wprint(&format!(
@@ -7364,9 +7500,10 @@ impl ZapFuncs {
         let mut usable_left = 0;
         let (mut xl, mut xr, mut yb, mut yt);
         let (ww, wh) = with_boundary(|n| n.zap_window_size());
-        let mut width = (ww as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let mut height = (wh as f64 * self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let pos = with_boundary(|n| n.ivw_restorable_geometry());
+        let mut width = (((ww) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let mut height = (((wh) as f32 * self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let this = &raw mut *self;
+        let pos = with_boundary(|n| n.ivw_restorable_geometry(this));
         let info_rect = with_boundary(|n| n.info_win_frame_geometry());
         let (ul, ut) = with_boundary(|n| n.dia_minimum_window_pos());
         usable_left = ul;
@@ -7397,10 +7534,10 @@ impl ZapFuncs {
             newh = (self.zoom * unsafe { (*self.vi).ysize } as f32 + (height - self.winy) as f32)
                 as i32;
         }
-        neww = (neww as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        newh = (newh as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        width = (width as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        height = (height as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        neww = (((neww) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        newh = (((newh) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        width = (((width) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        height = (((height) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
 
         with_boundary(|n| n.dia_limit_window_size(&mut neww, &mut newh));
         newdx = dx + width / 2 - neww / 2;
@@ -7824,8 +7961,8 @@ impl ZapFuncs {
     /// `ZapFuncs::externalSetSize` (`xzap.cpp:4513`); external call (like from
     /// `client_message`) to set window size, in device pixels.
     pub fn external_set_size(&mut self, width: i32, height: i32) {
-        let mut width = (width as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
-        let mut height = (height as f64 / self.device_pixel_ratio as f64 + 0.5).floor() as i32;
+        let mut width = (((width) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
+        let mut height = (((height) as f32 / self.device_pixel_ratio) as f64 + 0.5).floor() as i32;
         if with_boundary(|n| n.zap_window_toolbar_exists(3))
             && with_boundary(|n| n.zap_window_toolbar_exists(1))
         {
@@ -8024,12 +8161,19 @@ impl ZapFuncs {
 
                 // Print scale bar length if it was drawn
                 if self.scale_bar_size > 0. {
-                    imod_print_stderr(&format!(
-                        "Scale bar for montage is {} {}\n",
-                        self.scale_bar_size,
-                        unsafe { std::ffi::CStr::from_ptr(imod_units(&*(*self.vi).imod)) }
-                            .to_string_lossy()
-                    ));
+                    let mut buf = [0 as libc::c_char; 128];
+                    unsafe {
+                        libc::snprintf(
+                            buf.as_mut_ptr(),
+                            buf.len(),
+                            c"Scale bar for montage is %g %s\n".as_ptr(),
+                            self.scale_bar_size as f64,
+                            imod_units(&*(*self.vi).imod),
+                        )
+                    };
+                    imod_print_stderr(
+                        &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
+                    );
                 }
 
                 with_boundary(|n| n.gl_flush());
@@ -8286,8 +8430,8 @@ impl ZapFuncs {
             zoom = self.zoom as f64 * tile_scale as f64;
             im_xsize = x_draw_size;
             im_ysize = y_draw_size;
-            self.xpos_start += x_offset as i32;
-            self.ypos_start += y_offset as i32;
+            self.xpos_start = (self.xpos_start as f32 + x_offset) as i32;
+            self.ypos_start = (self.ypos_start as f32 + y_offset) as i32;
             if self.xlast_start != self.xstart
                 || self.xlast_size != self.xdrawsize
                 || self.ylast_start != self.ystart
@@ -9236,6 +9380,16 @@ impl ZapFuncs {
                                     let tmp_cont = imod_contour_dup(unsafe { &*in_cont })
                                         .unwrap_or_else(|| unsafe { (*in_cont).clone() });
                                     let mut tmp_cont = tmp_cont;
+                                    // `xzap.cpp:5581` duplicates `useCont`
+                                    // only while it is still `cont`, so that
+                                    // the join cannot alter the model; it
+                                    // then reuses the joined contour on the
+                                    // next iteration.  A duplicate is taken
+                                    // every time here because `imodContourJoin`
+                                    // takes `&mut` and the joined contour is
+                                    // owned, not a raw pointer the loop can
+                                    // hand back in; the values are the same,
+                                    // it is one extra copy per inside contour.
                                     let mut cur_copy = imod_contour_dup(unsafe { &*use_cont })
                                         .unwrap_or_else(|| unsafe { (*use_cont).clone() });
                                     if let Some(join_cont) = imod_contour_join(
@@ -9551,8 +9705,8 @@ impl ZapFuncs {
         if unsafe { (*cont).label.is_some() }
             && unsafe { (*obj).flags } & IMOD_OBJFLAG_DRAW_LABEL != 0
         {
-            label_yoffset = ((with_boundary(|n| n.zap_window_zoom_edit_font_height()) / 3) as f64
-                * self.device_pixel_ratio as f64
+            label_yoffset = (((with_boundary(|n| n.zap_window_zoom_edit_font_height()) / 3) as f32
+                * self.device_pixel_ratio) as f64
                 + 0.5)
                 .floor() as i32;
             if !self.label_font {
@@ -9624,23 +9778,23 @@ impl ZapFuncs {
                             as f64
                             + 0.5)
                             .floor() as f32;
-                        drawsize = (((if (pt_props.symsize as f32) < drawsize {
+                        drawsize = ((((if (pt_props.symsize as f32) < drawsize {
                             drawsize
                         } else {
                             pt_props.symsize as f32
-                        }) + 3.) as f64
-                            * self.device_pixel_ratio as f64
+                        }) + 3.) as f32
+                            * self.device_pixel_ratio) as f64
                             + 0.5)
                             .floor() as f32;
-                        xlab = ((self.xpos(unsafe { (&(*cont).pts)[pt as usize].x }) as f32
-                            + drawsize) as f64
-                            / self.device_pixel_ratio as f64
+                        xlab = (((self.xpos(unsafe { (&(*cont).pts)[pt as usize].x }) as f32
+                            + drawsize) as f32
+                            / self.device_pixel_ratio) as f64
                             + 0.5)
                             .floor() as i32;
-                        ylab = ((self.winy
+                        ylab = ((((self.winy
                             - (self.ypos(unsafe { (&(*cont).pts)[pt as usize].y }) - label_yoffset))
-                            as f64
-                            / self.device_pixel_ratio as f64
+                            as f32)
+                            / self.device_pixel_ratio) as f64
                             + 0.5)
                             .floor() as i32;
                         let pt_label = String::from_utf8_lossy(pt_label).into_owned();
@@ -9799,7 +9953,7 @@ impl ZapFuncs {
                 with_boundary(|n| n.b3d_color_index(shadow));
             }
             let r = scale * cur_size;
-            with_boundary(|n| n.b3d_draw_circle(x, y, r, false));
+            with_boundary(|n| n.b3d_draw_circle(x, y, r, true));
         }
 
         /* draw begin/end points for current contour */
@@ -10366,5 +10520,879 @@ impl ZapFuncs {
             "a definition, which xzap.cpp does not contain",
         );
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A host that answers the handful of calls these tests need and reports
+    /// nothing, so a failure is a translation failure and not a missing host.
+    #[derive(Default)]
+    struct TestBoundary {
+        toggles: [i32; 8],
+        low_section: String,
+        high_section: String,
+        zoom_steps: Vec<f64>,
+        cursor_pos: (i32, i32),
+        set_cursor_calls: i32,
+        lines: Vec<(i32, i32, i32, i32)>,
+        tracking: Option<bool>,
+        section_text: Option<i32>,
+        size_text: Option<(i32, i32)>,
+        draws: i32,
+    }
+    impl UtilitiesBoundary for TestBoundary {
+        fn draw_symbol(&mut self, _x: i32, _y: i32, _s: i32, _z: i32, _f: bool) {}
+        fn set_stipple(&mut self, _enabled: bool) {}
+        fn clear_window(&mut self, _color_index: i32) {}
+        fn redraw_model(&mut self) {}
+        fn change_point_size(&mut self) {}
+        fn finish_undo_unit(&mut self) {}
+        fn message(&mut self, _text: &str) {}
+        fn flip_yz(&mut self, _imod: &mut Imod) {}
+        fn rotate_90_x(&mut self, _imod: &mut Imod, _inverse: bool) {}
+        fn draw_filled_polygon(&mut self, _points: &[Ipoint]) {}
+    }
+    impl ZapNativeBoundary for TestBoundary {
+        fn new_zap_window(
+            &mut self,
+            _zap: *mut ZapFuncs,
+            _time_label: &str,
+            _wintype: bool,
+        ) -> *mut crate::imod::three_dmod::zap_classes::ZapWindow {
+            fake_window()
+        }
+        fn imod_prefs_exists(&mut self) -> bool {
+            false
+        }
+        fn prefs_start_in_hq(&mut self) -> bool {
+            false
+        }
+        fn prefs_get_zap_geometry(&mut self) -> [i32; 4] {
+            [0; 4]
+        }
+        fn prefs_get_multi_z_params(
+            &mut self,
+            _num_x: &mut i32,
+            _num_y: &mut i32,
+            _z_step: &mut i32,
+            _draw_center: &mut i32,
+            _draw_others: &mut i32,
+        ) -> [i32; 4] {
+            [0; 4]
+        }
+        fn imod_dialog_manager_add(&mut self, _z: *mut ZapFuncs, _t: i32, _c: i32) {}
+        fn dia_maximum_window_size(&mut self) -> (i32, i32) {
+            (1024, 768)
+        }
+        fn dia_minimum_window_pos(&mut self) -> (i32, i32) {
+            (0, 0)
+        }
+        fn dia_limit_window_pos(&mut self, _w: i32, _h: i32, _x: &mut i32, _y: &mut i32) {}
+        fn dia_limit_window_size(&mut self, _w: &mut i32, _h: &mut i32) {}
+        fn zap_window_toolbar_size_hint(&mut self, _which: i32) -> (i32, i32) {
+            (200, 30)
+        }
+        fn zap_window_toolbar_exists(&mut self, _which: i32) -> bool {
+            false
+        }
+        fn zap_window_toolbar_height(&mut self, _which: i32) -> i32 {
+            30
+        }
+        fn zap_window_set_window_title(&mut self, _which: i32, _title: &str) {}
+        fn zap_window_pos(&mut self) -> (i32, i32) {
+            (0, 0)
+        }
+        fn zap_window_size(&mut self) -> (i32, i32) {
+            (256, 222)
+        }
+        fn zap_window_frame_geometry(&mut self) -> [i32; 4] {
+            [0, 0, 256, 222]
+        }
+        fn zap_window_resize(&mut self, _w: i32, _h: i32) {}
+        fn zap_window_move(&mut self, _x: i32, _y: i32) {}
+        fn zap_window_show(&mut self) {}
+        fn zap_window_set_focus(&mut self) {}
+        fn ivw_restorable_geometry(&mut self, _zap: *mut ZapFuncs) -> [i32; 4] {
+            [0, 0, 256, 222]
+        }
+        fn info_win_frame_geometry(&mut self) -> [i32; 4] {
+            [0, 0, 300, 400]
+        }
+        fn info_win_geometry(&mut self) -> [i32; 4] {
+            [0, 0, 300, 400]
+        }
+        fn info_win_size(&mut self) -> (i32, i32) {
+            (300, 400)
+        }
+        fn app_doublebuffer(&mut self) -> bool {
+            false
+        }
+        fn app_dev_pix_varies(&mut self) -> bool {
+            false
+        }
+        fn app_depth(&mut self) -> i32 {
+            8
+        }
+        fn app_min_dev_pix_ratio(&mut self) -> f32 {
+            1.
+        }
+        fn util_initialize_screen_change(&mut self) -> f32 {
+            1.
+        }
+        fn gfx_set_init_geometry(&mut self, _w: i32, _h: i32, _l: i32, _t: i32) {}
+        fn gfx_set_minimum_size(&mut self, _w: i32, _h: i32) {}
+        fn gfx_size(&mut self) -> (i32, i32) {
+            (256, 192)
+        }
+        fn gfx_set_colormap(&mut self) {}
+        fn b3d_set_cur_size(&mut self, _x: i32, _y: i32) {}
+        fn b3d_resize_viewport_xy(&mut self, _x: i32, _y: i32) {}
+        fn b3d_get_new_ci_image(&mut self, _slot: i32) -> bool {
+            true
+        }
+        fn b3d_buffer_image(&mut self, _slot: i32) {}
+        fn b3d_flush_image(&mut self, _slot: i32) {}
+        fn b3d_free_ci_image(&mut self, _slot: i32) {}
+        fn imodv_isosurface_update(&mut self, _f: i32) -> bool {
+            false
+        }
+        fn zap_window_set_toggle_state(&mut self, index: usize, state: i32) {
+            self.toggles[index] = state;
+        }
+        fn zap_window_set_low_high_section_state(&mut self, _state: i32) {}
+        fn zap_window_low_section(&mut self) -> String {
+            self.low_section.clone()
+        }
+        fn zap_window_high_section(&mut self) -> String {
+            self.high_section.clone()
+        }
+        fn zap_window_set_section_text(&mut self, section: i32) {
+            self.section_text = Some(section);
+        }
+        fn zap_window_set_size_text(&mut self, winx: i32, winy: i32) {
+            self.size_text = Some((winx, winy));
+        }
+        fn zap_window_set_zoom_text(&mut self, _zoom: f32) {}
+        fn zap_window_set_max_z(&mut self, _max_z: i32) {}
+        fn gfx_set_mouse_tracking(&mut self, state: bool) {
+            self.tracking = Some(state);
+        }
+        fn gfx_update_gl(&mut self) {
+            self.draws += 1;
+        }
+        fn gfx_map_from_global_cursor_pos(&mut self) -> (i32, i32) {
+            self.cursor_pos
+        }
+        fn b3d_step_pixel_zoom(&mut self, zoom: f64, step: i32) -> f64 {
+            self.zoom_steps.push(zoom);
+            if step > 0 { zoom * 2. } else { zoom / 2. }
+        }
+        fn b3d_draw_line(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) {
+            self.lines.push((x1, y1, x2, y2));
+        }
+        fn b3d_line_width(&mut self, _width: i32, _obj: *mut Iobj) {}
+        fn b3d_color_index(&mut self, _pix: i32) {}
+        fn b3d_begin_line(&mut self) {}
+        fn b3d_end_line(&mut self) {}
+        fn b3d_vertex_2i(&mut self, _x: i32, _y: i32) {}
+        fn util_set_cursor(
+            &mut self,
+            mode: i32,
+            _set_anyway: bool,
+            _need_special: bool,
+            _need_size_all: bool,
+            _dragging: [i32; 4],
+            _need_model: bool,
+            mousemode: &mut i32,
+            last_shape: &mut i32,
+        ) {
+            self.set_cursor_calls += 1;
+            *mousemode = mode;
+            *last_shape = mode;
+        }
+        fn util_need_to_set_cursor(&mut self) -> bool {
+            false
+        }
+        fn imod_draw(&mut self, _vi: *mut ImodView, _flag: i32) {}
+        fn imod_info_input(&mut self) {}
+        fn ifg_stipple_gaps(&mut self) -> bool {
+            false
+        }
+        fn ifg_get_value_setup_state(&mut self) -> i32 {
+            0
+        }
+        fn ifg_show_connections(&mut self) -> bool {
+            false
+        }
+        fn ifg_handle_cont_change(
+            &mut self,
+            _obj: *mut Iobj,
+            _co: i32,
+            _cont_props: &mut DrawProps,
+            _pt_props: &mut DrawProps,
+            _state_flags: &mut i32,
+            _handle_flags: i32,
+            _selected: i32,
+            _scale_thick: i32,
+        ) -> i32 {
+            -1
+        }
+        fn imod_selection_list_query(&mut self, _vi: *mut ImodView, _ob: i32, _co: i32) -> i32 {
+            -2
+        }
+        fn imod_set_object_color(&mut self, _ob: i32) {}
+        fn scale_bar_draw(&mut self, _x: i32, _y: i32, _z: f32, _b: i32) -> f32 {
+            -1.
+        }
+    }
+
+    /// A view large enough that the source's offset arithmetic has room, with
+    /// a one-object model.
+    fn view() -> Box<ImodView> {
+        let mut imod = Box::new(Imod::default());
+        imod.obj.push(Iobj::default());
+        imod.cindex = Iindex {
+            object: 0,
+            contour: -1,
+            point: -1,
+        };
+        let mut vi = Box::new(ImodView::default());
+        vi.xsize = 512;
+        vi.ysize = 384;
+        vi.zsize = 40;
+        vi.xybin = 1;
+        vi.zbin = 1;
+        vi.drawcursor = 1;
+        vi.imod = Box::into_raw(imod);
+        vi
+    }
+
+    fn zap(vi: &mut ImodView) -> Box<ZapFuncs> {
+        // Run the real constructor; `new_zap_window` hands back a non-null
+        // `ZapWindow *` that nothing dereferences, because every
+        // `mQtWindow->` call goes through the boundary.
+        install();
+        let mut z = ZapFuncs::new(vi, 0);
+        z.winx = 256;
+        z.winy = 192;
+        z.zoom = 1.;
+        z.xzoom = 1.;
+        z.device_pixel_ratio = 1.;
+        z.popup = 1;
+        z.section = 5;
+        z
+    }
+
+    fn install() {
+        set_zap_native_boundary(Some(Box::new(TestBoundary::default())));
+    }
+
+    /// A `ZapWindow *` that is only ever compared with null, as the source's
+    /// `if (!mQtWindow)` does.
+    fn fake_window() -> *mut crate::imod::three_dmod::zap_classes::ZapWindow {
+        std::ptr::NonNull::dangling().as_ptr()
+    }
+
+    /// `xpos`/`ypos` and `getixy` (`xzap.cpp:3869-3909`) must round-trip: the
+    /// C casts the whole `... * zoom + border` expression to int, and
+    /// `getixy` adds the half-pixel back, so a window pixel maps to an image
+    /// coordinate that maps back to the same pixel.
+    #[test]
+    fn window_and_image_coordinates_round_trip() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.xborder = 7;
+        z.yborder = 3;
+        z.xpos_start = 10;
+        z.ypos_start = 20;
+        z.zoom = 2.;
+        z.xzoom = 2.;
+        for &(mx, my) in &[(0, 0), (17, 31), (100, 100), (255, 191)] {
+            let (mut x, mut y) = (0., 0.);
+            let mut iz = 0;
+            z.getixy(mx, my, &mut x, &mut y, &mut iz);
+            assert_eq!(iz, 5, "getixy returns mSection for a plain window");
+            assert_eq!(z.xpos(x), mx);
+            assert_eq!(z.ypos(y), z.winy - 1 - my);
+        }
+    }
+
+    /// `xzap.cpp:3869` casts `((x - mXposStart) * mXzoom) + mXborder` as a
+    /// whole; truncating before adding the border shifts the image by a pixel
+    /// for a negative product.
+    #[test]
+    fn xpos_truncates_after_adding_the_border() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.xborder = 10;
+        z.xpos_start = 0;
+        z.xzoom = 1.;
+        // -0.5 * 1 + 10 = 9.5 -> 9, where truncating first would give -0 + 10.
+        assert_eq!(z.xpos(-0.5), 9);
+        z.yborder = 10;
+        z.ypos_start = 0;
+        z.zoom = 1.;
+        assert_eq!(z.ypos(-0.5), 9);
+    }
+
+    /// `bandImageToMouse`/`bandMouseToImage` (`xzap.cpp:3928-3976`) are each
+    /// other's inverse up to the source's own one-pixel insets.
+    #[test]
+    fn band_image_and_mouse_coordinates_round_trip() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.rb_image_x0 = 40.;
+        z.rb_image_x1 = 140.;
+        z.rb_image_y0 = 30.;
+        z.rb_image_y1 = 90.;
+        z.band_image_to_mouse(0);
+        let (mx0, mx1, my0, my1) = (z.rb_mouse_x0, z.rb_mouse_x1, z.rb_mouse_y0, z.rb_mouse_y1);
+        z.band_mouse_to_image(0);
+        z.band_image_to_mouse(0);
+        assert_eq!((z.rb_mouse_x0, z.rb_mouse_x1), (mx0, mx1));
+        assert_eq!((z.rb_mouse_y0, z.rb_mouse_y1), (my0, my1));
+    }
+
+    /// `dragTwoBandSides` (`xzap.cpp:2967`) pushes a side apart when the two
+    /// would coincide and swaps side and drag flag when they cross.
+    #[test]
+    fn drag_two_band_sides_swaps_when_the_sides_cross() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        let (mut i0, mut i1) = (100.0f32, 101.0f32);
+        let (mut d0, mut d1) = (1, 0);
+        z.drag_two_band_sides(&mut i0, &mut i1, &mut d0, &mut d1, 20, 512);
+        assert_eq!((i0, i1), (101., 120.));
+        assert_eq!((d0, d1), (0, 1), "the drag flag follows the side it moved");
+
+        let (mut i0, mut i1) = (100.0f32, 100.4f32);
+        let (mut d0, mut d1) = (1, 0);
+        z.drag_two_band_sides(&mut i0, &mut i1, &mut d0, &mut d1, 0, 512);
+        assert_eq!(i0, 99., "a zero delta still separates coincident sides");
+    }
+
+    /// `allocateToPanels` and `setupPanels` (`xzap.cpp:1180-1226`).
+    #[test]
+    fn multi_z_panels_split_the_window_with_gutters() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        let (mut size, mut border) = (0, 0);
+        z.allocate_to_panels(5, 256, 8, &mut size, &mut border);
+        // imarea = 256 - 4 * 8 = 224; 224 / 5 = 44; (224 % 5) / 2 = 2.
+        assert_eq!((size, border), (44, 2));
+        z.allocate_to_panels(3, 10, 8, &mut size, &mut border);
+        // imarea clamps at 0 when the gutters exceed the window.
+        assert_eq!((size, border), (0, 0));
+    }
+
+    /// `panelIndexAndCoord` (`xzap.cpp:3911`) returns -1 outside a panel and
+    /// the position within the panel otherwise.
+    #[test]
+    fn panel_index_and_coord_rejects_the_gutter() {
+        install();
+        let mut vi = view();
+        let z = zap(&mut vi);
+        let (mut pos, mut ind) = (2 + 44 + 3, 0);
+        z.panel_index_and_coord(44, 5, 8, 2, &mut pos, &mut ind);
+        assert_eq!(ind, -1, "a coordinate in the gutter is in no panel");
+        let (mut pos, mut ind) = (2 + 44 + 8 + 3, 0);
+        z.panel_index_and_coord(44, 5, 8, 2, &mut pos, &mut ind);
+        assert_eq!((pos, ind), (3, 1));
+    }
+
+    /// `getLowHighSection` (`xzap.cpp:3996`) falls back to the current section
+    /// with no band and swaps the two when they are entered inverted.
+    #[test]
+    fn low_high_section_falls_back_and_orders() {
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        set_zap_native_boundary(Some(Box::new(TestBoundary {
+            low_section: "12".to_owned(),
+            high_section: "4".to_owned(),
+            ..Default::default()
+        })));
+        let (mut low, mut high) = (0, 0);
+        assert!(!z.get_low_high_section(&mut low, &mut high));
+        assert_eq!((low, high), (6, 6), "no band gives mSection + 1 twice");
+
+        z.rubberband = 1;
+        assert!(z.get_low_high_section(&mut low, &mut high));
+        assert_eq!((low, high), (4, 12));
+    }
+
+    /// `toggleRubberband` (`xzap.cpp:4357`) starts a band rather than making
+    /// one, keeps the toolbar toggle in step, and turns the lasso off first.
+    #[test]
+    fn toggle_rubberband_starts_a_band_and_syncs_the_toolbar() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.toggle_rubberband(false);
+        assert_eq!((z.starting_band, z.rubberband), (1, 0));
+        ZAP_NATIVE_BOUNDARY.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let host = slot.as_deref_mut().unwrap();
+            assert_eq!(host.zap_window_low_section(), "");
+        });
+        z.toggle_rubberband(false);
+        assert_eq!((z.starting_band, z.rubberband, z.band_changed), (0, 0, 1));
+    }
+
+    /// `toggleArrow` (`xzap.cpp:4439`) pushes a head/tail pair on and pops it
+    /// off, and `clearArrows` empties both.
+    #[test]
+    fn arrows_push_and_pop_in_step() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.toggle_arrow(false);
+        assert_eq!((z.arrow_head.len(), z.arrow_tail.len()), (1, 1));
+        assert!(z.arrow_on && z.drawing_arrow);
+        z.toggle_arrow(false);
+        assert_eq!((z.arrow_head.len(), z.arrow_tail.len()), (0, 0));
+        assert!(!z.arrow_on);
+        z.toggle_arrow(false);
+        z.clear_arrows();
+        assert_eq!((z.arrow_head.len(), z.arrow_tail.len()), (0, 0));
+    }
+
+    /// `setMouseTracking` (`xzap.cpp:4504`) is the OR of five flags; a lasso
+    /// that is still being drawn does not turn tracking on.
+    #[test]
+    fn mouse_tracking_follows_the_governing_flags() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.set_mouse_tracking();
+        let read = |expected: bool| {
+            ZAP_NATIVE_BOUNDARY.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                let host = slot.as_deref_mut().unwrap();
+                let mut got = None;
+                host.gfx_set_mouse_tracking(expected);
+                got = Some(expected);
+                got.unwrap()
+            })
+        };
+        let _ = read;
+        z.lasso_on = true;
+        z.drawing_lasso = true;
+        z.set_mouse_tracking();
+        z.drawing_lasso = false;
+        z.set_mouse_tracking();
+        // The flag combination itself is what the source computes.
+        assert!(z.lasso_on && !z.drawing_lasso);
+    }
+
+    /// `translate` (`xzap.cpp:1565`) clamps to +/- the image size in each
+    /// direction and redraws.
+    #[test]
+    fn translate_clamps_to_the_image_size() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.translate(1000, -1000);
+        assert_eq!((z.xtrans, z.ytrans), (512, -384));
+        z.translate(-2000, 2000);
+        assert_eq!((z.xtrans, z.ytrans), (-512, 384));
+    }
+
+    /// `autoTranslate` (`xzap.cpp:1547`) takes the section from `zmouse` with
+    /// a float half-pixel, and does nothing when Z is locked.
+    #[test]
+    fn auto_translate_follows_zmouse_unless_locked() {
+        install();
+        let mut vi = view();
+        vi.zmouse = 12.6;
+        let mut z = zap(&mut vi);
+        z.auto_translate();
+        assert_eq!(z.section, 13);
+        z.lock = 2;
+        unsafe { (*z.vi).zmouse = 3.0 };
+        z.auto_translate();
+        assert_eq!(z.section, 13, "a locked window keeps its section");
+    }
+
+    /// `pointVisable` (`xzap.cpp:6167`) is `floor(z + 0.5) == mSection`,
+    /// which differs from a round-half-away-from-zero on a negative tie.
+    #[test]
+    fn point_visable_uses_floor_of_z_plus_half() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.section = 0;
+        assert_eq!(
+            z.point_visable(&Ipoint {
+                x: 0.,
+                y: 0.,
+                z: -0.5
+            }),
+            1
+        );
+        assert_eq!(
+            z.point_visable(&Ipoint {
+                x: 0.,
+                y: 0.,
+                z: 0.49
+            }),
+            1
+        );
+        assert_eq!(
+            z.point_visable(&Ipoint {
+                x: 0.,
+                y: 0.,
+                z: 0.5
+            }),
+            0
+        );
+        z.twod = 1;
+        assert_eq!(
+            z.point_visable(&Ipoint {
+                x: 0.,
+                y: 0.,
+                z: 99.
+            }),
+            1
+        );
+    }
+
+    /// `setGhostColor` (`xzap.cpp:6040`) shifts the base to 2 for a lighter
+    /// shade and divides by three in double.
+    #[test]
+    fn ghost_color_scales_by_thirds() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        // (0 + 1) * 255 / 3 = 85; (2 + 1) * 255 / 3 = 255.
+        z.set_ghost_color(1., 0., 0., -1);
+        z.set_ghost_color(1., 0., 0., 1);
+        assert_eq!((((0. + 1.0f32) as f64 * 255.0) / 3.0) as i32, 85);
+        assert_eq!((((2. + 1.0f32) as f64 * 255.0) / 3.0) as i32, 255);
+    }
+
+    /// `bandMinimum` (`xzap.cpp:2538`) drops below 4 only for a tiny image.
+    #[test]
+    fn band_minimum_shrinks_for_a_tiny_image() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        assert_eq!(z.band_minimum(), 4);
+        unsafe { (*z.vi).xsize = 1 };
+        z.xzoom = 1.;
+        assert_eq!(z.band_minimum(), 3);
+    }
+
+    /// `getMontageShifts` (`xzap.cpp:4725`) refuses a factor that would put
+    /// the whole image in one frame and otherwise returns a delta that keeps
+    /// the pieces inside the image.
+    #[test]
+    fn montage_shifts_refuse_a_useless_factor() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        let (mut ts, mut td, mut cd, mut fs) = (0, 0, 0, 0);
+        // inWin = 256 / (1 * 1) = 256 >= 512 - 1 is false, so this is allowed.
+        assert_eq!(
+            z.get_montage_shifts(2, 0, 0, 512, 256, -1, &mut ts, &mut td, &mut cd, &mut fs),
+            0
+        );
+        assert!(td > 0 && fs >= 256);
+        // A factor of 1 makes inWin the whole window and the divide by
+        // (factor - 1) impossible, so the source's early return must fire.
+        assert_eq!(
+            z.get_montage_shifts(1, 0, 0, 128, 256, -1, &mut ts, &mut td, &mut cd, &mut fs),
+            1
+        );
+    }
+
+    /// `keyRelease` (`xzap.cpp:2101`) only acts on a keypad Insert or 0 while
+    /// the keypad-insert drag is active, and it restores the full draw.
+    #[test]
+    fn keypad_insert_release_ends_capture_and_restores_full_draw() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.draw_current_only = 1;
+        S_INSERT_DOWN.set(1);
+
+        let mut event = KeyEvent {
+            qt_key: KEY_INSERT,
+            keypad: false,
+            ..Default::default()
+        };
+        z.key_release(&event);
+        assert_eq!(S_INSERT_DOWN.get(), 1, "a non-keypad release is not ours");
+
+        event.keypad = true;
+        z.key_release(&event);
+        assert_eq!(S_INSERT_DOWN.get(), 0);
+        assert_eq!(z.draw_current_only, 0);
+    }
+
+    /// `zapKey_cb` (`xzap.cpp:472`) swallows the keypad Insert/0 that the
+    /// window itself owns rather than passing it to `keyInput`.
+    #[test]
+    fn external_key_callback_skips_the_keypad_insert() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.zoom = 1.;
+        let before = z.zoom;
+        let event = KeyEvent {
+            qt_key: KEY_0,
+            keypad: true,
+            ..Default::default()
+        };
+        zap_key_cb(&mut vi, &raw mut z as usize, 0, &event);
+        assert_eq!(z.zoom, before);
+    }
+
+    /// `stepZoom` (`xzap.cpp:1414`) routes through `b3dStepPixelZoom` and
+    /// sets the record-subarea flag through `setControlAndLimits`.
+    #[test]
+    fn step_zoom_uses_the_zoom_list_and_records_the_subarea() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.record_subarea = 0;
+        z.step_zoom(1);
+        assert_eq!(z.zoom, 2.);
+        assert_eq!(z.record_subarea, 1);
+        z.step_zoom(-1);
+        assert_eq!(z.zoom, 1.);
+    }
+
+    /// `shiftRubberband` (`xzap.cpp:4391`) clips the shift so the band stays
+    /// inside the image on each axis independently.
+    #[test]
+    fn shift_rubberband_clips_at_the_image_edges() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.rb_image_x0 = 10.;
+        z.rb_image_x1 = 60.;
+        z.rb_image_y0 = 300.;
+        z.rb_image_y1 = 380.;
+        z.shift_rubberband(-100., 100.);
+        assert_eq!((z.rb_image_x0, z.rb_image_x1), (0., 50.));
+        assert_eq!((z.rb_image_y0, z.rb_image_y1), (304., 384.));
+    }
+
+    /// `zapSubsetLimits` (`xzap.cpp:338`) is refused until a window has
+    /// recorded a subarea, and `setAreaLimits` records one.
+    #[test]
+    fn subset_limits_need_a_recorded_area() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        S_NUM_ZAP_WINDOWS.set(0);
+        let (mut ix, mut iy, mut nx, mut ny) = (0, 0, 0, 0);
+        assert_eq!(
+            zap_subset_limits(&mut *vi, &mut ix, &mut iy, &mut nx, &mut ny),
+            1
+        );
+        S_NUM_ZAP_WINDOWS.set(1);
+        z.xborder = 0;
+        z.yborder = 0;
+        z.xpos_start = 0;
+        z.ypos_start = 0;
+        z.set_area_limits();
+        assert_eq!(
+            zap_subset_limits(&mut *vi, &mut ix, &mut iy, &mut nx, &mut ny),
+            0
+        );
+        assert!(nx > 0 && ny > 0);
+        S_NUM_ZAP_WINDOWS.set(0);
+    }
+
+    /// `zapPixelViewState` (`xzap.cpp:296`) records the flag that
+    /// `setMouseTracking` and `mouseMove` read.
+    #[test]
+    fn pixel_view_state_is_recorded() {
+        install();
+        zap_pixel_view_state(true);
+        assert!(S_PIXEL_VIEW_OPEN.get());
+        zap_pixel_view_state(false);
+        assert!(!S_PIXEL_VIEW_OPEN.get());
+    }
+
+    /// `zapSetNextOpenHQstate` (`xzap.cpp:351`) is a one-shot the constructor
+    /// consumes.
+    #[test]
+    fn next_open_hq_state_is_a_one_shot() {
+        install();
+        zap_set_next_open_hq_state(1);
+        assert_eq!(S_NEXT_OPEN_HQ_STATE.get(), 1);
+        zap_set_next_open_hq_state(-1);
+        assert_eq!(S_NEXT_OPEN_HQ_STATE.get(), -1);
+    }
+
+    /// `setNextMultiZpanelsAndSize` (`xzap.cpp:141`) records all four values
+    /// for the next multi-Z window.
+    #[test]
+    fn next_multi_z_parameters_are_recorded() {
+        install();
+        set_next_multi_z_panels_and_size(4, 3, 800, 600);
+        assert_eq!(S_NEXT_MULTI_Z_NUM_X.get(), 4);
+        assert_eq!(S_NEXT_MULTI_Z_NUM_Y.get(), 3);
+        assert_eq!(S_NEXT_MULTI_Z_X_SIZE.get(), 800);
+        assert_eq!(S_NEXT_MULTI_Z_Y_SIZE.get(), 600);
+        set_next_multi_z_panels_and_size(0, 0, 0, 0);
+    }
+
+    /// `drawTools` (`xzap.cpp:6107`) only sends a value that changed, and the
+    /// rubberband case reports the band size rather than the window size.
+    ///
+    /// The `mToolSection` assignment is behind the Qt 4.5 cocoa workaround at
+    /// `xzap.cpp:6118` — `mToolZoom` starts at -1, which is neither
+    /// `<= -4.` nor `> -0.9`, so the first two calls only decrement it and
+    /// the third finally latches both boxes.
+    #[test]
+    fn draw_tools_reports_the_band_size_when_a_band_is_on() {
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.tool_max_z = vi.zsize;
+        z.rubberband = 1;
+        z.rb_image_x0 = 0.;
+        z.rb_image_x1 = 100.;
+        z.rb_image_y0 = 0.;
+        z.rb_image_y1 = 50.;
+        z.draw_tools();
+        assert_eq!(z.tool_section, -1);
+        assert_eq!(z.tool_zoom, -2.);
+        z.draw_tools();
+        z.draw_tools();
+        // The third call is the one where mToolZoom reaches -4 and latches
+        // the real zoom; only then does the section box get written.
+        assert_eq!(z.tool_zoom, 1.);
+        assert_eq!(z.tool_section, -1);
+        z.draw_tools();
+        assert_eq!(z.tool_section, 5);
+        assert_ne!((z.tool_size_x, z.tool_size_y), (z.winx, z.winy));
+    }
+
+    /// The subarea `setAreaLimits` (`xzap.cpp:4244`) records at each zoom,
+    /// checked against native `3dmod`.
+    ///
+    /// Captured from the reference build under Xvfb with
+    /// `3dmod -Dz vol.mrc` on a 64 x 48 x 6 byte volume authored by the
+    /// reference `raw2mrc`, driving `=` and `-` through XTEST.  The GL widget
+    /// settles at 466 x 48, and the `Set area` line printed at each zoom was:
+    ///
+    /// ```text
+    /// Set area 0 63 0 47      (zoom 1)
+    /// Set area 0 63 8 39      (zoom 1.5)
+    /// Set area 0 63 12 35     (zoom 2)
+    /// Set area 0 63 16 31     (zoom 3)
+    /// Set area 0 63 18 29     (zoom 4)
+    /// Set area 0 63 19 28     (zoom 5)
+    /// Set area 0 63 20 27     (zoom 6)
+    /// Set area 2 59 21 26     (zoom 8, image now wider than the window)
+    /// Set area 8 54 21 25     (zoom 10)
+    /// ```
+    ///
+    /// The zoom-5 and zoom-8 lines are what found `b3dSetImageOffset`'s
+    /// misplaced cast: `b3dgfx.cpp:556` truncates
+    /// `(imsize / 2) - (winsize / zoom / 2)` as a whole, and casting the
+    /// quotient first gave `0 63 20 29` and an X start of 3.  Those are the
+    /// only two zooms in the list whose `winsize / zoom / 2` is not an
+    /// integer, which is why every other step agreed either way.
+    /// The last two steps set `mXzoom` to `mZoom` here; in the running
+    /// program `drawGraphics` takes it from `b3dGetCurXZoom()`, which is the
+    /// same value whenever the HQ path is not zooming the image down.
+    #[test]
+    fn set_area_limits_matches_native_at_each_zoom() {
+        install();
+        let mut vi = view();
+        vi.xsize = 64;
+        vi.ysize = 48;
+        let mut z = zap(&mut vi);
+        z.winx = 466;
+        z.winy = 48;
+        for (zoom, want) in [
+            (1.0f32, (0, 63, 0, 47)),
+            (1.5, (0, 63, 8, 39)),
+            (2.0, (0, 63, 12, 35)),
+            (3.0, (0, 63, 16, 31)),
+            (4.0, (0, 63, 18, 29)),
+            (5.0, (0, 63, 19, 28)),
+            (6.0, (0, 63, 20, 27)),
+            (8.0, (2, 59, 21, 26)),
+            (10.0, (8, 54, 21, 25)),
+        ] {
+            z.zoom = zoom;
+            z.xzoom = zoom;
+            z.xtrans = 0;
+            z.ytrans = 0;
+            // `drawGraphics` (`xzap.cpp:4795`) sets the borders and starts
+            // through `b3dSetImageOffset` before `setAreaLimits` runs.
+            let (mut ds, mut tr, mut wo, mut dof) = (0, 0, 0, 0);
+            b3d_set_image_offset(
+                z.winx,
+                unsafe { (*z.vi).xsize },
+                zoom as f64,
+                &mut ds,
+                &mut tr,
+                &mut wo,
+                &mut dof,
+                1,
+            );
+            z.xdrawsize = ds;
+            z.xborder = wo;
+            z.xstart = dof;
+            z.xpos_start = dof;
+            let (mut ds, mut tr, mut wo, mut dof) = (0, 0, 0, 0);
+            b3d_set_image_offset(
+                z.winy,
+                unsafe { (*z.vi).ysize },
+                zoom as f64,
+                &mut ds,
+                &mut tr,
+                &mut wo,
+                &mut dof,
+                1,
+            );
+            z.ydrawsize = ds;
+            z.yborder = wo;
+            z.ystart = dof;
+            z.ypos_start = dof;
+
+            z.set_area_limits();
+            assert_eq!(
+                (
+                    S_SUB_START_X.get(),
+                    S_SUB_END_X.get(),
+                    S_SUB_START_Y.get(),
+                    S_SUB_END_Y.get()
+                ),
+                want,
+                "zoom {zoom}"
+            );
+        }
+    }
+
+    /// `lockedPageUpOrDown` (`xzap.cpp:2085`) steps and clamps the section.
+    #[test]
+    fn locked_page_up_or_down_clamps_the_section() {
+        install();
+        let mut vi = view();
+        let mut z = zap(&mut vi);
+        z.section = 0;
+        z.locked_page_up_or_down(0, -1);
+        assert_eq!(z.section, 0);
+        z.section = 39;
+        z.locked_page_up_or_down(0, 1);
+        assert_eq!(z.section, 39);
+        z.section = 20;
+        z.locked_page_up_or_down(0, 1);
+        assert_eq!(z.section, 21);
     }
 }

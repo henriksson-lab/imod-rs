@@ -14,7 +14,7 @@ use super::{
     multi_line_button::MultiLineButton,
     process_dialog::{ProcessDialog, ProcessDialogApplicationManager},
 };
-use crate::imod::etomo::process::process_series::ProcessSeries;
+use crate::imod::etomo::process_series::ProcessSeries;
 use crate::imod::etomo::r#type::{axis_id::AxisID, axis_type::AxisType, dialog_type::DialogType};
 
 /// Source-visible state sent to Java `JLabel` at the Swing boundary.

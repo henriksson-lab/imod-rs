@@ -444,7 +444,16 @@ pub fn b3d_set_image_offset(
     }
     *woff = 0;
     *drawsize = (winsize as f64 / zoom) as i32;
-    *doff = (imsize / 2 - (winsize as f64 / zoom / 2.0) as i32) - *offset;
+    // `b3dgfx.cpp:556` is `doff = (int)((imsize / 2) - (winsize / zoom / 2));`
+    // — the cast covers the whole subtraction, so the fractional part of
+    // `winsize / zoom / 2` is carried into it and truncated only at the end.
+    // Casting the quotient first is one larger whenever that quotient is not
+    // an integer, which moves the pan offset by a pixel; native `3dmod -Dz`
+    // on a 64 x 48 x 6 volume in a 466 x 48 GL widget prints
+    // `Set area 0 63 19 28` at zoom 5 and `Set area 2 59 21 26` at zoom 8,
+    // which only the source's cast placement reproduces.
+    *doff = ((imsize / 2) as f64 - (winsize as f64 / zoom / 2.0)) as i32;
+    *doff -= *offset;
     if *doff < 0 {
         let maxwoff = winsize / 6;
         *woff = (-(*doff) as f64 * zoom) as i32;

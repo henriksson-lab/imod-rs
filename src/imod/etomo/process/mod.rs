@@ -12,7 +12,6 @@ pub mod process_data;
 pub mod process_manager;
 pub mod process_messages;
 pub mod process_result_display_factory_interface;
-pub mod process_series;
 pub mod process_state;
 pub mod tomosetexts_output;
 pub mod tools_process_manager;

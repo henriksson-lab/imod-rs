@@ -12,6 +12,7 @@ pub mod logic;
 pub mod manager_key;
 pub mod parallel_manager;
 pub mod process;
+pub mod process_series;
 pub mod serial_sections_manager;
 pub mod storage;
 pub mod task_interface;
