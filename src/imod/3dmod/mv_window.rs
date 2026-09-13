@@ -1283,6 +1283,14 @@ impl ImodvNativeGl {
 
 #[cfg(feature = "three-dmod-gl")]
 impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
+    /// `b3dInitializeGL()` (`b3dgfx.cpp:135`), for `imodvPaintGL`'s first-time
+    /// probe (`mv_gfx.cpp:234`).  The state is transient, as it is at the
+    /// `b3d_line_width`/`b3d_point_size` routes in this file: the source keeps the
+    /// answer in `a->glExtFlags`, which is what the caller stores.
+    fn initialize_gl_extensions(&mut self) -> i32 {
+        let mut state = crate::imod::three_dmod::b3dgfx::B3dGfxState::default();
+        crate::imod::three_dmod::b3dgfx::b3d_initialize_gl(&mut state, self)
+    }
     /// `a->mainWin->mCurGLw->makeCurrent()`.  Qt's `makeCurrent` has no error
     /// return, so a failure here is reported once and drawing proceeds as the
     /// source does.

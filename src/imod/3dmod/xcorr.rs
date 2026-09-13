@@ -44,11 +44,11 @@ pub unsafe fn slice_byte_binned_fft(
             nx_dim /= binning;
             binned.resize((nx_dim * (nyin / binning)) as usize, 0);
             crate::imod::three_dmod::imodview::ivw_bin_by_n(
-                core::slice::from_raw_parts((*sin).data.b, (nxin * nyin) as usize),
+                (*sin).data.b,
                 nxin,
                 nyin,
                 binning,
-                &mut binned,
+                binned.as_mut_ptr(),
             );
             input = binned.as_mut_ptr();
         }

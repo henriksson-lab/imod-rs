@@ -551,8 +551,10 @@ pub fn imod_print_stderr(message: &str) {
     eprint!("{message}");
 }
 pub fn imod_trace(key: char, message: &str) {
+    // `imodTrace` (`utilities.cpp:1430`) routes through `imodPuts`, which adds
+    // the newline; `imodPrintStderr` does not.
     if imod_debug(key) {
-        imod_print_stderr(message)
+        imod_puts(message)
     }
 }
 pub fn imod_puts(message: &str) {

@@ -47,6 +47,9 @@ pub trait ImodvGfxGl {
     fn draw_light_vector(&mut self, app: &ImodvApp, light: Ipoint);
     fn draw_scale_bar(&mut self, app: &ImodvApp, scale: f32, color: i32) -> f32;
     fn read_rgb_pixels(&mut self, x: i32, width: i32, height: i32) -> Vec<u8>;
+    /// `b3dInitializeGL()` (`b3dgfx.cpp`), called from `imodvPaintGL`'s
+    /// first-time probe (`mv_gfx.cpp:234-238`).  Returns the extension flags.
+    fn initialize_gl_extensions(&mut self) -> i32;
 }
 
 /// `imodv_winset`.
@@ -192,6 +195,20 @@ pub fn imodv_paint_gl(
     new_qt_opengl: bool,
     gl: &mut dyn ImodvGfxGl,
 ) {
+    // `mv_gfx.cpp:233-238`: first time in, find the OpenGL version and set
+    // `vertBufOK` to -1 or 1.  This runs before the `!a->imod` return, and the
+    // translation had omitted it entirely, so `vertBufOK` stayed at its
+    // sentinel and `Ctrl-Shift-V` never reached its toggle.
+    if a.vert_buf_ok < -1 {
+        a.gl_ext_flags = gl.initialize_gl_extensions();
+        a.vert_buf_ok = if a.gl_ext_flags & crate::imod::three_dmod::b3dgfx::B3DGLEXT_VERTBUF != 0 {
+            1
+        } else {
+            -1
+        };
+        a.prim_restart_ok =
+            i32::from(a.gl_ext_flags & crate::imod::three_dmod::b3dgfx::B3DGLEXT_PRIM_RESTART != 0);
+    }
     if a.imod.is_null() {
         return;
     }
@@ -373,8 +390,14 @@ mod tests {
     #[derive(Default)]
     struct RecordingGfxGl {
         calls: Vec<&'static str>,
+        /// What `b3dInitializeGL()` reports back to the `mv_gfx.cpp:234` probe.
+        ext_flags: i32,
     }
     impl ImodvGfxGl for RecordingGfxGl {
+        fn initialize_gl_extensions(&mut self) -> i32 {
+            self.calls.push("initialize_gl_extensions");
+            self.ext_flags
+        }
         fn make_current(&mut self) {
             self.calls.push("make_current")
         }
@@ -435,6 +458,52 @@ mod tests {
         }
     }
 
+    /// `mv_gfx.cpp:234` probes only while `vertBufOK < -1`, so a second paint
+    /// must not re-probe, and the flags it derives must follow `:236-237`.
+    #[test]
+    fn imodv_paint_gl_probes_gl_extensions_once_and_derives_the_flags() {
+        use crate::imod::three_dmod::b3dgfx::{B3DGLEXT_PRIM_RESTART, B3DGLEXT_VERTBUF};
+        let mut model = Imod::default();
+        let mut a = ImodvApp {
+            winx: 64,
+            winy: 48,
+            ..Default::default()
+        };
+        a.imod = &mut model;
+        assert_eq!(a.vert_buf_ok, -2, "imodv.cpp:179 sentinel");
+        let mut gl = RecordingGfxGl {
+            ext_flags: B3DGLEXT_VERTBUF | B3DGLEXT_PRIM_RESTART,
+            ..Default::default()
+        };
+        imodv_paint_gl(&mut a, [0, 0, 0], false, &mut gl);
+        assert_eq!(a.gl_ext_flags, B3DGLEXT_VERTBUF | B3DGLEXT_PRIM_RESTART);
+        assert_eq!(a.vert_buf_ok, 1);
+        assert_eq!(a.prim_restart_ok, 1);
+        assert_eq!(
+            gl.calls
+                .iter()
+                .filter(|c| **c == "initialize_gl_extensions")
+                .count(),
+            1
+        );
+        gl.calls.clear();
+        imodv_paint_gl(&mut a, [0, 0, 0], false, &mut gl);
+        assert!(
+            !gl.calls.contains(&"initialize_gl_extensions"),
+            "probes once"
+        );
+        // Without the extension, `:236` gives -1, not 0.
+        let mut b = ImodvApp {
+            winx: 64,
+            winy: 48,
+            ..Default::default()
+        };
+        b.imod = &mut model;
+        let mut off = RecordingGfxGl::default();
+        imodv_paint_gl(&mut b, [0, 0, 0], false, &mut off);
+        assert_eq!(b.vert_buf_ok, -1);
+        assert_eq!(b.prim_restart_ok, 0);
+    }
     #[test]
     fn imodv_paint_gl_issues_the_source_boundary_sequence() {
         let mut model = Imod {
@@ -449,9 +518,14 @@ mod tests {
         a.imod = &mut model;
         let mut gl = RecordingGfxGl::default();
         imodv_paint_gl(&mut a, [0, 0, 0], false, &mut gl);
+        // `mv_gfx.cpp:233-238` probes the GL version on the first paint, before
+        // anything else, while `vertBufOK` is still its `imodv.cpp:179`
+        // sentinel of -2.  This expectation previously omitted it because the
+        // probe was untranslated.
         assert_eq!(
             gl.calls,
             vec![
+                "initialize_gl_extensions",
                 "make_current",
                 "make_current",
                 "clear",

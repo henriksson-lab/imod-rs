@@ -360,6 +360,8 @@ impl Default for Iobj {
 #[repr(C)]
 pub struct Imod {
     pub obj: Vec<Iobj>,
+    /// `Mod_Model::ctime` (`imodel.h:457`), the current time index.
+    pub ctime: i32,
     pub store: Vec<super::istore::Istore>,
     pub name: [std::ffi::c_char; IMOD_STRSIZE],
     pub xmax: i32,
@@ -397,6 +399,7 @@ impl Default for Imod {
     fn default() -> Self {
         Self {
             obj: Vec::new(),
+            ctime: 0,
             store: Vec::new(),
             name: [0; IMOD_STRSIZE],
             xmax: 0,

@@ -215,7 +215,10 @@ impl Default for ImodvApp {
             fullscreen: 0,
             standalone: 0,
             view: Iview::default(),
-            vert_buf_ok: 0,
+            // `imodv.cpp:179`: `a->vertBufOK = -2;`.  The sentinel matters --
+            // `imodvPaintGL` probes only while it is `< -1` (`mv_gfx.cpp:234`),
+            // so initialising it to 0 skipped the probe permanently.
+            vert_buf_ok: -2,
             prim_restart_ok: 0,
             gl_ext_flags: 0,
             vb_manager: std::ptr::null_mut(),
