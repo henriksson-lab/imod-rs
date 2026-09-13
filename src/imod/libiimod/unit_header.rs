@@ -10,6 +10,7 @@
 use crate::imod::libcfshr::b3dutil::{
     f2c_string, set_or_clear_flags, write_16_bit_mode_for_floats,
 };
+use crate::imod::libcfshr::linearxforms::{angles_to_matrix, icalc_angles};
 use crate::imod::libiimod::iimage::{IIFILE_MRC, IIFILE_TIFF, ImodImageFile};
 use crate::imod::libiimod::mrcfiles::{
     IIUNIT_4BIT_MODE, IIUNIT_HALF_FLOATS, IIUNIT_HALF_XSIZE, IMOD_MRC_STAMP, MRC_EXT_TYPE_AGAR,
@@ -623,90 +624,33 @@ pub unsafe fn iiu_alt_tilt_orig(i: i32, p: *mut f32) {
 }
 /// Matches C `iiuAltTiltRot` (`unit_header.c`).
 pub unsafe fn iiu_alt_tilt_rot(iunit: i32, tilt: *mut f32) {
+    let mut amat1 = [0.0_f32; 9];
+    let mut amat2 = [0.0_f32; 9];
+    let mut amat3 = [0.0_f32; 9];
     let hdr = unsafe { iiu_mrc_header(iunit, c"iiuAltTiltRot".as_ptr(), 1, 0) };
+
     unsafe {
-        // This is the inlined `anglesToMatrix(angles, matrix, 3)` source body.
-        let cnv = 0.0174532921_f64;
-        let mut amat1 = [0.0_f32; 9];
-        let mut amat2 = [0.0_f32; 9];
-        for (angles, matrix) in [
-            (tilt, &mut amat1),
-            ((*hdr).tiltangles.as_mut_ptr().add(3), &mut amat2),
-        ] {
-            let alpha = *angles as f64 * cnv;
-            let beta = *angles.add(1) as f64 * cnv;
-            let gamma = *angles.add(2) as f64 * cnv;
-            let (ca, sa) = (alpha.cos(), alpha.sin());
-            let (cb, sb) = (beta.cos(), beta.sin());
-            let (cg, sg) = (gamma.cos(), gamma.sin());
-            matrix[0] = (cb * cg) as f32;
-            matrix[3] = (-cb * sg) as f32;
-            matrix[6] = sb as f32;
-            matrix[1] = (sa * sb * cg + ca * sg) as f32;
-            matrix[4] = (-sa * sb * sg + ca * cg) as f32;
-            matrix[7] = (-sa * cb) as f32;
-            matrix[2] = (-ca * sb * cg + sa * sg) as f32;
-            matrix[5] = (ca * sb * sg + sa * cg) as f32;
-            matrix[8] = (ca * cb) as f32;
-        }
-        let mut amat3 = [0.0_f32; 9];
+        /* Convert new and old angles to matrices, then multiply */
+        angles_to_matrix(&*(tilt as *const [f32; 3]), &mut amat1, 3);
+        angles_to_matrix(
+            &*((*hdr).tiltangles.as_ptr().add(3) as *const [f32; 3]),
+            &mut amat2,
+            3,
+        );
         for k in 0..3 {
             for l in 0..3 {
+                amat3[l + 3 * k] = 0.;
                 for m in 0..3 {
                     amat3[l + 3 * k] += amat1[l + 3 * m] * amat2[m + 3 * k];
                 }
             }
         }
 
-        // This is the successful `matrixToAngles` path used by `icalc_angles`.
-        let (r11, r12, r13) = (amat3[0] as f64, amat3[3] as f64, amat3[6] as f64);
-        let (r21, r22, r23) = (amat3[1] as f64, amat3[4] as f64, amat3[7] as f64);
-        let (r31, r32, r33) = (amat3[2] as f64, amat3[5] as f64, amat3[8] as f64);
-        let determinant = r11 * r22 * r33 - r11 * r23 * r32 + r12 * r23 * r31 - r12 * r21 * r33
-            + r13 * r21 * r32
-            - r13 * r22 * r31;
-        if (determinant - 1.0).abs() > 0.01 {
-            libc::printf(
-                c"icalc_angles - matrix %10.6f %10.6f %10.6f\n".as_ptr(),
-                r11,
-                r12,
-                r13,
-            );
-            libc::printf(
-                c"                      %10.6f %10.6f %10.6f\n".as_ptr(),
-                r21,
-                r22,
-                r23,
-            );
-            libc::printf(
-                c"                      %10.6f %10.6f %10.6f\n".as_ptr(),
-                r31,
-                r32,
-                r33,
-            );
-            libc::printf(c"determinant - %f\n".as_ptr(), determinant - 1.0);
-            libc::printf(c"ERROR: icalc_angles - Not a pure rotation matrix\n".as_ptr());
-            libc::fflush(core::ptr::null_mut());
-            return;
-        }
-        let (alpha, beta, gamma) = if (r13 - 1.0).abs() < 0.0000001 || (r13 + 1.0).abs() < 0.0000001
-        {
-            (0.0, r13.asin(), r21.atan2(r22))
-        } else if r13.abs() <= 0.0000001 {
-            ((-r23).atan2(r33), 0.0, (-r12).atan2(r11))
-        } else {
-            let alpha = (-r23).atan2(r33);
-            let gamma = (-r12).atan2(r11);
-            let cosb = if gamma.cos().abs() > 0.01 {
-                r11 / gamma.cos()
-            } else {
-                -r12 / gamma.sin()
-            };
-            (alpha, r13.atan2(cosb), gamma)
-        };
-        (*hdr).tiltangles[3] = (alpha / 0.017453292_f64) as f32;
-        (*hdr).tiltangles[4] = (beta / 0.017453292_f64) as f32;
-        (*hdr).tiltangles[5] = (gamma / 0.017453292_f64) as f32;
+        /* Convert back to angles */
+        icalc_angles(
+            &mut *((*hdr).tiltangles.as_mut_ptr().add(3) as *mut [f32; 3]),
+            &amat3,
+        );
     }
 }
 pub unsafe fn iiu_ret_delta(i: i32, p: *mut f32) {

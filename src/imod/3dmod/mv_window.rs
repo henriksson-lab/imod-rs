@@ -2380,12 +2380,18 @@ pub fn run_native_opengl(
     use std::rc::Rc;
     use winit::dpi::PhysicalSize;
     use winit::event::{
-        ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent as WinitWindowEvent,
+        DeviceEvent, ElementState, Event, MouseButton, MouseScrollDelta,
+        WindowEvent as WinitWindowEvent,
     };
-    use winit::event_loop::EventLoop;
+    use winit::event_loop::{DeviceEvents, EventLoop};
     use winit::window::Window;
 
     let event_loop = EventLoop::new().map_err(|error| error.to_string())?;
+    // Raw button events are what separate a wheel press from its release; see
+    // the `MouseWheel` arm below.  Qt's xcb backend reads the same X11
+    // XInput2 events directly, so this is not an added input source, only the
+    // same information winit does not put on `WindowEvent::MouseWheel`.
+    event_loop.listen_device_events(DeviceEvents::Always);
     let app = model_window.app();
     let width = app.want_winx.max(app.winx).max(1) as u32;
     let height = app.want_winy.max(app.winy).max(1) as u32;
@@ -2452,6 +2458,9 @@ pub fn run_native_opengl(
     let mut ctrl_down = false;
     let mut alt_down = false;
     let mut cursor = winit::dpi::PhysicalPosition::new(0.0f64, 0.0f64);
+    // Set by the raw release of a legacy wheel button, consumed by the
+    // duplicate `MouseWheel` that follows it.  See the `MouseWheel` arm.
+    let mut wheel_button_released = false;
     IMODV_EXIT_REQUESTED.store(false, std::sync::atomic::Ordering::Relaxed);
     event_loop
         .run(move |event, target| match event {
@@ -2650,13 +2659,30 @@ pub fn run_native_opengl(
                     // `QWheelEvent::delta()` is 120 per notch, the value
                     // `imodvScrollWheel` tests the sign of.
                     //
-                    // Deviation: where X11 reports the wheel as legacy button
-                    // 4/5 presses, winit's `xinput2_button_input`
-                    // (`x11/event_processor.rs:1083`) emits this event for the
-                    // press *and* the release, while Qt delivers one
-                    // `QWheelEvent` per notch, so such a notch zooms twice.  A
-                    // device reported as axis motion takes winit's motion path
-                    // and arrives once, which matches.
+                    // Where X11 reports the wheel as legacy button 4/5,
+                    // winit's `xinput2_button_input`
+                    // (`x11/event_processor.rs:1083`) builds this event from
+                    // the button number without looking at `state`, so it
+                    // fires for the press *and* the release, while Qt's xcb
+                    // backend acts on the press only and delivers one
+                    // `QWheelEvent` per notch.  The raw button events say
+                    // which of the two this is: measured under Xvfb with an
+                    // XTEST-injected notch, the order is raw press, wheel,
+                    // raw release, wheel.  So the wheel that follows a raw
+                    // release is the duplicate, and dropping it leaves one
+                    // per notch, as Qt has.
+                    //
+                    // A device reported as axis motion takes winit's motion
+                    // path instead; its emulated buttons carry
+                    // `XIPointerEmulated`, which suppresses both the raw
+                    // button event (`event_processor.rs:1420`) and the button
+                    // one (`:1063`), so the flag is never set and its single
+                    // wheel event is delivered.  The flag is cleared by the
+                    // one wheel event it suppresses and never outlives it.
+                    if wheel_button_released {
+                        wheel_button_released = false;
+                        return;
+                    }
                     let event = KeyEvent {
                         x: cursor.x as i32,
                         y: cursor.y as i32,
@@ -2768,6 +2794,18 @@ pub fn run_native_opengl(
                 }
                 _ => {}
             },
+            Event::DeviceEvent {
+                event: DeviceEvent::Button { button, state },
+                ..
+            } => {
+                // X11 legacy wheel buttons.  `xinput2_button_input`
+                // (`x11/event_processor.rs:1083`) maps details 4 to 7 to
+                // `MouseWheel`, so those are the ones whose release produces
+                // a duplicate.
+                if (4..=7).contains(&button) {
+                    wheel_button_released = state == ElementState::Released;
+                }
+            }
             _ => {}
         })
         .map_err(|error| error.to_string())

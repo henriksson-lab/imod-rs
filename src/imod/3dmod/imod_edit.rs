@@ -22,10 +22,16 @@ use crate::imod::libimod::istore::{istore_copy_cont_surf_items, istore_count_con
 use crate::imod::three_dmod::imod::imod_trace;
 use crate::imod::three_dmod::imodview::ImodView;
 
-/// `Z_SLICE_BOX` from `display.h`.
-pub const Z_SLICE_BOX: i32 = 0;
-/// `X_SLICE_BOX` from `display.h`.
+/// `X_SLICE_BOX`, `Y_SLICE_BOX` and `Z_SLICE_BOX` from the anonymous enum at
+/// `xxyz.h:51`, which begins at `NOT_IN_BOX = 0`.  These were previously
+/// declared here as 0 and 1 with a `display.h` citation; the behaviour of
+/// `imodContourIsPlanar` only distinguishes the three, but the values now
+/// match the source so a caller that has them from `xxyz.h` agrees.
 pub const X_SLICE_BOX: i32 = 1;
+/// See [`X_SLICE_BOX`].
+pub const Y_SLICE_BOX: i32 = 2;
+/// See [`X_SLICE_BOX`].
+pub const Z_SLICE_BOX: i32 = 3;
 
 /// Explicit boundary for `vi->undo` in `imod_edit.cpp`.
 pub trait ImodEditUndo {

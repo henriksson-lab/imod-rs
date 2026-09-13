@@ -20,10 +20,17 @@ pub unsafe fn todfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut 
                 return;
             }
         }
-        if nx & 1 != 0 || nx <= 0 || ny <= 0 {
-            return;
-        }
+        // `todfft.c:74-78`: `if (2*nxo2 != nx)`, printing and ending the
+        // program.  The source has no other guard here -- no check on a
+        // non-positive `nx` or `ny` -- so neither does this.
         let nxo2 = nx / 2;
+        if 2 * nxo2 != nx {
+            libc::printf(
+                c"ERROR: todfft - nx= %d must be even with IMOD FFT routines\n".as_ptr(),
+                nx,
+            );
+            std::process::exit(1);
+        }
         let stride = nx + 2;
         let total = stride * ny;
         let scale = (1.0 / (nx * ny) as f64).sqrt() as f32;

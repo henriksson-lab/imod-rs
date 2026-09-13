@@ -8,6 +8,7 @@
 //! missing rather than silently dropping the action.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::libcfshr::b3dutil::sprintf_arg;
 use std::ffi::{CStr, c_char};
 
 use crate::imod::libimod::imat::{
@@ -926,13 +927,15 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                             } else {
                                 c"Object".as_ptr()
                             },
-                            clips.normal[ip].x as f64,
-                            clips.normal[ip].y as f64,
-                            (clips.normal[ip].z / zscale) as f64,
-                            ((clips.normal[ip].x * clips.point[ip].x)
-                                + (clips.normal[ip].y * clips.point[ip].y)
-                                + (clips.normal[ip].z * clips.point[ip].z))
-                                as f64,
+                            sprintf_arg(clips.normal[ip].x as f64),
+                            sprintf_arg(clips.normal[ip].y as f64),
+                            sprintf_arg((clips.normal[ip].z / zscale) as f64),
+                            sprintf_arg(
+                                ((clips.normal[ip].x * clips.point[ip].x)
+                                    + (clips.normal[ip].y * clips.point[ip].y)
+                                    + (clips.normal[ip].z * clips.point[ip].z))
+                                    as f64,
+                            ),
                         );
                     }
                     qstr = unsafe { CStr::from_ptr(qstr2.as_ptr()) }
@@ -1278,7 +1281,7 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                                 qstr2.as_mut_ptr(),
                                 qstr2.len(),
                                 c"%7.3f ".as_ptr(),
-                                imod_ref.view[0].mat[tstep as usize] as f64,
+                                sprintf_arg(imod_ref.view[0].mat[tstep as usize] as f64),
                             );
                         }
                         qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
@@ -1291,9 +1294,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                         qstr2.as_mut_ptr(),
                         qstr2.len(),
                         c"Trans (x,y,z) = (%g, %g, %g)\n".as_ptr(),
-                        imod_ref.view[0].trans.x as f64,
-                        imod_ref.view[0].trans.y as f64,
-                        imod_ref.view[0].trans.z as f64,
+                        sprintf_arg(imod_ref.view[0].trans.x as f64),
+                        sprintf_arg(imod_ref.view[0].trans.y as f64),
+                        sprintf_arg(imod_ref.view[0].trans.z as f64),
                     );
                 }
                 qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
@@ -1302,9 +1305,9 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                         qstr2.as_mut_ptr(),
                         qstr2.len(),
                         c"Rotate (x,y,z) = (%g, %g, %g)\n".as_ptr(),
-                        imod_ref.view[0].rot.x as f64,
-                        imod_ref.view[0].rot.y as f64,
-                        imod_ref.view[0].rot.z as f64,
+                        sprintf_arg(imod_ref.view[0].rot.x as f64),
+                        sprintf_arg(imod_ref.view[0].rot.y as f64),
+                        sprintf_arg(imod_ref.view[0].rot.z as f64),
                     );
                 }
                 qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
@@ -1316,8 +1319,8 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                             qstr2.len(),
                             c"%d frames / %.3f sec = %.3f FPS\n".as_ptr(),
                             a.movie_frames,
-                            elapsed as f64,
-                            (a.movie_frames as f32 / elapsed) as f64,
+                            sprintf_arg(elapsed as f64),
+                            sprintf_arg((a.movie_frames as f32 / elapsed) as f64),
                         );
                     }
                     qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();

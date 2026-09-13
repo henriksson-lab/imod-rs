@@ -20,8 +20,16 @@ pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i
                 return;
             }
         }
-        if nx <= 0 || ny <= 0 || (idir >= 0 && nx & 1 != 0) {
-            return;
+        // `odfft.c:76-80`: `if (!(2*nxo2 == nx || idir < 0))`, printing and
+        // ending the program.  The source has no other guard here -- no
+        // check on a non-positive `nx` or `ny` -- so neither does this.
+        let nxo2 = nx / 2;
+        if !(2 * nxo2 == nx || idir < 0) {
+            libc::printf(
+                c"ERROR: odfft - nx= %d must be even with IMOD FFT routines\n".as_ptr(),
+                nx,
+            );
+            std::process::exit(1);
         }
         let scale = (1.0 / nx as f64).sqrt() as f32;
         let mut dim = [0_i32; 6];
@@ -83,7 +91,14 @@ pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i
                 }
                 hermft(array, array.add(1), nx / 2, dim.as_mut_ptr());
             }
-            _ => {}
+            // `odfft.c:185-187`: the `default:` arm of the source's switch.
+            _ => {
+                libc::printf(
+                    c"ERROR: odfft - idir = %d is an illegal option\n".as_ptr(),
+                    idir,
+                );
+                std::process::exit(1);
+            }
         }
     }
 }

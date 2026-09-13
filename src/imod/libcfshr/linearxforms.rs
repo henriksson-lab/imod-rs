@@ -117,6 +117,10 @@ pub fn angles_to_matrix(angles: &[f32; 3], matrix: &mut [f32], rows: usize) {
 pub fn icalc_matrix(angles: &[f32; 3], matrix: &mut [f32]) {
     angles_to_matrix(angles, matrix, 3)
 }
+/// `linearxforms.c:226`: `double sDet;` is a file-scope global, not a local, and
+/// `icalc_angles` prints it after `matrixToAngles` has failed.  Keeping it a
+/// local would lose the value that failure path reports.
+pub static mut S_DET: f64 = 0.0;
 /// Matches `matrixToAngles`.
 pub fn matrix_to_angles(matrix: &[f32], rows: usize) -> Result<(f64, f64, f64), ()> {
     let (r11, r12, r13, r21, r22, r23, r31, r32, r33) = (
@@ -130,11 +134,14 @@ pub fn matrix_to_angles(matrix: &[f32], rows: usize) -> Result<(f64, f64, f64), 
         matrix[2 + rows] as f64,
         matrix[2 + 2 * rows] as f64,
     );
-    let det = r11 * r22 * r33 - r11 * r23 * r32 + r12 * r23 * r31 - r12 * r21 * r33
-        + r13 * r21 * r32
-        - r13 * r22 * r31;
-    if (det - 1.).abs() > 0.01 {
-        return Err(());
+    unsafe {
+        S_DET = r11 * r22 * r33 - r11 * r23 * r32 + r12 * r23 * r31 - r12 * r21 * r33
+            + r13 * r21 * r32
+            - r13 * r22 * r31;
+        S_DET -= 1.0;
+        if S_DET > 0.01 || S_DET < -0.01 {
+            return Err(());
+        }
     }
     let (a, b, g) = if (r13 - 1.).abs() < 1e-7 || (r13 + 1.).abs() < 1e-7 {
         (0., r13.asin(), r21.atan2(r22))
@@ -152,11 +159,42 @@ pub fn matrix_to_angles(matrix: &[f32], rows: usize) -> Result<(f64, f64, f64), 
     };
     Ok((a / 0.017453292, b / 0.017453292, g / 0.017453292))
 }
-/// Matches `icalc_angles`.
-pub fn icalc_angles(angles: &mut [f32; 3], matrix: &[f32]) -> Result<(), ()> {
-    let (x, y, z) = matrix_to_angles(matrix, 3)?;
-    *angles = [x as f32, y as f32, z as f32];
-    Ok(())
+/// Matches `icalc_angles`.  `linearxforms.c:302` returns `void`: on a matrix
+/// that is not a pure rotation it leaves `angles` untouched and prints the five
+/// lines the old Fortran routine printed, to stdout.  That printing is part of
+/// the contract — a caller has no other way to learn the call failed.
+pub fn icalc_angles(angles: &mut [f32; 3], matrix: &[f32]) {
+    if let Ok((x, y, z)) = matrix_to_angles(matrix, 3) {
+        angles[0] = x as f32;
+        angles[1] = y as f32;
+        angles[2] = z as f32;
+        return;
+    }
+
+    // And here is what the old fortran routine did:
+    unsafe {
+        libc::printf(
+            c"icalc_angles - matrix %10.6f %10.6f %10.6f\n".as_ptr(),
+            matrix[0] as f64,
+            matrix[3] as f64,
+            matrix[6] as f64,
+        );
+        libc::printf(
+            c"                      %10.6f %10.6f %10.6f\n".as_ptr(),
+            matrix[1] as f64,
+            matrix[4] as f64,
+            matrix[7] as f64,
+        );
+        libc::printf(
+            c"                      %10.6f %10.6f %10.6f\n".as_ptr(),
+            matrix[2] as f64,
+            matrix[5] as f64,
+            matrix[8] as f64,
+        );
+        libc::printf(c"determinant - %f\n".as_ptr(), S_DET);
+        libc::printf(c"ERROR: icalc_angles - Not a pure rotation matrix\n".as_ptr());
+        libc::fflush(core::ptr::null_mut());
+    }
 }
 /// Matches `invertMatrix`.
 pub fn invert_matrix(matrix: &[f32; 9], inverse: &mut [f32; 9]) {
