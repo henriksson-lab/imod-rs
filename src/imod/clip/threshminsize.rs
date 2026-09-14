@@ -1,14 +1,17 @@
 //! Translation of `IMOD/clip/threshminsize.cpp`.
 #![allow(dead_code)]
+
 use crate::imod::clip::clip::{ClipOptions, PlaneConnectedPoints, ZConnectedSets};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::islice::{Islice, slice_create, slice_free, slice_put_val};
 use crate::imod::libiimod::mrcfiles::MrcHeader;
+use std::io::Write as _;
 
 /// C++ `thresholdWithMinSize`.
 pub unsafe fn threshold_with_min_size(
-    hin: *mut MrcHeader,
-    hout: *mut MrcHeader,
-    opt: *mut ClipOptions,
+    hin: &mut MrcHeader,
+    hout: &mut MrcHeader,
+    opt: &mut ClipOptions,
     thresh_lo: f32,
     thresh_hi: f32,
     mut z_write: i32,
@@ -18,13 +21,13 @@ pub unsafe fn threshold_with_min_size(
             &mut *hout,
             b"clip: thresholded with minimum size constraint",
         );
-        if (*opt).min_size == 0 {
+        if opt.min_size == 0 {
             crate::imod::clip::clip::show_error("CLIP - The minimum size entry must be non-zero");
             return -1;
         }
-        let mut min_size = (*opt).min_size;
+        let mut min_size = opt.min_size;
         let mut direction = 1.;
-        let mut thresh = (*opt).thresh;
+        let mut thresh = opt.thresh;
         let (fill, set) = if min_size < 0 {
             min_size = -min_size;
             direction = -1.;
@@ -33,7 +36,7 @@ pub unsafe fn threshold_with_min_size(
             thresh *= 1.0000006;
             (thresh_lo, thresh_hi)
         };
-        let (nx, ny) = ((*opt).ix, (*opt).iy);
+        let (nx, ny) = (opt.ix, opt.iy);
         let mut shift = 0_u32;
         let mut mask = 0_u32;
         let mut nyleft = ny - 1;
@@ -50,11 +53,11 @@ pub unsafe fn threshold_with_min_size(
                 return -1;
             }
         }
-        let out = slice_create(nx, ny, (*opt).mode);
+        let out = slice_create(nx, ny, opt.mode);
         if out.is_null() {
             // `threshminsize.cpp:126-129`.  Note the doubled space in the
             // source's text.
-            libc::printf(c"ERROR: CLIP - Allocating  memory\n".as_ptr());
+            let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - Allocating  memory\n");
             return -1;
         }
         // The source's two `catch` blocks (`threshminsize.cpp:358-365`,
@@ -63,32 +66,49 @@ pub unsafe fn threshold_with_min_size(
         // texts are therefore unreachable rather than omitted.
         let mut grouped = vec![0_u8; (nx * ny) as usize];
         let mut planes: Vec<Vec<PlaneConnectedPoints>> =
-            (0..(*opt).nofsecs).map(|_| Vec::new()).collect();
+            (0..opt.nofsecs).map(|_| Vec::new()).collect();
         let mut sets: Vec<ZConnectedSets> = Vec::new();
-        let offset = if (*opt).dim == 3 { 1 } else { 0 };
+        let offset = if opt.dim == 3 { 1 } else { 0 };
         let mut kout = 0;
         let mut next: *mut Islice = core::ptr::null_mut();
         let mut last: *mut Islice = core::ptr::null_mut();
         let mut input: *mut Islice = core::ptr::null_mut();
-        for kin in -offset..(*opt).nofsecs {
-            if kin + offset < (*opt).nofsecs {
-                let z = *(*opt).secs.add((kin + offset) as usize);
+        for kin in -offset..opt.nofsecs {
+            if kin + offset < opt.nofsecs {
+                let z = opt.secs[(kin + offset) as usize];
                 next = crate::imod::libiimod::mrcslice::slice_read_subm(
                     hin,
                     z,
                     b'z' as i8,
                     nx,
                     ny,
-                    (*opt).cx as i32,
-                    (*opt).cy as i32,
+                    opt.cx as i32,
+                    opt.cy as i32,
                 );
                 if next.is_null() || crate::imod::libiimod::mrcslice::slice_float(next) < 0 {
-                    let message = if next.is_null() {
-                        format!("CLIP - Reading slice {z} from file")
-                    } else {
-                        format!("CLIP - Converting slice {z} to floating point")
-                    };
-                    crate::imod::clip::clip::show_error(&message);
+                    // `threshminsize.cpp:143`: the first `%s` is chosen by
+                    // `nextSlice` and the third by `inSlice`, which are not the
+                    // same test -- a conversion failure on the very first slice
+                    // prints "Converting slice N from file".
+                    let _ = ImodFile::Stdout.write_all(
+                        c_format(
+                            "ERROR: CLIP - %s slice %d %s\n",
+                            &[
+                                CArg::Str(if !next.is_null() {
+                                    "Converting"
+                                } else {
+                                    "Reading"
+                                }),
+                                CArg::Int(z as i64),
+                                CArg::Str(if !input.is_null() {
+                                    "to floating point"
+                                } else {
+                                    "from file"
+                                }),
+                            ],
+                        )
+                        .as_bytes(),
+                    );
                     if !next.is_null() {
                         slice_free(next)
                     };
@@ -183,7 +203,7 @@ pub unsafe fn threshold_with_min_size(
                         || sets[si].xmin > plane.xmax
                         || sets[si].ymax < plane.ymin
                         || sets[si].ymin > plane.ymax);
-                    let joins = (*opt).dim == 3
+                    let joins = opt.dim == 3
                         && overlaps
                         && (0..sets[si].index.len()).any(|n| {
                             sets[si].plane_z[n] == kin - 1
@@ -235,10 +255,10 @@ pub unsafe fn threshold_with_min_size(
                     })
                 }
             }
-            let active = if kin < (*opt).nofsecs - 1 {
+            let active = if kin < opt.nofsecs - 1 {
                 kin
             } else {
-                (*opt).nofsecs
+                opt.nofsecs
             };
             while kout < active {
                 if sets.iter().any(|z| z.zmin <= kout && z.zmax == active) {
@@ -289,7 +309,7 @@ pub unsafe fn threshold_with_min_size(
             slice_free(last)
         }
         slice_free(out);
-        crate::imod::clip::file_io::set_mrc_coords(opt)
+        crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
     }
 }
 
@@ -301,8 +321,8 @@ mod tests {
 
     #[test]
     fn threshold_rejects_zero_minimum_size_before_slice_io() {
-        let mut hin = unsafe { core::mem::zeroed::<MrcHeader>() };
-        let mut hout = unsafe { core::mem::zeroed::<MrcHeader>() };
+        let mut hin = unsafe { MrcHeader::default() };
+        let mut hout = unsafe { MrcHeader::default() };
         mrc_head_new(&mut hin, 2, 2, 1, 2);
         mrc_head_new(&mut hout, 2, 2, 1, 2);
         let defects = CameraDefects {
@@ -332,11 +352,8 @@ mod tests {
             pix_use_mean: vec![],
         };
         let mut opt = ClipOptions {
-            pname: core::ptr::null_mut(),
-            command: core::ptr::null_mut(),
-            hin: core::ptr::null_mut(),
-            hin2: core::ptr::null_mut(),
-            hout: core::ptr::null_mut(),
+            pname: String::new(),
+            command: String::new(),
             process: 44,
             x: 0,
             y: 0,
@@ -371,22 +388,22 @@ mod tests {
             mode: 2,
             dim: 3,
             infiles: 1,
-            fnames: core::ptr::null_mut(),
+            fnames: Vec::new(),
             sano: 0,
             add2file: 0,
             isec: 0,
             val: 0.,
             nofsecs: 1,
-            secs: core::ptr::null_mut(),
+            secs: Vec::new(),
             out_before: 0,
             out_after: 0,
             ocanresize: 0,
             ocanchmode: 0,
             from_one: 0,
-            ofname: core::ptr::null_mut(),
-            plname: core::ptr::null_mut(),
-            super_gain_name: core::ptr::null_mut(),
-            point_out_name: core::ptr::null_mut(),
+            ofname: None,
+            plname: None,
+            super_gain_name: None,
+            point_out_name: None,
             new_xoverlap: 0,
             new_yoverlap: 0,
             rotation_flip: 0,

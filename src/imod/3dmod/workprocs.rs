@@ -66,6 +66,10 @@ pub struct ImodWorkproc {
     pub m_movie_timer: WorkprocTimer,
     pub m_control_timer: WorkprocTimer,
     pub m_display_busy: i32,
+    /// `ImodWorkproc::mVi`.  `ImodView` owns this `ImodWorkproc`, so the C++
+    /// back-pointer cannot be a Rust borrow; it is never dereferenced here
+    /// (every method takes the view as an argument), so only the identity is
+    /// kept.
     pub m_vi: usize,
     pub m_timer_fired: i32,
     pub m_exit_on_timeout: bool,
@@ -87,7 +91,7 @@ impl ImodWorkproc {
             m_movie_timer: WorkprocTimer::default(),
             m_control_timer: WorkprocTimer::default(),
             m_display_busy: 0,
-            m_vi: vw as *const ImodView as usize,
+            m_vi: core::ptr::from_ref(vw).addr(),
             m_timer_fired: 0,
             m_exit_on_timeout: false,
             m_dlg_dock_timers: [None, None],

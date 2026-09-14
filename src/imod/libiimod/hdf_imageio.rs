@@ -7,6 +7,7 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libcfshr::autodoc::adoc_new;
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_shift_bytes};
 use crate::imod::libcfshr::ilist::{Ilist, ilist_append, ilist_item, ilist_new, ilist_size};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
@@ -42,8 +43,6 @@ struct StackSetData {
 }
 
 unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-    static mut stdout: *mut libc::FILE;
     fn H5Screate_simple(rank: c_int, dims: *const HsizeT, maxdims: *const HsizeT) -> HidT;
     fn H5Sclose(id: HidT) -> c_int;
     fn H5Sselect_hyperslab(
@@ -116,7 +115,7 @@ pub unsafe fn hdf_read_section_any(
     if in_file.is_null() || (*in_file).header.is_null() {
         return 1;
     }
-    let mut li: LoadInfo = zeroed();
+    let mut li = LoadInfo::default();
     ii_mrc_set_load_info(in_file, &mut li);
     let hdata = (*in_file).header.cast::<MrcHeader>();
     let mut d: LineProcData = zeroed();
@@ -384,7 +383,7 @@ pub unsafe fn hdf_write_section_any(
         return 1;
     }
     let h = (*in_file).header.cast::<MrcHeader>();
-    let mut li: LoadInfo = zeroed();
+    let mut li = LoadInfo::default();
     ii_mrc_set_load_info(in_file, &mut li);
     let mut buf_mode = (*h).mode;
     let convert = from_float > 0 && !matches!((*h).mode, MRC_MODE_COMPLEX_FLOAT | MRC_MODE_FLOAT);
@@ -493,8 +492,11 @@ pub unsafe fn hdf_write_section_any(
                 is_open: 1,
             };
             if ilist_append(
-                (*in_file).stack_set_list.cast(),
-                (&stack as *const StackSetData).cast_mut().cast(),
+                &mut *(*in_file).stack_set_list.cast::<Ilist>(),
+                core::slice::from_raw_parts(
+                    (&raw const stack).cast::<u8>(),
+                    core::mem::size_of::<StackSetData>(),
+                ),
             ) != 0
             {
                 cleanup_tmp(
@@ -508,7 +510,7 @@ pub unsafe fn hdf_write_section_any(
                 return 1;
             }
             *(*in_file).z_to_data_set_map.add(cz as usize) =
-                ilist_size((*in_file).stack_set_list.cast()) - 1;
+                ilist_size((*in_file).stack_set_list.cast::<Ilist>().as_ref()) - 1;
         }
         get_dataset_for_z(in_file, cz, &mut none)
     } else {
@@ -677,8 +679,9 @@ pub unsafe fn init_new_hdf_file(in_file: *mut ImodImageFile) -> i32 {
             }
         }
     } else {
-        (*in_file).stack_set_list =
-            ilist_new(core::mem::size_of::<StackSetData>() as i32, size).cast();
+        (*in_file).stack_set_list = ilist_new(core::mem::size_of::<StackSetData>() as i32, size)
+            .map_or(core::ptr::null_mut(), Box::into_raw)
+            .cast();
         (*in_file).z_to_data_set_map =
             libc::malloc((size as usize) * core::mem::size_of::<i32>()).cast();
         if (*in_file).stack_set_list.is_null() || (*in_file).z_to_data_set_map.is_null() {
@@ -851,10 +854,12 @@ unsafe fn get_dataset_for_z(in_file: *mut ImodImageFile, cz: i32, no_data: *mut 
             return 0;
         }
         let stack = ilist_item(
-            (*in_file).stack_set_list.cast::<Ilist>(),
+            (*in_file).stack_set_list.cast::<Ilist>().as_mut(),
             *(*in_file).z_to_data_set_map.add(cz as usize),
         )
-        .cast::<StackSetData>();
+        .map_or(core::ptr::null_mut(), |item| {
+            item.as_mut_ptr().cast::<StackSetData>()
+        });
         if (*stack).is_open != 0 {
             (*stack).dset_id
         } else {
@@ -881,7 +886,10 @@ unsafe fn cleanup_tmp(
     mspace: HidT,
     mess: Option<&str>,
 ) {
-    libc::fflush(stdout);
+    {
+        use std::io::Write;
+        let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.flush();
+    }
     if mspace != 0 {
         H5Sclose(mspace);
     }
@@ -896,7 +904,7 @@ unsafe fn cleanup_tmp(
     }
     if let Some(message) = mess {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: hdf{}SectionAny - {}.\n",
                 if free_map >= 0 { "Read" } else { "Write" },
@@ -942,9 +950,9 @@ mod tests {
             assert_eq!(H5Gclose(images), 0);
             assert_eq!(H5Gclose(mdf), 0);
 
-            let mut header: MrcHeader = zeroed();
-            let mut image: ImodImageFile = zeroed();
-            let mut companion: ImodImageFile = zeroed();
+            let mut header = MrcHeader::default();
+            let mut image = ImodImageFile::default();
+            let mut companion = ImodImageFile::default();
             let mut volumes = [
                 &mut image as *mut ImodImageFile,
                 &mut companion as *mut ImodImageFile,
@@ -1073,12 +1081,12 @@ mod tests {
             assert_eq!(H5Gclose(images), 0);
             assert_eq!(H5Gclose(mdf), 0);
 
-            let mut header: MrcHeader = zeroed();
+            let mut header = MrcHeader::default();
             header.nx = 2;
             header.ny = 2;
             header.nz = 4;
             header.mode = MRC_MODE_FLOAT;
-            let mut image: ImodImageFile = zeroed();
+            let mut image = ImodImageFile::default();
             image.header = (&raw mut header).cast();
             image.nx = 2;
             image.ny = 2;
@@ -1099,9 +1107,12 @@ mod tests {
                 hdf_write_section_any(&mut image, section.as_ptr().cast_mut().cast(), 3, 0),
                 0
             );
-            assert_eq!(ilist_size(image.stack_set_list.cast()), 1);
+            assert_eq!(ilist_size(image.stack_set_list.cast::<Ilist>().as_ref()), 1);
             assert_eq!(*image.z_to_data_set_map.add(3), 0);
-            let stack = ilist_item(image.stack_set_list.cast(), 0).cast::<StackSetData>();
+            let stack = ilist_item(image.stack_set_list.cast::<Ilist>().as_mut(), 0)
+                .unwrap()
+                .as_mut_ptr()
+                .cast::<StackSetData>();
             assert_eq!(
                 std::ffi::CStr::from_ptr((*stack).name).to_bytes(),
                 b"/MDF/images/3/image"
@@ -1121,7 +1132,9 @@ mod tests {
             assert_eq!(read, section);
             assert_eq!(H5Dclose((*stack).dset_id), 0);
             libc::free((*stack).name.cast());
-            crate::imod::libcfshr::ilist::ilist_delete(image.stack_set_list.cast());
+            crate::imod::libcfshr::ilist::ilist_delete(Some(Box::from_raw(
+                image.stack_set_list.cast::<Ilist>(),
+            )));
             libc::free(image.z_to_data_set_map.cast());
             assert_eq!(H5Fclose(file), 0);
             std::fs::remove_file(path).unwrap();

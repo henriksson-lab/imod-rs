@@ -12,7 +12,7 @@ pub type FortStrLenT = i32;
 pub unsafe fn adocf2cstr(string: *const c_char, string_size: FortStrLenT) -> *mut c_char {
     let new_str = f2c_string(string, string_size);
     if new_str.is_null() {
-        pip_set_error(c"Memory error converting string from Fortran to C".as_ptr());
+        pip_set_error(b"Memory error converting string from Fortran to C");
     }
     new_str
 }
@@ -128,9 +128,7 @@ pub unsafe extern "C" fn adocgetxmlrootelement_(
     if err == 0 && string.is_null() {
         c2f_string(c" ".as_ptr(), element, elem_size);
     } else if err == 0 && c2f_string(string, element, elem_size) != 0 {
-        pip_set_error(
-            c"In AdocGetXmlRootElement, string is too long for character variable".as_ptr(),
-        );
+        pip_set_error(b"In AdocGetXmlRootElement, string is too long for character variable");
         err = -1;
     }
     if !string.is_null() {
@@ -414,7 +412,7 @@ pub unsafe extern "C" fn adocgetsectionname_(
     let mut p = core::ptr::null_mut();
     let mut e = adoc_get_section_name(c, *si - 1, &mut p);
     if e == 0 && c2f_string(p, string, ss) != 0 {
-        pip_set_error(c"In AdocGetSectionName, string is too long for character variable".as_ptr());
+        pip_set_error(b"In AdocGetSectionName, string is too long for character variable");
         e = -1;
     }
     if !p.is_null() {
@@ -507,9 +505,7 @@ pub unsafe extern "C" fn adocgetcollectionname_(
     let mut p = core::ptr::null_mut();
     let mut e = adoc_get_collection_name(*ci - 1, &mut p);
     if e == 0 && c2f_string(p, string, ss) != 0 {
-        pip_set_error(
-            c"In AdocGetCollectionName, string is too long for character variable".as_ptr(),
-        );
+        pip_set_error(b"In AdocGetCollectionName, string is too long for character variable");
         e = -1;
         libc::free(p.cast());
     }
@@ -578,7 +574,7 @@ pub unsafe extern "C" fn adocgetstring_(
     let mut p = core::ptr::null_mut();
     let mut e = adoc_get_string(c, *si - 1, k, &mut p);
     if e == 0 && c2f_string(p, string, ss) != 0 {
-        pip_set_error(c"In AdocGetString, string is too long for character variable".as_ptr());
+        pip_set_error(b"In AdocGetString, string is too long for character variable");
         e = -1;
     }
     if !p.is_null() {
@@ -769,15 +765,11 @@ pub unsafe extern "C" fn adocgetstandardnames_(
 ) -> i32 {
     let mut e = 0;
     if c2f_string(ADOC_GLOBAL_NAME.as_ptr(), global, gs) != 0 {
-        pip_set_error(
-            c"In AdocGetStandardNames, global name is too long for character variable".as_ptr(),
-        );
+        pip_set_error(b"In AdocGetStandardNames, global name is too long for character variable");
         e = -1;
     }
     if e == 0 && c2f_string(ADOC_ZVALUE_NAME.as_ptr(), zvalue, zs) != 0 {
-        pip_set_error(
-            c"In AdocGetSectionName, zvalue name is too long for character variable".as_ptr(),
-        );
+        pip_set_error(b"In AdocGetSectionName, zvalue name is too long for character variable");
         e = -1;
     }
     e

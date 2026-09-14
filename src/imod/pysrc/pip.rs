@@ -110,7 +110,10 @@ pub fn pip_exit_on_error(use_standard_error: i32, prefix: &str) -> i32 {
     *S_EXIT_PREFIX.lock().expect("PIP exit prefix mutex") =
         Some(prefix.to_string_lossy().into_owned());
     unsafe {
-        crate::imod::libcfshr::parse_params::pip_exit_on_error(use_standard_error, prefix.as_ptr())
+        crate::imod::libcfshr::parse_params::pip_exit_on_error(
+            use_standard_error,
+            prefix.to_bytes(),
+        )
     }
 }
 
@@ -125,7 +128,7 @@ pub fn pip_set_linked_option(option: &str) {
         return;
     };
     unsafe {
-        crate::imod::libcfshr::parse_params::pip_set_linked_option(option.as_ptr());
+        crate::imod::libcfshr::parse_params::pip_set_linked_option(option.to_bytes());
     }
 }
 
@@ -146,7 +149,7 @@ pub fn pip_add_option(option_string: &str) -> i32 {
     let Ok(option_string) = CString::new(option_string) else {
         return -1;
     };
-    unsafe { crate::imod::libcfshr::parse_params::pip_add_option(option_string.as_ptr()) }
+    unsafe { crate::imod::libcfshr::parse_params::pip_add_option(option_string.to_bytes()) }
 }
 
 /// Matches `PipNextArg` (`IMOD/pysrc/pip.py:275`).
@@ -154,7 +157,7 @@ pub fn pip_next_arg(argument_string: &str) -> i32 {
     let Ok(argument_string) = CString::new(argument_string) else {
         return -1;
     };
-    unsafe { crate::imod::libcfshr::parse_params::pip_next_arg(argument_string.as_ptr()) }
+    unsafe { crate::imod::libcfshr::parse_params::pip_next_arg(argument_string.to_bytes()) }
 }
 
 /// Matches `PipNumberOfArgs` (`IMOD/pysrc/pip.py:356`).
@@ -163,8 +166,8 @@ pub fn pip_number_of_args() -> (i32, i32) {
     let mut non_option_arguments = 0;
     unsafe {
         crate::imod::libcfshr::parse_params::pip_number_of_args(
-            &raw mut option_arguments,
-            &raw mut non_option_arguments,
+            &mut option_arguments,
+            &mut non_option_arguments,
         )
     }
     (option_arguments, non_option_arguments)
@@ -173,17 +176,14 @@ pub fn pip_number_of_args() -> (i32, i32) {
 /// Matches `PipGetNonOptionArg` (`IMOD/pysrc/pip.py:363`).
 pub fn pip_get_non_option_arg(argument_number: i32) -> Result<String, i32> {
     *PIP_ERRNO.lock().expect("PIP errno mutex") = 0;
-    let mut value = std::ptr::null_mut();
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_non_option_arg(argument_number, &raw mut value)
-    };
+    let mut value: Vec<u8> = Vec::new();
+    let status =
+        crate::imod::libcfshr::parse_params::pip_get_non_option_arg(argument_number, &mut value);
     if status != 0 {
         *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
         return Err(status);
     }
-    let result = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
-    unsafe { libc::free(value.cast()) };
-    Ok(result)
+    Ok(String::from_utf8_lossy(&value).into_owned())
 }
 
 /// Matches `PipGetString` (`IMOD/pysrc/pip.py:377`).
@@ -192,10 +192,8 @@ pub fn pip_get_string(option: &str, default_value: &str) -> Result<String, i32> 
     let Ok(option) = CString::new(option) else {
         return Err(-1);
     };
-    let mut value = std::ptr::null_mut();
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_string(option.as_ptr(), &raw mut value)
-    };
+    let mut value: Vec<u8> = Vec::new();
+    let status = crate::imod::libcfshr::parse_params::pip_get_string(option.to_bytes(), &mut value);
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 {
         return Err(status);
@@ -203,9 +201,7 @@ pub fn pip_get_string(option: &str, default_value: &str) -> Result<String, i32> 
     if status > 0 {
         return Ok(default_value.to_owned());
     }
-    let result = unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() };
-    unsafe { libc::free(value.cast()) };
-    Ok(result)
+    Ok(String::from_utf8_lossy(&value).into_owned())
 }
 
 /// Matches `PipGetBoolean` (`IMOD/pysrc/pip.py:390`).
@@ -216,7 +212,7 @@ pub fn pip_get_boolean(option: &str, default_value: i32) -> Result<i32, i32> {
     };
     let mut value = default_value;
     let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_boolean(option.as_ptr(), &raw mut value)
+        crate::imod::libcfshr::parse_params::pip_get_boolean(option.to_bytes(), &mut value)
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 { Err(status) } else { Ok(value) }
@@ -230,7 +226,7 @@ pub fn pip_get_integer(option: &str, default_value: i32) -> Result<i32, i32> {
     };
     let mut value = default_value;
     let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_integer(option.as_ptr(), &raw mut value)
+        crate::imod::libcfshr::parse_params::pip_get_integer(option.to_bytes(), &mut value)
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 { Err(status) } else { Ok(value) }
@@ -244,7 +240,7 @@ pub fn pip_get_float(option: &str, default_value: f32) -> Result<f32, i32> {
     };
     let mut value = default_value;
     let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_float(option.as_ptr(), &raw mut value)
+        crate::imod::libcfshr::parse_params::pip_get_float(option.to_bytes(), &mut value)
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 { Err(status) } else { Ok(value) }
@@ -258,9 +254,9 @@ pub fn pip_get_two_integers(option: &str, default_values: (i32, i32)) -> Result<
     let (mut first, mut second) = default_values;
     let status = unsafe {
         crate::imod::libcfshr::parse_params::pip_get_two_integers(
-            option.as_ptr(),
-            &raw mut first,
-            &raw mut second,
+            option.to_bytes(),
+            &mut first,
+            &mut second,
         )
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
@@ -279,9 +275,9 @@ pub fn pip_get_two_floats(option: &str, default_values: (f32, f32)) -> Result<(f
     let (mut first, mut second) = default_values;
     let status = unsafe {
         crate::imod::libcfshr::parse_params::pip_get_two_floats(
-            option.as_ptr(),
-            &raw mut first,
-            &raw mut second,
+            option.to_bytes(),
+            &mut first,
+            &mut second,
         )
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
@@ -303,10 +299,10 @@ pub fn pip_get_three_integers(
     let (mut first, mut second, mut third) = default_values;
     let status = unsafe {
         crate::imod::libcfshr::parse_params::pip_get_three_integers(
-            option.as_ptr(),
-            &raw mut first,
-            &raw mut second,
-            &raw mut third,
+            option.to_bytes(),
+            &mut first,
+            &mut second,
+            &mut third,
         )
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
@@ -328,10 +324,10 @@ pub fn pip_get_three_floats(
     let (mut first, mut second, mut third) = default_values;
     let status = unsafe {
         crate::imod::libcfshr::parse_params::pip_get_three_floats(
-            option.as_ptr(),
-            &raw mut first,
-            &raw mut second,
-            &raw mut third,
+            option.to_bytes(),
+            &mut first,
+            &mut second,
+            &mut third,
         )
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
@@ -347,13 +343,14 @@ pub fn pip_get_integer_array(option: &str, values: &mut [i32]) -> Result<usize, 
     let Ok(option) = CString::new(option) else {
         return Err(-1);
     };
-    let mut number = values.len() as i32;
+    let len = values.len() as i32;
+    let mut number = len;
     let status = unsafe {
         crate::imod::libcfshr::parse_params::pip_get_integer_array(
-            option.as_ptr(),
-            values.as_mut_ptr(),
-            &raw mut number,
-            values.len() as i32,
+            option.to_bytes(),
+            values,
+            &mut number,
+            len,
         )
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
@@ -369,13 +366,14 @@ pub fn pip_get_float_array(option: &str, values: &mut [f32]) -> Result<usize, i3
     let Ok(option) = CString::new(option) else {
         return Err(-1);
     };
-    let mut number = values.len() as i32;
+    let len = values.len() as i32;
+    let mut number = len;
     let status = unsafe {
         crate::imod::libcfshr::parse_params::pip_get_float_array(
-            option.as_ptr(),
-            values.as_mut_ptr(),
-            &raw mut number,
-            values.len() as i32,
+            option.to_bytes(),
+            values,
+            &mut number,
+            len,
         )
     };
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
@@ -398,7 +396,7 @@ pub fn pip_print_help(
     };
     unsafe {
         crate::imod::libcfshr::parse_params::pip_print_help(
-            program_name.as_ptr(),
+            program_name.to_bytes(),
             use_standard_error,
             input_files,
             output_files,
@@ -413,14 +411,12 @@ pub fn pip_print_entries() {
 
 /// Matches `PipGetError` (`IMOD/pysrc/pip.py:645`).
 pub fn pip_get_error() -> Result<String, i32> {
-    let mut message = std::ptr::null_mut();
-    let status = unsafe { crate::imod::libcfshr::parse_params::pip_get_error(&raw mut message) };
+    let mut message: Vec<u8> = Vec::new();
+    let status = crate::imod::libcfshr::parse_params::pip_get_error(&mut message);
     if status != 0 {
         return Err(status);
     }
-    let result = unsafe { CStr::from_ptr(message).to_string_lossy().into_owned() };
-    unsafe { libc::free(message.cast()) };
-    Ok(result)
+    Ok(String::from_utf8_lossy(&message).into_owned())
 }
 
 /// Matches `PipSetError` (`IMOD/pysrc/pip.py:657`).
@@ -428,7 +424,7 @@ pub fn pip_set_error(error_string: &str) -> i32 {
     let Ok(error_string) = CString::new(error_string) else {
         return -1;
     };
-    unsafe { crate::imod::libcfshr::parse_params::pip_set_error(error_string.as_ptr()) }
+    unsafe { crate::imod::libcfshr::parse_params::pip_set_error(error_string.to_bytes()) }
 }
 
 /// Matches `PipNumberOfEntries` (`IMOD/pysrc/pip.py:685`).
@@ -438,7 +434,7 @@ pub fn pip_number_of_entries(option: &str) -> Result<i32, i32> {
     };
     let mut number = 0;
     let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_number_of_entries(option.as_ptr(), &raw mut number)
+        crate::imod::libcfshr::parse_params::pip_number_of_entries(option.to_bytes(), &mut number)
     };
     if status < 0 { Err(status) } else { Ok(number) }
 }
@@ -450,7 +446,7 @@ pub fn pip_linked_index(option: &str) -> Result<i32, i32> {
     };
     let mut index = 0;
     let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_linked_index(option.as_ptr(), &raw mut index)
+        crate::imod::libcfshr::parse_params::pip_linked_index(option.to_bytes(), &mut index)
     };
     if status < 0 { Err(status) } else { Ok(index) }
 }
@@ -467,25 +463,23 @@ pub fn pip_parse_input(arguments: &[String], options: &[String]) -> Result<(i32,
         .map(|value| CString::new(value.as_str()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| -1)?;
-    let mut argument_pointers = arguments
+    let argument_bytes = arguments
         .iter()
-        .map(|value| value.as_ptr().cast_mut())
+        .map(|value| value.to_bytes().to_vec())
         .collect::<Vec<_>>();
-    let mut option_pointers = options
+    let option_bytes = options
         .iter()
-        .map(|value| value.as_ptr())
+        .map(|value| value.to_bytes())
         .collect::<Vec<_>>();
     let (mut option_count, mut non_option_count) = (0, 0);
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_parse_input(
-            argument_pointers.len() as i32,
-            argument_pointers.as_mut_ptr(),
-            option_pointers.as_mut_ptr(),
-            option_pointers.len() as i32,
-            &raw mut option_count,
-            &raw mut non_option_count,
-        )
-    };
+    let status = crate::imod::libcfshr::parse_params::pip_parse_input(
+        argument_bytes.len() as i32,
+        &argument_bytes,
+        &option_bytes,
+        option_bytes.len() as i32,
+        &mut option_count,
+        &mut non_option_count,
+    );
     if status < 0 {
         Err(status)
     } else {
@@ -500,7 +494,7 @@ pub fn pip_read_option_file(program_name: &str, help_level: i32, local_directory
     };
     unsafe {
         crate::imod::libcfshr::parse_params::pip_read_option_file(
-            program_name.as_ptr(),
+            program_name.to_bytes(),
             help_level,
             local_directory,
         )
@@ -514,19 +508,17 @@ pub fn pip_parse_entries(arguments: &[String]) -> Result<(i32, i32), i32> {
         .map(|value| CString::new(value.as_str()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| -1)?;
-    let mut pointers = arguments
+    let argument_bytes = arguments
         .iter()
-        .map(|value| value.as_ptr().cast_mut())
+        .map(|value| value.to_bytes().to_vec())
         .collect::<Vec<_>>();
     let (mut option_count, mut non_option_count) = (0, 0);
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_parse_entries(
-            pointers.len() as i32,
-            pointers.as_mut_ptr(),
-            &raw mut option_count,
-            &raw mut non_option_count,
-        )
-    };
+    let status = crate::imod::libcfshr::parse_params::pip_parse_entries(
+        argument_bytes.len() as i32,
+        &argument_bytes,
+        &mut option_count,
+        &mut non_option_count,
+    );
     if status < 0 {
         Err(status)
     } else {
@@ -539,20 +531,16 @@ pub fn pip_get_in_out_file(option: &str, non_option_argument: i32) -> Result<Opt
     let Ok(option) = CString::new(option) else {
         return Err(-1);
     };
-    let mut filename = std::ptr::null_mut();
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::pip_get_in_out_file(
-            option.as_ptr(),
-            non_option_argument,
-            &raw mut filename,
-        )
-    };
+    let mut filename: Vec<u8> = Vec::new();
+    let status = crate::imod::libcfshr::parse_params::pip_get_in_out_file(
+        option.to_bytes(),
+        non_option_argument,
+        &mut filename,
+    );
     if status != 0 {
         return Ok(None);
     }
-    let result = unsafe { CStr::from_ptr(filename).to_string_lossy().into_owned() };
-    unsafe { libc::free(filename.cast()) };
-    Ok(Some(result))
+    Ok(Some(String::from_utf8_lossy(&filename).into_owned()))
 }
 
 /// Matches `PipStartsWith` (`IMOD/pysrc/pip.py:1504`).
@@ -566,8 +554,8 @@ pub fn pip_starts_with(full_string: &str, substring: &str) -> bool {
     };
     unsafe {
         crate::imod::libcfshr::parse_params::pip_starts_with(
-            full_string.as_ptr(),
-            substring.as_ptr(),
+            full_string.to_bytes(),
+            substring.to_bytes(),
         ) != 0
     }
 }
@@ -794,10 +782,9 @@ pub fn get_next_value_string(option: &str) -> Result<(i32, Option<String>), i32>
     let Ok(option) = CString::new(option) else {
         return Err(-1);
     };
-    let mut value = std::ptr::null_mut();
-    let status = unsafe {
-        crate::imod::libcfshr::parse_params::get_next_value_string(option.as_ptr(), &raw mut value)
-    };
+    let mut value: Vec<u8> = Vec::new();
+    let status =
+        crate::imod::libcfshr::parse_params::get_next_value_string(option.to_bytes(), &mut value);
     *PIP_ERRNO.lock().expect("PIP errno mutex") = status;
     if status < 0 {
         return Err(status);
@@ -805,10 +792,7 @@ pub fn get_next_value_string(option: &str) -> Result<(i32, Option<String>), i32>
     if status == 1 {
         return Ok((status, None));
     }
-    Ok((
-        status,
-        Some(unsafe { CStr::from_ptr(value).to_string_lossy().into_owned() }),
-    ))
+    Ok((status, Some(String::from_utf8_lossy(&value).into_owned())))
 }
 
 /// Matches `AddValueString` (`IMOD/pysrc/pip.py:1433`).
@@ -816,12 +800,7 @@ pub fn add_value_string(option_index: i32, value: &str) -> i32 {
     let Ok(value) = CString::new(value) else {
         return -1;
     };
-    // The C parser owns and frees its stored value, as its source function does.
-    let copied = unsafe { libc::strdup(value.as_ptr()) };
-    if copied.is_null() {
-        return -1;
-    }
-    unsafe { crate::imod::libcfshr::parse_params::add_value_string(option_index, copied) }
+    crate::imod::libcfshr::parse_params::add_value_string(option_index, value.to_bytes())
 }
 
 /// Matches `LookupOption` (`IMOD/pysrc/pip.py:1463`).
@@ -829,7 +808,7 @@ pub fn lookup_option(option: &str, maximum_lookup: i32) -> i32 {
     let Ok(option) = CString::new(option) else {
         return -1;
     };
-    unsafe { crate::imod::libcfshr::parse_params::lookup_option(option.as_ptr(), maximum_lookup) }
+    crate::imod::libcfshr::parse_params::lookup_option(option.to_bytes(), maximum_lookup)
 }
 
 /// Matches `OptionLineOfValues` (`IMOD/pysrc/pip.py:1287`).
@@ -865,7 +844,7 @@ pub fn pip_read_or_parse_options(
     minimum_arguments: i32,
     input_files: i32,
     output_files: i32,
-    header_function: Option<unsafe extern "C" fn(*const libc::c_char)>,
+    header_function: Option<fn(&[u8])>,
 ) -> (i32, i32) {
     let arguments = arguments
         .iter()
@@ -880,30 +859,28 @@ pub fn pip_read_or_parse_options(
     let Ok(program_name) = CString::new(program_name) else {
         return (0, 0);
     };
-    let mut argument_pointers = arguments
+    let argument_bytes = arguments
         .iter()
-        .map(|value| value.as_ptr().cast_mut())
+        .map(|value| value.to_bytes().to_vec())
         .collect::<Vec<_>>();
-    let mut option_pointers = options
+    let option_bytes = options
         .iter()
-        .map(|value| value.as_ptr())
+        .map(|value| value.to_bytes())
         .collect::<Vec<_>>();
     let (mut option_count, mut non_option_count) = (0, 0);
-    unsafe {
-        crate::imod::libcfshr::parse_params::pip_read_or_parse_options(
-            argument_pointers.len() as i32,
-            argument_pointers.as_mut_ptr(),
-            option_pointers.as_mut_ptr(),
-            option_pointers.len() as i32,
-            program_name.as_ptr(),
-            minimum_arguments,
-            input_files,
-            output_files,
-            &raw mut option_count,
-            &raw mut non_option_count,
-            header_function,
-        );
-    }
+    crate::imod::libcfshr::parse_params::pip_read_or_parse_options(
+        argument_bytes.len() as i32,
+        &argument_bytes,
+        &option_bytes,
+        option_bytes.len() as i32,
+        program_name.to_bytes(),
+        minimum_arguments,
+        input_files,
+        output_files,
+        &mut option_count,
+        &mut non_option_count,
+        header_function,
+    );
     (option_count, non_option_count)
 }
 

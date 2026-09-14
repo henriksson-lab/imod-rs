@@ -3223,11 +3223,14 @@ pub unsafe fn draw_current_clip_plane(
                     as f32;
             }
         } else {
-            // `Imod::editGlobalClip` (`imodel.h`) is not carried by the
-            // translated `Imod` in `libimod`, so the object's own clip set is
-            // used here, which is the source's branch whenever global clip
-            // editing is off.
-            let clips = &(*app.obj).clips;
+            // `mv_ogl.cpp:3069`: `a->imod->editGlobalClip ? &a->imod->view->clips
+            // : &a->obj->clips`.  `view` is the array and `view->clips` is
+            // element 0's.
+            let clips = if (*app.imod).edit_global_clip != 0 {
+                &(&(*app.imod).view)[0].clips
+            } else {
+                &(*app.obj).clips
+            };
             let ip = clips.plane as usize;
             if clips.flags & (1 << ip) == 0 {
                 return;
@@ -3560,9 +3563,14 @@ pub unsafe fn find_clicked_drawn_element(
                         continue;
                     };
                     if extra.flags & IMOD_OBJFLAG_EXTRA_MODV == 0
-                        || unsafe { std::ffi::CStr::from_ptr(extra.name.as_ptr()) }
-                            .to_string_lossy()
-                            .contains("point extra")
+                        || String::from_utf8_lossy(
+                            &extra.name[..extra
+                                .name
+                                .iter()
+                                .position(|byte| *byte == 0)
+                                .unwrap_or(extra.name.len())],
+                        )
+                        .contains("point extra")
                     {
                         continue;
                     }

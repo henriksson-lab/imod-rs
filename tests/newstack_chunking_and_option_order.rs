@@ -65,7 +65,6 @@ fn write_input(dir: &std::path::Path, extra: Option<&[u8]>) {
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(path_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 64, 48, 5, 2), 0);
         if let Some(extra) = extra {
@@ -79,7 +78,10 @@ fn write_input(dir: &std::path::Path, extra: Option<&[u8]>) {
             );
         }
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..5 {
             let mut pixels = (0..64 * 48)
                 .map(|index| (section * 7 + index % 251) as f32)
@@ -112,10 +114,9 @@ fn run(dir: &std::path::Path, args: &[&str]) -> (i32, String, String) {
 /// Reads back an MRC output's extended-header size, type fields and bytes.
 fn extended_header(path: &std::path::Path) -> (i32, i16, i16, Vec<u8>) {
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
-    let mut header = unsafe { std::mem::zeroed::<MrcHeader>() };
+    let mut header = unsafe { MrcHeader::default() };
     unsafe {
         let file = ii_open(path_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         ii_close(file);
     }

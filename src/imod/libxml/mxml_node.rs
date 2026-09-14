@@ -1,103 +1,120 @@
 //! Translation of `IMOD/libxml/mxml-node.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+//!
+//! `mxml_new` and `mxml_free` are the library's only allocator calls, so this
+//! module is where the [`MxmlArena`] node slots are taken and released.  Every
+//! function that the C hands a `mxml_node_t *` takes the arena plus the slot
+//! index of that node.
+#![allow(dead_code)]
 
 use super::*;
-use core::ffi::{c_char, c_int, c_void};
+use core::any::Any;
+use core::ffi::c_int;
 
 /// Matches C `mxmlAdd` (`mxml-node.c:41`).
-pub unsafe fn mxml_add(
-    parent: *mut MxmlNode,
+pub fn mxml_add(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
     where_: c_int,
-    child: *mut MxmlNode,
-    node: *mut MxmlNode,
+    child: Option<usize>,
+    node: Option<usize>,
 ) {
     /*
      * Range check input...
      */
 
-    if parent.is_null() || node.is_null() {
+    let (Some(parent), Some(node)) = (parent, node) else {
         return;
-    }
+    };
 
     /*
      * Remove the node from any existing parent...
      */
 
-    if !(*node).parent.is_null() {
-        mxml_remove(node);
+    if arena.node(node).parent.is_some() {
+        mxml_remove(arena, Some(node));
     }
 
     /*
      * Reset pointers...
      */
 
-    (*node).parent = parent;
+    arena.node_mut(node).parent = Some(parent);
 
     match where_ {
         MXML_ADD_BEFORE => {
-            if child.is_null() || child == (*parent).child || (*child).parent != parent {
+            if child.is_none()
+                || child == arena.node(parent).child
+                || arena.node(child.unwrap()).parent != Some(parent)
+            {
                 /*
                  * Insert as first node under parent...
                  */
 
-                (*node).next = (*parent).child;
+                arena.node_mut(node).next = arena.node(parent).child;
 
-                if !(*parent).child.is_null() {
-                    (*(*parent).child).prev = node;
+                if let Some(first) = arena.node(parent).child {
+                    arena.node_mut(first).prev = Some(node);
                 } else {
-                    (*parent).last_child = node;
+                    arena.node_mut(parent).last_child = Some(node);
                 }
 
-                (*parent).child = node;
+                arena.node_mut(parent).child = Some(node);
             } else {
                 /*
                  * Insert node before this child...
                  */
 
-                (*node).next = child;
-                (*node).prev = (*child).prev;
+                let child = child.unwrap();
 
-                if !(*child).prev.is_null() {
-                    (*(*child).prev).next = node;
+                arena.node_mut(node).next = Some(child);
+                arena.node_mut(node).prev = arena.node(child).prev;
+
+                if let Some(prev) = arena.node(child).prev {
+                    arena.node_mut(prev).next = Some(node);
                 } else {
-                    (*parent).child = node;
+                    arena.node_mut(parent).child = Some(node);
                 }
 
-                (*child).prev = node;
+                arena.node_mut(child).prev = Some(node);
             }
         }
 
         MXML_ADD_AFTER => {
-            if child.is_null() || child == (*parent).last_child || (*child).parent != parent {
+            if child.is_none()
+                || child == arena.node(parent).last_child
+                || arena.node(child.unwrap()).parent != Some(parent)
+            {
                 /*
                  * Insert as last node under parent...
                  */
 
-                (*node).parent = parent;
-                (*node).prev = (*parent).last_child;
+                arena.node_mut(node).parent = Some(parent);
+                arena.node_mut(node).prev = arena.node(parent).last_child;
 
-                if !(*parent).last_child.is_null() {
-                    (*(*parent).last_child).next = node;
+                if let Some(last) = arena.node(parent).last_child {
+                    arena.node_mut(last).next = Some(node);
                 } else {
-                    (*parent).child = node;
+                    arena.node_mut(parent).child = Some(node);
                 }
 
-                (*parent).last_child = node;
+                arena.node_mut(parent).last_child = Some(node);
             } else {
                 /*
                  * Insert node after this child...
                  */
 
-                (*node).prev = child;
-                (*node).next = (*child).next;
+                let child = child.unwrap();
 
-                if !(*child).next.is_null() {
-                    (*(*child).next).prev = node;
+                arena.node_mut(node).prev = Some(child);
+                arena.node_mut(node).next = arena.node(child).next;
+
+                if let Some(next) = arena.node(child).next {
+                    arena.node_mut(next).prev = Some(node);
                 } else {
-                    (*parent).last_child = node;
+                    arena.node_mut(parent).last_child = Some(node);
                 }
 
-                (*child).next = node;
+                arena.node_mut(child).next = Some(node);
             }
         }
 
@@ -106,54 +123,54 @@ pub unsafe fn mxml_add(
 }
 
 /// Matches C `mxmlDelete` (`mxml-node.c:165`).
-pub unsafe fn mxml_delete(node: *mut MxmlNode) {
-    let mut current: *mut MxmlNode;
-    let mut next: *mut MxmlNode;
+pub fn mxml_delete(arena: &mut MxmlArena, node: Option<usize>) {
+    let mut current: Option<usize>;
+    let mut next: Option<usize>;
 
     /*
      * Range check input...
      */
 
-    if node.is_null() {
+    let Some(node) = node else {
         return;
-    }
+    };
 
     /*
      * Remove the node from its parent, if any...
      */
 
-    mxml_remove(node);
+    mxml_remove(arena, Some(node));
 
     /*
      * Delete children...
      */
 
-    current = (*node).child;
-    while !current.is_null() {
+    current = arena.node(node).child;
+    while let Some(cur) = current {
         /*
          * Get the next node...
          */
 
-        next = (*current).child;
-        if !next.is_null() {
+        next = arena.node(cur).child;
+        if next.is_some() {
             /*
              * Free parent nodes after child nodes have been freed...
              */
 
-            (*current).child = core::ptr::null_mut();
+            arena.node_mut(cur).child = None;
             current = next;
             continue;
         }
 
-        next = (*current).next;
-        if next.is_null() {
+        next = arena.node(cur).next;
+        if next.is_none() {
             /*
              * Next node is the parent, which we'll free as needed...
              */
 
-            next = (*current).parent;
-            if next == node {
-                next = core::ptr::null_mut();
+            next = arena.node(cur).parent;
+            if next == Some(node) {
+                next = None;
             }
         }
 
@@ -161,7 +178,7 @@ pub unsafe fn mxml_delete(node: *mut MxmlNode) {
          * Free child...
          */
 
-        mxml_free(current);
+        mxml_free(arena, cur);
 
         current = next;
     }
@@ -170,175 +187,201 @@ pub unsafe fn mxml_delete(node: *mut MxmlNode) {
      * Then free the memory used by the parent node...
      */
 
-    mxml_free(node);
+    mxml_free(arena, node);
 }
 
 /// Matches C `mxmlGetRefCount` (`mxml-node.c:230`).
-pub unsafe fn mxml_get_ref_count(node: *mut MxmlNode) -> c_int {
+pub fn mxml_get_ref_count(arena: &MxmlArena, node: Option<usize>) -> c_int {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
+    let Some(node) = node else {
         return 0;
-    }
+    };
 
     /*
      * Return the reference count...
      */
 
-    (*node).ref_count
+    arena.node(node).ref_count
 }
 
 /// Matches C `mxmlNewCDATA` (`mxml-node.c:259`).
-pub unsafe fn mxml_new_cdata(parent: *mut MxmlNode, data: *const c_char) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+pub fn mxml_new_cdata(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
+    data: Option<&[u8]>,
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Range check input...
      */
 
-    if data.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(data) = data else {
+        return None;
+    };
 
     /*
      * Create the node and set the name value...
      */
 
-    node = mxml_new(parent, MXML_ELEMENT);
-    if !node.is_null() {
-        (*node).value.element.name = _mxml_strdupf(c"![CDATA[%s]]".as_ptr(), data as *mut c_void);
+    node = mxml_new(arena, parent, MXML_ELEMENT);
+    if let Some(node) = node
+        && let MxmlValue::Element(element) = &mut arena.node_mut(node).value
+    {
+        element.name = Some(_mxml_strdupf(b"![CDATA[%s]]", data));
     }
 
     node
 }
 
 /// Matches C `mxmlNewCustom` (`mxml-node.c:299`).
-pub unsafe fn mxml_new_custom(
-    parent: *mut MxmlNode,
-    data: *mut c_void,
+pub fn mxml_new_custom(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
+    data: Option<Box<dyn Any>>,
     destroy: MxmlCustomDestroyCb,
-) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Create the node and set the value...
      */
 
-    node = mxml_new(parent, MXML_CUSTOM);
-    if !node.is_null() {
-        (*node).value.custom.data = data;
-        (*node).value.custom.destroy = destroy;
+    node = mxml_new(arena, parent, MXML_CUSTOM);
+    if let Some(node) = node
+        && let MxmlValue::Custom(custom) = &mut arena.node_mut(node).value
+    {
+        custom.data = data;
+        custom.destroy = destroy;
     }
 
     node
 }
 
 /// Matches C `mxmlNewElement` (`mxml-node.c:335`).
-pub unsafe fn mxml_new_element(parent: *mut MxmlNode, name: *const c_char) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+pub fn mxml_new_element(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
+    name: Option<&[u8]>,
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Range check input...
      */
 
-    if name.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(name) = name else {
+        return None;
+    };
 
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(parent, MXML_ELEMENT);
-    if !node.is_null() {
-        (*node).value.element.name = libc::strdup(name);
+    node = mxml_new(arena, parent, MXML_ELEMENT);
+    if let Some(node) = node
+        && let MxmlValue::Element(element) = &mut arena.node_mut(node).value
+    {
+        element.name = Some(name.to_vec());
     }
 
     node
 }
 
 /// Matches C `mxmlNewInteger` (`mxml-node.c:373`).
-pub unsafe fn mxml_new_integer(parent: *mut MxmlNode, integer: c_int) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+pub fn mxml_new_integer(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
+    integer: c_int,
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(parent, MXML_INTEGER);
-    if !node.is_null() {
-        (*node).value.integer = integer;
+    node = mxml_new(arena, parent, MXML_INTEGER);
+    if let Some(node) = node {
+        arena.node_mut(node).value = MxmlValue::Integer(integer);
     }
 
     node
 }
 
 /// Matches C `mxmlNewOpaque` (`mxml-node.c:404`).
-pub unsafe fn mxml_new_opaque(parent: *mut MxmlNode, opaque: *const c_char) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+pub fn mxml_new_opaque(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
+    opaque: Option<&[u8]>,
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Range check input...
      */
 
-    if opaque.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(opaque) = opaque else {
+        return None;
+    };
 
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(parent, MXML_OPAQUE);
-    if !node.is_null() {
-        (*node).value.opaque = libc::strdup(opaque);
+    node = mxml_new(arena, parent, MXML_OPAQUE);
+    if let Some(node) = node {
+        arena.node_mut(node).value = MxmlValue::Opaque(Some(opaque.to_vec()));
     }
 
     node
 }
 
 /// Matches C `mxmlNewReal` (`mxml-node.c:442`).
-pub unsafe fn mxml_new_real(parent: *mut MxmlNode, real: f64) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+pub fn mxml_new_real(arena: &mut MxmlArena, parent: Option<usize>, real: f64) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(parent, MXML_REAL);
-    if !node.is_null() {
-        (*node).value.real = real;
+    node = mxml_new(arena, parent, MXML_REAL);
+    if let Some(node) = node {
+        arena.node_mut(node).value = MxmlValue::Real(real);
     }
 
     node
 }
 
 /// Matches C `mxmlNewText` (`mxml-node.c:477`).
-pub unsafe fn mxml_new_text(
-    parent: *mut MxmlNode,
+pub fn mxml_new_text(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
     whitespace: c_int,
-    string: *const c_char,
-) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+    string: Option<&[u8]>,
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Range check input...
      */
 
-    if string.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(string) = string else {
+        return None;
+    };
 
     /*
      * Create the node and set the text value...
      */
 
-    node = mxml_new(parent, MXML_TEXT);
-    if !node.is_null() {
-        (*node).value.text.whitespace = whitespace;
-        (*node).value.text.string = libc::strdup(string);
+    node = mxml_new(arena, parent, MXML_TEXT);
+    if let Some(node) = node
+        && let MxmlValue::Text(text) = &mut arena.node_mut(node).value
+    {
+        text.whitespace = whitespace;
+        text.string = Some(string.to_vec());
     }
 
     node
@@ -348,94 +391,99 @@ pub unsafe fn mxml_new_text(
 ///
 /// The C function is `mxmlNewTextf(parent, whitespace, format, ...)`.  Stable
 /// Rust cannot define a C-variadic function, so the `va_list` that the C body
-/// starts is taken as a parameter and forwarded to `_mxml_vstrdupf` unchanged.
-pub unsafe fn mxml_new_textf(
-    parent: *mut MxmlNode,
+/// starts is taken as the single explicit argument `_mxml_vstrdupf` accepts.
+pub fn mxml_new_textf(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
     whitespace: c_int,
-    format: *const c_char,
-    ap: *mut c_void,
-) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+    format: Option<&[u8]>,
+    arg: &[u8],
+) -> Option<usize> {
+    let node: Option<usize>;
 
     /*
      * Range check input...
      */
 
-    if format.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(format) = format else {
+        return None;
+    };
 
     /*
      * Create the node and set the text value...
      */
 
-    node = mxml_new(parent, MXML_TEXT);
-    if !node.is_null() {
-        (*node).value.text.whitespace = whitespace;
-        (*node).value.text.string = _mxml_vstrdupf(format, ap);
+    node = mxml_new(arena, parent, MXML_TEXT);
+    if let Some(node) = node {
+        let string = _mxml_vstrdupf(format, arg);
+        if let MxmlValue::Text(text) = &mut arena.node_mut(node).value {
+            text.whitespace = whitespace;
+            text.string = Some(string);
+        }
     }
 
     node
 }
 
 /// Matches C `mxmlRemove` (`mxml-node.c:565`).
-pub unsafe fn mxml_remove(node: *mut MxmlNode) {
+pub fn mxml_remove(arena: &mut MxmlArena, node: Option<usize>) {
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).parent.is_null() {
+    let Some(node) = node else {
         return;
-    }
+    };
+    let Some(parent) = arena.node(node).parent else {
+        return;
+    };
 
     /*
      * Remove from parent...
      */
 
-    if !(*node).prev.is_null() {
-        (*(*node).prev).next = (*node).next;
+    if let Some(prev) = arena.node(node).prev {
+        arena.node_mut(prev).next = arena.node(node).next;
     } else {
-        (*(*node).parent).child = (*node).next;
+        arena.node_mut(parent).child = arena.node(node).next;
     }
 
-    if !(*node).next.is_null() {
-        (*(*node).next).prev = (*node).prev;
+    if let Some(next) = arena.node(node).next {
+        arena.node_mut(next).prev = arena.node(node).prev;
     } else {
-        (*(*node).parent).last_child = (*node).prev;
+        arena.node_mut(parent).last_child = arena.node(node).prev;
     }
 
-    (*node).parent = core::ptr::null_mut();
-    (*node).prev = core::ptr::null_mut();
-    (*node).next = core::ptr::null_mut();
+    arena.node_mut(node).parent = None;
+    arena.node_mut(node).prev = None;
+    arena.node_mut(node).next = None;
 }
 
 /// Matches C `mxmlNewXML` (`mxml-node.c:629`).
-pub unsafe fn mxml_new_xml(version: *const c_char) -> *mut MxmlNode {
-    let mut element: [c_char; 1024] = [0; 1024];
+pub fn mxml_new_xml(arena: &mut MxmlArena, version: Option<&[u8]>) -> Option<usize> {
+    let mut element: Vec<u8> = Vec::new();
 
-    libc::snprintf(
-        element.as_mut_ptr(),
-        core::mem::size_of::<[c_char; 1024]>(),
-        c"?xml version=\"%s\" encoding=\"utf-8\"?".as_ptr(),
-        if !version.is_null() {
-            version
-        } else {
-            c"1.0".as_ptr()
-        },
-    );
+    /*
+     * snprintf(element, sizeof(element), "?xml version=\"%s\" encoding=\"utf-8\"?",
+     *          version ? version : "1.0") -- into a 1024-byte buffer.
+     */
+    element.extend_from_slice(b"?xml version=\"");
+    element.extend_from_slice(version.unwrap_or(b"1.0"));
+    element.extend_from_slice(b"\" encoding=\"utf-8\"?");
+    element.truncate(1023);
 
-    mxml_new_element(core::ptr::null_mut(), element.as_ptr())
+    mxml_new_element(arena, MXML_NO_PARENT, Some(&element))
 }
 
 /// Matches C `mxmlRelease` (`mxml-node.c:651`).
-pub unsafe fn mxml_release(node: *mut MxmlNode) -> c_int {
-    if !node.is_null() {
-        (*node).ref_count -= 1;
-        if (*node).ref_count <= 0 {
-            mxml_delete(node);
+pub fn mxml_release(arena: &mut MxmlArena, node: Option<usize>) -> c_int {
+    if let Some(node) = node {
+        arena.node_mut(node).ref_count -= 1;
+        if arena.node(node).ref_count <= 0 {
+            mxml_delete(arena, Some(node));
             0
         } else {
-            (*node).ref_count
+            arena.node(node).ref_count
         }
     } else {
         -1
@@ -443,72 +491,45 @@ pub unsafe fn mxml_release(node: *mut MxmlNode) -> c_int {
 }
 
 /// Matches C `mxmlRetain` (`mxml-node.c:675`).
-pub unsafe fn mxml_retain(node: *mut MxmlNode) -> c_int {
-    if !node.is_null() {
-        (*node).ref_count += 1;
-        (*node).ref_count
+pub fn mxml_retain(arena: &mut MxmlArena, node: Option<usize>) -> c_int {
+    if let Some(node) = node {
+        arena.node_mut(node).ref_count += 1;
+        arena.node(node).ref_count
     } else {
         -1
     }
 }
 
 /// Matches C static `mxml_free` (`mxml-node.c:690`).
-pub unsafe fn mxml_free(node: *mut MxmlNode) {
-    let mut i: c_int;
+///
+/// Taking the node out of its arena slot is the `free(node)` at the end; every
+/// `free` the C does on the value is that value's own drop, so the arms below
+/// keep only what the C does beyond freeing — calling the custom destructor.
+pub fn mxml_free(arena: &mut MxmlArena, node: usize) {
+    let slot = node;
+    let node = arena.nodes[slot]
+        .take()
+        .expect("mxml: mxml_free on a freed slot");
 
-    match (*node).type_ {
-        MXML_ELEMENT => {
-            if !(*node).value.element.name.is_null() {
-                libc::free((*node).value.element.name as *mut c_void);
-            }
-
-            if (*node).value.element.num_attrs != 0 {
-                i = 0;
-                while i < (*node).value.element.num_attrs {
-                    if !(*(*node).value.element.attrs.add(i as usize))
-                        .name
-                        .is_null()
-                    {
-                        libc::free(
-                            (*(*node).value.element.attrs.add(i as usize)).name as *mut c_void,
-                        );
-                    }
-                    if !(*(*node).value.element.attrs.add(i as usize))
-                        .value
-                        .is_null()
-                    {
-                        libc::free(
-                            (*(*node).value.element.attrs.add(i as usize)).value as *mut c_void,
-                        );
-                    }
-                    i += 1;
-                }
-
-                libc::free((*node).value.element.attrs as *mut c_void);
-            }
-        }
+    match node.type_ {
+        MXML_ELEMENT => { /* free(name); free each attr's name and value; free(attrs) */ }
 
         MXML_INTEGER => { /* Nothing to do */ }
 
-        MXML_OPAQUE => {
-            if !(*node).value.opaque.is_null() {
-                libc::free((*node).value.opaque as *mut c_void);
-            }
-        }
+        MXML_OPAQUE => { /* free(opaque) */ }
 
         MXML_REAL => { /* Nothing to do */ }
 
-        MXML_TEXT => {
-            if !(*node).value.text.string.is_null() {
-                libc::free((*node).value.text.string as *mut c_void);
-            }
-        }
+        MXML_TEXT => { /* free(text.string) */ }
 
         MXML_CUSTOM => {
-            if !(*node).value.custom.data.is_null() {
-                if let Some(f) = (*node).value.custom.destroy {
-                    f((*node).value.custom.data);
-                }
+            let MxmlValue::Custom(mut custom) = node.value else {
+                unreachable!("mxml: MXML_CUSTOM node without a custom value")
+            };
+            if let Some(data) = custom.data.as_deref_mut()
+                && let Some(destroy) = custom.destroy
+            {
+                destroy(data);
             }
         }
 
@@ -519,40 +540,81 @@ pub unsafe fn mxml_free(node: *mut MxmlNode) {
      * Free this node...
      */
 
-    libc::free(node as *mut c_void);
+    arena.free.push(slot);
 }
 
 /// Matches C static `mxml_new` (`mxml-node.c:747`).
-pub unsafe fn mxml_new(parent: *mut MxmlNode, type_: MxmlType) -> *mut MxmlNode {
-    let node: *mut MxmlNode;
+pub fn mxml_new(arena: &mut MxmlArena, parent: Option<usize>, type_: MxmlType) -> Option<usize> {
+    let node: usize;
 
     /*
-     * Allocate memory for the node...
+     * Allocate memory for the node...  A freed slot is reused the way malloc
+     * reuses a freed block; the C cannot fail to allocate here in practice and
+     * a Rust allocation failure aborts rather than returning NULL.
      */
 
-    node = libc::calloc(1, core::mem::size_of::<MxmlNode>()) as *mut MxmlNode;
-    if node.is_null() {
-        return core::ptr::null_mut();
+    let fresh = MxmlNode {
+        type_: 0,
+        next: None,
+        prev: None,
+        parent: None,
+        child: None,
+        last_child: None,
+        value: match type_ {
+            MXML_ELEMENT => MxmlValue::Element(MxmlElement {
+                name: None,
+                num_attrs: 0,
+                attrs: Vec::new(),
+            }),
+            MXML_INTEGER => MxmlValue::Integer(0),
+            MXML_OPAQUE => MxmlValue::Opaque(None),
+            MXML_REAL => MxmlValue::Real(0.0),
+            MXML_TEXT => MxmlValue::Text(MxmlText {
+                whitespace: 0,
+                string: None,
+            }),
+            MXML_CUSTOM => MxmlValue::Custom(MxmlCustom {
+                data: None,
+                destroy: None,
+            }),
+            _ => MxmlValue::Ignore,
+        },
+        ref_count: 0,
+        user_data: None,
+    };
+
+    if let Some(slot) = arena.free.pop() {
+        arena.nodes[slot] = Some(fresh);
+        node = slot;
+    } else {
+        arena.nodes.push(Some(fresh));
+        node = arena.nodes.len() - 1;
     }
 
     /*
      * Set the node type...
      */
 
-    (*node).type_ = type_;
-    (*node).ref_count = 1;
+    arena.node_mut(node).type_ = type_;
+    arena.node_mut(node).ref_count = 1;
 
     /*
      * Add to the parent if present...
      */
 
-    if !parent.is_null() {
-        mxml_add(parent, MXML_ADD_AFTER, MXML_ADD_TO_PARENT, node);
+    if parent.is_some() {
+        mxml_add(
+            arena,
+            parent,
+            MXML_ADD_AFTER,
+            MXML_ADD_TO_PARENT,
+            Some(node),
+        );
     }
 
     /*
      * Return the new node...
      */
 
-    node
+    Some(node)
 }

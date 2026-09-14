@@ -167,7 +167,7 @@ pub unsafe fn iiu_write_header(
         (*hdr).amin = dmin;
         (*hdr).amax = dmax;
         (*hdr).amean = dmean;
-        if mrc_head_write((*hdr).fp.cast(), hdr) != 0 {
+        if mrc_head_write(&mut (*hdr).fp.clone().unwrap(), &mut *hdr) != 0 {
             1
         } else {
             0
@@ -293,8 +293,13 @@ pub unsafe fn iiu_trans_header(into_unit: i32, iunit: i32) -> i32 {
         return -1;
     }
     unsafe {
-        let fp = (*jh).fp;
-        core::ptr::copy_nonoverlapping(ih, jh, 1);
+        // `unit_header.c:381-387` saves the output handle, copies the whole
+        // input header over it, then puts the handle back.  The block copy
+        // duplicates every field bitwise, so the saved handle is written back
+        // with `ptr::write` rather than assigned — assigning would drop the
+        // copy the block made without it ever having been owned.
+        let fp = (*jh).fp.take();
+        *jh = (*ih).clone();
         (*jh).fp = fp;
         mrc_init_output_header(&mut *jh);
         if iiu_file_type(into_unit) != IIFILE_MRC {

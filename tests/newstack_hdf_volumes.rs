@@ -28,11 +28,13 @@ fn write_input_mrc(tag: &str) -> std::path::PathBuf {
     let path_c = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(path_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 8, 6, 4, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for z in 0..4 {
             let mut section: Vec<f32> = (0..48).map(|i| (z * 100 + i) as f32).collect();
             assert_eq!(
@@ -90,7 +92,6 @@ fn newstack_3d_one_writes_a_single_hdf_volume() {
     let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         assert_eq!((*file).file, IIFILE_HDF);
         assert_eq!((*file).nz, 4);
         // A stack of 2-D datasets reports no Z chunking at all.
@@ -162,7 +163,6 @@ fn newstack_chunk_reports_the_actual_tile_size() {
     let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         assert_eq!((*file).file, IIFILE_HDF);
         assert_eq!(
             (
@@ -417,7 +417,6 @@ fn newstack_3d_two_adds_a_volume_to_an_existing_file() {
         ii_allow_multi_volume(1);
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
         ii_allow_multi_volume(0);
-        assert!(!file.is_null());
         assert_eq!((*file).num_volumes, 3);
         ii_close(file);
     }

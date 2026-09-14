@@ -176,7 +176,7 @@ impl TextField {
     }
     /// Java `getDocument`; document identity stays at the native widget boundary.
     pub fn get_document_identity(&self) -> usize {
-        self as *const Self as usize
+        core::ptr::from_ref(self).addr()
     }
     pub fn set_columns(&mut self) {
         if let Some(field_type) = self.field_type {

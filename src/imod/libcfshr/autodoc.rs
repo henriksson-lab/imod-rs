@@ -6,6 +6,7 @@
 //! `MALLOC_CHUNK` blocks, and every error return matches the original.
 #![allow(dead_code, unsafe_op_in_unsafe_fn)]
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_milli_sleep, imod_backup_file};
 use crate::imod::libcfshr::mxmlwrap::{ixml_reset_last_level, ixml_whitespace_cb};
 use crate::imod::libcfshr::parse_params::{
@@ -13,18 +14,14 @@ use crate::imod::libcfshr::parse_params::{
 };
 use crate::imod::libcfshr::robuststat::rs_sort_indexed_floats;
 use crate::imod::libxml::{
-    MXML_DESCEND, MXML_ELEMENT, MXML_OPAQUE, MxmlNode, MxmlSaveCb, mxml_delete,
-    mxml_element_get_attr, mxml_element_set_attr, mxml_get_element, mxml_get_first_child,
-    mxml_get_last_child, mxml_get_next_sibling, mxml_get_type, mxml_load_file, mxml_new_element,
-    mxml_new_text, mxml_new_xml, mxml_opaque_cb, mxml_save_file, mxml_set_wrap_margin,
-    mxml_walk_next,
+    MXML_DESCEND, MXML_ELEMENT, MXML_NO_PARENT, MXML_OPAQUE, MxmlArena, MxmlSaveCb, MxmlValue,
+    mxml_delete, mxml_element_get_attr, mxml_element_set_attr, mxml_get_element,
+    mxml_get_first_child, mxml_get_last_child, mxml_get_next_sibling, mxml_get_type,
+    mxml_load_file, mxml_new_element, mxml_new_text, mxml_new_xml, mxml_opaque_cb, mxml_save_file,
+    mxml_set_wrap_margin, mxml_walk_next,
 };
 use core::ffi::{c_char, c_int, c_void};
 use std::ffi::CStr;
-
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
 
 /* --- IMOD/include/autodoc.h ------------------------------------------- */
 
@@ -176,7 +173,7 @@ pub unsafe extern "C" fn adoc_read(filename: *const c_char) -> i32 {
     afile = libc::fopen(filename, c"r".as_ptr());
     if afile.is_null() {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: AdocRead - Error opening autodoc file {}",
                 CStr::from_ptr(filename).to_string_lossy()
@@ -198,24 +195,41 @@ pub unsafe extern "C" fn adoc_read(filename: *const c_char) -> i32 {
     last_ind = -1;
     S_LAST_WAS_XML = 0;
 
+    let borrowed = std::os::fd::BorrowedFd::borrow_raw(libc::fileno(afile));
+    let Ok(owned) = borrowed.try_clone_to_owned() else {
+        libc::fclose(afile);
+        return -1;
+    };
+    let mut aimod = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
+
     loop {
         /* We cannot allow in-line comments so that value lines can contain
         anything.  But do allow blank and comment lines */
+        /* `PipReadNextLine` now reads through an `ImodFile`; `aimod` is a
+        duplicate of this file's descriptor, so both share one offset, and
+        `readXmlFile` rewinds (`autodoc.c:1778`) before it reads. */
+        let mut line_buf: Vec<u8> = Vec::new();
         line_len = pip_read_next_line(
-            afile.cast(),
-            big_str.as_mut_ptr(),
+            &mut aimod,
+            &mut line_buf,
             BIG_STR_SIZE as c_int,
-            comment_char,
+            comment_char as u8,
             1,
             0,
             &mut indst,
         );
+        if line_len >= 0 {
+            for (i, b) in line_buf.iter().enumerate() {
+                big_str[i] = *b as c_char;
+            }
+            big_str[line_buf.len()] = 0;
+        }
         if line_len == -3 {
             break;
         }
         if line_len < 0 {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: AdocRead - {} {}\n",
                     if line_len == -2 {
@@ -232,7 +246,12 @@ pub unsafe extern "C" fn adoc_read(filename: *const c_char) -> i32 {
 
         /* For first line, check for XML file and read that */
         line = big_str.as_mut_ptr().add(indst as usize);
-        if first_line != 0 && pip_starts_with(line, XML_START.as_ptr()) != 0 {
+        if first_line != 0
+            && pip_starts_with(
+                CStr::from_ptr(line).to_bytes(),
+                CStr::from_ptr(XML_START.as_ptr()).to_bytes(),
+            ) != 0
+        {
             err = read_xml_file(afile);
             libc::fclose(afile);
             if err < 0 {
@@ -256,7 +275,10 @@ pub unsafe extern "C" fn adoc_read(filename: *const c_char) -> i32 {
             continue;
         }
 
-        if pip_starts_with(line, OPEN_DELIM.as_ptr()) != 0
+        if pip_starts_with(
+            CStr::from_ptr(line).to_bytes(),
+            CStr::from_ptr(OPEN_DELIM.as_ptr()).to_bytes(),
+        ) != 0
             && !libc::strstr(line, CLOSE_DELIM.as_ptr()).is_null()
         {
             /* If this is a section start, get name - value.  Here there must be
@@ -393,7 +415,7 @@ pub unsafe extern "C" fn adoc_read(filename: *const c_char) -> i32 {
         if err == bad_line {
             big_str[ERR_STR_SIZE - 50] = 0;
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "Error: AdocRead -Improperly formatted line in autodoc: {}\n",
                     CStr::from_ptr(big_str.as_ptr()).to_string_lossy()
@@ -606,7 +628,7 @@ pub unsafe extern "C" fn adoc_write(filename: *const c_char) -> i32 {
         return -1;
     }
     if (*S_CUR_ADOC).backed_up == 0 {
-        backerr = imod_backup_file(filename);
+        backerr = imod_backup_file(CStr::from_ptr(filename).to_string_lossy().as_ref());
     }
     (*S_CUR_ADOC).backed_up = 1;
     if (*S_CUR_ADOC).write_as_xml != 0 {
@@ -963,7 +985,7 @@ pub unsafe fn fs_printf(
     if !S_FILE.is_null() {
         if libc::fprintf(S_FILE, format, a1, a2, a3, a4) < 0 {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: AdocWrite - writing element to file\n"),
             );
             retval = -1;
@@ -980,7 +1002,7 @@ pub unsafe fn fs_printf(
         );
         if num_written >= S_BYTES_LEFT {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: AdocWrite - writing element to string\n"),
             );
             retval = -1;
@@ -1054,7 +1076,11 @@ pub unsafe fn setup_section_order() -> *mut c_int {
     }
 
     /* Sort, use the sorted indexes below */
-    rs_sort_indexed_floats(ord_sect_values, ord_sect_inds, (*S_CUR_ADOC).num_sections);
+    rs_sort_indexed_floats(
+        core::slice::from_raw_parts(ord_sect_values, (*S_CUR_ADOC).num_sections as usize),
+        core::slice::from_raw_parts_mut(ord_sect_inds, (*S_CUR_ADOC).num_sections as usize),
+        (*S_CUR_ADOC).num_sections,
+    );
     libc::free(ord_sect_values.cast::<c_void>());
     ord_sect_inds
 }
@@ -1896,10 +1922,13 @@ pub unsafe extern "C" fn adoc_get_double(
     if err != 0 {
         return err;
     }
+    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
     err = pip_get_line_of_values(
-        string,
-        string,
-        val1.cast::<c_void>(),
+        &value_bytes,
+        &value_bytes,
+        crate::imod::libcfshr::parse_params::PipValueArray::Double(
+            core::slice::from_raw_parts_mut(val1, 1),
+        ),
         PIP_DOUBLE,
         &mut num_to_get,
         1,
@@ -2007,12 +2036,16 @@ pub unsafe extern "C" fn adoc_get_integer_array(
     if err != 0 {
         return err;
     }
+    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
     err = pip_get_line_of_values(
-        string,
-        string,
-        array.cast::<c_void>(),
+        &value_bytes,
+        &value_bytes,
+        crate::imod::libcfshr::parse_params::PipValueArray::Int(core::slice::from_raw_parts_mut(
+            array,
+            array_size.max(0) as usize,
+        )),
         PIP_INTEGER,
-        num_to_get,
+        &mut *num_to_get,
         array_size,
     );
     libc::free(string.cast::<c_void>());
@@ -2034,12 +2067,16 @@ pub unsafe extern "C" fn adoc_get_float_array(
     if err != 0 {
         return err;
     }
+    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
     err = pip_get_line_of_values(
-        string,
-        string,
-        array.cast::<c_void>(),
+        &value_bytes,
+        &value_bytes,
+        crate::imod::libcfshr::parse_params::PipValueArray::Float(core::slice::from_raw_parts_mut(
+            array,
+            array_size.max(0) as usize,
+        )),
         PIP_FLOAT,
-        num_to_get,
+        &mut *num_to_get,
         array_size,
     );
     libc::free(string.cast::<c_void>());
@@ -2061,12 +2098,15 @@ pub unsafe extern "C" fn adoc_get_double_array(
     if err != 0 {
         return err;
     }
+    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
     err = pip_get_line_of_values(
-        string,
-        string,
-        array.cast::<c_void>(),
+        &value_bytes,
+        &value_bytes,
+        crate::imod::libcfshr::parse_params::PipValueArray::Double(
+            core::slice::from_raw_parts_mut(array, array_size.max(0) as usize),
+        ),
         PIP_DOUBLE,
-        num_to_get,
+        &mut *num_to_get,
         array_size,
     );
     libc::free(string.cast::<c_void>());
@@ -2254,14 +2294,19 @@ pub unsafe extern "C" fn adoc_write_section_start(
 }
 
 /// Matches C static `readXmlFile` (`autodoc.c:1765`).
+///
+/// The mini-XML tree is arena-allocated now, so the node pointers are slot
+/// indices into a `MxmlArena` that lives for the length of this function, and
+/// the element names and values it hands back are byte slices that have to be
+/// NUL-terminated again for the rest of autodoc, which is still C-shaped.
 pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
-    let xml: *mut MxmlNode;
-    let mut node: *mut MxmlNode;
-    let mut top: *mut MxmlNode;
-    let mut sect_node: *mut MxmlNode;
-    let mut child: *mut MxmlNode;
-    let mut key: *const c_char;
-    let mut value: *const c_char;
+    let xml: Option<usize>;
+    let mut node: Option<usize>;
+    let mut top: Option<usize>;
+    let mut sect_node: Option<usize>;
+    let mut child: Option<usize>;
+    let mut key: Option<Vec<u8>>;
+    let mut value: Option<Vec<u8>>;
     let mut icol: c_int;
     let mut ind: c_int;
     let mut global: c_int;
@@ -2283,69 +2328,97 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
     S_NUM_VALUE_NOT_TEXT = 0;
     S_NUM_MULTIPLE_CHILDS = 0;
 
-    xml = mxml_load_file(core::ptr::null_mut(), fp, Some(mxml_opaque_cb));
-    if xml.is_null() {
+    /*
+     * `mxmlLoadFile` reads a `FILE *`; the descriptor is duplicated into an
+     * `ImodFile` so that the read starts where the rewind left it.  The caller
+     * closes `fp` as soon as this returns.
+     */
+    let borrowed = std::os::fd::BorrowedFd::borrow_raw(libc::fileno(fp));
+    let Ok(owned) = borrowed.try_clone_to_owned() else {
+        return -2;
+    };
+    let mut afile = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
+
+    let arena = &mut MxmlArena::new();
+    xml = mxml_load_file(arena, MXML_NO_PARENT, &mut afile, Some(mxml_opaque_cb));
+    if xml.is_none() {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: AdocRead - Loading file as XML\n"),
         );
         return -2;
     }
 
     /* Get the top node and then get the next if it is opaque node */
-    top = mxml_walk_next(xml, xml, MXML_DESCEND);
-    if (*top).type_ == MXML_OPAQUE {
-        top = mxml_walk_next(top, xml, MXML_DESCEND);
+    top = mxml_walk_next(arena, xml, xml, MXML_DESCEND);
+    if mxml_get_type(arena, top) == MXML_OPAQUE {
+        top = mxml_walk_next(arena, top, xml, MXML_DESCEND);
     }
-    key = mxml_get_element(top);
-    if !key.is_null() {
-        (*S_CUR_ADOC).root_element = libc::strdup(key);
+    key = mxml_get_element(arena, top).map(|k| {
+        let mut k = k.to_vec();
+        k.push(0);
+        k
+    });
+    if let Some(key) = &key {
+        (*S_CUR_ADOC).root_element = libc::strdup(key.as_ptr().cast::<c_char>());
     }
 
     /* Walk through the children of the top node, (autodoc) */
-    sect_node = mxml_get_first_child(top);
-    while !sect_node.is_null() {
+    sect_node = mxml_get_first_child(arena, top);
+    while let Some(cur_sect_node) = sect_node {
         /* If a child of top is opaque, it is presumed whitespace and skip it */
-        if (*sect_node).type_ == MXML_OPAQUE {
-            sect_node = mxml_get_next_sibling(sect_node);
+        if arena.node(cur_sect_node).type_ == MXML_OPAQUE {
+            sect_node = mxml_get_next_sibling(arena, sect_node);
             continue;
         }
 
         if test_and_add_comment(
-            sect_node,
+            arena,
+            cur_sect_node,
             &mut comment_list,
             &mut num_comments,
             &mut max_comments,
         ) != 0
         {
-            sect_node = mxml_get_next_sibling(sect_node);
+            sect_node = mxml_get_next_sibling(arena, sect_node);
             continue;
         }
 
         /* This is the section type if it an element node, which it really will be, and
         it must have the "name" attribute for the value */
-        key = mxml_get_element(sect_node);
-        global = if !key.is_null() && libc::strcmp(key, ADOC_GLOBAL_NAME.as_ptr()) == 0 {
+        key = mxml_get_element(arena, sect_node).map(|k| {
+            let mut k = k.to_vec();
+            k.push(0);
+            k
+        });
+        global = if key.as_ref().is_some_and(|k| {
+            libc::strcmp(k.as_ptr().cast::<c_char>(), ADOC_GLOBAL_NAME.as_ptr()) == 0
+        }) {
             1
         } else {
             0
         };
-        value = mxml_element_get_attr(sect_node, c"name".as_ptr());
-        if key.is_null() {
+        value = mxml_element_get_attr(arena, sect_node, Some(b"name")).map(|v| {
+            let mut v = v.to_vec();
+            v.push(0);
+            v
+        });
+        if key.is_none() {
             S_NUM_SECT_NOT_ELEM += 1;
         }
-        if global == 0 && value.is_null() {
+        if global == 0 && value.is_none() {
             S_NUM_SECT_NO_NAME += 1;
         }
-        if key.is_null() || (global == 0 && value.is_null()) {
-            sect_node = mxml_get_next_sibling(sect_node);
+        if key.is_none() || (global == 0 && value.is_none()) {
+            sect_node = mxml_get_next_sibling(arena, sect_node);
             continue;
         }
+        let key_ptr = key.as_ref().unwrap().as_ptr().cast::<c_char>();
 
         /* Lookup the collection under the key and create one if not found */
-        icol = lookup_collection(S_CUR_ADOC, key);
+        icol = lookup_collection(S_CUR_ADOC, key_ptr);
         if icol < 0 {
-            err = add_collection(S_CUR_ADOC, key);
+            err = add_collection(S_CUR_ADOC, key_ptr);
             if err != 0 {
                 break;
             }
@@ -2355,7 +2428,11 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
 
         /* Add a section to the collection and set it as current one */
         if global == 0 {
-            err = add_section(S_CUR_ADOC, icol, value);
+            err = add_section(
+                S_CUR_ADOC,
+                icol,
+                value.as_ref().unwrap().as_ptr().cast::<c_char>(),
+            );
             if err != 0 {
                 break;
             }
@@ -2370,14 +2447,34 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
         }
 
         /* Assign any other attributes as key-values in the section */
+        let num_attrs = match &arena.node(cur_sect_node).value {
+            MxmlValue::Element(element) => element.num_attrs,
+            _ => 0,
+        };
         ind = 0;
-        while ind < (*sect_node).value.element.num_attrs {
-            let attr = (*sect_node).value.element.attrs.add(ind as usize);
-            if libc::strcmp((*attr).name, c"name".as_ptr()) != 0 {
+        while ind < num_attrs {
+            let (aname, avalue) = match &arena.node(cur_sect_node).value {
+                MxmlValue::Element(element) => {
+                    let attr = &element.attrs[ind as usize];
+                    let mut aname = attr.name.clone();
+                    aname.push(0);
+                    let avalue = attr.value.as_ref().map(|v| {
+                        let mut v = v.clone();
+                        v.push(0);
+                        v
+                    });
+                    (aname, avalue)
+                }
+                _ => break,
+            };
+            if libc::strcmp(aname.as_ptr().cast::<c_char>(), c"name".as_ptr()) != 0 {
                 err = sect_set_key_value_type(
                     cur_sect,
-                    (*attr).name,
-                    (*attr).value,
+                    aname.as_ptr().cast::<c_char>(),
+                    match &avalue {
+                        Some(v) => v.as_ptr().cast::<c_char>(),
+                        None => core::ptr::null(),
+                    },
                     ADOC_STRING,
                     &mut last_ind,
                 );
@@ -2389,51 +2486,78 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
         }
 
         /* Now walk through the children of section node */
-        node = mxml_get_first_child(sect_node);
-        while !node.is_null() {
+        node = mxml_get_first_child(arena, sect_node);
+        while let Some(cur_node) = node {
             /* Again, skip children that are opaque and definitely white space */
-            if (*node).type_ == MXML_OPAQUE
-                && !(*node).value.opaque.is_null()
-                && *(*node).value.opaque == b'\n' as c_char
+            if arena.node(cur_node).type_ == MXML_OPAQUE
+                && match &arena.node(cur_node).value {
+                    MxmlValue::Opaque(opaque) => opaque
+                        .as_deref()
+                        .is_some_and(|o| !o.is_empty() && o[0] == b'\n'),
+                    _ => false,
+                }
             {
-                node = mxml_get_next_sibling(node);
+                node = mxml_get_next_sibling(arena, node);
                 continue;
             }
 
             if test_and_add_comment(
-                node,
+                arena,
+                cur_node,
                 &mut comment_list,
                 &mut num_comments,
                 &mut max_comments,
             ) != 0
             {
-                node = mxml_get_next_sibling(node);
+                node = mxml_get_next_sibling(arena, node);
                 continue;
             }
 
             /* It must be an element */
-            key = mxml_get_element(node);
-            if key.is_null() {
+            key = mxml_get_element(arena, node).map(|k| {
+                let mut k = k.to_vec();
+                k.push(0);
+                k
+            });
+            if key.is_none() {
                 S_NUM_CHILD_NOT_ELEM += 1;
             } else {
-                if (*node).value.element.num_attrs != 0 {
+                if match &arena.node(cur_node).value {
+                    MxmlValue::Element(element) => element.num_attrs != 0,
+                    _ => false,
+                } {
                     S_NUM_CHILD_ATTRIBS += 1;
                 }
-                child = mxml_get_first_child(node);
+                child = mxml_get_first_child(arena, node);
 
                 /* The first child should be opaque and there should be only one */
-                if !child.is_null() && mxml_get_type(child) != MXML_OPAQUE {
+                if child.is_some() && mxml_get_type(arena, child) != MXML_OPAQUE {
                     S_NUM_VALUE_NOT_TEXT += 1;
                 } else {
-                    if !child.is_null() && mxml_get_last_child(node) != child {
+                    if child.is_some() && mxml_get_last_child(arena, node) != child {
                         S_NUM_MULTIPLE_CHILDS += 1;
                     }
-                    value = if !child.is_null() {
-                        (*child).value.opaque
-                    } else {
-                        core::ptr::null_mut()
+                    value = match child {
+                        Some(child) => match &arena.node(child).value {
+                            MxmlValue::Opaque(opaque) => opaque.as_ref().map(|o| {
+                                let mut o = o.clone();
+                                o.push(0);
+                                o
+                            }),
+                            _ => None,
+                        },
+                        None => None,
                     };
-                    err = sect_set_key_value_type(cur_sect, key, value, ADOC_STRING, &mut last_ind);
+                    err = sect_set_key_value_type(
+                        cur_sect,
+                        key.as_ref().unwrap().as_ptr().cast::<c_char>(),
+                        match &value {
+                            Some(v) => v.as_ptr().cast::<c_char>(),
+                            None => core::ptr::null(),
+                        },
+                        ADOC_STRING,
+                        &mut last_ind,
+                    );
                     if err != 0 {
                         break;
                     }
@@ -2447,7 +2571,7 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
             }
 
             /* Step to next key-value in section, if any */
-            node = mxml_get_next_sibling(node);
+            node = mxml_get_next_sibling(arena, node);
         }
         if err != 0 {
             break;
@@ -2462,7 +2586,7 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
         }
 
         /* Step to next section if any */
-        sect_node = mxml_get_next_sibling(sect_node);
+        sect_node = mxml_get_next_sibling(arena, sect_node);
     }
 
     if err != 0 {
@@ -2470,7 +2594,7 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
     }
     handle_final_comments(err, &mut comment_list, num_comments);
 
-    mxml_delete(xml);
+    mxml_delete(arena, xml);
     err
 }
 
@@ -2507,20 +2631,31 @@ pub unsafe fn add_to_comment_list(
 
 /// Matches C static `testAndAddComment` (`autodoc.c:1992`).
 pub unsafe fn test_and_add_comment(
-    node: *mut MxmlNode,
+    arena: &MxmlArena,
+    node: usize,
     comment_list: *mut *mut *mut c_char,
     num_comments: *mut c_int,
     max_comments: *mut c_int,
 ) -> i32 {
-    let key: *const c_char;
+    let key: Option<Vec<u8>>;
     let tmp_str: *mut c_char;
     let mut len: c_int;
-    key = mxml_get_element(node);
-    if (*node).type_ == MXML_ELEMENT
-        && !key.is_null()
-        && pip_starts_with(key, XML_COMMENT_START.as_ptr()) != 0
+    key = mxml_get_element(arena, Some(node)).map(|k| {
+        let mut k = k.to_vec();
+        k.push(0);
+        k
+    });
+    if arena.node(node).type_ == MXML_ELEMENT
+        && key.as_ref().is_some_and(|k| {
+            pip_starts_with(k, CStr::from_ptr(XML_COMMENT_START.as_ptr()).to_bytes()) != 0
+        })
     {
-        tmp_str = libc::strdup(key.add((XML_COMSTART_LEN - 1) as usize));
+        let key = key.unwrap();
+        tmp_str = libc::strdup(
+            key.as_ptr()
+                .cast::<c_char>()
+                .add((XML_COMSTART_LEN - 1) as usize),
+        );
         if !tmp_str.is_null() {
             *tmp_str.add(0) = b'#' as c_char;
             len = libc::strlen(tmp_str) as c_int;
@@ -2577,12 +2712,16 @@ pub unsafe fn handle_final_comments(
 }
 
 /// Matches C static `writeXmlFile` (`autodoc.c:2044`).
+///
+/// The tree is arena-allocated, and `mxmlSaveFile` takes a Rust writer, so the
+/// `FILE *` that `openForWrite` returns is written through a duplicate of its
+/// descriptor.  Nothing else writes to that `FILE *`, so no output interleaves.
 pub unsafe fn write_xml_file(filename: *const c_char) -> i32 {
     let afile: *mut libc::FILE;
-    let xml: *mut MxmlNode;
-    let mut node: *mut MxmlNode;
-    let mut elem: *mut MxmlNode;
-    let top: *mut MxmlNode;
+    let xml: Option<usize>;
+    let mut node: Option<usize>;
+    let mut elem: Option<usize>;
+    let top: Option<usize>;
     let mut i: c_int;
     let mut j: c_int;
     let mut k: c_int;
@@ -2612,15 +2751,18 @@ pub unsafe fn write_xml_file(filename: *const c_char) -> i32 {
         }
     }
 
-    xml = mxml_new_xml(c"1.0".as_ptr());
-    top = mxml_new_element(
-        xml,
-        if !(*S_CUR_ADOC).root_element.is_null() {
-            (*S_CUR_ADOC).root_element
-        } else {
-            c"autodoc".as_ptr() as *mut c_char
-        },
-    );
+    let arena = &mut MxmlArena::new();
+    xml = mxml_new_xml(arena, Some(b"1.0"));
+    let root: Vec<u8> = if !(*S_CUR_ADOC).root_element.is_null() {
+        let mut r = CStr::from_ptr((*S_CUR_ADOC).root_element)
+            .to_bytes()
+            .to_vec();
+        r.push(0);
+        r
+    } else {
+        b"autodoc\0".to_vec()
+    };
+    top = mxml_new_element(arena, xml, Some(&root[..root.len() - 1]));
     ind = 0;
     while ind < (*S_CUR_ADOC).num_sections {
         use_ind = if ordered_write != 0 {
@@ -2634,24 +2776,38 @@ pub unsafe fn write_xml_file(filename: *const c_char) -> i32 {
         coll = (*S_CUR_ADOC).collections.add(i as usize);
         sect = (*coll).sections.add(j as usize);
         while com_ind < (*sect).num_comments && *(*sect).com_index.add(com_ind as usize) == -1 {
-            write_comment_to_xml(top, *(*sect).comments.add(com_ind as usize));
+            write_comment_to_xml(arena, top, *(*sect).comments.add(com_ind as usize));
             com_ind += 1;
         }
-        node = mxml_new_element(top, (*coll).name);
+        node = mxml_new_element(arena, top, Some(CStr::from_ptr((*coll).name).to_bytes()));
         if i != 0 || j != 0 || libc::strcmp((*sect).name, ADOC_GLOBAL_NAME.as_ptr()) != 0 {
-            mxml_element_set_attr(node, c"name".as_ptr(), (*sect).name);
+            mxml_element_set_attr(
+                arena,
+                node,
+                Some(b"name"),
+                Some(CStr::from_ptr((*sect).name).to_bytes()),
+            );
         }
 
         /* Loop on key-values */
         k = 0;
         while k < (*sect).num_keys {
             while com_ind < (*sect).num_comments && *(*sect).com_index.add(com_ind as usize) == k {
-                write_comment_to_xml(node, *(*sect).comments.add(com_ind as usize));
+                write_comment_to_xml(arena, node, *(*sect).comments.add(com_ind as usize));
                 com_ind += 1;
             }
-            elem = mxml_new_element(node, *(*sect).keys.add(k as usize));
+            elem = mxml_new_element(
+                arena,
+                node,
+                Some(CStr::from_ptr(*(*sect).keys.add(k as usize)).to_bytes()),
+            );
             if !(*(*sect).values.add(k as usize)).is_null() {
-                mxml_new_text(elem, 0, *(*sect).values.add(k as usize));
+                mxml_new_text(
+                    arena,
+                    elem,
+                    0,
+                    Some(CStr::from_ptr(*(*sect).values.add(k as usize)).to_bytes()),
+                );
             }
             k += 1;
         }
@@ -2659,24 +2815,32 @@ pub unsafe fn write_xml_file(filename: *const c_char) -> i32 {
     }
     i = 0;
     while i < (*S_CUR_ADOC).num_final_com {
-        write_comment_to_xml(top, *(*S_CUR_ADOC).final_comments.add(i as usize));
+        write_comment_to_xml(arena, top, *(*S_CUR_ADOC).final_comments.add(i as usize));
         i += 1;
     }
 
     mxml_set_wrap_margin(0);
     ixml_reset_last_level();
-    let cb: MxmlSaveCb = Some(core::mem::transmute::<
-        unsafe extern "C" fn(*mut c_void, i32) -> *const c_char,
-        unsafe extern "C" fn(*mut MxmlNode, c_int) -> *const c_char,
-    >(ixml_whitespace_cb));
-    ind = mxml_save_file(xml, afile, cb);
+    let cb: MxmlSaveCb = Some(ixml_whitespace_cb);
+    let borrowed = std::os::fd::BorrowedFd::borrow_raw(libc::fileno(afile));
+    let Ok(owned) = borrowed.try_clone_to_owned() else {
+        libc::fclose(afile);
+        return -1;
+    };
+    let mut out = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
+    ind = mxml_save_file(arena, xml, &mut out, cb);
+    drop(out);
     libc::fclose(afile);
-    mxml_delete(xml);
+    mxml_delete(arena, xml);
     ind
 }
 
 /// Matches C static `writeCommentToXML` (`autodoc.c:2124`).
-pub unsafe fn write_comment_to_xml(parent: *mut MxmlNode, comment: *mut c_char) {
+pub unsafe fn write_comment_to_xml(
+    arena: &mut MxmlArena,
+    parent: Option<usize>,
+    comment: *mut c_char,
+) {
     let len: c_int;
     let tmp_str: *mut c_char;
 
@@ -2696,7 +2860,7 @@ pub unsafe fn write_comment_to_xml(parent: *mut MxmlNode, comment: *mut c_char) 
                 c" ".as_ptr()
             },
         );
-        mxml_new_element(parent, tmp_str);
+        mxml_new_element(arena, parent, Some(CStr::from_ptr(tmp_str).to_bytes()));
         libc::free(tmp_str.cast::<c_void>());
     }
 }
@@ -3237,7 +3401,7 @@ pub unsafe fn adoc_memory_error(ptr: *mut c_void, routine: *const c_char) -> i32
         return 0;
     }
     b3d_error(
-        stderr,
+        Some(&mut ImodFile::Stderr),
         format_args!(
             "ERROR: {} - Allocating memory for string or autodoc component\n",
             CStr::from_ptr(routine).to_string_lossy()

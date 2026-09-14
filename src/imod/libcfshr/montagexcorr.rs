@@ -1,453 +1,136 @@
-unsafe extern "C" {
-    static mut stdout: *mut FILE;
-    fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn sprintf(
-        __s: *mut ::core::ffi::c_char,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    fn exp(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn pow(__x: ::core::ffi::c_double, __y: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn sqrt(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn fabs(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn floor(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    fn strchr(__s: *const ::core::ffi::c_char, __c: ::core::ffi::c_int)
-    -> *mut ::core::ffi::c_char;
-    fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
-    fn get_sample_of_array(
-        image: *mut ::core::ffi::c_void,
-        mode: ::core::ffi::c_int,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-        sampleFrac: ::core::ffi::c_float,
-        ixStart: ::core::ffi::c_int,
-        iyStart: ::core::ffi::c_int,
-        nxUse: ::core::ffi::c_int,
-        nyUse: ::core::ffi::c_int,
-        filltoExclude: ::core::ffi::c_float,
-        samples: *mut ::core::ffi::c_float,
-        maxSamples: ::core::ffi::c_int,
-        numSamples: *mut ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int;
-    fn nice_frame(
-        num: ::core::ffi::c_int,
-        idnum: ::core::ffi::c_int,
-        limit: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int;
-    fn xcorr_set_ctf(
-        sigma1: ::core::ffi::c_float,
-        sigma2: ::core::ffi::c_float,
-        radius1: ::core::ffi::c_float,
-        radius2: ::core::ffi::c_float,
-        ctf: *mut ::core::ffi::c_float,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-        delta: *mut ::core::ffi::c_float,
-    );
-    fn xcorr_filter_part(
-        fft: *mut ::core::ffi::c_float,
-        array: *mut ::core::ffi::c_float,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-        ctf: *mut ::core::ffi::c_float,
-        delta: ::core::ffi::c_float,
-    );
-    fn xcorr_mean_zero(
-        array: *mut ::core::ffi::c_float,
-        nxdim: ::core::ffi::c_int,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-    );
-    fn xcorr_peak_find(
-        array: *mut ::core::ffi::c_float,
-        nxdim: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-        xpeak: *mut ::core::ffi::c_float,
-        ypeak: *mut ::core::ffi::c_float,
-        peak: *mut ::core::ffi::c_float,
-        maxpeaks: ::core::ffi::c_int,
-    );
-    fn set_peak_find_limits(
-        limXlo: ::core::ffi::c_int,
-        limXhi: ::core::ffi::c_int,
-        limYlo: ::core::ffi::c_int,
-        limYhi: ::core::ffi::c_int,
-        useEllipse: ::core::ffi::c_int,
-    );
-    fn parabolic_fit_position(
-        y1: ::core::ffi::c_float,
-        y2: ::core::ffi::c_float,
-        y3: ::core::ffi::c_float,
-    ) -> ::core::ffi::c_double;
-    fn conjugate_product(
-        array: *mut ::core::ffi::c_float,
-        brray: *mut ::core::ffi::c_float,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-    );
-    fn weighted_corr_from_sums(
-        aSum: ::core::ffi::c_double,
-        aSumSq: ::core::ffi::c_double,
-        bsum: ::core::ffi::c_double,
-        bSumSq: ::core::ffi::c_double,
-        abSum: ::core::ffi::c_double,
-        wSum: ::core::ffi::c_double,
-        sumArray: *mut ::core::ffi::c_double,
-        descrip: *const ::core::ffi::c_char,
-    ) -> ::core::ffi::c_double;
-    fn slice_taper_out_pad(
-        array: *mut ::core::ffi::c_void,
-        type_0: ::core::ffi::c_int,
-        nxbox: ::core::ffi::c_int,
-        nybox: ::core::ffi::c_int,
-        brray: *mut ::core::ffi::c_float,
-        nxdim: ::core::ffi::c_int,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-        ifmean: ::core::ffi::c_int,
-        dmeanin: ::core::ffi::c_float,
-    );
-    fn slice_smooth_out_pad(
-        array: *mut ::core::ffi::c_void,
-        type_0: ::core::ffi::c_int,
-        nxbox: ::core::ffi::c_int,
-        nybox: ::core::ffi::c_int,
-        brray: *mut ::core::ffi::c_float,
-        nxdim: ::core::ffi::c_int,
-        nx: ::core::ffi::c_int,
-        ny: ::core::ffi::c_int,
-    );
-    fn rs_sort_indexed_floats(
-        x: *mut ::core::ffi::c_float,
-        index: *mut ::core::ffi::c_int,
-        n: ::core::ffi::c_int,
-    );
-    fn percentile_float(
-        s: ::core::ffi::c_int,
-        r: *mut ::core::ffi::c_float,
-        num: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_float;
-    fn make_standard_dev_map(
-        array: *mut ::core::ffi::c_float,
-        nxDim: ::core::ffi::c_int,
-        ixStart: ::core::ffi::c_int,
-        ixEnd: ::core::ffi::c_int,
-        iyStart: ::core::ffi::c_int,
-        iyEnd: ::core::ffi::c_int,
-        binning: ::core::ffi::c_int,
-        boxSize: ::core::ffi::c_int,
-        sdArr: *mut ::core::ffi::c_float,
-        sumArr: *mut ::core::ffi::c_float,
-        sqrArr: *mut ::core::ffi::c_float,
-        xOffset: *mut ::core::ffi::c_int,
-        yOffset: *mut ::core::ffi::c_int,
-    );
-    fn b3dIMax(narg: ::core::ffi::c_int, ...) -> ::core::ffi::c_int;
-    fn wall_time() -> ::core::ffi::c_double;
-    fn num_omp_threads(optimalThreads: ::core::ffi::c_int) -> ::core::ffi::c_int;
-}
-pub type size_t = usize;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __uint64_t = u64;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut core::ffi::c_void,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    pub _flags2: ::core::ffi::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut core::ffi::c_void,
-    pub _wide_data: *mut core::ffi::c_void,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub __pad5: size_t,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused2: [::core::ffi::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-#[inline]
-unsafe extern "C" fn __bswap_16(mut __bsx: __uint16_t) -> __uint16_t {
-    return (__bsx as ::core::ffi::c_int >> 8 as ::core::ffi::c_int & 0xff as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) << 8 as ::core::ffi::c_int)
-        as __uint16_t;
-}
-#[inline]
-unsafe extern "C" fn __bswap_32(mut __bsx: __uint32_t) -> __uint32_t {
-    return (__bsx & 0xff000000 as __uint32_t) >> 24 as ::core::ffi::c_int
-        | (__bsx & 0xff0000 as __uint32_t) >> 8 as ::core::ffi::c_int
-        | (__bsx & 0xff00 as __uint32_t) << 8 as ::core::ffi::c_int
-        | (__bsx & 0xff as __uint32_t) << 24 as ::core::ffi::c_int;
-}
-#[inline]
-unsafe extern "C" fn __bswap_64(mut __bsx: __uint64_t) -> __uint64_t {
-    return ((__bsx as ::core::ffi::c_ulonglong & 0xff00000000000000 as ::core::ffi::c_ulonglong)
-        >> 56 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff000000000000 as ::core::ffi::c_ulonglong)
-            >> 40 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff0000000000 as ::core::ffi::c_ulonglong)
-            >> 24 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff00000000 as ::core::ffi::c_ulonglong)
-            >> 8 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff000000 as ::core::ffi::c_ulonglong)
-            << 8 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff0000 as ::core::ffi::c_ulonglong)
-            << 24 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff00 as ::core::ffi::c_ulonglong)
-            << 40 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff as ::core::ffi::c_ulonglong)
-            << 56 as ::core::ffi::c_int) as __uint64_t;
-}
-#[inline]
-unsafe extern "C" fn __uint16_identity(mut __x: __uint16_t) -> __uint16_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint32_identity(mut __x: __uint32_t) -> __uint32_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint64_identity(mut __x: __uint64_t) -> __uint64_t {
-    return __x;
-}
-pub const MONTXC_MAX_PEAKS: ::core::ffi::c_int = 100 as ::core::ffi::c_int;
-pub const MONTXC_MAX_DEBUG_LINE: ::core::ffi::c_int = 90 as ::core::ffi::c_int;
-pub const MAX_RUNNERS_UP: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-static mut sDistWeightHalfFall: ::core::ffi::c_float = 0.0f32;
-static mut sLastTrimmedMaxSD: ::core::ffi::c_float = -1.0f64 as ::core::ffi::c_float;
-static mut sLastRunnersUp: [::core::ffi::c_float; 4] = [0.; 4];
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_basic_sizes(
-    mut ixy: ::core::ffi::c_int,
-    mut nbin: ::core::ffi::c_int,
-    mut indentXC: ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut aspectMax: ::core::ffi::c_float,
-    mut extraWidth: ::core::ffi::c_float,
-    mut padFrac: ::core::ffi::c_float,
-    mut niceLimit: ::core::ffi::c_int,
-    mut indentUse: *mut ::core::ffi::c_int,
-    mut nxyBox: *mut ::core::ffi::c_int,
-    mut numExtra: *mut ::core::ffi::c_int,
-    mut nxPad: *mut ::core::ffi::c_int,
-    mut nyPad: *mut ::core::ffi::c_int,
-    mut maxLongShift: *mut ::core::ffi::c_int,
+//! Translation of `IMOD/libcfshr/montagexcorr.c` — functions for correlation of overlap
+//! zones between montage pieces.
+//!
+//! Author of the original: David Mastronarde.  One Rust function per C function, with the
+//! original identifier named in each doc comment.
+#![allow(non_snake_case, dead_code, unused_variables, unused_assignments)]
+
+use crate::imod::libcfshr::b3dutil::{CArg, c_format};
+use core::ffi::c_int;
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+
+// ---------------------------------------------------------------------------------------
+// Foreign boundary: the C stdout stream.
+//
+// The six debug format strings are rendered by `b3dutil::c_format`, the tree's verified
+// translation of glibc's `printf` formatting (they use `%14.7e`, `%14.7g` and `%g`, which
+// Rust's own formatting does not reproduce).  The *stream* is a separate matter: the debug
+// lines still go out through libc stdio rather than `println!`, because C stdio is
+// block-buffered when redirected and Rust's stdout is not, so a program that mixed the two
+// would reorder its own output under `>` while looking correct on a terminal.
+// ---------------------------------------------------------------------------------------
+
+pub const MONTXC_MAX_PEAKS: c_int = 100;
+pub const MONTXC_MAX_DEBUG_LINE: c_int = 90;
+pub const MAX_RUNNERS_UP: c_int = 2;
+pub const SLICE_MODE_FLOAT: c_int = 2;
+
+/// C `static float sDistWeightHalfFall`, held as raw bits so the file-scope global keeps the
+/// process-wide sharing the C has without needing a lock.
+static S_DIST_WEIGHT_HALF_FALL: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+/// C `static float sLastTrimmedMaxSD`.
+static S_LAST_TRIMMED_MAX_SD: AtomicU32 = AtomicU32::new((-1.0f32).to_bits());
+/// C `static float sLastRunnersUp[MAX_RUNNERS_UP * 2]`.
+static S_LAST_RUNNERS_UP: [AtomicU32; 4] = [
+    AtomicU32::new(0.0f32.to_bits()),
+    AtomicU32::new(0.0f32.to_bits()),
+    AtomicU32::new(0.0f32.to_bits()),
+    AtomicU32::new(0.0f32.to_bits()),
+];
+
+/// C `montXCBasicSizes`.
+///
+/// Sets up most of the sizes for the overlap zone correlations.
+pub fn mont_xc_basic_sizes(
+    mut ixy: c_int,
+    nbin: c_int,
+    indentXC: c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    aspectMax: f32,
+    extraWidth: f32,
+    padFrac: f32,
+    niceLimit: c_int,
+    indentUse: &mut c_int,
+    nxyBox: &mut [c_int],
+    numExtra: &mut [c_int],
+    nxPad: &mut c_int,
+    nyPad: &mut c_int,
+    maxLongShift: &mut c_int,
 ) {
-    let mut iyx: ::core::ffi::c_int = 0;
-    let mut nxyBorder: [::core::ffi::c_int; 2] = [0; 2];
-    let mut shiftInOverlap: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    if ixy > 1 as ::core::ffi::c_int {
-        ixy = ixy % 2 as ::core::ffi::c_int;
-        shiftInOverlap = if *nxyOverlap.offset((1 as ::core::ffi::c_int - ixy) as isize)
-            >= 0 as ::core::ffi::c_int
-        {
-            *nxyOverlap.offset((1 as ::core::ffi::c_int - ixy) as isize)
+    let iyx: c_int;
+    let mut nxyBorder: [c_int; 2] = [0; 2];
+    let mut shiftInOverlap: c_int = 0;
+    if ixy > 1 {
+        ixy = ixy % 2;
+        shiftInOverlap = if nxyOverlap[(1 - ixy) as usize] >= 0 {
+            nxyOverlap[(1 - ixy) as usize]
         } else {
-            -*nxyOverlap.offset((1 as ::core::ffi::c_int - ixy) as isize)
+            -nxyOverlap[(1 - ixy) as usize]
         };
     }
-    iyx = 1 as ::core::ffi::c_int - ixy;
-    *indentUse = if indentXC
-        < (*nxyOverlap.offset(ixy as isize) - 8 as ::core::ffi::c_int) / 2 as ::core::ffi::c_int
+    iyx = 1 - ixy;
+    *indentUse = indentXC.min((nxyOverlap[ixy as usize] - 8) / 2);
+    nxyBox[ixy as usize] = (nxyOverlap[ixy as usize] - *indentUse * 2) / nbin;
+    nxyBox[iyx as usize] =
+        (nxyPiece[iyx as usize] - shiftInOverlap - (2 * nbin).max(nxyPiece[ixy as usize] / 20))
+            .min((aspectMax * nxyOverlap[ixy as usize] as f32) as c_int)
+            / nbin;
+    numExtra[iyx as usize] = 0;
+    numExtra[ixy as usize] =
+        (2 * (((extraWidth * nxyBox[ixy as usize] as f32) as f64 + 0.5).floor() as c_int / 2)).min(
+            (nxyPiece[ixy as usize]
+                - crate::imod::libcfshr::b3dutil::b3d_i_max(&[
+                    nbin,
+                    *indentUse,
+                    nxyPiece[ixy as usize] / 20,
+                ]) * 2)
+                / nbin
+                - nxyBox[ixy as usize],
+        );
+    nxyBox[ixy as usize] = nxyBox[ixy as usize] + numExtra[ixy as usize];
+    *maxLongShift = ((if 1.9f64 * nxyOverlap[ixy as usize] as f64 / nbin as f64
+        > 1.5f64 * nxyBox[ixy as usize] as f64
     {
-        indentXC
+        1.9f64 * nxyOverlap[ixy as usize] as f64 / nbin as f64
     } else {
-        (*nxyOverlap.offset(ixy as isize) - 8 as ::core::ffi::c_int) / 2 as ::core::ffi::c_int
-    };
-    *nxyBox.offset(ixy as isize) =
-        (*nxyOverlap.offset(ixy as isize) - *indentUse * 2 as ::core::ffi::c_int) / nbin;
-    *nxyBox.offset(iyx as isize) = (if *nxyPiece.offset(iyx as isize)
-        - shiftInOverlap
-        - (if 2 as ::core::ffi::c_int * nbin
-            > *nxyPiece.offset(ixy as isize) / 20 as ::core::ffi::c_int
-        {
-            2 as ::core::ffi::c_int * nbin
-        } else {
-            *nxyPiece.offset(ixy as isize) / 20 as ::core::ffi::c_int
-        })
-        < (aspectMax * *nxyOverlap.offset(ixy as isize) as ::core::ffi::c_float)
-            as ::core::ffi::c_int
-    {
-        *nxyPiece.offset(iyx as isize)
-            - shiftInOverlap
-            - (if 2 as ::core::ffi::c_int * nbin
-                > *nxyPiece.offset(ixy as isize) / 20 as ::core::ffi::c_int
-            {
-                2 as ::core::ffi::c_int * nbin
-            } else {
-                *nxyPiece.offset(ixy as isize) / 20 as ::core::ffi::c_int
-            })
-    } else {
-        (aspectMax * *nxyOverlap.offset(ixy as isize) as ::core::ffi::c_float) as ::core::ffi::c_int
-    }) / nbin;
-    *numExtra.offset(iyx as isize) = 0 as ::core::ffi::c_int;
-    *numExtra.offset(ixy as isize) = if 2 as ::core::ffi::c_int
-        * (floor(
-            (extraWidth * *nxyBox.offset(ixy as isize) as ::core::ffi::c_float)
-                as ::core::ffi::c_double
-                + 0.5f64,
-        ) as ::core::ffi::c_int
-            / 2 as ::core::ffi::c_int)
-        < (*nxyPiece.offset(ixy as isize)
-            - (3 as ::core::ffi::c_int)
-                .max(nbin)
-                .max(*indentUse)
-                .max(*nxyPiece.offset(ixy as isize) / 20 as ::core::ffi::c_int)
-                * 2 as ::core::ffi::c_int)
-            / nbin
-            - *nxyBox.offset(ixy as isize)
-    {
-        2 as ::core::ffi::c_int
-            * (floor(
-                (extraWidth * *nxyBox.offset(ixy as isize) as ::core::ffi::c_float)
-                    as ::core::ffi::c_double
-                    + 0.5f64,
-            ) as ::core::ffi::c_int
-                / 2 as ::core::ffi::c_int)
-    } else {
-        (*nxyPiece.offset(ixy as isize)
-            - (3 as ::core::ffi::c_int)
-                .max(nbin)
-                .max(*indentUse)
-                .max(*nxyPiece.offset(ixy as isize) / 20 as ::core::ffi::c_int)
-                * 2 as ::core::ffi::c_int)
-            / nbin
-            - *nxyBox.offset(ixy as isize)
-    };
-    *nxyBox.offset(ixy as isize) = *nxyBox.offset(ixy as isize) + *numExtra.offset(ixy as isize);
-    *maxLongShift = floor(
-        (if 1.9f64 * *nxyOverlap.offset(ixy as isize) as ::core::ffi::c_double
-            / nbin as ::core::ffi::c_double
-            > 1.5f64 * *nxyBox.offset(ixy as isize) as ::core::ffi::c_double
-        {
-            1.9f64 * *nxyOverlap.offset(ixy as isize) as ::core::ffi::c_double
-                / nbin as ::core::ffi::c_double
-        } else {
-            1.5f64 * *nxyBox.offset(ixy as isize) as ::core::ffi::c_double
-        }) + 0.5f64,
-    ) as ::core::ffi::c_int;
-    nxyBorder[ixy as usize] = if 5 as ::core::ffi::c_int
-        > floor(
-            (padFrac * *nxyBox.offset(ixy as isize) as ::core::ffi::c_float)
-                as ::core::ffi::c_double
-                + 0.5f64,
-        ) as ::core::ffi::c_int
-    {
-        5 as ::core::ffi::c_int
-    } else {
-        floor(
-            (padFrac * *nxyBox.offset(ixy as isize) as ::core::ffi::c_float)
-                as ::core::ffi::c_double
-                + 0.5f64,
-        ) as ::core::ffi::c_int
-    };
-    nxyBorder[iyx as usize] = if (if 5 as ::core::ffi::c_int
-        > floor(
-            (padFrac * *nxyBox.offset(iyx as isize) as ::core::ffi::c_float)
-                as ::core::ffi::c_double
-                + 0.5f64,
-        ) as ::core::ffi::c_int
-    {
-        5 as ::core::ffi::c_int
-    } else {
-        floor(
-            (padFrac * *nxyBox.offset(iyx as isize) as ::core::ffi::c_float)
-                as ::core::ffi::c_double
-                + 0.5f64,
-        ) as ::core::ffi::c_int
-    }) < (if 5 as ::core::ffi::c_int
-        > floor(0.45f64 * *maxLongShift as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int
-    {
-        5 as ::core::ffi::c_int
-    } else {
-        floor(0.45f64 * *maxLongShift as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int
-    }) {
-        if 5 as ::core::ffi::c_int
-            > floor(
-                (padFrac * *nxyBox.offset(iyx as isize) as ::core::ffi::c_float)
-                    as ::core::ffi::c_double
-                    + 0.5f64,
-            ) as ::core::ffi::c_int
-        {
-            5 as ::core::ffi::c_int
-        } else {
-            floor(
-                (padFrac * *nxyBox.offset(iyx as isize) as ::core::ffi::c_float)
-                    as ::core::ffi::c_double
-                    + 0.5f64,
-            ) as ::core::ffi::c_int
-        }
-    } else if 5 as ::core::ffi::c_int
-        > floor(0.45f64 * *maxLongShift as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int
-    {
-        5 as ::core::ffi::c_int
-    } else {
-        floor(0.45f64 * *maxLongShift as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int
-    };
-    *nxPad = crate::imod::libcfshr::filtxcorr::nice_frame(
-        *nxyBox.offset(0 as ::core::ffi::c_int as isize)
-            + 2 as ::core::ffi::c_int * nxyBorder[0 as ::core::ffi::c_int as usize],
-        2 as ::core::ffi::c_int,
-        niceLimit,
-    );
-    *nyPad = crate::imod::libcfshr::filtxcorr::nice_frame(
-        *nxyBox.offset(1 as ::core::ffi::c_int as isize)
-            + 2 as ::core::ffi::c_int * nxyBorder[1 as ::core::ffi::c_int as usize],
-        2 as ::core::ffi::c_int,
-        niceLimit,
-    );
+        1.5f64 * nxyBox[ixy as usize] as f64
+    }) + 0.5f64)
+        .floor() as c_int;
+
+    /* get the padded size */
+    /* Limit the long dimension padding to that needed for the maximum shift */
+    nxyBorder[ixy as usize] =
+        5.max(((padFrac * nxyBox[ixy as usize] as f32) as f64 + 0.5).floor() as c_int);
+    nxyBorder[iyx as usize] = 5
+        .max(((padFrac * nxyBox[iyx as usize] as f32) as f64 + 0.5).floor() as c_int)
+        .min(5.max((0.45f64 * *maxLongShift as f64 + 0.5).floor() as c_int));
+    *nxPad =
+        crate::imod::libcfshr::filtxcorr::nice_frame(nxyBox[0] + 2 * nxyBorder[0], 2, niceLimit);
+    *nyPad =
+        crate::imod::libcfshr::filtxcorr::nice_frame(nxyBox[1] + 2 * nxyBorder[1], 2, niceLimit);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcbasicsizes_(
-    mut ixy: *mut ::core::ffi::c_int,
-    mut nbin: *mut ::core::ffi::c_int,
-    mut indentXC: *mut ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut aspectMax: *mut ::core::ffi::c_float,
-    mut extraWidth: *mut ::core::ffi::c_float,
-    mut padFrac: *mut ::core::ffi::c_float,
-    mut niceLimit: *mut ::core::ffi::c_int,
-    mut indentUse: *mut ::core::ffi::c_int,
-    mut nxyBox: *mut ::core::ffi::c_int,
-    mut numExtra: *mut ::core::ffi::c_int,
-    mut nxPad: *mut ::core::ffi::c_int,
-    mut nyPad: *mut ::core::ffi::c_int,
-    mut maxLongShift: *mut ::core::ffi::c_int,
+
+/// C `montxcbasicsizes` — Fortran wrapper for `montXCBasicSizes`.  `ixy` should be 1 or 2.
+pub fn montxcbasicsizes(
+    ixy: &c_int,
+    nbin: &c_int,
+    indentXC: &c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    aspectMax: &f32,
+    extraWidth: &f32,
+    padFrac: &f32,
+    niceLimit: &c_int,
+    indentUse: &mut c_int,
+    nxyBox: &mut [c_int],
+    numExtra: &mut [c_int],
+    nxPad: &mut c_int,
+    nyPad: &mut c_int,
+    maxLongShift: &mut c_int,
 ) {
     mont_xc_basic_sizes(
-        *ixy - 1 as ::core::ffi::c_int,
+        *ixy - 1,
         *nbin,
         *indentXC,
         nxyPiece,
@@ -464,128 +147,116 @@ pub unsafe extern "C" fn montxcbasicsizes_(
         maxLongShift,
     );
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_inds_and_ctf(
-    mut ixy: ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut nxyBox: *mut ::core::ffi::c_int,
-    mut nbin: ::core::ffi::c_int,
-    mut indentUse: ::core::ffi::c_int,
-    mut numExtra: *mut ::core::ffi::c_int,
-    mut nxPad: ::core::ffi::c_int,
-    mut nyPad: ::core::ffi::c_int,
-    mut numSmooth: ::core::ffi::c_int,
-    mut sigma1: ::core::ffi::c_float,
-    mut sigma2: ::core::ffi::c_float,
-    mut radius1: ::core::ffi::c_float,
-    mut radius2: ::core::ffi::c_float,
-    mut evalCCC: ::core::ffi::c_int,
-    mut ind0Lower: *mut ::core::ffi::c_int,
-    mut ind1Lower: *mut ::core::ffi::c_int,
-    mut ind0Upper: *mut ::core::ffi::c_int,
-    mut ind1Upper: *mut ::core::ffi::c_int,
-    mut nxSmooth: *mut ::core::ffi::c_int,
-    mut nySmooth: *mut ::core::ffi::c_int,
-    mut ctf: *mut ::core::ffi::c_float,
-    mut delta: *mut ::core::ffi::c_float,
+
+/// C `montXCIndsAndCTF`.
+///
+/// Sets up indices for extracting boxes, and the filter function.
+pub fn mont_xc_inds_and_ctf(
+    mut ixy: c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    nxyBox: &[c_int],
+    nbin: c_int,
+    indentUse: c_int,
+    numExtra: &[c_int],
+    nxPad: c_int,
+    nyPad: c_int,
+    numSmooth: c_int,
+    sigma1: f32,
+    sigma2: f32,
+    radius1: f32,
+    radius2: f32,
+    evalCCC: c_int,
+    ind0Lower: &mut [c_int],
+    ind1Lower: &mut [c_int],
+    ind0Upper: &mut [c_int],
+    ind1Upper: &mut [c_int],
+    nxSmooth: &mut c_int,
+    nySmooth: &mut c_int,
+    ctf: &mut [f32],
+    delta: &mut f32,
 ) {
-    let mut iyx: ::core::ffi::c_int = 0;
-    let mut shiftInOverlap: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut longShift: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    if ixy > 1 as ::core::ffi::c_int {
-        ixy = ixy % 2 as ::core::ffi::c_int;
-        longShift = 1 as ::core::ffi::c_int;
-        shiftInOverlap = -*nxyOverlap.offset((1 as ::core::ffi::c_int - ixy) as isize);
+    let mut iyx: c_int;
+    let mut shiftInOverlap: c_int = 0;
+    let mut longShift: c_int = 0;
+    if ixy > 1 {
+        ixy = ixy % 2;
+        longShift = 1;
+        shiftInOverlap = -nxyOverlap[(1 - ixy) as usize];
     }
-    iyx = 1 as ::core::ffi::c_int - ixy;
-    *ind0Lower.offset(iyx as isize) = *nxyPiece.offset(iyx as isize) / 2 as ::core::ffi::c_int
-        - shiftInOverlap
-        - nbin * *nxyBox.offset(iyx as isize) / 2 as ::core::ffi::c_int;
-    *ind1Lower.offset(iyx as isize) = *ind0Lower.offset(iyx as isize)
-        + nbin * *nxyBox.offset(iyx as isize)
-        - 1 as ::core::ffi::c_int;
-    *ind0Lower.offset(ixy as isize) =
-        *nxyPiece.offset(ixy as isize) - *nxyOverlap.offset(ixy as isize) + indentUse
-            - nbin * *numExtra.offset(ixy as isize);
-    *ind1Lower.offset(ixy as isize) = *ind0Lower.offset(ixy as isize)
-        + nbin * *nxyBox.offset(ixy as isize)
-        - 1 as ::core::ffi::c_int;
-    *ind0Upper = indentUse;
-    *ind1Upper = indentUse + nbin * *nxyBox.offset(ixy as isize) - 1 as ::core::ffi::c_int;
+    iyx = 1 - ixy;
+    ind0Lower[iyx as usize] =
+        (nxyPiece[iyx as usize] / 2 - shiftInOverlap) - (nbin * nxyBox[iyx as usize]) / 2;
+    ind1Lower[iyx as usize] = ind0Lower[iyx as usize] + nbin * nxyBox[iyx as usize] - 1;
+    ind0Lower[ixy as usize] = nxyPiece[ixy as usize] - nxyOverlap[ixy as usize] + indentUse
+        - nbin * numExtra[ixy as usize];
+    ind1Lower[ixy as usize] = ind0Lower[ixy as usize] + nbin * nxyBox[ixy as usize] - 1;
+    ind0Upper[0] = indentUse;
+    ind1Upper[0] = indentUse + nbin * nxyBox[ixy as usize] - 1;
     if longShift != 0 {
         if ixy != 0 {
-            *ind0Upper.offset(1 as ::core::ffi::c_int as isize) =
-                *ind0Upper.offset(0 as ::core::ffi::c_int as isize);
-            *ind1Upper.offset(1 as ::core::ffi::c_int as isize) =
-                *ind1Upper.offset(0 as ::core::ffi::c_int as isize);
+            ind0Upper[1] = ind0Upper[0];
+            ind1Upper[1] = ind1Upper[0];
         }
-        *ind0Upper.offset(iyx as isize) = *ind0Lower.offset(iyx as isize) + shiftInOverlap;
-        *ind1Upper.offset(iyx as isize) = *ind1Lower.offset(iyx as isize) + shiftInOverlap;
+        ind0Upper[iyx as usize] = ind0Lower[iyx as usize] + shiftInOverlap;
+        ind1Upper[iyx as usize] = ind1Lower[iyx as usize] + shiftInOverlap;
     }
-    *nxSmooth = *nxyBox.offset(0 as ::core::ffi::c_int as isize)
-        + (if 2 as ::core::ffi::c_int * numSmooth
-            < (nxPad - *nxyBox.offset(0 as ::core::ffi::c_int as isize)) / 2 as ::core::ffi::c_int
-        {
-            2 as ::core::ffi::c_int * numSmooth
-        } else {
-            (nxPad - *nxyBox.offset(0 as ::core::ffi::c_int as isize)) / 2 as ::core::ffi::c_int
-        });
-    *nySmooth = *nxyBox.offset(1 as ::core::ffi::c_int as isize)
-        + (if 2 as ::core::ffi::c_int * numSmooth
-            < (nyPad - *nxyBox.offset(1 as ::core::ffi::c_int as isize)) / 2 as ::core::ffi::c_int
-        {
-            2 as ::core::ffi::c_int * numSmooth
-        } else {
-            (nyPad - *nxyBox.offset(1 as ::core::ffi::c_int as isize)) / 2 as ::core::ffi::c_int
-        });
-    crate::imod::libcfshr::filtxcorr::xcorr_set_ctf(
-        sigma1,
-        nbin as ::core::ffi::c_float * sigma2,
-        radius1,
-        nbin as ::core::ffi::c_float * radius2,
-        ctf,
-        nxPad,
-        nyPad,
-        delta,
-    );
+
+    /* Set up smoothing over some pixels, but no more than half of the pad */
+    *nxSmooth = nxyBox[0] + (2 * numSmooth).min((nxPad - nxyBox[0]) / 2);
+    *nySmooth = nxyBox[1] + (2 * numSmooth).min((nyPad - nxyBox[1]) / 2);
+
+    /* Multiply high-frequency filtering parameters by the binning so they are equivalent
+    to frequencies in unbinned images */
+    unsafe {
+        crate::imod::libcfshr::filtxcorr::xcorr_set_ctf(
+            sigma1,
+            nbin as f32 * sigma2,
+            radius1,
+            nbin as f32 * radius2,
+            ctf,
+            nxPad,
+            nyPad,
+            delta,
+        );
+    }
     if evalCCC != 0 {
-        iyx = 0 as ::core::ffi::c_int;
-        while iyx < 8193 as ::core::ffi::c_int {
-            *ctf.offset(iyx as isize) =
-                sqrt(*ctf.offset(iyx as isize) as ::core::ffi::c_double) as ::core::ffi::c_float;
+        iyx = 0;
+        while iyx < 8193 {
+            ctf[iyx as usize] = (ctf[iyx as usize] as f64).sqrt() as f32;
             iyx += 1;
         }
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcindsandctf_(
-    mut ixy: *mut ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut nxyBox: *mut ::core::ffi::c_int,
-    mut nbin: *mut ::core::ffi::c_int,
-    mut indentUse: *mut ::core::ffi::c_int,
-    mut numExtra: *mut ::core::ffi::c_int,
-    mut nxPad: *mut ::core::ffi::c_int,
-    mut nyPad: *mut ::core::ffi::c_int,
-    mut numSmooth: *mut ::core::ffi::c_int,
-    mut sigma1: *mut ::core::ffi::c_float,
-    mut sigma2: *mut ::core::ffi::c_float,
-    mut radius1: *mut ::core::ffi::c_float,
-    mut radius2: *mut ::core::ffi::c_float,
-    mut evalCCC: *mut ::core::ffi::c_int,
-    mut ind0Lower: *mut ::core::ffi::c_int,
-    mut ind1Lower: *mut ::core::ffi::c_int,
-    mut ind0Upper: *mut ::core::ffi::c_int,
-    mut ind1Upper: *mut ::core::ffi::c_int,
-    mut nxSmooth: *mut ::core::ffi::c_int,
-    mut nySmooth: *mut ::core::ffi::c_int,
-    mut ctf: *mut ::core::ffi::c_float,
-    mut delta: *mut ::core::ffi::c_float,
+
+/// C `montxcindsandctf` — Fortran wrapper for `montXCIndsAndCTF`.  `ixy` should be 1 or 2.
+pub fn montxcindsandctf(
+    ixy: &c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    nxyBox: &[c_int],
+    nbin: &c_int,
+    indentUse: &c_int,
+    numExtra: &[c_int],
+    nxPad: &c_int,
+    nyPad: &c_int,
+    numSmooth: &c_int,
+    sigma1: &f32,
+    sigma2: &f32,
+    radius1: &f32,
+    radius2: &f32,
+    evalCCC: &c_int,
+    ind0Lower: &mut [c_int],
+    ind1Lower: &mut [c_int],
+    ind0Upper: &mut [c_int],
+    ind1Upper: &mut [c_int],
+    nxSmooth: &mut c_int,
+    nySmooth: &mut c_int,
+    ctf: &mut [f32],
+    delta: &mut f32,
 ) {
     mont_xc_inds_and_ctf(
-        *ixy - 1 as ::core::ffi::c_int,
+        *ixy - 1,
         nxyPiece,
         nxyOverlap,
         nxyBox,
@@ -610,34 +281,36 @@ pub unsafe extern "C" fn montxcindsandctf_(
         delta,
     );
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_find_binning(
-    mut maxBin: ::core::ffi::c_int,
-    mut targetSize: ::core::ffi::c_int,
-    mut indentXC: ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut aspectMax: ::core::ffi::c_float,
-    mut extraWidth: ::core::ffi::c_float,
-    mut padFrac: ::core::ffi::c_float,
-    mut niceLimit: ::core::ffi::c_int,
-    mut numPaddedPix: *mut ::core::ffi::c_int,
-    mut numBoxedPix: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut nxPad: ::core::ffi::c_int = 0;
-    let mut nyPad: ::core::ffi::c_int = 0;
-    let mut indentUse: ::core::ffi::c_int = 0;
-    let mut nxyBox: [::core::ffi::c_int; 2] = [0; 2];
-    let mut numExtra: [::core::ffi::c_int; 2] = [0; 2];
-    let mut maxLongShift: ::core::ffi::c_int = 0;
-    let mut ixy: ::core::ffi::c_int = 0;
-    let mut nbin: ::core::ffi::c_int = 0;
-    nbin = 1 as ::core::ffi::c_int;
+
+/// C `montXCFindBinning`.
+///
+/// Finds binning needed to keep boxed out area smaller than a target size.
+pub fn mont_xc_find_binning(
+    maxBin: c_int,
+    targetSize: c_int,
+    indentXC: c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    aspectMax: f32,
+    extraWidth: f32,
+    padFrac: f32,
+    niceLimit: c_int,
+    numPaddedPix: &mut c_int,
+    numBoxedPix: &mut c_int,
+) -> c_int {
+    let mut nxPad: c_int = 0;
+    let mut nyPad: c_int = 0;
+    let mut indentUse: c_int = 0;
+    let mut nxyBox: [c_int; 2] = [0; 2];
+    let mut numExtra: [c_int; 2] = [0; 2];
+    let mut maxLongShift: c_int = 0;
+    let mut ixy: c_int;
+    let mut nbin: c_int = 1;
     while nbin <= maxBin {
-        *numPaddedPix = 0 as ::core::ffi::c_int;
-        *numBoxedPix = 0 as ::core::ffi::c_int;
-        ixy = 0 as ::core::ffi::c_int;
-        while ixy < 2 as ::core::ffi::c_int {
+        *numPaddedPix = 0;
+        *numBoxedPix = 0;
+        ixy = 0;
+        while ixy < 2 {
             mont_xc_basic_sizes(
                 ixy,
                 nbin,
@@ -648,33 +321,15 @@ pub unsafe extern "C" fn mont_xc_find_binning(
                 extraWidth,
                 padFrac,
                 niceLimit,
-                &raw mut indentUse,
-                (&raw mut nxyBox as *mut ::core::ffi::c_int)
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_int,
-                (&raw mut numExtra as *mut ::core::ffi::c_int)
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_int,
-                &raw mut nxPad,
-                &raw mut nyPad,
-                &raw mut maxLongShift,
+                &mut indentUse,
+                &mut nxyBox[0..],
+                &mut numExtra[0..],
+                &mut nxPad,
+                &mut nyPad,
+                &mut maxLongShift,
             );
-            *numPaddedPix = if *numPaddedPix
-                > (nxPad + 8 as ::core::ffi::c_int) * (nyPad + 8 as ::core::ffi::c_int)
-            {
-                *numPaddedPix
-            } else {
-                (nxPad + 8 as ::core::ffi::c_int) * (nyPad + 8 as ::core::ffi::c_int)
-            };
-            *numBoxedPix = if *numBoxedPix
-                > (nxyBox[0 as ::core::ffi::c_int as usize] + 4 as ::core::ffi::c_int)
-                    * (nxyBox[1 as ::core::ffi::c_int as usize] + 4 as ::core::ffi::c_int)
-            {
-                *numBoxedPix
-            } else {
-                (nxyBox[0 as ::core::ffi::c_int as usize] + 4 as ::core::ffi::c_int)
-                    * (nxyBox[1 as ::core::ffi::c_int as usize] + 4 as ::core::ffi::c_int)
-            };
+            *numPaddedPix = (*numPaddedPix).max((nxPad + 8) * (nyPad + 8));
+            *numBoxedPix = (*numBoxedPix).max((nxyBox[0] + 4) * (nxyBox[1] + 4));
             ixy += 1;
         }
         if *numBoxedPix <= targetSize * targetSize {
@@ -682,23 +337,24 @@ pub unsafe extern "C" fn mont_xc_find_binning(
         }
         nbin += 1;
     }
-    return maxBin;
+    maxBin
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcfindbinning_(
-    mut maxBin: *mut ::core::ffi::c_int,
-    mut targetSize: *mut ::core::ffi::c_int,
-    mut indentXC: *mut ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut aspectMax: *mut ::core::ffi::c_float,
-    mut extraWidth: *mut ::core::ffi::c_float,
-    mut padFrac: *mut ::core::ffi::c_float,
-    mut niceLimit: *mut ::core::ffi::c_int,
-    mut numPaddedPix: *mut ::core::ffi::c_int,
-    mut numBoxedPix: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return mont_xc_find_binning(
+
+/// C `montxcfindbinning` — Fortran wrapper for `montXCFindBinning`.
+pub fn montxcfindbinning(
+    maxBin: &c_int,
+    targetSize: &c_int,
+    indentXC: &c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    aspectMax: &f32,
+    extraWidth: &f32,
+    padFrac: &f32,
+    niceLimit: &c_int,
+    numPaddedPix: &mut c_int,
+    numBoxedPix: &mut c_int,
+) -> c_int {
+    mont_xc_find_binning(
         *maxBin,
         *targetSize,
         *indentXC,
@@ -710,92 +366,88 @@ pub unsafe extern "C" fn montxcfindbinning_(
         *niceLimit,
         numPaddedPix,
         numBoxedPix,
-    );
+    )
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_find_binning2(
-    mut maxBin: ::core::ffi::c_int,
-    mut targetSize: ::core::ffi::c_int,
-    mut indentXC: ::core::ffi::c_int,
-    mut ixy: ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut expectedShift: *mut ::core::ffi::c_int,
-    mut aspectMax: ::core::ffi::c_float,
-    mut extraWidth: ::core::ffi::c_float,
-    mut padFrac: ::core::ffi::c_float,
-    mut niceLimit: ::core::ffi::c_int,
-    mut numPaddedPix: *mut ::core::ffi::c_int,
-    mut numBoxedPix: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut nxPad: ::core::ffi::c_int = 0;
-    let mut nyPad: ::core::ffi::c_int = 0;
-    let mut indentUse: ::core::ffi::c_int = 0;
-    let mut nxyBox: [::core::ffi::c_int; 2] = [0; 2];
-    let mut numExtra: [::core::ffi::c_int; 2] = [0; 2];
-    let mut maxLongShift: ::core::ffi::c_int = 0;
-    let mut nbin: ::core::ffi::c_int = 0;
-    let mut overlapUse: [::core::ffi::c_int; 2] = [0; 2];
-    overlapUse[ixy as usize] = *nxyOverlap.offset(ixy as isize)
-        + (if 0 as ::core::ffi::c_int > -*expectedShift.offset(ixy as isize) {
-            0 as ::core::ffi::c_int
-        } else {
-            -*expectedShift.offset(ixy as isize)
-        });
-    overlapUse[(1 as ::core::ffi::c_int - ixy) as usize] =
-        *expectedShift.offset((1 as ::core::ffi::c_int - ixy) as isize);
-    nbin = 1 as ::core::ffi::c_int;
+
+/// C `montXCFindBinning2`.
+///
+/// Finds binning needed to keep boxed out area smaller than a target size along one edge,
+/// with expected shift at the edge taken into account.
+pub fn mont_xc_find_binning2(
+    maxBin: c_int,
+    targetSize: c_int,
+    indentXC: c_int,
+    ixy: c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    expectedShift: &[c_int],
+    aspectMax: f32,
+    extraWidth: f32,
+    padFrac: f32,
+    niceLimit: c_int,
+    numPaddedPix: &mut c_int,
+    numBoxedPix: &mut c_int,
+) -> c_int {
+    let mut nxPad: c_int = 0;
+    let mut nyPad: c_int = 0;
+    let mut indentUse: c_int = 0;
+    let mut nxyBox: [c_int; 2] = [0; 2];
+    let mut numExtra: [c_int; 2] = [0; 2];
+    let mut maxLongShift: c_int = 0;
+    let mut nbin: c_int;
+    let mut overlapUse: [c_int; 2] = [0; 2];
+    overlapUse[ixy as usize] = nxyOverlap[ixy as usize] + 0.max(-expectedShift[ixy as usize]);
+    overlapUse[(1 - ixy) as usize] = expectedShift[(1 - ixy) as usize];
+    nbin = 1;
     while nbin <= maxBin {
         mont_xc_basic_sizes(
-            ixy + 2 as ::core::ffi::c_int,
+            ixy + 2,
             nbin,
             indentXC,
             nxyPiece,
-            &raw mut overlapUse as *mut ::core::ffi::c_int,
+            &overlapUse,
             aspectMax,
             extraWidth,
             padFrac,
             niceLimit,
-            &raw mut indentUse,
-            (&raw mut nxyBox as *mut ::core::ffi::c_int).offset(0 as ::core::ffi::c_int as isize)
-                as *mut ::core::ffi::c_int,
-            (&raw mut numExtra as *mut ::core::ffi::c_int).offset(0 as ::core::ffi::c_int as isize)
-                as *mut ::core::ffi::c_int,
-            &raw mut nxPad,
-            &raw mut nyPad,
-            &raw mut maxLongShift,
+            &mut indentUse,
+            &mut nxyBox[0..],
+            &mut numExtra[0..],
+            &mut nxPad,
+            &mut nyPad,
+            &mut maxLongShift,
         );
-        *numPaddedPix = (nxPad + 8 as ::core::ffi::c_int) * (nyPad + 8 as ::core::ffi::c_int);
-        *numBoxedPix = (nxyBox[0 as ::core::ffi::c_int as usize] + 4 as ::core::ffi::c_int)
-            * (nxyBox[1 as ::core::ffi::c_int as usize] + 4 as ::core::ffi::c_int);
+        *numPaddedPix = (nxPad + 8) * (nyPad + 8);
+        *numBoxedPix = (nxyBox[0] + 4) * (nxyBox[1] + 4);
         if *numBoxedPix <= targetSize * targetSize {
             return nbin;
         }
         nbin += 1;
     }
-    return maxBin;
+    maxBin
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcfindbinning2_(
-    mut maxBin: *mut ::core::ffi::c_int,
-    mut targetSize: *mut ::core::ffi::c_int,
-    mut indentXC: *mut ::core::ffi::c_int,
-    mut ixy: *mut ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut expectedShift: *mut ::core::ffi::c_int,
-    mut aspectMax: *mut ::core::ffi::c_float,
-    mut extraWidth: *mut ::core::ffi::c_float,
-    mut padFrac: *mut ::core::ffi::c_float,
-    mut niceLimit: *mut ::core::ffi::c_int,
-    mut numPaddedPix: *mut ::core::ffi::c_int,
-    mut numBoxedPix: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return mont_xc_find_binning2(
+
+/// C `montxcfindbinning2` — Fortran wrapper for `montXCFindBinning2`.
+pub fn montxcfindbinning2(
+    maxBin: &c_int,
+    targetSize: &c_int,
+    indentXC: &c_int,
+    ixy: &c_int,
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    expectedShift: &[c_int],
+    aspectMax: &f32,
+    extraWidth: &f32,
+    padFrac: &f32,
+    niceLimit: &c_int,
+    numPaddedPix: &mut c_int,
+    numBoxedPix: &mut c_int,
+) -> c_int {
+    mont_xc_find_binning2(
         *maxBin,
         *targetSize,
         *indentXC,
-        *ixy - 1 as ::core::ffi::c_int,
+        *ixy - 1,
         nxyPiece,
         nxyOverlap,
         expectedShift,
@@ -805,272 +457,264 @@ pub unsafe extern "C" fn montxcfindbinning2_(
         *niceLimit,
         numPaddedPix,
         numBoxedPix,
-    );
+    )
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xcorr_edge(
-    mut lowerIn: *mut ::core::ffi::c_float,
-    mut upperIn: *mut ::core::ffi::c_float,
-    mut nxyBox: *mut ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut nxSmooth: ::core::ffi::c_int,
-    mut nySmooth: ::core::ffi::c_int,
-    mut nxPad: ::core::ffi::c_int,
-    mut nyPad: ::core::ffi::c_int,
-    mut lowerPad: *mut ::core::ffi::c_float,
-    mut upperPad: *mut ::core::ffi::c_float,
-    mut lowerCopy: *mut ::core::ffi::c_float,
-    mut numXcorrPeaks: ::core::ffi::c_int,
-    mut legacy: ::core::ffi::c_int,
-    mut ctf: *mut ::core::ffi::c_float,
-    mut delta: ::core::ffi::c_float,
-    mut inExtra: *mut ::core::ffi::c_int,
-    mut nbin: ::core::ffi::c_int,
-    mut ixy: ::core::ffi::c_int,
-    mut maxLongShift: ::core::ffi::c_int,
-    mut weightCCC: ::core::ffi::c_int,
-    mut xDisplace: *mut ::core::ffi::c_float,
-    mut yDisplace: *mut ::core::ffi::c_float,
-    mut CCC: *mut ::core::ffi::c_float,
-    mut twoDfft: Option<
-        unsafe extern "C" fn(
-            *mut ::core::ffi::c_float,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-        ) -> (),
-    >,
+
+/// C `montXCorrEdge`.
+///
+/// Performs Fourier correlations and evaluation of real-space correlations to find
+/// displacement on an edge.
+///
+/// `lowerCopy` is the C `float *lowerCopy` that may be NULL; `dumpEdge` is the C function
+/// pointer that may be NULL.  `debugStr`/`debugLen` are the C debug buffer and its length.
+pub fn mont_xcorr_edge(
+    lowerIn: &[f32],
+    upperIn: &[f32],
+    nxyBox: &[c_int],
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    nxSmooth: c_int,
+    nySmooth: c_int,
+    mut nxPad: c_int,
+    mut nyPad: c_int,
+    lowerPad: &mut [f32],
+    upperPad: &mut [f32],
+    mut lowerCopy: Option<&mut [f32]>,
+    numXcorrPeaks: c_int,
+    legacy: c_int,
+    ctf: &[f32],
+    delta: f32,
+    inExtra: &[c_int],
+    nbin: c_int,
+    ixy: c_int,
+    maxLongShift: c_int,
+    weightCCC: c_int,
+    xDisplace: &mut f32,
+    yDisplace: &mut f32,
+    CCC: &mut f32,
+    twoDfft: &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int),
     mut dumpEdge: Option<
-        unsafe extern "C" fn(
-            *mut ::core::ffi::c_float,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-        ) -> (),
+        &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int, &mut c_int, &mut c_int),
     >,
-    mut debugStr: *mut ::core::ffi::c_char,
-    mut debugLen: ::core::ffi::c_int,
-    mut debugLevel: ::core::ffi::c_int,
+    debugStr: &mut [u8],
+    debugLen: c_int,
+    debugLevel: c_int,
 ) {
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut nxTrim: ::core::ffi::c_int = 0;
-    let mut nyTrim: ::core::ffi::c_int = 0;
-    let mut numPixel: ::core::ffi::c_int = 0;
-    let mut indPeak: ::core::ffi::c_int = 0;
-    let mut indSecond: ::core::ffi::c_int = 0;
-    let mut indThird: ::core::ffi::c_int = 0;
-    let mut curDebugLen: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut nxPadDim: ::core::ffi::c_int = nxPad + 2 as ::core::ffi::c_int;
-    let mut arrayIn: *mut ::core::ffi::c_float = lowerIn;
-    let mut arrayOut: *mut ::core::ffi::c_float = lowerPad;
-    let mut xpeak: [::core::ffi::c_float; 100] = [0.; 100];
-    let mut ypeak: [::core::ffi::c_float; 100] = [0.; 100];
-    let mut peak: [::core::ffi::c_float; 100] = [0.; 100];
-    let mut wgtOrderInds: [::core::ffi::c_int; 100] = [0; 100];
-    let mut wgtPeaks: [::core::ffi::c_float; 100] = [0.; 100];
-    let mut gaussPeakProbs: [::core::ffi::c_float; 100] = [0.; 100];
-    let mut sumArray: [::core::ffi::c_double; 7] = [0.; 7];
-    let mut grandSums: [::core::ffi::c_double; 7] = [0.; 7];
-    let mut cccSecond: ::core::ffi::c_double = 0.;
-    let mut cccThird: ::core::ffi::c_double = 0.;
-    let mut xTemp: ::core::ffi::c_float = 0.;
-    let mut yTemp: ::core::ffi::c_float = 0.;
-    let mut newCCC: ::core::ffi::c_float = 0.;
-    let mut zero: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut one: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    let mut jxy: ::core::ffi::c_int = 0;
-    let mut ixyP1: ::core::ffi::c_int = 0;
-    let mut numInSum: ::core::ffi::c_int = 0;
-    let mut weights: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut aWeights: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut bWeights: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut nxWgt: ::core::ffi::c_int = 0;
-    let mut nyWgt: ::core::ffi::c_int = 0;
-    let mut numSamp: ::core::ffi::c_int = 0;
-    let mut binWgt: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-    let mut wgtXoffset: ::core::ffi::c_int = 0;
-    let mut wgtYoffset: ::core::ffi::c_int = 0;
-    let mut wgtBox: ::core::ffi::c_int = 10 as ::core::ffi::c_int;
-    let mut evalCCC: ::core::ffi::c_int = if numXcorrPeaks > 1 as ::core::ffi::c_int && legacy == 0
-    {
-        1 as ::core::ffi::c_int
+    let mut ind: c_int;
+    let mut i: c_int;
+    let mut nxTrim: c_int = 0;
+    let mut nyTrim: c_int = 0;
+    let mut numPixel: c_int = 0;
+    let mut indPeak: c_int;
+    let mut indSecond: c_int;
+    let mut indThird: c_int;
+    let mut curDebugLen: c_int = 0;
+    let mut nxPadDim: c_int = nxPad + 2;
+    let mut xpeak: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
+    let mut ypeak: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
+    let mut peak: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
+    let mut wgtOrderInds: [c_int; MONTXC_MAX_PEAKS as usize] = [0; MONTXC_MAX_PEAKS as usize];
+    let mut wgtPeaks: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
+    let mut gaussPeakProbs: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
+    let mut sumArray: [f64; 7] = [0.; 7];
+    let mut grandSums: [f64; 7] = [0.; 7];
+    let mut cccSecond: f64 = 0.;
+    let mut cccThird: f64 = 0.;
+    let mut xTemp: f32;
+    let mut yTemp: f32;
+    let mut newCCC: f32 = 0.;
+    let mut zero: c_int = 0;
+    let mut one: c_int = 1;
+    let jxy: c_int = 0;
+    let mut ixyP1: c_int;
+    let mut numInSum: c_int;
+    let mut aWeights: Option<Vec<f32>> = None;
+    let mut bWeights: Option<Vec<f32>> = None;
+    let nxWgt: c_int;
+    let nyWgt: c_int;
+    let mut numSamp: c_int = 0;
+    let binWgt: c_int = 2;
+    let mut wgtXoffset: c_int = 0;
+    let mut wgtYoffset: c_int = 0;
+    let wgtBox: c_int = 10;
+    let evalCCC: c_int = if numXcorrPeaks > 1 && legacy == 0 {
+        1
     } else {
-        0 as ::core::ffi::c_int
+        0
     };
-    let mut ccc: ::core::ffi::c_double = 0.;
-    let mut cccMax: ::core::ffi::c_double = 0.;
-    let mut wgtCCC: ::core::ffi::c_double = 0.;
-    let mut fracArea: ::core::ffi::c_double = 0.;
-    let mut sigma: ::core::ffi::c_double = 0.;
-    let mut gaussProb: ::core::ffi::c_double = 0.;
-    let mut expectDist: [::core::ffi::c_double; 2] = [0.; 2];
-    let mut delx: ::core::ffi::c_int = 0;
-    let mut dely: ::core::ffi::c_int = 0;
-    let mut xStart: ::core::ffi::c_int = 0;
-    let mut xEnd: ::core::ffi::c_int = 0;
-    let mut yStart: ::core::ffi::c_int = 0;
-    let mut yEnd: ::core::ffi::c_int = 0;
-    let mut fullPixel: ::core::ffi::c_int = 0;
-    let mut wgtTrim: ::core::ffi::c_int = 0;
-    let mut nyLocal: ::core::ffi::c_int = 0;
-    let mut nxLocal: ::core::ffi::c_int = 0;
-    let mut numLocalX: ::core::ffi::c_int = 0;
-    let mut localXoverlap: ::core::ffi::c_int = 0;
-    let mut numLocalY: ::core::ffi::c_int = 0;
-    let mut localYoverlap: ::core::ffi::c_int = 0;
-    let mut lyStart: ::core::ffi::c_int = 0;
-    let mut lyEnd: ::core::ffi::c_int = 0;
-    let mut lxStart: ::core::ffi::c_int = 0;
-    let mut lxEnd: ::core::ffi::c_int = 0;
-    let mut localX: ::core::ffi::c_int = 0;
-    let mut localY: ::core::ffi::c_int = 0;
-    let mut loc: ::core::ffi::c_int = 0;
-    let mut indOrd: ::core::ffi::c_int = 0;
-    let mut localXseq: [::core::ffi::c_int; 100] = [0; 100];
-    let mut localYseq: [::core::ffi::c_int; 100] = [0; 100];
-    let mut localAspect: ::core::ffi::c_float = 0.;
-    let mut maxLocalAspect: ::core::ffi::c_float = 2.0f32;
-    let mut maxWsum: ::core::ffi::c_float = 0.0f32;
-    let mut distLimit: ::core::ffi::c_float = 0.;
-    let mut expectedXpeak: ::core::ffi::c_float = 0.;
-    let mut expectedYpeak: ::core::ffi::c_float = 0.;
-    let mut wsumAtMax: ::core::ffi::c_float = 0.;
-    let mut wsum: ::core::ffi::c_float = 0.;
-    let mut delExtent: ::core::ffi::c_float = 0.;
-    let mut wgtThresh: ::core::ffi::c_float = 0.;
-    let mut fracDiffCrit: ::core::ffi::c_float = 0.95f32;
-    let mut minWsumRatio: ::core::ffi::c_float = 0.33f32;
-    let mut runnerUpThreshFac: ::core::ffi::c_float = 0.8f32;
-    let mut longShiftToAdd: [::core::ffi::c_int; 2] =
-        [0 as ::core::ffi::c_int, 0 as ::core::ffi::c_int];
-    let mut extraFromExpected: [::core::ffi::c_int; 2] =
-        [0 as ::core::ffi::c_int, 0 as ::core::ffi::c_int];
-    let mut expectedLeft: [::core::ffi::c_float; 2] = [
-        0.0f64 as ::core::ffi::c_float,
-        0.0f64 as ::core::ffi::c_float,
-    ];
-    let mut numExtra: [::core::ffi::c_int; 2] = [0; 2];
-    let mut edgeDisplace: ::core::ffi::c_float = if ixy != 0 { *yDisplace } else { *xDisplace };
-    let mut longDisplace: ::core::ffi::c_float = if ixy != 0 { *xDisplace } else { *yDisplace };
-    let mut overlapPow: ::core::ffi::c_double = 0.166667f64;
-    static mut first: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    let mut wallStart: ::core::ffi::c_double = 0.;
-    numExtra[0 as ::core::ffi::c_int as usize] = *inExtra.offset(0 as ::core::ffi::c_int as isize);
-    numExtra[1 as ::core::ffi::c_int as usize] =
-        if *inExtra.offset(1 as ::core::ffi::c_int as isize) >= 0 as ::core::ffi::c_int {
-            *inExtra.offset(1 as ::core::ffi::c_int as isize)
-        } else {
-            -*inExtra.offset(1 as ::core::ffi::c_int as isize)
-        };
-    if weightCCC > 0 as ::core::ffi::c_int {
-        extraFromExpected[ixy as usize] = floor(
-            (if 0.0f64 > -edgeDisplace as ::core::ffi::c_double {
-                0.0f64
-            } else {
-                -edgeDisplace as ::core::ffi::c_double
-            }) + 0.5f64,
-        ) as ::core::ffi::c_int;
-        expectedLeft[ixy as usize] = (if 0.0f64 > edgeDisplace as ::core::ffi::c_double {
+    let mut ccc: f64 = 0.;
+    let mut cccMax: f64 = 0.;
+    let wgtCCC: f64 = 0.;
+    let mut fracArea: f64 = 0.;
+    let mut sigma: f64 = 0.;
+    let mut gaussProb: f64;
+    let mut expectDist: [f64; 2] = [0.; 2];
+    let mut delx: c_int;
+    let mut dely: c_int;
+    let mut xStart: c_int;
+    let mut xEnd: c_int;
+    let mut yStart: c_int;
+    let mut yEnd: c_int;
+    let mut fullPixel: c_int = 0;
+    let wgtTrim: c_int;
+    let mut nyLocal: c_int = 0;
+    let mut nxLocal: c_int = 0;
+    let mut numLocalX: c_int = 0;
+    let mut localXoverlap: c_int = 0;
+    let mut numLocalY: c_int = 0;
+    let mut localYoverlap: c_int = 0;
+    let mut lyStart: c_int;
+    let mut lyEnd: c_int;
+    let mut lxStart: c_int;
+    let mut lxEnd: c_int;
+    let mut localX: c_int;
+    let mut localY: c_int;
+    let mut loc: c_int;
+    let mut indOrd: c_int;
+    let mut localXseq: [c_int; 100] = [0; 100];
+    let mut localYseq: [c_int; 100] = [0; 100];
+    let mut localAspect: f32;
+    let maxLocalAspect: f32 = 2.;
+    let mut maxWsum: f32 = 0.;
+    let mut distLimit: f32 = 0.;
+    let mut expectedXpeak: f32 = 0.;
+    let mut expectedYpeak: f32 = 0.;
+    let mut wsumAtMax: f32;
+    let mut wsum: f32 = 0.;
+    let delExtent: f32 = 0.;
+    let wgtThresh: f32 = 0.;
+    let fracDiffCrit: f32 = 0.95;
+    let minWsumRatio: f32 = 0.33;
+    let runnerUpThreshFac: f32 = 0.8;
+    let mut longShiftToAdd: [c_int; 2] = [0, 0];
+    let mut extraFromExpected: [c_int; 2] = [0, 0];
+    let mut expectedLeft: [f32; 2] = [0., 0.];
+    let mut numExtra: [c_int; 2] = [0; 2];
+    let edgeDisplace: f32 = if ixy != 0 { *yDisplace } else { *xDisplace };
+    let longDisplace: f32 = if ixy != 0 { *xDisplace } else { *yDisplace };
+    let overlapPow: f64 = 0.166667;
+    // C `static int first = 1;` — read only by the commented-out SD-map image dumps.
+    static FIRST: AtomicI32 = AtomicI32::new(1);
+    let wallStart: f64;
+
+    numExtra[0] = inExtra[0];
+    numExtra[1] = if inExtra[1] >= 0 {
+        inExtra[1]
+    } else {
+        -inExtra[1]
+    };
+
+    if weightCCC > 0 {
+        // These are all unbinned
+        extraFromExpected[ixy as usize] = ((if 0.0f64 > -edgeDisplace as f64 {
             0.0f64
         } else {
-            edgeDisplace as ::core::ffi::c_double
-        }) as ::core::ffi::c_float;
-        longShiftToAdd[(1 as ::core::ffi::c_int - ixy) as usize] =
-            floor(longDisplace as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
+            -edgeDisplace as f64
+        }) + 0.5f64)
+            .floor() as c_int;
+        expectedLeft[ixy as usize] = (if 0.0f64 > edgeDisplace as f64 {
+            0.0f64
+        } else {
+            edgeDisplace as f64
+        }) as f32;
+        longShiftToAdd[(1 - ixy) as usize] = (longDisplace as f64 + 0.5f64).floor() as c_int;
+
+        // Probability down to half at the overlap plus extra extent: has to be binned
+        let sDistWeightHalfFall = f32::from_bits(S_DIST_WEIGHT_HALF_FALL.load(Ordering::Relaxed));
         sigma = 2.0f64
-            * (if sDistWeightHalfFall as ::core::ffi::c_double > 0.0f64 {
-                sDistWeightHalfFall / nbin as ::core::ffi::c_float
+            * (if sDistWeightHalfFall as f64 > 0.0f64 {
+                sDistWeightHalfFall / nbin as f32
             } else {
-                (*nxyOverlap.offset(ixy as isize) / nbin + numExtra[ixy as usize])
-                    as ::core::ffi::c_float
-            }) as ::core::ffi::c_double
+                (nxyOverlap[ixy as usize] / nbin + numExtra[ixy as usize]) as f32
+            }) as f64
             / 2.355f64;
-        distLimit = (2.03f64 * sigma) as ::core::ffi::c_float;
-        expectedXpeak = expectedLeft[0 as ::core::ffi::c_int as usize]
-            / nbin as ::core::ffi::c_float
-            + numExtra[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
-        expectedYpeak = expectedLeft[1 as ::core::ffi::c_int as usize]
-            / nbin as ::core::ffi::c_float
-            + *inExtra.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_float;
-        if debugLevel > 1 as ::core::ffi::c_int && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
-            sprintf(
-                debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char,
-                b"sigma %.2f limit %.1f  expected %.1f %.1f\n\0" as *const u8
-                    as *const ::core::ffi::c_char,
-                sigma,
-                distLimit as ::core::ffi::c_double,
-                expectedXpeak as ::core::ffi::c_double,
-                expectedYpeak as ::core::ffi::c_double,
+        distLimit = (2.03f64 * sigma) as f32;
+        expectedXpeak = expectedLeft[0] / nbin as f32 + numExtra[0] as f32;
+        expectedYpeak = expectedLeft[1] / nbin as f32 + inExtra[1] as f32;
+        if debugLevel > 1 && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
+            let text = c_format(
+                "sigma %.2f limit %.1f  expected %.1f %.1f\n",
+                &[
+                    CArg::Dbl(sigma),
+                    CArg::Dbl(distLimit as f64),
+                    CArg::Dbl(expectedXpeak as f64),
+                    CArg::Dbl(expectedYpeak as f64),
+                ],
             );
-            curDebugLen = (curDebugLen as ::core::ffi::c_ulong)
-                .wrapping_add(strlen(
-                    debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char
-                ) as ::core::ffi::c_ulong) as ::core::ffi::c_int
-                as ::core::ffi::c_int;
+            let at = curDebugLen as usize;
+            debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
+            debugStr[at + text.len()] = 0;
+            curDebugLen += text.len() as c_int;
         }
     }
-    ixyP1 = ixy + 1 as ::core::ffi::c_int;
-    i = 0 as ::core::ffi::c_int;
-    while i < 4 as ::core::ffi::c_int {
-        sLastRunnersUp[i as usize] = -1.0e30f64 as ::core::ffi::c_float;
+    ixyP1 = ixy + 1;
+
+    // Clear out the 2nd and third peaks
+    i = 0;
+    while i < 4 {
+        S_LAST_RUNNERS_UP[i as usize].store((-1.0e30f64 as f32).to_bits(), Ordering::Relaxed);
         i += 1;
     }
-    xStart = (nxPad - *nxyBox.offset(0 as ::core::ffi::c_int as isize)) / 2 as ::core::ffi::c_int;
+
+    // Set coordinate limits for weighting/SD maps
+    xStart = (nxPad - nxyBox[0]) / 2;
     xEnd = nxPad - xStart;
-    yStart = (nyPad - *nxyBox.offset(1 as ::core::ffi::c_int as isize)) / 2 as ::core::ffi::c_int;
+    yStart = (nyPad - nxyBox[1]) / 2;
     yEnd = nyPad - yStart;
-    nxWgt = (xEnd - xStart + binWgt - 1 as ::core::ffi::c_int) / binWgt;
-    xEnd = xStart + binWgt * nxWgt - 1 as ::core::ffi::c_int;
-    nyWgt = (yEnd - yStart + binWgt - 1 as ::core::ffi::c_int) / binWgt;
-    yEnd = yStart + binWgt * nyWgt - 1 as ::core::ffi::c_int;
-    wgtTrim = if (5 as ::core::ffi::c_int)
-        < (if nxWgt < nyWgt { nxWgt } else { nyWgt }) / 20 as ::core::ffi::c_int
-    {
-        5 as ::core::ffi::c_int
-    } else {
-        (if nxWgt < nyWgt { nxWgt } else { nyWgt }) / 20 as ::core::ffi::c_int
-    };
-    if !lowerCopy.is_null() {
-        if numXcorrPeaks > 1 as ::core::ffi::c_int {
-            aWeights = malloc(
-                ((nxWgt * nyWgt) as size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-            ) as *mut ::core::ffi::c_float;
+    nxWgt = (xEnd - xStart + binWgt - 1) / binWgt;
+    xEnd = xStart + binWgt * nxWgt - 1;
+    nyWgt = (yEnd - yStart + binWgt - 1) / binWgt;
+    yEnd = yStart + binWgt * nyWgt - 1;
+    wgtTrim = 5.min(nxWgt.min(nyWgt) / 20);
+
+    // Set up to get SD maps if there is an array
+    if lowerCopy.is_some() {
+        if numXcorrPeaks > 1 {
+            aWeights = Some(vec![0.0f32; (nxWgt * nyWgt) as usize]);
         }
-        bWeights = malloc(
-            ((nxWgt * nyWgt) as size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-        ) as *mut ::core::ffi::c_float;
-        if weightCCC != 0 && aWeights.is_null() || bWeights.is_null() {
-            free(aWeights as *mut ::core::ffi::c_void);
-            aWeights = ::core::ptr::null_mut::<::core::ffi::c_float>();
-            free(bWeights as *mut ::core::ffi::c_void);
-            bWeights = ::core::ptr::null_mut::<::core::ffi::c_float>();
+        bWeights = Some(vec![0.0f32; (nxWgt * nyWgt) as usize]);
+        // A Vec allocation failure aborts rather than returning NULL, so the `!bWeights` half
+        // of the source's test can no longer fire; the `weightCCC && !aWeights` half still
+        // does, when numXcorrPeaks <= 1.
+        if (weightCCC != 0 && aWeights.is_none()) || bWeights.is_none() {
+            aWeights = None;
+            bWeights = None;
         }
     }
-    weights = aWeights;
-    sLastTrimmedMaxSD = -1.0f64 as ::core::ffi::c_float;
-    ind = 0 as ::core::ffi::c_int;
-    while ind < 2 as ::core::ffi::c_int {
-        if nxSmooth > *nxyBox.offset(0 as ::core::ffi::c_int as isize)
-            && nySmooth > *nxyBox.offset(1 as ::core::ffi::c_int as isize)
-        {
+
+    // Loop on lower and upper piece, extracting etc.
+    S_LAST_TRIMMED_MAX_SD.store((-1.0f32).to_bits(), Ordering::Relaxed);
+    ind = 0;
+    while ind < 2 {
+        // The C walks `arrayIn`/`arrayOut`/`weights` from lower to upper at the end of the
+        // iteration; Rust cannot re-seat a `&mut` from one parameter to another, so the same
+        // choice is made at the top of the body instead.
+        let arrayIn: &[f32] = if ind == 0 { lowerIn } else { upperIn };
+        let arrayOut: &mut [f32] = if ind == 0 {
+            &mut *lowerPad
+        } else {
+            &mut *upperPad
+        };
+        let weights: Option<&mut [f32]> = if ind == 0 {
+            aWeights.as_deref_mut()
+        } else {
+            bWeights.as_deref_mut()
+        };
+        if nxSmooth > nxyBox[0] && nySmooth > nxyBox[1] {
             crate::imod::libcfshr::taperpad::slice_smooth_out_pad(
-                arrayIn as *mut ::core::ffi::c_void,
+                crate::imod::libcfshr::taperpad::PadIn::Float(arrayIn),
                 SLICE_MODE_FLOAT,
-                *nxyBox.offset(0 as ::core::ffi::c_int as isize),
-                *nxyBox.offset(1 as ::core::ffi::c_int as isize),
+                nxyBox[0],
+                nxyBox[1],
                 arrayOut,
                 nxSmooth,
                 nxSmooth,
                 nySmooth,
             );
+            // The source passes `arrayOut` as both source and destination here;
+            // `PadIn::InPlace` is that case.
             crate::imod::libcfshr::taperpad::slice_taper_out_pad(
-                arrayOut as *mut ::core::ffi::c_void,
+                crate::imod::libcfshr::taperpad::PadIn::InPlace,
                 SLICE_MODE_FLOAT,
                 nxSmooth,
                 nySmooth,
@@ -1078,743 +722,653 @@ pub unsafe extern "C" fn mont_xcorr_edge(
                 nxPadDim,
                 nxPad,
                 nyPad,
-                0 as ::core::ffi::c_int,
-                0.0f32,
+                0,
+                0.,
             );
         } else {
             crate::imod::libcfshr::taperpad::slice_taper_out_pad(
-                arrayIn as *mut ::core::ffi::c_void,
+                crate::imod::libcfshr::taperpad::PadIn::Float(arrayIn),
                 SLICE_MODE_FLOAT,
-                *nxyBox.offset(0 as ::core::ffi::c_int as isize),
-                *nxyBox.offset(1 as ::core::ffi::c_int as isize),
+                nxyBox[0],
+                nxyBox[1],
                 arrayOut,
                 nxPadDim,
                 nxPad,
                 nyPad,
-                0 as ::core::ffi::c_int,
-                0.0f32,
+                0,
+                0.,
             );
         }
-        crate::imod::libcfshr::filtxcorr::xcorr_mean_zero(arrayOut, nxPadDim, nxPad, nyPad);
-        if dumpEdge.is_some() {
-            dumpEdge.expect("non-null function pointer")(
+        unsafe {
+            crate::imod::libcfshr::filtxcorr::xcorr_mean_zero(arrayOut, nxPadDim, nxPad, nyPad);
+        }
+        if let Some(f) = &mut dumpEdge {
+            f(
                 arrayOut,
-                &raw mut nxPadDim,
-                &raw mut nxPad,
-                &raw mut nyPad,
-                &raw mut ixyP1,
-                &raw mut zero,
+                &mut nxPadDim,
+                &mut nxPad,
+                &mut nyPad,
+                &mut ixyP1,
+                &mut zero,
             );
         }
-        if !weights.is_null() {
-            crate::imod::libcfshr::multibinstat::make_standard_dev_map(
-                arrayOut,
-                nxPadDim,
-                xStart,
-                xEnd,
-                yStart,
-                yEnd,
-                binWgt,
-                wgtBox,
-                weights,
-                lowerCopy,
-                lowerCopy.offset((nxWgt * nyWgt) as isize),
-                &raw mut wgtXoffset,
-                &raw mut wgtYoffset,
-            );
-            crate::imod::libcfshr::samplemeansd::get_sample_of_array(
-                weights as *mut ::core::ffi::c_void,
-                2 as ::core::ffi::c_int,
-                nxWgt,
-                nyWgt,
-                1.0f32,
-                wgtTrim,
-                wgtTrim,
-                nxWgt - 2 as ::core::ffi::c_int * wgtTrim,
-                nyWgt - 2 as ::core::ffi::c_int * wgtTrim,
-                -1.0f64 as ::core::ffi::c_float,
-                lowerCopy,
-                if (10000 as ::core::ffi::c_int) < nxPad * nyPad {
-                    10000 as ::core::ffi::c_int
+
+        // Make the weighting/SD map
+        // No variant on using simple SDs gave better results
+        if let Some(w) = weights {
+            let lc = lowerCopy.as_deref_mut().unwrap();
+            {
+                let (lcSum, lcSqr) = lc.split_at_mut((nxWgt * nyWgt) as usize);
+                crate::imod::libcfshr::multibinstat::make_standard_dev_map(
+                    &arrayOut[..],
+                    nxPadDim,
+                    xStart,
+                    xEnd,
+                    yStart,
+                    yEnd,
+                    binWgt,
+                    wgtBox,
+                    &mut w[..],
+                    lcSum,
+                    lcSqr,
+                    &mut wgtXoffset,
+                    &mut wgtYoffset,
+                );
+            }
+            unsafe {
+                crate::imod::libcfshr::samplemeansd::get_sample_of_array(
+                    core::slice::from_raw_parts(w.as_ptr().cast::<u8>(), w.len() * 4),
+                    2,
+                    nxWgt,
+                    nyWgt,
+                    1.,
+                    wgtTrim,
+                    wgtTrim,
+                    nxWgt - 2 * wgtTrim,
+                    nyWgt - 2 * wgtTrim,
+                    -1.,
+                    lc,
+                    10000.min(nxPad * nyPad),
+                    &mut numSamp,
+                );
+            }
+            if numSamp > 0 {
+                if numSamp <= 20 {
+                    S_LAST_TRIMMED_MAX_SD
+                        .store(lc[(numSamp - 1) as usize].to_bits(), Ordering::Relaxed);
                 } else {
-                    nxPad * nyPad
-                },
-                &raw mut numSamp,
-            );
-            if numSamp > 0 as ::core::ffi::c_int {
-                if numSamp <= 20 as ::core::ffi::c_int {
-                    sLastTrimmedMaxSD =
-                        *lowerCopy.offset((numSamp - 1 as ::core::ffi::c_int) as isize);
-                } else {
-                    sLastTrimmedMaxSD = crate::imod::libcfshr::percentile::percentile_float(
-                        (0.95f64 * numSamp as ::core::ffi::c_double) as ::core::ffi::c_int,
-                        lowerCopy,
+                    let v = crate::imod::libcfshr::percentile::percentile_float(
+                        (0.95f64 * numSamp as f64) as c_int,
+                        lc,
                         numSamp,
                     );
+                    S_LAST_TRIMMED_MAX_SD.store(v.to_bits(), Ordering::Relaxed);
                 }
             }
+            /*if (first) {
+            if (ind)
+              mrcWriteImageToFile("bstddev.mrc", weights, 2, nxWgt, nyWgt);
+            else
+              mrcWriteImageToFile("astddev.mrc", weights, 2, nxWgt, nyWgt);
+              }*/
         }
-        twoDfft.expect("non-null function pointer")(
-            arrayOut,
-            &raw mut nxPad,
-            &raw mut nyPad,
-            &raw mut zero,
-        );
-        if delta as ::core::ffi::c_double > 0.0f64 && (ind == 0 || evalCCC != 0) {
-            crate::imod::libcfshr::filtxcorr::xcorr_filter_part(
-                arrayOut, arrayOut, nxPad, nyPad, ctf, delta,
-            );
+
+        twoDfft(arrayOut, &mut nxPad, &mut nyPad, &mut zero);
+
+        /* If filtering, apply to lower, and to upper as well if evaluating CCC's */
+        if delta as f64 > 0. && (ind == 0 || evalCCC != 0) {
+            // `XCorrFilterPart(arrayOut, arrayOut, ...)`: source and destination alias in C.
+            let p = arrayOut.as_mut_ptr();
+            unsafe {
+                crate::imod::libcfshr::filtxcorr::xcorr_filter_part(
+                    crate::imod::libcfshr::filtxcorr::FilterIn::InPlace,
+                    core::slice::from_raw_parts_mut(p, ((nxPad + 2) * nyPad) as usize),
+                    nxPad,
+                    nyPad,
+                    &ctf,
+                    delta,
+                );
+            }
         }
-        arrayIn = upperIn;
-        arrayOut = upperPad;
-        weights = bWeights;
         ind += 1;
     }
-    first = 0 as ::core::ffi::c_int;
-    if delta as ::core::ffi::c_double > 0.0f64 && evalCCC != 0 {
-        memcpy(
-            lowerCopy as *mut ::core::ffi::c_void,
-            lowerPad as *const ::core::ffi::c_void,
-            ((nxPadDim * nyPad) as size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-        );
+    FIRST.store(0, Ordering::Relaxed);
+    if delta as f64 > 0. && evalCCC != 0 {
+        let n = (nxPadDim * nyPad) as usize;
+        lowerCopy.as_deref_mut().unwrap()[..n].copy_from_slice(&lowerPad[..n]);
     }
-    crate::imod::libcfshr::filtxcorr::conjugate_product(lowerPad, upperPad, nxPad, nyPad);
-    twoDfft.expect("non-null function pointer")(
-        lowerPad,
-        &raw mut nxPad,
-        &raw mut nyPad,
-        &raw mut one,
-    );
+
+    /* multiply lower by complex conjugate of upper, put back in lower */
+    unsafe {
+        crate::imod::libcfshr::filtxcorr::conjugate_product(lowerPad, upperPad, nxPad, nyPad);
+    }
+    twoDfft(lowerPad, &mut nxPad, &mut nyPad, &mut one);
     if weightCCC != 0 {
         crate::imod::libcfshr::filtxcorr::set_peak_find_limits(
-            (expectedXpeak - distLimit) as ::core::ffi::c_int,
-            (expectedXpeak + distLimit) as ::core::ffi::c_int,
-            (expectedYpeak - distLimit) as ::core::ffi::c_int,
-            (expectedYpeak + distLimit) as ::core::ffi::c_int,
-            1 as ::core::ffi::c_int,
+            (expectedXpeak - distLimit) as c_int,
+            (expectedXpeak + distLimit) as c_int,
+            (expectedYpeak - distLimit) as c_int,
+            (expectedYpeak + distLimit) as c_int,
+            1,
         );
     }
-    crate::imod::libcfshr::filtxcorr::xcorr_peak_find(
-        lowerPad,
-        nxPadDim,
-        nyPad,
-        &raw mut xpeak as *mut ::core::ffi::c_float,
-        &raw mut ypeak as *mut ::core::ffi::c_float,
-        &raw mut peak as *mut ::core::ffi::c_float,
-        if 16 as ::core::ffi::c_int > numXcorrPeaks {
-            16 as ::core::ffi::c_int
-        } else {
-            numXcorrPeaks
-        },
-    );
-    indThird = -(1 as ::core::ffi::c_int);
-    indSecond = indThird;
-    indPeak = indSecond;
-    i = 0 as ::core::ffi::c_int;
-    while i
-        < (if 16 as ::core::ffi::c_int > numXcorrPeaks {
-            16 as ::core::ffi::c_int
-        } else {
-            numXcorrPeaks
-        })
-    {
-        if ixy == 0 as ::core::ffi::c_int
-            && fabs(ypeak[i as usize] as ::core::ffi::c_double)
-                > maxLongShift as ::core::ffi::c_double
-            || ixy == 1 as ::core::ffi::c_int
-                && fabs(xpeak[i as usize] as ::core::ffi::c_double)
-                    > maxLongShift as ::core::ffi::c_double
+    unsafe {
+        crate::imod::libcfshr::filtxcorr::xcorr_peak_find(
+            lowerPad,
+            nxPadDim,
+            nyPad,
+            &mut xpeak,
+            &mut ypeak,
+            &mut peak,
+            16.max(numXcorrPeaks),
+        );
+    }
+
+    /* Eliminate any peaks that shift beyond maximum along edge */
+    /* leave indPeak pointing to first good peak */
+    indThird = -1;
+    indSecond = -1;
+    indPeak = -1;
+    i = 0;
+    while i < 16.max(numXcorrPeaks) {
+        if ixy == 0 && (ypeak[i as usize] as f64).abs() > maxLongShift as f64
+            || ixy == 1 && (xpeak[i as usize] as f64).abs() > maxLongShift as f64
         {
-            peak[i as usize] = -1.0e30f64 as ::core::ffi::c_float;
-            if debugLevel > 2 as ::core::ffi::c_int
-                && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE
-            {
-                sprintf(
-                    debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char,
-                    b"Eliminated peak %d at %.1f %.1f\n\0" as *const u8
-                        as *const ::core::ffi::c_char,
-                    i,
-                    xpeak[i as usize] as ::core::ffi::c_double,
-                    ypeak[i as usize] as ::core::ffi::c_double,
+            peak[i as usize] = -1.0e30f64 as f32;
+            if debugLevel > 2 && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
+                let text = c_format(
+                    "Eliminated peak %d at %.1f %.1f\n",
+                    &[
+                        CArg::Int(i as i64),
+                        CArg::Dbl(xpeak[i as usize] as f64),
+                        CArg::Dbl(ypeak[i as usize] as f64),
+                    ],
                 );
-                curDebugLen = (curDebugLen as ::core::ffi::c_ulong)
-                    .wrapping_add(strlen(
-                        debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char
-                    ) as ::core::ffi::c_ulong) as ::core::ffi::c_int
-                    as ::core::ffi::c_int;
+                let at = curDebugLen as usize;
+                debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
+                debugStr[at + text.len()] = 0;
+                curDebugLen += text.len() as c_int;
             }
-        } else if indPeak == -(1 as ::core::ffi::c_int)
-            && peak[i as usize] as ::core::ffi::c_double > -1.0e29f64
-        {
+        } else if indPeak == -1 && peak[i as usize] as f64 > -1.0e29f64 {
             indPeak = i;
         }
         i += 1;
     }
-    if indPeak == -(1 as ::core::ffi::c_int) {
-        indPeak = 0 as ::core::ffi::c_int;
-        xpeak[0 as ::core::ffi::c_int as usize] =
-            numExtra[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
-        ypeak[0 as ::core::ffi::c_int as usize] =
-            *inExtra.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_float;
+
+    /* But if no peak was legal, zero out the shift */
+    if indPeak == -1 {
+        indPeak = 0;
+        xpeak[0] = numExtra[0] as f32;
+        ypeak[0] = inExtra[1] as f32;
     }
     *CCC = -1.5f32;
     if evalCCC != 0 {
-        if delta == 0 as ::core::ffi::c_int as ::core::ffi::c_float {
+        /* If there was no filtering, simply pad images again */
+        if delta == 0 as c_int as f32 {
             crate::imod::libcfshr::taperpad::slice_taper_out_pad(
-                lowerIn as *mut ::core::ffi::c_void,
+                crate::imod::libcfshr::taperpad::PadIn::Float(lowerIn),
                 SLICE_MODE_FLOAT,
-                *nxyBox.offset(0 as ::core::ffi::c_int as isize),
-                *nxyBox.offset(1 as ::core::ffi::c_int as isize),
-                lowerCopy,
+                nxyBox[0],
+                nxyBox[1],
+                lowerCopy.as_deref_mut().unwrap(),
                 nxPadDim,
                 nxPad,
                 nyPad,
-                0 as ::core::ffi::c_int,
-                0.0f32,
+                0,
+                0.,
             );
             crate::imod::libcfshr::taperpad::slice_taper_out_pad(
-                upperIn as *mut ::core::ffi::c_void,
+                crate::imod::libcfshr::taperpad::PadIn::Float(upperIn),
                 SLICE_MODE_FLOAT,
-                *nxyBox.offset(0 as ::core::ffi::c_int as isize),
-                *nxyBox.offset(1 as ::core::ffi::c_int as isize),
+                nxyBox[0],
+                nxyBox[1],
                 upperPad,
                 nxPadDim,
                 nxPad,
                 nyPad,
-                0 as ::core::ffi::c_int,
-                0.0f32,
+                0,
+                0.,
             );
         } else {
-            twoDfft.expect("non-null function pointer")(
-                lowerCopy,
-                &raw mut nxPad,
-                &raw mut nyPad,
-                &raw mut one,
+            /* Otherwise, back-transform the filtered images */
+            twoDfft(
+                lowerCopy.as_deref_mut().unwrap(),
+                &mut nxPad,
+                &mut nyPad,
+                &mut one,
             );
-            twoDfft.expect("non-null function pointer")(
-                upperPad,
-                &raw mut nxPad,
-                &raw mut nyPad,
-                &raw mut one,
-            );
-            if dumpEdge.is_some() {
-                dumpEdge.expect("non-null function pointer")(
-                    lowerCopy,
-                    &raw mut nxPadDim,
-                    &raw mut nxPad,
-                    &raw mut nyPad,
-                    &raw mut ixyP1,
-                    &raw mut zero,
+            twoDfft(upperPad, &mut nxPad, &mut nyPad, &mut one);
+            if let Some(f) = &mut dumpEdge {
+                f(
+                    lowerCopy.as_deref_mut().unwrap(),
+                    &mut nxPadDim,
+                    &mut nxPad,
+                    &mut nyPad,
+                    &mut ixyP1,
+                    &mut zero,
                 );
-                dumpEdge.expect("non-null function pointer")(
+                f(
                     upperPad,
-                    &raw mut nxPadDim,
-                    &raw mut nxPad,
-                    &raw mut nyPad,
-                    &raw mut ixyP1,
-                    &raw mut zero,
+                    &mut nxPadDim,
+                    &mut nxPad,
+                    &mut nyPad,
+                    &mut ixyP1,
+                    &mut zero,
                 );
             }
         }
-        cccThird = -1.5f64;
-        cccSecond = cccThird;
-        cccMax = cccSecond;
-        wsumAtMax = 0.0f32;
-        nxTrim = (if (4 as ::core::ffi::c_int)
-            < *nxyBox.offset(0 as ::core::ffi::c_int as isize) / 8 as ::core::ffi::c_int
-        {
-            4 as ::core::ffi::c_int
-        } else {
-            *nxyBox.offset(0 as ::core::ffi::c_int as isize) / 8 as ::core::ffi::c_int
-        }) + (nxPad - *nxyBox.offset(0 as ::core::ffi::c_int as isize))
-            / 2 as ::core::ffi::c_int;
-        nyTrim = (if (4 as ::core::ffi::c_int)
-            < *nxyBox.offset(1 as ::core::ffi::c_int as isize) / 8 as ::core::ffi::c_int
-        {
-            4 as ::core::ffi::c_int
-        } else {
-            *nxyBox.offset(1 as ::core::ffi::c_int as isize) / 8 as ::core::ffi::c_int
-        }) + (nyPad - *nxyBox.offset(1 as ::core::ffi::c_int as isize))
-            / 2 as ::core::ffi::c_int;
-        fullPixel =
-            (nxPad - 2 as ::core::ffi::c_int * nxTrim) * (nyPad - 2 as ::core::ffi::c_int * nyTrim);
-        localAspect = ((*nxyBox.offset((1 as ::core::ffi::c_int - ixy) as isize)
-            as ::core::ffi::c_float
-            / *nxyBox.offset(ixy as isize) as ::core::ffi::c_float)
-            as ::core::ffi::c_double
-            / 1.4f64) as ::core::ffi::c_float;
+
+        // Set up local box sizes
+        cccThird = -1.5;
+        cccSecond = -1.5;
+        cccMax = -1.5;
+        wsumAtMax = 0.;
+        nxTrim = 4.min(nxyBox[0] / 8) + (nxPad - nxyBox[0]) / 2;
+        nyTrim = 4.min(nxyBox[1] / 8) + (nyPad - nxyBox[1]) / 2;
+        fullPixel = (nxPad - 2 * nxTrim) * (nyPad - 2 * nyTrim);
+        localAspect = ((nxyBox[(1 - ixy) as usize] as f32 / nxyBox[ixy as usize] as f32) as f64
+            / 1.4f64) as f32;
         localAspect = if localAspect < maxLocalAspect {
             localAspect
         } else {
             maxLocalAspect
         };
-        if ixy > 0 as ::core::ffi::c_int {
-            nyLocal = (nyPad - 2 as ::core::ffi::c_int * nyTrim) / 2 as ::core::ffi::c_int;
-            nxLocal = (localAspect * nyLocal as ::core::ffi::c_float) as ::core::ffi::c_int;
+        if ixy > 0 {
+            nyLocal = (nyPad - 2 * nyTrim) / 2;
+            nxLocal = (localAspect * nyLocal as f32) as c_int;
         } else {
-            nxLocal = (nxPad - 2 as ::core::ffi::c_int * nxTrim) / 2 as ::core::ffi::c_int;
-            nyLocal = (localAspect * nxLocal as ::core::ffi::c_float) as ::core::ffi::c_int;
+            nxLocal = (nxPad - 2 * nxTrim) / 2;
+            nyLocal = (localAspect * nxLocal as f32) as c_int;
         }
-        i = 0 as ::core::ffi::c_int;
+        i = 0;
         while i < numXcorrPeaks {
             wgtOrderInds[i as usize] = i;
-            gaussPeakProbs[i as usize] = 1.0f32;
+            gaussPeakProbs[i as usize] = 1.;
             i += 1;
         }
+
+        // Set up weighting for all peaks here so that they can be sorted by raw peak
+        // strength times weighting
         if weightCCC != 0 {
-            i = 0 as ::core::ffi::c_int;
+            i = 0;
             while i < numXcorrPeaks {
-                expectDist[0 as ::core::ffi::c_int as usize] =
-                    (xpeak[i as usize] - expectedXpeak) as ::core::ffi::c_double;
-                expectDist[1 as ::core::ffi::c_int as usize] =
-                    (ypeak[i as usize] - expectedYpeak) as ::core::ffi::c_double;
-                gaussPeakProbs[i as usize] = exp(-0.5f64
-                    * (pow(expectDist[0 as ::core::ffi::c_int as usize] / sigma, 2.0f64)
-                        + pow(expectDist[1 as ::core::ffi::c_int as usize] / sigma, 2.0f64)))
-                    as ::core::ffi::c_float;
-                if debugLevel > 2 as ::core::ffi::c_int
-                    && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE
-                {
-                    sprintf(
-                        debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char,
-                        b"%d: expected dist %.1f %.1f  prob %.3f\n\0" as *const u8
-                            as *const ::core::ffi::c_char,
-                        i,
-                        expectDist[0 as ::core::ffi::c_int as usize],
-                        expectDist[1 as ::core::ffi::c_int as usize],
-                        gaussPeakProbs[i as usize] as ::core::ffi::c_double,
+                expectDist[0] = (xpeak[i as usize] - expectedXpeak) as f64;
+                expectDist[1] = (ypeak[i as usize] - expectedYpeak) as f64;
+                gaussPeakProbs[i as usize] = (-0.5f64
+                    * ((expectDist[0] / sigma).powf(2.0f64) + (expectDist[1] / sigma).powf(2.0f64)))
+                .exp() as f32;
+                if debugLevel > 2 && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
+                    let text = c_format(
+                        "%d: expected dist %.1f %.1f  prob %.3f\n",
+                        &[
+                            CArg::Int(i as i64),
+                            CArg::Dbl(expectDist[0]),
+                            CArg::Dbl(expectDist[1]),
+                            CArg::Dbl(gaussPeakProbs[i as usize] as f64),
+                        ],
                     );
-                    curDebugLen = (curDebugLen as ::core::ffi::c_ulong)
-                        .wrapping_add(strlen(
-                            debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char
-                        ) as ::core::ffi::c_ulong)
-                        as ::core::ffi::c_int
-                        as ::core::ffi::c_int;
+                    let at = curDebugLen as usize;
+                    debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
+                    debugStr[at + text.len()] = 0;
+                    curDebugLen += text.len() as c_int;
                 }
                 wgtPeaks[i as usize] = -gaussPeakProbs[i as usize] * peak[i as usize];
                 i += 1;
             }
-            crate::imod::libcfshr::robuststat::rs_sort_indexed_floats(
-                &raw mut wgtPeaks as *mut ::core::ffi::c_float,
-                &raw mut wgtOrderInds as *mut ::core::ffi::c_int,
-                numXcorrPeaks,
-            );
+            unsafe {
+                crate::imod::libcfshr::robuststat::rs_sort_indexed_floats(
+                    &wgtPeaks,
+                    &mut wgtOrderInds,
+                    numXcorrPeaks,
+                );
+            }
         }
+
+        /*
+         * Loop on peaks
+         */
         wallStart = crate::imod::libcfshr::b3dutil::wall_time();
-        indOrd = 0 as ::core::ffi::c_int;
+        indOrd = 0;
         while indOrd < numXcorrPeaks {
             i = wgtOrderInds[indOrd as usize];
-            if !(peak[i as usize] as ::core::ffi::c_double <= -1.0e29f64) {
-                gaussProb = gaussPeakProbs[i as usize] as ::core::ffi::c_double;
-                if !(i != 0 && gaussProb < 1.01f64 * cccMax) {
-                    if !(ixy == 0 as ::core::ffi::c_int
-                        && fabs(
-                            (*nxyPiece.offset(0 as ::core::ffi::c_int as isize)
-                                as ::core::ffi::c_float
-                                + nbin as ::core::ffi::c_float
-                                    * (xpeak[i as usize]
-                                        - numExtra[0 as ::core::ffi::c_int as usize]
-                                            as ::core::ffi::c_float)
-                                - extraFromExpected[0 as ::core::ffi::c_int as usize]
-                                    as ::core::ffi::c_float
-                                - *nxyOverlap.offset(0 as ::core::ffi::c_int as isize)
-                                    as ::core::ffi::c_float)
-                                as ::core::ffi::c_double,
-                        ) <= 3.0f64
-                        || ixy == 1 as ::core::ffi::c_int
-                            && fabs(
-                                (*nxyPiece.offset(1 as ::core::ffi::c_int as isize)
-                                    as ::core::ffi::c_float
-                                    + nbin as ::core::ffi::c_float
-                                        * (ypeak[i as usize]
-                                            - *inExtra.offset(1 as ::core::ffi::c_int as isize)
-                                                as ::core::ffi::c_float)
-                                    - extraFromExpected[1 as ::core::ffi::c_int as usize]
-                                        as ::core::ffi::c_float
-                                    - *nxyOverlap.offset(1 as ::core::ffi::c_int as isize)
-                                        as ::core::ffi::c_float)
-                                    as ::core::ffi::c_double,
-                            ) <= 3.0f64)
+            if peak[i as usize] as f64 <= -1.0e29f64 {
+                indOrd += 1;
+                continue;
+            }
+
+            // Skip if a CCC of 1 cannot possibly beat the current max
+            gaussProb = gaussPeakProbs[i as usize] as f64;
+            if i != 0 && gaussProb < 1.01f64 * cccMax {
+                indOrd += 1;
+                continue;
+            }
+
+            /* Reject peak at zero image offset from fixed pattern noise */
+            if ixy == 0
+                && ((nxyPiece[0] as f32 + nbin as f32 * (xpeak[i as usize] - numExtra[0] as f32)
+                    - extraFromExpected[0] as f32
+                    - nxyOverlap[0] as f32) as f64)
+                    .abs()
+                    <= 3.0f64
+                || ixy == 1
+                    && ((nxyPiece[1] as f32 + nbin as f32 * (ypeak[i as usize] - inExtra[1] as f32)
+                        - extraFromExpected[1] as f32
+                        - nxyOverlap[1] as f32) as f64)
+                        .abs()
+                        <= 3.0f64
+            {
+                indOrd += 1;
+                continue;
+            }
+
+            // Ends are non-inclusive to avoid all the + 1's below
+            delx = (xpeak[i as usize] as f64 + 0.5f64).floor() as c_int;
+            xStart = nxTrim.max(nxTrim + delx);
+            xEnd = (nxPad - nxTrim).min(nxPad - nxTrim + delx);
+            dely = (ypeak[i as usize] as f64 + 0.5f64).floor() as c_int;
+            yStart = nyTrim.max(nyTrim + dely);
+            yEnd = (nyPad - nyTrim).min(nyPad - nyTrim + dely);
+            numPixel = (yEnd - yStart) * (xEnd - xStart);
+            fracArea = numPixel as f64 / fullPixel as f64;
+            if i != 0 && fracArea < 0.125f64 {
+                indOrd += 1;
+                continue;
+            }
+
+            // What we used to do
+            /*ccc = XCorrCCCoefficient(lowerCopy, upperPad, nxPadDim, nxPad, nyPad,
+            xpeak[i], ypeak[i], nxTrim, nyTrim, &numPixel);
+            printf(" %d:  %.4f\n", i, ccc);*/
+
+            // Set up local areas and sequence for doing them
+            local_num_and_overlap(xEnd - xStart, nxLocal, &mut numLocalX, &mut localXoverlap);
+            local_num_and_overlap(yEnd - yStart, nyLocal, &mut numLocalY, &mut localYoverlap);
+            if ixy > 0 {
+                setup_local_sequence(numLocalX, numLocalY, &mut localXseq, &mut localYseq);
+            } else {
+                setup_local_sequence(numLocalY, numLocalX, &mut localYseq, &mut localXseq);
+            }
+
+            // Loop on local areas from middle out and sum component of CCC
+            ind = 0;
+            while ind < 7 {
+                grandSums[ind as usize] = 0.;
+                ind += 1;
+            }
+            numInSum = 0;
+            loc = 0;
+            while loc < numLocalX * numLocalY {
+                localX = localXseq[loc as usize];
+                localY = localYseq[loc as usize];
+                if numLocalY == 1 {
+                    lyStart = yStart + 0.max((yEnd - yStart - nyLocal) / 2);
+                    lyEnd = yEnd.min(yStart + nyLocal);
+                } else {
+                    lyStart = yStart + localY * (nyLocal - localYoverlap);
+                    lyEnd = yEnd.min(lyStart + nyLocal);
+                }
+                if numLocalX == 1 {
+                    lxStart = xStart + 0.max((xEnd - xStart - nxLocal) / 2);
+                    lxEnd = xEnd.min(xStart + nxLocal);
+                } else {
+                    lxStart = xStart + localX * (nxLocal - localXoverlap);
+                    lxEnd = xEnd.min(lxStart + nxLocal - 1);
+                }
+
+                // Do search for best correlation in this area
+                xTemp = xpeak[i as usize];
+                yTemp = ypeak[i as usize];
+                mont_xc_find_best_corr(
+                    lowerCopy.as_deref().unwrap(),
+                    upperPad,
+                    nxPadDim,
+                    nxPad,
+                    nyPad,
+                    nxTrim,
+                    nyTrim,
+                    lxStart,
+                    lxEnd - 1,
+                    lyStart,
+                    lyEnd - 1,
+                    &mut xTemp,
+                    &mut yTemp,
+                    &mut newCCC,
+                    10.,
+                    aWeights.as_deref(),
+                    bWeights.as_deref(),
+                    nxWgt,
+                    binWgt,
+                    wgtXoffset,
+                    wgtYoffset,
+                    (if 0.02f64 < cccMax / 10.0f64 {
+                        0.02f64
+                    } else {
+                        cccMax / 10.0f64
+                    }) as f32,
+                    Some(&mut sumArray[..]),
+                );
+
+                if newCCC != 0 as c_int as f32 {
+                    numInSum += 1;
+                    ind = 0;
+                    while ind < 6 {
+                        grandSums[ind as usize] += sumArray[ind as usize];
+                        ind += 1;
+                    }
+
+                    wsum = grandSums[5] as f32;
+                    ccc = unsafe {
+                        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+                            grandSums[0],
+                            grandSums[1],
+                            grandSums[2],
+                            grandSums[3],
+                            grandSums[4],
+                            wsum as f64,
+                            None,
+                            "",
+                        )
+                    };
+
+                    // Give up if the ccc after enough area is much lower than the max
+                    if indOrd > 0
+                        && (wsum as f64 > maxWsum as f64 / 10.0f64
+                            && gaussProb * ccc < 0.5f64 * cccMax
+                            || wsum as f64 > maxWsum as f64 / 5.0f64
+                                && gaussProb * ccc < 0.75f64 * cccMax
+                            || wsum as f64 > maxWsum as f64 / 3.0f64
+                                && gaussProb * ccc < 0.85f64 * cccMax
+                            || wsum as f64 > maxWsum as f64 / 2.0f64
+                                && gaussProb * ccc < 0.9f64 * cccMax)
                     {
-                        delx = floor(xpeak[i as usize] as ::core::ffi::c_double + 0.5f64)
-                            as ::core::ffi::c_int;
-                        xStart = if nxTrim > nxTrim + delx {
-                            nxTrim
-                        } else {
-                            nxTrim + delx
-                        };
-                        xEnd = if nxPad - nxTrim < nxPad - nxTrim + delx {
-                            nxPad - nxTrim
-                        } else {
-                            nxPad - nxTrim + delx
-                        };
-                        dely = floor(ypeak[i as usize] as ::core::ffi::c_double + 0.5f64)
-                            as ::core::ffi::c_int;
-                        yStart = if nyTrim > nyTrim + dely {
-                            nyTrim
-                        } else {
-                            nyTrim + dely
-                        };
-                        yEnd = if nyPad - nyTrim < nyPad - nyTrim + dely {
-                            nyPad - nyTrim
-                        } else {
-                            nyPad - nyTrim + dely
-                        };
-                        numPixel = (yEnd - yStart) * (xEnd - xStart);
-                        fracArea =
-                            numPixel as ::core::ffi::c_double / fullPixel as ::core::ffi::c_double;
-                        if !(i != 0 && fracArea < 0.125f64) {
-                            local_num_and_overlap(
-                                xEnd - xStart,
-                                nxLocal,
-                                &raw mut numLocalX,
-                                &raw mut localXoverlap,
-                            );
-                            local_num_and_overlap(
-                                yEnd - yStart,
-                                nyLocal,
-                                &raw mut numLocalY,
-                                &raw mut localYoverlap,
-                            );
-                            if ixy > 0 as ::core::ffi::c_int {
-                                setup_local_sequence(
-                                    numLocalX,
-                                    numLocalY,
-                                    &raw mut localXseq as *mut ::core::ffi::c_int,
-                                    &raw mut localYseq as *mut ::core::ffi::c_int,
-                                );
-                            } else {
-                                setup_local_sequence(
-                                    numLocalY,
-                                    numLocalX,
-                                    &raw mut localYseq as *mut ::core::ffi::c_int,
-                                    &raw mut localXseq as *mut ::core::ffi::c_int,
-                                );
-                            }
-                            ind = 0 as ::core::ffi::c_int;
-                            while ind < 7 as ::core::ffi::c_int {
-                                grandSums[ind as usize] = 0.0f64;
-                                ind += 1;
-                            }
-                            numInSum = 0 as ::core::ffi::c_int;
-                            loc = 0 as ::core::ffi::c_int;
-                            while loc < numLocalX * numLocalY {
-                                localX = localXseq[loc as usize];
-                                localY = localYseq[loc as usize];
-                                if numLocalY == 1 as ::core::ffi::c_int {
-                                    lyStart = yStart
-                                        + (if 0 as ::core::ffi::c_int
-                                            > (yEnd - yStart - nyLocal) / 2 as ::core::ffi::c_int
-                                        {
-                                            0 as ::core::ffi::c_int
-                                        } else {
-                                            (yEnd - yStart - nyLocal) / 2 as ::core::ffi::c_int
-                                        });
-                                    lyEnd = if yEnd < yStart + nyLocal {
-                                        yEnd
-                                    } else {
-                                        yStart + nyLocal
-                                    };
-                                } else {
-                                    lyStart = yStart + localY * (nyLocal - localYoverlap);
-                                    lyEnd = if yEnd < lyStart + nyLocal {
-                                        yEnd
-                                    } else {
-                                        lyStart + nyLocal
-                                    };
-                                }
-                                if numLocalX == 1 as ::core::ffi::c_int {
-                                    lxStart = xStart
-                                        + (if 0 as ::core::ffi::c_int
-                                            > (xEnd - xStart - nxLocal) / 2 as ::core::ffi::c_int
-                                        {
-                                            0 as ::core::ffi::c_int
-                                        } else {
-                                            (xEnd - xStart - nxLocal) / 2 as ::core::ffi::c_int
-                                        });
-                                    lxEnd = if xEnd < xStart + nxLocal {
-                                        xEnd
-                                    } else {
-                                        xStart + nxLocal
-                                    };
-                                } else {
-                                    lxStart = xStart + localX * (nxLocal - localXoverlap);
-                                    lxEnd = if xEnd < lxStart + nxLocal - 1 as ::core::ffi::c_int {
-                                        xEnd
-                                    } else {
-                                        lxStart + nxLocal - 1 as ::core::ffi::c_int
-                                    };
-                                }
-                                xTemp = xpeak[i as usize];
-                                yTemp = ypeak[i as usize];
-                                mont_xc_find_best_corr(
-                                    lowerCopy,
-                                    upperPad,
-                                    nxPadDim,
-                                    nxPad,
-                                    nyPad,
-                                    nxTrim,
-                                    nyTrim,
-                                    lxStart,
-                                    lxEnd - 1 as ::core::ffi::c_int,
-                                    lyStart,
-                                    lyEnd - 1 as ::core::ffi::c_int,
-                                    &raw mut xTemp,
-                                    &raw mut yTemp,
-                                    &raw mut newCCC,
-                                    10.0f32,
-                                    aWeights,
-                                    bWeights,
-                                    nxWgt,
-                                    binWgt,
-                                    wgtXoffset,
-                                    wgtYoffset,
-                                    (if 0.02f64 < cccMax / 10.0f64 {
-                                        0.02f64
-                                    } else {
-                                        cccMax / 10.0f64
-                                    }) as ::core::ffi::c_float,
-                                    &raw mut sumArray as *mut ::core::ffi::c_double,
-                                );
-                                if newCCC != 0 as ::core::ffi::c_int as ::core::ffi::c_float {
-                                    numInSum += 1;
-                                    ind = 0 as ::core::ffi::c_int;
-                                    while ind < 6 as ::core::ffi::c_int {
-                                        grandSums[ind as usize] += sumArray[ind as usize];
-                                        ind += 1;
-                                    }
-                                    wsum = grandSums[5 as ::core::ffi::c_int as usize]
-                                        as ::core::ffi::c_float;
-                                    ccc = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-                                        grandSums[0 as ::core::ffi::c_int as usize],
-                                        grandSums[1 as ::core::ffi::c_int as usize],
-                                        grandSums[2 as ::core::ffi::c_int as usize],
-                                        grandSums[3 as ::core::ffi::c_int as usize],
-                                        grandSums[4 as ::core::ffi::c_int as usize],
-                                        wsum as ::core::ffi::c_double,
-                                        ::core::ptr::null_mut::<::core::ffi::c_double>(),
-                                        b"\0" as *const u8 as *const ::core::ffi::c_char,
-                                    );
-                                    if indOrd > 0 as ::core::ffi::c_int
-                                        && (wsum as ::core::ffi::c_double
-                                            > maxWsum as ::core::ffi::c_double / 10.0f64
-                                            && gaussProb * ccc < 0.5f64 * cccMax
-                                            || wsum as ::core::ffi::c_double
-                                                > maxWsum as ::core::ffi::c_double / 5.0f64
-                                                && gaussProb * ccc < 0.75f64 * cccMax
-                                            || wsum as ::core::ffi::c_double
-                                                > maxWsum as ::core::ffi::c_double / 3.0f64
-                                                && gaussProb * ccc < 0.85f64 * cccMax
-                                            || wsum as ::core::ffi::c_double
-                                                > maxWsum as ::core::ffi::c_double / 2.0f64
-                                                && gaussProb * ccc < 0.9f64 * cccMax)
-                                    {
-                                        break;
-                                    }
-                                }
-                                loc += 1;
-                            }
-                            maxWsum = if maxWsum > wsum { maxWsum } else { wsum };
-                            if wsum > minWsumRatio * wsumAtMax {
-                                if gaussProb * ccc > cccMax {
-                                    if cccMax > -(1 as ::core::ffi::c_int) as ::core::ffi::c_double
-                                    {
-                                        indThird = indSecond;
-                                        indSecond = indPeak;
-                                        cccThird = cccSecond;
-                                        cccSecond = cccMax;
-                                    }
-                                    cccMax = gaussProb * ccc;
-                                    indPeak = i;
-                                    wsumAtMax = wsum;
-                                } else if gaussProb * ccc > cccSecond {
-                                    cccThird = cccSecond;
-                                    cccSecond = gaussProb * ccc;
-                                    indThird = indSecond;
-                                    indSecond = i;
-                                } else if gaussProb * ccc > cccThird {
-                                    cccThird = gaussProb * ccc;
-                                    indThird = i;
-                                }
-                            }
-                            if debugLevel > 1 as ::core::ffi::c_int
-                                && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE
-                            {
-                                sprintf(
-                                    debugStr.offset(curDebugLen as isize)
-                                        as *mut ::core::ffi::c_char,
-                                    b"%2d: at %7.1f %7.1f peak %14.7e  frac %.3f CCC %.5f%s wgt %.5f%s %g\n\0"
-                                        as *const u8 as *const ::core::ffi::c_char,
-                                    i,
-                                    xpeak[i as usize] as ::core::ffi::c_double,
-                                    ypeak[i as usize] as ::core::ffi::c_double,
-                                    peak[i as usize] as ::core::ffi::c_double,
-                                    fracArea,
-                                    ccc,
-                                    if weightCCC == 0 && indPeak == i {
-                                        b"*\0" as *const u8 as *const ::core::ffi::c_char
-                                    } else {
-                                        b" \0" as *const u8 as *const ::core::ffi::c_char
-                                    },
-                                    gaussProb * ccc,
-                                    if weightCCC != 0 && indPeak == i {
-                                        b"*\0" as *const u8 as *const ::core::ffi::c_char
-                                    } else {
-                                        b" \0" as *const u8 as *const ::core::ffi::c_char
-                                    },
-                                    wsum as ::core::ffi::c_double,
-                                );
-                                curDebugLen = (curDebugLen as ::core::ffi::c_ulong).wrapping_add(
-                                    strlen(debugStr.offset(curDebugLen as isize)
-                                        as *mut ::core::ffi::c_char)
-                                        as ::core::ffi::c_ulong,
-                                )
-                                    as ::core::ffi::c_int
-                                    as ::core::ffi::c_int;
-                            }
-                        }
+                        break;
                     }
                 }
+                loc += 1;
+            }
+            maxWsum = if maxWsum > wsum { maxWsum } else { wsum };
+
+            // Handle a new max or a new 2nd or 3rd place one
+            if wsum > minWsumRatio * wsumAtMax {
+                if gaussProb * ccc > cccMax {
+                    if cccMax > -1 as c_int as f64 {
+                        indThird = indSecond;
+                        indSecond = indPeak;
+                        cccThird = cccSecond;
+                        cccSecond = cccMax;
+                    }
+                    cccMax = gaussProb * ccc;
+                    indPeak = i;
+                    wsumAtMax = wsum;
+                } else if gaussProb * ccc > cccSecond {
+                    cccThird = cccSecond;
+                    cccSecond = gaussProb * ccc;
+                    indThird = indSecond;
+                    indSecond = i;
+                } else if gaussProb * ccc > cccThird {
+                    cccThird = gaussProb * ccc;
+                    indThird = i;
+                }
+            }
+
+            if debugLevel > 1 && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
+                let text = c_format(
+                    "%2d: at %7.1f %7.1f peak %14.7e  frac %.3f CCC %.5f%s wgt %.5f%s %g\n",
+                    &[
+                        CArg::Int(i as i64),
+                        CArg::Dbl(xpeak[i as usize] as f64),
+                        CArg::Dbl(ypeak[i as usize] as f64),
+                        CArg::Dbl(peak[i as usize] as f64),
+                        CArg::Dbl(fracArea),
+                        CArg::Dbl(ccc),
+                        CArg::Str(if weightCCC == 0 && indPeak == i {
+                            "*"
+                        } else {
+                            " "
+                        }),
+                        CArg::Dbl(gaussProb * ccc),
+                        CArg::Str(if weightCCC != 0 && indPeak == i {
+                            "*"
+                        } else {
+                            " "
+                        }),
+                        CArg::Dbl(wsum as f64),
+                    ],
+                );
+                let at = curDebugLen as usize;
+                debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
+                debugStr[at + text.len()] = 0;
+                curDebugLen += text.len() as c_int;
             }
             indOrd += 1;
         }
         i = indPeak;
-        if debugLevel == 1 as ::core::ffi::c_int && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
-            sprintf(
-                debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char,
-                b"Peak %d at %7.1f %7.1f  peak = %14.7g  CCC = %.5f\n\0" as *const u8
-                    as *const ::core::ffi::c_char,
-                i,
-                xpeak[i as usize] as ::core::ffi::c_double,
-                ypeak[i as usize] as ::core::ffi::c_double,
-                peak[i as usize] as ::core::ffi::c_double,
-                cccMax,
+        if debugLevel == 1 && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
+            let text = c_format(
+                "Peak %d at %7.1f %7.1f  peak = %14.7g  CCC = %.5f\n",
+                &[
+                    CArg::Int(i as i64),
+                    CArg::Dbl(xpeak[i as usize] as f64),
+                    CArg::Dbl(ypeak[i as usize] as f64),
+                    CArg::Dbl(peak[i as usize] as f64),
+                    CArg::Dbl(cccMax),
+                ],
             );
-            curDebugLen = (curDebugLen as ::core::ffi::c_ulong)
-                .wrapping_add(strlen(
-                    debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char
-                ) as ::core::ffi::c_ulong) as ::core::ffi::c_int
-                as ::core::ffi::c_int;
+            let at = curDebugLen as usize;
+            debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
+            debugStr[at + text.len()] = 0;
+            curDebugLen += text.len() as c_int;
         }
-        *CCC = cccMax as ::core::ffi::c_float;
-        if indSecond >= 0 as ::core::ffi::c_int
-            && cccSecond > runnerUpThreshFac as ::core::ffi::c_double * cccMax
-        {
-            sLastRunnersUp[0 as ::core::ffi::c_int as usize] = nbin as ::core::ffi::c_float
-                * (xpeak[indSecond as usize]
-                    - numExtra[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float)
-                + longShiftToAdd[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-                - extraFromExpected[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
-            sLastRunnersUp[1 as ::core::ffi::c_int as usize] = nbin as ::core::ffi::c_float
-                * (ypeak[indSecond as usize]
-                    - *inExtra.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_float)
-                + longShiftToAdd[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-                - extraFromExpected[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
+        *CCC = cccMax as f32;
+
+        // Save the runners up
+        if indSecond >= 0 && cccSecond > runnerUpThreshFac as f64 * cccMax {
+            S_LAST_RUNNERS_UP[0].store(
+                (nbin as f32 * (xpeak[indSecond as usize] - numExtra[0] as f32)
+                    + longShiftToAdd[0] as f32
+                    - extraFromExpected[0] as f32)
+                    .to_bits(),
+                Ordering::Relaxed,
+            );
+            S_LAST_RUNNERS_UP[1].store(
+                (nbin as f32 * (ypeak[indSecond as usize] - inExtra[1] as f32)
+                    + longShiftToAdd[1] as f32
+                    - extraFromExpected[1] as f32)
+                    .to_bits(),
+                Ordering::Relaxed,
+            );
         }
-        if indThird >= 0 as ::core::ffi::c_int
-            && cccThird > runnerUpThreshFac as ::core::ffi::c_double * cccMax
-        {
-            sLastRunnersUp[2 as ::core::ffi::c_int as usize] = nbin as ::core::ffi::c_float
-                * (xpeak[indThird as usize]
-                    - numExtra[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float)
-                + longShiftToAdd[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-                - extraFromExpected[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
-            sLastRunnersUp[3 as ::core::ffi::c_int as usize] = nbin as ::core::ffi::c_float
-                * (ypeak[indThird as usize]
-                    - *inExtra.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_float)
-                + longShiftToAdd[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-                - extraFromExpected[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
+        if indThird >= 0 && cccThird > runnerUpThreshFac as f64 * cccMax {
+            S_LAST_RUNNERS_UP[2].store(
+                (nbin as f32 * (xpeak[indThird as usize] - numExtra[0] as f32)
+                    + longShiftToAdd[0] as f32
+                    - extraFromExpected[0] as f32)
+                    .to_bits(),
+                Ordering::Relaxed,
+            );
+            S_LAST_RUNNERS_UP[3].store(
+                (nbin as f32 * (ypeak[indThird as usize] - inExtra[1] as f32)
+                    + longShiftToAdd[1] as f32
+                    - extraFromExpected[1] as f32)
+                    .to_bits(),
+                Ordering::Relaxed,
+            );
         }
     }
-    if dumpEdge.is_some() {
-        dumpEdge.expect("non-null function pointer")(
+    if let Some(f) = &mut dumpEdge {
+        f(
             lowerPad,
-            &raw mut nxPadDim,
-            &raw mut nxPad,
-            &raw mut nyPad,
-            &raw mut ixyP1,
-            &raw mut one,
+            &mut nxPadDim,
+            &mut nxPad,
+            &mut nyPad,
+            &mut ixyP1,
+            &mut one,
         );
     }
-    *xDisplace = nbin as ::core::ffi::c_float
-        * (xpeak[indPeak as usize]
-            - numExtra[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float)
-        + longShiftToAdd[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-        - extraFromExpected[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
-    *yDisplace = nbin as ::core::ffi::c_float
-        * (ypeak[indPeak as usize]
-            - *inExtra.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_float)
-        + longShiftToAdd[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-        - extraFromExpected[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float;
+
+    /* return the amount to shift upper to align it to lower (verified) */
+    // Subtract both extra width and the increase in width from expected shift, add the
+    // shift from extracting overlaps in long direction
+    *xDisplace = nbin as f32 * (xpeak[indPeak as usize] - numExtra[0] as f32)
+        + longShiftToAdd[0] as f32
+        - extraFromExpected[0] as f32;
+    *yDisplace = nbin as f32 * (ypeak[indPeak as usize] - inExtra[1] as f32)
+        + longShiftToAdd[1] as f32
+        - extraFromExpected[1] as f32;
     if debugLevel != 0 && debugLen > curDebugLen + MONTXC_MAX_DEBUG_LINE {
-        sprintf(
-            debugStr.offset(curDebugLen as isize) as *mut ::core::ffi::c_char,
-            b"Peak at %8.2f %8.2f  Displacement %8.2f %8.2f\n\0" as *const u8
-                as *const ::core::ffi::c_char,
-            xpeak[indPeak as usize] as ::core::ffi::c_double,
-            ypeak[indPeak as usize] as ::core::ffi::c_double,
-            *xDisplace as ::core::ffi::c_double,
-            *yDisplace as ::core::ffi::c_double,
+        // The source does not advance curDebugLen after this last line.
+        let text = c_format(
+            "Peak at %8.2f %8.2f  Displacement %8.2f %8.2f\n",
+            &[
+                CArg::Dbl(xpeak[indPeak as usize] as f64),
+                CArg::Dbl(ypeak[indPeak as usize] as f64),
+                CArg::Dbl(*xDisplace as f64),
+                CArg::Dbl(*yDisplace as f64),
+            ],
         );
+        let at = curDebugLen as usize;
+        debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
+        debugStr[at + text.len()] = 0;
     }
-    free(aWeights as *mut ::core::ffi::c_void);
-    aWeights = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    free(bWeights as *mut ::core::ffi::c_void);
-    bWeights = ::core::ptr::null_mut::<::core::ffi::c_float>();
+    // B3DFREE(aWeights); B3DFREE(bWeights) — the Vecs drop here.
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcorredge_(
-    mut lowerIn: *mut ::core::ffi::c_float,
-    mut upperIn: *mut ::core::ffi::c_float,
-    mut nxyBox: *mut ::core::ffi::c_int,
-    mut nxyPiece: *mut ::core::ffi::c_int,
-    mut nxyOverlap: *mut ::core::ffi::c_int,
-    mut nxSmooth: *mut ::core::ffi::c_int,
-    mut nySmooth: *mut ::core::ffi::c_int,
-    mut nxPad: *mut ::core::ffi::c_int,
-    mut nyPad: *mut ::core::ffi::c_int,
-    mut lowerPad: *mut ::core::ffi::c_float,
-    mut upperPad: *mut ::core::ffi::c_float,
-    mut lowerCopy: *mut ::core::ffi::c_float,
-    mut numXcorrPeaks: *mut ::core::ffi::c_int,
-    mut legacy: *mut ::core::ffi::c_int,
-    mut ctf: *mut ::core::ffi::c_float,
-    mut delta: *mut ::core::ffi::c_float,
-    mut numExtra: *mut ::core::ffi::c_int,
-    mut nbin: *mut ::core::ffi::c_int,
-    mut ixy: *mut ::core::ffi::c_int,
-    mut maxLongShift: *mut ::core::ffi::c_int,
-    mut weightCCC: *mut ::core::ffi::c_int,
-    mut xDisplace: *mut ::core::ffi::c_float,
-    mut yDisplace: *mut ::core::ffi::c_float,
-    mut CCC: *mut ::core::ffi::c_float,
-    mut twoDfft: Option<
-        unsafe extern "C" fn(
-            *mut ::core::ffi::c_float,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-        ) -> (),
+
+/// C `montxcorredge` — Fortran wrapper for `montXCorrEdge`.  The wrapper collects and prints
+/// the debug strings if `debugLevel` is non-zero.
+pub fn montxcorredge(
+    lowerIn: &[f32],
+    upperIn: &[f32],
+    nxyBox: &[c_int],
+    nxyPiece: &[c_int],
+    nxyOverlap: &[c_int],
+    nxSmooth: &c_int,
+    nySmooth: &c_int,
+    nxPad: &c_int,
+    nyPad: &c_int,
+    lowerPad: &mut [f32],
+    upperPad: &mut [f32],
+    lowerCopy: Option<&mut [f32]>,
+    numXcorrPeaks: &c_int,
+    legacy: &c_int,
+    ctf: &[f32],
+    delta: &f32,
+    numExtra: &[c_int],
+    nbin: &c_int,
+    ixy: &c_int,
+    maxLongShift: &c_int,
+    weightCCC: &c_int,
+    xDisplace: &mut f32,
+    yDisplace: &mut f32,
+    CCC: &mut f32,
+    twoDfft: &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int),
+    dumpEdge: Option<
+        &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int, &mut c_int, &mut c_int),
     >,
-    mut dumpEdge: Option<
-        unsafe extern "C" fn(
-            *mut ::core::ffi::c_float,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-            *mut ::core::ffi::c_int,
-        ) -> (),
-    >,
-    mut debugLevel: *mut ::core::ffi::c_int,
+    debugLevel: &c_int,
 ) {
-    let mut debugLen: ::core::ffi::c_int = MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE;
-    let mut debugStr: [::core::ffi::c_char; 9000] = [0; 9000];
-    let mut curDebug: *mut ::core::ffi::c_char = (&raw mut debugStr as *mut ::core::ffi::c_char)
-        .offset(0 as ::core::ffi::c_int as isize)
-        as *mut ::core::ffi::c_char;
-    let mut lineEnd: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let debugLen: c_int = MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE;
+    let mut debugStr: [u8; (MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE) as usize] =
+        [0; (MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE) as usize];
     mont_xcorr_edge(
         lowerIn,
         upperIn,
@@ -1834,7 +1388,7 @@ pub unsafe extern "C" fn montxcorredge_(
         *delta,
         numExtra,
         *nbin,
-        *ixy - 1 as ::core::ffi::c_int,
+        *ixy - 1,
         *maxLongShift,
         *weightCCC,
         xDisplace,
@@ -1842,370 +1396,365 @@ pub unsafe extern "C" fn montxcorredge_(
         CCC,
         twoDfft,
         dumpEdge,
-        &raw mut debugStr as *mut ::core::ffi::c_char,
+        &mut debugStr,
         debugLen,
         *debugLevel,
     );
     if *debugLevel != 0 {
+        // `curDebug` is an index rather than a pointer; `strchr` scans to the NUL, and the
+        // source overwrites each newline with one, so the bound is recomputed each pass.
+        let mut curDebug: usize = 0;
         loop {
-            lineEnd = strchr(curDebug, '\n' as i32);
-            if lineEnd.is_null() {
+            let nul = debugStr[curDebug..]
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(debugStr.len() - curDebug);
+            let Some(lineEnd) = debugStr[curDebug..curDebug + nul]
+                .iter()
+                .position(|&b| b == b'\n')
+            else {
                 break;
+            };
+            let lineEnd = curDebug + lineEnd;
+            debugStr[lineEnd] = 0x00;
+            // Foreign boundary: keep the debug lines on libc's stdout, not Rust's.  Mixing
+            // the two reorders output under redirection (CLAUDE.md, "printf vs println!").
+            unsafe {
+                libc::printf(
+                    b"%s\n\0".as_ptr().cast(),
+                    debugStr[curDebug..].as_ptr().cast::<core::ffi::c_char>(),
+                );
             }
-            *lineEnd = 0 as ::core::ffi::c_char;
-            printf(
-                b"%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-                curDebug,
-            );
-            curDebug = lineEnd.offset(1 as ::core::ffi::c_int as isize);
+            curDebug = lineEnd + 1;
         }
-        fflush(stdout);
+        // `fflush(stdout)`: the libc crate does not export glibc's `stdout` object except
+        // as a raw FILE handle, and `fflush(NULL)` flushes every C output stream, a superset.
+        unsafe {
+            libc::fflush(core::ptr::null_mut());
+        }
     }
 }
-unsafe extern "C" fn local_num_and_overlap(
-    mut extent: ::core::ffi::c_int,
-    mut nxLocal: ::core::ffi::c_int,
-    mut numLocalXp: *mut ::core::ffi::c_int,
-    mut nxOverlap: *mut ::core::ffi::c_int,
+
+/// C `localNumAndOverlap` (static).
+///
+/// Get number of boxes and their overlap on one axis.
+fn local_num_and_overlap(
+    extent: c_int,
+    nxLocal: c_int,
+    numLocalXp: &mut c_int,
+    nxOverlap: &mut c_int,
 ) {
-    let mut targetOverlap: ::core::ffi::c_float = 0.35f32;
-    let mut minOverlap: ::core::ffi::c_float = 0.2f32;
-    let mut maxOverlap: ::core::ffi::c_float = 0.5f32;
-    let mut numLocalX: ::core::ffi::c_int = 0;
-    numLocalX = floor(
-        (extent - nxLocal) as ::core::ffi::c_double
-            / (nxLocal as ::core::ffi::c_double
-                * (1.0f64 - targetOverlap as ::core::ffi::c_double))
-            + 0.5f64,
-    ) as ::core::ffi::c_int
-        + 1 as ::core::ffi::c_int;
-    numLocalX = if numLocalX > 1 as ::core::ffi::c_int {
-        numLocalX
-    } else {
-        1 as ::core::ffi::c_int
-    };
-    while numLocalX > 1 as ::core::ffi::c_int
-        && (nxLocal as ::core::ffi::c_double
-            - (extent - nxLocal) as ::core::ffi::c_double
-                / (numLocalX as ::core::ffi::c_double - 1.0f64))
-            / nxLocal as ::core::ffi::c_double
-            > maxOverlap as ::core::ffi::c_double
+    let targetOverlap: f32 = 0.35;
+    let minOverlap: f32 = 0.2;
+    let maxOverlap: f32 = 0.5;
+    let mut numLocalX: c_int;
+    numLocalX = ((extent - nxLocal) as f64 / (nxLocal as f64 * (1.0f64 - targetOverlap as f64))
+        + 0.5f64)
+        .floor() as c_int
+        + 1;
+    numLocalX = if numLocalX > 1 { numLocalX } else { 1 };
+    while numLocalX > 1
+        && (nxLocal as f64 - (extent - nxLocal) as f64 / (numLocalX as f64 - 1.0f64))
+            / nxLocal as f64
+            > maxOverlap as f64
     {
         numLocalX -= 1;
     }
-    while numLocalX > 1 as ::core::ffi::c_int
-        && ((nxLocal as ::core::ffi::c_double
-            - (extent - nxLocal) as ::core::ffi::c_double
-                / (numLocalX as ::core::ffi::c_double - 1.0f64))
-            / nxLocal as ::core::ffi::c_double)
-            < minOverlap as ::core::ffi::c_double
+
+    while numLocalX > 1
+        && ((nxLocal as f64 - (extent - nxLocal) as f64 / (numLocalX as f64 - 1.0f64))
+            / nxLocal as f64)
+            < minOverlap as f64
     {
         numLocalX += 1;
     }
-    *nxOverlap = nxLocal
-        - (extent - nxLocal)
-            / (if 1 as ::core::ffi::c_int > numLocalX - 1 as ::core::ffi::c_int {
-                1 as ::core::ffi::c_int
-            } else {
-                numLocalX - 1 as ::core::ffi::c_int
-            });
+    *nxOverlap = nxLocal - (extent - nxLocal) / 1.max(numLocalX - 1);
     *numLocalXp = numLocalX;
 }
-unsafe extern "C" fn setup_local_sequence(
-    mut numLocalX: ::core::ffi::c_int,
-    mut numLocalY: ::core::ffi::c_int,
-    mut localXseq: *mut ::core::ffi::c_int,
-    mut localYseq: *mut ::core::ffi::c_int,
+
+/// C `setupLocalSequence` (static).
+///
+/// Set up sequence from middle out.
+fn setup_local_sequence(
+    numLocalX: c_int,
+    numLocalY: c_int,
+    localXseq: &mut [c_int],
+    localYseq: &mut [c_int],
 ) {
-    let mut numLocalSeq: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut localX: ::core::ffi::c_int = 0;
-    let mut localY: ::core::ffi::c_int = 0;
-    let mut dir: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-    ind = 0 as ::core::ffi::c_int;
-    while ind < numLocalX + 2 as ::core::ffi::c_int {
+    let mut numLocalSeq: c_int = 0;
+    let mut ind: c_int;
+    let mut localX: c_int;
+    let mut localY: c_int;
+    let mut dir: c_int = -1;
+    ind = 0;
+    while ind < numLocalX + 2 {
         if ind != 0 {
-            localX = numLocalX / 2 as ::core::ffi::c_int
-                + dir * ((ind + 1 as ::core::ffi::c_int) / 2 as ::core::ffi::c_int);
+            localX = numLocalX / 2 + dir * ((ind + 1) / 2);
             dir = -dir;
         } else {
-            localX = numLocalX / 2 as ::core::ffi::c_int;
+            localX = numLocalX / 2;
         }
-        if localX >= 0 as ::core::ffi::c_int && localX < numLocalX {
-            localY = 0 as ::core::ffi::c_int;
+        if localX >= 0 && localX < numLocalX {
+            localY = 0;
             while localY < numLocalY {
-                *localXseq.offset(numLocalSeq as isize) = localX;
-                let fresh0 = numLocalSeq;
-                numLocalSeq = numLocalSeq + 1;
-                *localYseq.offset(fresh0 as isize) = localY;
+                localXseq[numLocalSeq as usize] = localX;
+                localYseq[numLocalSeq as usize] = localY;
+                numLocalSeq += 1;
                 localY += 1;
             }
         }
         ind += 1;
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcorrgetmaxes_(
-    mut maxPeak: *mut ::core::ffi::c_int,
-    mut maxLines: *mut ::core::ffi::c_int,
-) {
+
+/// C `montxcorrgetmaxes` — Fortran-callable routine returning the maximum number of peaks
+/// allowed in `maxPeak` and the maximum number of debug lines in `maxLines`.
+pub fn montxcorrgetmaxes(maxPeak: &mut c_int, maxLines: &mut c_int) {
     *maxPeak = MONTXC_MAX_PEAKS;
     *maxLines = MONTXC_MAX_DEBUG_LINE;
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_set_dist_weight_half_fall(mut inVal: *mut ::core::ffi::c_float) {
-    sDistWeightHalfFall = *inVal;
+
+/// C `montXCSetDistWeightHalfFall`.
+///
+/// Sets the distance in pixels at which weighting by distance from expected shift falls by
+/// half to `inVal` (callable from Fortran or C).
+pub fn mont_xc_set_dist_weight_half_fall(inVal: &f32) {
+    S_DIST_WEIGHT_HALF_FALL.store(inVal.to_bits(), Ordering::Relaxed);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_get_last_trimmed_max_sd() -> ::core::ffi::c_double {
-    return sLastTrimmedMaxSD as ::core::ffi::c_double;
+
+/// C `montXCGetLastTrimmedMaxSD`.
+///
+/// Returns the 95th percentile value of the SD map used for weighted cross-correlation.
+pub fn mont_xc_get_last_trimmed_max_sd() -> f64 {
+    f32::from_bits(S_LAST_TRIMMED_MAX_SD.load(Ordering::Relaxed)) as f64
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_get_last_runners_up(
-    mut disps: *mut ::core::ffi::c_float,
-    mut maxPairs: ::core::ffi::c_int,
-) {
-    let mut i: ::core::ffi::c_int = 0;
-    i = 0 as ::core::ffi::c_int;
-    while i < 2 as ::core::ffi::c_int
-        * (if (2 as ::core::ffi::c_int) < maxPairs {
-            2 as ::core::ffi::c_int
-        } else {
-            maxPairs
-        })
-    {
-        *disps.offset(i as isize) = sLastRunnersUp[i as usize];
+
+/// C `montXCGetLastRunnersUp`.
+///
+/// Returns up to `maxPairs` X,Y alternative displacements into `disps`.
+pub fn mont_xc_get_last_runners_up(disps: &mut [f32], maxPairs: c_int) {
+    let mut i: c_int;
+    i = 0;
+    while i < 2 * MAX_RUNNERS_UP.min(maxPairs) {
+        disps[i as usize] = f32::from_bits(S_LAST_RUNNERS_UP[i as usize].load(Ordering::Relaxed));
         i += 1;
     }
-    i = 2 as ::core::ffi::c_int * MAX_RUNNERS_UP;
-    while i < 2 as ::core::ffi::c_int * maxPairs {
-        *disps.offset(i as isize) = -1.0e30f64 as ::core::ffi::c_float;
+    i = 2 * MAX_RUNNERS_UP;
+    while i < 2 * maxPairs {
+        disps[i as usize] = -1.0e30f64 as f32;
         i += 1;
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn montxcgetlastrunnersup_(
-    mut disps: *mut ::core::ffi::c_float,
-    mut maxPairs: *mut ::core::ffi::c_int,
-) {
+
+/// C `montxcgetlastrunnersup` — Fortran wrapper for `montXCGetLastRunnersUp`.
+pub fn montxcgetlastrunnersup(disps: &mut [f32], maxPairs: &c_int) {
     mont_xc_get_last_runners_up(disps, *maxPairs);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn row_of_three_corrs(
-    mut array: *mut ::core::ffi::c_float,
-    mut brray: *mut ::core::ffi::c_float,
-    mut nxDim: ::core::ffi::c_int,
-    mut ix0: ::core::ffi::c_int,
-    mut ix1: ::core::ffi::c_int,
-    mut iy0: ::core::ffi::c_int,
-    mut iy1: ::core::ffi::c_int,
-    mut delX: ::core::ffi::c_int,
-    mut delY: ::core::ffi::c_int,
-    mut aWeights: *mut ::core::ffi::c_float,
-    mut bWeights: *mut ::core::ffi::c_float,
-    mut nxWgt: ::core::ffi::c_int,
-    mut binning: ::core::ffi::c_int,
-    mut wgtXoffset: ::core::ffi::c_int,
-    mut wgtYoffset: ::core::ffi::c_int,
-    mut corr1: *mut ::core::ffi::c_float,
-    mut corr2: *mut ::core::ffi::c_float,
-    mut corr3: *mut ::core::ffi::c_float,
-    mut sumArr1: *mut ::core::ffi::c_double,
-    mut sumArr2: *mut ::core::ffi::c_double,
-    mut sumArr3: *mut ::core::ffi::c_double,
+
+/// C `rowOfThreeCorrs`.
+///
+/// Computes cross-correlation coefficients at three adjacent shifts in X in subareas of two
+/// images.
+pub fn row_of_three_corrs(
+    array: &[f32],
+    brray: &[f32],
+    nxDim: c_int,
+    ix0: c_int,
+    ix1: c_int,
+    iy0: c_int,
+    iy1: c_int,
+    delX: c_int,
+    delY: c_int,
+    aWeights: Option<&[f32]>,
+    bWeights: Option<&[f32]>,
+    nxWgt: c_int,
+    mut binning: c_int,
+    wgtXoffset: c_int,
+    wgtYoffset: c_int,
+    corr1: &mut f32,
+    corr2: &mut f32,
+    corr3: &mut f32,
+    mut sumArr1: Option<&mut [f64]>,
+    mut sumArr2: Option<&mut [f64]>,
+    mut sumArr3: Option<&mut [f64]>,
 ) {
-    let mut ix: ::core::ffi::c_int = 0;
-    let mut iy: ::core::ffi::c_int = 0;
-    let mut aBase: ::core::ffi::c_int = 0;
-    let mut nsum: ::core::ffi::c_int = 0;
-    let mut end: ::core::ffi::c_int = 0;
-    let mut bBase: ::core::ffi::c_int = 0;
-    let mut aWgtBase: ::core::ffi::c_int = 0;
-    let mut bWgtBase: ::core::ffi::c_int = 0;
-    let mut abSum1: ::core::ffi::c_double = 0.;
-    let mut abSum2: ::core::ffi::c_double = 0.;
-    let mut abSum3: ::core::ffi::c_double = 0.;
-    let mut aSumSq1: ::core::ffi::c_double = 0.;
-    let mut aSumSq2: ::core::ffi::c_double = 0.;
-    let mut aSumSq3: ::core::ffi::c_double = 0.;
-    let mut aSum1: ::core::ffi::c_double = 0.;
-    let mut aSum2: ::core::ffi::c_double = 0.;
-    let mut aSum3: ::core::ffi::c_double = 0.;
-    let mut bSumSq1: ::core::ffi::c_double = 0.;
-    let mut bSumSq2: ::core::ffi::c_double = 0.;
-    let mut bSumSq3: ::core::ffi::c_double = 0.;
-    let mut bSumSq: ::core::ffi::c_double = 0.;
-    let mut denom: ::core::ffi::c_double = 0.;
-    let mut amean: ::core::ffi::c_double = 0.;
-    let mut bmean: ::core::ffi::c_double = 0.;
-    let mut bSum1: ::core::ffi::c_double = 0.;
-    let mut bSum2: ::core::ffi::c_double = 0.;
-    let mut bSum3: ::core::ffi::c_double = 0.;
-    let mut bSum: ::core::ffi::c_double = 0.;
-    let mut wSum2: ::core::ffi::c_double = 0.;
-    let mut wSum1: ::core::ffi::c_double = 0.;
-    let mut wSum3: ::core::ffi::c_double = 0.;
-    let mut abTmp1: ::core::ffi::c_double = 0.;
-    let mut abTmp2: ::core::ffi::c_double = 0.;
-    let mut abTmp3: ::core::ffi::c_double = 0.;
-    let mut aTmp1: ::core::ffi::c_double = 0.;
-    let mut aTmpSq1: ::core::ffi::c_double = 0.;
-    let mut aTmp2: ::core::ffi::c_double = 0.;
-    let mut aTmpSq2: ::core::ffi::c_double = 0.;
-    let mut aTmp3: ::core::ffi::c_double = 0.;
-    let mut aTmpSq3: ::core::ffi::c_double = 0.;
-    let mut bTmp1: ::core::ffi::c_double = 0.;
-    let mut bTmp2: ::core::ffi::c_double = 0.;
-    let mut bTmp3: ::core::ffi::c_double = 0.;
-    let mut bTmpSq1: ::core::ffi::c_double = 0.;
-    let mut bTmpSq2: ::core::ffi::c_double = 0.;
-    let mut bTmpSq3: ::core::ffi::c_double = 0.;
-    let mut wTmp2: ::core::ffi::c_double = 0.;
-    let mut wTmp1: ::core::ffi::c_double = 0.;
-    let mut wTmp3: ::core::ffi::c_double = 0.;
-    let mut aval: ::core::ffi::c_float = 0.;
-    let mut bval1: ::core::ffi::c_float = 0.;
-    let mut bval2: ::core::ffi::c_float = 0.;
-    let mut bval3: ::core::ffi::c_float = 0.;
-    let mut bval: ::core::ffi::c_float = 0.;
-    let mut wgt: ::core::ffi::c_float = 0.;
-    let mut wgt1: ::core::ffi::c_float = 0.;
-    let mut wgt3: ::core::ffi::c_float = 0.;
-    let mut awgt: ::core::ffi::c_float = 0.;
-    let mut numThreads: ::core::ffi::c_int = 0;
-    let mut maxThreads: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
-    numThreads = (floor(
-        sqrt((ix1 - ix0) as ::core::ffi::c_double * (iy1 - iy0) as ::core::ffi::c_double) / 80.0f64
-            + 0.5f64,
-    ) as ::core::ffi::c_int as ::core::ffi::c_double
-        * (if !aWeights.is_null() { 2.0f64 } else { 1.0f64 }))
-        as ::core::ffi::c_int;
-    numThreads = if 1 as ::core::ffi::c_int
-        > (if maxThreads < numThreads {
-            maxThreads
-        } else {
-            numThreads
-        }) {
-        1 as ::core::ffi::c_int
-    } else if maxThreads < numThreads {
-        maxThreads
-    } else {
-        numThreads
-    };
+    let mut ix: c_int;
+    let mut iy: c_int;
+    let mut aBase: c_int;
+    let nsum: c_int = 0;
+    let end: c_int = 0;
+    let mut bBase: c_int;
+    let mut aWgtBase: c_int;
+    let mut bWgtBase: c_int;
+    let mut abSum1: f64;
+    let mut abSum2: f64;
+    let mut abSum3: f64;
+    let mut aSumSq1: f64;
+    let mut aSumSq2: f64;
+    let mut aSumSq3: f64;
+    let mut aSum1: f64;
+    let mut aSum2: f64;
+    let mut aSum3: f64;
+    let mut bSumSq1: f64;
+    let mut bSumSq2: f64;
+    let mut bSumSq3: f64;
+    let mut bSumSq: f64;
+    let denom: f64 = 0.;
+    let amean: f64 = 0.;
+    let bmean: f64 = 0.;
+    let mut bSum1: f64;
+    let mut bSum2: f64;
+    let mut bSum3: f64;
+    let mut bSum: f64;
+    let mut wSum2: f64;
+    let mut wSum1: f64;
+    let mut wSum3: f64;
+    let mut abTmp1: f64;
+    let mut abTmp2: f64;
+    let mut abTmp3: f64;
+    let mut aTmp1: f64;
+    let mut aTmpSq1: f64;
+    let mut aTmp2: f64;
+    let mut aTmpSq2: f64;
+    let mut aTmp3: f64;
+    let mut aTmpSq3: f64;
+    let mut bTmp1: f64;
+    let mut bTmp2: f64;
+    let mut bTmp3: f64;
+    let mut bTmpSq1: f64;
+    let mut bTmpSq2: f64;
+    let mut bTmpSq3: f64;
+    let mut wTmp2: f64;
+    let mut wTmp1: f64;
+    let mut wTmp3: f64;
+    let mut aval: f32;
+    let mut bval1: f32;
+    let mut bval2: f32;
+    let mut bval3: f32;
+    let mut bval: f32;
+    let mut wgt: f32;
+    let mut wgt1: f32;
+    let mut wgt3: f32;
+    let mut awgt: f32;
+    let mut numThreads: c_int;
+    let maxThreads: c_int = 8;
+
+    numThreads = ((((ix1 - ix0) as f64 * (iy1 - iy0) as f64).sqrt() / 80.0f64 + 0.5f64).floor()
+        as c_int as f64
+        * (if aWeights.is_some() { 2.0f64 } else { 1.0f64 })) as c_int;
+    numThreads = numThreads.clamp(1, maxThreads);
     numThreads = crate::imod::libcfshr::b3dutil::num_omp_threads(numThreads);
-    binning = if 1 as ::core::ffi::c_int > binning {
-        1 as ::core::ffi::c_int
-    } else {
-        binning
-    };
-    aSumSq3 = 0.0f64;
-    aSum3 = aSumSq3;
-    aSumSq2 = aSum3;
-    aSum1 = aSumSq2;
-    aSumSq1 = aSum1;
-    aSum2 = aSumSq1;
-    abSum3 = aSum2;
-    abSum2 = abSum3;
-    abSum1 = abSum2;
-    bSumSq3 = 0.0f64;
-    bSumSq2 = bSumSq3;
-    bSumSq1 = bSumSq2;
-    wSum3 = 0.0f64;
-    wSum2 = wSum3;
-    wSum1 = wSum2;
-    bSum3 = wSum1;
-    bSum2 = bSum3;
-    bSum1 = bSum2;
+
+    binning = 1.max(binning);
+
+    abSum1 = 0.;
+    abSum2 = 0.;
+    abSum3 = 0.;
+    aSum2 = 0.;
+    aSumSq1 = 0.;
+    aSum1 = 0.;
+    aSumSq2 = 0.;
+    aSum3 = 0.;
+    aSumSq3 = 0.;
+    bSumSq1 = 0.;
+    bSumSq2 = 0.;
+    bSumSq3 = 0.;
+    bSum1 = 0.;
+    bSum2 = 0.;
+    bSum3 = 0.;
+    wSum1 = 0.;
+    wSum2 = 0.;
+    wSum3 = 0.;
+
+    // The source's `#pragma omp parallel for` reduction runs this loop serially here; the
+    // reduction order is the same as an OpenMP run with one thread.
     iy = iy0;
     while iy <= iy1 {
         aBase = iy * nxDim;
         bBase = (iy - delY) * nxDim - delX;
         aWgtBase = (iy / binning + wgtYoffset) * nxWgt + wgtXoffset;
         bWgtBase = ((iy - delY) / binning + wgtYoffset) * nxWgt + wgtXoffset;
-        bSum = 0.0f64;
-        bSumSq = bSum;
-        wTmp3 = 0.0f64;
-        wTmp1 = wTmp3;
-        wTmp2 = wTmp1;
-        abTmp3 = wTmp2;
-        abTmp2 = abTmp3;
-        abTmp1 = abTmp2;
-        aTmpSq3 = 0.0f64;
-        aTmp3 = aTmpSq3;
-        aTmpSq2 = aTmp3;
-        aTmp2 = aTmpSq2;
-        aTmpSq1 = aTmp2;
-        aTmp1 = aTmpSq1;
-        bTmpSq3 = 0.0f64;
-        bTmpSq2 = bTmpSq3;
-        bTmpSq1 = bTmpSq2;
-        bTmp3 = bTmpSq1;
-        bTmp2 = bTmp3;
-        bTmp1 = bTmp2;
-        if !aWeights.is_null() {
+        bSumSq = 0.;
+        bSum = 0.;
+        abTmp1 = 0.;
+        abTmp2 = 0.;
+        abTmp3 = 0.;
+        wTmp2 = 0.;
+        wTmp1 = 0.;
+        wTmp3 = 0.;
+        aTmp1 = 0.;
+        aTmpSq1 = 0.;
+        aTmp2 = 0.;
+        aTmpSq2 = 0.;
+        aTmp3 = 0.;
+        aTmpSq3 = 0.;
+        bTmp1 = 0.;
+        bTmp2 = 0.;
+        bTmp3 = 0.;
+        bTmpSq1 = 0.;
+        bTmpSq2 = 0.;
+        bTmpSq3 = 0.;
+
+        if let (Some(aw), Some(bw)) = (aWeights, bWeights) {
+            // Do fast loop
             ix = ix0;
             while ix <= ix1 {
-                awgt = *aWeights.offset((ix / binning + aWgtBase) as isize);
-                wgt1 = awgt
-                    * *bWeights.offset(
-                        ((ix + 1 as ::core::ffi::c_int - delX) / binning + bWgtBase) as isize,
-                    );
-                wgt = awgt * *bWeights.offset(((ix - delX) / binning + bWgtBase) as isize);
-                wgt3 = awgt
-                    * *bWeights.offset(
-                        ((ix - 1 as ::core::ffi::c_int - delX) / binning + bWgtBase) as isize,
-                    );
-                wTmp1 += wgt1 as ::core::ffi::c_double;
-                wTmp2 += wgt as ::core::ffi::c_double;
-                wTmp3 += wgt3 as ::core::ffi::c_double;
-                aval = *array.offset((ix + aBase) as isize);
-                bval = *brray.offset((ix + bBase) as isize);
-                bval1 = *brray.offset((ix + bBase + 1 as ::core::ffi::c_int) as isize);
-                bval3 = *brray.offset((ix + bBase - 1 as ::core::ffi::c_int) as isize);
-                aTmp1 += (aval * wgt1) as ::core::ffi::c_double;
-                aTmp2 += (aval * wgt) as ::core::ffi::c_double;
-                aTmp3 += (aval * wgt3) as ::core::ffi::c_double;
-                bTmp1 += (bval1 * wgt1) as ::core::ffi::c_double;
-                bTmp2 += (bval * wgt) as ::core::ffi::c_double;
-                bTmp3 += (bval3 * wgt3) as ::core::ffi::c_double;
-                aTmpSq1 += (aval * aval * wgt1) as ::core::ffi::c_double;
-                aTmpSq2 += (aval * aval * wgt) as ::core::ffi::c_double;
-                aTmpSq3 += (aval * aval * wgt3) as ::core::ffi::c_double;
-                bTmpSq1 += (bval1 * bval1 * wgt1) as ::core::ffi::c_double;
-                bTmpSq2 += (bval * bval * wgt) as ::core::ffi::c_double;
-                bTmpSq3 += (bval3 * bval3 * wgt3) as ::core::ffi::c_double;
-                abTmp1 += (aval * bval1 * wgt1) as ::core::ffi::c_double;
-                abTmp2 += (aval * bval * wgt) as ::core::ffi::c_double;
-                abTmp3 += (aval * bval3 * wgt3) as ::core::ffi::c_double;
+                awgt = aw[(ix / binning + aWgtBase) as usize];
+                wgt1 = awgt * bw[((ix + 1 - delX) / binning + bWgtBase) as usize];
+                wgt = awgt * bw[((ix - delX) / binning + bWgtBase) as usize];
+                wgt3 = awgt * bw[((ix - 1 - delX) / binning + bWgtBase) as usize];
+                wTmp1 += wgt1 as f64;
+                wTmp2 += wgt as f64;
+                wTmp3 += wgt3 as f64;
+                aval = array[(ix + aBase) as usize];
+                bval = brray[(ix + bBase) as usize];
+                bval1 = brray[(ix + bBase + 1) as usize];
+                bval3 = brray[(ix + bBase - 1) as usize];
+                aTmp1 += (aval * wgt1) as f64;
+                aTmp2 += (aval * wgt) as f64;
+                aTmp3 += (aval * wgt3) as f64;
+                bTmp1 += (bval1 * wgt1) as f64;
+                bTmp2 += (bval * wgt) as f64;
+                bTmp3 += (bval3 * wgt3) as f64;
+                aTmpSq1 += (aval * aval * wgt1) as f64;
+                aTmpSq2 += (aval * aval * wgt) as f64;
+                aTmpSq3 += (aval * aval * wgt3) as f64;
+                bTmpSq1 += (bval1 * bval1 * wgt1) as f64;
+                bTmpSq2 += (bval * bval * wgt) as f64;
+                bTmpSq3 += (bval3 * bval3 * wgt3) as f64;
+                abTmp1 += (aval * bval1 * wgt1) as f64;
+                abTmp2 += (aval * bval * wgt) as f64;
+                abTmp3 += (aval * bval3 * wgt3) as f64;
                 ix += 1;
             }
         } else {
-            aval = *array.offset((ix0 + aBase) as isize);
-            bval1 = *brray.offset((ix0 + bBase + 1 as ::core::ffi::c_int) as isize);
-            bval2 = *brray.offset((ix0 + bBase) as isize);
-            bval3 = *brray.offset((ix0 + bBase - 1 as ::core::ffi::c_int) as isize);
-            aTmp2 += aval as ::core::ffi::c_double;
-            aTmpSq2 += (aval * aval) as ::core::ffi::c_double;
-            abTmp1 += (aval * bval1) as ::core::ffi::c_double;
-            abTmp2 += (aval * bval2) as ::core::ffi::c_double;
-            abTmp3 += (aval * bval3) as ::core::ffi::c_double;
-            bTmp2 += bval2 as ::core::ffi::c_double;
-            bTmp3 += (bval3 + bval2) as ::core::ffi::c_double;
-            bTmpSq2 += (bval2 * bval2) as ::core::ffi::c_double;
-            bTmpSq3 += (bval3 * bval3 + bval2 * bval2) as ::core::ffi::c_double;
-            ix = ix0 + 1 as ::core::ffi::c_int;
+            // Add first position
+            aval = array[(ix0 + aBase) as usize];
+            bval1 = brray[(ix0 + bBase + 1) as usize];
+            bval2 = brray[(ix0 + bBase) as usize];
+            bval3 = brray[(ix0 + bBase - 1) as usize];
+            aTmp2 += aval as f64;
+            aTmpSq2 += (aval * aval) as f64;
+            abTmp1 += (aval * bval1) as f64;
+            abTmp2 += (aval * bval2) as f64;
+            abTmp3 += (aval * bval3) as f64;
+            bTmp2 += bval2 as f64;
+            bTmp3 += (bval3 + bval2) as f64;
+            bTmpSq2 += (bval2 * bval2) as f64;
+            bTmpSq3 += (bval3 * bval3 + bval2 * bval2) as f64;
+
+            // Do fast loop
+            ix = ix0 + 1;
             while ix < ix1 {
-                aval = *array.offset((ix + aBase) as isize);
-                bval = *brray.offset((ix + bBase) as isize);
-                aTmp2 += aval as ::core::ffi::c_double;
-                bSum += bval as ::core::ffi::c_double;
-                aTmpSq2 += (aval * aval) as ::core::ffi::c_double;
-                bSumSq += (bval * bval) as ::core::ffi::c_double;
-                abTmp1 += (aval * *brray.offset((ix + bBase + 1 as ::core::ffi::c_int) as isize))
-                    as ::core::ffi::c_double;
-                abTmp2 += (aval * bval) as ::core::ffi::c_double;
-                abTmp3 += (aval * *brray.offset((ix + bBase - 1 as ::core::ffi::c_int) as isize))
-                    as ::core::ffi::c_double;
+                aval = array[(ix + aBase) as usize];
+                bval = brray[(ix + bBase) as usize];
+                aTmp2 += aval as f64;
+                bSum += bval as f64;
+                aTmpSq2 += (aval * aval) as f64;
+                bSumSq += (bval * bval) as f64;
+                abTmp1 += (aval * brray[(ix + bBase + 1) as usize]) as f64;
+                abTmp2 += (aval * bval) as f64;
+                abTmp3 += (aval * brray[(ix + bBase - 1) as usize]) as f64;
                 ix += 1;
             }
             bTmp1 += bSum;
@@ -2214,27 +1763,32 @@ pub unsafe extern "C" fn row_of_three_corrs(
             bTmpSq1 += bSumSq;
             bTmpSq2 += bSumSq;
             bTmpSq3 += bSumSq;
-            aval = *array.offset((ix1 + aBase) as isize);
-            bval1 = *brray.offset((ix1 + bBase + 1 as ::core::ffi::c_int) as isize);
-            bval2 = *brray.offset((ix1 + bBase) as isize);
-            bval3 = *brray.offset((ix1 + bBase - 1 as ::core::ffi::c_int) as isize);
-            aTmp2 += aval as ::core::ffi::c_double;
-            aTmpSq2 += (aval * aval) as ::core::ffi::c_double;
-            abTmp1 += (aval * bval1) as ::core::ffi::c_double;
-            abTmp2 += (aval * bval2) as ::core::ffi::c_double;
-            abTmp3 += (aval * bval3) as ::core::ffi::c_double;
-            bTmp1 += (bval1 + bval2) as ::core::ffi::c_double;
-            bTmp2 += bval2 as ::core::ffi::c_double;
-            bTmpSq1 += (bval1 * bval1 + bval2 * bval2) as ::core::ffi::c_double;
-            bTmpSq2 += (bval2 * bval2) as ::core::ffi::c_double;
-            wTmp1 += (ix1 + 1 as ::core::ffi::c_int - ix0) as ::core::ffi::c_double;
-            wTmp2 += (ix1 + 1 as ::core::ffi::c_int - ix0) as ::core::ffi::c_double;
-            wTmp3 += (ix1 + 1 as ::core::ffi::c_int - ix0) as ::core::ffi::c_double;
+
+            // Add last position
+            aval = array[(ix1 + aBase) as usize];
+            bval1 = brray[(ix1 + bBase + 1) as usize];
+            bval2 = brray[(ix1 + bBase) as usize];
+            bval3 = brray[(ix1 + bBase - 1) as usize];
+            aTmp2 += aval as f64;
+            aTmpSq2 += (aval * aval) as f64;
+            abTmp1 += (aval * bval1) as f64;
+            abTmp2 += (aval * bval2) as f64;
+            abTmp3 += (aval * bval3) as f64;
+            bTmp1 += (bval1 + bval2) as f64;
+            bTmp2 += bval2 as f64;
+            bTmpSq1 += (bval1 * bval1 + bval2 * bval2) as f64;
+            bTmpSq2 += (bval2 * bval2) as f64;
+
+            wTmp1 += (ix1 + 1 - ix0) as f64;
+            wTmp2 += (ix1 + 1 - ix0) as f64;
+            wTmp3 += (ix1 + 1 - ix0) as f64;
             aTmp3 = aTmp2;
             aTmp1 = aTmp3;
             aTmpSq3 = aTmpSq2;
             aTmpSq1 = aTmpSq3;
         }
+
+        // Accumulate
         wSum1 += wTmp1;
         wSum2 += wTmp2;
         wSum3 += wTmp3;
@@ -2255,266 +1809,252 @@ pub unsafe extern "C" fn row_of_three_corrs(
         bSumSq3 += bTmpSq3;
         iy += 1;
     }
-    *corr1 = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-        aSum1,
-        aSumSq1,
-        bSum1,
-        bSumSq1,
-        abSum1,
-        wSum1,
-        sumArr1,
-        b"\0" as *const u8 as *const ::core::ffi::c_char,
-    ) as ::core::ffi::c_float;
-    *corr2 = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-        aSum2,
-        aSumSq2,
-        bSum2,
-        bSumSq2,
-        abSum2,
-        wSum2,
-        sumArr2,
-        b"\0" as *const u8 as *const ::core::ffi::c_char,
-    ) as ::core::ffi::c_float;
-    *corr3 = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-        aSum3,
-        aSumSq3,
-        bSum3,
-        bSumSq3,
-        abSum3,
-        wSum3,
-        sumArr3,
-        b"\0" as *const u8 as *const ::core::ffi::c_char,
-    ) as ::core::ffi::c_float;
+
+    *corr1 = unsafe {
+        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+            aSum1,
+            aSumSq1,
+            bSum1,
+            bSumSq1,
+            abSum1,
+            wSum1,
+            sumArr1.as_deref_mut(),
+            "",
+        )
+    } as f32;
+    *corr2 = unsafe {
+        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+            aSum2,
+            aSumSq2,
+            bSum2,
+            bSumSq2,
+            abSum2,
+            wSum2,
+            sumArr2.as_deref_mut(),
+            "",
+        )
+    } as f32;
+    *corr3 = unsafe {
+        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+            aSum3,
+            aSumSq3,
+            bSum3,
+            bSumSq3,
+            abSum3,
+            wSum3,
+            sumArr3.as_deref_mut(),
+            "",
+        )
+    } as f32;
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn column_of_three_corrs(
-    mut array: *mut ::core::ffi::c_float,
-    mut brray: *mut ::core::ffi::c_float,
-    mut nxDim: ::core::ffi::c_int,
-    mut ix0: ::core::ffi::c_int,
-    mut ix1: ::core::ffi::c_int,
-    mut iy0: ::core::ffi::c_int,
-    mut iy1: ::core::ffi::c_int,
-    mut delX: ::core::ffi::c_int,
-    mut delY: ::core::ffi::c_int,
-    mut aWeights: *mut ::core::ffi::c_float,
-    mut bWeights: *mut ::core::ffi::c_float,
-    mut nxWgt: ::core::ffi::c_int,
-    mut binning: ::core::ffi::c_int,
-    mut wgtXoffset: ::core::ffi::c_int,
-    mut wgtYoffset: ::core::ffi::c_int,
-    mut corr1: *mut ::core::ffi::c_float,
-    mut corr2: *mut ::core::ffi::c_float,
-    mut corr3: *mut ::core::ffi::c_float,
-    mut sumArr1: *mut ::core::ffi::c_double,
-    mut sumArr2: *mut ::core::ffi::c_double,
-    mut sumArr3: *mut ::core::ffi::c_double,
+
+/// C `columnOfThreeCorrs`.
+///
+/// Computes cross-correlation coefficients at three adjacent shifts in Y in subareas of two
+/// images.  Arguments are the same as for `rowOfThreeCorrs`.
+pub fn column_of_three_corrs(
+    array: &[f32],
+    brray: &[f32],
+    nxDim: c_int,
+    ix0: c_int,
+    ix1: c_int,
+    iy0: c_int,
+    iy1: c_int,
+    delX: c_int,
+    delY: c_int,
+    aWeights: Option<&[f32]>,
+    bWeights: Option<&[f32]>,
+    nxWgt: c_int,
+    binning: c_int,
+    wgtXoffset: c_int,
+    wgtYoffset: c_int,
+    corr1: &mut f32,
+    corr2: &mut f32,
+    corr3: &mut f32,
+    mut sumArr1: Option<&mut [f64]>,
+    mut sumArr2: Option<&mut [f64]>,
+    mut sumArr3: Option<&mut [f64]>,
 ) {
-    let mut ix: ::core::ffi::c_int = 0;
-    let mut iy: ::core::ffi::c_int = 0;
-    let mut aBase: ::core::ffi::c_int = 0;
-    let mut nsum: ::core::ffi::c_int = 0;
-    let mut end: ::core::ffi::c_int = 0;
-    let mut bBase: ::core::ffi::c_int = 0;
-    let mut aWgtBase: ::core::ffi::c_int = 0;
-    let mut bWgtBase: ::core::ffi::c_int = 0;
-    let mut bWgtBase1: ::core::ffi::c_int = 0;
-    let mut bWgtBase3: ::core::ffi::c_int = 0;
-    let mut wInd: ::core::ffi::c_int = 0;
-    let mut abSum1: ::core::ffi::c_double = 0.;
-    let mut abSum2: ::core::ffi::c_double = 0.;
-    let mut abSum3: ::core::ffi::c_double = 0.;
-    let mut aSumSq1: ::core::ffi::c_double = 0.;
-    let mut aSumSq2: ::core::ffi::c_double = 0.;
-    let mut aSumSq3: ::core::ffi::c_double = 0.;
-    let mut aSum1: ::core::ffi::c_double = 0.;
-    let mut aSum2: ::core::ffi::c_double = 0.;
-    let mut aSum3: ::core::ffi::c_double = 0.;
-    let mut bSumSq1: ::core::ffi::c_double = 0.;
-    let mut bSumSq2: ::core::ffi::c_double = 0.;
-    let mut bSumSq3: ::core::ffi::c_double = 0.;
-    let mut bSumSq: ::core::ffi::c_double = 0.;
-    let mut denom: ::core::ffi::c_double = 0.;
-    let mut amean: ::core::ffi::c_double = 0.;
-    let mut bmean: ::core::ffi::c_double = 0.;
-    let mut bSum1: ::core::ffi::c_double = 0.;
-    let mut bSum2: ::core::ffi::c_double = 0.;
-    let mut bSum3: ::core::ffi::c_double = 0.;
-    let mut bSum: ::core::ffi::c_double = 0.;
-    let mut wSum2: ::core::ffi::c_double = 0.;
-    let mut wSum1: ::core::ffi::c_double = 0.;
-    let mut wSum3: ::core::ffi::c_double = 0.;
-    let mut abTmp1: ::core::ffi::c_double = 0.;
-    let mut abTmp2: ::core::ffi::c_double = 0.;
-    let mut abTmp3: ::core::ffi::c_double = 0.;
-    let mut aTmp1: ::core::ffi::c_double = 0.;
-    let mut aTmpSq1: ::core::ffi::c_double = 0.;
-    let mut aTmp2: ::core::ffi::c_double = 0.;
-    let mut aTmpSq2: ::core::ffi::c_double = 0.;
-    let mut aTmp3: ::core::ffi::c_double = 0.;
-    let mut aTmpSq3: ::core::ffi::c_double = 0.;
-    let mut aTmpSq: ::core::ffi::c_double = 0.;
-    let mut bTmp1: ::core::ffi::c_double = 0.;
-    let mut bTmp2: ::core::ffi::c_double = 0.;
-    let mut bTmp3: ::core::ffi::c_double = 0.;
-    let mut bTmpSq1: ::core::ffi::c_double = 0.;
-    let mut bTmpSq2: ::core::ffi::c_double = 0.;
-    let mut bTmpSq3: ::core::ffi::c_double = 0.;
-    let mut wTmp2: ::core::ffi::c_double = 0.;
-    let mut wTmp1: ::core::ffi::c_double = 0.;
-    let mut wTmp3: ::core::ffi::c_double = 0.;
-    let mut aTmp: ::core::ffi::c_double = 0.;
-    let mut aval: ::core::ffi::c_float = 0.;
-    let mut bval1: ::core::ffi::c_float = 0.;
-    let mut bval2: ::core::ffi::c_float = 0.;
-    let mut bval3: ::core::ffi::c_float = 0.;
-    let mut bval: ::core::ffi::c_float = 0.;
-    let mut wgt: ::core::ffi::c_float = 0.;
-    let mut wgt1: ::core::ffi::c_float = 0.;
-    let mut wgt3: ::core::ffi::c_float = 0.;
-    let mut awgt: ::core::ffi::c_float = 0.;
-    let mut numThreads: ::core::ffi::c_int = 0;
-    let mut maxThreads: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
-    numThreads = (floor(
-        sqrt((ix1 - ix0) as ::core::ffi::c_double * (iy1 - iy0) as ::core::ffi::c_double) / 80.0f64
-            + 0.5f64,
-    ) as ::core::ffi::c_int as ::core::ffi::c_double
-        * (if !aWeights.is_null() { 2.0f64 } else { 1.0f64 }))
-        as ::core::ffi::c_int;
-    numThreads = if 1 as ::core::ffi::c_int
-        > (if maxThreads < numThreads {
-            maxThreads
-        } else {
-            numThreads
-        }) {
-        1 as ::core::ffi::c_int
-    } else if maxThreads < numThreads {
-        maxThreads
-    } else {
-        numThreads
-    };
+    let mut ix: c_int;
+    let mut iy: c_int;
+    let mut aBase: c_int;
+    let nsum: c_int = 0;
+    let end: c_int = 0;
+    let mut bBase: c_int;
+    let mut aWgtBase: c_int;
+    let mut bWgtBase: c_int;
+    let mut bWgtBase1: c_int;
+    let mut bWgtBase3: c_int;
+    let mut wInd: c_int;
+    let mut abSum1: f64;
+    let mut abSum2: f64;
+    let mut abSum3: f64;
+    let mut aSumSq1: f64;
+    let mut aSumSq2: f64;
+    let mut aSumSq3: f64;
+    let mut aSum1: f64;
+    let mut aSum2: f64;
+    let mut aSum3: f64;
+    let mut bSumSq1: f64;
+    let mut bSumSq2: f64;
+    let mut bSumSq3: f64;
+    let mut bSumSq: f64;
+    let denom: f64 = 0.;
+    let amean: f64 = 0.;
+    let bmean: f64 = 0.;
+    let mut bSum1: f64;
+    let mut bSum2: f64;
+    let mut bSum3: f64;
+    let mut bSum: f64;
+    let mut wSum2: f64;
+    let mut wSum1: f64;
+    let mut wSum3: f64;
+    let mut abTmp1: f64;
+    let mut abTmp2: f64;
+    let mut abTmp3: f64;
+    let mut aTmp1: f64;
+    let mut aTmpSq1: f64;
+    let mut aTmp2: f64;
+    let mut aTmpSq2: f64;
+    let mut aTmp3: f64;
+    let mut aTmpSq3: f64;
+    let mut aTmpSq: f64;
+    let mut bTmp1: f64;
+    let mut bTmp2: f64;
+    let mut bTmp3: f64;
+    let mut bTmpSq1: f64;
+    let mut bTmpSq2: f64;
+    let mut bTmpSq3: f64;
+    let mut wTmp2: f64;
+    let mut wTmp1: f64;
+    let mut wTmp3: f64;
+    let mut aTmp: f64;
+    let mut aval: f32;
+    let mut bval1: f32;
+    let mut bval2: f32;
+    let mut bval3: f32;
+    let mut bval: f32;
+    let mut wgt: f32;
+    let mut wgt1: f32;
+    let mut wgt3: f32;
+    let mut awgt: f32;
+    let mut numThreads: c_int;
+    let maxThreads: c_int = 8;
+
+    numThreads = ((((ix1 - ix0) as f64 * (iy1 - iy0) as f64).sqrt() / 80.0f64 + 0.5f64).floor()
+        as c_int as f64
+        * (if aWeights.is_some() { 2.0f64 } else { 1.0f64 })) as c_int;
+    numThreads = numThreads.clamp(1, maxThreads);
     numThreads = crate::imod::libcfshr::b3dutil::num_omp_threads(numThreads);
-    aSumSq3 = 0.0f64;
-    aSum3 = aSumSq3;
-    aSumSq2 = aSum3;
-    aSum1 = aSumSq2;
-    aSumSq1 = aSum1;
-    aSum2 = aSumSq1;
-    abSum3 = aSum2;
-    abSum2 = abSum3;
-    abSum1 = abSum2;
-    bSumSq3 = 0.0f64;
-    bSumSq2 = bSumSq3;
-    bSumSq1 = bSumSq2;
-    wSum3 = 0.0f64;
-    wSum2 = wSum3;
-    wSum1 = wSum2;
-    bSum3 = wSum1;
-    bSum2 = bSum3;
-    bSum1 = bSum2;
-    iy = iy0
-        + (if !aWeights.is_null() {
-            0 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        });
-    while iy
-        <= iy1
-            - (if !aWeights.is_null() {
-                0 as ::core::ffi::c_int
-            } else {
-                1 as ::core::ffi::c_int
-            })
-    {
+
+    abSum1 = 0.;
+    abSum2 = 0.;
+    abSum3 = 0.;
+    aSum2 = 0.;
+    aSumSq1 = 0.;
+    aSum1 = 0.;
+    aSumSq2 = 0.;
+    aSum3 = 0.;
+    aSumSq3 = 0.;
+    bSumSq1 = 0.;
+    bSumSq2 = 0.;
+    bSumSq3 = 0.;
+    bSum1 = 0.;
+    bSum2 = 0.;
+    bSum3 = 0.;
+    wSum1 = 0.;
+    wSum2 = 0.;
+    wSum3 = 0.;
+
+    iy = iy0 + (if aWeights.is_some() { 0 } else { 1 });
+    while iy <= iy1 - (if aWeights.is_some() { 0 } else { 1 }) {
         aBase = iy * nxDim;
         bBase = (iy - delY) * nxDim - delX;
-        bSum = 0.0f64;
-        bSumSq = bSum;
-        wTmp3 = 0.0f64;
-        wTmp1 = wTmp3;
-        wTmp2 = wTmp1;
-        abTmp3 = wTmp2;
-        abTmp2 = abTmp3;
-        abTmp1 = abTmp2;
-        aTmpSq3 = 0.0f64;
-        aTmp3 = aTmpSq3;
-        aTmpSq2 = aTmp3;
-        aTmp2 = aTmpSq2;
-        aTmpSq1 = aTmp2;
-        aTmp1 = aTmpSq1;
-        bTmpSq3 = 0.0f64;
-        bTmpSq2 = bTmpSq3;
-        bTmpSq1 = bTmpSq2;
-        bTmp3 = bTmpSq1;
-        bTmp2 = bTmp3;
-        bTmp1 = bTmp2;
-        if !aWeights.is_null() {
+        bSumSq = 0.;
+        bSum = 0.;
+        abTmp1 = 0.;
+        abTmp2 = 0.;
+        abTmp3 = 0.;
+        wTmp2 = 0.;
+        wTmp1 = 0.;
+        wTmp3 = 0.;
+        aTmp1 = 0.;
+        aTmpSq1 = 0.;
+        aTmp2 = 0.;
+        aTmpSq2 = 0.;
+        aTmp3 = 0.;
+        aTmpSq3 = 0.;
+        bTmp1 = 0.;
+        bTmp2 = 0.;
+        bTmp3 = 0.;
+        bTmpSq1 = 0.;
+        bTmpSq2 = 0.;
+        bTmpSq3 = 0.;
+
+        if let (Some(aw), Some(bw)) = (aWeights, bWeights) {
+            // Weighting: Set up weight bases
             aWgtBase = (iy / binning + wgtYoffset) * nxWgt + wgtXoffset;
-            bWgtBase1 =
-                ((iy + 1 as ::core::ffi::c_int - delY) / binning + wgtYoffset) * nxWgt + wgtXoffset;
+            bWgtBase1 = ((iy + 1 - delY) / binning + wgtYoffset) * nxWgt + wgtXoffset;
             bWgtBase = ((iy - delY) / binning + wgtYoffset) * nxWgt + wgtXoffset;
-            bWgtBase3 =
-                ((iy - 1 as ::core::ffi::c_int - delY) / binning + wgtYoffset) * nxWgt + wgtXoffset;
+            bWgtBase3 = ((iy - 1 - delY) / binning + wgtYoffset) * nxWgt + wgtXoffset;
+
             ix = ix0;
             while ix <= ix1 {
-                awgt = *aWeights.offset((ix / binning + aWgtBase) as isize);
+                awgt = aw[(ix / binning + aWgtBase) as usize];
                 wInd = (ix - delX) / binning;
-                wgt1 = awgt * *bWeights.offset((wInd + bWgtBase1) as isize);
-                wgt = awgt * *bWeights.offset((wInd + bWgtBase) as isize);
-                wgt3 = awgt * *bWeights.offset((wInd + bWgtBase3) as isize);
-                wTmp1 += wgt1 as ::core::ffi::c_double;
-                wTmp2 += wgt as ::core::ffi::c_double;
-                wTmp3 += wgt3 as ::core::ffi::c_double;
-                aval = *array.offset((ix + aBase) as isize);
-                bval = *brray.offset((ix + bBase) as isize);
-                bval1 = *brray.offset((ix + bBase + nxDim) as isize);
-                bval3 = *brray.offset((ix + bBase - nxDim) as isize);
-                aTmp1 += (aval * wgt1) as ::core::ffi::c_double;
-                aTmp2 += (aval * wgt) as ::core::ffi::c_double;
-                aTmp3 += (aval * wgt3) as ::core::ffi::c_double;
-                bTmp1 += (bval1 * wgt1) as ::core::ffi::c_double;
-                bTmp2 += (bval * wgt) as ::core::ffi::c_double;
-                bTmp3 += (bval3 * wgt3) as ::core::ffi::c_double;
-                aTmpSq1 += (aval * aval * wgt1) as ::core::ffi::c_double;
-                aTmpSq2 += (aval * aval * wgt) as ::core::ffi::c_double;
-                aTmpSq3 += (aval * aval * wgt3) as ::core::ffi::c_double;
-                bTmpSq1 += (bval1 * bval1 * wgt1) as ::core::ffi::c_double;
-                bTmpSq2 += (bval * bval * wgt) as ::core::ffi::c_double;
-                bTmpSq3 += (bval3 * bval3 * wgt3) as ::core::ffi::c_double;
-                abTmp1 += (aval * bval1 * wgt1) as ::core::ffi::c_double;
-                abTmp2 += (aval * bval * wgt) as ::core::ffi::c_double;
-                abTmp3 += (aval * bval3 * wgt3) as ::core::ffi::c_double;
+                wgt1 = awgt * bw[(wInd + bWgtBase1) as usize];
+                wgt = awgt * bw[(wInd + bWgtBase) as usize];
+                wgt3 = awgt * bw[(wInd + bWgtBase3) as usize];
+                wTmp1 += wgt1 as f64;
+                wTmp2 += wgt as f64;
+                wTmp3 += wgt3 as f64;
+                aval = array[(ix + aBase) as usize];
+                bval = brray[(ix + bBase) as usize];
+                bval1 = brray[(ix + bBase + nxDim) as usize];
+                bval3 = brray[(ix + bBase - nxDim) as usize];
+                aTmp1 += (aval * wgt1) as f64;
+                aTmp2 += (aval * wgt) as f64;
+                aTmp3 += (aval * wgt3) as f64;
+                bTmp1 += (bval1 * wgt1) as f64;
+                bTmp2 += (bval * wgt) as f64;
+                bTmp3 += (bval3 * wgt3) as f64;
+                aTmpSq1 += (aval * aval * wgt1) as f64;
+                aTmpSq2 += (aval * aval * wgt) as f64;
+                aTmpSq3 += (aval * aval * wgt3) as f64;
+                bTmpSq1 += (bval1 * bval1 * wgt1) as f64;
+                bTmpSq2 += (bval * bval * wgt) as f64;
+                bTmpSq3 += (bval3 * bval3 * wgt3) as f64;
+                abTmp1 += (aval * bval1 * wgt1) as f64;
+                abTmp2 += (aval * bval * wgt) as f64;
+                abTmp3 += (aval * bval3 * wgt3) as f64;
                 ix += 1;
             }
         } else {
+            // No weights: do the restricted range
             aBase = iy * nxDim;
             bBase = (iy - delY) * nxDim - delX;
-            bSum = 0.0f64;
-            bSumSq = bSum;
-            aTmpSq = 0 as ::core::ffi::c_int as ::core::ffi::c_double;
-            aTmp = aTmpSq;
-            abTmp3 = aTmp;
-            abTmp2 = abTmp3;
-            abTmp1 = abTmp2;
+            bSumSq = 0.;
+            bSum = 0.;
+            abTmp1 = 0.;
+            abTmp2 = 0.;
+            abTmp3 = 0.;
+            aTmp = 0.;
+            aTmpSq = 0.;
             ix = ix0;
             while ix <= ix1 {
-                aval = *array.offset((ix + aBase) as isize);
-                aTmp += aval as ::core::ffi::c_double;
-                bSum += *brray.offset((ix + bBase) as isize) as ::core::ffi::c_double;
-                aTmpSq += (aval * aval) as ::core::ffi::c_double;
-                bSumSq += (*brray.offset((ix + bBase) as isize)
-                    * *brray.offset((ix + bBase) as isize))
-                    as ::core::ffi::c_double;
-                abTmp1 +=
-                    (aval * *brray.offset((ix + bBase + nxDim) as isize)) as ::core::ffi::c_double;
-                abTmp2 += (aval * *brray.offset((ix + bBase) as isize)) as ::core::ffi::c_double;
-                abTmp3 +=
-                    (aval * *brray.offset((ix + bBase - nxDim) as isize)) as ::core::ffi::c_double;
+                aval = array[(ix + aBase) as usize];
+                aTmp += aval as f64;
+                bSum += brray[(ix + bBase) as usize] as f64;
+                aTmpSq += (aval * aval) as f64;
+                bSumSq += (brray[(ix + bBase) as usize] * brray[(ix + bBase) as usize]) as f64;
+                abTmp1 += (aval * brray[(ix + bBase + nxDim) as usize]) as f64;
+                abTmp2 += (aval * brray[(ix + bBase) as usize]) as f64;
+                abTmp3 += (aval * brray[(ix + bBase - nxDim) as usize]) as f64;
                 ix += 1;
             }
-            wTmp1 += (ix1 + 1 as ::core::ffi::c_int - ix0) as ::core::ffi::c_double;
-            wTmp2 += (ix1 + 1 as ::core::ffi::c_int - ix0) as ::core::ffi::c_double;
-            wTmp3 += (ix1 + 1 as ::core::ffi::c_int - ix0) as ::core::ffi::c_double;
+            wTmp1 += (ix1 + 1 - ix0) as f64;
+            wTmp2 += (ix1 + 1 - ix0) as f64;
+            wTmp3 += (ix1 + 1 - ix0) as f64;
             bTmp3 = bSum;
             bTmp2 = bTmp3;
             bTmp1 = bTmp2;
@@ -2528,6 +2068,8 @@ pub unsafe extern "C" fn column_of_three_corrs(
             aTmpSq2 = aTmpSq3;
             aTmpSq1 = aTmpSq2;
         }
+
+        // Accumulate
         wSum1 += wTmp1;
         wSum2 += wTmp2;
         wSum3 += wTmp3;
@@ -2546,64 +2088,69 @@ pub unsafe extern "C" fn column_of_three_corrs(
         bSumSq1 += bTmpSq1;
         bSumSq2 += bTmpSq2;
         bSumSq3 += bTmpSq3;
+
         iy += 1;
     }
-    if aWeights.is_null() {
+
+    if aWeights.is_none() {
+        // For no weights, complete the first row
         aBase = iy0 * nxDim;
         bBase = (iy0 - delY) * nxDim - delX;
-        bTmpSq3 = 0 as ::core::ffi::c_int as ::core::ffi::c_double;
-        bTmpSq2 = bTmpSq3;
-        bTmpSq1 = bTmpSq2;
-        bTmp3 = bTmpSq1;
-        bTmp2 = bTmp3;
-        bTmp1 = bTmp2;
-        aTmpSq = 0 as ::core::ffi::c_int as ::core::ffi::c_double;
-        aTmp = aTmpSq;
-        abTmp3 = aTmp;
-        abTmp2 = abTmp3;
-        abTmp1 = abTmp2;
+
+        bTmp1 = 0.;
+        bTmp2 = 0.;
+        bTmp3 = 0.;
+        bTmpSq1 = 0.;
+        bTmpSq2 = 0.;
+        bTmpSq3 = 0.;
+        abTmp1 = 0.;
+        abTmp2 = 0.;
+        abTmp3 = 0.;
+        aTmp = 0.;
+        aTmpSq = 0.;
         ix = ix0;
         while ix <= ix1 {
-            aval = *array.offset((ix + aBase) as isize);
-            bval1 = *brray.offset((ix + bBase + nxDim) as isize);
-            bval2 = *brray.offset((ix + bBase) as isize);
-            bval3 = *brray.offset((ix + bBase - nxDim) as isize);
-            aTmp += aval as ::core::ffi::c_double;
-            aTmpSq += (aval * aval) as ::core::ffi::c_double;
-            abTmp1 += (aval * bval1) as ::core::ffi::c_double;
-            abTmp2 += (aval * bval2) as ::core::ffi::c_double;
-            abTmp3 += (aval * bval3) as ::core::ffi::c_double;
-            bTmp2 += bval2 as ::core::ffi::c_double;
-            bTmp3 += (bval3 + bval2) as ::core::ffi::c_double;
-            bTmpSq2 += (bval2 * bval2) as ::core::ffi::c_double;
-            bTmpSq3 += (bval3 * bval3 + bval2 * bval2) as ::core::ffi::c_double;
+            aval = array[(ix + aBase) as usize];
+            bval1 = brray[(ix + bBase + nxDim) as usize];
+            bval2 = brray[(ix + bBase) as usize];
+            bval3 = brray[(ix + bBase - nxDim) as usize];
+            aTmp += aval as f64;
+            aTmpSq += (aval * aval) as f64;
+            abTmp1 += (aval * bval1) as f64;
+            abTmp2 += (aval * bval2) as f64;
+            abTmp3 += (aval * bval3) as f64;
+            bTmp2 += bval2 as f64;
+            bTmp3 += (bval3 + bval2) as f64;
+            bTmpSq2 += (bval2 * bval2) as f64;
+            bTmpSq3 += (bval3 * bval3 + bval2 * bval2) as f64;
             ix += 1;
         }
+
+        // Complete the last row
         aBase = iy1 * nxDim;
         bBase = (iy1 - delY) * nxDim - delX;
         ix = ix0;
         while ix <= ix1 {
-            aval = *array.offset((ix + aBase) as isize);
-            bval1 = *brray.offset((ix + bBase + nxDim) as isize);
-            bval2 = *brray.offset((ix + bBase) as isize);
-            bval3 = *brray.offset((ix + bBase - nxDim) as isize);
-            aTmp += aval as ::core::ffi::c_double;
-            aTmpSq += (aval * aval) as ::core::ffi::c_double;
-            abTmp1 += (aval * bval1) as ::core::ffi::c_double;
-            abTmp2 += (aval * bval2) as ::core::ffi::c_double;
-            abTmp3 += (aval * bval3) as ::core::ffi::c_double;
-            bTmp1 += (bval1 + bval2) as ::core::ffi::c_double;
-            bTmp2 += bval2 as ::core::ffi::c_double;
-            bTmpSq1 += (bval1 * bval1 + bval2 * bval2) as ::core::ffi::c_double;
-            bTmpSq2 += (bval2 * bval2) as ::core::ffi::c_double;
+            aval = array[(ix + aBase) as usize];
+            bval1 = brray[(ix + bBase + nxDim) as usize];
+            bval2 = brray[(ix + bBase) as usize];
+            bval3 = brray[(ix + bBase - nxDim) as usize];
+            aTmp += aval as f64;
+            aTmpSq += (aval * aval) as f64;
+            abTmp1 += (aval * bval1) as f64;
+            abTmp2 += (aval * bval2) as f64;
+            abTmp3 += (aval * bval3) as f64;
+            bTmp1 += (bval1 + bval2) as f64;
+            bTmp2 += bval2 as f64;
+            bTmpSq1 += (bval1 * bval1 + bval2 * bval2) as f64;
+            bTmpSq2 += (bval2 * bval2) as f64;
             ix += 1;
         }
-        wSum1 += (2 as ::core::ffi::c_int * (ix1 + 1 as ::core::ffi::c_int - ix0))
-            as ::core::ffi::c_double;
-        wSum2 += (2 as ::core::ffi::c_int * (ix1 + 1 as ::core::ffi::c_int - ix0))
-            as ::core::ffi::c_double;
-        wSum3 += (2 as ::core::ffi::c_int * (ix1 + 1 as ::core::ffi::c_int - ix0))
-            as ::core::ffi::c_double;
+
+        // Accumulate
+        wSum1 += (2 * (ix1 + 1 - ix0)) as f64;
+        wSum2 += (2 * (ix1 + 1 - ix0)) as f64;
+        wSum3 += (2 * (ix1 + 1 - ix0)) as f64;
         aSum1 += aTmp;
         aSum2 += aTmp;
         aSum3 += aTmp;
@@ -2620,145 +2167,127 @@ pub unsafe extern "C" fn column_of_three_corrs(
         bSumSq2 += bTmpSq2;
         bSumSq3 += bTmpSq3;
     }
-    *corr1 = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-        aSum1,
-        aSumSq1,
-        bSum1,
-        bSumSq1,
-        abSum1,
-        wSum1,
-        sumArr1,
-        b"\0" as *const u8 as *const ::core::ffi::c_char,
-    ) as ::core::ffi::c_float;
-    *corr2 = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-        aSum2,
-        aSumSq2,
-        bSum2,
-        bSumSq2,
-        abSum2,
-        wSum2,
-        sumArr2,
-        b"\0" as *const u8 as *const ::core::ffi::c_char,
-    ) as ::core::ffi::c_float;
-    *corr3 = crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
-        aSum3,
-        aSumSq3,
-        bSum3,
-        bSumSq3,
-        abSum3,
-        wSum3,
-        sumArr3,
-        b"\0" as *const u8 as *const ::core::ffi::c_char,
-    ) as ::core::ffi::c_float;
+
+    *corr1 = unsafe {
+        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+            aSum1,
+            aSumSq1,
+            bSum1,
+            bSumSq1,
+            abSum1,
+            wSum1,
+            sumArr1.as_deref_mut(),
+            "",
+        )
+    } as f32;
+    *corr2 = unsafe {
+        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+            aSum2,
+            aSumSq2,
+            bSum2,
+            bSumSq2,
+            abSum2,
+            wSum2,
+            sumArr2.as_deref_mut(),
+            "",
+        )
+    } as f32;
+    *corr3 = unsafe {
+        crate::imod::libcfshr::filtxcorr::weighted_corr_from_sums(
+            aSum3,
+            aSumSq3,
+            bSum3,
+            bSumSq3,
+            abSum3,
+            wSum3,
+            sumArr3.as_deref_mut(),
+            "",
+        )
+    } as f32;
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mont_xc_find_best_corr(
-    mut array: *mut ::core::ffi::c_float,
-    mut brray: *mut ::core::ffi::c_float,
-    mut nxDim: ::core::ffi::c_int,
-    mut nx: ::core::ffi::c_int,
-    mut ny: ::core::ffi::c_int,
-    mut nxTrim: ::core::ffi::c_int,
-    mut nyTrim: ::core::ffi::c_int,
-    mut ixStart: ::core::ffi::c_int,
-    mut ixEnd: ::core::ffi::c_int,
-    mut iyStart: ::core::ffi::c_int,
-    mut iyEnd: ::core::ffi::c_int,
-    mut delX: *mut ::core::ffi::c_float,
-    mut delY: *mut ::core::ffi::c_float,
-    mut corr: *mut ::core::ffi::c_float,
-    mut maxDist: ::core::ffi::c_float,
-    mut aWeights: *mut ::core::ffi::c_float,
-    mut bWeights: *mut ::core::ffi::c_float,
-    mut nxWgt: ::core::ffi::c_int,
-    mut binning: ::core::ffi::c_int,
-    mut wgtXoffset: ::core::ffi::c_int,
-    mut wgtYoffset: ::core::ffi::c_int,
-    mut threshCCC: ::core::ffi::c_float,
-    mut bestSumArr: *mut ::core::ffi::c_double,
+
+/// C `montXCFindBestCorr`.
+///
+/// Finds the shift with the best cross-correlation coefficient between overlapping subareas
+/// on two images.
+pub fn mont_xc_find_best_corr(
+    array: &[f32],
+    brray: &[f32],
+    nxDim: c_int,
+    nx: c_int,
+    ny: c_int,
+    nxTrim: c_int,
+    nyTrim: c_int,
+    ixStart: c_int,
+    ixEnd: c_int,
+    iyStart: c_int,
+    iyEnd: c_int,
+    delX: &mut f32,
+    delY: &mut f32,
+    corr: &mut f32,
+    maxDist: f32,
+    aWeights: Option<&[f32]>,
+    bWeights: Option<&[f32]>,
+    nxWgt: c_int,
+    binning: c_int,
+    wgtXoffset: c_int,
+    wgtYoffset: c_int,
+    threshCCC: f32,
+    mut bestSumArr: Option<&mut [f64]>,
 ) {
-    let mut corrs: [[::core::ffi::c_float; 3]; 3] = [[0.; 3]; 3];
-    let mut corrTmp: [[::core::ffi::c_float; 3]; 3] = [[0.; 3]; 3];
-    let mut cccMax: ::core::ffi::c_float = 0.;
-    let mut sumArrs: [[[::core::ffi::c_double; 6]; 3]; 3] = [[[0.; 6]; 3]; 3];
-    let mut sumTmp: [[[::core::ffi::c_double; 6]; 3]; 3] = [[[0.; 6]; 3]; 3];
-    let mut done: [[::core::ffi::c_int; 3]; 3] = [[0; 3]; 3];
-    let mut first: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    let mut curDelX: ::core::ffi::c_int =
-        floor(*delX as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-    let mut curDelY: ::core::ffi::c_int =
-        floor(*delY as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-    let mut ix: ::core::ffi::c_int = 0;
-    let mut iy: ::core::ffi::c_int = 0;
-    let mut ixMax: ::core::ffi::c_int = 0;
-    let mut iyMax: ::core::ffi::c_int = 0;
-    let mut ix0: ::core::ffi::c_int = 0;
-    let mut ix1: ::core::ffi::c_int = 0;
-    let mut iy0: ::core::ffi::c_int = 0;
-    let mut iy1: ::core::ffi::c_int = 0;
-    let mut nc: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut needCol: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-    ix0 = if ixStart > nxTrim + curDelX {
-        ixStart
-    } else {
-        nxTrim + curDelX
-    };
-    ix1 = if ixEnd < nx + curDelX - nxTrim {
-        ixEnd
-    } else {
-        nx + curDelX - nxTrim
-    };
-    iy0 = if iyStart > nyTrim + curDelY {
-        iyStart
-    } else {
-        nyTrim + curDelY
-    };
-    iy1 = if iyEnd < ny + curDelY - nyTrim {
-        iyEnd
-    } else {
-        ny + curDelY - nyTrim
-    };
-    fflush(stdout);
-    iy = 0 as ::core::ffi::c_int;
-    while iy < 3 as ::core::ffi::c_int {
-        done[iy as usize][2 as ::core::ffi::c_int as usize] = 0 as ::core::ffi::c_int;
-        done[iy as usize][1 as ::core::ffi::c_int as usize] =
-            done[iy as usize][2 as ::core::ffi::c_int as usize];
-        done[iy as usize][0 as ::core::ffi::c_int as usize] =
-            done[iy as usize][1 as ::core::ffi::c_int as usize];
+    let mut corrs: [[f32; 3]; 3] = [[0.; 3]; 3];
+    let mut corrTmp: [[f32; 3]; 3] = [[0.; 3]; 3];
+    let mut cccMax: f32;
+    let mut sumArrs: [[[f64; 6]; 3]; 3] = [[[0.; 6]; 3]; 3];
+    let mut sumTmp: [[[f64; 6]; 3]; 3] = [[[0.; 6]; 3]; 3];
+    let mut done: [[c_int; 3]; 3] = [[0; 3]; 3];
+    let first: c_int = 1;
+    let mut curDelX: c_int = (*delX as f64 + 0.5f64).floor() as c_int;
+    let mut curDelY: c_int = (*delY as f64 + 0.5f64).floor() as c_int;
+    let mut ix: c_int;
+    let mut iy: c_int;
+    let mut ixMax: c_int;
+    let mut iyMax: c_int;
+    let mut ix0: c_int;
+    let mut ix1: c_int;
+    let mut iy0: c_int;
+    let mut iy1: c_int;
+    let nc: c_int;
+    let mut ind: c_int;
+    let mut needCol: c_int = -1;
+
+    ix0 = ixStart.max(nxTrim + curDelX);
+    ix1 = ixEnd.min(nx + curDelX - nxTrim);
+    iy0 = iyStart.max(nyTrim + curDelY);
+    iy1 = iyEnd.min(ny + curDelY - nyTrim);
+    // C `fflush(stdout)` at montagexcorr.c:1349 — see the note in `montxcorredge`.
+    unsafe {
+        libc::fflush(core::ptr::null_mut());
+    }
+    iy = 0;
+    while iy < 3 {
+        done[iy as usize][0] = 0;
+        done[iy as usize][1] = 0;
+        done[iy as usize][2] = 0;
         iy += 1;
     }
-    while pow(
-        (curDelX as ::core::ffi::c_float - *delX) as ::core::ffi::c_double,
-        2.0f64,
-    ) + pow(
-        (curDelY as ::core::ffi::c_float - *delY) as ::core::ffi::c_double,
-        2.0f64,
-    ) < (maxDist * maxDist) as ::core::ffi::c_double
+
+    while ((curDelX as f32 - *delX) as f64).powf(2.0f64)
+        + ((curDelY as f32 - *delY) as f64).powf(2.0f64)
+        < (maxDist * maxDist) as f64
     {
-        ix0 = if ixStart > nxTrim + curDelX - 1 as ::core::ffi::c_int {
-            ixStart
-        } else {
-            nxTrim + curDelX - 1 as ::core::ffi::c_int
-        };
-        ix1 = if ixEnd < nx + curDelX + 1 as ::core::ffi::c_int - nxTrim {
-            ixEnd
-        } else {
-            nx + curDelX + 1 as ::core::ffi::c_int - nxTrim
-        };
-        iy0 = if iyStart > nyTrim + curDelY - 1 as ::core::ffi::c_int {
-            iyStart
-        } else {
-            nyTrim + curDelY - 1 as ::core::ffi::c_int
-        };
-        iy1 = if iyEnd < ny + curDelY + 1 as ::core::ffi::c_int - nyTrim {
-            iyEnd
-        } else {
-            ny + curDelY + 1 as ::core::ffi::c_int - nyTrim
-        };
-        if needCol >= 0 as ::core::ffi::c_int {
-            nc = needCol;
+        ix0 = ixStart.max(nxTrim + curDelX - 1);
+        ix1 = ixEnd.min(nx + curDelX + 1 - nxTrim);
+        iy0 = iyStart.max(nyTrim + curDelY - 1);
+        iy1 = iyEnd.min(ny + curDelY + 1 - nyTrim);
+
+        if needCol >= 0 {
+            let nc = needCol;
+            // `&corrs[0][nc]`, `&corrs[1][nc]`, `&corrs[2][nc]` are three disjoint elements
+            // in three different rows; destructuring the outer array splits the borrow at
+            // exactly the boundary the C pointers do.
+            let [c0, c1, c2] = &mut corrs;
+            let [s0, s1, s2] = &mut sumArrs;
             column_of_three_corrs(
                 array,
                 brray,
@@ -2767,7 +2296,7 @@ pub unsafe extern "C" fn mont_xc_find_best_corr(
                 ix1,
                 iy0,
                 iy1,
-                curDelX + nc - 1 as ::core::ffi::c_int,
+                curDelX + nc - 1,
                 curDelY,
                 aWeights,
                 bWeights,
@@ -2775,49 +2304,26 @@ pub unsafe extern "C" fn mont_xc_find_best_corr(
                 binning,
                 wgtXoffset,
                 wgtYoffset,
-                (&raw mut *(&raw mut corrs as *mut [::core::ffi::c_float; 3])
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_float)
-                    .offset(nc as isize) as *mut ::core::ffi::c_float,
-                (&raw mut *(&raw mut corrs as *mut [::core::ffi::c_float; 3])
-                    .offset(1 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_float)
-                    .offset(nc as isize) as *mut ::core::ffi::c_float,
-                (&raw mut *(&raw mut corrs as *mut [::core::ffi::c_float; 3])
-                    .offset(2 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_float)
-                    .offset(nc as isize) as *mut ::core::ffi::c_float,
-                (&raw mut *(&raw mut *(&raw mut sumArrs as *mut [[::core::ffi::c_double; 6]; 3])
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut [::core::ffi::c_double; 6])
-                    .offset(nc as isize) as *mut ::core::ffi::c_double)
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_double,
-                (&raw mut *(&raw mut *(&raw mut sumArrs as *mut [[::core::ffi::c_double; 6]; 3])
-                    .offset(1 as ::core::ffi::c_int as isize)
-                    as *mut [::core::ffi::c_double; 6])
-                    .offset(nc as isize) as *mut ::core::ffi::c_double)
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_double,
-                (&raw mut *(&raw mut *(&raw mut sumArrs as *mut [[::core::ffi::c_double; 6]; 3])
-                    .offset(2 as ::core::ffi::c_int as isize)
-                    as *mut [::core::ffi::c_double; 6])
-                    .offset(nc as isize) as *mut ::core::ffi::c_double)
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as *mut ::core::ffi::c_double,
+                &mut c0[nc as usize],
+                &mut c1[nc as usize],
+                &mut c2[nc as usize],
+                Some(&mut s0[nc as usize][..]),
+                Some(&mut s1[nc as usize][..]),
+                Some(&mut s2[nc as usize][..]),
             );
-            done[2 as ::core::ffi::c_int as usize][nc as usize] = 1 as ::core::ffi::c_int;
-            done[1 as ::core::ffi::c_int as usize][nc as usize] =
-                done[2 as ::core::ffi::c_int as usize][nc as usize];
-            done[0 as ::core::ffi::c_int as usize][nc as usize] =
-                done[1 as ::core::ffi::c_int as usize][nc as usize];
+            done[0][nc as usize] = 1;
+            done[1][nc as usize] = 1;
+            done[2][nc as usize] = 1;
         }
-        iy = 0 as ::core::ffi::c_int;
-        while iy < 3 as ::core::ffi::c_int {
-            if !(done[iy as usize][0 as ::core::ffi::c_int as usize] != 0
-                && done[iy as usize][1 as ::core::ffi::c_int as usize] != 0
-                && done[iy as usize][2 as ::core::ffi::c_int as usize] != 0)
+
+        iy = 0;
+        while iy < 3 {
+            if !(done[iy as usize][0] != 0
+                && done[iy as usize][1] != 0
+                && done[iy as usize][2] != 0)
             {
+                let [c0, c1, c2] = &mut corrs[iy as usize];
+                let [s0, s1, s2] = &mut sumArrs[iy as usize];
                 row_of_three_corrs(
                     array,
                     brray,
@@ -2827,73 +2333,47 @@ pub unsafe extern "C" fn mont_xc_find_best_corr(
                     iy0,
                     iy1,
                     curDelX,
-                    curDelY + iy - 1 as ::core::ffi::c_int,
+                    curDelY + iy - 1,
                     aWeights,
                     bWeights,
                     nxWgt,
                     binning,
                     wgtXoffset,
                     wgtYoffset,
-                    (&raw mut *(&raw mut corrs as *mut [::core::ffi::c_float; 3])
-                        .offset(iy as isize) as *mut ::core::ffi::c_float)
-                        .offset(0 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_float,
-                    (&raw mut *(&raw mut corrs as *mut [::core::ffi::c_float; 3])
-                        .offset(iy as isize) as *mut ::core::ffi::c_float)
-                        .offset(1 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_float,
-                    (&raw mut *(&raw mut corrs as *mut [::core::ffi::c_float; 3])
-                        .offset(iy as isize) as *mut ::core::ffi::c_float)
-                        .offset(2 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_float,
-                    (&raw mut *(&raw mut *(&raw mut sumArrs as *mut [[::core::ffi::c_double; 6]; 3])
-                        .offset(iy as isize)
-                        as *mut [::core::ffi::c_double; 6])
-                        .offset(0 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_double)
-                        .offset(0 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_double,
-                    (&raw mut *(&raw mut *(&raw mut sumArrs as *mut [[::core::ffi::c_double; 6]; 3])
-                        .offset(iy as isize)
-                        as *mut [::core::ffi::c_double; 6])
-                        .offset(1 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_double)
-                        .offset(0 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_double,
-                    (&raw mut *(&raw mut *(&raw mut sumArrs as *mut [[::core::ffi::c_double; 6]; 3])
-                        .offset(iy as isize)
-                        as *mut [::core::ffi::c_double; 6])
-                        .offset(2 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_double)
-                        .offset(0 as ::core::ffi::c_int as isize)
-                        as *mut ::core::ffi::c_double,
+                    c0,
+                    c1,
+                    c2,
+                    Some(&mut s0[..]),
+                    Some(&mut s1[..]),
+                    Some(&mut s2[..]),
                 );
-                done[iy as usize][2 as ::core::ffi::c_int as usize] = 1 as ::core::ffi::c_int;
-                done[iy as usize][1 as ::core::ffi::c_int as usize] =
-                    done[iy as usize][2 as ::core::ffi::c_int as usize];
-                done[iy as usize][0 as ::core::ffi::c_int as usize] =
-                    done[iy as usize][1 as ::core::ffi::c_int as usize];
+                done[iy as usize][0] = 1;
+                done[iy as usize][1] = 1;
+                done[iy as usize][2] = 1;
             }
             iy += 1;
         }
-        iyMax = 1 as ::core::ffi::c_int;
-        ixMax = iyMax;
-        cccMax = corrs[1 as ::core::ffi::c_int as usize][1 as ::core::ffi::c_int as usize];
-        iy = 0 as ::core::ffi::c_int;
-        while iy < 3 as ::core::ffi::c_int {
-            ix = 0 as ::core::ffi::c_int;
-            while ix < 3 as ::core::ffi::c_int {
+
+        // Find maximum and copy all the correlations and clear out done to prepare for shift
+        ixMax = 1;
+        iyMax = 1;
+        cccMax = corrs[1][1];
+        iy = 0;
+        while iy < 3 {
+            ix = 0;
+            while ix < 3 {
                 corrTmp[iy as usize][ix as usize] = corrs[iy as usize][ix as usize];
-                done[iy as usize][ix as usize] = 0 as ::core::ffi::c_int;
-                ind = 0 as ::core::ffi::c_int;
-                while ind < 6 as ::core::ffi::c_int {
+                done[iy as usize][ix as usize] = 0;
+                ind = 0;
+                while ind < 6 {
                     sumTmp[iy as usize][ix as usize][ind as usize] =
                         sumArrs[iy as usize][ix as usize][ind as usize];
                     ind += 1;
                 }
+
+                // Do not move away from the middle as the maximum if two are equal
                 if corrs[iy as usize][ix as usize] > cccMax
-                    || corrs[iy as usize][ix as usize] == cccMax
-                        && (ixMax != 1 as ::core::ffi::c_int || iyMax != 1 as ::core::ffi::c_int)
+                    || corrs[iy as usize][ix as usize] == cccMax && (ixMax != 1 || iyMax != 1)
                 {
                     ixMax = ix;
                     iyMax = iy;
@@ -2903,78 +2383,59 @@ pub unsafe extern "C" fn mont_xc_find_best_corr(
             }
             iy += 1;
         }
-        curDelX += ixMax - 1 as ::core::ffi::c_int;
-        curDelY += iyMax - 1 as ::core::ffi::c_int;
-        if ixMax == 1 as ::core::ffi::c_int && iyMax == 1 as ::core::ffi::c_int
-            || cccMax < threshCCC
-        {
+
+        // Done if the max is still in the middle
+        curDelX += ixMax - 1;
+        curDelY += iyMax - 1;
+        if ixMax == 1 && iyMax == 1 || cccMax < threshCCC {
             *corr = cccMax;
-            *delX = (curDelX as ::core::ffi::c_double
-                + (if ixMax == 1 as ::core::ffi::c_int && iyMax == 1 as ::core::ffi::c_int {
-                    0.0f64
+            *delX = (curDelX as f64
+                + (if ixMax == 1 && iyMax == 1 {
+                    0.
                 } else {
                     crate::imod::libcfshr::filtxcorr::parabolic_fit_position(
-                        corrs[1 as ::core::ffi::c_int as usize][0 as ::core::ffi::c_int as usize],
-                        corrs[1 as ::core::ffi::c_int as usize][1 as ::core::ffi::c_int as usize],
-                        corrs[1 as ::core::ffi::c_int as usize][2 as ::core::ffi::c_int as usize],
+                        corrs[1][0],
+                        corrs[1][1],
+                        corrs[1][2],
                     )
-                })) as ::core::ffi::c_float;
-            *delY = (curDelY as ::core::ffi::c_double
-                + (if ixMax == 1 as ::core::ffi::c_int && iyMax == 1 as ::core::ffi::c_int {
-                    0.0f64
+                })) as f32;
+            *delY = (curDelY as f64
+                + (if ixMax == 1 && iyMax == 1 {
+                    0.
                 } else {
                     crate::imod::libcfshr::filtxcorr::parabolic_fit_position(
-                        corrs[0 as ::core::ffi::c_int as usize][1 as ::core::ffi::c_int as usize],
-                        corrs[1 as ::core::ffi::c_int as usize][1 as ::core::ffi::c_int as usize],
-                        corrs[2 as ::core::ffi::c_int as usize][1 as ::core::ffi::c_int as usize],
+                        corrs[0][1],
+                        corrs[1][1],
+                        corrs[2][1],
                     )
-                })) as ::core::ffi::c_float;
-            if !aWeights.is_null() {
-                ind = 0 as ::core::ffi::c_int;
-                while ind < 6 as ::core::ffi::c_int {
-                    *bestSumArr.offset(ind as isize) =
-                        sumArrs[ixMax as usize][iyMax as usize][ind as usize];
+                })) as f32;
+            if aWeights.is_some() {
+                let bsa = bestSumArr.as_deref_mut().unwrap();
+                ind = 0;
+                while ind < 6 {
+                    // The source indexes [ixMax][iyMax] here while it fills sumArrs as
+                    // [iy][ix] everywhere else; that transposition is preserved.
+                    bsa[ind as usize] = sumArrs[ixMax as usize][iyMax as usize][ind as usize];
                     ind += 1;
                 }
             }
             return;
         }
-        if ixMax != 1 as ::core::ffi::c_int {
+
+        // Set up to do a column (first) if shifting in X, and shift the correlations
+        if ixMax != 1 {
             needCol = ixMax;
         }
-        iy = if 0 as ::core::ffi::c_int > iyMax - 1 as ::core::ffi::c_int {
-            0 as ::core::ffi::c_int
-        } else {
-            iyMax - 1 as ::core::ffi::c_int
-        };
-        while iy
-            <= (if (2 as ::core::ffi::c_int) < iyMax + 1 as ::core::ffi::c_int {
-                2 as ::core::ffi::c_int
-            } else {
-                iyMax + 1 as ::core::ffi::c_int
-            })
-        {
-            ix = if 0 as ::core::ffi::c_int > ixMax - 1 as ::core::ffi::c_int {
-                0 as ::core::ffi::c_int
-            } else {
-                ixMax - 1 as ::core::ffi::c_int
-            };
-            while ix
-                <= (if (2 as ::core::ffi::c_int) < ixMax + 1 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else {
-                    ixMax + 1 as ::core::ffi::c_int
-                })
-            {
-                done[(iy + 1 as ::core::ffi::c_int - iyMax) as usize]
-                    [(ix + 1 as ::core::ffi::c_int - ixMax) as usize] = 1 as ::core::ffi::c_int;
-                corrs[(iy + 1 as ::core::ffi::c_int - iyMax) as usize]
-                    [(ix + 1 as ::core::ffi::c_int - ixMax) as usize] =
+        iy = 0.max(iyMax - 1);
+        while iy <= 2.min(iyMax + 1) {
+            ix = 0.max(ixMax - 1);
+            while ix <= 2.min(ixMax + 1) {
+                done[(iy + 1 - iyMax) as usize][(ix + 1 - ixMax) as usize] = 1;
+                corrs[(iy + 1 - iyMax) as usize][(ix + 1 - ixMax) as usize] =
                     corrTmp[iy as usize][ix as usize];
-                ind = 0 as ::core::ffi::c_int;
-                while ind < 6 as ::core::ffi::c_int {
-                    sumArrs[(iy + 1 as ::core::ffi::c_int - iyMax) as usize]
-                        [(ix + 1 as ::core::ffi::c_int - ixMax) as usize][ind as usize] =
+                ind = 0;
+                while ind < 6 {
+                    sumArrs[(iy + 1 - iyMax) as usize][(ix + 1 - ixMax) as usize][ind as usize] =
                         sumTmp[iy as usize][ix as usize][ind as usize];
                     ind += 1;
                 }
@@ -2983,9 +2444,10 @@ pub unsafe extern "C" fn mont_xc_find_best_corr(
             iy += 1;
         }
     }
-    *corr = 0 as ::core::ffi::c_int as ::core::ffi::c_float;
+
+    // Too far, return 0.
+    *corr = 0 as c_int as f32;
 }
-pub const SLICE_MODE_FLOAT: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
 
 #[cfg(test)]
 mod tests {
@@ -2993,51 +2455,49 @@ mod tests {
 
     #[test]
     fn basic_sizes_and_binning_follow_source_edge_geometry() {
-        unsafe {
-            let mut pieces = [100, 120];
-            let mut overlap = [20, 25];
-            let mut use_indent = 0;
-            let mut boxed = [0; 2];
-            let mut extra = [0; 2];
-            let mut xpad = 0;
-            let mut ypad = 0;
-            let mut maximum = 0;
-            mont_xc_basic_sizes(
-                0,
-                1,
+        let pieces = [100, 120];
+        let overlap = [20, 25];
+        let mut use_indent = 0;
+        let mut boxed = [0; 2];
+        let mut extra = [0; 2];
+        let mut xpad = 0;
+        let mut ypad = 0;
+        let mut maximum = 0;
+        mont_xc_basic_sizes(
+            0,
+            1,
+            4,
+            &pieces,
+            &overlap,
+            2.0,
+            0.2,
+            0.1,
+            5,
+            &mut use_indent,
+            &mut boxed,
+            &mut extra,
+            &mut xpad,
+            &mut ypad,
+            &mut maximum,
+        );
+        assert_eq!(use_indent, 4);
+        assert!(boxed[0] >= 12 && boxed[1] > 0 && xpad >= boxed[0] && ypad >= boxed[1]);
+        let mut padded = 0;
+        let mut area = 0;
+        assert!(
+            mont_xc_find_binning(
                 4,
-                pieces.as_mut_ptr(),
-                overlap.as_mut_ptr(),
-                2.0,
+                200,
+                4,
+                &pieces,
+                &overlap,
+                2.,
                 0.2,
                 0.1,
                 5,
-                &mut use_indent,
-                boxed.as_mut_ptr(),
-                extra.as_mut_ptr(),
-                &mut xpad,
-                &mut ypad,
-                &mut maximum,
-            );
-            assert_eq!(use_indent, 4);
-            assert!(boxed[0] >= 12 && boxed[1] > 0 && xpad >= boxed[0] && ypad >= boxed[1]);
-            let mut padded = 0;
-            let mut area = 0;
-            assert!(
-                mont_xc_find_binning(
-                    4,
-                    200,
-                    4,
-                    pieces.as_mut_ptr(),
-                    overlap.as_mut_ptr(),
-                    2.,
-                    0.2,
-                    0.1,
-                    5,
-                    &mut padded,
-                    &mut area
-                ) >= 1
-            );
-        }
+                &mut padded,
+                &mut area
+            ) >= 1
+        );
     }
 }

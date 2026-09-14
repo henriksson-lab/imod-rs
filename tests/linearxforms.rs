@@ -31,7 +31,7 @@ fn icalc_angles_leaves_its_output_untouched_when_the_matrix_is_not_a_rotation() 
 
     // `linearxforms.c:226`: the determinant it prints is the file-scope `sDet`
     // after `sDet -= 1.0`, so for this 2I matrix it is 8 - 1 = 7.
-    assert_eq!(unsafe { S_DET }, 7.0);
+    assert_eq!(S_DET.get(), 7.0);
 
     // And the success path does write, through the same entry point.
     let mut m = [0.; 9];

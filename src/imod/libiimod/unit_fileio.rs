@@ -126,6 +126,7 @@ pub type b3dInt16 = ::core::ffi::c_short;
 pub type b3dInt32 = ::core::ffi::c_int;
 pub type b3dFloat = ::core::ffi::c_float;
 pub type fortStrLen_t = ::core::ffi::c_int;
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
     b3d_error, b3d_get_error as b3dGetError, b3d_milli_sleep as b3dMilliSleep,
     b3d_set_store_error as b3dSetStoreError, f2c_string as f2cString,
@@ -236,7 +237,7 @@ pub unsafe extern "C" fn iiu_open(
     {
         if getenv(b"IMOD_NO_IMAGE_BACKUP\0" as *const u8 as *const ::core::ffi::c_char).is_null() {
             *__errno_location() = 0 as ::core::ffi::c_int;
-            if imodBackupFile(name) != 0 {
+            if imodBackupFile(::core::ffi::CStr::from_ptr(name).to_string_lossy().as_ref()) != 0 {
                 errSave = *__errno_location();
                 fprintf(
                     stdout,
@@ -273,7 +274,7 @@ pub unsafe extern "C" fn iiu_open(
         (*u).ii_file = iiOpenNew(name, modes[mode as usize], IIFILE_DEFAULT);
         if (*u).ii_file.is_null() {
             b3d_error(
-                stdout.cast(),
+                Some(&mut ImodFile::Stdout),
                 format_args!("\nERROR: iiuOpen - Opening new output file\n"),
             );
             if sExitOnError != 0 {
@@ -292,7 +293,7 @@ pub unsafe extern "C" fn iiu_open(
         (*u).ii_file = iiOpen(name, modes[mode as usize]);
         if (*u).ii_file.is_null() {
             b3d_error(
-                stdout.cast(),
+                Some(&mut ImodFile::Stdout),
                 format_args!(
                     "\nERROR: iiuOpen - Could not open '{}'\n",
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
@@ -309,7 +310,7 @@ pub unsafe extern "C" fn iiu_open(
             && (*u).read_only == 0
         {
             b3d_error(
-                stdout.cast(),
+                Some(&mut ImodFile::Stdout),
                 format_args!(
                     "\nERROR: iiuOpen - Non-MRC-type file '{}' with no write function must be opened read-only\n",
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
@@ -324,7 +325,7 @@ pub unsafe extern "C" fn iiu_open(
         if (*(*u).ii_file).file == IIFILE_TIFF {
             if (*(*u).ii_file).mode < 0 as ::core::ffi::c_int {
                 b3d_error(
-                    stdout.cast(),
+                    Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: iiuOpen - TIFF file '{}' has a data type that is not supported\n",
                         core::ffi::CStr::from_ptr(name).to_string_lossy()
@@ -343,16 +344,17 @@ pub unsafe extern "C" fn iiu_open(
         && (*(*u).ii_file).file != IIFILE_HDF
         && (*(*u).ii_file).file != IIFILE_SHR_MEM
     {
-        (*u).header =
-            malloc((1 as size_t).wrapping_mul(::core::mem::size_of::<MrcHeader>() as size_t))
-                as *mut MrcHeader;
+        // `Box`, not `malloc`: `iiFillMrcHeader` below takes a `&mut
+        // MrcHeader` and assigns its `Option<ImodFile>` `fp`, which on
+        // `malloc` residue is a drop of garbage rather than a store.
+        (*u).header = Box::into_raw(Box::new(MrcHeader::default()));
         iiu_memory_error(
             (*u).header as *mut ::core::ffi::c_void,
             b"ERROR: iiuOpen - Allocating MRC header\0" as *const u8 as *const ::core::ffi::c_char,
         );
         if iiFillMrcHeader((*u).ii_file, (*u).header) != 0 {
             b3d_error(
-                stdout.cast(),
+                Some(&mut ImodFile::Stdout),
                 format_args!(
                     "\nERROR: iiuOpen - file '{}' is not a format that provides an MRC-like header and cannot be read\n",
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
@@ -416,7 +418,10 @@ pub unsafe extern "C" fn iiu_close(mut iunit: ::core::ffi::c_int) {
         && unit < sMapSize
         && *sUnitMap.offset(unit as isize) >= 0 as ::core::ffi::c_int
     {
-        u = ilistItem(sUnitList, *sUnitMap.offset(unit as isize)) as *mut Unit;
+        u = ilistItem(sUnitList.as_mut(), *sUnitMap.offset(unit as isize))
+            .map_or(::core::ptr::null_mut(), |item| {
+                item.as_mut_ptr().cast::<Unit>()
+            });
         if (*u).being_used != 0 {
             (*u).being_used = 0 as ::core::ffi::c_uchar;
             iiClose((*u).ii_file);
@@ -433,7 +438,7 @@ pub unsafe extern "C" fn iiu_close(mut iunit: ::core::ffi::c_int) {
                 }
             }
             if (*(*u).ii_file).file == IIFILE_TIFF {
-                free((*u).header as *mut ::core::ffi::c_void);
+                drop(Box::from_raw((*u).header));
             }
             iiDelete((*u).ii_file);
         }
@@ -484,7 +489,7 @@ pub unsafe extern "C" fn iiu_volume_open(
     mut mainUnit: ::core::ffi::c_int,
     mut volIndex: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut fp: *mut libc::FILE = ::core::ptr::null_mut::<libc::FILE>();
+    let fp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
     let mut u: *mut Unit = lookup_unit(
         mainUnit,
         b"iiuOpenVolume\0" as *const u8 as *const ::core::ffi::c_char,
@@ -511,7 +516,7 @@ pub unsafe extern "C" fn iiu_volume_open(
     } else {
         fp = iiFOpenVolume((*u).ii_file, volIndex);
     }
-    if fp.is_null() {
+    if fp.is_none() {
         if sExitOnError != 0 {
             exit(1 as ::core::ffi::c_int);
         } else {
@@ -780,10 +785,16 @@ pub unsafe extern "C" fn iiu_read_sec_part(
     (*u).current_sec += 1;
     (*u).current_line = 0 as ::core::ffi::c_int;
     if err != 0 && sStoreError < 0 as ::core::ffi::c_int {
-        printf(
-            b"\n%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-            b3dGetError(),
-        );
+        {
+            use std::io::Write;
+            let _ = ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\n%s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3dGetError())],
+                )
+                .as_bytes(),
+            );
+        }
     }
     return err;
 }
@@ -826,10 +837,16 @@ pub unsafe extern "C" fn iiu_read_lines(
         err = iiReadSectionFloat((*u).ii_file, array as *mut ::core::ffi::c_char, iz);
     }
     if err != 0 && sStoreError < 0 as ::core::ffi::c_int {
-        printf(
-            b"\n%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-            b3dGetError(),
-        );
+        {
+            use std::io::Write;
+            let _ = ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\n%s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3dGetError())],
+                )
+                .as_bytes(),
+            );
+        }
     }
     return err;
 }
@@ -973,7 +990,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
         && (indX0 != 0 || indX1 != (*(*u).ii_file).nx - 1 as ::core::ffi::c_int)
     {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: iiuWriteSecPart - Attempting to write to a portion of a line for a non-HDF file, unit {}\n",
                 iunit
@@ -996,7 +1013,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
     (*(*u).ii_file).pad_right = nxdim - (indX1 + 1 as ::core::ffi::c_int - indX0) - ixStart;
     if (*(*u).ii_file).pad_right < 0 as ::core::ffi::c_int {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: iiuWriteSecPart - X dimension of data ({}) is not big enough for specified X indexes in writing to unit {} (xstart {} x0 {} x1 {})\n",
                 nxdim, iunit, ixStart, indX0, indX1
@@ -1010,7 +1027,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
     }
     if (*(*u).ii_file).ury >= (*(*u).ii_file).ny {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: iiuWriteSecPart - Starting and ending lines ({} to {}) to write to unit {} go past end of end for section from line {}\n",
                 iyStart,
@@ -1035,7 +1052,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
     if err != 0 {
         if !useMess.is_null() {
             b3d_error(
-                stdout.cast(),
+                Some(&mut ImodFile::Stdout),
                 format_args!(
                     "\nERROR: iiuWriteSecPart - writing X {} to {}, Y {} to {} to section in unit {}\n",
                     indX0, indX1, iyStart, iyEnd, iunit
@@ -1102,7 +1119,7 @@ pub unsafe extern "C" fn iiu_write_lines(
     }
     if err != 0 {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: iiuWriteLines - writing lines to unit {}.\n",
                 iunit
@@ -1149,7 +1166,7 @@ unsafe extern "C" fn setup_current_lines(
     (*(*u).ii_file).ury = (*u).current_line + numLines - 1 as ::core::ffi::c_int;
     if (*(*u).ii_file).ury >= (*(*u).ii_file).ny {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: iiuRead/WriteLines - lines go past end of current section  (cur line {}  #l {}  to {}  ny {}).\n",
                 (*u).current_line,
@@ -1461,7 +1478,7 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
     }
     if iunit <= 0 as ::core::ffi::c_int || iunit > MAX_UNIT {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "ERROR: iiuOpen - A unit number of {} is out of range\n",
                 iunit
@@ -1495,7 +1512,7 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
     }
     if *sUnitMap.offset((iunit - 1 as ::core::ffi::c_int) as isize) >= 0 as ::core::ffi::c_int {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "WARNING: iiuOpen - Unit number {} is already in use; closing it\n",
                 iunit
@@ -1507,14 +1524,17 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         sUnitList = ilistNew(
             ::core::mem::size_of::<Unit>() as ::core::ffi::c_int,
             4 as ::core::ffi::c_int,
-        );
+        )
+        .map_or(::core::ptr::null_mut(), Box::into_raw);
     }
     if sUnitList.is_null() {
         return ::core::ptr::null_mut::<Unit>();
     }
     i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(sUnitList) {
-        u = ilistItem(sUnitList, i) as *mut Unit;
+    while i < ilistSize(sUnitList.as_ref()) {
+        u = ilistItem(sUnitList.as_mut(), i).map_or(::core::ptr::null_mut(), |item| {
+            item.as_mut_ptr().cast::<Unit>()
+        });
         if (*u).being_used == 0 {
             *sUnitMap.offset((iunit - 1 as ::core::ffi::c_int) as isize) = i;
             return u;
@@ -1522,12 +1542,25 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         i += 1;
     }
     newUnit.being_used = 0 as ::core::ffi::c_uchar;
-    if ilistAppend(sUnitList, &raw mut newUnit as *mut ::core::ffi::c_void) != 0 {
+    if ilistAppend(
+        &mut *sUnitList,
+        ::core::slice::from_raw_parts(
+            (&raw const newUnit).cast::<u8>(),
+            ::core::mem::size_of::<Unit>(),
+        ),
+    ) != 0
+    {
         return ::core::ptr::null_mut::<Unit>();
     }
     *sUnitMap.offset((iunit - 1 as ::core::ffi::c_int) as isize) =
-        ilistSize(sUnitList) - 1 as ::core::ffi::c_int;
-    return ilistItem(sUnitList, ilistSize(sUnitList) - 1 as ::core::ffi::c_int) as *mut Unit;
+        ilistSize(sUnitList.as_ref()) - 1 as ::core::ffi::c_int;
+    return ilistItem(
+        sUnitList.as_mut(),
+        ilistSize(sUnitList.as_ref()) - 1 as ::core::ffi::c_int,
+    )
+    .map_or(::core::ptr::null_mut(), |item| {
+        item.as_mut_ptr().cast::<Unit>()
+    });
 }
 unsafe extern "C" fn mybcopy(
     mut a: *mut ::core::ffi::c_char,
@@ -1556,7 +1589,7 @@ unsafe extern "C" fn lookup_unit(
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
     if unit <= 0 as ::core::ffi::c_int || unit > MAX_UNIT {
         b3d_error(
-            stdout.cast(),
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: {} - {} is not a legal unit number.\n",
                 core::ffi::CStr::from_ptr(function).to_string_lossy(),
@@ -1569,9 +1602,12 @@ unsafe extern "C" fn lookup_unit(
         && *sUnitMap.offset((unit - 1 as ::core::ffi::c_int) as isize) >= 0 as ::core::ffi::c_int
     {
         u = ilistItem(
-            sUnitList,
+            sUnitList.as_mut(),
             *sUnitMap.offset((unit - 1 as ::core::ffi::c_int) as isize),
-        ) as *mut Unit;
+        )
+        .map_or(::core::ptr::null_mut(), |item| {
+            item.as_mut_ptr().cast::<Unit>()
+        });
         (*u).no_convert = is_unit_on_list(sNoConvList, unit) as ::core::ffi::c_uchar;
         if (*(*u).ii_file).format == IIFORMAT_COMPLEX {
             (*u).no_convert = 1 as ::core::ffi::c_uchar;
@@ -1579,7 +1615,7 @@ unsafe extern "C" fn lookup_unit(
         if (*u).being_used != 0 {
             if checkRW > 1 as ::core::ffi::c_int && (*u).read_only as ::core::ffi::c_int != 0 {
                 b3d_error(
-                    stdout.cast(),
+                    Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: {} - Trying to write to unit {}, which was opened read-only.\n",
                         core::ffi::CStr::from_ptr(function).to_string_lossy(),
@@ -1594,7 +1630,7 @@ unsafe extern "C" fn lookup_unit(
                     || (*u).no_convert == 0 && (*(*u).ii_file).read_section_float.is_none())
             {
                 b3d_error(
-                    stdout.cast(),
+                    Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: {} - There is no function for reading {} from the type of file on unit {}.\n",
                         core::ffi::CStr::from_ptr(function).to_string_lossy(),
@@ -1614,7 +1650,7 @@ unsafe extern "C" fn lookup_unit(
                     || (*u).no_convert == 0 && (*(*u).ii_file).write_section_float.is_none())
             {
                 b3d_error(
-                    stdout.cast(),
+                    Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: {} - There is no function for writing {} to the type of file on unit {}.\n",
                         core::ffi::CStr::from_ptr(function).to_string_lossy(),
@@ -1632,7 +1668,7 @@ unsafe extern "C" fn lookup_unit(
         }
     }
     b3d_error(
-        stdout.cast(),
+        Some(&mut ImodFile::Stdout),
         format_args!(
             "\nERROR: {} - unit {} is not open.\n",
             core::ffi::CStr::from_ptr(function).to_string_lossy(),
@@ -1653,13 +1689,21 @@ unsafe extern "C" fn add_unit_to_list(mut list: *mut *mut Ilist, mut unit: ::cor
         *list = ilistNew(
             ::core::mem::size_of::<b3dInt16>() as ::core::ffi::c_int,
             4 as ::core::ffi::c_int,
-        );
+        )
+        .map_or(::core::ptr::null_mut(), Box::into_raw);
     }
     iiu_memory_error(
         *list as *mut ::core::ffi::c_void,
         b"Allocating a unit list\0" as *const u8 as *const ::core::ffi::c_char,
     );
-    if ilistAppend(*list, &raw mut val as *mut ::core::ffi::c_void) != 0 {
+    if ilistAppend(
+        &mut **list,
+        ::core::slice::from_raw_parts(
+            (&raw const val).cast::<u8>(),
+            ::core::mem::size_of::<b3dInt16>(),
+        ),
+    ) != 0
+    {
         iiu_memory_error(
             NULL,
             b"Appending to a unit list\0" as *const u8 as *const ::core::ffi::c_char,
@@ -1670,10 +1714,12 @@ unsafe extern "C" fn remove_unit_from_list(mut list: *mut Ilist, mut unit: ::cor
     let mut valp: *mut b3dInt16 = ::core::ptr::null_mut::<b3dInt16>();
     let mut i: ::core::ffi::c_int = 0;
     i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(list) {
-        valp = ilistItem(list, i) as *mut b3dInt16;
+    while i < ilistSize(list.as_ref()) {
+        valp = ilistItem(list.as_mut(), i).map_or(::core::ptr::null_mut(), |item| {
+            item.as_mut_ptr().cast::<b3dInt16>()
+        });
         if *valp as ::core::ffi::c_int == unit {
-            ilistRemove(list, i);
+            ilistRemove(&mut *list, i);
             return;
         }
         i += 1;
@@ -1686,8 +1732,10 @@ unsafe extern "C" fn is_unit_on_list(
     let mut valp: *mut b3dInt16 = ::core::ptr::null_mut::<b3dInt16>();
     let mut i: ::core::ffi::c_int = 0;
     i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(list) {
-        valp = ilistItem(list, i) as *mut b3dInt16;
+    while i < ilistSize(list.as_ref()) {
+        valp = ilistItem(list.as_mut(), i).map_or(::core::ptr::null_mut(), |item| {
+            item.as_mut_ptr().cast::<b3dInt16>()
+        });
         if *valp as ::core::ffi::c_int == unit {
             return 1 as ::core::ffi::c_int;
         }

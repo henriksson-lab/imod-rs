@@ -450,12 +450,15 @@ pub unsafe fn slice_mat_filter(sin: *mut Islice, mat: *mut f32, dim: i32) -> *mu
     unsafe {
         if (*sin).mode == MRC_MODE_FLOAT {
             crate::imod::libcfshr::filtxcorr::apply_kernel_filter(
-                (*sin).data.f,
-                (*sout).data.f,
+                core::slice::from_raw_parts((*sin).data.f, ((*sin).xsize * (*sin).ysize) as usize),
+                core::slice::from_raw_parts_mut(
+                    (*sout).data.f,
+                    ((*sout).xsize * (*sout).ysize) as usize,
+                ),
                 (*sin).xsize,
                 (*sin).xsize,
                 (*sin).ysize,
-                mat,
+                core::slice::from_raw_parts(mat, (dim * dim) as usize),
                 dim,
             );
         } else {

@@ -423,11 +423,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
         return;
     }
     iyEdgeStart = 1 as ::core::ffi::c_int;
-    *ierr = select_zoom_filter(
-        ifiltType,
-        zoomFac as ::core::ffi::c_double,
-        &raw mut ifiltWidth,
-    );
+    *ierr = select_zoom_filter(ifiltType, zoomFac as ::core::ffi::c_double, &mut ifiltWidth);
     if *ierr != 0 as ::core::ffi::c_int {
         return;
     }
@@ -560,8 +556,13 @@ pub unsafe extern "C" fn iiu_read_reduced(
         }
         chunkYstart =
             yUseStart + iyStart as ::core::ffi::c_float * redFac - iy0 as ::core::ffi::c_float;
+        // `zoomWithFilter` takes typed line and output slices now; the
+        // `makeLinePointers` block above still runs for its error-5 path.
+        let linePtrVec: Vec<&[::core::ffi::c_float]> = (0..(iy1 + 1 - iy0) as usize)
+            .map(|i| ::core::slice::from_raw_parts(temp.add(i * nxLoad as usize), nxLoad as usize))
+            .collect();
         *ierr = zoom_with_filter(
-            linePtrs,
+            crate::imod::libcfshr::zoomdown::ZoomLines::Float(&linePtrVec),
             nxLoad,
             iy1 + 1 as ::core::ffi::c_int - iy0,
             xUseStart - ix0 as ::core::ffi::c_float,
@@ -571,10 +572,14 @@ pub unsafe extern "C" fn iiu_read_reduced(
             nxDim,
             ibXoffset,
             SLICE_MODE_FLOAT,
-            array.offset(((iyStart + ibYoffset) * nxDim) as isize) as *mut ::core::ffi::c_float
-                as *mut ::core::ffi::c_void,
-            ::core::ptr::null_mut::<b3dUInt32>(),
-            ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
+            &mut crate::imod::libcfshr::zoomdown::ZoomOut::Float(
+                ::core::slice::from_raw_parts_mut(
+                    array.offset(((iyStart + ibYoffset) * nxDim) as isize),
+                    (((iyEnd - iyStart - 1) * nxDim) + ibXoffset + nxRedUse) as usize,
+                ),
+            ),
+            None,
+            None,
         );
         if *ierr != 0 as ::core::ffi::c_int {
             free(linePtrs as *mut ::core::ffi::c_void);

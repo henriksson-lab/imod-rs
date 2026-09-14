@@ -17,8 +17,10 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
         let input =
             std::env::temp_dir().join(format!("imod-rs-header-cli-{}.mrc", std::process::id()));
         let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
-        let mut mrc: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
+                .unwrap();
+        let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 3, 4, 2, MRC_MODE_FLOAT), 0);
         mrc.xlen = 6.0;
         mrc.ylen = 12.0;
@@ -31,9 +33,9 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
         mrc.amean = 4.125;
         mrc.labels[0][..80].fill(b'A');
         mrc.nlabl = 1;
-        mrc.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut mrc), 0);
-        libc::fclose(file);
+        mrc.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut mrc), 0);
+        drop(file);
         let result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-size", "-mode", "-minimum", "-maximum", "-mean"])
@@ -121,21 +123,31 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
         let old_fei =
             std::env::temp_dir().join(format!("imod-rs-header-old-fei-{}.mrc", std::process::id()));
         let old_fei_c = CString::new(old_fei.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(old_fei_c.as_ptr(), c"wb".as_ptr());
-        let mut mrc: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&old_fei_c.to_string_lossy(), "wb")
+                .unwrap();
+        let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 2, 2, 1, MRC_MODE_FLOAT), 0);
         mrc.next = 48;
         mrc.nint = 0;
         mrc.nreal = 12;
         mrc.labels[0][..4].copy_from_slice(b"Fei ");
         mrc.nlabl = 1;
-        mrc.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut mrc), 0);
+        mrc.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut mrc), 0);
         let mut extended = [0_f32; 12];
         extended[10] = 30.0;
         extended[11] = 20.0;
-        assert_eq!(libc::fwrite(extended.as_ptr().cast(), 4, 12, file), 12);
-        libc::fclose(file);
+        assert_eq!(
+            imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
+                unsafe { core::slice::from_raw_parts(extended.as_ptr().cast::<u8>(), 4 * (12),) },
+                4,
+                12,
+                &mut file,
+            ),
+            12
+        );
+        drop(file);
         let old_fei_result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&old_fei)
@@ -162,18 +174,28 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
         let new_fei =
             std::env::temp_dir().join(format!("imod-rs-header-new-fei-{}.mrc", std::process::id()));
         let new_fei_c = CString::new(new_fei.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(new_fei_c.as_ptr(), c"wb".as_ptr());
-        let mut mrc: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&new_fei_c.to_string_lossy(), "wb")
+                .unwrap();
+        let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 2, 2, 1, MRC_MODE_FLOAT), 0);
         mrc.next = 160;
         mrc.ext_type = *b"FEI1";
-        mrc.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut mrc), 0);
+        mrc.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut mrc), 0);
         let mut extended = [0_u8; 160];
         extended[8..12].copy_from_slice(&(1_i32 << 12).to_ne_bytes());
         extended[140..148].copy_from_slice(&30.0_f64.to_ne_bytes());
-        assert_eq!(libc::fwrite(extended.as_ptr().cast(), 1, 160, file), 160);
-        libc::fclose(file);
+        assert_eq!(
+            imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
+                unsafe { core::slice::from_raw_parts(extended.as_ptr().cast::<u8>(), 1 * (160),) },
+                1,
+                160,
+                &mut file,
+            ),
+            160
+        );
+        drop(file);
         let new_fei_result = common::imod_cmd("header")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&new_fei)
@@ -192,12 +214,14 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
         let mdoc_input =
             std::env::temp_dir().join(format!("imod-rs-header-mdoc-{}.mrc", std::process::id()));
         let mdoc_input_c = CString::new(mdoc_input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(mdoc_input_c.as_ptr(), c"wb".as_ptr());
-        let mut mrc: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&mdoc_input_c.to_string_lossy(), "wb")
+                .unwrap();
+        let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 2, 2, 1, MRC_MODE_FLOAT), 0);
-        mrc.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut mrc), 0);
-        libc::fclose(file);
+        mrc.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut mrc), 0);
+        drop(file);
         let mdoc = mdoc_input.with_extension("mrc.mdoc");
         std::fs::write(
             &mdoc,

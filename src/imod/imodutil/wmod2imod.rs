@@ -4,7 +4,7 @@ use std::env;
 use std::ffi::CString;
 use std::fs::File;
 
-use crate::imod::libcfshr::b3dutil::fgetline;
+use crate::imod::libcfshr::b3dutil::{ImodFile, fgetline};
 use crate::imod::libimod::imodel::{
     IMOD_OBJFLAG_OPEN, Imod, Ipoint, imod_new_contour, imod_new_object,
 };
@@ -58,23 +58,22 @@ pub fn wmod2imod() {
         println!("wmod2imod [-z scale] [wmod filename] [imod filename]");
         std::process::exit(1);
     }
-    let input = CString::new(argv[i].as_str()).unwrap_or_default();
-    let fin = unsafe { libc::fopen(input.as_ptr(), c"r".as_ptr()) };
-    if fin.is_null() {
+    let fin = ImodFile::open(&argv[i], "r");
+    let Some(mut fin) = fin else {
         // C increments i before this diagnostic, so it prints the output name.
         eprintln!(
             "Couldn't open {}",
             argv.get(i + 1).unwrap_or(&argv[i]).as_str()
         );
         std::process::exit(3)
-    }
+    };
     i += 1;
     let output = &argv[i];
-    let mut fout = File::create(output).unwrap_or_else(|_| {
+    let Some(mut fout) = ImodFile::open(output, "wb") else {
         eprintln!("Couldn't open {output}");
         std::process::exit(3)
-    });
-    let mut model = imod_from_wmod(fin).unwrap_or_else(|| {
+    };
+    let mut model = imod_from_wmod(&mut fin).unwrap_or_else(|| {
         eprintln!("Error reading imod file.");
         std::process::exit(3)
     });
@@ -86,7 +85,7 @@ pub fn wmod2imod() {
 }
 
 /// Original: `imod_from_wmod` (`wmod2imod.c:122`).
-pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
+pub fn imod_from_wmod(fin: &mut ImodFile) -> Option<Imod> {
     const MAXLINE: i32 = 128;
     const MAXOBJ: usize = 256;
     /// Original: `Wmod_Colors` (`wmod2imod.c:100`).
@@ -102,7 +101,7 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
         [0.0, 1.0, 1.0],
     ];
     let cont_string = c"Object #:";
-    let mut line = [0_i8; MAXLINE as usize];
+    let mut line = [0_u8; MAXLINE as usize];
     let mut objlookup = [0_i32; MAXOBJ];
     let mut nobj = 0_i32;
     let mut display_switch = 0_i32;
@@ -112,7 +111,7 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
     let mut point = Ipoint::default();
     unsafe {
         loop {
-            let len = fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            let len = fgetline(fin, &mut line, MAXLINE);
             if len < 0 {
                 break;
             }
@@ -122,8 +121,8 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
             let mut tline = std::ptr::null::<std::ffi::c_char>();
             let mut i = 0_usize;
             while line[i] != 0 {
-                if line[i] == b'O' as i8 {
-                    tline = line.as_ptr().add(i);
+                if line[i] == b'O' {
+                    tline = line.as_ptr().add(i).cast();
                     break;
                 }
                 i += 1;
@@ -135,10 +134,18 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
             if libc::strncmp(tline, cont_string.as_ptr(), cont_string.count_bytes()) != 0 {
                 continue;
             }
-            fgetline(fin, line.as_mut_ptr(), MAXLINE);
-            libc::sscanf(line.as_ptr(), c"%*s %*s %*s %d".as_ptr(), &mut points);
-            fgetline(fin, line.as_mut_ptr(), MAXLINE);
-            libc::sscanf(line.as_ptr(), c"%*s %*s %d".as_ptr(), &mut display_switch);
+            fgetline(fin, &mut line, MAXLINE);
+            libc::sscanf(
+                line.as_ptr().cast(),
+                c"%*s %*s %*s %d".as_ptr(),
+                &mut points,
+            );
+            fgetline(fin, &mut line, MAXLINE);
+            libc::sscanf(
+                line.as_ptr().cast(),
+                c"%*s %*s %d".as_ptr(),
+                &mut display_switch,
+            );
             if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
                 objlookup[display_switch as usize] = 1;
             }
@@ -151,7 +158,7 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
     // leaving the rest of the IMOD_STRSIZE array as allocated.
     let newmodname = b"IMOD-NewModel";
     for i in 0..13 {
-        model.name[i] = newmodname[i] as std::ffi::c_char;
+        model.name[i] = newmodname[i];
     }
     model.name[13] = 0x00;
     model.flags = (1 << 11) | (1 << 10);
@@ -184,22 +191,24 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
                 object.blue = wimp_number as f32 / 255.0_f32;
             }
             // `wmod2imod.c:184`: `sprintf(mod->obj[nobj].name, "Wimp no. %d", i)`.
-            unsafe {
-                libc::sprintf(
-                    object.name.as_mut_ptr(),
-                    c"Wimp no. %d".as_ptr(),
-                    wimp_number as std::ffi::c_int,
-                );
-            }
+            let name = crate::imod::libcfshr::b3dutil::c_format(
+                "Wimp no. %d",
+                &[crate::imod::libcfshr::b3dutil::CArg::Int(
+                    wimp_number as i64,
+                )],
+            );
+            object.name[..name.len()].copy_from_slice(name.as_bytes());
+            object.name[name.len()] = 0;
             nobj += 1;
         } else {
             objlookup[wimp_number] = -1;
         }
     }
     unsafe {
-        libc::rewind(fin);
+        use std::io::Seek;
+        let _ = fin.rewind();
         loop {
-            let len = fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            let len = fgetline(fin, &mut line, MAXLINE);
             if len < 0 {
                 break;
             }
@@ -209,8 +218,8 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
             let mut tline = std::ptr::null::<std::ffi::c_char>();
             let mut i = 0_usize;
             while line[i] != 0 {
-                if line[i] == b'O' as i8 {
-                    tline = line.as_ptr().add(i);
+                if line[i] == b'O' {
+                    tline = line.as_ptr().add(i).cast();
                     break;
                 }
                 i += 1;
@@ -221,11 +230,19 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
             if libc::strncmp(tline, cont_string.as_ptr(), cont_string.count_bytes()) != 0 {
                 continue;
             }
-            fgetline(fin, line.as_mut_ptr(), MAXLINE);
-            libc::sscanf(line.as_ptr(), c"%*s %*s %*s %d".as_ptr(), &mut points);
-            fgetline(fin, line.as_mut_ptr(), MAXLINE);
-            libc::sscanf(line.as_ptr(), c"%*s %*s %d".as_ptr(), &mut display_switch);
-            fgetline(fin, line.as_mut_ptr(), MAXLINE);
+            fgetline(fin, &mut line, MAXLINE);
+            libc::sscanf(
+                line.as_ptr().cast(),
+                c"%*s %*s %*s %d".as_ptr(),
+                &mut points,
+            );
+            fgetline(fin, &mut line, MAXLINE);
+            libc::sscanf(
+                line.as_ptr().cast(),
+                c"%*s %*s %d".as_ptr(),
+                &mut display_switch,
+            );
+            fgetline(fin, &mut line, MAXLINE);
             model.cindex.object = if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
                 objlookup[display_switch as usize]
             } else {
@@ -241,9 +258,9 @@ pub fn imod_from_wmod(fin: *mut libc::FILE) -> Option<Imod> {
             }
             let contour_index = model.cindex.contour as usize;
             for i in 0..points {
-                fgetline(fin, line.as_mut_ptr(), MAXLINE);
+                fgetline(fin, &mut line, MAXLINE);
                 libc::sscanf(
-                    line.as_ptr(),
+                    line.as_ptr().cast(),
                     c"%*d %f %f %f".as_ptr(),
                     &mut point.x,
                     &mut point.y,
@@ -314,14 +331,13 @@ mod tests {
         let mut wimp_file = File::create(&wimp).unwrap();
         imod_to_wmod(&source, &mut wimp_file, "fixture.wimp").unwrap();
         wimp_file.flush().unwrap();
-        let wimp_name = CString::new(wimp.to_str().unwrap()).unwrap();
-        let wimp_file = unsafe { libc::fopen(wimp_name.as_ptr(), c"r".as_ptr()) };
-        let converted = imod_from_wmod(wimp_file).unwrap();
-        unsafe { libc::fclose(wimp_file) };
+        let mut wimp_file = ImodFile::open(wimp.to_str().unwrap(), "r").unwrap();
+        let converted = imod_from_wmod(&mut wimp_file).unwrap();
+        drop(wimp_file);
         assert_eq!(converted.obj.len(), 1);
         assert_eq!(
-            unsafe { std::ffi::CStr::from_ptr(converted.obj[0].name.as_ptr()) },
-            c"Wimp no. 247"
+            &converted.obj[0].name[..b"Wimp no. 247".len() + 1],
+            b"Wimp no. 247\0"
         );
         assert_eq!(
             (

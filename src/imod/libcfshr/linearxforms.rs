@@ -1,5 +1,7 @@
 //! Translation of `IMOD/libcfshr/linearxforms.c`.
 #![allow(dead_code)]
+use crate::imod::libcfshr::b3dutil::{CArg, c_format};
+use std::cell::Cell;
 use std::io::{BufRead, Write};
 
 /// Matches `xfUnit`.
@@ -117,10 +119,15 @@ pub fn angles_to_matrix(angles: &[f32; 3], matrix: &mut [f32], rows: usize) {
 pub fn icalc_matrix(angles: &[f32; 3], matrix: &mut [f32]) {
     angles_to_matrix(angles, matrix, 3)
 }
-/// `linearxforms.c:226`: `double sDet;` is a file-scope global, not a local, and
-/// `icalc_angles` prints it after `matrixToAngles` has failed.  Keeping it a
-/// local would lose the value that failure path reports.
-pub static mut S_DET: f64 = 0.0;
+thread_local! {
+    /// `linearxforms.c:226`: `double sDet;` is a file-scope global, not a local,
+    /// and `icalc_angles` prints it after `matrixToAngles` has failed.  Keeping
+    /// it a local would lose the value that failure path reports.  A
+    /// thread-local `Cell` holds it without `static mut`: it is written and read
+    /// inside a single `icalc_angles` call, so the narrower scope changes
+    /// nothing about when it is set or what is printed.
+    pub static S_DET: Cell<f64> = const { Cell::new(0.0) };
+}
 /// Matches `matrixToAngles`.
 pub fn matrix_to_angles(matrix: &[f32], rows: usize) -> Result<(f64, f64, f64), ()> {
     let (r11, r12, r13, r21, r22, r23, r31, r32, r33) = (
@@ -134,14 +141,13 @@ pub fn matrix_to_angles(matrix: &[f32], rows: usize) -> Result<(f64, f64, f64), 
         matrix[2 + rows] as f64,
         matrix[2 + 2 * rows] as f64,
     );
-    unsafe {
-        S_DET = r11 * r22 * r33 - r11 * r23 * r32 + r12 * r23 * r31 - r12 * r21 * r33
-            + r13 * r21 * r32
-            - r13 * r22 * r31;
-        S_DET -= 1.0;
-        if S_DET > 0.01 || S_DET < -0.01 {
-            return Err(());
-        }
+    S_DET.set(
+        r11 * r22 * r33 - r11 * r23 * r32 + r12 * r23 * r31 - r12 * r21 * r33 + r13 * r21 * r32
+            - r13 * r22 * r31,
+    );
+    S_DET.set(S_DET.get() - 1.0);
+    if S_DET.get() > 0.01 || S_DET.get() < -0.01 {
+        return Err(());
     }
     let (a, b, g) = if (r13 - 1.).abs() < 1e-7 || (r13 + 1.).abs() < 1e-7 {
         (0., r13.asin(), r21.atan2(r22))
@@ -172,30 +178,46 @@ pub fn icalc_angles(angles: &mut [f32; 3], matrix: &[f32]) {
     }
 
     // And here is what the old fortran routine did:
-    unsafe {
-        libc::printf(
-            c"icalc_angles - matrix %10.6f %10.6f %10.6f\n".as_ptr(),
-            matrix[0] as f64,
-            matrix[3] as f64,
-            matrix[6] as f64,
-        );
-        libc::printf(
-            c"                      %10.6f %10.6f %10.6f\n".as_ptr(),
-            matrix[1] as f64,
-            matrix[4] as f64,
-            matrix[7] as f64,
-        );
-        libc::printf(
-            c"                      %10.6f %10.6f %10.6f\n".as_ptr(),
-            matrix[2] as f64,
-            matrix[5] as f64,
-            matrix[8] as f64,
-        );
-        libc::printf(c"determinant - %f\n".as_ptr(), S_DET);
-        libc::printf(c"ERROR: icalc_angles - Not a pure rotation matrix\n".as_ptr());
-        libc::fflush(core::ptr::null_mut());
-    }
+    let mut out = std::io::stdout();
+    let _ = out.write_all(
+        c_format(
+            "icalc_angles - matrix %10.6f %10.6f %10.6f\n",
+            &[
+                CArg::Dbl(matrix[0] as f64),
+                CArg::Dbl(matrix[3] as f64),
+                CArg::Dbl(matrix[6] as f64),
+            ],
+        )
+        .as_bytes(),
+    );
+    let _ = out.write_all(
+        c_format(
+            "                      %10.6f %10.6f %10.6f\n",
+            &[
+                CArg::Dbl(matrix[1] as f64),
+                CArg::Dbl(matrix[4] as f64),
+                CArg::Dbl(matrix[7] as f64),
+            ],
+        )
+        .as_bytes(),
+    );
+    let _ = out.write_all(
+        c_format(
+            "                      %10.6f %10.6f %10.6f\n",
+            &[
+                CArg::Dbl(matrix[2] as f64),
+                CArg::Dbl(matrix[5] as f64),
+                CArg::Dbl(matrix[8] as f64),
+            ],
+        )
+        .as_bytes(),
+    );
+    let _ = out.write_all(c_format("determinant - %f\n", &[CArg::Dbl(S_DET.get())]).as_bytes());
+    let _ = out
+        .write_all(c_format("ERROR: icalc_angles - Not a pure rotation matrix\n", &[]).as_bytes());
+    let _ = out.flush();
 }
+
 /// Matches `invertMatrix`.
 pub fn invert_matrix(matrix: &[f32; 9], inverse: &mut [f32; 9]) {
     let d = matrix[0] * matrix[4] * matrix[8]

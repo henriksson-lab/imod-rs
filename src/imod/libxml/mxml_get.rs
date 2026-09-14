@@ -1,307 +1,361 @@
 //! Translation of `IMOD/libxml/mxml-get.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(dead_code)]
 
 use super::*;
-use core::ffi::{c_char, c_int, c_void};
+use core::any::Any;
+use core::ffi::c_int;
 
 /// Matches C `mxmlGetCDATA` (`mxml-get.c:33`).
-pub unsafe fn mxml_get_cdata(node: *mut MxmlNode) -> *const c_char {
+pub fn mxml_get_cdata(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]> {
     /*
      * Range check input...
      */
 
-    if node.is_null()
-        || (*node).type_ != MXML_ELEMENT
-        || libc::strncmp((*node).value.element.name, c"![CDATA[".as_ptr(), 8) != 0
-    {
-        return core::ptr::null();
+    let Some(node) = node else {
+        return None;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
+        return None;
+    }
+    let MxmlValue::Element(element) = &arena.node(node).value else {
+        return None;
+    };
+    let name = element.name.as_deref()?;
+    if !name.starts_with(b"![CDATA[") {
+        return None;
     }
 
     /*
      * Return the text following the CDATA declaration...
      */
 
-    (*node).value.element.name.add(8)
+    Some(&name[8..])
 }
 
 /// Matches C `mxmlGetCustom` (`mxml-get.c:59`).
-pub unsafe fn mxml_get_custom(node: *mut MxmlNode) -> *const c_void {
+pub fn mxml_get_custom(arena: &MxmlArena, node: Option<usize>) -> Option<&dyn Any> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        return core::ptr::null();
-    }
+    let Some(node) = node else {
+        return None;
+    };
 
     /*
      * Return the custom value...
      */
 
-    if (*node).type_ == MXML_CUSTOM {
-        (*node).value.custom.data
-    } else if (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_CUSTOM
+    if arena.node(node).type_ == MXML_CUSTOM {
+        match &arena.node(node).value {
+            MxmlValue::Custom(custom) => custom.data.as_deref(),
+            _ => None,
+        }
+    } else if arena.node(node).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(node).child
+        && arena.node(child).type_ == MXML_CUSTOM
     {
-        (*(*node).child).value.custom.data
+        match &arena.node(child).value {
+            MxmlValue::Custom(custom) => custom.data.as_deref(),
+            _ => None,
+        }
     } else {
-        core::ptr::null()
+        None
     }
 }
 
 /// Matches C `mxmlGetElement` (`mxml-get.c:88`).
-pub unsafe fn mxml_get_element(node: *mut MxmlNode) -> *const c_char {
+pub fn mxml_get_element(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]> {
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT {
-        return core::ptr::null();
+    let Some(node) = node else {
+        return None;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
+        return None;
     }
 
     /*
      * Return the element name...
      */
 
-    (*node).value.element.name
+    match &arena.node(node).value {
+        MxmlValue::Element(element) => element.name.as_deref(),
+        _ => None,
+    }
 }
 
 /// Matches C `mxmlGetFirstChild` (`mxml-get.c:111`).
-pub unsafe fn mxml_get_first_child(node: *mut MxmlNode) -> *mut MxmlNode {
+pub fn mxml_get_first_child(arena: &MxmlArena, node: Option<usize>) -> Option<usize> {
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT {
-        return core::ptr::null_mut();
+    let Some(node) = node else {
+        return None;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
+        return None;
     }
 
     /*
      * Return the first child node...
      */
 
-    (*node).child
+    arena.node(node).child
 }
 
 /// Matches C `mxmlGetInteger` (`mxml-get.c:136`).
-pub unsafe fn mxml_get_integer(node: *mut MxmlNode) -> c_int {
+pub fn mxml_get_integer(arena: &MxmlArena, node: Option<usize>) -> c_int {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
+    let Some(node) = node else {
         return 0;
-    }
+    };
 
     /*
      * Return the integer value...
      */
 
-    if (*node).type_ == MXML_INTEGER {
-        (*node).value.integer
-    } else if (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_INTEGER
+    if arena.node(node).type_ == MXML_INTEGER {
+        match &arena.node(node).value {
+            MxmlValue::Integer(integer) => *integer,
+            _ => 0,
+        }
+    } else if arena.node(node).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(node).child
+        && arena.node(child).type_ == MXML_INTEGER
     {
-        (*(*node).child).value.integer
+        match &arena.node(child).value {
+            MxmlValue::Integer(integer) => *integer,
+            _ => 0,
+        }
     } else {
         0
     }
 }
 
 /// Matches C `mxmlGetLastChild` (`mxml-get.c:165`).
-pub unsafe fn mxml_get_last_child(node: *mut MxmlNode) -> *mut MxmlNode {
+pub fn mxml_get_last_child(arena: &MxmlArena, node: Option<usize>) -> Option<usize> {
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT {
-        return core::ptr::null_mut();
+    let Some(node) = node else {
+        return None;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
+        return None;
     }
 
     /*
      * Return the node type...
      */
 
-    (*node).last_child
+    arena.node(node).last_child
 }
 
 /// Matches C `mxmlGetNextSibling` (`mxml-get.c:186`).
-pub unsafe fn mxml_get_next_sibling(node: *mut MxmlNode) -> *mut MxmlNode {
+pub fn mxml_get_next_sibling(arena: &MxmlArena, node: Option<usize>) -> Option<usize> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(node) = node else {
+        return None;
+    };
 
     /*
      * Return the node type...
      */
 
-    (*node).next
+    arena.node(node).next
 }
 
 /// Matches C `mxmlGetOpaque` (`mxml-get.c:210`).
-pub unsafe fn mxml_get_opaque(node: *mut MxmlNode) -> *const c_char {
+pub fn mxml_get_opaque(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        return core::ptr::null();
-    }
+    let Some(node) = node else {
+        return None;
+    };
 
     /*
      * Return the opaque value...
      */
 
-    if (*node).type_ == MXML_OPAQUE {
-        (*node).value.opaque
-    } else if (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_OPAQUE
+    if arena.node(node).type_ == MXML_OPAQUE {
+        match &arena.node(node).value {
+            MxmlValue::Opaque(opaque) => opaque.as_deref(),
+            _ => None,
+        }
+    } else if arena.node(node).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(node).child
+        && arena.node(child).type_ == MXML_OPAQUE
     {
-        (*(*node).child).value.opaque
+        match &arena.node(child).value {
+            MxmlValue::Opaque(opaque) => opaque.as_deref(),
+            _ => None,
+        }
     } else {
-        core::ptr::null()
+        None
     }
 }
 
 /// Matches C `mxmlGetParent` (`mxml-get.c:239`).
-pub unsafe fn mxml_get_parent(node: *mut MxmlNode) -> *mut MxmlNode {
+pub fn mxml_get_parent(arena: &MxmlArena, node: Option<usize>) -> Option<usize> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(node) = node else {
+        return None;
+    };
 
     /*
      * Return the parent node...
      */
 
-    (*node).parent
+    arena.node(node).parent
 }
 
 /// Matches C `mxmlGetPrevSibling` (`mxml-get.c:262`).
-pub unsafe fn mxml_get_prev_sibling(node: *mut MxmlNode) -> *mut MxmlNode {
+pub fn mxml_get_prev_sibling(arena: &MxmlArena, node: Option<usize>) -> Option<usize> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(node) = node else {
+        return None;
+    };
 
     /*
      * Return the previous sibling node...
      */
 
-    (*node).prev
+    arena.node(node).prev
 }
 
 /// Matches C `mxmlGetReal` (`mxml-get.c:287`).
-pub unsafe fn mxml_get_real(node: *mut MxmlNode) -> f64 {
+pub fn mxml_get_real(arena: &MxmlArena, node: Option<usize>) -> f64 {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
+    let Some(node) = node else {
         return 0.0;
-    }
+    };
 
     /*
      * Return the real value...
      */
 
-    if (*node).type_ == MXML_REAL {
-        (*node).value.real
-    } else if (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_REAL
+    if arena.node(node).type_ == MXML_REAL {
+        match &arena.node(node).value {
+            MxmlValue::Real(real) => *real,
+            _ => 0.0,
+        }
+    } else if arena.node(node).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(node).child
+        && arena.node(child).type_ == MXML_REAL
     {
-        (*(*node).child).value.real
+        match &arena.node(child).value {
+            MxmlValue::Real(real) => *real,
+            _ => 0.0,
+        }
     } else {
         0.0
     }
 }
 
 /// Matches C `mxmlGetText` (`mxml-get.c:320`).
-pub unsafe fn mxml_get_text(node: *mut MxmlNode, whitespace: *mut c_int) -> *const c_char {
+pub fn mxml_get_text<'a>(
+    arena: &'a MxmlArena,
+    node: Option<usize>,
+    whitespace: Option<&mut c_int>,
+) -> Option<&'a [u8]> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        if !whitespace.is_null() {
+    let Some(node) = node else {
+        if let Some(whitespace) = whitespace {
             *whitespace = 0;
         }
 
-        return core::ptr::null();
-    }
+        return None;
+    };
 
     /*
      * Return the text value...
      */
 
-    if (*node).type_ == MXML_TEXT {
-        if !whitespace.is_null() {
-            *whitespace = (*node).value.text.whitespace;
+    if arena.node(node).type_ == MXML_TEXT {
+        let MxmlValue::Text(text) = &arena.node(node).value else {
+            return None;
+        };
+        if let Some(whitespace) = whitespace {
+            *whitespace = text.whitespace;
         }
 
-        (*node).value.text.string
-    } else if (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_TEXT
+        text.string.as_deref()
+    } else if arena.node(node).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(node).child
+        && arena.node(child).type_ == MXML_TEXT
     {
-        if !whitespace.is_null() {
-            *whitespace = (*(*node).child).value.text.whitespace;
+        let MxmlValue::Text(text) = &arena.node(child).value else {
+            return None;
+        };
+        if let Some(whitespace) = whitespace {
+            *whitespace = text.whitespace;
         }
 
-        (*(*node).child).value.text.string
+        text.string.as_deref()
     } else {
-        if !whitespace.is_null() {
+        if let Some(whitespace) = whitespace {
             *whitespace = 0;
         }
 
-        core::ptr::null()
+        None
     }
 }
 
 /// Matches C `mxmlGetType` (`mxml-get.c:369`).
-pub unsafe fn mxml_get_type(node: *mut MxmlNode) -> MxmlType {
+pub fn mxml_get_type(arena: &MxmlArena, node: Option<usize>) -> MxmlType {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
+    let Some(node) = node else {
         return MXML_IGNORE;
-    }
+    };
 
     /*
      * Return the node type...
      */
 
-    (*node).type_
+    arena.node(node).type_
 }
 
 /// Matches C `mxmlGetUserData` (`mxml-get.c:390`).
-pub unsafe fn mxml_get_user_data(node: *mut MxmlNode) -> *mut c_void {
+pub fn mxml_get_user_data(arena: &MxmlArena, node: Option<usize>) -> Option<&dyn Any> {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
-        return core::ptr::null_mut();
-    }
+    let Some(node) = node else {
+        return None;
+    };
 
     /*
      * Return the user data pointer...
      */
 
-    (*node).user_data
+    arena.node(node).user_data.as_deref()
 }

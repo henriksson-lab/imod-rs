@@ -46,8 +46,7 @@ pub fn pip_parse_input(
         }
         if separator == ' ' {
             for i in 1..=num_options {
-                let entry = CString::new(options[(i - 1) as usize]).unwrap();
-                result = pip_add_option(entry.as_ptr());
+                result = pip_add_option(options[(i - 1) as usize].as_bytes());
                 if result != 0 {
                     return result;
                 }
@@ -75,12 +74,10 @@ pub fn pip_parse_input(
                     ind_end = len_all;
                 }
                 if ind_str > ind_end {
-                    let message = CString::new("Too few options in string").unwrap();
-                    pip_set_error(message.as_ptr());
+                    pip_set_error(b"Too few options in string");
                     return -1;
                 }
-                let entry = CString::new(&all[(ind_str - 1) as usize..ind_end as usize]).unwrap();
-                result = pip_add_option(entry.as_ptr());
+                result = pip_add_option(&all[(ind_str - 1) as usize..ind_end as usize]);
                 if result != 0 {
                     return result;
                 }
@@ -112,23 +109,18 @@ pub fn pip_parse_entries(num_opt_arg: &mut i32, num_non_opt_arg: &mut i32) -> i3
                 len_trim -= 1;
             }
             if len_trim == BUFFER_SIZE {
-                let message =
-                    CString::new("Input argument too long for buffer in PipParseEntries").unwrap();
-                pip_set_error(message.as_ptr());
+                pip_set_error(b"Input argument too long for buffer in PipParseEntries");
                 return -1;
             }
             bytes.truncate(len_trim);
-            let string = CString::new(bytes).unwrap();
-            let result = pip_next_arg(string.as_ptr());
+            let result = pip_next_arg(&bytes);
             if result < 0 {
                 return result;
             }
             if result > 0 && i == iargc {
-                let message = CString::new(
-                    "A value was expected but not found for the last option on the command line",
-                )
-                .unwrap();
-                pip_set_error(message.as_ptr());
+                pip_set_error(
+                    b"A value was expected but not found for the last option on the command line",
+                );
                 return -1;
             }
         }
@@ -155,8 +147,7 @@ pub fn pip_get_logical(option: &str, value: &mut bool) -> i32 {
     unsafe {
         let mut intval = 0_i32;
         let mut result = 0_i32;
-        let name = CString::new(option).unwrap();
-        let ierr = pip_get_boolean(name.as_ptr(), &raw mut intval);
+        let ierr = pip_get_boolean(option.as_bytes(), &mut intval);
         if ierr != 0 {
             result = ierr;
         } else {
@@ -180,12 +171,11 @@ pub fn pip_read_or_parse_options(
     num_non_opt_arg: &mut i32,
 ) {
     unsafe {
-        let name = CString::new(prog_name).unwrap();
         //
         // First try to read autodoc file
         //
         pip_allow_comma_defaults(1);
-        let mut ierr = pip_read_option_file(name.as_ptr(), 1, 0);
+        let mut ierr = pip_read_option_file(prog_name.as_bytes(), 1, 0);
         pip_exit_on_error(0, exit_string);
         //
         // If that is OK, go parse the entries;
@@ -194,26 +184,18 @@ pub fn pip_read_or_parse_options(
         if ierr == 0 {
             ierr = pip_parse_entries(num_opt_arg, num_non_opt_arg);
         } else {
-            let mut error_string = core::ptr::null_mut();
-            ierr = pip_get_error(&raw mut error_string);
+            let mut error_string: Vec<u8> = Vec::new();
+            ierr = pip_get_error(&mut error_string);
             // `errString` is `character*240`, so `write(*, '(a, a)')` emits the
             // blank-padded 240-character variable, not the trimmed message.
-            let text = if error_string.is_null() {
-                String::new()
-            } else {
-                CStr::from_ptr(error_string).to_string_lossy().into_owned()
-            };
-            let mut padded: Vec<u8> = text.into_bytes();
+            let mut padded: Vec<u8> = error_string;
             padded.truncate(240);
             padded.resize(240, b' ');
             println!("PIP WARNING: {}", String::from_utf8_lossy(&padded));
             println!(" Using fallback options in main program");
-            if !error_string.is_null() {
-                libc::free(error_string.cast());
-            }
             ierr = pip_parse_input(options, num_options, '@', num_opt_arg, num_non_opt_arg);
             if ierr == 0 {
-                pip_read_prog_defaults(name.as_ptr());
+                pip_read_prog_defaults(prog_name.as_bytes());
             }
         }
         //
@@ -222,10 +204,8 @@ pub fn pip_read_or_parse_options(
         if interactive && *num_opt_arg + *num_non_opt_arg == 0 {
             return;
         }
-        if *num_opt_arg + *num_non_opt_arg < min_args
-            || pip_get_boolean(c"help".as_ptr(), &raw mut ierr) == 0
-        {
-            pip_print_help(name.as_ptr(), 0, num_in_files, num_out_files);
+        if *num_opt_arg + *num_non_opt_arg < min_args || pip_get_boolean(b"help", &mut ierr) == 0 {
+            pip_print_help(prog_name.as_bytes(), 0, num_in_files, num_out_files);
             std::process::exit(0);
         }
     }
@@ -242,32 +222,25 @@ pub fn pip_get_in_out_file(
         let mut result = 0_i32;
         let mut num_opt_arg = 0_i32;
         let mut num_non_opt_arg = 0_i32;
-        pip_number_of_args(&raw mut num_opt_arg, &raw mut num_non_opt_arg);
+        pip_number_of_args(&mut num_opt_arg, &mut num_non_opt_arg);
         //
         // if there is PIP input, first look for explicit option by the name
         // then get the given non-option argument if there are enough
         //
         if num_opt_arg + num_non_opt_arg > 0 {
-            let name = CString::new(option).unwrap();
-            let mut value = core::ptr::null_mut();
-            result = pip_get_string(name.as_ptr(), &raw mut value);
+            let mut value: Vec<u8> = Vec::new();
+            result = pip_get_string(option.as_bytes(), &mut value);
             if result == 0 {
-                *filename = CStr::from_ptr(value).to_string_lossy().into_owned();
-            }
-            if !value.is_null() {
-                libc::free(value.cast());
-                value = core::ptr::null_mut();
+                *filename = String::from_utf8_lossy(&value).into_owned();
             }
             if result != 0 {
                 if num_non_opt_arg < non_opt_arg_no {
                     return result;
                 }
-                result = pip_get_non_option_arg(non_opt_arg_no - 1, &raw mut value);
-                if result == 0 && !value.is_null() {
-                    *filename = CStr::from_ptr(value).to_string_lossy().into_owned();
-                }
-                if !value.is_null() {
-                    libc::free(value.cast());
+                value.clear();
+                result = pip_get_non_option_arg(non_opt_arg_no - 1, &mut value);
+                if result == 0 {
+                    *filename = String::from_utf8_lossy(&value).into_owned();
                 }
             }
         } else {
@@ -292,8 +265,7 @@ pub fn pip_get_in_out_file(
 /// keeps the literal as written and trims it again inside `exitError`.
 pub fn pip_exit_on_error(if_use_stderr: i32, message: &str) {
     unsafe {
-        let text = CString::new(message.trim_end_matches(' ')).unwrap();
-        pip_exit_on_error_fw(if_use_stderr, text.as_ptr());
+        pip_exit_on_error_fw(if_use_stderr, message.trim_end_matches(' ').as_bytes());
     }
     set_exit_prefix(message);
 }

@@ -49,27 +49,39 @@ pub unsafe fn find_auto_corr_peaks(
             }
         }
         let mut num_found = num_peaks;
+        let array_len = ((nx_pad + 2) * ny_pad) as usize;
         if crate::imod::libcfshr::filtxcorr::find_many_xcorr_peaks(
-            array,
+            core::slice::from_raw_parts(array, array_len),
             nx_pad + 2,
             ny_pad,
             -3,
             -1,
-            x_peaks,
-            y_peaks,
-            peak,
+            core::slice::from_raw_parts_mut(x_peaks, num_peaks as usize),
+            core::slice::from_raw_parts_mut(y_peaks, num_peaks as usize),
+            core::slice::from_raw_parts_mut(peak, num_peaks as usize),
             num_peaks,
             (1.5 * num_peaks as f64) as i32,
             &mut num_found,
         ) != 0
         {
+            // `autocorrpeaks.c:107` passes `&Xpeaks[0]`, `&Ypeaks[0]` and
+            // `&peak[0]` — pointers, not a length — and
+            // `XCorrPeakFindWidth` dereferences `*peak` unconditionally
+            // (`filtxcorr.c:608`) while initialising only `i < maxPeaks`
+            // entries (`:533`).  With `maxPeaks == 0` the C therefore reads
+            // and writes `peak[0]` of an array it was told holds nothing;
+            // every caller in fact supplies at least one element.  The slices
+            // are sized `max(1)` so that read is in bounds here too, rather
+            // than a zero-length slice that panics where the C quietly
+            // succeeds.
+            let slice_len = (num_peaks as usize).max(1);
             crate::imod::libcfshr::filtxcorr::xcorr_peak_find(
-                array,
+                core::slice::from_raw_parts(array, array_len),
                 nx_pad + 2,
                 ny_pad,
-                x_peaks,
-                y_peaks,
-                peak,
+                core::slice::from_raw_parts_mut(x_peaks, slice_len),
+                core::slice::from_raw_parts_mut(y_peaks, slice_len),
+                core::slice::from_raw_parts_mut(peak, slice_len),
                 num_peaks,
             );
         }
@@ -484,8 +496,7 @@ unsafe fn find_peak_series(
                     || *x.add(i as usize) < 0.
                     || i == *far
                     || (*x.add(i as usize) < 1. && (*y.add(i as usize)).abs() < 1.)
-                    || crate::imod::libcfshr::b3dutil::number_in_list(i, list.as_ptr(), nlist, 0)
-                        != 0
+                    || crate::imod::libcfshr::b3dutil::number_in_list(i, Some(&list), nlist, 0) != 0
                 {
                     continue;
                 }
@@ -592,11 +603,8 @@ unsafe fn perpendicular_line_median(a: *mut f32, nx: i32, ny: i32, x: f32, y: f3
         }
         let mut median = -1e37;
         if v.len() > 4 {
-            crate::imod::libcfshr::robuststat::rs_fast_median_in_place(
-                v.as_mut_ptr(),
-                v.len() as i32,
-                &mut median,
-            );
+            let n = v.len() as i32;
+            crate::imod::libcfshr::robuststat::rs_fast_median_in_place(&mut v, n, &mut median);
         }
         median as f64
     }

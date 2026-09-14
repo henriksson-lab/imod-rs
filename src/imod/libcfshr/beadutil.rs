@@ -99,7 +99,11 @@ pub unsafe fn bead_integral(
         *annmean = (annsum / nann as f64) as f32;
         *cenmean = (censum / ncen as f64) as f32;
         if ann_pct > 0. {
-            *median = percentile_float((ann_pct * nann as f32 + 1.) as i32, temp, nann);
+            *median = percentile_float(
+                (ann_pct * nann as f32 + 1.) as i32,
+                core::slice::from_raw_parts_mut(temp, nann as usize),
+                nann,
+            );
         }
         if ann_pct < 0. && !median.is_null() {
             *median = ncen as f32;
@@ -182,13 +186,11 @@ mod tests {
             .position(|value| *value == 0.)
             .unwrap_or(temp.len());
         let mut source_selected = temp[..annular_count].to_vec();
-        let expected = unsafe {
-            crate::imod::libcfshr::percentile::percentile_float(
-                (0.5 * annular_count as f32 + 1.) as i32,
-                source_selected.as_mut_ptr(),
-                annular_count as i32,
-            )
-        };
+        let expected = crate::imod::libcfshr::percentile::percentile_float(
+            (0.5 * annular_count as f32 + 1.) as i32,
+            &mut source_selected,
+            annular_count as i32,
+        );
         assert_eq!(percentile, expected);
     }
 

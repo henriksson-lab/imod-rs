@@ -144,7 +144,7 @@ mod tests {
         let mut d = ImodvModeled::default();
         let mut f = imodv_modeled_form_new(&app);
         f.name_changed(&mut app, &mut d, "model A");
-        assert_eq!(m.name[0], b'm' as i8);
+        assert_eq!(m.name[0], b'm');
         f.pixel_size = "2.5 nm".into();
         f.new_pixel_size(&mut app, &mut d);
         assert_eq!(m.pixsize, 2.5);

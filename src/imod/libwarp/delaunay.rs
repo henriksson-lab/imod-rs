@@ -1,36 +1,43 @@
-//! Translation scaffolding for `IMOD/libwarp/delaunay.h`.
+//! Translation of `IMOD/libwarp/delaunay.c` and `delaunay.h`.
+//!
+//! `IMOD/libwarp/Makefile:34` compiles `delaunay.c` with `-DCLARKSON_HULL`, so
+//! the `#ifdef CLARKSON_HULL` arm is the one translated here: the backend is
+//! `hullwrap`'s Clarkson hull, not Shewchuk's `triangle`. The `#else` arm's
+//! `tio_init`, `triangulate()` call, edge list and the eleven
+//! `triangulateio`-only fields it frees have no counterpart in the built
+//! library and are not translated.
 #![allow(dead_code)]
 
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libwarp::hullwrap::{HullIo, hull_triangulate};
 use crate::imod::libwarp::istack::Istack;
-use crate::imod::libwarp::istack::{
-    istack_create, istack_destroy, istack_pop, istack_push, istack_reset,
-};
-use crate::imod::libwarp::nn::NN_VERBOSE;
-use crate::imod::libwarp::nn::Point;
+use crate::imod::libwarp::istack::{istack_create, istack_pop, istack_push, istack_reset};
+use crate::imod::libwarp::nn::{NN_VERBOSE, Point};
 use crate::imod::libwarp::nncommon::circle_contains;
 use crate::imod::libwarp::nncommon_vulnerable::circle_build1;
 
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
+/// C `N_SEARCH_TURNON` (`delaunay.c:53`).
+const N_SEARCH_TURNON: i32 = 20;
+/// C `N_FLAGS_TURNON` (`delaunay.c:54`); declared by the source and unused.
+const N_FLAGS_TURNON: i32 = 1000;
+/// C `N_FLAGS_INC` (`delaunay.c:55`).
+const N_FLAGS_INC: i32 = 100;
 
-/// C `triangle` (`delaunay.h`).
-#[repr(C)]
+/// C `triangle` (`delaunay.h:29`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Triangle {
     pub vids: [i32; 3],
 }
 
-/// C `triangle_neighbours` (`delaunay.h`).
-#[repr(C)]
+/// C `triangle_neighbours` (`delaunay.h:33`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TriangleNeighbours {
     pub tids: [i32; 3],
 }
 
-/// C `circle` (`delaunay.h`).
-#[repr(C)]
+/// C `circle` (`delaunay.h:37`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Circle {
     pub x: f64,
@@ -38,444 +45,543 @@ pub struct Circle {
     pub r: f64,
 }
 
-/// C `struct delaunay` (`delaunay.h`).
-#[repr(C)]
+/// C `struct delaunay` (`delaunay.h:60`).
+///
+/// Every `malloc`'d array becomes a `Vec`, and `int** point_triangles` — an
+/// array of per-point arrays — becomes `Vec<Vec<i32>>`, which is the same
+/// shape without the two-level free. The one real change of ownership is
+/// `points`: the C keeps a *shallow* alias to the caller's array
+/// (`delaunay.c:355`, "only shallow copy of the input data is contained in
+/// struct delaunay"), and `delaunay_destroy` deliberately does not free it.
+/// Here the triangulation owns its copy. Only `nnai_interpolate` and
+/// `nnhpi_modify_data` write through that alias, and nothing in this tree
+/// reads the caller's array back afterwards.
 pub struct Delaunay {
     pub npoints: i32,
-    pub points: *mut Point,
+    pub points: Vec<Point>,
     pub xmin: f64,
     pub xmax: f64,
     pub ymin: f64,
     pub ymax: f64,
+
     pub ntriangles: i32,
-    pub triangles: *mut Triangle,
-    pub circles: *mut Circle,
-    pub neighbours: *mut TriangleNeighbours,
-    pub n_point_triangles: *mut i32,
-    pub point_triangles: *mut *mut i32,
+    pub triangles: Vec<Triangle>,
+    pub circles: Vec<Circle>,
+    /// for `delaunay_xytoi()`
+    pub neighbours: Vec<TriangleNeighbours>,
+
+    /// `n_point_triangles[i]` is number of triangles i-th point belongs to
+    pub n_point_triangles: Vec<i32>,
+    /// `point_triangles[i][j]` is index of j-th triangle i-th point belongs to
+    pub point_triangles: Vec<Vec<i32>>,
+
     pub nedges: i32,
-    pub edges: *mut i32,
-    pub flags: *mut i32,
+    /// n-th edge is formed by `points[edges[n*2]]` and `points[edges[n*2+1]]`
+    pub edges: Vec<i32>,
+
+    /*
+     * Work data for delaunay_circles_find(). Placed here for efficiency
+     * reasons. Should be moved to the procedure if parallelizable code
+     * needed.
+     */
+    pub flags: Vec<i32>,
+    /// last search result, used in start up of a new search
     pub first_id: i32,
-    pub t_in: *mut Istack,
-    pub t_out: *mut Istack,
+    pub t_in: Option<Istack>,
+    pub t_out: Option<Istack>,
+
+    /*
+     * to keep track of flags set to 1 in the case of very large data sets
+     */
     pub nflags: i32,
     pub nflagsallocated: i32,
-    pub flagids: *mut i32,
+    pub flagids: Vec<i32>,
 }
 
-/// Original static `delaunay_create` (`IMOD/libwarp/delaunay.c:127`).
-unsafe fn delaunay_create() -> *mut Delaunay {
-    unsafe {
-        let delaunay = libc::malloc(core::mem::size_of::<Delaunay>()).cast::<Delaunay>();
-        (*delaunay).npoints = 0;
-        (*delaunay).points = core::ptr::null_mut();
-        (*delaunay).xmin = f64::MAX;
-        (*delaunay).xmax = -f64::MAX;
-        (*delaunay).ymin = f64::MAX;
-        (*delaunay).ymax = -f64::MAX;
-        (*delaunay).ntriangles = 0;
-        (*delaunay).triangles = core::ptr::null_mut();
-        (*delaunay).circles = core::ptr::null_mut();
-        (*delaunay).neighbours = core::ptr::null_mut();
-        (*delaunay).n_point_triangles = core::ptr::null_mut();
-        (*delaunay).point_triangles = core::ptr::null_mut();
-        (*delaunay).nedges = 0;
-        (*delaunay).edges = core::ptr::null_mut();
-        (*delaunay).flags = core::ptr::null_mut();
-        (*delaunay).first_id = -1;
-        (*delaunay).t_in = core::ptr::null_mut();
-        (*delaunay).t_out = core::ptr::null_mut();
-        (*delaunay).nflags = 0;
-        (*delaunay).nflagsallocated = 0;
-        (*delaunay).flagids = core::ptr::null_mut();
-        delaunay
+/// Original static `delaunay_create` (`delaunay.c:127`).
+fn delaunay_create() -> Box<Delaunay> {
+    let d = Box::new(Delaunay {
+        npoints: 0,
+        points: Vec::new(),
+        xmin: f64::MAX,
+        xmax: -f64::MAX,
+        ymin: f64::MAX,
+        ymax: -f64::MAX,
+        ntriangles: 0,
+        triangles: Vec::new(),
+        circles: Vec::new(),
+        neighbours: Vec::new(),
+        n_point_triangles: Vec::new(),
+        point_triangles: Vec::new(),
+        nedges: 0,
+        edges: Vec::new(),
+        flags: Vec::new(),
+        first_id: -1,
+        t_in: None,
+        t_out: None,
+        nflags: 0,
+        nflagsallocated: 0,
+        flagids: Vec::new(),
+    });
+
+    d
+}
+
+/// Original static `tio_destroy`, `CLARKSON_HULL` arm (`delaunay.c:104`).
+fn tio_destroy(tio: &mut HullIo) {
+    // `free(tio->pointlist)`, `free(tio->trianglelist)`,
+    // `free(tio->neighborlist)`, each guarded by a NULL test that an empty
+    // `Vec` makes unnecessary.
+    tio.pointlist = Vec::new();
+    tio.trianglelist = Vec::new();
+    tio.neighborlist = Vec::new();
+}
+
+/// Original static `tio2delaunay`, `CLARKSON_HULL` arm (`delaunay.c:157`).
+///
+/// The `#ifndef CLARKSON_HULL` assertions on `tio_out->numberofpoints` and the
+/// edge-list copy at the end belong to the `triangle` backend and are not in
+/// the built library.
+fn tio2delaunay(tio_out: &mut HullIo, d: &mut Delaunay) {
+    for i in 0..d.npoints {
+        let p = &d.points[i as usize];
+
+        if p.x < d.xmin {
+            d.xmin = p.x;
+        }
+        if p.x > d.xmax {
+            d.xmax = p.x;
+        }
+        if p.y < d.ymin {
+            d.ymin = p.y;
+        }
+        if p.y > d.ymax {
+            d.ymax = p.y;
+        }
     }
-}
+    if NN_VERBOSE.get() != 0 {
+        let mut err = ImodFile::Stderr;
+        let _ = err.write_all(b"input:\n");
+        for i in 0..d.npoints {
+            let p = &d.points[i as usize];
 
-/// Original static selected-`CLARKSON_HULL` `tio_destroy` (`delaunay.c:90`).
-unsafe fn tio_destroy(hull: *mut HullIo) {
-    unsafe {
-        if !(*hull).pointlist.is_null() {
-            libc::free((*hull).pointlist.cast());
-        }
-        if !(*hull).trianglelist.is_null() {
-            libc::free((*hull).trianglelist.cast());
-        }
-        if !(*hull).neighborlist.is_null() {
-            libc::free((*hull).neighborlist.cast());
-        }
-    }
-}
-
-/// Original static `tio2delaunay` selected `CLARKSON_HULL` branch (`delaunay.c:157`).
-unsafe fn tio2delaunay(hull: *mut HullIo, delaunay: *mut Delaunay) {
-    unsafe {
-        for index in 0..(*delaunay).npoints {
-            let point = (*delaunay).points.add(index as usize);
-            (*delaunay).xmin = (*delaunay).xmin.min((*point).x);
-            (*delaunay).xmax = (*delaunay).xmax.max((*point).x);
-            (*delaunay).ymin = (*delaunay).ymin.min((*point).y);
-            (*delaunay).ymax = (*delaunay).ymax.max((*point).y);
-        }
-        (*delaunay).ntriangles = (*hull).numberoftriangles;
-        if NN_VERBOSE != 0 {
-            libc::fprintf(stderr, c"input:\n".as_ptr());
-            for index in 0..(*delaunay).npoints {
-                let point = (*delaunay).points.add(index as usize);
-                libc::fprintf(
-                    stderr,
-                    c"  %d: %15.7g %15.7g %15.7g\n".as_ptr(),
-                    index,
-                    (*point).x,
-                    (*point).y,
-                    (*point).z,
-                );
-            }
-            libc::fprintf(stderr, c"triangles:\n".as_ptr());
-        }
-        if (*delaunay).ntriangles <= 0 {
-            return;
-        }
-        let count = (*delaunay).ntriangles as usize;
-        (*delaunay).triangles = libc::malloc(count * core::mem::size_of::<Triangle>()).cast();
-        (*delaunay).neighbours =
-            libc::malloc(count * core::mem::size_of::<TriangleNeighbours>()).cast();
-        (*delaunay).circles = libc::malloc(count * core::mem::size_of::<Circle>()).cast();
-        (*delaunay).n_point_triangles =
-            libc::calloc((*delaunay).npoints as usize, core::mem::size_of::<i32>()).cast();
-        (*delaunay).point_triangles =
-            libc::malloc((*delaunay).npoints as usize * core::mem::size_of::<*mut i32>()).cast();
-        (*delaunay).flags = libc::calloc(count, core::mem::size_of::<i32>()).cast();
-        for index in 0..(*delaunay).ntriangles {
-            let triangle = (*delaunay).triangles.add(index as usize);
-            let neighbours = (*delaunay).neighbours.add(index as usize);
-            for coordinate in 0..3 {
-                (*triangle).vids[coordinate] = *(*hull)
-                    .trianglelist
-                    .add((3 * index + coordinate as i32) as usize);
-                (*neighbours).tids[coordinate] = *(*hull)
-                    .neighborlist
-                    .add((3 * index + coordinate as i32) as usize);
-                (*(*delaunay)
-                    .n_point_triangles
-                    .add((*triangle).vids[coordinate] as usize)) += 1;
-            }
-            let _ = circle_build1(
-                (*delaunay).circles.add(index as usize),
-                (*delaunay).points.add((*triangle).vids[0] as usize),
-                (*delaunay).points.add((*triangle).vids[1] as usize),
-                (*delaunay).points.add((*triangle).vids[2] as usize),
+            let _ = err.write_all(
+                c_format(
+                    "  %d: %15.7g %15.7g %15.7g\n",
+                    &[
+                        CArg::Int(i as i64),
+                        CArg::Dbl(p.x),
+                        CArg::Dbl(p.y),
+                        CArg::Dbl(p.z),
+                    ],
+                )
+                .as_bytes(),
             );
-            if NN_VERBOSE != 0 {
-                libc::fprintf(
-                    stderr,
-                    c"  %d: (%d,%d,%d)\n".as_ptr(),
-                    index,
-                    (*triangle).vids[0],
-                    (*triangle).vids[1],
-                    (*triangle).vids[2],
-                );
-            }
         }
-        for index in 0..(*delaunay).npoints {
-            let n = *(*delaunay).n_point_triangles.add(index as usize);
-            *(*delaunay).point_triangles.add(index as usize) = if n > 0 {
-                libc::malloc(n as usize * core::mem::size_of::<i32>()).cast()
+    }
+
+    d.ntriangles = tio_out.numberoftriangles;
+    if d.ntriangles > 0 {
+        d.triangles = vec![Triangle::default(); d.ntriangles as usize];
+        d.neighbours = vec![TriangleNeighbours::default(); d.ntriangles as usize];
+        d.circles = vec![Circle::default(); d.ntriangles as usize];
+        d.n_point_triangles = vec![0i32; d.npoints as usize];
+        d.point_triangles = vec![Vec::new(); d.npoints as usize];
+        d.flags = vec![0i32; d.ntriangles as usize];
+    }
+
+    if NN_VERBOSE.get() != 0 {
+        let _ = ImodFile::Stderr.write_all(b"triangles:\n");
+    }
+    for i in 0..d.ntriangles {
+        let offset = i * 3;
+        let mut t = Triangle::default();
+        let mut nb = TriangleNeighbours::default();
+        let mut c = Circle::default();
+        let _status: i32;
+
+        t.vids[0] = tio_out.trianglelist[offset as usize];
+        t.vids[1] = tio_out.trianglelist[(offset + 1) as usize];
+        t.vids[2] = tio_out.trianglelist[(offset + 2) as usize];
+
+        nb.tids[0] = tio_out.neighborlist[offset as usize];
+        nb.tids[1] = tio_out.neighborlist[(offset + 1) as usize];
+        nb.tids[2] = tio_out.neighborlist[(offset + 2) as usize];
+
+        _status = circle_build1(
+            &mut c,
+            &d.points[t.vids[0] as usize],
+            &d.points[t.vids[1] as usize],
+            &d.points[t.vids[2] as usize],
+        );
+        // `assert(status)`; the source builds with assertions on.
+        assert!(_status != 0);
+
+        d.triangles[i as usize] = t;
+        d.neighbours[i as usize] = nb;
+        d.circles[i as usize] = c;
+
+        if NN_VERBOSE.get() != 0 {
+            let _ = ImodFile::Stderr.write_all(
+                c_format(
+                    "  %d: (%d,%d,%d)\n",
+                    &[
+                        CArg::Int(i as i64),
+                        CArg::Int(t.vids[0] as i64),
+                        CArg::Int(t.vids[1] as i64),
+                        CArg::Int(t.vids[2] as i64),
+                    ],
+                )
+                .as_bytes(),
+            );
+        }
+    }
+
+    for i in 0..d.ntriangles {
+        let t = d.triangles[i as usize];
+
+        for j in 0..3 {
+            d.n_point_triangles[t.vids[j] as usize] += 1;
+        }
+    }
+    if d.ntriangles > 0 {
+        for i in 0..d.npoints {
+            if d.n_point_triangles[i as usize] > 0 {
+                d.point_triangles[i as usize] =
+                    vec![0i32; d.n_point_triangles[i as usize] as usize];
             } else {
-                core::ptr::null_mut()
-            };
-            *(*delaunay).n_point_triangles.add(index as usize) = 0;
-        }
-        for index in 0..(*delaunay).ntriangles {
-            let triangle = (*delaunay).triangles.add(index as usize);
-            for coordinate in 0..3 {
-                let vertex = (*triangle).vids[coordinate];
-                let count = (*delaunay).n_point_triangles.add(vertex as usize);
-                *(*(*delaunay).point_triangles.add(vertex as usize)).add(*count as usize) = index;
-                *count += 1;
+                d.point_triangles[i as usize] = Vec::new();
             }
+            d.n_point_triangles[i as usize] = 0;
+        }
+    }
+    for i in 0..d.ntriangles {
+        let t = d.triangles[i as usize];
+
+        for j in 0..3 {
+            let vid = t.vids[j];
+
+            let slot = d.n_point_triangles[vid as usize];
+            d.point_triangles[vid as usize][slot as usize] = i;
+            d.n_point_triangles[vid as usize] += 1;
         }
     }
 }
 
-/// Original `delaunay_destroy` (`IMOD/libwarp/delaunay.c:372`).
-pub unsafe fn delaunay_destroy(delaunay: *mut Delaunay) {
-    unsafe {
-        if delaunay.is_null() {
-            return;
-        }
-        if !(*delaunay).point_triangles.is_null() {
-            for index in 0..(*delaunay).npoints {
-                let triangles = *(*delaunay).point_triangles.add(index as usize);
-                if !triangles.is_null() {
-                    libc::free(triangles.cast());
+/// Original `delaunay_build`, `CLARKSON_HULL` arm (`delaunay.c:293`).
+///
+/// For Clarkson Hull there are no holes or segments; to prune triangles at the
+/// edge of the hull, `ns` carries the minimum number of triangles to prune
+/// with and `holes` carries the two criteria, a height/base ratio and a
+/// fraction of total area.
+pub fn delaunay_build(
+    np: i32,
+    points: &[Point],
+    ns: i32,
+    _segments: Option<&[i32]>,
+    nh: i32,
+    holes: Option<&[f64]>,
+) -> Option<Box<Delaunay>> {
+    let mut d = delaunay_create();
+    let mut tio_in = HullIo {
+        pointlist: Vec::new(),
+        numberofpoints: 0,
+        trianglelist: Vec::new(),
+        neighborlist: Vec::new(),
+        numberoftriangles: 0,
+        height_base_crit: 0.,
+        area_fraction_crit: 0.,
+        min_num_for_pruning: 0,
+        verbose: 0,
+    };
+
+    if np == 0 {
+        // `free(d); return NULL;`
+        drop(d);
+        return None;
+    }
+
+    tio_in.pointlist = vec![0.0f64; (np * 2) as usize];
+    tio_in.numberofpoints = np;
+    let mut j = 0usize;
+    for i in 0..np {
+        tio_in.pointlist[j] = points[i as usize].x;
+        j += 1;
+        tio_in.pointlist[j] = points[i as usize].y;
+        j += 1;
+    }
+
+    if NN_VERBOSE.get() != 0 {
+        let _ = ImodFile::Stderr.flush();
+    }
+
+    /*
+     * climax
+     */
+    tio_in.verbose = NN_VERBOSE.get();
+    tio_in.height_base_crit = 0.;
+    tio_in.min_num_for_pruning = 2;
+    tio_in.area_fraction_crit = 0.;
+    if nh > 0 && holes.is_some() {
+        let holes = holes.unwrap();
+        tio_in.min_num_for_pruning = ns;
+        tio_in.height_base_crit = holes[0];
+        tio_in.area_fraction_crit = holes[1];
+    }
+    hull_triangulate(&mut tio_in);
+
+    if NN_VERBOSE.get() != 0 {
+        let _ = ImodFile::Stderr.flush();
+    }
+
+    d.npoints = np;
+    d.points = points.to_vec();
+
+    tio2delaunay(&mut tio_in, &mut d);
+    tio_destroy(&mut tio_in);
+
+    Some(d)
+}
+
+/// Original `delaunay_destroy` (`delaunay.c:372`).
+pub fn delaunay_destroy(d: Option<Box<Delaunay>>) {
+    if d.is_none() {
+        return;
+    }
+
+    // The source's nine guarded `free`s, the two `istack_destroy`s and the
+    // final `free(d)` are all the one drop here.
+    drop(d);
+}
+
+/// Original static `onrightside` (`delaunay.c:405`).
+///
+/// Returns whether the point p is on the right side of the vector (p0, p1).
+fn onrightside(p: &Point, p0: &Point, p1: &Point) -> i32 {
+    ((p1.x - p.x) * (p0.y - p.y) > (p0.x - p.x) * (p1.y - p.y)) as i32
+}
+
+/// Original `delaunay_xytoi` (`delaunay.c:417`).
+///
+/// Two source-level degeneracies live here and neither is fixed, because
+/// fixing either would change what the program does:
+///
+/// * With a **collinear** input the hull returns no triangles, `d->triangles`
+///   stays NULL, and `t = &d->triangles[id]` (`delaunay.c:433`) dereferences
+///   it for any query inside the — degenerate — bounding box. Verified against
+///   the vendored C: four collinear points and a query on the line SIGSEGVs.
+///   Safe Rust cannot reproduce a NULL dereference; this panics on the index
+///   instead. That is the one behaviour difference, and it is UB on the C side.
+/// * The `do { for (i…) } while (i < 3)` walk can cycle between two degenerate
+///   triangles and never terminate. Reproduced as written.
+pub fn delaunay_xytoi(d: &Delaunay, p: &Point, id: i32) -> i32 {
+    let mut t: Triangle;
+    let mut i: i32;
+    let mut id = id;
+
+    if p.x < d.xmin || p.x > d.xmax || p.y < d.ymin || p.y > d.ymax {
+        return -1;
+    }
+
+    if id < 0 || id > d.ntriangles {
+        id = 0;
+    }
+    t = d.triangles[id as usize];
+    loop {
+        i = 0;
+        while i < 3 {
+            let i1 = (i + 1) % 3;
+
+            if onrightside(
+                p,
+                &d.points[t.vids[i as usize] as usize],
+                &d.points[t.vids[i1 as usize] as usize],
+            ) != 0
+            {
+                id = d.neighbours[id as usize].tids[((i + 2) % 3) as usize];
+                if id < 0 {
+                    return id;
                 }
-            }
-            libc::free((*delaunay).point_triangles.cast());
-        }
-        if (*delaunay).nedges > 0 {
-            libc::free((*delaunay).edges.cast());
-        }
-        if !(*delaunay).n_point_triangles.is_null() {
-            libc::free((*delaunay).n_point_triangles.cast());
-        }
-        if !(*delaunay).flags.is_null() {
-            libc::free((*delaunay).flags.cast());
-        }
-        if !(*delaunay).circles.is_null() {
-            libc::free((*delaunay).circles.cast());
-        }
-        if !(*delaunay).neighbours.is_null() {
-            libc::free((*delaunay).neighbours.cast());
-        }
-        if !(*delaunay).triangles.is_null() {
-            libc::free((*delaunay).triangles.cast());
-        }
-        if !(*delaunay).t_in.is_null() {
-            istack_destroy((*delaunay).t_in);
-        }
-        if !(*delaunay).t_out.is_null() {
-            istack_destroy((*delaunay).t_out);
-        }
-        if !(*delaunay).flagids.is_null() {
-            libc::free((*delaunay).flagids.cast());
-        }
-        libc::free(delaunay.cast());
-    }
-}
-
-/// Original `delaunay_build` selected `CLARKSON_HULL` branch (`delaunay.c:279`).
-pub unsafe fn delaunay_build(
-    point_count: i32,
-    points: *mut Point,
-    _: i32,
-    _: *mut i32,
-    prune_count: i32,
-    criteria: *mut f64,
-) -> *mut Delaunay {
-    unsafe {
-        let delaunay = delaunay_create();
-        if point_count == 0 {
-            libc::free(delaunay.cast());
-            return core::ptr::null_mut();
-        }
-        let coordinates =
-            libc::malloc((2 * point_count) as usize * core::mem::size_of::<f64>()).cast::<f64>();
-        for i in 0..point_count {
-            *coordinates.add((2 * i) as usize) = (*points.add(i as usize)).x;
-            *coordinates.add((2 * i + 1) as usize) = (*points.add(i as usize)).y;
-        }
-        let mut hull = HullIo {
-            pointlist: coordinates,
-            numberofpoints: point_count,
-            trianglelist: core::ptr::null_mut(),
-            neighborlist: core::ptr::null_mut(),
-            numberoftriangles: 0,
-            height_base_crit: 0.,
-            area_fraction_crit: 0.,
-            min_num_for_pruning: 2,
-            verbose: NN_VERBOSE,
-        };
-        if prune_count > 0 && !criteria.is_null() {
-            hull.min_num_for_pruning = prune_count;
-            hull.height_base_crit = *criteria;
-            hull.area_fraction_crit = *criteria.add(1);
-        }
-        if NN_VERBOSE != 0 {
-            libc::fflush(stderr);
-        }
-        let _ = hull_triangulate(&mut hull);
-        if NN_VERBOSE != 0 {
-            libc::fflush(stderr);
-        }
-        (*delaunay).npoints = point_count;
-        (*delaunay).points = points;
-        tio2delaunay(&mut hull, delaunay);
-        tio_destroy(&mut hull);
-        delaunay
-    }
-}
-
-/// Original static `onrightside` (`IMOD/libwarp/delaunay.c:408`).
-unsafe fn on_right_side(point: *mut Point, point_zero: *mut Point, point_one: *mut Point) -> i32 {
-    unsafe {
-        (((*point_one).x - (*point).x) * ((*point_zero).y - (*point).y)
-            > ((*point_zero).x - (*point).x) * ((*point_one).y - (*point).y)) as i32
-    }
-}
-
-/// Original `delaunay_xytoi` (`IMOD/libwarp/delaunay.c:420`).
-pub unsafe fn delaunay_xytoi(delaunay: *mut Delaunay, point: *mut Point, mut id: i32) -> i32 {
-    unsafe {
-        if (*point).x < (*delaunay).xmin
-            || (*point).x > (*delaunay).xmax
-            || (*point).y < (*delaunay).ymin
-            || (*point).y > (*delaunay).ymax
-        {
-            return -1;
-        }
-
-        if id < 0 || id > (*delaunay).ntriangles {
-            id = 0;
-        }
-        let mut triangle = (*delaunay).triangles.add(id as usize);
-        loop {
-            let mut index = 0;
-            while index < 3 {
-                let index_one = (index + 1) % 3;
-                if on_right_side(
-                    point,
-                    (*delaunay)
-                        .points
-                        .add((*triangle).vids[index as usize] as usize),
-                    (*delaunay)
-                        .points
-                        .add((*triangle).vids[index_one as usize] as usize),
-                ) != 0
-                {
-                    id = (*delaunay).neighbours.add(id as usize).read().tids
-                        [((index + 2) % 3) as usize];
-                    if id < 0 {
-                        return id;
-                    }
-                    triangle = (*delaunay).triangles.add(id as usize);
-                    break;
-                }
-                index += 1;
-            }
-            if index == 3 {
+                t = d.triangles[id as usize];
                 break;
             }
+            i += 1;
         }
-        id
+        if i >= 3 {
+            break;
+        }
     }
+
+    id
 }
 
-/// Original static `delaunay_addflag` (`IMOD/libwarp/delaunay.c:448`).
-unsafe fn delaunay_addflag(delaunay: *mut Delaunay, index: i32) {
-    unsafe {
-        if (*delaunay).nflags == (*delaunay).nflagsallocated {
-            (*delaunay).nflagsallocated += 100;
-            (*delaunay).flagids = libc::realloc(
-                (*delaunay).flagids.cast(),
-                (*delaunay).nflagsallocated as usize * core::mem::size_of::<i32>(),
-            )
-            .cast();
-        }
-        *(*delaunay).flagids.add((*delaunay).nflags as usize) = index;
-        (*delaunay).nflags += 1;
+/// Original static `delaunay_addflag` (`delaunay.c:445`).
+fn delaunay_addflag(d: &mut Delaunay, i: i32) {
+    if d.nflags == d.nflagsallocated {
+        d.nflagsallocated += N_FLAGS_INC;
+        d.flagids.resize(d.nflagsallocated as usize, 0);
     }
+    d.flagids[d.nflags as usize] = i;
+    d.nflags += 1;
 }
 
-/// Original static `delaunay_resetflags` (`IMOD/libwarp/delaunay.c:458`).
-unsafe fn delaunay_resetflags(delaunay: *mut Delaunay) {
-    unsafe {
-        for index in 0..(*delaunay).nflags {
-            *(*delaunay)
-                .flags
-                .add(*(*delaunay).flagids.add(index as usize) as usize) = 0;
-        }
-        (*delaunay).nflags = 0;
+/// Original static `delaunay_resetflags` (`delaunay.c:455`).
+fn delaunay_resetflags(d: &mut Delaunay) {
+    for i in 0..d.nflags {
+        let id = d.flagids[i as usize];
+        d.flags[id as usize] = 0;
     }
+    d.nflags = 0;
 }
 
-/// Original `delaunay_circles_find` (`IMOD/libwarp/delaunay.c:486`).
-pub unsafe fn delaunay_circles_find(
-    delaunay: *mut Delaunay,
-    point: *mut Point,
-    count: *mut i32,
-    output: *mut *mut i32,
-) {
-    unsafe {
-        let mut contains = 0;
-        if (*delaunay).t_in.is_null() {
-            (*delaunay).t_in = istack_create();
-            (*delaunay).t_out = istack_create();
-        }
-        if (*delaunay).ntriangles <= 20 {
-            istack_reset((*delaunay).t_out);
-            for index in 0..(*delaunay).ntriangles {
-                if circle_contains((*delaunay).circles.add(index as usize), point) != 0 {
-                    istack_push((*delaunay).t_out, index);
-                }
+/// Original `delaunay_circles_find` (`delaunay.c:483`).
+///
+/// Finds all tricircles the specified point belongs to.
+///
+/// The C hands the caller `*out = d->t_out->v`, a live borrow of the
+/// triangulation's own stack, which cannot coexist with the `&mut Delaunay`
+/// every caller also holds. `out` is filled with the same `*n` values instead.
+/// The two failure paths that set `*out = NULL` leave it empty with `*n == 0`.
+pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut Vec<i32>) {
+    /*
+     * This flag was introduced as a hack to handle some degenerate cases. It
+     * is set to 1 only if the triangle associated with the first circle is
+     * already known to contain the point. In this case the circle is assumed
+     * to contain the point without a check. In my practice this turned
+     * useful in some cases when point p coincided with one of the vertices
+     * of a thin triangle.
+     */
+    let mut contains = 0;
+    let mut i: i32;
+
+    if d.t_in.is_none() {
+        d.t_in = Some(*istack_create());
+        d.t_out = Some(*istack_create());
+    }
+
+    /*
+     * if there are only a few data points, do linear search
+     */
+    if d.ntriangles <= N_SEARCH_TURNON {
+        istack_reset(d.t_out.as_mut().unwrap());
+
+        for i in 0..d.ntriangles {
+            let c = d.circles[i as usize];
+            if circle_contains(&c, p) != 0 {
+                istack_push(d.t_out.as_mut().unwrap(), i);
             }
-            *count = (*(*delaunay).t_out).n;
-            *output = (*(*delaunay).t_out).v;
-            return;
         }
-        if (*delaunay).first_id < 0
-            || circle_contains(
-                (*delaunay).circles.add((*delaunay).first_id as usize),
-                point,
-            ) == 0
-        {
-            (*delaunay).first_id = delaunay_xytoi(delaunay, point, (*delaunay).first_id);
-            contains = ((*delaunay).first_id >= 0) as i32;
-            if (*delaunay).first_id < 0 {
-                let prior_count = (*(*delaunay).t_out).n;
-                let mut triangle_id = -1;
-                let mut index = 0;
-                while index < prior_count {
-                    triangle_id = *(*(*delaunay).t_out).v.add(index as usize);
-                    if circle_contains((*delaunay).circles.add(triangle_id as usize), point) != 0 {
+
+        let t_out = d.t_out.as_ref().unwrap();
+        *n = t_out.n;
+        out.clear();
+        out.extend_from_slice(&t_out.v[..t_out.n as usize]);
+
+        return;
+    }
+    /*
+     * otherwise, do a more complicated stuff
+     */
+
+    /*
+     * It is important to have a reasonable seed here. If the last search
+     * was successful -- start with the last found tricircle, otherwhile (i)
+     * try to find a triangle containing p; if fails then (ii) check
+     * tricircles from the last search; if fails then (iii) make linear
+     * search through all tricircles
+     */
+    if d.first_id < 0 || circle_contains(&d.circles[d.first_id as usize], p) == 0 {
+        /*
+         * if any triangle contains p -- start with this triangle
+         */
+        d.first_id = delaunay_xytoi(d, p, d.first_id);
+        contains = (d.first_id >= 0) as i32;
+
+        /*
+         * if no triangle contains p, there still is a chance that it is
+         * inside some of circumcircles
+         */
+        if d.first_id < 0 {
+            let nn = d.t_out.as_ref().unwrap().n;
+            let mut tid = -1;
+
+            /*
+             * first check results of the last search
+             */
+            i = 0;
+            while i < nn {
+                tid = d.t_out.as_ref().unwrap().v[i as usize];
+                if circle_contains(&d.circles[tid as usize], p) != 0 {
+                    break;
+                }
+                i += 1;
+            }
+            /*
+             * if unsuccessful, search through all circles
+             */
+            if tid < 0 || i == nn {
+                let nt = d.ntriangles as f64;
+
+                tid = 0;
+                while (tid as f64) < nt {
+                    if circle_contains(&d.circles[tid as usize], p) != 0 {
                         break;
                     }
-                    index += 1;
+                    tid += 1;
                 }
-                if triangle_id < 0 || index == prior_count {
-                    let triangle_count = (*delaunay).ntriangles as f64;
-                    triangle_id = 0;
-                    while (triangle_id as f64) < triangle_count {
-                        if circle_contains((*delaunay).circles.add(triangle_id as usize), point)
-                            != 0
-                        {
-                            break;
-                        }
-                        triangle_id += 1;
-                    }
-                    if (triangle_id as f64) == triangle_count {
-                        istack_reset((*delaunay).t_out);
-                        *count = 0;
-                        *output = core::ptr::null_mut();
-                        return;
-                    }
-                }
-                (*delaunay).first_id = triangle_id;
-            }
-        }
-        istack_reset((*delaunay).t_in);
-        istack_reset((*delaunay).t_out);
-        istack_push((*delaunay).t_in, (*delaunay).first_id);
-        *(*delaunay).flags.add((*delaunay).first_id as usize) = 1;
-        delaunay_addflag(delaunay, (*delaunay).first_id);
-        while (*(*delaunay).t_in).n > 0 {
-            let triangle_id = istack_pop((*delaunay).t_in);
-            let triangle = (*delaunay).triangles.add(triangle_id as usize);
-            if contains != 0
-                || circle_contains((*delaunay).circles.add(triangle_id as usize), point) != 0
-            {
-                istack_push((*delaunay).t_out, triangle_id);
-                for index in 0..3 {
-                    let vertex_id = (*triangle).vids[index as usize];
-                    let triangle_count = *(*delaunay).n_point_triangles.add(vertex_id as usize);
-                    for neighbour_index in 0..triangle_count {
-                        let neighbour_id = *(*(*delaunay).point_triangles.add(vertex_id as usize))
-                            .add(neighbour_index as usize);
-                        if *(*delaunay).flags.add(neighbour_id as usize) == 0 {
-                            istack_push((*delaunay).t_in, neighbour_id);
-                            *(*delaunay).flags.add(neighbour_id as usize) = 1;
-                            delaunay_addflag(delaunay, neighbour_id);
-                        }
-                    }
+                if (tid as f64) == nt {
+                    istack_reset(d.t_out.as_mut().unwrap());
+                    *n = 0;
+                    out.clear();
+                    return; /* failed */
                 }
             }
-            contains = 0;
+            d.first_id = tid;
         }
-        *count = (*(*delaunay).t_out).n;
-        *output = (*(*delaunay).t_out).v;
-        delaunay_resetflags(delaunay);
     }
+
+    istack_reset(d.t_in.as_mut().unwrap());
+    istack_reset(d.t_out.as_mut().unwrap());
+
+    let first_id = d.first_id;
+    istack_push(d.t_in.as_mut().unwrap(), first_id);
+    d.flags[first_id as usize] = 1;
+    delaunay_addflag(d, first_id);
+
+    /*
+     * main cycle
+     */
+    while d.t_in.as_ref().unwrap().n > 0 {
+        let tid = istack_pop(d.t_in.as_mut().unwrap());
+        let t = d.triangles[tid as usize];
+
+        if contains != 0 || circle_contains(&d.circles[tid as usize], p) != 0 {
+            istack_push(d.t_out.as_mut().unwrap(), tid);
+            for i in 0..3 {
+                let vid = t.vids[i as usize];
+                let nt = d.n_point_triangles[vid as usize];
+
+                for j in 0..nt {
+                    let ntid = d.point_triangles[vid as usize][j as usize];
+
+                    if d.flags[ntid as usize] == 0 {
+                        istack_push(d.t_in.as_mut().unwrap(), ntid);
+                        d.flags[ntid as usize] = 1;
+                        delaunay_addflag(d, ntid);
+                    }
+                }
+            }
+        }
+        contains = 0;
+    }
+
+    {
+        let t_out = d.t_out.as_ref().unwrap();
+        *n = t_out.n;
+        out.clear();
+        out.extend_from_slice(&t_out.v[..t_out.n as usize]);
+    }
+    delaunay_resetflags(d);
 }
 
 #[cfg(test)]
@@ -483,103 +589,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn xytoi_walks_neighbours_and_rejects_outside_source_bounds() {
-        let mut points = [
-            Point {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            },
-            Point {
-                x: 1.,
-                y: 0.,
-                z: 0.,
-            },
-            Point {
-                x: 0.,
-                y: 1.,
-                z: 0.,
-            },
-            Point {
-                x: 1.,
-                y: 1.,
-                z: 0.,
-            },
-        ];
-        let mut triangles = [Triangle { vids: [0, 1, 2] }, Triangle { vids: [1, 3, 2] }];
-        let mut neighbours = [
-            TriangleNeighbours { tids: [1, -1, -1] },
-            TriangleNeighbours { tids: [-1, 0, -1] },
-        ];
-        let mut delaunay: Delaunay = unsafe { core::mem::zeroed() };
-        delaunay.points = points.as_mut_ptr();
-        delaunay.xmin = 0.;
-        delaunay.xmax = 1.;
-        delaunay.ymin = 0.;
-        delaunay.ymax = 1.;
-        delaunay.ntriangles = 2;
-        delaunay.triangles = triangles.as_mut_ptr();
-        delaunay.neighbours = neighbours.as_mut_ptr();
-        let mut upper_right = Point {
-            x: 0.75,
-            y: 0.75,
-            z: 0.,
-        };
-        let mut outside = Point {
-            x: 1.1,
-            y: 0.5,
-            z: 0.,
-        };
-
-        unsafe {
-            assert_eq!(delaunay_xytoi(&mut delaunay, &mut upper_right, 0), 1);
-            assert_eq!(delaunay_xytoi(&mut delaunay, &mut outside, 0), -1);
-        }
-    }
-
-    #[test]
-    fn circles_find_uses_the_source_small_triangulation_linear_search() {
-        let mut points = [Point {
-            x: 0.,
-            y: 0.,
-            z: 0.,
-        }];
-        let circles = [
-            Circle {
-                x: 0.,
-                y: 0.,
-                r: 1.,
-            },
-            Circle {
-                x: 3.,
-                y: 0.,
-                r: 1.,
-            },
-        ];
-        let mut delaunay = unsafe { delaunay_create() };
-        unsafe {
-            (*delaunay).points = points.as_mut_ptr();
-            (*delaunay).npoints = 1;
-            (*delaunay).circles = libc::malloc(2 * core::mem::size_of::<Circle>()).cast();
-            core::ptr::copy_nonoverlapping(circles.as_ptr(), (*delaunay).circles, 2);
-            (*delaunay).ntriangles = 2;
-            let mut query = Point {
-                x: 0.5,
-                y: 0.,
-                z: 0.,
-            };
-            let mut count = -1;
-            let mut found = core::ptr::null_mut();
-            delaunay_circles_find(delaunay, &mut query, &mut count, &mut found);
-            assert_eq!(count, 1);
-            assert_eq!(*found, 0);
-            delaunay_destroy(delaunay);
-        }
-    }
-
-    #[test]
     fn hull_backend_preserves_source_bounds_when_no_triangle_is_possible() {
-        let mut points = [
+        let points = [
             Point {
                 x: -2.,
                 y: 4.,
@@ -591,21 +602,55 @@ mod tests {
                 z: 0.,
             },
         ];
-        unsafe {
-            let delaunay = delaunay_build(
-                2,
-                points.as_mut_ptr(),
-                0,
-                core::ptr::null_mut(),
-                0,
-                core::ptr::null_mut(),
-            );
-            assert_eq!((*delaunay).ntriangles, 0);
-            assert_eq!((*delaunay).xmin, -2.);
-            assert_eq!((*delaunay).xmax, 3.);
-            assert_eq!((*delaunay).ymin, -1.);
-            assert_eq!((*delaunay).ymax, 4.);
-            delaunay_destroy(delaunay);
-        }
+        let d = delaunay_build(2, &points, 0, None, 0, None).unwrap();
+        assert_eq!(d.ntriangles, 0);
+        assert_eq!(d.xmin, -2.);
+        assert_eq!(d.xmax, 3.);
+        assert_eq!(d.ymin, -1.);
+        assert_eq!(d.ymax, 4.);
+        delaunay_destroy(Some(d));
+    }
+
+    #[test]
+    fn build_of_a_single_triangle_maps_points_and_finds_its_circle() {
+        let points = [
+            Point {
+                x: 0.,
+                y: 0.,
+                z: 0.,
+            },
+            Point {
+                x: 1.,
+                y: 0.,
+                z: 0.,
+            },
+            Point {
+                x: 0.,
+                y: 1.,
+                z: 0.,
+            },
+        ];
+        let mut d = delaunay_build(3, &points, 0, None, 0, None).unwrap();
+        assert_eq!(d.ntriangles, 1);
+        let inside = Point {
+            x: 0.25,
+            y: 0.25,
+            z: 0.,
+        };
+        assert_eq!(delaunay_xytoi(&d, &inside, -1), 0);
+        let outside = Point {
+            x: 5.,
+            y: 5.,
+            z: 0.,
+        };
+        assert_eq!(delaunay_xytoi(&d, &outside, -1), -1);
+
+        let mut n = -1;
+        let mut out: Vec<i32> = Vec::new();
+        delaunay_circles_find(&mut d, &inside, &mut n, &mut out);
+        assert_eq!(n, 1);
+        assert_eq!(out, vec![0]);
+        assert_eq!(N_FLAGS_TURNON, 1000);
+        delaunay_destroy(Some(d));
     }
 }

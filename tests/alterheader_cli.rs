@@ -40,12 +40,14 @@ fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
             std::process::id()
         ));
         let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 3, 2, MRC_MODE_FLOAT), 0);
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
-        libc::fclose(file);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        drop(file);
         let result = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .args([
@@ -77,10 +79,12 @@ fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
             stdout.contains("Number of columns, rows, sections"),
             "{stdout}"
         );
-        let file = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-        let mut output: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut output), 0);
-        libc::fclose(file);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                .unwrap();
+        let mut output = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut output), 0);
+        drop(file);
         assert_eq!((output.xorg, output.yorg, output.zorg), (1.0, 2.0, 3.0));
         assert_eq!((output.mapc, output.mapr, output.maps), (3, 2, 1));
         assert_eq!((output.mx, output.my, output.mz), (8, 6, 4));
@@ -103,15 +107,17 @@ fn alterheader_inserts_title_at_source_one_based_position() {
             std::process::id()
         ));
         let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.nlabl = 2;
         header.labels[0][..5].copy_from_slice(b"first");
         header.labels[1][..6].copy_from_slice(b"second");
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
-        libc::fclose(file);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        drop(file);
         let result = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-position", "2", "-title", "inserted"])
@@ -119,10 +125,12 @@ fn alterheader_inserts_title_at_source_one_based_position() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{:?}", result);
-        let file = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-        let mut output: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut output), 0);
-        libc::fclose(file);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                .unwrap();
+        let mut output = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut output), 0);
+        drop(file);
         assert_eq!(output.nlabl, 3);
         assert_eq!(&output.labels[0][..5], b"first");
         assert_eq!(&output.labels[1][..8], b"inserted");
@@ -139,14 +147,16 @@ fn alterheader_modefix_reports_source_mode_conversion_and_range_warning() {
             std::process::id()
         ));
         let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, 1), 0);
         header.amin = -4.0;
         header.amax = 12.0;
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
-        libc::fclose(file);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        drop(file);
         let result = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .args(["-modefix", input.to_str().unwrap()])
@@ -161,10 +171,12 @@ fn alterheader_modefix_reports_source_mode_conversion_and_range_warning() {
             ),
             "{stdout}"
         );
-        let file = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-        let mut changed = core::mem::zeroed::<MrcHeader>();
-        assert_eq!(mrc_head_read(file, &mut changed), 0);
-        libc::fclose(file);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                .unwrap();
+        let mut changed = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut changed), 0);
+        drop(file);
         assert_eq!(changed.mode, 6);
         std::fs::remove_file(input).unwrap();
     }
@@ -181,12 +193,14 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
             std::process::id()
         ));
         let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 3, 2, MRC_MODE_FLOAT), 0);
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
-        libc::fclose(file);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        drop(file);
 
         let mut child = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
@@ -233,10 +247,12 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
         // Label 15 reopens the file on unit 3 and reprints the header.
         assert!(stdout.contains(" RO image file on unit   3 : "), "{stdout}");
 
-        let file = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-        let mut output: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut output), 0);
-        libc::fclose(file);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                .unwrap();
+        let mut output = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut output), 0);
+        drop(file);
         assert_eq!((output.xorg, output.yorg, output.zorg), (1.0, 2.0, 3.0));
         // `del` rewrites the cell as mxyz * delta (`alterheader.f90:340`).
         assert_eq!((output.xlen, output.ylen, output.zlen), (8.0, 9.0, 8.0));
@@ -255,12 +271,14 @@ fn alterheader_interactive_rejects_an_unknown_keyword_and_reprompts() {
             std::process::id()
         ));
         let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
-        libc::fclose(file);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        drop(file);
         let mut child = common::imod_cmd("alterheader")
             .env("AUTODOC_DIR", AUTODOC)
             .arg(&input)
@@ -298,12 +316,14 @@ fn alterheader_falls_back_to_the_program_option_table_without_an_autodoc() {
     ));
     unsafe {
         let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
-        libc::fclose(file);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
+        drop(file);
     }
     let result = common::imod_cmd("alterheader")
         .env_remove("AUTODOC_DIR")

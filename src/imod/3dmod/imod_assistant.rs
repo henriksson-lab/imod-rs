@@ -6,7 +6,6 @@
 //! to receive the source `error(const QString &)` signal.
 #![allow(dead_code)]
 
-use std::ffi::CStr;
 use std::fs;
 use std::io::Write;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -54,11 +53,7 @@ impl ImodAssistant {
         pref_absolute: bool,
     ) -> Self {
         let mut m_assumed_imod = 0;
-        let m_imod_dir = unsafe {
-            CStr::from_ptr(imod_dir_or_default(&mut m_assumed_imod))
-                .to_string_lossy()
-                .into_owned()
-        };
+        let m_imod_dir = unsafe { imod_dir_or_default(Some(&mut m_assumed_imod)) };
 
         // The Windows standalone-directory fallback in the source is a
         // platform-specific Qt file check.

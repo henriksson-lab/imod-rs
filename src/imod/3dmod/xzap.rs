@@ -4508,9 +4508,14 @@ impl ZapFuncs {
                         // Look through selection list, remove any that do not
                         // fit constraints
                         let sel_list = unsafe { (*vi).selection_list };
-                        i = unsafe { ilist_size(sel_list) } - 1;
+                        i = unsafe { ilist_size(sel_list.as_ref()) } - 1;
                         while i >= 0 {
-                            let indp = unsafe { ilist_item(sel_list, i) } as *mut Iindex;
+                            let indp = unsafe {
+                                ilist_item(sel_list.as_mut(), i)
+                                    .map_or(core::ptr::null_mut(), |item| {
+                                        item.as_mut_ptr().cast::<Iindex>()
+                                    })
+                            };
                             let mut keep = false;
                             if unsafe { (*indp).object } < unsafe { (&(*imod).obj).len() as i32 } {
                                 obj = unsafe {
@@ -4542,7 +4547,7 @@ impl ZapFuncs {
                                 }
                             }
                             if !keep {
-                                unsafe { ilist_remove(sel_list, i) };
+                                unsafe { ilist_remove(&mut *sel_list, i) };
                             }
                             i -= 1;
                         }
@@ -6163,7 +6168,7 @@ impl ZapFuncs {
                         {
                             // Crosses.  Select this contour; add current
                             // contour if list empty
-                            if unsafe { ilist_size((*vi).selection_list) } == 0
+                            if unsafe { ilist_size((*vi).selection_list.as_ref()) } == 0
                                 && unsafe { (*imod).cindex.contour } >= 0
                             {
                                 let ind = unsafe { (*imod).cindex };
@@ -7110,9 +7115,13 @@ impl ZapFuncs {
                 if which != 0 {
                     store.type_ = GEN_STORE_COLOR;
                     store.flags = GEN_STORE_BYTE << 2;
-                    store.index = StoreUnion { i: 3 + i as i32 };
-                    store.value = StoreUnion { i: 0 };
-                    unsafe { store.value.b[0] = 255 };
+                    store.index = StoreUnion::from_i(3 + i as i32);
+                    store.value = StoreUnion::from_i(0);
+                    // `xzap.cpp:3850` `store.value.b[0] = 255` -- one byte of
+                    // the union, over the zero just written.
+                    let mut bytes = store.value.b();
+                    bytes[0] = 255;
+                    store.value.set_b(bytes);
                     istore_insert(unsafe { &mut (*obj).store }, store);
                 }
             }
@@ -9857,12 +9866,12 @@ impl ZapFuncs {
             for st in 0..unsafe { (&(*cont).store).len() } {
                 let stp = unsafe { &(&(*cont).store)[st] };
                 if stp.type_ == GEN_STORE_CONNECT {
-                    let pt = unsafe { stp.index.i };
+                    let pt = (stp.index.i());
                     if pt >= 0
                         && pt < unsafe { (&(*cont).pts).len() as i32 }
                         && self.point_visable(unsafe { &(&(*cont).pts)[pt as usize] }) != 0
                     {
-                        let value = unsafe { stp.value.i };
+                        let value = (stp.value.i());
                         let (x, y) = (
                             self.xpos(unsafe { (&(*cont).pts)[pt as usize].x }),
                             self.ypos(unsafe { (&(*cont).pts)[pt as usize].y }),

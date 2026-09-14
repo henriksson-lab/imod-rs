@@ -7,7 +7,7 @@
 //! Qt event loop is present.  The X11 boundary deliberately reports an error
 //! when `xclip` or an X display is unavailable.
 
-use std::ffi::CString;
+use crate::imod::libcfshr::b3dutil::{CArg, c_format};
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -62,7 +62,13 @@ impl ImodSendEvent {
                 self.clipboard_changed(&text);
             }
             if self.debug_out {
-                eprintln!("Imodsendevent - resending {qstr} ");
+                let _ = std::io::stderr().write_all(
+                    c_format(
+                        "Imodsendevent - resending %s \n",
+                        &[CArg::Str(qstr.as_str())],
+                    )
+                    .as_bytes(),
+                );
             }
             if let Some(mut owner) = self.clipboard_owner.take() {
                 let _ = owner.kill();
@@ -77,14 +83,23 @@ impl ImodSendEvent {
             {
                 Ok(child) => child,
                 Err(error) => {
-                    eprintln!("ERROR: imodsendevent - cannot access X clipboard: {error}");
+                    let _ = std::io::stderr().write_all(
+                        c_format(
+                            "ERROR: imodsendevent - cannot access X clipboard: %s\n",
+                            &[CArg::Str(error.to_string().as_str())],
+                        )
+                        .as_bytes(),
+                    );
                     self.exit_code = Some(2);
                     return;
                 }
             };
             if let Some(mut stdin) = child.stdin.take() {
                 if stdin.write_all(qstr.as_bytes()).is_err() {
-                    eprintln!("ERROR: imodsendevent - cannot write X clipboard");
+                    let _ = std::io::stderr().write_all(
+                        c_format("ERROR: imodsendevent - cannot write X clipboard\n", &[])
+                            .as_bytes(),
+                    );
                     self.exit_code = Some(2);
                     let _ = child.kill();
                     let _ = child.wait();
@@ -95,14 +110,22 @@ impl ImodSendEvent {
             self.clipboard_owner = Some(child);
             return;
         }
-        eprintln!("ERROR: imodsendevent - timeout before response received from target 3dmod");
+        let _ = std::io::stderr().write_all(
+            c_format(
+                "ERROR: imodsendevent - timeout before response received from target 3dmod\n",
+                &[],
+            )
+            .as_bytes(),
+        );
         self.exit_code = Some(2);
     }
 
     /// Maps `ImodSendEvent::clipboardChanged()`.
     pub fn clipboard_changed(&mut self, text: &str) {
         if self.debug_out {
-            eprintln!("Imodsendevent - clipboard = {text}");
+            let _ = std::io::stderr().write_all(
+                c_format("Imodsendevent - clipboard = %s\n", &[CArg::Str(text)]).as_bytes(),
+            );
         }
         if text.is_empty() {
             return;
@@ -123,7 +146,13 @@ impl ImodSendEvent {
         if text[index + 1..] != *"ERROR" {
             return;
         }
-        eprintln!("ERROR: imodsendevent - message received but error occurred executing it");
+        let _ = std::io::stderr().write_all(
+            c_format(
+                "ERROR: imodsendevent - message received but error occurred executing it\n",
+                &[],
+            )
+            .as_bytes(),
+        );
         self.exit_code = Some(3);
     }
 }
@@ -151,29 +180,61 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
             Some(b't') => {
                 arg_index += 1;
                 let Some(value) = arguments.get(arg_index) else {
-                    eprintln!("ERROR: imodsendevent - invalid timeout entry ");
+                    let _ = std::io::stderr().write_all(
+                        c_format("ERROR: imodsendevent - invalid timeout entry \n", &[]).as_bytes(),
+                    );
                     return 3;
                 };
-                let Ok(c_value) = CString::new(value.as_str()) else {
-                    eprintln!("ERROR: imodsendevent - invalid timeout entry {value}");
-                    return 3;
-                };
-                let mut end_pointer = std::ptr::null_mut();
-                let parsed = unsafe { libc::strtod(c_value.as_ptr(), &mut end_pointer) };
-                let consumed = unsafe { end_pointer.offset_from(c_value.as_ptr()) } as usize;
+                // `strtod`: skip leading whitespace, convert the longest prefix
+                // that is a number, and leave `endptr` at the first character
+                // not consumed — the original pointer when nothing converts.
+                let mut parsed = 0.0_f64;
+                let mut consumed = 0_usize;
+                let bytes = value.as_bytes();
+                let mut scan = 0_usize;
+                while scan < bytes.len() && bytes[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
+                let mut end = bytes.len();
+                while end > scan {
+                    if let Some(Ok(number)) = value.get(scan..end).map(str::parse::<f64>) {
+                        parsed = number;
+                        consumed = end;
+                        break;
+                    }
+                    end -= 1;
+                }
                 if consumed < value.len() {
-                    eprintln!("ERROR: imodsendevent - invalid timeout entry {value}");
+                    let _ = std::io::stderr().write_all(
+                        c_format(
+                            "ERROR: imodsendevent - invalid timeout entry %s\n",
+                            &[CArg::Str(value.as_str())],
+                        )
+                        .as_bytes(),
+                    );
                     return 3;
                 }
                 timeout = parsed;
             }
             Some(b'D') => event.debug_out = true,
             Some(b'h') => {
-                println!("   Usage: imodsendevent [-t timeout] [-D] Window_ID action [arguments]");
+                let _ = std::io::stdout().write_all(
+                    c_format(
+                        "   Usage: imodsendevent [-t timeout] [-D] Window_ID action [arguments]\n",
+                        &[],
+                    )
+                    .as_bytes(),
+                );
                 return 0;
             }
             _ => {
-                eprintln!("ERROR: imodsendevent - invalid argument {argument}");
+                let _ = std::io::stderr().write_all(
+                    c_format(
+                        "ERROR: imodsendevent - invalid argument %s\n",
+                        &[CArg::Str(argument.as_str())],
+                    )
+                    .as_bytes(),
+                );
                 return 3;
             }
         }
@@ -181,50 +242,90 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
     }
     let num_args = arguments.len().saturating_sub(arg_index);
     if num_args < 2 {
-        eprintln!(
-            "ERROR: imodsendevent - Wrong number of arguments\n   Usage: imodsendevent [-t timeout] [-D] Window_ID action [arguments]"
+        let _ = std::io::stderr().write_all(
+            c_format(
+                "ERROR: imodsendevent - Wrong number of arguments\n   Usage: imodsendevent [-t timeout] [-D] Window_ID action [arguments]\n",
+                &[],
+            )
+            .as_bytes(),
         );
         return 3;
     }
+    // Check the arguments for odd characters.  `strtol` with base 10 is the same
+    // longest-prefix scan as `strtod`, over an optional sign and decimal digits,
+    // and the source only looks at how much of the argument it consumed.
     let window_argument = &arguments[arg_index];
-    let Ok(c_window_argument) = CString::new(window_argument.as_str()) else {
-        eprintln!("ERROR: imodsendevent - invalid characters in window ID entry {window_argument}");
-        return 3;
-    };
-    let mut end_pointer = std::ptr::null_mut();
-    event.win_id = unsafe { libc::strtol(c_window_argument.as_ptr(), &mut end_pointer, 10) as i32 };
-    let consumed = unsafe { end_pointer.offset_from(c_window_argument.as_ptr()) } as usize;
+    let bytes = window_argument.as_bytes();
+    let mut scan = 0_usize;
+    while scan < bytes.len() && bytes[scan].is_ascii_whitespace() {
+        scan += 1;
+    }
+    let mut consumed = 0_usize;
+    let mut end = bytes.len();
+    while end > scan {
+        if let Some(Ok(number)) = window_argument.get(scan..end).map(str::parse::<i64>) {
+            event.win_id = number as i32;
+            consumed = end;
+            break;
+        }
+        end -= 1;
+    }
     if consumed < window_argument.len() {
-        eprintln!("ERROR: imodsendevent - invalid characters in window ID entry {window_argument}");
+        let _ = std::io::stderr().write_all(
+            c_format(
+                "ERROR: imodsendevent - invalid characters in window ID entry %s\n",
+                &[CArg::Str(window_argument.as_str())],
+            )
+            .as_bytes(),
+        );
         return 3;
     }
     let action_argument = &arguments[arg_index + 1];
-    let Ok(c_action_argument) = CString::new(action_argument.as_str()) else {
-        eprintln!("ERROR: imodsendevent - invalid characters in action entry {action_argument}");
-        return 3;
-    };
-    let mut end_pointer = std::ptr::null_mut();
-    unsafe {
-        libc::strtol(c_action_argument.as_ptr(), &mut end_pointer, 10);
+    let bytes = action_argument.as_bytes();
+    let mut scan = 0_usize;
+    while scan < bytes.len() && bytes[scan].is_ascii_whitespace() {
+        scan += 1;
     }
-    let consumed = unsafe { end_pointer.offset_from(c_action_argument.as_ptr()) } as usize;
+    let mut consumed = 0_usize;
+    let mut end = bytes.len();
+    while end > scan {
+        if let Some(Ok(_action)) = action_argument.get(scan..end).map(str::parse::<i64>) {
+            consumed = end;
+            break;
+        }
+        end -= 1;
+    }
     if consumed < action_argument.len() {
-        eprintln!("ERROR: imodsendevent - invalid characters in action entry {action_argument}");
+        let _ = std::io::stderr().write_all(
+            c_format(
+                "ERROR: imodsendevent - invalid characters in action entry %s\n",
+                &[CArg::Str(action_argument.as_str())],
+            )
+            .as_bytes(),
+        );
         return 3;
     }
 
     // QTime::currentTime() only uses local minute, second, and millisecond in
-    // the C++ source.  `localtime_r` is the direct C-library equivalent.
-    let milliseconds = SystemTime::now()
+    // the C++ source.  Converting epoch seconds to local civil time needs the C
+    // library's timezone database (`/etc/localtime`, `$TZ`), which Rust's
+    // standard library does not provide and this crate takes no dependency for,
+    // so `localtime_r` is the one foreign call left in this module.
+    let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_millis() as i32;
-    let mut local_time = unsafe { std::mem::zeroed::<libc::tm>() };
-    let mut now: libc::time_t = 0;
-    unsafe {
-        libc::time(&mut now);
-        libc::localtime_r(&now, &mut local_time);
-    }
+        .unwrap_or_default();
+    let milliseconds = since_epoch.subsec_millis() as i32;
+    let now = since_epoch.as_secs() as libc::time_t;
+    let local_time = unsafe {
+        let mut local_time = std::mem::MaybeUninit::<libc::tm>::uninit();
+        if libc::localtime_r(&raw const now, local_time.as_mut_ptr()).is_null() {
+            let _ = std::io::stderr().write_all(
+                c_format("ERROR: imodsendevent - cannot get the local time\n", &[]).as_bytes(),
+            );
+            return 3;
+        }
+        local_time.assume_init()
+    };
     let time_stamp = 60_000 * local_time.tm_min + 1_000 * local_time.tm_sec + milliseconds;
     event.time_str = format!("{window_argument} {time_stamp} ");
     event.cmd_str = arguments[arg_index + 1..].join(" ");
@@ -232,7 +333,9 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
 
     let interval = (1000.0 * timeout + 0.5) as i64;
     if event.debug_out {
-        eprintln!("Imodsendevent sending: {qstr}");
+        let _ = std::io::stderr().write_all(
+            c_format("Imodsendevent sending: %s\n", &[CArg::Str(qstr.as_str())]).as_bytes(),
+        );
     }
     let mut child = match Command::new("xclip")
         .args(["-selection", "clipboard", "-i", "-quiet"])
@@ -243,13 +346,21 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
     {
         Ok(child) => child,
         Err(error) => {
-            eprintln!("ERROR: imodsendevent - cannot access X clipboard: {error}");
+            let _ = std::io::stderr().write_all(
+                c_format(
+                    "ERROR: imodsendevent - cannot access X clipboard: %s\n",
+                    &[CArg::Str(error.to_string().as_str())],
+                )
+                .as_bytes(),
+            );
             return 2;
         }
     };
     if let Some(mut stdin) = child.stdin.take() {
         if stdin.write_all(qstr.as_bytes()).is_err() {
-            eprintln!("ERROR: imodsendevent - cannot write X clipboard");
+            let _ = std::io::stderr().write_all(
+                c_format("ERROR: imodsendevent - cannot write X clipboard\n", &[]).as_bytes(),
+            );
             let _ = child.kill();
             let _ = child.wait();
             return 2;
@@ -265,7 +376,13 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
         .flatten()
         .is_some()
     {
-        eprintln!("ERROR: imodsendevent - cannot access X clipboard (Qt/X clipboard unavailable)");
+        let _ = std::io::stderr().write_all(
+            c_format(
+                "ERROR: imodsendevent - cannot access X clipboard (Qt/X clipboard unavailable)\n",
+                &[],
+            )
+            .as_bytes(),
+        );
         return 2;
     }
 
@@ -283,8 +400,12 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
                     .flatten()
             });
         let Some(text) = text else {
-            eprintln!(
-                "ERROR: imodsendevent - cannot read X clipboard (Qt/X clipboard unavailable)"
+            let _ = std::io::stderr().write_all(
+                c_format(
+                    "ERROR: imodsendevent - cannot read X clipboard (Qt/X clipboard unavailable)\n",
+                    &[],
+                )
+                .as_bytes(),
             );
             return 2;
         };

@@ -1,3434 +1,3420 @@
-unsafe extern "C" {
-    static mut stdin: *mut FILE;
-    static mut stdout: *mut FILE;
-    static mut stderr: *mut FILE;
-    fn fclose(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn fopen(
-        __filename: *const ::core::ffi::c_char,
-        __modes: *const ::core::ffi::c_char,
-    ) -> *mut FILE;
-    fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn sprintf(
-        __s: *mut ::core::ffi::c_char,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    fn fgets(
-        __s: *mut ::core::ffi::c_char,
-        __n: ::core::ffi::c_int,
-        __stream: *mut FILE,
-    ) -> *mut ::core::ffi::c_char;
-    fn rewind(__stream: *mut FILE);
-    fn feof(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn toupper(__c: ::core::ffi::c_int) -> ::core::ffi::c_int;
-    fn atoi(__nptr: *const ::core::ffi::c_char) -> ::core::ffi::c_int;
-    fn strtod(
-        __nptr: *const ::core::ffi::c_char,
-        __endptr: *mut *mut ::core::ffi::c_char,
-    ) -> ::core::ffi::c_double;
-    fn strtol(
-        __nptr: *const ::core::ffi::c_char,
-        __endptr: *mut *mut ::core::ffi::c_char,
-        __base: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_long;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn exit(__status: ::core::ffi::c_int) -> !;
-    fn getenv(__name: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn strncpy(
-        __dest: *mut ::core::ffi::c_char,
-        __src: *const ::core::ffi::c_char,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_char;
-    fn strcat(
-        __dest: *mut ::core::ffi::c_char,
-        __src: *const ::core::ffi::c_char,
-    ) -> *mut ::core::ffi::c_char;
-    fn strcmp(
-        __s1: *const ::core::ffi::c_char,
-        __s2: *const ::core::ffi::c_char,
-    ) -> ::core::ffi::c_int;
-    fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn strchr(__s: *const ::core::ffi::c_char, __c: ::core::ffi::c_int)
-    -> *mut ::core::ffi::c_char;
-    fn strpbrk(
-        __s: *const ::core::ffi::c_char,
-        __accept: *const ::core::ffi::c_char,
-    ) -> *mut ::core::ffi::c_char;
-    fn strstr(
-        __haystack: *const ::core::ffi::c_char,
-        __needle: *const ::core::ffi::c_char,
-    ) -> *mut ::core::ffi::c_char;
-    fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
+//! Translation of `IMOD/libcfshr/parse_params.c` — the PIP package for parsing
+//! input parameters.
+//!
+//! One Rust function per source function, with the original identifier in the
+//! doc comment.  The unit is converted to Rust types per `NATIVE.md`: no raw
+//! pointers, no `unsafe`, no `libc::`, no NUL-terminated strings.
+//!
+//! **Strings are bytes.**  Every `char *` in the source is `Vec<u8>`/`&[u8]`,
+//! because option names, values and help text arrive from `argv` and from
+//! autodoc files and the source copies them through byte for byte.  A `String`
+//! round trip would replace a byte that is not valid UTF-8; nothing here parses
+//! text, so nothing here needs one.  The C sentinel `sNullString` — a pointer
+//! to a shared empty string that means "this slot owns nothing" — is
+//! `Option<Vec<u8>>::None`, which is also how a NULL `char *` is spelled; the
+//! two are distinguishable where the source distinguishes them (`defaultVal`).
+//!
+//! **Output.**  The source writes with `fprintf`/`printf`.  Every format string
+//! here that has a conversion other than `%s` goes through
+//! [`crate::imod::libcfshr::b3dutil::c_format`] with the source's own format
+//! string; the rest — which in this unit is most of them, since PIP's output is
+//! literals and `%s` — is written as the bytes C's `%s` would copy, because
+//! `c_format` returns a `String` and would put U+FFFD in place of a byte that
+//! an option value legitimately carries.  The stream is
+//! [`ImodFile::Stdout`]/[`ImodFile::Stderr`], which are the *C* streams: the
+//! programs that call PIP still write their own output with `libc::printf`, and
+//! C stdio is block-buffered under redirection while Rust's is not, so PIP's
+//! error and usage text would move ahead of theirs in a captured file if it
+//! went through `std::io::stdout()`.
+//!
+//! **`strtol` and `strtod`** are translated below as the C library functions
+//! they are, beside the code that calls them, for the same reason `c_format` is
+//! a translation of `printf`: `str::parse` rejects the partial parses that
+//! `PipGetLineOfValues` depends on, and the position where the scan stops is
+//! the value the source compares against `endPtr`.
+#![allow(dead_code)]
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
+use std::cell::{Cell, RefCell};
+use std::io::Write;
+
+/* #define NON_OPTION_STRING "NonOptionArgument" */
+const NON_OPTION_STRING: &[u8] = b"NonOptionArgument";
+/* #define STANDARD_INPUT_STRING "StandardInput" */
+const STANDARD_INPUT_STRING: &[u8] = b"StandardInput";
+/* #define STANDARD_INPUT_END  "EndInput" */
+const STANDARD_INPUT_END: &[u8] = b"EndInput";
+/* #define PARAM_FILE_STRING  "PF" */
+const PARAM_FILE_STRING: &[u8] = b"PF";
+/* #define BOOLEAN_STRING    "B" */
+const BOOLEAN_STRING: &[u8] = b"B";
+/* #define LOOKUP_NOT_FOUND -1 */
+const LOOKUP_NOT_FOUND: i32 = -1;
+/* #define LOOKUP_AMBIGUOUS -2 */
+const LOOKUP_AMBIGUOUS: i32 = -2;
+/* #define TEMP_STR_SIZE  1024 */
+const TEMP_STR_SIZE: i32 = 1024;
+/* #define LINE_STR_SIZE  102400 */
+const LINE_STR_SIZE: i32 = 102400;
+/* #define ADOC_STR_SIZE  10240 */
+const ADOC_STR_SIZE: i32 = 10240;
+/* #define PREFIX_SIZE    64 */
+const PREFIX_SIZE: usize = 64;
+/* #define PATH_SEPARATOR '/' on everything but _WIN32 */
+const PATH_SEPARATOR: u8 = b'/';
+/* #define OPTFILE_DIR "autodoc" */
+const OPTFILE_DIR: &[u8] = b"autodoc";
+/* #define OPTFILE_EXT "adoc" */
+const OPTFILE_EXT: &[u8] = b"adoc";
+/* #define OPTDIR_VARIABLE "AUTODOC_DIR" */
+const OPTDIR_VARIABLE: &[u8] = b"AUTODOC_DIR";
+/* #define DEFAULTS_FILE "progDefaults.adoc" */
+const DEFAULTS_FILE: &[u8] = b"progDefaults.adoc";
+/* #define DEFAULTS_DIR "com" */
+const DEFAULTS_DIR: &[u8] = b"com";
+/* #define DEFAULT_SUB_STR "%{default}" */
+const DEFAULT_SUB_STR: &[u8] = b"%{default}";
+/* #define PRINTENTRY_VARIABLE  "PIP_PRINT_ENTRIES" */
+const PRINTENTRY_VARIABLE: &[u8] = b"PIP_PRINT_ENTRIES";
+/* #define OPEN_DELIM "[" */
+const OPEN_DELIM: &[u8] = b"[";
+/* #define CLOSE_DELIM "]" */
+const CLOSE_DELIM: &[u8] = b"]";
+/* #define VALUE_DELIM "=" */
+const VALUE_DELIM: &[u8] = b"=";
+/* `<limits.h>` PATH_MAX, which `PipReadOptionFile` uses under `#ifdef`. */
+const PATH_MAX: i32 = 4096;
+
+/// `PIP_INTEGER` (`parse_params.h`).
+pub const PIP_INTEGER: i32 = 1;
+/// `PIP_FLOAT` (`parse_params.h`).
+pub const PIP_FLOAT: i32 = 2;
+/// `PIP_DOUBLE` (`parse_params.h`).
+pub const PIP_DOUBLE: i32 = 3;
+
+/// The structure for storing the options and the arguments as they are parsed.
+///
+/// C `typedef struct pipOptions { ... } PipOptions` (`parse_params.c:44`).  The
+/// `char *` members are `Option<Vec<u8>>`, where `None` is both the source's
+/// NULL and its `sNullString` sentinel; `char **valuePtr` with its parallel
+/// `count` is a `Vec<Vec<u8>>`, and `count` is kept because the source reads and
+/// writes it in its own right.
+#[derive(Default, Clone)]
+pub struct PipOptions {
+    /// `char *shortName` — short option name.
+    pub short_name: Option<Vec<u8>>,
+    /// `char *longName` — long option name.
+    pub long_name: Option<Vec<u8>>,
+    /// `char *type` — type string.  Named `type_0` because `type` is a keyword.
+    pub type_0: Option<Vec<u8>>,
+    /// `char *helpString` — help string.
+    pub help_string: Option<Vec<u8>>,
+    /// `char *format` — value format, to appear after option for usage output.
+    pub format: Option<Vec<u8>>,
+    /// `char *defaultVal` — default value when option not entered.
+    pub default_val: Option<Vec<u8>>,
+    /// `char **valuePtr` — array of string pointers with values.
+    pub value_ptr: Vec<Vec<u8>>,
+    /// `int multiple` — 0 if single value allowed, or number of next one being
+    /// returned (numbered from 1).
+    pub multiple: i32,
+    /// `int count` — number of values accumulated.
+    pub count: i32,
+    /// `int lenShort` — length of short name.
+    pub len_short: i32,
+    /// `int lenLong` — length of long name.
+    pub len_long: i32,
+    /// `int *nextLinked` — array of indexes of next non-option argument or
+    /// linked option, for associating an entry with another one.
+    pub next_linked: Vec<i32>,
+    /// `int linked` — flag that it is a linked option.
+    pub linked: i32,
 }
-use crate::imod::libcfshr::b3dutil::expand_arg_list;
-pub struct _IO_wide_data {
-    _private: [u8; 0],
+
+/// The array an option's values are read into, standing for the source's
+/// `void *array` plus its `valType` selector in `PipGetLineOfValues`.
+///
+/// C reaches the same storage through `int *`, `float *` and `double *` aliases
+/// of one `void *`; the arm the caller builds is the alias the source's
+/// `valType` selects.
+pub enum PipValueArray<'a> {
+    /// `int *iarray` — `PIP_INTEGER`.
+    Int(&'a mut [i32]),
+    /// `float *farray` — `PIP_FLOAT`.
+    Float(&'a mut [f32]),
+    /// `double *darray` — `PIP_DOUBLE`.
+    Double(&'a mut [f64]),
 }
-pub struct _IO_codecvt {
-    _private: [u8; 0],
+
+/// Which local variable `CheckKeyword`'s `char ***lastCopied` was made to point
+/// at.
+///
+/// The source stores the *address of a variable* so the next line's
+/// continuation text can be appended to whichever string was gotten last, and
+/// compares it with `lastGottenStr == &usageStr`.  A pointer to a local cannot
+/// be held safely, so the identity of the variable is carried instead and the
+/// comparisons become a match on this value.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PipKeywordSlot {
+    /// `&sValueDelim`
+    ValueDelim,
+    /// `&shortName`
+    ShortName,
+    /// `&longName`
+    LongName,
+    /// `&type`
+    Type,
+    /// `&formatStr`
+    FormatStr,
+    /// `&defaultStr`
+    DefaultStr,
+    /// `&usageStr`
+    UsageStr,
+    /// `&tipStr`
+    TipStr,
+    /// `&manStr`
+    ManStr,
 }
-pub struct _IO_marker {
-    _private: [u8; 0],
-}
-pub type __builtin_va_list = [__va_list_tag; 1];
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct __va_list_tag {
-    pub gp_offset: ::core::ffi::c_uint,
-    pub fp_offset: ::core::ffi::c_uint,
-    pub overflow_arg_area: *mut ::core::ffi::c_void,
-    pub reg_save_area: *mut ::core::ffi::c_void,
-}
-pub type size_t = usize;
-pub type va_list = __builtin_va_list;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __uint64_t = u64;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    pub _flags2: ::core::ffi::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub __pad5: size_t,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused2: [::core::ffi::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub type PipOptions = pipOptions;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct pipOptions {
-    pub shortName: *mut ::core::ffi::c_char,
-    pub longName: *mut ::core::ffi::c_char,
-    pub type_0: *mut ::core::ffi::c_char,
-    pub helpString: *mut ::core::ffi::c_char,
-    pub format: *mut ::core::ffi::c_char,
-    pub defaultVal: *mut ::core::ffi::c_char,
-    pub valuePtr: *mut *mut ::core::ffi::c_char,
-    pub multiple: ::core::ffi::c_int,
-    pub count: ::core::ffi::c_int,
-    pub lenShort: ::core::ffi::c_int,
-    pub lenLong: ::core::ffi::c_int,
-    pub nextLinked: *mut ::core::ffi::c_int,
-    pub linked: ::core::ffi::c_int,
-}
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const PIP_INTEGER: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const PIP_FLOAT: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const PIP_DOUBLE: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-#[inline]
-unsafe extern "C" fn __bswap_16(mut __bsx: __uint16_t) -> __uint16_t {
-    return (__bsx as ::core::ffi::c_int >> 8 as ::core::ffi::c_int & 0xff as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) << 8 as ::core::ffi::c_int)
-        as __uint16_t;
-}
-#[inline]
-unsafe extern "C" fn __bswap_32(mut __bsx: __uint32_t) -> __uint32_t {
-    return (__bsx & 0xff000000 as __uint32_t) >> 24 as ::core::ffi::c_int
-        | (__bsx & 0xff0000 as __uint32_t) >> 8 as ::core::ffi::c_int
-        | (__bsx & 0xff00 as __uint32_t) << 8 as ::core::ffi::c_int
-        | (__bsx & 0xff as __uint32_t) << 24 as ::core::ffi::c_int;
-}
-#[inline]
-unsafe extern "C" fn __bswap_64(mut __bsx: __uint64_t) -> __uint64_t {
-    return ((__bsx as ::core::ffi::c_ulonglong & 0xff00000000000000 as ::core::ffi::c_ulonglong)
-        >> 56 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff000000000000 as ::core::ffi::c_ulonglong)
-            >> 40 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff0000000000 as ::core::ffi::c_ulonglong)
-            >> 24 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff00000000 as ::core::ffi::c_ulonglong)
-            >> 8 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff000000 as ::core::ffi::c_ulonglong)
-            << 8 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff0000 as ::core::ffi::c_ulonglong)
-            << 24 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff00 as ::core::ffi::c_ulonglong)
-            << 40 as ::core::ffi::c_int
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff as ::core::ffi::c_ulonglong)
-            << 56 as ::core::ffi::c_int) as __uint64_t;
-}
-#[inline]
-unsafe extern "C" fn __uint16_identity(mut __x: __uint16_t) -> __uint16_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint32_identity(mut __x: __uint32_t) -> __uint32_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint64_identity(mut __x: __uint64_t) -> __uint64_t {
-    return __x;
-}
-pub const PATH_MAX: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
-pub const NON_OPTION_STRING: [::core::ffi::c_char; 18] = unsafe {
-    ::core::mem::transmute::<[u8; 18], [::core::ffi::c_char; 18]>(*b"NonOptionArgument\0")
-};
-pub const STANDARD_INPUT_STRING: [::core::ffi::c_char; 14] =
-    unsafe { ::core::mem::transmute::<[u8; 14], [::core::ffi::c_char; 14]>(*b"StandardInput\0") };
-pub const STANDARD_INPUT_END: [::core::ffi::c_char; 9] =
-    unsafe { ::core::mem::transmute::<[u8; 9], [::core::ffi::c_char; 9]>(*b"EndInput\0") };
-pub const PARAM_FILE_STRING: [::core::ffi::c_char; 3] =
-    unsafe { ::core::mem::transmute::<[u8; 3], [::core::ffi::c_char; 3]>(*b"PF\0") };
-pub const BOOLEAN_STRING: [::core::ffi::c_char; 2] =
-    unsafe { ::core::mem::transmute::<[u8; 2], [::core::ffi::c_char; 2]>(*b"B\0") };
-pub const LOOKUP_NOT_FOUND: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-pub const LOOKUP_AMBIGUOUS: ::core::ffi::c_int = -(2 as ::core::ffi::c_int);
-pub const TEMP_STR_SIZE: ::core::ffi::c_int = 1024 as ::core::ffi::c_int;
-pub const LINE_STR_SIZE: ::core::ffi::c_int = 102400 as ::core::ffi::c_int;
-pub const ADOC_STR_SIZE: ::core::ffi::c_int = 10240 as ::core::ffi::c_int;
-pub const PREFIX_SIZE: ::core::ffi::c_int = 64 as ::core::ffi::c_int;
-pub const PATH_SEPARATOR: ::core::ffi::c_int = '/' as i32;
-pub const OPTFILE_DIR: [::core::ffi::c_char; 8] =
-    unsafe { ::core::mem::transmute::<[u8; 8], [::core::ffi::c_char; 8]>(*b"autodoc\0") };
-pub const OPTFILE_EXT: [::core::ffi::c_char; 5] =
-    unsafe { ::core::mem::transmute::<[u8; 5], [::core::ffi::c_char; 5]>(*b"adoc\0") };
-pub const OPTDIR_VARIABLE: [::core::ffi::c_char; 12] =
-    unsafe { ::core::mem::transmute::<[u8; 12], [::core::ffi::c_char; 12]>(*b"AUTODOC_DIR\0") };
-pub const DEFAULTS_FILE: [::core::ffi::c_char; 18] = unsafe {
-    ::core::mem::transmute::<[u8; 18], [::core::ffi::c_char; 18]>(*b"progDefaults.adoc\0")
-};
-pub const DEFAULTS_DIR: [::core::ffi::c_char; 4] =
-    unsafe { ::core::mem::transmute::<[u8; 4], [::core::ffi::c_char; 4]>(*b"com\0") };
-pub const DEFAULT_SUB_STR: [::core::ffi::c_char; 11] =
-    unsafe { ::core::mem::transmute::<[u8; 11], [::core::ffi::c_char; 11]>(*b"%{default}\0") };
-pub const PRINTENTRY_VARIABLE: [::core::ffi::c_char; 18] = unsafe {
-    ::core::mem::transmute::<[u8; 18], [::core::ffi::c_char; 18]>(*b"PIP_PRINT_ENTRIES\0")
-};
-pub const OPEN_DELIM: [::core::ffi::c_char; 2] =
-    unsafe { ::core::mem::transmute::<[u8; 2], [::core::ffi::c_char; 2]>(*b"[\0") };
-pub const CLOSE_DELIM: [::core::ffi::c_char; 2] =
-    unsafe { ::core::mem::transmute::<[u8; 2], [::core::ffi::c_char; 2]>(*b"]\0") };
-pub const VALUE_DELIM: [::core::ffi::c_char; 2] =
-    unsafe { ::core::mem::transmute::<[u8; 2], [::core::ffi::c_char; 2]>(*b"=\0") };
-static mut sTypes: [*mut ::core::ffi::c_char; 13] = [
-    BOOLEAN_STRING.as_ptr() as *mut ::core::ffi::c_char,
-    PARAM_FILE_STRING.as_ptr() as *mut ::core::ffi::c_char,
-    b"LI\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"I\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"F\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"IP\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"FP\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"IT\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"FT\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"IA\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"FA\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"CH\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"FN\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+
+/* static char *sTypes[] = {...} */
+const S_TYPES: [&[u8]; 13] = [
+    BOOLEAN_STRING,
+    PARAM_FILE_STRING,
+    b"LI",
+    b"I",
+    b"F",
+    b"IP",
+    b"FP",
+    b"IT",
+    b"FT",
+    b"IA",
+    b"FA",
+    b"CH",
+    b"FN",
 ];
-static mut sTypeDescriptions: [*mut ::core::ffi::c_char; 14] = [
-    b"Boolean\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Parameter file\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"List of integer ranges\0" as *const u8 as *const ::core::ffi::c_char
-        as *mut ::core::ffi::c_char,
-    b"Integer\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Floating point\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Two integers\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Two floats\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Three integers\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Three floats\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Multiple integers\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Multiple floats\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Text string\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"File name\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Unknown argument type\0" as *const u8 as *const ::core::ffi::c_char
-        as *mut ::core::ffi::c_char,
+/* static char *sTypeDescriptions[] = {...} */
+const S_TYPE_DESCRIPTIONS: [&[u8]; 14] = [
+    b"Boolean",
+    b"Parameter file",
+    b"List of integer ranges",
+    b"Integer",
+    b"Floating point",
+    b"Two integers",
+    b"Two floats",
+    b"Three integers",
+    b"Three floats",
+    b"Multiple integers",
+    b"Multiple floats",
+    b"Text string",
+    b"File name",
+    b"Unknown argument type",
 ];
-static mut sTypeForUsage: [*mut ::core::ffi::c_char; 14] = [
-    b"Boolean\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"File\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"List\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Int\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Float\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"2 ints\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"2 floats\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"3 ints\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"3 floats\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Ints\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Floats\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"String\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"File\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"Unknown argument type\0" as *const u8 as *const ::core::ffi::c_char
-        as *mut ::core::ffi::c_char,
+/* static char *sTypeForUsage[] = {...} */
+const S_TYPE_FOR_USAGE: [&[u8]; 14] = [
+    b"Boolean",
+    b"File",
+    b"List",
+    b"Int",
+    b"Float",
+    b"2 ints",
+    b"2 floats",
+    b"3 ints",
+    b"3 floats",
+    b"Ints",
+    b"Floats",
+    b"String",
+    b"File",
+    b"Unknown argument type",
 ];
-static mut sNumTypes: ::core::ffi::c_char = 13 as ::core::ffi::c_char;
-static mut sNullChar: ::core::ffi::c_char = 0 as ::core::ffi::c_char;
-static mut sNullString: *mut ::core::ffi::c_char =
-    unsafe { &raw const sNullChar as *mut ::core::ffi::c_char };
-static mut sQuoteTypes: *mut ::core::ffi::c_char =
-    b"\"'`\0" as *const u8 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-static mut sHighestNonOptGotten: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-static mut sOptTable: *mut PipOptions = ::core::ptr::null::<PipOptions>() as *mut PipOptions;
-static mut sTableSize: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNumOptions: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNonOptInd: ::core::ffi::c_int = 0;
-static mut sErrorString: *mut ::core::ffi::c_char =
-    ::core::ptr::null::<::core::ffi::c_char>() as *mut ::core::ffi::c_char;
-static mut sUsageString: *mut ::core::ffi::c_char =
-    ::core::ptr::null::<::core::ffi::c_char>() as *mut ::core::ffi::c_char;
-static mut sExitPrefix: [::core::ffi::c_char; 64] = unsafe {
-    ::core::mem::transmute::<
-        [u8; 64],
-        [::core::ffi::c_char; 64],
-    >(
-        *b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
-    )
-};
-static mut sErrorDest: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNextOption: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNextArgBelongsTo: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-static mut sNumOptionArguments: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sTempStr: *mut ::core::ffi::c_char =
-    ::core::ptr::null::<::core::ffi::c_char>() as *mut ::core::ffi::c_char;
-static mut sLineStr: *mut ::core::ffi::c_char =
-    ::core::ptr::null::<::core::ffi::c_char>() as *mut ::core::ffi::c_char;
-static mut sAllowDefaults: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sOutputManpage: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sPrintEntries: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-static mut sDefaultDelim: [::core::ffi::c_char; 2] = VALUE_DELIM;
-static mut sValueDelim: *mut ::core::ffi::c_char =
-    unsafe { &raw const sDefaultDelim as *mut ::core::ffi::c_char };
-static mut sProgramName: *mut ::core::ffi::c_char =
-    unsafe { &raw const sNullChar as *mut ::core::ffi::c_char };
-static mut sNoCase: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sDoneEnds: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sTakeStdIn: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNonOptLines: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNoAbbrevs: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNotFoundOK: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sLinkedOption: *mut ::core::ffi::c_char =
-    ::core::ptr::null::<::core::ffi::c_char>() as *mut ::core::ffi::c_char;
-static mut sTestAbbrevForUsage: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sDoubleDashOptions: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNoHelpAbbrevs: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_initialize(mut numOpts: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    if sTempStr.is_null() {
-        sTempStr = malloc(TEMP_STR_SIZE as size_t) as *mut ::core::ffi::c_char;
-    }
-    sLineStr = malloc(LINE_STR_SIZE as size_t) as *mut ::core::ffi::c_char;
-    sNumOptions = numOpts;
-    sTableSize = numOpts + 2 as ::core::ffi::c_int;
-    sNonOptInd = sNumOptions;
-    sOptTable =
-        malloc((sTableSize as size_t).wrapping_mul(::core::mem::size_of::<PipOptions>() as size_t))
-            as *mut PipOptions;
-    if sTempStr.is_null() || sLineStr.is_null() || sOptTable.is_null() {
-        pip_memory_error(
-            NULL,
-            b"pip_initialize\0" as *const u8 as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    i = 0 as ::core::ffi::c_int;
-    while i < sTableSize {
-        let ref mut fresh0 = (*sOptTable.offset(i as isize)).shortName;
-        *fresh0 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let ref mut fresh1 = (*sOptTable.offset(i as isize)).longName;
-        *fresh1 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let ref mut fresh2 = (*sOptTable.offset(i as isize)).type_0;
-        *fresh2 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let ref mut fresh3 = (*sOptTable.offset(i as isize)).helpString;
-        *fresh3 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let ref mut fresh4 = (*sOptTable.offset(i as isize)).format;
-        *fresh4 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let ref mut fresh5 = (*sOptTable.offset(i as isize)).defaultVal;
-        *fresh5 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        let ref mut fresh6 = (*sOptTable.offset(i as isize)).valuePtr;
-        *fresh6 = ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-        (*sOptTable.offset(i as isize)).multiple = 0 as ::core::ffi::c_int;
-        (*sOptTable.offset(i as isize)).count = 0 as ::core::ffi::c_int;
-        let ref mut fresh7 = (*sOptTable.offset(i as isize)).nextLinked;
-        *fresh7 = ::core::ptr::null_mut::<::core::ffi::c_int>();
-        (*sOptTable.offset(i as isize)).linked = 0 as ::core::ffi::c_int;
-        i += 1;
-    }
-    let ref mut fresh8 = (*sOptTable.offset(sNonOptInd as isize)).longName;
-    *fresh8 = strdup(NON_OPTION_STRING.as_ptr());
-    let ref mut fresh9 =
-        (*sOptTable.offset((sNonOptInd + 1 as ::core::ffi::c_int) as isize)).shortName;
-    *fresh9 = strdup(STANDARD_INPUT_STRING.as_ptr());
-    let ref mut fresh10 =
-        (*sOptTable.offset((sNonOptInd + 1 as ::core::ffi::c_int) as isize)).longName;
-    *fresh10 = strdup(STANDARD_INPUT_END.as_ptr());
-    if (*sOptTable.offset(sNonOptInd as isize)).longName.is_null()
-        || (*sOptTable.offset((sNonOptInd + 1 as ::core::ffi::c_int) as isize))
-            .shortName
-            .is_null()
-        || (*sOptTable.offset((sNonOptInd + 1 as ::core::ffi::c_int) as isize))
-            .longName
-            .is_null()
-    {
-        pip_memory_error(
-            NULL,
-            b"pip_initialize\0" as *const u8 as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    (*sOptTable.offset(sNonOptInd as isize)).multiple = 1 as ::core::ffi::c_int;
-    return 0 as ::core::ffi::c_int;
+/* static char sNumTypes = 13; -- a char, promoted to int at its one use */
+const S_NUM_TYPES: i8 = 13;
+/* static char *sQuoteTypes = "\"'`"; */
+const S_QUOTE_TYPES: &[u8] = b"\"'`";
+
+thread_local! {
+    /* static int sHighestNonOptGotten = -1; */
+    static S_HIGHEST_NON_OPT_GOTTEN: Cell<i32> = const { Cell::new(-1) };
+    /* static PipOptions *sOptTable = NULL; */
+    static S_OPT_TABLE: RefCell<Vec<PipOptions>> = const { RefCell::new(Vec::new()) };
+    /* static int sTableSize = 0; */
+    static S_TABLE_SIZE: Cell<i32> = const { Cell::new(0) };
+    /* static int sNumOptions = 0; */
+    static S_NUM_OPTIONS: Cell<i32> = const { Cell::new(0) };
+    /* static int sNonOptInd; */
+    static S_NON_OPT_IND: Cell<i32> = const { Cell::new(0) };
+    /* static char *sErrorString = NULL; */
+    static S_ERROR_STRING: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    /* static char *sUsageString = NULL; */
+    static S_USAGE_STRING: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    /* static char sExitPrefix[PREFIX_SIZE] = ""; -- fixed buffer, NUL-terminated */
+    static S_EXIT_PREFIX: RefCell<[u8; PREFIX_SIZE]> = const { RefCell::new([0; PREFIX_SIZE]) };
+    /* static int sErrorDest = 0; */
+    static S_ERROR_DEST: Cell<i32> = const { Cell::new(0) };
+    /* static int sNextOption = 0; */
+    static S_NEXT_OPTION: Cell<i32> = const { Cell::new(0) };
+    /* static int sNextArgBelongsTo = -1; */
+    static S_NEXT_ARG_BELONGS_TO: Cell<i32> = const { Cell::new(-1) };
+    /* static int sNumOptionArguments = 0; */
+    static S_NUM_OPTION_ARGUMENTS: Cell<i32> = const { Cell::new(0) };
+    /* static char *sTempStr = NULL; -- a TEMP_STR_SIZE buffer holding a string */
+    static S_TEMP_STR: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /* static char *sLineStr = NULL; -- a LINE_STR_SIZE buffer holding a line */
+    static S_LINE_STR: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /* static int sAllowDefaults = 0; */
+    static S_ALLOW_DEFAULTS: Cell<i32> = const { Cell::new(0) };
+    /* static int sOutputManpage = 0; */
+    static S_OUTPUT_MANPAGE: Cell<i32> = const { Cell::new(0) };
+    /* static int sPrintEntries = -1; */
+    static S_PRINT_ENTRIES: Cell<i32> = const { Cell::new(-1) };
+    /* static char sDefaultDelim[] = VALUE_DELIM; static char *sValueDelim = sDefaultDelim; */
+    static S_VALUE_DELIM: RefCell<Option<Vec<u8>>> = RefCell::new(Some(VALUE_DELIM.to_vec()));
+    /* static char *sProgramName = &sNullChar; */
+    static S_PROGRAM_NAME: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    /* static int sNoCase = 0; */
+    static S_NO_CASE: Cell<i32> = const { Cell::new(0) };
+    /* static int sDoneEnds = 0; */
+    static S_DONE_ENDS: Cell<i32> = const { Cell::new(0) };
+    /* static int sTakeStdIn = 0; */
+    static S_TAKE_STD_IN: Cell<i32> = const { Cell::new(0) };
+    /* static int sNonOptLines = 0; */
+    static S_NON_OPT_LINES: Cell<i32> = const { Cell::new(0) };
+    /* static int sNoAbbrevs = 0; */
+    static S_NO_ABBREVS: Cell<i32> = const { Cell::new(0) };
+    /* static int sNotFoundOK = 0; */
+    static S_NOT_FOUND_OK: Cell<i32> = const { Cell::new(0) };
+    /* static char *sLinkedOption = NULL; */
+    static S_LINKED_OPTION: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    /* static int sTestAbbrevForUsage = 0; */
+    static S_TEST_ABBREV_FOR_USAGE: Cell<i32> = const { Cell::new(0) };
+    /* static int sDoubleDashOptions = 0; */
+    static S_DOUBLE_DASH_OPTIONS: Cell<i32> = const { Cell::new(0) };
+    /* static int sNoHelpAbbrevs = 0; */
+    static S_NO_HELP_ABBREVS: Cell<i32> = const { Cell::new(0) };
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_done() {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut optp: *mut PipOptions = ::core::ptr::null_mut::<PipOptions>();
+
+/// Original C `PipInitialize` (`parse_params.c:157`).
+///
+/// Initialize option tables for given number of options.
+pub fn pip_initialize(num_opts: i32) -> i32 {
+    /* if (!sTempStr) sTempStr = malloc(TEMP_STR_SIZE);  sLineStr = malloc(...)
+    -- allocation cannot fail here, so the NULL tests that follow, and the
+    PipMemoryError they guard, are unreachable. */
+    S_TEMP_STR.with_borrow_mut(|s| s.clear());
+    S_LINE_STR.with_borrow_mut(|s| s.clear());
+
+    /* Make the table big enough for extra entries (NonOptionArgs) */
+    S_NUM_OPTIONS.set(num_opts);
+    S_TABLE_SIZE.set(num_opts + 2);
+    S_NON_OPT_IND.set(S_NUM_OPTIONS.get());
+    let table_size = S_TABLE_SIZE.get();
+    let non_opt_ind = S_NON_OPT_IND.get();
+
+    /* Initialize the table */
+    S_OPT_TABLE.with_borrow_mut(|table| {
+        table.clear();
+        for _i in 0..table_size {
+            table.push(PipOptions::default());
+        }
+
+        /* In the last slots, put non-option arguments, and also put the
+        name for the standard input option for easy checking on duplication */
+        table[non_opt_ind as usize].long_name = Some(NON_OPTION_STRING.to_vec());
+        table[non_opt_ind as usize + 1].short_name = Some(STANDARD_INPUT_STRING.to_vec());
+        table[non_opt_ind as usize + 1].long_name = Some(STANDARD_INPUT_END.to_vec());
+        table[non_opt_ind as usize].multiple = 1;
+    });
+
+    0
+}
+
+/// Original C `PipDone` (`parse_params.c:206`).
+///
+/// Free all allocated memory and set state back to initial state.
+pub fn pip_done() {
     pip_warn_unused_non_opt_args();
-    i = 0 as ::core::ffi::c_int;
-    while i < sTableSize {
-        optp = sOptTable.offset(i as isize) as *mut PipOptions;
-        free((*optp).shortName as *mut ::core::ffi::c_void);
-        (*optp).shortName = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        free((*optp).longName as *mut ::core::ffi::c_void);
-        (*optp).longName = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        free((*optp).type_0 as *mut ::core::ffi::c_void);
-        (*optp).type_0 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        free((*optp).helpString as *mut ::core::ffi::c_void);
-        (*optp).helpString = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        free((*optp).format as *mut ::core::ffi::c_void);
-        (*optp).format = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        free((*optp).defaultVal as *mut ::core::ffi::c_void);
-        (*optp).defaultVal = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        if !(*optp).valuePtr.is_null() {
-            j = 0 as ::core::ffi::c_int;
-            while j < (*optp).count {
-                free(*(*optp).valuePtr.offset(j as isize) as *mut ::core::ffi::c_void);
-                let ref mut fresh19 = *(*optp).valuePtr.offset(j as isize);
-                *fresh19 = ::core::ptr::null_mut::<::core::ffi::c_char>();
-                j += 1;
-            }
-            free((*optp).valuePtr as *mut ::core::ffi::c_void);
+    S_OPT_TABLE.with_borrow_mut(|table| table.clear());
+    S_TABLE_SIZE.set(0);
+    S_NUM_OPTIONS.set(0);
+    S_ERROR_STRING.with_borrow_mut(|s| *s = None);
+    S_USAGE_STRING.with_borrow_mut(|s| *s = None);
+    S_LINKED_OPTION.with_borrow_mut(|s| *s = None);
+    S_NEXT_OPTION.set(0);
+    S_NEXT_ARG_BELONGS_TO.set(-1);
+    S_NUM_OPTION_ARGUMENTS.set(0);
+    S_ALLOW_DEFAULTS.set(0);
+    S_TEMP_STR.with_borrow_mut(|s| s.clear());
+    S_LINE_STR.with_borrow_mut(|s| s.clear());
+    S_PROGRAM_NAME.with_borrow_mut(|s| *s = None);
+}
+
+/// Original C `PipWarnUnusedNonOptArgs` (`parse_params.c:248`).
+///
+/// Warn if extra non-option args entered.
+pub fn pip_warn_unused_non_opt_args() -> i32 {
+    let non_opt_ind = S_NON_OPT_IND.get();
+    /* The source indexes sOptTable unconditionally; with no table at all there
+    is nothing entered, so the count is zero. */
+    let (count, values) = S_OPT_TABLE.with_borrow(|table| match table.get(non_opt_ind as usize) {
+        Some(opt) => (opt.count, opt.value_ptr.clone()),
+        None => (0, Vec::new()),
+    });
+    let unused = (count - 1) - S_HIGHEST_NON_OPT_GOTTEN.get();
+    if unused > 0 {
+        let mut out = ImodFile::Stdout;
+        let _ = out.write_all(b"\nWARNING: Extra non-option arguments not used by the program:");
+        for ind in (S_HIGHEST_NON_OPT_GOTTEN.get() + 1)..count {
+            /* printf("  %s", sOptTable[sNonOptInd].valuePtr[ind]); */
+            let _ = out.write_all(b"  ");
+            let _ = out.write_all(&values[ind as usize]);
         }
-        free((*optp).nextLinked as *mut ::core::ffi::c_void);
-        (*optp).nextLinked = ::core::ptr::null_mut::<::core::ffi::c_int>();
-        i += 1;
+        let _ = out.write_all(b"\n\n");
     }
-    free(sOptTable as *mut ::core::ffi::c_void);
-    sOptTable = ::core::ptr::null_mut::<PipOptions>();
-    sOptTable = ::core::ptr::null_mut::<PipOptions>();
-    sTableSize = 0 as ::core::ffi::c_int;
-    sNumOptions = 0 as ::core::ffi::c_int;
-    free(sErrorString as *mut ::core::ffi::c_void);
-    sErrorString = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sErrorString = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    free(sUsageString as *mut ::core::ffi::c_void);
-    sUsageString = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sUsageString = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    free(sLinkedOption as *mut ::core::ffi::c_void);
-    sLinkedOption = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sLinkedOption = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sNextOption = 0 as ::core::ffi::c_int;
-    sNextArgBelongsTo = -(1 as ::core::ffi::c_int);
-    sNumOptionArguments = 0 as ::core::ffi::c_int;
-    sAllowDefaults = 0 as ::core::ffi::c_int;
-    free(sTempStr as *mut ::core::ffi::c_void);
-    sTempStr = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sTempStr = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    free(sLineStr as *mut ::core::ffi::c_void);
-    sLineStr = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sLineStr = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if sProgramName != sNullString {
-        free(sProgramName as *mut ::core::ffi::c_void);
+    unused
+}
+
+/// Original C `PipExitOnError` (`parse_params.c:265`).
+///
+/// Set up for Pip to handle exiting on error, with a prefix string.
+pub fn pip_exit_on_error(use_std_err: i32, prefix: &[u8]) -> i32 {
+    /* Get rid of existing string; and if called with null string,
+    this cancels an existing exit on error */
+    S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = 0x00);
+
+    if prefix.is_empty() {
+        return 0;
     }
-    sProgramName = sNullString;
+
+    S_ERROR_DEST.set(use_std_err);
+    /* strncpy(sExitPrefix, prefix, PREFIX_SIZE - 1); sExitPrefix[PREFIX_SIZE - 1] = 0; */
+    S_EXIT_PREFIX.with_borrow_mut(|p| {
+        *p = [0; PREFIX_SIZE];
+        let n = prefix.len().min(PREFIX_SIZE - 1);
+        p[..n].copy_from_slice(&prefix[..n]);
+        p[PREFIX_SIZE - 1] = 0x00;
+    });
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_warn_unused_non_opt_args() -> ::core::ffi::c_int {
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut unused: ::core::ffi::c_int = (*sOptTable.offset(sNonOptInd as isize)).count
-        - 1 as ::core::ffi::c_int
-        - sHighestNonOptGotten;
-    if unused > 0 as ::core::ffi::c_int {
-        printf(
-            b"\nWARNING: Extra non-option arguments not used by the program:\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
-        ind = sHighestNonOptGotten + 1 as ::core::ffi::c_int;
-        while ind < (*sOptTable.offset(sNonOptInd as isize)).count {
-            printf(
-                b"  %s\0" as *const u8 as *const ::core::ffi::c_char,
-                *(*sOptTable.offset(sNonOptInd as isize))
-                    .valuePtr
-                    .offset(ind as isize),
-            );
-            ind += 1;
-        }
-        printf(b"\n\n\0" as *const u8 as *const ::core::ffi::c_char);
-    }
-    return unused;
+
+/// Original C `setExitPrefix` (`parse_params.c:283`).
+///
+/// Function for compatibility with Fortran routines, so `setExitPrefix` and
+/// `exitError` can be used without using PIP.
+#[allow(non_snake_case)]
+pub fn setExitPrefix(prefix: &[u8]) {
+    pip_exit_on_error(0, prefix);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_exit_on_error(
-    mut useStdErr: ::core::ffi::c_int,
-    mut prefix: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    sExitPrefix[0 as ::core::ffi::c_int as usize] = 0 as ::core::ffi::c_char;
-    if prefix.is_null() || *prefix == 0 {
-        return 0 as ::core::ffi::c_int;
-    }
-    sErrorDest = useStdErr;
-    strncpy(
-        &raw mut sExitPrefix as *mut ::core::ffi::c_char,
-        prefix,
-        (PREFIX_SIZE - 1 as ::core::ffi::c_int) as size_t,
-    );
-    sExitPrefix[(PREFIX_SIZE - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
-    return 0 as ::core::ffi::c_int;
+
+/// Original C `setStandardExitPrefix` (`parse_params.c:288`).
+#[allow(non_snake_case)]
+pub fn setStandardExitPrefix(prog_name: &[u8]) {
+    /* sprintf(prefix, "\nERROR: %s - ", progName); */
+    let mut prefix: Vec<u8> = Vec::with_capacity(prog_name.len() + 15);
+    prefix.extend_from_slice(b"\nERROR: ");
+    prefix.extend_from_slice(prog_name);
+    prefix.extend_from_slice(b" - ");
+    pip_exit_on_error(0, &prefix);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn setExitPrefix(mut prefix: *const ::core::ffi::c_char) {
-    pip_exit_on_error(0 as ::core::ffi::c_int, prefix);
+
+/// Original C `PipAllowCommaDefaults` (`parse_params.c:298`).
+pub fn pip_allow_comma_defaults(val: i32) {
+    S_ALLOW_DEFAULTS.set(val);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn setStandardExitPrefix(mut progName: *const ::core::ffi::c_char) {
-    let mut prefix: *mut ::core::ffi::c_char =
-        malloc(strlen(progName).wrapping_add(15 as size_t)) as *mut ::core::ffi::c_char;
-    if pip_memory_error(
-        prefix as *mut ::core::ffi::c_void,
-        b"setStandardExitPrefix\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0
-    {
-        return;
-    }
-    sprintf(
-        prefix,
-        b"\nERROR: %s - \0" as *const u8 as *const ::core::ffi::c_char,
-        progName,
-    );
-    pip_exit_on_error(0 as ::core::ffi::c_int, prefix);
-    free(prefix as *mut ::core::ffi::c_void);
+
+/// Original C `PipSetManpageOutput` (`parse_params.c:303`).
+pub fn pip_set_manpage_output(val: i32) {
+    S_OUTPUT_MANPAGE.set(val);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_allow_comma_defaults(mut val: ::core::ffi::c_int) {
-    sAllowDefaults = val;
+
+/// Original C `PipSetUsageString` (`parse_params.c:308`).
+pub fn pip_set_usage_string(usage: &[u8]) -> i32 {
+    S_USAGE_STRING.with_borrow_mut(|s| *s = Some(usage.to_vec()));
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_set_manpage_output(mut val: ::core::ffi::c_int) {
-    sOutputManpage = val;
+
+/// Original C `PipEnableEntryOutput` (`parse_params.c:317`).
+pub fn pip_enable_entry_output(val: i32) {
+    S_PRINT_ENTRIES.set(val);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_set_usage_string(
-    mut usage: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    free(sUsageString as *mut ::core::ffi::c_void);
-    sUsageString = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sUsageString = strdup(usage);
-    if pip_memory_error(
-        sUsageString as *mut ::core::ffi::c_void,
-        b"pip_set_usage_string\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0
-    {
-        return -(1 as ::core::ffi::c_int);
-    }
-    return 0 as ::core::ffi::c_int;
+
+/// Original C `PipSetLinkedOption` (`parse_params.c:322`).
+pub fn pip_set_linked_option(option: &[u8]) -> i32 {
+    S_LINKED_OPTION.with_borrow_mut(|s| *s = Some(option.to_vec()));
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_enable_entry_output(mut val: ::core::ffi::c_int) {
-    sPrintEntries = val;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_set_linked_option(
-    mut option: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    free(sLinkedOption as *mut ::core::ffi::c_void);
-    sLinkedOption = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    sLinkedOption = strdup(option);
-    if pip_memory_error(
-        sLinkedOption as *mut ::core::ffi::c_void,
-        b"pip_set_linked_option\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0
-    {
-        return -(1 as ::core::ffi::c_int);
-    }
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_set_special_flags(
-    mut inCase: ::core::ffi::c_int,
-    mut inDone: ::core::ffi::c_int,
-    mut inStd: ::core::ffi::c_int,
-    mut inLines: ::core::ffi::c_int,
-    mut inAbbrevs: ::core::ffi::c_int,
+
+/// Original C `PipSetSpecialFlags` (`parse_params.c:334`).
+///
+/// Set noxious special flags for Tilt program.
+pub fn pip_set_special_flags(
+    in_case: i32,
+    in_done: i32,
+    in_std: i32,
+    in_lines: i32,
+    in_abbrevs: i32,
 ) {
-    sNoCase = inCase;
-    sDoneEnds = inDone;
-    sTakeStdIn = inStd;
-    sNonOptLines = inLines;
-    sNoAbbrevs = inAbbrevs;
+    S_NO_CASE.set(in_case);
+    S_DONE_ENDS.set(in_done);
+    S_TAKE_STD_IN.set(in_std);
+    S_NON_OPT_LINES.set(in_lines);
+    S_NO_ABBREVS.set(in_abbrevs);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_add_option(
-    mut optionString: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut indEnd: ::core::ffi::c_int = 0;
-    let mut oldSlen: ::core::ffi::c_int = 0;
-    let mut newSlen: ::core::ffi::c_int = 0;
-    let mut newLlen: ::core::ffi::c_int = 0;
-    let mut oldLlen: ::core::ffi::c_int = 0;
-    let mut optp: *mut PipOptions = sOptTable.offset(sNextOption as isize) as *mut PipOptions;
-    let mut colonPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut oldShort: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut oldLong: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut newShort: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut newLong: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut subStr: *const ::core::ffi::c_char = optionString;
-    if sNextOption >= sNumOptions {
-        pip_set_error(
-            b"Attempting to add more options than were originally specified\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
+
+/// Original C `PipAddOption` (`parse_params.c:347`).
+///
+/// Add an option, with short and long name, type, and help string.
+pub fn pip_add_option(option_string: &[u8]) -> i32 {
+    let next_option = S_NEXT_OPTION.get();
+    if next_option >= S_NUM_OPTIONS.get() {
+        pip_set_error(b"Attempting to add more options than were originally specified");
+        return -1;
     }
-    colonPtr = strchr(subStr, ':' as i32);
-    if !colonPtr.is_null() {
-        indEnd = colonPtr.offset_from(subStr) as ::core::ffi::c_long as ::core::ffi::c_int;
-        if indEnd > 0 as ::core::ffi::c_int {
-            (*optp).shortName = pip_sub_str_dup(
-                subStr,
-                0 as ::core::ffi::c_int,
-                indEnd - 1 as ::core::ffi::c_int,
-            );
-            (*optp).lenShort = indEnd;
+
+    /* In the following, if there is ever not another :, skip to error */
+    /* get the short name */
+    let mut sub_str: &[u8] = option_string;
+    let mut new_short: Vec<u8> = Vec::new();
+    let mut new_long: Vec<u8> = Vec::new();
+    let mut new_slen = 0i32;
+    let mut new_llen = 0i32;
+    let mut ok = false;
+
+    if let Some(colon) = sub_str.iter().position(|&c| c == b':') {
+        let ind_end = colon as i32;
+        if ind_end > 0 {
+            new_short = pip_sub_str_dup(sub_str, 0, ind_end - 1);
+            new_slen = ind_end;
         } else {
-            (*optp).shortName = strdup(sNullString);
-            (*optp).lenShort = 0 as ::core::ffi::c_int;
+            new_short = Vec::new();
+            new_slen = 0;
         }
-        if pip_memory_error(
-            (*optp).shortName as *mut ::core::ffi::c_void,
-            b"pip_add_option\0" as *const u8 as *const ::core::ffi::c_char,
-        ) != 0
-        {
-            return -(1 as ::core::ffi::c_int);
-        }
-        subStr = subStr.offset((indEnd + 1 as ::core::ffi::c_int) as isize);
-        colonPtr = strchr(subStr, ':' as i32);
-        if !colonPtr.is_null() {
-            if pip_memory_error(
-                colonPtr as *mut ::core::ffi::c_void,
-                b"pip_add_option\0" as *const u8 as *const ::core::ffi::c_char,
-            ) != 0
-            {
-                return -(1 as ::core::ffi::c_int);
-            }
-            indEnd = colonPtr.offset_from(subStr) as ::core::ffi::c_long as ::core::ffi::c_int;
-            if indEnd > 0 as ::core::ffi::c_int {
-                (*optp).longName = pip_sub_str_dup(
-                    subStr,
-                    0 as ::core::ffi::c_int,
-                    indEnd - 1 as ::core::ffi::c_int,
-                );
-                (*optp).lenLong = indEnd;
+        sub_str = &sub_str[(ind_end + 1) as usize..];
+
+        /* Get the long name */
+        if let Some(colon) = sub_str.iter().position(|&c| c == b':') {
+            let ind_end = colon as i32;
+            if ind_end > 0 {
+                new_long = pip_sub_str_dup(sub_str, 0, ind_end - 1);
+                new_llen = ind_end;
             } else {
-                (*optp).longName = strdup(sNullString);
-                (*optp).lenLong = 0 as ::core::ffi::c_int;
+                new_long = Vec::new();
+                new_llen = 0;
             }
-            if pip_memory_error(
-                (*optp).longName as *mut ::core::ffi::c_void,
-                b"pip_add_option\0" as *const u8 as *const ::core::ffi::c_char,
-            ) != 0
-            {
-                return -(1 as ::core::ffi::c_int);
-            }
-            subStr = subStr.offset((indEnd + 1 as ::core::ffi::c_int) as isize);
-            colonPtr = strchr(subStr, ':' as i32);
-            if !colonPtr.is_null() {
-                if pip_memory_error(
-                    colonPtr as *mut ::core::ffi::c_void,
-                    b"pip_add_option\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    return -(1 as ::core::ffi::c_int);
-                }
-                indEnd = colonPtr.offset_from(subStr) as ::core::ffi::c_long as ::core::ffi::c_int;
-                if indEnd > 0 as ::core::ffi::c_int {
-                    ind = indEnd - 1 as ::core::ffi::c_int;
-                    if *subStr.offset(ind as isize) as ::core::ffi::c_int == 'M' as i32
-                        || *subStr.offset(ind as isize) as ::core::ffi::c_int == 'L' as i32
-                    {
-                        (*optp).multiple = 1 as ::core::ffi::c_int;
-                        if *subStr.offset(ind as isize) as ::core::ffi::c_int == 'L' as i32 {
-                            (*optp).linked = 1 as ::core::ffi::c_int;
+            sub_str = &sub_str[(ind_end + 1) as usize..];
+
+            /* Get the type and if there is M at the end, trim it off and set
+            multiple flag to 1 */
+            if let Some(colon) = sub_str.iter().position(|&c| c == b':') {
+                let ind_end = colon as i32;
+                let mut multiple = 0i32;
+                let mut linked = 0i32;
+                let type_0: Vec<u8>;
+                if ind_end > 0 {
+                    let mut ind = ind_end - 1;
+                    if sub_str[ind as usize] == b'M' || sub_str[ind as usize] == b'L' {
+                        multiple = 1;
+                        if sub_str[ind as usize] == b'L' {
+                            linked = 1;
                         }
                         ind -= 1;
                     }
-                    (*optp).type_0 = pip_sub_str_dup(subStr, 0 as ::core::ffi::c_int, ind);
+                    type_0 = pip_sub_str_dup(sub_str, 0, ind);
                 } else {
-                    (*optp).type_0 = strdup(sNullString);
+                    type_0 = Vec::new();
                 }
-                if pip_memory_error(
-                    (*optp).type_0 as *mut ::core::ffi::c_void,
-                    b"pip_add_option\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    return -(1 as ::core::ffi::c_int);
-                }
-                subStr = subStr.offset((indEnd + 1 as ::core::ffi::c_int) as isize);
-                (*optp).helpString = strdup(subStr);
-                if pip_memory_error(
-                    (*optp).helpString as *mut ::core::ffi::c_void,
-                    b"pip_add_option\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    return -(1 as ::core::ffi::c_int);
-                }
-                newShort = (*optp).shortName;
-                newLong = (*optp).longName;
-                newSlen = (*optp).lenShort;
-                newLlen = (*optp).lenLong;
-                ind = 0 as ::core::ffi::c_int;
-                while ind < sTableSize {
-                    if !(ind >= sNextOption && ind < sNonOptInd) {
-                        oldShort = (*sOptTable.offset(ind as isize)).shortName;
-                        oldLong = (*sOptTable.offset(ind as isize)).longName;
-                        oldSlen = (*sOptTable.offset(ind as isize)).lenShort;
-                        oldLlen = (*sOptTable.offset(ind as isize)).lenLong;
-                        if (pip_starts_with(newShort, oldShort) != 0
-                            || pip_starts_with(oldShort, newShort) != 0)
-                            && (newSlen > 1 as ::core::ffi::c_int
-                                && oldSlen > 1 as ::core::ffi::c_int
-                                || newSlen == 1 as ::core::ffi::c_int
-                                    && oldSlen == 1 as ::core::ffi::c_int)
-                            && (sNoAbbrevs == 0 || newSlen == oldSlen)
-                            || (pip_starts_with(oldLong, newShort) != 0
-                                || pip_starts_with(newShort, oldLong) != 0)
-                                && (sNoAbbrevs == 0 || newSlen == oldLlen)
-                            || (pip_starts_with(oldShort, newLong) != 0
-                                || pip_starts_with(newLong, oldShort) != 0)
-                                && (sNoAbbrevs == 0 || oldSlen == newLlen)
-                            || (pip_starts_with(oldLong, newLong) != 0
-                                || pip_starts_with(newLong, oldLong) != 0)
-                                && (sNoAbbrevs == 0 || oldLlen == newSlen)
-                        {
-                            sprintf(
-                                sTempStr,
-                                b"Option %s  %s is ambiguous with option %s  %s\0" as *const u8
-                                    as *const ::core::ffi::c_char,
-                                newShort,
-                                newLong,
-                                oldShort,
-                                oldLong,
-                            );
-                            pip_set_error(sTempStr);
-                            return -(1 as ::core::ffi::c_int);
-                        }
-                    }
-                    ind += 1;
-                }
-                sNextOption += 1;
-                return 0 as ::core::ffi::c_int;
+                sub_str = &sub_str[(ind_end + 1) as usize..];
+
+                /* Now if there is anything left, it is the help string */
+                let help_string = sub_str.to_vec();
+
+                S_OPT_TABLE.with_borrow_mut(|table| {
+                    let optp = &mut table[next_option as usize];
+                    optp.short_name = Some(new_short.clone());
+                    optp.len_short = new_slen;
+                    optp.long_name = Some(new_long.clone());
+                    optp.len_long = new_llen;
+                    optp.multiple = multiple;
+                    optp.linked = linked;
+                    optp.type_0 = Some(type_0);
+                    optp.help_string = Some(help_string);
+                });
+                ok = true;
             }
         }
     }
-    sprintf(
-        sTempStr,
-        b"Option does not have three colons in it:  \0" as *const u8 as *const ::core::ffi::c_char,
-    );
-    append_to_error_string(optionString);
-    return -(1 as ::core::ffi::c_int);
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_next_arg(
-    mut argString: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut argCopy: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut err: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut lenarg: ::core::ffi::c_int = 0;
-    let mut newNum: ::core::ffi::c_int = 0;
-    let mut ifAlloc: ::core::ffi::c_int = 0;
-    let mut noMatch: ::core::ffi::c_int = 0;
-    let mut newArgs: *mut *mut ::core::ffi::c_char =
-        ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-    let mut ch: ::core::ffi::c_char = 0;
-    let mut paramFile: *mut FILE = ::core::ptr::null_mut::<FILE>();
-    let mut indStart: ::core::ffi::c_int = 0;
-    if sNextArgBelongsTo >= 0 as ::core::ffi::c_int {
-        argCopy = strdup(argString);
-        if pip_memory_error(
-            argCopy as *mut ::core::ffi::c_void,
-            b"pip_next_arg\0" as *const u8 as *const ::core::ffi::c_char,
-        ) != 0
-        {
-            return -(1 as ::core::ffi::c_int);
-        }
-        err = add_value_string(sNextArgBelongsTo, argCopy);
-        if err == 0
-            && strcmp(
-                (*sOptTable.offset(sNextArgBelongsTo as isize)).type_0,
-                PARAM_FILE_STRING.as_ptr(),
-            ) == 0
-        {
-            paramFile = fopen(argCopy, b"r\0" as *const u8 as *const ::core::ffi::c_char);
-            if !paramFile.is_null() {
-                err = read_param_file(paramFile);
-                fclose(paramFile);
-            } else {
-                sprintf(
-                    sTempStr,
-                    b"Error opening parameter file %s\0" as *const u8 as *const ::core::ffi::c_char,
-                    argCopy,
-                );
-                pip_set_error(sTempStr);
-                err = -(1 as ::core::ffi::c_int);
+
+    if ok {
+        /* Need to check the short and long names against all previous
+        names and special names */
+        let table_size = S_TABLE_SIZE.get();
+        let non_opt_ind = S_NON_OPT_IND.get();
+        let no_abbrevs = S_NO_ABBREVS.get();
+        for ind in 0..table_size {
+            /* after checking existing ones, skip to NonOptionArg and
+            StandardInput entries */
+            if ind >= next_option && ind < non_opt_ind {
+                continue;
+            }
+
+            let (old_short, old_long, old_slen, old_llen) = S_OPT_TABLE.with_borrow(|table| {
+                let o = &table[ind as usize];
+                (
+                    o.short_name.clone(),
+                    o.long_name.clone(),
+                    o.len_short,
+                    o.len_long,
+                )
+            });
+            let os: &[u8] = old_short.as_deref().unwrap_or(b"");
+            let ol: &[u8] = old_long.as_deref().unwrap_or(b"");
+
+            /* Allow ambiguous options if no abbrev */
+            if ((pip_starts_with(&new_short, os) != 0 || pip_starts_with(os, &new_short) != 0)
+                && ((new_slen > 1 && old_slen > 1) || (new_slen == 1 && old_slen == 1))
+                && (no_abbrevs == 0 || new_slen == old_slen))
+                || ((pip_starts_with(ol, &new_short) != 0 || pip_starts_with(&new_short, ol) != 0)
+                    && (no_abbrevs == 0 || new_slen == old_llen))
+                || ((pip_starts_with(os, &new_long) != 0 || pip_starts_with(&new_long, os) != 0)
+                    && (no_abbrevs == 0 || old_slen == new_llen))
+                || ((pip_starts_with(ol, &new_long) != 0 || pip_starts_with(&new_long, ol) != 0)
+                    && (no_abbrevs == 0 || old_llen == new_slen))
+            {
+                /* sprintf(sTempStr, "Option %s  %s is ambiguous with option %s  %s", ...)
+                -- glibc's %s prints "(null)" for a NULL pointer, and the two
+                trailing table entries have NULL names. */
+                let temp = S_TEMP_STR.with_borrow_mut(|t| {
+                    t.clear();
+                    t.extend_from_slice(b"Option ");
+                    t.extend_from_slice(&new_short);
+                    t.extend_from_slice(b"  ");
+                    t.extend_from_slice(&new_long);
+                    t.extend_from_slice(b" is ambiguous with option ");
+                    t.extend_from_slice(old_short.as_deref().unwrap_or(b"(null)"));
+                    t.extend_from_slice(b"  ");
+                    t.extend_from_slice(old_long.as_deref().unwrap_or(b"(null)"));
+                    t.clone()
+                });
+                pip_set_error(&temp);
+                return -1;
             }
         }
-        sNextArgBelongsTo = -(1 as ::core::ffi::c_int);
+
+        S_NEXT_OPTION.set(next_option + 1);
+        return 0;
+    }
+
+    /* sprintf(sTempStr, "Option does not have three colons in it:  "); */
+    S_TEMP_STR.with_borrow_mut(|t| {
+        t.clear();
+        t.extend_from_slice(b"Option does not have three colons in it:  ");
+    });
+    append_to_error_string(option_string);
+    -1
+}
+
+/// Original C `PipNextArg` (`parse_params.c:479`).
+///
+/// Call this to process the next argument.
+pub fn pip_next_arg(arg_string: &[u8]) -> i32 {
+    /* If we are expecting a value for an option, duplicate string and add
+    it to the option */
+    let next_arg_belongs_to = S_NEXT_ARG_BELONGS_TO.get();
+    if next_arg_belongs_to >= 0 {
+        let arg_copy = arg_string.to_vec();
+        let mut err = add_value_string(next_arg_belongs_to, &arg_copy);
+
+        /* Check whether this option was for reading from parameter file */
+        let is_param_file = S_OPT_TABLE.with_borrow(|table| {
+            table[next_arg_belongs_to as usize].type_0.as_deref() == Some(PARAM_FILE_STRING)
+        });
+        if err == 0 && is_param_file {
+            /* fopen(argCopy, "r").  `ImodFile::open` takes a `&str`, and this
+            path comes from `argv` as bytes, so the file is opened from the
+            bytes and wrapped in the same type. */
+            match std::fs::File::open(std::path::Path::new(
+                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&arg_copy),
+            ))
+            .ok()
+            .map(|f| ImodFile::File(std::rc::Rc::new(f)))
+            {
+                Some(mut param_file) => {
+                    err = read_param_file(&mut param_file);
+                }
+                None => {
+                    /* sprintf(sTempStr, "Error opening parameter file %s", argCopy); */
+                    let temp = S_TEMP_STR.with_borrow_mut(|t| {
+                        t.clear();
+                        t.extend_from_slice(b"Error opening parameter file ");
+                        t.extend_from_slice(&arg_copy);
+                        t.clone()
+                    });
+                    pip_set_error(&temp);
+                    err = -1;
+                }
+            }
+        }
+
+        S_NEXT_ARG_BELONGS_TO.set(-1);
         return err;
     }
-    if *argString.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == '-' as i32 {
-        indStart = 1 as ::core::ffi::c_int;
-        lenarg = strlen(argString) as ::core::ffi::c_int;
-        if lenarg > 1 as ::core::ffi::c_int
-            && *argString.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                == '-' as i32
-        {
-            indStart = 2 as ::core::ffi::c_int;
+
+    /* Is it a legal option starting with - or -- ? */
+    if !arg_string.is_empty() && arg_string[0] == b'-' {
+        let mut ind_start = 1usize;
+        let lenarg = arg_string.len();
+        if lenarg > 1 && arg_string[1] == b'-' {
+            ind_start = 2;
         }
-        if lenarg == indStart {
-            pip_set_error(
-                b"Illegal argument: - or --\0" as *const u8 as *const ::core::ffi::c_char,
-            );
-            return -(1 as ::core::ffi::c_int);
+        if lenarg == ind_start {
+            pip_set_error(b"Illegal argument: - or --");
+            return -1;
         }
-        if pip_starts_with(
-            STANDARD_INPUT_STRING.as_ptr(),
-            argString.offset(indStart as isize),
-        ) != 0
-        {
-            err = read_param_file(stdin);
-            return err;
+
+        /* First check for StandardInput */
+        if pip_starts_with(STANDARD_INPUT_STRING, &arg_string[ind_start..]) != 0 {
+            let mut stdin_file = ImodFile::Stdin;
+            return read_param_file(&mut stdin_file);
         }
-        sNotFoundOK = 1 as ::core::ffi::c_int;
-        i = indStart;
-        while i < lenarg {
-            ch = *argString.offset(i as isize);
-            if ch as ::core::ffi::c_int != '-' as i32
-                && ch as ::core::ffi::c_int != ',' as i32
-                && ch as ::core::ffi::c_int != '.' as i32
-                && ch as ::core::ffi::c_int != ' ' as i32
-                && ((ch as ::core::ffi::c_int) < '0' as i32
-                    || ch as ::core::ffi::c_int > '9' as i32)
-            {
-                sNotFoundOK = 0 as ::core::ffi::c_int;
+
+        /* Next check if it is a potential numeric non-option arg */
+        S_NOT_FOUND_OK.set(1);
+        for i in ind_start..lenarg {
+            let ch = arg_string[i];
+            if ch != b'-' && ch != b',' && ch != b'.' && ch != b' ' && (ch < b'0' || ch > b'9') {
+                S_NOT_FOUND_OK.set(0);
                 break;
-            } else {
-                i += 1;
             }
         }
-        err = lookup_option(argString.offset(indStart as isize), sNextOption);
-        if !(sNotFoundOK != 0 && err == LOOKUP_NOT_FOUND) {
-            sNotFoundOK = 0 as ::core::ffi::c_int;
-            if err < 0 as ::core::ffi::c_int {
+
+        /* Lookup the option among true defined options */
+        let err = lookup_option(&arg_string[ind_start..], S_NEXT_OPTION.get());
+
+        /* Process as an option unless it could be numeric and was not found */
+        if !(S_NOT_FOUND_OK.get() != 0 && err == LOOKUP_NOT_FOUND) {
+            S_NOT_FOUND_OK.set(0);
+            if err < 0 {
                 return err;
             }
-            sNumOptionArguments += 1;
-            if strcmp(
-                BOOLEAN_STRING.as_ptr(),
-                (*sOptTable.offset(err as isize)).type_0,
-            ) != 0
-            {
-                sNextArgBelongsTo = err;
-                return 1 as ::core::ffi::c_int;
+
+            S_NUM_OPTION_ARGUMENTS.set(S_NUM_OPTION_ARGUMENTS.get() + 1);
+
+            /* For an option with value, setup to get argument next time and
+            return an indicator that there had better be another */
+            let is_boolean = S_OPT_TABLE
+                .with_borrow(|table| table[err as usize].type_0.as_deref() == Some(BOOLEAN_STRING));
+            if !is_boolean {
+                S_NEXT_ARG_BELONGS_TO.set(err);
+                return 1;
             } else {
-                argCopy = strdup(b"1\0" as *const u8 as *const ::core::ffi::c_char);
-                if pip_memory_error(
-                    argCopy as *mut ::core::ffi::c_void,
-                    b"pip_next_arg\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    return -(1 as ::core::ffi::c_int);
-                }
-                return add_value_string(err, argCopy);
+                /* for a boolean option, set the argument with a 1 */
+                return add_value_string(err, b"1");
             }
         }
-        sNotFoundOK = 0 as ::core::ffi::c_int;
+        S_NOT_FOUND_OK.set(0);
     }
-    newArgs = expand_arg_list(
-        &raw mut argString,
-        1 as ::core::ffi::c_int,
-        &raw mut newNum,
-        &raw mut ifAlloc,
-        &raw mut noMatch,
-    );
-    if newArgs.is_null() {
-        pip_set_error(
-            b"Memory allocation failed when expanding non-option arguments\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    i = 0 as ::core::ffi::c_int;
-    while i < newNum {
-        if ifAlloc == 0 {
-            argCopy = strdup(argString);
-            if pip_memory_error(
-                argCopy as *mut ::core::ffi::c_void,
-                b"pip_next_arg\0" as *const u8 as *const ::core::ffi::c_char,
-            ) != 0
-            {
-                return -(1 as ::core::ffi::c_int);
-            }
-        } else {
-            argCopy = *newArgs.offset(i as isize);
-        }
-        err = add_value_string(sNonOptInd, argCopy);
-        if err != 0 {
-            return err;
-        }
-        i += 1;
-    }
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_number_of_args(
-    mut numOptArgs: *mut ::core::ffi::c_int,
-    mut numNonOptArgs: *mut ::core::ffi::c_int,
-) {
-    *numOptArgs = sNumOptionArguments;
-    *numNonOptArgs = (*sOptTable.offset(sNonOptInd as isize)).count;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_non_option_arg(
-    mut argNo: ::core::ffi::c_int,
-    mut arg: *mut *mut ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    if argNo >= (*sOptTable.offset(sNonOptInd as isize)).count {
-        pip_set_error(
-            b"Requested a non-option argument beyond the number available\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    sHighestNonOptGotten = if sHighestNonOptGotten > argNo {
-        sHighestNonOptGotten
-    } else {
-        argNo
-    };
-    *arg = strdup(
-        *(*sOptTable.offset(sNonOptInd as isize))
-            .valuePtr
-            .offset(argNo as isize),
-    );
-    return pip_memory_error(
-        *arg as *mut ::core::ffi::c_void,
-        b"pip_get_non_option_arg\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_string(
-    mut option: *const ::core::ffi::c_char,
-    mut string: *mut *mut ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut err: ::core::ffi::c_int = 0;
-    let mut valErr: ::core::ffi::c_int = 0;
-    valErr = get_next_value_string(option, &raw mut strPtr);
-    if valErr == 0 || valErr == 2 as ::core::ffi::c_int {
-        *string = strdup(strPtr);
-        err = pip_memory_error(
-            *string as *mut ::core::ffi::c_void,
-            b"pip_get_string\0" as *const u8 as *const ::core::ffi::c_char,
-        );
+
+    /* A non-option argument.
+    `expandArgList` (`b3dutil.c:1702-1707`) is a wild-card expansion that
+    exists only under `_WIN32`; everywhere else it is the `#else` arm, which
+    sets `*ifAlloc = 0`, `*noMatchInd = -1`, `*newNum = numArg` and returns
+    the vector it was given.  Calling the translated `expand_arg_list` would
+    put a `*const *const c_char` back into a converted unit, so the `#else`
+    arm is written out here instead. */
+    let new_num = 1;
+    for _i in 0..new_num {
+        let arg_copy = arg_string.to_vec();
+        let err = add_value_string(S_NON_OPT_IND.get(), &arg_copy);
         if err != 0 {
             return err;
         }
     }
-    return valErr;
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_boolean(
-    mut option: *const ::core::ffi::c_char,
-    mut val: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut err: ::core::ffi::c_int = 0;
-    err = get_next_value_string(option, &raw mut strPtr);
+
+/// Original C `PipNumberOfArgs` (`parse_params.c:586`).
+///
+/// Return number of option arguments (approximate) and number of non-option
+/// arguments.
+pub fn pip_number_of_args(num_opt_args: &mut i32, num_non_opt_args: &mut i32) {
+    *num_opt_args = S_NUM_OPTION_ARGUMENTS.get();
+    *num_non_opt_args = S_OPT_TABLE.with_borrow(|table| table[S_NON_OPT_IND.get() as usize].count);
+}
+
+/// Original C `PipGetNonOptionArg` (`parse_params.c:595`).
+///
+/// Get a non-option argument, index numbered from 0 here.
+pub fn pip_get_non_option_arg(arg_no: i32, arg: &mut Vec<u8>) -> i32 {
+    let non_opt_ind = S_NON_OPT_IND.get();
+    let count = S_OPT_TABLE.with_borrow(|table| table[non_opt_ind as usize].count);
+    if arg_no >= count {
+        pip_set_error(b"Requested a non-option argument beyond the number available");
+        return -1;
+    }
+    /* ACCUM_MAX(sHighestNonOptGotten, argNo); */
+    if arg_no > S_HIGHEST_NON_OPT_GOTTEN.get() {
+        S_HIGHEST_NON_OPT_GOTTEN.set(arg_no);
+    }
+    *arg = S_OPT_TABLE
+        .with_borrow(|table| table[non_opt_ind as usize].value_ptr[arg_no as usize].clone());
+    0
+}
+
+/// Original C `PipGetString` (`parse_params.c:610`).
+pub fn pip_get_string(option: &[u8], string: &mut Vec<u8>) -> i32 {
+    let mut str_ptr: Vec<u8> = Vec::new();
+    let val_err = get_next_value_string(option, &mut str_ptr);
+    if val_err == 0 || val_err == 2 {
+        *string = str_ptr;
+    }
+    val_err
+}
+
+/// Original C `PipGetBoolean` (`parse_params.c:627`).
+///
+/// Get a boolean (binary) option; make sure it has a legal specification.
+pub fn pip_get_boolean(option: &[u8], val: &mut i32) -> i32 {
+    let mut str_ptr: Vec<u8> = Vec::new();
+    let err = get_next_value_string(option, &mut str_ptr);
     if err != 0 {
         return err;
     }
-    if strcmp(strPtr, b"1\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"T\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"TRUE\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"ON\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"t\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"true\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"on\0" as *const u8 as *const ::core::ffi::c_char) == 0
+    let s: &[u8] = &str_ptr;
+    if s == b"1"
+        || s == b"T"
+        || s == b"TRUE"
+        || s == b"ON"
+        || s == b"t"
+        || s == b"true"
+        || s == b"on"
     {
-        *val = 1 as ::core::ffi::c_int;
-    } else if strcmp(strPtr, b"0\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"F\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(
-            strPtr,
-            b"FALSE\0" as *const u8 as *const ::core::ffi::c_char,
-        ) == 0
-        || strcmp(strPtr, b"OFF\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(strPtr, b"f\0" as *const u8 as *const ::core::ffi::c_char) == 0
-        || strcmp(
-            strPtr,
-            b"false\0" as *const u8 as *const ::core::ffi::c_char,
-        ) == 0
-        || strcmp(strPtr, b"off\0" as *const u8 as *const ::core::ffi::c_char) == 0
+        *val = 1;
+    } else if s == b"0"
+        || s == b"F"
+        || s == b"FALSE"
+        || s == b"OFF"
+        || s == b"f"
+        || s == b"false"
+        || s == b"off"
     {
-        *val = 0 as ::core::ffi::c_int;
+        *val = 0;
     } else {
-        sprintf(
-            sTempStr,
-            b"Illegal entry for boolean option %s: %s\0" as *const u8 as *const ::core::ffi::c_char,
-            option,
-            strPtr,
-        );
-        pip_set_error(sTempStr);
-        return -(1 as ::core::ffi::c_int);
+        /* sprintf(sTempStr, "Illegal entry for boolean option %s: %s", option, strPtr); */
+        let temp = S_TEMP_STR.with_borrow_mut(|t| {
+            t.clear();
+            t.extend_from_slice(b"Illegal entry for boolean option ");
+            t.extend_from_slice(option);
+            t.extend_from_slice(b": ");
+            t.extend_from_slice(s);
+            t.clone()
+        });
+        pip_set_error(&temp);
+        return -1;
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_integer(
-    mut option: *const ::core::ffi::c_char,
-    mut val: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut num: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    return pip_get_integer_array(option, val, &raw mut num, 1 as ::core::ffi::c_int);
+
+/// Original C `PipGetInteger` (`parse_params.c:654`).
+pub fn pip_get_integer(option: &[u8], val: &mut i32) -> i32 {
+    let mut num = 1;
+    let mut array = [*val];
+    let err = pip_get_integer_array(option, &mut array, &mut num, 1);
+    *val = array[0];
+    err
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_float(
-    mut option: *const ::core::ffi::c_char,
-    mut val: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    let mut num: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    return pip_get_float_array(option, val, &raw mut num, 1 as ::core::ffi::c_int);
+
+/// Original C `PipGetFloat` (`parse_params.c:660`).
+pub fn pip_get_float(option: &[u8], val: &mut f32) -> i32 {
+    let mut num = 1;
+    let mut array = [*val];
+    let err = pip_get_float_array(option, &mut array, &mut num, 1);
+    *val = array[0];
+    err
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_two_integers(
-    mut option: *const ::core::ffi::c_char,
-    mut val1: *mut ::core::ffi::c_int,
-    mut val2: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut num: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-    let mut tmp: [::core::ffi::c_int; 2] = [0; 2];
-    tmp[0 as ::core::ffi::c_int as usize] = *val1;
-    tmp[1 as ::core::ffi::c_int as usize] = *val2;
-    err = pip_get_integer_array(
-        option,
-        &raw mut tmp as *mut ::core::ffi::c_int,
-        &raw mut num,
-        2 as ::core::ffi::c_int,
-    );
-    if err != 0 as ::core::ffi::c_int {
+
+/// Original C `PipGetTwoIntegers` (`parse_params.c:669`).
+pub fn pip_get_two_integers(option: &[u8], val1: &mut i32, val2: &mut i32) -> i32 {
+    let mut num = 2;
+    let mut tmp = [*val1, *val2];
+    let err = pip_get_integer_array(option, &mut tmp, &mut num, 2);
+    if err != 0 {
         return err;
     }
-    *val1 = tmp[0 as ::core::ffi::c_int as usize];
-    *val2 = tmp[1 as ::core::ffi::c_int as usize];
-    return 0 as ::core::ffi::c_int;
+    *val1 = tmp[0];
+    *val2 = tmp[1];
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_two_floats(
-    mut option: *const ::core::ffi::c_char,
-    mut val1: *mut ::core::ffi::c_float,
-    mut val2: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut num: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-    let mut tmp: [::core::ffi::c_float; 2] = [0.; 2];
-    tmp[0 as ::core::ffi::c_int as usize] = *val1;
-    tmp[1 as ::core::ffi::c_int as usize] = *val2;
-    err = pip_get_float_array(
-        option,
-        &raw mut tmp as *mut ::core::ffi::c_float,
-        &raw mut num,
-        2 as ::core::ffi::c_int,
-    );
-    if err != 0 as ::core::ffi::c_int {
+
+/// Original C `PipGetTwoFloats` (`parse_params.c:683`).
+pub fn pip_get_two_floats(option: &[u8], val1: &mut f32, val2: &mut f32) -> i32 {
+    let mut num = 2;
+    let mut tmp = [*val1, *val2];
+    let err = pip_get_float_array(option, &mut tmp, &mut num, 2);
+    if err != 0 {
         return err;
     }
-    *val1 = tmp[0 as ::core::ffi::c_int as usize];
-    *val2 = tmp[1 as ::core::ffi::c_int as usize];
-    return 0 as ::core::ffi::c_int;
+    *val1 = tmp[0];
+    *val2 = tmp[1];
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_three_integers(
-    mut option: *const ::core::ffi::c_char,
-    mut val1: *mut ::core::ffi::c_int,
-    mut val2: *mut ::core::ffi::c_int,
-    mut val3: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut num: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    let mut tmp: [::core::ffi::c_int; 3] = [0; 3];
-    tmp[0 as ::core::ffi::c_int as usize] = *val1;
-    tmp[1 as ::core::ffi::c_int as usize] = *val2;
-    tmp[2 as ::core::ffi::c_int as usize] = *val3;
-    err = pip_get_integer_array(
-        option,
-        &raw mut tmp as *mut ::core::ffi::c_int,
-        &raw mut num,
-        3 as ::core::ffi::c_int,
-    );
-    if err != 0 as ::core::ffi::c_int {
+
+/// Original C `PipGetThreeIntegers` (`parse_params.c:700`).
+pub fn pip_get_three_integers(
+    option: &[u8],
+    val1: &mut i32,
+    val2: &mut i32,
+    val3: &mut i32,
+) -> i32 {
+    let mut num = 3;
+    let mut tmp = [*val1, *val2, *val3];
+    let err = pip_get_integer_array(option, &mut tmp, &mut num, 3);
+    if err != 0 {
         return err;
     }
-    *val1 = tmp[0 as ::core::ffi::c_int as usize];
-    *val2 = tmp[1 as ::core::ffi::c_int as usize];
-    *val3 = tmp[2 as ::core::ffi::c_int as usize];
-    return 0 as ::core::ffi::c_int;
+    *val1 = tmp[0];
+    *val2 = tmp[1];
+    *val3 = tmp[2];
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_three_floats(
-    mut option: *const ::core::ffi::c_char,
-    mut val1: *mut ::core::ffi::c_float,
-    mut val2: *mut ::core::ffi::c_float,
-    mut val3: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut num: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    let mut tmp: [::core::ffi::c_float; 3] = [0.; 3];
-    tmp[0 as ::core::ffi::c_int as usize] = *val1;
-    tmp[1 as ::core::ffi::c_int as usize] = *val2;
-    tmp[2 as ::core::ffi::c_int as usize] = *val3;
-    err = pip_get_float_array(
-        option,
-        &raw mut tmp as *mut ::core::ffi::c_float,
-        &raw mut num,
-        3 as ::core::ffi::c_int,
-    );
-    if err != 0 as ::core::ffi::c_int {
+
+/// Original C `PipGetThreeFloats` (`parse_params.c:716`).
+pub fn pip_get_three_floats(option: &[u8], val1: &mut f32, val2: &mut f32, val3: &mut f32) -> i32 {
+    let mut num = 3;
+    let mut tmp = [*val1, *val2, *val3];
+    let err = pip_get_float_array(option, &mut tmp, &mut num, 3);
+    if err != 0 {
         return err;
     }
-    *val1 = tmp[0 as ::core::ffi::c_int as usize];
-    *val2 = tmp[1 as ::core::ffi::c_int as usize];
-    *val3 = tmp[2 as ::core::ffi::c_int as usize];
-    return 0 as ::core::ffi::c_int;
+    *val1 = tmp[0];
+    *val2 = tmp[1];
+    *val3 = tmp[2];
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_integer_array(
-    mut option: *const ::core::ffi::c_char,
-    mut array: *mut ::core::ffi::c_int,
-    mut numToGet: *mut ::core::ffi::c_int,
-    mut arraySize: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return option_line_of_values(
+
+/// Original C `PipGetIntegerArray` (`parse_params.c:736`).
+pub fn pip_get_integer_array(
+    option: &[u8],
+    array: &mut [i32],
+    num_to_get: &mut i32,
+    array_size: i32,
+) -> i32 {
+    option_line_of_values(
         option,
-        array as *mut ::core::ffi::c_void,
+        PipValueArray::Int(array),
         PIP_INTEGER,
-        numToGet,
-        arraySize,
-    );
+        num_to_get,
+        array_size,
+    )
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_float_array(
-    mut option: *const ::core::ffi::c_char,
-    mut array: *mut ::core::ffi::c_float,
-    mut numToGet: *mut ::core::ffi::c_int,
-    mut arraySize: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return option_line_of_values(
+
+/// Original C `PipGetFloatArray` (`parse_params.c:742`).
+pub fn pip_get_float_array(
+    option: &[u8],
+    array: &mut [f32],
+    num_to_get: &mut i32,
+    array_size: i32,
+) -> i32 {
+    option_line_of_values(
         option,
-        array as *mut ::core::ffi::c_void,
+        PipValueArray::Float(array),
         PIP_FLOAT,
-        numToGet,
-        arraySize,
-    );
+        num_to_get,
+        array_size,
+    )
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_print_help(
-    mut progName: *const ::core::ffi::c_char,
-    mut useStdErr: ::core::ffi::c_int,
-    mut inputFiles: ::core::ffi::c_int,
-    mut outputFiles: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut abbrevOK: ::core::ffi::c_int = 0;
-    let mut lastOpt: ::core::ffi::c_int = 0;
-    let mut jlim: ::core::ffi::c_int = 0;
-    let mut optLen: ::core::ffi::c_int = 0;
-    let mut hasbf: ::core::ffi::c_int = 0;
-    let mut numOut: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut numReal: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut brokeAtSpace: ::core::ffi::c_int = 0;
-    let mut brokeAtNewLine: ::core::ffi::c_int = 0;
-    let mut helplim: ::core::ffi::c_int = 74 as ::core::ffi::c_int;
-    let mut sname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut lname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut newLinePt: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut defPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut out: *mut FILE = if useStdErr != 0 { stderr } else { stdout };
-    let mut indent4: [::core::ffi::c_char; 5] =
-        ::core::mem::transmute::<[u8; 5], [::core::ffi::c_char; 5]>(*b"    \0");
-    let mut indentStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut linePos: ::core::ffi::c_int = 11 as ::core::ffi::c_int;
-    let mut fort90: ::core::ffi::c_int = if sOutputManpage == -(3 as ::core::ffi::c_int) {
-        1 as ::core::ffi::c_int
+
+/// Original C `PipPrintHelp` (`parse_params.c:760`).
+///
+/// Print a complete usage statement, man page entry, or program fallback code.
+pub fn pip_print_help(
+    prog_name: &[u8],
+    use_std_err: i32,
+    input_files: i32,
+    output_files: i32,
+) -> i32 {
+    let mut num_out = 0i32;
+    let mut num_real = 0i32;
+    let helplim: i32 = 74;
+    let mut out = if use_std_err != 0 {
+        ImodFile::Stderr
     } else {
-        0 as ::core::ffi::c_int
+        ImodFile::Stdout
     };
-    let mut fort77: ::core::ffi::c_int = if sOutputManpage == -(2 as ::core::ffi::c_int) {
-        1 as ::core::ffi::c_int
+    let indent4: &[u8] = b"    ";
+    let mut line_pos = 11i32;
+    let output_manpage = S_OUTPUT_MANPAGE.get();
+    let fort90 = if output_manpage == -3 { 1 } else { 0 };
+    let fort77 = if output_manpage == -2 { 1 } else { 0 };
+    let c_code = if output_manpage == 2 { 1 } else { 0 };
+    let python = if output_manpage == 3 { 1 } else { 0 };
+    let fort_cont: &[u8] = if fort90 != 0 {
+        b" &\n      '"
     } else {
-        0 as ::core::ffi::c_int
+        b"\n     &    '"
     };
-    let mut cCode: ::core::ffi::c_int = if sOutputManpage == 2 as ::core::ffi::c_int {
-        1 as ::core::ffi::c_int
+    let mut descriptions: &[&[u8]; 14] = &S_TYPE_DESCRIPTIONS;
+    let num_options = S_NUM_OPTIONS.get();
+    let double_dash: &[u8] = if S_DOUBLE_DASH_OPTIONS.get() != 0 {
+        b"-"
     } else {
-        0 as ::core::ffi::c_int
+        b""
     };
-    let mut python: ::core::ffi::c_int = if sOutputManpage == 3 as ::core::ffi::c_int {
-        1 as ::core::ffi::c_int
-    } else {
-        0 as ::core::ffi::c_int
-    };
-    let mut fortCont: *mut ::core::ffi::c_char = (if fort90 != 0 {
-        b" &\n      '\0" as *const u8 as *const ::core::ffi::c_char
-    } else {
-        b"\n     &    '\0" as *const u8 as *const ::core::ffi::c_char
-    }) as *mut ::core::ffi::c_char;
-    let mut descriptions: *mut *mut ::core::ffi::c_char =
-        (&raw mut sTypeDescriptions as *mut *mut ::core::ffi::c_char)
-            .offset(0 as ::core::ffi::c_int as isize) as *mut *mut ::core::ffi::c_char;
-    i = 0 as ::core::ffi::c_int;
-    while i < sNumOptions {
-        sname = (*sOptTable.offset(i as isize)).shortName;
-        lname = (*sOptTable.offset(i as isize)).longName;
-        if !lname.is_null() && *lname as ::core::ffi::c_int != 0
-            || !sname.is_null() && *sname as ::core::ffi::c_int != 0
+
+    /* Get correct number of options for Fortran fallback */
+    for i in 0..num_options {
+        let (sname, lname) = S_OPT_TABLE.with_borrow(|t| {
+            (
+                t[i as usize].short_name.clone(),
+                t[i as usize].long_name.clone(),
+            )
+        });
+        if lname.as_deref().is_some_and(|l| !l.is_empty())
+            || sname.as_deref().is_some_and(|s| !s.is_empty())
         {
-            numReal += 1;
+            num_real += 1;
         }
-        i += 1;
     }
-    if sOutputManpage == 0 {
-        if !sUsageString.is_null() {
-            fprintf(
-                out,
-                b"%s\0" as *const u8 as *const ::core::ffi::c_char,
-                sUsageString,
-            );
+
+    if output_manpage == 0 {
+        let usage = S_USAGE_STRING.with_borrow(|u| u.clone());
+        if let Some(usage) = usage {
+            let _ = out.write_all(&usage);
         } else {
-            fprintf(
-                out,
-                b"Usage: %s \0" as *const u8 as *const ::core::ffi::c_char,
-                progName,
-            );
-            if sNumOptions != 0 {
-                fprintf(
-                    out,
-                    b"[Options]\0" as *const u8 as *const ::core::ffi::c_char,
-                );
+            let _ = out.write_all(b"Usage: ");
+            let _ = out.write_all(prog_name);
+            let _ = out.write_all(b" ");
+            if num_options != 0 {
+                let _ = out.write_all(b"[Options]");
             }
-            if inputFiles != 0 {
-                fprintf(
-                    out,
-                    b" input_file\0" as *const u8 as *const ::core::ffi::c_char,
-                );
+            if input_files != 0 {
+                let _ = out.write_all(b" input_file");
             }
-            if inputFiles > 1 as ::core::ffi::c_int {
-                fprintf(out, b"s...\0" as *const u8 as *const ::core::ffi::c_char);
+            if input_files > 1 {
+                let _ = out.write_all(b"s...");
             }
-            if outputFiles != 0 {
-                fprintf(
-                    out,
-                    b" output_file\0" as *const u8 as *const ::core::ffi::c_char,
-                );
+            if output_files != 0 {
+                let _ = out.write_all(b" output_file");
             }
-            if outputFiles > 1 as ::core::ffi::c_int {
-                fprintf(out, b"s...\0" as *const u8 as *const ::core::ffi::c_char);
+            if output_files > 1 {
+                let _ = out.write_all(b"s...");
             }
         }
-        fprintf(out, b"\n\0" as *const u8 as *const ::core::ffi::c_char);
-        if numReal == 0 {
-            return 0 as ::core::ffi::c_int;
+        let _ = out.write_all(b"\n");
+
+        if num_real == 0 {
+            return 0;
         }
-        if sNoHelpAbbrevs == 0 {
-            fprintf(
-                out,
-                b"Options can be abbreviated, current short name abbreviations are in parentheses\n\0"
-                    as *const u8 as *const ::core::ffi::c_char,
+        if S_NO_HELP_ABBREVS.get() == 0 {
+            let _ = out.write_all(
+                b"Options can be abbreviated, current short name abbreviations are in parentheses\n",
             );
         }
-        fprintf(
-            out,
-            b"Options:\n\0" as *const u8 as *const ::core::ffi::c_char,
-        );
-        descriptions = (&raw mut sTypeForUsage as *mut *mut ::core::ffi::c_char)
-            .offset(0 as ::core::ffi::c_int as isize)
-            as *mut *mut ::core::ffi::c_char;
+        let _ = out.write_all(b"Options:\n");
+        descriptions = &S_TYPE_FOR_USAGE;
     }
-    sTestAbbrevForUsage = 1 as ::core::ffi::c_int;
-    let mut current_block_166: u64;
-    i = 0 as ::core::ffi::c_int;
-    while i < sNumOptions {
-        sname = (*sOptTable.offset(i as isize)).shortName;
-        lname = (*sOptTable.offset(i as isize)).longName;
-        indentStr = sNullString;
-        abbrevOK = 0 as ::core::ffi::c_int;
-        if !sname.is_null() && *sname as ::core::ffi::c_int != 0 && sNoHelpAbbrevs == 0 {
-            jlim = strlen(sname).wrapping_sub(1 as size_t) as ::core::ffi::c_int;
-            if jlim > TEMP_STR_SIZE - 10 as ::core::ffi::c_int {
-                jlim = TEMP_STR_SIZE - 10 as ::core::ffi::c_int;
+
+    S_TEST_ABBREV_FOR_USAGE.set(1);
+    for i in 0..num_options {
+        let (sname_opt, lname_opt, type_opt, format_opt, default_opt, help_opt, multiple, linked) =
+            S_OPT_TABLE.with_borrow(|t| {
+                let o = &t[i as usize];
+                (
+                    o.short_name.clone(),
+                    o.long_name.clone(),
+                    o.type_0.clone(),
+                    o.format.clone(),
+                    o.default_val.clone(),
+                    o.help_string.clone(),
+                    o.multiple,
+                    o.linked,
+                )
+            });
+        let sname: &[u8] = sname_opt.as_deref().unwrap_or(b"");
+        let lname: &[u8] = lname_opt.as_deref().unwrap_or(b"");
+        let type_0: &[u8] = type_opt.as_deref().unwrap_or(b"");
+        let mut indent_str: &[u8] = b"";
+
+        /* Try to look up an abbreviation of the short name */
+        let mut abbrev_ok = 0i32;
+        if !sname.is_empty() && S_NO_HELP_ABBREVS.get() == 0 {
+            let mut jlim = sname.len() as i32 - 1;
+            if jlim > TEMP_STR_SIZE - 10 {
+                jlim = TEMP_STR_SIZE - 10;
             }
-            j = 0 as ::core::ffi::c_int;
-            while j < jlim {
-                *sTempStr.offset(j as isize) = *sname.offset(j as isize);
-                *sTempStr.offset((j + 1 as ::core::ffi::c_int) as isize) = 0 as ::core::ffi::c_char;
-                if lookup_option(sTempStr, sNumOptions) == i {
-                    abbrevOK = 1 as ::core::ffi::c_int;
+            for j in 0..jlim {
+                /* sTempStr[j] = sname[j]; sTempStr[j + 1] = 0x00; */
+                let probe = S_TEMP_STR.with_borrow_mut(|t| {
+                    t.truncate(j as usize);
+                    t.push(sname[j as usize]);
+                    t.clone()
+                });
+                if lookup_option(&probe, num_options) == i {
+                    abbrev_ok = 1;
                     break;
-                } else {
-                    j += 1;
                 }
             }
         }
-        if !lname.is_null() && *lname as ::core::ffi::c_int != 0
-            || !sname.is_null() && *sname as ::core::ffi::c_int != 0
-        {
-            if sOutputManpage <= 0 as ::core::ffi::c_int && fort90 == 0 {
-                indentStr = &raw mut indent4 as *mut ::core::ffi::c_char;
+
+        if !lname.is_empty() || !sname.is_empty() {
+            if output_manpage <= 0 && fort90 == 0 {
+                indent_str = indent4;
             }
+
+            /* Output Fortran fallback code (-2) */
             if fort77 != 0 || fort90 != 0 {
-                lastOpt = (i == sNumOptions - 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-                if numOut == 0 {
-                    fprintf(
-                        out,
-                        b"%s  integer numOptions\n%s  parameter (numOptions = %d)\n%s  character*(40 * numOptions) options(1)\n%s  options(1) =%s\0"
-                            as *const u8 as *const ::core::ffi::c_char,
-                        indentStr,
-                        indentStr,
-                        numReal,
-                        indentStr,
-                        indentStr,
-                        fortCont,
+                let last_opt = i == num_options - 1;
+                if num_out == 0 {
+                    let _ = out.write_all(
+                        &c_format_bytes(
+                            "%s  integer numOptions\n%s  parameter (numOptions = %d)\n%s  character*(40 * numOptions) options(1)\n%s  options(1) =%s",
+                            &[
+                                CArg::Bytes(indent_str),
+                                CArg::Bytes(indent_str),
+                                CArg::Int(num_real as i64),
+                                CArg::Bytes(indent_str),
+                                CArg::Bytes(indent_str),
+                                CArg::Bytes(fort_cont),
+                            ],
+                        ),
                     );
                 }
-                optLen = strlen(sname)
-                    .wrapping_add(strlen(lname))
-                    .wrapping_add(strlen((*sOptTable.offset(i as isize)).type_0))
-                    .wrapping_add(4 as size_t)
-                    .wrapping_add((*sOptTable.offset(i as isize)).multiple as size_t)
-                    as ::core::ffi::c_int;
-                if linePos
-                    + optLen
-                    + (if lastOpt != 0 {
-                        0 as ::core::ffi::c_int
+
+                let opt_len =
+                    sname.len() as i32 + lname.len() as i32 + type_0.len() as i32 + 4 + multiple;
+
+                if line_pos
+                    + opt_len
+                    + (if last_opt {
+                        0
+                    } else if fort90 != 0 {
+                        5
                     } else {
-                        (if fort90 != 0 {
-                            5 as ::core::ffi::c_int
-                        } else {
-                            3 as ::core::ffi::c_int
-                        })
+                        3
                     })
-                    > 90 as ::core::ffi::c_int
+                    > 90
                 {
-                    fprintf(
-                        out,
-                        b"'//%s\0" as *const u8 as *const ::core::ffi::c_char,
-                        fortCont,
-                    );
-                    linePos = if fort90 != 0 {
-                        7 as ::core::ffi::c_int
-                    } else {
-                        11 as ::core::ffi::c_int
-                    };
+                    let _ = out.write_all(b"'//");
+                    let _ = out.write_all(fort_cont);
+                    line_pos = if fort90 != 0 { 7 } else { 11 };
                 }
-                fprintf(
-                    out,
-                    b"%s:%s:%s%s%s\0" as *const u8 as *const ::core::ffi::c_char,
-                    sname,
-                    lname,
-                    (*sOptTable.offset(i as isize)).type_0,
-                    if (*sOptTable.offset(i as isize)).multiple != 0 {
-                        if (*sOptTable.offset(i as isize)).linked != 0 {
-                            b"L:\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"M:\0" as *const u8 as *const ::core::ffi::c_char
-                        }
-                    } else {
-                        b":\0" as *const u8 as *const ::core::ffi::c_char
-                    },
-                    if lastOpt != 0 {
-                        b"'\n\0" as *const u8 as *const ::core::ffi::c_char
-                    } else {
-                        b"@\0" as *const u8 as *const ::core::ffi::c_char
-                    },
-                );
-                linePos += optLen;
-                numOut += 1;
-                current_block_166 = 2569451025026770673;
-            } else if cCode != 0 || python != 0 {
-                lastOpt = (i == sNumOptions - 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-                if numOut == 0 {
-                    if cCode != 0 {
-                        fprintf(
-                            out,
-                            b"  int numOptions = %d;\n  const char *options[] = {\n    \0"
-                                as *const u8
-                                as *const ::core::ffi::c_char,
-                            numReal,
-                        );
-                        linePos = 5 as ::core::ffi::c_int;
-                    } else {
-                        fprintf(
-                            out,
-                            b"options = [\0" as *const u8 as *const ::core::ffi::c_char,
-                        );
-                        linePos = 12 as ::core::ffi::c_int;
-                    }
-                }
-                optLen = strlen(sname)
-                    .wrapping_add(strlen(lname))
-                    .wrapping_add(strlen((*sOptTable.offset(i as isize)).type_0))
-                    .wrapping_add(7 as size_t)
-                    .wrapping_add((*sOptTable.offset(i as isize)).multiple as size_t)
-                    as ::core::ffi::c_int;
-                if linePos + optLen > 90 as ::core::ffi::c_int {
-                    if cCode != 0 {
-                        fprintf(out, b"\n    \0" as *const u8 as *const ::core::ffi::c_char);
-                        linePos = 5 as ::core::ffi::c_int;
-                    } else {
-                        fprintf(
-                            out,
-                            b"\n           \0" as *const u8 as *const ::core::ffi::c_char,
-                        );
-                        linePos = 12 as ::core::ffi::c_int;
-                    }
-                }
-                fprintf(
-                    out,
-                    b"\"%s:%s:%s%s\"%s\0" as *const u8 as *const ::core::ffi::c_char,
-                    sname,
-                    lname,
-                    (*sOptTable.offset(i as isize)).type_0,
-                    if (*sOptTable.offset(i as isize)).multiple != 0 {
-                        if (*sOptTable.offset(i as isize)).linked != 0 {
-                            b"L:\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"M:\0" as *const u8 as *const ::core::ffi::c_char
-                        }
-                    } else {
-                        b":\0" as *const u8 as *const ::core::ffi::c_char
-                    },
-                    if lastOpt != 0 {
-                        if cCode != 0 {
-                            b"};\n\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"]\n\0" as *const u8 as *const ::core::ffi::c_char
-                        }
-                    } else {
-                        b", \0" as *const u8 as *const ::core::ffi::c_char
-                    },
-                );
-                linePos += optLen;
-                numOut += 1;
-                current_block_166 = 2569451025026770673;
-            } else {
-                if i != 0 && sOutputManpage < 0 as ::core::ffi::c_int {
-                    fprintf(out, b"\n\0" as *const u8 as *const ::core::ffi::c_char);
-                }
-                if sOutputManpage > 0 as ::core::ffi::c_int {
-                    fprintf(
-                        out,
-                        b".TP\n.B \0" as *const u8 as *const ::core::ffi::c_char,
-                    );
-                }
-                fprintf(out, b" \0" as *const u8 as *const ::core::ffi::c_char);
-                if !sname.is_null() && *sname as ::core::ffi::c_int != 0 {
-                    fprintf(
-                        out,
-                        b"%s-%s\0" as *const u8 as *const ::core::ffi::c_char,
-                        if sDoubleDashOptions != 0 {
-                            b"-\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"\0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                        sname,
-                    );
-                }
-                if abbrevOK != 0 {
-                    fprintf(
-                        out,
-                        b" (%s-%s)\0" as *const u8 as *const ::core::ffi::c_char,
-                        if sDoubleDashOptions != 0 {
-                            b"-\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"\0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                        sTempStr,
-                    );
-                }
-                if !sname.is_null()
-                    && *sname as ::core::ffi::c_int != 0
-                    && !lname.is_null()
-                    && *lname as ::core::ffi::c_int != 0
-                {
-                    fprintf(
-                        out,
-                        b"  %sOR%s  \0" as *const u8 as *const ::core::ffi::c_char,
-                        if sOutputManpage > 0 as ::core::ffi::c_int {
-                            b"\\fR\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"\0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                        if sOutputManpage > 0 as ::core::ffi::c_int {
-                            b"\\fP\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"\0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                    );
-                }
-                if !lname.is_null() && *lname as ::core::ffi::c_int != 0 {
-                    fprintf(
-                        out,
-                        b"%s-%s\0" as *const u8 as *const ::core::ffi::c_char,
-                        if sDoubleDashOptions != 0 {
-                            b"-\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"\0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                        lname,
-                    );
-                }
-                j = 0 as ::core::ffi::c_int;
-                while j < sNumTypes as ::core::ffi::c_int {
-                    if strcmp((*sOptTable.offset(i as isize)).type_0, sTypes[j as usize]) == 0 {
-                        break;
-                    }
-                    j += 1;
-                }
-                if !(*sOptTable.offset(i as isize)).format.is_null() {
-                    if sOutputManpage > 0 as ::core::ffi::c_int {
-                        hasbf = pip_starts_with(
-                            (*sOptTable.offset(i as isize)).format,
-                            b"\\f\0" as *const u8 as *const ::core::ffi::c_char,
-                        );
-                        fprintf(
-                            out,
-                            b" \t %s%s%s\0" as *const u8 as *const ::core::ffi::c_char,
-                            if hasbf == 0 as ::core::ffi::c_int {
-                                b"\\fI\0" as *const u8 as *const ::core::ffi::c_char
-                            } else {
-                                b"\0" as *const u8 as *const ::core::ffi::c_char
-                            },
-                            (*sOptTable.offset(i as isize)).format,
-                            if hasbf == 0 as ::core::ffi::c_int {
-                                b"\\fR\0" as *const u8 as *const ::core::ffi::c_char
-                            } else {
-                                b"\0" as *const u8 as *const ::core::ffi::c_char
-                            },
-                        );
-                    } else {
-                        optLen =
-                            strlen((*sOptTable.offset(i as isize)).format) as ::core::ffi::c_int;
-                        fprintf(out, b"   \0" as *const u8 as *const ::core::ffi::c_char);
-                        j = 0 as ::core::ffi::c_int;
-                        while j < optLen {
-                            if pip_starts_with(
-                                (*sOptTable.offset(i as isize)).format.offset(j as isize),
-                                b"\\f\0" as *const u8 as *const ::core::ffi::c_char,
-                            ) != 0
-                            {
-                                j += 2 as ::core::ffi::c_int;
-                            } else {
-                                fprintf(
-                                    out,
-                                    b"%c\0" as *const u8 as *const ::core::ffi::c_char,
-                                    *(*sOptTable.offset(i as isize)).format.offset(j as isize)
-                                        as ::core::ffi::c_int,
-                                );
-                            }
-                            j += 1;
-                        }
-                    }
-                } else if strcmp(
-                    (*sOptTable.offset(i as isize)).type_0,
-                    BOOLEAN_STRING.as_ptr(),
-                ) != 0
-                {
-                    fprintf(
-                        out,
-                        b"%s%s%s\0" as *const u8 as *const ::core::ffi::c_char,
-                        if sOutputManpage > 0 as ::core::ffi::c_int {
-                            b" \t \\fI\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"   \0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                        *descriptions.offset(j as isize),
-                        if sOutputManpage > 0 as ::core::ffi::c_int {
-                            b"\\fR\0" as *const u8 as *const ::core::ffi::c_char
-                        } else {
-                            b"\0" as *const u8 as *const ::core::ffi::c_char
-                        },
-                    );
-                }
-                fprintf(out, b"\n\0" as *const u8 as *const ::core::ffi::c_char);
-                current_block_166 = 11865390570819897086;
+                /* fprintf(out, "%s:%s:%s%s%s", ...) */
+                let _ = out.write_all(sname);
+                let _ = out.write_all(b":");
+                let _ = out.write_all(lname);
+                let _ = out.write_all(b":");
+                let _ = out.write_all(type_0);
+                let _ = out.write_all(if multiple != 0 {
+                    if linked != 0 { &b"L:"[..] } else { &b"M:"[..] }
+                } else {
+                    &b":"[..]
+                });
+                let _ = out.write_all(if last_opt { &b"'\n"[..] } else { &b"@"[..] });
+                line_pos += opt_len;
+                num_out += 1;
+                continue;
             }
-        } else if fort77 != 0 || fort90 != 0 || cCode != 0 || python != 0 {
-            current_block_166 = 2569451025026770673;
-        } else {
-            if sOutputManpage == 1 as ::core::ffi::c_int {
-                fprintf(out, b".SS \0" as *const u8 as *const ::core::ffi::c_char);
-            } else {
-                fprintf(out, b"\n\0" as *const u8 as *const ::core::ffi::c_char);
-            }
-            current_block_166 = 11865390570819897086;
-        }
-        match current_block_166 {
-            11865390570819897086 => {
-                if !(*sOptTable.offset(i as isize)).helpString.is_null()
-                    && *(*sOptTable.offset(i as isize)).helpString as ::core::ffi::c_int != 0
-                {
-                    lname = strdup((*sOptTable.offset(i as isize)).helpString);
-                    if pip_memory_error(
-                        lname as *mut ::core::ffi::c_void,
-                        b"pip_print_help\0" as *const u8 as *const ::core::ffi::c_char,
-                    ) != 0
-                    {
-                        return -(1 as ::core::ffi::c_int);
-                    }
-                    if !(*sOptTable.offset(i as isize)).defaultVal.is_null() {
-                        while strlen(lname)
-                            .wrapping_add(strlen((*sOptTable.offset(i as isize)).defaultVal))
-                            < (LINE_STR_SIZE - 10 as ::core::ffi::c_int) as size_t
-                        {
-                            defPtr = strstr(lname, DEFAULT_SUB_STR.as_ptr());
-                            if defPtr.is_null() {
-                                break;
-                            }
-                            strncpy(
-                                sLineStr,
-                                lname,
-                                defPtr.offset_from(lname) as ::core::ffi::c_long as size_t,
-                            );
-                            sprintf(
-                                sLineStr.offset(
-                                    defPtr.offset_from(lname) as ::core::ffi::c_long as isize
-                                ) as *mut ::core::ffi::c_char,
-                                b"%s%s\0" as *const u8 as *const ::core::ffi::c_char,
-                                (*sOptTable.offset(i as isize)).defaultVal,
-                                defPtr.offset(strlen(DEFAULT_SUB_STR.as_ptr()) as isize),
-                            );
-                            free(lname as *mut ::core::ffi::c_void);
-                            lname = strdup(sLineStr);
-                            if pip_memory_error(
-                                lname as *mut ::core::ffi::c_void,
-                                b"pip_print_help\0" as *const u8 as *const ::core::ffi::c_char,
-                            ) != 0
-                            {
-                                return -(1 as ::core::ffi::c_int);
-                            }
-                        }
-                    }
-                    sname = lname;
-                    optLen = strlen(sname) as ::core::ffi::c_int;
-                    newLinePt = strchr(sname, '\n' as i32);
-                    while optLen > helplim || !newLinePt.is_null() {
-                        brokeAtNewLine = 0 as ::core::ffi::c_int;
-                        if !newLinePt.is_null()
-                            && newLinePt.offset_from(sname) as ::core::ffi::c_long
-                                <= helplim as ::core::ffi::c_long
-                        {
-                            j = newLinePt.offset_from(sname) as ::core::ffi::c_long
-                                as ::core::ffi::c_int;
-                            newLinePt = strchr(
-                                sname
-                                    .offset(j as isize)
-                                    .offset(1 as ::core::ffi::c_int as isize),
-                                '\n' as i32,
-                            );
-                            brokeAtSpace = 0 as ::core::ffi::c_int;
-                            brokeAtNewLine = 1 as ::core::ffi::c_int;
-                        } else {
-                            j = helplim;
-                            while j >= 1 as ::core::ffi::c_int {
-                                if *sname.offset(j as isize) as ::core::ffi::c_int == ' ' as i32 {
-                                    break;
-                                }
-                                j -= 1;
-                            }
-                            brokeAtSpace = 1 as ::core::ffi::c_int;
-                        }
-                        if sOutputManpage > 0 as ::core::ffi::c_int
-                            && (*sname.offset(0 as ::core::ffi::c_int as isize)
-                                as ::core::ffi::c_int
-                                == '.' as i32
-                                || *sname.offset(0 as ::core::ffi::c_int as isize)
-                                    as ::core::ffi::c_int
-                                    == '\'' as i32)
-                        {
-                            fprintf(out, b"\\&\0" as *const u8 as *const ::core::ffi::c_char);
-                        }
-                        *sname.offset(j as isize) = 0 as ::core::ffi::c_char;
-                        fprintf(
-                            out,
-                            b"%s%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-                            indentStr,
-                            sname,
+
+            /* Fallback output for C code (2) or Python code (3) */
+            if c_code != 0 || python != 0 {
+                let last_opt = i == num_options - 1;
+                if num_out == 0 {
+                    if c_code != 0 {
+                        let _ = out.write_all(
+                            c_format(
+                                "  int numOptions = %d;\n  const char *options[] = {\n    ",
+                                &[CArg::Int(num_real as i64)],
+                            )
+                            .as_bytes(),
                         );
-                        if sOutputManpage == 1 as ::core::ffi::c_int
-                            && brokeAtNewLine != 0
-                            && *sname.offset((j + 1 as ::core::ffi::c_int) as isize)
-                                as ::core::ffi::c_int
-                                != ' ' as i32
-                        {
-                            fprintf(out, b".br\n\0" as *const u8 as *const ::core::ffi::c_char);
-                        }
-                        if brokeAtSpace != 0 && sOutputManpage > 0 as ::core::ffi::c_int {
-                            while *sname.offset((j + 1 as ::core::ffi::c_int) as isize)
-                                as ::core::ffi::c_int
-                                == ' ' as i32
-                            {
-                                j += 1;
-                            }
-                        }
-                        sname = sname.offset((j + 1 as ::core::ffi::c_int) as isize);
-                        optLen -= j + 1 as ::core::ffi::c_int;
+                        line_pos = 5;
+                    } else {
+                        let _ = out.write_all(b"options = [");
+                        line_pos = 12;
                     }
-                    fprintf(
-                        out,
-                        b"%s%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-                        indentStr,
-                        sname,
-                    );
-                    free(lname as *mut ::core::ffi::c_void);
                 }
-                if (*sOptTable.offset(i as isize)).linked != 0 {
-                    fprintf(
-                        out,
-                        b"%s(Multiple entries linked to a different option)\n\0" as *const u8
-                            as *const ::core::ffi::c_char,
-                        indentStr,
-                    );
-                } else if (*sOptTable.offset(i as isize)).multiple != 0 {
-                    fprintf(
-                        out,
-                        b"%s(Successive entries accumulate)\n\0" as *const u8
-                            as *const ::core::ffi::c_char,
-                        indentStr,
-                    );
+                let opt_len =
+                    sname.len() as i32 + lname.len() as i32 + type_0.len() as i32 + 7 + multiple;
+                if line_pos + opt_len > 90 {
+                    if c_code != 0 {
+                        let _ = out.write_all(b"\n    ");
+                        line_pos = 5;
+                    } else {
+                        /* If Emacs indents as it is pasted (it used to), take out leading spaces */
+                        let _ = out.write_all(b"\n           ");
+                        line_pos = 12;
+                    }
                 }
+                /* fprintf(out, "\"%s:%s:%s%s\"%s", ...) */
+                let _ = out.write_all(b"\"");
+                let _ = out.write_all(sname);
+                let _ = out.write_all(b":");
+                let _ = out.write_all(lname);
+                let _ = out.write_all(b":");
+                let _ = out.write_all(type_0);
+                let _ = out.write_all(if multiple != 0 {
+                    if linked != 0 { &b"L:"[..] } else { &b"M:"[..] }
+                } else {
+                    &b":"[..]
+                });
+                let _ = out.write_all(b"\"");
+                let _ = out.write_all(if last_opt {
+                    if c_code != 0 {
+                        &b"};\n"[..]
+                    } else {
+                        &b"]\n"[..]
+                    }
+                } else {
+                    &b", "[..]
+                });
+                line_pos += opt_len;
+                num_out += 1;
+                continue;
             }
-            _ => {}
-        }
-        i += 1;
-    }
-    sTestAbbrevForUsage = 0 as ::core::ffi::c_int;
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_print_entries() {
-    let mut name: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut sname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut lname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut i: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    if sPrintEntries < 0 as ::core::ffi::c_int {
-        sPrintEntries = 0 as ::core::ffi::c_int;
-        name = getenv(PRINTENTRY_VARIABLE.as_ptr());
-        if !name.is_null() {
-            sPrintEntries = atoi(name);
-        }
-    }
-    if sPrintEntries == 0 {
-        return;
-    }
-    j = 0 as ::core::ffi::c_int;
-    i = 0 as ::core::ffi::c_int;
-    while i < sNumOptions {
-        j += (*sOptTable.offset(i as isize)).count;
-        i += 1;
-    }
-    if j + (*sOptTable.offset(sNonOptInd as isize)).count == 0 {
-        return;
-    }
-    printf(
-        b"\n*** Entries to program %s ***\n\0" as *const u8 as *const ::core::ffi::c_char,
-        sProgramName,
-    );
-    i = 0 as ::core::ffi::c_int;
-    while i < sNumOptions {
-        sname = (*sOptTable.offset(i as isize)).shortName;
-        lname = (*sOptTable.offset(i as isize)).longName;
-        if !lname.is_null() && *lname as ::core::ffi::c_int != 0
-            || !sname.is_null() && *sname as ::core::ffi::c_int != 0
-        {
-            name = if !lname.is_null() && *lname as ::core::ffi::c_int != 0 {
-                lname
-            } else {
-                sname
-            };
-            j = 0 as ::core::ffi::c_int;
-            while j < (*sOptTable.offset(i as isize)).count {
-                printf(
-                    b"  %s = %s\n\0" as *const u8 as *const ::core::ffi::c_char,
-                    name,
-                    *(*sOptTable.offset(i as isize)).valuePtr.offset(j as isize),
-                );
+
+            if i != 0 && output_manpage < 0 {
+                let _ = out.write_all(b"\n");
+            }
+            if output_manpage > 0 {
+                let _ = out.write_all(b".TP\n.B ");
+            }
+            let _ = out.write_all(b" ");
+            if !sname.is_empty() {
+                let _ = out.write_all(double_dash);
+                let _ = out.write_all(b"-");
+                let _ = out.write_all(sname);
+            }
+            if abbrev_ok != 0 {
+                let temp = S_TEMP_STR.with_borrow(|t| t.clone());
+                let _ = out.write_all(b" (");
+                let _ = out.write_all(double_dash);
+                let _ = out.write_all(b"-");
+                let _ = out.write_all(&temp);
+                let _ = out.write_all(b")");
+            }
+            if !sname.is_empty() && !lname.is_empty() {
+                let _ = out.write_all(b"  ");
+                let _ = out.write_all(if output_manpage > 0 {
+                    &b"\\fR"[..]
+                } else {
+                    &b""[..]
+                });
+                let _ = out.write_all(b"OR");
+                let _ = out.write_all(if output_manpage > 0 {
+                    &b"\\fP"[..]
+                } else {
+                    &b""[..]
+                });
+                let _ = out.write_all(b"  ");
+            }
+            if !lname.is_empty() {
+                let _ = out.write_all(double_dash);
+                let _ = out.write_all(b"-");
+                let _ = out.write_all(lname);
+            }
+
+            /* Get index for description string */
+            let mut j = 0i32;
+            while j < S_NUM_TYPES as i32 {
+                if type_0 == S_TYPES[j as usize] {
+                    break;
+                }
                 j += 1;
             }
-        }
-        i += 1;
-    }
-    if (*sOptTable.offset(sNonOptInd as isize)).count != 0 {
-        printf(b"  Non-option arguments:\0" as *const u8 as *const ::core::ffi::c_char);
-        j = 0 as ::core::ffi::c_int;
-        while j < (*sOptTable.offset(sNonOptInd as isize)).count {
-            if !strchr(
-                *(*sOptTable.offset(sNonOptInd as isize))
-                    .valuePtr
-                    .offset(j as isize),
-                ' ' as i32,
-            )
-            .is_null()
-            {
-                printf(
-                    b"   \"%s\"\0" as *const u8 as *const ::core::ffi::c_char,
-                    *(*sOptTable.offset(sNonOptInd as isize))
-                        .valuePtr
-                        .offset(j as isize),
-                );
-            } else {
-                printf(
-                    b"   %s\0" as *const u8 as *const ::core::ffi::c_char,
-                    *(*sOptTable.offset(sNonOptInd as isize))
-                        .valuePtr
-                        .offset(j as isize),
-                );
-            }
-            j += 1;
-        }
-        printf(b"\n\0" as *const u8 as *const ::core::ffi::c_char);
-    }
-    printf(b"*** End of entries ***\n\n\0" as *const u8 as *const ::core::ffi::c_char);
-    fflush(stdout);
-    fflush(stdout);
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_error(
-    mut errString: *mut *mut ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    if sErrorString.is_null() {
-        *errString = strdup(sNullString);
-        pip_memory_error(
-            *errString as *mut ::core::ffi::c_void,
-            b"pip_get_error\0" as *const u8 as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    *errString = strdup(sErrorString);
-    return pip_memory_error(
-        *errString as *mut ::core::ffi::c_void,
-        b"pip_get_error\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_set_error(
-    mut errString: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut outFile: *mut FILE = if sErrorDest != 0 { stderr } else { stdout };
-    if !sErrorString.is_null() {
-        free(sErrorString as *mut ::core::ffi::c_void);
-    }
-    sErrorString = strdup(errString);
-    if sErrorString.is_null() && sExitPrefix[0 as ::core::ffi::c_int as usize] == 0 {
-        return -(1 as ::core::ffi::c_int);
-    }
-    if sExitPrefix[0 as ::core::ffi::c_int as usize] != 0 {
-        fprintf(
-            outFile,
-            b"%s \0" as *const u8 as *const ::core::ffi::c_char,
-            &raw mut sExitPrefix as *mut ::core::ffi::c_char,
-        );
-        fprintf(
-            outFile,
-            b"%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-            if !sErrorString.is_null() {
-                sErrorString as *const ::core::ffi::c_char
-            } else {
-                b"Unspecified error\0" as *const u8 as *const ::core::ffi::c_char
-            },
-        );
-        exit(1 as ::core::ffi::c_int);
-    }
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn exit_error(format: *const ::core::ffi::c_char) {
-    pip_set_error(format);
-    exit(1 as ::core::ffi::c_int);
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_number_of_entries(
-    mut option: *const ::core::ffi::c_char,
-    mut numEntries: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    err = lookup_option(option, sNonOptInd + 1 as ::core::ffi::c_int);
-    if err < 0 as ::core::ffi::c_int {
-        return err;
-    }
-    *numEntries = (*sOptTable.offset(err as isize)).count;
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_linked_index(
-    mut option: *const ::core::ffi::c_char,
-    mut index: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut ilink: ::core::ffi::c_int = 0;
-    let mut which: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    err = lookup_option(option, sNonOptInd + 1 as ::core::ffi::c_int);
-    if err < 0 as ::core::ffi::c_int {
-        return err;
-    }
-    if (*sOptTable.offset(err as isize)).linked == 0 {
-        sprintf(
-            sTempStr,
-            b"Trying to get a linked index for option %s, which is not identified as linked\0"
-                as *const u8 as *const ::core::ffi::c_char,
-            option,
-        );
-        pip_set_error(sTempStr);
-        return -(1 as ::core::ffi::c_int);
-    }
-    ind = 0 as ::core::ffi::c_int;
-    if (*sOptTable.offset(err as isize)).multiple != 0 {
-        ind = (*sOptTable.offset(err as isize)).multiple - 1 as ::core::ffi::c_int;
-    }
-    if !sLinkedOption.is_null() {
-        ilink = lookup_option(sLinkedOption, sNumOptions);
-        if ilink < 0 as ::core::ffi::c_int {
-            return ilink;
-        }
-        if (*sOptTable.offset(ilink as isize)).count != 0 {
-            which = 1 as ::core::ffi::c_int;
-        }
-    }
-    *index = *(*sOptTable.offset(err as isize))
-        .nextLinked
-        .offset((2 as ::core::ffi::c_int * ind + which) as isize);
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_parse_input(
-    mut argc: ::core::ffi::c_int,
-    mut argv: *mut *mut ::core::ffi::c_char,
-    mut options: *mut *const ::core::ffi::c_char,
-    mut numOpts: ::core::ffi::c_int,
-    mut numOptArgs: *mut ::core::ffi::c_int,
-    mut numNonOptArgs: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    err = pip_initialize(numOpts);
-    if err != 0 {
-        return err;
-    }
-    i = 0 as ::core::ffi::c_int;
-    while i < numOpts {
-        err = pip_add_option(*options.offset(i as isize));
-        if err != 0 {
-            return err;
-        }
-        i += 1;
-    }
-    return pip_parse_entries(argc, argv, numOptArgs, numNonOptArgs);
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_read_option_file(
-    mut progName: *const ::core::ffi::c_char,
-    mut helpLevel: ::core::ffi::c_int,
-    mut localDir: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut len: ::core::ffi::c_int = 0;
-    let mut indst: ::core::ffi::c_int = 0;
-    let mut lineLen: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    let mut needSize: ::core::ffi::c_int = 0;
-    let mut isOption: ::core::ffi::c_int = 0;
-    let mut isSection: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut optFile: *mut FILE = ::core::ptr::null_mut::<FILE>();
-    let mut bigStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut pipDir: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut textStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut helpStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut formatStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut defaultStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut numOpts: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut bigSize: ::core::ffi::c_int = ADOC_STR_SIZE;
-    let mut readingOpt: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut longName: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut shortName: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut type_0: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut usageStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut tipStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut manStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut gotLong: ::core::ffi::c_int = 0;
-    let mut gotShort: ::core::ffi::c_int = 0;
-    let mut gotType: ::core::ffi::c_int = 0;
-    let mut gotUsage: ::core::ffi::c_int = 0;
-    let mut gotTip: ::core::ffi::c_int = 0;
-    let mut gotMan: ::core::ffi::c_int = 0;
-    let mut gotFormat: ::core::ffi::c_int = 0;
-    let mut gotDefault: ::core::ffi::c_int = 0;
-    let mut gotDelim: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut optStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut optStrSize: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut lastGottenStr: *mut *mut ::core::ffi::c_char =
-        ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-    let mut inQuoteIndex: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-    if bigSize < PATH_MAX {
-        bigSize = PATH_MAX;
-    }
-    if sTempStr.is_null() {
-        sTempStr = malloc(TEMP_STR_SIZE as size_t) as *mut ::core::ffi::c_char;
-    }
-    bigStr = malloc(bigSize as size_t) as *mut ::core::ffi::c_char;
-    if bigStr.is_null() || sTempStr.is_null() {
-        pip_memory_error(
-            NULL,
-            b"pip_read_option_file\0" as *const u8 as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    sProgramName = strdup(progName);
-    if sProgramName.is_null() {
-        sProgramName = sNullString;
-    }
-    if localDir == 0 {
-        pipDir = getenv(OPTDIR_VARIABLE.as_ptr());
-        if !pipDir.is_null() {
-            if strlen(pipDir) > (bigSize - 100 as ::core::ffi::c_int) as size_t {
-                pip_set_error(
-                    b"AUTODOC_DIR is suspiciously long\0" as *const u8
-                        as *const ::core::ffi::c_char,
-                );
-                return -(1 as ::core::ffi::c_int);
-            }
-            sprintf(
-                bigStr,
-                b"%s%c%s.%s\0" as *const u8 as *const ::core::ffi::c_char,
-                pipDir,
-                PATH_SEPARATOR,
-                progName,
-                OPTFILE_EXT.as_ptr(),
-            );
-            optFile = fopen(bigStr, b"r\0" as *const u8 as *const ::core::ffi::c_char);
-        }
-        if optFile.is_null() {
-            pipDir = getenv(b"IMOD_DIR\0" as *const u8 as *const ::core::ffi::c_char);
-            if !pipDir.is_null() {
-                if strlen(pipDir) > (bigSize - 100 as ::core::ffi::c_int) as size_t {
-                    pip_set_error(
-                        b"IMOD_DIR is suspiciously long\0" as *const u8
-                            as *const ::core::ffi::c_char,
-                    );
-                    return -(1 as ::core::ffi::c_int);
+
+            /* If there is a format, then for manpage output, wrap it in \fI-\fR unless it
+            already starts with \f.  For usage output, strip \fx */
+            if let Some(format) = format_opt.as_deref() {
+                if output_manpage > 0 {
+                    let hasbf = pip_starts_with(format, b"\\f");
+                    let _ = out.write_all(b" \t ");
+                    let _ = out.write_all(if hasbf == 0 { &b"\\fI"[..] } else { &b""[..] });
+                    let _ = out.write_all(format);
+                    let _ = out.write_all(if hasbf == 0 { &b"\\fR"[..] } else { &b""[..] });
+                } else {
+                    let opt_len = format.len() as i32;
+                    let _ = out.write_all(b"   ");
+                    let mut k = 0i32;
+                    while k < opt_len {
+                        if pip_starts_with(&format[k as usize..], b"\\f") != 0 {
+                            k += 2;
+                        } else {
+                            let _ = out.write_all(&format[k as usize..k as usize + 1]);
+                        }
+                        k += 1;
+                    }
                 }
-                sprintf(
-                    bigStr,
-                    b"%s%c%s%c%s.%s\0" as *const u8 as *const ::core::ffi::c_char,
-                    pipDir,
-                    PATH_SEPARATOR,
-                    OPTFILE_DIR.as_ptr(),
-                    PATH_SEPARATOR,
-                    progName,
-                    OPTFILE_EXT.as_ptr(),
-                );
-                optFile = fopen(bigStr, b"r\0" as *const u8 as *const ::core::ffi::c_char);
+            /* Otherwise output the description string, inside \fI \fR for man output */
+            } else if type_0 != BOOLEAN_STRING {
+                let _ = out.write_all(if output_manpage > 0 {
+                    &b" \t \\fI"[..]
+                } else {
+                    &b"   "[..]
+                });
+                let _ = out.write_all(descriptions[j as usize]);
+                let _ = out.write_all(if output_manpage > 0 {
+                    &b"\\fR"[..]
+                } else {
+                    &b""[..]
+                });
             }
-        }
-    } else if localDir > 0 as ::core::ffi::c_int {
-        ind = 0 as ::core::ffi::c_int;
-        i = 0 as ::core::ffi::c_int;
-        while i < localDir && i < 20 as ::core::ffi::c_int {
-            let fresh20 = ind;
-            ind = ind + 1;
-            *bigStr.offset(fresh20 as isize) = '.' as i32 as ::core::ffi::c_char;
-            let fresh21 = ind;
-            ind = ind + 1;
-            *bigStr.offset(fresh21 as isize) = '.' as i32 as ::core::ffi::c_char;
-            let fresh22 = ind;
-            ind = ind + 1;
-            *bigStr.offset(fresh22 as isize) = PATH_SEPARATOR as ::core::ffi::c_char;
-            i += 1;
-        }
-        sprintf(
-            bigStr.offset(ind as isize),
-            b"%s%c%s.%s\0" as *const u8 as *const ::core::ffi::c_char,
-            OPTFILE_DIR.as_ptr(),
-            PATH_SEPARATOR,
-            progName,
-            OPTFILE_EXT.as_ptr(),
-        );
-        optFile = fopen(bigStr, b"r\0" as *const u8 as *const ::core::ffi::c_char);
-    }
-    if optFile.is_null() {
-        sprintf(
-            bigStr,
-            b"%s.%s\0" as *const u8 as *const ::core::ffi::c_char,
-            progName,
-            OPTFILE_EXT.as_ptr(),
-        );
-        optFile = fopen(bigStr, b"r\0" as *const u8 as *const ::core::ffi::c_char);
-        if optFile.is_null() {
-            sprintf(
-                bigStr,
-                b"Autodoc file %s.%s was not found or not readable.\nCheck environment variable settings of AUTODOC_DIR and IMOD_DIR\nor place autodoc file in current directory\0"
-                    as *const u8 as *const ::core::ffi::c_char,
-                progName,
-                OPTFILE_EXT.as_ptr(),
-            );
-            pip_set_error(bigStr);
-            return -(1 as ::core::ffi::c_int);
-        }
-    }
-    loop {
-        lineLen = pip_read_next_line(
-            optFile,
-            bigStr,
-            bigSize,
-            '#' as i32 as ::core::ffi::c_char,
-            0 as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-            &raw mut indst,
-        );
-        if lineLen == -(3 as ::core::ffi::c_int) {
-            break;
-        }
-        if lineLen == -(2 as ::core::ffi::c_int) {
-            pip_set_error(
-                b"Error reading option file\0" as *const u8 as *const ::core::ffi::c_char,
-            );
-            return -(1 as ::core::ffi::c_int);
-        }
-        if lineLen == -(1 as ::core::ffi::c_int) {
-            bigSize += ADOC_STR_SIZE;
-            free(bigStr as *mut ::core::ffi::c_void);
-            bigStr = malloc(bigSize as size_t) as *mut ::core::ffi::c_char;
-            if pip_memory_error(
-                bigStr as *mut ::core::ffi::c_void,
-                b"pip_read_option_file\0" as *const u8 as *const ::core::ffi::c_char,
-            ) != 0
-            {
-                return -(1 as ::core::ffi::c_int);
-            }
-            numOpts = 0 as ::core::ffi::c_int;
-            rewind(optFile);
+            let _ = out.write_all(b"\n");
+        } else if fort77 != 0 || fort90 != 0 || c_code != 0 || python != 0 {
+            continue;
+        } else if output_manpage == 1 {
+            let _ = out.write_all(b".SS ");
         } else {
-            if numOpts == 0 {
-                check_keyword(
-                    bigStr.offset(indst as isize),
-                    b"KeyValueDelimiter\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut sValueDelim,
-                    &raw mut gotDelim,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if pip_starts_with(
-                    bigStr.offset(indst as isize),
-                    b"DoubleDashOptions\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    sDoubleDashOptions = 1 as ::core::ffi::c_int;
-                }
-                if pip_starts_with(
-                    bigStr.offset(indst as isize),
-                    b"NoHelpAbbreviations\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    sNoHelpAbbrevs = 1 as ::core::ffi::c_int;
-                }
-                if pip_starts_with(
-                    bigStr.offset(indst as isize),
-                    b"NoAbbreviations\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    sNoAbbrevs = 1 as ::core::ffi::c_int;
-                }
-            }
-            if line_is_option_token(bigStr.offset(indst as isize)) > 0 as ::core::ffi::c_int {
-                numOpts += 1;
-            }
+            let _ = out.write_all(b"\n");
         }
-    }
-    err = pip_initialize(numOpts);
-    if err != 0 {
-        return err;
-    }
-    rewind(optFile);
-    formatStr = sNullString;
-    manStr = formatStr;
-    tipStr = manStr;
-    usageStr = tipStr;
-    type_0 = usageStr;
-    shortName = type_0;
-    longName = shortName;
-    defaultStr = sNullString;
-    gotDefault = 0 as ::core::ffi::c_int;
-    gotFormat = gotDefault;
-    gotMan = gotFormat;
-    gotTip = gotMan;
-    gotUsage = gotTip;
-    gotType = gotUsage;
-    gotShort = gotType;
-    gotLong = gotShort;
-    loop {
-        lineLen = pip_read_next_line(
-            optFile,
-            bigStr,
-            bigSize,
-            '#' as i32 as ::core::ffi::c_char,
-            0 as ::core::ffi::c_int,
-            0 as ::core::ffi::c_int,
-            &raw mut indst,
-        );
-        if lineLen == -(2 as ::core::ffi::c_int) {
-            pip_set_error(
-                b"Error reading autodoc file\0" as *const u8 as *const ::core::ffi::c_char,
-            );
-            return -(1 as ::core::ffi::c_int);
-        }
-        textStr = bigStr.offset(indst as isize);
-        isOption = line_is_option_token(textStr);
-        if readingOpt != 0 && (lineLen == -(3 as ::core::ffi::c_int) || isOption != 0) {
-            if helpLevel <= 1 as ::core::ffi::c_int {
-                if gotUsage != 0 {
-                    helpStr = usageStr;
-                } else if gotTip != 0 {
-                    helpStr = tipStr;
-                } else {
-                    helpStr = manStr;
-                }
-            } else if helpLevel == 2 as ::core::ffi::c_int {
-                if gotTip != 0 {
-                    helpStr = tipStr;
-                } else if gotUsage != 0 {
-                    helpStr = usageStr;
-                } else {
-                    helpStr = manStr;
-                }
-            } else if gotMan != 0 {
-                helpStr = manStr;
-            } else if gotTip != 0 {
-                helpStr = tipStr;
-            } else {
-                helpStr = usageStr;
-            }
-            if isSection != 0 {
-                if gotShort != 0 {
-                    free(shortName as *mut ::core::ffi::c_void);
-                }
-                if gotLong != 0 {
-                    free(longName as *mut ::core::ffi::c_void);
-                }
-                shortName = sNullString;
-                longName = shortName;
-                gotShort = 0 as ::core::ffi::c_int;
-                gotLong = gotShort;
-            }
-            needSize = strlen(shortName)
-                .wrapping_add(strlen(longName))
-                .wrapping_add(strlen(helpStr))
-                .wrapping_add(15 as size_t) as ::core::ffi::c_int;
-            if optStrSize < needSize {
-                if optStrSize != 0 {
-                    free(optStr as *mut ::core::ffi::c_void);
-                }
-                optStrSize = needSize;
-                optStr = malloc(optStrSize as size_t) as *mut ::core::ffi::c_char;
-                if pip_memory_error(
-                    optStr as *mut ::core::ffi::c_void,
-                    b"pip_read_option_file\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    return -(1 as ::core::ffi::c_int);
-                }
-            }
-            sprintf(
-                optStr,
-                b"%s:%s:%s:%s\0" as *const u8 as *const ::core::ffi::c_char,
-                shortName,
-                longName,
-                type_0,
-                helpStr,
-            );
-            err = pip_add_option(optStr);
-            if err != 0 {
-                return err;
-            }
-            if gotFormat != 0 {
-                let ref mut fresh23 =
-                    (*sOptTable.offset((sNextOption - 1 as ::core::ffi::c_int) as isize)).format;
-                *fresh23 = formatStr;
-            }
-            if gotDefault != 0 {
-                let ref mut fresh24 = (*sOptTable
-                    .offset((sNextOption - 1 as ::core::ffi::c_int) as isize))
-                .defaultVal;
-                *fresh24 = defaultStr;
-            }
-            if gotShort != 0 {
-                free(shortName as *mut ::core::ffi::c_void);
-            }
-            if gotLong != 0 {
-                free(longName as *mut ::core::ffi::c_void);
-            }
-            if gotType != 0 {
-                free(type_0 as *mut ::core::ffi::c_void);
-            }
-            if gotUsage != 0 {
-                free(usageStr as *mut ::core::ffi::c_void);
-            }
-            if gotTip != 0 {
-                free(tipStr as *mut ::core::ffi::c_void);
-            }
-            if gotMan != 0 {
-                free(manStr as *mut ::core::ffi::c_void);
-            }
-            formatStr = sNullString;
-            manStr = formatStr;
-            tipStr = manStr;
-            usageStr = tipStr;
-            type_0 = usageStr;
-            shortName = type_0;
-            longName = shortName;
-            defaultStr = sNullString;
-            gotFormat = 0 as ::core::ffi::c_int;
-            gotMan = gotFormat;
-            gotTip = gotMan;
-            gotUsage = gotTip;
-            gotType = gotUsage;
-            gotShort = gotType;
-            gotLong = gotShort;
-            gotDefault = 0 as ::core::ffi::c_int;
-            readingOpt = 0 as ::core::ffi::c_int;
-        }
-        if lineLen == -(3 as ::core::ffi::c_int) {
-            break;
-        }
-        if readingOpt != 0 {
-            if (lastGottenStr == &raw mut usageStr
-                || lastGottenStr == &raw mut tipStr
-                || lastGottenStr == &raw mut manStr)
-                && (inQuoteIndex >= 0 as ::core::ffi::c_int
-                    || strstr(textStr, sValueDelim).is_null())
-            {
-                ind = strlen(*lastGottenStr) as ::core::ffi::c_int;
-                len = strlen(textStr) as ::core::ffi::c_int;
-                needSize = ind + len + 3 as ::core::ffi::c_int;
-                *lastGottenStr = realloc(
-                    *lastGottenStr as *mut ::core::ffi::c_void,
-                    needSize as size_t,
-                ) as *mut ::core::ffi::c_char;
-                strcat(
-                    *lastGottenStr,
-                    if *(*lastGottenStr).offset((ind - 1 as ::core::ffi::c_int) as isize)
-                        as ::core::ffi::c_int
-                        == '.' as i32
+
+        /* Print help string, breaking up line as needed */
+        if help_opt.as_deref().is_some_and(|h| !h.is_empty()) {
+            let mut help: Vec<u8> = help_opt.unwrap();
+
+            /* First look for default variable string and replace it with default */
+            if let Some(default_val) = default_opt.as_deref() {
+                while (help.len() + default_val.len()) < (LINE_STR_SIZE - 10) as usize {
+                    let def_pos = match help
+                        .windows(DEFAULT_SUB_STR.len())
+                        .position(|w| w == DEFAULT_SUB_STR)
                     {
-                        b"  \0" as *const u8 as *const ::core::ffi::c_char
+                        Some(p) => p,
+                        None => break,
+                    };
+                    /* strncpy(sLineStr, lname, defPtr - lname);
+                    sprintf(&sLineStr[defPtr - lname], "%s%s", defaultVal,
+                            defPtr + strlen(DEFAULT_SUB_STR));
+                    free(lname); lname = strdup(sLineStr); */
+                    let mut line: Vec<u8> = Vec::new();
+                    line.extend_from_slice(&help[..def_pos]);
+                    line.extend_from_slice(default_val);
+                    line.extend_from_slice(&help[def_pos + DEFAULT_SUB_STR.len()..]);
+                    S_LINE_STR.with_borrow_mut(|l| *l = line.clone());
+                    help = line;
+                }
+            }
+
+            /* sname = lname; -- a walking pointer into the duplicated string */
+            let mut pos = 0usize;
+            let mut opt_len = help.len() as i32;
+            let mut new_line_pt = help.iter().position(|&c| c == b'\n');
+            while opt_len > helplim || new_line_pt.is_some() {
+                /* Break string at newline */
+                let mut broke_at_new_line = 0i32;
+                let broke_at_space;
+                let mut j: i32;
+                if new_line_pt.is_some_and(|p| p >= pos && (p - pos) as i32 <= helplim) {
+                    j = (new_line_pt.unwrap() - pos) as i32;
+                    new_line_pt = help[pos + j as usize + 1..]
+                        .iter()
+                        .position(|&c| c == b'\n')
+                        .map(|p| p + pos + j as usize + 1);
+                    broke_at_space = 0;
+                    broke_at_new_line = 1;
+                } else {
+                    /* Or break string at last space before limit */
+                    j = helplim;
+                    while j >= 1 {
+                        if help[pos + j as usize] == b' ' {
+                            break;
+                        }
+                        j -= 1;
+                    }
+                    broke_at_space = 1;
+                }
+
+                /* For manpage output, insert zero-width character if line starts with . or ' */
+                if output_manpage > 0 && (help[pos] == b'.' || help[pos] == b'\'') {
+                    let _ = out.write_all(b"\\&");
+                }
+
+                /* Replace break point with null, print and reset pointer and count */
+                let _ = out.write_all(indent_str);
+                let _ = out.write_all(&help[pos..pos + j as usize]);
+                let _ = out.write_all(b"\n");
+                /* sname[j + 1] reads the byte after the break point, which at the
+                end of the string is the C terminator. */
+                let after_break = |k: usize| -> u8 {
+                    if pos + k + 1 < help.len() {
+                        help[pos + k + 1]
                     } else {
-                        b" \0" as *const u8 as *const ::core::ffi::c_char
-                    },
-                );
-                if *textStr.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                    == '^' as i32
+                        0
+                    }
+                };
+                if output_manpage == 1 && broke_at_new_line != 0 && after_break(j as usize) != b' '
                 {
-                    *textStr.offset(0 as ::core::ffi::c_int as isize) =
-                        '\n' as i32 as ::core::ffi::c_char;
+                    let _ = out.write_all(b".br\n");
                 }
-                if inQuoteIndex >= 0 as ::core::ffi::c_int
-                    && (len == 0
-                        || *textStr.offset((len - 1 as ::core::ffi::c_int) as isize)
-                            as ::core::ffi::c_int
-                            == *sQuoteTypes.offset(inQuoteIndex as isize) as ::core::ffi::c_int)
-                {
-                    if len != 0 {
-                        *textStr.offset((len - 1 as ::core::ffi::c_int) as isize) =
-                            0 as ::core::ffi::c_char;
-                        strcat(*lastGottenStr, textStr);
-                    }
-                    inQuoteIndex = -(1 as ::core::ffi::c_int);
-                    lastGottenStr = ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-                } else {
-                    strcat(*lastGottenStr, textStr);
-                }
-            } else {
-                lastGottenStr = ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-                inQuoteIndex = -(1 as ::core::ffi::c_int);
-                err = check_keyword(
-                    textStr,
-                    b"short\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut shortName,
-                    &raw mut gotShort,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if err != 0 {
-                    return err;
-                }
-                err = check_keyword(
-                    textStr,
-                    b"long\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut longName,
-                    &raw mut gotLong,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if err != 0 {
-                    return err;
-                }
-                err = check_keyword(
-                    textStr,
-                    b"type\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut type_0,
-                    &raw mut gotType,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if err != 0 {
-                    return err;
-                }
-                err = check_keyword(
-                    textStr,
-                    b"format\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut formatStr,
-                    &raw mut gotFormat,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if err != 0 {
-                    return err;
-                }
-                err = check_keyword(
-                    textStr,
-                    b"default\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut defaultStr,
-                    &raw mut gotDefault,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if err != 0 {
-                    return err;
-                }
-                if helpLevel <= 1 as ::core::ffi::c_int || !(gotTip != 0 || gotMan != 0) {
-                    err = check_keyword(
-                        textStr,
-                        b"usage\0" as *const u8 as *const ::core::ffi::c_char,
-                        &raw mut usageStr,
-                        &raw mut gotUsage,
-                        &raw mut lastGottenStr,
-                        &raw mut inQuoteIndex,
-                    );
-                    if err != 0 {
-                        return err;
+                if broke_at_space != 0 && output_manpage > 0 {
+                    while after_break(j as usize) == b' ' {
+                        j += 1;
                     }
                 }
-                if helpLevel == 2 as ::core::ffi::c_int
-                    || helpLevel <= 1 as ::core::ffi::c_int && gotUsage == 0
-                    || helpLevel >= 3 as ::core::ffi::c_int && gotMan == 0
-                {
-                    err = check_keyword(
-                        textStr,
-                        b"tooltip\0" as *const u8 as *const ::core::ffi::c_char,
-                        &raw mut tipStr,
-                        &raw mut gotTip,
-                        &raw mut lastGottenStr,
-                        &raw mut inQuoteIndex,
-                    );
-                    if err != 0 {
-                        return err;
-                    }
-                }
-                if helpLevel >= 3 as ::core::ffi::c_int
-                    || helpLevel == 2 as ::core::ffi::c_int && gotTip == 0
-                    || helpLevel <= 1 as ::core::ffi::c_int && !(gotTip != 0 || gotUsage != 0)
-                {
-                    err = check_keyword(
-                        textStr,
-                        b"manpage\0" as *const u8 as *const ::core::ffi::c_char,
-                        &raw mut manStr,
-                        &raw mut gotMan,
-                        &raw mut lastGottenStr,
-                        &raw mut inQuoteIndex,
-                    );
-                    if err != 0 {
-                        return err;
-                    }
-                }
-                if inQuoteIndex >= 0 as ::core::ffi::c_int && !lastGottenStr.is_null() {
-                    len = strlen(*lastGottenStr) as ::core::ffi::c_int;
-                    if len != 0
-                        && *(*lastGottenStr).offset((len - 1 as ::core::ffi::c_int) as isize)
-                            as ::core::ffi::c_int
-                            == *sQuoteTypes.offset(inQuoteIndex as isize) as ::core::ffi::c_int
-                    {
-                        *(*lastGottenStr).offset((len - 1 as ::core::ffi::c_int) as isize) =
-                            0 as ::core::ffi::c_char;
-                        inQuoteIndex = -(1 as ::core::ffi::c_int);
-                        lastGottenStr = ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-                    }
-                }
+                pos += j as usize + 1;
+                opt_len -= j + 1;
             }
-        } else if isOption > 0 as ::core::ffi::c_int {
-            lastGottenStr = ::core::ptr::null_mut::<*mut ::core::ffi::c_char>();
-            readingOpt = 1 as ::core::ffi::c_int;
-            isSection = isOption - 1 as ::core::ffi::c_int;
-            if isSection == 0 {
-                err = check_keyword(
-                    textStr.offset(strlen(OPEN_DELIM.as_ptr()) as isize),
-                    b"Field\0" as *const u8 as *const ::core::ffi::c_char,
-                    &raw mut longName,
-                    &raw mut gotLong,
-                    &raw mut lastGottenStr,
-                    ::core::ptr::null_mut::<::core::ffi::c_int>(),
-                );
-                if err != 0 {
-                    return err;
-                }
-                if gotLong != 0 {
-                    *longName.offset(strlen(longName).wrapping_sub(1 as size_t) as isize) =
-                        sNullChar;
-                }
-            }
+            let _ = out.write_all(indent_str);
+            let _ = out.write_all(&help[pos..]);
+            let _ = out.write_all(b"\n");
+        }
+
+        if linked != 0 {
+            let _ = out.write_all(indent_str);
+            let _ = out.write_all(b"(Multiple entries linked to a different option)\n");
+        } else if multiple != 0 {
+            let _ = out.write_all(indent_str);
+            let _ = out.write_all(b"(Successive entries accumulate)\n");
         }
     }
-    free(bigStr as *mut ::core::ffi::c_void);
-    if optStrSize != 0 {
-        free(optStr as *mut ::core::ffi::c_void);
-    }
-    return 0 as ::core::ffi::c_int;
+    S_TEST_ABBREV_FOR_USAGE.set(0);
+    let _ = out.flush();
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_parse_entries(
-    mut argc: ::core::ffi::c_int,
-    mut argv: *mut *mut ::core::ffi::c_char,
-    mut numOptArgs: *mut ::core::ffi::c_int,
-    mut numNonOptArgs: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    if argc < sTakeStdIn {
-        err = read_param_file(stdin);
-        if err != 0 {
-            return err;
-        }
-    } else {
-        i = 1 as ::core::ffi::c_int;
-        while i < argc {
-            err = pip_next_arg(*argv.offset(i as isize));
-            if err < 0 as ::core::ffi::c_int {
-                return err;
-            }
-            if err != 0 && i == argc - 1 as ::core::ffi::c_int {
-                pip_set_error(
-                    b"A value was expected but not found for the last option on the command line\0"
-                        as *const u8 as *const ::core::ffi::c_char,
-                );
-                return -(1 as ::core::ffi::c_int);
-            }
-            i += 1;
+
+/// Original C `PipPrintEntries` (`parse_params.c:1006`).
+///
+/// Print all the option entries if enabled by program call and/or environment
+/// variable.
+pub fn pip_print_entries() {
+    if S_PRINT_ENTRIES.get() < 0 {
+        S_PRINT_ENTRIES.set(0);
+        /* name = getenv(PRINTENTRY_VARIABLE); if (name) sPrintEntries = atoi(name); */
+        if let Some(name) = std::env::var_os(std::ffi::OsStr::new(
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(PRINTENTRY_VARIABLE),
+        )) {
+            let bytes =
+                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(name.as_os_str());
+            let mut end = 0usize;
+            S_PRINT_ENTRIES.set(strtol(bytes, &mut end, 10) as i32);
         }
     }
-    pip_number_of_args(numOptArgs, numNonOptArgs);
-    pip_print_entries();
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_read_or_parse_options(
-    mut argc: ::core::ffi::c_int,
-    mut argv: *mut *mut ::core::ffi::c_char,
-    mut options: *mut *const ::core::ffi::c_char,
-    mut numOpts: ::core::ffi::c_int,
-    mut progName: *const ::core::ffi::c_char,
-    mut minArgs: ::core::ffi::c_int,
-    mut numInFiles: ::core::ffi::c_int,
-    mut numOutFiles: ::core::ffi::c_int,
-    mut numOptArgs: *mut ::core::ffi::c_int,
-    mut numNonOptArgs: *mut ::core::ffi::c_int,
-    mut headerFunc: Option<unsafe extern "C" fn(*const ::core::ffi::c_char) -> ()>,
-) {
-    let mut ierr: ::core::ffi::c_int = 0;
-    let mut errString: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut prefix: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    prefix = malloc(strlen(progName).wrapping_add(12 as size_t)) as *mut ::core::ffi::c_char;
-    sprintf(
-        prefix,
-        b"ERROR: %s -\0" as *const u8 as *const ::core::ffi::c_char,
-        progName,
-    );
-    ierr = pip_read_option_file(progName, 0 as ::core::ffi::c_int, 0 as ::core::ffi::c_int);
-    pip_exit_on_error(0 as ::core::ffi::c_int, prefix);
-    free(prefix as *mut ::core::ffi::c_void);
-    if ierr == 0 {
-        pip_parse_entries(argc, argv, numOptArgs, numNonOptArgs);
-    } else {
-        pip_get_error(&raw mut errString);
-        if options.is_null() || numOpts == 0 {
-            pip_set_error(errString);
-        }
-        if !errString.is_null() {
-            printf(
-                b"PIP WARNING: %s\nUsing fallback options in main program\n\0" as *const u8
-                    as *const ::core::ffi::c_char,
-                errString,
-            );
-            free(errString as *mut ::core::ffi::c_void);
-        }
-        pip_parse_input(argc, argv, options, numOpts, numOptArgs, numNonOptArgs);
-        pip_read_prog_defaults(progName);
-    }
-    if *numOptArgs + *numNonOptArgs < minArgs
-        || pip_get_boolean(
-            b"help\0" as *const u8 as *const ::core::ffi::c_char,
-            &raw mut ierr,
-        ) == 0 as ::core::ffi::c_int
-            && ierr != 0
-    {
-        if headerFunc.is_some() {
-            headerFunc.expect("non-null function pointer")(progName);
-        }
-        pip_print_help(progName, 0 as ::core::ffi::c_int, numInFiles, numOutFiles);
-        exit(0 as ::core::ffi::c_int);
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_read_prog_defaults(mut progName: *const ::core::ffi::c_char) {
-    let mut pipDir: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut savePrefix: ::core::ffi::c_char = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut sectInd: ::core::ffi::c_int = 0;
-    let mut adocInd: ::core::ffi::c_int = 0;
-    pipDir = getenv(b"IMOD_DIR\0" as *const u8 as *const ::core::ffi::c_char);
-    if pipDir.is_null() || strlen(pipDir) > (TEMP_STR_SIZE - 100 as ::core::ffi::c_int) as size_t {
+    if S_PRINT_ENTRIES.get() == 0 {
         return;
     }
-    savePrefix = sExitPrefix[0 as ::core::ffi::c_int as usize];
-    sExitPrefix[0 as ::core::ffi::c_int as usize] = 0 as ::core::ffi::c_char;
-    sprintf(
-        sTempStr,
-        b"%s%c%s%c%s\0" as *const u8 as *const ::core::ffi::c_char,
-        pipDir,
-        PATH_SEPARATOR,
-        DEFAULTS_DIR.as_ptr(),
-        PATH_SEPARATOR,
-        DEFAULTS_FILE.as_ptr(),
-    );
-    adocInd = crate::imod::libcfshr::autodoc::adoc_read(sTempStr);
-    if adocInd >= 0 as ::core::ffi::c_int {
-        sectInd = crate::imod::libcfshr::autodoc::adoc_lookup_section(
-            b"Program\0" as *const u8 as *const ::core::ffi::c_char,
-            progName,
-        );
-        if sectInd >= 0 as ::core::ffi::c_int {
-            i = 0 as ::core::ffi::c_int;
-            while i < sTableSize {
-                crate::imod::libcfshr::autodoc::adoc_get_string(
-                    b"Program\0" as *const u8 as *const ::core::ffi::c_char,
-                    sectInd,
-                    (*sOptTable.offset(i as isize)).longName,
-                    &raw mut (*sOptTable.offset(i as isize)).defaultVal,
-                );
-                i += 1;
+
+    let num_options = S_NUM_OPTIONS.get();
+    let non_opt_ind = S_NON_OPT_IND.get();
+
+    /* Count up entries */
+    let mut j = 0i32;
+    for i in 0..num_options {
+        j += S_OPT_TABLE.with_borrow(|t| t[i as usize].count);
+    }
+    let non_opt_count = S_OPT_TABLE.with_borrow(|t| t[non_opt_ind as usize].count);
+    if j + non_opt_count == 0 {
+        return;
+    }
+
+    let mut out = ImodFile::Stdout;
+    let program_name = S_PROGRAM_NAME.with_borrow(|p| p.clone());
+    let _ = out.write_all(b"\n*** Entries to program ");
+    let _ = out.write_all(program_name.as_deref().unwrap_or(b""));
+    let _ = out.write_all(b" ***\n");
+    for i in 0..num_options {
+        let (sname, lname, values) = S_OPT_TABLE.with_borrow(|t| {
+            let o = &t[i as usize];
+            (
+                o.short_name.clone(),
+                o.long_name.clone(),
+                o.value_ptr.clone(),
+            )
+        });
+        let s: &[u8] = sname.as_deref().unwrap_or(b"");
+        let l: &[u8] = lname.as_deref().unwrap_or(b"");
+        if !l.is_empty() || !s.is_empty() {
+            let name: &[u8] = if !l.is_empty() { l } else { s };
+            let count = S_OPT_TABLE.with_borrow(|t| t[i as usize].count);
+            for k in 0..count {
+                let _ = out.write_all(b"  ");
+                let _ = out.write_all(name);
+                let _ = out.write_all(b" = ");
+                let _ = out.write_all(&values[k as usize]);
+                let _ = out.write_all(b"\n");
             }
         }
-        crate::imod::libcfshr::autodoc::adoc_clear(adocInd);
     }
-    sExitPrefix[0 as ::core::ffi::c_int as usize] = savePrefix;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_in_out_file(
-    mut option: *const ::core::ffi::c_char,
-    mut nonOptArgNo: ::core::ffi::c_int,
-    mut filename: *mut *mut ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    if pip_get_string(option, filename) != 0 {
-        if nonOptArgNo >= (*sOptTable.offset(sNonOptInd as isize)).count {
-            return 1 as ::core::ffi::c_int;
+    if non_opt_count != 0 {
+        let values = S_OPT_TABLE.with_borrow(|t| t[non_opt_ind as usize].value_ptr.clone());
+        let _ = out.write_all(b"  Non-option arguments:");
+        for k in 0..non_opt_count {
+            let v = &values[k as usize];
+            if v.contains(&b' ') {
+                let _ = out.write_all(b"   \"");
+                let _ = out.write_all(v);
+                let _ = out.write_all(b"\"");
+            } else {
+                let _ = out.write_all(b"   ");
+                let _ = out.write_all(v);
+            }
         }
-        pip_get_non_option_arg(nonOptArgNo, filename);
+        let _ = out.write_all(b"\n");
     }
-    return 0 as ::core::ffi::c_int;
+    let _ = out.write_all(b"*** End of entries ***\n\n");
+
+    /* Windows needed two flushes here */
+    let _ = out.flush();
+    let _ = out.flush();
 }
-unsafe extern "C" fn read_param_file(mut pFile: *mut FILE) -> ::core::ffi::c_int {
-    let mut lineLen: ::core::ffi::c_int = 0;
-    let mut indst: ::core::ffi::c_int = 0;
-    let mut indnd: ::core::ffi::c_int = 0;
-    let mut optNum: ::core::ffi::c_int = 0;
-    let mut gotEquals: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut token: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    loop {
-        sNotFoundOK = if sNumOptionArguments == 0
-            && (*sOptTable.offset(sNonOptInd as isize)).count < sNonOptLines
-        {
-            1 as ::core::ffi::c_int
+
+/// Original C `PipGetError` (`parse_params.c:1059`).
+///
+/// Return the error string, or an empty string and an error if there is none.
+pub fn pip_get_error(err_string: &mut Vec<u8>) -> i32 {
+    match S_ERROR_STRING.with_borrow(|e| e.clone()) {
+        None => {
+            *err_string = Vec::new();
+            -1
+        }
+        Some(s) => {
+            *err_string = s;
+            0
+        }
+    }
+}
+
+/// Original C `PipSetError` (`parse_params.c:1076`).
+///
+/// Set the error string.  If `sExitPrefix` is set, then output an error message
+/// to stderr or stdout and exit.
+pub fn pip_set_error(err_string: &[u8]) -> i32 {
+    S_ERROR_STRING.with_borrow_mut(|e| *e = Some(err_string.to_vec()));
+
+    let has_prefix = S_EXIT_PREFIX.with_borrow(|p| p[0] != 0);
+    if has_prefix {
+        /* `fprintf(outFile, "%s ", sExitPrefix)` -- the space is a second one
+        after a prefix that already ends in one -- then `"%s\n"` with the
+        message, on *stdout* unless sErrorDest was set. */
+        let prefix = S_EXIT_PREFIX.with_borrow(|p| {
+            let n = p.iter().position(|&c| c == 0).unwrap_or(PREFIX_SIZE);
+            p[..n].to_vec()
+        });
+        let mut out = if S_ERROR_DEST.get() != 0 {
+            ImodFile::Stderr
         } else {
-            0 as ::core::ffi::c_int
+            ImodFile::Stdout
         };
-        lineLen = pip_read_next_line(
-            pFile,
-            sLineStr,
-            LINE_STR_SIZE,
-            '#' as i32 as ::core::ffi::c_char,
-            0 as ::core::ffi::c_int,
-            1 as ::core::ffi::c_int,
-            &raw mut indst,
+        let _ = out.write_all(&prefix);
+        let _ = out.write_all(b" ");
+        let _ = out.write_all(err_string);
+        let _ = out.write_all(b"\n");
+        let _ = out.flush();
+        /* C `exit` flushes every stdio stream; standard output can be holding a
+        partial line written by the program before the error. */
+        let _ = ImodFile::Stdout.flush();
+        std::process::exit(1);
+    }
+    0
+}
+
+/// Original C `exitError` (`parse_params.c:1093`).
+///
+/// The source is variadic and `vsprintf`s into a 512-byte buffer; the caller
+/// formats the message here, as the translated callers already did.
+pub fn exit_error(format: &[u8]) -> ! {
+    pip_set_error(format);
+    /* PipSetError already exited when an exit prefix is set. */
+    let _ = ImodFile::Stdout.flush();
+    std::process::exit(1);
+}
+
+/// Original C `PipNumberOfEntries` (`parse_params.c:1106`).
+///
+/// Return the number of entries for a particular option.
+pub fn pip_number_of_entries(option: &[u8], num_entries: &mut i32) -> i32 {
+    let err = lookup_option(option, S_NON_OPT_IND.get() + 1);
+    if err < 0 {
+        return err;
+    }
+    *num_entries = S_OPT_TABLE.with_borrow(|t| t[err as usize].count);
+    0
+}
+
+/// Original C `PipLinkedIndex` (`parse_params.c:1118`).
+///
+/// Return the index of the next non-option arg or linked option that was
+/// entered after this option.
+pub fn pip_linked_index(option: &[u8], index: &mut i32) -> i32 {
+    let mut which = 0i32;
+    let err = lookup_option(option, S_NON_OPT_IND.get() + 1);
+    if err < 0 {
+        return err;
+    }
+    let (linked, multiple) =
+        S_OPT_TABLE.with_borrow(|t| (t[err as usize].linked, t[err as usize].multiple));
+    if linked == 0 {
+        /* sprintf(sTempStr, "Trying to get a linked index for option %s, which is not "
+        "identified as linked", option); */
+        let temp = S_TEMP_STR.with_borrow_mut(|t| {
+            t.clear();
+            t.extend_from_slice(b"Trying to get a linked index for option ");
+            t.extend_from_slice(option);
+            t.extend_from_slice(b", which is not identified as linked");
+            t.clone()
+        });
+        pip_set_error(&temp);
+        return -1;
+    }
+    let mut ind = 0i32;
+    if multiple != 0 {
+        ind = multiple - 1;
+    }
+
+    /* Use count from non-option args, but use the count from the linked option
+    instead if it was entered at all.  This allows other non-option args to be used */
+    let linked_option = S_LINKED_OPTION.with_borrow(|l| l.clone());
+    if let Some(linked_option) = linked_option {
+        let ilink = lookup_option(&linked_option, S_NUM_OPTIONS.get());
+        if ilink < 0 {
+            return ilink;
+        }
+        if S_OPT_TABLE.with_borrow(|t| t[ilink as usize].count) != 0 {
+            which = 1;
+        }
+    }
+    *index = S_OPT_TABLE.with_borrow(|t| t[err as usize].next_linked[(2 * ind + which) as usize]);
+    0
+}
+
+/// Original C `PipParseInput` (`parse_params.c:1160`).
+///
+/// Top level routine to be called to process options and arguments.
+pub fn pip_parse_input(
+    argc: i32,
+    argv: &[Vec<u8>],
+    options: &[&[u8]],
+    num_opts: i32,
+    num_opt_args: &mut i32,
+    num_non_opt_args: &mut i32,
+) -> i32 {
+    /* Initialize */
+    let err = pip_initialize(num_opts);
+    if err != 0 {
+        return err;
+    }
+
+    /* add the options */
+    for i in 0..num_opts {
+        let err = pip_add_option(options[i as usize]);
+        if err != 0 {
+            return err;
+        }
+    }
+
+    pip_parse_entries(argc, argv, num_opt_args, num_non_opt_args)
+}
+
+/// Original C `PipReadOptionFile` (`parse_params.c:1182`).
+///
+/// Alternative routine to have options read from a file.
+pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -> i32 {
+    let mut is_section = 0i32;
+    let mut opt_file: Option<ImodFile> = None;
+    let mut num_opts = 0i32;
+    let mut big_size = ADOC_STR_SIZE;
+    let mut reading_opt = 0i32;
+    let mut got_delim = 0i32;
+    let mut in_quote_index = -1i32;
+    let mut last_gotten_str: Option<PipKeywordSlot> = None;
+
+    /* #ifdef PATH_MAX */
+    if big_size < PATH_MAX {
+        big_size = PATH_MAX;
+    }
+
+    /* Set up temp string for error processing and big string for lines */
+    let mut big_str: Vec<u8> = Vec::new();
+
+    /* Save the program name for entry output */
+    S_PROGRAM_NAME.with_borrow_mut(|p| *p = Some(prog_name.to_vec()));
+
+    /* If local directory not set, look for environment variable pointing
+    directly to where the file should be */
+    if local_dir == 0 {
+        if let Some(pip_dir) = std::env::var_os(std::ffi::OsStr::new(
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(OPTDIR_VARIABLE),
+        )) {
+            let pip_dir =
+                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(pip_dir.as_os_str())
+                    .to_vec();
+            if pip_dir.len() as i32 > big_size - 100 {
+                pip_set_error(b"AUTODOC_DIR is suspiciously long");
+                return -1;
+            }
+            /* sprintf(bigStr, "%s%c%s.%s", pipDir, PATH_SEPARATOR, progName, OPTFILE_EXT); */
+            big_str.clear();
+            big_str.extend_from_slice(&pip_dir);
+            big_str.push(PATH_SEPARATOR);
+            big_str.extend_from_slice(prog_name);
+            big_str.push(b'.');
+            big_str.extend_from_slice(OPTFILE_EXT);
+            opt_file = std::fs::File::open(std::path::Path::new(
+                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+            ))
+            .ok()
+            .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+        }
+
+        if opt_file.is_none() {
+            if let Some(pip_dir) = std::env::var_os("IMOD_DIR") {
+                let pip_dir = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(
+                    pip_dir.as_os_str(),
+                )
+                .to_vec();
+                if pip_dir.len() as i32 > big_size - 100 {
+                    pip_set_error(b"IMOD_DIR is suspiciously long");
+                    return -1;
+                }
+                /* sprintf(bigStr, "%s%c%s%c%s.%s", ...) */
+                big_str.clear();
+                big_str.extend_from_slice(&pip_dir);
+                big_str.push(PATH_SEPARATOR);
+                big_str.extend_from_slice(OPTFILE_DIR);
+                big_str.push(PATH_SEPARATOR);
+                big_str.extend_from_slice(prog_name);
+                big_str.push(b'.');
+                big_str.extend_from_slice(OPTFILE_EXT);
+                opt_file = std::fs::File::open(std::path::Path::new(
+                    <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+                ))
+                .ok()
+                .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+            }
+        }
+    }
+    /* If local directory set, set up name with ../ as many times as specified
+    and look for file there */
+    else if local_dir > 0 {
+        big_str.clear();
+        let mut i = 0;
+        while i < local_dir && i < 20 {
+            big_str.push(b'.');
+            big_str.push(b'.');
+            big_str.push(PATH_SEPARATOR);
+            i += 1;
+        }
+        big_str.extend_from_slice(OPTFILE_DIR);
+        big_str.push(PATH_SEPARATOR);
+        big_str.extend_from_slice(prog_name);
+        big_str.push(b'.');
+        big_str.extend_from_slice(OPTFILE_EXT);
+        opt_file = std::fs::File::open(std::path::Path::new(
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+        ))
+        .ok()
+        .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+    }
+
+    /* If there is still no file, look in current directory */
+    if opt_file.is_none() {
+        big_str.clear();
+        big_str.extend_from_slice(prog_name);
+        big_str.push(b'.');
+        big_str.extend_from_slice(OPTFILE_EXT);
+        opt_file = std::fs::File::open(std::path::Path::new(
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+        ))
+        .ok()
+        .map(|f| ImodFile::File(std::rc::Rc::new(f)));
+
+        if opt_file.is_none() {
+            /* sprintf(bigStr, "Autodoc file %s.%s was not found ...") */
+            big_str.clear();
+            big_str.extend_from_slice(b"Autodoc file ");
+            big_str.extend_from_slice(prog_name);
+            big_str.push(b'.');
+            big_str.extend_from_slice(OPTFILE_EXT);
+            big_str.extend_from_slice(
+                b" was not found or not readable.\nCheck environment variable settings of AUTODOC_DIR and IMOD_DIR\nor place autodoc file in current directory",
+            );
+            pip_set_error(&big_str);
+            return -1;
+        }
+    }
+    let mut opt_file = opt_file.unwrap();
+
+    /* Count up the options */
+    let mut indst = 0i32;
+    loop {
+        let line_len = pip_read_next_line(
+            &mut opt_file,
+            &mut big_str,
+            big_size,
+            b'#',
+            0,
+            0,
+            &mut indst,
         );
-        if lineLen == -(3 as ::core::ffi::c_int) {
+        if line_len == -3 {
             break;
         }
-        if lineLen == -(2 as ::core::ffi::c_int) {
-            pip_set_error(
-                b"Error reading parameter file or StandardInput\0" as *const u8
-                    as *const ::core::ffi::c_char,
-            );
-            return -(1 as ::core::ffi::c_int);
+        if line_len == -2 {
+            pip_set_error(b"Error reading option file");
+            return -1;
         }
-        if lineLen == -(1 as ::core::ffi::c_int) {
-            pip_set_error(
-                b"Line too long for buffer while reading parameter file or StandardInput\0"
-                    as *const u8 as *const ::core::ffi::c_char,
-            );
-            return -(1 as ::core::ffi::c_int);
+
+        /* If the string was not long enough, get a bigger string and start over */
+        if line_len == -1 {
+            big_size += ADOC_STR_SIZE;
+            big_str.clear();
+            num_opts = 0;
+            let _ = std::io::Seek::seek(&mut opt_file, std::io::SeekFrom::Start(0));
+            continue;
         }
-        strPtr = strpbrk(
-            sLineStr.offset(indst as isize),
-            b"= \t\0" as *const u8 as *const ::core::ffi::c_char,
+
+        /* Look for new keyword-value delimiter before any options */
+        if num_opts == 0 {
+            let text: Vec<u8> = big_str[indst as usize..].to_vec();
+            let mut delim = S_VALUE_DELIM.with_borrow(|d| d.clone());
+            check_keyword(
+                &text,
+                b"KeyValueDelimiter",
+                &mut delim,
+                &mut got_delim,
+                &mut last_gotten_str,
+                PipKeywordSlot::ValueDelim,
+                None,
+            );
+            S_VALUE_DELIM.with_borrow_mut(|d| *d = delim);
+            if pip_starts_with(&text, b"DoubleDashOptions") != 0 {
+                S_DOUBLE_DASH_OPTIONS.set(1);
+            }
+            if pip_starts_with(&text, b"NoHelpAbbreviations") != 0 {
+                S_NO_HELP_ABBREVS.set(1);
+            }
+            if pip_starts_with(&text, b"NoAbbreviations") != 0 {
+                S_NO_ABBREVS.set(1);
+            }
+        }
+
+        /* Look for options */
+        if line_is_option_token(&big_str[indst as usize..]) > 0 {
+            num_opts += 1;
+        }
+    }
+
+    /* Initialize */
+    let err = pip_initialize(num_opts);
+    if err != 0 {
+        return err;
+    }
+
+    /* rewind file and process the options */
+    let _ = std::io::Seek::seek(&mut opt_file, std::io::SeekFrom::Start(0));
+    let mut long_name: Option<Vec<u8>> = None;
+    let mut short_name: Option<Vec<u8>> = None;
+    let mut type_0: Option<Vec<u8>> = None;
+    let mut usage_str: Option<Vec<u8>> = None;
+    let mut tip_str: Option<Vec<u8>> = None;
+    let mut man_str: Option<Vec<u8>> = None;
+    let mut format_str: Option<Vec<u8>> = None;
+    let mut default_str: Option<Vec<u8>> = None;
+    let (mut got_long, mut got_short, mut got_type, mut got_usage) = (0i32, 0i32, 0i32, 0i32);
+    let (mut got_tip, mut got_man, mut got_format, mut got_default) = (0i32, 0i32, 0i32, 0i32);
+
+    loop {
+        let line_len = pip_read_next_line(
+            &mut opt_file,
+            &mut big_str,
+            big_size,
+            b'#',
+            0,
+            0,
+            &mut indst,
         );
-        indnd = (if !strPtr.is_null() {
-            strPtr.offset_from(sLineStr) as ::core::ffi::c_long - 1 as ::core::ffi::c_long
+        if line_len == -2 {
+            pip_set_error(b"Error reading autodoc file");
+            return -1;
+        }
+
+        /* textStr = bigStr + indst; on end of file indst still names the start of
+        the previous line, which is what the source reads too. */
+        let mut text_str: Vec<u8> = if (indst as usize) <= big_str.len() {
+            big_str[indst as usize..].to_vec()
         } else {
-            (lineLen - 1 as ::core::ffi::c_int) as ::core::ffi::c_long
-        }) as ::core::ffi::c_int;
-        if indnd >= lineLen {
-            indnd = lineLen - 1 as ::core::ffi::c_int;
-        }
-        token = pip_sub_str_dup(sLineStr, indst, indnd);
-        if pip_memory_error(
-            token as *mut ::core::ffi::c_void,
-            b"read_param_file\0" as *const u8 as *const ::core::ffi::c_char,
-        ) != 0
-        {
-            return -(1 as ::core::ffi::c_int);
-        }
-        if strcmp(token, STANDARD_INPUT_END.as_ptr()) == 0
-            || sDoneEnds != 0
-                && strlen(token) == 4 as size_t
-                && pip_starts_with(b"DONE\0" as *const u8 as *const ::core::ffi::c_char, token) != 0
-        {
-            break;
-        }
-        optNum = lookup_option(token, sNumOptions);
-        free(token as *mut ::core::ffi::c_void);
-        if optNum < 0 as ::core::ffi::c_int {
-            if sNotFoundOK != 0 {
-                token = pip_sub_str_dup(sLineStr, indst, lineLen - 1 as ::core::ffi::c_int);
-                if pip_memory_error(
-                    token as *mut ::core::ffi::c_void,
-                    b"read_param_file\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-                {
-                    return -(1 as ::core::ffi::c_int);
+            Vec::new()
+        };
+        let is_option = line_is_option_token(&text_str);
+        if reading_opt != 0 && (line_len == -3 || is_option != 0) {
+            /* If we were reading options, it is time to add them if we are at
+            end of file or if we have reached a new token of any kind
+
+            Pick the closest help string that was read in if the given one
+            does not match (there has got to be an easier way!) */
+            let help_str: Vec<u8> = if help_level <= 1 {
+                if got_usage != 0 {
+                    usage_str.clone().unwrap_or_default()
+                } else if got_tip != 0 {
+                    tip_str.clone().unwrap_or_default()
+                } else {
+                    man_str.clone().unwrap_or_default()
                 }
-                err = add_value_string(sNonOptInd, token);
-                if err != 0 {
-                    return err;
+            } else if help_level == 2 {
+                if got_tip != 0 {
+                    tip_str.clone().unwrap_or_default()
+                } else if got_usage != 0 {
+                    usage_str.clone().unwrap_or_default()
+                } else {
+                    man_str.clone().unwrap_or_default()
                 }
+            } else if got_man != 0 {
+                man_str.clone().unwrap_or_default()
+            } else if got_tip != 0 {
+                tip_str.clone().unwrap_or_default()
             } else {
-                return optNum;
+                usage_str.clone().unwrap_or_default()
+            };
+
+            /* If it is a section header, get rid of the names */
+            if is_section != 0 {
+                short_name = None;
+                long_name = None;
+                got_long = 0;
+                got_short = 0;
             }
-        } else {
-            if strcmp(
-                (*sOptTable.offset(optNum as isize)).type_0,
-                PARAM_FILE_STRING.as_ptr(),
-            ) == 0
-            {
-                pip_set_error(
-                    b"Trying to open a parameter file while reading a parameter file or StandardInput\0"
-                        as *const u8 as *const ::core::ffi::c_char,
-                );
-                return -(1 as ::core::ffi::c_int);
-            }
-            indst = indnd + 1 as ::core::ffi::c_int;
-            gotEquals = 0 as ::core::ffi::c_int;
-            while indst < lineLen {
-                if *sLineStr.offset(indst as isize) as ::core::ffi::c_int == '=' as i32 {
-                    if gotEquals != 0 {
-                        sprintf(
-                            sTempStr,
-                            b"Two = signs in input line:  \0" as *const u8
-                                as *const ::core::ffi::c_char,
-                        );
-                        append_to_error_string(sLineStr);
-                        return -(1 as ::core::ffi::c_int);
-                    }
-                    gotEquals = 1 as ::core::ffi::c_int;
-                } else if *sLineStr.offset(indst as isize) as ::core::ffi::c_int != ' ' as i32
-                    && *sLineStr.offset(indst as isize) as ::core::ffi::c_int != '\t' as i32
-                {
-                    break;
-                }
-                indst += 1;
-            }
-            if indst < lineLen {
-                token = pip_sub_str_dup(sLineStr, indst, lineLen - 1 as ::core::ffi::c_int);
-            } else if strcmp(
-                (*sOptTable.offset(optNum as isize)).type_0,
-                BOOLEAN_STRING.as_ptr(),
-            ) == 0
-            {
-                token = strdup(b"1\0" as *const u8 as *const ::core::ffi::c_char);
-            } else {
-                sprintf(
-                    sTempStr,
-                    b"Missing a value on the input line:  \0" as *const u8
-                        as *const ::core::ffi::c_char,
-                );
-                append_to_error_string(sLineStr);
-                return -(1 as ::core::ffi::c_int);
-            }
-            if pip_memory_error(
-                token as *mut ::core::ffi::c_void,
-                b"read_param_file\0" as *const u8 as *const ::core::ffi::c_char,
-            ) != 0
-            {
-                return -(1 as ::core::ffi::c_int);
-            }
-            err = add_value_string(optNum, token);
+
+            /* sprintf(optStr, "%s:%s:%s:%s", shortName, longName, type, helpStr); */
+            let mut opt_str: Vec<u8> = Vec::new();
+            opt_str.extend_from_slice(short_name.as_deref().unwrap_or(b""));
+            opt_str.push(b':');
+            opt_str.extend_from_slice(long_name.as_deref().unwrap_or(b""));
+            opt_str.push(b':');
+            opt_str.extend_from_slice(type_0.as_deref().unwrap_or(b""));
+            opt_str.push(b':');
+            opt_str.extend_from_slice(&help_str);
+
+            let err = pip_add_option(&opt_str);
             if err != 0 {
                 return err;
             }
-            sNumOptionArguments += 1;
-        }
-    }
-    sNotFoundOK = 0 as ::core::ffi::c_int;
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_read_stdin_if_set() -> ::core::ffi::c_int {
-    if sTakeStdIn != 0 {
-        return read_param_file(stdin);
-    }
-    return 0 as ::core::ffi::c_int;
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_read_next_line(
-    mut pFile: *mut FILE,
-    mut sLineStr_0: *mut ::core::ffi::c_char,
-    mut strSize: ::core::ffi::c_int,
-    mut comment: ::core::ffi::c_char,
-    mut keepComments: ::core::ffi::c_int,
-    mut inLineComments: ::core::ffi::c_int,
-    mut firstNonWhite: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut indst: ::core::ffi::c_int = 0;
-    let mut lineLen: ::core::ffi::c_int = 0;
-    let mut ch: ::core::ffi::c_char = 0;
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    loop {
-        if fgets(sLineStr_0, strSize, pFile).is_null() {
-            if feof(pFile) != 0 {
-                return -(3 as ::core::ffi::c_int);
+
+            /* Assign format and default if got one */
+            let next_option = S_NEXT_OPTION.get();
+            if got_format != 0 {
+                let f = format_str.take();
+                S_OPT_TABLE.with_borrow_mut(|t| t[(next_option - 1) as usize].format = f);
             }
-            return -(2 as ::core::ffi::c_int);
+            if got_default != 0 {
+                let d = default_str.take();
+                S_OPT_TABLE.with_borrow_mut(|t| t[(next_option - 1) as usize].default_val = d);
+            }
+
+            /* Clean up memory and reset flags */
+            long_name = None;
+            short_name = None;
+            type_0 = None;
+            usage_str = None;
+            tip_str = None;
+            man_str = None;
+            format_str = None;
+            default_str = None;
+            got_long = 0;
+            got_short = 0;
+            got_type = 0;
+            got_usage = 0;
+            got_tip = 0;
+            got_man = 0;
+            got_format = 0;
+            got_default = 0;
+            reading_opt = 0;
         }
-        lineLen = strlen(sLineStr_0) as ::core::ffi::c_int;
-        if lineLen == strSize - 1 as ::core::ffi::c_int {
-            return -(1 as ::core::ffi::c_int);
+
+        if line_len == -3 {
+            break;
         }
-        indst = 0 as ::core::ffi::c_int;
-        while indst < lineLen {
-            if *sLineStr_0.offset(indst as isize) as ::core::ffi::c_int != ' ' as i32
-                && *sLineStr_0.offset(indst as isize) as ::core::ffi::c_int != '\t' as i32
-            {
+
+        /* If reading options, look for the various keywords */
+        if reading_opt != 0 {
+            /* If the last string gotten was a help string and the line does not contain the
+            value delimiter or we are in a quote, then append it to the last string */
+            let value_delim = S_VALUE_DELIM.with_borrow(|d| d.clone()).unwrap_or_default();
+            let has_delim = if value_delim.is_empty() {
+                true
+            } else {
+                text_str
+                    .windows(value_delim.len())
+                    .any(|w| w == value_delim.as_slice())
+            };
+            let is_help_slot = matches!(
+                last_gotten_str,
+                Some(PipKeywordSlot::UsageStr)
+                    | Some(PipKeywordSlot::TipStr)
+                    | Some(PipKeywordSlot::ManStr)
+            );
+            if is_help_slot && (in_quote_index >= 0 || !has_delim) {
+                let target: &mut Option<Vec<u8>> = match last_gotten_str {
+                    Some(PipKeywordSlot::UsageStr) => &mut usage_str,
+                    Some(PipKeywordSlot::TipStr) => &mut tip_str,
+                    _ => &mut man_str,
+                };
+                let cur = target.get_or_insert_with(Vec::new);
+                let ind = cur.len();
+                let len = text_str.len();
+                /* strcat(*lastGottenStr, (*lastGottenStr)[ind - 1] == '.' ? "  " : " ");
+                -- with an empty string the source reads one byte before the
+                allocation; the separator it would then append is unknowable, so
+                a single space is used. */
+                if ind >= 1 && cur[ind - 1] == b'.' {
+                    cur.extend_from_slice(b"  ");
+                } else {
+                    cur.extend_from_slice(b" ");
+                }
+
+                /* Replace leading ^ with a newline */
+                if !text_str.is_empty() && text_str[0] == b'^' {
+                    text_str[0] = b'\n';
+                }
+
+                /* If inside quotes, look for quote at end and say it is the end of accepting
+                continuation lines, and as a protection, also say a blank line ends it */
+                if in_quote_index >= 0
+                    && (len == 0 || text_str[len - 1] == S_QUOTE_TYPES[in_quote_index as usize])
+                {
+                    if len != 0 {
+                        text_str.truncate(len - 1);
+                        cur.extend_from_slice(&text_str);
+                    }
+                    in_quote_index = -1;
+                    last_gotten_str = None;
+                } else {
+                    cur.extend_from_slice(&text_str);
+                }
+            }
+            /* Otherwise look for each keyword of interest, but null out the pointer
+            to last gotten one so that it will only be valid on the next line */
+            else {
+                last_gotten_str = None;
+                in_quote_index = -1;
+                let err = check_keyword(
+                    &text_str,
+                    b"short",
+                    &mut short_name,
+                    &mut got_short,
+                    &mut last_gotten_str,
+                    PipKeywordSlot::ShortName,
+                    None,
+                );
+                if err != 0 {
+                    return err;
+                }
+                let err = check_keyword(
+                    &text_str,
+                    b"long",
+                    &mut long_name,
+                    &mut got_long,
+                    &mut last_gotten_str,
+                    PipKeywordSlot::LongName,
+                    None,
+                );
+                if err != 0 {
+                    return err;
+                }
+                let err = check_keyword(
+                    &text_str,
+                    b"type",
+                    &mut type_0,
+                    &mut got_type,
+                    &mut last_gotten_str,
+                    PipKeywordSlot::Type,
+                    None,
+                );
+                if err != 0 {
+                    return err;
+                }
+                let err = check_keyword(
+                    &text_str,
+                    b"format",
+                    &mut format_str,
+                    &mut got_format,
+                    &mut last_gotten_str,
+                    PipKeywordSlot::FormatStr,
+                    None,
+                );
+                if err != 0 {
+                    return err;
+                }
+                let err = check_keyword(
+                    &text_str,
+                    b"default",
+                    &mut default_str,
+                    &mut got_default,
+                    &mut last_gotten_str,
+                    PipKeywordSlot::DefaultStr,
+                    None,
+                );
+                if err != 0 {
+                    return err;
+                }
+
+                /* Check for usage if at help level 1 or if we haven't got either of
+                the other strings yet */
+                if help_level <= 1 || !(got_tip != 0 || got_man != 0) {
+                    let err = check_keyword(
+                        &text_str,
+                        b"usage",
+                        &mut usage_str,
+                        &mut got_usage,
+                        &mut last_gotten_str,
+                        PipKeywordSlot::UsageStr,
+                        Some(&mut in_quote_index),
+                    );
+                    if err != 0 {
+                        return err;
+                    }
+                }
+
+                /* Check for tooltip if at level 2 or if at level 1 and haven't got
+                usage, or at level 3 and haven't got manpage */
+                if help_level == 2
+                    || (help_level <= 1 && got_usage == 0)
+                    || (help_level >= 3 && got_man == 0)
+                {
+                    let err = check_keyword(
+                        &text_str,
+                        b"tooltip",
+                        &mut tip_str,
+                        &mut got_tip,
+                        &mut last_gotten_str,
+                        PipKeywordSlot::TipStr,
+                        Some(&mut in_quote_index),
+                    );
+                    if err != 0 {
+                        return err;
+                    }
+                }
+
+                /* Check for manpage if at level 3 or if at level 2 and haven't got
+                tip, or at level 1 and haven't got tip or usage */
+                if help_level >= 3
+                    || (help_level == 2 && got_tip == 0)
+                    || (help_level <= 1 && !(got_tip != 0 || got_usage != 0))
+                {
+                    let err = check_keyword(
+                        &text_str,
+                        b"manpage",
+                        &mut man_str,
+                        &mut got_man,
+                        &mut last_gotten_str,
+                        PipKeywordSlot::ManStr,
+                        Some(&mut in_quote_index),
+                    );
+                    if err != 0 {
+                        return err;
+                    }
+                }
+
+                /* If that was a line with quoted string, check for quote at end of line and
+                close out the help string if so */
+                if in_quote_index >= 0 && last_gotten_str.is_some() {
+                    let target: Option<&mut Option<Vec<u8>>> = match last_gotten_str {
+                        Some(PipKeywordSlot::ShortName) => Some(&mut short_name),
+                        Some(PipKeywordSlot::LongName) => Some(&mut long_name),
+                        Some(PipKeywordSlot::Type) => Some(&mut type_0),
+                        Some(PipKeywordSlot::FormatStr) => Some(&mut format_str),
+                        Some(PipKeywordSlot::DefaultStr) => Some(&mut default_str),
+                        Some(PipKeywordSlot::UsageStr) => Some(&mut usage_str),
+                        Some(PipKeywordSlot::TipStr) => Some(&mut tip_str),
+                        Some(PipKeywordSlot::ManStr) => Some(&mut man_str),
+                        _ => None,
+                    };
+                    if let Some(target) = target {
+                        let cur = target.get_or_insert_with(Vec::new);
+                        let len = cur.len();
+                        if len != 0 && cur[len - 1] == S_QUOTE_TYPES[in_quote_index as usize] {
+                            cur.truncate(len - 1);
+                            in_quote_index = -1;
+                            last_gotten_str = None;
+                        }
+                    }
+                }
+            }
+        }
+        /* But if not reading options, check for a new option token and start
+        reading if one is found.  But first take a Field value as default
+        long option name */
+        else if is_option > 0 {
+            last_gotten_str = None;
+            reading_opt = 1;
+            is_section = is_option - 1;
+            if is_section == 0 {
+                let err = check_keyword(
+                    &text_str[OPEN_DELIM.len()..],
+                    b"Field",
+                    &mut long_name,
+                    &mut got_long,
+                    &mut last_gotten_str,
+                    PipKeywordSlot::LongName,
+                    None,
+                );
+                if err != 0 {
+                    return err;
+                }
+                if got_long != 0 {
+                    /* longName[strlen(longName) - 1] = sNullChar; */
+                    if let Some(l) = long_name.as_mut() {
+                        let n = l.len();
+                        if n > 0 {
+                            l.truncate(n - 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Original C `PipParseEntries` (`parse_params.c:1540`).
+///
+/// Routine to parse the entries in command line after options have been
+/// defined one way or another.
+pub fn pip_parse_entries(
+    argc: i32,
+    argv: &[Vec<u8>],
+    num_opt_args: &mut i32,
+    num_non_opt_args: &mut i32,
+) -> i32 {
+    /* Special case: no arguments and flag set to take stdin automatically */
+    if argc < S_TAKE_STD_IN.get() {
+        let mut stdin_file = ImodFile::Stdin;
+        let err = read_param_file(&mut stdin_file);
+        if err != 0 {
+            return err;
+        }
+    } else {
+        /* parse the arguments */
+        for i in 1..argc {
+            let err = pip_next_arg(&argv[i as usize]);
+            if err < 0 {
+                return err;
+            }
+            if err != 0 && i == argc - 1 {
+                pip_set_error(
+                    b"A value was expected but not found for the last option on the command line",
+                );
+                return -1;
+            }
+        }
+    }
+    pip_number_of_args(num_opt_args, num_non_opt_args);
+    pip_print_entries();
+    0
+}
+
+/// Original C `PipReadOrParseOptions` (`parse_params.c:1570`).
+///
+/// High-level routine to initialize from autodoc with optional fallback
+/// options.  Set exit string and output to stdout, print usage if not enough
+/// arguments.
+#[allow(clippy::too_many_arguments)]
+pub fn pip_read_or_parse_options(
+    argc: i32,
+    argv: &[Vec<u8>],
+    options: &[&[u8]],
+    num_opts: i32,
+    prog_name: &[u8],
+    min_args: i32,
+    num_in_files: i32,
+    num_out_files: i32,
+    num_opt_args: &mut i32,
+    num_non_opt_args: &mut i32,
+    header_func: Option<fn(&[u8])>,
+) {
+    /* sprintf(prefix, "ERROR: %s -", progName); */
+    let mut prefix: Vec<u8> = Vec::with_capacity(prog_name.len() + 12);
+    prefix.extend_from_slice(b"ERROR: ");
+    prefix.extend_from_slice(prog_name);
+    prefix.extend_from_slice(b" -");
+
+    /* Startup with fallback */
+    let ierr = pip_read_option_file(prog_name, 0, 0);
+    pip_exit_on_error(0, &prefix);
+    if ierr == 0 {
+        pip_parse_entries(argc, argv, num_opt_args, num_non_opt_args);
+    } else {
+        let mut err_string: Vec<u8> = Vec::new();
+        pip_get_error(&mut err_string);
+        if options.is_empty() || num_opts == 0 {
+            pip_set_error(&err_string);
+        }
+        /* printf("PIP WARNING: %s\nUsing fallback options in main program\n", errString); */
+        let mut out = ImodFile::Stdout;
+        let _ = out.write_all(b"PIP WARNING: ");
+        let _ = out.write_all(&err_string);
+        let _ = out.write_all(b"\nUsing fallback options in main program\n");
+        pip_parse_input(
+            argc,
+            argv,
+            options,
+            num_opts,
+            num_opt_args,
+            num_non_opt_args,
+        );
+        pip_read_prog_defaults(prog_name);
+    }
+
+    /* Output usage and exit if not enough arguments or help entered */
+    let mut ierr = 0i32;
+    if *num_opt_args + *num_non_opt_args < min_args
+        || (pip_get_boolean(b"help", &mut ierr) == 0 && ierr != 0)
+    {
+        if let Some(header_func) = header_func {
+            header_func(prog_name);
+        }
+        pip_print_help(prog_name, 0, num_in_files, num_out_files);
+        let _ = ImodFile::Stdout.flush();
+        std::process::exit(0);
+    }
+}
+
+/// Original C `PipReadProgDefaults` (`parse_params.c:1616`).
+///
+/// If there was a failure to read autodoc, call this to check for defaults in
+/// the master file.
+pub fn pip_read_prog_defaults(prog_name: &[u8]) {
+    let pip_dir = match std::env::var_os("IMOD_DIR") {
+        Some(d) => {
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(d.as_os_str()).to_vec()
+        }
+        None => return,
+    };
+    if pip_dir.len() as i32 > TEMP_STR_SIZE - 100 {
+        return;
+    }
+
+    /* Save and clear out the first character of exit prefix to prevent exit */
+    let save_prefix = S_EXIT_PREFIX.with_borrow(|p| p[0]);
+    S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = 0x00);
+    /* sprintf(sTempStr, "%s%c%s%c%s", pipDir, PATH_SEPARATOR, DEFAULTS_DIR, PATH_SEPARATOR,
+    DEFAULTS_FILE); */
+    let temp = S_TEMP_STR.with_borrow_mut(|t| {
+        t.clear();
+        t.extend_from_slice(&pip_dir);
+        t.push(PATH_SEPARATOR);
+        t.extend_from_slice(DEFAULTS_DIR);
+        t.push(PATH_SEPARATOR);
+        t.extend_from_slice(DEFAULTS_FILE);
+        t.clone()
+    });
+
+    /* The autodoc unit is still C-shaped: this is the one foreign boundary
+    left in this file, and it goes away when `libcfshr::autodoc` is converted. */
+    let table_size = S_TABLE_SIZE.get();
+    unsafe {
+        let path = std::ffi::CString::new(temp).unwrap_or_default();
+        let adoc_ind = crate::imod::libcfshr::autodoc::adoc_read(path.as_ptr());
+        if adoc_ind >= 0 {
+            /* Look up the program and then check for each option in its section */
+            let type_name = std::ffi::CString::new("Program").unwrap();
+            let name = std::ffi::CString::new(prog_name).unwrap_or_default();
+            let sect_ind = crate::imod::libcfshr::autodoc::adoc_lookup_section(
+                type_name.as_ptr(),
+                name.as_ptr(),
+            );
+            if sect_ind >= 0 {
+                for i in 0..table_size {
+                    let long_name = S_OPT_TABLE.with_borrow(|t| t[i as usize].long_name.clone());
+                    let key =
+                        std::ffi::CString::new(long_name.unwrap_or_default()).unwrap_or_default();
+                    let mut value: *mut std::ffi::c_char = std::ptr::null_mut();
+                    if crate::imod::libcfshr::autodoc::adoc_get_string(
+                        type_name.as_ptr(),
+                        sect_ind,
+                        key.as_ptr(),
+                        &raw mut value,
+                    ) == 0
+                        && !value.is_null()
+                    {
+                        let bytes = std::ffi::CStr::from_ptr(value).to_bytes().to_vec();
+                        S_OPT_TABLE.with_borrow_mut(|t| t[i as usize].default_val = Some(bytes));
+                        libc::free(value.cast());
+                    }
+                }
+            }
+            crate::imod::libcfshr::autodoc::adoc_clear(adoc_ind);
+        }
+    }
+    S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = save_prefix);
+}
+
+/// Original C `PipGetInOutFile` (`parse_params.c:1650`).
+///
+/// Routine to get input/output file from parameter or non-option args.
+pub fn pip_get_in_out_file(option: &[u8], non_opt_arg_no: i32, filename: &mut Vec<u8>) -> i32 {
+    if pip_get_string(option, filename) != 0 {
+        let count = S_OPT_TABLE.with_borrow(|t| t[S_NON_OPT_IND.get() as usize].count);
+        if non_opt_arg_no >= count {
+            return 1;
+        }
+        pip_get_non_option_arg(non_opt_arg_no, filename);
+    }
+    0
+}
+
+/// Original C `ReadParamFile` (`parse_params.c:1665`).
+///
+/// Read successive lines from a parameter file or standard input, and store as
+/// options and values.
+fn read_param_file(p_file: &mut ImodFile) -> i32 {
+    loop {
+        /* If non-option lines are allowed, set flag that it is OK for LookupOption
+        to not find the option, but only for the given number of lines at the
+        start of the input */
+        let non_opt_count = S_OPT_TABLE.with_borrow(|t| t[S_NON_OPT_IND.get() as usize].count);
+        S_NOT_FOUND_OK.set(
+            if S_NUM_OPTION_ARGUMENTS.get() == 0 && non_opt_count < S_NON_OPT_LINES.get() {
+                1
+            } else {
+                0
+            },
+        );
+        let mut indst = 0i32;
+        let mut line: Vec<u8> = S_LINE_STR.with_borrow(|l| l.clone());
+        let line_len = pip_read_next_line(p_file, &mut line, LINE_STR_SIZE, b'#', 0, 1, &mut indst);
+        S_LINE_STR.with_borrow_mut(|l| *l = line.clone());
+        if line_len == -3 {
+            break;
+        }
+        if line_len == -2 {
+            pip_set_error(b"Error reading parameter file or StandardInput");
+            return -1;
+        }
+        if line_len == -1 {
+            pip_set_error(
+                b"Line too long for buffer while reading parameter file or StandardInput",
+            );
+            return -1;
+        }
+
+        /* Find token and make a copy */
+        let sep = line[indst as usize..]
+            .iter()
+            .position(|&c| c == b'=' || c == b' ' || c == b'\t')
+            .map(|p| p + indst as usize);
+        let mut indnd = match sep {
+            Some(p) => p as i32 - 1,
+            None => line_len - 1,
+        };
+        if indnd >= line_len {
+            indnd = line_len - 1;
+        }
+
+        let token = pip_sub_str_dup(&line, indst, indnd);
+
+        /* Done if it matches end of input string */
+        if token == STANDARD_INPUT_END
+            || (S_DONE_ENDS.get() != 0 && token.len() == 4 && pip_starts_with(b"DONE", &token) != 0)
+        {
+            break;
+        }
+
+        /* Look up option and free the token string */
+        let opt_num = lookup_option(&token, S_NUM_OPTIONS.get());
+        if opt_num < 0 {
+            /* If no option, process special case if in-line non-options allowed,
+            or error out */
+            if S_NOT_FOUND_OK.get() != 0 {
+                let token = pip_sub_str_dup(&line, indst, line_len - 1);
+                let err = add_value_string(S_NON_OPT_IND.get(), &token);
+                if err != 0 {
+                    return err;
+                }
+                continue;
+            } else {
+                return opt_num;
+            }
+        }
+
+        if S_OPT_TABLE
+            .with_borrow(|t| t[opt_num as usize].type_0.as_deref() == Some(PARAM_FILE_STRING))
+        {
+            pip_set_error(
+                b"Trying to open a parameter file while reading a parameter file or StandardInput",
+            );
+            return -1;
+        }
+
+        /* Find first non-white space, passing over at most one equals sign */
+        let mut indst2 = indnd + 1;
+        let mut got_equals = 0i32;
+        while indst2 < line_len {
+            if line[indst2 as usize] == b'=' {
+                if got_equals != 0 {
+                    S_TEMP_STR.with_borrow_mut(|t| {
+                        t.clear();
+                        t.extend_from_slice(b"Two = signs in input line:  ");
+                    });
+                    append_to_error_string(&line);
+                    return -1;
+                }
+                got_equals = 1;
+            } else if line[indst2 as usize] != b' ' && line[indst2 as usize] != b'\t' {
+                break;
+            }
+            indst2 += 1;
+        }
+
+        /* If there is a string, get one; if not, get a "1" for boolean, otherwise
+        it is an error */
+        let token: Vec<u8> = if indst2 < line_len {
+            pip_sub_str_dup(&line, indst2, line_len - 1)
+        } else if S_OPT_TABLE
+            .with_borrow(|t| t[opt_num as usize].type_0.as_deref() == Some(BOOLEAN_STRING))
+        {
+            b"1".to_vec()
+        } else {
+            S_TEMP_STR.with_borrow_mut(|t| {
+                t.clear();
+                t.extend_from_slice(b"Missing a value on the input line:  ");
+            });
+            append_to_error_string(&line);
+            return -1;
+        };
+
+        /* Add the token as a value string and increment argument number */
+        let err = add_value_string(opt_num, &token);
+        if err != 0 {
+            return err;
+        }
+        S_NUM_OPTION_ARGUMENTS.set(S_NUM_OPTION_ARGUMENTS.get() + 1);
+    }
+    S_NOT_FOUND_OK.set(0);
+    0
+}
+
+/// Original C `PipReadStdinIfSet` (`parse_params.c:1758`).
+///
+/// Call from fortran to read stdin if the flag is set to take from stdin.
+pub fn pip_read_stdin_if_set() -> i32 {
+    if S_TAKE_STD_IN.get() != 0 {
+        let mut stdin_file = ImodFile::Stdin;
+        return read_param_file(&mut stdin_file);
+    }
+    0
+}
+
+/// Original C `PipReadNextLine` (`parse_params.c:1776`).
+///
+/// Reads a line from the file `pFile`, stripping white space at the end of the
+/// line and in-line comments starting with `comment` if `inLineComments` is
+/// non-zero.  Discards the line and reads another if it is blank or if the
+/// first non-blank character is `comment`, unless `keepComments` is nonzero.
+/// Returns the line in `line_str` and the index of the first non-white space
+/// character in `first_non_white`.  The size of the source's buffer is provided
+/// in `str_size`.  Returns the length of the line, or -3 for end of file, -1 if
+/// the line is too long, or -2 for error reading file.
+pub fn pip_read_next_line(
+    p_file: &mut ImodFile,
+    line_str: &mut Vec<u8>,
+    str_size: i32,
+    comment: u8,
+    keep_comments: i32,
+    in_line_comments: i32,
+    first_non_white: &mut i32,
+) -> i32 {
+    use std::io::Read;
+    let mut indst;
+    let mut line_len: i32;
+
+    loop {
+        /* fgets(sLineStr, strSize, pFile): at most strSize - 1 bytes, stopping
+        after a newline.  A seekable file is read in one block and repositioned
+        to just past the newline, which is what stdio's own buffering does; a
+        stream that cannot be repositioned is read a byte at a time, and Rust's
+        standard input is itself buffered so that costs no extra system call. */
+        let cap = (str_size - 1).max(0) as usize;
+        let mut buf: Vec<u8> = vec![0; cap];
+        let mut n = 0usize;
+        let seekable = matches!(p_file, ImodFile::File(_));
+        if seekable {
+            while n < cap {
+                let want = (cap - n).min(512);
+                match p_file.read(&mut buf[n..n + want]) {
+                    Ok(0) => break,
+                    Ok(k) => {
+                        n += k;
+                        if buf[..n].contains(&b'\n') {
+                            break;
+                        }
+                    }
+                    Err(_) => return -2,
+                }
+            }
+            let stop = match buf[..n].iter().position(|&c| c == b'\n') {
+                Some(p) => p + 1,
+                None => n,
+            };
+            if stop < n {
+                if std::io::Seek::seek(p_file, std::io::SeekFrom::Current(-((n - stop) as i64)))
+                    .is_err()
+                {
+                    return -2;
+                }
+            }
+            n = stop;
+        } else {
+            while n < cap {
+                let mut one = [0u8; 1];
+                match p_file.read(&mut one) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        buf[n] = one[0];
+                        n += 1;
+                        if one[0] == b'\n' {
+                            break;
+                        }
+                    }
+                    Err(_) => return -2,
+                }
+            }
+        }
+
+        /* If error, it's OK if it's an EOF, or an error otherwise */
+        if n == 0 {
+            return -3;
+        }
+
+        /* check for line too long */
+        /* lineLen = strlen(sLineStr): an embedded NUL ends the string. */
+        line_len = match buf[..n].iter().position(|&c| c == 0) {
+            Some(p) => p as i32,
+            None => n as i32,
+        };
+        line_str.clear();
+        line_str.extend_from_slice(&buf[..line_len as usize]);
+        if line_len == str_size - 1 {
+            return -1;
+        }
+
+        /* Get first non-white space */
+        indst = 0i32;
+        while indst < line_len {
+            if line_str[indst as usize] != b' ' && line_str[indst as usize] != b'\t' {
                 break;
             }
             indst += 1;
         }
-        if *sLineStr_0.offset(indst as isize) as ::core::ffi::c_int == comment as ::core::ffi::c_int
-        {
-            if !(keepComments != 0) {
+
+        /* If it is a comment, skip or strip line ending and return */
+        let ch_at_indst = if indst < line_len {
+            line_str[indst as usize]
+        } else {
+            0
+        };
+        if ch_at_indst == comment {
+            if keep_comments != 0 {
+                while line_len > 0
+                    && (line_str[(line_len - 1) as usize] == b'\n'
+                        || line_str[(line_len - 1) as usize] == b'\r')
+                {
+                    line_len -= 1;
+                }
+                line_str.truncate(line_len as usize);
+                break;
+            } else {
                 continue;
             }
-            while *sLineStr_0.offset((lineLen - 1 as ::core::ffi::c_int) as isize)
-                as ::core::ffi::c_int
-                == '\n' as i32
-                || *sLineStr_0.offset((lineLen - 1 as ::core::ffi::c_int) as isize)
-                    as ::core::ffi::c_int
-                    == '\r' as i32
-            {
-                lineLen -= 1;
-            }
-            *sLineStr_0.offset(lineLen as isize) = 0 as ::core::ffi::c_char;
-            break;
-        } else {
-            strPtr = strchr(sLineStr_0, comment as ::core::ffi::c_int);
-            if !strPtr.is_null() && inLineComments != 0 {
-                lineLen =
-                    strPtr.offset_from(sLineStr_0) as ::core::ffi::c_long as ::core::ffi::c_int;
-            }
-            while lineLen > 0 as ::core::ffi::c_int {
-                ch = *sLineStr_0.offset((lineLen - 1 as ::core::ffi::c_int) as isize);
-                if ch as ::core::ffi::c_int != ' ' as i32
-                    && ch as ::core::ffi::c_int != '\t' as i32
-                    && ch as ::core::ffi::c_int != '\n' as i32
-                    && ch as ::core::ffi::c_int != '\r' as i32
-                {
-                    break;
-                }
-                lineLen -= 1;
-            }
-            *sLineStr_0.offset(lineLen as isize) = 0 as ::core::ffi::c_char;
-            if indst < lineLen || keepComments != 0 {
-                break;
+        }
+
+        /* adjust line length to remove comment, if we have in-line comments */
+        let com_pos = line_str.iter().position(|&c| c == comment);
+        if let Some(p) = com_pos {
+            if in_line_comments != 0 {
+                line_len = p as i32;
             }
         }
+
+        /* adjust line length back further to remove white space and newline */
+        while line_len > 0 {
+            let ch = line_str[(line_len - 1) as usize];
+            if ch != b' ' && ch != b'\t' && ch != b'\n' && ch != b'\r' {
+                break;
+            }
+            line_len -= 1;
+        }
+        line_str.truncate(line_len as usize);
+
+        /* Return if something is on line or we are keeping comments */
+        if indst < line_len || keep_comments != 0 {
+            break;
+        }
     }
-    *firstNonWhite = indst;
-    return lineLen;
+    *first_non_white = indst;
+    line_len
 }
-unsafe extern "C" fn option_line_of_values(
-    mut option: *const ::core::ffi::c_char,
-    mut array: *mut ::core::ffi::c_void,
-    mut valType: ::core::ffi::c_int,
-    mut numToGet: *mut ::core::ffi::c_int,
-    mut arraySize: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut err: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut valErr: ::core::ffi::c_int = 0;
-    valErr = get_next_value_string(option, &raw mut strPtr);
-    if valErr == 0 || valErr == 2 as ::core::ffi::c_int {
-        err = pip_get_line_of_values(option, strPtr, array, valType, numToGet, arraySize);
+
+/// Original C `OptionLineOfValues` (`parse_params.c:1863`).
+///
+/// Parse a line of values for an option and return them into an array.
+fn option_line_of_values(
+    option: &[u8],
+    array: PipValueArray<'_>,
+    val_type: i32,
+    num_to_get: &mut i32,
+    array_size: i32,
+) -> i32 {
+    /* Get string and save pointer to it for error messages */
+    let mut str_ptr: Vec<u8> = Vec::new();
+    let val_err = get_next_value_string(option, &mut str_ptr);
+    let mut err = 0i32;
+    if val_err == 0 || val_err == 2 {
+        err = pip_get_line_of_values(option, &str_ptr, array, val_type, num_to_get, array_size);
     }
     if err != 0 {
         return err;
     }
-    return valErr;
+    val_err
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_get_line_of_values(
-    mut option: *const ::core::ffi::c_char,
-    mut strPtr: *const ::core::ffi::c_char,
-    mut array: *mut ::core::ffi::c_void,
-    mut valType: ::core::ffi::c_int,
-    mut numToGet: *mut ::core::ffi::c_int,
-    mut arraySize: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut sepPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut endPtr: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-    let mut invalid: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut fullStr: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-    let mut iarray: *mut ::core::ffi::c_int = array as *mut ::core::ffi::c_int;
-    let mut farray: *mut ::core::ffi::c_float = array as *mut ::core::ffi::c_float;
-    let mut darray: *mut ::core::ffi::c_double = array as *mut ::core::ffi::c_double;
-    let mut numGot: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut gotComma: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    let mut sepStr: [::core::ffi::c_char; 5] =
-        ::core::mem::transmute::<[u8; 5], [::core::ffi::c_char; 5]>(*b",\t /\0");
-    fullStr = strPtr;
-    while strlen(strPtr) != 0 {
-        sepPtr = strpbrk(strPtr, &raw mut sepStr as *mut ::core::ffi::c_char);
-        if sepPtr.is_null() {
-            endPtr = strPtr.offset(strlen(strPtr) as isize);
-        } else if sepPtr == strPtr as *mut ::core::ffi::c_char {
-            if *strPtr.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == '/' as i32
-            {
-                if sAllowDefaults != 0 && *numToGet > 0 as ::core::ffi::c_int {
-                    numGot = *numToGet;
-                    break;
-                } else {
+
+/// Original C `PipGetLineOfValues` (`parse_params.c:1890`).
+///
+/// Parses a line of values from the string in `str_ptr` and returns them into
+/// `array`, whose size is given by `array_size`.  The number of values to get is
+/// set in `num_to_get`, where a value of zero indicates all values should be
+/// returned, and a value of -1 indicates that up to `array_size` values should
+/// be returned; in either case the number gotten is returned in `num_to_get`.
+pub fn pip_get_line_of_values(
+    option: &[u8],
+    str_ptr: &[u8],
+    mut array: PipValueArray<'_>,
+    val_type: i32,
+    num_to_get: &mut i32,
+    array_size: i32,
+) -> i32 {
+    let mut num_got = 0i32;
+    let mut got_comma = 1i32;
+    /* char sepStr[] = ",\t /"; */
+    let sep_str: &[u8] = b",\t /";
+
+    let full_str: &[u8] = str_ptr;
+    let mut pos = 0usize;
+    while pos < full_str.len() {
+        let sep_ptr = full_str[pos..]
+            .iter()
+            .position(|c| sep_str.contains(c))
+            .map(|p| p + pos);
+        let end_ptr: usize;
+        match sep_ptr {
+            None => {
+                /* null pointer means read a number to end of string */
+                end_ptr = full_str.len();
+            }
+            Some(p) if p == pos => {
+                /* separator at start means advance by one byte and continue */
+                /* if defaults allowed and a specific number are expected,
+                / means stop processing and mark all values as received */
+                if full_str[pos] == b'/' {
+                    if S_ALLOW_DEFAULTS.get() != 0 && *num_to_get > 0 {
+                        num_got = *num_to_get;
+                        break;
+                    }
                     line_of_values_error(
-                        fullStr,
-                        format_args!(
-                            "Default entry with a / is not allowed in value entry:  {}  ",
-                            ::core::ffi::CStr::from_ptr(option).to_string_lossy()
-                        ),
+                        full_str,
+                        "Default entry with a / is not allowed in value entry:  %s  ",
+                        &[CArg::Bytes(option)],
                     );
-                    return -(1 as ::core::ffi::c_int);
+                    return -1;
                 }
-            } else {
-                if *strPtr.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                    == ',' as i32
-                {
-                    if gotComma != 0 {
-                        if sAllowDefaults != 0 && *numToGet > 0 as ::core::ffi::c_int {
-                            numGot += 1;
-                            if numGot >= *numToGet {
+
+                /* special handling of commas to allow default values */
+                if full_str[pos] == b',' {
+                    /* If already have a comma, skip an array value if defaults allowed */
+                    if got_comma != 0 {
+                        if S_ALLOW_DEFAULTS.get() != 0 && *num_to_get > 0 {
+                            num_got += 1;
+                            if num_got >= *num_to_get {
                                 break;
                             }
                         } else {
                             line_of_values_error(
-                                fullStr,
-                                format_args!(
-                                    "Default entries with commas are not allowed in value entry:  {}  ",
-                                    ::core::ffi::CStr::from_ptr(option).to_string_lossy()
-                                ),
+                                full_str,
+                                "Default entries with commas are not allowed in value entry:  %s  ",
+                                &[CArg::Bytes(option)],
                             );
-                            return -(1 as ::core::ffi::c_int);
+                            return -1;
                         }
                     }
-                    gotComma = 1 as ::core::ffi::c_int;
+                    got_comma = 1;
                 }
-                strPtr = strPtr.offset(1);
+                pos += 1;
                 continue;
             }
-        } else {
-            endPtr = sepPtr;
+            Some(p) => {
+                /* otherwise, this should be the end pointer in the strto[ld] call */
+                end_ptr = p;
+            }
         }
-        if numGot >= arraySize {
+
+        /* If we are already full, then it is an error */
+        if num_got >= array_size {
             line_of_values_error(
-                fullStr,
-                format_args!(
-                    "Too many values for input array in value entry:  {}  ",
-                    ::core::ffi::CStr::from_ptr(option).to_string_lossy()
-                ),
+                full_str,
+                "Too many values for input array in value entry:  %s  ",
+                &[CArg::Bytes(option)],
             );
-            return -(1 as ::core::ffi::c_int);
+            return -1;
         }
-        if valType == PIP_INTEGER {
-            let fresh16 = numGot;
-            numGot = numGot + 1;
-            *iarray.offset(fresh16 as isize) =
-                strtol(strPtr, &raw mut invalid, 10 as ::core::ffi::c_int) as ::core::ffi::c_int;
-        } else if valType == PIP_FLOAT {
-            let fresh17 = numGot;
-            numGot = numGot + 1;
-            *farray.offset(fresh17 as isize) =
-                strtod(strPtr, &raw mut invalid) as ::core::ffi::c_float;
+
+        /* convert number, get pointer to first invalid char */
+        let mut scanned = 0usize;
+        if val_type == PIP_INTEGER {
+            let v = strtol(&full_str[pos..], &mut scanned, 10);
+            if let PipValueArray::Int(a) = &mut array {
+                a[num_got as usize] = v as i32;
+            }
+            num_got += 1;
+        } else if val_type == PIP_FLOAT {
+            let v = strtod(&full_str[pos..], &mut scanned);
+            if let PipValueArray::Float(a) = &mut array {
+                a[num_got as usize] = v as f32;
+            }
+            num_got += 1;
         } else {
-            let fresh18 = numGot;
-            numGot = numGot + 1;
-            *darray.offset(fresh18 as isize) = strtod(strPtr, &raw mut invalid);
+            let v = strtod(&full_str[pos..], &mut scanned);
+            if let PipValueArray::Double(a) = &mut array {
+                a[num_got as usize] = v;
+            }
+            num_got += 1;
         }
-        if invalid != endPtr as *mut ::core::ffi::c_char {
+        let invalid = pos + scanned;
+
+        /* If invalid character is before end character, it is an error */
+        if invalid != end_ptr {
             line_of_values_error(
-                fullStr,
-                format_args!(
-                    "Illegal character in value entry:  {}  ",
-                    ::core::ffi::CStr::from_ptr(option).to_string_lossy()
-                ),
+                full_str,
+                "Illegal character in value entry:  %s  ",
+                &[CArg::Bytes(option)],
             );
-            return -(1 as ::core::ffi::c_int);
+            return -1;
         }
-        gotComma = 0 as ::core::ffi::c_int;
-        if *endPtr == 0
-            || *numToGet > 0 as ::core::ffi::c_int && numGot >= *numToGet
-            || *numToGet < 0 as ::core::ffi::c_int && numGot >= arraySize
+
+        /* Mark that there is no comma after we have a number */
+        got_comma = 0;
+
+        /* Done if at end of line, or if count is fulfilled, or if buffer is full and
+        numToGet < 0 */
+        let end_char = if end_ptr < full_str.len() {
+            full_str[end_ptr]
+        } else {
+            0
+        };
+        if end_char == 0
+            || (*num_to_get > 0 && num_got >= *num_to_get)
+            || (*num_to_get < 0 && num_got >= array_size)
         {
             break;
         }
-        strPtr = endPtr;
+
+        /* Otherwise advance to separator and continue */
+        pos = end_ptr;
     }
-    if *numToGet <= 0 as ::core::ffi::c_int {
-        *numToGet = numGot;
+
+    /* return number actually gotten if it was left open */
+    if *num_to_get <= 0 {
+        *num_to_get = num_got;
     }
-    if numGot < *numToGet {
+
+    /* If not enough values found, return error */
+    if num_got < *num_to_get {
         line_of_values_error(
-            fullStr,
-            format_args!(
-                "{} values expected but only {} values found in value entry:  {}  ",
-                *numToGet,
-                numGot,
-                ::core::ffi::CStr::from_ptr(option).to_string_lossy()
-            ),
+            full_str,
+            "%d values expected but only %d values found in value entry:  %s  ",
+            &[
+                CArg::Int(*num_to_get as i64),
+                CArg::Int(num_got as i64),
+                CArg::Bytes(option),
+            ],
         );
-        return -(1 as ::core::ffi::c_int);
+        return -1;
     }
-    return 0 as ::core::ffi::c_int;
+
+    0
 }
-/// Source `LineOfValuesError` (`parse_params.c:1999`).  The C `format`/varargs
-/// pair maps to `core::fmt::Arguments`, the same boundary shape `b3dError`
-/// uses, and `vsprintf` into `sTempStr` is reproduced byte for byte.
-unsafe fn line_of_values_error(
-    full_str: *const ::core::ffi::c_char,
-    format: core::fmt::Arguments<'_>,
-) {
-    // `PipLineOfValues` is explicitly usable before `PipInitialize`; the C
-    // `LineOfValuesError` therefore obtains this scratch buffer on demand.
-    if sTempStr.is_null() {
-        sTempStr = malloc(TEMP_STR_SIZE as size_t) as *mut ::core::ffi::c_char;
-    }
-    if sTempStr.is_null() {
-        return;
-    }
-    let text = format.to_string();
-    let bytes = text.as_bytes();
-    let count = bytes.len().min(TEMP_STR_SIZE as usize - 1);
-    ::core::ptr::copy_nonoverlapping(
-        bytes.as_ptr().cast::<::core::ffi::c_char>(),
-        sTempStr,
-        count,
-    );
-    *sTempStr.add(count) = 0;
+
+/// Original C `LineOfValuesError` (`parse_params.c:1994`).
+///
+/// `PipGetLineOfValues` can be called without initializing PIP, so this
+/// function is needed to allocate `sTempStr` if needed.  It handles appending
+/// the input string to the error.  The source's `va_list` becomes the slice of
+/// [`CArg`] that [`c_format`] takes.
+fn line_of_values_error(full_str: &[u8], format: &str, args: &[CArg]) {
+    /* vsprintf(sTempStr, format, args); */
+    let formatted = c_format(format, args);
+    S_TEMP_STR.with_borrow_mut(|t| {
+        t.clear();
+        t.extend_from_slice(formatted.as_bytes());
+    });
     append_to_error_string(full_str);
 }
-pub unsafe extern "C" fn get_next_value_string(
-    mut option: *const ::core::ffi::c_char,
-    mut strPtr: *mut *mut ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut index: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    err = lookup_option(option, sNonOptInd + 1 as ::core::ffi::c_int);
-    if err < 0 as ::core::ffi::c_int {
+
+/// Original C `GetNextValueString` (`parse_params.c:2015`).
+///
+/// Get the value string for the given option.  Return < 0 if the option is
+/// invalid, 1 if the option was not entered, 2 if it was not entered and a
+/// default string is being returned.  If the option allows multiple values,
+/// advance the multiple counter.
+pub fn get_next_value_string(option: &[u8], str_ptr: &mut Vec<u8>) -> i32 {
+    let mut index = 0i32;
+
+    let err = lookup_option(option, S_NON_OPT_IND.get() + 1);
+    if err < 0 {
         return err;
     }
-    if (*sOptTable.offset(err as isize)).count == 0 {
-        if (*sOptTable.offset(err as isize)).defaultVal.is_null() {
-            return 1 as ::core::ffi::c_int;
+    let (count, multiple, default_val) = S_OPT_TABLE.with_borrow(|t| {
+        let o = &t[err as usize];
+        (o.count, o.multiple, o.default_val.clone())
+    });
+    if count == 0 {
+        match default_val {
+            None => return 1,
+            Some(d) => {
+                *str_ptr = d;
+                return 2;
+            }
         }
-        *strPtr = (*sOptTable.offset(err as isize)).defaultVal;
-        return 2 as ::core::ffi::c_int;
     }
-    if (*sOptTable.offset(err as isize)).multiple != 0 {
-        index = (*sOptTable.offset(err as isize)).multiple - 1 as ::core::ffi::c_int;
-        if (*sOptTable.offset(err as isize)).multiple < (*sOptTable.offset(err as isize)).count {
-            let ref mut fresh15 = (*sOptTable.offset(err as isize)).multiple;
-            *fresh15 += 1;
+
+    if multiple != 0 {
+        index = multiple - 1;
+        if multiple < count {
+            S_OPT_TABLE.with_borrow_mut(|t| t[err as usize].multiple = multiple + 1);
         }
     }
-    *strPtr = *(*sOptTable.offset(err as isize))
-        .valuePtr
-        .offset(index as isize);
-    return 0 as ::core::ffi::c_int;
+    *str_ptr = S_OPT_TABLE.with_borrow(|t| t[err as usize].value_ptr[index as usize].clone());
+    0
 }
-pub unsafe extern "C" fn add_value_string(
-    mut option: ::core::ffi::c_int,
-    mut strPtr: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut optp: *mut PipOptions = sOptTable.offset(option as isize) as *mut PipOptions;
-    if (*optp).count == 0 || (*optp).multiple != 0 {
-        if (*optp).count != 0 {
-            (*optp).valuePtr = realloc(
-                (*optp).valuePtr as *mut ::core::ffi::c_void,
-                (((*optp).count + 1 as ::core::ffi::c_int) as size_t)
-                    .wrapping_mul(::core::mem::size_of::<*mut ::core::ffi::c_char>() as size_t),
-            ) as *mut *mut ::core::ffi::c_char;
-            if (*optp).linked != 0 {
-                (*optp).nextLinked = realloc(
-                    (*optp).nextLinked as *mut ::core::ffi::c_void,
-                    ((((*optp).count + 1 as ::core::ffi::c_int) * 2 as ::core::ffi::c_int)
-                        as size_t)
-                        .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-                ) as *mut ::core::ffi::c_int;
-            }
-        } else {
-            (*optp).valuePtr = malloc(::core::mem::size_of::<*mut ::core::ffi::c_char>() as size_t)
-                as *mut *mut ::core::ffi::c_char;
-            if (*optp).linked != 0 {
-                (*optp).nextLinked = malloc(
-                    (2 as size_t)
-                        .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-                ) as *mut ::core::ffi::c_int;
-            }
-        }
-        if pip_memory_error(
-            (*optp).valuePtr as *mut ::core::ffi::c_void,
-            b"add_value_string\0" as *const u8 as *const ::core::ffi::c_char,
-        ) != 0
-            || (*optp).linked != 0
-                && pip_memory_error(
-                    (*optp).nextLinked as *mut ::core::ffi::c_void,
-                    b"add_value_string\0" as *const u8 as *const ::core::ffi::c_char,
-                ) != 0
-        {
-            return -(1 as ::core::ffi::c_int);
+
+/// Original C `AddValueString` (`parse_params.c:2043`).
+///
+/// Add a string to the set of values for an option.
+pub fn add_value_string(option: i32, str_ptr: &[u8]) -> i32 {
+    /* If the count is zero or we accept multiple values, need to allocate
+    array for address of string, and array for next non option index */
+    let (count, multiple, linked) = S_OPT_TABLE.with_borrow(|t| {
+        let o = &t[option as usize];
+        (o.count, o.multiple, o.linked)
+    });
+    if count == 0 || multiple != 0 {
+        if linked != 0 {
+            S_OPT_TABLE.with_borrow_mut(|t| {
+                t[option as usize]
+                    .next_linked
+                    .resize(((count + 1) * 2) as usize, 0)
+            });
         }
     } else {
-        if !(*(*optp).valuePtr).is_null() {
-            free(*(*optp).valuePtr as *mut ::core::ffi::c_void);
-        }
-        (*optp).count = 0 as ::core::ffi::c_int;
+        /* otherwise, need to free existing value */
+        S_OPT_TABLE.with_borrow_mut(|t| {
+            t[option as usize].value_ptr.clear();
+            t[option as usize].count = 0;
+        });
     }
-    if (*optp).linked != 0 {
-        *(*optp)
-            .nextLinked
-            .offset((2 as ::core::ffi::c_int * (*optp).count) as isize) =
-            (*sOptTable.offset(sNonOptInd as isize)).count;
-        *(*optp)
-            .nextLinked
-            .offset((2 as ::core::ffi::c_int * (*optp).count + 1 as ::core::ffi::c_int) as isize) =
-            0 as ::core::ffi::c_int;
-        if !sLinkedOption.is_null() {
-            err = lookup_option(sLinkedOption, sNumOptions);
-            if err < 0 as ::core::ffi::c_int {
+    /* save address that was passed in.  The caller had to make a duplicate */
+
+    if linked != 0 {
+        let count = S_OPT_TABLE.with_borrow(|t| t[option as usize].count);
+        let non_opt_count = S_OPT_TABLE.with_borrow(|t| t[S_NON_OPT_IND.get() as usize].count);
+        S_OPT_TABLE.with_borrow_mut(|t| {
+            let o = &mut t[option as usize];
+            o.next_linked[(2 * count) as usize] = non_opt_count;
+            o.next_linked[(2 * count + 1) as usize] = 0;
+        });
+        let linked_option = S_LINKED_OPTION.with_borrow(|l| l.clone());
+        if let Some(linked_option) = linked_option {
+            let err = lookup_option(&linked_option, S_NUM_OPTIONS.get());
+            if err < 0 {
                 return err;
             }
-            *(*optp).nextLinked.offset(
-                (2 as ::core::ffi::c_int * (*optp).count + 1 as ::core::ffi::c_int) as isize,
-            ) = (*sOptTable.offset(err as isize)).count;
+            let linked_count = S_OPT_TABLE.with_borrow(|t| t[err as usize].count);
+            S_OPT_TABLE.with_borrow_mut(|t| {
+                t[option as usize].next_linked[(2 * count + 1) as usize] = linked_count
+            });
         }
     }
-    let fresh13 = (*optp).count;
-    (*optp).count = (*optp).count + 1;
-    let ref mut fresh14 = *(*optp).valuePtr.offset(fresh13 as isize);
-    *fresh14 = strPtr as *mut ::core::ffi::c_char;
-    return 0 as ::core::ffi::c_int;
+    S_OPT_TABLE.with_borrow_mut(|t| {
+        let o = &mut t[option as usize];
+        o.value_ptr.push(str_ptr.to_vec());
+        o.count += 1;
+    });
+    0
 }
-pub unsafe extern "C" fn lookup_option(
-    mut option: *const ::core::ffi::c_char,
-    mut maxLookup: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut starts: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut lenopt: ::core::ffi::c_int = 0;
-    let mut lenShort: ::core::ffi::c_int = 0;
-    let mut found: ::core::ffi::c_int = LOOKUP_NOT_FOUND;
-    let mut sname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut lname: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    lenopt = strlen(option) as ::core::ffi::c_int;
-    i = 0 as ::core::ffi::c_int;
-    while i < maxLookup {
-        sname = (*sOptTable.offset(i as isize)).shortName;
-        lname = (*sOptTable.offset(i as isize)).longName;
-        lenShort = (*sOptTable.offset(i as isize)).lenShort;
-        starts = pip_starts_with(sname, option);
-        if lenopt == 1 as ::core::ffi::c_int && starts != 0 && lenShort == 1 as ::core::ffi::c_int {
+
+/// Original C `LookupOption` (`parse_params.c:2089`).
+///
+/// Look up an option in the table, issue an error message if the option does
+/// not exist or is ambiguous; return index of option or an error code.  This is
+/// the unique-prefix matcher: `PipStartsWith(sname, option)` accepts any
+/// abbreviation that is not shared with another option.
+pub fn lookup_option(option: &[u8], max_lookup: i32) -> i32 {
+    let mut found = LOOKUP_NOT_FOUND;
+    let lenopt = option.len() as i32;
+    let no_abbrevs = S_NO_ABBREVS.get();
+
+    /* Look at all of the options specified by maxLookup */
+    for i in 0..max_lookup {
+        let (sname_opt, lname_opt, len_short) = S_OPT_TABLE.with_borrow(|t| {
+            let o = &t[i as usize];
+            (o.short_name.clone(), o.long_name.clone(), o.len_short)
+        });
+        let sname: &[u8] = sname_opt.as_deref().unwrap_or(b"");
+        let lname: &[u8] = lname_opt.as_deref().unwrap_or(b"");
+        let starts = pip_starts_with(sname, option);
+
+        /* First test for single letter short name match - if passes, skip ambiguity test */
+        if lenopt == 1 && starts != 0 && len_short == 1 {
             found = i;
             break;
-        } else {
-            if starts != 0 && (sNoAbbrevs == 0 || lenopt == lenShort)
-                || pip_starts_with(lname, option) != 0
-                    && (sNoAbbrevs == 0 || lenopt as size_t == strlen(lname))
-            {
-                if found == LOOKUP_NOT_FOUND {
-                    found = i;
-                } else {
-                    if sTestAbbrevForUsage == 0 {
-                        sprintf(
-                            sTempStr,
-                            b"An option specified by \"%s\" is ambiguous between option %s -  %s  and option %s -  %s\0"
-                                as *const u8 as *const ::core::ffi::c_char,
-                            option,
-                            sname,
-                            lname,
-                            (*sOptTable.offset(found as isize)).shortName,
-                            (*sOptTable.offset(found as isize)).longName,
-                        );
-                        pip_set_error(sTempStr);
-                    }
-                    return LOOKUP_AMBIGUOUS;
+        }
+        if (starts != 0 && (no_abbrevs == 0 || lenopt == len_short))
+            || (pip_starts_with(lname, option) != 0
+                && (no_abbrevs == 0 || lenopt == lname.len() as i32))
+        {
+            /* If it is found, it's an error if one has already been found */
+            if found == LOOKUP_NOT_FOUND {
+                found = i;
+            } else {
+                if S_TEST_ABBREV_FOR_USAGE.get() == 0 {
+                    /* sprintf(sTempStr, "An option specified by \"%s\" is ambiguous between "
+                    "option %s -  %s  and option %s -  %s", ...) */
+                    let (found_short, found_long) = S_OPT_TABLE.with_borrow(|t| {
+                        let o = &t[found as usize];
+                        (o.short_name.clone(), o.long_name.clone())
+                    });
+                    let temp = S_TEMP_STR.with_borrow_mut(|t| {
+                        t.clear();
+                        t.extend_from_slice(b"An option specified by \"");
+                        t.extend_from_slice(option);
+                        t.extend_from_slice(b"\" is ambiguous between option ");
+                        t.extend_from_slice(sname_opt.as_deref().unwrap_or(b"(null)"));
+                        t.extend_from_slice(b" -  ");
+                        t.extend_from_slice(lname_opt.as_deref().unwrap_or(b"(null)"));
+                        t.extend_from_slice(b"  and option ");
+                        t.extend_from_slice(found_short.as_deref().unwrap_or(b"(null)"));
+                        t.extend_from_slice(b" -  ");
+                        t.extend_from_slice(found_long.as_deref().unwrap_or(b"(null)"));
+                        t.clone()
+                    });
+                    pip_set_error(&temp);
                 }
+                return LOOKUP_AMBIGUOUS;
             }
-            i += 1;
         }
     }
-    if found == LOOKUP_NOT_FOUND && sNotFoundOK == 0 {
-        sprintf(
-            sTempStr,
-            b"Illegal option: %s\0" as *const u8 as *const ::core::ffi::c_char,
-            option,
-        );
-        pip_set_error(sTempStr);
+
+    /* Set error string unless flag set that non-options are OK */
+    if found == LOOKUP_NOT_FOUND && S_NOT_FOUND_OK.get() == 0 {
+        /* sprintf(sTempStr, "Illegal option: %s", option); */
+        let temp = S_TEMP_STR.with_borrow_mut(|t| {
+            t.clear();
+            t.extend_from_slice(b"Illegal option: ");
+            t.extend_from_slice(option);
+            t.clone()
+        });
+        pip_set_error(&temp);
     }
-    return found;
+    found
 }
-unsafe extern "C" fn pip_sub_str_dup(
-    mut s1: *const ::core::ffi::c_char,
-    mut i1: ::core::ffi::c_int,
-    mut i2: ::core::ffi::c_int,
-) -> *mut ::core::ffi::c_char {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut size: ::core::ffi::c_int = i2 + 2 as ::core::ffi::c_int - i1;
-    let mut s2: *mut ::core::ffi::c_char = malloc(size as size_t) as *mut ::core::ffi::c_char;
-    if pip_memory_error(
-        s2 as *mut ::core::ffi::c_void,
-        b"pip_sub_str_dup\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0
-    {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    i = i1;
+
+/// Original C `PipSubStrDup` (`parse_params.c:2128`).
+///
+/// Duplicate a substring into a new string.
+fn pip_sub_str_dup(s1: &[u8], i1: i32, i2: i32) -> Vec<u8> {
+    let mut s2: Vec<u8> = Vec::new();
+    let mut i = i1;
     while i <= i2 {
-        *s2.offset((i - i1) as isize) = *s1.offset(i as isize);
+        if i >= 0 && (i as usize) < s1.len() {
+            s2.push(s1[i as usize]);
+        } else {
+            /* The source reads s1[i] regardless; past the terminator that is a
+            NUL, which strdup-style copying would stop at. */
+            break;
+        }
         i += 1;
     }
-    *s2.offset((size - 1 as ::core::ffi::c_int) as isize) = 0 as ::core::ffi::c_char;
-    return s2;
+    s2
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_memory_error(
-    mut ptr: *mut ::core::ffi::c_void,
-    mut routine: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    if !ptr.is_null() {
-        return 0 as ::core::ffi::c_int;
+
+/// Original C `PipMemoryError` (`parse_params.c:2145`).
+///
+/// Test for whether the pointer is valid and give memory error if not.  The
+/// source's `void *ptr` is the result of an allocation; Rust allocation does
+/// not return null, so callers inside this unit pass `true`.
+pub fn pip_memory_error(ptr_non_null: bool, routine: &[u8]) -> i32 {
+    if ptr_non_null {
+        return 0;
     }
-    if sTempStr.is_null() {
-        sTempStr = malloc(TEMP_STR_SIZE as size_t) as *mut ::core::ffi::c_char;
-    }
-    if sTempStr.is_null() {
-        pip_set_error(
-            b"Failed to get memory for string in pip_memory_error\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
-        return -(1 as ::core::ffi::c_int);
-    }
-    sprintf(
-        sTempStr,
-        b"Failed to get memory for string in %s\0" as *const u8 as *const ::core::ffi::c_char,
-        routine,
-    );
-    pip_set_error(sTempStr);
-    return -(1 as ::core::ffi::c_int);
+    /* sprintf(sTempStr, "Failed to get memory for string in %s", routine); */
+    let temp = S_TEMP_STR.with_borrow_mut(|t| {
+        t.clear();
+        t.extend_from_slice(b"Failed to get memory for string in ");
+        t.extend_from_slice(routine);
+        t.clone()
+    });
+    pip_set_error(&temp);
+    -1
 }
-unsafe extern "C" fn append_to_error_string(mut str: *const ::core::ffi::c_char) {
-    let mut len: ::core::ffi::c_int = strlen(sTempStr) as ::core::ffi::c_int;
-    *sTempStr.offset((TEMP_STR_SIZE - 1 as ::core::ffi::c_int) as isize) = 0 as ::core::ffi::c_char;
-    strncpy(
-        sTempStr.offset(len as isize) as *mut ::core::ffi::c_char,
-        str,
-        (TEMP_STR_SIZE - len - 1 as ::core::ffi::c_int) as size_t,
-    );
-    pip_set_error(sTempStr);
+
+/// Original C `AppendToErrorString` (`parse_params.c:2164`).
+///
+/// Add as much of a string as fits to the `sTempStr` and use to set error.
+fn append_to_error_string(str_arg: &[u8]) {
+    let temp = S_TEMP_STR.with_borrow_mut(|t| {
+        let len = t.len();
+        /* strncpy(&sTempStr[len], str, TEMP_STR_SIZE - len - 1) into a
+        TEMP_STR_SIZE buffer whose last byte was just set to NUL. */
+        let room = (TEMP_STR_SIZE as usize).saturating_sub(len + 1);
+        let n = str_arg.len().min(room);
+        t.extend_from_slice(&str_arg[..n]);
+        t.clone()
+    });
+    pip_set_error(&temp);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pip_starts_with(
-    mut fullStr: *const ::core::ffi::c_char,
-    mut subStr: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    if fullStr.is_null() || subStr.is_null() {
-        return 0 as ::core::ffi::c_int;
+
+/// Original C `PipStartsWith` (`parse_params.c:2176`).
+///
+/// Returns 1 if `full_str` starts with `sub_str`, where either string can be
+/// empty (the source's NULL and empty-string cases both give 0).
+pub fn pip_starts_with(full_str: &[u8], sub_str: &[u8]) -> i32 {
+    if full_str.is_empty() || sub_str.is_empty() {
+        return 0;
     }
-    if *fullStr == 0 || *subStr == 0 {
-        return 0 as ::core::ffi::c_int;
+    if S_NO_CASE.get() != 0 {
+        let mut f = 0usize;
+        let mut s = 0usize;
+        while f < full_str.len() && s < sub_str.len() {
+            if full_str[f].to_ascii_uppercase() != sub_str[s].to_ascii_uppercase() {
+                return 0;
+            }
+            f += 1;
+            s += 1;
+        }
+        if s >= sub_str.len() {
+            return 1;
+        }
+    } else if full_str.starts_with(sub_str) {
+        return 1;
     }
-    if sNoCase != 0 {
-        while *fullStr as ::core::ffi::c_int != 0 && *subStr as ::core::ffi::c_int != 0 {
-            let fresh11 = fullStr;
-            fullStr = fullStr.offset(1);
-            let fresh12 = subStr;
-            subStr = subStr.offset(1);
-            if toupper(*fresh11 as ::core::ffi::c_int) != toupper(*fresh12 as ::core::ffi::c_int) {
-                return 0 as ::core::ffi::c_int;
+    0
+}
+
+/// Original C `LineIsOptionToken` (`parse_params.c:2197`).
+///
+/// Determines whether the line contains the token for an option inside the
+/// opening and closing delimiters and returns 1 if it does, or -1 if it is
+/// another token.
+fn line_is_option_token(line: &[u8]) -> i32 {
+    /* It is not a token unless it starts with open delim and contains close */
+    if pip_starts_with(line, OPEN_DELIM) == 0
+        || !line.windows(CLOSE_DELIM.len()).any(|w| w == CLOSE_DELIM)
+    {
+        return 0;
+    }
+
+    /* It must then contain "Field" right after delim to be an option */
+    let token = &line[OPEN_DELIM.len()..];
+    if pip_starts_with(token, b"Field") != 0 {
+        return 1;
+    }
+    if pip_starts_with(token, b"SectionHeader") != 0 {
+        return 2;
+    }
+
+    -1
+}
+
+/// Original C `CheckKeyword` (`parse_params.c:2222`).
+///
+/// Checks for whether a keyword occurs at the beginning of the line and is
+/// followed by the keyword-value delimiter, and if so duplicates the value
+/// string and sets the flag.  The source's `char ***lastCopied` — the address
+/// of the variable holding the string — becomes `last_copied` plus the `slot`
+/// naming which variable `copyto` is.
+#[allow(clippy::too_many_arguments)]
+fn check_keyword(
+    line: &[u8],
+    keyword: &[u8],
+    copyto: &mut Option<Vec<u8>>,
+    gotit: &mut i32,
+    last_copied: &mut Option<PipKeywordSlot>,
+    slot: PipKeywordSlot,
+    quote_ind: Option<&mut i32>,
+) -> i32 {
+    /* First make sure line starts with it */
+    if pip_starts_with(line, keyword) == 0 {
+        return 0;
+    }
+
+    /* Now look for delimiter */
+    let value_delim = S_VALUE_DELIM.with_borrow(|d| d.clone()).unwrap_or_default();
+    let val_start = if value_delim.is_empty() {
+        /* strstr(line, "") returns line */
+        Some(0usize)
+    } else {
+        line.windows(value_delim.len())
+            .position(|w| w == value_delim.as_slice())
+    };
+    let mut val_start = match val_start {
+        Some(p) => p,
+        None => return 0,
+    };
+
+    /* Free previous entry if there was one, and mark that it was not gotten,
+    so that an empty entry can supercede a non-empty one */
+    if *gotit != 0 && copyto.is_some() {
+        *copyto = None;
+        *gotit = 0;
+    }
+
+    /* Eat spaces after the delimiter and return if nothing left */
+    /* In other words, a key with no value is the same as having no key at all */
+    val_start += value_delim.len();
+    while val_start < line.len() && (line[val_start] == b' ' || line[val_start] == b'\t') {
+        val_start += 1;
+    }
+    if val_start >= line.len() {
+        return 0;
+    }
+
+    /* Look for quote if directed to */
+    if let Some(quote_ind) = quote_ind {
+        match S_QUOTE_TYPES.iter().position(|&q| q == line[val_start]) {
+            Some(p) => {
+                *quote_ind = p as i32;
+                val_start += 1;
+            }
+            None => *quote_ind = -1,
+        }
+    }
+
+    /* Copy string and return address, set flag that it was gotten */
+    let copy_str = line[val_start..].to_vec();
+
+    *gotit = 1;
+    *copyto = Some(copy_str);
+    *last_copied = Some(slot);
+    0
+}
+
+/// The C library's `strtol` with the source's base, as a Rust function.
+///
+/// This is a boundary translation, like [`c_format`]: `str::parse` rejects the
+/// partial parses `PipGetLineOfValues` relies on, and the index where the scan
+/// stopped is what the source compares against its own end pointer.  `*end` is
+/// returned as an index into `s`, and is 0 when no conversion was performed, as
+/// C leaves `endptr` at `nptr`.
+fn strtol(s: &[u8], end: &mut usize, base: i32) -> i64 {
+    let mut i = 0usize;
+    while i < s.len()
+        && (s[i] == b' '
+            || s[i] == b'\t'
+            || s[i] == b'\n'
+            || s[i] == 0x0b
+            || s[i] == 0x0c
+            || s[i] == b'\r')
+    {
+        i += 1;
+    }
+    let mut negative = false;
+    if i < s.len() && (s[i] == b'+' || s[i] == b'-') {
+        negative = s[i] == b'-';
+        i += 1;
+    }
+    let mut base = base;
+    if (base == 0 || base == 16)
+        && i + 1 < s.len()
+        && s[i] == b'0'
+        && (s[i + 1] | 32) == b'x'
+        && i + 2 < s.len()
+        && (s[i + 2] as char).is_digit(16)
+    {
+        i += 2;
+        base = 16;
+    } else if base == 0 {
+        base = if i < s.len() && s[i] == b'0' { 8 } else { 10 };
+    }
+    let digits_start = i;
+    let mut value: i64 = 0;
+    let mut overflow = false;
+    while i < s.len() {
+        let d = match (s[i] as char).to_digit(base as u32) {
+            Some(d) => d as i64,
+            None => break,
+        };
+        if !overflow {
+            match value
+                .checked_mul(base as i64)
+                .and_then(|v| v.checked_add(d))
+            {
+                Some(v) => value = v,
+                None => overflow = true,
             }
         }
-        if *subStr == 0 {
-            return 1 as ::core::ffi::c_int;
-        }
-    } else if strstr(fullStr, subStr) == fullStr as *mut ::core::ffi::c_char {
-        return 1 as ::core::ffi::c_int;
+        i += 1;
     }
-    return 0 as ::core::ffi::c_int;
+    if i == digits_start {
+        /* No conversion: endptr is left at the original nptr. */
+        *end = 0;
+        return 0;
+    }
+    *end = i;
+    if overflow {
+        return if negative { i64::MIN } else { i64::MAX };
+    }
+    if negative { -value } else { value }
 }
-unsafe extern "C" fn line_is_option_token(
-    mut line: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut token: *const ::core::ffi::c_char = ::core::ptr::null::<::core::ffi::c_char>();
-    if pip_starts_with(line, OPEN_DELIM.as_ptr()) == 0
-        || strstr(line, CLOSE_DELIM.as_ptr()).is_null()
+
+/// The C library's `strtod`, as a Rust function.
+///
+/// Accepts what glibc accepts — leading white space, a sign, a decimal or C99
+/// hexadecimal significand with an optional exponent, and `inf`/`infinity`/
+/// `nan` — and reports in `*end` the index in `s` where the scan stopped, which
+/// is 0 when no conversion was performed.
+fn strtod(s: &[u8], end: &mut usize) -> f64 {
+    let mut i = 0usize;
+    while i < s.len()
+        && (s[i] == b' '
+            || s[i] == b'\t'
+            || s[i] == b'\n'
+            || s[i] == 0x0b
+            || s[i] == 0x0c
+            || s[i] == b'\r')
     {
-        return 0 as ::core::ffi::c_int;
+        i += 1;
     }
-    token = line.offset(strlen(OPEN_DELIM.as_ptr()) as isize);
-    if pip_starts_with(token, b"Field\0" as *const u8 as *const ::core::ffi::c_char) != 0 {
-        return 1 as ::core::ffi::c_int;
+    let sign_pos = i;
+    let mut negative = false;
+    if i < s.len() && (s[i] == b'+' || s[i] == b'-') {
+        negative = s[i] == b'-';
+        i += 1;
     }
-    if pip_starts_with(
-        token,
-        b"SectionHeader\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0
-    {
-        return 2 as ::core::ffi::c_int;
-    }
-    return -(1 as ::core::ffi::c_int);
-}
-unsafe extern "C" fn check_keyword(
-    mut line: *const ::core::ffi::c_char,
-    mut keyword: *const ::core::ffi::c_char,
-    mut copyto: *mut *mut ::core::ffi::c_char,
-    mut gotit: *mut ::core::ffi::c_int,
-    mut lastCopied: *mut *mut *mut ::core::ffi::c_char,
-    mut quoteInd: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut valStart: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut quoteStart: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut copyStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if pip_starts_with(line, keyword) == 0 {
-        return 0 as ::core::ffi::c_int;
-    }
-    valStart = strstr(line, sValueDelim);
-    if valStart.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    if *gotit != 0 && *copyto != sNullString {
-        free(*copyto as *mut ::core::ffi::c_void);
-        *copyto = sNullString;
-        *gotit = 0 as ::core::ffi::c_int;
-    }
-    valStart = valStart.offset(strlen(sValueDelim) as isize);
-    while *valStart as ::core::ffi::c_int == ' ' as i32
-        || *valStart as ::core::ffi::c_int == '\t' as i32
-    {
-        valStart = valStart.offset(1);
-    }
-    if *valStart == 0 {
-        return 0 as ::core::ffi::c_int;
-    }
-    if !quoteInd.is_null() {
-        quoteStart = strchr(sQuoteTypes, *valStart as ::core::ffi::c_int);
-        if !quoteStart.is_null() {
-            *quoteInd =
-                quoteStart.offset_from(sQuoteTypes) as ::core::ffi::c_long as ::core::ffi::c_int;
-            valStart = valStart.offset(1);
+    let _ = sign_pos;
+
+    /* infinity */
+    let rest = &s[i..];
+    let lower_starts = |p: &[u8]| -> bool {
+        rest.len() >= p.len()
+            && rest[..p.len()]
+                .iter()
+                .zip(p.iter())
+                .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    };
+    if lower_starts(b"infinity") {
+        *end = i + 8;
+        return if negative {
+            f64::NEG_INFINITY
         } else {
-            *quoteInd = -(1 as ::core::ffi::c_int);
+            f64::INFINITY
+        };
+    }
+    if lower_starts(b"inf") {
+        *end = i + 3;
+        return if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
+    }
+    if lower_starts(b"nan") {
+        let mut j = i + 3;
+        /* nan(n-char-sequence) */
+        if j < s.len() && s[j] == b'(' {
+            let mut k = j + 1;
+            while k < s.len() && (s[k].is_ascii_alphanumeric() || s[k] == b'_') {
+                k += 1;
+            }
+            if k < s.len() && s[k] == b')' {
+                j = k + 1;
+            }
+        }
+        *end = j;
+        return if negative { -f64::NAN } else { f64::NAN };
+    }
+
+    /* C99 hexadecimal floating literal */
+    if i + 1 < s.len() && s[i] == b'0' && (s[i + 1] | 32) == b'x' {
+        let mut j = i + 2;
+        let mut mantissa: f64 = 0.0;
+        let mut any = false;
+        while j < s.len() && (s[j] as char).is_digit(16) {
+            mantissa = mantissa * 16.0 + (s[j] as char).to_digit(16).unwrap() as f64;
+            j += 1;
+            any = true;
+        }
+        let mut bin_exp: i32 = 0;
+        if j < s.len() && s[j] == b'.' {
+            j += 1;
+            while j < s.len() && (s[j] as char).is_digit(16) {
+                mantissa = mantissa * 16.0 + (s[j] as char).to_digit(16).unwrap() as f64;
+                bin_exp -= 4;
+                j += 1;
+                any = true;
+            }
+        }
+        if any {
+            let mantissa_end = j;
+            if j < s.len() && (s[j] | 32) == b'p' {
+                let mut k = j + 1;
+                let mut esign = 1i32;
+                if k < s.len() && (s[k] == b'+' || s[k] == b'-') {
+                    if s[k] == b'-' {
+                        esign = -1;
+                    }
+                    k += 1;
+                }
+                let estart = k;
+                let mut ev: i32 = 0;
+                while k < s.len() && s[k].is_ascii_digit() {
+                    ev = ev.saturating_mul(10).saturating_add((s[k] - b'0') as i32);
+                    k += 1;
+                }
+                if k > estart {
+                    bin_exp = bin_exp.saturating_add(esign * ev);
+                    j = k;
+                } else {
+                    j = mantissa_end;
+                }
+            }
+            *end = j;
+            let value = mantissa * (2.0f64).powi(bin_exp);
+            return if negative { -value } else { value };
         }
     }
-    copyStr = strdup(valStart);
-    if pip_memory_error(
-        copyStr as *mut ::core::ffi::c_void,
-        b"check_keyword\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0
-    {
-        return -(1 as ::core::ffi::c_int);
+
+    /* Decimal */
+    let num_start = i;
+    let mut j = i;
+    let digits_before = j;
+    while j < s.len() && s[j].is_ascii_digit() {
+        j += 1;
     }
-    *gotit = 1 as ::core::ffi::c_int;
-    *copyto = copyStr;
-    *lastCopied = copyto;
-    return 0 as ::core::ffi::c_int;
+    let mut any_digits = j > digits_before;
+    if j < s.len() && s[j] == b'.' {
+        j += 1;
+        let digits_after = j;
+        while j < s.len() && s[j].is_ascii_digit() {
+            j += 1;
+        }
+        any_digits = any_digits || j > digits_after;
+    }
+    if !any_digits {
+        /* No conversion. */
+        *end = 0;
+        return 0.0;
+    }
+    let mantissa_end = j;
+    if j < s.len() && (s[j] | 32) == b'e' {
+        let mut k = j + 1;
+        if k < s.len() && (s[k] == b'+' || s[k] == b'-') {
+            k += 1;
+        }
+        let estart = k;
+        while k < s.len() && s[k].is_ascii_digit() {
+            k += 1;
+        }
+        if k > estart {
+            j = k;
+        } else {
+            j = mantissa_end;
+        }
+    }
+    *end = j;
+    let text = std::str::from_utf8(&s[num_start..j]).unwrap_or("0");
+    let value: f64 = text.parse().unwrap_or(0.0);
+    if negative { -value } else { value }
 }

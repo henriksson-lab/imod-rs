@@ -143,7 +143,7 @@ pub fn ioew_nametext(model: &mut Imod, edit: &mut ObjectEdit, name: &str) {
     if let Some(o) = get_object_or_close(model, edit) {
         o.name = [0; 64];
         for (d, s) in o.name.iter_mut().zip(name.bytes().take(63)) {
-            *d = s as i8;
+            *d = s;
         }
         imodv_finish_chg_unit();
     }

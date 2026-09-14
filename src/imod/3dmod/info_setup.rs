@@ -914,7 +914,7 @@ pub fn maintain_model_name(
     window.info_controls.set_model_name(imod_filename);
     mod_.name.fill(0);
     for (to, from) in mod_.name.iter_mut().zip(imod_filename.bytes()) {
-        *to = from as i8;
+        *to = from;
     }
     window.manage_menus(native);
 }

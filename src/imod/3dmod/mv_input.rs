@@ -904,10 +904,8 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 let obj = objed_object(unsafe { &mut *a_ptr })
                     .map_or(std::ptr::null_mut(), |o| o as *mut Iobj);
                 if !obj.is_null() {
-                    // `a->imod->editGlobalClip` has no member on the translated
-                    // `Imod` (`imodel.rs` deviation note); `imodDefault`
-                    // (`imodel.c:93`) leaves it 0, which selects the object clips.
-                    let edit_global_clip = 0;
+                    // `mv_input.cpp:167` `a->imod->editGlobalClip`.
+                    let edit_global_clip = imod_ref.edit_global_clip;
                     let clips = if edit_global_clip != 0 {
                         &mut imod_ref.view[0].clips
                     } else {
@@ -1775,9 +1773,8 @@ pub fn imodv_zoomd(a: &mut ImodvApp, zoom: f64) {
 pub fn register_clip_plane_chg(a: &mut ImodvApp, n: &mut dyn MvInputNativeBoundary) {
     let a_ptr = a as *mut ImodvApp;
     if S_FIRST_MOVE.get() != 0 {
-        // `a->imod->editGlobalClip` has no member on the translated `Imod`
-        // (`imodel.rs` deviation note) and `imodDefault` leaves it 0.
-        let edit_global_clip = 0;
+        // `mv_input.cpp:864` `a->imod->editGlobalClip`.
+        let edit_global_clip = unsafe { (*a.imod).edit_global_clip };
         if edit_global_clip != 0 {
             imodv_register_model_chg();
         } else {
@@ -1846,8 +1843,8 @@ pub fn imodv_translate_by_delta(
                 .map_or(std::ptr::null_mut(), |o| o as *mut Iobj);
             if !obj.is_null() {
                 register_clip_plane_chg(unsafe { &mut *a_ptr }, n);
-                // `editGlobalClip` is 0: see the note in `imodvKeyPress`.
-                let edit_global_clip = 0;
+                // `mv_input.cpp:915` `a->imod->editGlobalClip`.
+                let edit_global_clip = unsafe { (*a.imod).edit_global_clip };
                 let clips = if edit_global_clip != 0 {
                     unsafe { &mut (&mut (*a.imod).view)[0].clips }
                 } else {
@@ -2011,8 +2008,8 @@ pub fn imodv_compute_rotation(
     } else {
         let obj =
             objed_object(unsafe { &mut *a_ptr }).map_or(std::ptr::null_mut(), |o| o as *mut Iobj);
-        // `editGlobalClip` is 0: see the note in `imodvKeyPress`.
-        let edit_global_clip = 0;
+        // `mv_input.cpp:1031` `imod->editGlobalClip`.
+        let edit_global_clip = unsafe { (*imod).edit_global_clip };
         let Some(model) = (unsafe { imod.as_mut() }) else {
             return;
         };

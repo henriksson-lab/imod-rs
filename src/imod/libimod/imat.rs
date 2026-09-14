@@ -4,6 +4,9 @@
 //! "a quick and dirty way to get transforms on none gl machines."
 #![allow(dead_code, unused_variables)]
 
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::linearxforms::matrix_to_angles;
 use crate::imod::libimod::imodel::Ipoint;
 
@@ -81,26 +84,34 @@ pub fn imod_mat_id(mat: &mut Imat) {
 ///
 /// Prints matrix in `mat`.
 pub fn imod_mat_print(mat: &Imat) {
-    unsafe {
-        if mat.dim == 2 {
-            for i in 0..2usize {
-                libc::printf(
-                    c"%13.6f %13.6f %13.3f\n".as_ptr(),
-                    mat.data[i] as std::ffi::c_double,
-                    mat.data[i + 3] as std::ffi::c_double,
-                    mat.data[i + 6] as std::ffi::c_double,
-                );
-            }
-        } else {
-            for i in 0..3usize {
-                libc::printf(
-                    c"%13.6f %13.6f %13.6f %13.3f\n".as_ptr(),
-                    mat.data[i] as std::ffi::c_double,
-                    mat.data[i + 4] as std::ffi::c_double,
-                    mat.data[i + 8] as std::ffi::c_double,
-                    mat.data[i + 12] as std::ffi::c_double,
-                );
-            }
+    if mat.dim == 2 {
+        for i in 0..2usize {
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "%13.6f %13.6f %13.3f\n",
+                    &[
+                        CArg::Dbl(mat.data[i] as f64),
+                        CArg::Dbl(mat.data[i + 3] as f64),
+                        CArg::Dbl(mat.data[i + 6] as f64),
+                    ],
+                )
+                .as_bytes(),
+            );
+        }
+    } else {
+        for i in 0..3usize {
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "%13.6f %13.6f %13.6f %13.3f\n",
+                    &[
+                        CArg::Dbl(mat.data[i] as f64),
+                        CArg::Dbl(mat.data[i + 4] as f64),
+                        CArg::Dbl(mat.data[i + 8] as f64),
+                        CArg::Dbl(mat.data[i + 12] as f64),
+                    ],
+                )
+                .as_bytes(),
+            );
         }
     }
 }

@@ -4,17 +4,22 @@
 //! per-thread `pthread_key_t` variant of `_mxml_global()` is the one compiled
 //! into the vendored library and the one translated here.  The `WIN32` and
 //! no-threads variants are not part of this build.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+//!
+//! The `pthread_key_t` plus `pthread_once` plus `calloc` machinery is exactly
+//! what Rust's `thread_local!` is: a lazily created, per-thread block with a
+//! destructor.  `_mxml_key`, `_mxml_key_once`, `_mxml_init` and
+//! `_mxml_destructor` therefore become the declaration of [`MXML_GLOBAL`] and
+//! its `Drop`, and `_mxml_global` hands out the key rather than a pointer, so
+//! a caller reaches the block with `mxml_global().with_borrow_mut(...)`.
+#![allow(dead_code)]
 
 use super::*;
-use core::ffi::{c_char, c_int, c_void};
-
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
+use core::cell::RefCell;
+use core::ffi::c_int;
+use std::io::Write;
+use std::thread::LocalKey;
 
 /// Matches C `_mxml_global_t` (`mxml-private.h:30`).
-#[repr(C)]
 pub struct MxmlGlobal {
     pub error_cb: MxmlErrorCb,
     pub num_entity_cbs: c_int,
@@ -24,106 +29,119 @@ pub struct MxmlGlobal {
     pub custom_save_cb: MxmlCustomSaveCb,
 }
 
-/// Matches C static `_mxml_key` (`mxml-private.c:106`).
-static mut MXML_KEY: libc::pthread_key_t = !0;
-/// Matches C static `_mxml_key_once` (`mxml-private.c:107`).
-static mut MXML_KEY_ONCE: libc::pthread_once_t = libc::PTHREAD_ONCE_INIT;
+thread_local! {
+    /// Matches the per-thread block C reaches through static `_mxml_key`
+    /// (`mxml-private.c:106`).  The C `calloc`s it and then fills in the three
+    /// fields at `mxml-private.c:170-172`; those are the initialiser here.
+    static MXML_GLOBAL: RefCell<MxmlGlobal> = RefCell::new(MxmlGlobal {
+        error_cb: None,
+        num_entity_cbs: 1,
+        entity_cbs: {
+            let mut cbs: [MxmlEntityCb; 100] = [None; 100];
+            cbs[0] = Some(mxml_entity_cb);
+            cbs
+        },
+        wrap: 72,
+        custom_load_cb: None,
+        custom_save_cb: None,
+    });
+}
 
 /// Matches C `mxml_error` (`mxml-private.c:41`).
 ///
 /// The C function is `mxml_error(const char *format, ...)` and runs the
 /// arguments through `vsnprintf` into a 1024-byte buffer.  Stable Rust cannot
-/// define a C-variadic function, so callers format their arguments into a
-/// 1024-byte buffer of their own and pass the result here; running it back
-/// through `snprintf("%s")` keeps the same 1023-character truncation.
-pub unsafe fn mxml_error(format: *const c_char) {
-    let mut s: [c_char; 1024] = [0; 1024];
-    let global: *mut MxmlGlobal = mxml_global();
+/// define a C-variadic function, so callers format their arguments themselves
+/// and pass the result here; truncating at 1023 bytes keeps the same
+/// truncation the C buffer imposes.
+pub fn mxml_error(format: &[u8]) {
+    let error_cb: MxmlErrorCb = mxml_global().with_borrow(|global| global.error_cb);
 
-    if format.is_null() {
-        return;
-    }
+    /*
+     * Range check input...  (the C tests `format` for NULL, which a slice
+     * cannot be.)
+     */
 
-    libc::snprintf(
-        s.as_mut_ptr(),
-        core::mem::size_of::<[c_char; 1024]>(),
-        c"%s".as_ptr(),
-        format,
-    );
+    /*
+     * Format the error message string...
+     */
 
-    if let Some(cb) = (*global).error_cb {
-        cb(s.as_ptr());
+    let s: &[u8] = &format[..format.len().min(1023)];
+
+    /*
+     * And then display the error message...
+     */
+
+    if let Some(cb) = error_cb {
+        cb(s);
     } else {
-        libc::fprintf(stderr, c"mxml: %s\n".as_ptr(), s.as_ptr());
+        let mut stderr = std::io::stderr();
+        let _ = stderr.write_all(b"mxml: ");
+        let _ = stderr.write_all(s);
+        let _ = stderr.write_all(b"\n");
     }
 }
 
 /// Matches C `mxml_ignore_cb` (`mxml-private.c:71`).
-pub unsafe extern "C" fn mxml_ignore_cb(_node: *mut MxmlNode) -> MxmlType {
+pub fn mxml_ignore_cb(_arena: &MxmlArena, _node: Option<usize>) -> MxmlType {
     MXML_IGNORE
 }
 
 /// Matches C `mxml_integer_cb` (`mxml-private.c:85`).
-pub unsafe extern "C" fn mxml_integer_cb(_node: *mut MxmlNode) -> MxmlType {
+pub fn mxml_integer_cb(_arena: &MxmlArena, _node: Option<usize>) -> MxmlType {
     MXML_INTEGER
 }
 
 /// Matches C `mxml_opaque_cb` (`mxml-private.c:99`).
-pub unsafe extern "C" fn mxml_opaque_cb(_node: *mut MxmlNode) -> MxmlType {
+pub fn mxml_opaque_cb(_arena: &MxmlArena, _node: Option<usize>) -> MxmlType {
     MXML_OPAQUE
 }
 
 /// Matches C `mxml_real_cb` (`mxml-private.c:113`).
-pub unsafe extern "C" fn mxml_real_cb(_node: *mut MxmlNode) -> MxmlType {
+pub fn mxml_real_cb(_arena: &MxmlArena, _node: Option<usize>) -> MxmlType {
     MXML_REAL
 }
 
 /// Matches C static `_mxml_destructor` (`mxml-private.c:119`).
-pub unsafe extern "C" fn _mxml_destructor(g: *mut c_void) {
-    libc::free(g);
+///
+/// The C body is `free(g)`, the `pthread_key_create` destructor for the
+/// per-thread block.  A `thread_local!` runs the block's `Drop` at the same
+/// point, so the function has nothing left to do; taking the block by value
+/// keeps the ownership transfer the `free` performed.
+pub fn _mxml_destructor(g: MxmlGlobal) {
+    drop(g);
 }
 
 /// Matches C static `_MXML_FINI`/`_mxml_fini` (`mxml-private.c:130`).
 ///
 /// The C function carries `__attribute((destructor))` so the loader runs it at
-/// unload.  Rust has no portable equivalent; the body is translated but is not
-/// registered, which only affects process-exit cleanup of the per-thread block.
-pub unsafe fn _mxml_fini() {
-    let global: *mut MxmlGlobal;
-
-    if MXML_KEY != !0 {
-        global = libc::pthread_getspecific(MXML_KEY) as *mut MxmlGlobal;
-        if !global.is_null() {
-            _mxml_destructor(global as *mut c_void);
-        }
-
-        libc::pthread_key_delete(MXML_KEY);
-        MXML_KEY = !0;
-    }
+/// unload: it frees this thread's block and deletes the key.  Rust has no
+/// portable equivalent and none is needed — the `thread_local!` block is
+/// dropped when the thread ends — so the body resets the block to the state a
+/// fresh `_mxml_global` would build, which is what a later call would see.
+pub fn _mxml_fini() {
+    mxml_global().with_borrow_mut(|global| {
+        global.error_cb = None;
+        global.num_entity_cbs = 1;
+        global.entity_cbs = [None; 100];
+        global.entity_cbs[0] = Some(mxml_entity_cb);
+        global.wrap = 72;
+        global.custom_load_cb = None;
+        global.custom_save_cb = None;
+    });
 }
 
 /// Matches C `_mxml_global` (`mxml-private.c:151`).
-pub unsafe fn mxml_global() -> *mut MxmlGlobal {
-    let mut global: *mut MxmlGlobal;
-
-    libc::pthread_once(&raw mut MXML_KEY_ONCE, _mxml_init);
-
-    global = libc::pthread_getspecific(MXML_KEY) as *mut MxmlGlobal;
-    if global.is_null() {
-        global = libc::calloc(1, core::mem::size_of::<MxmlGlobal>()) as *mut MxmlGlobal;
-        libc::pthread_setspecific(MXML_KEY, global as *const c_void);
-
-        (*global).num_entity_cbs = 1;
-        (*global).entity_cbs[0] = Some(mxml_entity_cb);
-        (*global).wrap = 72;
-    }
-
-    global
+///
+/// The C returns a pointer into the per-thread block; the key itself is
+/// returned instead, so a caller writes `mxml_global().with_borrow_mut(|global|
+/// ...)` where the C writes `global = _mxml_global(); global->wrap = ...`.
+pub fn mxml_global() -> &'static LocalKey<RefCell<MxmlGlobal>> {
+    &MXML_GLOBAL
 }
 
 /// Matches C static `_mxml_init` (`mxml-private.c:177`).
-pub extern "C" fn _mxml_init() {
-    unsafe {
-        libc::pthread_key_create(&raw mut MXML_KEY, Some(_mxml_destructor));
-    }
-}
+///
+/// The C body is the one-time `pthread_key_create`; `thread_local!` creates
+/// its key on first access, so there is nothing to do here.
+pub fn _mxml_init() {}

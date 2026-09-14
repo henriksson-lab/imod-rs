@@ -6,7 +6,6 @@
 #![allow(dead_code)]
 
 use crate::imod::three_dmod::mv_window::{Key, KeyEvent};
-use core::ffi::c_void;
 
 pub const AUTOX_MAX_RESOLUTION: i32 = 200;
 
@@ -19,6 +18,10 @@ pub enum AutoxChangeEvent {
 
 /// Direct Qt and `autox.cpp` calls performed by this source unit. Implementors
 /// own real widgets/signals and paired image-view state.
+/// The `QButtonGroup *` (and other native object) arguments below are opaque
+/// native identities, spelled the way `DockingDialogNativeBoundary` spells
+/// them: a frontend which owns Qt can use its pointer cast to `usize`, a
+/// non-Qt frontend a stable application handle, and `0` is the source's null.
 pub trait AutoxNativeBoundary {
     fn setup_ui(&mut self);
     fn set_delete_on_close(&mut self);
@@ -30,16 +33,16 @@ pub trait AutoxNativeBoundary {
         labels: [&str; 2],
         minimum: i32,
         maximum: i32,
-    ) -> *mut c_void;
+    ) -> usize;
     fn multi_slider_set_range(&mut self, slider: i32, minimum: i32, maximum: i32);
     fn multi_slider_set_decimals(&mut self, slider: i32, decimals: i32);
     fn multi_slider_set_tool_tip(&mut self, slider: i32, text: &str);
-    fn create_contrast_group(&mut self) -> *mut c_void;
-    fn contrast_group_add_button(&mut self, group: *mut c_void, which: i32);
+    fn create_contrast_group(&mut self) -> usize;
+    fn contrast_group_add_button(&mut self, group: usize, which: i32);
     fn set_button_width(&mut self, label: &str, rounded_style: bool, factor: f64) -> i32;
     fn set_fixed_width(&mut self, which: i32, width: i32);
     fn rounded_style(&self) -> bool;
-    fn set_contrast_group(&mut self, group: *mut c_void, contrast: i32);
+    fn set_contrast_group(&mut self, group: usize, contrast: i32);
     fn multi_slider_set_value(&mut self, slider: i32, value: i32);
     fn set_alt_mouse_checked(&mut self, checked: bool);
     fn set_diagonals_checked(&mut self, checked: bool);
@@ -69,25 +72,26 @@ pub trait AutoxNativeBoundary {
     fn ivw_control_key(&mut self, release: i32, event: KeyEvent);
 }
 
-/// `AutoxWindow` (`form_autox.h`), preserving the C++ field ownership.
-#[repr(C)]
+/// `AutoxWindow` (`form_autox.h`), preserving the C++ field order and ownership.
+/// The C++ class is a `QWidget` subclass that is never written out as raw
+/// bytes, so it carries no layout requirement of its own.
 #[derive(Debug)]
 pub struct AutoxWindow {
-    pub m_top_win: *mut c_void,
+    pub m_top_win: usize,
     pub m_ctrl_pressed: bool,
-    pub m_sliders: *mut c_void,
-    pub contrast_group: *mut c_void,
+    pub m_sliders: usize,
+    pub contrast_group: usize,
 }
 
 impl AutoxWindow {
     /// `AutoxWindow::AutoxWindow`.
-    pub fn new(m_top_win: *mut c_void, native: &mut dyn AutoxNativeBoundary) -> Self {
+    pub fn new(m_top_win: usize, native: &mut dyn AutoxNativeBoundary) -> Self {
         native.setup_ui();
         let mut window = Self {
             m_top_win,
             m_ctrl_pressed: false,
-            m_sliders: core::ptr::null_mut(),
-            contrast_group: core::ptr::null_mut(),
+            m_sliders: 0,
+            contrast_group: 0,
         };
         window.init(native);
         window
@@ -239,7 +243,6 @@ mod tests {
     struct Native {
         calls: Vec<String>,
         hot: bool,
-        marker: u8,
     }
     impl AutoxNativeBoundary for Native {
         fn setup_ui(&mut self) {
@@ -254,8 +257,8 @@ mod tests {
         fn connect_autox_signals(&mut self) {
             self.calls.push("connect".into())
         }
-        fn create_multi_slider(&mut self, _: i32, _: [&str; 2], _: i32, _: i32) -> *mut c_void {
-            &mut self.marker as *mut u8 as *mut c_void
+        fn create_multi_slider(&mut self, _: i32, _: [&str; 2], _: i32, _: i32) -> usize {
+            1
         }
         fn multi_slider_set_range(&mut self, a: i32, b: i32, c: i32) {
             self.calls.push(format!("range:{a}:{b}:{c}"))
@@ -266,10 +269,10 @@ mod tests {
         fn multi_slider_set_tool_tip(&mut self, a: i32, _: &str) {
             self.calls.push(format!("tip:{a}"))
         }
-        fn create_contrast_group(&mut self) -> *mut c_void {
-            &mut self.marker as *mut u8 as *mut c_void
+        fn create_contrast_group(&mut self) -> usize {
+            1
         }
-        fn contrast_group_add_button(&mut self, _: *mut c_void, a: i32) {
+        fn contrast_group_add_button(&mut self, _: usize, a: i32) {
             self.calls.push(format!("button:{a}"))
         }
         fn set_button_width(&mut self, a: &str, _: bool, _: f64) -> i32 {
@@ -281,7 +284,7 @@ mod tests {
         fn rounded_style(&self) -> bool {
             false
         }
-        fn set_contrast_group(&mut self, _: *mut c_void, a: i32) {
+        fn set_contrast_group(&mut self, _: usize, a: i32) {
             self.calls.push(format!("contrast:{a}"))
         }
         fn multi_slider_set_value(&mut self, a: i32, b: i32) {
@@ -369,7 +372,7 @@ mod tests {
     #[test]
     fn threshold_drag_is_deferred_but_resolution_is_not() {
         let mut n = Native::default();
-        let mut f = AutoxWindow::new(core::ptr::null_mut(), &mut n);
+        let mut f = AutoxWindow::new(0, &mut n);
         f.slider_changed(0, 12, true, &mut n);
         f.slider_changed(1, 34, true, &mut n);
         assert!(!n.calls.iter().any(|x| x == "slider:0:12"));
@@ -381,7 +384,7 @@ mod tests {
             hot: true,
             ..Default::default()
         };
-        let mut f = AutoxWindow::new(core::ptr::null_mut(), &mut n);
+        let mut f = AutoxWindow::new(0, &mut n);
         f.key_press_event(
             KeyEvent {
                 key: Key::Character('C'),
@@ -396,7 +399,7 @@ mod tests {
     #[test]
     fn set_states_keeps_source_order() {
         let mut n = Native::default();
-        let mut f = AutoxWindow::new(core::ptr::null_mut(), &mut n);
+        let mut f = AutoxWindow::new(0, &mut n);
         f.set_states(1, 100, 50, 1, 0, &mut n);
         assert_eq!(
             &n.calls[n.calls.len() - 5..],
@@ -413,7 +416,7 @@ mod tests {
     #[test]
     fn change_event_calls_base_then_mac_menu_and_font_width_path() {
         let mut n = Native::default();
-        let mut f = AutoxWindow::new(core::ptr::null_mut(), &mut n);
+        let mut f = AutoxWindow::new(0, &mut n);
         f.top_change_event(AutoxChangeEvent::FontChange, &mut n);
         assert!(n.calls.windows(2).any(|calls| calls == ["change", "menu"]));
         assert!(n.calls.iter().any(|call| call == "width:0:40"));

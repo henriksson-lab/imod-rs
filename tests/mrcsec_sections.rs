@@ -39,11 +39,16 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
         let mut got = String::new();
         unsafe {
             let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
-            let fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-            assert!(!fp.is_null(), "mode {mode}: fixture must open");
-            let mut header: MrcHeader = std::mem::zeroed();
-            assert_eq!(mrc_head_read(fp, &mut header), 0, "mode {mode}: header");
-            header.fp = fp.cast();
+            let mut fp =
+                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                    .unwrap();
+            let mut header = MrcHeader::default();
+            assert_eq!(
+                mrc_head_read(&mut fp, &mut header),
+                0,
+                "mode {mode}: header"
+            );
+            header.fp = Some(fp.clone());
             let (nx, ny, nz) = (header.nx, header.ny, header.nz);
             let z = nz / 2;
             let mut li = std::mem::zeroed();
@@ -170,7 +175,7 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
                 4,
                 mrc_read_y_float(&mut header, &mut li, buf.as_mut_ptr().cast(), 2)
             );
-            libc::fclose(fp);
+            drop(fp);
         }
         assert_eq!(got, want, "mode {mode} must match the reference driver");
     }

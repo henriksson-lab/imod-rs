@@ -5,6 +5,9 @@
 //! implemented by the source-mapped `imodel_files` unit, not by a substitute
 //! serialization format.
 
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::robuststat::rs_sort_ints;
 use crate::imod::libiimod::mrcfiles::{LoadInfo, MrcHeader};
 use crate::imod::libimod::icont::{imod_contour_copy, imod_contours_delete, imod_contours_new};
@@ -19,12 +22,6 @@ use crate::imod::libimod::iplane::{imod_clips_initialize, imod_clips_trans};
 use crate::imod::libimod::ipoint::imod_point_normalize;
 use crate::imod::libimod::istore::{istore_checksum, istore_delete_cont_surf};
 use crate::imod::libimod::objgroup::{obj_group_list_checksum, obj_group_list_delete};
-
-unsafe extern "C" {
-    /// The C library's `stderr` stream, as used by the source's
-    /// `fprintf(stderr, ...)` diagnostics.
-    static stderr: *mut libc::FILE;
-}
 
 /// Original: `IMOD_STRSIZE` (`imodel.h:30`).
 pub const IMOD_STRSIZE: usize = 128;
@@ -272,7 +269,11 @@ pub struct Iobj {
     pub store: Vec<super::istore::Istore>,
     /// `imodel.h:442` declares `Ilabel *label` on the object.
     pub label: Option<super::ilabel::Ilabel>,
-    pub name: [std::ffi::c_char; IOBJ_STRSIZE],
+    /// `Mod_Object::name` (`imodel.h:392`), a fixed 64-byte field that
+    /// `imodel_write` emits whole.  NATIVE.md §3/§5: the padding past the
+    /// string is part of the on-disk layout, so this is `[u8; N]` with
+    /// explicit NUL padding and never a `String`.
+    pub name: [u8; IOBJ_STRSIZE],
     pub extra: [u32; 16],
     pub flags: u32,
     pub axis: i32,
@@ -363,7 +364,12 @@ pub struct Imod {
     /// `Mod_Model::ctime` (`imodel.h:457`), the current time index.
     pub ctime: i32,
     pub store: Vec<super::istore::Istore>,
-    pub name: [std::ffi::c_char; IMOD_STRSIZE],
+    /// `Mod_Model::name` (`imodel.h:460`), a fixed 128-byte field that
+    /// `imodel_write` emits whole.  Native leaves everything past the 13
+    /// bytes `imodDefault` writes as heap residue, which is a documented
+    /// non-achievable; this is `[u8; N]` with explicit padding, never a
+    /// `String`, which would truncate at the first NUL and lose the field.
+    pub name: [u8; IMOD_STRSIZE],
     pub xmax: i32,
     pub ymax: i32,
     pub zmax: i32,
@@ -389,6 +395,15 @@ pub struct Imod {
     pub gamma: f32,
     pub cview: i32,
     pub view: Vec<Iview>,
+    /// `Mod_Model::editGlobalClip` (`imodel.h:488`), "Flag that global clip is
+    /// selected".  Runtime state, not part of the file format -- `imodel_write`
+    /// never emits it -- and `imodDefault` leaves it 0.  Read by
+    /// `mv_objed.cpp:1555-1760`, `mv_ogl.cpp:3069` and `mv_input.cpp:167-1032`.
+    ///
+    /// `Mod_Model::tmax` (`imodel.h:480`) sits two fields above it in the
+    /// source and is deliberately **not** carried: nothing in the vendored tree
+    /// reads or writes it.
+    pub edit_global_clip: i32,
     pub ref_image: Option<Iref_image>,
     pub slicer_ang: Vec<Slicer_angles>,
     pub group_list: Vec<Iobj_group>,
@@ -431,6 +446,7 @@ impl Default for Imod {
             gamma: 0.,
             cview: 0,
             view: vec![Iview::default()],
+            edit_global_clip: 0,
             ref_image: None,
             slicer_ang: Vec::new(),
             group_list: Vec::new(),
@@ -678,9 +694,15 @@ pub fn imod_next_point(mod_: &mut Imod) -> i32 {
 ///
 /// The source returns `imod->fileName`, a separately allocated path that this
 /// data representation does not carry; the model `name` array is returned in
-/// its place, as a NUL-terminated `char *` exactly as the source does.
-pub fn imod_get_filename(imod: &Imod) -> *const std::ffi::c_char {
-    imod.name.as_ptr()
+/// its place.  The C returns a `char *` into a NUL-terminated buffer, so the
+/// slice stops at the first NUL exactly as `strlen` would.
+pub fn imod_get_filename(imod: &Imod) -> &[u8] {
+    let end = imod
+        .name
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(IMOD_STRSIZE);
+    &imod.name[..end]
 }
 
 /// Original: `imodGetFlipped` (`imodel.c:2206`).
@@ -1414,7 +1436,7 @@ pub fn imod_default(model: &mut Imod) -> i32 {
     model.flags = IMODF_NEW_TO_3DMOD | IMODF_Z_FROM_MINUSPT5;
     let mut i = 0;
     while i < 13 {
-        model.name[i] = newmodname[i] as std::ffi::c_char;
+        model.name[i] = newmodname[i];
         i += 1;
     }
     model.name[i] = 0x00;
@@ -1695,9 +1717,7 @@ pub fn imod_delete_list_of_conts(mod_: &mut Imod, contours: &[i32], mut num_cont
 
     /* Copy and sort */
     let mut sorted: Vec<i32> = contours[..num_conts as usize].to_vec();
-    unsafe {
-        rs_sort_ints(sorted.as_mut_ptr(), num_conts);
-    }
+    rs_sort_ints(&mut sorted, num_conts);
 
     /* Eliminate duplicates */
     let mut ind = 1usize;
@@ -1922,21 +1942,21 @@ pub fn imodel_model_clean(mod_: &mut Imod, keep_empty_objs: i32) -> i32 {
 /// Original: `imodUnits` (`imodel.c:1360`).
 ///
 /// Returns a string (e.g., "nm") for the pixel size units of model `mod_`.
-pub fn imod_units(mod_: &Imod) -> *const std::ffi::c_char {
+pub fn imod_units(mod_: &Imod) -> &'static str {
     let units = mod_.units;
-    let retval: *const std::ffi::c_char;
+    let retval: &'static str;
 
     match units {
-        IMOD_UNIT_PIXEL => retval = c"pixels".as_ptr(),
-        IMOD_UNIT_KILO => retval = c"km".as_ptr(),
-        IMOD_UNIT_METER => retval = c"m".as_ptr(),
-        IMOD_UNIT_CM => retval = c"cm".as_ptr(),
-        IMOD_UNIT_MM => retval = c"mm".as_ptr(),
-        IMOD_UNIT_UM => retval = c"um".as_ptr(),
-        IMOD_UNIT_NM => retval = c"nm".as_ptr(),
-        IMOD_UNIT_ANGSTROM => retval = c"A".as_ptr(),
-        IMOD_UNIT_PM => retval = c"pm".as_ptr(),
-        _ => retval = c"unknown units".as_ptr(),
+        IMOD_UNIT_PIXEL => retval = "pixels",
+        IMOD_UNIT_KILO => retval = "km",
+        IMOD_UNIT_METER => retval = "m",
+        IMOD_UNIT_CM => retval = "cm",
+        IMOD_UNIT_MM => retval = "mm",
+        IMOD_UNIT_UM => retval = "um",
+        IMOD_UNIT_NM => retval = "nm",
+        IMOD_UNIT_ANGSTROM => retval = "A",
+        IMOD_UNIT_PM => retval = "pm",
+        _ => retval = "unknown units",
     }
     retval
 }
@@ -1947,7 +1967,7 @@ pub fn imod_units(mod_: &Imod) -> *const std::ffi::c_char {
 /// `imod` and returns the value.
 pub fn imod_checksum(imod: &Imod) -> i32 {
     let mut any_pts = 0;
-    let debug = if unsafe { libc::getenv(c"IMOD_DEBUG_CHECKSUM".as_ptr()) }.is_null() {
+    let debug = if std::env::var_os("IMOD_DEBUG_CHECKSUM").is_none() {
         0
     } else {
         1
@@ -1967,9 +1987,8 @@ pub fn imod_checksum(imod: &Imod) -> i32 {
     sum += imod.view.len() as f64;
     sum += (imod.flags & !IMODF_FLIPYZ & !IMODF_NEW_TO_3DMOD & !IMODF_ROT90X) as f64;
     if debug != 0 {
-        unsafe {
-            libc::fprintf(stderr, c"\ninitial %f\n".as_ptr(), sum);
-        }
+        let _ =
+            ImodFile::Stderr.write_all(c_format("\ninitial %f\n", &[CArg::Dbl(sum)]).as_bytes());
         last_sum = sum;
     }
 
@@ -1986,9 +2005,8 @@ pub fn imod_checksum(imod: &Imod) -> i32 {
     }
     sum += obj_group_list_checksum(&imod.group_list);
     if debug != 0 {
-        unsafe {
-            libc::fprintf(stderr, c"obj group %f\n".as_ptr(), sum);
-        }
+        let _ =
+            ImodFile::Stderr.write_all(c_format("obj group %f\n", &[CArg::Dbl(sum)]).as_bytes());
         last_sum = sum;
     }
 
@@ -2006,9 +2024,7 @@ pub fn imod_checksum(imod: &Imod) -> i32 {
         sum += istore_checksum(&imod.store);
     }
     if debug != 0 {
-        unsafe {
-            libc::fprintf(stderr, c"object %f\n".as_ptr(), sum);
-        }
+        let _ = ImodFile::Stderr.write_all(c_format("object %f\n", &[CArg::Dbl(sum)]).as_bytes());
         last_sum = sum;
     }
 
@@ -2058,9 +2074,7 @@ pub fn imod_checksum(imod: &Imod) -> i32 {
         }
     }
     if debug != 0 {
-        unsafe {
-            libc::fprintf(stderr, c"views %f\n".as_ptr(), sum);
-        }
+        let _ = ImodFile::Stderr.write_all(c_format("views %f\n", &[CArg::Dbl(sum)]).as_bytes());
         last_sum = sum;
     }
     let _ = last_sum;
@@ -2069,9 +2083,13 @@ pub fn imod_checksum(imod: &Imod) -> i32 {
     let mut isum = (sum / 1000000.) as i32;
     isum = (1000. * (sum - 1000000. * isum as f64)) as i32;
     if debug != 0 {
-        unsafe {
-            libc::fprintf(stderr, c"checksum = %f %d\n".as_ptr(), sum, isum);
-        }
+        let _ = ImodFile::Stderr.write_all(
+            c_format(
+                "checksum = %f %d\n",
+                &[CArg::Dbl(sum), CArg::Int(isum as i64)],
+            )
+            .as_bytes(),
+        );
     }
     isum
 }
@@ -2689,17 +2707,10 @@ mod source_driver_model {
     use crate::imod::libimod::ipoint::imod_point_append;
 
     fn g9(v: f64) -> String {
-        let mut buf = [0u8; 64];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr() as *mut std::ffi::c_char,
-                buf.len(),
-                c"%.9g".as_ptr(),
-                v,
-            );
-        }
-        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
+        crate::imod::libcfshr::b3dutil::c_format(
+            "%.9g",
+            &[crate::imod::libcfshr::b3dutil::CArg::Dbl(v)],
+        )
     }
 
     fn dumpmodel(out: &mut String, tag: &str, m: &Imod) {
@@ -2862,12 +2873,6 @@ mod source_driver_model {
         }
     }
 
-    fn cstr(p: *const std::ffi::c_char) -> String {
-        unsafe { std::ffi::CStr::from_ptr(p) }
-            .to_string_lossy()
-            .into_owned()
-    }
-
     #[test]
     fn source_c_driver_differential_model() {
         let sq = [0.0f32, 0., 10., 0., 10., 10., 0., 10.];
@@ -2924,14 +2929,14 @@ mod source_driver_model {
         out.push_str("--- units ---\n");
         for i in 0..7 {
             m.units = un[i] as i32;
-            out.push_str(&format!("u {} {}\n", m.units, cstr(imod_units(&m))));
+            out.push_str(&format!("u {} {}\n", m.units, imod_units(&m)));
         }
         m.units = 42;
-        out.push_str(&format!("u {} {}\n", m.units, cstr(imod_units(&m))));
+        out.push_str(&format!("u {} {}\n", m.units, imod_units(&m)));
         m.units = -10;
-        out.push_str(&format!("u {} {}\n", m.units, cstr(imod_units(&m))));
+        out.push_str(&format!("u {} {}\n", m.units, imod_units(&m)));
         m.units = -12;
-        out.push_str(&format!("u {} {}\n", m.units, cstr(imod_units(&m))));
+        out.push_str(&format!("u {} {}\n", m.units, imod_units(&m)));
         m.units = 0;
 
         out.push_str("--- build ---\n");
@@ -3142,7 +3147,7 @@ mod source_driver_model {
             m2.xmax = 100;
             m2.ymax = 80;
             m2.zmax = 20;
-            let mut h: MrcHeader = unsafe { core::mem::zeroed() };
+            let mut h: MrcHeader = MrcHeader::default();
             h.xorg = 5.;
             h.yorg = -3.;
             h.zorg = 2.;
@@ -3174,7 +3179,7 @@ mod source_driver_model {
                 m2.flags
             ));
             {
-                let mut li: LoadInfo = unsafe { core::mem::zeroed() };
+                let mut li: LoadInfo = LoadInfo::default();
                 li.xmin = 2;
                 li.ymin = 4;
                 li.zmin = 1;

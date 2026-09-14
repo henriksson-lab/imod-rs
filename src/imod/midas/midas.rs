@@ -228,11 +228,9 @@ impl Default for MidasView {
 /// Releases the source `hin->fp` ownership acquired by `load_image`.
 impl Drop for MidasView {
     fn drop(&mut self) {
-        if let Some(header) = self.hin.take() {
-            if !header.fp.is_null() {
-                unsafe { libc::fclose(header.fp.cast()) };
-            }
-        }
+        // Dropping the header drops its `ImodFile`, and with it the last
+        // `Rc<File>` reference, which is the `fclose`.
+        drop(self.hin.take());
     }
 }
 

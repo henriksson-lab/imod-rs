@@ -9,6 +9,8 @@
 
 use std::ffi::CStr;
 use std::fs::{File, OpenOptions, remove_file, rename};
+
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -196,7 +198,7 @@ pub fn imod_autosave(
     state.autosave_filename = path.to_string_lossy().into_owned();
     imod_cleanup_autosave(state);
     state.autosave_filename = path.to_string_lossy().into_owned();
-    let Ok(mut file) = File::create(&path) else {
+    let Some(mut file) = ImodFile::open(&path.to_string_lossy(), "w") else {
         state.autosave_filename.clear();
         return -1;
     };
@@ -249,12 +251,8 @@ pub fn save_model(
     }
     let name = PathBuf::from(&state.imod_filename);
     imod_make_backup(state, &name);
-    let Ok(file) = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&name)
-    else {
+    // `imod_io.cpp:269` is `fopen(..., "wb+")`.
+    let Some(file) = ImodFile::open(&name.to_string_lossy(), "wb+") else {
         imod_undo_backup(state);
         let filename = native.choose_save_name();
         return saveas_model(state, model, view, filename, native);
@@ -276,7 +274,7 @@ pub fn saveas_model(
         return state.last_error;
     };
     imod_make_backup(state, &name);
-    let Ok(file) = File::create(&name) else {
+    let Some(file) = ImodFile::open(&name.to_string_lossy(), "w") else {
         imod_undo_backup(state);
         state.last_error = map_errno(
             io::Error::last_os_error()
@@ -298,7 +296,7 @@ pub fn write_model(
     state: &mut ImodIoState,
     model: &mut Imod,
     view: ImodIoViewState,
-    mut file: File,
+    mut file: ImodFile,
     name: &Path,
     native: &mut dyn ImodIoBoundary,
 ) -> i32 {
@@ -350,7 +348,7 @@ pub fn restore_saved_model_state(
 }
 
 /// `LoadModel`, after `fopen` has supplied the model stream.
-pub fn load_model(file: &mut File) -> Option<Imod> {
+pub fn load_model(file: &mut ImodFile) -> Option<Imod> {
     let mut model = imod_new()?;
     imod_read_file(&mut model, file).ok()?;
     Some(model)
@@ -366,7 +364,7 @@ pub fn load_model_file(
     let path = filename
         .map(PathBuf::from)
         .or_else(|| native.choose_load_name())?;
-    let Ok(mut file) = File::open(&path) else {
+    let Some(mut file) = ImodFile::open(&path.to_string_lossy(), "r") else {
         state.last_error = map_errno(
             io::Error::last_os_error()
                 .raw_os_error()

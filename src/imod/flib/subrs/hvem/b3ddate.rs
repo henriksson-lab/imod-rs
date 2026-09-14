@@ -7,20 +7,30 @@
 /// `YYYYMMDD` value returned by `DATE_AND_TIME`.
 pub fn b3d_date(dat: &mut [u8]) {
     let months = [
-        b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
-        b"Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let mut now = 0_i64;
-    let mut local = unsafe { core::mem::zeroed::<libc::tm>() };
-    unsafe {
-        libc::time(&raw mut now);
-        libc::localtime_r(&raw const now, &raw mut local);
-    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as libc::time_t;
+    // Foreign boundary, and the only one left in this module: `DATE_AND_TIME`
+    // returns *local* civil time, and converting epoch seconds to it needs the
+    // C library's timezone database (`/etc/localtime`, `$TZ`).  Rust's standard
+    // library has no equivalent and this crate carries no date-time dependency,
+    // so `localtime_r` stays a call into libc rather than being reimplemented.
+    let local = unsafe {
+        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+        if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
+            dat.fill(b' ');
+            return;
+        }
+        local.assume_init()
+    };
     let month = months[local.tm_mon as usize];
     let text = format!(
         "{:>2}-{}-{:02}",
         local.tm_mday,
-        core::str::from_utf8(month).unwrap(),
+        month,
         (local.tm_year + 1900) % 100
     );
     dat.fill(b' ');

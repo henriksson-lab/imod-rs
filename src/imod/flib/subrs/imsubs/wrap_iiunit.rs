@@ -171,7 +171,10 @@ mod tests {
             let header = (*file).header.cast::<MrcHeader>();
             assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
             ii_sync_from_mrc_header(file, header);
-            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            assert_eq!(
+                mrc_head_write(&mut (*file).fp.clone().unwrap(), &mut *header),
+                0
+            );
             let mut first = [1.0_f32, 2.0, 3.0, 4.0];
             let mut second = [5.0_f32, 6.0, 7.0, 8.0];
             assert_eq!(

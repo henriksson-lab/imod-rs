@@ -67,12 +67,15 @@ pub unsafe fn scaled_sobel(
         }
         let (source, destination) = if binning > 1 {
             let error = crate::imod::libcfshr::reduce_by_binning::reduce_by_binning(
-                in_image.cast(),
+                core::slice::from_raw_parts(
+                    in_image.cast::<u8>(),
+                    (nxin as usize * nyin as usize) * 4,
+                ),
                 crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
                 nxin,
                 nyin,
                 binning,
-                temporary.cast(),
+                core::slice::from_raw_parts_mut(temporary.cast::<u8>(), size as usize * 4),
                 0,
                 &mut nxbin,
                 &mut nybin,
@@ -86,7 +89,7 @@ pub unsafe fn scaled_sobel(
             (in_image, temporary)
         };
         let edge = crate::imod::libcfshr::taperpad::slice_edge_mean(
-            source,
+            core::slice::from_raw_parts(source, (nxbin * nybin) as usize),
             nxbin,
             0,
             nxbin - 1,
@@ -113,8 +116,8 @@ pub unsafe fn scaled_sobel(
             );
         } else {
             let error = crate::imod::libcfshr::zoomdown::zoom_filt_interp(
-                source,
-                destination,
+                core::slice::from_raw_parts(source, (nxbin * nybin) as usize),
+                core::slice::from_raw_parts_mut(destination, (nxo * nyo) as usize),
                 nxbin,
                 nybin,
                 nxo,

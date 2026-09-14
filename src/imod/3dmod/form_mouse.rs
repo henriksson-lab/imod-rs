@@ -3,7 +3,6 @@
 //! QButtonGroup/widget installation is an explicit native-GUI boundary. The
 //! source preference mutations and exact mapping-to-label tables are here.
 #![allow(dead_code)]
-use core::ffi::c_void;
 
 /// `imod_pref_struct` fields read and written by `MouseForm`.
 #[derive(Clone, Debug, Default)]
@@ -34,15 +33,19 @@ pub enum MouseFormButton {
 
 /// Direct Qt widgets, `QButtonGroup`, `connect`, and `dia_qtutils` calls.
 /// This unit owns neither a substitute UI nor event loop.
+/// The `QButtonGroup *` (and other native object) arguments below are opaque
+/// native identities, spelled the way `DockingDialogNativeBoundary` spells
+/// them: a frontend which owns Qt can use its pointer cast to `usize`, a
+/// non-Qt frontend a stable application handle, and `0` is the source's null.
 pub trait MouseNativeBoundary {
     fn ctrl_string(&self) -> &str;
     fn set_ctrl_text(&mut self, text: &str);
     fn set_ctrl_tool_tip(&mut self, text: &str);
-    fn create_button_group(&mut self) -> *mut c_void;
-    fn group_add_button(&mut self, group: *mut c_void, button: MouseFormButton, id: i32);
-    fn connect_group_clicked(&mut self, group: *mut c_void);
+    fn create_button_group(&mut self) -> usize;
+    fn group_add_button(&mut self, group: usize, button: MouseFormButton, id: i32);
+    fn connect_group_clicked(&mut self, group: usize);
     fn connect_swap_toggled(&mut self);
-    fn set_group(&mut self, group: *mut c_void, value: i32);
+    fn set_group(&mut self, group: usize, value: i32);
     fn set_swap_checked(&mut self, value: bool);
     fn set_left_label(&mut self, text: &str);
     fn set_middle_label(&mut self, text: &str);
@@ -53,18 +56,18 @@ pub trait MouseNativeBoundary {
 #[derive(Debug)]
 pub struct MouseForm {
     pub m_prefs: ImodPrefStruct,
-    pub hot_key_group: *mut c_void,
-    pub active_group: *mut c_void,
-    pub mouse_group: *mut c_void,
+    pub hot_key_group: usize,
+    pub active_group: usize,
+    pub mouse_group: usize,
 }
 impl MouseForm {
     /// `MouseForm::MouseForm`.
     pub fn new(prefs: ImodPrefStruct, native: &mut dyn MouseNativeBoundary) -> Self {
         let mut form = Self {
             m_prefs: prefs,
-            hot_key_group: core::ptr::null_mut(),
-            active_group: core::ptr::null_mut(),
-            mouse_group: core::ptr::null_mut(),
+            hot_key_group: 0,
+            active_group: 0,
+            mouse_group: 0,
         };
         form.init(native);
         form
@@ -161,19 +164,19 @@ mod tests {
         }
         fn set_ctrl_text(&mut self, _: &str) {}
         fn set_ctrl_tool_tip(&mut self, _: &str) {}
-        fn create_button_group(&mut self) -> *mut c_void {
-            core::ptr::dangling_mut()
+        fn create_button_group(&mut self) -> usize {
+            1
         }
-        fn group_add_button(&mut self, _: *mut c_void, button: MouseFormButton, id: i32) {
+        fn group_add_button(&mut self, _: usize, button: MouseFormButton, id: i32) {
             self.buttons.push((button, id));
         }
-        fn connect_group_clicked(&mut self, _: *mut c_void) {
+        fn connect_group_clicked(&mut self, _: usize) {
             self.group_connections += 1;
         }
         fn connect_swap_toggled(&mut self) {
             self.swap_connection = true;
         }
-        fn set_group(&mut self, _: *mut c_void, x: i32) {
+        fn set_group(&mut self, _: usize, x: i32) {
             self.groups.push(x)
         }
         fn set_swap_checked(&mut self, _: bool) {}

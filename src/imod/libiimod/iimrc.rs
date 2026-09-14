@@ -3,7 +3,10 @@
 //! Function names are a systematic snake-case rendering of the C names.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_fread, b3d_fseek, extra_is_nbytes_and_flags};
+use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libcfshr::b3dutil::{
+    SEEK_CUR, SEEK_SET, b3d_error, b3d_fread, b3d_fseek, extra_is_nbytes_and_flags,
+};
 use crate::imod::libiimod::iimage::{
     IIFILE_MRC, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE, IIFORMAT_RGB, IITYPE_BYTE, IITYPE_FLOAT,
     IITYPE_SHORT, IITYPE_UBYTE, IITYPE_USHORT, ImodImageFile, ii_change_call_count,
@@ -20,10 +23,6 @@ use crate::imod::libiimod::mrcsec::{
 };
 use core::ffi::c_char;
 
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
-
 const IIERR_BAD_CALL: i32 = -1;
 const IIERR_NOT_FORMAT: i32 = 1;
 const IIERR_IO_ERROR: i32 = 2;
@@ -31,22 +30,24 @@ const IIERR_MEMORY_ERR: i32 = 3;
 
 /// Matches C `iiMRCCheck(ImodImageFile *)` (`iimrc.c:31`).
 pub unsafe extern "C" fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
-    if iif.is_null() || unsafe { (*iif).fp }.is_null() {
+    if iif.is_null() || unsafe { (*iif).fp.is_none() } {
         return IIERR_BAD_CALL;
     }
-    let hdr = unsafe { libc::malloc(core::mem::size_of::<MrcHeader>()).cast::<MrcHeader>() };
+    // `Box`, not `malloc`: `MrcHeader.fp` is a non-`Copy` `Option<ImodFile>`
+    // now, so assigning it over `malloc` residue would drop garbage.
+    let hdr = Box::into_raw(Box::new(MrcHeader::default()));
     if hdr.is_null() {
         unsafe {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiMRCCheck - getting memory for header\n"),
             )
         };
         return IIERR_MEMORY_ERR;
     }
-    let err = unsafe { mrc_head_read((*iif).fp, hdr) };
+    let err = unsafe { mrc_head_read(&mut (*iif).fp.clone().unwrap(), &mut *hdr) };
     if err != 0 {
-        unsafe { libc::free(hdr.cast()) };
+        unsafe { drop(Box::from_raw(hdr)) };
         return if err < 0 {
             IIERR_IO_ERROR
         } else {
@@ -128,7 +129,7 @@ pub unsafe extern "C" fn ii_mrc_set_io_funcs(in_file: *mut ImodImageFile, raw_fi
 pub unsafe extern "C" fn ii_mrc_delete(in_file: *mut ImodImageFile) {
     unsafe {
         if !(*in_file).header.is_null() {
-            libc::free((*in_file).header.cast());
+            drop(Box::from_raw((*in_file).header.cast::<MrcHeader>()));
         }
     }
 }
@@ -136,8 +137,11 @@ pub unsafe extern "C" fn ii_mrc_delete(in_file: *mut ImodImageFile) {
 pub unsafe extern "C" fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: *const c_char) -> i32 {
     unsafe {
         *libc::__errno_location() = 0;
-        (*in_file).fp = libc::fopen((*in_file).filename, mode);
-        if (*in_file).fp.is_null() {
+        (*in_file).fp = ImodFile::open(
+            &core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy(),
+            &core::ffi::CStr::from_ptr(mode).to_string_lossy(),
+        );
+        if (*in_file).fp.is_none() {
             let errno = *libc::__errno_location();
             let filename = if (*in_file).filename.is_null() {
                 "(null)"
@@ -152,7 +156,7 @@ pub unsafe extern "C" fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: *con
                 c"".as_ptr()
             };
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: iiMRCopenNew - Could not open {}{}{}\n",
                     filename,
@@ -166,17 +170,17 @@ pub unsafe extern "C" fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: *con
             );
             return 1;
         }
-        (*in_file).header = libc::malloc(core::mem::size_of::<MrcHeader>()).cast();
+        (*in_file).header = Box::into_raw(Box::new(MrcHeader::default())).cast();
         if (*in_file).header.is_null() {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiMRCopenNew - Allocating MRC header\n"),
             );
             return 1;
         }
         mrc_head_new(&mut *(*in_file).header.cast::<MrcHeader>(), 1, 1, 1, 0);
         ii_mrc_set_io_funcs(in_file, 0);
-        (*(*in_file).header.cast::<MrcHeader>()).fp = (*in_file).fp.cast();
+        (*(*in_file).header.cast::<MrcHeader>()).fp = (*in_file).fp.clone();
         (*in_file).file = IIFILE_MRC;
     }
     0
@@ -192,7 +196,12 @@ pub unsafe extern "C" fn ii_mrc_fill_header(
         }
         let source = (*in_file).header.cast::<MrcHeader>();
         if hdata != source {
-            core::ptr::copy_nonoverlapping(source, hdata, 1);
+            // `iimrc.c:150` is `*hdata = *(MrcHeader *)inFile->header`, a
+            // whole-struct assignment.  It has to be a `clone` here, not a
+            // bitwise copy: `MrcHeader.fp` owns an `Rc<File>`, so duplicating
+            // its bits leaves two owners at refcount one and the second drop
+            // corrupts the heap.
+            *hdata = (*source).clone();
         }
     }
     0
@@ -249,7 +258,7 @@ unsafe fn read_section_unscaled(
     in_section: i32,
     as_float: i32,
 ) -> i32 {
-    let mut li: LoadInfo = unsafe { core::mem::zeroed() };
+    let mut li = LoadInfo::default();
     let h = unsafe { (*in_file).header.cast::<MrcHeader>() };
     unsafe {
         ii_mrc_set_load_info(in_file, &mut li);
@@ -258,7 +267,7 @@ unsafe fn read_section_unscaled(
         li.black = 0;
         li.white = 255;
         li.mirror_fft = 0;
-        (*h).fp = (*in_file).fp.cast();
+        (*h).fp = (*in_file).fp.clone();
         ii_change_call_count(1);
         let err = if as_float != 0 {
             mrc_read_section_float(h, &mut li, buf.cast(), in_section)
@@ -292,14 +301,14 @@ unsafe fn read_section_scaled(
     in_section: i32,
     outmax: i32,
 ) -> i32 {
-    let mut li: LoadInfo = unsafe { core::mem::zeroed() };
+    let mut li = LoadInfo::default();
     let h = unsafe { (*in_file).header.cast::<MrcHeader>() };
     unsafe {
         ii_mrc_set_load_info(in_file, &mut li);
         li.outmin = 0;
         li.outmax = outmax;
         li.mirror_fft = (*in_file).mirror_fft;
-        (*h).fp = (*in_file).fp.cast();
+        (*h).fp = (*in_file).fp.clone();
         ii_change_call_count(1);
         let err = if outmax > 255 {
             mrc_read_section_ushort(h, &mut li, buf.cast(), in_section)
@@ -333,14 +342,14 @@ unsafe fn write_section(
     in_section: i32,
     as_float: i32,
 ) -> i32 {
-    let mut li: LoadInfo = unsafe { core::mem::zeroed() };
+    let mut li = LoadInfo::default();
     let h = unsafe { (*in_file).header.cast::<MrcHeader>() };
     unsafe {
         ii_mrc_set_load_info(in_file, &mut li);
-        (*h).fp = (*in_file).fp.cast();
+        (*h).fp = (*in_file).fp.clone();
         if (*in_file).axis != 3 {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiMRCwriteSection - attempting to write Y slices\n"),
             );
             return 1;
@@ -388,7 +397,7 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
         nread = nextra / nbytes;
         unsafe {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "There are piece coordinates for only {} frames in the extra header\n",
                     nread
@@ -397,24 +406,33 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
         };
     }
     unsafe {
-        (*li).pcoords = libc::malloc(core::mem::size_of::<i32>() * 3 * nz as usize).cast();
-        b3d_fseek((*in_file).fp, offset, libc::SEEK_SET);
+        (*li).pcoords = Some(vec![0i32; 3 * nz as usize]);
+        let mut fp = (*in_file).fp.clone().unwrap();
+        b3d_fseek(&mut fp, offset, SEEK_SET);
         for i in 0..nread {
-            let mut pcoordxy = [0_u16; 2];
-            let mut pcoordz = 0_i16;
-            b3d_fread(pcoordxy.as_mut_ptr().cast(), 2, 2, (*in_file).fp);
-            b3d_fread((&mut pcoordz as *mut i16).cast(), 1, 2, (*in_file).fp);
+            let mut pcoordxy = [0_u8; 4];
+            let mut pcoordz = [0_u8; 2];
+            let got_xy = b3d_fread(&mut pcoordxy, 2, 2, &mut fp);
+            let got_z = b3d_fread(&mut pcoordz, 1, 2, &mut fp);
+            let mut xy = [
+                u16::from_ne_bytes([pcoordxy[0], pcoordxy[1]]),
+                u16::from_ne_bytes([pcoordxy[2], pcoordxy[3]]),
+            ];
+            let mut z = i16::from_ne_bytes(pcoordz);
             if (*hdr).swapped != 0 {
                 mrc_swap_shorts(
-                    core::slice::from_raw_parts_mut(pcoordxy.as_mut_ptr().cast::<i16>(), 2),
+                    core::slice::from_raw_parts_mut(xy.as_mut_ptr().cast::<i16>(), 2),
                     2,
                 );
-                mrc_swap_shorts(core::slice::from_raw_parts_mut(&mut pcoordz, 1), 1);
+                mrc_swap_shorts(core::slice::from_mut(&mut z), 1);
             }
-            if libc::ferror((*in_file).fp) != 0 {
+            // `iimrc.c:406` tests `ferror(inFile->fp)`; a short transfer is the
+            // same condition reached through the return value, which is what
+            // [`b3d_fread`] reports.
+            if got_xy != 2 || got_z != 2 {
                 nread = i;
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!(
                         "Error reading piece coordinates from extra header after {} frames\n",
                         i
@@ -422,12 +440,13 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
                 );
                 break;
             }
-            *(*li).pcoords.add((i * 3) as usize) = pcoordxy[0] as i32;
-            *(*li).pcoords.add((i * 3 + 1) as usize) = pcoordxy[1] as i32;
-            *(*li).pcoords.add((i * 3 + 2) as usize) = pcoordz as i32;
+            let pcoords = (&mut (*li).pcoords).as_mut().unwrap();
+            pcoords[(i * 3) as usize] = xy[0] as i32;
+            pcoords[(i * 3 + 1) as usize] = xy[1] as i32;
+            pcoords[(i * 3 + 2) as usize] = z as i32;
             offset = nbytes - 6;
             if offset > 0 {
-                b3d_fseek((*in_file).fp, offset, libc::SEEK_CUR);
+                b3d_fseek(&mut fp, offset, SEEK_CUR);
             }
         }
         (*li).plist = nread;
@@ -490,7 +509,7 @@ mod tests {
                 ((*image).format, (*image).type_, (*image).mode),
                 (87, 99, 123)
             );
-            libc::free(image.cast());
+            drop(Box::from_raw(image));
         }
     }
 
@@ -498,20 +517,19 @@ mod tests {
     fn fill_header_and_piece_coordinate_check_retain_source_shallow_copy_and_rules() {
         unsafe {
             let image = ii_new();
-            assert!(!image.is_null());
-            let mut source: MrcHeader = core::mem::zeroed();
+            let mut source = MrcHeader::default();
             source.nx = 12;
             source.labels[0][0] = b'X';
             (*image).header = (&mut source as *mut MrcHeader).cast();
-            let mut copied: MrcHeader = core::mem::zeroed();
+            let mut copied = MrcHeader::default();
             assert_eq!(ii_mrc_fill_header(image, &mut copied), 0);
             assert_eq!((copied.nx, copied.labels[0][0]), (12, b'X'));
             assert_eq!(ii_mrc_fill_header(image, &mut source), 0);
             (*image).header = core::ptr::null_mut();
             assert_eq!(ii_mrc_fill_header(image, &mut copied), 1);
-            libc::free(image.cast());
+            drop(Box::from_raw(image));
 
-            let mut header: MrcHeader = core::mem::zeroed();
+            let mut header = MrcHeader::default();
             assert_eq!(ii_mrc_check_pcoord(&mut header), 0);
             header.next = 128;
             header.nreal = 2;
@@ -541,7 +559,7 @@ mod tests {
             (*image).axis = 1;
             (*image).pad_left = 7;
             (*image).pad_right = 9;
-            let mut li: LoadInfo = core::mem::zeroed();
+            let mut li = LoadInfo::default();
             ii_mrc_set_load_info(image, &mut li);
             assert_eq!(
                 (li.xmin, li.xmax, li.ymin, li.ymax, li.zmin, li.zmax),
@@ -551,7 +569,7 @@ mod tests {
                 (li.slope, li.offset, li.axis, li.pad_left, li.pad_right),
                 (2.5, -3.0, 1, 7, 9)
             );
-            libc::free(image.cast());
+            drop(Box::from_raw(image));
         }
     }
 
@@ -561,13 +579,13 @@ mod tests {
             let image = ii_new();
             assert!(!image.is_null());
             ii_mrc_delete(image);
-            (*image).header = libc::malloc(core::mem::size_of::<MrcHeader>()).cast();
+            (*image).header = Box::into_raw(Box::new(MrcHeader::default())).cast();
             assert!(!(*image).header.is_null());
             ii_mrc_delete(image);
             // C intentionally leaves `header` unchanged after free; clear it
             // here solely to keep this test from freeing it twice.
             (*image).header = core::ptr::null_mut();
-            libc::free(image.cast());
+            drop(Box::from_raw(image));
         }
     }
 
@@ -585,7 +603,7 @@ mod tests {
             assert!((*image).clean_up.is_none());
             assert!((*image).write_section.is_none());
             assert!((*image).write_section_float.is_none());
-            libc::free(image.cast());
+            drop(Box::from_raw(image));
 
             let mut path = b"/tmp/imod-rs-iimrc-XXXXXX\0".to_vec();
             let fd = libc::mkstemp(path.as_mut_ptr().cast());
@@ -603,9 +621,9 @@ mod tests {
             assert!((*image).clean_up.is_some());
             assert!((*image).write_section.is_some());
             assert!((*image).write_section_float.is_some());
-            assert_eq!(libc::fclose((*image).fp), 0);
+            (*image).fp = None;
             ii_mrc_delete(image);
-            libc::free(image.cast());
+            drop(Box::from_raw(image));
             assert_eq!(libc::unlink(path.as_ptr().cast()), 0);
         }
     }
@@ -613,19 +631,21 @@ mod tests {
     #[test]
     fn mrc_check_reads_real_header_and_installs_section_reader() {
         unsafe {
-            let fp = libc::tmpfile();
-            assert!(!fp.is_null());
-            let mut header: MrcHeader = core::mem::zeroed();
+            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
+            let mut header = MrcHeader::default();
             mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
-            header.fp = fp.cast();
-            assert_eq!(mrc_head_write(fp, &mut header), 0);
+            header.fp = Some(fp.clone());
+            assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
             let pixels = [1_u8, 2, 3, 4];
-            assert_eq!(libc::fwrite(pixels.as_ptr().cast(), 1, 4, fp), 4);
-            libc::rewind(fp);
+            assert_eq!(
+                crate::imod::libcfshr::b3dutil::b3d_fwrite(&pixels, 1, 4, &mut fp),
+                4
+            );
+            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
 
             let image = ii_new();
             assert!(!image.is_null());
-            (*image).fp = fp;
+            (*image).fp = Some(fp.clone());
             assert_eq!(ii_mrc_check(image), 0);
             assert_eq!(
                 (
@@ -644,8 +664,8 @@ mod tests {
             );
             assert_eq!(read, [129, 130, 131, 132]);
             ii_mrc_delete(image);
-            libc::fclose(fp);
-            libc::free(image.cast());
+            drop(fp);
+            drop(Box::from_raw(image));
         }
     }
 }

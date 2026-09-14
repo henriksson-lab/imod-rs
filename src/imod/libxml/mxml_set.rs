@@ -1,29 +1,56 @@
 //! Translation of `IMOD/libxml/mxml-set.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(dead_code)]
 
 use super::*;
-use core::ffi::{c_char, c_int, c_void};
+use core::any::Any;
+use core::ffi::c_int;
 
 /// Matches C `mxmlSetCDATA` (`mxml-set.c:32`).
-pub unsafe fn mxml_set_cdata(mut node: *mut MxmlNode, data: *const c_char) -> c_int {
+pub fn mxml_set_cdata(arena: &mut MxmlArena, node: Option<usize>, data: Option<&[u8]>) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && libc::strncmp((*node).value.element.name, c"![CDATA[".as_ptr(), 8) != 0
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_ELEMENT
-        && libc::strncmp((*(*node).child).value.element.name, c"![CDATA[".as_ptr(), 8) == 0
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && match &arena.node(n).value {
+            MxmlValue::Element(element) => !element
+                .name
+                .as_deref()
+                .is_some_and(|name| name.starts_with(b"![CDATA[")),
+            _ => false,
+        }
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_ELEMENT
+        && match &arena.node(child).value {
+            MxmlValue::Element(element) => element
+                .name
+                .as_deref()
+                .is_some_and(|name| name.starts_with(b"![CDATA[")),
+            _ => false,
+        }
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null()
-        || (*node).type_ != MXML_ELEMENT
-        || data.is_null()
-        || libc::strncmp((*node).value.element.name, c"![CDATA[".as_ptr(), 8) != 0
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
+        return -1;
+    }
+    let Some(data) = data else {
+        return -1;
+    };
+    let MxmlValue::Element(element) = &mut arena.node_mut(node).value else {
+        return -1;
+    };
+    if !element
+        .name
+        .as_deref()
+        .is_some_and(|name| name.starts_with(b"![CDATA["))
     {
         return -1;
     }
@@ -32,34 +59,36 @@ pub unsafe fn mxml_set_cdata(mut node: *mut MxmlNode, data: *const c_char) -> c_
      * Free any old element value and set the new value...
      */
 
-    if !(*node).value.element.name.is_null() {
-        libc::free((*node).value.element.name as *mut c_void);
-    }
-
-    (*node).value.element.name = _mxml_strdupf(c"![CDATA[%s]]".as_ptr(), data as *mut c_void);
+    element.name = Some(_mxml_strdupf(b"![CDATA[%s]]", data));
 
     0
 }
 
 /// Matches C `mxmlSetCustom` (`mxml-set.c:70`).
-pub unsafe fn mxml_set_custom(
-    mut node: *mut MxmlNode,
-    data: *mut c_void,
+pub fn mxml_set_custom(
+    arena: &mut MxmlArena,
+    node: Option<usize>,
+    data: Option<Box<dyn Any>>,
     destroy: MxmlCustomDestroyCb,
 ) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_CUSTOM
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_CUSTOM
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null() || (*node).type_ != MXML_CUSTOM {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_CUSTOM {
         return -1;
     }
 
@@ -67,56 +96,69 @@ pub unsafe fn mxml_set_custom(
      * Free any old element value and set the new value...
      */
 
-    if !(*node).value.custom.data.is_null() {
-        if let Some(f) = (*node).value.custom.destroy {
-            f((*node).value.custom.data);
-        }
+    let MxmlValue::Custom(custom) = &mut arena.node_mut(node).value else {
+        return -1;
+    };
+    if let Some(old) = custom.data.as_deref_mut()
+        && let Some(f) = custom.destroy
+    {
+        f(old);
     }
 
-    (*node).value.custom.data = data;
-    (*node).value.custom.destroy = destroy;
+    custom.data = data;
+    custom.destroy = destroy;
 
     0
 }
 
 /// Matches C `mxmlSetElement` (`mxml-set.c:104`).
-pub unsafe fn mxml_set_element(node: *mut MxmlNode, name: *const c_char) -> c_int {
+pub fn mxml_set_element(arena: &mut MxmlArena, node: Option<usize>, name: Option<&[u8]>) -> c_int {
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT || name.is_null() {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
         return -1;
     }
+    let Some(name) = name else {
+        return -1;
+    };
 
     /*
      * Free any old element value and set the new value...
      */
 
-    if !(*node).value.element.name.is_null() {
-        libc::free((*node).value.element.name as *mut c_void);
-    }
-
-    (*node).value.element.name = libc::strdup(name);
+    let MxmlValue::Element(element) = &mut arena.node_mut(node).value else {
+        return -1;
+    };
+    element.name = Some(name.to_vec());
 
     0
 }
 
 /// Matches C `mxmlSetInteger` (`mxml-set.c:130`).
-pub unsafe fn mxml_set_integer(mut node: *mut MxmlNode, integer: c_int) -> c_int {
+pub fn mxml_set_integer(arena: &mut MxmlArena, node: Option<usize>, integer: c_int) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_INTEGER
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_INTEGER
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null() || (*node).type_ != MXML_INTEGER {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_INTEGER {
         return -1;
     }
 
@@ -124,57 +166,66 @@ pub unsafe fn mxml_set_integer(mut node: *mut MxmlNode, integer: c_int) -> c_int
      * Set the new value and return...
      */
 
-    (*node).value.integer = integer;
+    arena.node_mut(node).value = MxmlValue::Integer(integer);
 
     0
 }
 
 /// Matches C `mxmlSetOpaque` (`mxml-set.c:158`).
-pub unsafe fn mxml_set_opaque(mut node: *mut MxmlNode, opaque: *const c_char) -> c_int {
+pub fn mxml_set_opaque(arena: &mut MxmlArena, node: Option<usize>, opaque: Option<&[u8]>) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_OPAQUE
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_OPAQUE
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null() || (*node).type_ != MXML_OPAQUE || opaque.is_null() {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_OPAQUE {
         return -1;
     }
+    let Some(opaque) = opaque else {
+        return -1;
+    };
 
     /*
      * Free any old opaque value and set the new value...
      */
 
-    if !(*node).value.opaque.is_null() {
-        libc::free((*node).value.opaque as *mut c_void);
-    }
-
-    (*node).value.opaque = libc::strdup(opaque);
+    arena.node_mut(node).value = MxmlValue::Opaque(Some(opaque.to_vec()));
 
     0
 }
 
 /// Matches C `mxmlSetReal` (`mxml-set.c:190`).
-pub unsafe fn mxml_set_real(mut node: *mut MxmlNode, real: f64) -> c_int {
+pub fn mxml_set_real(arena: &mut MxmlArena, node: Option<usize>, real: f64) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_REAL
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_REAL
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null() || (*node).type_ != MXML_REAL {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_REAL {
         return -1;
     }
 
@@ -182,43 +233,51 @@ pub unsafe fn mxml_set_real(mut node: *mut MxmlNode, real: f64) -> c_int {
      * Set the new value and return...
      */
 
-    (*node).value.real = real;
+    arena.node_mut(node).value = MxmlValue::Real(real);
 
     0
 }
 
 /// Matches C `mxmlSetText` (`mxml-set.c:218`).
-pub unsafe fn mxml_set_text(
-    mut node: *mut MxmlNode,
+pub fn mxml_set_text(
+    arena: &mut MxmlArena,
+    node: Option<usize>,
     whitespace: c_int,
-    string: *const c_char,
+    string: Option<&[u8]>,
 ) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_TEXT
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_TEXT
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null() || (*node).type_ != MXML_TEXT || string.is_null() {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_TEXT {
         return -1;
     }
+    let Some(string) = string else {
+        return -1;
+    };
 
     /*
      * Free any old string value and set the new value...
      */
 
-    if !(*node).value.text.string.is_null() {
-        libc::free((*node).value.text.string as *mut c_void);
-    }
-
-    (*node).value.text.whitespace = whitespace;
-    (*node).value.text.string = libc::strdup(string);
+    let MxmlValue::Text(text) = &mut arena.node_mut(node).value else {
+        return -1;
+    };
+    text.whitespace = whitespace;
+    text.string = Some(string.to_vec());
 
     0
 }
@@ -230,57 +289,70 @@ pub unsafe fn mxml_set_text(
 /// list rather than a `va_list` — the mismatch is in the vendored source.  The
 /// shape is preserved here with the single explicit argument that stable Rust
 /// allows; see `_mxml_strdupf`.
-pub unsafe fn mxml_set_textf(
-    mut node: *mut MxmlNode,
+pub fn mxml_set_textf(
+    arena: &mut MxmlArena,
+    node: Option<usize>,
     whitespace: c_int,
-    format: *const c_char,
-    arg: *mut c_void,
+    format: Option<&[u8]>,
+    arg: &[u8],
 ) -> c_int {
     /*
      * Range check input...
      */
 
-    if !node.is_null()
-        && (*node).type_ == MXML_ELEMENT
-        && !(*node).child.is_null()
-        && (*(*node).child).type_ == MXML_TEXT
+    let mut node = node;
+
+    if let Some(n) = node
+        && arena.node(n).type_ == MXML_ELEMENT
+        && let Some(child) = arena.node(n).child
+        && arena.node(child).type_ == MXML_TEXT
     {
-        node = (*node).child;
+        node = Some(child);
     }
 
-    if node.is_null() || (*node).type_ != MXML_TEXT || format.is_null() {
+    let Some(node) = node else {
+        return -1;
+    };
+    if arena.node(node).type_ != MXML_TEXT {
         return -1;
     }
+    let Some(format) = format else {
+        return -1;
+    };
 
     /*
      * Free any old string value and set the new value...
      */
 
-    if !(*node).value.text.string.is_null() {
-        libc::free((*node).value.text.string as *mut c_void);
-    }
-
-    (*node).value.text.whitespace = whitespace;
-    (*node).value.text.string = _mxml_strdupf(format, arg);
+    let string = _mxml_strdupf(format, arg);
+    let MxmlValue::Text(text) = &mut arena.node_mut(node).value else {
+        return -1;
+    };
+    text.whitespace = whitespace;
+    text.string = Some(string);
 
     0
 }
 
 /// Matches C `mxmlSetUserData` (`mxml-set.c:299`).
-pub unsafe fn mxml_set_user_data(node: *mut MxmlNode, data: *mut c_void) -> c_int {
+pub fn mxml_set_user_data(
+    arena: &mut MxmlArena,
+    node: Option<usize>,
+    data: Option<Box<dyn Any>>,
+) -> c_int {
     /*
      * Range check input...
      */
 
-    if node.is_null() {
+    let Some(node) = node else {
         return -1;
-    }
+    };
 
     /*
      * Set the user data pointer and return...
      */
 
-    (*node).user_data = data;
+    arena.node_mut(node).user_data = data;
 
     0
 }
@@ -293,20 +365,24 @@ mod tests {
     /// (`mxml-set.c:141` and friends), so setting text on the element that owns
     /// a text node succeeds and rewrites the child.  The native
     /// `libimxml.so` returns 0 and reads back "bye".
+    ///
+    /// The tree the reference parsed from `<root>hello</root>` is built here
+    /// with the node API instead: `mxml_file`'s parser is a later conversion
+    /// wave, and the shape it produces for that document with no load callback
+    /// is exactly an element with one whitespace-free text child.
     #[test]
     fn set_text_descends_from_the_element_into_its_child() {
-        unsafe {
-            let tree =
-                mxml_load_string(core::ptr::null_mut(), c"<root>hello</root>".as_ptr(), None);
-            assert!(!tree.is_null());
-            assert_eq!((*tree).type_, MXML_ELEMENT);
-            assert_eq!(mxml_set_text(tree, 0, c"bye".as_ptr()), 0);
-            let mut ws: c_int = 0;
-            assert_eq!(
-                std::ffi::CStr::from_ptr(mxml_get_text(tree, &raw mut ws)).to_bytes(),
-                b"bye"
-            );
-            mxml_delete(tree);
-        }
+        let arena = &mut MxmlArena::new();
+        let tree = mxml_new_element(arena, MXML_NO_PARENT, Some(b"root"));
+        assert!(tree.is_some());
+        mxml_new_text(arena, tree, 0, Some(b"hello"));
+        assert_eq!(mxml_get_type(arena, tree), MXML_ELEMENT);
+        assert_eq!(mxml_set_text(arena, tree, 0, Some(b"bye")), 0);
+        let mut ws: c_int = 0;
+        assert_eq!(
+            mxml_get_text(arena, tree, Some(&mut ws)),
+            Some(b"bye".as_slice())
+        );
+        mxml_delete(arena, tree);
     }
 }

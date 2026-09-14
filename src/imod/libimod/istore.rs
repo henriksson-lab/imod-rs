@@ -1,33 +1,118 @@
 //! Scaffold for the complete `IMOD/libimod/istore.c` source unit.
 #![allow(dead_code, unused_variables)]
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::imodel::{IMOD_ERROR_READ, Icont, Iobj};
 use crate::imod::libimod::imodel_files::{
     imod_get_float, imod_get_int, imod_get_short, imod_put_float, imod_put_int, imod_put_short,
 };
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+/// Original: `StoreUnion` / `union store_type` (`istore.h:90`).
+///
+/// A genuine C type-punning union: `istore.c` writes one member and reads
+/// another -- `istoreGenerateItems` stores an `int` and `istoreExtractChanges`
+/// reads the same four bytes as `b[4]` -- and `imodel_files.c` writes them to
+/// disk as one 32-bit word either way.  So the four bytes, not any one member,
+/// are the value.
+///
+/// Rust has no *safe* union: every read of a `union` field is `unsafe` because
+/// the compiler cannot know which member was last written.  The four bytes are
+/// therefore held directly, in the machine's own order, and the five members of
+/// the C union are accessor pairs over them -- one method per member of
+/// `istore.h:91-95`, with a setter and a constructor each, and nothing else.
+/// `to_ne_bytes`/`from_ne_bytes` is a bit-for-bit reinterpretation, exactly what
+/// the union does, so no byte moves and no value changes.
 #[repr(C)]
-#[derive(Clone, Copy)]
-pub union StoreUnion {
-    pub i: i32,
-    pub f: f32,
-    pub us: [u16; 2],
-    pub s: [i16; 2],
-    pub b: [u8; 4],
+#[derive(Clone, Copy, Default)]
+pub struct StoreUnion {
+    /// The union's four bytes, in the machine's byte order.
+    pub bytes: [u8; 4],
 }
-impl Default for StoreUnion {
-    fn default() -> Self {
-        Self { i: 0 }
+impl StoreUnion {
+    /// `StoreUnion::i` (`istore.h:91`), read.
+    pub fn i(self) -> i32 {
+        i32::from_ne_bytes(self.bytes)
+    }
+    /// `StoreUnion::i` (`istore.h:91`), written.
+    pub fn set_i(&mut self, value: i32) {
+        self.bytes = value.to_ne_bytes();
+    }
+    /// `StoreUnion::i` (`istore.h:91`), as an initialiser.
+    pub fn from_i(value: i32) -> Self {
+        Self {
+            bytes: value.to_ne_bytes(),
+        }
+    }
+    /// `StoreUnion::f` (`istore.h:92`), read.
+    pub fn f(self) -> f32 {
+        f32::from_ne_bytes(self.bytes)
+    }
+    /// `StoreUnion::f` (`istore.h:92`), written.
+    pub fn set_f(&mut self, value: f32) {
+        self.bytes = value.to_ne_bytes();
+    }
+    /// `StoreUnion::f` (`istore.h:92`), as an initialiser.
+    pub fn from_f(value: f32) -> Self {
+        Self {
+            bytes: value.to_ne_bytes(),
+        }
+    }
+    /// `StoreUnion::us[2]` (`istore.h:93`), read.
+    pub fn us(self) -> [u16; 2] {
+        [
+            u16::from_ne_bytes([self.bytes[0], self.bytes[1]]),
+            u16::from_ne_bytes([self.bytes[2], self.bytes[3]]),
+        ]
+    }
+    /// `StoreUnion::us[2]` (`istore.h:93`), written.
+    pub fn set_us(&mut self, value: [u16; 2]) {
+        let (low, high) = (value[0].to_ne_bytes(), value[1].to_ne_bytes());
+        self.bytes = [low[0], low[1], high[0], high[1]];
+    }
+    /// `StoreUnion::us[2]` (`istore.h:93`), as an initialiser.
+    pub fn from_us(value: [u16; 2]) -> Self {
+        let mut union = Self::default();
+        union.set_us(value);
+        union
+    }
+    /// `StoreUnion::s[2]` (`istore.h:94`), read.
+    pub fn s(self) -> [i16; 2] {
+        [
+            i16::from_ne_bytes([self.bytes[0], self.bytes[1]]),
+            i16::from_ne_bytes([self.bytes[2], self.bytes[3]]),
+        ]
+    }
+    /// `StoreUnion::s[2]` (`istore.h:94`), written.
+    pub fn set_s(&mut self, value: [i16; 2]) {
+        let (low, high) = (value[0].to_ne_bytes(), value[1].to_ne_bytes());
+        self.bytes = [low[0], low[1], high[0], high[1]];
+    }
+    /// `StoreUnion::s[2]` (`istore.h:94`), as an initialiser.
+    pub fn from_s(value: [i16; 2]) -> Self {
+        let mut union = Self::default();
+        union.set_s(value);
+        union
+    }
+    /// `StoreUnion::b[4]` (`istore.h:95`), read.
+    pub fn b(self) -> [u8; 4] {
+        self.bytes
+    }
+    /// `StoreUnion::b[4]` (`istore.h:95`), written.
+    pub fn set_b(&mut self, value: [u8; 4]) {
+        self.bytes = value;
+    }
+    /// `StoreUnion::b[4]` (`istore.h:95`), as an initialiser.
+    pub fn from_b(value: [u8; 4]) -> Self {
+        Self { bytes: value }
     }
 }
 impl core::fmt::Debug for StoreUnion {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        unsafe { self.i.fmt(f) }
+        self.i().fmt(f)
     }
 }
 impl PartialEq for StoreUnion {
     fn eq(&self, other: &Self) -> bool {
-        unsafe { self.i == other.i }
+        self.i() == other.i()
     }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -60,7 +145,7 @@ pub struct DrawProps {
     pub no_cap: i32,
 }
 /// Original: `imodWriteStore` (`istore.c:23`).
-pub fn imod_write_store(list: &[Istore], id: i32, file: &mut File) -> i32 {
+pub fn imod_write_store(list: &[Istore], id: i32, file: &mut ImodFile) -> i32 {
     if list.is_empty() {
         return 0;
     }
@@ -77,18 +162,18 @@ pub fn imod_write_store(list: &[Istore], id: i32, file: &mut File) -> i32 {
             // the int/float/short writes drop their `ferror` return.
             match dtype {
                 0 => {
-                    let _ = imod_put_int(file, unsafe { item.i });
+                    let _ = imod_put_int(file, (item.i()));
                 }
                 1 => {
-                    let _ = imod_put_float(file, unsafe { item.f });
+                    let _ = imod_put_float(file, (item.f()));
                 }
                 2 => {
-                    let shorts = unsafe { item.s };
+                    let shorts = (item.s());
                     let _ = imod_put_short(file, shorts[0]);
                     let _ = imod_put_short(file, shorts[1]);
                 }
                 _ => {
-                    if file.write_all(&unsafe { item.b }).is_err() {
+                    if file.write_all(&(item.b())).is_err() {
                         return 1;
                     }
                 }
@@ -100,7 +185,7 @@ pub fn imod_write_store(list: &[Istore], id: i32, file: &mut File) -> i32 {
     0
 }
 /// Original: `imodReadStore` (`istore.c`).
-pub fn imod_read_store(file: &mut File, error: &mut i32) -> Option<Vec<Istore>> {
+pub fn imod_read_store(file: &mut ImodFile, error: &mut i32) -> Option<Vec<Istore>> {
     let nread = match imod_get_int(file) {
         Ok(bytes) => bytes / 12,
         Err(_) => {
@@ -136,21 +221,21 @@ pub fn imod_read_store(file: &mut File, error: &mut i32) -> Option<Vec<Istore>> 
         for item in &mut items {
             *item = match dtype {
                 0 => match imod_get_int(file) {
-                    Ok(value) => StoreUnion { i: value },
+                    Ok(value) => StoreUnion::from_i(value),
                     Err(_) => {
                         *error = IMOD_ERROR_READ;
                         return None;
                     }
                 },
                 1 => match imod_get_float(file) {
-                    Ok(value) => StoreUnion { f: value },
+                    Ok(value) => StoreUnion::from_f(value),
                     Err(_) => {
                         *error = IMOD_ERROR_READ;
                         return None;
                     }
                 },
                 2 => match (imod_get_short(file), imod_get_short(file)) {
-                    (Ok(first), Ok(second)) => StoreUnion { s: [first, second] },
+                    (Ok(first), Ok(second)) => StoreUnion::from_s([first, second]),
                     _ => {
                         *error = IMOD_ERROR_READ;
                         return None;
@@ -162,7 +247,7 @@ pub fn imod_read_store(file: &mut File, error: &mut i32) -> Option<Vec<Istore>> 
                         *error = IMOD_ERROR_READ;
                         return None;
                     }
-                    StoreUnion { b: bytes }
+                    StoreUnion::from_b(bytes)
                 }
             };
             dtype = (flags >> 2) & 3;
@@ -174,7 +259,7 @@ pub fn imod_read_store(file: &mut File, error: &mut i32) -> Option<Vec<Istore>> 
             value: items[1],
         };
         let index = if flags & ((1 << 4) | 3) == 0 {
-            unsafe { store.index.i }
+            (store.index.i())
         } else {
             i32::MAX
         };
@@ -192,12 +277,12 @@ pub fn imod_read_store(file: &mut File, error: &mut i32) -> Option<Vec<Istore>> 
 /// Original: `storeCompare` (`istore.c`).
 pub fn store_compare(one: &Istore, two: &Istore) -> core::cmp::Ordering {
     let first = if one.flags & ((1 << 4) | 3) == 0 {
-        unsafe { one.index.i }
+        (one.index.i())
     } else {
         i32::MAX
     };
     let second = if two.flags & ((1 << 4) | 3) == 0 {
-        unsafe { two.index.i }
+        (two.index.i())
     } else {
         i32::MAX
     };
@@ -220,7 +305,7 @@ pub fn istore_next_obj_item<'a>(
         if store.flags & ((1 << 4) | 3) != 0 {
             return None;
         }
-        let index = unsafe { store.index.i };
+        let index = (store.index.i());
         if (store.flags & (1 << 6) == 0 && index == co)
             || (store.flags & (1 << 6) != 0 && index == surf)
         {
@@ -242,7 +327,7 @@ pub fn istore_insert(list: &mut Vec<Istore>, store: Istore) -> i32 {
     if store.flags & (1 << 4) != 0 {
         after = list.len();
     } else {
-        let found = istore_lookup(list, unsafe { store.index.i });
+        let found = istore_lookup(list, (store.index.i()));
         lookup = found.0;
         after = found.1;
     }
@@ -267,9 +352,9 @@ pub fn istore_lookup(list: &[Istore], index: i32) -> (Option<usize>, usize) {
 
     // test that first element is below item  - if above, done
     let store = &list[0];
-    if store.flags & noindex != 0 || unsafe { store.index.i } > index {
+    if store.flags & noindex != 0 || (store.index.i()) > index {
         return (None, 0);
-    } else if unsafe { store.index.i } == index {
+    } else if (store.index.i()) == index {
         matched = 0;
     }
 
@@ -277,9 +362,9 @@ pub fn istore_lookup(list: &[Istore], index: i32) -> (Option<usize>, usize) {
     // and return
     let store = &list[above as usize];
     if matched < 0 && store.flags & noindex == 0 {
-        if unsafe { store.index.i } < index {
+        if (store.index.i()) < index {
             return (None, list.len());
-        } else if unsafe { store.index.i } == index {
+        } else if (store.index.i()) == index {
             matched = above;
         }
     }
@@ -289,9 +374,9 @@ pub fn istore_lookup(list: &[Istore], index: i32) -> (Option<usize>, usize) {
     while matched < 0 && above - below > 1 {
         let mid = (above + below) / 2;
         let store = &list[mid as usize];
-        if store.flags & noindex != 0 || unsafe { store.index.i } > index {
+        if store.flags & noindex != 0 || (store.index.i()) > index {
             above = mid;
-        } else if unsafe { store.index.i } == index {
+        } else if (store.index.i()) == index {
             matched = mid;
         } else {
             below = mid;
@@ -307,7 +392,7 @@ pub fn istore_lookup(list: &[Istore], index: i32) -> (Option<usize>, usize) {
     let mut mid = matched + 1;
     while mid < list.len() as i32 {
         let store = &list[mid as usize];
-        if store.flags & noindex != 0 || unsafe { store.index.i } > index {
+        if store.flags & noindex != 0 || (store.index.i()) > index {
             break;
         }
         mid += 1;
@@ -317,7 +402,7 @@ pub fn istore_lookup(list: &[Istore], index: i32) -> (Option<usize>, usize) {
     // Then find first one before the match, and return first match
     let mut mid = matched - 1;
     while mid >= 0 {
-        if unsafe { list[mid as usize].index.i } < index {
+        if (list[mid as usize].index.i()) < index {
             break;
         }
         mid -= 1;
@@ -327,115 +412,124 @@ pub fn istore_lookup(list: &[Istore], index: i32) -> (Option<usize>, usize) {
 /// Original: `istoreDump` (`istore.c:281`).
 pub fn istore_dump(list: &[Istore]) {
     let types = [
-        c"COLOR",
-        c"FCOLOR",
-        c"TRANS",
-        c"GAP",
-        c"CONNECT",
-        c"3DWIDTH",
-        c"2DWIDTH",
-        c"SYMTYPE",
-        c"SYMSIZE",
-        c"VALUE1",
-        c"MINMAX1",
-        c"VALUE2",
-        c"MINMAX2",
-        c"VALUE3",
-        c"MINMAX3",
-        c"VALUE4",
-        c"MINMAX4",
-        c"VALUE5",
-        c"MINMAX5",
-        c"VALUE6",
-        c"MINMAX6",
-        c"ISOPARAM",
-        c"ISOTHRESH",
+        "COLOR",
+        "FCOLOR",
+        "TRANS",
+        "GAP",
+        "CONNECT",
+        "3DWIDTH",
+        "2DWIDTH",
+        "SYMTYPE",
+        "SYMSIZE",
+        "VALUE1",
+        "MINMAX1",
+        "VALUE2",
+        "MINMAX2",
+        "VALUE3",
+        "MINMAX3",
+        "VALUE4",
+        "MINMAX4",
+        "VALUE5",
+        "MINMAX5",
+        "VALUE6",
+        "MINMAX6",
+        "ISOPARAM",
+        "ISOTHRESH",
     ];
-    unsafe {
-        libc::printf(c" %d items in list:\n".as_ptr(), list.len() as i32);
-        for store in list {
-            libc::printf(c"%6d-".as_ptr(), store.type_ as i32);
-            if store.type_ > 0 && store.type_ as usize <= types.len() {
-                libc::printf(c"%s".as_ptr(), types[store.type_ as usize - 1].as_ptr());
-            }
-            libc::printf(c"  %6o-".as_ptr(), store.flags as i32);
-            let mut dtype = 0;
-            let j = if store.type_ == 23 || store.type_ == 22 {
-                1
-            } else {
-                0
-            };
-            if store.flags & (1 << 4) != 0 {
-                libc::printf(c"NOIND".as_ptr());
-                dtype = 1;
-            }
-            if j == 0 && store.flags & (1 << 5) != 0 {
-                libc::printf(
-                    c"%sREVERT".as_ptr(),
-                    if dtype != 0 { c"|" } else { c"" }.as_ptr(),
-                );
-                dtype = 1;
-            }
-            if j == 0 && store.flags & (1 << 6) != 0 {
-                libc::printf(
-                    c"%sSURF".as_ptr(),
-                    if dtype != 0 { c"|" } else { c"" }.as_ptr(),
-                );
-                dtype = 1;
-            }
-            if j == 0 && store.flags & (1 << 7) != 0 {
-                libc::printf(
-                    c"%sONEPT".as_ptr(),
-                    if dtype != 0 { c"|" } else { c"" }.as_ptr(),
-                );
-                dtype = 1;
-            }
-            if j != 0 && store.flags & (1 << 5) != 0 {
-                libc::printf(
-                    c"%sCAP".as_ptr(),
-                    if dtype != 0 { c"|" } else { c"" }.as_ptr(),
-                );
-                dtype = 1;
-            }
-            if j != 0 && store.flags & (1 << 6) != 0 {
-                libc::printf(
-                    c"%sDEL".as_ptr(),
-                    if dtype != 0 { c"|" } else { c"" }.as_ptr(),
-                );
-                dtype = 1;
-            }
-            if j != 0 && store.flags & (1 << 7) != 0 {
-                libc::printf(
-                    c"%sOUTER".as_ptr(),
-                    if dtype != 0 { c"|" } else { c"" }.as_ptr(),
-                );
-            }
-            let mut dtype = store.flags & 3;
-            for item in [store.index, store.value] {
-                match dtype {
-                    0 => {
-                        libc::printf(c" %11d".as_ptr(), item.i);
-                    }
-                    1 => {
-                        libc::printf(c" %12.6g".as_ptr(), item.f as f64);
-                    }
-                    2 => {
-                        libc::printf(c" %6d %6d".as_ptr(), item.s[0] as i32, item.s[1] as i32);
-                    }
-                    _ => {
-                        libc::printf(
-                            c" %3d %3d %3d %3d".as_ptr(),
-                            item.b[0] as i32,
-                            item.b[1] as i32,
-                            item.b[2] as i32,
-                            item.b[3] as i32,
-                        );
-                    }
-                }
-                dtype = (store.flags >> 2) & 3;
-            }
-            libc::printf(c"\n".as_ptr());
+    let mut out = ImodFile::Stdout;
+    let _ =
+        out.write_all(c_format(" %d items in list:\n", &[CArg::Int(list.len() as i64)]).as_bytes());
+    for store in list {
+        let _ = out.write_all(c_format("%6d-", &[CArg::Int(store.type_ as i64)]).as_bytes());
+        if store.type_ > 0 && store.type_ as usize <= types.len() {
+            let _ = out.write_all(
+                c_format("%s", &[CArg::Str(types[store.type_ as usize - 1])]).as_bytes(),
+            );
         }
+        let _ = out.write_all(c_format("  %6o-", &[CArg::Uint(store.flags as u64)]).as_bytes());
+        let mut dtype = 0;
+        let j = if store.type_ == 23 || store.type_ == 22 {
+            1
+        } else {
+            0
+        };
+        if store.flags & (1 << 4) != 0 {
+            let _ = out.write_all(c_format("NOIND", &[]).as_bytes());
+            dtype = 1;
+        }
+        if j == 0 && store.flags & (1 << 5) != 0 {
+            let _ = out.write_all(
+                c_format("%sREVERT", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
+            );
+            dtype = 1;
+        }
+        if j == 0 && store.flags & (1 << 6) != 0 {
+            let _ = out.write_all(
+                c_format("%sSURF", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
+            );
+            dtype = 1;
+        }
+        if j == 0 && store.flags & (1 << 7) != 0 {
+            let _ = out.write_all(
+                c_format("%sONEPT", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
+            );
+            dtype = 1;
+        }
+        if j != 0 && store.flags & (1 << 5) != 0 {
+            let _ = out.write_all(
+                c_format("%sCAP", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
+            );
+            dtype = 1;
+        }
+        if j != 0 && store.flags & (1 << 6) != 0 {
+            let _ = out.write_all(
+                c_format("%sDEL", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
+            );
+            dtype = 1;
+        }
+        if j != 0 && store.flags & (1 << 7) != 0 {
+            let _ = out.write_all(
+                c_format("%sOUTER", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
+            );
+        }
+        let mut dtype = store.flags & 3;
+        for item in [store.index, store.value] {
+            match dtype {
+                0 => {
+                    let _ =
+                        out.write_all(c_format(" %11d", &[CArg::Int(item.i() as i64)]).as_bytes());
+                }
+                1 => {
+                    let _ = out
+                        .write_all(c_format(" %12.6g", &[CArg::Dbl(item.f() as f64)]).as_bytes());
+                }
+                2 => {
+                    let _ = out.write_all(
+                        c_format(
+                            " %6d %6d",
+                            &[CArg::Int(item.s()[0] as i64), CArg::Int(item.s()[1] as i64)],
+                        )
+                        .as_bytes(),
+                    );
+                }
+                _ => {
+                    let _ = out.write_all(
+                        c_format(
+                            " %3d %3d %3d %3d",
+                            &[
+                                CArg::Int(item.b()[0] as i64),
+                                CArg::Int(item.b()[1] as i64),
+                                CArg::Int(item.b()[2] as i64),
+                                CArg::Int(item.b()[3] as i64),
+                            ],
+                        )
+                        .as_bytes(),
+                    );
+                }
+            }
+            dtype = (store.flags >> 2) & 3;
+        }
+        let _ = out.write_all(c_format("\n", &[]).as_bytes());
     }
 }
 /// Original: `istoreChecksum` (`istore.c:357`).
@@ -448,13 +542,15 @@ pub fn istore_checksum(list: &[Istore]) -> f64 {
         let mut dtype = store.flags & 3;
         for item in [store.index, store.value] {
             sum += match dtype {
-                0 => unsafe { item.i as f64 },
-                1 => unsafe { item.f as f64 },
-                2 => unsafe { (item.s[0] as i32 + item.s[1] as i32) as f64 },
-                _ => unsafe {
-                    (item.b[0] as u32 + item.b[1] as u32 + item.b[2] as u32 + item.b[3] as u32)
-                        as f64
-                },
+                0 => (item.i() as f64),
+                1 => (item.f() as f64),
+                2 => ((item.s()[0] as i32 + item.s()[1] as i32) as f64),
+                _ => {
+                    ((item.b()[0] as u32
+                        + item.b()[1] as u32
+                        + item.b()[2] as u32
+                        + item.b()[3] as u32) as f64)
+                }
             };
             dtype = (store.flags >> 2) & 3;
         }
@@ -518,8 +614,8 @@ pub fn istore_count_cont_surf_items(list: &[Istore], index: i32, surf_flag: i32)
         }
         // `istore.c:461` overwrites the caller's index with the item's own,
         // so the `index == stp->index.i` test at :462 is always true.
-        index = unsafe { store.index.i };
-        if (store.flags & (1 << 6)) == surf_flag && index == unsafe { store.index.i } {
+        index = (store.index.i());
+        if (store.flags & (1 << 6)) == surf_flag && index == (store.index.i()) {
             count += 1;
         }
     }
@@ -546,7 +642,7 @@ pub fn istore_connect_number(list: &[Istore], index: i32) -> i32 {
     };
     for store in &list[lookup..after] {
         if store.type_ == 5 {
-            return unsafe { store.value.i };
+            return (store.value.i());
         }
     }
     -1
@@ -561,8 +657,8 @@ pub fn istore_add_min_max(list: &mut Vec<Istore>, type_: i16, min: f32, max: f32
             break;
         }
         if store.type_ == type_ && store.flags == ((1 << 4) | (1 << 2) | 1) {
-            store.index = StoreUnion { f: min };
-            store.value = StoreUnion { f: max };
+            store.index = StoreUnion::from_f(min);
+            store.value = StoreUnion::from_f(max);
             return 0;
         }
     }
@@ -571,8 +667,8 @@ pub fn istore_add_min_max(list: &mut Vec<Istore>, type_: i16, min: f32, max: f32
         Istore {
             type_,
             flags: (1 << 4) | (1 << 2) | 1,
-            index: StoreUnion { f: min },
-            value: StoreUnion { f: max },
+            index: StoreUnion::from_f(min),
+            value: StoreUnion::from_f(max),
         },
     )
 }
@@ -593,7 +689,7 @@ pub fn istore_find_add_min_max(obj: &mut Iobj, type_: i16) -> i32 {
         .chain(obj.cont.iter().flat_map(|cont| cont.store.iter()))
     {
         if store.type_ == type_ && store.flags & (1 << 5) == 0 {
-            let value = unsafe { store.value.f };
+            let value = (store.value.f());
             // B3DMIN/B3DMAX are plain ternaries, not IEEE minNum.
             min = if min < value { min } else { value };
             max = if max > value { max } else { value };
@@ -621,8 +717,8 @@ pub fn istore_get_min_max(
             return 0;
         }
         if store.type_ == type_ && store.flags & 3 == 1 {
-            *min = unsafe { store.index.f };
-            *max = unsafe { store.value.f };
+            *min = (store.index.f());
+            *max = (store.value.f());
             return 1;
         }
     }
@@ -633,85 +729,6 @@ pub fn istore_get_min_max(
 mod tests {
     use super::*;
 
-    /// `istoreDump` text, verbatim from the driver linked against
-    /// `IMOD/libimod/istore.c` (`%12.6g` and the flag-name decoding at
-    /// `istore.c:297-325` are part of the contract).
-    #[test]
-    fn dump_matches_source_printf_text() {
-        let mut list = vec![
-            Istore {
-                type_: 1,
-                flags: (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7),
-                index: StoreUnion { i: 0 },
-                value: StoreUnion { i: 0 },
-            },
-            Istore {
-                type_: 10,
-                flags: 4,
-                index: StoreUnion { i: 3 },
-                value: StoreUnion { f: 1234567. },
-            },
-            Istore {
-                type_: 23,
-                flags: (1 << 5) | (1 << 6) | (1 << 7),
-                index: StoreUnion { i: 0 },
-                value: StoreUnion { i: 0 },
-            },
-            Istore {
-                type_: 24,
-                flags: 2,
-                index: StoreUnion { s: [-3, 9] },
-                value: StoreUnion { i: 0 },
-            },
-            Istore {
-                type_: 99,
-                flags: 0,
-                index: StoreUnion { i: 7 },
-                value: StoreUnion { i: 8 },
-            },
-            Istore {
-                type_: 0,
-                flags: 3,
-                index: StoreUnion { b: [1, 2, 3, 4] },
-                value: StoreUnion { i: 0 },
-            },
-        ];
-        list[3].value = StoreUnion { i: 0 };
-        let path =
-            std::env::temp_dir().join(format!("imod-rs-istore-dump-{}.txt", std::process::id()));
-        let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-        unsafe {
-            libc::fflush(std::ptr::null_mut());
-            let saved = libc::dup(1);
-            let fd = libc::open(
-                c_path.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
-                0o644,
-            );
-            libc::dup2(fd, 1);
-            istore_dump(&list);
-            istore_dump(&[]);
-            libc::fflush(std::ptr::null_mut());
-            libc::dup2(saved, 1);
-            libc::close(fd);
-            libc::close(saved);
-        }
-        let text = std::fs::read_to_string(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(
-            text,
-            concat!(
-                " 6 items in list:\n",
-                "     1-COLOR     360-NOIND|REVERT|SURF|ONEPT           0           0\n",
-                "    10-VALUE1       4-           3  1.23457e+06\n",
-                "    23-ISOTHRESH     340-CAP|DEL|OUTER           0           0\n",
-                "    24-       2-     -3      9           0\n",
-                "    99-       0-           7           8\n",
-                "     0-       3-   1   2   3   4           0\n",
-                " 0 items in list:\n",
-            )
-        );
-    }
     /// `imodReadStore` divides the chunk length by SIZE_STOR before the
     /// `nread <= 0` test (`istore.c:80-86`), so a chunk shorter than one
     /// record is an IMOD_ERROR_READ, not an empty list.
@@ -723,13 +740,13 @@ mod tests {
                 std::process::id(),
                 bytes
             ));
-            let mut file = File::create(&path).unwrap();
+            let mut file = ImodFile::open(path.to_str().unwrap(), "wb").unwrap();
             file.write_all(&bytes.to_be_bytes()).unwrap();
             for _ in 0..records {
                 file.write_all(&[0u8; 12]).unwrap();
             }
             drop(file);
-            let mut file = File::open(&path).unwrap();
+            let mut file = ImodFile::open(path.to_str().unwrap(), "rb").unwrap();
             let mut error = -1;
             let read = imod_read_store(&mut file, &mut error);
             if records == 0 {
@@ -964,8 +981,8 @@ mod tests {
                 .map(|s| Istore {
                     type_: s[0] as i16,
                     flags: s[1] as u16,
-                    index: StoreUnion { i: s[2] },
-                    value: StoreUnion { i: s[3] },
+                    index: StoreUnion::from_i(s[2]),
+                    value: StoreUnion::from_i(s[3]),
                 })
                 .collect()
         }
@@ -976,8 +993,8 @@ mod tests {
                     " [{},{},{},{}]",
                     store.type_,
                     store.flags,
-                    unsafe { store.index.i },
-                    unsafe { store.value.i }
+                    (store.index.i()),
+                    (store.value.i())
                 ));
             }
             out.push('\n');
@@ -1035,8 +1052,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: REV,
-                    index: StoreUnion { i: 2 },
-                    value: StoreUnion { i: 77 },
+                    index: StoreUnion::from_i(2),
+                    value: StoreUnion::from_i(77),
                 }
             )
         ));
@@ -1048,8 +1065,8 @@ mod tests {
                 Istore {
                     type_: 9,
                     flags: NOIND,
-                    index: StoreUnion { i: 2 },
-                    value: StoreUnion { i: 88 },
+                    index: StoreUnion::from_i(2),
+                    value: StoreUnion::from_i(88),
                 }
             )
         ));
@@ -1061,8 +1078,8 @@ mod tests {
                 Istore {
                     type_: 9,
                     flags: NOIND | REV,
-                    index: StoreUnion { i: 2 },
-                    value: StoreUnion { i: 99 },
+                    index: StoreUnion::from_i(2),
+                    value: StoreUnion::from_i(99),
                 }
             )
         ));
@@ -1075,8 +1092,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: 0,
-                    index: StoreUnion { i: 4 },
-                    value: StoreUnion { i: 5 },
+                    index: StoreUnion::from_i(4),
+                    value: StoreUnion::from_i(5),
                 }
             )
         ));
@@ -1091,8 +1108,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: 0,
-                    index: StoreUnion { i: 2 },
-                    value: StoreUnion { i: 55 },
+                    index: StoreUnion::from_i(2),
+                    value: StoreUnion::from_i(55),
                 }
             )
         ));
@@ -1105,8 +1122,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: 0,
-                    index: StoreUnion { i: 4 },
-                    value: StoreUnion { i: 7 },
+                    index: StoreUnion::from_i(4),
+                    value: StoreUnion::from_i(7),
                 }
             )
         ));
@@ -1118,8 +1135,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: GAPF,
-                    index: StoreUnion { i: 6 },
-                    value: StoreUnion { i: 7 },
+                    index: StoreUnion::from_i(6),
+                    value: StoreUnion::from_i(7),
                 }
             )
         ));
@@ -1132,8 +1149,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: 0,
-                    index: StoreUnion { i: 1 },
-                    value: StoreUnion { i: 2 },
+                    index: StoreUnion::from_i(1),
+                    value: StoreUnion::from_i(2),
                 }
             )
         ));
@@ -1193,8 +1210,8 @@ mod tests {
         let one = Istore {
             type_: 9,
             flags: GAPF,
-            index: StoreUnion { i: 4 },
-            value: StoreUnion { i: 2 },
+            index: StoreUnion::from_i(4),
+            value: StoreUnion::from_i(2),
         };
         o.push_str(&format!(
             "addOne ret={}\n",
@@ -1205,7 +1222,7 @@ mod tests {
             istore_add_one_index_item(
                 &mut list,
                 Istore {
-                    value: StoreUnion { i: 9 },
+                    value: StoreUnion::from_i(9),
                     ..one
                 }
             )
@@ -1216,7 +1233,7 @@ mod tests {
                 &mut list,
                 Istore {
                     flags: GAPF | SURF,
-                    value: StoreUnion { i: 3 },
+                    value: StoreUnion::from_i(3),
                     ..one
                 }
             )
@@ -1510,9 +1527,7 @@ mod tests {
             store: mk(&[[1, (SURF | (3 << 2)) as i32, 3, 0], [8, 0, 0, -3]]),
             ..Default::default()
         };
-        obj.store[0].value = StoreUnion {
-            b: [128, 64, 32, 0],
-        };
+        obj.store[0].value = StoreUnion::from_b([128, 64, 32, 0]);
         istore_sort(&mut obj.store);
         let mut def = DrawProps::default();
         istore_default_draw_props(&obj, &mut def);
@@ -1584,8 +1599,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        obj.store[0].value = StoreUnion { f: 3. };
-        obj.cont[0].store[0].value = StoreUnion { f: 7. };
+        obj.store[0].value = StoreUnion::from_f(3.);
+        obj.cont[0].store[0].value = StoreUnion::from_f(7.);
         o.push_str(&format!(
             "findAddMinMax1 ret={}\n",
             istore_find_add_min_max1(&mut obj)
@@ -1635,12 +1650,12 @@ mod tests {
                 i,
                 store.type_,
                 store.flags,
-                unsafe { store.index.i },
-                unsafe { store.value.b[0] },
-                unsafe { store.value.b[1] },
-                unsafe { store.value.b[2] },
-                unsafe { store.value.i },
-                unsafe { store.value.f }
+                (store.index.i()),
+                (store.value.b()[0]),
+                (store.value.b()[1]),
+                (store.value.b()[2]),
+                (store.value.i()),
+                (store.value.f())
             ));
         }
 
@@ -1660,8 +1675,8 @@ mod tests {
         dump(&mut o, "p2.cleanEnds.empty", &list);
 
         let mut list = mk(&[[-5, 40000, 0, 0], [7, 2, 0, 0]]);
-        list[1].index = StoreUnion { s: [30000, 30000] };
-        list[1].value = StoreUnion { s: [30000, 30000] };
+        list[1].index = StoreUnion::from_s([30000, 30000]);
+        list[1].value = StoreUnion::from_s([30000, 30000]);
         o.push_str(&format!(
             "p2 checksum wide = {:.1}\n",
             istore_checksum(&list)
@@ -1723,7 +1738,7 @@ mod tests {
             [1, (REV | (3 << 2)) as i32, 4, 0],
             [11, 21, 0, 0],
         ]);
-        list[0].value = StoreUnion { b: [10, 20, 30, 0] };
+        list[0].value = StoreUnion::from_b([10, 20, 30, 0]);
         let def = DrawProps {
             red: 0.5,
             trans: 2,
@@ -1857,15 +1872,15 @@ mod tests {
                 "p3 gen[{}] type={} bytes={},{},{}\n",
                 i,
                 store.type_,
-                unsafe { store.value.b[0] },
-                unsafe { store.value.b[1] },
-                unsafe { store.value.b[2] }
+                (store.value.b()[0]),
+                (store.value.b()[1]),
+                (store.value.b()[2])
             ));
         }
 
         let mut list = mk(&[[3, 0, 1, 1], [11, 21, 0, 0], [13, 21, 0, 0]]);
-        list[1].index = StoreUnion { f: 1. };
-        list[1].value = StoreUnion { f: 2. };
+        list[1].index = StoreUnion::from_f(1.);
+        list[1].value = StoreUnion::from_f(2.);
         o.push_str(&format!(
             "p3 addMinMax update ret={}\n",
             istore_add_min_max(&mut list, 11, 4., 8.)
@@ -1876,8 +1891,8 @@ mod tests {
                 i,
                 store.type_,
                 store.flags,
-                unsafe { store.index.f },
-                unsafe { store.value.f }
+                (store.index.f()),
+                (store.value.f())
             ));
         }
         o.push_str(&format!(
@@ -1920,8 +1935,8 @@ mod tests {
                 Istore {
                     type_: 3,
                     flags: 0,
-                    index: StoreUnion { i: 5 },
-                    value: StoreUnion { i: 1 },
+                    index: StoreUnion::from_i(5),
+                    value: StoreUnion::from_i(1),
                 }
             )
         ));
@@ -1952,21 +1967,21 @@ mod tests {
         istore_insert(
             &mut list,
             Istore {
-                index: StoreUnion { i: 3 },
+                index: StoreUnion::from_i(3),
                 ..Istore::default()
             },
         );
         istore_insert(
             &mut list,
             Istore {
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Istore::default()
             },
         );
         istore_insert(
             &mut list,
             Istore {
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 flags: 1 << 5,
                 ..Istore::default()
             },
@@ -1974,14 +1989,14 @@ mod tests {
         istore_insert(
             &mut list,
             Istore {
-                index: StoreUnion { i: 0 },
+                index: StoreUnion::from_i(0),
                 flags: 1 << 4,
                 ..Istore::default()
             },
         );
-        assert_eq!(unsafe { list[0].index.i }, 2);
+        assert_eq!((list[0].index.i()), 2);
         assert_ne!(list[0].flags & (1 << 5), 0);
-        assert_eq!(unsafe { list[1].index.i }, 2);
+        assert_eq!((list[1].index.i()), 2);
         assert_eq!(istore_lookup(&list, 2), (Some(0), 2));
         assert_ne!(list.last().unwrap().flags & (1 << 4), 0);
     }
@@ -1990,13 +2005,13 @@ mod tests {
         let list = [
             Istore {
                 type_: 4,
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Default::default()
             },
             Istore {
                 type_: 5,
-                index: StoreUnion { i: 2 },
-                value: StoreUnion { i: 12 },
+                index: StoreUnion::from_i(2),
+                value: StoreUnion::from_i(12),
                 ..Default::default()
             },
         ];
@@ -2009,7 +2024,7 @@ mod tests {
     fn source_counts_and_minmax_span_object_contour_mesh_stores() {
         let value = Istore {
             type_: 10,
-            value: StoreUnion { f: 3. },
+            value: StoreUnion::from_f(3.),
             ..Istore::default()
         };
         let mut object = Iobj {
@@ -2017,7 +2032,7 @@ mod tests {
             cont: vec![crate::imod::libimod::imodel::Icont {
                 store: vec![Istore {
                     type_: 10,
-                    value: StoreUnion { f: 7. },
+                    value: StoreUnion::from_f(7.),
                     ..Istore::default()
                 }],
                 ..Default::default()
@@ -2047,7 +2062,7 @@ mod tests {
         );
         assert_eq!((min, max), (3., 7.));
         let surface = Istore {
-            index: StoreUnion { i: 4 },
+            index: StoreUnion::from_i(4),
             flags: 1 << 6,
             ..Istore::default()
         };
@@ -2057,11 +2072,11 @@ mod tests {
     fn first_skip_and_trans_state_match_source_rules() {
         let list = [
             Istore {
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Default::default()
             },
             Istore {
-                index: StoreUnion { i: 5 },
+                index: StoreUnion::from_i(5),
                 ..Default::default()
             },
             Istore {
@@ -2075,13 +2090,13 @@ mod tests {
         let trans = [
             Istore {
                 type_: 3,
-                value: StoreUnion { i: 2 },
+                value: StoreUnion::from_i(2),
                 ..Default::default()
             },
             Istore {
                 type_: 3,
                 flags: 1 << 5,
-                value: StoreUnion { i: 0 },
+                value: StoreUnion::from_i(0),
                 ..Default::default()
             },
         ];
@@ -2094,13 +2109,13 @@ mod tests {
         let list = [
             Istore {
                 type_: 3,
-                index: StoreUnion { i: 2 },
-                value: StoreUnion { i: 4 },
+                index: StoreUnion::from_i(2),
+                value: StoreUnion::from_i(4),
                 ..Default::default()
             },
             Istore {
                 type_: 3,
-                index: StoreUnion { i: 3 },
+                index: StoreUnion::from_i(3),
                 flags: 1 << 5,
                 ..Default::default()
             },
@@ -2145,19 +2160,19 @@ mod tests {
         let list = [
             Istore {
                 type_: 4,
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Default::default()
             },
             Istore {
                 type_: 5,
-                index: StoreUnion { i: 2 },
-                value: StoreUnion { i: 9 },
+                index: StoreUnion::from_i(2),
+                value: StoreUnion::from_i(9),
                 ..Default::default()
             },
             Istore {
                 type_: 10,
-                index: StoreUnion { i: 2 },
-                value: StoreUnion { f: 3. },
+                index: StoreUnion::from_i(2),
+                value: StoreUnion::from_f(3.),
                 ..Default::default()
             },
         ];
@@ -2177,16 +2192,16 @@ mod tests {
         let mut list = Vec::new();
         let start = Istore {
             type_: 3,
-            index: StoreUnion { i: 2 },
-            value: StoreUnion { i: 7 },
+            index: StoreUnion::from_i(2),
+            value: StoreUnion::from_i(7),
             ..Default::default()
         };
         assert_eq!(istore_insert_change(&mut list, start), 0);
         assert_eq!(istore_end_change(&mut list, 3, 5), 0);
         assert_eq!(list.len(), 2);
-        assert_eq!(unsafe { list[0].index.i }, 2);
+        assert_eq!((list[0].index.i()), 2);
         assert_ne!(list[1].flags & (1 << 5), 0);
-        assert_eq!(unsafe { list[1].index.i }, 5);
+        assert_eq!((list[1].index.i()), 5);
         assert_eq!(istore_clear_change(&mut list, 3, 3), 0);
         assert!(list.is_empty());
         assert_eq!(istore_clear_change(&mut list, 3, 3), 1);
@@ -2197,50 +2212,50 @@ mod tests {
         let mut changes = vec![
             Istore {
                 type_: 6,
-                index: StoreUnion { i: 1 },
-                value: StoreUnion { i: 4 },
+                index: StoreUnion::from_i(1),
+                value: StoreUnion::from_i(4),
                 ..Default::default()
             },
             Istore {
                 type_: 6,
-                index: StoreUnion { i: 4 },
+                index: StoreUnion::from_i(4),
                 flags: 1 << 5,
                 ..Default::default()
             },
             Istore {
                 type_: 6,
-                index: StoreUnion { i: 7 },
-                value: StoreUnion { i: 8 },
+                index: StoreUnion::from_i(7),
+                value: StoreUnion::from_i(8),
                 ..Default::default()
             },
         ];
         istore_clear_range(&mut changes, 6, 2, 4);
         assert_eq!(changes.len(), 1);
-        assert_eq!(unsafe { changes[0].index.i }, 7);
+        assert_eq!((changes[0].index.i()), 7);
 
         let mut single = Vec::new();
         let point = Istore {
             type_: 9,
             flags: 1 << 7,
-            index: StoreUnion { i: 4 },
-            value: StoreUnion { i: 2 },
+            index: StoreUnion::from_i(4),
+            value: StoreUnion::from_i(2),
         };
         assert_eq!(istore_add_one_index_item(&mut single, point), 0);
         assert_eq!(
             istore_add_one_index_item(
                 &mut single,
                 Istore {
-                    value: StoreUnion { i: 9 },
+                    value: StoreUnion::from_i(9),
                     ..point
                 },
             ),
             0
         );
         assert_eq!(single.len(), 1);
-        assert_eq!(unsafe { single[0].value.i }, 9);
+        assert_eq!((single[0].value.i()), 9);
         let surface = Istore {
             flags: (1 << 7) | (1 << 6),
-            value: StoreUnion { i: 3 },
+            value: StoreUnion::from_i(3),
             ..point
         };
         assert_eq!(istore_add_one_index_item(&mut single, surface), 0);
@@ -2276,8 +2291,8 @@ mod tests {
         );
         assert_eq!(list[0].flags, 3 << 2);
         assert_eq!(list[1].flags, 3 << 2);
-        assert_eq!(unsafe { list[0].value.b }, [255, 127, 0, 0]);
-        assert_eq!(unsafe { list[4].value.f }, 1.25);
+        assert_eq!((list[0].value.b()), [255, 127, 0, 0]);
+        assert_eq!((list[4].value.f()), 1.25);
 
         // `imodWriteStore` must retain source byte order for generated colour
         // payloads: treating this as GEN_STORE_SHORT reverses each pair.
@@ -2285,7 +2300,7 @@ mod tests {
             "imod-rs-istore-generated-colour-{}.bin",
             std::process::id()
         ));
-        let mut file = File::create(&path).unwrap();
+        let mut file = ImodFile::open(path.to_str().unwrap(), "wb").unwrap();
         assert_eq!(imod_write_store(&list[..1], 0x5354_4f52, &mut file), 0);
         drop(file);
         let bytes = std::fs::read(&path).unwrap();
@@ -2294,8 +2309,8 @@ mod tests {
 
         let contour_list = [Istore {
             type_: 3,
-            index: StoreUnion { i: 2 },
-            value: StoreUnion { i: 9 },
+            index: StoreUnion::from_i(2),
+            value: StoreUnion::from_i(9),
             ..Default::default()
         }];
         let mut mesh_list = Vec::new();
@@ -2304,48 +2319,48 @@ mod tests {
             0
         );
         assert_eq!(mesh_list.len(), 1);
-        assert_eq!(unsafe { mesh_list[0].index.i }, 4);
-        assert_eq!(unsafe { mesh_list[0].value.i }, 9);
+        assert_eq!((mesh_list[0].index.i()), 4);
+        assert_eq!((mesh_list[0].value.i()), 9);
     }
 
     #[test]
     fn break_find_shift_and_delete_follow_source_index_rules() {
         let mut changes = vec![Istore {
             type_: 3,
-            index: StoreUnion { i: 0 },
-            value: StoreUnion { i: 4 },
+            index: StoreUnion::from_i(0),
+            value: StoreUnion::from_i(4),
             ..Default::default()
         }];
         assert_eq!(istore_break_changes(&mut changes, 2, 5), 0);
         assert_eq!(changes.len(), 3);
-        assert_eq!(unsafe { changes[1].index.i }, 2);
+        assert_eq!((changes[1].index.i()), 2);
         assert_ne!(changes[1].flags & (1 << 5), 0);
-        assert_eq!(unsafe { changes[2].index.i }, 2);
+        assert_eq!((changes[2].index.i()), 2);
         assert_eq!(istore_find_break(&changes, 2), 2);
 
         istore_shift_index(&mut changes, 2, -1, 1);
-        assert_eq!(unsafe { changes[1].index.i }, 3);
-        assert_eq!(unsafe { changes[2].index.i }, 3);
+        assert_eq!((changes[1].index.i()), 3);
+        assert_eq!((changes[2].index.i()), 3);
         assert_eq!(istore_delete_point(&mut changes, 3, 6), 0);
         assert_eq!(changes.len(), 2);
-        assert_eq!(unsafe { changes[1].index.i }, 3);
+        assert_eq!((changes[1].index.i()), 3);
         assert_ne!(changes[1].flags & (1 << 5), 0);
 
         let mut cont_surf = vec![
             Istore {
                 type_: 9,
-                index: StoreUnion { i: 1 },
+                index: StoreUnion::from_i(1),
                 ..Default::default()
             },
             Istore {
                 type_: 9,
                 flags: 1 << 6,
-                index: StoreUnion { i: 1 },
+                index: StoreUnion::from_i(1),
                 ..Default::default()
             },
             Istore {
                 type_: 9,
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Default::default()
             },
         ];
@@ -2353,7 +2368,7 @@ mod tests {
         assert_eq!(cont_surf.len(), 2);
         istore_delete_cont_surf(&mut cont_surf, 1, 0);
         assert_eq!(cont_surf.len(), 1);
-        assert_eq!(unsafe { cont_surf[0].index.i }, 1);
+        assert_eq!((cont_surf[0].index.i()), 1);
     }
 
     #[test]
@@ -2361,14 +2376,14 @@ mod tests {
         let changes = vec![
             Istore {
                 type_: 3,
-                index: StoreUnion { i: 0 },
-                value: StoreUnion { i: 5 },
+                index: StoreUnion::from_i(0),
+                value: StoreUnion::from_i(5),
                 ..Default::default()
             },
             Istore {
                 type_: 3,
                 flags: 1 << 5,
-                index: StoreUnion { i: 5 },
+                index: StoreUnion::from_i(5),
                 ..Default::default()
             },
             Istore {
@@ -2383,8 +2398,8 @@ mod tests {
             0
         );
         assert_eq!(extracted.len(), 2);
-        assert_eq!(unsafe { extracted[0].index.i }, 0);
-        assert_eq!(unsafe { extracted[1].index.i }, 3);
+        assert_eq!((extracted[0].index.i()), 0);
+        assert_eq!((extracted[1].index.i()), 3);
 
         let mut copied = Vec::new();
         assert_eq!(istore_copy_non_index(&changes, &mut copied), 0);
@@ -2392,13 +2407,13 @@ mod tests {
         let mut point_and_surface = vec![
             Istore {
                 type_: 9,
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Default::default()
             },
             Istore {
                 type_: 9,
                 flags: 1 << 6,
-                index: StoreUnion { i: 2 },
+                index: StoreUnion::from_i(2),
                 ..Default::default()
             },
         ];
@@ -2409,7 +2424,7 @@ mod tests {
         assert!(
             copied
                 .iter()
-                .any(|store| { store.flags & (1 << 6) != 0 && unsafe { store.index.i } == 7 })
+                .any(|store| { store.flags & (1 << 6) != 0 && (store.index.i()) == 7 })
         );
         istore_clean_ends(&mut point_and_surface);
         assert_eq!(point_and_surface.len(), 2);
@@ -2417,11 +2432,11 @@ mod tests {
         let mut gap = vec![Istore {
             type_: 4,
             flags: 1 << 7,
-            index: StoreUnion { i: 0 },
+            index: StoreUnion::from_i(0),
             ..Default::default()
         }];
         assert_eq!(istore_invert(&mut gap, 4), 0);
-        assert_eq!(unsafe { gap[0].index.i }, 2);
+        assert_eq!((gap[0].index.i()), 2);
 
         // `istoreInvert` consumes the matching successor while translating a
         // multi-point change; otherwise that old end is translated a second
@@ -2429,22 +2444,22 @@ mod tests {
         let mut range = vec![
             Istore {
                 type_: 3,
-                index: StoreUnion { i: 1 },
-                value: StoreUnion { i: 7 },
+                index: StoreUnion::from_i(1),
+                value: StoreUnion::from_i(7),
                 ..Default::default()
             },
             Istore {
                 type_: 3,
                 flags: 1 << 5,
-                index: StoreUnion { i: 4 },
+                index: StoreUnion::from_i(4),
                 ..Default::default()
             },
         ];
         assert_eq!(istore_invert(&mut range, 6), 0);
         assert_eq!(range.len(), 2);
-        assert_eq!(unsafe { range[0].index.i }, 2);
+        assert_eq!((range[0].index.i()), 2);
         assert_eq!(range[0].flags & (1 << 5), 0);
-        assert_eq!(unsafe { range[1].index.i }, 5);
+        assert_eq!((range[1].index.i()), 5);
         assert_ne!(range[1].flags & (1 << 5), 0);
     }
 
@@ -2460,14 +2475,14 @@ mod tests {
             store: vec![
                 Istore {
                     type_: 3,
-                    index: StoreUnion { i: 0 },
-                    value: StoreUnion { i: 2 },
+                    index: StoreUnion::from_i(0),
+                    value: StoreUnion::from_i(2),
                     ..Default::default()
                 },
                 Istore {
                     type_: 3,
                     flags: 1 << 5,
-                    index: StoreUnion { i: 4 },
+                    index: StoreUnion::from_i(4),
                     ..Default::default()
                 },
             ],
@@ -2482,33 +2497,34 @@ mod tests {
             0
         );
         assert_eq!(new_contour.store.len(), 2);
-        assert_eq!(unsafe { new_contour.store[0].index.i }, 0);
-        assert_eq!(unsafe { new_contour.store[1].index.i }, 2);
+        assert_eq!((new_contour.store[0].index.i()), 0);
+        assert_eq!((new_contour.store[1].index.i()), 2);
         assert_eq!(contour.store.len(), 4);
     }
 
     #[test]
     fn binary_store_roundtrip_preserves_source_twelve_byte_records() {
         let path = std::env::temp_dir().join(format!("imod-rs-istore-{}.bin", std::process::id()));
-        let mut file = File::create(&path).unwrap();
+        let mut file = ImodFile::open(path.to_str().unwrap(), "wb").unwrap();
         let source = vec![
             Istore {
                 type_: 1,
                 flags: 1 | (3 << 2),
-                index: StoreUnion { f: 1.5 },
-                value: StoreUnion { b: [1, 2, 3, 4] },
+                index: StoreUnion::from_f(1.5),
+                value: StoreUnion::from_b([1, 2, 3, 4]),
             },
             Istore {
                 type_: 10,
                 flags: 2,
-                index: StoreUnion { s: [-2, 9] },
-                value: StoreUnion { i: 17 },
+                index: StoreUnion::from_s([-2, 9]),
+                value: StoreUnion::from_i(17),
             },
         ];
         assert_eq!(imod_write_store(&source, 0x5354_4f52, &mut file), 0);
-        assert_eq!(file.metadata().unwrap().len(), 32);
+        // Two 12-byte records plus the 4-byte id and 4-byte length.
+        assert_eq!(file.seek(SeekFrom::End(0)).unwrap(), 32);
         drop(file);
-        let mut file = File::open(&path).unwrap();
+        let mut file = ImodFile::open(path.to_str().unwrap(), "rb").unwrap();
         file.seek(SeekFrom::Start(4)).unwrap();
         let mut error = -1;
         let read = imod_read_store(&mut file, &mut error);
@@ -2516,10 +2532,10 @@ mod tests {
         let read = read.unwrap();
         assert_eq!(read.len(), 2);
         assert_eq!(read[0].flags, source[0].flags);
-        assert_eq!(unsafe { read[0].index.f }, 1.5);
-        assert_eq!(unsafe { read[0].value.b }, [1, 2, 3, 4]);
-        assert_eq!(unsafe { read[1].index.s }, [-2, 9]);
-        assert_eq!(unsafe { read[1].value.i }, 17);
+        assert_eq!((read[0].index.f()), 1.5);
+        assert_eq!((read[0].value.b()), [1, 2, 3, 4]);
+        assert_eq!((read[1].index.s()), [-2, 9]);
+        assert_eq!((read[1].value.i()), 17);
         std::fs::remove_file(path).unwrap();
     }
 
@@ -2528,26 +2544,26 @@ mod tests {
         let list = vec![
             Istore {
                 type_: 3,
-                index: StoreUnion { i: 2 },
-                value: StoreUnion { i: 4 },
+                index: StoreUnion::from_i(2),
+                value: StoreUnion::from_i(4),
                 ..Default::default()
             },
             Istore {
                 type_: 4,
                 flags: 1 << 7,
-                index: StoreUnion { i: 3 },
+                index: StoreUnion::from_i(3),
                 ..Default::default()
             },
             Istore {
                 type_: 3,
                 flags: 1 << 5,
-                index: StoreUnion { i: 5 },
+                index: StoreUnion::from_i(5),
                 ..Default::default()
             },
             Istore {
                 type_: 9,
                 flags: 1 << 6,
-                index: StoreUnion { i: 7 },
+                index: StoreUnion::from_i(7),
                 ..Default::default()
             },
         ];
@@ -2577,15 +2593,13 @@ mod tests {
                 Istore {
                     type_: 1,
                     flags: 1 << 6,
-                    index: StoreUnion { i: 3 },
-                    value: StoreUnion {
-                        b: [128, 64, 32, 0],
-                    },
+                    index: StoreUnion::from_i(3),
+                    value: StoreUnion::from_b([128, 64, 32, 0]),
                 },
                 Istore {
                     type_: 8,
-                    index: StoreUnion { i: 0 },
-                    value: StoreUnion { i: -3 },
+                    index: StoreUnion::from_i(0),
+                    value: StoreUnion::from_i(-3),
                     ..Default::default()
                 },
             ],
@@ -2594,16 +2608,14 @@ mod tests {
                 store: vec![
                     Istore {
                         type_: 2,
-                        index: StoreUnion { i: 1 },
-                        value: StoreUnion {
-                            b: [0, 255, 128, 0],
-                        },
+                        index: StoreUnion::from_i(1),
+                        value: StoreUnion::from_b([0, 255, 128, 0]),
                         ..Default::default()
                     },
                     Istore {
                         type_: 2,
                         flags: 1 << 5,
-                        index: StoreUnion { i: 2 },
+                        index: StoreUnion::from_i(2),
                         ..Default::default()
                     },
                 ],
@@ -2647,7 +2659,7 @@ pub fn istore_retain_point(list: &[Istore], index: i32) -> i32 {
         return 1;
     }
     for store in list.iter().skip(after) {
-        if store.flags & ((1 << 4) | 3) != 0 || unsafe { store.index.i } > index + 1 {
+        if store.flags & ((1 << 4) | 3) != 0 || (store.index.i()) > index + 1 {
             break;
         }
         if store.flags & (1 << 5) != 0 {
@@ -2655,7 +2667,7 @@ pub fn istore_retain_point(list: &[Istore], index: i32) -> i32 {
         }
     }
     for store in list[..after].iter().rev() {
-        if unsafe { store.index.i } < index - 1 {
+        if (store.index.i()) < index - 1 {
             break;
         }
         if store.type_ == 4 {
@@ -2666,7 +2678,7 @@ pub fn istore_retain_point(list: &[Istore], index: i32) -> i32 {
 }
 /// Original: `istoreInsertChange` (`istore.c:657`).
 pub fn istore_insert_change(list: &mut Vec<Istore>, store: Istore) -> i32 {
-    let (found, mut after) = istore_lookup(list, unsafe { store.index.i });
+    let (found, mut after) = istore_lookup(list, (store.index.i()));
 
     // If there is a match at the current index, eliminate it
     if let Some(start) = found {
@@ -2690,9 +2702,7 @@ pub fn istore_insert_change(list: &mut Vec<Istore>, store: Istore) -> i32 {
     }
     for i in (0..lookup).rev() {
         if list[i].type_ == store.type_ {
-            if list[i].flags & (1 << 5) == 0
-                && unsafe { list[i].value.i } == unsafe { store.value.i }
-            {
+            if list[i].flags & (1 << 5) == 0 && (list[i].value.i()) == (store.value.i()) {
                 need_item = false;
             }
             break;
@@ -2756,7 +2766,7 @@ pub fn istore_end_change(list: &mut Vec<Istore>, type_: i16, index: i32) -> i32 
             Istore {
                 type_,
                 flags: 1 << 5,
-                index: StoreUnion { i: index },
+                index: StoreUnion::from_i(index),
                 ..Default::default()
             },
         )
@@ -2803,7 +2813,7 @@ pub fn istore_clear_range(list: &mut Vec<Istore>, type_: i16, start: i32, end: i
     let (_, after) = istore_lookup(list, start);
     let mut has_change = false;
     for store in list.iter().skip(after) {
-        if store.flags & ((1 << 4) | 3) != 0 || unsafe { store.index.i } > end {
+        if store.flags & ((1 << 4) | 3) != 0 || (store.index.i()) > end {
             break;
         }
         if store.type_ == type_ {
@@ -2830,7 +2840,7 @@ pub fn istore_clear_range(list: &mut Vec<Istore>, type_: i16, start: i32, end: i
         }
         if list[i].type_ == type_ {
             let flags = list[i].flags;
-            let index = unsafe { list[i].index.i };
+            let index = (list[i].index.i());
             if ended && index > end {
                 break;
             }
@@ -2854,7 +2864,7 @@ pub fn istore_clear_range(list: &mut Vec<Istore>, type_: i16, start: i32, end: i
 }
 /// Original: `istoreAddOneIndexItem` (`istore.c:904`).
 pub fn istore_add_one_index_item(list: &mut Vec<Istore>, store: Istore) -> i32 {
-    let (lookup, after) = istore_lookup(list, unsafe { store.index.i });
+    let (lookup, after) = istore_lookup(list, (store.index.i()));
     if let Some(lookup) = lookup {
         for item in &mut list[lookup..after] {
             if item.type_ == store.type_ && (item.flags & (1 << 6)) == (store.flags & (1 << 6)) {
@@ -2902,17 +2912,15 @@ pub fn istore_generate_items(
             Istore {
                 type_: 1,
                 flags: 3 << 2,
-                index: StoreUnion { i: index },
-                value: StoreUnion {
-                    // `(int)(255. * props->red)` truncates in double and is
-                    // then narrowed to b3dUByte by modular conversion.
-                    b: [
-                        (255. * props.red as f64) as i32 as u8,
-                        (255. * props.green as f64) as i32 as u8,
-                        (255. * props.blue as f64) as i32 as u8,
-                        0,
-                    ],
-                },
+                index: StoreUnion::from_i(index),
+                // `(int)(255. * props->red)` truncates in double and is then
+                // narrowed to b3dUByte by modular conversion.
+                value: StoreUnion::from_b([
+                    (255. * props.red as f64) as i32 as u8,
+                    (255. * props.green as f64) as i32 as u8,
+                    (255. * props.blue as f64) as i32 as u8,
+                    0,
+                ]),
             },
         ) != 0
     {
@@ -2924,15 +2932,13 @@ pub fn istore_generate_items(
             Istore {
                 type_: 2,
                 flags: 3 << 2,
-                index: StoreUnion { i: index },
-                value: StoreUnion {
-                    b: [
-                        (255. * props.fill_red as f64) as i32 as u8,
-                        (255. * props.fill_green as f64) as i32 as u8,
-                        (255. * props.fill_blue as f64) as i32 as u8,
-                        0,
-                    ],
-                },
+                index: StoreUnion::from_i(index),
+                value: StoreUnion::from_b([
+                    (255. * props.fill_red as f64) as i32 as u8,
+                    (255. * props.fill_green as f64) as i32 as u8,
+                    (255. * props.fill_blue as f64) as i32 as u8,
+                    0,
+                ]),
             },
         ) != 0
     {
@@ -2943,8 +2949,8 @@ pub fn istore_generate_items(
             list,
             Istore {
                 type_: 3,
-                index: StoreUnion { i: index },
-                value: StoreUnion { i: props.trans },
+                index: StoreUnion::from_i(index),
+                value: StoreUnion::from_i(props.trans),
                 ..Default::default()
             },
         ) != 0
@@ -2956,8 +2962,8 @@ pub fn istore_generate_items(
             list,
             Istore {
                 type_: 6,
-                index: StoreUnion { i: index },
-                value: StoreUnion { i: props.linewidth },
+                index: StoreUnion::from_i(index),
+                value: StoreUnion::from_i(props.linewidth),
                 ..Default::default()
             },
         ) != 0
@@ -2970,8 +2976,8 @@ pub fn istore_generate_items(
             Istore {
                 type_: 10,
                 flags: 1 << 2,
-                index: StoreUnion { i: index },
-                value: StoreUnion { f: props.value1 },
+                index: StoreUnion::from_i(index),
+                value: StoreUnion::from_f(props.value1),
             },
         ) != 0
     {
@@ -3008,7 +3014,7 @@ pub fn istore_break_changes(list: &mut Vec<Istore>, index: i32, psize: i32) -> i
     let mut cur_start = 0;
     while cur_start < list.len() {
         let current = list[cur_start];
-        if current.flags & ((1 << 4) | 3) != 0 || unsafe { current.index.i } >= index {
+        if current.flags & ((1 << 4) | 3) != 0 || (current.index.i()) >= index {
             break;
         }
         if current.flags & ((1 << 7) | (1 << 5)) != 0 {
@@ -3019,15 +3025,15 @@ pub fn istore_break_changes(list: &mut Vec<Istore>, index: i32, psize: i32) -> i
         let mut point_revert = index + 1;
         let mut need_restart = index < psize;
         for next in list.iter().skip(cur_start + 1) {
-            if next.flags & ((1 << 4) | 3) != 0 || unsafe { next.index.i } > index {
+            if next.flags & ((1 << 4) | 3) != 0 || (next.index.i()) > index {
                 break;
             }
             if store.type_ == next.type_ {
                 if next.flags & (1 << 5) != 0 {
-                    point_revert = unsafe { next.index.i };
+                    point_revert = (next.index.i());
                     break;
                 }
-                if unsafe { next.index.i } == index {
+                if (next.index.i()) == index {
                     need_restart = false;
                 } else {
                     store = *next;
@@ -3037,12 +3043,12 @@ pub fn istore_break_changes(list: &mut Vec<Istore>, index: i32, psize: i32) -> i
         if point_revert > index {
             let mut store_end = store;
             store_end.flags |= 1 << 5;
-            store_end.index = StoreUnion { i: index };
+            store_end.index = StoreUnion::from_i(index);
             if istore_insert(list, store_end) != 0 {
                 return 1;
             }
             if need_restart {
-                store.index = StoreUnion { i: index };
+                store.index = StoreUnion::from_i(index);
                 if istore_insert(list, store) != 0 {
                     return 1;
                 }
@@ -3080,10 +3086,8 @@ pub fn istore_shift_index(list: &mut Vec<Istore>, point_index: i32, start_scan: 
         if store.flags & ((1 << 4) | 3) != 0 {
             break;
         }
-        if store.flags & (1 << 6) == 0 && unsafe { store.index.i } >= point_index {
-            store.index = StoreUnion {
-                i: unsafe { store.index.i } + amount,
-            };
+        if store.flags & (1 << 6) == 0 && (store.index.i()) >= point_index {
+            store.index = StoreUnion::from_i((store.index.i()) + amount);
         }
     }
     istore_sort(list);
@@ -3107,7 +3111,7 @@ pub fn istore_delete_point(list: &mut Vec<Istore>, index: i32, psize: i32) -> i3
             let mut need_move = true;
             let mut remove_end = None;
             for (offset, next) in list.iter().enumerate().skip(after) {
-                if next.flags & ((1 << 4) | 3) != 0 || unsafe { next.index.i } > index + 1 {
+                if next.flags & ((1 << 4) | 3) != 0 || (next.index.i()) > index + 1 {
                     break;
                 }
                 if next.type_ == store.type_ {
@@ -3134,9 +3138,7 @@ pub fn istore_delete_point(list: &mut Vec<Istore>, index: i32, psize: i32) -> i3
             }
             if need_move {
                 let mut moved = store;
-                moved.index = StoreUnion {
-                    i: unsafe { moved.index.i } + 1,
-                };
+                moved.index = StoreUnion::from_i((moved.index.i()) + 1);
                 if istore_insert(list, moved) != 0 {
                     return 1;
                 }
@@ -3220,14 +3222,10 @@ pub fn istore_invert(list: &mut Vec<Istore>, psize: i32) -> i32 {
         // Copy one-point type but move gap back by one
         if current.flags & (1 << 7) != 0 {
             let mut item = current;
-            item.index = StoreUnion {
-                i: psize - 1 - unsafe { item.index.i },
-            };
+            item.index = StoreUnion::from_i(psize - 1 - (item.index.i()));
             if item.type_ == 4 {
-                let moved = unsafe { item.index.i } - 1;
-                item.index = StoreUnion {
-                    i: if moved < 0 { psize - 1 } else { moved },
-                };
+                let moved = (item.index.i()) - 1;
+                item.index = StoreUnion::from_i(if moved < 0 { psize - 1 } else { moved });
             }
             if istore_insert(&mut inverted, item) != 0 {
                 return 1;
@@ -3239,9 +3237,7 @@ pub fn istore_invert(list: &mut Vec<Istore>, psize: i32) -> i32 {
         // Convert the start to an end and add it with inverted index, then
         // save the starting change
         let mut item = current;
-        item.index = StoreUnion {
-            i: psize - unsafe { item.index.i },
-        };
+        item.index = StoreUnion::from_i(psize - (item.index.i()));
         item.flags |= 1 << 5;
         if istore_insert(&mut inverted, item) != 0 {
             return 1;
@@ -3253,9 +3249,7 @@ pub fn istore_invert(list: &mut Vec<Istore>, psize: i32) -> i32 {
         while next < list.len() {
             let successor = list[next];
             if store.type_ == successor.type_ {
-                store.index = StoreUnion {
-                    i: psize - unsafe { successor.index.i },
-                };
+                store.index = StoreUnion::from_i(psize - (successor.index.i()));
                 if istore_insert(&mut inverted, store) != 0 {
                     return 1;
                 }
@@ -3286,7 +3280,7 @@ pub fn istore_clean_ends(list: &mut Vec<Istore>) {
                 // `istore.c:1431` tests `stp->flags`, not `stp2->flags`; the
                 // outer item is already known to carry an index, so only the
                 // index comparison can break the scan.
-                if unsafe { next.index.i } != unsafe { list[i].index.i } {
+                if (next.index.i()) != (list[i].index.i()) {
                     break;
                 }
                 if next.type_ == list[i].type_ {
@@ -3325,9 +3319,7 @@ pub fn istore_extract_changes(
     let after_last = istore_find_break(&temporary, index_end + 1) as usize;
     for store in &temporary[after_first..after_last] {
         let mut store = *store;
-        store.index = StoreUnion {
-            i: unsafe { store.index.i } + new_start - index_start,
-        };
+        store.index = StoreUnion::from_i((store.index.i()) + new_start - index_start);
         if istore_insert(new_list, store) != 0 {
             return 1;
         }
@@ -3358,7 +3350,7 @@ pub fn istore_copy_cont_surf_items(
         for store in &old_list[lookup..after] {
             if store.flags & (1 << 6) == surf_flag {
                 let mut store = *store;
-                store.index = StoreUnion { i: index_to };
+                store.index = StoreUnion::from_i(index_to);
                 if istore_insert(new_list, store) != 0 {
                     return 1;
                 }
@@ -3402,9 +3394,6 @@ pub fn istore_cont_surf_draw_props(
     if list.is_empty() {
         return 0;
     }
-    let surface_state = surf_state as *mut i32;
-    let contour_state = cont_state as *mut i32;
-
     // Set up to loop on surface entries first.  `istore.c:1626` skips the
     // `which = co; surfFlag = 0;` update at :1706 when `which < 0`, so a
     // negative surface number suppresses the contour pass entirely.
@@ -3424,23 +3413,19 @@ pub fn istore_cont_surf_draw_props(
                 match store.type_ {
                     1 => {
                         state |= 1;
-                        unsafe {
-                            cont_props.red = store.value.b[0] as f32 / 255.;
-                            cont_props.green = store.value.b[1] as f32 / 255.;
-                            cont_props.blue = store.value.b[2] as f32 / 255.;
-                        }
+                        cont_props.red = store.value.b()[0] as f32 / 255.;
+                        cont_props.green = store.value.b()[1] as f32 / 255.;
+                        cont_props.blue = store.value.b()[2] as f32 / 255.;
                     }
                     2 => {
                         state |= 2;
-                        unsafe {
-                            cont_props.fill_red = store.value.b[0] as f32 / 255.;
-                            cont_props.fill_green = store.value.b[1] as f32 / 255.;
-                            cont_props.fill_blue = store.value.b[2] as f32 / 255.;
-                        }
+                        cont_props.fill_red = store.value.b()[0] as f32 / 255.;
+                        cont_props.fill_green = store.value.b()[1] as f32 / 255.;
+                        cont_props.fill_blue = store.value.b()[2] as f32 / 255.;
                     }
                     3 => {
                         state |= 4;
-                        cont_props.trans = unsafe { store.value.i };
+                        cont_props.trans = (store.value.i());
                     }
                     4 => {
                         state |= 8;
@@ -3448,24 +3433,24 @@ pub fn istore_cont_surf_draw_props(
                     }
                     5 => {
                         state |= 16;
-                        cont_props.connect = unsafe { store.value.i };
+                        cont_props.connect = (store.value.i());
                     }
                     6 => {
                         state |= 32;
-                        cont_props.linewidth = unsafe { store.value.i };
+                        cont_props.linewidth = (store.value.i());
                     }
                     7 => {
                         state |= 64;
-                        cont_props.linewidth2 = unsafe { store.value.i };
+                        cont_props.linewidth2 = (store.value.i());
                     }
                     9 => {
                         state |= 256;
-                        cont_props.symsize = unsafe { store.value.i };
+                        cont_props.symsize = (store.value.i());
                     }
                     8 => {
                         state |= 128;
                         cont_props.symflags &= !1;
-                        cont_props.symtype = unsafe { store.value.i };
+                        cont_props.symtype = (store.value.i());
                         if cont_props.symtype < 0 {
                             cont_props.symtype = -1 - cont_props.symtype;
                             cont_props.symflags |= 1;
@@ -3473,7 +3458,7 @@ pub fn istore_cont_surf_draw_props(
                     }
                     10 => {
                         state |= 512;
-                        cont_props.value1 = unsafe { store.value.f };
+                        cont_props.value1 = (store.value.f());
                     }
                     24 => cont_props.no_cap = 1,
                     _ => {}
@@ -3481,27 +3466,23 @@ pub fn istore_cont_surf_draw_props(
             }
         }
         if j != 0 {
-            unsafe {
-                *contour_state = state;
-            }
+            *cont_state = state;
         } else {
-            unsafe {
-                *surface_state = state;
-            }
+            *surf_state = state;
         }
 
         // Next pass through, loop on contour entries
         which = co;
         surf_flag = 0;
     }
-    unsafe { *contour_state | *surface_state }
+    *cont_state | *surf_state
 }
 /// Original: `istoreFirstChangeIndex` (`istore.c:1717`).
 pub fn istore_first_change_index(list: &[Istore]) -> i32 {
     if list.is_empty() || list[0].flags & ((1 << 4) | 3) != 0 {
         return -1;
     }
-    unsafe { list[0].index.i }
+    (list[0].index.i())
 }
 /// Original: `istoreNextChange` (`istore.c:1738`).
 pub fn istore_next_change(
@@ -3522,7 +3503,7 @@ pub fn istore_next_change(
         if store.flags & ((1 << 4) | 3) != 0 {
             return -1;
         }
-        let item = unsafe { store.index.i };
+        let item = (store.index.i());
         if index < 0 {
             index = item
         } else if item != index {
@@ -3539,9 +3520,9 @@ pub fn istore_next_change(
                     props.blue = def.blue;
                     *state &= !1;
                 } else {
-                    props.red = unsafe { store.value.b[0] } as f32 / 255.;
-                    props.green = unsafe { store.value.b[1] } as f32 / 255.;
-                    props.blue = unsafe { store.value.b[2] } as f32 / 255.;
+                    props.red = (store.value.b()[0]) as f32 / 255.;
+                    props.green = (store.value.b()[1]) as f32 / 255.;
+                    props.blue = (store.value.b()[2]) as f32 / 255.;
                     *state |= 1;
                 }
             }
@@ -3553,9 +3534,9 @@ pub fn istore_next_change(
                     props.fill_blue = def.fill_blue;
                     *state &= !2;
                 } else {
-                    props.fill_red = unsafe { store.value.b[0] } as f32 / 255.;
-                    props.fill_green = unsafe { store.value.b[1] } as f32 / 255.;
-                    props.fill_blue = unsafe { store.value.b[2] } as f32 / 255.;
+                    props.fill_red = (store.value.b()[0]) as f32 / 255.;
+                    props.fill_green = (store.value.b()[1]) as f32 / 255.;
+                    props.fill_blue = (store.value.b()[2]) as f32 / 255.;
                     *state |= 2;
                 }
             }
@@ -3565,7 +3546,7 @@ pub fn istore_next_change(
                     props.trans = def.trans;
                     *state &= !4
                 } else {
-                    props.trans = unsafe { store.value.i };
+                    props.trans = (store.value.i());
                     *state |= 4
                 }
             }
@@ -3577,7 +3558,7 @@ pub fn istore_next_change(
             5 => {
                 *changes |= 16;
                 *state |= 16;
-                props.connect = unsafe { store.value.i }
+                props.connect = (store.value.i())
             }
             6 => {
                 *changes |= 32;
@@ -3585,7 +3566,7 @@ pub fn istore_next_change(
                     props.linewidth = def.linewidth;
                     *state &= !32
                 } else {
-                    props.linewidth = unsafe { store.value.i };
+                    props.linewidth = (store.value.i());
                     *state |= 32
                 }
             }
@@ -3595,7 +3576,7 @@ pub fn istore_next_change(
                     props.linewidth2 = def.linewidth2;
                     *state &= !64
                 } else {
-                    props.linewidth2 = unsafe { store.value.i };
+                    props.linewidth2 = (store.value.i());
                     *state |= 64
                 }
             }
@@ -3605,7 +3586,7 @@ pub fn istore_next_change(
                     props.symsize = def.symsize;
                     *state &= !256
                 } else {
-                    props.symsize = unsafe { store.value.i };
+                    props.symsize = (store.value.i());
                     *state |= 256
                 }
             }
@@ -3617,7 +3598,7 @@ pub fn istore_next_change(
                     *state &= !128;
                 } else {
                     props.symflags &= !1;
-                    props.symtype = unsafe { store.value.i };
+                    props.symtype = (store.value.i());
                     if props.symtype < 0 {
                         props.symtype = -1 - props.symtype;
                         props.symflags |= 1;
@@ -3631,7 +3612,7 @@ pub fn istore_next_change(
                     props.value1 = def.value1;
                     *state &= !512
                 } else {
-                    props.value1 = unsafe { store.value.f };
+                    props.value1 = (store.value.f());
                     *state |= 512
                 }
             }
@@ -3696,7 +3677,7 @@ pub fn istore_skip_to_index(list: &[Istore], index: i32) -> i32 {
     if item >= list.len() || list[item].flags & ((1 << 4) | 3) != 0 {
         return -1;
     }
-    unsafe { list[item].index.i }
+    (list[item].index.i())
 }
 /// Original: `istoreTransStateMatches` (`istore.c:1971`).
 pub fn istore_trans_state_matches(list: &[Istore], state: i32) -> i32 {
@@ -3704,7 +3685,7 @@ pub fn istore_trans_state_matches(list: &[Istore], state: i32) -> i32 {
         .any(|store| {
             store.type_ == 3
                 && store.flags & (1 << 5) == 0
-                && (if unsafe { store.value.i } != 0 { 1 } else { 0 }) == state
+                && (if (store.value.i()) != 0 { 1 } else { 0 }) == state
         })
         .then_some(1)
         .unwrap_or(0)

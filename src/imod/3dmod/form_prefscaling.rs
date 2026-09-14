@@ -1,8 +1,6 @@
 //! Translation of `IMOD/3dmod/form_prefscaling.cpp` and `form_prefscaling.h`.
 #![allow(dead_code)]
 
-use core::ffi::c_void;
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ImodPrefStruct {
     pub load_ushorts: bool,
@@ -56,12 +54,16 @@ pub enum PrefScalingSpinBox {
     AutoSdSpinBox,
 }
 
+/// The `QButtonGroup *` (and other native object) arguments below are opaque
+/// native identities, spelled the way `DockingDialogNativeBoundary` spells
+/// them: a frontend which owns Qt can use its pointer cast to `usize`, a
+/// non-Qt frontend a stable application handle, and `0` is the source's null.
 pub trait PrefScalingNativeBoundary {
     fn setup_ui(&mut self);
-    fn create_button_group(&mut self) -> *mut c_void;
-    fn group_add_button(&mut self, group: *mut c_void, button: PrefScalingButton, id: i32);
-    fn connect_scan_group_clicked(&mut self, group: *mut c_void);
-    fn connect_piece_group_clicked(&mut self, group: *mut c_void);
+    fn create_button_group(&mut self) -> usize;
+    fn group_add_button(&mut self, group: usize, button: PrefScalingButton, id: i32);
+    fn connect_scan_group_clicked(&mut self, group: usize);
+    fn connect_piece_group_clicked(&mut self, group: usize);
     fn connect_auto_mean_value_changed(&mut self);
     fn connect_auto_sd_value_changed(&mut self);
     fn connect_set_target_clicked(&mut self);
@@ -70,7 +72,7 @@ pub trait PrefScalingNativeBoundary {
     fn set_auto_sd_enabled(&mut self, enabled: bool);
     fn set_checked(&mut self, control: PrefScalingCheckBox, value: bool);
     fn set_spin_box(&mut self, control: PrefScalingSpinBox, value: i32);
-    fn set_group(&mut self, group: *mut c_void, value: i32);
+    fn set_group(&mut self, group: usize, value: i32);
     fn set_auto_con_at_start(&mut self, value: i32);
     fn checked(&self, control: PrefScalingCheckBox) -> bool;
     fn spin_box_value(&self, control: PrefScalingSpinBox) -> i32;
@@ -83,8 +85,8 @@ pub trait PrefScalingNativeBoundary {
 #[derive(Debug)]
 pub struct PrefScalingForm {
     pub m_prefs: ImodPrefStruct,
-    pub scan_group: *mut c_void,
-    pub piece_group: *mut c_void,
+    pub scan_group: usize,
+    pub piece_group: usize,
 }
 
 impl PrefScalingForm {
@@ -96,8 +98,8 @@ impl PrefScalingForm {
         native.setup_ui();
         let mut form = Self {
             m_prefs: prefs,
-            scan_group: core::ptr::null_mut(),
-            piece_group: core::ptr::null_mut(),
+            scan_group: 0,
+            piece_group: 0,
         };
         form.init(cvi, native);
         form
@@ -164,8 +166,13 @@ impl PrefScalingForm {
         if range <= 0 {
             range = 1;
         }
-        let target_mean = (255. * (image_mean - cvi.black as f32) / range as f32 + 0.5) as i32;
-        let target_sd = (255. * image_sd / range as f32 - 0.5) as i32;
+        // `255.` and `0.5` are double literals in the source, so `imageMean -
+        // App->cvi->black` is the only single-precision step: the int converts to
+        // float for the subtraction, and that float then widens for the multiply,
+        // divide and add, which all happen in double.
+        let target_mean =
+            (255. * (image_mean - cvi.black as f32) as f64 / range as f64 + 0.5) as i32;
+        let target_sd = (255. * image_sd as f64 / range as f64 - 0.5) as i32;
         native.set_spin_box(PrefScalingSpinBox::AutoMeanSpinBox, target_mean);
         native.set_spin_box(PrefScalingSpinBox::AutoSdSpinBox, target_sd);
         self.m_prefs.auto_target_mean = native.spin_box_value(PrefScalingSpinBox::AutoMeanSpinBox);
@@ -227,16 +234,16 @@ mod tests {
 
     impl PrefScalingNativeBoundary for Native {
         fn setup_ui(&mut self) {}
-        fn create_button_group(&mut self) -> *mut c_void {
-            core::ptr::dangling_mut()
+        fn create_button_group(&mut self) -> usize {
+            1
         }
-        fn group_add_button(&mut self, _: *mut c_void, b: PrefScalingButton, id: i32) {
+        fn group_add_button(&mut self, _: usize, b: PrefScalingButton, id: i32) {
             self.buttons.push((b, id));
         }
-        fn connect_scan_group_clicked(&mut self, _: *mut c_void) {
+        fn connect_scan_group_clicked(&mut self, _: usize) {
             self.connections += 1;
         }
-        fn connect_piece_group_clicked(&mut self, _: *mut c_void) {
+        fn connect_piece_group_clicked(&mut self, _: usize) {
             self.connections += 1;
         }
         fn connect_auto_mean_value_changed(&mut self) {
@@ -269,7 +276,7 @@ mod tests {
         fn set_spin_box(&mut self, c: PrefScalingSpinBox, v: i32) {
             self.spins[c as usize] = v;
         }
-        fn set_group(&mut self, _: *mut c_void, _: i32) {}
+        fn set_group(&mut self, _: usize, _: i32) {}
         fn set_auto_con_at_start(&mut self, v: i32) {
             self.auto_start = v;
         }
@@ -324,6 +331,35 @@ mod tests {
             (form.m_prefs.auto_target_mean, form.m_prefs.auto_target_sd),
             (128, 25)
         );
+    }
+
+    /// `form_prefscaling.cpp:119-120` writes `255.` and `0.5` as double
+    /// literals, so `imageMean - App->cvi->black` is the only single-precision
+    /// step and the multiply, divide and add that follow are all double. Both
+    /// inputs here sit just under a truncation boundary in double and just over
+    /// it in an all-`f32` evaluation, which is what the translation used to do.
+    #[test]
+    fn target_widens_to_double_after_the_single_precision_subtraction() {
+        let mut native = Native {
+            mean_sd: Some((25558.1, 0., 0., 0.)),
+            ..Default::default()
+        };
+        let cvi = CurrentImageInfo {
+            black: 7271,
+            white: 7280,
+            ..Default::default()
+        };
+        let mut form = PrefScalingForm::new(ImodPrefStruct::default(), cvi, &mut native);
+        form.set_target_clicked(cvi, &mut native);
+        assert_eq!(form.m_prefs.auto_target_mean, 518134);
+        native.mean_sd = Some((0., 13311.8, 0., 0.));
+        let cvi = CurrentImageInfo {
+            black: 0,
+            white: 3434,
+            ..Default::default()
+        };
+        form.set_target_clicked(cvi, &mut native);
+        assert_eq!(form.m_prefs.auto_target_sd, 987);
     }
 
     #[test]

@@ -5,14 +5,12 @@ use crate::imod::libcfshr::autodoc::{
     adoc_clear, adoc_get_three_integers, adoc_lookup_by_name_value, adoc_open_image_metadata,
     adoc_set_current,
 };
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::b3d_error;
 use crate::imod::libiimod::mrcfiles::{LoadInfo, MrcHeader};
 use core::ffi::c_char;
 use core::sync::atomic::{AtomicI32, Ordering};
-
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
+use std::io::Read;
 
 static S_PIECE_KEY_IND: AtomicI32 = AtomicI32::new(0);
 
@@ -21,47 +19,80 @@ pub unsafe fn mrc_plist_li(li: *mut LoadInfo, hdata: *mut MrcHeader, fname: *con
     if fname.is_null() {
         return 1;
     }
-    let fin = unsafe { libc::fopen(fname, c"r".as_ptr()) };
-    if fin.is_null() {
+    let Some(mut fin) = ImodFile::open(
+        &unsafe { core::ffi::CStr::from_ptr(fname) }.to_string_lossy(),
+        "r",
+    ) else {
         unsafe {
             (*li).plist = 0;
-            b3d_error(stderr, format_args!("ERROR opening piece list file"));
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!("ERROR opening piece list file"),
+            );
         }
         return -1;
-    }
-    let retval = unsafe { mrc_plist_load(li, hdata, fin) };
-    unsafe { libc::fclose(fin) };
+    };
+    let retval = unsafe { mrc_plist_load(li, hdata, &mut fin) };
+    drop(fin);
     retval
 }
 
 /// Matches C `mrc_plist_load(IloadInfo *, MrcHeader *, FILE *)` (`plist.c:43`).
-pub unsafe fn mrc_plist_load(
-    li: *mut LoadInfo,
-    hdata: *mut MrcHeader,
-    fin: *mut libc::FILE,
-) -> i32 {
+pub unsafe fn mrc_plist_load(li: *mut LoadInfo, hdata: *mut MrcHeader, fin: &mut ImodFile) -> i32 {
     unsafe { plist_load(fin, li, (*hdata).nx, (*hdata).ny, (*hdata).nz) }
 }
 
 /// Matches C static `plist_load` (`plist.c:48`).
-unsafe fn plist_load(fin: *mut libc::FILE, li: *mut LoadInfo, nx: i32, ny: i32, nz: i32) -> i32 {
+unsafe fn plist_load(fin: &mut ImodFile, li: *mut LoadInfo, nx: i32, ny: i32, nz: i32) -> i32 {
     unsafe {
         (*li).plist = nz;
-        (*li).pcoords = libc::malloc(core::mem::size_of::<i32>() * 3 * nz as usize).cast();
+        (*li).pcoords = Some(vec![0i32; 3 * nz as usize]);
+        // `plist.c:56` is `fscanf(fin, "%d %d %d", &x, &y, &z)`.  `%d` skips
+        // leading whitespace, takes an optional sign and digits, and stops at
+        // the first character that cannot extend the number; the call returns
+        // how many of the three it filled, or `EOF` when the input ends before
+        // any conversion at all.  Reading the file once and walking
+        // whitespace-separated tokens is that, with the same two outcomes
+        // distinguished, which matters because the source prints its error
+        // only when the result is not `EOF`.
+        let mut text = String::new();
+        let _ = fin.read_to_string(&mut text);
+        let mut tokens = text.split_ascii_whitespace();
         for i in 0..nz {
-            let mut x = 0;
-            let mut y = 0;
-            let mut z = 0;
-            let scanret = libc::fscanf(fin, c"%d %d %d".as_ptr(), &mut x, &mut y, &mut z);
+            let mut value = [0i32; 3];
+            let mut scanret = 0;
+            for field in 0..3 {
+                let Some(token) = tokens.next() else {
+                    scanret = if field == 0 { -1 } else { field };
+                    break;
+                };
+                let end = token
+                    .char_indices()
+                    .position(|(at, c)| {
+                        !(c.is_ascii_digit() || (at == 0 && (c == '-' || c == '+')))
+                    })
+                    .unwrap_or(token.len());
+                match token[..end].parse::<i32>() {
+                    Ok(parsed) => {
+                        value[field as usize] = parsed;
+                        scanret = field + 1;
+                    }
+                    Err(_) => {
+                        scanret = field;
+                        break;
+                    }
+                }
+            }
             if scanret == 3 {
-                *(*li).pcoords.add((i * 3) as usize) = x;
-                *(*li).pcoords.add((i * 3 + 1) as usize) = y;
-                *(*li).pcoords.add((i * 3 + 2) as usize) = z;
+                let pcoords = (&mut (*li).pcoords).as_mut().unwrap();
+                pcoords[(i * 3) as usize] = value[0];
+                pcoords[(i * 3 + 1) as usize] = value[1];
+                pcoords[(i * 3 + 2) as usize] = value[2];
             } else {
                 (*li).plist = i;
-                if scanret != libc::EOF {
+                if scanret != -1 {
                     b3d_error(
-                        stderr,
+                        Some(&mut ImodFile::Stderr),
                         format_args!("Error reading piece list after {} lines\n", i),
                     );
                 }
@@ -75,27 +106,28 @@ unsafe fn plist_load(fin: *mut libc::FILE, li: *mut LoadInfo, nx: i32, ny: i32, 
 /// Matches C `mrc_plist_proc(IloadInfo *, int, int, int)` (`plist.c:84`).
 pub unsafe fn mrc_plist_proc(li: *mut LoadInfo, nx: i32, ny: i32, nz: i32) -> i32 {
     unsafe {
-        let mut pmin = [*(*li).pcoords, *(*li).pcoords.add(1), *(*li).pcoords.add(2)];
+        let pcoords = (&mut (*li).pcoords).as_mut().unwrap();
+        let mut pmin = [pcoords[0], pcoords[1], pcoords[2]];
         let mut pmax = [pmin[0] + nx, pmin[1] + ny, pmin[2]];
         for i in 1..(*li).plist {
-            let point = (*li).pcoords.add((i * 3) as usize);
-            if pmin[0] > *point {
-                pmin[0] = *point;
+            let point = (i * 3) as usize;
+            if pmin[0] > pcoords[point] {
+                pmin[0] = pcoords[point];
             }
-            if pmin[1] > *point.add(1) {
-                pmin[1] = *point.add(1);
+            if pmin[1] > pcoords[point + 1] {
+                pmin[1] = pcoords[point + 1];
             }
-            if pmin[2] > *point.add(2) {
-                pmin[2] = *point.add(2);
+            if pmin[2] > pcoords[point + 2] {
+                pmin[2] = pcoords[point + 2];
             }
-            if pmax[0] < *point + nx {
-                pmax[0] = *point + nx;
+            if pmax[0] < pcoords[point] + nx {
+                pmax[0] = pcoords[point] + nx;
             }
-            if pmax[1] < *point.add(1) + ny {
-                pmax[1] = *point.add(1) + ny;
+            if pmax[1] < pcoords[point + 1] + ny {
+                pmax[1] = pcoords[point + 1] + ny;
             }
-            if pmax[2] < *point.add(2) {
-                pmax[2] = *point.add(2);
+            if pmax[2] < pcoords[point + 2] {
+                pmax[2] = pcoords[point + 2];
             }
         }
         (*li).px = (pmax[0] - pmin[0]) as f32;
@@ -105,29 +137,25 @@ pub unsafe fn mrc_plist_proc(li: *mut LoadInfo, nx: i32, ny: i32, nz: i32) -> i3
         (*li).opy = pmin[1] as f32;
         (*li).opz = pmin[2] as f32;
         for i in 0..(*li).plist {
-            let point = (*li).pcoords.add((i * 3) as usize);
-            *point -= pmin[0];
-            *point.add(1) -= pmin[1];
-            *point.add(2) -= pmin[2];
+            let point = (i * 3) as usize;
+            pcoords[point] -= pmin[0];
+            pcoords[point + 1] -= pmin[1];
+            pcoords[point + 2] -= pmin[2];
         }
-        let zlist = libc::malloc(core::mem::size_of::<i32>() * ((*li).pz as i32 + 1) as usize)
-            .cast::<i32>();
-        if zlist.is_null() {
-            return 1;
-        }
+        let mut zlist = vec![0i32; ((*li).pz as i32 + 1) as usize];
         (*li).pdz = 0;
         for i in 0..(*li).pz as i32 {
-            *zlist.add(i as usize) = 0;
+            zlist[i as usize] = 0;
         }
         for i in 0..(*li).plist {
-            *zlist.add(*(*li).pcoords.add((i * 3 + 2) as usize) as usize) += 1;
+            zlist[pcoords[(i * 3 + 2) as usize] as usize] += 1;
         }
         for i in 0..(*li).pz as i32 {
-            if *zlist.add(i as usize) != 0 {
+            if zlist[i as usize] != 0 {
                 (*li).pdz += 1;
             }
         }
-        libc::free(zlist.cast());
+        drop(zlist);
     }
     0
 }
@@ -145,10 +173,7 @@ pub unsafe fn mrc_plist_create(
 ) -> i32 {
     unsafe {
         (*li).plist = nz;
-        (*li).pcoords = libc::malloc(core::mem::size_of::<i32>() * 3 * nz as usize).cast();
-        if (*li).pcoords.is_null() {
-            return 1;
-        }
+        (*li).pcoords = Some(vec![0i32; 3 * nz as usize]);
         let (mut x, mut y, mut z) = (0, 0, 0);
         if ovx >= nx {
             ovx = nx - 1;
@@ -156,10 +181,11 @@ pub unsafe fn mrc_plist_create(
         if ovy >= ny {
             ovy = ny - 1;
         }
+        let pcoords = (&mut (*li).pcoords).as_mut().unwrap();
         for i in 0..nz {
-            *(*li).pcoords.add((i * 3) as usize) = x * (nx - ovx);
-            *(*li).pcoords.add((i * 3 + 1) as usize) = y * (ny - ovy);
-            *(*li).pcoords.add((i * 3 + 2) as usize) = z;
+            pcoords[(i * 3) as usize] = x * (nx - ovx);
+            pcoords[(i * 3 + 1) as usize] = y * (ny - ovy);
+            pcoords[(i * 3 + 2) as usize] = z;
             x += 1;
             if x >= nfx {
                 y += 1;
@@ -185,24 +211,26 @@ pub unsafe fn ii_plist_load(
     if filename.is_null() || nz < 1 || ny < 1 || nx < 1 {
         return 1;
     }
-    let fin = unsafe { libc::fopen(filename, c"r".as_ptr()) };
-    if fin.is_null() {
+    let Some(mut fin) = ImodFile::open(
+        &unsafe { core::ffi::CStr::from_ptr(filename) }.to_string_lossy(),
+        "r",
+    ) else {
         return 1;
-    }
-    let retval = unsafe { ii_plist_load_f(fin, li, nx, ny, nz) };
-    unsafe { libc::fclose(fin) };
+    };
+    let retval = unsafe { ii_plist_load_f(&mut fin, li, nx, ny, nz) };
+    drop(fin);
     retval
 }
 
 /// Matches C `iiPlistLoadF(FILE *, IloadInfo *, int, int, int)` (`plist.c:210`).
 pub unsafe fn ii_plist_load_f(
-    fin: *mut libc::FILE,
+    fin: &mut ImodFile,
     li: *mut LoadInfo,
     nx: i32,
     ny: i32,
     nz: i32,
 ) -> i32 {
-    if fin.is_null() || nz < 1 || ny < 1 || nx < 1 {
+    if nz < 1 || ny < 1 || nx < 1 {
         return 1;
     }
     unsafe { plist_load(fin, li, nx, ny, nz) }
@@ -277,13 +305,7 @@ pub unsafe fn ii_plist_from_autodoc(
         return 1;
     }
     unsafe {
-        (*li).pcoords = libc::malloc(core::mem::size_of::<i32>() * 3 * nz as usize).cast();
-        if (*li).pcoords.is_null() {
-            if clear_on_done != 0 {
-                adoc_clear(adoc_index);
-            }
-            return -5;
-        }
+        (*li).pcoords = Some(vec![0i32; 3 * nz as usize]);
         (*li).plist = nz;
         let mut i = 0;
         while i < nz {
@@ -300,9 +322,21 @@ pub unsafe fn ii_plist_from_autodoc(
                     sect_names[(sect_type - 1) as usize],
                     index,
                     keys[key_order[key_ind as usize] as usize],
-                    (*li).pcoords.add((i * 3) as usize),
-                    (*li).pcoords.add((i * 3 + 1) as usize),
-                    (*li).pcoords.add((i * 3 + 2) as usize),
+                    (&mut (*li).pcoords)
+                        .as_mut()
+                        .unwrap()
+                        .as_mut_ptr()
+                        .add((i * 3) as usize),
+                    (&mut (*li).pcoords)
+                        .as_mut()
+                        .unwrap()
+                        .as_mut_ptr()
+                        .add((i * 3 + 1) as usize),
+                    (&mut (*li).pcoords)
+                        .as_mut()
+                        .unwrap()
+                        .as_mut_ptr()
+                        .add((i * 3 + 2) as usize),
                 );
                 if err == 0 {
                     break;
@@ -317,7 +351,7 @@ pub unsafe fn ii_plist_from_autodoc(
             adoc_clear(adoc_index);
         }
         if i < nz {
-            libc::free((*li).pcoords.cast());
+            (*li).pcoords = None;
             (*li).plist = 0;
             return 2;
         }
@@ -342,7 +376,7 @@ mod tests {
             "/fixtures/piece-list.txt"
         ))
         .unwrap();
-        let mut load_info: LoadInfo = unsafe { core::mem::zeroed() };
+        let mut load_info = LoadInfo::default();
         assert_eq!(
             unsafe { ii_plist_load(path.as_ptr(), &mut load_info, 100, 80, 9) },
             0
@@ -357,26 +391,22 @@ mod tests {
             (0.0, 0.0, 0.0)
         );
         assert_eq!(load_info.pdz, 2);
-        unsafe {
-            assert_eq!(*load_info.pcoords.add(12), 960);
-            assert_eq!(*load_info.pcoords.add(26), 1);
-            libc::free(load_info.pcoords.cast());
-        }
+        let pcoords = load_info.pcoords.as_ref().unwrap();
+        assert_eq!(pcoords[12], 960);
+        assert_eq!(pcoords[26], 1);
     }
 
     #[test]
     fn creates_piece_grid_with_source_overlap_clamping() {
-        let mut load_info: LoadInfo = unsafe { core::mem::zeroed() };
+        let mut load_info = LoadInfo::default();
         assert_eq!(
             unsafe { mrc_plist_create(&mut load_info, 10, 8, 5, 2, 2, 20, 9) },
             0
         );
         assert_eq!((load_info.px, load_info.py, load_info.pz), (11.0, 9.0, 2.0));
-        unsafe {
-            assert_eq!(*load_info.pcoords.add(3), 1);
-            assert_eq!(*load_info.pcoords.add(7), 1);
-            assert_eq!(*load_info.pcoords.add(14), 1);
-            libc::free(load_info.pcoords.cast());
-        }
+        let pcoords = load_info.pcoords.as_ref().unwrap();
+        assert_eq!(pcoords[3], 1);
+        assert_eq!(pcoords[7], 1);
+        assert_eq!(pcoords[14], 1);
     }
 }

@@ -1,125 +1,100 @@
 //! Translation of `IMOD/libcfshr/writelist.c`.
 #![allow(dead_code)]
 
-use core::ffi::c_char;
-
-unsafe extern "C" {
-    static mut stdout: *mut libc::FILE;
-}
+use crate::imod::libcfshr::b3dutil::{CArg, c_format, c_format_bytes};
+use std::io::Write;
 
 /// Original `writeList` (`writelist.c:23`).
-pub unsafe fn write_list(list: *mut i32, number_of_values: i32, line_length: i32) -> i32 {
-    unsafe {
-        let mut line_string = list_to_string(list, number_of_values);
-        let saved_string = line_string;
-        if line_string.is_null() {
-            return 1;
-        }
-        while libc::strlen(line_string) > line_length as usize {
-            let mut index = line_length - 1;
-            while index > 0 {
-                if *line_string.add(index as usize) == b',' as c_char {
-                    break;
-                }
-                index -= 1;
+pub fn write_list(list: &[i32], number_of_values: i32, line_length: i32) -> i32 {
+    let Some(line_string) = list_to_string(list, number_of_values) else {
+        return 1;
+    };
+    // The C advances `lineStr` through the buffer it keeps in `saveStr` and
+    // overwrites the separating comma with a newline in place; `start` is that
+    // advancing pointer, and the bytes stay in one owned buffer.
+    let mut saved_string = line_string.into_bytes();
+    let mut start = 0_usize;
+    while saved_string.len() - start > line_length as usize {
+        let mut index = line_length - 1;
+        while index > 0 {
+            if saved_string[start + index as usize] == b',' {
+                break;
             }
-            *line_string.add(index as usize) = b'\n' as c_char;
-            line_string = line_string.add(index as usize + 1);
+            index -= 1;
         }
-        libc::printf(c"%s".as_ptr(), saved_string);
-        libc::printf(c"\n".as_ptr());
-        libc::fflush(stdout);
-        libc::free(saved_string.cast());
-        0
+        saved_string[start + index as usize] = b'\n';
+        start += index as usize + 1;
     }
+    let mut out = std::io::stdout();
+    let _ = out.write_all(&c_format_bytes("%s", &[CArg::Bytes(&saved_string)]));
+    let _ = out.write_all(c_format("\n", &[]).as_bytes());
+    let _ = out.flush();
+    0
 }
 
 /// Original Fortran wrapper `writelist` (`writelist.c:45`).
-pub unsafe fn writelist(list: *mut i32, number_of_values: *mut i32, line_length: *mut i32) -> i32 {
-    unsafe { write_list(list, *number_of_values, *line_length) }
+pub fn writelist(list: &[i32], number_of_values: &i32, line_length: &i32) -> i32 {
+    write_list(list, *number_of_values, *line_length)
 }
 
 /// Original Fortran wrapper `wrlist` (`writelist.c:52`).
-pub unsafe fn wrlist(list: *mut i32, number_of_values: *mut i32) {
-    unsafe {
-        write_list(list, *number_of_values, 80);
-    }
+pub fn wrlist(list: &[i32], number_of_values: &i32) {
+    write_list(list, *number_of_values, 80);
 }
 
 /// Original `listToString` (`writelist.c:62`).
-pub unsafe fn list_to_string(list: *mut i32, number_of_values: i32) -> *mut c_char {
-    unsafe {
-        let mut returned_string: *mut c_char = core::ptr::null_mut();
-        let mut range_start = *list;
-        for index in 1..number_of_values {
-            if *list.add(index as usize) != *list.add(index as usize - 1) + 1 {
-                returned_string =
-                    add_range_to_line(range_start, *list.add(index as usize - 1), returned_string);
-                if returned_string.is_null() {
-                    return core::ptr::null_mut();
-                }
-                range_start = *list.add(index as usize);
-            }
+///
+/// The C hands back a `malloc`ed string the caller must free, and NULL for a
+/// memory error; the `String` owns itself and the `None` arm keeps the caller's
+/// error path.
+pub fn list_to_string(list: &[i32], number_of_values: i32) -> Option<String> {
+    let mut returned_string: Option<String> = None;
+    let mut range_start = list[0];
+    for index in 1..number_of_values {
+        if list[index as usize] != list[index as usize - 1] + 1 {
+            returned_string =
+                add_range_to_line(range_start, list[index as usize - 1], returned_string);
+            returned_string.as_ref()?;
+            range_start = list[index as usize];
         }
-        add_range_to_line(
-            range_start,
-            *list.add(number_of_values as usize - 1),
-            returned_string,
-        )
     }
+    add_range_to_line(
+        range_start,
+        list[number_of_values as usize - 1],
+        returned_string,
+    )
 }
 
 /// Original static `addRangeToLine` (`writelist.c:78`).
-pub unsafe fn add_range_to_line(
+pub fn add_range_to_line(
     number_start: i32,
     number_end: i32,
-    line: *mut c_char,
-) -> *mut c_char {
-    unsafe {
-        let mut range_string = [0_i8; 32];
-        let mut end_string = [0_i8; 16];
-        libc::sprintf(range_string.as_mut_ptr(), c"%d".as_ptr(), number_start);
-        if number_end > number_start {
-            libc::strcat(range_string.as_mut_ptr(), c"-".as_ptr());
-            libc::sprintf(end_string.as_mut_ptr(), c"%d".as_ptr(), number_end);
-            libc::strcat(range_string.as_mut_ptr(), end_string.as_ptr());
-        }
-        if !line.is_null() {
-            let returned_line = libc::realloc(
-                line.cast(),
-                libc::strlen(line) + libc::strlen(range_string.as_ptr()) + 4,
-            )
-            .cast::<c_char>();
-            if returned_line.is_null() {
-                return core::ptr::null_mut();
-            }
-            libc::strcat(returned_line, c",".as_ptr());
-            libc::strcat(returned_line, range_string.as_ptr());
-            returned_line
-        } else {
-            let returned_line =
-                libc::malloc(libc::strlen(range_string.as_ptr()) + 4).cast::<c_char>();
-            if returned_line.is_null() {
-                return core::ptr::null_mut();
-            }
-            libc::strcpy(returned_line, range_string.as_ptr());
-            returned_line
-        }
+    line: Option<String>,
+) -> Option<String> {
+    let mut range_string = c_format("%d", &[CArg::Int(number_start as i64)]);
+    if number_end > number_start {
+        range_string.push_str("-");
+        let end_string = c_format("%d", &[CArg::Int(number_end as i64)]);
+        range_string.push_str(&end_string);
+    }
+
+    if let Some(mut returned_line) = line {
+        returned_line.push_str(",");
+        returned_line.push_str(&range_string);
+        Some(returned_line)
+    } else {
+        Some(range_string)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::ffi::CStr;
 
     #[test]
     fn converts_only_increasing_adjacent_values_to_source_ranges() {
-        unsafe {
-            let mut values = [1_i32, 2, 3, 8, 10, 11, 4];
-            let text = list_to_string(values.as_mut_ptr(), values.len() as i32);
-            assert_eq!(CStr::from_ptr(text).to_bytes(), b"1-3,8,10-11,4");
-            libc::free(text.cast());
-        }
+        let values = [1_i32, 2, 3, 8, 10, 11, 4];
+        let text = list_to_string(&values, values.len() as i32);
+        assert_eq!(text.as_deref(), Some("1-3,8,10-11,4"));
     }
 }

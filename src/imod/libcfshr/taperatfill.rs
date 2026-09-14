@@ -467,10 +467,11 @@ pub unsafe fn slice_replace_fill(
                 }
                 edge_vals = reduced;
             }
+            let n = edge_vals.len() as i32;
             crate::imod::libcfshr::robuststat::rs_fast_median_in_place(
-                edge_vals.as_mut_ptr(),
-                edge_vals.len() as i32,
-                new_fill,
+                &mut edge_vals,
+                n,
+                &mut *new_fill,
             );
         } else {
             *new_fill = (sum / nsum as f64) as f32;

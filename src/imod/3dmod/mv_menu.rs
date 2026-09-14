@@ -7,6 +7,8 @@
 #![allow(dead_code, unused_variables)]
 
 use std::fs::{File, remove_file, rename};
+
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use std::path::Path;
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
@@ -147,7 +149,7 @@ pub fn imodv_load_model(a: &mut ImodvApp, path: Option<&Path>) -> i32 {
 }
 
 /// `writeOpenedModelFile`, after the source's `fopen` has produced `file`.
-pub fn write_opened_model_file(a: &mut ImodvApp, file: &mut File) -> i32 {
+pub fn write_opened_model_file(a: &mut ImodvApp, file: &mut ImodFile) -> i32 {
     let Some(model) = (unsafe { a.imod.as_ref() }) else {
         return 1;
     };
@@ -165,8 +167,7 @@ pub fn imodv_file_save(a: &mut ImodvApp, filename: &Path) -> i32 {
             return 1;
         }
     }
-    let error = File::create(filename)
-        .ok()
+    let error = ImodFile::open(&filename.to_string_lossy(), "w")
         .map_or(1, |mut f| write_opened_model_file(a, &mut f));
     if error != 0 {
         let _ = remove_file(filename);
@@ -302,7 +303,7 @@ pub fn imodv_view_menu(
                         b"Volume bounding box extra object\0"
                     };
                     for (out, input) in extra_object.name.iter_mut().zip(name) {
-                        *out = *input as i8;
+                        *out = *input;
                     }
                     extra_object.cont = imod_contours_new(6).unwrap_or_default();
                     if extra_object.cont.len() == 6 {
@@ -365,7 +366,7 @@ pub fn imodv_view_menu(
                         .iter_mut()
                         .zip(b"Current point extra object\0")
                     {
-                        *out = *input as i8;
+                        *out = *input;
                     }
                     extra_object.flags |= IMOD_OBJFLAG_SCAT
                         | IMOD_OBJFLAG_MESH

@@ -1,85 +1,113 @@
 //! Translation of `IMOD/libfft/srfp.c`.
+//!
+//! `factor`, `sym` and `unsym` are the caller's `int[16]` scratch arrays,
+//! written from index 1 upward exactly as the source writes them.
 
 /// C `srfp`.
-pub unsafe fn srfp(
+pub fn srfp(
     pts: i32,
     pmax: i32,
     twogrp: i32,
-    factor: *mut i32,
-    sym: *mut i32,
-    psym: *mut i32,
-    unsym: *mut i32,
-    error: *mut i32,
+    factor: &mut [i32],
+    sym: &mut [i32],
+    psym: &mut i32,
+    unsym: &mut [i32],
+    error: &mut i32,
 ) {
-    unsafe {
-        let mut pp = [0_i32; 15];
-        let mut qq = [0_i32; 8];
-        let mut n = pts;
-        let mut f = 2;
-        let mut p = 0_usize;
-        let mut q = 0_usize;
-        *psym = 1;
-        while n > 1 {
-            let mut divisor = f;
-            while divisor <= pmax && n != (n / divisor) * divisor {
-                divisor += 1;
+    let mut pp = [0_i32; 15];
+    let mut qq = [0_i32; 8];
+    let mut n = pts;
+    let nest = 14_usize;
+    let mut f = 2;
+    let mut p = 0_usize;
+    let mut q = 0_usize;
+    *psym = 1;
+    while n > 1 {
+        let mut divisor = f;
+        while divisor <= pmax && n != (n / divisor) * divisor {
+            divisor += 1;
+        }
+        // `srfp.c:32-40`: two separate checks, each printing before it sets
+        // `error`.  The translation had merged them into one condition and
+        // emitted neither message; a C-versus-Rust differential over the
+        // factorisation put 20 stdout lines on the C side and none on ours.
+        //
+        // These go through `libc::printf` rather than Rust's stdout on
+        // purpose.  `cmplft` prints its own `invalid number of points`
+        // message through libc immediately after `srfp` returns with this
+        // flag set, and C stdio is block-buffered under redirection while
+        // Rust's is not — a Rust `print!` here would reorder the two lines in
+        // a captured file while looking correct on a terminal.  The whole
+        // `libfft` output path converts as one unit; see NATIVE.md.
+        if divisor > pmax {
+            unsafe {
+                libc::printf(c"largest factor exceeds %d.  n = %d.\n".as_ptr(), pmax, pts);
             }
-            if divisor > pmax || 2 * p + q >= 14 {
-                *error = 1;
-                return;
+            *error = 1;
+            return;
+        }
+        if 2 * p + q >= nest {
+            unsafe {
+                libc::printf(
+                    c"factor count exceeds %d.  n = %d.\n".as_ptr(),
+                    nest as i32,
+                    pts,
+                );
             }
-            f = divisor;
+            *error = 1;
+            return;
+        }
+        f = divisor;
+        n /= f;
+        if n != (n / f) * f {
+            q += 1;
+            qq[q] = f;
+        } else {
             n /= f;
-            if n != (n / f) * f {
-                q += 1;
-                qq[q] = f;
-            } else {
-                n /= f;
-                p += 1;
-                pp[p] = f;
-                *psym *= f;
-            }
+            p += 1;
+            pp[p] = f;
+            *psym *= f;
         }
-        let r = if q == 0 { 0 } else { 1 };
-        if p >= 1 {
-            for index in 1..=p {
-                *sym.add(index) = pp[p + 1 - index];
-                *factor.add(index) = pp[p + 1 - index];
-                *factor.add(p + q + index) = pp[index];
-                *sym.add(p + r + index) = pp[index];
-            }
-        }
-        if q >= 1 {
-            for index in 1..=q {
-                *unsym.add(index) = qq[index];
-                *factor.add(p + index) = qq[index];
-            }
-            *sym.add(p + 1) = pts / (*psym * *psym);
-        }
-        let mut count = 2 * p + q;
-        *factor.add(count + 1) = 0;
-        let mut power_two = 1;
-        let mut index = 0_usize;
-        while *factor.add(index + 1) != 0 {
-            index += 1;
-            if *factor.add(index) != 2 {
-                continue;
-            }
-            power_two *= 2;
-            *factor.add(index) = 1;
-            if power_two < twogrp && *factor.add(index + 1) == 2 {
-                continue;
-            }
-            *factor.add(index) = power_two;
-            power_two = 1;
-        }
-        let r = if p == 0 { 0 } else { r };
-        count = 2 * p + r;
-        *sym.add(count + 1) = 0;
-        let q = if q <= 1 { 0 } else { q };
-        *unsym.add(q + 1) = 0;
-        *error = 0;
     }
+    let r = if q == 0 { 0 } else { 1 };
+    if p >= 1 {
+        for index in 1..=p {
+            sym[index] = pp[p + 1 - index];
+            factor[index] = pp[p + 1 - index];
+            factor[p + q + index] = pp[index];
+            sym[p + r + index] = pp[index];
+        }
+    }
+    if q >= 1 {
+        for index in 1..=q {
+            unsym[index] = qq[index];
+            factor[p + index] = qq[index];
+        }
+        sym[p + 1] = pts / (*psym * *psym);
+    }
+    let mut count = 2 * p + q;
+    factor[count + 1] = 0;
+    let mut power_two = 1;
+    let mut index = 0_usize;
+    while factor[index + 1] != 0 {
+        index += 1;
+        if factor[index] != 2 {
+            continue;
+        }
+        power_two *= 2;
+        factor[index] = 1;
+        if power_two < twogrp && factor[index + 1] == 2 {
+            continue;
+        }
+        factor[index] = power_two;
+        power_two = 1;
+    }
+    let r = if p == 0 { 0 } else { r };
+    count = 2 * p + r;
+    sym[count + 1] = 0;
+    let q = if q <= 1 { 0 } else { q };
+    unsym[q + 1] = 0;
+    *error = 0;
 }
 
 #[cfg(test)]
@@ -92,18 +120,16 @@ mod tests {
         let mut unsym = [0_i32; 16];
         let mut psym = 0;
         let mut error = 0;
-        unsafe {
-            srfp(
-                23,
-                19,
-                8,
-                factor.as_mut_ptr(),
-                sym.as_mut_ptr(),
-                &mut psym,
-                unsym.as_mut_ptr(),
-                &mut error,
-            );
-        }
+        srfp(
+            23,
+            19,
+            8,
+            &mut factor,
+            &mut sym,
+            &mut psym,
+            &mut unsym,
+            &mut error,
+        );
         assert_eq!(error, 1);
     }
 }

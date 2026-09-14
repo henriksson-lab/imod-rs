@@ -1,8 +1,6 @@
 //! Translation of `IMOD/3dmod/form_behavior.cpp` and `form_behavior.h`.
 #![allow(dead_code)]
 
-use core::ffi::c_void;
-
 #[derive(Clone, Debug, Default)]
 pub struct ImodPrefStruct {
     pub allow_ctrl_on_mac: bool,
@@ -56,24 +54,28 @@ pub enum BehaviorSpinBox {
     AutosaveSpinBox,
 }
 
+/// The `QButtonGroup *` (and other native object) arguments below are opaque
+/// native identities, spelled the way `DockingDialogNativeBoundary` spells
+/// them: a frontend which owns Qt can use its pointer cast to `usize`, a
+/// non-Qt frontend a stable application handle, and `0` is the source's null.
 pub trait BehaviorNativeBoundary {
     fn setup_ui(&mut self);
-    fn create_exit_group(&mut self) -> *mut c_void;
-    fn exit_group_add_button(&mut self, group: *mut c_void, button: ExitButton, id: i32);
+    fn create_exit_group(&mut self) -> usize;
+    fn exit_group_add_button(&mut self, group: usize, button: ExitButton, id: i32);
     fn hide_allow_ctrl_on_mac(&mut self);
     fn set_allow_ctrl_enabled(&mut self, enabled: bool);
     fn macos(&self) -> bool;
     fn mac_ctrl_environment_set(&self) -> bool;
     fn qt_version_6_or_later(&self) -> bool;
-    fn connect_exit_group_button_clicked(&mut self, group: *mut c_void);
-    fn connect_exit_group_id_clicked(&mut self, group: *mut c_void);
+    fn connect_exit_group_button_clicked(&mut self, group: usize);
+    fn connect_exit_group_id_clicked(&mut self, group: usize);
     fn font_width(&self, text: &str) -> i32;
     fn set_autosave_spin_maximum_width(&mut self, width: i32);
     fn set_checked(&mut self, control: BehaviorCheckBox, value: bool);
     fn set_spin_box(&mut self, control: BehaviorSpinBox, value: i32);
     fn set_autosave_dir(&mut self, path: String);
     fn to_native_separators(&self, path: &str) -> String;
-    fn set_exit_group(&mut self, group: *mut c_void, id: i32);
+    fn set_exit_group(&mut self, group: usize, id: i32);
     fn checked(&self, control: BehaviorCheckBox) -> bool;
     fn spin_box_value(&self, control: BehaviorSpinBox) -> i32;
     fn autosave_dir(&self) -> String;
@@ -84,7 +86,7 @@ pub trait BehaviorNativeBoundary {
 #[derive(Debug)]
 pub struct BehaviorForm {
     pub m_prefs: ImodPrefStruct,
-    pub exit_group: *mut c_void,
+    pub exit_group: usize,
 }
 
 impl BehaviorForm {
@@ -92,7 +94,7 @@ impl BehaviorForm {
         native.setup_ui();
         let mut form = Self {
             m_prefs: prefs,
-            exit_group: core::ptr::null_mut(),
+            exit_group: 0,
         };
         form.init(native);
         form
@@ -177,7 +179,6 @@ mod tests {
         checks: [bool; 14],
         spins: [i32; 3],
         path: String,
-        group: u8,
         qt6: bool,
         old_connect: usize,
         new_connect: usize,
@@ -186,10 +187,10 @@ mod tests {
     }
     impl BehaviorNativeBoundary for Native {
         fn setup_ui(&mut self) {}
-        fn create_exit_group(&mut self) -> *mut c_void {
-            &mut self.group as *mut u8 as *mut c_void
+        fn create_exit_group(&mut self) -> usize {
+            1
         }
-        fn exit_group_add_button(&mut self, _: *mut c_void, _: ExitButton, _: i32) {}
+        fn exit_group_add_button(&mut self, _: usize, _: ExitButton, _: i32) {}
         fn hide_allow_ctrl_on_mac(&mut self) {
             self.hidden = true;
         }
@@ -205,10 +206,10 @@ mod tests {
         fn qt_version_6_or_later(&self) -> bool {
             self.qt6
         }
-        fn connect_exit_group_button_clicked(&mut self, _: *mut c_void) {
+        fn connect_exit_group_button_clicked(&mut self, _: usize) {
             self.old_connect += 1;
         }
-        fn connect_exit_group_id_clicked(&mut self, _: *mut c_void) {
+        fn connect_exit_group_id_clicked(&mut self, _: usize) {
             self.new_connect += 1;
         }
         fn font_width(&self, _: &str) -> i32 {
@@ -227,7 +228,7 @@ mod tests {
         fn to_native_separators(&self, x: &str) -> String {
             x.replace('/', "\\")
         }
-        fn set_exit_group(&mut self, _: *mut c_void, _: i32) {}
+        fn set_exit_group(&mut self, _: usize, _: i32) {}
         fn checked(&self, c: BehaviorCheckBox) -> bool {
             self.checks[c as usize]
         }

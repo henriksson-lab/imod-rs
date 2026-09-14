@@ -158,7 +158,7 @@ pub fn ii_raw_set_scale(smin: f32, smax: f32) {
 /// C `iiRawCheck`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
-    if in_file.is_null() || unsafe { (*in_file).fp.is_null() } {
+    if in_file.is_null() || unsafe { (*in_file).fp.is_none() } {
         return IIERR_BAD_CALL;
     }
 
@@ -201,7 +201,7 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
         return -1;
     }
     let hdr = unsafe { (*in_file).header.cast::<MrcHeader>() };
-    if unsafe { (*in_file).fp.is_null() } || hdr.is_null() {
+    if unsafe { (*in_file).fp.is_none() } || hdr.is_null() {
         return 1;
     }
     let info = *RAW_IMAGE_INFO
@@ -212,7 +212,7 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
         .expect("raw scan config mutex poisoned");
     let mut amin = info.amin;
     let mut amax = info.amax;
-    let mut li: LoadInfo = unsafe { core::mem::zeroed() };
+    let mut li = LoadInfo::default();
     mrc_init_li(Some(&mut li), None);
     let mut do_scan = info.scan_min_max != 0;
     let seed = RAW_SCAN_SEED.swap(0, Ordering::Relaxed);
@@ -364,9 +364,16 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
                 };
                 let mut sample_mean = 0.;
                 let mut sample_sd = 0.;
+                // `makeLinePointers` becomes the line byte views the
+                // translated `sampleMeanSD` takes; they are rebuilt per scan
+                // because `buffer` is refilled between calls.
+                let line_stride = unsafe { (*hdr).nx } as usize * (dsize * csize) as usize;
+                let lines: Vec<&[u8]> = (0..lines_to_scan as usize)
+                    .map(|index| &buffer[(line_stride * index)..])
+                    .collect();
                 unsafe {
                     sample_mean_sd(
-                        buf_ptrs,
+                        Some(&lines),
                         type_smsd,
                         (*hdr).nx,
                         lines_to_scan,
@@ -375,8 +382,8 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
                         0,
                         (*hdr).nx - 2 * xborder,
                         lines_to_scan,
-                        &mut sample_mean,
-                        &mut sample_sd,
+                        Some(&mut sample_mean),
+                        Some(&mut sample_sd),
                     );
                 }
                 let buf_pixels = buf_pixels * sample_frac;
@@ -448,11 +455,11 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
         {
             let path = unsafe { CStr::from_ptr((*in_file).filename) }.to_bytes();
             if let Ok(path) = CString::new(path) {
-                let mode = c"rb+";
-                let file = unsafe { libc::fopen(path.as_ptr(), mode.as_ptr()) };
-                if !file.is_null() {
-                    let mut temp: MrcHeader = unsafe { core::mem::zeroed() };
-                    if unsafe { mrc_head_read(file, &mut temp) } == 0 {
+                let file =
+                    crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb+");
+                if let Some(mut file) = file {
+                    let mut temp = MrcHeader::default();
+                    if unsafe { mrc_head_read(&mut file, &mut temp) } == 0 {
                         if do_mean_sd {
                             unsafe {
                                 temp.amin = (*hdr).amin;
@@ -477,12 +484,10 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
                             }
                         }
                         unsafe {
-                            mrc_head_write(file, &mut temp);
+                            mrc_head_write(&mut file, &mut temp);
                         }
                     }
-                    unsafe {
-                        libc::fclose(file);
-                    }
+                    drop(file);
                 }
             }
         }
@@ -554,17 +559,21 @@ mod tests {
     #[test]
     fn scan_reads_an_actual_raw_short_stream() {
         unsafe {
-            let file = libc::tmpfile();
-            assert!(!file.is_null());
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let values = [-7_i16, 3, 12, -2];
             assert_eq!(
-                libc::fwrite(values.as_ptr().cast(), 2, values.len(), file),
+                crate::imod::libcfshr::b3dutil::b3d_fwrite(
+                    core::slice::from_raw_parts(values.as_ptr().cast::<u8>(), 8),
+                    2,
+                    values.len(),
+                    &mut file
+                ),
                 values.len()
             );
-            libc::rewind(file);
+            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut file);
             let name = CString::new("scan.raw").unwrap();
-            let mut image: ImodImageFile = core::mem::zeroed();
-            image.fp = file;
+            let mut image = ImodImageFile::default();
+            image.fp = Some(file.clone());
             image.filename = name.as_ptr().cast_mut();
             {
                 let mut info = RAW_IMAGE_INFO.lock().unwrap();
@@ -589,7 +598,7 @@ mod tests {
             assert_eq!(ii_raw_check(&mut image), 0);
             assert_eq!((image.amin, image.amax, image.amean), (-7., 12., 2.5));
             (image.clean_up.unwrap())(&mut image);
-            libc::fclose(file);
+            drop(file);
         }
     }
 }

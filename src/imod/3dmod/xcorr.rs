@@ -61,14 +61,17 @@ pub unsafe fn slice_byte_binned_fft(
         let n_pad_pix = (n_pad_size + 2) * n_pad_size;
         let mut fft_array = vec![0.; n_pad_pix as usize];
         slice_taper_in_pad(
-            input.cast::<c_void>(),
+            crate::imod::libcfshr::taperpad::PadIn::Byte(core::slice::from_raw_parts(
+                input,
+                (nx_dim * (iy1 + 1)) as usize,
+            )),
             SLICE_MODE_BYTE,
             nx_dim,
             ix0,
             ix1,
             iy0,
             iy1,
-            fft_array.as_mut_ptr(),
+            &mut fft_array,
             n_pad_size + 2,
             n_pad_size,
             n_pad_size,
@@ -175,21 +178,31 @@ pub unsafe fn slice_fourier_filter(
         let mut ctf = [0.; 8193];
         let mut delta = 0.;
         xcorr_set_ctf(
-            sigma1,
-            sigma2,
-            radius1,
-            radius2,
-            ctf.as_mut_ptr(),
-            nxpad,
-            nypad,
-            &mut delta,
+            sigma1, sigma2, radius1, radius2, &mut ctf, nxpad, nypad, &mut delta,
         );
         slice_taper_out_pad(
-            (*sin).data.b.cast::<c_void>(),
+            match (*sin).mode {
+                0 => crate::imod::libcfshr::taperpad::PadIn::Byte(core::slice::from_raw_parts(
+                    (*sin).data.b,
+                    (nx * ny) as usize,
+                )),
+                1 => crate::imod::libcfshr::taperpad::PadIn::Short(core::slice::from_raw_parts(
+                    (*sin).data.s,
+                    (nx * ny) as usize,
+                )),
+                6 => crate::imod::libcfshr::taperpad::PadIn::UShort(core::slice::from_raw_parts(
+                    (*sin).data.us,
+                    (nx * ny) as usize,
+                )),
+                _ => crate::imod::libcfshr::taperpad::PadIn::Float(core::slice::from_raw_parts(
+                    (*sin).data.f,
+                    (nx * ny) as usize,
+                )),
+            },
             (*sin).mode,
             nx,
             ny,
-            brray.as_mut_ptr(),
+            &mut brray,
             nxpad + 2,
             nxpad,
             nypad,
@@ -199,11 +212,11 @@ pub unsafe fn slice_fourier_filter(
         let mut idir = 0;
         todfft(brray.as_mut_ptr(), &mut nxpad, &mut nypad, &mut idir);
         xcorr_filter_part(
-            brray.as_ptr(),
-            brray.as_mut_ptr(),
+            crate::imod::libcfshr::filtxcorr::FilterIn::InPlace,
+            &mut brray,
             nxpad,
             nypad,
-            ctf.as_ptr(),
+            &ctf,
             delta,
         );
         idir = 1;

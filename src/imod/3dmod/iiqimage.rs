@@ -5,6 +5,7 @@
 //! conversion loops.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::b3d_error;
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_NO_SUPPORT, IIERR_NOT_FORMAT, IIFILE_QIMAGE, IIFORMAT_LUMINANCE,
@@ -81,7 +82,7 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
         unsafe { iiqimage_delete(image) };
         unsafe {
             b3d_error(
-                core::ptr::null_mut(),
+                None,
                 format_args!(
                     "{} is a recognized file type but data type is not supported\n",
                     core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy()
@@ -91,9 +92,7 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_NO_SUPPORT;
     }
     unsafe {
-        if !(*in_file).fp.is_null() {
-            libc::fclose((*in_file).fp);
-        }
+        (*in_file).fp = None;
         (*in_file).nx = iiqimage_width(image);
         (*in_file).ny = iiqimage_height(image);
         (*in_file).nz = 1;
@@ -170,7 +169,11 @@ pub unsafe extern "C" fn qimage_reopen(in_file: *mut ImodImageFile) -> i32 {
     unsafe {
         (*in_file).header_size = 8;
         (*in_file).header = image.cast();
-        (*in_file).fp = image.cast();
+        // `iiqimage.cpp:110`: the QImage pointer cast to `FILE *` as this
+        // file's identity, never used for I/O.
+        (*in_file).fp = Some(crate::imod::libcfshr::b3dutil::ImodFile::Token(
+            image as usize,
+        ));
     }
     0
 }
@@ -183,7 +186,7 @@ pub unsafe extern "C" fn qimage_close(in_file: *mut ImodImageFile) {
     }
     unsafe {
         (*in_file).header = core::ptr::null_mut();
-        (*in_file).fp = core::ptr::null_mut();
+        (*in_file).fp = None;
     }
 }
 
@@ -328,10 +331,13 @@ mod tests {
     fn source_qimage_png_path_sets_up_and_reads_bottom_to_top() {
         let filename = CString::new("fixtures/mrc2tif-float-scaled.png").unwrap();
         let mode = CString::new("rb").unwrap();
-        let mut file: ImodImageFile = unsafe { core::mem::zeroed() };
+        let mut file = ImodImageFile::default();
         file.filename = filename.as_ptr().cast_mut();
-        file.fp = unsafe { libc::fopen(filename.as_ptr(), mode.as_ptr()) };
-        assert!(!file.fp.is_null());
+        file.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+            &filename.to_string_lossy(),
+            &mode.to_string_lossy(),
+        );
+        assert!(file.fp.is_some());
         assert_eq!(unsafe { ii_q_image_check(&mut file) }, 0);
         assert_eq!(file.format, IIFORMAT_LUMINANCE);
         assert_eq!(file.nz, 1);

@@ -1,5 +1,6 @@
 //! `IMOD/libimod/objgroup.c` and `IMOD/include/objgroup.h`.
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -89,7 +90,7 @@ pub fn obj_group_list_checksum(group_list: &[Iobj_group]) -> f64 {
     count
 }
 /// Original: `objGroupListWrite` (`objgroup.c:193`).
-pub fn obj_group_list_write(group_list: &[Iobj_group], file: &mut File) -> Result<(), i32> {
+pub fn obj_group_list_write(group_list: &[Iobj_group], file: &mut ImodFile) -> Result<(), i32> {
     for group in group_list {
         file.write_all(b"OGRP").map_err(|_| 11)?;
         file.write_all(&(32_i32 + 4 * group.obj_list.len() as i32).to_be_bytes())
@@ -102,7 +103,7 @@ pub fn obj_group_list_write(group_list: &[Iobj_group], file: &mut File) -> Resul
     Ok(())
 }
 /// Original: `objGroupRead` (`objgroup.c:223`).
-pub fn obj_group_read(group_list: &mut Vec<Iobj_group>, file: &mut File) -> Result<(), i32> {
+pub fn obj_group_read(group_list: &mut Vec<Iobj_group>, file: &mut ImodFile) -> Result<(), i32> {
     let mut size = [0; 4];
     file.read_exact(&mut size).map_err(|_| 10)?;
     let count = (i32::from_be_bytes(size) - 32) / 4;

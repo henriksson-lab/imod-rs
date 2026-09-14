@@ -1,524 +1,456 @@
-//! c2rust parity baseline of `IMOD/libfft/mdftkd.c`; identifiers and API are normalized at the module boundary.
-#![allow(non_snake_case, unused_mut, unsafe_op_in_unsafe_fn)]
+//! Translation of `IMOD/libfft/mdftkd.c` -- the multi-dimensional complex
+//! Fourier transform kernel driver and its radix kernels.
+//!
+//! The C source hands each kernel several `float *` that all point into the
+//! **same** caller array at different biases (`&x[stepAlong]`,
+//! `&x[2 * stepAlong]`, ...), and `cmplft` itself is always called with
+//! `y = &x[1]`, so the real and imaginary walkers alias too.  There is no safe
+//! Rust spelling for several `&mut [f32]` over one buffer, so the whole array
+//! is one `&mut [f32]` and every walker is a `usize` base index into it: the
+//! bias the C applies with `&x[i * stepAlong]` is applied at the same place,
+//! in `mdftkd`, as `x + i * step_along`.  A kernel's `x0[k]` is therefore
+//! `data[x0 + k as usize]`, with the source's index arithmetic unchanged.
 
-unsafe extern "C" {
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn cos(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn sin(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-}
-pub unsafe extern "C" fn mdftkd(
-    mut n: ::core::ffi::c_int,
-    mut factor: *mut ::core::ffi::c_int,
-    mut dim: *mut ::core::ffi::c_int,
-    mut x: *mut ::core::ffi::c_float,
-    mut y: *mut ::core::ffi::c_float,
-) {
-    let mut indFac: ::core::ffi::c_int = 0;
-    let mut nReduced: ::core::ffi::c_int = 0;
-    let mut pFac: ::core::ffi::c_int = 0;
-    let mut stepAlong: ::core::ffi::c_int = 0;
-    let mut sepAlong: ::core::ffi::c_int = 0;
-    sepAlong = *dim.offset(2 as ::core::ffi::c_int as isize);
-    indFac = 0 as ::core::ffi::c_int;
-    nReduced = n;
-    while *factor.offset((indFac + 1 as ::core::ffi::c_int) as isize) != 0 as ::core::ffi::c_int {
-        indFac = indFac + 1 as ::core::ffi::c_int;
-        pFac = *factor.offset(indFac as isize);
-        nReduced = nReduced / pFac;
-        stepAlong = nReduced * sepAlong;
-        match pFac {
+/// C `mdftkd`.
+pub fn mdftkd(n: i32, factor: &[i32], dim: &[i32], data: &mut [f32], x: usize, y: usize) {
+    let mut ind_fac: i32;
+    let mut n_reduced: i32;
+    let mut p_fac: i32;
+    let mut step_along: i32;
+    let sep_along: i32;
+
+    sep_along = dim[2];
+    ind_fac = 0;
+    n_reduced = n;
+    while factor[(ind_fac + 1) as usize] != 0 {
+        ind_fac = ind_fac + 1;
+        p_fac = factor[ind_fac as usize];
+        n_reduced = n_reduced / p_fac;
+        step_along = n_reduced * sep_along;
+        match p_fac {
             1 => {}
+
             2 => {
                 r2cftk(
                     n,
-                    nReduced,
+                    n_reduced,
+                    data,
                     x,
                     y,
-                    x.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    y.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
+                    x + step_along as usize,
+                    y + step_along as usize,
                     dim,
                 );
             }
+
             3 => {
                 r3cftk(
                     n,
-                    nReduced,
+                    n_reduced,
+                    data,
                     x,
                     y,
-                    x.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    y.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    x.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
+                    x + step_along as usize,
+                    y + step_along as usize,
+                    x + (2 * step_along) as usize,
+                    y + (2 * step_along) as usize,
                     dim,
                 );
             }
+
             4 => {
                 r4cftk(
                     n,
-                    nReduced,
+                    n_reduced,
+                    data,
                     x,
                     y,
-                    x.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    y.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    x.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((3 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((3 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
+                    x + step_along as usize,
+                    y + step_along as usize,
+                    x + (2 * step_along) as usize,
+                    y + (2 * step_along) as usize,
+                    x + (3 * step_along) as usize,
+                    y + (3 * step_along) as usize,
                     dim,
                 );
             }
+
             5 => {
                 r5cftk(
                     n,
-                    nReduced,
+                    n_reduced,
+                    data,
                     x,
                     y,
-                    x.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    y.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    x.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((3 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((3 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((4 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((4 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
+                    x + step_along as usize,
+                    y + step_along as usize,
+                    x + (2 * step_along) as usize,
+                    y + (2 * step_along) as usize,
+                    x + (3 * step_along) as usize,
+                    y + (3 * step_along) as usize,
+                    x + (4 * step_along) as usize,
+                    y + (4 * step_along) as usize,
                     dim,
                 );
             }
+
             8 => {
                 r8cftk(
                     n,
-                    nReduced,
+                    n_reduced,
+                    data,
                     x,
                     y,
-                    x.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    y.offset(stepAlong as isize) as *mut ::core::ffi::c_float,
-                    x.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((2 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((3 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((3 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((4 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((4 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((5 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((5 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((6 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((6 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    x.offset((7 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
-                    y.offset((7 as ::core::ffi::c_int * stepAlong) as isize)
-                        as *mut ::core::ffi::c_float,
+                    x + step_along as usize,
+                    y + step_along as usize,
+                    x + (2 * step_along) as usize,
+                    y + (2 * step_along) as usize,
+                    x + (3 * step_along) as usize,
+                    y + (3 * step_along) as usize,
+                    x + (4 * step_along) as usize,
+                    y + (4 * step_along) as usize,
+                    x + (5 * step_along) as usize,
+                    y + (5 * step_along) as usize,
+                    x + (6 * step_along) as usize,
+                    y + (6 * step_along) as usize,
+                    x + (7 * step_along) as usize,
+                    y + (7 * step_along) as usize,
                     dim,
                 );
             }
+
             6 => {
-                printf(
-                    b"\ntransfer error detected in mdftkd\n\n\0" as *const u8
-                        as *const ::core::ffi::c_char,
-                );
+                // `mdftkd.c:57`, `printf("\ntransfer error detected in
+                // mdftkd\n\n")`.  `srfp` never emits a factor of 6 -- it
+                // splits every composite into primes and regroups only powers
+                // of two -- so this arm is unreachable, and the stream it
+                // would print on is not exercised by any command.
+                // `mdftkd.c:57`.  Through `libc::printf`, not Rust's
+                // stdout: `cmplft` and `srfp` write to the C stream, and C
+                // stdio is block-buffered under redirection while Rust's is
+                // not, so mixing the two reorders a captured file.  The arm
+                // is unreachable in practice — `srfp` splits composites into
+                // primes and regroups only powers of two, so it never emits a
+                // factor of 6 — but the stream is part of the behaviour.
+                unsafe {
+                    libc::printf(c"\ntransfer error detected in mdftkd\n\n".as_ptr());
+                }
                 return;
             }
-            7 | _ => {
-                rpcftk(n, nReduced, pFac, stepAlong, x, y, dim);
+
+            // `mdftkd.c:60-61`, `case 7:` falls through to `default:`.
+            _ => {
+                rpcftk(n, n_reduced, p_fac, step_along, data, x, y, dim);
             }
         }
     }
 }
-pub unsafe extern "C" fn r2cftk(
-    mut n: ::core::ffi::c_int,
-    mut nReduced: ::core::ffi::c_int,
-    mut x0: *mut ::core::ffi::c_float,
-    mut y0: *mut ::core::ffi::c_float,
-    mut x1: *mut ::core::ffi::c_float,
-    mut y1: *mut ::core::ffi::c_float,
-    mut dim: *mut ::core::ffi::c_int,
+
+/// C `r2cftk`.
+///
+/// radix 2 multi-dimensional complex fourier transform kernel
+pub fn r2cftk(
+    n: i32,
+    n_reduced: i32,
+    data: &mut [f32],
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+    dim: &[i32],
 ) {
-    let mut fold: ::core::ffi::c_int = 0;
-    let mut zero: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut k0: ::core::ffi::c_int = 0;
-    let mut nRed2: ::core::ffi::c_int = 0;
-    let mut nRedOv2p1: ::core::ffi::c_int = 0;
-    let mut k1: ::core::ffi::c_int = 0;
-    let mut sepBetween: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut limAlong: ::core::ffi::c_int = 0;
-    let mut sepNRed2: ::core::ffi::c_int = 0;
-    let mut totFloats: ::core::ffi::c_int = 0;
-    let mut extentBetween: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut nSep: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_double = 0.;
-    let mut c: ::core::ffi::c_float = 0.;
-    let mut is: ::core::ffi::c_float = 0.;
-    let mut iu: ::core::ffi::c_float = 0.;
-    let mut rs: ::core::ffi::c_float = 0.;
-    let mut ru: ::core::ffi::c_float = 0.;
-    let mut sepAlong: ::core::ffi::c_float = 0.;
-    let mut twopi: ::core::ffi::c_float = 6.2831853f32;
-    let mut fjm1: ::core::ffi::c_float = 0.;
-    let mut fnRed2: ::core::ffi::c_float = 0.;
-    let mut itrip: ::core::ffi::c_int = 0;
-    let mut ntrip: ::core::ffi::c_int = 0;
-    totFloats = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    limAlong = *dim.offset(3 as ::core::ffi::c_int as isize);
-    extentBetween = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    sepBetween = *dim.offset(5 as ::core::ffi::c_int as isize);
-    nSep = n * sep;
-    nRed2 = nReduced * 2 as ::core::ffi::c_int;
-    fnRed2 = nRed2 as ::core::ffi::c_float;
-    nRedOv2p1 = nReduced / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-    sepNRed2 = sep * nRed2;
-    fjm1 = -1.0f64 as ::core::ffi::c_float;
-    j = 1 as ::core::ffi::c_int;
-    while j <= nRedOv2p1 {
-        fold = (j > 1 as ::core::ffi::c_int
-            && 2 as ::core::ffi::c_int * j < nReduced + 2 as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-        k0 = (j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
-        fjm1 = (fjm1 as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fjm1 / fnRed2) as ::core::ffi::c_double;
-        zero = (angle == 0.0f64) as ::core::ffi::c_int;
-        if zero == 0 {
-            c = cos(angle) as ::core::ffi::c_float;
-            sepAlong = sin(angle) as ::core::ffi::c_float;
+    let n_red2: i32;
+    let n_red_ov2p1: i32;
+    let sep_between: i32;
+    let lim_along: i32;
+    let sep_n_red2: i32;
+    let tot_floats: i32;
+    let extent_between: i32;
+    let sep: i32;
+    let n_sep: i32;
+    let mut c: f32 = 0.0;
+    let mut sep_along: f32 = 0.0;
+    let twopi: f32 = 6.2831853;
+    let mut fjm1: f32;
+    let fn_red2: f32;
+
+    tot_floats = dim[1];
+    sep = dim[2];
+    lim_along = dim[3];
+    extent_between = dim[4] - 1;
+    sep_between = dim[5];
+    n_sep = n * sep;
+    n_red2 = n_reduced * 2;
+    fn_red2 = n_red2 as f32;
+    n_red_ov2p1 = n_reduced / 2 + 1;
+    sep_n_red2 = sep * n_red2;
+
+    fjm1 = -1.0;
+    for j in 1..=n_red_ov2p1 {
+        let fold = j > 1 && 2 * j < n_reduced + 2;
+        let mut k0 = (j - 1) * sep + 1;
+        fjm1 = (fjm1 as f64 + 1.0) as f32;
+        let angle = (twopi * fjm1 / fn_red2) as f64;
+        let zero = angle == 0.0;
+        if !zero {
+            c = angle.cos() as f32;
+            sep_along = angle.sin() as f32;
         }
-        ntrip = if fold != 0 {
-            2 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        };
-        itrip = 0 as ::core::ffi::c_int;
-        while itrip < ntrip {
-            kk = k0;
-            while kk <= nSep {
-                l = kk;
-                while l <= totFloats {
-                    k1 = l + extentBetween;
-                    k = l - 1 as ::core::ffi::c_int;
+        let ntrip = if fold { 2 } else { 1 };
+        for _itrip in 0..ntrip {
+            let mut kk = k0;
+            while kk <= n_sep {
+                let mut l = kk;
+                while l <= tot_floats {
+                    let k1 = l + extent_between;
+                    let mut k = l - 1;
                     while k < k1 {
-                        rs = *x0.offset(k as isize) + *x1.offset(k as isize);
-                        is = *y0.offset(k as isize) + *y1.offset(k as isize);
-                        ru = *x0.offset(k as isize) - *x1.offset(k as isize);
-                        iu = *y0.offset(k as isize) - *y1.offset(k as isize);
-                        *x0.offset(k as isize) = rs;
-                        *y0.offset(k as isize) = is;
-                        if zero == 0 {
-                            *x1.offset(k as isize) = ru * c + iu * sepAlong;
-                            *y1.offset(k as isize) = iu * c - ru * sepAlong;
+                        let rs = data[x0 + k as usize] + data[x1 + k as usize];
+                        let is = data[y0 + k as usize] + data[y1 + k as usize];
+                        let ru = data[x0 + k as usize] - data[x1 + k as usize];
+                        let iu = data[y0 + k as usize] - data[y1 + k as usize];
+                        data[x0 + k as usize] = rs;
+                        data[y0 + k as usize] = is;
+                        if !zero {
+                            data[x1 + k as usize] = ru * c + iu * sep_along;
+                            data[y1 + k as usize] = iu * c - ru * sep_along;
                         } else {
-                            *x1.offset(k as isize) = ru;
-                            *y1.offset(k as isize) = iu;
+                            data[x1 + k as usize] = ru;
+                            data[y1 + k as usize] = iu;
                         }
-                        k += sepBetween;
+                        k += sep_between;
                     }
-                    l += limAlong;
+                    l += lim_along;
                 }
-                kk += sepNRed2;
+                kk += sep_n_red2;
             }
-            k0 = (nReduced + 1 as ::core::ffi::c_int - j) * sep + 1 as ::core::ffi::c_int;
+            k0 = (n_reduced + 1 - j) * sep + 1;
             c = -c;
-            itrip += 1;
         }
-        j += 1;
     }
 }
-pub unsafe extern "C" fn r3cftk(
-    mut n: ::core::ffi::c_int,
-    mut nReduced: ::core::ffi::c_int,
-    mut x0: *mut ::core::ffi::c_float,
-    mut y0: *mut ::core::ffi::c_float,
-    mut x1: *mut ::core::ffi::c_float,
-    mut y1: *mut ::core::ffi::c_float,
-    mut x2: *mut ::core::ffi::c_float,
-    mut y2: *mut ::core::ffi::c_float,
-    mut dim: *mut ::core::ffi::c_int,
+
+/// C `r3cftk`.
+///
+/// radix 3 multi-dimensional complex fourier transform kernel
+pub fn r3cftk(
+    n: i32,
+    n_reduced: i32,
+    data: &mut [f32],
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+    x2: usize,
+    y2: usize,
+    dim: &[i32],
 ) {
-    let mut fold: ::core::ffi::c_int = 0;
-    let mut zero: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut k0: ::core::ffi::c_int = 0;
-    let mut nRed3: ::core::ffi::c_int = 0;
-    let mut nRedOv2p1: ::core::ffi::c_int = 0;
-    let mut k1: ::core::ffi::c_int = 0;
-    let mut sepBetween: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut limAlong: ::core::ffi::c_int = 0;
-    let mut sepNRed3: ::core::ffi::c_int = 0;
-    let mut totFloats: ::core::ffi::c_int = 0;
-    let mut extentBetween: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut nSep: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_double = 0.;
-    let mut a: ::core::ffi::c_float = -0.5f64 as ::core::ffi::c_float;
-    let mut b: ::core::ffi::c_float = 0.86602540f32;
-    let mut c1: ::core::ffi::c_float = 0.;
-    let mut c2: ::core::ffi::c_float = 0.;
-    let mut s1: ::core::ffi::c_float = 0.;
-    let mut s2: ::core::ffi::c_float = 0.;
-    let mut t: ::core::ffi::c_float = 0.;
-    let mut twopi: ::core::ffi::c_float = 6.2831853f32;
-    let mut i0: ::core::ffi::c_float = 0.;
-    let mut i1: ::core::ffi::c_float = 0.;
-    let mut i2: ::core::ffi::c_float = 0.;
-    let mut ia: ::core::ffi::c_float = 0.;
-    let mut ib: ::core::ffi::c_float = 0.;
-    let mut is: ::core::ffi::c_float = 0.;
-    let mut r0: ::core::ffi::c_float = 0.;
-    let mut r1: ::core::ffi::c_float = 0.;
-    let mut r2: ::core::ffi::c_float = 0.;
-    let mut ra: ::core::ffi::c_float = 0.;
-    let mut rb: ::core::ffi::c_float = 0.;
-    let mut rs: ::core::ffi::c_float = 0.;
-    let mut fjm1: ::core::ffi::c_float = 0.;
-    let mut fnRed3: ::core::ffi::c_float = 0.;
-    let mut itrip: ::core::ffi::c_int = 0;
-    let mut ntrip: ::core::ffi::c_int = 0;
-    totFloats = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    limAlong = *dim.offset(3 as ::core::ffi::c_int as isize);
-    extentBetween = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    sepBetween = *dim.offset(5 as ::core::ffi::c_int as isize);
-    nSep = n * sep;
-    nRed3 = nReduced * 3 as ::core::ffi::c_int;
-    fnRed3 = nRed3 as ::core::ffi::c_float;
-    sepNRed3 = sep * nRed3;
-    nRedOv2p1 = nReduced / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-    fjm1 = -1.0f64 as ::core::ffi::c_float;
-    j = 1 as ::core::ffi::c_int;
-    while j <= nRedOv2p1 {
-        fold = (j > 1 as ::core::ffi::c_int
-            && 2 as ::core::ffi::c_int * j < nReduced + 2 as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-        k0 = (j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
-        fjm1 = (fjm1 as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fjm1 / fnRed3) as ::core::ffi::c_double;
-        zero = (angle == 0.0f64) as ::core::ffi::c_int;
-        if zero == 0 {
-            c1 = cos(angle) as ::core::ffi::c_float;
-            s1 = sin(angle) as ::core::ffi::c_float;
+    let n_red3: i32;
+    let n_red_ov2p1: i32;
+    let sep_between: i32;
+    let lim_along: i32;
+    let sep_n_red3: i32;
+    let tot_floats: i32;
+    let extent_between: i32;
+    let sep: i32;
+    let n_sep: i32;
+    let a: f32 = -0.5;
+    let b: f32 = 0.86602540;
+    let mut c1: f32 = 0.0;
+    let mut c2: f32 = 0.0;
+    let mut s1: f32 = 0.0;
+    let mut s2: f32 = 0.0;
+    let mut t: f32;
+    let twopi: f32 = 6.2831853;
+    let mut fjm1: f32;
+    let fn_red3: f32;
+
+    tot_floats = dim[1];
+    sep = dim[2];
+    lim_along = dim[3];
+    extent_between = dim[4] - 1;
+    sep_between = dim[5];
+    n_sep = n * sep;
+    n_red3 = n_reduced * 3;
+    fn_red3 = n_red3 as f32;
+    sep_n_red3 = sep * n_red3;
+    n_red_ov2p1 = n_reduced / 2 + 1;
+
+    fjm1 = -1.0;
+    for j in 1..=n_red_ov2p1 {
+        let fold = j > 1 && 2 * j < n_reduced + 2;
+        let mut k0 = (j - 1) * sep + 1;
+        fjm1 = (fjm1 as f64 + 1.0) as f32;
+        let angle = (twopi * fjm1 / fn_red3) as f64;
+        let zero = angle == 0.0;
+        if !zero {
+            c1 = angle.cos() as f32;
+            s1 = angle.sin() as f32;
             c2 = c1 * c1 - s1 * s1;
             s2 = s1 * c1 + c1 * s1;
         }
-        ntrip = if fold != 0 {
-            2 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        };
-        itrip = 0 as ::core::ffi::c_int;
-        while itrip < ntrip {
-            kk = k0;
-            while kk <= nSep {
-                l = kk;
-                while l <= totFloats {
-                    k1 = l + extentBetween;
-                    k = l - 1 as ::core::ffi::c_int;
+        let ntrip = if fold { 2 } else { 1 };
+        for _itrip in 0..ntrip {
+            let mut kk = k0;
+            while kk <= n_sep {
+                let mut l = kk;
+                while l <= tot_floats {
+                    let k1 = l + extent_between;
+                    let mut k = l - 1;
                     while k < k1 {
-                        r0 = *x0.offset(k as isize);
-                        i0 = *y0.offset(k as isize);
-                        rs = *x1.offset(k as isize) + *x2.offset(k as isize);
-                        is = *y1.offset(k as isize) + *y2.offset(k as isize);
-                        *x0.offset(k as isize) = r0 + rs;
-                        *y0.offset(k as isize) = i0 + is;
-                        ra = r0 + rs * a;
-                        ia = i0 + is * a;
-                        rb = (*x1.offset(k as isize) - *x2.offset(k as isize)) * b;
-                        ib = (*y1.offset(k as isize) - *y2.offset(k as isize)) * b;
-                        if zero == 0 {
-                            r1 = ra + ib;
-                            i1 = ia - rb;
-                            r2 = ra - ib;
-                            i2 = ia + rb;
-                            *x1.offset(k as isize) = r1 * c1 + i1 * s1;
-                            *y1.offset(k as isize) = i1 * c1 - r1 * s1;
-                            *x2.offset(k as isize) = r2 * c2 + i2 * s2;
-                            *y2.offset(k as isize) = i2 * c2 - r2 * s2;
+                        let r0 = data[x0 + k as usize];
+                        let i0 = data[y0 + k as usize];
+                        let rs = data[x1 + k as usize] + data[x2 + k as usize];
+                        let is = data[y1 + k as usize] + data[y2 + k as usize];
+                        data[x0 + k as usize] = r0 + rs;
+                        data[y0 + k as usize] = i0 + is;
+                        let ra = r0 + rs * a;
+                        let ia = i0 + is * a;
+                        let rb = (data[x1 + k as usize] - data[x2 + k as usize]) * b;
+                        let ib = (data[y1 + k as usize] - data[y2 + k as usize]) * b;
+                        if !zero {
+                            let r1 = ra + ib;
+                            let i1 = ia - rb;
+                            let r2 = ra - ib;
+                            let i2 = ia + rb;
+                            data[x1 + k as usize] = r1 * c1 + i1 * s1;
+                            data[y1 + k as usize] = i1 * c1 - r1 * s1;
+                            data[x2 + k as usize] = r2 * c2 + i2 * s2;
+                            data[y2 + k as usize] = i2 * c2 - r2 * s2;
                         } else {
-                            *x1.offset(k as isize) = ra + ib;
-                            *y1.offset(k as isize) = ia - rb;
-                            *x2.offset(k as isize) = ra - ib;
-                            *y2.offset(k as isize) = ia + rb;
+                            data[x1 + k as usize] = ra + ib;
+                            data[y1 + k as usize] = ia - rb;
+                            data[x2 + k as usize] = ra - ib;
+                            data[y2 + k as usize] = ia + rb;
                         }
-                        k += sepBetween;
+                        k += sep_between;
                     }
-                    l += limAlong;
+                    l += lim_along;
                 }
-                kk += sepNRed3;
+                kk += sep_n_red3;
             }
-            k0 = (nReduced + 1 as ::core::ffi::c_int - j) * sep + 1 as ::core::ffi::c_int;
+            k0 = (n_reduced + 1 - j) * sep + 1;
             t = c1 * a + s1 * b;
             s1 = c1 * b - s1 * a;
             c1 = t;
             t = c2 * a - s2 * b;
             s2 = -c2 * b - s2 * a;
             c2 = t;
-            itrip += 1;
         }
-        j += 1;
     }
 }
-pub unsafe extern "C" fn r4cftk(
-    mut n: ::core::ffi::c_int,
-    mut nReduced: ::core::ffi::c_int,
-    mut x0: *mut ::core::ffi::c_float,
-    mut y0: *mut ::core::ffi::c_float,
-    mut x1: *mut ::core::ffi::c_float,
-    mut y1: *mut ::core::ffi::c_float,
-    mut x2: *mut ::core::ffi::c_float,
-    mut y2: *mut ::core::ffi::c_float,
-    mut x3: *mut ::core::ffi::c_float,
-    mut y3: *mut ::core::ffi::c_float,
-    mut dim: *mut ::core::ffi::c_int,
+
+/// C `r4cftk`.
+///
+/// radix 4 multi-dimensional complex fourier transform kernel
+pub fn r4cftk(
+    n: i32,
+    n_reduced: i32,
+    data: &mut [f32],
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+    x2: usize,
+    y2: usize,
+    x3: usize,
+    y3: usize,
+    dim: &[i32],
 ) {
-    let mut fold: ::core::ffi::c_int = 0;
-    let mut zero: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut k0: ::core::ffi::c_int = 0;
-    let mut nRed4: ::core::ffi::c_int = 0;
-    let mut nRedOv2p1: ::core::ffi::c_int = 0;
-    let mut k1: ::core::ffi::c_int = 0;
-    let mut sepBetween: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut limAlong: ::core::ffi::c_int = 0;
-    let mut sepNRed4: ::core::ffi::c_int = 0;
-    let mut totFloats: ::core::ffi::c_int = 0;
-    let mut extentBetween: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut nSep: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_double = 0.;
-    let mut c1: ::core::ffi::c_float = 0.;
-    let mut c2: ::core::ffi::c_float = 0.;
-    let mut c3: ::core::ffi::c_float = 0.;
-    let mut s1: ::core::ffi::c_float = 0.;
-    let mut s2: ::core::ffi::c_float = 0.;
-    let mut s3: ::core::ffi::c_float = 0.;
-    let mut t: ::core::ffi::c_float = 0.;
-    let mut twopi: ::core::ffi::c_float = 6.2831853f32;
-    let mut i1: ::core::ffi::c_float = 0.;
-    let mut i2: ::core::ffi::c_float = 0.;
-    let mut i3: ::core::ffi::c_float = 0.;
-    let mut is0: ::core::ffi::c_float = 0.;
-    let mut is1: ::core::ffi::c_float = 0.;
-    let mut iu0: ::core::ffi::c_float = 0.;
-    let mut iu1: ::core::ffi::c_float = 0.;
-    let mut r1: ::core::ffi::c_float = 0.;
-    let mut r2: ::core::ffi::c_float = 0.;
-    let mut r3: ::core::ffi::c_float = 0.;
-    let mut rs0: ::core::ffi::c_float = 0.;
-    let mut rs1: ::core::ffi::c_float = 0.;
-    let mut ru0: ::core::ffi::c_float = 0.;
-    let mut ru1: ::core::ffi::c_float = 0.;
-    let mut fjm1: ::core::ffi::c_float = 0.;
-    let mut fnRed4: ::core::ffi::c_float = 0.;
-    let mut itrip: ::core::ffi::c_int = 0;
-    let mut ntrip: ::core::ffi::c_int = 0;
-    totFloats = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    limAlong = *dim.offset(3 as ::core::ffi::c_int as isize);
-    extentBetween = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    sepBetween = *dim.offset(5 as ::core::ffi::c_int as isize);
-    nSep = n * sep;
-    nRed4 = nReduced * 4 as ::core::ffi::c_int;
-    fnRed4 = nRed4 as ::core::ffi::c_float;
-    sepNRed4 = sep * nRed4;
-    nRedOv2p1 = nReduced / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-    fjm1 = -1.0f64 as ::core::ffi::c_float;
-    j = 1 as ::core::ffi::c_int;
-    while j <= nRedOv2p1 {
-        fold = (j > 1 as ::core::ffi::c_int
-            && 2 as ::core::ffi::c_int * j < nReduced + 2 as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-        k0 = (j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
-        fjm1 = (fjm1 as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fjm1 / fnRed4) as ::core::ffi::c_double;
-        zero = (angle == 0.0f64) as ::core::ffi::c_int;
-        if zero == 0 {
-            c1 = cos(angle) as ::core::ffi::c_float;
-            s1 = sin(angle) as ::core::ffi::c_float;
+    let n_red4: i32;
+    let n_red_ov2p1: i32;
+    let sep_between: i32;
+    let lim_along: i32;
+    let sep_n_red4: i32;
+    let tot_floats: i32;
+    let extent_between: i32;
+    let sep: i32;
+    let n_sep: i32;
+    let mut c1: f32 = 0.0;
+    let mut c2: f32 = 0.0;
+    let mut c3: f32 = 0.0;
+    let mut s1: f32 = 0.0;
+    let mut s2: f32 = 0.0;
+    let mut s3: f32 = 0.0;
+    let mut t: f32;
+    let twopi: f32 = 6.2831853;
+    let mut fjm1: f32;
+    let fn_red4: f32;
+
+    tot_floats = dim[1];
+    sep = dim[2];
+    lim_along = dim[3];
+    extent_between = dim[4] - 1;
+    sep_between = dim[5];
+    n_sep = n * sep;
+    n_red4 = n_reduced * 4;
+    fn_red4 = n_red4 as f32;
+    sep_n_red4 = sep * n_red4;
+    n_red_ov2p1 = n_reduced / 2 + 1;
+
+    fjm1 = -1.0;
+    for j in 1..=n_red_ov2p1 {
+        let fold = j > 1 && 2 * j < n_reduced + 2;
+        let mut k0 = (j - 1) * sep + 1;
+        fjm1 = (fjm1 as f64 + 1.0) as f32;
+        let angle = (twopi * fjm1 / fn_red4) as f64;
+        let zero = angle == 0.0;
+        if !zero {
+            c1 = angle.cos() as f32;
+            s1 = angle.sin() as f32;
             c2 = c1 * c1 - s1 * s1;
             s2 = s1 * c1 + c1 * s1;
             c3 = c2 * c1 - s2 * s1;
             s3 = s2 * c1 + c2 * s1;
         }
-        ntrip = if fold != 0 {
-            2 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        };
-        itrip = 0 as ::core::ffi::c_int;
-        while itrip < ntrip {
-            kk = k0;
-            while kk <= nSep {
-                l = kk;
-                while l <= totFloats {
-                    k1 = l + extentBetween;
-                    k = l - 1 as ::core::ffi::c_int;
+        let ntrip = if fold { 2 } else { 1 };
+        for _itrip in 0..ntrip {
+            let mut kk = k0;
+            while kk <= n_sep {
+                let mut l = kk;
+                while l <= tot_floats {
+                    let k1 = l + extent_between;
+                    let mut k = l - 1;
                     while k < k1 {
-                        rs0 = *x0.offset(k as isize) + *x2.offset(k as isize);
-                        is0 = *y0.offset(k as isize) + *y2.offset(k as isize);
-                        ru0 = *x0.offset(k as isize) - *x2.offset(k as isize);
-                        iu0 = *y0.offset(k as isize) - *y2.offset(k as isize);
-                        rs1 = *x1.offset(k as isize) + *x3.offset(k as isize);
-                        is1 = *y1.offset(k as isize) + *y3.offset(k as isize);
-                        ru1 = *x1.offset(k as isize) - *x3.offset(k as isize);
-                        iu1 = *y1.offset(k as isize) - *y3.offset(k as isize);
-                        *x0.offset(k as isize) = rs0 + rs1;
-                        *y0.offset(k as isize) = is0 + is1;
-                        if zero == 0 {
-                            r1 = ru0 + iu1;
-                            i1 = iu0 - ru1;
-                            r2 = rs0 - rs1;
-                            i2 = is0 - is1;
-                            r3 = ru0 - iu1;
-                            i3 = iu0 + ru1;
-                            *x2.offset(k as isize) = r1 * c1 + i1 * s1;
-                            *y2.offset(k as isize) = i1 * c1 - r1 * s1;
-                            *x1.offset(k as isize) = r2 * c2 + i2 * s2;
-                            *y1.offset(k as isize) = i2 * c2 - r2 * s2;
-                            *x3.offset(k as isize) = r3 * c3 + i3 * s3;
-                            *y3.offset(k as isize) = i3 * c3 - r3 * s3;
+                        let rs0 = data[x0 + k as usize] + data[x2 + k as usize];
+                        let is0 = data[y0 + k as usize] + data[y2 + k as usize];
+                        let ru0 = data[x0 + k as usize] - data[x2 + k as usize];
+                        let iu0 = data[y0 + k as usize] - data[y2 + k as usize];
+                        let rs1 = data[x1 + k as usize] + data[x3 + k as usize];
+                        let is1 = data[y1 + k as usize] + data[y3 + k as usize];
+                        let ru1 = data[x1 + k as usize] - data[x3 + k as usize];
+                        let iu1 = data[y1 + k as usize] - data[y3 + k as usize];
+                        data[x0 + k as usize] = rs0 + rs1;
+                        data[y0 + k as usize] = is0 + is1;
+                        if !zero {
+                            let r1 = ru0 + iu1;
+                            let i1 = iu0 - ru1;
+                            let r2 = rs0 - rs1;
+                            let i2 = is0 - is1;
+                            let r3 = ru0 - iu1;
+                            let i3 = iu0 + ru1;
+                            data[x2 + k as usize] = r1 * c1 + i1 * s1;
+                            data[y2 + k as usize] = i1 * c1 - r1 * s1;
+                            data[x1 + k as usize] = r2 * c2 + i2 * s2;
+                            data[y1 + k as usize] = i2 * c2 - r2 * s2;
+                            data[x3 + k as usize] = r3 * c3 + i3 * s3;
+                            data[y3 + k as usize] = i3 * c3 - r3 * s3;
                         } else {
-                            *x2.offset(k as isize) = ru0 + iu1;
-                            *y2.offset(k as isize) = iu0 - ru1;
-                            *x1.offset(k as isize) = rs0 - rs1;
-                            *y1.offset(k as isize) = is0 - is1;
-                            *x3.offset(k as isize) = ru0 - iu1;
-                            *y3.offset(k as isize) = iu0 + ru1;
+                            data[x2 + k as usize] = ru0 + iu1;
+                            data[y2 + k as usize] = iu0 - ru1;
+                            data[x1 + k as usize] = rs0 - rs1;
+                            data[y1 + k as usize] = is0 - is1;
+                            data[x3 + k as usize] = ru0 - iu1;
+                            data[y3 + k as usize] = iu0 + ru1;
                         }
-                        k += sepBetween;
+                        k += sep_between;
                     }
-                    l += limAlong;
+                    l += lim_along;
                 }
-                kk += sepNRed4;
+                kk += sep_n_red4;
             }
-            k0 = (nReduced + 1 as ::core::ffi::c_int - j) * sep + 1 as ::core::ffi::c_int;
+
+            k0 = (n_reduced + 1 - j) * sep + 1;
             t = c1;
             c1 = s1;
             s1 = t;
@@ -526,111 +458,76 @@ pub unsafe extern "C" fn r4cftk(
             t = c3;
             c3 = -s3;
             s3 = -t;
-            itrip += 1;
         }
-        j += 1;
     }
 }
-pub unsafe extern "C" fn r5cftk(
-    mut n: ::core::ffi::c_int,
-    mut nReduced: ::core::ffi::c_int,
-    mut x0: *mut ::core::ffi::c_float,
-    mut y0: *mut ::core::ffi::c_float,
-    mut x1: *mut ::core::ffi::c_float,
-    mut y1: *mut ::core::ffi::c_float,
-    mut x2: *mut ::core::ffi::c_float,
-    mut y2: *mut ::core::ffi::c_float,
-    mut x3: *mut ::core::ffi::c_float,
-    mut y3: *mut ::core::ffi::c_float,
-    mut x4: *mut ::core::ffi::c_float,
-    mut y4: *mut ::core::ffi::c_float,
-    mut dim: *mut ::core::ffi::c_int,
+
+/// C `r5cftk`.
+///
+/// radix 5 multi-dimensional complex fourier transform kernel
+pub fn r5cftk(
+    n: i32,
+    n_reduced: i32,
+    data: &mut [f32],
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+    x2: usize,
+    y2: usize,
+    x3: usize,
+    y3: usize,
+    x4: usize,
+    y4: usize,
+    dim: &[i32],
 ) {
-    let mut fold: ::core::ffi::c_int = 0;
-    let mut zero: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut k0: ::core::ffi::c_int = 0;
-    let mut nRed5: ::core::ffi::c_int = 0;
-    let mut nRedOv2p1: ::core::ffi::c_int = 0;
-    let mut k1: ::core::ffi::c_int = 0;
-    let mut sepBetween: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut limAlong: ::core::ffi::c_int = 0;
-    let mut sepNRed5: ::core::ffi::c_int = 0;
-    let mut totFloats: ::core::ffi::c_int = 0;
-    let mut extentBetween: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut nSep: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_double = 0.;
-    let mut a1: ::core::ffi::c_float = 0.30901699f32;
-    let mut a2: ::core::ffi::c_float = -0.80901699f64 as ::core::ffi::c_float;
-    let mut b1: ::core::ffi::c_float = 0.95105652f32;
-    let mut b2: ::core::ffi::c_float = 0.58778525f32;
-    let mut c1: ::core::ffi::c_float = 0.;
-    let mut c2: ::core::ffi::c_float = 0.;
-    let mut c3: ::core::ffi::c_float = 0.;
-    let mut c4: ::core::ffi::c_float = 0.;
-    let mut s1: ::core::ffi::c_float = 0.;
-    let mut s2: ::core::ffi::c_float = 0.;
-    let mut s3: ::core::ffi::c_float = 0.;
-    let mut s4: ::core::ffi::c_float = 0.;
-    let mut t: ::core::ffi::c_float = 0.;
-    let mut twopi: ::core::ffi::c_float = 6.2831853f32;
-    let mut r0: ::core::ffi::c_float = 0.;
-    let mut r1: ::core::ffi::c_float = 0.;
-    let mut r2: ::core::ffi::c_float = 0.;
-    let mut r3: ::core::ffi::c_float = 0.;
-    let mut r4: ::core::ffi::c_float = 0.;
-    let mut ra1: ::core::ffi::c_float = 0.;
-    let mut ra2: ::core::ffi::c_float = 0.;
-    let mut rb1: ::core::ffi::c_float = 0.;
-    let mut rb2: ::core::ffi::c_float = 0.;
-    let mut rs1: ::core::ffi::c_float = 0.;
-    let mut rs2: ::core::ffi::c_float = 0.;
-    let mut ru1: ::core::ffi::c_float = 0.;
-    let mut ru2: ::core::ffi::c_float = 0.;
-    let mut i0: ::core::ffi::c_float = 0.;
-    let mut i1: ::core::ffi::c_float = 0.;
-    let mut i2: ::core::ffi::c_float = 0.;
-    let mut i3: ::core::ffi::c_float = 0.;
-    let mut i4: ::core::ffi::c_float = 0.;
-    let mut ia1: ::core::ffi::c_float = 0.;
-    let mut ia2: ::core::ffi::c_float = 0.;
-    let mut ib1: ::core::ffi::c_float = 0.;
-    let mut ib2: ::core::ffi::c_float = 0.;
-    let mut is1: ::core::ffi::c_float = 0.;
-    let mut is2: ::core::ffi::c_float = 0.;
-    let mut iu1: ::core::ffi::c_float = 0.;
-    let mut iu2: ::core::ffi::c_float = 0.;
-    let mut fjm1: ::core::ffi::c_float = 0.;
-    let mut fnRed5: ::core::ffi::c_float = 0.;
-    let mut itrip: ::core::ffi::c_int = 0;
-    let mut ntrip: ::core::ffi::c_int = 0;
-    totFloats = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    limAlong = *dim.offset(3 as ::core::ffi::c_int as isize);
-    extentBetween = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    sepBetween = *dim.offset(5 as ::core::ffi::c_int as isize);
-    nSep = n * sep;
-    nRed5 = nReduced * 5 as ::core::ffi::c_int;
-    fnRed5 = nRed5 as ::core::ffi::c_float;
-    sepNRed5 = sep * nRed5;
-    nRedOv2p1 = nReduced / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-    fjm1 = -1.0f64 as ::core::ffi::c_float;
-    j = 1 as ::core::ffi::c_int;
-    while j <= nRedOv2p1 {
-        fold = (j > 1 as ::core::ffi::c_int
-            && 2 as ::core::ffi::c_int * j < nReduced + 2 as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-        k0 = (j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
-        fjm1 = (fjm1 as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fjm1 / fnRed5) as ::core::ffi::c_double;
-        zero = (angle == 0.0f64) as ::core::ffi::c_int;
-        if zero == 0 {
-            c1 = cos(angle) as ::core::ffi::c_float;
-            s1 = sin(angle) as ::core::ffi::c_float;
+    let n_red5: i32;
+    let n_red_ov2p1: i32;
+    let sep_between: i32;
+    let lim_along: i32;
+    let sep_n_red5: i32;
+    let tot_floats: i32;
+    let extent_between: i32;
+    let sep: i32;
+    let n_sep: i32;
+    let a1: f32 = 0.30901699;
+    let a2: f32 = -0.80901699;
+    let b1: f32 = 0.95105652;
+    let b2: f32 = 0.58778525;
+    let mut c1: f32 = 0.0;
+    let mut c2: f32 = 0.0;
+    let mut c3: f32 = 0.0;
+    let mut c4: f32 = 0.0;
+    let mut s1: f32 = 0.0;
+    let mut s2: f32 = 0.0;
+    let mut s3: f32 = 0.0;
+    let mut s4: f32 = 0.0;
+    let mut t: f32;
+    let twopi: f32 = 6.2831853;
+    let mut fjm1: f32;
+    let fn_red5: f32;
+
+    tot_floats = dim[1];
+    sep = dim[2];
+    lim_along = dim[3];
+    extent_between = dim[4] - 1;
+    sep_between = dim[5];
+    n_sep = n * sep;
+    n_red5 = n_reduced * 5;
+    fn_red5 = n_red5 as f32;
+    sep_n_red5 = sep * n_red5;
+    n_red_ov2p1 = n_reduced / 2 + 1;
+
+    fjm1 = -1.0;
+    for j in 1..=n_red_ov2p1 {
+        let fold = j > 1 && 2 * j < n_reduced + 2;
+        let mut k0 = (j - 1) * sep + 1;
+        fjm1 = (fjm1 as f64 + 1.0) as f32;
+        let angle = (twopi * fjm1 / fn_red5) as f64;
+        let zero = angle == 0.0;
+        if !zero {
+            c1 = angle.cos() as f32;
+            s1 = angle.sin() as f32;
             c2 = c1 * c1 - s1 * s1;
             s2 = s1 * c1 + c1 * s1;
             c3 = c2 * c1 - s2 * s1;
@@ -638,74 +535,69 @@ pub unsafe extern "C" fn r5cftk(
             c4 = c2 * c2 - s2 * s2;
             s4 = s2 * c2 + c2 * s2;
         }
-        ntrip = if fold != 0 {
-            2 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        };
-        itrip = 0 as ::core::ffi::c_int;
-        while itrip < ntrip {
-            kk = k0;
-            while kk <= nSep {
-                l = kk;
-                while l <= totFloats {
-                    k1 = l + extentBetween;
-                    k = l - 1 as ::core::ffi::c_int;
+        let ntrip = if fold { 2 } else { 1 };
+        for _itrip in 0..ntrip {
+            let mut kk = k0;
+            while kk <= n_sep {
+                let mut l = kk;
+                while l <= tot_floats {
+                    let k1 = l + extent_between;
+                    let mut k = l - 1;
                     while k < k1 {
-                        r0 = *x0.offset(k as isize);
-                        i0 = *y0.offset(k as isize);
-                        rs1 = *x1.offset(k as isize) + *x4.offset(k as isize);
-                        is1 = *y1.offset(k as isize) + *y4.offset(k as isize);
-                        ru1 = *x1.offset(k as isize) - *x4.offset(k as isize);
-                        iu1 = *y1.offset(k as isize) - *y4.offset(k as isize);
-                        rs2 = *x2.offset(k as isize) + *x3.offset(k as isize);
-                        is2 = *y2.offset(k as isize) + *y3.offset(k as isize);
-                        ru2 = *x2.offset(k as isize) - *x3.offset(k as isize);
-                        iu2 = *y2.offset(k as isize) - *y3.offset(k as isize);
-                        *x0.offset(k as isize) = r0 + rs1 + rs2;
-                        *y0.offset(k as isize) = i0 + is1 + is2;
-                        ra1 = r0 + rs1 * a1 + rs2 * a2;
-                        ia1 = i0 + is1 * a1 + is2 * a2;
-                        ra2 = r0 + rs1 * a2 + rs2 * a1;
-                        ia2 = i0 + is1 * a2 + is2 * a1;
-                        rb1 = ru1 * b1 + ru2 * b2;
-                        ib1 = iu1 * b1 + iu2 * b2;
-                        rb2 = ru1 * b2 - ru2 * b1;
-                        ib2 = iu1 * b2 - iu2 * b1;
-                        if zero == 0 {
-                            r1 = ra1 + ib1;
-                            i1 = ia1 - rb1;
-                            r2 = ra2 + ib2;
-                            i2 = ia2 - rb2;
-                            r3 = ra2 - ib2;
-                            i3 = ia2 + rb2;
-                            r4 = ra1 - ib1;
-                            i4 = ia1 + rb1;
-                            *x1.offset(k as isize) = r1 * c1 + i1 * s1;
-                            *y1.offset(k as isize) = i1 * c1 - r1 * s1;
-                            *x2.offset(k as isize) = r2 * c2 + i2 * s2;
-                            *y2.offset(k as isize) = i2 * c2 - r2 * s2;
-                            *x3.offset(k as isize) = r3 * c3 + i3 * s3;
-                            *y3.offset(k as isize) = i3 * c3 - r3 * s3;
-                            *x4.offset(k as isize) = r4 * c4 + i4 * s4;
-                            *y4.offset(k as isize) = i4 * c4 - r4 * s4;
+                        let r0 = data[x0 + k as usize];
+                        let i0 = data[y0 + k as usize];
+                        let rs1 = data[x1 + k as usize] + data[x4 + k as usize];
+                        let is1 = data[y1 + k as usize] + data[y4 + k as usize];
+                        let ru1 = data[x1 + k as usize] - data[x4 + k as usize];
+                        let iu1 = data[y1 + k as usize] - data[y4 + k as usize];
+                        let rs2 = data[x2 + k as usize] + data[x3 + k as usize];
+                        let is2 = data[y2 + k as usize] + data[y3 + k as usize];
+                        let ru2 = data[x2 + k as usize] - data[x3 + k as usize];
+                        let iu2 = data[y2 + k as usize] - data[y3 + k as usize];
+                        data[x0 + k as usize] = r0 + rs1 + rs2;
+                        data[y0 + k as usize] = i0 + is1 + is2;
+                        let ra1 = r0 + rs1 * a1 + rs2 * a2;
+                        let ia1 = i0 + is1 * a1 + is2 * a2;
+                        let ra2 = r0 + rs1 * a2 + rs2 * a1;
+                        let ia2 = i0 + is1 * a2 + is2 * a1;
+                        let rb1 = ru1 * b1 + ru2 * b2;
+                        let ib1 = iu1 * b1 + iu2 * b2;
+                        let rb2 = ru1 * b2 - ru2 * b1;
+                        let ib2 = iu1 * b2 - iu2 * b1;
+                        if !zero {
+                            let r1 = ra1 + ib1;
+                            let i1 = ia1 - rb1;
+                            let r2 = ra2 + ib2;
+                            let i2 = ia2 - rb2;
+                            let r3 = ra2 - ib2;
+                            let i3 = ia2 + rb2;
+                            let r4 = ra1 - ib1;
+                            let i4 = ia1 + rb1;
+                            data[x1 + k as usize] = r1 * c1 + i1 * s1;
+                            data[y1 + k as usize] = i1 * c1 - r1 * s1;
+                            data[x2 + k as usize] = r2 * c2 + i2 * s2;
+                            data[y2 + k as usize] = i2 * c2 - r2 * s2;
+                            data[x3 + k as usize] = r3 * c3 + i3 * s3;
+                            data[y3 + k as usize] = i3 * c3 - r3 * s3;
+                            data[x4 + k as usize] = r4 * c4 + i4 * s4;
+                            data[y4 + k as usize] = i4 * c4 - r4 * s4;
                         } else {
-                            *x1.offset(k as isize) = ra1 + ib1;
-                            *y1.offset(k as isize) = ia1 - rb1;
-                            *x2.offset(k as isize) = ra2 + ib2;
-                            *y2.offset(k as isize) = ia2 - rb2;
-                            *x3.offset(k as isize) = ra2 - ib2;
-                            *y3.offset(k as isize) = ia2 + rb2;
-                            *x4.offset(k as isize) = ra1 - ib1;
-                            *y4.offset(k as isize) = ia1 + rb1;
+                            data[x1 + k as usize] = ra1 + ib1;
+                            data[y1 + k as usize] = ia1 - rb1;
+                            data[x2 + k as usize] = ra2 + ib2;
+                            data[y2 + k as usize] = ia2 - rb2;
+                            data[x3 + k as usize] = ra2 - ib2;
+                            data[y3 + k as usize] = ia2 + rb2;
+                            data[x4 + k as usize] = ra1 - ib1;
+                            data[y4 + k as usize] = ia1 + rb1;
                         }
-                        k += sepBetween;
+                        k += sep_between;
                     }
-                    l += limAlong;
+                    l += lim_along;
                 }
-                kk += sepNRed5;
+                kk += sep_n_red5;
             }
-            k0 = (nReduced + 1 as ::core::ffi::c_int - j) * sep + 1 as ::core::ffi::c_int;
+            k0 = (n_reduced + 1 - j) * sep + 1;
             t = c1 * a1 + s1 * b1;
             s1 = c1 * b1 - s1 * a1;
             c1 = t;
@@ -718,140 +610,85 @@ pub unsafe extern "C" fn r5cftk(
             t = c4 * a1 - s4 * b1;
             s4 = -c4 * b1 - s4 * a1;
             c4 = t;
-            itrip += 1;
         }
-        j += 1;
     }
 }
-pub unsafe extern "C" fn r8cftk(
-    mut n: ::core::ffi::c_int,
-    mut nReduced: ::core::ffi::c_int,
-    mut x0: *mut ::core::ffi::c_float,
-    mut y0: *mut ::core::ffi::c_float,
-    mut x1: *mut ::core::ffi::c_float,
-    mut y1: *mut ::core::ffi::c_float,
-    mut x2: *mut ::core::ffi::c_float,
-    mut y2: *mut ::core::ffi::c_float,
-    mut x3: *mut ::core::ffi::c_float,
-    mut y3: *mut ::core::ffi::c_float,
-    mut x4: *mut ::core::ffi::c_float,
-    mut y4: *mut ::core::ffi::c_float,
-    mut x5: *mut ::core::ffi::c_float,
-    mut y5: *mut ::core::ffi::c_float,
-    mut x6: *mut ::core::ffi::c_float,
-    mut y6: *mut ::core::ffi::c_float,
-    mut x7: *mut ::core::ffi::c_float,
-    mut y7: *mut ::core::ffi::c_float,
-    mut dim: *mut ::core::ffi::c_int,
+
+/// C `r8cftk`.
+///
+/// radix 8 multi-dimensional complex fourier transform kernel
+pub fn r8cftk(
+    n: i32,
+    n_reduced: i32,
+    data: &mut [f32],
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+    x2: usize,
+    y2: usize,
+    x3: usize,
+    y3: usize,
+    x4: usize,
+    y4: usize,
+    x5: usize,
+    y5: usize,
+    x6: usize,
+    y6: usize,
+    x7: usize,
+    y7: usize,
+    dim: &[i32],
 ) {
-    let mut fold: ::core::ffi::c_int = 0;
-    let mut zero: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut k0: ::core::ffi::c_int = 0;
-    let mut nRed8: ::core::ffi::c_int = 0;
-    let mut nRedOv2p1: ::core::ffi::c_int = 0;
-    let mut k1: ::core::ffi::c_int = 0;
-    let mut sepBetween: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut limAlong: ::core::ffi::c_int = 0;
-    let mut sepNRed8: ::core::ffi::c_int = 0;
-    let mut totFloats: ::core::ffi::c_int = 0;
-    let mut extentBetween: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut nSep: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_double = 0.;
-    let mut c1: ::core::ffi::c_float = 0.;
-    let mut c2: ::core::ffi::c_float = 0.;
-    let mut c3: ::core::ffi::c_float = 0.;
-    let mut c4: ::core::ffi::c_float = 0.;
-    let mut c5: ::core::ffi::c_float = 0.;
-    let mut c6: ::core::ffi::c_float = 0.;
-    let mut c7: ::core::ffi::c_float = 0.;
-    let mut e: ::core::ffi::c_float = 0.70710678f32;
-    let mut s1: ::core::ffi::c_float = 0.;
-    let mut s2: ::core::ffi::c_float = 0.;
-    let mut s3: ::core::ffi::c_float = 0.;
-    let mut s4: ::core::ffi::c_float = 0.;
-    let mut s5: ::core::ffi::c_float = 0.;
-    let mut s6: ::core::ffi::c_float = 0.;
-    let mut s7: ::core::ffi::c_float = 0.;
-    let mut t: ::core::ffi::c_float = 0.;
-    let mut twopi: ::core::ffi::c_float = 6.2831853f32;
-    let mut r1: ::core::ffi::c_float = 0.;
-    let mut r2: ::core::ffi::c_float = 0.;
-    let mut r3: ::core::ffi::c_float = 0.;
-    let mut r4: ::core::ffi::c_float = 0.;
-    let mut r5: ::core::ffi::c_float = 0.;
-    let mut r6: ::core::ffi::c_float = 0.;
-    let mut r7: ::core::ffi::c_float = 0.;
-    let mut rs0: ::core::ffi::c_float = 0.;
-    let mut rs1: ::core::ffi::c_float = 0.;
-    let mut rs2: ::core::ffi::c_float = 0.;
-    let mut rs3: ::core::ffi::c_float = 0.;
-    let mut ru0: ::core::ffi::c_float = 0.;
-    let mut ru1: ::core::ffi::c_float = 0.;
-    let mut ru2: ::core::ffi::c_float = 0.;
-    let mut ru3: ::core::ffi::c_float = 0.;
-    let mut i1: ::core::ffi::c_float = 0.;
-    let mut i2: ::core::ffi::c_float = 0.;
-    let mut i3: ::core::ffi::c_float = 0.;
-    let mut i4: ::core::ffi::c_float = 0.;
-    let mut i5: ::core::ffi::c_float = 0.;
-    let mut i6: ::core::ffi::c_float = 0.;
-    let mut i7: ::core::ffi::c_float = 0.;
-    let mut is0: ::core::ffi::c_float = 0.;
-    let mut is1: ::core::ffi::c_float = 0.;
-    let mut is2: ::core::ffi::c_float = 0.;
-    let mut is3: ::core::ffi::c_float = 0.;
-    let mut iu0: ::core::ffi::c_float = 0.;
-    let mut iu1: ::core::ffi::c_float = 0.;
-    let mut iu2: ::core::ffi::c_float = 0.;
-    let mut iu3: ::core::ffi::c_float = 0.;
-    let mut rss0: ::core::ffi::c_float = 0.;
-    let mut rss1: ::core::ffi::c_float = 0.;
-    let mut rsu0: ::core::ffi::c_float = 0.;
-    let mut rsu1: ::core::ffi::c_float = 0.;
-    let mut rus0: ::core::ffi::c_float = 0.;
-    let mut rus1: ::core::ffi::c_float = 0.;
-    let mut ruu0: ::core::ffi::c_float = 0.;
-    let mut ruu1: ::core::ffi::c_float = 0.;
-    let mut iss0: ::core::ffi::c_float = 0.;
-    let mut iss1: ::core::ffi::c_float = 0.;
-    let mut isu0: ::core::ffi::c_float = 0.;
-    let mut isu1: ::core::ffi::c_float = 0.;
-    let mut ius0: ::core::ffi::c_float = 0.;
-    let mut ius1: ::core::ffi::c_float = 0.;
-    let mut iuu0: ::core::ffi::c_float = 0.;
-    let mut iuu1: ::core::ffi::c_float = 0.;
-    let mut fjm1: ::core::ffi::c_float = 0.;
-    let mut fnRed8: ::core::ffi::c_float = 0.;
-    let mut itrip: ::core::ffi::c_int = 0;
-    let mut ntrip: ::core::ffi::c_int = 0;
-    totFloats = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    limAlong = *dim.offset(3 as ::core::ffi::c_int as isize);
-    extentBetween = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    sepBetween = *dim.offset(5 as ::core::ffi::c_int as isize);
-    nSep = n * sep;
-    nRed8 = nReduced * 8 as ::core::ffi::c_int;
-    fnRed8 = nRed8 as ::core::ffi::c_float;
-    sepNRed8 = sep * nRed8;
-    nRedOv2p1 = nReduced / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-    fjm1 = -1.0f64 as ::core::ffi::c_float;
-    j = 1 as ::core::ffi::c_int;
-    while j <= nRedOv2p1 {
-        fold = (j > 1 as ::core::ffi::c_int
-            && 2 as ::core::ffi::c_int * j < nReduced + 2 as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-        k0 = (j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
-        fjm1 = (fjm1 as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fjm1 / fnRed8) as ::core::ffi::c_double;
-        zero = (angle == 0.0f64) as ::core::ffi::c_int;
-        if zero == 0 {
-            c1 = cos(angle) as ::core::ffi::c_float;
-            s1 = sin(angle) as ::core::ffi::c_float;
+    let n_red8: i32;
+    let n_red_ov2p1: i32;
+    let sep_between: i32;
+    let lim_along: i32;
+    let sep_n_red8: i32;
+    let tot_floats: i32;
+    let extent_between: i32;
+    let sep: i32;
+    let n_sep: i32;
+    let mut c1: f32 = 0.0;
+    let mut c2: f32 = 0.0;
+    let mut c3: f32 = 0.0;
+    let mut c4: f32 = 0.0;
+    let mut c5: f32 = 0.0;
+    let mut c6: f32 = 0.0;
+    let mut c7: f32 = 0.0;
+    let e: f32 = 0.70710678;
+    let mut s1: f32 = 0.0;
+    let mut s2: f32 = 0.0;
+    let mut s3: f32 = 0.0;
+    let mut s4: f32 = 0.0;
+    let mut s5: f32 = 0.0;
+    let mut s6: f32 = 0.0;
+    let mut s7: f32 = 0.0;
+    let mut t: f32;
+    let twopi: f32 = 6.2831853;
+    let mut fjm1: f32;
+    let fn_red8: f32;
+
+    tot_floats = dim[1];
+    sep = dim[2];
+    lim_along = dim[3];
+    extent_between = dim[4] - 1;
+    sep_between = dim[5];
+    n_sep = n * sep;
+    n_red8 = n_reduced * 8;
+    fn_red8 = n_red8 as f32;
+    sep_n_red8 = sep * n_red8;
+    n_red_ov2p1 = n_reduced / 2 + 1;
+
+    fjm1 = -1.0;
+    for j in 1..=n_red_ov2p1 {
+        let fold = j > 1 && 2 * j < n_reduced + 2;
+        let mut k0 = (j - 1) * sep + 1;
+        fjm1 = (fjm1 as f64 + 1.0) as f32;
+        let angle = (twopi * fjm1 / fn_red8) as f64;
+        let zero = angle == 0.0;
+        if !zero {
+            c1 = angle.cos() as f32;
+            s1 = angle.sin() as f32;
             c2 = c1 * c1 - s1 * s1;
             s2 = s1 * c1 + c1 * s1;
             c3 = c2 * c1 - s2 * s1;
@@ -865,112 +702,107 @@ pub unsafe extern "C" fn r8cftk(
             c7 = c4 * c3 - s4 * s3;
             s7 = s4 * c3 + c4 * s3;
         }
-        ntrip = if fold != 0 {
-            2 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        };
-        itrip = 0 as ::core::ffi::c_int;
-        while itrip < ntrip {
-            kk = k0;
-            while kk <= nSep {
-                l = kk;
-                while l <= totFloats {
-                    k1 = l + extentBetween;
-                    k = l - 1 as ::core::ffi::c_int;
+        let ntrip = if fold { 2 } else { 1 };
+        for _itrip in 0..ntrip {
+            let mut kk = k0;
+            while kk <= n_sep {
+                let mut l = kk;
+                while l <= tot_floats {
+                    let k1 = l + extent_between;
+                    let mut k = l - 1;
                     while k < k1 {
-                        rs0 = *x0.offset(k as isize) + *x4.offset(k as isize);
-                        is0 = *y0.offset(k as isize) + *y4.offset(k as isize);
-                        ru0 = *x0.offset(k as isize) - *x4.offset(k as isize);
-                        iu0 = *y0.offset(k as isize) - *y4.offset(k as isize);
-                        rs1 = *x1.offset(k as isize) + *x5.offset(k as isize);
-                        is1 = *y1.offset(k as isize) + *y5.offset(k as isize);
-                        ru1 = *x1.offset(k as isize) - *x5.offset(k as isize);
-                        iu1 = *y1.offset(k as isize) - *y5.offset(k as isize);
-                        rs2 = *x2.offset(k as isize) + *x6.offset(k as isize);
-                        is2 = *y2.offset(k as isize) + *y6.offset(k as isize);
-                        ru2 = *x2.offset(k as isize) - *x6.offset(k as isize);
-                        iu2 = *y2.offset(k as isize) - *y6.offset(k as isize);
-                        rs3 = *x3.offset(k as isize) + *x7.offset(k as isize);
-                        is3 = *y3.offset(k as isize) + *y7.offset(k as isize);
-                        ru3 = *x3.offset(k as isize) - *x7.offset(k as isize);
-                        iu3 = *y3.offset(k as isize) - *y7.offset(k as isize);
-                        rss0 = rs0 + rs2;
-                        iss0 = is0 + is2;
-                        rsu0 = rs0 - rs2;
-                        isu0 = is0 - is2;
-                        rss1 = rs1 + rs3;
-                        iss1 = is1 + is3;
-                        rsu1 = rs1 - rs3;
-                        isu1 = is1 - is3;
-                        rus0 = ru0 - iu2;
-                        ius0 = iu0 + ru2;
-                        ruu0 = ru0 + iu2;
-                        iuu0 = iu0 - ru2;
-                        rus1 = ru1 - iu3;
-                        ius1 = iu1 + ru3;
-                        ruu1 = ru1 + iu3;
-                        iuu1 = iu1 - ru3;
+                        let rs0 = data[x0 + k as usize] + data[x4 + k as usize];
+                        let is0 = data[y0 + k as usize] + data[y4 + k as usize];
+                        let ru0 = data[x0 + k as usize] - data[x4 + k as usize];
+                        let iu0 = data[y0 + k as usize] - data[y4 + k as usize];
+                        let rs1 = data[x1 + k as usize] + data[x5 + k as usize];
+                        let is1 = data[y1 + k as usize] + data[y5 + k as usize];
+                        let ru1 = data[x1 + k as usize] - data[x5 + k as usize];
+                        let iu1 = data[y1 + k as usize] - data[y5 + k as usize];
+                        let rs2 = data[x2 + k as usize] + data[x6 + k as usize];
+                        let is2 = data[y2 + k as usize] + data[y6 + k as usize];
+                        let ru2 = data[x2 + k as usize] - data[x6 + k as usize];
+                        let iu2 = data[y2 + k as usize] - data[y6 + k as usize];
+                        let rs3 = data[x3 + k as usize] + data[x7 + k as usize];
+                        let is3 = data[y3 + k as usize] + data[y7 + k as usize];
+                        let ru3 = data[x3 + k as usize] - data[x7 + k as usize];
+                        let iu3 = data[y3 + k as usize] - data[y7 + k as usize];
+                        let rss0 = rs0 + rs2;
+                        let iss0 = is0 + is2;
+                        let rsu0 = rs0 - rs2;
+                        let isu0 = is0 - is2;
+                        let rss1 = rs1 + rs3;
+                        let iss1 = is1 + is3;
+                        let rsu1 = rs1 - rs3;
+                        let isu1 = is1 - is3;
+                        let rus0 = ru0 - iu2;
+                        let ius0 = iu0 + ru2;
+                        let ruu0 = ru0 + iu2;
+                        let iuu0 = iu0 - ru2;
+                        let mut rus1 = ru1 - iu3;
+                        let mut ius1 = iu1 + ru3;
+                        let mut ruu1 = ru1 + iu3;
+                        let mut iuu1 = iu1 - ru3;
                         t = (rus1 + ius1) * e;
                         ius1 = (ius1 - rus1) * e;
                         rus1 = t;
                         t = (ruu1 + iuu1) * e;
                         iuu1 = (iuu1 - ruu1) * e;
                         ruu1 = t;
-                        *x0.offset(k as isize) = rss0 + rss1;
-                        *y0.offset(k as isize) = iss0 + iss1;
-                        if zero == 0 {
-                            r1 = ruu0 + ruu1;
-                            i1 = iuu0 + iuu1;
-                            r2 = rsu0 + isu1;
-                            i2 = isu0 - rsu1;
-                            r3 = rus0 + ius1;
-                            i3 = ius0 - rus1;
-                            r4 = rss0 - rss1;
-                            i4 = iss0 - iss1;
-                            r5 = ruu0 - ruu1;
-                            i5 = iuu0 - iuu1;
-                            r6 = rsu0 - isu1;
-                            i6 = isu0 + rsu1;
-                            r7 = rus0 - ius1;
-                            i7 = ius0 + rus1;
-                            *x4.offset(k as isize) = r1 * c1 + i1 * s1;
-                            *y4.offset(k as isize) = i1 * c1 - r1 * s1;
-                            *x2.offset(k as isize) = r2 * c2 + i2 * s2;
-                            *y2.offset(k as isize) = i2 * c2 - r2 * s2;
-                            *x6.offset(k as isize) = r3 * c3 + i3 * s3;
-                            *y6.offset(k as isize) = i3 * c3 - r3 * s3;
-                            *x1.offset(k as isize) = r4 * c4 + i4 * s4;
-                            *y1.offset(k as isize) = i4 * c4 - r4 * s4;
-                            *x5.offset(k as isize) = r5 * c5 + i5 * s5;
-                            *y5.offset(k as isize) = i5 * c5 - r5 * s5;
-                            *x3.offset(k as isize) = r6 * c6 + i6 * s6;
-                            *y3.offset(k as isize) = i6 * c6 - r6 * s6;
-                            *x7.offset(k as isize) = r7 * c7 + i7 * s7;
-                            *y7.offset(k as isize) = i7 * c7 - r7 * s7;
+                        data[x0 + k as usize] = rss0 + rss1;
+                        data[y0 + k as usize] = iss0 + iss1;
+                        if !zero {
+                            let r1 = ruu0 + ruu1;
+                            let i1 = iuu0 + iuu1;
+                            let r2 = rsu0 + isu1;
+                            let i2 = isu0 - rsu1;
+                            let r3 = rus0 + ius1;
+                            let i3 = ius0 - rus1;
+                            let r4 = rss0 - rss1;
+                            let i4 = iss0 - iss1;
+                            let r5 = ruu0 - ruu1;
+                            let i5 = iuu0 - iuu1;
+                            let r6 = rsu0 - isu1;
+                            let i6 = isu0 + rsu1;
+                            let r7 = rus0 - ius1;
+                            let i7 = ius0 + rus1;
+                            data[x4 + k as usize] = r1 * c1 + i1 * s1;
+                            data[y4 + k as usize] = i1 * c1 - r1 * s1;
+                            data[x2 + k as usize] = r2 * c2 + i2 * s2;
+                            data[y2 + k as usize] = i2 * c2 - r2 * s2;
+                            data[x6 + k as usize] = r3 * c3 + i3 * s3;
+                            data[y6 + k as usize] = i3 * c3 - r3 * s3;
+                            data[x1 + k as usize] = r4 * c4 + i4 * s4;
+                            data[y1 + k as usize] = i4 * c4 - r4 * s4;
+                            data[x5 + k as usize] = r5 * c5 + i5 * s5;
+                            data[y5 + k as usize] = i5 * c5 - r5 * s5;
+                            data[x3 + k as usize] = r6 * c6 + i6 * s6;
+                            data[y3 + k as usize] = i6 * c6 - r6 * s6;
+                            data[x7 + k as usize] = r7 * c7 + i7 * s7;
+                            data[y7 + k as usize] = i7 * c7 - r7 * s7;
                         } else {
-                            *x4.offset(k as isize) = ruu0 + ruu1;
-                            *y4.offset(k as isize) = iuu0 + iuu1;
-                            *x2.offset(k as isize) = rsu0 + isu1;
-                            *y2.offset(k as isize) = isu0 - rsu1;
-                            *x6.offset(k as isize) = rus0 + ius1;
-                            *y6.offset(k as isize) = ius0 - rus1;
-                            *x1.offset(k as isize) = rss0 - rss1;
-                            *y1.offset(k as isize) = iss0 - iss1;
-                            *x5.offset(k as isize) = ruu0 - ruu1;
-                            *y5.offset(k as isize) = iuu0 - iuu1;
-                            *x3.offset(k as isize) = rsu0 - isu1;
-                            *y3.offset(k as isize) = isu0 + rsu1;
-                            *x7.offset(k as isize) = rus0 - ius1;
-                            *y7.offset(k as isize) = ius0 + rus1;
+                            data[x4 + k as usize] = ruu0 + ruu1;
+                            data[y4 + k as usize] = iuu0 + iuu1;
+                            data[x2 + k as usize] = rsu0 + isu1;
+                            data[y2 + k as usize] = isu0 - rsu1;
+                            data[x6 + k as usize] = rus0 + ius1;
+                            data[y6 + k as usize] = ius0 - rus1;
+                            data[x1 + k as usize] = rss0 - rss1;
+                            data[y1 + k as usize] = iss0 - iss1;
+                            data[x5 + k as usize] = ruu0 - ruu1;
+                            data[y5 + k as usize] = iuu0 - iuu1;
+                            data[x3 + k as usize] = rsu0 - isu1;
+                            data[y3 + k as usize] = isu0 + rsu1;
+                            data[x7 + k as usize] = rus0 - ius1;
+                            data[y7 + k as usize] = ius0 + rus1;
                         }
-                        k += sepBetween;
+                        k += sep_between;
                     }
-                    l += limAlong;
+                    l += lim_along;
                 }
-                kk += sepNRed8;
+                kk += sep_n_red8;
             }
-            k0 = (nReduced + 1 as ::core::ffi::c_int - j) * sep + 1 as ::core::ffi::c_int;
+            k0 = (n_reduced + 1 - j) * sep + 1;
             t = (c1 + s1) * e;
             s1 = (c1 - s1) * e;
             c1 = t;
@@ -990,238 +822,198 @@ pub unsafe extern "C" fn r8cftk(
             t = (c7 - s7) * e;
             s7 = -(c7 + s7) * e;
             c7 = t;
-            itrip += 1;
         }
-        j += 1;
     }
 }
-pub unsafe extern "C" fn rpcftk(
-    mut n: ::core::ffi::c_int,
-    mut nReduced: ::core::ffi::c_int,
-    mut pFac: ::core::ffi::c_int,
-    mut stepAlong: ::core::ffi::c_int,
-    mut x: *mut ::core::ffi::c_float,
-    mut y: *mut ::core::ffi::c_float,
-    mut dim: *mut ::core::ffi::c_int,
+
+/// C `rpcftk`.
+///
+/// radix prime multi-dimensional complex fourier transform kernel
+pub fn rpcftk(
+    n: i32,
+    n_reduced: i32,
+    p_fac: i32,
+    step_along: i32,
+    data: &mut [f32],
+    x: usize,
+    y: usize,
+    dim: &[i32],
 ) {
-    let mut fold: ::core::ffi::c_int = 0;
-    let mut zero: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_double = 0.;
-    let mut is: ::core::ffi::c_float = 0.;
-    let mut iu: ::core::ffi::c_float = 0.;
-    let mut rs: ::core::ffi::c_float = 0.;
-    let mut ru: ::core::ffi::c_float = 0.;
-    let mut t: ::core::ffi::c_float = 0.;
-    let mut twopi: ::core::ffi::c_float = 6.2831853f32;
-    let mut xt: ::core::ffi::c_float = 0.;
-    let mut yt: ::core::ffi::c_float = 0.;
-    let mut fu: ::core::ffi::c_float = 0.;
-    let mut fp: ::core::ffi::c_float = 0.;
-    let mut fjm1: ::core::ffi::c_float = 0.;
-    let mut fnRedp: ::core::ffi::c_float = 0.;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut jj: ::core::ffi::c_int = 0;
-    let mut k0: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut nRedOv2p1: ::core::ffi::c_int = 0;
-    let mut nRedp: ::core::ffi::c_int = 0;
-    let mut pm: ::core::ffi::c_int = 0;
-    let mut pp: ::core::ffi::c_int = 0;
-    let mut u: ::core::ffi::c_int = 0;
-    let mut v: ::core::ffi::c_int = 0;
-    let mut k1: ::core::ffi::c_int = 0;
-    let mut sepBetween: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut limAlong: ::core::ffi::c_int = 0;
-    let mut sepNRedp: ::core::ffi::c_int = 0;
-    let mut totFloats: ::core::ffi::c_int = 0;
-    let mut extentBetween: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut nSep: ::core::ffi::c_int = 0;
-    let mut aa: [[::core::ffi::c_float; 10]; 10] = [[0.; 10]; 10];
-    let mut bb: [[::core::ffi::c_float; 10]; 10] = [[0.; 10]; 10];
-    let mut a: [::core::ffi::c_float; 19] = [0.; 19];
-    let mut b: [::core::ffi::c_float; 19] = [0.; 19];
-    let mut c: [::core::ffi::c_float; 19] = [0.; 19];
-    let mut sepAlong: [::core::ffi::c_float; 19] = [0.; 19];
-    let mut ia: [::core::ffi::c_float; 10] = [0.; 10];
-    let mut ib: [::core::ffi::c_float; 10] = [0.; 10];
-    let mut ra: [::core::ffi::c_float; 10] = [0.; 10];
-    let mut rb: [::core::ffi::c_float; 10] = [0.; 10];
-    let mut itrip: ::core::ffi::c_int = 0;
-    let mut ntrip: ::core::ffi::c_int = 0;
-    totFloats = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    limAlong = *dim.offset(3 as ::core::ffi::c_int as isize);
-    extentBetween = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    sepBetween = *dim.offset(5 as ::core::ffi::c_int as isize);
-    nSep = n * sep;
-    nRedOv2p1 = nReduced / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-    nRedp = nReduced * pFac;
-    fnRedp = nRedp as ::core::ffi::c_float;
-    sepNRedp = sep * nRedp;
-    pp = pFac / 2 as ::core::ffi::c_int;
-    pm = pFac - 1 as ::core::ffi::c_int;
-    fp = pFac as ::core::ffi::c_float;
-    fu = 0.0f32;
-    u = 1 as ::core::ffi::c_int;
-    while u <= pp {
-        fu = (fu as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fu / fp) as ::core::ffi::c_double;
-        jj = pFac - u;
-        a[u as usize] = cos(angle) as ::core::ffi::c_float;
-        b[u as usize] = sin(angle) as ::core::ffi::c_float;
+    let twopi: f32 = 6.2831853;
+    let mut t: f32;
+    let mut xt: f32;
+    let mut yt: f32;
+    let mut fu: f32;
+    let fp: f32;
+    let mut fjm1: f32;
+    let fn_redp: f32;
+    let mut jj: i32;
+    let n_red_ov2p1: i32;
+    let n_redp: i32;
+    let pm: i32;
+    let pp: i32;
+    let sep_between: i32;
+    let lim_along: i32;
+    let sep_n_redp: i32;
+    let tot_floats: i32;
+    let extent_between: i32;
+    let sep: i32;
+    let n_sep: i32;
+
+    // `rpcftk` declares these on the stack without initialising them; every
+    // element read below is written first (`pp <= 9` and `pm <= 18` for the
+    // largest factor `srfp` allows).
+    let mut aa = [[0.0_f32; 10]; 10];
+    let mut bb = [[0.0_f32; 10]; 10];
+    let mut a = [0.0_f32; 19];
+    let mut b = [0.0_f32; 19];
+    let mut c = [0.0_f32; 19];
+    let mut sep_along = [0.0_f32; 19];
+    let mut ia = [0.0_f32; 10];
+    let mut ib = [0.0_f32; 10];
+    let mut ra = [0.0_f32; 10];
+    let mut rb = [0.0_f32; 10];
+
+    tot_floats = dim[1];
+    sep = dim[2];
+    lim_along = dim[3];
+    extent_between = dim[4] - 1;
+    sep_between = dim[5];
+    n_sep = n * sep;
+    n_red_ov2p1 = n_reduced / 2 + 1;
+    n_redp = n_reduced * p_fac;
+    fn_redp = n_redp as f32;
+    sep_n_redp = sep * n_redp;
+    pp = p_fac / 2;
+    pm = p_fac - 1;
+    fp = p_fac as f32;
+    fu = 0.0;
+    for u in 1..=pp {
+        fu = (fu as f64 + 1.0) as f32;
+        let angle = (twopi * fu / fp) as f64;
+        jj = p_fac - u;
+        a[u as usize] = angle.cos() as f32;
+        b[u as usize] = angle.sin() as f32;
         a[jj as usize] = a[u as usize];
         b[jj as usize] = -b[u as usize];
-        u += 1;
     }
-    u = 1 as ::core::ffi::c_int;
-    while u <= pp {
-        v = 1 as ::core::ffi::c_int;
-        while v <= pp {
-            jj = u * v - u * v / pFac * pFac;
+    for u in 1..=pp {
+        for v in 1..=pp {
+            jj = u * v - u * v / p_fac * p_fac;
             aa[v as usize][u as usize] = a[jj as usize];
             bb[v as usize][u as usize] = b[jj as usize];
-            v += 1;
         }
-        u += 1;
     }
-    fjm1 = -1.0f64 as ::core::ffi::c_float;
-    j = 1 as ::core::ffi::c_int;
-    while j <= nRedOv2p1 {
-        fold = (j > 1 as ::core::ffi::c_int
-            && 2 as ::core::ffi::c_int * j < nReduced + 2 as ::core::ffi::c_int)
-            as ::core::ffi::c_int;
-        k0 = (j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
-        fjm1 = (fjm1 as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-        angle = (twopi * fjm1 / fnRedp) as ::core::ffi::c_double;
-        zero = (angle == 0.0f64) as ::core::ffi::c_int;
-        if zero == 0 {
-            c[1 as ::core::ffi::c_int as usize] = cos(angle) as ::core::ffi::c_float;
-            sepAlong[1 as ::core::ffi::c_int as usize] = sin(angle) as ::core::ffi::c_float;
-            u = 2 as ::core::ffi::c_int;
-            while u <= pm {
-                c[u as usize] = c[(u - 1 as ::core::ffi::c_int) as usize]
-                    * c[1 as ::core::ffi::c_int as usize]
-                    - sepAlong[(u - 1 as ::core::ffi::c_int) as usize]
-                        * sepAlong[1 as ::core::ffi::c_int as usize];
-                sepAlong[u as usize] = sepAlong[(u - 1 as ::core::ffi::c_int) as usize]
-                    * c[1 as ::core::ffi::c_int as usize]
-                    + c[(u - 1 as ::core::ffi::c_int) as usize]
-                        * sepAlong[1 as ::core::ffi::c_int as usize];
-                u += 1;
+
+    fjm1 = -1.0;
+    for j in 1..=n_red_ov2p1 {
+        let fold = j > 1 && 2 * j < n_reduced + 2;
+        let mut k0 = (j - 1) * sep + 1;
+        fjm1 = (fjm1 as f64 + 1.0) as f32;
+        let angle = (twopi * fjm1 / fn_redp) as f64;
+        let zero = angle == 0.0;
+        if !zero {
+            c[1] = angle.cos() as f32;
+            sep_along[1] = angle.sin() as f32;
+            for u in 2..=pm {
+                c[u as usize] =
+                    c[(u - 1) as usize] * c[1] - sep_along[(u - 1) as usize] * sep_along[1];
+                sep_along[u as usize] =
+                    sep_along[(u - 1) as usize] * c[1] + c[(u - 1) as usize] * sep_along[1];
             }
         }
-        ntrip = if fold != 0 {
-            2 as ::core::ffi::c_int
-        } else {
-            1 as ::core::ffi::c_int
-        };
-        itrip = 0 as ::core::ffi::c_int;
-        while itrip < ntrip {
-            kk = k0;
-            while kk <= nSep {
-                l = kk;
-                while l <= totFloats {
-                    k1 = l + extentBetween;
-                    k = l - 1 as ::core::ffi::c_int;
+        let ntrip = if fold { 2 } else { 1 };
+        for _itrip in 0..ntrip {
+            let mut kk = k0;
+            while kk <= n_sep {
+                let mut l = kk;
+                while l <= tot_floats {
+                    let k1 = l + extent_between;
+                    let mut k = l - 1;
                     while k < k1 {
-                        xt = *x.offset(k as isize);
-                        yt = *y.offset(k as isize);
-                        rs = *x.offset((k + stepAlong) as isize)
-                            + *x.offset((k + stepAlong * pm) as isize);
-                        is = *y.offset((k + stepAlong) as isize)
-                            + *y.offset((k + stepAlong * pm) as isize);
-                        ru = *x.offset((k + stepAlong) as isize)
-                            - *x.offset((k + stepAlong * pm) as isize);
-                        iu = *y.offset((k + stepAlong) as isize)
-                            - *y.offset((k + stepAlong * pm) as isize);
-                        u = 1 as ::core::ffi::c_int;
-                        while u <= pp {
-                            ra[u as usize] =
-                                xt + rs * aa[u as usize][1 as ::core::ffi::c_int as usize];
-                            ia[u as usize] =
-                                yt + is * aa[u as usize][1 as ::core::ffi::c_int as usize];
-                            rb[u as usize] = ru * bb[u as usize][1 as ::core::ffi::c_int as usize];
-                            ib[u as usize] = iu * bb[u as usize][1 as ::core::ffi::c_int as usize];
-                            u += 1;
+                        xt = data[x + k as usize];
+                        yt = data[y + k as usize];
+                        let mut rs = data[x + (k + step_along) as usize]
+                            + data[x + (k + step_along * pm) as usize];
+                        let mut is = data[y + (k + step_along) as usize]
+                            + data[y + (k + step_along * pm) as usize];
+                        let mut ru = data[x + (k + step_along) as usize]
+                            - data[x + (k + step_along * pm) as usize];
+                        let mut iu = data[y + (k + step_along) as usize]
+                            - data[y + (k + step_along * pm) as usize];
+                        for u in 1..=pp {
+                            ra[u as usize] = xt + rs * aa[u as usize][1];
+                            ia[u as usize] = yt + is * aa[u as usize][1];
+                            rb[u as usize] = ru * bb[u as usize][1];
+                            ib[u as usize] = iu * bb[u as usize][1];
                         }
                         xt = xt + rs;
                         yt = yt + is;
-                        u = 2 as ::core::ffi::c_int;
-                        while u <= pp {
-                            jj = pFac - u;
-                            rs = *x.offset((k + u * stepAlong) as isize)
-                                + *x.offset((k + jj * stepAlong) as isize);
-                            is = *y.offset((k + u * stepAlong) as isize)
-                                + *y.offset((k + jj * stepAlong) as isize);
-                            ru = *x.offset((k + u * stepAlong) as isize)
-                                - *x.offset((k + jj * stepAlong) as isize);
-                            iu = *y.offset((k + u * stepAlong) as isize)
-                                - *y.offset((k + jj * stepAlong) as isize);
+
+                        for u in 2..=pp {
+                            // u numbers from 1 not 0
+                            jj = p_fac - u;
+                            rs = data[x + (k + u * step_along) as usize]
+                                + data[x + (k + jj * step_along) as usize];
+                            is = data[y + (k + u * step_along) as usize]
+                                + data[y + (k + jj * step_along) as usize];
+                            ru = data[x + (k + u * step_along) as usize]
+                                - data[x + (k + jj * step_along) as usize];
+                            iu = data[y + (k + u * step_along) as usize]
+                                - data[y + (k + jj * step_along) as usize];
                             xt = xt + rs;
                             yt = yt + is;
-                            v = 1 as ::core::ffi::c_int;
-                            while v <= pp {
+                            for v in 1..=pp {
                                 ra[v as usize] = ra[v as usize] + rs * aa[v as usize][u as usize];
                                 ia[v as usize] = ia[v as usize] + is * aa[v as usize][u as usize];
                                 rb[v as usize] = rb[v as usize] + ru * bb[v as usize][u as usize];
                                 ib[v as usize] = ib[v as usize] + iu * bb[v as usize][u as usize];
-                                v += 1;
                             }
-                            u += 1;
                         }
-                        *x.offset(k as isize) = xt;
-                        *y.offset(k as isize) = yt;
-                        u = 1 as ::core::ffi::c_int;
-                        while u <= pp {
-                            jj = pFac - u;
-                            if zero == 0 {
+                        data[x + k as usize] = xt;
+                        data[y + k as usize] = yt;
+                        for u in 1..=pp {
+                            jj = p_fac - u;
+                            if !zero {
                                 xt = ra[u as usize] + ib[u as usize];
                                 yt = ia[u as usize] - rb[u as usize];
-                                *x.offset((k + u * stepAlong) as isize) =
-                                    xt * c[u as usize] + yt * sepAlong[u as usize];
-                                *y.offset((k + u * stepAlong) as isize) =
-                                    yt * c[u as usize] - xt * sepAlong[u as usize];
+                                data[x + (k + u * step_along) as usize] =
+                                    xt * c[u as usize] + yt * sep_along[u as usize];
+                                data[y + (k + u * step_along) as usize] =
+                                    yt * c[u as usize] - xt * sep_along[u as usize];
                                 xt = ra[u as usize] - ib[u as usize];
                                 yt = ia[u as usize] + rb[u as usize];
-                                *x.offset((k + jj * stepAlong) as isize) =
-                                    xt * c[jj as usize] + yt * sepAlong[jj as usize];
-                                *y.offset((k + jj * stepAlong) as isize) =
-                                    yt * c[jj as usize] - xt * sepAlong[jj as usize];
+                                data[x + (k + jj * step_along) as usize] =
+                                    xt * c[jj as usize] + yt * sep_along[jj as usize];
+                                data[y + (k + jj * step_along) as usize] =
+                                    yt * c[jj as usize] - xt * sep_along[jj as usize];
                             } else {
-                                *x.offset((k + u * stepAlong) as isize) =
+                                data[x + (k + u * step_along) as usize] =
                                     ra[u as usize] + ib[u as usize];
-                                *y.offset((k + u * stepAlong) as isize) =
+                                data[y + (k + u * step_along) as usize] =
                                     ia[u as usize] - rb[u as usize];
-                                *x.offset((k + jj * stepAlong) as isize) =
+                                data[x + (k + jj * step_along) as usize] =
                                     ra[u as usize] - ib[u as usize];
-                                *y.offset((k + jj * stepAlong) as isize) =
+                                data[y + (k + jj * step_along) as usize] =
                                     ia[u as usize] + rb[u as usize];
                             }
-                            u += 1;
                         }
-                        k += sepBetween;
+                        k += sep_between;
                     }
-                    l += limAlong;
+                    l += lim_along;
                 }
-                kk += sepNRedp;
+                kk += sep_n_redp;
             }
-            if fold == 0 {
+            if !fold {
                 break;
             }
-            k0 = (nReduced + 1 as ::core::ffi::c_int - j) * sep + 1 as ::core::ffi::c_int;
-            u = 1 as ::core::ffi::c_int;
-            while u <= pm {
-                t = c[u as usize] * a[u as usize] + sepAlong[u as usize] * b[u as usize];
-                sepAlong[u as usize] =
-                    -sepAlong[u as usize] * a[u as usize] + c[u as usize] * b[u as usize];
+            k0 = (n_reduced + 1 - j) * sep + 1;
+            for u in 1..=pm {
+                t = c[u as usize] * a[u as usize] + sep_along[u as usize] * b[u as usize];
+                sep_along[u as usize] =
+                    -sep_along[u as usize] * a[u as usize] + c[u as usize] * b[u as usize];
                 c[u as usize] = t;
-                u += 1;
             }
-            itrip += 1;
         }
-        j += 1;
     }
 }

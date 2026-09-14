@@ -41,6 +41,24 @@ fn accept_point(
 }
 
 /// Matches `amoeba` (`IMOD/libcfshr/amoeba.c:75`).
+/// `amoeba.c:103`: `float rho = 1.0, gamma = 0.5, chi = 2.0, sigma = 0.5;`
+/// — the reflection, contraction, expansion and shrinkage coefficients.
+///
+/// They are `float`, and that is load-bearing rather than incidental. Every
+/// combination formula below writes them as `(1. + rho)`, `(1. - chi)`,
+/// `(1. + rho * gamma)` and so on, where the `1.` is a **double** literal: so
+/// the coefficient is a double, the term it multiplies evaluates in double,
+/// and the term written as a bare `rho * p[...]` is a *single-precision*
+/// product that only widens for the addition. Folding them to `f32`
+/// constants — which the translation had done, as `2. * center - points`,
+/// `1.5 * center - 0.5 * points` and the rest — collapses that to a
+/// single-precision expression. This is CLAUDE.md's "a C `float` variable
+/// inside a double expression rounds mid-expression", five times over.
+const RHO: f32 = 1.0;
+const GAMMA: f32 = 0.5;
+const CHI: f32 = 2.0;
+const SIGMA: f32 = 0.5;
+
 pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
     points: &mut [f32],
     values: &mut [f32],
@@ -91,8 +109,15 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                 .map(|point| points[*point + dimension * fastest_dimension])
                 .sum::<f32>()
                 / dimensions as f32;
-            reflection[dimension] =
-                2. * center[dimension] - points[high + dimension * fastest_dimension];
+            // `amoeba.c:147`: `pref[idim] = (1. + rho) * pcen[idim] - rho *
+            // p[ihigh + idim*mp];`  `rho` is a `float` (`:103`) and the `1.`
+            // is a double, so `(1. + rho)` is a *double* coefficient and the
+            // whole left term evaluates in double, while `rho * p[...]` is a
+            // single-precision product that only then widens.  The result
+            // rounds to `float` once, at the assignment.
+            reflection[dimension] = ((1. + RHO as f64) * center[dimension] as f64
+                - (RHO * points[high + dimension * fastest_dimension]) as f64)
+                as f32;
         }
         let reflected_value = function(&reflection);
         if reflected_value >= values[low] && reflected_value < values[second] {
@@ -107,7 +132,12 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
             );
         } else if reflected_value < values[low] {
             for dimension in 0..dimensions {
-                expansion[dimension] = -center[dimension] + 2. * reflection[dimension];
+                // `amoeba.c:158`: `(1. - chi) * pcen[idim] + chi * pref[idim]`
+                // — `chi` is a `float`, so the coefficient is a double and the
+                // `chi * pref` product is single precision.
+                expansion[dimension] = ((1. - CHI as f64) * center[dimension] as f64
+                    + (CHI * reflection[dimension]) as f64)
+                    as f32;
             }
             let expansion_value = function(&expansion);
             if expansion_value < reflected_value {
@@ -135,8 +165,13 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
             let mut shrink = false;
             if reflected_value <= values[high] {
                 for dimension in 0..dimensions {
-                    expansion[dimension] = 1.5 * center[dimension]
-                        - 0.5 * points[high + dimension * fastest_dimension];
+                    // `amoeba.c:174-175`: `(1. + rho * gamma) * pcen[idim] -
+                    // rho * gamma * p[ihigh + idim*mp]`.  `rho * gamma` is a
+                    // single-precision product; `1. +` makes the coefficient a
+                    // double; the subtracted term stays single until it widens.
+                    expansion[dimension] = ((1. + (RHO * GAMMA) as f64) * center[dimension] as f64
+                        - (RHO * GAMMA * points[high + dimension * fastest_dimension]) as f64)
+                        as f32;
                 }
                 let contraction = function(&expansion);
                 if contraction <= reflected_value {
@@ -154,8 +189,11 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                 }
             } else {
                 for dimension in 0..dimensions {
-                    expansion[dimension] = 0.5 * center[dimension]
-                        + 0.5 * points[high + dimension * fastest_dimension];
+                    // `amoeba.c:185`: `(1. - gamma) * pcen[idim] + gamma *
+                    // p[ihigh + idim*mp]`.
+                    expansion[dimension] = ((1. - GAMMA as f64) * center[dimension] as f64
+                        + (GAMMA * points[high + dimension * fastest_dimension]) as f64)
+                        as f32;
                 }
                 let contraction = function(&expansion);
                 if contraction < values[high] {
@@ -177,8 +215,12 @@ pub fn amoeba<Function: FnMut(&[f32]) -> f32>(
                 for position in 1..points_count {
                     let point = index[position];
                     for dimension in 0..dimensions {
-                        expansion[dimension] = 0.5 * points[low + dimension * fastest_dimension]
-                            + 0.5 * points[point + dimension * fastest_dimension];
+                        // `amoeba.c:199-200`: `(1. - sigma) * p[ilow + idim*mp]
+                        // + sigma * p[ind + idim*mp]`.
+                        expansion[dimension] = ((1. - SIGMA as f64)
+                            * points[low + dimension * fastest_dimension] as f64
+                            + (SIGMA * points[point + dimension * fastest_dimension]) as f64)
+                            as f32;
                         points[point + dimension * fastest_dimension] = expansion[dimension];
                     }
                     values[point] = function(&expansion);

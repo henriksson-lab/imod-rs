@@ -1,8 +1,27 @@
 //! Translation of `IMOD/libcfshr/statfuncs.c` and its `cfsemshare.h` APIs.
 
-static mut VAL_SET: i32 = -1;
-static mut LAST_SEED: i32 = 0;
-static mut SAVED_VAL: f32 = 0.;
+use std::cell::Cell;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+thread_local! {
+    /// `statfuncs.c:354-356`: `static int valSet`, `static int lastSeed` and
+    /// `static float savedVal` inside `gaussianDeviate`.  Function-local statics
+    /// in C, so `Cell`s rather than `static mut`; the routine is documented as
+    /// not thread-safe (`twoGaussianDeviates` is the thread-safe one), so a
+    /// thread-local is the closer fit as well as the safe one.
+    static VAL_SET: Cell<i32> = const { Cell::new(-1) };
+    static LAST_SEED: Cell<i32> = const { Cell::new(0) };
+    static SAVED_VAL: Cell<f32> = const { Cell::new(0.) };
+    /// The state of the C library's `rand`, which `gaussianDeviate` seeds with
+    /// `srand` and then draws from.  This is glibc's default TYPE_3
+    /// additive-feedback generator (`stdlib/random_r.c`): a 31-entry table of
+    /// `int32_t`, a front index starting at 3 and a rear index starting at 0.
+    /// It is reproduced rather than called because it is pure computation with
+    /// no operating-system service behind it — unlike `localtime`, whose
+    /// timezone database has no Rust equivalent — and substituting a different
+    /// generator would change the sequence a given seed produces.
+    static RAND_STATE: Cell<([i32; 31], usize, usize)> = const { Cell::new(([0; 31], 3, 0)) };
+}
 
 /// Original `tValue` (`statfuncs.c:42`).
 pub fn t_value(signif: f64, ndf: i32) -> f64 {
@@ -59,8 +78,8 @@ pub fn t_value(signif: f64, ndf: i32) -> f64 {
 }
 
 /// Original `dtvalue` (`statfuncs.c:94`).
-pub unsafe fn dtvalue(signif: *mut f64, ndf: *mut i32) -> f64 {
-    unsafe { t_value(*signif, *ndf) }
+pub fn dtvalue(signif: &f64, ndf: &i32) -> f64 {
+    t_value(*signif, *ndf)
 }
 
 /// Original `fValue` (`statfuncs.c:108`).
@@ -123,8 +142,8 @@ pub fn f_value(signif: f64, ndf1: i32, ndf2: i32) -> f64 {
 }
 
 /// Original `dfvalue` (`statfuncs.c:157`).
-pub unsafe fn dfvalue(signif: *mut f64, ndf1: *mut i32, ndf2: *mut i32) -> f64 {
-    unsafe { f_value(*signif, *ndf1, *ndf2) }
+pub fn dfvalue(signif: &f64, ndf1: &i32, ndf2: &i32) -> f64 {
+    f_value(*signif, *ndf1, *ndf2)
 }
 
 /// Original `errFunc` (`statfuncs.c:185`).
@@ -157,8 +176,8 @@ pub fn err_func(x: f64) -> f64 {
 }
 
 /// Original `errfunc` (`statfuncs.c:220`).
-pub unsafe fn errfunc(x: *mut f64) -> f64 {
-    unsafe { err_func(*x) }
+pub fn errfunc(x: &f64) -> f64 {
+    err_func(*x)
 }
 
 /// Original `incompBeta` (`statfuncs.c:237`).
@@ -202,8 +221,8 @@ pub fn incomp_beta(a: f64, b: f64, x: f64) -> f64 {
 }
 
 /// Original `incompbeta` (`statfuncs.c:270`).
-pub unsafe fn incompbeta(a: *mut f64, b: *mut f64, x: *mut f64) -> f64 {
-    unsafe { incomp_beta(*a, *b, *x) }
+pub fn incompbeta(a: &f64, b: &f64, x: &f64) -> f64 {
+    incomp_beta(*a, *b, *x)
 }
 
 /// Original `betaFunc` (`statfuncs.c:277`).
@@ -250,83 +269,113 @@ pub fn ln_gamma(x: f64) -> f64 {
 }
 
 /// Original `gaussianDeviate` (`statfuncs.c:348`).
-pub unsafe fn gaussian_deviate(seed: i32) -> f32 {
-    if unsafe { VAL_SET < 0 || seed != LAST_SEED } {
-        let use_seed = if seed > 0 {
+pub fn gaussian_deviate(seed: i32) -> f32 {
+    // `rand()`, inlined at its call sites because the source calls the C
+    // library here rather than a routine of its own.  See `RAND_STATE`.
+    let next_rand = || -> i32 {
+        let (mut r, mut f, mut p) = RAND_STATE.get();
+        let val = (r[f] as u32).wrapping_add(r[p] as u32);
+        r[f] = val as i32;
+        f += 1;
+        if f >= 31 {
+            f = 0;
+            p += 1;
+        } else {
+            p += 1;
+            if p >= 31 {
+                p = 0;
+            }
+        }
+        RAND_STATE.set((r, f, p));
+        (val >> 1) as i32
+    };
+    if VAL_SET.get() < 0 || seed != LAST_SEED.get() {
+        let use_seed: u32 = if seed > 0 {
             seed as u32
         } else {
-            unsafe { libc::time(core::ptr::null_mut()) as u32 }
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as u32
         };
-        unsafe {
-            libc::srand(use_seed);
-            VAL_SET = 0;
-            LAST_SEED = seed;
+        // `srand(useSeed)`: glibc seeds the table with the Lehmer generator
+        // 16807 * x mod 2147483647 by Schrage's method, sets the front and rear
+        // indices, and discards 10 * 31 outputs.
+        let mut r = [0_i32; 31];
+        let mut word = if use_seed == 0 { 1 } else { use_seed as i32 };
+        r[0] = word;
+        for entry in r.iter_mut().take(31).skip(1) {
+            let hi = word / 127773;
+            let lo = word % 127773;
+            word = 16807 * lo - 2836 * hi;
+            if word < 0 {
+                word += 2147483647;
+            }
+            *entry = word;
         }
-    }
-    if unsafe { VAL_SET > 0 } {
-        unsafe {
-            VAL_SET = 0;
-            return SAVED_VAL;
+        RAND_STATE.set((r, 3, 0));
+        for _ in 0..310 {
+            next_rand();
         }
+        VAL_SET.set(0);
+        LAST_SEED.set(seed);
     }
-    let mut rad_sq = 2.;
-    let (mut val1, mut val2);
-    loop {
-        val1 = 2. * unsafe { libc::rand() } as f32 / 2_147_483_647. - 1.;
-        val2 = 2. * unsafe { libc::rand() } as f32 / 2_147_483_647. - 1.;
-        rad_sq = val1 * val1 + val2 * val2;
-        if rad_sq < 1. && rad_sq > 0. {
-            break;
+    let value;
+    if VAL_SET.get() > 0 {
+        value = SAVED_VAL.get();
+        VAL_SET.set(0);
+    } else {
+        // `(2. * rand()) / RAND_MAX - 1.` and `sqrt(-2. * log(radSq) / radSq)`
+        // are double expressions in the source that land in `float` variables:
+        // the widening happens before the arithmetic, not after.
+        let mut rad_sq = 2.0_f32;
+        let mut val1 = 0.0_f32;
+        let mut val2 = 0.0_f32;
+        while rad_sq >= 1. || rad_sq <= 0. {
+            val1 = ((2. * next_rand() as f64) / 2147483647. - 1.) as f32;
+            val2 = ((2. * next_rand() as f64) / 2147483647. - 1.) as f32;
+            rad_sq = val1 * val1 + val2 * val2;
         }
+        let fac = (-2. * (rad_sq as f64).ln() / rad_sq as f64).sqrt() as f32;
+        value = val1 * fac;
+        SAVED_VAL.set(val2 * fac);
+        VAL_SET.set(1);
     }
-    let fac = (-2. * rad_sq.ln() / rad_sq).sqrt();
-    unsafe {
-        SAVED_VAL = val2 * fac;
-        VAL_SET = 1;
-    }
-    val1 * fac
+    value
 }
 
 /// Original `gaussiandeviate` (`statfuncs.c:379`).
-pub unsafe fn gaussiandeviate(value: *mut f32, seed: *mut i32) {
-    unsafe {
-        *value = gaussian_deviate(*seed);
-    }
+pub fn gaussiandeviate(value: &mut f32, seed: &i32) {
+    *value = gaussian_deviate(*seed);
 }
 
 /// Original `twoGaussianDeviates` (`statfuncs.c:391`).
-pub unsafe fn two_gaussian_deviates(value1: *mut f32, value2: *mut f32, pseudo: *mut i32) {
-    if unsafe { *pseudo == 0 } {
-        unsafe {
-            *pseudo = libc::time(core::ptr::null_mut()) as i32 & 0xFFFFF;
-        }
+pub fn two_gaussian_deviates(value1: &mut f32, value2: &mut f32, pseudo: &mut i32) {
+    if *pseudo == 0 {
+        *pseudo = (SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as u32
+            & 0xFFFFF) as i32;
     }
-    let mut rad_sq = 2.;
-    let (mut val1, mut val2);
-    loop {
-        unsafe {
-            *pseudo = 197 * (*pseudo + 1) & 0xFFFFF;
-            val1 = 2. * *pseudo as f32 / 0xFFFFF as f32 - 1.;
-            *pseudo = 197 * (*pseudo + 1) & 0xFFFFF;
-            val2 = 2. * *pseudo as f32 / 0xFFFFF as f32 - 1.;
-        }
+    let mut rad_sq = 2.0_f32;
+    let mut val1 = 0.0_f32;
+    let mut val2 = 0.0_f32;
+    while rad_sq >= 1. || rad_sq <= 0. {
+        *pseudo = (197 * (*pseudo + 1)) & 0xFFFFF;
+        val1 = ((2. * *pseudo as f64) / 0xFFFFF as f64 - 1.) as f32;
+        *pseudo = (197 * (*pseudo + 1)) & 0xFFFFF;
+        val2 = ((2. * *pseudo as f64) / 0xFFFFF as f64 - 1.) as f32;
         rad_sq = val1 * val1 + val2 * val2;
-        if rad_sq < 1. && rad_sq > 0. {
-            break;
-        }
     }
-    let fac = (-2. * rad_sq.ln() / rad_sq).sqrt();
-    unsafe {
-        *value1 = val1 * fac;
-        *value2 = val2 * fac;
-    }
+    let fac = (-2. * (rad_sq as f64).ln() / rad_sq as f64).sqrt() as f32;
+    *value1 = val1 * fac;
+    *value2 = val2 * fac;
 }
 
 /// Original `twogaussiandeviates` (`statfuncs.c:416`).
-pub unsafe fn twogaussiandeviates(value1: *mut f32, value2: *mut f32, pseudo: *mut i32) {
-    unsafe {
-        two_gaussian_deviates(value1, value2, pseudo);
-    }
+pub fn twogaussiandeviates(value1: &mut f32, value2: &mut f32, pseudo: &mut i32) {
+    two_gaussian_deviates(value1, value2, pseudo);
 }
 
 #[cfg(test)]
@@ -345,18 +394,16 @@ mod tests {
     }
     #[test]
     fn gaussian_generators_are_seeded_and_finite() {
-        unsafe {
-            let first = gaussian_deviate(12345);
-            let second = gaussian_deviate(12345);
-            gaussian_deviate(7);
-            let repeated = gaussian_deviate(12345);
-            assert!(first.is_finite() && second.is_finite());
-            assert_eq!(first, repeated);
-            let mut one = 0.;
-            let mut two = 0.;
-            let mut pseudo = 123;
-            two_gaussian_deviates(&mut one, &mut two, &mut pseudo);
-            assert!(one.is_finite() && two.is_finite() && pseudo != 123);
-        }
+        let first = gaussian_deviate(12345);
+        let second = gaussian_deviate(12345);
+        gaussian_deviate(7);
+        let repeated = gaussian_deviate(12345);
+        assert!(first.is_finite() && second.is_finite());
+        assert_eq!(first, repeated);
+        let mut one = 0.;
+        let mut two = 0.;
+        let mut pseudo = 123;
+        two_gaussian_deviates(&mut one, &mut two, &mut pseudo);
+        assert!(one.is_finite() && two.is_finite() && pseudo != 123);
     }
 }

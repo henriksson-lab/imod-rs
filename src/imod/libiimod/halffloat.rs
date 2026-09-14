@@ -1,19 +1,14 @@
 //! Translation of `IMOD/libiimod/halffloat.c`.
 #![allow(dead_code)]
 
-pub unsafe fn imnp_halfbuf_to_floats(half_buf: *const u16, float_buf: *mut f32, num_vals: i32) {
-    unsafe {
-        for ind in 0..num_vals as isize {
-            *float_buf.offset(ind) =
-                f32::from_bits(imnp_halfbits_to_floatbits(*half_buf.offset(ind)));
-        }
+pub fn imnp_halfbuf_to_floats(half_buf: &[u16], float_buf: &mut [f32], num_vals: i32) {
+    for ind in 0..num_vals as usize {
+        float_buf[ind] = f32::from_bits(imnp_halfbits_to_floatbits(half_buf[ind]));
     }
 }
-pub unsafe fn imnp_floatbuf_to_halfs(float_buf: *const f32, half_buf: *mut u16, num_vals: i32) {
-    unsafe {
-        for ind in 0..num_vals as isize {
-            *half_buf.offset(ind) = imnp_floatbits_to_halfbits((*float_buf.offset(ind)).to_bits());
-        }
+pub fn imnp_floatbuf_to_halfs(float_buf: &[f32], half_buf: &mut [u16], num_vals: i32) {
+    for ind in 0..num_vals as usize {
+        half_buf[ind] = imnp_floatbits_to_halfbits(float_buf[ind].to_bits());
     }
 }
 pub fn imnp_floatbits_to_halfbits(f: u32) -> u16 {
@@ -75,10 +70,8 @@ mod tests {
         let in_f = [-2.0, 0.0, 1.5];
         let mut halves = [0; 3];
         let mut out = [0.; 3];
-        unsafe {
-            imnp_floatbuf_to_halfs(in_f.as_ptr(), halves.as_mut_ptr(), 3);
-            imnp_halfbuf_to_floats(halves.as_ptr(), out.as_mut_ptr(), 3);
-        }
+        imnp_floatbuf_to_halfs(&in_f, &mut halves, 3);
+        imnp_halfbuf_to_floats(&halves, &mut out, 3);
         assert_eq!(in_f, out);
     }
 }

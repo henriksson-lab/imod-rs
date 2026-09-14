@@ -54,7 +54,7 @@ use super::istore::{
     istore_lookup,
 };
 use super::iview::{imod_objview_complete, imod_objviews_free};
-use crate::imod::libcfshr::b3dutil::{c2f_string, f2c_string};
+use crate::imod::libcfshr::b3dutil::{ImodFile, c2f_string, f2c_string};
 
 unsafe extern "C" {
     static stderr: *mut libc::FILE;
@@ -374,7 +374,10 @@ pub unsafe fn openimoddata(fname: *const c_char, fsize: FortStrLenT) -> i32 {
     let path = std::ffi::CStr::from_ptr(cfilename)
         .to_string_lossy()
         .into_owned();
-    let fin = File::open(&path);
+    // `imodel_files.rs` now takes the shared `ImodFile` (NATIVE.md vocabulary
+    // item 1); this wrapper stays `extern "C"` on the Fortran side but adapts
+    // here.
+    let fin = ImodFile::open(&path, "rb").ok_or(());
     if fin.is_err() {
         if std::fs::metadata(&path).is_err() {
             S_LAST_OPEN_ERROR = FWRAP_ERROR_BAD_FILENAME;
@@ -1104,7 +1107,7 @@ pub unsafe fn getpointvalue(ob: i32, co: i32, pt: i32, value: &mut f32) -> i32 {
     for i in index..after {
         let item = &store[i];
         if item.type_ == GEN_STORE_VALUE1 {
-            *value = item.value.f;
+            *value = item.value.f();
             return FWRAP_NOERROR;
         }
     }
@@ -1411,7 +1414,14 @@ pub unsafe fn putimod(
             if (&(*(&raw const S_NAMES_PUT)))[pt].ob == 255 - (ob as i32 + mincolor) {
                 let src = (&(*(&raw const S_NAMES_PUT)))[pt].name;
                 if !src.is_null() {
-                    libc::strncpy(imod.obj[nobj].name.as_mut_ptr(), src, IOBJ_STRSIZE - 1);
+                    // `imodel_fwrap.c:1412` `strncpy(name, src, IOBJ_STRSIZE - 1)`.
+                    // `Iobj::name` is `[u8; N]` now (NATIVE.md §3), so the C
+                    // string is copied byte for byte with the same bound.
+                    libc::strncpy(
+                        imod.obj[nobj].name.as_mut_ptr().cast::<c_char>(),
+                        src,
+                        IOBJ_STRSIZE - 1,
+                    );
                 }
                 imod.obj[nobj].name[IOBJ_STRSIZE - 1] = 0;
                 ci = 1;
@@ -1419,7 +1429,7 @@ pub unsafe fn putimod(
         }
         if ci == 0 {
             libc::sprintf(
-                imod.obj[nobj].name.as_mut_ptr(),
+                imod.obj[nobj].name.as_mut_ptr().cast::<c_char>(),
                 c"Fmod # %d".as_ptr(),
                 wimpno as std::ffi::c_int,
             );
@@ -1703,8 +1713,8 @@ pub unsafe fn writeimod(fname: *const c_char, fsize: FortStrLenT) -> i32 {
         let mut store = Istore {
             type_: GEN_STORE_VALUE1,
             flags: (GEN_STORE_FLOAT << 2) | GEN_STORE_ONEPOINT,
-            index: StoreUnion { i: 0 },
-            value: StoreUnion { i: 0 },
+            index: StoreUnion::from_i(0),
+            value: StoreUnion::from_i(0),
         };
         for i in 0..(*(&raw const S_VALUES_PUT)).len() {
             let entry = (&(*(&raw const S_VALUES_PUT)))[i];
@@ -1718,16 +1728,16 @@ pub unsafe fn writeimod(fname: *const c_char, fsize: FortStrLenT) -> i32 {
             }
 
             /* Insert value into contour or object stores */
-            store.value = StoreUnion { f: entry.value };
+            store.value = StoreUnion::from_f(entry.value);
             if entry.pt < 0 {
-                store.index = StoreUnion { i: entry.co };
+                store.index = StoreUnion::from_i(entry.co);
                 istore_insert_change(&mut imod.obj[entry.ob as usize].store, store);
             } else {
                 let cont = &mut imod.obj[entry.ob as usize].cont[entry.co as usize];
                 if entry.pt > cont.pts.len() as i32 {
                     continue;
                 }
-                store.index = StoreUnion { i: entry.pt };
+                store.index = StoreUnion::from_i(entry.pt);
                 istore_insert_change(&mut cont.store, store);
             }
         }
@@ -1742,9 +1752,9 @@ pub unsafe fn writeimod(fname: *const c_char, fsize: FortStrLenT) -> i32 {
     imod_objview_complete(imod);
     let retcode;
     if S_WRITE_AS_WIMP != 0 {
-        let mut out = match File::create(&path) {
-            Ok(out) => out,
-            Err(_) => {
+        let mut out = match ImodFile::open(&path, "wb") {
+            Some(out) => out,
+            None => {
                 libc::free(filename.cast::<c_void>());
                 return FWRAP_ERROR_OPENING_FILE;
             }
@@ -1755,9 +1765,9 @@ pub unsafe fn writeimod(fname: *const c_char, fsize: FortStrLenT) -> i32 {
         };
         S_WRITE_AS_WIMP = 0;
     } else {
-        let mut out = match File::create(&path) {
-            Ok(out) => out,
-            Err(_) => {
+        let mut out = match ImodFile::open(&path, "wb") {
+            Some(out) => out,
+            None => {
                 libc::free(filename.cast::<c_void>());
                 return FWRAP_ERROR_OPENING_FILE;
             }
@@ -2076,7 +2086,7 @@ pub unsafe fn getmodelname(fname: *mut c_char, fsize: FortStrLenT) -> i32 {
         Some(imod) => imod,
         None => return FWRAP_ERROR_NO_MODEL,
     };
-    if c2f_string(imod.name.as_ptr(), fname, fsize) != 0 {
+    if c2f_string(imod.name.as_ptr().cast::<c_char>(), fname, fsize) != 0 {
         return FWRAP_ERROR_STRING_LEN;
     }
     FWRAP_NOERROR
@@ -2092,7 +2102,7 @@ pub unsafe fn getimodobjname(ob: i32, fname: *mut c_char, fsize: FortStrLenT) ->
     let obj = &imod.obj[S_OBJ];
     let mut i = 0i32;
     while i < fsize && (i as usize) < IOBJ_STRSIZE && obj.name[i as usize] != 0 {
-        *fname.add(i as usize) = obj.name[i as usize];
+        *fname.add(i as usize) = obj.name[i as usize] as c_char;
         i += 1;
     }
     while i < fsize {
@@ -2267,7 +2277,11 @@ pub unsafe fn putmodelname(fname: *const c_char, fsize: FortStrLenT) -> i32 {
         return FWRAP_ERROR_MEMORY;
     }
     let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    libc::strncpy(imod.name.as_mut_ptr(), tmpstr, IMOD_STRSIZE - 1);
+    libc::strncpy(
+        imod.name.as_mut_ptr().cast::<c_char>(),
+        tmpstr,
+        IMOD_STRSIZE - 1,
+    );
     imod.name[IMOD_STRSIZE - 1] = 0;
     libc::free(tmpstr.cast::<c_void>());
     FWRAP_NOERROR

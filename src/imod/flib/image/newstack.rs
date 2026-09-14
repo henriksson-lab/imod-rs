@@ -296,24 +296,16 @@ pub fn newstack() {
     // option abbreviation, `-param` files, and illegal-option exits all behave
     // as they do natively.
     unsafe {
-        let mut string_value: *mut libc::c_char = core::ptr::null_mut();
+        let mut string_value: Vec<u8> = Vec::new();
         let mut integer_value = 0_i32;
         let mut float_value = 0.0_f32;
-        if pip_get_string(c"FileOfInputs".as_ptr(), &raw mut string_value) == 0 {
-            input_list_name = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"FileOfInputs", &mut string_value) == 0 {
+            input_list_name = String::from_utf8_lossy(&string_value).into_owned();
         }
-        pip_number_of_entries(c"InputFile".as_ptr(), &raw mut input_entries);
+        pip_number_of_entries(b"InputFile", &mut input_entries);
         for _ in 0..input_entries {
-            if pip_get_string(c"InputFile".as_ptr(), &raw mut string_value) == 0 {
-                input_names.push(
-                    std::ffi::CStr::from_ptr(string_value)
-                        .to_string_lossy()
-                        .into_owned(),
-                );
-                libc::free(string_value.cast());
+            if pip_get_string(b"InputFile", &mut string_value) == 0 {
+                input_names.push(String::from_utf8_lossy(&string_value).into_owned());
             }
         }
         // `numInFiles = numInputFiles + max(0, numNonOptArg - 1)` and
@@ -321,42 +313,37 @@ pub fn newstack() {
         // (`newstack.f90:311, 558`): every non-option argument but the last is
         // an input, the last one is the output.
         for index in 0..num_non_opt_arg {
-            if pip_get_non_option_arg(index, &raw mut string_value) == 0 {
-                non_options.push(
-                    std::ffi::CStr::from_ptr(string_value)
-                        .to_string_lossy()
-                        .into_owned(),
-                );
-                libc::free(string_value.cast());
+            if pip_get_non_option_arg(index, &mut string_value) == 0 {
+                non_options.push(String::from_utf8_lossy(&string_value).into_owned());
             }
         }
-        pip_number_of_entries(c"SectionsToRead".as_ptr(), &raw mut section_list_entries);
-        if pip_get_integer(c"SkipSectionIncrement".as_ptr(), &raw mut integer_value) == 0 {
+        pip_number_of_entries(b"SectionsToRead", &mut section_list_entries);
+        if pip_get_integer(b"SkipSectionIncrement", &mut integer_value) == 0 {
             list_increment = integer_value;
         }
-        if pip_get_boolean(c"BlankOutput".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"BlankOutput", &mut integer_value) == 0 {
             blank = integer_value != 0;
         }
         // `newstack.f90:291`.
-        if pip_get_integer(c"MaxMegaSections".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"MaxMegaSections", &mut integer_value) == 0 {
             lim_sec = 1_000_000 * 1.max(integer_value);
         }
-        if pip_get_boolean(c"PrintXYSizeAndExit".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"PrintXYSizeAndExit", &mut integer_value) == 0 {
             print_size_and_exit = integer_value != 0;
         }
         quiet = print_size_and_exit;
         // `newstack.f90:318`.
-        if pip_get_boolean(c"StripExtraHeader".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"StripExtraHeader", &mut integer_value) == 0 {
             strip_extra = integer_value != 0;
         }
         // `newstack.f90:322`.
-        if pip_get_boolean(c"TwoDirectionTiltSeries".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"TwoDirectionTiltSeries", &mut integer_value) == 0 {
             two_directions = integer_value != 0;
         }
-        if pip_get_boolean(c"NumberedFromOne".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"NumberedFromOne", &mut integer_value) == 0 {
             numbered_from_one = integer_value != 0;
         }
-        if pip_get_boolean(c"SameSectionsToRead".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"SameSectionsToRead", &mut integer_value) == 0 {
             same_sections = integer_value != 0;
         }
         if same_sections && section_list_entries > 1 {
@@ -366,20 +353,17 @@ pub fn newstack() {
         if same_sections && two_directions {
             exit_error("You cannot enter -samesec with -twodir");
         }
-        if pip_get_integer(c"ReverseInputFileOrder".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"ReverseInputFileOrder", &mut integer_value) == 0 {
             if !input_list_name.is_empty() {
                 exit_error("You cannot enter -reverse with an input file list");
             }
             reverse_count = Some(integer_value);
         }
-        if pip_get_integer(c"BytesSignedInOutput".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"BytesSignedInOutput", &mut integer_value) == 0 {
             bytes_signed = Some(integer_value);
         }
-        if pip_get_string(c"ExcludeSections".as_ptr(), &raw mut string_value) == 0 {
-            let list = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"ExcludeSections", &mut string_value) == 0 {
+            let list = String::from_utf8_lossy(&string_value).into_owned();
             let mut parsed = vec![0_i32; 1_000_000];
             let (mut count, mut limit) = (0, 1_000_000);
             if parselist2(&list, &mut parsed, &mut count, &mut limit).is_err() {
@@ -388,11 +372,8 @@ pub fn newstack() {
             excluded_sections.extend_from_slice(&parsed[..count as usize]);
         }
         // `newstack.f90:376-385`.
-        if pip_get_string(c"FormatOfOutputFile".as_ptr(), &raw mut string_value) == 0 {
-            let value = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"FormatOfOutputFile", &mut string_value) == 0 {
+            let value = String::from_utf8_lossy(&string_value).into_owned();
             let error = set_output_type_from_string(&value);
             if error == -5 {
                 exit_error("HDF files are not supported by this IMOD package");
@@ -406,186 +387,137 @@ pub fn newstack() {
         }
         // `newstack.f90:397-403`.  `-remove` implies `-mdoc`, and `-addback`
         // without `-remove` is an error.
-        if pip_get_boolean(c"UseMdocFiles".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"UseMdocFiles", &mut integer_value) == 0 {
             use_mdoc_files = integer_value != 0;
         }
-        if pip_get_boolean(c"PixelSizeFromMdoc".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"PixelSizeFromMdoc", &mut integer_value) == 0 {
             pixel_from_mdoc = integer_value != 0;
         }
-        let remove_entered =
-            pip_get_string(c"RemoveForMdocName".as_ptr(), &raw mut string_value) == 0;
+        let remove_entered = pip_get_string(b"RemoveForMdocName", &mut string_value) == 0;
         if remove_entered {
-            remove_from_name = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+            remove_from_name = String::from_utf8_lossy(&string_value).into_owned();
             use_mdoc_files = true;
         }
-        if pip_get_string(c"AddBackForMdocName".as_ptr(), &raw mut string_value) == 0 {
+        if pip_get_string(b"AddBackForMdocName", &mut string_value) == 0 {
             if !remove_entered {
                 exit_error("You cannot enter -addback without -remove");
             }
-            add_to_name = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+            add_to_name = String::from_utf8_lossy(&string_value).into_owned();
         }
         //
         // Output files (`newstack.f90:556-563`).
-        if pip_get_string(c"FileOfOutputs".as_ptr(), &raw mut string_value) == 0 {
-            output_list_name = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"FileOfOutputs", &mut string_value) == 0 {
+            output_list_name = String::from_utf8_lossy(&string_value).into_owned();
         }
-        pip_number_of_entries(c"OutputFile".as_ptr(), &raw mut output_entries);
+        pip_number_of_entries(b"OutputFile", &mut output_entries);
         for _ in 0..output_entries {
-            if pip_get_string(c"OutputFile".as_ptr(), &raw mut string_value) == 0 {
-                output_names.push(
-                    std::ffi::CStr::from_ptr(string_value)
-                        .to_string_lossy()
-                        .into_owned(),
-                );
-                libc::free(string_value.cast());
+            if pip_get_string(b"OutputFile", &mut string_value) == 0 {
+                output_names.push(String::from_utf8_lossy(&string_value).into_owned());
             }
         }
         // `newstack.f90:564-568`.
-        if pip_get_integer(c"SplitStartingNumber".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"SplitStartingNumber", &mut integer_value) == 0 {
             series_base = integer_value;
         }
-        if pip_get_string(c"AppendExtension".as_ptr(), &raw mut string_value) == 0 {
-            series_ext = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"AppendExtension", &mut string_value) == 0 {
+            series_ext = String::from_utf8_lossy(&string_value).into_owned();
         }
         //
         // Size, mode and transforms (`newstack.f90:685-1130`).
         let (mut size_x, mut size_y) = (-1_i32, -1_i32);
-        if pip_get_two_integers(
-            c"SizeToOutputInXandY".as_ptr(),
-            &raw mut size_x,
-            &raw mut size_y,
-        ) == 0
-        {
+        if pip_get_two_integers(b"SizeToOutputInXandY", &mut size_x, &mut size_y) == 0 {
             size_to_output = Some([size_x, size_y]);
         }
-        if pip_get_integer(c"ModeToOutput".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"ModeToOutput", &mut integer_value) == 0 {
             mode = Some(set_float_output_for_entered_mode(integer_value));
         }
-        if pip_get_boolean(c"LinearInterpolation".as_ptr(), &raw mut integer_value) == 0
-            && integer_value != 0
-        {
+        if pip_get_boolean(b"LinearInterpolation", &mut integer_value) == 0 && integer_value != 0 {
             linear_entered = true;
             if_linear = 1;
         }
-        if pip_get_boolean(c"NearestNeighbor".as_ptr(), &raw mut integer_value) == 0
-            && integer_value != 0
-        {
+        if pip_get_boolean(b"NearestNeighbor", &mut integer_value) == 0 && integer_value != 0 {
             nearest_entered = true;
             if_linear = -1;
         }
-        if pip_get_string(c"TransformFile".as_ptr(), &raw mut string_value) == 0 {
-            xf_file = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"TransformFile", &mut string_value) == 0 {
+            xf_file = String::from_utf8_lossy(&string_value).into_owned();
         }
         // `UseTransformLines` is read inside `getItemsToUse`
         // (`newstack.f90:3333-3344`), which loops over every entry; reading it
         // here would consume the first one.
-        if pip_get_boolean(c"OneTransformPerFile".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"OneTransformPerFile", &mut integer_value) == 0 {
             one_per_file = integer_value != 0;
         }
-        if pip_get_boolean(c"PhaseShiftFFT".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"PhaseShiftFFT", &mut integer_value) == 0 {
             phase_shift = integer_value != 0;
         }
-        if pip_get_float(c"FourierReduceByFactor".as_ptr(), &raw mut float_value) == 0 {
+        if pip_get_float(b"FourierReduceByFactor", &mut float_value) == 0 {
             ft_reduce_fac = float_value;
         }
-        if pip_get_float(c"FourierExpandByFactor".as_ptr(), &raw mut float_value) == 0 {
+        if pip_get_float(b"FourierExpandByFactor", &mut float_value) == 0 {
             ft_expand_fac = float_value;
         }
         // `ierr = PipGetLogical('NoisePadForFFT', noisePad)` (`newstack.f90:754`).
-        if pip_get_boolean(c"NoisePadForFFT".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"NoisePadForFFT", &mut integer_value) == 0 {
             noise_pad = integer_value != 0;
         }
         fourier_scaling = ft_reduce_fac > 0. || ft_expand_fac > 0.;
-        if pip_get_float(c"RotateByAngle".as_ptr(), &raw mut float_value) == 0 {
+        if pip_get_float(b"RotateByAngle", &mut float_value) == 0 {
             rotate_angle = float_value;
         }
-        if pip_get_float(c"ExpandByFactor".as_ptr(), &raw mut float_value) == 0 {
+        if pip_get_float(b"ExpandByFactor", &mut float_value) == 0 {
             expand_factor = float_value;
         }
-        if pip_get_float(c"FillValue".as_ptr(), &raw mut float_value) == 0 {
+        if pip_get_float(b"FillValue", &mut float_value) == 0 {
             fill_value = Some(float_value);
         }
         // `newstack.f90:982`.
-        pip_get_two_integers(
-            c"TaperAtFill".as_ptr(),
-            &raw mut num_taper,
-            &raw mut inside_taper,
-        );
+        pip_get_two_integers(b"TaperAtFill", &mut num_taper, &mut inside_taper);
         // `ierr = PipGetInteger('VerboseOutput', iVerbose)`
         // (`newstack.f90:308`).
-        if pip_get_integer(c"VerboseOutput".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"VerboseOutput", &mut integer_value) == 0 {
             i_verbose = integer_value;
         }
         // `newstack.f90:979-980`.
-        if pip_get_string(c"DistortionField".as_ptr(), &raw mut string_value) == 0 {
-            idf_file = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"DistortionField", &mut string_value) == 0 {
+            idf_file = String::from_utf8_lossy(&string_value).into_owned();
         }
-        if pip_get_string(c"GradientFile".as_ptr(), &raw mut string_value) == 0 {
-            mag_grad_file = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"GradientFile", &mut string_value) == 0 {
+            mag_grad_file = String::from_utf8_lossy(&string_value).into_owned();
         }
         // `newstack.f90:1046`.
-        if pip_get_integer(c"BinByFactor".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"BinByFactor", &mut integer_value) == 0 {
             bin_factor = integer_value;
             if bin_factor <= 0 {
                 exit_error("Binning factor must be a positive number");
             }
         }
-        if pip_get_boolean(c"AllowOddEvenChange".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"AllowOddEvenChange", &mut integer_value) == 0 {
             odd_even_ok = integer_value;
         }
-        if pip_get_boolean(c"AdjustOrigin".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"AdjustOrigin", &mut integer_value) == 0 {
             adjust_origin = integer_value != 0;
         }
-        if pip_get_boolean(c"QuietOutput".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_boolean(b"QuietOutput", &mut integer_value) == 0 {
             quiet = quiet || integer_value != 0;
         }
         //
         // Tilt angle handling (`newstack.f90:989-1020`).
-        if pip_get_integer(c"ReorderByTiltAngle".as_ptr(), &raw mut integer_value) == 0 {
+        if pip_get_integer(b"ReorderByTiltAngle", &mut integer_value) == 0 {
             reorder_by_tilt = integer_value;
         }
-        if pip_get_string(c"AngleFileToReorder".as_ptr(), &raw mut string_value) == 0 {
-            angle_file_to_reorder = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"AngleFileToReorder", &mut string_value) == 0 {
+            angle_file_to_reorder = String::from_utf8_lossy(&string_value).into_owned();
         }
-        if pip_get_string(c"NewAngleOutputFile".as_ptr(), &raw mut string_value) == 0 {
-            new_angle_output_file = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"NewAngleOutputFile", &mut string_value) == 0 {
+            new_angle_output_file = String::from_utf8_lossy(&string_value).into_owned();
         }
-        if pip_get_string(c"TiltAngleFile".as_ptr(), &raw mut string_value) == 0 {
+        if pip_get_string(b"TiltAngleFile", &mut string_value) == 0 {
             // `newstack.f90:1008`.
             if strip_extra {
                 exit_error("You cannot enter both -tilt and -strip");
             }
-            tilt_angle_file = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+            tilt_angle_file = String::from_utf8_lossy(&string_value).into_owned();
         }
     }
     if linear_entered && nearest_entered {
@@ -716,13 +648,10 @@ pub fn newstack() {
     let mut need_close2 = 0_i32;
     let if_chunk_in;
     unsafe {
-        let mut string_value: *mut libc::c_char = core::ptr::null_mut();
+        let mut string_value: Vec<u8> = Vec::new();
         // `newstack.f90:386-390`.
-        if pip_get_string(c"VolumesToRead".as_ptr(), &raw mut string_value) == 0 {
-            let list = std::ffi::CStr::from_ptr(string_value)
-                .to_string_lossy()
-                .into_owned();
-            libc::free(string_value.cast());
+        if pip_get_string(b"VolumesToRead", &mut string_value) == 0 {
+            let list = String::from_utf8_lossy(&string_value).into_owned();
             // `call parseList2(listString, inList, numVolRead, limSec)`: with
             // a positive `limList` the routine prints its own diagnostic and
             // exits, so the source discards the outcome and so does this.
@@ -737,15 +666,15 @@ pub fn newstack() {
         // targets alone when the option is absent, so they keep the source
         // defaults 0, 0 and 1.
         if_chunk_in = 1 - pip_get_three_integers(
-            c"ChunkSizesInXYZ".as_ptr(),
-            &raw mut nx_tile,
-            &raw mut ny_tile,
-            &raw mut nz_chunk,
+            b"ChunkSizesInXYZ",
+            &mut nx_tile,
+            &mut ny_tile,
+            &mut nz_chunk,
         );
         if if_chunk_in > 0 {
             if3d_volumes = 1;
         }
-        pip_get_integer(c"Store3DVolumes".as_ptr(), &raw mut if3d_volumes);
+        pip_get_integer(b"Store3DVolumes", &mut if3d_volumes);
         if if_chunk_in > 0 && if3d_volumes < 0 {
             exit_error("You cannot enter chunk sizes and forbid volume output with -3d -1");
         }
@@ -753,7 +682,7 @@ pub fn newstack() {
             override_output_type(5);
         }
         // `newstack.f90:399`.
-        pip_get_integer(c"HDFCompressionIndex".as_ptr(), &raw mut i_hdf_compression);
+        pip_get_integer(b"HDFCompressionIndex", &mut i_hdf_compression);
     }
     if output_names.is_empty() {
         exit_error("No output file specified");
@@ -778,17 +707,14 @@ pub fn newstack() {
     // -twodir` (`newstack.f90:409`).  Parsing them in the option block ahead of
     // both reported the wrong error for `-twodir 1 -secs ...` with no input.
     unsafe {
-        let mut string_value: *mut std::os::raw::c_char = std::ptr::null_mut();
+        let mut string_value: Vec<u8> = Vec::new();
         for _ in 0..section_list_entries {
-            if pip_get_string(c"SectionsToRead".as_ptr(), &raw mut string_value) == 0 {
+            if pip_get_string(b"SectionsToRead", &mut string_value) == 0 {
                 // `newstack.f90:491-493`.
                 if two_directions {
                     exit_error("You cannot enter section lists with -twodir");
                 }
-                let list = std::ffi::CStr::from_ptr(string_value)
-                    .to_string_lossy()
-                    .into_owned();
-                libc::free(string_value.cast());
+                let list = String::from_utf8_lossy(&string_value).into_owned();
                 // `newstack.f90:286-291`: `limSec` bounds the section list and
                 // `-megasec` raises it.
                 let mut sections = vec![0_i32; lim_sec.max(1) as usize];
@@ -841,33 +767,24 @@ pub fn newstack() {
         // `ierr = readCheckWarpFile(xfFile, 0, 1, ...)` and
         // `if (ierr < -1) call exitError(listString)` (`newstack.f90:781-783`).
         // The `ierr >= 0` warping-file branch is not translated on this route.
-        let mut warp_name = CString::new(xf_file.as_bytes())
-            .unwrap()
-            .into_bytes_with_nul();
-        let mut list_string = vec![0_i8; 1024];
+        let mut list_string = String::new();
         let (mut idf_nx, mut idf_ny, mut num_xforms, mut idf_binning, mut warp_flags) =
             (0_i32, 0_i32, 0_i32, 0_i32, 0_i32);
         let mut pixel_size = 0.0_f32;
-        let warp_check = unsafe {
-            crate::imod::libwarp::warputils::read_check_warp_file(
-                warp_name.as_mut_ptr().cast(),
-                0,
-                1,
-                &raw mut idf_nx,
-                &raw mut idf_ny,
-                &raw mut num_xforms,
-                &raw mut idf_binning,
-                &raw mut pixel_size,
-                &raw mut warp_flags,
-                list_string.as_mut_ptr(),
-                list_string.len() as i32,
-            )
-        };
+        let warp_check = crate::imod::libwarp::warputils::read_check_warp_file(
+            &xf_file,
+            0,
+            1,
+            &mut idf_nx,
+            &mut idf_ny,
+            &mut num_xforms,
+            &mut idf_binning,
+            &mut pixel_size,
+            &mut warp_flags,
+            &mut list_string,
+        );
         if warp_check < -1 {
-            let message = unsafe { std::ffi::CStr::from_ptr(list_string.as_ptr()) }
-                .to_string_lossy()
-                .into_owned();
-            exit_error(message.trim_end());
+            exit_error(list_string.trim_end());
         }
         if warp_check >= 0 {
             //
@@ -964,7 +881,7 @@ pub fn newstack() {
             // `iiFillMrcHeader` (`unit_fileio.c:256-265`) -- a TIFF file's
             // `ImodImageFile.header` is the libtiff `TIFF *`
             // (`iitif.c:204, 687`), so reading it as an `MrcHeader` is garbage.
-            let header = std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
+            let header = (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
             // `newstack.f90:449-464`: retain the first input file's volume
             // structure in the output if the output is already HDF, and adopt
             // its chunk sizes unless the user entered them.
@@ -1026,7 +943,7 @@ pub fn newstack() {
                     sizes_match = false;
                 }
             } else {
-                first_header = Some(std::ptr::read(&header));
+                first_header = Some(header.clone());
             }
             nx_max = nx_max.max(header.nx);
             ny_max = ny_max.max(header.ny);
@@ -1115,7 +1032,7 @@ pub fn newstack() {
                 num_output_sections = vec![1; output_names.len()];
             } else {
                 let mut num_out_entries = 0_i32;
-                pip_number_of_entries(c"NumberToOutput".as_ptr(), &raw mut num_out_entries);
+                pip_number_of_entries(b"NumberToOutput", &mut num_out_entries);
                 if num_out_entries == 0 {
                     exit_error("You must specify number of sections to write to each output file");
                 }
@@ -1124,9 +1041,9 @@ pub fn newstack() {
                     let mut values = vec![0_i32; output_names.len()];
                     let mut num_to_get = 0_i32;
                     if pip_get_integer_array(
-                        c"NumberToOutput".as_ptr(),
-                        values.as_mut_ptr(),
-                        &raw mut num_to_get,
+                        b"NumberToOutput",
+                        &mut values,
+                        &mut num_to_get,
                         output_names.len().saturating_sub(num_output_sections.len()) as i32,
                     ) == 0
                     {
@@ -1293,7 +1210,7 @@ pub fn newstack() {
                 let mut xform = [0.0_f32; 6];
                 // `getlineartransform` (`warpwrapfort.c:128`) passes
                 // `*iz - 1` and a row count of 2.
-                if get_linear_transform(index - 1, xform.as_mut_ptr(), 2) != 0 {
+                if get_linear_transform(index - 1, &mut xform, 2) != 0 {
                     exit_error("Getting linear transform from warp file");
                 }
                 xform[4] *= warp_scale;
@@ -1313,20 +1230,18 @@ pub fn newstack() {
         //
         let mut contrast_limits = [0.0_f32, 255.0];
         // `newstack.f90:875`: `PipGetTwoFloats`.
-        let contrast_entered = pip_get_two_floats(
-            c"ContrastBlackWhite".as_ptr(),
-            &raw mut contrast_limits[0],
-            &raw mut contrast_limits[1],
-        ) == 0;
+        let contrast_entered = {
+            let [contrast_limits_0, contrast_limits_1, ..] = &mut contrast_limits;
+            pip_get_two_floats(b"ContrastBlackWhite", contrast_limits_0, contrast_limits_1)
+        } == 0;
         let mut scale_limits = [0.0_f32; 2];
         // `newstack.f90:876`: `PipGetTwoFloats`.
-        let scale_entered = pip_get_two_floats(
-            c"ScaleMinAndMax".as_ptr(),
-            &raw mut scale_limits[0],
-            &raw mut scale_limits[1],
-        ) == 0;
+        let scale_entered = {
+            let [scale_limits_0, scale_limits_1, ..] = &mut scale_limits;
+            pip_get_two_floats(b"ScaleMinAndMax", scale_limits_0, scale_limits_1)
+        } == 0;
         let mut float_densities = 0_i32;
-        let float_entered = pip_get_integer(c"FloatDensities".as_ptr(), &mut float_densities) == 0;
+        let float_entered = pip_get_integer(b"FloatDensities", &mut float_densities) == 0;
         // `newstack.f90:899-900`'s `if (ifFloat < 0)` check is **not** made
         // here: it sits after the mutually-exclusive check at
         // `newstack.f90:896-898` and inside the `ifFloat < 4` arm, so it is
@@ -1341,21 +1256,19 @@ pub fn newstack() {
         // short entry (`parse_params.c:1953-1956`) and silently stops after
         // two for a long one, where a `numToGet` of zero reads the whole line
         // and reports `Too many values for input array`.
-        let mean_sd_entered = pip_get_two_floats(
-            c"MeanAndStandardDeviation".as_ptr(),
-            &raw mut mean_sd[0],
-            &raw mut mean_sd[1],
-        ) == 0;
+        let mean_sd_entered = {
+            let [mean_sd_0, mean_sd_1, ..] = &mut mean_sd;
+            pip_get_two_floats(b"MeanAndStandardDeviation", mean_sd_0, mean_sd_1)
+        } == 0;
         let mut map_limits = [0.0_f32; 2];
         // `newstack.f90:880`: `PipGetTwoFloats`.
-        let map_entered = pip_get_two_floats(
-            c"MapFromRange".as_ptr(),
-            &raw mut map_limits[0],
-            &raw mut map_limits[1],
-        ) == 0;
+        let map_entered = {
+            let [map_limits_0, map_limits_1, ..] = &mut map_limits;
+            pip_get_two_floats(b"MapFromRange", map_limits_0, map_limits_1)
+        } == 0;
         // `newstack.f90:881`.
         let mut mult_add_count = 0_i32;
-        pip_number_of_entries(c"MultiplyAndAdd".as_ptr(), &mut mult_add_count);
+        pip_number_of_entries(b"MultiplyAndAdd", &mut mult_add_count);
         // `newstack.f90:882-883`.
         if map_entered && !(contrast_entered || scale_entered) {
             exit_error("You can use -map only with -scale or -contrast");
@@ -1421,11 +1334,10 @@ pub fn newstack() {
                     // `newstack.f90:911-912`: `ierr = PipGetTwoFloats(...)`,
                     // whose return value the source discards -- PIP has
                     // already reported and exited on a short entry.
-                    drop(pip_get_two_floats(
-                        c"MultiplyAndAdd".as_ptr(),
-                        &raw mut factor_and_add[0],
-                        &raw mut factor_and_add[1],
-                    ));
+                    drop({
+                        let [factor_and_add_0, factor_and_add_1, ..] = &mut factor_and_add;
+                        pip_get_two_floats(b"MultiplyAndAdd", factor_and_add_0, factor_and_add_1)
+                    });
                     scale_factors.push(factor_and_add);
                 }
             }
@@ -1444,11 +1356,10 @@ pub fn newstack() {
         // use; the source explicitly cancels it for a plain copy.
         let mut fix_range = [0.0_f32, 1.0_f32];
         // `newstack.f90:918`: `PipGetTwoFloats`.
-        let fix_range_entered = pip_get_two_floats(
-            c"FixRangeIfNeeded".as_ptr(),
-            &raw mut fix_range[0],
-            &raw mut fix_range[1],
-        ) == 0;
+        let fix_range_entered = {
+            let [fix_range_0, fix_range_1, ..] = &mut fix_range;
+            pip_get_two_floats(b"FixRangeIfNeeded", fix_range_0, fix_range_1)
+        } == 0;
         let mut output_mode = mode.unwrap_or(header.mode);
         if fix_range_entered {
             if float_densities != 0 || range_scale_entered || !scale_factors.is_empty() {
@@ -1472,11 +1383,10 @@ pub fn newstack() {
         let mut lim_to_alloc = 4_i64 * lim_sec as i64;
         let mut len_temp = 5_000_000_i64;
         let mut test_limits = [0_i32; 2];
-        if pip_get_two_integers(
-            c"TestLimits".as_ptr(),
-            &raw mut test_limits[0],
-            &raw mut test_limits[1],
-        ) == 0
+        if {
+            let [test_limits_0, test_limits_1, ..] = &mut test_limits;
+            pip_get_two_integers(b"TestLimits", test_limits_0, test_limits_1)
+        } == 0
         {
             lim_entered = 1;
             lim_to_alloc = test_limits[0] as i64;
@@ -1497,8 +1407,7 @@ pub fn newstack() {
         let mut alloc_idim_in_out = 0_usize;
         let physical_memory = crate::imod::libcfshr::b3dutil::b3d_physical_memory();
         let mut memory_limit_mb = 0_i32;
-        let memory_limit_entered =
-            pip_get_integer(c"MemoryLimit".as_ptr(), &mut memory_limit_mb) == 0;
+        let memory_limit_entered = pip_get_integer(b"MemoryLimit", &mut memory_limit_mb) == 0;
         if memory_limit_entered {
             lim_entered = 2;
             lim_to_alloc = memory_limit_mb as i64 * 1024 * 256;
@@ -1538,11 +1447,11 @@ pub fn newstack() {
         // (`newstack.f90:1049-1095`).
         //
         let mut ind_filt_temp = ind_filter;
-        let if_filt_set = 1 - pip_get_integer(c"AntialiasFilter".as_ptr(), &raw mut ind_filt_temp);
+        let if_filt_set = 1 - pip_get_integer(b"AntialiasFilter", &mut ind_filt_temp);
         if ind_filt_temp < 0 {
             ind_filt_temp = ind_filter;
         }
-        let if_shrink = 1 - pip_get_float(c"ShrinkByFactor".as_ptr(), &raw mut shrink_factor);
+        let if_shrink = 1 - pip_get_float(b"ShrinkByFactor", &mut shrink_factor);
         if if_filt_set > 0 && if_shrink == 0 && bin_factor > 1 && ind_filt_temp > 0 {
             shrink_factor = bin_factor as f32;
             bin_factor = 1;
@@ -1590,7 +1499,7 @@ pub fn newstack() {
                         // wrapper widens the result; dividing in f64 here
                         // gives a different filter scale by an ulp.
                         (1.0_f32 / shrink_factor) as f64,
-                        &raw mut lines_shrink,
+                        &mut lines_shrink,
                     )
                 };
                 if ierr == 1 {
@@ -1637,32 +1546,25 @@ pub fn newstack() {
         if !idf_file.is_empty() {
             if_distort = 1;
             xf_text = ", undistorted".to_owned();
-            let mut warp_name = CString::new(idf_file.as_bytes())
-                .unwrap_or_default()
-                .into_bytes_with_nul();
-            let mut list_string = vec![0_i8; 1024];
+            let mut list_string = String::new();
             let (mut idf_nx, mut idf_ny, mut idf_binning, mut warp_flags) = (0, 0, 0, 0);
             let mut pixel_size = 0.0_f32;
             if crate::imod::libwarp::warputils::read_check_warp_file(
-                warp_name.as_mut_ptr().cast(),
+                &idf_file,
                 1,
                 1,
-                &raw mut idf_nx,
-                &raw mut idf_ny,
-                &raw mut num_fields,
-                &raw mut idf_binning,
-                &raw mut pixel_size,
-                &raw mut warp_flags,
-                list_string.as_mut_ptr(),
-                list_string.len() as i32,
+                &mut idf_nx,
+                &mut idf_ny,
+                &mut num_fields,
+                &mut idf_binning,
+                &mut pixel_size,
+                &mut warp_flags,
+                &mut list_string,
             ) < 0
             {
-                let message = std::ffi::CStr::from_ptr(list_string.as_ptr())
-                    .to_string_lossy()
-                    .into_owned();
-                exit_error(message.trim_end());
+                exit_error(list_string.trim_end());
             }
-            if pip_get_float(c"ImagesAreBinned".as_ptr(), &raw mut binning_of_input) != 0
+            if pip_get_float(b"ImagesAreBinned", &mut binning_of_input) != 0
                 && header.nx <= idf_nx * idf_binning / 2
                 && header.ny <= idf_ny * idf_binning / 2
             {
@@ -1723,17 +1625,11 @@ pub fn newstack() {
             warp_y_offsets = vec![0.0_f32; routes.len().max(1)];
             let mut subarea_entries = Vec::<Vec<f32>>::new();
             let mut subarea_count = 0_i32;
-            pip_number_of_entries(c"SubareaOffsetsXandY".as_ptr(), &raw mut subarea_count);
+            pip_number_of_entries(b"SubareaOffsetsXandY", &mut subarea_count);
             for _ in 0..subarea_count {
                 let mut pair = [0.0_f32; 2];
                 let mut number = 0_i32;
-                if pip_get_float_array(
-                    c"SubareaOffsetsXandY".as_ptr(),
-                    pair.as_mut_ptr(),
-                    &raw mut number,
-                    2,
-                ) != 0
-                {
+                if pip_get_float_array(b"SubareaOffsetsXandY", &mut pair, &mut number, 2) != 0 {
                     exit_error("Getting subarea offset");
                 }
                 subarea_entries.push(pair[..number.max(0) as usize].to_vec());
@@ -1867,7 +1763,7 @@ pub fn newstack() {
                     // `unit_fileio.c:256-265`: the unit's own `MrcHeader`,
                     // which is the only one a non-MRC input has.
                     let scan_header =
-                        std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
+                        (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
                     scan_nx = scan_header.nx;
                     scan_ny = scan_header.ny;
                     // Source `mode` after `call irdhdr(1, ...)`
@@ -2123,18 +2019,8 @@ pub fn newstack() {
                 .collect::<Vec<_>>();
             let mut min_outliers = vec![0.0_f32; zmins.len()];
             let mut max_outliers = vec![0.0_f32; zmaxs.len()];
-            rs_mad_median_outliers(
-                zmins.as_mut_ptr(),
-                zmins.len() as i32,
-                8.0,
-                min_outliers.as_mut_ptr(),
-            );
-            rs_mad_median_outliers(
-                zmaxs.as_mut_ptr(),
-                zmaxs.len() as i32,
-                8.0,
-                max_outliers.as_mut_ptr(),
-            );
+            rs_mad_median_outliers(&zmins, zmins.len() as i32, 8.0, &mut min_outliers);
+            rs_mad_median_outliers(&zmaxs, zmaxs.len() as i32, 8.0, &mut max_outliers);
             for (&z, &outlier) in zmins.iter().zip(&min_outliers) {
                 if outlier >= 0.0 {
                     float2_zmin = float2_zmin.min(z);
@@ -2189,17 +2075,12 @@ pub fn newstack() {
         };
         let mut offset_entries = Vec::<Vec<f32>>::new();
         let mut offset_count = 0_i32;
-        pip_number_of_entries(c"OffsetsInXandY".as_ptr(), &mut offset_count);
+        pip_number_of_entries(b"OffsetsInXandY", &mut offset_count);
         for _ in 0..offset_count {
             let mut values = vec![0.0_f32; 2 * routes.len()];
+            let values_len = values.len() as i32;
             let mut number = 0_i32;
-            if pip_get_float_array(
-                c"OffsetsInXandY".as_ptr(),
-                values.as_mut_ptr(),
-                &mut number,
-                values.len() as i32,
-            ) != 0
-            {
+            if pip_get_float_array(b"OffsetsInXandY", &mut values, &mut number, values_len) != 0 {
                 exit_error("Getting offset entries");
             }
             values.truncate(number as usize);
@@ -2218,7 +2099,7 @@ pub fn newstack() {
             exit_error("There must be either one offset or an offset for each section");
         }
         let mut apply_first = 0_i32;
-        pip_get_boolean(c"ApplyOffsetsFirst".as_ptr(), &mut apply_first);
+        pip_get_boolean(b"ApplyOffsetsFirst", &mut apply_first);
         //
         // Check validity of phase shifting now that all requested actions are
         // processed (`newstack.f90:1098-1150`).
@@ -2290,9 +2171,9 @@ pub fn newstack() {
                     0.01,
                     16,
                     nice_fft_limit(),
-                    &raw mut nx_fspad,
-                    &raw mut nx_fcrop_pad,
-                    &raw mut actual_fac,
+                    &mut nx_fspad,
+                    &mut nx_fcrop_pad,
+                    &mut actual_fac,
                 ) > 0
                 {
                     exit_error(
@@ -2305,9 +2186,9 @@ pub fn newstack() {
                     0.01,
                     16,
                     nice_fft_limit(),
-                    &raw mut ny_fspad,
-                    &raw mut ny_fcrop_pad,
-                    &raw mut actual_fac,
+                    &mut ny_fspad,
+                    &mut ny_fcrop_pad,
+                    &mut actual_fac,
                 );
                 // `newstack.f90:1140`.
                 if i_verbose > 0 {
@@ -2333,11 +2214,9 @@ pub fn newstack() {
         let mut replace_nxyz = [0_i32; 3];
         let (mut replace_dmin, mut replace_dmax, mut replace_dmean) = (0.0_f32, 0.0_f32, 0.0_f32);
         let mut replace_mode_old = 0_i32;
-        let mut replace_list_string: *mut std::ffi::c_char = std::ptr::null_mut();
-        if pip_get_string(c"ReplaceSections".as_ptr(), &raw mut replace_list_string) == 0 {
-            let list = std::ffi::CStr::from_ptr(replace_list_string)
-                .to_string_lossy()
-                .into_owned();
+        let mut replace_list_string: Vec<u8> = Vec::new();
+        if pip_get_string(b"ReplaceSections", &mut replace_list_string) == 0 {
+            let list = String::from_utf8_lossy(&replace_list_string).into_owned();
             let mut parsed = vec![0_i32; routes.len().max(1)];
             let (mut num_replace, mut limit) = (0_i32, parsed.len() as i32);
             if parselist2(&list, &mut parsed, &mut num_replace, &mut limit).is_err() {
@@ -2522,23 +2401,19 @@ pub fn newstack() {
                 }
             }
             let (mut max_nx_grid, mut max_ny_grid) = (0_i32, 0_i32);
-            let mut list_string = vec![0_i8; 1024];
+            let mut list_string = String::new();
             if find_max_grid_size(
                 dx,
                 xn_big,
                 dy,
                 yn_big,
-                n_control.as_mut_ptr(),
-                &raw mut max_nx_grid,
-                &raw mut max_ny_grid,
-                list_string.as_mut_ptr(),
-                list_string.len() as i32,
+                &mut n_control,
+                &mut max_nx_grid,
+                &mut max_ny_grid,
+                &mut list_string,
             ) != 0
             {
-                let message = std::ffi::CStr::from_ptr(list_string.as_ptr())
-                    .to_string_lossy()
-                    .into_owned();
-                exit_error(message.trim_end());
+                exit_error(list_string.trim_end());
             }
             lm_grid = lm_grid.max(max_nx_grid).max(max_ny_grid);
         }
@@ -2562,11 +2437,10 @@ pub fn newstack() {
             let mut range_params = [10.0_f32, 1.2_f32];
             // `newstack.f90:935`: `ierr = PipGetTwoFloats(...)`, return value
             // discarded.
-            drop(pip_get_two_floats(
-                c"RangeFixingParams".as_ptr(),
-                &raw mut range_params[0],
-                &raw mut range_params[1],
-            ));
+            drop({
+                let [range_params_0, range_params_1, ..] = &mut range_params;
+                pip_get_two_floats(b"RangeFixingParams", range_params_0, range_params_1)
+            });
             let (mut range_fix_ok, mut scale_fix_alone_ok, mut scale_fix_shifted_ok) = (
                 (header.mode == 1 && header.amean < 0.0)
                     || (header.mode == 6 && header.amean < 16000.0),
@@ -3015,7 +2889,7 @@ pub fn newstack() {
                     // decision and the section reads -- uses this file's
                     // header and not the first input file's.
                     // `unit_fileio.c:256-265`: the unit's own `MrcHeader`.
-                    header = std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
+                    header = (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
                     // `newstack.f90:1570-1571`: the binned size to read is
                     // this file's, so inputs of different sizes each read
                     // their own extent into the common output size.
@@ -3518,8 +3392,8 @@ pub fn newstack() {
                 // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
                 // the destination `fp` around the whole-header copy, so the
                 // output header keeps its own stream and not the input's.
-                let fp_save = (*chunk_header).fp;
-                std::ptr::copy_nonoverlapping(&header, chunk_header, 1);
+                let fp_save = (*chunk_header).fp.take();
+                *chunk_header = header.clone();
                 (*chunk_header).fp = fp_save;
                 // `iiuTransHeader` runs `mrcInitOutputHeader`
                 // (`unit_header.c:387`) over the copied header, never
@@ -3836,8 +3710,8 @@ pub fn newstack() {
                     iiu_mrc_header(2, c"iiuTransHeader".as_ptr(), iiu_get_exit_on_error(), 2);
                 // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
                 // the destination `fp` around the whole-header copy.
-                let fp_save = (*out_header).fp;
-                std::ptr::copy_nonoverlapping(&header, out_header, 1);
+                let fp_save = (*out_header).fp.take();
+                *out_header = header.clone();
                 (*out_header).fp = fp_save;
                 // `iiuTransHeader` ends in `iiuTransExtendedData`
                 // (`unit_header.c:395`), whose first act -- for every output
@@ -4186,8 +4060,7 @@ pub fn newstack() {
                     if !active_input_file.is_null() {
                         active_input_index = input_index;
                         // `unit_fileio.c:256-265`: the unit's own `MrcHeader`.
-                        header =
-                            std::ptr::read(iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0));
+                        header = (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
                         // `newstack.f90:1570-1571`: the binned size to read is
                         // this file's, so inputs of different sizes each read
                         // their own extent into the common output size.
@@ -4509,7 +4382,7 @@ pub fn newstack() {
                         }
                     }
                     if has_warp {
-                        let mut list_string = vec![0_i8; 1024];
+                        let mut list_string = String::new();
                         if get_size_adjusted_grid(
                             grid_iy - 1,
                             xn_big,
@@ -4519,24 +4392,20 @@ pub fn newstack() {
                             1,
                             warp_scale,
                             read_reduction.round() as i32,
-                            &raw mut nx_grid,
-                            &raw mut ny_grid,
-                            &raw mut x_grid_start,
-                            &raw mut y_grid_start,
-                            &raw mut x_grid_intrv,
-                            &raw mut y_grid_intrv,
-                            field_dx.as_mut_ptr(),
-                            field_dy.as_mut_ptr(),
+                            &mut nx_grid,
+                            &mut ny_grid,
+                            &mut x_grid_start,
+                            &mut y_grid_start,
+                            &mut x_grid_intrv,
+                            &mut y_grid_intrv,
+                            &mut field_dx,
+                            &mut field_dy,
                             lm_grid,
                             lm_grid,
-                            list_string.as_mut_ptr(),
-                            list_string.len() as i32,
+                            &mut list_string,
                         ) != 0
                         {
-                            let message = std::ffi::CStr::from_ptr(list_string.as_ptr())
-                                .to_string_lossy()
-                                .into_owned();
-                            exit_error(message.trim_end());
+                            exit_error(list_string.trim_end());
                         }
                         for iy in 0..ny_grid as usize {
                             for ix in 0..nx_grid as usize {
@@ -4554,10 +4423,10 @@ pub fn newstack() {
                         );
                         if if_distort != 0 {
                             add_mag_grad_field(
-                                tmp_dx.as_mut_ptr(),
-                                tmp_dy.as_mut_ptr(),
-                                field_dx.as_mut_ptr(),
-                                field_dy.as_mut_ptr(),
+                                &tmp_dx,
+                                &tmp_dy,
+                                &mut field_dx,
+                                &mut field_dy,
                                 lm_grid,
                                 grad_nx,
                                 grad_ny,
@@ -4577,19 +4446,19 @@ pub fn newstack() {
                             );
                         } else {
                             make_mag_grad_field(
-                                tmp_dx.as_mut_ptr(),
-                                tmp_dy.as_mut_ptr(),
-                                field_dx.as_mut_ptr(),
-                                field_dy.as_mut_ptr(),
+                                &mut tmp_dx,
+                                &mut tmp_dy,
+                                &mut field_dx,
+                                &mut field_dy,
                                 lm_grid,
                                 grad_nx,
                                 grad_ny,
-                                &raw mut nx_grid,
-                                &raw mut ny_grid,
-                                &raw mut x_grid_start,
-                                &raw mut y_grid_start,
-                                &raw mut x_grid_intrv,
-                                &raw mut y_grid_intrv,
+                                &mut nx_grid,
+                                &mut ny_grid,
+                                &mut x_grid_start,
+                                &mut y_grid_start,
+                                &mut x_grid_intrv,
+                                &mut y_grid_intrv,
                                 grad_nx as f32 / 2.,
                                 grad_ny as f32 / 2.,
                                 pixel_mag_grad,
@@ -5255,7 +5124,7 @@ pub fn newstack() {
                         // `newstack.f90:2391-2392`.
                         if need_edge_mean {
                             dmean_sec = slice_edge_median(
-                                input.as_mut_ptr(),
+                                &input,
                                 bin_nx,
                                 0,
                                 bin_nx - 1,
@@ -5282,8 +5151,8 @@ pub fn newstack() {
                             // antialiasing filter's own resampler.
                             let ierr = unsafe {
                                 crate::imod::libcfshr::zoomdown::zoom_filt_interp(
-                                    input.as_mut_ptr(),
-                                    output.as_mut_ptr(),
+                                    &input,
+                                    &mut output,
                                     bin_nx,
                                     num_y_load,
                                     output_nx,
@@ -5332,8 +5201,8 @@ pub fn newstack() {
                                 xstart -= warp_x_offsets[offset_index] / read_reduction;
                             }
                             warp_interp(
-                                input.as_mut_ptr(),
-                                output.as_mut_ptr(),
+                                &input,
+                                &mut output,
                                 bin_nx,
                                 num_y_load,
                                 output_nx,
@@ -5347,8 +5216,8 @@ pub fn newstack() {
                                 dmean_sec,
                                 if_linear,
                                 if_warping,
-                                field_dx.as_mut_ptr(),
-                                field_dy.as_mut_ptr(),
+                                &field_dx,
+                                &field_dy,
                                 lm_grid,
                                 nx_grid,
                                 ny_grid,
@@ -5375,19 +5244,19 @@ pub fn newstack() {
                                 let (mut tsum, mut tsum_sq) = (0.0_f64, 0.0_f64);
                                 let (mut avg_sec, mut sd_this) = (0.0_f32, 0.0_f32);
                                 crate::imod::libcfshr::simplestat::array_min_max_mean_sd(
-                                    output.as_ptr(),
+                                    &output,
                                     output_nx,
                                     output_lines,
                                     0,
                                     output_nx - 1,
                                     0,
                                     output_lines - 1,
-                                    &raw mut tmin2,
-                                    &raw mut tmax2,
-                                    &raw mut tsum,
-                                    &raw mut tsum_sq,
-                                    &raw mut avg_sec,
-                                    &raw mut sd_this,
+                                    &mut tmin2,
+                                    &mut tmax2,
+                                    &mut tsum,
+                                    &mut tsum_sq,
+                                    &mut avg_sec,
+                                    &mut sd_this,
                                 );
                                 pix_chunk.push(f64::from(output_nx) * f64::from(output_lines));
                                 dsum_chunk.push(tsum);
@@ -5409,16 +5278,16 @@ pub fn newstack() {
                             } else {
                                 let mut tmean2 = 0.0_f32;
                                 crate::imod::libcfshr::simplestat::array_min_max_mean(
-                                    output.as_ptr(),
+                                    &output,
                                     output_nx,
                                     output_lines,
                                     0,
                                     output_nx - 1,
                                     0,
                                     output_lines - 1,
-                                    &raw mut tmin2,
-                                    &raw mut tmax2,
-                                    &raw mut tmean2,
+                                    &mut tmin2,
+                                    &mut tmax2,
+                                    &mut tmean2,
                                 );
                                 // `tsum = tmean2 * numPix` keeps a real*4 result.
                                 let tsum =
@@ -5936,7 +5805,7 @@ pub fn newstack() {
                         }
                     }
                     if has_warp {
-                        let mut list_string = vec![0_i8; 1024];
+                        let mut list_string = String::new();
                         if get_size_adjusted_grid(
                             // `getsizeadjustedgrid` (`warpwrapfort.c:326`)
                             // passes `*iz - 1`, so the source's 1-based index
@@ -5949,24 +5818,20 @@ pub fn newstack() {
                             1,
                             warp_scale,
                             read_reduction.round() as i32,
-                            &raw mut nx_grid,
-                            &raw mut ny_grid,
-                            &raw mut x_grid_start,
-                            &raw mut y_grid_start,
-                            &raw mut x_grid_intrv,
-                            &raw mut y_grid_intrv,
-                            field_dx.as_mut_ptr(),
-                            field_dy.as_mut_ptr(),
+                            &mut nx_grid,
+                            &mut ny_grid,
+                            &mut x_grid_start,
+                            &mut y_grid_start,
+                            &mut x_grid_intrv,
+                            &mut y_grid_intrv,
+                            &mut field_dx,
+                            &mut field_dy,
                             lm_grid,
                             lm_grid,
-                            list_string.as_mut_ptr(),
-                            list_string.len() as i32,
+                            &mut list_string,
                         ) != 0
                         {
-                            let message = std::ffi::CStr::from_ptr(list_string.as_ptr())
-                                .to_string_lossy()
-                                .into_owned();
-                            exit_error(message.trim_end());
+                            exit_error(list_string.trim_end());
                         }
                         // copy field to tmpDx, y in case there are mag grads
                         for iy in 0..ny_grid as usize {
@@ -5985,10 +5850,10 @@ pub fn newstack() {
                         let mag_use = (in_section + 1).min(num_mag_grad).max(1) as usize;
                         if if_distort != 0 {
                             add_mag_grad_field(
-                                tmp_dx.as_mut_ptr(),
-                                tmp_dy.as_mut_ptr(),
-                                field_dx.as_mut_ptr(),
-                                field_dy.as_mut_ptr(),
+                                &tmp_dx,
+                                &tmp_dy,
+                                &mut field_dx,
+                                &mut field_dy,
                                 lm_grid,
                                 nx_bin_sec,
                                 ny_bin_sec,
@@ -6008,19 +5873,19 @@ pub fn newstack() {
                             );
                         } else {
                             make_mag_grad_field(
-                                tmp_dx.as_mut_ptr(),
-                                tmp_dy.as_mut_ptr(),
-                                field_dx.as_mut_ptr(),
-                                field_dy.as_mut_ptr(),
+                                &mut tmp_dx,
+                                &mut tmp_dy,
+                                &mut field_dx,
+                                &mut field_dy,
                                 lm_grid,
                                 nx_bin_sec,
                                 ny_bin_sec,
-                                &raw mut nx_grid,
-                                &raw mut ny_grid,
-                                &raw mut x_grid_start,
-                                &raw mut y_grid_start,
-                                &raw mut x_grid_intrv,
-                                &raw mut y_grid_intrv,
+                                &mut nx_grid,
+                                &mut ny_grid,
+                                &mut x_grid_start,
+                                &mut y_grid_start,
+                                &mut x_grid_intrv,
+                                &mut y_grid_intrv,
                                 nx_bin_sec as f32 / 2.,
                                 ny_bin_sec as f32 / 2.,
                                 pixel_mag_grad,
@@ -6796,7 +6661,7 @@ pub fn newstack() {
                         // `(median1 + median2) / 4`.
                         if need_edge_mean {
                             dmean_sec = slice_edge_median(
-                                input.as_mut_ptr(),
+                                &input,
                                 nx_bin_sec,
                                 0,
                                 nx_bin_sec - 1,
@@ -6825,8 +6690,8 @@ pub fn newstack() {
                                 // `newstack.f90:2405-2412`.
                                 let ierr = unsafe {
                                     crate::imod::libcfshr::zoomdown::zoom_filt_interp(
-                                        input.as_mut_ptr(),
-                                        array[base..end].as_mut_ptr(),
+                                        &input,
+                                        &mut array[base..end],
                                         nx_bin_sec,
                                         num_y_load,
                                         output_nx,
@@ -6879,8 +6744,8 @@ pub fn newstack() {
                                     xstart -= warp_x_offsets[offset_index] / read_reduction;
                                 }
                                 warp_interp(
-                                    input.as_mut_ptr(),
-                                    array[base..end].as_mut_ptr(),
+                                    &input,
+                                    &mut array[base..end],
                                     nx_bin_sec,
                                     num_y_load,
                                     output_nx,
@@ -6894,8 +6759,8 @@ pub fn newstack() {
                                     dmean_sec,
                                     if_linear,
                                     if_warping,
-                                    field_dx.as_mut_ptr(),
-                                    field_dy.as_mut_ptr(),
+                                    &field_dx,
+                                    &field_dy,
                                     lm_grid,
                                     nx_grid,
                                     ny_grid,
@@ -6940,25 +6805,25 @@ pub fn newstack() {
                                 ];
                                 if noise_pad {
                                     slice_noise_taper_pad(
-                                        input.as_mut_ptr().cast(),
+                                        crate::imod::libcfshr::taperpad::PadIn::Float(&input),
                                         SLICE_MODE_FLOAT,
                                         nx_bin_sec,
                                         num_y_load,
-                                        fft.as_mut_ptr(),
+                                        &mut fft,
                                         nx_fspad + 2,
                                         nx_fspad,
                                         ny_fspad,
                                         20.max(120.min(nx_bin_sec.max(num_y_load) / 50)),
                                         4,
-                                        temp.as_mut_ptr(),
+                                        &mut temp,
                                     );
                                 } else {
                                     slice_taper_out_pad(
-                                        input.as_mut_ptr().cast(),
+                                        crate::imod::libcfshr::taperpad::PadIn::Float(&input),
                                         SLICE_MODE_FLOAT,
                                         nx_bin_sec,
                                         num_y_load,
-                                        fft.as_mut_ptr(),
+                                        &mut fft,
                                         nx_fspad + 2,
                                         nx_fspad,
                                         ny_fspad,
@@ -6978,12 +6843,7 @@ pub fn newstack() {
                                     vec![0.0_f32; ((nx_fcrop_pad + 2) * ny_fcrop_pad) as usize];
                                 if phase_shift {
                                     fourier_shift_image(
-                                        fft.as_mut_ptr(),
-                                        nx_fspad,
-                                        ny_fspad,
-                                        shift_x,
-                                        shift_y,
-                                        temp.as_mut_ptr(),
+                                        &mut fft, nx_fspad, ny_fspad, shift_x, shift_y, &mut temp,
                                     );
                                 } else {
                                     // `newstack.f90:2459`: a Fourier reduction
@@ -6993,27 +6853,27 @@ pub fn newstack() {
                                     out_base = 1 + alloc_idim_in_out as i64;
                                     if ft_reduce_fac > 0. {
                                         fourier_reduce_image(
-                                            fft.as_mut_ptr(),
+                                            &fft,
                                             nx_fspad,
                                             ny_fspad,
-                                            cropped.as_mut_ptr(),
+                                            &mut cropped,
                                             nx_fcrop_pad,
                                             ny_fcrop_pad,
                                             actual_fac * shift_x,
                                             actual_fac * shift_y,
-                                            temp.as_mut_ptr(),
+                                            Some(&mut temp),
                                         );
                                     } else {
                                         fourier_expand_image(
-                                            fft.as_mut_ptr(),
+                                            &mut fft,
                                             nx_fspad,
                                             ny_fspad,
-                                            cropped.as_mut_ptr(),
+                                            &mut cropped,
                                             nx_fcrop_pad,
                                             ny_fcrop_pad,
                                             shift_x,
                                             shift_y,
-                                            temp.as_mut_ptr(),
+                                            Some(&mut temp),
                                         );
                                     }
                                 }
@@ -7147,19 +7007,19 @@ pub fn newstack() {
                             let (mut tsum, mut tsum_sq) = (0.0_f64, 0.0_f64);
                             let (mut avg_sec, mut sd_this) = (0.0_f32, 0.0_f32);
                             crate::imod::libcfshr::simplestat::array_min_max_mean_sd(
-                                array[base..end].as_ptr(),
+                                &array[base..end],
                                 output_nx,
                                 num_y_chunk,
                                 0,
                                 output_nx - 1,
                                 0,
                                 num_y_chunk - 1,
-                                &raw mut tmin2,
-                                &raw mut tmax2,
-                                &raw mut tsum,
-                                &raw mut tsum_sq,
-                                &raw mut avg_sec,
-                                &raw mut sd_this,
+                                &mut tmin2,
+                                &mut tmax2,
+                                &mut tsum,
+                                &mut tsum_sq,
+                                &mut avg_sec,
+                                &mut sd_this,
                             );
                             // `newstack.f90:2517-2519`.
                             pix_chunk.push(f64::from(output_nx) * f64::from(num_y_chunk));
@@ -7205,16 +7065,16 @@ pub fn newstack() {
                             // rebuilt from the rounded mean.
                             let (mut tmin2, mut tmax2, mut tmean2) = (0.0_f32, 0.0_f32, 0.0_f32);
                             crate::imod::libcfshr::simplestat::array_min_max_mean(
-                                array[base..end].as_ptr(),
+                                &array[base..end],
                                 output_nx,
                                 num_y_chunk,
                                 0,
                                 output_nx - 1,
                                 0,
                                 num_y_chunk - 1,
-                                &raw mut tmin2,
-                                &raw mut tmax2,
-                                &raw mut tmean2,
+                                &mut tmin2,
+                                &mut tmax2,
+                                &mut tmean2,
                             );
                             // `newstack.f90:2529-2531`.
                             tmp_min = tmp_min.min(tmin2);
@@ -7740,7 +7600,7 @@ pub fn newstack() {
                 }
                 ii_sync_from_mrc_header(out_file, out_header);
                 if ((*out_file).file == IIFILE_MRC
-                    && mrc_head_write((*out_file).fp, out_header) != 0)
+                    && mrc_head_write(&mut (*out_file).fp.clone().unwrap(), &mut *out_header) != 0)
                     || ((*out_file).file != IIFILE_MRC && ii_write_header(out_file) != 0)
                 {
                     exit_error("Writing output header");
@@ -7947,19 +7807,16 @@ pub fn get_items_to_use(
     // first, which then failed the caller's section-count check.
     //
     let mut num_xf_lines = 0_i32;
-    unsafe { pip_number_of_entries(option.as_ptr(), &raw mut num_xf_lines) };
+    unsafe { pip_number_of_entries(option.to_bytes(), &mut num_xf_lines) };
     if num_xf_lines > 0 {
         let mut parsed = Vec::<i32>::new();
         for _ in 0..num_xf_lines {
-            let mut string_value: *mut std::ffi::c_char = std::ptr::null_mut();
+            let mut string_value: Vec<u8> = Vec::new();
             let list = unsafe {
-                if pip_get_string(option.as_ptr(), &raw mut string_value) != 0 {
+                if pip_get_string(option.to_bytes(), &mut string_value) != 0 {
                     continue;
                 }
-                let list = std::ffi::CStr::from_ptr(string_value)
-                    .to_string_lossy()
-                    .into_owned();
-                libc::free(string_value.cast());
+                let list = String::from_utf8_lossy(&string_value).into_owned();
                 list
             };
             let mut values = vec![0_i32; 1_000_000 - parsed.len()];
@@ -8467,19 +8324,19 @@ where
             let (mut avg_sec, mut sd_load) = (0.0_f32, 0.0_f32);
             unsafe {
                 crate::imod::libcfshr::simplestat::array_min_max_mean_sd(
-                    values.as_ptr(),
+                    &values,
                     nx,
                     lines,
                     0,
                     nx - 1,
                     0,
                     lines - 1,
-                    &raw mut tmin2,
-                    &raw mut tmax2,
-                    &raw mut sum,
-                    &raw mut tsum_sq,
-                    &raw mut avg_sec,
-                    &raw mut sd_load,
+                    &mut tmin2,
+                    &mut tmax2,
+                    &mut sum,
+                    &mut tsum_sq,
+                    &mut avg_sec,
+                    &mut sd_load,
                 );
             }
             sds.push(sd_load);
@@ -8996,11 +8853,9 @@ mod tests {
         // for this to exercise the parsed-list path.
         unsafe {
             crate::imod::libcfshr::parse_params::pip_initialize(1);
-            crate::imod::libcfshr::parse_params::pip_add_option(
-                c"uselines:UseTransformLines:LIM:".as_ptr(),
-            );
-            crate::imod::libcfshr::parse_params::pip_next_arg(c"-uselines".as_ptr());
-            crate::imod::libcfshr::parse_params::pip_next_arg(c"1-3,0".as_ptr());
+            crate::imod::libcfshr::parse_params::pip_add_option(b"uselines:UseTransformLines:LIM:");
+            crate::imod::libcfshr::parse_params::pip_next_arg(b"-uselines");
+            crate::imod::libcfshr::parse_params::pip_next_arg(b"1-3,0");
         }
         assert_eq!(
             get_items_to_use(

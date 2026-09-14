@@ -121,24 +121,19 @@ pub fn binvol() {
             exit_error("No output file specified");
         }
 
-        pip_get_float(c"BinningFactor".as_ptr(), &raw mut red_all);
+        pip_get_float(b"BinningFactor", &mut red_all);
         let mut bin_x = red_all;
         let mut bin_y = red_all;
         let mut bin_z = red_all;
-        pip_get_float(c"XBinningFactor".as_ptr(), &raw mut bin_x);
-        pip_get_float(c"YBinningFactor".as_ptr(), &raw mut bin_y);
-        pip_get_float(c"ZBinningFactor".as_ptr(), &raw mut bin_z);
+        pip_get_float(b"XBinningFactor", &mut bin_x);
+        pip_get_float(b"YBinningFactor", &mut bin_y);
+        pip_get_float(b"ZBinningFactor", &mut bin_z);
         pip_get_logical("FourierReduceByBinning", &mut ft_crop);
         pip_get_logical("FourierExpandByBinning", &mut ft_expand);
         let mut x_shift = 0.0_f32;
         let mut y_shift = 0.0_f32;
         let mut z_shift = 0.0_f32;
-        pip_get_three_floats(
-            c"ShiftsInXYZ".as_ptr(),
-            &raw mut x_shift,
-            &raw mut y_shift,
-            &raw mut z_shift,
-        );
+        pip_get_three_floats(b"ShiftsInXYZ", &mut x_shift, &mut y_shift, &mut z_shift);
         if ft_expand && ft_crop {
             exit_error("You cannot enter both -ftReduce and -ftExpand");
         }
@@ -153,7 +148,7 @@ pub fn binvol() {
             limit = standard_memory_limit_mb(30000) as i32;
             max_limit = limit.max((0.8 * physical_mem) as i32);
         }
-        ierr = pip_get_integer(c"MemoryLimit".as_ptr(), &raw mut limit);
+        ierr = pip_get_integer(b"MemoryLimit", &mut limit);
         if ierr == 0 && (limit < 1 || limit > max_limit) {
             // `write(bigfile, '(a, i7)')` then `call exitError(bigFile)`
             // (`binvol.f90:100`).
@@ -161,14 +156,14 @@ pub fn binvol() {
         }
         let lim_dim = i64::from(limit) * 1024 * 256;
 
-        pip_get_integer(c"AntialiasZFilter".as_ptr(), &raw mut ifilt_type);
+        pip_get_integer(b"AntialiasZFilter", &mut ifilt_type);
         if ifilt_type == 1 || ifilt_type > 6 {
             exit_error("Antialias filter type must be between 2 and 6, or < 0 for default");
         }
         if ifilt_type < 0 {
             ifilt_type = ifilt_default;
         }
-        pip_get_integer(c"VerboseOutput".as_ptr(), &raw mut if_verbose);
+        pip_get_integer(b"VerboseOutput", &mut if_verbose);
         pip_get_logical("SpreadSlicesInZ", &mut spread_z);
         if spread_z && ifilt_type <= 0 {
             exit_error("Spreading in Z can be used only with antialias filtering");
@@ -231,7 +226,7 @@ pub fn binvol() {
         }
         let red_fac = [bin_x, bin_y, bin_z];
         //
-        if pip_get_integer(c"ModeToOutput".as_ptr(), &raw mut mode) == 0 {
+        if pip_get_integer(b"ModeToOutput", &mut mode) == 0 {
             set_float_output_for_entered_mode(mode);
         }
         if mode != 0 && mode != 1 && mode != 2 && mode != 6 && mode != 12 {
@@ -265,9 +260,9 @@ pub fn binvol() {
                     0.01,
                     16,
                     nice_fft_limit(),
-                    &raw mut nfs_pad[i],
-                    &raw mut ncrop_pad[i],
-                    &raw mut actual_fac,
+                    &mut nfs_pad[i],
+                    &mut ncrop_pad[i],
+                    &mut actual_fac,
                 );
                 if ierr > 0 {
                     exit_error(
@@ -319,11 +314,7 @@ pub fn binvol() {
         let mut lines_filt = 0_i32;
         let mut z_cen_offset = 0.0_f32;
         if antialias_z {
-            if select_zoom_filter(
-                ifilt_type - 1,
-                f64::from(1.0_f32 / bin_z),
-                &raw mut lines_filt,
-            ) != 0
+            if select_zoom_filter(ifilt_type - 1, f64::from(1.0_f32 / bin_z), &mut lines_filt) != 0
             {
                 exit_error("Setting up the antialias filter");
             }
@@ -390,12 +381,14 @@ pub fn binvol() {
                 if iiu_read_section(1, fft_in[ibase..].as_mut_ptr().cast()) != 0 {
                     exit_error("Reading image file");
                 }
+                // `binvol.f90` passes the same array as input and output;
+                // `PadIn::InPlace` is that case.
                 slice_taper_out_pad(
-                    fft_in[ibase..].as_mut_ptr().cast(),
+                    crate::imod::libcfshr::taperpad::PadIn::InPlace,
                     2,
                     nx,
                     ny,
-                    fft_in[ibase..].as_mut_ptr(),
+                    &mut fft_in[ibase..],
                     nx_dim,
                     nfs_pad[0],
                     nfs_pad[1],
@@ -430,33 +423,33 @@ pub fn binvol() {
             );
             if ft_crop {
                 fourier_reduce_volume(
-                    fft_in.as_mut_ptr(),
+                    &fft_in,
                     nfs_pad[0],
                     nfs_pad[1],
                     nfs_pad[2],
-                    fft_out.as_mut_ptr(),
+                    &mut fft_out,
                     ncrop_pad[0],
                     ncrop_pad[1],
                     ncrop_pad[2],
                     xyz_shift[0] + x_shift,
                     xyz_shift[1] + y_shift,
                     xyz_shift[2] + z_shift,
-                    fft_work.as_mut_ptr(),
+                    Some(&mut fft_work),
                 );
             } else {
                 fourier_expand_volume(
-                    fft_in.as_mut_ptr(),
+                    &mut fft_in,
                     nfs_pad[0],
                     nfs_pad[1],
                     nfs_pad[2],
-                    fft_out.as_mut_ptr(),
+                    &mut fft_out,
                     ncrop_pad[0],
                     ncrop_pad[1],
                     ncrop_pad[2],
                     xyz_shift[0] + x_shift,
                     xyz_shift[1] + y_shift,
                     xyz_shift[2] + z_shift,
-                    fft_work.as_mut_ptr(),
+                    Some(&mut fft_work),
                 );
             }
             let (mut cx, mut cy, mut cz, mut idir) = (ncrop_pad[0], ncrop_pad[1], ncrop_pad[2], -1);
@@ -481,27 +474,42 @@ pub fn binvol() {
                 iiu_set_position(3, iz, 0);
                 let ibase = (i64::from(nx_dim) * i64::from(ncrop_pad[1]) * i64::from(iz - iz_start))
                     as usize;
+                // `binvol.f90` repacks in place: the source passes the same
+                // array as input and output, which `reduce_by_binning.c`
+                // documents as allowed.  Rust cannot hold a shared and a
+                // mutable borrow of one buffer, so the source region is copied
+                // out first; the repack only ever reads at an index >= the
+                // index it writes, so the bytes are the same either way.
+                let source: Vec<u8> = fft_out[ibase..]
+                    .iter()
+                    .flat_map(|value| value.to_ne_bytes())
+                    .collect();
+                let region = &mut fft_out[ibase..];
+                let destination = core::slice::from_raw_parts_mut(
+                    region.as_mut_ptr().cast::<u8>(),
+                    region.len() * 4,
+                );
                 irepak(
-                    fft_out[ibase..].as_mut_ptr().cast(),
-                    fft_out[ibase..].as_mut_ptr().cast(),
-                    &raw const nx_dim,
-                    &raw const ncrop_pad[1],
-                    &raw const ix_start,
+                    destination,
+                    &source,
+                    &nx_dim,
+                    &ncrop_pad[1],
+                    &ix_start,
                     &(ix_start + nx_bin - 1),
-                    &raw const iy_start,
+                    &iy_start,
                     &(iy_start + ny_bin - 1),
                 );
                 array_min_max_mean_fortran(
-                    fft_out[ibase..].as_ptr(),
-                    &raw const nx_bin,
-                    &raw const ny_bin,
+                    &fft_out[ibase..],
+                    &nx_bin,
+                    &ny_bin,
                     &1,
-                    &raw const nx_bin,
+                    &nx_bin,
                     &1,
-                    &raw const ny_bin,
-                    &raw mut dmin2,
-                    &raw mut dmax2,
-                    &raw mut dmean2,
+                    &ny_bin,
+                    &mut dmin2,
+                    &mut dmax2,
+                    &mut dmean2,
                 );
                 iiu_write_section(3, fft_out[ibase..].as_mut_ptr().cast());
                 dmax = dmax.max(dmax2);
@@ -745,10 +753,14 @@ pub fn binvol() {
                                         list_int(iout_base as i32 + 1)
                                     );
                                 }
+                                // `array` holds the output ring below
+                                // `in_base` and the input lines above it, which
+                                // is the boundary the source itself uses.
+                                let (ring, input) = array.split_at_mut(in_base as usize);
                                 bin_into_slice(
-                                    array[in_base as usize..].as_mut_ptr(),
+                                    input,
                                     nx_bin_into_slice,
-                                    array[iout_base..].as_mut_ptr(),
+                                    &mut ring[iout_base..],
                                     nx_bin,
                                     num_bin_lines,
                                     ired_bin_into_slice[0],
@@ -771,16 +783,16 @@ pub fn binvol() {
                             let iout_base =
                                 ((iring_pos[iz_out as usize] - 1) * nx_bin * ny_bin) as usize;
                             array_min_max_mean_fortran(
-                                array[iout_base..].as_ptr(),
-                                &raw const nx_bin,
-                                &raw const ny_bin,
+                                &array[iout_base..],
+                                &nx_bin,
+                                &ny_bin,
                                 &1,
-                                &raw const nx_bin,
+                                &nx_bin,
                                 &1,
-                                &raw const ny_bin,
-                                &raw mut dmin2,
-                                &raw mut dmax2,
-                                &raw mut dmean2,
+                                &ny_bin,
+                                &mut dmin2,
+                                &mut dmax2,
+                                &mut dmean2,
                             );
                             iiu_write_section(3, array[iout_base..].as_mut_ptr().cast());
                             if if_verbose > 1 {
@@ -852,10 +864,11 @@ pub fn binvol() {
                                 z_cen,
                                 lines_filt,
                             );
+                            let (output, input) = array.split_at_mut(in_base as usize);
                             bin_into_slice(
-                                array[in_base as usize..].as_mut_ptr(),
+                                input,
                                 nx_bin_into_slice,
-                                array.as_mut_ptr(),
+                                output,
                                 nx_bin,
                                 num_bin_lines,
                                 ired_bin_into_slice[0],
@@ -866,16 +879,16 @@ pub fn binvol() {
                         iy += num_lines;
 
                         array_min_max_mean_fortran(
-                            array.as_ptr(),
-                            &raw const nx_bin,
-                            &raw const num_bin_lines,
+                            &array,
+                            &nx_bin,
+                            &num_bin_lines,
                             &1,
-                            &raw const nx_bin,
+                            &nx_bin,
                             &1,
-                            &raw const num_bin_lines,
-                            &raw mut dmin2,
-                            &raw mut dmax2,
-                            &raw mut dmean2,
+                            &num_bin_lines,
+                            &mut dmin2,
+                            &mut dmax2,
+                            &mut dmean2,
                         );
                         iiu_write_lines(3, array.as_mut_ptr().cast(), num_bin_lines);
                         //

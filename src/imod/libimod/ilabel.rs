@@ -10,7 +10,9 @@
 //! malloc'd `label` array plus its `nl` count as a `Vec`.
 #![allow(dead_code)]
 
-use std::ffi::c_char;
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 use std::fs::File;
 
 use super::imodel::{IMOD_ERROR_MEMORY, IMOD_ERROR_WRITE};
@@ -203,31 +205,38 @@ pub fn imod_label_item_get(label: Option<&Ilabel>, index: i32) -> Option<&[u8]> 
 }
 
 /// Original: `imodLabelPrint` (`ilabel.c:237`).
-pub fn imod_label_print(lab: Option<&Ilabel>, fout: *mut libc::FILE) {
+pub fn imod_label_print(lab: Option<&Ilabel>, fout: &mut dyn Write) {
     let lab = match lab {
         Some(lab) => lab,
         None => return,
     };
-    unsafe {
-        if let Some(name) = &lab.name {
-            libc::fprintf(
-                fout,
-                c"contour label : \"%s\"\n".as_ptr(),
-                name.as_ptr() as *const c_char,
-            );
-        }
-        if !lab.label.is_empty() {
-            for i in 0..lab.label.len() {
-                libc::fprintf(
-                    fout,
-                    c"\t%3d : \"%s\"\n".as_ptr(),
-                    lab.label[i].index as std::ffi::c_int,
-                    match &lab.label[i].name {
-                        Some(name) => name.as_ptr() as *const c_char,
-                        None => std::ptr::null(),
-                    },
-                );
-            }
+    if let Some(name) = &lab.name {
+        let end = name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len());
+        let _ = fout.write_all(&c_format_bytes(
+            "contour label : \"%s\"\n",
+            &[CArg::Bytes(&name[..end])],
+        ));
+    }
+    if !lab.label.is_empty() {
+        for i in 0..lab.label.len() {
+            // glibc prints `(null)` for a NULL `%s`; `IlabelItem::name` is the
+            // C `b3dByte *name`, which `imodLabelRead` can leave NULL.
+            let text: &[u8] = match &lab.label[i].name {
+                Some(name) => {
+                    &name[..name
+                        .iter()
+                        .position(|&byte| byte == 0)
+                        .unwrap_or(name.len())]
+                }
+                None => b"(null)",
+            };
+            let _ = fout.write_all(&c_format_bytes(
+                "\t%3d : \"%s\"\n",
+                &[CArg::Int(lab.label[i].index as i64), CArg::Bytes(text)],
+            ));
         }
     }
 }
@@ -240,15 +249,13 @@ pub fn imod_label_match(label: Option<&Ilabel>, tstr: Option<&[u8]>) -> i32 {
         _ => return 0,
     };
 
-    unsafe {
-        ilabel_match_reg(
-            tstr.as_ptr() as *const c_char,
-            match &label.name {
-                Some(name) => name.as_ptr() as *const c_char,
-                None => std::ptr::null(),
-            },
-        )
-    }
+    ilabel_match_reg(
+        tstr,
+        match &label.name {
+            Some(name) => name,
+            None => &[],
+        },
+    )
 }
 
 /// Original: `imodLabelItemMatch` (`ilabel.c:264`).
@@ -264,64 +271,71 @@ pub fn imod_label_item_match(label: Option<&Ilabel>, tstr: Option<&[u8]>, index:
         None => return 0,
     };
 
-    unsafe {
-        ilabel_match_reg(
-            tstr.as_ptr() as *const c_char,
-            lstr.as_ptr() as *const c_char,
-        )
-    }
+    ilabel_match_reg(tstr, lstr)
 }
 
 /// Original: `ilabelMatchReg` (`ilabel.c:277`).
 ///
-/// Kept with the source's pointer walk over both NUL-terminated strings,
-/// including the recursion on `exp + 1`.
-pub unsafe fn ilabel_match_reg(mut exp: *const c_char, str_: *const c_char) -> i32 {
+/// The C walks two NUL-terminated `const char *`.  Both are byte slices here,
+/// with the same NUL sentinel: `exp` is indexed from a moving base exactly as
+/// the source advances its pointer, and `exp[0] == 0` -- the source's
+/// end-of-expression test -- becomes "at or past the slice's NUL".
+pub fn ilabel_match_reg(exp: &[u8], str_: &[u8]) -> i32 {
     let len: i32;
     let mut n: i32;
 
-    if exp.is_null() || str_.is_null() {
+    /* The C's `(!exp) || (!str)` NULL test; an empty slice has no NUL to read
+    and stands for the same absence. */
+    if exp.is_empty() || str_.is_empty() {
         return 0;
     }
 
-    len = unsafe { libc::strlen(str_) } as i32;
+    len = str_
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(str_.len()) as i32;
+
+    /* The C's moving `exp` pointer, as an offset from the start of the slice. */
+    let mut base = 0usize;
+    let at =
+        |slice: &[u8], index: usize| -> u8 { if index < slice.len() { slice[index] } else { 0 } };
 
     let mut i: i32 = 0;
     while i < len {
-        if unsafe { *exp } == 0 {
+        if at(exp, base) == 0 {
             return 0;
         }
 
-        if unsafe { *exp } == b'\\' as c_char {
-            exp = unsafe { exp.add(1) };
+        if at(exp, base) == b'\\' {
+            base += 1;
         } else {
-            if unsafe { *exp } == b'?' as c_char {
-                exp = unsafe { exp.add(1) };
+            if at(exp, base) == b'?' {
+                base += 1;
                 i += 1;
                 continue;
             }
-            if unsafe { *exp } == b'*' as c_char {
-                n = unsafe { *exp.add(1) } as i32;
+            if at(exp, base) == b'*' {
+                n = at(exp, base + 1) as i32;
                 if n == 0 {
                     return 1;
                 }
-                if n == unsafe { *str_.add(i as usize) } as i32 {
-                    if unsafe { ilabel_match_reg(exp.add(1), str_.add(i as usize)) } != 0 {
-                        return 1;
-                    }
+                if n == at(str_, i as usize) as i32
+                    && ilabel_match_reg(&exp[(base + 1).min(exp.len())..], &str_[i as usize..]) != 0
+                {
+                    return 1;
                 }
                 i += 1;
                 continue;
             }
         }
 
-        if unsafe { *exp } != unsafe { *str_.add(i as usize) } {
+        if at(exp, base) != at(str_, i as usize) {
             return 0;
         }
-        exp = unsafe { exp.add(1) };
+        base += 1;
         i += 1;
     }
-    if unsafe { *exp } != 0 {
+    if at(exp, base) != 0 {
         return 0;
     }
     1
@@ -369,7 +383,7 @@ fn getpadlen(string: Option<&[u8]>) -> i32 {
 }
 
 /// Original: `imodLabelWrite` (`ilabel.c:384`).
-pub fn imod_label_write(lab: Option<&Ilabel>, tag: u32, fout: &mut File) -> i32 {
+pub fn imod_label_write(lab: Option<&Ilabel>, tag: u32, fout: &mut ImodFile) -> i32 {
     let mut id: u32;
     let mut len: i32;
     let mut pad: i32;
@@ -455,7 +469,7 @@ pub fn imod_label_write(lab: Option<&Ilabel>, tag: u32, fout: &mut File) -> i32 
 }
 
 /// Original: `imodLabelRead` (`ilabel.c:449`).
-pub fn imod_label_read(fin: &mut File, err: &mut i32) -> Option<Ilabel> {
+pub fn imod_label_read(fin: &mut ImodFile, err: &mut i32) -> Option<Ilabel> {
     let retcode = 0;
     let mut lab = imod_label_new();
     let ml: i32;

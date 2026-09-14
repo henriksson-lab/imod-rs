@@ -190,7 +190,7 @@ pub fn trimvol() -> i32 {
             );
             return 1;
         }
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         if ii_fill_mrc_header(input, &raw mut header) != 0 {
             println!("ERROR: trimvol - Reading input header");
             ii_close(input);
@@ -415,7 +415,7 @@ pub fn trimvol() -> i32 {
                 (final_nz as f32 / 2.0 + ycen) * (*out_header).zlen / final_nz as f32;
         }
         ii_sync_from_mrc_header(output, out_header);
-        if mrc_head_write((*output).fp, out_header) != 0 {
+        if mrc_head_write(&mut (*output).fp.clone().unwrap(), &mut *out_header) != 0 {
             println!("ERROR: trimvol - Writing output header");
             ii_close(output);
             ii_close(input);
@@ -483,12 +483,12 @@ pub fn trimvol() -> i32 {
                         volume[((oz * out_ny + oy) * out_nx + ox) as usize];
                 }
             }
-            let mut write_info = std::mem::zeroed::<LoadInfo>();
+            let mut write_info = LoadInfo::default();
             write_info.xmin = 0;
             write_info.xmax = out_nx - 1;
             write_info.ymin = 0;
             write_info.ymax = final_ny - 1;
-            (*out_header).fp = (*output).fp.cast();
+            (*out_header).fp = (*output).fp.clone();
             if mrc_write_section_any(
                 out_header,
                 &raw mut write_info,
@@ -514,7 +514,7 @@ pub fn trimvol() -> i32 {
         (*out_header).amin = min;
         (*out_header).amax = max;
         (*out_header).amean = (sum / volume.len() as f64) as f32;
-        if mrc_head_write((*output).fp, out_header) != 0 {
+        if mrc_head_write(&mut (*output).fp.clone().unwrap(), &mut *out_header) != 0 {
             println!("ERROR: trimvol - Updating output header");
             ii_close(output);
             ii_close(input);

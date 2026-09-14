@@ -10,6 +10,7 @@
 //! `read_exact`/`imod_get_float`.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libimod::imat::{
     Imat, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_rotate_vector, imod_mat_transform,
 };
@@ -178,7 +179,7 @@ pub fn imod_clips_copy(from_clips: &Iclip_planes, to_clips: &mut Iclip_planes) {
 /// `fin`; the number of vectors and normals read is based on the size of the
 /// data chunk.  Returns non-zero for a read error, standing in for the
 /// source's `ferror(fin)`.
-pub fn imod_clips_read(clips: &mut Iclip_planes, fin: &mut File) -> i32 {
+pub fn imod_clips_read(clips: &mut Iclip_planes, fin: &mut ImodFile) -> i32 {
     let mut size_bytes = [0_u8; 4];
     if fin.read_exact(&mut size_bytes).is_err() {
         return 1;
@@ -324,17 +325,10 @@ mod tests {
     /// `%.9g` through the C library, so the driver's formatting is part of the
     /// comparison.
     fn g9(v: f64) -> String {
-        let mut buf = [0u8; 64];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr() as *mut std::ffi::c_char,
-                buf.len(),
-                c"%.9g".as_ptr(),
-                v,
-            );
-        }
-        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
+        crate::imod::libcfshr::b3dutil::c_format(
+            "%.9g",
+            &[crate::imod::libcfshr::b3dutil::CArg::Dbl(v)],
+        )
     }
 
     /// Differential harness against a driver compiled directly against the

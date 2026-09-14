@@ -6,8 +6,8 @@
 #![allow(dead_code, unused_variables, unused_assignments, unused_mut)]
 
 use crate::imod::libcfshr::b3dutil::{
-    b3d_shift_bytes, imod_backup_file, imod_prog_name, mrc_big_seek, override_write_bytes,
-    replace_file_arg_vec,
+    b3d_fwrite, b3d_shift_bytes, imod_backup_file, imod_prog_name, mrc_big_seek,
+    override_write_bytes, replace_file_arg_vec,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libiimod::iimage::ImodImageFile;
@@ -41,12 +41,21 @@ const IIFLAG_BYTES_SWAPPED: u32 = 4;
 unsafe fn usage(progname: *const c_char) -> ! {
     unsafe {
         // `tif2mrc.c:33`: `VERSION_NAME`, `__DATE__` and `__TIME__`.
-        libc::printf(
-            c"Tif2mrc Version %s %s %s\n".as_ptr(),
-            c"5.2.17".as_ptr(),
-            crate::imod::libcfshr::b3dutil::IMOD_BUILD_DATE.as_ptr(),
-            crate::imod::libcfshr::b3dutil::IMOD_BUILD_TIME.as_ptr(),
-        );
+        {
+            use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+            use std::io::Write;
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "Tif2mrc Version %s %s %s\n",
+                    &[
+                        CArg::Str("5.2.17"),
+                        CArg::Str(crate::imod::libcfshr::b3dutil::IMOD_BUILD_DATE),
+                        CArg::Str(crate::imod::libcfshr::b3dutil::IMOD_BUILD_TIME),
+                    ],
+                )
+                .as_bytes(),
+            );
+        }
         crate::imod::libcfshr::b3dutil::imod_copyright();
         libc::printf(
             c"Usage: %s [options] <tiff files...> <mrcfile>\n".as_ptr(),
@@ -163,7 +172,7 @@ unsafe fn convertrgb(tifdata: *mut u8, xsize: i32, ysize: i32, ntsc: i32) {
 unsafe fn expand_index_to_rgb(datap: *mut *mut u8, iifile: *mut ImodImageFile, section: i32) {
     unsafe {
         if iifile.is_null() || (*iifile).colormap.is_null() {
-            exit_error(c"Colormap data not read in properly.\n".as_ptr());
+            exit_error(b"Colormap data not read in properly.\n");
             return;
         }
         let mut size = (*iifile).nx as usize * (*iifile).ny as usize;
@@ -172,7 +181,7 @@ unsafe fn expand_index_to_rgb(datap: *mut *mut u8, iifile: *mut ImodImageFile, s
         }
         let out = libc::malloc(3 * size).cast::<u8>();
         if out.is_null() {
-            exit_error(c"Unable to allocate memory for expanding RGB data.\n".as_ptr());
+            exit_error(b"Unable to allocate memory for expanding RGB data.\n");
             return;
         }
         let input = *datap;
@@ -357,12 +366,12 @@ unsafe fn manage_tvipsdata(
 /// Original `main` (`tif2mrc.c:58`).  It retains C argv semantics for binary wiring.
 pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
     unsafe {
-        let bgfp: *mut libc::FILE;
-        let mut tiffp: *mut libc::FILE;
-        let mut mrcfp: *mut libc::FILE;
+        let mut bgfp: crate::imod::libcfshr::b3dutil::ImodFile;
+        let mut tiffp: crate::imod::libcfshr::b3dutil::ImodFile;
+        let mut mrcfp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
 
-        let mut tiff: TfInfo = core::mem::zeroed();
-        let mut hdata: MrcHeader = core::mem::zeroed();
+        let mut tiff = TfInfo::default();
+        let mut hdata = MrcHeader::default();
 
         let mut mode = 0_i32;
         let mut pix_size = 0_i32;
@@ -417,14 +426,19 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
         let mut ushort_fill: u16 = 0;
         let mut label = [0_i8; MRC_LABEL_SIZE + 1];
         let mut tilt_file: *mut c_char = core::ptr::null_mut();
-        let mut tiltfp: *mut libc::FILE = core::ptr::null_mut();
+        let mut tiltfp: Option<crate::imod::libcfshr::b3dutil::ImodFile> = None;
         let openmode = c"rb".as_ptr().cast_mut();
         let mut bgfile: *mut c_char = core::ptr::null_mut();
-        let progname = imod_prog_name(*argv);
+        let progname_str =
+            imod_prog_name(core::ffi::CStr::from_ptr(*argv).to_string_lossy().as_ref());
+        // `usage` and the `sprintf` below still take the C string the source
+        // passes; this keeps one copy alive for them.
+        let progname_c = std::ffi::CString::new(progname_str.as_str()).unwrap_or_default();
+        let progname = progname_c.as_ptr();
         let mut prefix = [0_i8; 100];
         // `tif2mrc.c:105-106`.
         libc::sprintf(prefix.as_mut_ptr(), c"\nERROR: %s - ".as_ptr(), progname);
-        setExitPrefix(prefix.as_ptr());
+        setExitPrefix(core::ffi::CStr::from_ptr(prefix.as_ptr()).to_bytes());
         // `exitError` is variadic in the source; the translated entry point takes a
         // single formatted string, so each call formats into this buffer first.
         let mut errmess = [0_i8; 512];
@@ -545,7 +559,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
         }
 
         if (argc - 1) < (iarg + 1) {
-            exit_error(c"Argument error: no output file specified".as_ptr());
+            exit_error(b"Argument error: no output file specified");
         }
         let mut argvp = argv;
         let mut replaced = 0_i32;
@@ -560,7 +574,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
         }
 
         if divide + unsign + keep_ushort + force_signed > 1 {
-            exit_error(c"You must select only one of -u, -d, -k, or -s.".as_ptr());
+            exit_error(b"You must select only one of -u, -d, -k, or -s.");
         }
         if divide != 0 {
             unsign = 1;
@@ -571,19 +585,26 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
         tiff_filter_warnings();
         chunk_criterion *= 1024. * 1024.;
         if pixel_entered != 0 && any_tif_pixel != 0 {
-            exit_error(c"You cannot enter both -p and -P".as_ptr());
+            exit_error(b"You cannot enter both -p and -P");
         }
         if !tilt_file.is_null() {
-            imod_backup_file(tilt_file);
-            tiltfp = libc::fopen(tilt_file, c"w".as_ptr());
-            if tiltfp.is_null() {
+            imod_backup_file(
+                core::ffi::CStr::from_ptr(tilt_file)
+                    .to_string_lossy()
+                    .as_ref(),
+            );
+            tiltfp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &core::ffi::CStr::from_ptr(tilt_file).to_string_lossy(),
+                "w",
+            );
+            if tiltfp.is_none() {
                 libc::snprintf(
                     errmess.as_mut_ptr(),
                     512,
                     c"Opening tilt angle file %s".as_ptr(),
                     tilt_file,
                 );
-                exit_error(errmess.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
             }
         }
 
@@ -605,22 +626,20 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                     c"Couldn't open %s.".as_ptr(),
                     *argvp.add(iarg as usize),
                 );
-                exit_error(errmess.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
             }
 
-            tiffp = tiff.fp;
+            tiffp = tiff.fp.clone().unwrap();
             if !tiff.iifile.is_null() {
                 tiff_pages = (*tiff.iifile).nz;
             } else {
-                tiff_pages = tiff_ifd_number(tiffp);
+                tiff_pages = tiff_ifd_number(&mut tiffp);
             }
             if tiff_pages > 1 {
                 libc::printf(c"Reading multi-paged TIFF file.\n".as_ptr());
 
                 if bg != 0 {
-                    exit_error(
-                        c"Background subtraction not supported for multi-paged images.".as_ptr(),
-                    );
+                    exit_error(b"Background subtraction not supported for multi-paged images.");
                 }
 
                 if mrcxsize != 0 {
@@ -630,22 +649,37 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                 }
 
                 if tiff.iifile.is_null() {
-                    read_tiffheader(tiffp, &mut tiff.header);
-                    libc::rewind(tiffp);
-                    libc::fread((&mut tiff.header.byteorder as *mut i16).cast(), 2, 1, tiffp);
+                    read_tiffheader(&mut tiffp, &mut tiff.header);
+                    crate::imod::libcfshr::b3dutil::b3d_rewind(&mut tiffp);
+                    crate::imod::libcfshr::b3dutil::b3d_fread(
+                        core::slice::from_raw_parts_mut(
+                            (&mut tiff.header.byteorder as *mut i16).cast::<u8>(),
+                            2,
+                        ),
+                        2,
+                        1,
+                        &mut tiffp,
+                    );
 
-                    tiff.header.first_ifd_offset = tiff_first_ifd(tiffp) as i32;
-                    libc::rewind(tiffp);
-                    read_tiffentries(tiffp, &mut tiff);
+                    tiff.header.first_ifd_offset = tiff_first_ifd(&mut tiffp) as i32;
+                    crate::imod::libcfshr::b3dutil::b3d_rewind(&mut tiffp);
+                    read_tiffentries(&mut tiffp, &mut tiff);
                 }
 
                 if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
-                    && imod_backup_file(*argvp.add((argc - 1) as usize)) != 0
+                    && imod_backup_file(
+                        core::ffi::CStr::from_ptr(*argvp.add((argc - 1) as usize))
+                            .to_string_lossy()
+                            .as_ref(),
+                    ) != 0
                 {
-                    exit_error(c"Couldn't create backup file".as_ptr());
+                    exit_error(b"Couldn't create backup file");
                 }
-                mrcfp = libc::fopen(*argvp.add((argc - 1) as usize), c"wb".as_ptr());
-                if mrcfp.is_null() {
+                mrcfp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                    &core::ffi::CStr::from_ptr(*argvp.add((argc - 1) as usize)).to_string_lossy(),
+                    "wb",
+                );
+                if mrcfp.is_none() {
                     libc::perror(c"tif2mrc".as_ptr());
                     libc::snprintf(
                         errmess.as_mut_ptr(),
@@ -653,13 +687,13 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                         c"Opening %s\n".as_ptr(),
                         *argvp.add((argc - 1) as usize),
                     );
-                    exit_error(errmess.as_ptr());
+                    exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
                 }
 
                 xsize = tiff.directory[WIDTHINDEX].value;
                 ysize = tiff.directory[LENGTHINDEX].value;
                 mrc_head_new(&mut hdata, xsize, ysize, tiff_pages, mode);
-                mrc_head_write(mrcfp, &mut hdata);
+                mrc_head_write(mrcfp.as_mut().unwrap(), &mut hdata);
                 manage_mode(
                     &tiff,
                     keep_ushort,
@@ -683,7 +717,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                         section
                     };
 
-                    tifdata = tiff_read_section(tiffp, &mut tiff, in_section);
+                    tifdata = tiff_read_section(&mut tiffp, &mut tiff, in_section);
 
                     if tifdata.is_null() {
                         libc::snprintf(
@@ -692,7 +726,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                             c"Failed to get image data for section %d".as_ptr(),
                             in_section,
                         );
-                        exit_error(errmess.as_ptr());
+                        exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
                     }
 
                     if tiff.photometric_interpretation == 3 {
@@ -712,7 +746,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                     );
 
                     mrc_big_seek(
-                        mrcfp,
+                        mrcfp.as_mut().unwrap(),
                         1024,
                         section * xsize,
                         ysize * pix_size,
@@ -722,11 +756,14 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                     if mode == 0 && hdata.bytes_signed != 0 {
                         b3d_shift_bytes(tifdata, tifdata.cast(), xsize, ysize, 1, 1);
                     }
-                    libc::fwrite(
-                        tifdata.cast(),
+                    b3d_fwrite(
+                        core::slice::from_raw_parts(
+                            tifdata.cast::<u8>(),
+                            (pix_size * xsize) as usize * ysize as usize,
+                        ),
                         (pix_size * xsize) as usize,
                         ysize as usize,
-                        mrcfp,
+                        mrcfp.as_mut().unwrap(),
                     );
 
                     libc::free(tifdata.cast());
@@ -761,10 +798,10 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                 }
                 hdata.mode = mode;
                 mrc_head_label(&mut hdata, b"tif2mrc: Converted to mrc format.");
-                mrc_head_write(mrcfp, &mut hdata);
+                mrc_head_write(mrcfp.as_mut().unwrap(), &mut hdata);
 
                 /* cleanup */
-                libc::fclose(mrcfp);
+                drop(mrcfp.take());
                 libc::exit(0);
             }
             tiff_close_file(&mut tiff);
@@ -779,17 +816,17 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                     c"Couldn't open %s.".as_ptr(),
                     bgfile,
                 );
-                exit_error(errmess.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
             }
-            bgfp = tiff.fp;
-            bgdata = tiff_read_file(bgfp, &mut tiff);
+            bgfp = tiff.fp.clone().unwrap();
+            bgdata = tiff_read_file(&mut bgfp, &mut tiff);
             if bgdata.is_null() {
                 libc::snprintf(errmess.as_mut_ptr(), 512, c"Reading %s.".as_ptr(), bgfile);
-                exit_error(errmess.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
             }
             bg_bits = tiff.bits_per_sample;
             if (bg_bits != 8 && bg_bits != 16) || tiff.photometric_interpretation >= 2 {
-                exit_error(c"Background file must be 8 or 16-bit grayscale".as_ptr());
+                exit_error(b"Background file must be 8 or 16-bit grayscale");
             }
 
             bgxsize = tiff.directory[WIDTHINDEX].value;
@@ -824,12 +861,19 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
 
         /* Write out mrcheader */
         if libc::getenv(c"IMOD_NO_IMAGE_BACKUP".as_ptr()).is_null()
-            && imod_backup_file(*argvp.add((argc - 1) as usize)) != 0
+            && imod_backup_file(
+                core::ffi::CStr::from_ptr(*argvp.add((argc - 1) as usize))
+                    .to_string_lossy()
+                    .as_ref(),
+            ) != 0
         {
-            exit_error(c"Couldn't create backup file".as_ptr());
+            exit_error(b"Couldn't create backup file");
         }
-        mrcfp = libc::fopen(*argvp.add((argc - 1) as usize), c"wb".as_ptr());
-        if mrcfp.is_null() {
+        mrcfp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+            &core::ffi::CStr::from_ptr(*argvp.add((argc - 1) as usize)).to_string_lossy(),
+            "wb",
+        );
+        if mrcfp.is_none() {
             libc::perror(c"tif2mrc".as_ptr());
             libc::snprintf(
                 errmess.as_mut_ptr(),
@@ -837,10 +881,10 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                 c"Opening %s".as_ptr(),
                 *argvp.add((argc - 1) as usize),
             );
-            exit_error(errmess.as_ptr());
+            exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
         }
         mrc_head_new(&mut hdata, xsize, ysize, argc - iarg - 1, mode);
-        mrc_head_write(mrcfp, &mut hdata);
+        mrc_head_write(mrcfp.as_mut().unwrap(), &mut hdata);
 
         /* Loop through all the tiff files adding them to the MRC stack. */
         first_file_ind = iarg;
@@ -865,20 +909,27 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                     c"Couldn't open %s.".as_ptr(),
                     *argvp.add(iread as usize),
                 );
-                exit_error(errmess.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
             }
             libc::printf(
                 c"Opening %s for input\n".as_ptr(),
                 *argvp.add(iread as usize),
             );
             libc::fflush(stdout);
-            tiffp = tiff.fp;
+            tiffp = tiff.fp.clone().unwrap();
             k = manage_tvipsdata(tiff.iifile, label.as_mut_ptr(), &mut tilt_angle);
             if !tilt_file.is_null() {
                 if k != 0 {
-                    exit_error(c"There is no tilt angle value in this file".as_ptr());
+                    exit_error(b"There is no tilt angle value in this file");
                 }
-                libc::fprintf(tiltfp, c"%7.2f\n".as_ptr(), tilt_angle as f64);
+                use std::io::Write;
+                let _ = tiltfp.as_mut().unwrap().write_all(
+                    crate::imod::libcfshr::b3dutil::c_format(
+                        "%7.2f\n",
+                        &[crate::imod::libcfshr::b3dutil::CArg::Dbl(tilt_angle as f64)],
+                    )
+                    .as_bytes(),
+                );
             }
 
             /* Decide whether to set up chunks */
@@ -925,7 +976,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                 }
 
                 /* Read in tiff file */
-                tifdata = tiff_read_file(tiffp, &mut tiff);
+                tifdata = tiff_read_file(&mut tiffp, &mut tiff);
                 if tifdata.is_null() {
                     libc::snprintf(
                         errmess.as_mut_ptr(),
@@ -933,7 +984,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                         c"Reading %s.".as_ptr(),
                         *argvp.add(iread as usize),
                     );
-                    exit_error(errmess.as_ptr());
+                    exit_error(core::ffi::CStr::from_ptr(errmess.as_ptr()).to_bytes());
                 }
 
                 xsize = tiff.directory[WIDTHINDEX].value;
@@ -972,7 +1023,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                         || (tiff.photometric_interpretation / 2 == 0 && tiff.bits_per_sample == 8))
                         && mode != MRC_MODE_BYTE)
                 {
-                    exit_error(c"All files must have the same data type.".as_ptr());
+                    exit_error(b"All files must have the same data type.");
                 }
 
                 if tiff.photometric_interpretation == 3 {
@@ -993,8 +1044,7 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                         || (mode != MRC_MODE_BYTE && bg_bits == 8)
                     {
                         exit_error(
-                            c"Background data must have  the same data type as the image files."
-                                .as_ptr(),
+                            b"Background data must have  the same data type as the image files.",
                         );
                     }
 
@@ -1035,11 +1085,14 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
 
                 if (xsize == mrcxsize) && (ysize == mrcysize) {
                     /* Write out mrc file */
-                    libc::fwrite(
-                        tifdata.cast(),
+                    b3d_fwrite(
+                        core::slice::from_raw_parts(
+                            tifdata.cast::<u8>(),
+                            (pix_size * xsize) as usize * nlines as usize,
+                        ),
                         (pix_size * xsize) as usize,
                         nlines as usize,
-                        mrcfp,
+                        mrcfp.as_mut().unwrap(),
                     );
                 } else {
                     libc::printf(
@@ -1090,27 +1143,56 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                         if y + yoffset < 0 || y + yoffset >= ysize {
                             /* Do fill lines */
                             for _x in 0..mrcxsize {
-                                libc::fwrite(fill_ptr.cast(), pix_size as usize, 1, mrcfp);
+                                b3d_fwrite(
+                                    core::slice::from_raw_parts(
+                                        fill_ptr.cast::<u8>(),
+                                        pix_size as usize,
+                                    ),
+                                    pix_size as usize,
+                                    1,
+                                    mrcfp.as_mut().unwrap(),
+                                );
                             }
                         } else {
                             /* Fill left edge if necessary, write data, fill right if needed */
                             k = xoffset;
                             while k < 0 {
-                                libc::fwrite(fill_ptr.cast(), pix_size as usize, 1, mrcfp);
+                                b3d_fwrite(
+                                    core::slice::from_raw_parts(
+                                        fill_ptr.cast::<u8>(),
+                                        pix_size as usize,
+                                    ),
+                                    pix_size as usize,
+                                    1,
+                                    mrcfp.as_mut().unwrap(),
+                                );
                                 k += 1;
                             }
                             xdo = (pix_size
                                 * (if xoffset > 0 { xoffset } else { 0 } + (y + yoffset) * xsize))
                                 as usize;
-                            libc::fwrite(
-                                tifdata.add(xdo).cast(),
+                            b3d_fwrite(
+                                core::slice::from_raw_parts(
+                                    tifdata.add(xdo).cast::<u8>(),
+                                    pix_size as usize
+                                        * (if xsize < mrcxsize { xsize } else { mrcxsize })
+                                            as usize,
+                                ),
                                 pix_size as usize,
                                 (if xsize < mrcxsize { xsize } else { mrcxsize }) as usize,
-                                mrcfp,
+                                mrcfp.as_mut().unwrap(),
                             );
                             k = 0;
                             while k < mrcxsize - xsize + xoffset {
-                                libc::fwrite(fill_ptr.cast(), pix_size as usize, 1, mrcfp);
+                                b3d_fwrite(
+                                    core::slice::from_raw_parts(
+                                        fill_ptr.cast::<u8>(),
+                                        pix_size as usize,
+                                    ),
+                                    pix_size as usize,
+                                    1,
+                                    mrcfp.as_mut().unwrap(),
+                                );
                                 k += 1;
                             }
                         }
@@ -1166,14 +1248,14 @@ pub unsafe fn tif2mrc(mut argc: i32, argv: *mut *mut c_char) -> i32 {
                 hdata.nlabl += 1;
             }
         }
-        mrc_head_write(mrcfp, &mut hdata);
+        mrc_head_write(mrcfp.as_mut().unwrap(), &mut hdata);
 
         /* cleanup */
-        if !mrcfp.is_null() {
-            libc::fclose(mrcfp);
+        if mrcfp.is_some() {
+            drop(mrcfp.take());
         }
         if !tilt_file.is_null() {
-            libc::fclose(tiltfp);
+            drop(tiltfp.take());
         }
         libc::exit(0);
     }
@@ -1221,9 +1303,9 @@ mod tests {
     #[test]
     fn unsigned_16_bit_tiff_selects_unsigned_short_mode() {
         unsafe {
-            let mut image: ImodImageFile = core::mem::zeroed();
+            let mut image = ImodImageFile::default();
             image.type_ = IITYPE_USHORT;
-            let mut tiff: TfInfo = core::mem::zeroed();
+            let mut tiff = TfInfo::default();
             tiff.bits_per_sample = 16;
             tiff.iifile = &raw mut image;
             let mut pixel_size = 0;

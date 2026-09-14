@@ -76,13 +76,16 @@ pub struct LoadTileRequest {
     pub to_x_start: i32,
     pub to_y_start: i32,
 }
+/// `FastSegment` (`pyramidcache.h:70-76`).  The source's `unsigned char *line`
+/// points into the tile that owns the data; here it is the borrow of that
+/// tile's buffer starting at the same element.
 #[derive(Clone, Copy, Debug)]
-pub struct FastSegment {
+pub struct FastSegment<'a> {
     pub xor_y: i32,
     pub yor_z: i32,
     pub length: i32,
     pub stride: i32,
-    pub line: *const u8,
+    pub line: &'a [u8],
 }
 
 /// Source-visible `ViewInfo` members used by this unit, separated from Qt and I/O.
@@ -785,12 +788,12 @@ impl PyramidCache {
             .sum()
     }
     /// `fastPlaneAccess`.
-    pub fn fast_plane_access(
-        &self,
+    pub fn fast_plane_access<'a>(
+        &'a self,
         cache_ind: i32,
         plane: i32,
         axis: i32,
-        segments: &mut Vec<FastSegment>,
+        segments: &mut Vec<FastSegment<'a>>,
         starts: &mut Vec<i32>,
     ) -> i32 {
         if cache_ind < 0 || cache_ind >= self.num_caches {
@@ -814,7 +817,7 @@ impl PyramidCache {
                             yor_z: z,
                             length: b - a + 1,
                             stride: t.xsize,
-                            line: unsafe { t.data.as_ptr().add(xi as usize) },
+                            line: &t.data[xi as usize..],
                         });
                     }
                 }
@@ -836,7 +839,7 @@ impl PyramidCache {
                             yor_z: z,
                             length: b - a + 1,
                             stride: 1,
-                            line: unsafe { t.data.as_ptr().add(yi as usize * t.xsize as usize) },
+                            line: &t.data[yi as usize * t.xsize as usize..],
                         });
                     }
                 }

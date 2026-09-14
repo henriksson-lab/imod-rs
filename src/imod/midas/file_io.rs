@@ -122,14 +122,14 @@ pub fn load_angles(view: &mut MidasView) -> Result<(), String> {
 pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> {
     let name = CString::new(filename.as_os_str().as_encoded_bytes())
         .map_err(|_| format!("Couldn't open {}: NUL in pathname", filename.display()))?;
-    let fp = unsafe { libc::fopen(name.as_ptr(), c"rb".as_ptr()) };
-    if fp.is_null() {
+    let Some(mut fp) =
+        crate::imod::libcfshr::b3dutil::ImodFile::open(&filename.to_string_lossy(), "rb")
+    else {
         return Err(format!("Couldn't open {}", filename.display()));
-    }
-    let mut header: MrcHeader = unsafe { std::mem::zeroed() };
-    header.fp = fp.cast();
-    if unsafe { mrc_head_read(fp, &mut header) } != 0 {
-        unsafe { libc::fclose(fp) };
+    };
+    let mut header = MrcHeader::default();
+    header.fp = Some(fp.clone());
+    if unsafe { mrc_head_read(&mut fp, &mut header) } != 0 {
         return Err(format!("Error reading header from {}", filename.display()));
     }
     let (mut smin, mut smax) = (header.amin, header.amax);
@@ -137,7 +137,7 @@ pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> 
         smin = view.sminin;
         smax = view.smaxin;
     }
-    let mut li: LoadInfo = unsafe { std::mem::zeroed() };
+    let mut li = LoadInfo::default();
     mrc_init_li(Some(&mut li), None);
     li.xmin = 0;
     li.xmax = header.nx - 1;
@@ -160,17 +160,17 @@ pub fn load_refimage(view: &mut MidasView, filename: &Path) -> Result<i32, Strin
             filename.display()
         )
     })?;
-    let fp = unsafe { libc::fopen(name.as_ptr(), c"rb".as_ptr()) };
-    if fp.is_null() {
+    let Some(mut fp) =
+        crate::imod::libcfshr::b3dutil::ImodFile::open(&filename.to_string_lossy(), "rb")
+    else {
         return Err(format!(
             "Error opening reference image {}",
             filename.display()
         ));
-    }
-    let mut header: MrcHeader = unsafe { std::mem::zeroed() };
-    header.fp = fp.cast();
-    if unsafe { mrc_head_read(fp, &mut header) } != 0 {
-        unsafe { libc::fclose(fp) };
+    };
+    let mut header = MrcHeader::default();
+    header.fp = Some(fp.clone());
+    if unsafe { mrc_head_read(&mut fp, &mut header) } != 0 {
         return Err(format!(
             "Error reading header of reference image {}",
             filename.display()
@@ -178,7 +178,6 @@ pub fn load_refimage(view: &mut MidasView, filename: &Path) -> Result<i32, Strin
     }
     view.refzsize = header.nz;
     if header.nx != view.xsize || header.ny != view.ysize {
-        unsafe { libc::fclose(fp) };
         return Err(format!(
             "Error: size of reference image in {} does not match size of images being aligned.",
             filename.display()
@@ -205,7 +204,7 @@ pub fn load_refimage(view: &mut MidasView, filename: &Path) -> Result<i32, Strin
     let sec = view.xsec;
     let result = midas_read_z_byte(view, &mut header, &mut li, &mut data, sec);
     view.li = Some(li);
-    unsafe { libc::fclose(fp) };
+    drop(fp);
     result.map(|_| {
         view.ref_data = data;
         view.ref_present = true;
@@ -231,14 +230,14 @@ pub fn midas_read_z_byte(
             return Err("Error reading MRC byte section".into());
         }
         let (mut nx, mut ny) = (0, 0);
-        if unsafe {
+        if {
             reduce_by_binning(
-                view.unbinned_buf.as_mut_ptr().cast(),
+                &view.unbinned_buf,
                 SLICE_MODE_BYTE,
                 header.nx,
                 header.ny,
                 view.binning,
-                data.as_mut_ptr().cast(),
+                data,
                 1,
                 &mut nx,
                 &mut ny,
@@ -291,24 +290,26 @@ mod tests {
             std::env::temp_dir().join(format!("imod-rs-midas-image-{}.mrc", std::process::id()));
         let name = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
         unsafe {
-            let fp = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-            let mut header: MrcHeader = std::mem::zeroed();
+            let mut fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                    .unwrap();
+            let mut header = MrcHeader::default();
             mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
             header.amin = 0.;
             header.amax = 3.;
             header.amean = 1.5;
-            assert_eq!(mrc_head_write(fp, &mut header), 0);
+            assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
             assert_eq!(
                 mrc_write_slice(
                     [0_u8, 1, 2, 3].as_ptr().cast_mut().cast(),
-                    fp,
+                    &mut fp,
                     &mut header,
                     0,
                     b'z' as i8
                 ),
                 0
             );
-            libc::fclose(fp);
+            drop(fp);
         }
         let mut view = new_view();
         view.binning = 1;
@@ -332,7 +333,7 @@ mod tests {
         view.hin = Some(header);
         view.li = Some(li);
         assert_eq!(bytes, [0, 85, 170, 255]);
-        unsafe { libc::fclose(view.hin.take().unwrap().fp.cast()) };
+        drop(view.hin.take());
         let _ = fs::remove_file(path);
     }
 }

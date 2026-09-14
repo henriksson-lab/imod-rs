@@ -1,8 +1,6 @@
 //! Translation of `IMOD/3dmod/form_snapshot.cpp` and `form_snapshot.h`.
 #![allow(dead_code)]
 
-use core::ffi::c_void;
-
 #[derive(Clone, Debug, Default)]
 pub struct ImodPrefStruct {
     pub snap_format: String,
@@ -37,21 +35,25 @@ pub enum SnapshotSpinBox {
     TiffQualitySpinBox,
 }
 
+/// The `QButtonGroup *` (and other native object) arguments below are opaque
+/// native identities, spelled the way `DockingDialogNativeBoundary` spells
+/// them: a frontend which owns Qt can use its pointer cast to `usize`, a
+/// non-Qt frontend a stable application handle, and `0` is the source's null.
 pub trait SnapshotNativeBoundary {
     fn setup_ui(&mut self);
     fn snap_format_list(&self) -> Vec<String>;
     fn snap_format2(&self, format: &str) -> String;
     fn ctrl_string(&self) -> &str;
     fn add_format_items(&mut self, formats: &[String]);
-    fn create_tiff_comp_group(&mut self) -> *mut c_void;
-    fn group_add_button(&mut self, group: *mut c_void, button: TiffCompressionButton, id: i32);
-    fn connect_tiff_comp_group_clicked(&mut self, group: *mut c_void);
+    fn create_tiff_comp_group(&mut self) -> usize;
+    fn group_add_button(&mut self, group: usize, button: TiffCompressionButton, id: i32);
+    fn connect_tiff_comp_group_clicked(&mut self, group: usize);
     fn connect_jpeg_for_image_toggled(&mut self);
     fn connect_format_activated_show_other_formats(&mut self);
     fn set_format_index(&mut self, index: i32);
     fn set_spin_box(&mut self, control: SnapshotSpinBox, value: i32);
     fn set_checked(&mut self, control: SnapshotCheckBox, value: bool);
-    fn set_group(&mut self, group: *mut c_void, value: i32);
+    fn set_group(&mut self, group: usize, value: i32);
     fn set_other_formats_label(&mut self, text: String);
     fn set_jpeg_for_image_enabled(&mut self, enabled: bool);
     fn set_tiff_jpeg_quality_label_enabled(&mut self, enabled: bool);
@@ -59,14 +61,14 @@ pub trait SnapshotNativeBoundary {
     fn format_text(&self) -> String;
     fn spin_box_value(&self, control: SnapshotSpinBox) -> i32;
     fn checked(&self, control: SnapshotCheckBox) -> bool;
-    fn checked_group(&self, group: *mut c_void) -> i32;
+    fn checked_group(&self, group: usize) -> i32;
     fn retranslate_ui(&mut self);
 }
 
 #[derive(Debug)]
 pub struct SnapshotForm {
     pub m_prefs: ImodPrefStruct,
-    pub tiff_comp_group: *mut c_void,
+    pub tiff_comp_group: usize,
 }
 
 impl SnapshotForm {
@@ -74,7 +76,7 @@ impl SnapshotForm {
         native.setup_ui();
         let mut form = Self {
             m_prefs: prefs,
-            tiff_comp_group: core::ptr::null_mut(),
+            tiff_comp_group: 0,
         };
         form.init(native);
         form
@@ -191,7 +193,6 @@ mod tests {
         checks: [bool; 3],
         enabled: [bool; 3],
         label: String,
-        group: u8,
         buttons: Vec<(TiffCompressionButton, i32)>,
         tiff_connections: usize,
         jpeg_connections: usize,
@@ -214,13 +215,13 @@ mod tests {
             "Ctrl"
         }
         fn add_format_items(&mut self, _: &[String]) {}
-        fn create_tiff_comp_group(&mut self) -> *mut c_void {
-            &mut self.group as *mut u8 as *mut c_void
+        fn create_tiff_comp_group(&mut self) -> usize {
+            1
         }
-        fn group_add_button(&mut self, _: *mut c_void, b: TiffCompressionButton, id: i32) {
+        fn group_add_button(&mut self, _: usize, b: TiffCompressionButton, id: i32) {
             self.buttons.push((b, id));
         }
-        fn connect_tiff_comp_group_clicked(&mut self, _: *mut c_void) {
+        fn connect_tiff_comp_group_clicked(&mut self, _: usize) {
             self.tiff_connections += 1;
         }
         fn connect_jpeg_for_image_toggled(&mut self) {
@@ -234,7 +235,7 @@ mod tests {
         fn set_checked(&mut self, c: SnapshotCheckBox, v: bool) {
             self.checks[c as usize] = v;
         }
-        fn set_group(&mut self, _: *mut c_void, _: i32) {}
+        fn set_group(&mut self, _: usize, _: i32) {}
         fn set_other_formats_label(&mut self, text: String) {
             self.label = text;
         }
@@ -256,7 +257,7 @@ mod tests {
         fn checked(&self, c: SnapshotCheckBox) -> bool {
             self.checks[c as usize]
         }
-        fn checked_group(&self, _: *mut c_void) -> i32 {
+        fn checked_group(&self, _: usize) -> i32 {
             2
         }
         fn retranslate_ui(&mut self) {}

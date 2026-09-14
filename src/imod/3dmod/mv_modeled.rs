@@ -125,7 +125,7 @@ pub fn imodv_modeled_name(a: &mut ImodvApp, name: &str, dialog: &mut ImodvModele
             .iter_mut()
             .zip(name.as_bytes().iter().take(IMOD_STRSIZE - 1))
         {
-            *out = *byte as i8;
+            *out = *byte;
         }
     }
     update_work_area(a, dialog);

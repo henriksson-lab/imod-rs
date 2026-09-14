@@ -3,6 +3,7 @@
 //! This module retains the operating-system shared-memory ABI.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::islice::slice_mode_if_real;
 use crate::imod::libiimod::iimage::{
     ImodImageFile, LineProcData, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
@@ -79,7 +80,7 @@ pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *
         (*ii_file).reopen = Some(reopen);
         (*ii_file).filename = libc::strdup(filename);
         (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
-        let header = libc::malloc(core::mem::size_of::<MrcHeader>()).cast::<MrcHeader>();
+        let header = Box::into_raw(Box::new(MrcHeader::default()));
         (*ii_file).header = header.cast();
         if header.is_null() || (*ii_file).filename.is_null() {
             ii_delete(ii_file);
@@ -98,16 +99,19 @@ pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *
         libc::strncpy((*ii_file).fmode.as_mut_ptr(), mode, 3);
         (*ii_file).file = IIFILE_SHR_MEM;
         if libc::strstr(mode, c"w".as_ptr()).is_null() {
-            core::ptr::copy_nonoverlapping((*ii_file).user_data.cast::<MrcHeader>(), header, 1);
+            // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
+            *header = (*(*ii_file).user_data.cast::<MrcHeader>()).clone();
             ii_sync_from_mrc_header(ii_file, header);
         } else {
             mrc_head_new(&mut *header, 1, 1, 1, 0);
             (*header).packed4bits = 0;
             (*header).half_floats = 0;
-            (*header).fp = (*ii_file).user_data.cast();
+            // `iishrmem.c:108`: `(FILE *)iiFile->userData`, the shared-memory
+            // base address used as an identity token, never for I/O.
+            (*header).fp = Some(ImodFile::Token((*ii_file).user_data as usize));
         }
-        (*ii_file).fp = (*ii_file).user_data.cast();
-        (*header).fp = (*ii_file).fp.cast();
+        (*ii_file).fp = Some(ImodFile::Token((*ii_file).user_data as usize));
+        (*header).fp = (*ii_file).fp.clone();
         (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
         (*ii_file).sync_from_mrc_header = Some(sync_from_mrc_header);
         (*ii_file).write_header = Some(write_header);
@@ -269,7 +273,16 @@ pub unsafe fn ii_shr_mem_remove(filename: *const c_char) -> i32 {
 }
 unsafe extern "C" fn clean_up(ii_file: *mut ImodImageFile) {
     unsafe {
-        libc::free((*ii_file).header.cast());
+        // `iishrmem.c:268` is `free(iiFile->header)`, and `free(NULL)` is a
+        // no-op; `Box::from_raw(null)` is undefined behaviour.  The header is
+        // null whenever `iiDelete` runs on a file whose header was never
+        // allocated, which the `posix_shared_memory_reads_cropped_padded_floats`
+        // test reaches.
+        let header = (*ii_file).header.cast::<MrcHeader>();
+        if !header.is_null() {
+            drop(Box::from_raw(header));
+            (*ii_file).header = core::ptr::null_mut();
+        }
     }
 }
 unsafe extern "C" fn reopen(ii_file: *mut ImodImageFile) -> i32 {
@@ -289,7 +302,8 @@ unsafe extern "C" fn sync_from_mrc_header(
 ) -> i32 {
     unsafe {
         if (*ii_file).header.cast::<MrcHeader>() != hdata {
-            core::ptr::copy_nonoverlapping(hdata, (*ii_file).header.cast(), 1);
+            // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
+            *(*ii_file).header.cast::<MrcHeader>() = (*hdata).clone();
         }
         0
     }
@@ -348,7 +362,7 @@ unsafe fn shm_read_section_any(
         }
         let mut pix_size_buf = [0, 1, 4, 2];
         let mut d: LineProcData = zeroed();
-        let mut li: LoadInfo = zeroed();
+        let mut li = LoadInfo::default();
         ii_mrc_set_load_info(in_file, &mut li);
         let pad_left = li.pad_left.max(0);
         let pad_right = li.pad_right.max(0);
@@ -458,7 +472,7 @@ unsafe fn shm_write_section_any(
         if h.is_null() || (*in_file).user_data.is_null() {
             return 1;
         }
-        let mut li: LoadInfo = zeroed();
+        let mut li = LoadInfo::default();
         ii_mrc_set_load_info(in_file, &mut li);
         let mut buf_mode = (*h).mode;
         let convert =

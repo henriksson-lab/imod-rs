@@ -16,32 +16,29 @@ use super::readlinevalues::{
 /// Original `getTiltAngles` (`gettiltangles.c:27`).
 pub unsafe fn get_tilt_angles(num_views: *mut i32, tilt: *mut f32, lim_tilt: i32) {
     if unsafe { *num_views > lim_tilt } {
-        unsafe {
-            exit_error(c"Array for tilt angles is not big enough for the number of views".as_ptr())
-        };
+        unsafe { exit_error(b"Array for tilt angles is not big enough for the number of views") };
     }
     let mut tilt_start = 0.;
     let mut tilt_inc = 0.;
-    let mut ierr = unsafe { pip_get_float(c"FirstTiltAngle".as_ptr(), &mut tilt_start) };
-    let ierr2 = unsafe { pip_get_float(c"TiltIncrement".as_ptr(), &mut tilt_inc) };
+    let mut ierr = unsafe { pip_get_float(b"FirstTiltAngle", &mut tilt_start) };
+    let ierr2 = unsafe { pip_get_float(b"TiltIncrement", &mut tilt_inc) };
     let start_inc_ok = ierr == 0 && ierr2 == 0;
-    let mut filename: *mut c_char = core::ptr::null_mut();
-    ierr = unsafe { pip_get_string(c"TiltFile".as_ptr(), &mut filename) };
+    let mut filename: Vec<u8> = Vec::new();
+    ierr = unsafe { pip_get_string(b"TiltFile", &mut filename) };
     let mut num_lines = 0;
-    unsafe { pip_number_of_entries(c"TiltAngles".as_ptr(), &mut num_lines) };
+    unsafe { pip_number_of_entries(b"TiltAngles", &mut num_lines) };
 
     if ierr > 0 && num_lines == 0 {
         if !start_inc_ok {
             unsafe {
                 exit_error(
-                    c"No tilt angles specified by start and increment, file, or individual values"
-                        .as_ptr(),
+                    b"No tilt angles specified by start and increment, file, or individual values",
                 )
             };
         }
         if unsafe { *num_views <= 0 } {
             unsafe {
-                exit_error(c"Tilt angles may not be entered by starting and increment angles because the program did not specify the number of views".as_ptr())
+                exit_error(b"Tilt angles may not be entered by starting and increment angles because the program did not specify the number of views")
             };
         }
         for index in 0..unsafe { *num_views } as usize {
@@ -52,9 +49,7 @@ pub unsafe fn get_tilt_angles(num_views: *mut i32, tilt: *mut f32, lim_tilt: i32
     if num_lines > 0 {
         if ierr == 0 {
             unsafe {
-                exit_error(
-                    c"You cannot specify both a tilt angle file and individual entries".as_ptr(),
-                )
+                exit_error(b"You cannot specify both a tilt angle file and individual entries")
             };
         }
         let mut index = 0;
@@ -62,8 +57,11 @@ pub unsafe fn get_tilt_angles(num_views: *mut i32, tilt: *mut f32, lim_tilt: i32
             let mut nin_line = 0;
             unsafe {
                 pip_get_float_array(
-                    c"TiltAngles".as_ptr(),
-                    tilt.add(index as usize),
+                    b"TiltAngles",
+                    core::slice::from_raw_parts_mut(
+                        tilt.add(index as usize),
+                        (lim_tilt - index).max(0) as usize,
+                    ),
                     &mut nin_line,
                     lim_tilt - index,
                 )
@@ -80,32 +78,25 @@ pub unsafe fn get_tilt_angles(num_views: *mut i32, tilt: *mut f32, lim_tilt: i32
                 index
             );
             let message = std::ffi::CString::new(message).unwrap();
-            unsafe { exit_error(message.as_ptr()) };
+            unsafe { exit_error(message.to_bytes()) };
         }
         return;
     }
-    unsafe { read_tilt_file(num_views, filename, tilt, lim_tilt) };
+    unsafe { read_tilt_file(num_views, &filename, tilt, lim_tilt) };
 }
 
 /// Original `readTiltFile` (`gettiltangles.c:90`).
-pub unsafe fn read_tilt_file(
-    num_views: *mut i32,
-    filename: *const c_char,
-    tilt: *mut f32,
-    lim_tilt: i32,
-) {
+pub unsafe fn read_tilt_file(num_views: *mut i32, filename: &[u8], tilt: *mut f32, lim_tilt: i32) {
     if unsafe { *num_views > lim_tilt } {
-        unsafe {
-            exit_error(c"Array for tilt angles is not big enough for the number of views".as_ptr())
-        };
+        unsafe { exit_error(b"Array for tilt angles is not big enough for the number of views") };
     }
-    let path = unsafe { OsStr::from_bytes(CStr::from_ptr(filename).to_bytes()) };
+    let path = OsStr::from_bytes(filename);
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) => {
             let message =
                 std::ffi::CString::new(format!("Error opening tilt angle file: {error}")).unwrap();
-            unsafe { exit_error(message.as_ptr()) };
+            unsafe { exit_error(message.to_bytes()) };
             unreachable!();
         }
     };
@@ -127,12 +118,12 @@ pub unsafe fn read_tilt_file(
             unsafe { *num_views }
         ))
         .unwrap();
-        unsafe { exit_error(message.as_ptr()) };
+        unsafe { exit_error(message.to_bytes()) };
     }
     if ierr != 0 {
         let message = exit_from_value_read_error(ierr, "tilt angles").unwrap_err();
         let message = std::ffi::CString::new(message).unwrap();
-        unsafe { exit_error(message.as_ptr()) };
+        unsafe { exit_error(message.to_bytes()) };
     }
     if unsafe { *num_views == 0 } {
         unsafe { *num_views = num_to_get };
@@ -142,7 +133,6 @@ pub unsafe fn read_tilt_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CString;
     use std::io::Write;
 
     #[test]
@@ -151,13 +141,13 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(file, "-60.0\n-1.5\n45.25").unwrap();
         drop(file);
-        let filename = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let filename = path.as_os_str().as_bytes().to_vec();
         let mut num_views = 0;
         let mut tilt = [0.; 4];
         unsafe {
             read_tilt_file(
                 &mut num_views,
-                filename.as_ptr(),
+                &filename,
                 tilt.as_mut_ptr(),
                 tilt.len() as i32,
             )
@@ -174,13 +164,13 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(file, "1\n2\n3").unwrap();
         drop(file);
-        let filename = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let filename = path.as_os_str().as_bytes().to_vec();
         let mut num_views = 2;
         let mut tilt = [0.; 3];
         unsafe {
             read_tilt_file(
                 &mut num_views,
-                filename.as_ptr(),
+                &filename,
                 tilt.as_mut_ptr(),
                 tilt.len() as i32,
             )

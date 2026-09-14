@@ -6,6 +6,7 @@ use crate::imod::libcfshr::autodoc::{
     adoc_get_section_name, adoc_get_three_floats, adoc_get_two_integers, adoc_open_image_metadata,
     adoc_read,
 };
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_get_store_error, b3d_set_store_error};
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_ADOC, IiSectionFunc, ImodImageFile,
@@ -22,18 +23,13 @@ use core::ffi::c_char;
 /// `autodoc.h` ("PreData"), which `iiadoc.c` includes.
 const IIADOC_IMAGE: &core::ffi::CStr = c"Image";
 
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
-
 /// Matches C `iiADOCCheck(ImodImageFile *)` (`iiadoc.c:30`).
 pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
-    if in_file.is_null() || unsafe { (*in_file).fp }.is_null() {
+    if in_file.is_null() || unsafe { (*in_file).fp.is_none() } {
         return IIERR_BAD_CALL;
     }
     unsafe {
-        libc::fclose((*in_file).fp);
-        (*in_file).fp = core::ptr::null_mut();
+        (*in_file).fp = None;
 
         let save_store = b3d_get_store_error();
         b3d_set_store_error(1);
@@ -74,10 +70,13 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
             (*in_file).nz = num_sect;
         }
 
-        (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
-        if (*in_file).fp.is_null() {
+        (*in_file).fp = ImodFile::open(
+            &core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy(),
+            &core::ffi::CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+        );
+        if (*in_file).fp.is_none() {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiADOCCheck - reopening file after reading as adoc"),
             );
             adoc_clear((*in_file).adoc_index);
@@ -153,11 +152,8 @@ unsafe extern "C" fn adoc_close(in_file: *mut ImodImageFile) {
         if !in_file.is_null() && (*in_file).adoc_index >= 0 {
             adoc_clear((*in_file).adoc_index);
         }
-        if !in_file.is_null() && !(*in_file).fp.is_null() {
-            libc::fclose((*in_file).fp);
-        }
         if !in_file.is_null() {
-            (*in_file).fp = core::ptr::null_mut();
+            (*in_file).fp = None;
             (*in_file).adoc_index = -1;
         }
     }
@@ -167,12 +163,18 @@ unsafe extern "C" fn adoc_close(in_file: *mut ImodImageFile) {
 unsafe extern "C" fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
     unsafe {
         (*in_file).adoc_index = adoc_read((*in_file).filename);
-        (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
-        if (*in_file).fp.is_null() {
-            b3d_error(stderr, format_args!("ERROR: adocReopen - reopening file"));
+        (*in_file).fp = ImodFile::open(
+            &core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy(),
+            &core::ffi::CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+        );
+        if (*in_file).fp.is_none() {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!("ERROR: adocReopen - reopening file"),
+            );
             adoc_clear((*in_file).adoc_index);
         }
-        if (*in_file).adoc_index < 0 || (*in_file).fp.is_null() {
+        if (*in_file).adoc_index < 0 || (*in_file).fp.is_none() {
             1
         } else {
             0
@@ -222,7 +224,7 @@ unsafe fn read_section_file(
         let mut filename = core::ptr::null_mut();
         if adoc_get_section_name(IIADOC_IMAGE.as_ptr(), section, &mut filename) != 0 {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiadoc - Getting filename for section {}", section),
             );
             return 1;
@@ -244,7 +246,7 @@ unsafe fn read_section_file(
             use_name = libc::malloc(full_len).cast();
             if use_name.is_null() {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!("ERROR: iiadoc - Allocating memory for filename\n"),
                 );
                 return 1;
@@ -259,7 +261,7 @@ unsafe fn read_section_file(
         }
         if sect_file.is_null() {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiadoc - Cannot open file for section {}\n", section),
             );
             return 1;
@@ -269,7 +271,7 @@ unsafe fn read_section_file(
             || (*sect_file).mode != (*in_file).mode
         {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: iiadoc - File for section {} has wrong size or mode (section: {} x {} mode {}, file: {} x {} mode {})\n",
                     section,

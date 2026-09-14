@@ -2,6 +2,8 @@
 
 use std::io::Write;
 
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
+
 use super::imat::{imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform};
 use super::imodel::{
     IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_END, IMOD_MESH_ENDPOLY,
@@ -14,7 +16,7 @@ use super::iobj::{
 use super::iview::imod_view_model_default;
 
 /// Original: `imod_to_wmod` (`imodel_to.c:36`).
-pub fn imod_to_wmod(imod: &Imod, output: &mut impl Write, filename: &str) -> Result<(), i32> {
+pub fn imod_to_wmod(imod: &Imod, output: &mut dyn Write, filename: &str) -> Result<(), i32> {
     let contour_count: usize = imod.obj.iter().map(|object| object.cont.len()).sum();
     let point_total: usize = imod
         .obj
@@ -79,7 +81,7 @@ pub fn imod_to_wmod(imod: &Imod, output: &mut impl Write, filename: &str) -> Res
 ///
 /// `imodMeshPolyNormFactors` (`imesh.c:312`) has no translated module yet, so
 /// its three index factors are computed in place.
-pub fn imod_to_nff(mod_: &Imod, fout: *mut libc::FILE) -> i32 {
+pub fn imod_to_nff(mod_: &Imod, fout: &mut ImodFile) -> i32 {
     let mut _xo = 0f32;
     let _yo = 0f32;
     let _zo = 0f32; /* x,y,z offsets. */
@@ -94,18 +96,24 @@ pub fn imod_to_nff(mod_: &Imod, fout: *mut libc::FILE) -> i32 {
         /* Set color for each object. */
         let obj = &mod_.obj[objnum];
 
-        unsafe {
-            libc::fprintf(
-                fout,
-                c"# object with %d contours.\n".as_ptr(),
-                obj.cont.len() as std::ffi::c_int,
+        {
+            let _ = fout.write_all(
+                c_format(
+                    "# object with %d contours.\n",
+                    &[CArg::Int(obj.cont.len() as i64)],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(
-                fout,
-                c"f %g %g %g 0 0 0 0 0\n".as_ptr(),
-                obj.red as std::ffi::c_double,
-                obj.green as std::ffi::c_double,
-                obj.blue as std::ffi::c_double,
+            let _ = fout.write_all(
+                c_format(
+                    "f %g %g %g 0 0 0 0 0\n",
+                    &[
+                        CArg::Dbl(obj.red as f64),
+                        CArg::Dbl(obj.green as f64),
+                        CArg::Dbl(obj.blue as f64),
+                    ],
+                )
+                .as_bytes(),
             );
         }
 
@@ -136,20 +144,26 @@ pub fn imod_to_nff(mod_: &Imod, fout: *mut libc::FILE) -> i32 {
                                 };
                             i += 1;
                             while mesh.list[i] != IMOD_MESH_ENDPOLY {
-                                unsafe { libc::fprintf(fout, c"pp 3\n".as_ptr()) };
+                                {
+                                    let _ = fout.write_all(c_format("pp 3\n", &[]).as_bytes());
+                                }
                                 for _ in 0..3 {
                                     let vert = mesh.vert[mesh.list[i + vert_base] as usize];
                                     let norm = mesh.vert[(mesh.list[i] + norm_add) as usize];
-                                    unsafe {
-                                        libc::fprintf(
-                                            fout,
-                                            c"%g %g %g %g %g %g\n".as_ptr(),
-                                            (vert.x * mod_.xscale) as std::ffi::c_double,
-                                            (vert.y * mod_.yscale) as std::ffi::c_double,
-                                            (vert.z * mod_.zscale) as std::ffi::c_double,
-                                            (norm.x * mod_.xscale) as std::ffi::c_double,
-                                            (norm.y * mod_.yscale) as std::ffi::c_double,
-                                            (norm.z * mod_.zscale) as std::ffi::c_double,
+                                    {
+                                        let _ = fout.write_all(
+                                            c_format(
+                                                "%g %g %g %g %g %g\n",
+                                                &[
+                                                    CArg::Dbl((vert.x * mod_.xscale) as f64),
+                                                    CArg::Dbl((vert.y * mod_.yscale) as f64),
+                                                    CArg::Dbl((vert.z * mod_.zscale) as f64),
+                                                    CArg::Dbl((norm.x * mod_.xscale) as f64),
+                                                    CArg::Dbl((norm.y * mod_.yscale) as f64),
+                                                    CArg::Dbl((norm.z * mod_.zscale) as f64),
+                                                ],
+                                            )
+                                            .as_bytes(),
                                         );
                                     }
                                     i += list_inc;
@@ -170,130 +184,203 @@ pub fn imod_to_nff(mod_: &Imod, fout: *mut libc::FILE) -> i32 {
 
                 if iobj_scat(obj.flags) != 0 {
                     for i in 0..cont.pts.len() {
-                        unsafe {
-                            libc::fprintf(
-                                fout,
-                                c"s %g %g %g %d\n".as_ptr(),
-                                ((cont.pts[i].x + mod_.xoffset) * mod_.xscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[i].y + mod_.yoffset) * mod_.yscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[i].z + mod_.zoffset) * mod_.zscale)
-                                    as std::ffi::c_double,
-                                obj.pdrawsize as std::ffi::c_int,
+                        {
+                            let _ = fout.write_all(
+                                c_format(
+                                    "s %g %g %g %d\n",
+                                    &[
+                                        CArg::Dbl(
+                                            ((cont.pts[i].x + mod_.xoffset) * mod_.xscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[i].y + mod_.yoffset) * mod_.yscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[i].z + mod_.zoffset) * mod_.zscale) as f64,
+                                        ),
+                                        CArg::Int(obj.pdrawsize as i64),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
                         }
                     }
                 } else if (obj.flags & IMOD_OBJFLAG_OPEN) == 0 {
-                    unsafe {
-                        libc::fprintf(fout, c"p %d\n".as_ptr(), cont.pts.len() as std::ffi::c_int)
-                    };
+                    {
+                        let _ = fout.write_all(
+                            c_format("p %d\n", &[CArg::Int(cont.pts.len() as i64)]).as_bytes(),
+                        );
+                    }
                     for i in 0..cont.pts.len() {
-                        unsafe {
-                            libc::fprintf(
-                                fout,
-                                c"%g %g %g\n".as_ptr(),
-                                ((cont.pts[i].x + mod_.xoffset) * mod_.xscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[i].y + mod_.yoffset) * mod_.yscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[i].z + mod_.zoffset) * mod_.zscale)
-                                    as std::ffi::c_double,
+                        {
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%g %g %g\n",
+                                    &[
+                                        CArg::Dbl(
+                                            ((cont.pts[i].x + mod_.xoffset) * mod_.xscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[i].y + mod_.yoffset) * mod_.yscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[i].z + mod_.zoffset) * mod_.zscale) as f64,
+                                        ),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
                         }
                     }
                 } else {
                     if cont.pts.len() == 1 {
-                        unsafe { libc::fprintf(fout, c"p %d\n".as_ptr(), 3 as std::ffi::c_int) };
+                        {
+                            let _ = fout
+                                .write_all(c_format("p %d\n", &[CArg::Int((3) as i64)]).as_bytes());
+                        }
                         for _ in 0..3 {
-                            unsafe {
-                                libc::fprintf(
-                                    fout,
-                                    c"%g %g %g\n".as_ptr(),
-                                    ((cont.pts[0].x + mod_.xoffset) * mod_.xscale)
-                                        as std::ffi::c_double,
-                                    ((cont.pts[0].y + mod_.yoffset) * mod_.yscale)
-                                        as std::ffi::c_double,
-                                    ((cont.pts[0].z + mod_.zoffset) * mod_.zscale)
-                                        as std::ffi::c_double,
+                            {
+                                let _ = fout.write_all(
+                                    c_format(
+                                        "%g %g %g\n",
+                                        &[
+                                            CArg::Dbl(
+                                                ((cont.pts[0].x + mod_.xoffset) * mod_.xscale)
+                                                    as f64,
+                                            ),
+                                            CArg::Dbl(
+                                                ((cont.pts[0].y + mod_.yoffset) * mod_.yscale)
+                                                    as f64,
+                                            ),
+                                            CArg::Dbl(
+                                                ((cont.pts[0].z + mod_.zoffset) * mod_.zscale)
+                                                    as f64,
+                                            ),
+                                        ],
+                                    )
+                                    .as_bytes(),
                                 );
                             }
                         }
                     }
 
                     if cont.pts.len() == 2 {
-                        unsafe {
-                            libc::fprintf(fout, c"p %d\n".as_ptr(), 3 as std::ffi::c_int);
-                            libc::fprintf(
-                                fout,
-                                c"%g %g %g\n".as_ptr(),
-                                ((cont.pts[0].x + mod_.xoffset) * mod_.xscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[0].y + mod_.yoffset) * mod_.yscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[0].z + mod_.zoffset) * mod_.zscale)
-                                    as std::ffi::c_double,
+                        {
+                            let _ = fout
+                                .write_all(c_format("p %d\n", &[CArg::Int((3) as i64)]).as_bytes());
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%g %g %g\n",
+                                    &[
+                                        CArg::Dbl(
+                                            ((cont.pts[0].x + mod_.xoffset) * mod_.xscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[0].y + mod_.yoffset) * mod_.yscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[0].z + mod_.zoffset) * mod_.zscale) as f64,
+                                        ),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
 
-                            libc::fprintf(
-                                fout,
-                                c"%g %g %g\n".as_ptr(),
-                                ((cont.pts[1].x + mod_.xoffset) * mod_.xscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[1].y + mod_.yoffset) * mod_.yscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[1].z + mod_.zoffset) * mod_.zscale)
-                                    as std::ffi::c_double,
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%g %g %g\n",
+                                    &[
+                                        CArg::Dbl(
+                                            ((cont.pts[1].x + mod_.xoffset) * mod_.xscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[1].y + mod_.yoffset) * mod_.yscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[1].z + mod_.zoffset) * mod_.zscale) as f64,
+                                        ),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
 
-                            libc::fprintf(
-                                fout,
-                                c"%g %g %g\n".as_ptr(),
-                                ((cont.pts[0].x + mod_.xoffset) * mod_.xscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[0].y + mod_.yoffset) * mod_.yscale)
-                                    as std::ffi::c_double,
-                                ((cont.pts[0].z + mod_.zoffset) * mod_.zscale)
-                                    as std::ffi::c_double,
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%g %g %g\n",
+                                    &[
+                                        CArg::Dbl(
+                                            ((cont.pts[0].x + mod_.xoffset) * mod_.xscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[0].y + mod_.yoffset) * mod_.yscale) as f64,
+                                        ),
+                                        CArg::Dbl(
+                                            ((cont.pts[0].z + mod_.zoffset) * mod_.zscale) as f64,
+                                        ),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
                         }
                     }
 
                     if cont.pts.len() > 2 {
-                        unsafe {
-                            libc::fprintf(
-                                fout,
-                                c"p %d\n".as_ptr(),
-                                ((cont.pts.len() * 2) - 2) as std::ffi::c_int,
-                            )
-                        };
+                        {
+                            let _ = fout.write_all(
+                                c_format("p %d\n", &[CArg::Int(((cont.pts.len() * 2) - 2) as i64)])
+                                    .as_bytes(),
+                            );
+                        }
                         for i in 0..cont.pts.len() {
-                            unsafe {
-                                libc::fprintf(
-                                    fout,
-                                    c"%g %g %g\n".as_ptr(),
-                                    ((cont.pts[i].x + mod_.xoffset) * mod_.xscale)
-                                        as std::ffi::c_double,
-                                    ((cont.pts[i].y + mod_.yoffset) * mod_.yscale)
-                                        as std::ffi::c_double,
-                                    ((cont.pts[i].z + mod_.zoffset) * mod_.zscale)
-                                        as std::ffi::c_double,
+                            {
+                                let _ = fout.write_all(
+                                    c_format(
+                                        "%g %g %g\n",
+                                        &[
+                                            CArg::Dbl(
+                                                ((cont.pts[i].x + mod_.xoffset) * mod_.xscale)
+                                                    as f64,
+                                            ),
+                                            CArg::Dbl(
+                                                ((cont.pts[i].y + mod_.yoffset) * mod_.yscale)
+                                                    as f64,
+                                            ),
+                                            CArg::Dbl(
+                                                ((cont.pts[i].z + mod_.zoffset) * mod_.zscale)
+                                                    as f64,
+                                            ),
+                                        ],
+                                    )
+                                    .as_bytes(),
                                 );
                             }
                         }
 
                         let mut i = cont.pts.len() as i32 - 2;
                         while i > 0 {
-                            unsafe {
-                                libc::fprintf(
-                                    fout,
-                                    c"%g %g %g\n".as_ptr(),
-                                    ((cont.pts[i as usize].x + mod_.xoffset) * mod_.xscale)
-                                        as std::ffi::c_double,
-                                    ((cont.pts[i as usize].y + mod_.yoffset) * mod_.yscale)
-                                        as std::ffi::c_double,
-                                    ((cont.pts[i as usize].z + mod_.zoffset) * mod_.zscale)
-                                        as std::ffi::c_double,
+                            {
+                                let _ = fout.write_all(
+                                    c_format(
+                                        "%g %g %g\n",
+                                        &[
+                                            CArg::Dbl(
+                                                ((cont.pts[i as usize].x + mod_.xoffset)
+                                                    * mod_.xscale)
+                                                    as f64,
+                                            ),
+                                            CArg::Dbl(
+                                                ((cont.pts[i as usize].y + mod_.yoffset)
+                                                    * mod_.yscale)
+                                                    as f64,
+                                            ),
+                                            CArg::Dbl(
+                                                ((cont.pts[i as usize].z + mod_.zoffset)
+                                                    * mod_.zscale)
+                                                    as f64,
+                                            ),
+                                        ],
+                                    )
+                                    .as_bytes(),
                                 );
                             }
                             i -= 1;
@@ -311,20 +398,20 @@ pub fn imod_to_nff(mod_: &Imod, fout: *mut libc::FILE) -> i32 {
 /// Writes `type<n>.cont`, `type<n>.mesh` and `Viewdata` into the working
 /// directory exactly as the source does.
 pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
-    let vdata = c"visible=no rep=l trans=no cull=off depthcue=yes shademode=f";
-    let mdata = c"visible=no rep=l trans=yes cull=off depthcue=yes shademode=s";
-    let viewdata = c"Viewdata";
+    let vdata = "visible=no rep=l trans=no cull=off depthcue=yes shademode=f";
+    let mdata = "visible=no rep=l trans=yes cull=off depthcue=yes shademode=s";
+    let viewdata = "Viewdata";
 
     for ob in 0..mod_.obj.len() {
         imod_object_sort(&mut mod_.obj[ob]);
     }
 
     for ob in 0..mod_.obj.len() {
-        let filename = std::ffi::CString::new(format!("type{}.cont", ob)).unwrap();
-        let fout = unsafe { libc::fopen(filename.as_ptr(), c"w".as_ptr()) };
-        if fout.is_null() {
+        let filename = format!("type{}.cont", ob);
+        let Some(mut fout) = ImodFile::open(&filename, "w") else {
             continue;
-        }
+        };
+        let fout = &mut fout;
 
         for co in 0..mod_.obj[ob].cont.len() {
             let cont = &mod_.obj[ob].cont[co];
@@ -343,100 +430,133 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
                 continue;
             }
 
-            unsafe {
-                libc::fprintf(
-                    fout,
-                    c"#synu\n#Imod object %d\n".as_ptr(),
-                    ob as std::ffi::c_int,
+            {
+                let _ = fout.write_all(
+                    c_format("#synu\n#Imod object %d\n", &[CArg::Int(ob as i64)]).as_bytes(),
                 );
             }
             if mod_.obj[ob].flags & IMOD_OBJFLAG_OPEN != 0 {
-                unsafe {
-                    libc::fprintf(
-                        fout,
-                        c"polygonmesh 4l %dl %dl 1l\n%d\n%d\n1\n0\n".as_ptr(),
-                        vertices as std::ffi::c_int,
-                        edges as std::ffi::c_int,
-                        vertices as std::ffi::c_int,
-                        edges as std::ffi::c_int,
+                {
+                    let _ = fout.write_all(
+                        c_format(
+                            "polygonmesh 4l %dl %dl 1l\n%d\n%d\n1\n0\n",
+                            &[
+                                CArg::Int(vertices as i64),
+                                CArg::Int(edges as i64),
+                                CArg::Int(vertices as i64),
+                                CArg::Int(edges as i64),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                 }
 
                 if v > 1 {
                     for pt in 0..v as usize {
-                        unsafe {
-                            libc::fprintf(
-                                fout,
-                                c"%5.2f %5.2f %5.2f\n".as_ptr(),
-                                cont.pts[pt].x as std::ffi::c_double,
-                                cont.pts[pt].y as std::ffi::c_double,
-                                (cont.pts[pt].z * mod_.zscale) as std::ffi::c_double,
+                        {
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%5.2f %5.2f %5.2f\n",
+                                    &[
+                                        CArg::Dbl(cont.pts[pt].x as f64),
+                                        CArg::Dbl(cont.pts[pt].y as f64),
+                                        CArg::Dbl((cont.pts[pt].z * mod_.zscale) as f64),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
                         }
                     }
                     for pt in 0..v {
-                        unsafe { libc::fprintf(fout, c"%d\n".as_ptr(), pt as std::ffi::c_int) };
+                        {
+                            let _ = fout
+                                .write_all(c_format("%d\n", &[CArg::Int(pt as i64)]).as_bytes());
+                        }
                     }
                     let mut pt = v - 2;
                     while pt > 0 {
-                        unsafe { libc::fprintf(fout, c"%d\n".as_ptr(), pt as std::ffi::c_int) };
+                        {
+                            let _ = fout
+                                .write_all(c_format("%d\n", &[CArg::Int(pt as i64)]).as_bytes());
+                        }
                         pt -= 1;
                     }
-                    unsafe {
-                        libc::fprintf(fout, c"%d\n".as_ptr(), ((2 * v) - 3) as std::ffi::c_int)
-                    };
+                    {
+                        let _ = fout.write_all(
+                            c_format("%d\n", &[CArg::Int(((2 * v) - 3) as i64)]).as_bytes(),
+                        );
+                    }
                 } else {
-                    unsafe {
-                        libc::fprintf(
-                            fout,
-                            c"%5.2f %5.2f %5.2f\n".as_ptr(),
-                            cont.pts[0].x as std::ffi::c_double,
-                            cont.pts[0].y as std::ffi::c_double,
-                            (cont.pts[0].z * mod_.zscale) as std::ffi::c_double,
+                    {
+                        let _ = fout.write_all(
+                            c_format(
+                                "%5.2f %5.2f %5.2f\n",
+                                &[
+                                    CArg::Dbl(cont.pts[0].x as f64),
+                                    CArg::Dbl(cont.pts[0].y as f64),
+                                    CArg::Dbl((cont.pts[0].z * mod_.zscale) as f64),
+                                ],
+                            )
+                            .as_bytes(),
                         );
-                        libc::fprintf(
-                            fout,
-                            c"%5.2f %5.2f %5.2f\n".as_ptr(),
-                            cont.pts[0].x as std::ffi::c_double,
-                            cont.pts[0].y as std::ffi::c_double,
-                            (cont.pts[0].z * mod_.zscale) as std::ffi::c_double,
+                        let _ = fout.write_all(
+                            c_format(
+                                "%5.2f %5.2f %5.2f\n",
+                                &[
+                                    CArg::Dbl(cont.pts[0].x as f64),
+                                    CArg::Dbl(cont.pts[0].y as f64),
+                                    CArg::Dbl((cont.pts[0].z * mod_.zscale) as f64),
+                                ],
+                            )
+                            .as_bytes(),
                         );
-                        libc::fprintf(fout, c"0\n1\n1\n".as_ptr());
+                        let _ = fout.write_all(c_format("0\n1\n1\n", &[]).as_bytes());
                     }
                 }
             } else {
-                unsafe {
-                    libc::fprintf(
-                        fout,
-                        c"polygonmesh 4l %dl %dl 1l\n%d\n%d\n1\n0\n".as_ptr(),
-                        v as std::ffi::c_int,
-                        v as std::ffi::c_int,
-                        v as std::ffi::c_int,
-                        v as std::ffi::c_int,
+                {
+                    let _ = fout.write_all(
+                        c_format(
+                            "polygonmesh 4l %dl %dl 1l\n%d\n%d\n1\n0\n",
+                            &[
+                                CArg::Int(v as i64),
+                                CArg::Int(v as i64),
+                                CArg::Int(v as i64),
+                                CArg::Int(v as i64),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                 }
                 for pt in 0..v as usize {
-                    unsafe {
-                        libc::fprintf(
-                            fout,
-                            c"%5.2f %5.2f %5.2f\n".as_ptr(),
-                            cont.pts[pt].x as std::ffi::c_double,
-                            cont.pts[pt].y as std::ffi::c_double,
-                            (cont.pts[pt].z * mod_.zscale) as std::ffi::c_double,
+                    {
+                        let _ = fout.write_all(
+                            c_format(
+                                "%5.2f %5.2f %5.2f\n",
+                                &[
+                                    CArg::Dbl(cont.pts[pt].x as f64),
+                                    CArg::Dbl(cont.pts[pt].y as f64),
+                                    CArg::Dbl((cont.pts[pt].z * mod_.zscale) as f64),
+                                ],
+                            )
+                            .as_bytes(),
                         );
                     }
                 }
                 let mut pt = 0;
                 while pt < v {
-                    unsafe { libc::fprintf(fout, c"%d\n".as_ptr(), pt as std::ffi::c_int) };
+                    {
+                        let _ =
+                            fout.write_all(c_format("%d\n", &[CArg::Int(pt as i64)]).as_bytes());
+                    }
                     pt += 1;
                 }
                 pt -= 1;
-                unsafe { libc::fprintf(fout, c"%d\n".as_ptr(), pt as std::ffi::c_int) };
+                {
+                    let _ = fout.write_all(c_format("%d\n", &[CArg::Int(pt as i64)]).as_bytes());
+                }
             }
         }
-
-        unsafe { libc::fclose(fout) };
 
         if !mod_.obj[ob].mesh.is_empty() {
             let zscale = mod_.zscale as f64;
@@ -444,47 +564,53 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
         }
     }
 
-    let fview = unsafe { libc::fopen(viewdata.as_ptr(), c"w".as_ptr()) };
+    let fview = ImodFile::open(viewdata, "w");
 
-    if !fview.is_null() {
+    if let Some(mut fview) = fview {
+        let fview = &mut fview;
         for ob in 0..mod_.obj.len() {
-            unsafe {
-                libc::fprintf(
-                    fview,
-                    c"type%d.cont %s ".as_ptr(),
-                    ob as std::ffi::c_int,
-                    vdata.as_ptr(),
+            {
+                let _ = fview.write_all(
+                    c_format("type%d.cont %s ", &[CArg::Int(ob as i64), CArg::Str(vdata)])
+                        .as_bytes(),
                 );
-                libc::fprintf(
-                    fview,
-                    c"color=%1.2f,%1.2f,%1.2f,%1.2f\n".as_ptr(),
-                    mod_.obj[ob].red as std::ffi::c_double,
-                    mod_.obj[ob].green as std::ffi::c_double,
-                    mod_.obj[ob].blue as std::ffi::c_double,
-                    mod_.obj[ob].trans as std::ffi::c_double / 255.0,
+                let _ = fview.write_all(
+                    c_format(
+                        "color=%1.2f,%1.2f,%1.2f,%1.2f\n",
+                        &[
+                            CArg::Dbl(mod_.obj[ob].red as f64),
+                            CArg::Dbl(mod_.obj[ob].green as f64),
+                            CArg::Dbl(mod_.obj[ob].blue as f64),
+                            CArg::Dbl((mod_.obj[ob].trans as std::ffi::c_double / 255.0) as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
             }
 
             if !mod_.obj[ob].mesh.is_empty() {
-                unsafe {
-                    libc::fprintf(
-                        fview,
-                        c"type%d.mesh %s ".as_ptr(),
-                        ob as std::ffi::c_int,
-                        mdata.as_ptr(),
+                {
+                    let _ = fview.write_all(
+                        c_format("type%d.mesh %s ", &[CArg::Int(ob as i64), CArg::Str(mdata)])
+                            .as_bytes(),
                     );
-                    libc::fprintf(
-                        fview,
-                        c"color=%1.2f,%1.2f,%1.2f,%1.2f\n".as_ptr(),
-                        mod_.obj[ob].red as std::ffi::c_double,
-                        mod_.obj[ob].green as std::ffi::c_double,
-                        mod_.obj[ob].blue as std::ffi::c_double,
-                        mod_.obj[ob].trans as std::ffi::c_double / 255.0,
+                    let _ = fview.write_all(
+                        c_format(
+                            "color=%1.2f,%1.2f,%1.2f,%1.2f\n",
+                            &[
+                                CArg::Dbl(mod_.obj[ob].red as f64),
+                                CArg::Dbl(mod_.obj[ob].green as f64),
+                                CArg::Dbl(mod_.obj[ob].blue as f64),
+                                CArg::Dbl(
+                                    (mod_.obj[ob].trans as std::ffi::c_double / 255.0) as f64,
+                                ),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                 }
             }
         }
-        unsafe { libc::fclose(fview) };
     }
 
     0
@@ -492,11 +618,15 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
 
 /// Original: `imod_mesh_to_synu` (`imodel_to.c:381`).
 pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
-    let filename = std::ffi::CString::new(format!("type{}.mesh", no)).unwrap();
-    let fout = unsafe { libc::fopen(filename.as_ptr(), c"w".as_ptr()) };
-    if fout.is_null() {
+    let filename = format!("type{}.mesh", no);
+    // `imodel_to.c:394` opens this stream and **never closes it** -- the source
+    // has no `fclose` on this path, so the C relies on `exit()` flushing every
+    // open stream.  The translated handle closes when it goes out of scope,
+    // which writes the same bytes and differs only in descriptor lifetime.
+    let Some(mut fout) = ImodFile::open(&filename, "w") else {
         return -1;
-    }
+    };
+    let fout = &mut fout;
 
     for i in 0..obj.mesh.len() {
         let mesh = &obj.mesh[i];
@@ -507,35 +637,44 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
         let no_of_polys = no_of_verts;
         let no_of_edges = no_of_polys * 3;
 
-        unsafe {
-            libc::fprintf(
-                fout,
-                c"#synu\n#Imod object %d\n#mesh %d\n".as_ptr(),
-                no as std::ffi::c_int,
-                i as std::ffi::c_int,
+        {
+            let _ = fout.write_all(
+                c_format(
+                    "#synu\n#Imod object %d\n#mesh %d\n",
+                    &[CArg::Int(no as i64), CArg::Int(i as i64)],
+                )
+                .as_bytes(),
             );
 
-            libc::fprintf(
-                fout,
-                c"polygonmesh 4l %dl %dl %dl\n%d\n%d\n%d\n0\n".as_ptr(),
-                no_of_verts as std::ffi::c_int,
-                no_of_edges as std::ffi::c_int,
-                no_of_polys as std::ffi::c_int,
-                no_of_verts as std::ffi::c_int,
-                no_of_edges as std::ffi::c_int,
-                no_of_polys as std::ffi::c_int,
+            let _ = fout.write_all(
+                c_format(
+                    "polygonmesh 4l %dl %dl %dl\n%d\n%d\n%d\n0\n",
+                    &[
+                        CArg::Int(no_of_verts as i64),
+                        CArg::Int(no_of_edges as i64),
+                        CArg::Int(no_of_polys as i64),
+                        CArg::Int(no_of_verts as i64),
+                        CArg::Int(no_of_edges as i64),
+                        CArg::Int(no_of_polys as i64),
+                    ],
+                )
+                .as_bytes(),
             );
         }
 
         /* vertices list */
         for v in 0..no_of_verts as usize {
-            unsafe {
-                libc::fprintf(
-                    fout,
-                    c"%5.2f %5.2f %5.2f\n".as_ptr(),
-                    mesh.vert[v].x as std::ffi::c_double,
-                    mesh.vert[v].y as std::ffi::c_double,
-                    mesh.vert[v].z as std::ffi::c_double * zscale,
+            {
+                let _ = fout.write_all(
+                    c_format(
+                        "%5.2f %5.2f %5.2f\n",
+                        &[
+                            CArg::Dbl(mesh.vert[v].x as f64),
+                            CArg::Dbl(mesh.vert[v].y as f64),
+                            CArg::Dbl((mesh.vert[v].z as std::ffi::c_double * zscale) as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
             }
         }
@@ -613,30 +752,40 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
                     }
 
                     if direction > 0 {
-                        unsafe {
-                            libc::fprintf(
-                                fout,
-                                c"%d\n%d\n%d\n".as_ptr(),
-                                v3 as std::ffi::c_int,
-                                v2 as std::ffi::c_int,
-                                v1 as std::ffi::c_int,
-                            )
-                        };
+                        {
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%d\n%d\n%d\n",
+                                    &[
+                                        CArg::Int(v3 as i64),
+                                        CArg::Int(v2 as i64),
+                                        CArg::Int(v1 as i64),
+                                    ],
+                                )
+                                .as_bytes(),
+                            );
+                        }
                     } else {
-                        unsafe {
-                            libc::fprintf(
-                                fout,
-                                c"%d\n%d\n%d\n".as_ptr(),
-                                v1 as std::ffi::c_int,
-                                v2 as std::ffi::c_int,
-                                v3 as std::ffi::c_int,
-                            )
-                        };
+                        {
+                            let _ = fout.write_all(
+                                c_format(
+                                    "%d\n%d\n%d\n",
+                                    &[
+                                        CArg::Int(v1 as i64),
+                                        CArg::Int(v2 as i64),
+                                        CArg::Int(v3 as i64),
+                                    ],
+                                )
+                                .as_bytes(),
+                            );
+                        }
                     }
                     v1 = v2;
                     v2 = mesh.list[l];
                 } else {
-                    unsafe { libc::fprintf(fout, c"0\n1\n2\n".as_ptr()) };
+                    {
+                        let _ = fout.write_all(c_format("0\n1\n2\n", &[]).as_bytes());
+                    }
                 }
             }
             l += 1;
@@ -644,7 +793,10 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
 
         /* polygon list:  2, 5, 8, 11, ... */
         for p in 0..no_of_polys {
-            unsafe { libc::fprintf(fout, c"%d\n".as_ptr(), ((p * 3) + 2) as std::ffi::c_int) };
+            {
+                let _ =
+                    fout.write_all(c_format("%d\n", &[CArg::Int(((p * 3) + 2) as i64)]).as_bytes());
+            }
         }
     }
     0
@@ -657,14 +809,14 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
  */
 
 /// Original: `imod_to_RIB` (`imodel_to.c:523`).
-pub fn imod_to_rib(imod: &mut Imod, fout: *mut libc::FILE) -> i32 {
+pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
     let image_max = Ipoint {
         x: 0.,
         y: 0.,
         z: 0.,
     };
 
-    let _image_filename = c"imod2RIB.tif";
+    let _image_filename = "imod2RIB.tif";
     let mut opac: f32;
     let mut cscale: f32; /* camera scale */
     let mut fovytan: f32;
@@ -701,129 +853,155 @@ pub fn imod_to_rib(imod: &mut Imod, fout: *mut libc::FILE) -> i32 {
 
     cdist = (cdist as f64 / 0.75) as f32;
 
-    unsafe {
-        libc::fprintf(fout, c"#RenderMan RIB-Structure 1.0\n".as_ptr());
-        libc::fprintf(fout, c"#Created\n".as_ptr());
-        libc::fprintf(fout, c"#by IMOD\n\n".as_ptr());
+    {
+        let _ = fout.write_all(c_format("#RenderMan RIB-Structure 1.0\n", &[]).as_bytes());
+        let _ = fout.write_all(c_format("#Created\n", &[]).as_bytes());
+        let _ = fout.write_all(c_format("#by IMOD\n\n", &[]).as_bytes());
 
-        libc::fprintf(
-            fout,
-            c"#The Renderman (R) Interface Procedures and RIB Protocol are:\n".as_ptr(),
+        let _ = fout.write_all(
+            c_format(
+                "#The Renderman (R) Interface Procedures and RIB Protocol are:\n",
+                &[],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(fout, c"#Copyright 1988,1989, Pixar.\n".as_ptr());
-        libc::fprintf(fout, c"#All rights reseved.\n".as_ptr());
-        libc::fprintf(
-            fout,
-            c"#RenderMan (R) is a registered trademark of Pixar.\n".as_ptr(),
+        let _ = fout.write_all(c_format("#Copyright 1988,1989, Pixar.\n", &[]).as_bytes());
+        let _ = fout.write_all(c_format("#All rights reseved.\n", &[]).as_bytes());
+        let _ = fout.write_all(
+            c_format("#RenderMan (R) is a registered trademark of Pixar.\n", &[]).as_bytes(),
         );
-        libc::fprintf(fout, c"#\n\n".as_ptr());
+        let _ = fout.write_all(c_format("#\n\n", &[]).as_bytes());
 
         if vw.fovy != 0. {
-            libc::fprintf(
-                fout,
-                c"Projection \"perspective\"  \"fov\" %g\n".as_ptr(),
-                vw.fovy as std::ffi::c_double,
+            let _ = fout.write_all(
+                c_format(
+                    "Projection \"perspective\"  \"fov\" %g\n",
+                    &[CArg::Dbl(vw.fovy as f64)],
+                )
+                .as_bytes(),
             );
             cscale = 1.0;
         }
 
         /* Position light for Model */
-        libc::fprintf(
-            fout,
-            c"LightSource \"distantlight\" 1 \"from\" [%g %g %g] ".as_ptr(),
-            lxn as std::ffi::c_double,
-            lyn as std::ffi::c_double,
-            lzn as std::ffi::c_double,
+        let _ = fout.write_all(
+            c_format(
+                "LightSource \"distantlight\" 1 \"from\" [%g %g %g] ",
+                &[
+                    CArg::Dbl(lxn as f64),
+                    CArg::Dbl(lyn as f64),
+                    CArg::Dbl(lzn as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(fout, c"\"to\" [0 0 0] \"intensity\" 1\n".as_ptr());
+        let _ = fout.write_all(c_format("\"to\" [0 0 0] \"intensity\" 1\n", &[]).as_bytes());
 
-        libc::fprintf(fout, c"\nWorldBegin\n".as_ptr());
-        libc::fprintf(
-            fout,
-            c"Translate 0 0 %g\n".as_ptr(),
-            cdist as std::ffi::c_double,
-        );
-        libc::fprintf(
-            fout,
-            c"Scale %g %g -%g\n".as_ptr(),
-            cscale as std::ffi::c_double,
-            cscale as std::ffi::c_double,
-            cscale as std::ffi::c_double,
-        );
-
-        libc::fprintf(
-            fout,
-            c"Rotate %g 1 0 0\n".as_ptr(),
-            vw.rot.x as std::ffi::c_double,
-        );
-        libc::fprintf(
-            fout,
-            c"Rotate %g 0 1 0\n".as_ptr(),
-            vw.rot.y as std::ffi::c_double,
-        );
-        libc::fprintf(
-            fout,
-            c"Rotate %g 0 0 1\n".as_ptr(),
-            vw.rot.z as std::ffi::c_double,
+        let _ = fout.write_all(c_format("\nWorldBegin\n", &[]).as_bytes());
+        let _ =
+            fout.write_all(c_format("Translate 0 0 %g\n", &[CArg::Dbl(cdist as f64)]).as_bytes());
+        let _ = fout.write_all(
+            c_format(
+                "Scale %g %g -%g\n",
+                &[
+                    CArg::Dbl(cscale as f64),
+                    CArg::Dbl(cscale as f64),
+                    CArg::Dbl(cscale as f64),
+                ],
+            )
+            .as_bytes(),
         );
 
-        libc::fprintf(
-            fout,
-            c"Translate %g %g %g\n".as_ptr(),
-            vw.trans.x as std::ffi::c_double,
-            vw.trans.y as std::ffi::c_double,
-            vw.trans.z as std::ffi::c_double,
+        let _ =
+            fout.write_all(c_format("Rotate %g 1 0 0\n", &[CArg::Dbl(vw.rot.x as f64)]).as_bytes());
+        let _ =
+            fout.write_all(c_format("Rotate %g 0 1 0\n", &[CArg::Dbl(vw.rot.y as f64)]).as_bytes());
+        let _ =
+            fout.write_all(c_format("Rotate %g 0 0 1\n", &[CArg::Dbl(vw.rot.z as f64)]).as_bytes());
+
+        let _ = fout.write_all(
+            c_format(
+                "Translate %g %g %g\n",
+                &[
+                    CArg::Dbl(vw.trans.x as f64),
+                    CArg::Dbl(vw.trans.y as f64),
+                    CArg::Dbl(vw.trans.z as f64),
+                ],
+            )
+            .as_bytes(),
         );
     }
 
     /* Draw each object */
     for ob in 0..imod.obj.len() {
         let obj = &imod.obj[ob];
-        unsafe {
-            libc::fprintf(
-                fout,
-                c"\n# Object %d\n".as_ptr(),
-                (ob + 1) as std::ffi::c_int,
-            )
-        };
+        {
+            let _ = fout
+                .write_all(c_format("\n# Object %d\n", &[CArg::Int((ob + 1) as i64)]).as_bytes());
+        }
         if obj.name[0] != 0 {
-            unsafe { libc::fprintf(fout, c"# %s\n".as_ptr(), obj.name.as_ptr()) };
+            {
+                let _ = fout.write_all(&c_format_bytes(
+                    "# %s\n",
+                    &[CArg::Bytes(
+                        &obj.name[..obj
+                            .name
+                            .iter()
+                            .position(|byte| *byte == 0)
+                            .unwrap_or(obj.name.len())],
+                    )],
+                ));
+            }
         }
         if iobj_off(obj.flags) != 0 {
-            unsafe { libc::fprintf(fout, c"#Turned off, no rendering.\n".as_ptr()) };
+            {
+                let _ = fout.write_all(c_format("#Turned off, no rendering.\n", &[]).as_bytes());
+            }
             continue;
         }
-        unsafe {
-            libc::fprintf(fout, c"AttributeBegin\n".as_ptr());
+        {
+            let _ = fout.write_all(c_format("AttributeBegin\n", &[]).as_bytes());
 
-            libc::fprintf(
-                fout,
-                c"Color [ %g %g %g  ]\n".as_ptr(),
-                obj.red as std::ffi::c_double,
-                obj.green as std::ffi::c_double,
-                obj.blue as std::ffi::c_double,
+            let _ = fout.write_all(
+                c_format(
+                    "Color [ %g %g %g  ]\n",
+                    &[
+                        CArg::Dbl(obj.red as f64),
+                        CArg::Dbl(obj.green as f64),
+                        CArg::Dbl(obj.blue as f64),
+                    ],
+                )
+                .as_bytes(),
             );
 
             opac = (100 - obj.trans as i32) as f32;
             opac = (opac as f64 * 0.01) as f32;
-            libc::fprintf(
-                fout,
-                c"Opacity %g %g %g\n".as_ptr(),
-                opac as std::ffi::c_double,
-                opac as std::ffi::c_double,
-                opac as std::ffi::c_double,
+            let _ = fout.write_all(
+                c_format(
+                    "Opacity %g %g %g\n",
+                    &[
+                        CArg::Dbl(opac as f64),
+                        CArg::Dbl(opac as f64),
+                        CArg::Dbl(opac as f64),
+                    ],
+                )
+                .as_bytes(),
             );
 
-            libc::fprintf(
-                fout,
-                c"LightSource \"ambientlight\" 1 \"intensity\" %g\n".as_ptr(),
-                (obj.ambient as f64 / 256.0) as f32 as std::ffi::c_double,
+            let _ = fout.write_all(
+                c_format(
+                    "LightSource \"ambientlight\" 1 \"intensity\" %g\n",
+                    &[CArg::Dbl(((obj.ambient as f64 / 256.0) as f32) as f64)],
+                )
+                .as_bytes(),
             );
 
-            libc::fprintf(
-                fout,
-                c"Surface \"plastic\" \"Ks\" %g\n".as_ptr(),
-                (obj.shininess as f32 * 0.007_812_5f32) as std::ffi::c_double,
+            let _ = fout.write_all(
+                c_format(
+                    "Surface \"plastic\" \"Ks\" %g\n",
+                    &[CArg::Dbl((obj.shininess as f32 * 0.007_812_5f32) as f64)],
+                )
+                .as_bytes(),
             );
         }
 
@@ -839,9 +1017,13 @@ pub fn imod_to_rib(imod: &mut Imod, fout: *mut libc::FILE) -> i32 {
             p_rib_tubes(fout, obj, imod.zscale as f64);
         }
 
-        unsafe { libc::fprintf(fout, c"AttributeEnd\n".as_ptr()) };
+        {
+            let _ = fout.write_all(c_format("AttributeEnd\n", &[]).as_bytes());
+        }
     }
-    unsafe { libc::fprintf(fout, c"WorldEnd\n".as_ptr()) };
+    {
+        let _ = fout.write_all(c_format("WorldEnd\n", &[]).as_bytes());
+    }
     0
 }
 
@@ -849,7 +1031,7 @@ pub fn imod_to_rib(imod: &mut Imod, fout: *mut libc::FILE) -> i32 {
 ///
 /// `imodMeshPolyNormFactors` (`imesh.c:312`) has no translated module yet, so
 /// its three index factors are computed in place.
-pub fn p_rib_mesh(fout: *mut libc::FILE, mesh: &Imesh, zscale: f64) -> i32 {
+pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
     let mut cndat = Ipoint::default();
     let mut norm = [Ipoint::default(); 3];
     let mut vert = [Ipoint::default(); 3];
@@ -870,24 +1052,32 @@ pub fn p_rib_mesh(fout: *mut libc::FILE, mesh: &Imesh, zscale: f64) -> i32 {
         match mesh.list[i] {
             /* IMOD_MESH_BGNPOLY */
             -21 => {
-                unsafe { libc::fprintf(fout, c"Polygon \"P\" [".as_ptr()) };
+                {
+                    let _ = fout.write_all(c_format("Polygon \"P\" [", &[]).as_bytes());
+                }
                 loop {
                     i += 1;
                     if mesh.list[i] == IMOD_MESH_ENDPOLY {
                         break;
                     }
                     let v = mesh.vert[mesh.list[i] as usize];
-                    unsafe {
-                        libc::fprintf(
-                            fout,
-                            c" %g %g %g ".as_ptr(),
-                            v.x as std::ffi::c_double,
-                            v.y as std::ffi::c_double,
-                            (v.z * z) as std::ffi::c_double,
-                        )
-                    };
+                    {
+                        let _ = fout.write_all(
+                            c_format(
+                                " %g %g %g ",
+                                &[
+                                    CArg::Dbl(v.x as f64),
+                                    CArg::Dbl(v.y as f64),
+                                    CArg::Dbl((v.z * z) as f64),
+                                ],
+                            )
+                            .as_bytes(),
+                        );
+                    }
                 }
-                unsafe { libc::fprintf(fout, c"]\n".as_ptr()) };
+                {
+                    let _ = fout.write_all(c_format("]\n", &[]).as_bytes());
+                }
             }
 
             /* IMOD_MESH_BGNBIGPOLY: todo: draw concave poly */
@@ -913,28 +1103,36 @@ pub fn p_rib_mesh(fout: *mut libc::FILE, mesh: &Imesh, zscale: f64) -> i32 {
                         i += list_inc;
                     }
 
-                    unsafe {
-                        libc::fprintf(fout, c"Polygon \"P\" [".as_ptr());
+                    {
+                        let _ = fout.write_all(c_format("Polygon \"P\" [", &[]).as_bytes());
                         for v in vert {
-                            libc::fprintf(
-                                fout,
-                                c" %g %g %g ".as_ptr(),
-                                v.x as std::ffi::c_double,
-                                v.y as std::ffi::c_double,
-                                (v.z * z) as std::ffi::c_double,
+                            let _ = fout.write_all(
+                                c_format(
+                                    " %g %g %g ",
+                                    &[
+                                        CArg::Dbl(v.x as f64),
+                                        CArg::Dbl(v.y as f64),
+                                        CArg::Dbl((v.z * z) as f64),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
                         }
-                        libc::fprintf(fout, c"] \"N\" [".as_ptr());
+                        let _ = fout.write_all(c_format("] \"N\" [", &[]).as_bytes());
                         for n in norm {
-                            libc::fprintf(
-                                fout,
-                                c" %g %g %g ".as_ptr(),
-                                n.x as std::ffi::c_double,
-                                n.y as std::ffi::c_double,
-                                (n.z * z) as std::ffi::c_double,
+                            let _ = fout.write_all(
+                                c_format(
+                                    " %g %g %g ",
+                                    &[
+                                        CArg::Dbl(n.x as f64),
+                                        CArg::Dbl(n.y as f64),
+                                        CArg::Dbl((n.z * z) as f64),
+                                    ],
+                                )
+                                .as_bytes(),
                             );
                         }
-                        libc::fprintf(fout, c"]\n".as_ptr());
+                        let _ = fout.write_all(c_format("]\n", &[]).as_bytes());
                     }
                 }
             }
@@ -970,7 +1168,7 @@ pub fn p_rib_mesh(fout: *mut libc::FILE, mesh: &Imesh, zscale: f64) -> i32 {
 }
 
 /// Original: `pRIB_scat` (`imodel_to.c:731`).
-pub fn p_rib_scat(fout: *mut libc::FILE, obj: &Iobj, z: f64) -> i32 {
+pub fn p_rib_scat(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
     let ssize = obj.pdrawsize as f32 * 0.5f32;
 
     for co in 0..obj.cont.len() {
@@ -979,24 +1177,32 @@ pub fn p_rib_scat(fout: *mut libc::FILE, obj: &Iobj, z: f64) -> i32 {
             continue;
         }
         for pt in 0..cont.pts.len() {
-            unsafe {
-                libc::fprintf(fout, c"TransformBegin\n".as_ptr());
-                libc::fprintf(
-                    fout,
-                    c"Translate %g %g %g\n".as_ptr(),
-                    cont.pts[pt].x as std::ffi::c_double,
-                    cont.pts[pt].y as std::ffi::c_double,
-                    cont.pts[pt].z as std::ffi::c_double * z,
+            {
+                let _ = fout.write_all(c_format("TransformBegin\n", &[]).as_bytes());
+                let _ = fout.write_all(
+                    c_format(
+                        "Translate %g %g %g\n",
+                        &[
+                            CArg::Dbl(cont.pts[pt].x as f64),
+                            CArg::Dbl(cont.pts[pt].y as f64),
+                            CArg::Dbl((cont.pts[pt].z as std::ffi::c_double * z) as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
-                libc::fprintf(
-                    fout,
-                    c"Scale %g %g %g\n".as_ptr(),
-                    ssize as std::ffi::c_double,
-                    ssize as std::ffi::c_double,
-                    ssize as std::ffi::c_double,
+                let _ = fout.write_all(
+                    c_format(
+                        "Scale %g %g %g\n",
+                        &[
+                            CArg::Dbl(ssize as f64),
+                            CArg::Dbl(ssize as f64),
+                            CArg::Dbl(ssize as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
-                libc::fprintf(fout, c"Sphere 1 -1 1 360\n".as_ptr());
-                libc::fprintf(fout, c"TransformEnd\n".as_ptr());
+                let _ = fout.write_all(c_format("Sphere 1 -1 1 360\n", &[]).as_bytes());
+                let _ = fout.write_all(c_format("TransformEnd\n", &[]).as_bytes());
             }
         }
     }
@@ -1004,7 +1210,7 @@ pub fn p_rib_scat(fout: *mut libc::FILE, obj: &Iobj, z: f64) -> i32 {
 }
 
 /// Original: `pRIB_tubes` (`imodel_to.c:754`).
-pub fn p_rib_tubes(fout: *mut libc::FILE, obj: &Iobj, z: f64) -> i32 {
+pub fn p_rib_tubes(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
     for co in 0..obj.cont.len() {
         let cont = &obj.cont[co];
         let lpt = cont.pts.len() as i32 - 1;
@@ -1028,7 +1234,7 @@ pub fn p_rib_tubes(fout: *mut libc::FILE, obj: &Iobj, z: f64) -> i32 {
 
 /// Original: `prib_tube` (`imodel_to.c:771`).
 pub fn prib_tube(
-    fout: *mut libc::FILE,
+    fout: &mut ImodFile,
     p1: &Ipoint,
     p2: &Ipoint,
     slices: i32,
@@ -1052,23 +1258,27 @@ pub fn prib_tube(
         imod_mat_transform(&mat, &norm, &mut rotated);
         offset[1] = rotated;
 
-        unsafe {
-            libc::fprintf(fout, c"Polygon \"P\" ".as_ptr());
-            libc::fprintf(
-                fout,
-                c"[ %g %g %g  %g %g %g  %g %g %g  %g %g %g ]\n".as_ptr(),
-                (p2.x + offset[0].x) as std::ffi::c_double,
-                (p2.y + offset[0].y) as std::ffi::c_double,
-                p2.z as std::ffi::c_double * z,
-                (p2.x + offset[1].x) as std::ffi::c_double,
-                (p2.y + offset[1].y) as std::ffi::c_double,
-                p2.z as std::ffi::c_double * z,
-                (p1.x + offset[1].x) as std::ffi::c_double,
-                (p1.y + offset[1].y) as std::ffi::c_double,
-                p1.z as std::ffi::c_double * z,
-                (p1.x + offset[0].x) as std::ffi::c_double,
-                (p1.y + offset[0].y) as std::ffi::c_double,
-                p1.z as std::ffi::c_double * z,
+        {
+            let _ = fout.write_all(c_format("Polygon \"P\" ", &[]).as_bytes());
+            let _ = fout.write_all(
+                c_format(
+                    "[ %g %g %g  %g %g %g  %g %g %g  %g %g %g ]\n",
+                    &[
+                        CArg::Dbl((p2.x + offset[0].x) as f64),
+                        CArg::Dbl((p2.y + offset[0].y) as f64),
+                        CArg::Dbl((p2.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl((p2.x + offset[1].x) as f64),
+                        CArg::Dbl((p2.y + offset[1].y) as f64),
+                        CArg::Dbl((p2.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl((p1.x + offset[1].x) as f64),
+                        CArg::Dbl((p1.y + offset[1].y) as f64),
+                        CArg::Dbl((p1.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl((p1.x + offset[0].x) as f64),
+                        CArg::Dbl((p1.y + offset[0].y) as f64),
+                        CArg::Dbl((p1.z as std::ffi::c_double * z) as f64),
+                    ],
+                )
+                .as_bytes(),
             );
         }
         offset[0] = offset[1];

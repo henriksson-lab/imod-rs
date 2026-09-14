@@ -30,11 +30,13 @@ struct OsVersionInfoExW {
     w_reserved: u8,
 }
 
+/// The one foreign boundary of this unit: `kernel32`'s version-compare API,
+/// which `winversion.c` calls directly.  Compiled only on Windows.
 #[cfg(windows)]
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn VerifyVersionInfoW(
-        version_information: *const OsVersionInfoExW,
+        version_information: &OsVersionInfoExW,
         type_mask: u32,
         condition_mask: u64,
     ) -> i32;
@@ -105,7 +107,7 @@ pub fn is_windows_10() -> i32 {
 pub fn is_windows_version(major: i32, op_major: i32, minor: i32, op_minor: i32) -> i32 {
     #[cfg(windows)]
     unsafe {
-        let mut osvi = OsVersionInfoExW {
+        let osvi = OsVersionInfoExW {
             dw_os_version_info_size: core::mem::size_of::<OsVersionInfoExW>() as u32,
             dw_major_version: major as u32,
             dw_minor_version: minor as u32,
@@ -123,7 +125,7 @@ pub fn is_windows_version(major: i32, op_major: i32, minor: i32, op_minor: i32) 
         condition_mask = VerSetConditionMask(condition_mask, VER_MINORVERSION, op_minor as u8);
         condition_mask = VerSetConditionMask(condition_mask, VER_PLATFORMID, VER_EQUAL);
         return if VerifyVersionInfoW(
-            &mut osvi,
+            &osvi,
             VER_MAJORVERSION | VER_MINORVERSION | VER_PLATFORMID,
             condition_mask,
         ) != 0

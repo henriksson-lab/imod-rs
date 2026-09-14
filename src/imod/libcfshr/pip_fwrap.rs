@@ -71,7 +71,7 @@ pub unsafe extern "C" fn pipexitonerrorfw_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_exit_on_error(*useStdErr, cStr);
+    err = pip_exit_on_error(*useStdErr, ::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -118,7 +118,11 @@ pub unsafe extern "C" fn pipreadoptionfile_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_read_option_file(cStr, *helpLevel, *localDir);
+    err = pip_read_option_file(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        *helpLevel,
+        *localDir,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -130,12 +134,10 @@ pub unsafe extern "C" fn pipreadprogdefaults_(
     let mut cStr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
     cStr = pipf2cstr(option, optionSize);
     if cStr.is_null() {
-        pip_set_error(
-            b"Memory error in pipreadprogdefaults_\0" as *const u8 as *const ::core::ffi::c_char,
-        );
+        pip_set_error(b"Memory error in pipreadprogdefaults_");
         return;
     }
-    pip_read_prog_defaults(cStr);
+    pip_read_prog_defaults(::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
 }
 #[unsafe(no_mangle)]
@@ -149,7 +151,7 @@ pub unsafe extern "C" fn pipaddoption_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_add_option(cStr);
+    err = pip_add_option(::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -164,7 +166,7 @@ pub unsafe extern "C" fn pipnextarg_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_next_arg(cStr);
+    err = pip_next_arg(::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -173,7 +175,7 @@ pub unsafe extern "C" fn pipnumberofargs_(
     mut numOptArgs: *mut ::core::ffi::c_int,
     mut numNonOptArgs: *mut ::core::ffi::c_int,
 ) {
-    pip_number_of_args(numOptArgs, numNonOptArgs);
+    pip_number_of_args(&mut *numOptArgs, &mut *numNonOptArgs);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pipgetnonoptionarg_(
@@ -181,18 +183,14 @@ pub unsafe extern "C" fn pipgetnonoptionarg_(
     mut arg: *mut ::core::ffi::c_char,
     mut stringSize: fortStrLen_t,
 ) -> ::core::ffi::c_int {
-    let mut argPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let mut argVec: Vec<u8> = Vec::new();
     let mut err: ::core::ffi::c_int = 0;
-    err = pip_get_non_option_arg(*argNo - 1 as ::core::ffi::c_int, &raw mut argPtr);
+    err = pip_get_non_option_arg(*argNo - 1 as ::core::ffi::c_int, &mut argVec);
+    argVec.push(0);
+    let argPtr = argVec.as_ptr().cast::<::core::ffi::c_char>();
     if err == 0 && c2f_string(argPtr, arg, stringSize as ::core::ffi::c_int) != 0 {
-        pip_set_error(
-            b"Non-option argument too long for character variable\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
+        pip_set_error(b"Non-option argument too long for character variable");
         err = -(1 as ::core::ffi::c_int);
-    }
-    if !argPtr.is_null() {
-        free(argPtr as *mut ::core::ffi::c_void);
     }
     return err;
 }
@@ -210,16 +208,13 @@ pub unsafe extern "C" fn pipgetstring_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_string(cStr, &raw mut strPtr);
+    let mut strVec: Vec<u8> = Vec::new();
+    err = pip_get_string(::core::ffi::CStr::from_ptr(cStr).to_bytes(), &mut strVec);
+    strVec.push(0);
+    strPtr = strVec.as_ptr().cast::<::core::ffi::c_char>().cast_mut();
     if err == 0 && c2f_string(strPtr, string, stringSize as ::core::ffi::c_int) != 0 {
-        pip_set_error(
-            b"In pip_get_string, string is too long for character variable\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
+        pip_set_error(b"In pip_get_string, string is too long for character variable");
         err = -(1 as ::core::ffi::c_int);
-    }
-    if !strPtr.is_null() {
-        free(strPtr as *mut ::core::ffi::c_void);
     }
     free(cStr as *mut ::core::ffi::c_void);
     return err;
@@ -236,7 +231,7 @@ pub unsafe extern "C" fn pipgetinteger_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_integer(cStr, val);
+    err = pip_get_integer(::core::ffi::CStr::from_ptr(cStr).to_bytes(), &mut *val);
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -252,7 +247,7 @@ pub unsafe extern "C" fn pipgetfloat_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_float(cStr, val);
+    err = pip_get_float(::core::ffi::CStr::from_ptr(cStr).to_bytes(), &mut *val);
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -269,7 +264,11 @@ pub unsafe extern "C" fn pipgettwointegers_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_two_integers(cStr, val1, val2);
+    err = pip_get_two_integers(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        &mut *val1,
+        &mut *val2,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -286,7 +285,11 @@ pub unsafe extern "C" fn pipgettwofloats_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_two_floats(cStr, val1, val2);
+    err = pip_get_two_floats(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        &mut *val1,
+        &mut *val2,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -304,7 +307,12 @@ pub unsafe extern "C" fn pipgetthreeintegers_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_three_integers(cStr, val1, val2, val3);
+    err = pip_get_three_integers(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        &mut *val1,
+        &mut *val2,
+        &mut *val3,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -322,7 +330,12 @@ pub unsafe extern "C" fn pipgetthreefloats_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_three_floats(cStr, val1, val2, val3);
+    err = pip_get_three_floats(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        &mut *val1,
+        &mut *val2,
+        &mut *val3,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -338,7 +351,7 @@ pub unsafe extern "C" fn pipgetboolean_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_boolean(cStr, val);
+    err = pip_get_boolean(::core::ffi::CStr::from_ptr(cStr).to_bytes(), &mut *val);
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -356,7 +369,12 @@ pub unsafe extern "C" fn pipgetintegerarray_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_integer_array(cStr, array, numToGet, *arraySize);
+    err = pip_get_integer_array(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        ::core::slice::from_raw_parts_mut(array, (*arraySize).max(0) as usize),
+        &mut *numToGet,
+        *arraySize,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -374,7 +392,12 @@ pub unsafe extern "C" fn pipgetfloatarray_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_get_float_array(cStr, array, numToGet, *arraySize);
+    err = pip_get_float_array(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        ::core::slice::from_raw_parts_mut(array, (*arraySize).max(0) as usize),
+        &mut *numToGet,
+        *arraySize,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -390,10 +413,15 @@ pub unsafe extern "C" fn pipprinthelp_(
     let mut err: ::core::ffi::c_int = 0;
     cStr = pipf2cstr(string, stringSize);
     if cStr.is_null() {
-        pip_set_error(b"Memory error in pipgethelp_\0" as *const u8 as *const ::core::ffi::c_char);
+        pip_set_error(b"Memory error in pipgethelp_");
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_print_help(cStr, *useStdErr, *inputFiles, *outputFiles);
+    err = pip_print_help(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        *useStdErr,
+        *inputFiles,
+        *outputFiles,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -406,14 +434,15 @@ pub unsafe extern "C" fn pipgeterror_(
     mut errString: *mut ::core::ffi::c_char,
     mut stringSize: fortStrLen_t,
 ) -> ::core::ffi::c_int {
-    let mut strPtr: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let mut strVec: Vec<u8> = Vec::new();
     let mut err: ::core::ffi::c_int = 0;
-    err = pip_get_error(&raw mut strPtr);
-    if strPtr.is_null() {
-        return -(1 as ::core::ffi::c_int);
-    }
+    /* `PipGetError` always returns a string here -- the source's NULL test can
+    only fire on a failed strdup -- so the error code it returns is ignored,
+    exactly as `pipgeterror_` ignores it. */
+    err = pip_get_error(&mut strVec);
+    strVec.push(0);
+    let strPtr = strVec.as_ptr().cast::<::core::ffi::c_char>();
     err = c2f_string(strPtr, errString, stringSize as ::core::ffi::c_int);
-    free(strPtr as *mut ::core::ffi::c_void);
     return err;
 }
 #[unsafe(no_mangle)]
@@ -425,10 +454,10 @@ pub unsafe extern "C" fn pipseterror_(
     let mut err: ::core::ffi::c_int = 0;
     cStr = pipf2cstr(errString, stringSize);
     if cStr.is_null() {
-        pip_set_error(b"Memory error in pipseterror_\0" as *const u8 as *const ::core::ffi::c_char);
+        pip_set_error(b"Memory error in pipseterror_");
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_set_error(cStr);
+    err = pip_set_error(::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -441,12 +470,10 @@ pub unsafe extern "C" fn pipsetusagestring_(
     let mut err: ::core::ffi::c_int = 0;
     cStr = pipf2cstr(errString, stringSize);
     if cStr.is_null() {
-        pip_set_error(
-            b"Memory error in pipsetusagestring_\0" as *const u8 as *const ::core::ffi::c_char,
-        );
+        pip_set_error(b"Memory error in pipsetusagestring_");
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_set_usage_string(cStr);
+    err = pip_set_usage_string(::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -459,12 +486,10 @@ pub unsafe extern "C" fn pipsetlinkedoption_(
     let mut err: ::core::ffi::c_int = 0;
     cStr = pipf2cstr(option, optionSize);
     if cStr.is_null() {
-        pip_set_error(
-            b"Memory error in pipsetlinkedoption_\0" as *const u8 as *const ::core::ffi::c_char,
-        );
+        pip_set_error(b"Memory error in pipsetlinkedoption_");
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_set_linked_option(cStr);
+    err = pip_set_linked_option(::core::ffi::CStr::from_ptr(cStr).to_bytes());
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -480,7 +505,7 @@ pub unsafe extern "C" fn piplinkedindex_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_linked_index(cStr, index);
+    err = pip_linked_index(::core::ffi::CStr::from_ptr(cStr).to_bytes(), &mut *index);
     *index += 1;
     free(cStr as *mut ::core::ffi::c_void);
     return err;
@@ -497,7 +522,10 @@ pub unsafe extern "C" fn pipnumberofentries_(
     if cStr.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
-    err = pip_number_of_entries(cStr, numEntries);
+    err = pip_number_of_entries(
+        ::core::ffi::CStr::from_ptr(cStr).to_bytes(),
+        &mut *numEntries,
+    );
     free(cStr as *mut ::core::ffi::c_void);
     return err;
 }
@@ -511,10 +539,7 @@ unsafe extern "C" fn pipf2cstr(
 ) -> *mut ::core::ffi::c_char {
     let mut newStr: *mut ::core::ffi::c_char = f2c_string(str, strSize as ::core::ffi::c_int);
     if newStr.is_null() {
-        pip_set_error(
-            b"Memory error converting string from Fortran to C\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
+        pip_set_error(b"Memory error converting string from Fortran to C");
     }
     return newStr;
 }

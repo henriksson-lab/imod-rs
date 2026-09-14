@@ -1,118 +1,136 @@
 //! Translation of `IMOD/libxml/mxml-attr.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(dead_code)]
 
 use super::*;
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::c_int;
 
 /// Matches C `mxmlElementDeleteAttr` (`mxml-attr.c:38`).
-pub unsafe fn mxml_element_delete_attr(node: *mut MxmlNode, name: *const c_char) {
+pub fn mxml_element_delete_attr(arena: &mut MxmlArena, node: Option<usize>, name: Option<&[u8]>) {
     let mut i: c_int;
-    let mut attr: *mut MxmlAttr;
+    let mut attr: usize;
 
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT || name.is_null() {
+    let Some(node) = node else {
+        return;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
         return;
     }
+    let Some(name) = name else {
+        return;
+    };
+    let MxmlValue::Element(element) = &mut arena.node_mut(node).value else {
+        return;
+    };
 
     /*
      * Look for the attribute...
      */
 
-    i = (*node).value.element.num_attrs;
-    attr = (*node).value.element.attrs;
+    i = element.num_attrs;
+    attr = 0;
     while i > 0 {
-        if libc::strcmp((*attr).name, name) == 0 {
+        if element.attrs[attr].name == name {
             /*
-             * Delete this attribute...
+             * Delete this attribute...  (the C frees the name and value and
+             * then memmoves the tail of the array down over the slot.)
              */
 
-            libc::free((*attr).name as *mut c_void);
-            libc::free((*attr).value as *mut c_void);
+            element.attrs.remove(attr);
 
-            i -= 1;
-            if i > 0 {
-                libc::memmove(
-                    attr as *mut c_void,
-                    attr.add(1) as *const c_void,
-                    i as usize * core::mem::size_of::<MxmlAttr>(),
-                );
-            }
+            element.num_attrs -= 1;
 
-            (*node).value.element.num_attrs -= 1;
-
-            if (*node).value.element.num_attrs == 0 {
-                libc::free((*node).value.element.attrs as *mut c_void);
-            }
+            /* The C frees the whole array when the last attribute goes. */
             return;
         }
 
         i -= 1;
-        attr = attr.add(1);
+        attr += 1;
     }
 }
 
 /// Matches C `mxmlElementGetAttr` (`mxml-attr.c:96`).
-pub unsafe fn mxml_element_get_attr(node: *mut MxmlNode, name: *const c_char) -> *const c_char {
+pub fn mxml_element_get_attr<'a>(
+    arena: &'a MxmlArena,
+    node: Option<usize>,
+    name: Option<&[u8]>,
+) -> Option<&'a [u8]> {
     let mut i: c_int;
-    let mut attr: *mut MxmlAttr;
+    let mut attr: usize;
 
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT || name.is_null() {
-        return core::ptr::null();
+    let Some(node) = node else {
+        return None;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
+        return None;
     }
+    let Some(name) = name else {
+        return None;
+    };
+    let MxmlValue::Element(element) = &arena.node(node).value else {
+        return None;
+    };
 
     /*
      * Look for the attribute...
      */
 
-    i = (*node).value.element.num_attrs;
-    attr = (*node).value.element.attrs;
+    i = element.num_attrs;
+    attr = 0;
     while i > 0 {
-        if libc::strcmp((*attr).name, name) == 0 {
-            return (*attr).value;
+        if element.attrs[attr].name == name {
+            return element.attrs[attr].value.as_deref();
         }
 
         i -= 1;
-        attr = attr.add(1);
+        attr += 1;
     }
 
     /*
      * Didn't find attribute, so return NULL...
      */
 
-    core::ptr::null()
+    None
 }
 
 /// Matches C `mxmlElementSetAttr` (`mxml-attr.c:154`).
-pub unsafe fn mxml_element_set_attr(
-    node: *mut MxmlNode,
-    name: *const c_char,
-    value: *const c_char,
+pub fn mxml_element_set_attr(
+    arena: &mut MxmlArena,
+    node: Option<usize>,
+    name: Option<&[u8]>,
+    value: Option<&[u8]>,
 ) {
-    let valuec: *mut c_char;
+    let valuec: Option<Vec<u8>>;
 
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT || name.is_null() {
+    let Some(node) = node else {
+        return;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
         return;
     }
+    let Some(name) = name else {
+        return;
+    };
 
-    if !value.is_null() {
-        valuec = libc::strdup(value);
+    if let Some(value) = value {
+        valuec = Some(value.to_vec());
     } else {
-        valuec = core::ptr::null_mut();
+        valuec = None;
     }
 
-    if mxml_set_attr(node, name, valuec) != 0 {
-        libc::free(valuec as *mut c_void);
+    if mxml_set_attr(arena, node, name, valuec) != 0 {
+        /* The C frees `valuec` here; the owned Vec was moved in and dropped. */
     }
 }
 
@@ -123,21 +141,31 @@ pub unsafe fn mxml_element_set_attr(
 /// taken explicitly; `_mxml_strdupf` carries the same restriction.  The only
 /// call in IMOD is `mxmlElementSetAttrf(node, name, "%d", value)` in
 /// `libcfshr/mxmlwrap.c:375`.
-pub unsafe fn mxml_element_set_attrf(
-    node: *mut MxmlNode,
-    name: *const c_char,
-    format: *const c_char,
-    arg: *mut c_void,
+pub fn mxml_element_set_attrf(
+    arena: &mut MxmlArena,
+    node: Option<usize>,
+    name: Option<&[u8]>,
+    format: Option<&[u8]>,
+    arg: &[u8],
 ) {
-    let value: *mut c_char;
+    let value: Vec<u8>;
 
     /*
      * Range check input...
      */
 
-    if node.is_null() || (*node).type_ != MXML_ELEMENT || name.is_null() || format.is_null() {
+    let Some(node) = node else {
+        return;
+    };
+    if arena.node(node).type_ != MXML_ELEMENT {
         return;
     }
+    let Some(name) = name else {
+        return;
+    };
+    let Some(format) = format else {
+        return;
+    };
 
     /*
      * Format the value...
@@ -145,97 +173,64 @@ pub unsafe fn mxml_element_set_attrf(
 
     value = _mxml_strdupf(format, arg);
 
-    if value.is_null() {
-        let mut msg: [c_char; 1024] = [0; 1024];
-        libc::snprintf(
-            msg.as_mut_ptr(),
-            core::mem::size_of::<[c_char; 1024]>(),
-            c"Unable to allocate memory for attribute '%s' in element %s!".as_ptr(),
-            name,
-            (*node).value.element.name,
-        );
-        mxml_error(msg.as_ptr());
-    } else if mxml_set_attr(node, name, value) != 0 {
-        libc::free(value as *mut c_void);
+    /*
+     * The C reports "Unable to allocate memory for attribute '%s' in element
+     * %s!" when the format allocation returns NULL; a Vec aborts instead.
+     */
+    if mxml_set_attr(arena, node, name, Some(value)) != 0 {
+        /* The C frees `value` here; the owned Vec was moved in and dropped. */
     }
 }
 
 /// Matches C static `mxml_set_attr` (`mxml-attr.c:234`).
-pub unsafe fn mxml_set_attr(node: *mut MxmlNode, name: *const c_char, value: *mut c_char) -> c_int {
+///
+/// The C takes ownership of `value` on success and leaves it to the caller to
+/// free on failure; the owned `Option<Vec<u8>>` carries that transfer, and the
+/// two failure arms — `realloc` and `strdup` returning NULL — cannot occur.
+pub fn mxml_set_attr(
+    arena: &mut MxmlArena,
+    node: usize,
+    name: &[u8],
+    value: Option<Vec<u8>>,
+) -> c_int {
     let mut i: c_int;
-    let mut attr: *mut MxmlAttr;
+    let mut attr: usize;
+
+    let MxmlValue::Element(element) = &mut arena.node_mut(node).value else {
+        return -1;
+    };
 
     /*
      * Look for the attribute...
      */
 
-    i = (*node).value.element.num_attrs;
-    attr = (*node).value.element.attrs;
+    i = element.num_attrs;
+    attr = 0;
     while i > 0 {
-        if libc::strcmp((*attr).name, name) == 0 {
+        if element.attrs[attr].name == name {
             /*
              * Free the old value as needed...
              */
 
-            if !(*attr).value.is_null() {
-                libc::free((*attr).value as *mut c_void);
-            }
-
-            (*attr).value = value;
+            element.attrs[attr].value = value;
 
             return 0;
         }
 
         i -= 1;
-        attr = attr.add(1);
+        attr += 1;
     }
 
     /*
      * Add a new attribute...
      */
 
-    if (*node).value.element.num_attrs == 0 {
-        attr = libc::malloc(core::mem::size_of::<MxmlAttr>()) as *mut MxmlAttr;
-    } else {
-        attr = libc::realloc(
-            (*node).value.element.attrs as *mut c_void,
-            ((*node).value.element.num_attrs + 1) as usize * core::mem::size_of::<MxmlAttr>(),
-        ) as *mut MxmlAttr;
-    }
+    element.attrs.push(MxmlAttr {
+        name: name.to_vec(),
+        value,
+    });
 
-    if attr.is_null() {
-        let mut msg: [c_char; 1024] = [0; 1024];
-        libc::snprintf(
-            msg.as_mut_ptr(),
-            core::mem::size_of::<[c_char; 1024]>(),
-            c"Unable to allocate memory for attribute '%s' in element %s!".as_ptr(),
-            name,
-            (*node).value.element.name,
-        );
-        mxml_error(msg.as_ptr());
-        return -1;
-    }
-
-    (*node).value.element.attrs = attr;
-    attr = attr.add((*node).value.element.num_attrs as usize);
-
-    (*attr).name = libc::strdup(name);
-    if (*attr).name.is_null() {
-        let mut msg: [c_char; 1024] = [0; 1024];
-        libc::snprintf(
-            msg.as_mut_ptr(),
-            core::mem::size_of::<[c_char; 1024]>(),
-            c"Unable to allocate memory for attribute '%s' in element %s!".as_ptr(),
-            name,
-            (*node).value.element.name,
-        );
-        mxml_error(msg.as_ptr());
-        return -1;
-    }
-
-    (*attr).value = value;
-
-    (*node).value.element.num_attrs += 1;
+    element.num_attrs += 1;
 
     0
 }

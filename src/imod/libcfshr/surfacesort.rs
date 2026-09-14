@@ -1,1172 +1,897 @@
-#![allow(
-    dead_code,
-    non_snake_case,
-    non_camel_case_types,
-    unused_mut,
-    unused_assignments,
-    unsafe_op_in_unsafe_fn
-)]
-//! Mechanical C2Rust baseline of `IMOD/libcfshr/surfacesort.c`, wired to direct translated dependencies.
+//! Translation of `IMOD/libcfshr/surfacesort.c`: sorting points onto two
+//! surfaces.
+#![allow(dead_code)]
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use core::cell::Cell;
+use std::io::Write;
 
 use super::robuststat::{rs_mad_median_outliers, rs_median, rs_sort_indexed_floats};
 use super::simplestat::{ls_fit2, ls_fit3, sums_to_avg_sd};
 
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-unsafe extern "C" {
-    static mut stdout: *mut FILE;
-    fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn atan(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn atan2(__y: ::core::ffi::c_double, __x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn cos(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn sin(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn sqrt(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn fabs(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn floor(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn c_sums_to_avg_sd(
-        sx: ::core::ffi::c_float,
-        sxsq: ::core::ffi::c_float,
-        n: ::core::ffi::c_int,
-        avg: *mut ::core::ffi::c_float,
-        sd: *mut ::core::ffi::c_float,
-    );
-    fn c_ls_fit2(
-        x1: *mut ::core::ffi::c_float,
-        x2: *mut ::core::ffi::c_float,
-        y: *mut ::core::ffi::c_float,
-        n: ::core::ffi::c_int,
-        a: *mut ::core::ffi::c_float,
-        b: *mut ::core::ffi::c_float,
-        c: *mut ::core::ffi::c_float,
-    );
-    fn c_ls_fit3(
-        x1: *mut ::core::ffi::c_float,
-        x2: *mut ::core::ffi::c_float,
-        x3: *mut ::core::ffi::c_float,
-        y: *mut ::core::ffi::c_float,
-        n: ::core::ffi::c_int,
-        a1: *mut ::core::ffi::c_float,
-        a2: *mut ::core::ffi::c_float,
-        a3: *mut ::core::ffi::c_float,
-        c: *mut ::core::ffi::c_float,
-    );
-    fn c_rs_sort_indexed_floats(
-        x: *mut ::core::ffi::c_float,
-        index: *mut ::core::ffi::c_int,
-        n: ::core::ffi::c_int,
-    );
-    fn c_rs_median(
-        x: *mut ::core::ffi::c_float,
-        n: ::core::ffi::c_int,
-        tmp: *mut ::core::ffi::c_float,
-        median: *mut ::core::ffi::c_float,
-    );
-    fn c_rs_mad_median_outliers(
-        x: *mut ::core::ffi::c_float,
-        n: ::core::ffi::c_int,
-        kcrit: ::core::ffi::c_float,
-        out: *mut ::core::ffi::c_float,
-    );
+/// Original `DTOR` (`surfacesort.c:21`).
+pub const DTOR: f64 = 0.017453293;
+
+/* DOC_SECTION PARAMETERS */
+/* DOC_CODE Algorithm and Parameters for surfaceSort */
+/*
+This routine works as follows: ^
+First it fits a plane to all of the points and rotates the points to make that plane
+level.  Analysis proceeds with rotated positions. ^
+For rapid access to neighboring points, it sets up a grid of squares (at sGridSpacing)
+and list of delta values to grid positions in successively wider rings around one
+grid square.  Then it makes lists of points within each grid square. ^
+For each point (not marked as an outlier by values of -1 in the group array) it then
+searches for the neighboring point at the steepest angle with respect to it, looking
+at up to sMaxAngleNeigh neighbors. ^
+Duplicate pairs are allowed to form, and are eliminated after sorting. ^
+The points are sorted by steepest angle, and then it determines a set of pairs to use
+for building clusters, as controlled by parameters sSteepestRatio, sNumMinForAmax,
+sAngleMax, sNumMinForArelax, and sAngleRelax. ^
+Given this set of pairs, it then makes a list of the separation in Z between each pair
+and analyzes for MAD-Median outliers with criterion sOutlierCrit.  These outliers are
+eliminated from cluster formation, as are the ones identified by the caller.
+Pairs are always considered in order from the steepest angle downward.  To build a
+cluster, it starts with the next point that hasn't been added to a cluster yet, putting
+it and its pair on a list of cluster points to check.  Each point on the cluster list
+is checked for whether it occurs in a pair at a steep angle, and if so its mate is
+then added to the opposite group. ^
+For each cluster, a central position and an average delta Z are computed. ^
+Finally, it searches in progressively bigger rings around the clusters for grid
+squares where there are unassigned points.  When it finds an unassigned point, it
+collects the nearest assigned points in the neighborhood up to sMaxNumFit or up to
+a distance of sMaxFitDist.  If this includes points from both surfaces and there are
+at least sBiplaneMinFit points, it fits a pair of planes to all points; otherwise it
+fits a single plane to just the points from one surface if there are at least
+sPlaneMinFit points for this; otherwise it simply gets a mean of Z positions on the
+top and bottom if possible.  One way or another this gives an estimate of the top and
+bottom Z position at the unassigned point, and it assigns the point based on which Z
+it is closer to.  In fact, this process is done in two rounds, and on the first round
+assignment is deferred if the disparity between the point and estimated surface Z
+values as a percentage of the Z separation exceeds sMaxRound1Dist. ^
+^
+The numbers in the comments below are index values for setSurfSortParam */
+
+thread_local! {
+    /// Spacing of squares for sorting points and accessing rings of points (0)
+    static S_GRID_SPACING: Cell<f32> = const { Cell::new(50.) };
+    /// Maximum neighbors to evaluate for finding neighbor with steepest angle (1)
+    static S_MAX_ANGLE_NEIGH: Cell<i32> = const { Cell::new(50) };
+    /// Use pairs with angle more than this fraction of very steepest angle (2)
+    static S_STEEPEST_RATIO: Cell<f32> = const { Cell::new(0.5) };
+    /// If there are fewer than this number of pairs, take pairs down to sAngleMax (3)
+    static S_NUM_MIN_FOR_AMAX: Cell<i32> = const { Cell::new(10) };
+    /// Angle to go down to if sSteepestRatio doesn't give enough pairs (4)
+    static S_ANGLE_MAX: Cell<f32> = const { Cell::new(20.) };
+    /// If fewer than this number of pairs, take pairs down to sAngleRelax (5)
+    static S_NUM_MIN_FOR_ARELAX: Cell<i32> = const { Cell::new(3) };
+    /// Angle to go down to if sAngleMax doesn't give enough pairs (6)
+    static S_ANGLE_RELAX: Cell<f32> = const { Cell::new(5.) };
+    /// Criterion for MAD-Median outlier elimination based on delta Z of a pair (7)
+    static S_OUTLIER_CRIT: Cell<f32> = const { Cell::new(3.) };
+    /// Maximum distance to search for neighboring points in plane fits (8)
+    static S_MAX_FIT_DIST: Cell<f32> = const { Cell::new(2048.) };
+    /// Maximum number of points in plane fits (9)
+    static S_MAX_NUM_FIT: Cell<i32> = const { Cell::new(15) };
+    /// Minimum # of points for fitting parallel planes (10)
+    static S_BIPLANE_MIN_FIT: Cell<i32> = const { Cell::new(5) };
+    /// Minimum # of points for fitting one plane (11)
+    static S_PLANE_MIN_FIT: Cell<i32> = const { Cell::new(4) };
+    /// Maximum % distance of Z value between nearest and other plane for
+    /// deferring to 2nd round: values > 50 disable deferring points (12)
+    static S_MAX_ROUND1_DIST: Cell<f32> = const { Cell::new(100.) };
+    /// 1 for minimal output, 2 for exhaustive output (13)
+    static S_DEBUG_LEVEL: Cell<i32> = const { Cell::new(0) };
 }
-pub type size_t = usize;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    pub _flags2: ::core::ffi::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub __pad5: size_t,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused2: [::core::ffi::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub const DTOR: ::core::ffi::c_double = 0.017453293f64;
-static mut sGridSpacing: ::core::ffi::c_float = 50.0f32;
-static mut sMaxAngleNeigh: ::core::ffi::c_int = 50 as ::core::ffi::c_int;
-static mut sSteepestRatio: ::core::ffi::c_float = 0.5f32;
-static mut sNumMinForAmax: ::core::ffi::c_int = 10 as ::core::ffi::c_int;
-static mut sAngleMax: ::core::ffi::c_float = 20.0f32;
-static mut sNumMinForArelax: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-static mut sAngleRelax: ::core::ffi::c_float = 5.0f32;
-static mut sOutlierCrit: ::core::ffi::c_float = 3.0f32;
-static mut sMaxFitDist: ::core::ffi::c_float = 2048.0f32;
-static mut sMaxNumFit: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
-static mut sBiplaneMinFit: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
-static mut sPlaneMinFit: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-static mut sMaxRound1Dist: ::core::ffi::c_float = 100.0f32;
-static mut sDebugLevel: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_surf_sort_param(
-    mut index: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
+/* END_CODE */
+/* END_SECTION */
+
+/// Original `setSurfSortParam` (`surfacesort.c:99`).
+///
+/// `B3DNINT` is `(int)floor(a + 0.5)`, not `round()`.
+pub fn set_surf_sort_param(index: i32, value: f32) -> i32 {
+    let nint = |v: f32| (v as f64 + 0.5).floor() as i32;
     match index {
-        0 => {
-            sGridSpacing = value;
-        }
-        1 => {
-            sMaxAngleNeigh = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        2 => {
-            sSteepestRatio = value;
-        }
-        3 => {
-            sNumMinForAmax = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        4 => {
-            sAngleMax = value;
-        }
-        5 => {
-            sNumMinForArelax = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        6 => {
-            sAngleRelax = value;
-        }
-        7 => {
-            sOutlierCrit = value;
-        }
-        8 => {
-            sMaxFitDist = value;
-        }
-        9 => {
-            sMaxNumFit = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        10 => {
-            sBiplaneMinFit = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        11 => {
-            sPlaneMinFit = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        12 => {
-            sMaxRound1Dist = value;
-        }
-        13 => {
-            sDebugLevel = floor(value as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int;
-        }
-        _ => return 1 as ::core::ffi::c_int,
+        0 => S_GRID_SPACING.with(|c| c.set(value)),
+        1 => S_MAX_ANGLE_NEIGH.with(|c| c.set(nint(value))),
+        2 => S_STEEPEST_RATIO.with(|c| c.set(value)),
+        3 => S_NUM_MIN_FOR_AMAX.with(|c| c.set(nint(value))),
+        4 => S_ANGLE_MAX.with(|c| c.set(value)),
+        5 => S_NUM_MIN_FOR_ARELAX.with(|c| c.set(nint(value))),
+        6 => S_ANGLE_RELAX.with(|c| c.set(value)),
+        7 => S_OUTLIER_CRIT.with(|c| c.set(value)),
+        8 => S_MAX_FIT_DIST.with(|c| c.set(value)),
+        9 => S_MAX_NUM_FIT.with(|c| c.set(nint(value))),
+        10 => S_BIPLANE_MIN_FIT.with(|c| c.set(nint(value))),
+        11 => S_PLANE_MIN_FIT.with(|c| c.set(nint(value))),
+        12 => S_MAX_ROUND1_DIST.with(|c| c.set(value)),
+        13 => S_DEBUG_LEVEL.with(|c| c.set(nint(value))),
+        _ => return 1,
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_surf_sort_param_fortran(
-    mut index: *mut ::core::ffi::c_int,
-    mut value: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    return set_surf_sort_param(*index, *value);
+
+/// Original `setsurfsortparam` (`surfacesort.c:125`).
+pub fn setsurfsortparam(index: &i32, value: &f32) -> i32 {
+    set_surf_sort_param(*index, *value)
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn surface_sort(
-    mut xyz: *mut ::core::ffi::c_float,
-    mut numPts: ::core::ffi::c_int,
-    mut markersInGroup: ::core::ffi::c_int,
-    mut group: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut numGridX: ::core::ffi::c_int = 0;
-    let mut numGridY: ::core::ffi::c_int = 0;
-    let mut numSquares: ::core::ffi::c_int = 0;
-    let mut numRings: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut ring: ::core::ffi::c_int = 0;
-    let mut dx: ::core::ffi::c_int = 0;
-    let mut dy: ::core::ffi::c_int = 0;
-    let mut sx: ::core::ffi::c_int = 0;
-    let mut sy: ::core::ffi::c_int = 0;
-    let mut afit: ::core::ffi::c_float = 0.;
-    let mut bfit: ::core::ffi::c_float = 0.;
-    let mut cfit: ::core::ffi::c_float = 0.;
-    let mut zp: ::core::ffi::c_float = 0.;
-    let mut xmin: ::core::ffi::c_float = 0.;
-    let mut xmax: ::core::ffi::c_float = 0.;
-    let mut ymin: ::core::ffi::c_float = 0.;
-    let mut ymax: ::core::ffi::c_float = 0.;
-    let mut diagonal: ::core::ffi::c_float = 0.;
-    let mut pdx: ::core::ffi::c_float = 0.;
-    let mut pdy: ::core::ffi::c_float = 0.;
-    let mut alpha: ::core::ffi::c_double = 0.;
-    let mut cosal: ::core::ffi::c_double = 0.;
-    let mut sinal: ::core::ffi::c_double = 0.;
-    let mut theta: ::core::ffi::c_double = 0.;
-    let mut sinth: ::core::ffi::c_double = 0.;
-    let mut costh: ::core::ffi::c_double = 0.;
-    let mut slope: ::core::ffi::c_double = 0.;
-    let mut xrot: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut yrot: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut zrot: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut idx: *mut ::core::ffi::c_short = ::core::ptr::null_mut::<::core::ffi::c_short>();
-    let mut idy: *mut ::core::ffi::c_short = ::core::ptr::null_mut::<::core::ffi::c_short>();
-    let mut ringStart: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut numInSquare: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut squareInd: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut pointLists: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut steepNeigh: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut sortInd: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut squareDone: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut steepAngle: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut xfit: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut yfit: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut zfit: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut grpfit: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut delZ: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut outlie: *mut ::core::ffi::c_float = ::core::ptr::null_mut::<::core::ffi::c_float>();
-    let mut cluster: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut clusterSX: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut clusterSY: *mut ::core::ffi::c_int = ::core::ptr::null_mut::<::core::ffi::c_int>();
-    let mut isq: ::core::ffi::c_int = 0;
-    let mut ipt: ::core::ffi::c_int = 0;
-    let mut ix: ::core::ffi::c_int = 0;
-    let mut iy: ::core::ffi::c_int = 0;
-    let mut jnd: ::core::ffi::c_int = 0;
-    let mut jsq: ::core::ffi::c_int = 0;
-    let mut jpt: ::core::ffi::c_int = 0;
-    let mut numNeigh: ::core::ffi::c_int = 0;
-    let mut firstSteep: ::core::ffi::c_int = 0;
-    let mut numSteep: ::core::ffi::c_int = 0;
-    let mut ifdup: ::core::ffi::c_int = 0;
-    let mut angle: ::core::ffi::c_float = 0.;
-    let mut verySteepest: ::core::ffi::c_float = 0.;
-    let mut zbot: ::core::ffi::c_float = 0.;
-    let mut ztop: ::core::ffi::c_float = 0.;
-    let mut a1: ::core::ffi::c_float = 0.;
-    let mut a2: ::core::ffi::c_float = 0.;
-    let mut dzfit: ::core::ffi::c_float = 0.;
-    let mut con: ::core::ffi::c_float = 0.;
-    let mut medianDelZ: ::core::ffi::c_float = 0.;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut numDone: ::core::ffi::c_int = 0;
-    let mut jdxy: ::core::ffi::c_int = 0;
-    let mut kdxy: ::core::ffi::c_int = 0;
-    let mut jring: ::core::ffi::c_int = 0;
-    let mut tx: ::core::ffi::c_int = 0;
-    let mut ty: ::core::ffi::c_int = 0;
-    let mut maxRings: ::core::ffi::c_int = 0;
-    let mut grpsum: ::core::ffi::c_int = 0;
-    let mut keepGroup: ::core::ffi::c_int = 0;
-    let mut ntop: ::core::ffi::c_int = 0;
-    let mut nbot: ::core::ffi::c_int = 0;
-    let mut nfit: ::core::ffi::c_int = 0;
-    let mut jx: ::core::ffi::c_int = 0;
-    let mut jy: ::core::ffi::c_int = 0;
-    let mut knd: ::core::ffi::c_int = 0;
-    let mut kpt: ::core::ffi::c_int = 0;
-    let mut numCluster: ::core::ffi::c_int = 0;
-    let mut numInClust: ::core::ffi::c_int = 0;
-    let mut checkInd: ::core::ffi::c_int = 0;
-    let mut oldpt: ::core::ffi::c_int = 0;
-    let mut newpt: ::core::ffi::c_int = 0;
-    let mut numErr: ::core::ffi::c_int = 0;
-    let mut round: ::core::ffi::c_int = 0;
-    let mut xsum: ::core::ffi::c_float = 0.;
-    let mut ysum: ::core::ffi::c_float = 0.;
-    let mut errsum: ::core::ffi::c_float = 0.;
-    let mut errsq: ::core::ffi::c_float = 0.;
-    let mut errmax: ::core::ffi::c_float = 0.;
-    if numPts < 3 as ::core::ffi::c_int {
-        *group.offset(0 as ::core::ffi::c_int as isize) = 1 as ::core::ffi::c_int;
-        if numPts > 1 as ::core::ffi::c_int {
-            *group.offset(1 as ::core::ffi::c_int as isize) = 2 as ::core::ffi::c_int;
+
+/// Original `surfaceSort` (`surfacesort.c:139`).
+///
+/// The source's twenty-one `B3DMALLOC` failure returns (error 1) are
+/// unreachable here: a `Vec` allocation aborts rather than returning null.
+pub fn surface_sort(xyz: &[f32], num_pts: i32, markers_in_group: i32, group: &mut [i32]) -> i32 {
+    let s_grid_spacing = S_GRID_SPACING.with(|c| c.get());
+    let s_max_angle_neigh = S_MAX_ANGLE_NEIGH.with(|c| c.get());
+    let s_steepest_ratio = S_STEEPEST_RATIO.with(|c| c.get());
+    let s_num_min_for_amax = S_NUM_MIN_FOR_AMAX.with(|c| c.get());
+    let s_angle_max = S_ANGLE_MAX.with(|c| c.get());
+    let s_num_min_for_arelax = S_NUM_MIN_FOR_ARELAX.with(|c| c.get());
+    let s_angle_relax = S_ANGLE_RELAX.with(|c| c.get());
+    let s_outlier_crit = S_OUTLIER_CRIT.with(|c| c.get());
+    let s_max_fit_dist = S_MAX_FIT_DIST.with(|c| c.get());
+    let s_max_num_fit = S_MAX_NUM_FIT.with(|c| c.get());
+    let s_biplane_min_fit = S_BIPLANE_MIN_FIT.with(|c| c.get());
+    let s_plane_min_fit = S_PLANE_MIN_FIT.with(|c| c.get());
+    let s_max_round1_dist = S_MAX_ROUND1_DIST.with(|c| c.get());
+    let s_debug_level = S_DEBUG_LEVEL.with(|c| c.get());
+
+    let (mut afit, mut bfit, mut cfit) = (0.0f32, 0.0f32, 0.0f32);
+
+    if num_pts < 3 {
+        group[0] = 1;
+        if num_pts > 1 {
+            group[1] = 2;
         }
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
-    xrot = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    yrot = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    zrot = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    if xrot.is_null() || yrot.is_null() || zrot.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    i = 0 as ::core::ffi::c_int;
-    while i < numPts {
-        *xrot.offset(i as isize) = *xyz.offset((3 as ::core::ffi::c_int * i) as isize);
-        *yrot.offset(i as isize) =
-            *xyz.offset((3 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize);
-        *zrot.offset(i as isize) =
-            *xyz.offset((3 as ::core::ffi::c_int * i + 2 as ::core::ffi::c_int) as isize);
-        i += 1;
+
+    /* Copy to rot arrays and fit a plane to all of the points */
+    let mut xrot = vec![0.0f32; num_pts as usize];
+    let mut yrot = vec![0.0f32; num_pts as usize];
+    let mut zrot = vec![0.0f32; num_pts as usize];
+    for i in 0..num_pts as usize {
+        xrot[i] = xyz[3 * i];
+        yrot[i] = xyz[3 * i + 1];
+        zrot[i] = xyz[3 * i + 2];
     }
     ls_fit2(
-        xrot,
-        yrot,
-        zrot,
-        numPts,
-        &raw mut afit,
-        &raw mut bfit,
-        &raw mut cfit,
+        &xrot,
+        &yrot,
+        &zrot,
+        num_pts,
+        &mut afit,
+        &mut bfit,
+        Some(&mut cfit),
     );
-    alpha = atan(bfit as ::core::ffi::c_double);
-    cosal = cos(alpha);
-    sinal = sin(alpha);
-    slope = afit as ::core::ffi::c_double / (cosal - bfit as ::core::ffi::c_double * sinal);
-    theta = -atan(slope);
-    costh = cos(theta);
-    sinth = sin(theta);
-    ymin = 1.0e30f32;
-    xmin = ymin;
-    ymax = -1.0e30f64 as ::core::ffi::c_float;
-    xmax = ymax;
-    i = 0 as ::core::ffi::c_int;
-    while i < numPts {
-        *yrot.offset(i as isize) = (*xyz
-            .offset((3 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize)
-            as ::core::ffi::c_double
-            * cosal
-            + *xyz.offset((3 as ::core::ffi::c_int * i + 2 as ::core::ffi::c_int) as isize)
-                as ::core::ffi::c_double
-                * sinal) as ::core::ffi::c_float;
-        zp = (-*xyz.offset((3 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize)
-            as ::core::ffi::c_double
-            * sinal
-            + *xyz.offset((3 as ::core::ffi::c_int * i + 2 as ::core::ffi::c_int) as isize)
-                as ::core::ffi::c_double
-                * cosal) as ::core::ffi::c_float;
-        *xrot.offset(i as isize) =
-            (*xyz.offset((3 as ::core::ffi::c_int * i) as isize) as ::core::ffi::c_double * costh
-                - zp as ::core::ffi::c_double * sinth) as ::core::ffi::c_float;
-        *zrot.offset(i as isize) =
-            (*xyz.offset((3 as ::core::ffi::c_int * i) as isize) as ::core::ffi::c_double * sinth
-                + zp as ::core::ffi::c_double * costh) as ::core::ffi::c_float;
-        xmin = if xmin < *xrot.offset(i as isize) {
-            xmin
-        } else {
-            *xrot.offset(i as isize)
-        };
-        xmax = if xmax > *xrot.offset(i as isize) {
-            xmax
-        } else {
-            *xrot.offset(i as isize)
-        };
-        ymin = if ymin < *yrot.offset(i as isize) {
-            ymin
-        } else {
-            *yrot.offset(i as isize)
-        };
-        ymax = if ymax > *yrot.offset(i as isize) {
-            ymax
-        } else {
-            *yrot.offset(i as isize)
-        };
-        i += 1;
+
+    /* Find rotation angles and cosine and sines */
+    let alpha = (bfit as f64).atan();
+    let cosal = alpha.cos();
+    let sinal = alpha.sin();
+    let slope = afit as f64 / (cosal - bfit as f64 * sinal);
+    let theta = -slope.atan();
+    let costh = theta.cos();
+    let sinth = theta.sin();
+
+    /* Back-rotate by -alpha around X then -theta around Y */
+    let mut xmin: f32 = 1.0e30;
+    let mut ymin: f32 = 1.0e30;
+    let mut xmax: f32 = -1.0e30;
+    let mut ymax: f32 = -1.0e30;
+    for i in 0..num_pts as usize {
+        yrot[i] = (xyz[3 * i + 1] as f64 * cosal + xyz[3 * i + 2] as f64 * sinal) as f32;
+        let zp: f32 = (-(xyz[3 * i + 1] as f64) * sinal + xyz[3 * i + 2] as f64 * cosal) as f32;
+        xrot[i] = (xyz[3 * i] as f64 * costh - zp as f64 * sinth) as f32;
+        zrot[i] = (xyz[3 * i] as f64 * sinth + zp as f64 * costh) as f32;
+        // `B3DMIN`/`B3DMAX` keep the second operand when the comparison is
+        // false, which is not what `f32::min`/`max` do on a NaN.
+        xmin = if xmin < xrot[i] { xmin } else { xrot[i] };
+        xmax = if xmax > xrot[i] { xmax } else { xrot[i] };
+        ymin = if ymin < yrot[i] { ymin } else { yrot[i] };
+        ymax = if ymax > yrot[i] { ymax } else { yrot[i] };
     }
-    numGridX =
-        (((xmax - xmin) / sGridSpacing) as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_int;
-    numGridY =
-        (((ymax - ymin) / sGridSpacing) as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_int;
-    numSquares = numGridX * numGridY;
-    diagonal = sqrt(
-        (numGridX as ::core::ffi::c_double - 1.0f64) * (numGridX as ::core::ffi::c_double - 1.0f64)
-            + (numGridY as ::core::ffi::c_double - 1.0f64)
-                * (numGridY as ::core::ffi::c_double - 1.0f64),
-    ) as ::core::ffi::c_float;
-    numRings = floor(diagonal as ::core::ffi::c_double + 0.5f64) as ::core::ffi::c_int
-        + 1 as ::core::ffi::c_int;
-    idx = malloc(
-        ((4 as ::core::ffi::c_int * numSquares) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_short>() as size_t),
-    ) as *mut ::core::ffi::c_short;
-    idy = malloc(
-        ((4 as ::core::ffi::c_int * numSquares) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_short>() as size_t),
-    ) as *mut ::core::ffi::c_short;
-    ringStart = malloc(
-        ((numRings + 2 as ::core::ffi::c_int) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    numInSquare = malloc(
-        (numSquares as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    squareInd = malloc(
-        (numSquares as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    pointLists = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    squareDone = malloc(
-        (numSquares as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_uchar>() as size_t),
-    ) as *mut ::core::ffi::c_uchar;
-    steepAngle = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    steepNeigh = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    sortInd = malloc(
-        (numPts as size_t).wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    xfit = malloc(
-        (sMaxNumFit as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    yfit = malloc(
-        (sMaxNumFit as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    zfit = malloc(
-        (sMaxNumFit as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    grpfit = malloc(
-        (sMaxNumFit as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    if idx.is_null()
-        || idy.is_null()
-        || numInSquare.is_null()
-        || squareInd.is_null()
-        || squareDone.is_null()
-        || ringStart.is_null()
-        || pointLists.is_null()
-        || steepAngle.is_null()
-        || steepNeigh.is_null()
-        || sortInd.is_null()
-        || xfit.is_null()
-        || yfit.is_null()
-        || zfit.is_null()
-        || grpfit.is_null()
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    ind = 0 as ::core::ffi::c_int;
-    ring = 0 as ::core::ffi::c_int;
-    while ring < numRings {
-        *ringStart.offset(ring as isize) = ind;
-        dy = -(numGridY - 1 as ::core::ffi::c_int);
-        while dy < numGridY {
-            dx = -(numGridX - 1 as ::core::ffi::c_int);
-            while dx < numGridX {
-                if floor(sqrt((dx * dx + dy * dy) as ::core::ffi::c_double) + 0.5f64)
-                    as ::core::ffi::c_int
-                    == ring
-                {
-                    *idx.offset(ind as isize) = dx as ::core::ffi::c_short;
-                    let fresh0 = ind;
-                    ind = ind + 1;
-                    *idy.offset(fresh0 as isize) = dy as ::core::ffi::c_short;
+
+    /* Set up grid and get arrays */
+    let num_grid_x = (((xmax - xmin) / s_grid_spacing) as f64 + 1.) as i32;
+    let num_grid_y = (((ymax - ymin) / s_grid_spacing) as f64 + 1.) as i32;
+    let num_squares = num_grid_x * num_grid_y;
+    let diagonal: f32 = ((num_grid_x as f64 - 1.) * (num_grid_x as f64 - 1.)
+        + (num_grid_y as f64 - 1.) * (num_grid_y as f64 - 1.))
+        .sqrt() as f32;
+    let num_rings = (diagonal as f64 + 0.5).floor() as i32 + 1;
+    let mut idx = vec![0i16; (4 * num_squares) as usize];
+    let mut idy = vec![0i16; (4 * num_squares) as usize];
+    let mut ring_start = vec![0i32; (num_rings + 2) as usize];
+    let mut num_in_square = vec![0i32; num_squares as usize];
+    let mut square_ind = vec![0i32; num_squares as usize];
+    let mut point_lists = vec![0i32; num_pts as usize];
+    let mut square_done = vec![0u8; num_squares as usize];
+    let mut steep_angle = vec![0.0f32; num_pts as usize];
+    let mut steep_neigh = vec![0i32; num_pts as usize];
+    let mut sort_ind = vec![0i32; num_pts as usize];
+    let mut xfit = vec![0.0f32; s_max_num_fit as usize];
+    let mut yfit = vec![0.0f32; s_max_num_fit as usize];
+    let mut zfit = vec![0.0f32; s_max_num_fit as usize];
+    let mut grpfit = vec![0.0f32; s_max_num_fit as usize];
+
+    /* Set up rings of delta values */
+    let mut ind: i32 = 0;
+    for ring in 0..num_rings {
+        ring_start[ring as usize] = ind;
+        for dy in -(num_grid_y - 1)..num_grid_y {
+            for dx in -(num_grid_x - 1)..num_grid_x {
+                if (((dx * dx + dy * dy) as f64).sqrt() + 0.5).floor() as i32 == ring {
+                    idx[ind as usize] = dx as i16;
+                    idy[ind as usize] = dy as i16;
+                    ind += 1;
                 }
-                dx += 1;
             }
-            dy += 1;
         }
-        ring += 1;
     }
-    *ringStart.offset(numRings as isize) = ind;
-    i = 0 as ::core::ffi::c_int;
-    while i < numSquares {
-        *numInSquare.offset(i as isize) = 0 as ::core::ffi::c_int;
-        i += 1;
+    ring_start[num_rings as usize] = ind;
+
+    /* Sort the points into grid - first count how many in each square so
+    indexes can be set up, then make the indexes, then put points into index
+    list */
+    for i in 0..num_squares as usize {
+        num_in_square[i] = 0;
     }
-    i = 0 as ::core::ffi::c_int;
-    while i < numPts {
-        sx = ((*xrot.offset(i as isize) - xmin) / sGridSpacing) as ::core::ffi::c_int;
-        sy = ((*yrot.offset(i as isize) - ymin) / sGridSpacing) as ::core::ffi::c_int;
-        let ref mut fresh1 = *numInSquare.offset((sx + sy * numGridX) as isize);
-        *fresh1 += 1;
-        i += 1;
+    for i in 0..num_pts as usize {
+        let sx = ((xrot[i] - xmin) / s_grid_spacing) as i32;
+        let sy = ((yrot[i] - ymin) / s_grid_spacing) as i32;
+        num_in_square[(sx + sy * num_grid_x) as usize] += 1;
     }
-    ind = 0 as ::core::ffi::c_int;
-    i = 0 as ::core::ffi::c_int;
-    while i < numSquares {
-        *squareInd.offset(i as isize) = ind;
-        ind += *numInSquare.offset(i as isize);
-        *numInSquare.offset(i as isize) = 0 as ::core::ffi::c_int;
-        *squareDone.offset(i as isize) = 0 as ::core::ffi::c_uchar;
-        i += 1;
+    let mut ind: i32 = 0;
+    for i in 0..num_squares as usize {
+        square_ind[i] = ind;
+        ind += num_in_square[i];
+        num_in_square[i] = 0;
+        square_done[i] = 0;
     }
-    i = 0 as ::core::ffi::c_int;
-    while i < numPts {
-        sx = ((*xrot.offset(i as isize) - xmin) / sGridSpacing) as ::core::ffi::c_int;
-        sy = ((*yrot.offset(i as isize) - ymin) / sGridSpacing) as ::core::ffi::c_int;
-        ind = sx + sy * numGridX;
-        *pointLists.offset(
-            (*squareInd.offset(ind as isize) + *numInSquare.offset(ind as isize)) as isize,
-        ) = i;
-        let ref mut fresh2 = *numInSquare.offset(ind as isize);
-        *fresh2 += 1;
-        i += 1;
+    for i in 0..num_pts as usize {
+        let sx = ((xrot[i] - xmin) / s_grid_spacing) as i32;
+        let sy = ((yrot[i] - ymin) / s_grid_spacing) as i32;
+        let ind = sx + sy * num_grid_x;
+        point_lists[(square_ind[ind as usize] + num_in_square[ind as usize]) as usize] = i as i32;
+        num_in_square[ind as usize] += 1;
     }
-    ind = 0 as ::core::ffi::c_int;
-    while ind < numSquares {
-        sx = ind % numGridX;
-        sy = ind / numGridX;
-        isq = 0 as ::core::ffi::c_int;
-        while isq < *numInSquare.offset(ind as isize) {
-            ipt = *pointLists.offset((*squareInd.offset(ind as isize) + isq) as isize);
-            *steepAngle.offset(ipt as isize) = -1.0f64 as ::core::ffi::c_float;
-            *steepNeigh.offset(ipt as isize) = -(1 as ::core::ffi::c_int);
-            *sortInd.offset(ipt as isize) = ipt;
-            if markersInGroup != 0 && *group.offset(ipt as isize) < 0 as ::core::ffi::c_int {
-                if sDebugLevel > 1 as ::core::ffi::c_int {
-                    printf(
-                        b"Skipping search for %d\n\0" as *const u8 as *const ::core::ffi::c_char,
-                        ipt,
+
+    /* For each point, find the neighbor with the steepest angle
+    Loop on the squares; loop on each point in the square
+    For each point, loop on sequence of neighboring squares and on points in
+    each square until reach maximum number of neighors */
+    for ind in 0..num_squares {
+        let sx = ind % num_grid_x;
+        let sy = ind / num_grid_x;
+        for isq in 0..num_in_square[ind as usize] {
+            let ipt = point_lists[(square_ind[ind as usize] + isq) as usize];
+            steep_angle[ipt as usize] = -1.;
+            steep_neigh[ipt as usize] = -1;
+            sort_ind[ipt as usize] = ipt;
+            if markers_in_group != 0 && group[ipt as usize] < 0 {
+                if s_debug_level > 1 {
+                    let _ = ImodFile::Stdout.write_all(
+                        c_format("Skipping search for %d\n", &[CArg::Int(ipt as i64)]).as_bytes(),
                     );
                 }
-            } else {
-                numNeigh = 0 as ::core::ffi::c_int;
-                jdxy = 0 as ::core::ffi::c_int;
-                while jdxy < *ringStart.offset(numRings as isize) && numNeigh < sMaxAngleNeigh {
-                    ix = sx + *idx.offset(jdxy as isize) as ::core::ffi::c_int;
-                    iy = sy + *idy.offset(jdxy as isize) as ::core::ffi::c_int;
-                    if !(ix < 0 as ::core::ffi::c_int
-                        || ix >= numGridX
-                        || iy < 0 as ::core::ffi::c_int
-                        || iy >= numGridY)
-                    {
-                        jnd = ix + iy * numGridX;
-                        jsq = 0 as ::core::ffi::c_int;
-                        while jsq < *numInSquare.offset(jnd as isize) && numNeigh < sMaxAngleNeigh {
-                            jpt = *pointLists
-                                .offset((*squareInd.offset(jnd as isize) + jsq) as isize);
-                            if !(ipt == jpt
-                                || markersInGroup != 0
-                                    && *group.offset(jpt as isize) < 0 as ::core::ffi::c_int)
-                            {
-                                pdx = *xrot.offset(ipt as isize) - *xrot.offset(jpt as isize);
-                                pdy = *yrot.offset(ipt as isize) - *yrot.offset(jpt as isize);
-                                angle = (atan2(
-                                    fabs(
-                                        (*zrot.offset(ipt as isize) - *zrot.offset(jpt as isize))
-                                            as ::core::ffi::c_double,
-                                    ),
-                                    sqrt((pdx * pdx + pdy * pdy) as ::core::ffi::c_double),
-                                ) / DTOR)
-                                    as ::core::ffi::c_float;
-                                if angle > *steepAngle.offset(ipt as isize) {
-                                    *steepAngle.offset(ipt as isize) = angle;
-                                    *steepNeigh.offset(ipt as isize) = jpt;
-                                }
-                                numNeigh += 1;
-                            }
-                            jsq += 1;
-                        }
-                    }
-                    jdxy += 1;
-                }
+                continue;
             }
-            isq += 1;
+            let mut num_neigh = 0;
+            let mut jdxy = 0;
+            while jdxy < ring_start[num_rings as usize] && num_neigh < s_max_angle_neigh {
+                let ix = sx + idx[jdxy as usize] as i32;
+                let iy = sy + idy[jdxy as usize] as i32;
+                if ix < 0 || ix >= num_grid_x || iy < 0 || iy >= num_grid_y {
+                    jdxy += 1;
+                    continue;
+                }
+                let jnd = ix + iy * num_grid_x;
+                let mut jsq = 0;
+                while jsq < num_in_square[jnd as usize] && num_neigh < s_max_angle_neigh {
+                    let jpt = point_lists[(square_ind[jnd as usize] + jsq) as usize];
+                    if ipt == jpt || (markers_in_group != 0 && group[jpt as usize] < 0) {
+                        jsq += 1;
+                        continue;
+                    }
+                    let pdx = xrot[ipt as usize] - xrot[jpt as usize];
+                    let pdy = yrot[ipt as usize] - yrot[jpt as usize];
+                    let angle = (((zrot[ipt as usize] - zrot[jpt as usize]) as f64).abs())
+                        .atan2(((pdx * pdx + pdy * pdy) as f64).sqrt())
+                        / DTOR;
+                    let angle = angle as f32;
+                    if angle > steep_angle[ipt as usize] {
+                        steep_angle[ipt as usize] = angle;
+                        steep_neigh[ipt as usize] = jpt;
+                    }
+                    num_neigh += 1;
+                    jsq += 1;
+                }
+                jdxy += 1;
+            }
         }
-        ind += 1;
     }
-    i = 0 as ::core::ffi::c_int;
-    while i < numPts {
-        *group.offset(i as isize) = 0 as ::core::ffi::c_int;
-        i += 1;
+
+    /* Zero group values now that markers have been used, if any */
+    for i in 0..num_pts as usize {
+        group[i] = 0;
     }
-    rs_sort_indexed_floats(steepAngle, sortInd, numPts);
-    if sDebugLevel > 1 as ::core::ffi::c_int {
-        i = 0 as ::core::ffi::c_int;
-        while i < numPts {
-            ipt = *sortInd.offset(i as isize);
-            printf(
-                b"pt %d  neigh %d  angle %f\n\0" as *const u8 as *const ::core::ffi::c_char,
-                ipt,
-                *steepNeigh.offset(ipt as isize),
-                *steepAngle.offset(ipt as isize) as ::core::ffi::c_double,
+
+    /* Sort the points by steepest angle */
+    rs_sort_indexed_floats(&steep_angle, &mut sort_ind, num_pts);
+    if s_debug_level > 1 {
+        for i in 0..num_pts as usize {
+            let ipt = sort_ind[i];
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "pt %d  neigh %d  angle %f\n",
+                    &[
+                        CArg::Int(ipt as i64),
+                        CArg::Int(steep_neigh[ipt as usize] as i64),
+                        CArg::Dbl(steep_angle[ipt as usize] as f64),
+                    ],
+                )
+                .as_bytes(),
             );
-            i += 1;
         }
     }
-    verySteepest =
-        *steepAngle.offset(*sortInd.offset((numPts - 1 as ::core::ffi::c_int) as isize) as isize);
-    firstSteep = numPts - 1 as ::core::ffi::c_int;
-    numSteep = 1 as ::core::ffi::c_int;
-    ind = numPts - 2 as ::core::ffi::c_int;
-    while ind >= 0 as ::core::ffi::c_int {
-        angle = *steepAngle.offset(*sortInd.offset(ind as isize) as isize);
-        if angle < sSteepestRatio * verySteepest && numSteep >= sNumMinForAmax
-            || angle < sAngleMax && numSteep >= sNumMinForArelax
-            || angle < sAngleRelax
+    let very_steepest = steep_angle[sort_ind[(num_pts - 1) as usize] as usize];
+
+    /* Find pairs that are sufficiently steep */
+    let mut first_steep = num_pts - 1;
+    let mut num_steep = 1;
+    for ind in (0..=num_pts - 2).rev() {
+        let angle = steep_angle[sort_ind[ind as usize] as usize];
+
+        /* Termination conditions: */
+        if (angle < s_steepest_ratio * very_steepest && num_steep >= s_num_min_for_amax)
+            || (angle < s_angle_max && num_steep >= s_num_min_for_arelax)
+            || (angle < s_angle_relax)
         {
             break;
         }
-        ifdup = 0 as ::core::ffi::c_int;
-        i = ind + 1 as ::core::ffi::c_int;
-        while i < numPts {
-            if *steepAngle.offset(*sortInd.offset(i as isize) as isize) as ::core::ffi::c_double
-                > angle as ::core::ffi::c_double + 1.0e-5f64
-            {
+
+        /* Check for duplicate pair */
+        let mut ifdup = 0;
+        for i in ind + 1..num_pts {
+            // `steepAngle[sortInd[i]] > angle + 1.e-5` -- the sum is a double.
+            if (steep_angle[sort_ind[i as usize] as usize] as f64) > angle as f64 + 1.0e-5 {
                 break;
             }
-            if *sortInd.offset(i as isize)
-                == *steepNeigh.offset(*sortInd.offset(ind as isize) as isize)
-                && *sortInd.offset(ind as isize)
-                    == *steepNeigh.offset(*sortInd.offset(i as isize) as isize)
+            if sort_ind[i as usize] == steep_neigh[sort_ind[ind as usize] as usize]
+                && sort_ind[ind as usize] == steep_neigh[sort_ind[i as usize] as usize]
             {
-                ifdup = 1 as ::core::ffi::c_int;
-                if sDebugLevel > 1 as ::core::ffi::c_int {
-                    printf(
-                        b"Duplicate  %d  %d  %f\n\0" as *const u8 as *const ::core::ffi::c_char,
-                        *sortInd.offset(ind as isize),
-                        *sortInd.offset(i as isize),
-                        *steepAngle.offset(*sortInd.offset(ind as isize) as isize)
-                            as ::core::ffi::c_double,
+                ifdup = 1;
+                if s_debug_level > 1 {
+                    let _ = ImodFile::Stdout.write_all(
+                        c_format(
+                            "Duplicate  %d  %d  %f\n",
+                            &[
+                                CArg::Int(sort_ind[ind as usize] as i64),
+                                CArg::Int(sort_ind[i as usize] as i64),
+                                CArg::Dbl(steep_angle[sort_ind[ind as usize] as usize] as f64),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                 }
-                *steepAngle.offset(*sortInd.offset(ind as isize) as isize) =
-                    -1.0f64 as ::core::ffi::c_float;
+                steep_angle[sort_ind[ind as usize] as usize] = -1.;
                 break;
-            } else {
-                i += 1;
             }
         }
-        if !(ifdup != 0) {
-            numSteep += 1;
-            firstSteep = ind;
+        if ifdup != 0 {
+            continue;
         }
-        ind -= 1;
+
+        /* Add this point as start of steep ones to use */
+        num_steep += 1;
+        first_steep = ind;
     }
-    delZ = malloc(
-        ((numPts - firstSteep) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    outlie = malloc(
-        ((numPts - firstSteep) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-    ) as *mut ::core::ffi::c_float;
-    cluster = malloc(
-        ((numPts - firstSteep) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    clusterSX = malloc(
-        ((numPts - firstSteep) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    clusterSY = malloc(
-        ((numPts - firstSteep) as size_t)
-            .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-    ) as *mut ::core::ffi::c_int;
-    if delZ.is_null()
-        || outlie.is_null()
-        || cluster.is_null()
-        || clusterSX.is_null()
-        || clusterSY.is_null()
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    i = 0 as ::core::ffi::c_int;
-    ind = firstSteep;
-    while ind < numPts {
-        if *steepAngle.offset(*sortInd.offset(ind as isize) as isize)
-            > 0 as ::core::ffi::c_int as ::core::ffi::c_float
-        {
-            let fresh3 = i;
-            i = i + 1;
-            *delZ.offset(fresh3 as isize) =
-                fabs(
-                    (*zrot.offset(*sortInd.offset(ind as isize) as isize)
-                        - *zrot.offset(
-                            *steepNeigh.offset(*sortInd.offset(ind as isize) as isize) as isize
-                        )) as ::core::ffi::c_double,
-                ) as ::core::ffi::c_float;
+
+    /* Collect the delta Z values to get median and outlier evaluation */
+    // `B3DMALLOC(..., numPts - firstSteep)` (`surfacesort.c:351-355`).  That
+    // size is too small: with a single steep pair `firstSteep == numPts - 1`,
+    // so the allocation holds one element and `cluster[1] = jpt`
+    // (`surfacesort.c:388`) writes past it.  The source overruns the heap
+    // there; these are sized `numPts` instead, which is an upper bound on
+    // every index used and reproduces what the C's malloc slack gives it.
+    let alloc = if num_pts > num_pts - first_steep {
+        num_pts
+    } else {
+        num_pts - first_steep
+    } as usize;
+    let mut del_z = vec![0.0f32; alloc];
+    let mut outlie = vec![0.0f32; alloc];
+    let mut cluster = vec![0i32; alloc];
+    let mut cluster_sx = vec![0i32; alloc];
+    let mut cluster_sy = vec![0i32; alloc];
+    let mut median_del_z = 0.0f32;
+    let mut i = 0usize;
+    for ind in first_steep..num_pts {
+        if steep_angle[sort_ind[ind as usize] as usize] > 0. {
+            del_z[i] = ((zrot[sort_ind[ind as usize] as usize]
+                - zrot[steep_neigh[sort_ind[ind as usize] as usize] as usize])
+                as f64)
+                .abs() as f32;
+            i += 1;
         }
-        ind += 1;
     }
-    rs_median(delZ, numSteep, outlie, &raw mut medianDelZ);
-    if sDebugLevel != 0 {
-        printf(
-            b"Steep pairs: n = %d  median delz = %f\n\0" as *const u8 as *const ::core::ffi::c_char,
-            i,
-            medianDelZ as ::core::ffi::c_double,
+    rs_median(&del_z, num_steep, &mut outlie, &mut median_del_z);
+    if s_debug_level != 0 {
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "Steep pairs: n = %d  median delz = %f\n",
+                &[CArg::Int(i as i64), CArg::Dbl(median_del_z as f64)],
+            )
+            .as_bytes(),
         );
     }
-    if numSteep > 2 as ::core::ffi::c_int {
-        rs_mad_median_outliers(delZ, numSteep, sOutlierCrit, outlie);
-        i = 0 as ::core::ffi::c_int;
-        ind = firstSteep;
-        while ind < numPts {
-            if *steepAngle.offset(*sortInd.offset(ind as isize) as isize)
-                > 0 as ::core::ffi::c_int as ::core::ffi::c_float
-            {
-                if *outlie.offset(i as isize) as ::core::ffi::c_double != 0.0f64 {
-                    *steepAngle.offset(*sortInd.offset(ind as isize) as isize) =
-                        -1.0f64 as ::core::ffi::c_float;
-                    numSteep -= 1;
+    if num_steep > 2 {
+        /* If more than 2 points, identify outliers with criterion, and then
+        eliminate them too */
+        rs_mad_median_outliers(&del_z, num_steep, s_outlier_crit, &mut outlie);
+        let mut i = 0usize;
+        for ind in first_steep..num_pts {
+            if steep_angle[sort_ind[ind as usize] as usize] > 0. {
+                if outlie[i] != 0. {
+                    steep_angle[sort_ind[ind as usize] as usize] = -1.;
+                    num_steep -= 1;
                 }
                 i += 1;
             }
-            ind += 1;
         }
     }
-    numCluster = 0 as ::core::ffi::c_int;
-    numDone = 0 as ::core::ffi::c_int;
+
+    /* Build clusters from the top of the list down */
+    let mut num_cluster = 0i32;
+    let mut num_done = 0i32;
     loop {
-        ind = numPts - 1 as ::core::ffi::c_int;
-        while ind >= firstSteep {
-            if *steepAngle.offset(*sortInd.offset(ind as isize) as isize)
-                > 0 as ::core::ffi::c_int as ::core::ffi::c_float
-            {
+        /* Look for first remaining pair */
+        let mut ind = num_pts - 1;
+        while ind >= first_steep {
+            if steep_angle[sort_ind[ind as usize] as usize] > 0. {
                 break;
             }
             ind -= 1;
         }
-        if ind < firstSteep {
+        if ind < first_steep {
             break;
         }
-        numInClust = 2 as ::core::ffi::c_int;
-        ipt = *sortInd.offset(ind as isize);
-        jpt = *steepNeigh.offset(ipt as isize);
-        *cluster.offset(0 as ::core::ffi::c_int as isize) = ipt;
-        *cluster.offset(1 as ::core::ffi::c_int as isize) = jpt;
-        *group.offset(ipt as isize) = if *zrot.offset(ipt as isize) < *zrot.offset(jpt as isize) {
-            1 as ::core::ffi::c_int
+
+        /* Start a cluster and list of points to check */
+        let mut num_in_clust = 2usize;
+        let ipt = sort_ind[ind as usize];
+        let jpt = steep_neigh[ipt as usize];
+        cluster[0] = ipt;
+        cluster[1] = jpt;
+        group[ipt as usize] = if zrot[ipt as usize] < zrot[jpt as usize] {
+            1
         } else {
-            2 as ::core::ffi::c_int
+            2
         };
-        *group.offset(jpt as isize) = 3 as ::core::ffi::c_int - *group.offset(ipt as isize);
-        checkInd = 0 as ::core::ffi::c_int;
-        *steepAngle.offset(ipt as isize) = -1.0f64 as ::core::ffi::c_float;
-        while checkInd < numInClust {
-            jnd = ind - 1 as ::core::ffi::c_int;
-            while jnd >= firstSteep {
-                ipt = *sortInd.offset(jnd as isize);
-                jpt = *steepNeigh.offset(ipt as isize);
-                if *steepAngle.offset(ipt as isize)
-                    > 0 as ::core::ffi::c_int as ::core::ffi::c_float
-                    && (ipt == *cluster.offset(checkInd as isize)
-                        || jpt == *cluster.offset(checkInd as isize))
+        group[jpt as usize] = 3 - group[ipt as usize];
+        let mut check_ind = 0usize;
+        steep_angle[ipt as usize] = -1.;
+        while check_ind < num_in_clust {
+            /* To check a point in cluster list, loop on the rest of the best pairs looking
+            for one that includes this point */
+            for jnd in (first_steep..=ind - 1).rev() {
+                let ipt = sort_ind[jnd as usize];
+                let jpt = steep_neigh[ipt as usize];
+                if steep_angle[ipt as usize] > 0.
+                    && (ipt == cluster[check_ind] || jpt == cluster[check_ind])
                 {
-                    newpt = ipt;
-                    oldpt = jpt;
-                    if ipt == *cluster.offset(checkInd as isize) {
+                    /* oldpt is index of one already in cluster, newpt is its pair */
+                    let mut newpt = ipt;
+                    let mut oldpt = jpt;
+                    if ipt == cluster[check_ind] {
                         oldpt = ipt;
                         newpt = jpt;
                     }
-                    knd = if *zrot.offset(oldpt as isize) < *zrot.offset(newpt as isize) {
-                        1 as ::core::ffi::c_int
+
+                    /* Check consistency with existing entry */
+                    let knd = if zrot[oldpt as usize] < zrot[newpt as usize] {
+                        1
                     } else {
-                        2 as ::core::ffi::c_int
+                        2
                     };
-                    if knd != *group.offset(oldpt as isize) {
-                        printf(
-                            b"INCONSISTENCY IN INITIAL STEEP PAIRS IN SURFACE SORT.\n\0"
-                                as *const u8
-                                as *const ::core::ffi::c_char,
+                    if knd != group[oldpt as usize] {
+                        let _ = ImodFile::Stdout.write_all(
+                            c_format(
+                                "INCONSISTENCY IN INITIAL STEEP PAIRS IN SURFACE SORT.\n",
+                                &[],
+                            )
+                            .as_bytes(),
                         );
                     } else {
-                        ifdup = 0 as ::core::ffi::c_int;
-                        knd = if *zrot.offset(oldpt as isize) >= *zrot.offset(newpt as isize) {
-                            1 as ::core::ffi::c_int
+                        /* See if other point is already in cluster; if so check its
+                        surface consistency too */
+                        let mut ifdup = 0;
+                        let knd = if zrot[oldpt as usize] >= zrot[newpt as usize] {
+                            1
                         } else {
-                            2 as ::core::ffi::c_int
+                            2
                         };
-                        j = 0 as ::core::ffi::c_int;
-                        while j < numInClust {
-                            if newpt == *cluster.offset(j as isize) {
-                                ifdup = 1 as ::core::ffi::c_int;
-                                if knd != *group.offset(newpt as isize) {
-                                    printf(
-                                        b"INCONSISTENCY IN INITIAL STEEP PAIRS IN SURFACE SORT.\n\0"
-                                            as *const u8
-                                            as *const ::core::ffi::c_char,
+                        for j in 0..num_in_clust {
+                            if newpt == cluster[j] {
+                                ifdup = 1;
+                                if knd != group[newpt as usize] {
+                                    let _ = ImodFile::Stdout.write_all(
+                                        c_format(
+                                            "INCONSISTENCY IN INITIAL STEEP PAIRS IN SURFACE \
+                                             SORT.\n",
+                                            &[],
+                                        )
+                                        .as_bytes(),
                                     );
                                 }
                                 break;
-                            } else {
-                                j += 1;
                             }
                         }
+
+                        /* Add new point to cluster and set its angle -1 to mark its pair as used */
                         if ifdup == 0 {
-                            let fresh4 = numInClust;
-                            numInClust = numInClust + 1;
-                            *cluster.offset(fresh4 as isize) = newpt;
-                            *group.offset(newpt as isize) = knd;
+                            cluster[num_in_clust] = newpt;
+                            num_in_clust += 1;
+                            group[newpt as usize] = knd;
                         }
                     }
-                    *steepAngle.offset(ipt as isize) = -1.0f64 as ::core::ffi::c_float;
+                    steep_angle[ipt as usize] = -1.;
                 }
-                jnd -= 1;
             }
-            checkInd += 1;
+            check_ind += 1;
         }
-        nbot = 0 as ::core::ffi::c_int;
-        ntop = 0 as ::core::ffi::c_int;
-        zbot = 0.0f32;
-        ztop = 0.0f32;
-        xsum = 0.0f32;
-        ysum = 0.0f32;
-        i = 0 as ::core::ffi::c_int;
-        while i < numInClust {
-            ipt = *cluster.offset(i as isize);
-            if *group.offset(ipt as isize) == 2 as ::core::ffi::c_int {
+
+        /* A cluster is done.  Get its delta Z overall and central square */
+        let mut nbot = 0i32;
+        let mut ntop = 0i32;
+        let mut zbot = 0.0f32;
+        let mut ztop = 0.0f32;
+        let mut xsum = 0.0f32;
+        let mut ysum = 0.0f32;
+        for i in 0..num_in_clust {
+            let ipt = cluster[i];
+            if group[ipt as usize] == 2 {
                 ntop += 1;
-                ztop += *zrot.offset(ipt as isize);
+                ztop += zrot[ipt as usize];
             } else {
                 nbot += 1;
-                zbot += *zrot.offset(ipt as isize);
+                zbot += zrot[ipt as usize];
             }
-            xsum += *xrot.offset(ipt as isize);
-            ysum += *yrot.offset(ipt as isize);
-            i += 1;
+            xsum += xrot[ipt as usize];
+            ysum += yrot[ipt as usize];
         }
-        *delZ.offset(numCluster as isize) =
-            ztop / ntop as ::core::ffi::c_float - zbot / nbot as ::core::ffi::c_float;
-        *clusterSX.offset(numCluster as isize) = ((xsum / numInClust as ::core::ffi::c_float
-            - xmin)
-            / sGridSpacing) as ::core::ffi::c_int;
-        let fresh5 = numCluster;
-        numCluster = numCluster + 1;
-        *clusterSY.offset(fresh5 as isize) = ((ysum / numInClust as ::core::ffi::c_float - ymin)
-            / sGridSpacing) as ::core::ffi::c_int;
-        numDone += numInClust;
-        if sDebugLevel != 0 {
-            printf(
-                b"cluster %d  num  %d  delz  %f  sx, sy %d %d, done %d\n\0" as *const u8
-                    as *const ::core::ffi::c_char,
-                numCluster,
-                numInClust,
-                *delZ.offset((numCluster - 1 as ::core::ffi::c_int) as isize)
-                    as ::core::ffi::c_double,
-                *clusterSX.offset((numCluster - 1 as ::core::ffi::c_int) as isize),
-                *clusterSY.offset((numCluster - 1 as ::core::ffi::c_int) as isize),
-                numDone,
+
+        del_z[num_cluster as usize] = ztop / ntop as f32 - zbot / nbot as f32;
+        cluster_sx[num_cluster as usize] =
+            ((xsum / num_in_clust as f32 - xmin) / s_grid_spacing) as i32;
+        cluster_sy[num_cluster as usize] =
+            ((ysum / num_in_clust as f32 - ymin) / s_grid_spacing) as i32;
+        num_cluster += 1;
+        num_done += num_in_clust as i32;
+        if s_debug_level != 0 {
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "cluster %d  num  %d  delz  %f  sx, sy %d %d, done %d\n",
+                    &[
+                        CArg::Int(num_cluster as i64),
+                        CArg::Int(num_in_clust as i64),
+                        CArg::Dbl(del_z[(num_cluster - 1) as usize] as f64),
+                        CArg::Int(cluster_sx[(num_cluster - 1) as usize] as i64),
+                        CArg::Int(cluster_sy[(num_cluster - 1) as usize] as i64),
+                        CArg::Int(num_done as i64),
+                    ],
+                )
+                .as_bytes(),
             );
         }
-        if sDebugLevel > 1 as ::core::ffi::c_int {
-            i = 0 as ::core::ffi::c_int;
-            while i < numInClust {
-                printf(
-                    b"%d  %.1f  %.1f  %.1f  %d\n\0" as *const u8 as *const ::core::ffi::c_char,
-                    *cluster.offset(i as isize),
-                    *xrot.offset(*cluster.offset(i as isize) as isize) as ::core::ffi::c_double,
-                    *yrot.offset(*cluster.offset(i as isize) as isize) as ::core::ffi::c_double,
-                    *zrot.offset(*cluster.offset(i as isize) as isize) as ::core::ffi::c_double,
-                    *group.offset(*cluster.offset(i as isize) as isize),
+        if s_debug_level > 1 {
+            for i in 0..num_in_clust {
+                let _ = ImodFile::Stdout.write_all(
+                    c_format(
+                        "%d  %.1f  %.1f  %.1f  %d\n",
+                        &[
+                            CArg::Int(cluster[i] as i64),
+                            CArg::Dbl(xrot[cluster[i] as usize] as f64),
+                            CArg::Dbl(yrot[cluster[i] as usize] as f64),
+                            CArg::Dbl(zrot[cluster[i] as usize] as f64),
+                            CArg::Int(group[cluster[i] as usize] as i64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
-                i += 1;
             }
         }
     }
-    numErr = 0 as ::core::ffi::c_int;
-    errmax = -1000.0f64 as ::core::ffi::c_float;
-    errsq = 0.0f32;
-    errsum = errsq;
-    round = 0 as ::core::ffi::c_int;
-    while round < 2 as ::core::ffi::c_int {
-        ring = 0 as ::core::ffi::c_int;
-        while ring < numRings && numDone < numPts {
-            ind = 0 as ::core::ffi::c_int;
-            while ind < numCluster && numDone < numPts {
-                sx = *clusterSX.offset(ind as isize);
-                sy = *clusterSY.offset(ind as isize);
-                jdxy = *ringStart.offset(ring as isize);
-                while jdxy < *ringStart.offset((ring + 1 as ::core::ffi::c_int) as isize)
-                    && numDone < numPts
-                {
-                    ix = sx + *idx.offset(jdxy as isize) as ::core::ffi::c_int;
-                    iy = sy + *idy.offset(jdxy as isize) as ::core::ffi::c_int;
-                    if !(ix < 0 as ::core::ffi::c_int
-                        || ix >= numGridX
-                        || iy < 0 as ::core::ffi::c_int
-                        || iy >= numGridY)
-                    {
-                        jnd = ix + iy * numGridX;
-                        if !(*squareDone.offset(jnd as isize) != 0) {
-                            *squareDone.offset(jnd as isize) = 1 as ::core::ffi::c_uchar;
-                            jsq = 0 as ::core::ffi::c_int;
-                            while jsq < *numInSquare.offset(jnd as isize) && numDone < numPts {
-                                jpt = *pointLists
-                                    .offset((*squareInd.offset(jnd as isize) + jsq) as isize);
-                                if *group.offset(jpt as isize) == 0 {
-                                    *squareDone.offset(jnd as isize) = 0 as ::core::ffi::c_uchar;
-                                    maxRings = floor(
-                                        (sMaxFitDist / sGridSpacing) as ::core::ffi::c_double
-                                            + 0.5f64,
-                                    )
-                                        as ::core::ffi::c_int;
-                                    maxRings = if maxRings < numRings {
-                                        maxRings
-                                    } else {
-                                        numRings
-                                    };
-                                    nfit = 0 as ::core::ffi::c_int;
-                                    grpsum = 0 as ::core::ffi::c_int;
-                                    tx = ((*xrot.offset(jpt as isize) - xmin) / sGridSpacing)
-                                        as ::core::ffi::c_int;
-                                    ty = ((*yrot.offset(jpt as isize) - ymin) / sGridSpacing)
-                                        as ::core::ffi::c_int;
-                                    jring = 0 as ::core::ffi::c_int;
-                                    while (jring < maxRings || nfit < 2 as ::core::ffi::c_int)
-                                        && nfit < sMaxNumFit
+
+    let mut num_err = 0i32;
+    let mut errmax = -1000.0f32;
+    let mut errsum = 0.0f32;
+    let mut errsq = 0.0f32;
+
+    /* Loop on rings, in each ring loop on clusters */
+    for round in 0..2 {
+        let mut ring = 0;
+        while ring < num_rings && num_done < num_pts {
+            let mut ind = 0;
+            while ind < num_cluster && num_done < num_pts {
+                let sx = cluster_sx[ind as usize];
+                let sy = cluster_sy[ind as usize];
+
+                /* Loop on the squares in the ring and on the points in the squares */
+                let mut jdxy = ring_start[ring as usize];
+                while jdxy < ring_start[(ring + 1) as usize] && num_done < num_pts {
+                    let ix = sx + idx[jdxy as usize] as i32;
+                    let iy = sy + idy[jdxy as usize] as i32;
+                    if ix < 0 || ix >= num_grid_x || iy < 0 || iy >= num_grid_y {
+                        jdxy += 1;
+                        continue;
+                    }
+                    let jnd = ix + iy * num_grid_x;
+
+                    /* If square done, skip; otherwise set to 1 and reset to 0 when
+                    find a point that needs doing */
+                    if square_done[jnd as usize] != 0 {
+                        jdxy += 1;
+                        continue;
+                    }
+                    square_done[jnd as usize] = 1;
+                    let mut jsq = 0;
+                    while jsq < num_in_square[jnd as usize] && num_done < num_pts {
+                        let jpt = point_lists[(square_ind[jnd as usize] + jsq) as usize];
+                        if group[jpt as usize] == 0 {
+                            square_done[jnd as usize] = 0;
+
+                            /* Now do rings around this point to collect identified
+                            neighbors within a certain range up to a certain count */
+                            let mut max_rings =
+                                ((s_max_fit_dist / s_grid_spacing) as f64 + 0.5).floor() as i32;
+                            max_rings = if max_rings < num_rings {
+                                max_rings
+                            } else {
+                                num_rings
+                            };
+                            let mut nfit = 0i32;
+                            let mut grpsum = 0i32;
+                            let tx = ((xrot[jpt as usize] - xmin) / s_grid_spacing) as i32;
+                            let ty = ((yrot[jpt as usize] - ymin) / s_grid_spacing) as i32;
+                            let mut jring = 0;
+                            while (jring < max_rings || nfit < 2) && nfit < s_max_num_fit {
+                                let mut kdxy = ring_start[jring as usize];
+                                while kdxy < ring_start[(jring + 1) as usize]
+                                    && nfit < s_max_num_fit
+                                {
+                                    let jx = tx + idx[kdxy as usize] as i32;
+                                    let jy = ty + idy[kdxy as usize] as i32;
+                                    if jx < 0 || jx >= num_grid_x || jy < 0 || jy >= num_grid_y {
+                                        kdxy += 1;
+                                        continue;
+                                    }
+                                    let knd = jx + jy * num_grid_x;
+                                    let mut isq = 0;
+                                    while isq < num_in_square[knd as usize] && nfit < s_max_num_fit
                                     {
-                                        kdxy = *ringStart.offset(jring as isize);
-                                        while kdxy
-                                            < *ringStart
-                                                .offset((jring + 1 as ::core::ffi::c_int) as isize)
-                                            && nfit < sMaxNumFit
-                                        {
-                                            jx = tx
-                                                + *idx.offset(kdxy as isize) as ::core::ffi::c_int;
-                                            jy = ty
-                                                + *idy.offset(kdxy as isize) as ::core::ffi::c_int;
-                                            if !(jx < 0 as ::core::ffi::c_int
-                                                || jx >= numGridX
-                                                || jy < 0 as ::core::ffi::c_int
-                                                || jy >= numGridY)
-                                            {
-                                                knd = jx + jy * numGridX;
-                                                isq = 0 as ::core::ffi::c_int;
-                                                while isq < *numInSquare.offset(knd as isize)
-                                                    && nfit < sMaxNumFit
-                                                {
-                                                    kpt = *pointLists.offset(
-                                                        (*squareInd.offset(knd as isize) + isq)
-                                                            as isize,
-                                                    );
-                                                    if *group.offset(kpt as isize) != 0 {
-                                                        *xfit.offset(nfit as isize) =
-                                                            *xrot.offset(kpt as isize);
-                                                        *yfit.offset(nfit as isize) =
-                                                            *yrot.offset(kpt as isize);
-                                                        *zfit.offset(nfit as isize) =
-                                                            *zrot.offset(kpt as isize);
-                                                        let fresh6 = nfit;
-                                                        nfit = nfit + 1;
-                                                        *grpfit.offset(fresh6 as isize) = (*group
-                                                            .offset(kpt as isize)
-                                                            - 1 as ::core::ffi::c_int)
-                                                            as ::core::ffi::c_float;
-                                                        grpsum += *group.offset(kpt as isize)
-                                                            - 1 as ::core::ffi::c_int;
-                                                    }
-                                                    isq += 1;
-                                                }
+                                        let kpt =
+                                            point_lists[(square_ind[knd as usize] + isq) as usize];
+                                        if group[kpt as usize] != 0 {
+                                            xfit[nfit as usize] = xrot[kpt as usize];
+                                            yfit[nfit as usize] = yrot[kpt as usize];
+                                            zfit[nfit as usize] = zrot[kpt as usize];
+                                            grpfit[nfit as usize] =
+                                                (group[kpt as usize] - 1) as f32;
+                                            nfit += 1;
+                                            grpsum += group[kpt as usize] - 1;
+                                        }
+                                        isq += 1;
+                                    }
+                                    kdxy += 1;
+                                }
+                                jring += 1;
+                            }
+                            if s_debug_level > 1 {
+                                let _ = ImodFile::Stdout.write_all(
+                                    c_format(
+                                        "For %d  %.1f %.1f  %.1f  nfit %d  ntop %d\n",
+                                        &[
+                                            CArg::Int(jpt as i64),
+                                            CArg::Dbl(xrot[jpt as usize] as f64),
+                                            CArg::Dbl(yrot[jpt as usize] as f64),
+                                            CArg::Dbl(zrot[jpt as usize] as f64),
+                                            CArg::Int(nfit as i64),
+                                            CArg::Int(grpsum as i64),
+                                        ],
+                                    )
+                                    .as_bytes(),
+                                );
+                            }
+
+                            let mut zbot: f32;
+                            let mut ztop: f32;
+                            /* Fit a biplane if there are enough points and 2 surfaces */
+                            if nfit >= s_biplane_min_fit && grpsum != 0 && grpsum != nfit {
+                                let (mut a1, mut a2, mut dzfit, mut con) = (0.0f32, 0., 0., 0.);
+                                ls_fit3(
+                                    &xfit, &yfit, &grpfit, &zfit, nfit, &mut a1, &mut a2,
+                                    &mut dzfit, &mut con,
+                                );
+
+                                /* Get bottom and top predicted values.  Store current DZ as
+                                delz for this area if there are at least 2 on each surface*/
+                                zbot = a1 * xrot[jpt as usize] + a2 * yrot[jpt as usize] + con;
+                                ztop = zbot + dzfit;
+                                if s_debug_level > 1 {
+                                    let _ = ImodFile::Stdout.write_all(
+                                        c_format(
+                                            "fit3 %f  %f %f %f\n",
+                                            &[
+                                                CArg::Dbl(a1 as f64),
+                                                CArg::Dbl(a2 as f64),
+                                                CArg::Dbl(dzfit as f64),
+                                                CArg::Dbl(con as f64),
+                                            ],
+                                        )
+                                        .as_bytes(),
+                                    );
+                                }
+                                if grpsum > 1 && nfit - grpsum > 1 {
+                                    del_z[ind as usize] = dzfit;
+                                }
+                            } else {
+                                /* Need to keep just one group for single plane fit - so find
+                                out how many points this leaves */
+                                let mut keep_group = 1;
+                                if grpsum <= nfit / 2 {
+                                    keep_group = 0;
+                                }
+                                if (keep_group != 0 && grpsum >= s_plane_min_fit)
+                                    || (keep_group == 0 && nfit - grpsum >= s_plane_min_fit)
+                                {
+                                    /* If this leaves enough points for a fit, repack the array
+                                    with that group */
+                                    if grpsum != 0 && grpsum != nfit {
+                                        let mut j = 0i32;
+                                        for i in 0..nfit as usize {
+                                            if grpfit[i] == keep_group as f32 {
+                                                xfit[j as usize] = xfit[i];
+                                                yfit[j as usize] = yfit[i];
+                                                zfit[j as usize] = zfit[i];
+                                                grpfit[j as usize] = grpfit[i];
+                                                j += 1;
                                             }
-                                            kdxy += 1;
                                         }
-                                        jring += 1;
+                                        nfit = j;
+                                        grpsum = j * keep_group;
                                     }
-                                    if sDebugLevel > 1 as ::core::ffi::c_int {
-                                        printf(
-                                            b"For %d  %.1f %.1f  %.1f  nfit %d  ntop %d\n\0"
-                                                as *const u8
-                                                as *const ::core::ffi::c_char,
-                                            jpt,
-                                            *xrot.offset(jpt as isize) as ::core::ffi::c_double,
-                                            *yrot.offset(jpt as isize) as ::core::ffi::c_double,
-                                            *zrot.offset(jpt as isize) as ::core::ffi::c_double,
-                                            nfit,
-                                            grpsum,
-                                        );
-                                    }
-                                    if nfit >= sBiplaneMinFit && grpsum != 0 && grpsum != nfit {
-                                        ls_fit3(
-                                            xfit,
-                                            yfit,
-                                            grpfit,
-                                            zfit,
-                                            nfit,
-                                            &raw mut a1,
-                                            &raw mut a2,
-                                            &raw mut dzfit,
-                                            &raw mut con,
-                                        );
-                                        zbot = a1 * *xrot.offset(jpt as isize)
-                                            + a2 * *yrot.offset(jpt as isize)
-                                            + con;
-                                        ztop = zbot + dzfit;
-                                        if sDebugLevel > 1 as ::core::ffi::c_int {
-                                            printf(
-                                                b"fit3 %f  %f %f %f\n\0" as *const u8
-                                                    as *const ::core::ffi::c_char,
-                                                a1 as ::core::ffi::c_double,
-                                                a2 as ::core::ffi::c_double,
-                                                dzfit as ::core::ffi::c_double,
-                                                con as ::core::ffi::c_double,
-                                            );
-                                        }
-                                        if grpsum > 1 as ::core::ffi::c_int
-                                            && nfit - grpsum > 1 as ::core::ffi::c_int
-                                        {
-                                            *delZ.offset(ind as isize) = dzfit;
-                                        }
+
+                                    /* Do fit and get upper and lower Z using the delz for area*/
+                                    let (mut a1, mut a2, mut con) = (0.0f32, 0., 0.);
+                                    ls_fit2(
+                                        &xfit,
+                                        &yfit,
+                                        &zfit,
+                                        nfit,
+                                        &mut a1,
+                                        &mut a2,
+                                        Some(&mut con),
+                                    );
+                                    zbot = a1 * xrot[jpt as usize] + a2 * yrot[jpt as usize] + con;
+                                    ztop = zbot;
+                                    if keep_group != 0 {
+                                        zbot -= del_z[ind as usize];
                                     } else {
-                                        keepGroup = 1 as ::core::ffi::c_int;
-                                        if grpsum <= nfit / 2 as ::core::ffi::c_int {
-                                            keepGroup = 0 as ::core::ffi::c_int;
-                                        }
-                                        if keepGroup != 0 && grpsum >= sPlaneMinFit
-                                            || keepGroup == 0 && nfit - grpsum >= sPlaneMinFit
-                                        {
-                                            if grpsum != 0 && grpsum != nfit {
-                                                j = 0 as ::core::ffi::c_int;
-                                                i = 0 as ::core::ffi::c_int;
-                                                while i < nfit {
-                                                    if *grpfit.offset(i as isize)
-                                                        == keepGroup as ::core::ffi::c_float
-                                                    {
-                                                        *xfit.offset(j as isize) =
-                                                            *xfit.offset(i as isize);
-                                                        *yfit.offset(j as isize) =
-                                                            *yfit.offset(i as isize);
-                                                        *zfit.offset(j as isize) =
-                                                            *zfit.offset(i as isize);
-                                                        let fresh7 = j;
-                                                        j = j + 1;
-                                                        *grpfit.offset(fresh7 as isize) =
-                                                            *grpfit.offset(i as isize);
-                                                    }
-                                                    i += 1;
-                                                }
-                                                nfit = j;
-                                                grpsum = j * keepGroup;
-                                            }
-                                            ls_fit2(
-                                                xfit,
-                                                yfit,
-                                                zfit,
-                                                nfit,
-                                                &raw mut a1,
-                                                &raw mut a2,
-                                                &raw mut con,
-                                            );
-                                            ztop = a1 * *xrot.offset(jpt as isize)
-                                                + a2 * *yrot.offset(jpt as isize)
-                                                + con;
-                                            zbot = ztop;
-                                            if keepGroup != 0 {
-                                                zbot -= *delZ.offset(ind as isize);
-                                            } else {
-                                                ztop += *delZ.offset(ind as isize);
-                                            }
-                                            if sDebugLevel > 1 as ::core::ffi::c_int {
-                                                printf(
-                                                    b"fit2  %f  %f  %f  zbot %.1f  ztop  %.1f\n\0"
-                                                        as *const u8
-                                                        as *const ::core::ffi::c_char,
-                                                    a1 as ::core::ffi::c_double,
-                                                    a2 as ::core::ffi::c_double,
-                                                    con as ::core::ffi::c_double,
-                                                    zbot as ::core::ffi::c_double,
-                                                    ztop as ::core::ffi::c_double,
-                                                );
-                                            }
+                                        ztop += del_z[ind as usize];
+                                    }
+                                    if s_debug_level > 1 {
+                                        let _ = ImodFile::Stdout.write_all(
+                                            c_format(
+                                                "fit2  %f  %f  %f  zbot %.1f  ztop  %.1f\n",
+                                                &[
+                                                    CArg::Dbl(a1 as f64),
+                                                    CArg::Dbl(a2 as f64),
+                                                    CArg::Dbl(con as f64),
+                                                    CArg::Dbl(zbot as f64),
+                                                    CArg::Dbl(ztop as f64),
+                                                ],
+                                            )
+                                            .as_bytes(),
+                                        );
+                                    }
+                                } else {
+                                    /* Otherwise get mean of bottom and top */
+                                    let mut nbot = 0i32;
+                                    let mut ntop = 0i32;
+                                    zbot = 0.;
+                                    ztop = 0.;
+                                    for i in 0..nfit as usize {
+                                        if grpfit[i] != 0. {
+                                            ntop += 1;
+                                            ztop += zfit[i];
                                         } else {
-                                            nbot = 0 as ::core::ffi::c_int;
-                                            ntop = 0 as ::core::ffi::c_int;
-                                            zbot = 0.0f32;
-                                            ztop = 0.0f32;
-                                            i = 0 as ::core::ffi::c_int;
-                                            while i < nfit {
-                                                if *grpfit.offset(i as isize) != 0. {
-                                                    ntop += 1;
-                                                    ztop += *zfit.offset(i as isize);
-                                                } else {
-                                                    nbot += 1;
-                                                    zbot += *zfit.offset(i as isize);
-                                                }
-                                                i += 1;
-                                            }
-                                            if nbot != 0 {
-                                                zbot /= nbot as ::core::ffi::c_float;
-                                            }
-                                            if ntop != 0 {
-                                                ztop /= ntop as ::core::ffi::c_float;
-                                            }
-                                            if nbot != 0 && ntop == 0 {
-                                                ztop = zbot + *delZ.offset(ind as isize);
-                                            }
-                                            if nbot == 0 && ntop != 0 {
-                                                zbot = ztop - *delZ.offset(ind as isize);
-                                            }
-                                            if sDebugLevel > 1 as ::core::ffi::c_int {
-                                                printf(
-                                                    b"means  %d  %d  zbot %.1f  ztop  %.1f\n\0"
-                                                        as *const u8
-                                                        as *const ::core::ffi::c_char,
-                                                    nbot,
-                                                    ntop,
-                                                    zbot as ::core::ffi::c_double,
-                                                    ztop as ::core::ffi::c_double,
-                                                );
-                                            }
+                                            nbot += 1;
+                                            zbot += zfit[i];
                                         }
                                     }
-                                    if fabs(
-                                        (*zrot.offset(jpt as isize) - zbot)
-                                            as ::core::ffi::c_double,
-                                    ) < fabs(
-                                        (*zrot.offset(jpt as isize) - ztop)
-                                            as ::core::ffi::c_double,
-                                    ) {
-                                        *group.offset(jpt as isize) = 1 as ::core::ffi::c_int;
-                                        xsum = (100.0f64
-                                            * (*zrot.offset(jpt as isize) - zbot)
-                                                as ::core::ffi::c_double
-                                            / (ztop - zbot) as ::core::ffi::c_double)
-                                            as ::core::ffi::c_float;
-                                    } else {
-                                        *group.offset(jpt as isize) = 2 as ::core::ffi::c_int;
-                                        xsum = (100.0f64
-                                            * (ztop - *zrot.offset(jpt as isize))
-                                                as ::core::ffi::c_double
-                                            / (ztop - zbot) as ::core::ffi::c_double)
-                                            as ::core::ffi::c_float;
+
+                                    /* Use both means if they exist; otherwise use delta Z and
+                                    one mean to get the two Z values */
+                                    if nbot != 0 {
+                                        zbot /= nbot as f32;
                                     }
-                                    if round != 0 || xsum < sMaxRound1Dist {
-                                        if sDebugLevel > 1 as ::core::ffi::c_int {
-                                            printf(
-                                                b"Assign to %d   distance %.1f%%\n\0" as *const u8
-                                                    as *const ::core::ffi::c_char,
-                                                *group.offset(jpt as isize),
-                                                xsum as ::core::ffi::c_double,
-                                            );
-                                        }
-                                        numDone += 1;
-                                        errsum += xsum;
-                                        errmax = if errmax > xsum { errmax } else { xsum };
-                                        errsq += xsum * xsum;
-                                        numErr += 1;
-                                    } else {
-                                        if sDebugLevel > 1 as ::core::ffi::c_int {
-                                            printf(
-                                                b"Defer %d because distance is %.1f%%\n\0"
-                                                    as *const u8
-                                                    as *const ::core::ffi::c_char,
-                                                jpt,
-                                                xsum as ::core::ffi::c_double,
-                                            );
-                                        }
-                                        *group.offset(jpt as isize) = 0 as ::core::ffi::c_int;
+                                    if ntop != 0 {
+                                        ztop /= ntop as f32;
+                                    }
+                                    if nbot != 0 && ntop == 0 {
+                                        ztop = zbot + del_z[ind as usize];
+                                    }
+                                    if nbot == 0 && ntop != 0 {
+                                        zbot = ztop - del_z[ind as usize];
+                                    }
+                                    if s_debug_level > 1 {
+                                        let _ = ImodFile::Stdout.write_all(
+                                            c_format(
+                                                "means  %d  %d  zbot %.1f  ztop  %.1f\n",
+                                                &[
+                                                    CArg::Int(nbot as i64),
+                                                    CArg::Int(ntop as i64),
+                                                    CArg::Dbl(zbot as f64),
+                                                    CArg::Dbl(ztop as f64),
+                                                ],
+                                            )
+                                            .as_bytes(),
+                                        );
                                     }
                                 }
-                                jsq += 1;
+                            }
+
+                            /* At last, assign point to group based on which Z is closest */
+                            let xsum: f32;
+                            if ((zrot[jpt as usize] - zbot) as f64).abs()
+                                < ((zrot[jpt as usize] - ztop) as f64).abs()
+                            {
+                                group[jpt as usize] = 1;
+                                // `100.` is a double literal, so the whole
+                                // expression is evaluated in double.
+                                xsum = (100. * (zrot[jpt as usize] - zbot) as f64
+                                    / (ztop - zbot) as f64)
+                                    as f32;
+                            } else {
+                                group[jpt as usize] = 2;
+                                xsum = (100. * (ztop - zrot[jpt as usize]) as f64
+                                    / (ztop - zbot) as f64)
+                                    as f32;
+                            }
+                            if round != 0 || xsum < s_max_round1_dist {
+                                if s_debug_level > 1 {
+                                    let _ = ImodFile::Stdout.write_all(
+                                        c_format(
+                                            "Assign to %d   distance %.1f%%\n",
+                                            &[
+                                                CArg::Int(group[jpt as usize] as i64),
+                                                CArg::Dbl(xsum as f64),
+                                            ],
+                                        )
+                                        .as_bytes(),
+                                    );
+                                }
+                                num_done += 1;
+                                errsum += xsum;
+                                errmax = if errmax > xsum { errmax } else { xsum };
+                                errsq += xsum * xsum;
+                                num_err += 1;
+                            } else {
+                                if s_debug_level > 1 {
+                                    let _ = ImodFile::Stdout.write_all(
+                                        c_format(
+                                            "Defer %d because distance is %.1f%%\n",
+                                            &[CArg::Int(jpt as i64), CArg::Dbl(xsum as f64)],
+                                        )
+                                        .as_bytes(),
+                                    );
+                                }
+                                group[jpt as usize] = 0;
                             }
                         }
+                        jsq += 1;
                     }
                     jdxy += 1;
                 }
@@ -1174,53 +899,32 @@ pub unsafe extern "C" fn surface_sort(
             }
             ring += 1;
         }
-        round += 1;
     }
-    sums_to_avg_sd(errsum, errsq, numErr, &raw mut xsum, &raw mut ysum);
-    if sDebugLevel != 0 {
-        printf(
-            b"Distance from nearest plane for %d points: mean %.1f%%  SD %.1f%%  max %.1f%%\n\0"
-                as *const u8 as *const ::core::ffi::c_char,
-            numErr,
-            xsum as ::core::ffi::c_double,
-            ysum as ::core::ffi::c_double,
-            errmax as ::core::ffi::c_double,
+    let (mut xsum, mut ysum) = (0.0f32, 0.0f32);
+    sums_to_avg_sd(errsum, errsq, num_err, &mut xsum, &mut ysum);
+    if s_debug_level != 0 {
+        let mut out = ImodFile::Stdout;
+        let _ = out.write_all(
+            c_format(
+                "Distance from nearest plane for %d points: mean %.1f%%  SD %.1f%%  max %.1f%%\n",
+                &[
+                    CArg::Int(num_err as i64),
+                    CArg::Dbl(xsum as f64),
+                    CArg::Dbl(ysum as f64),
+                    CArg::Dbl(errmax as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        fflush(stdout);
+        let _ = out.flush();
     }
-    free(xrot as *mut ::core::ffi::c_void);
-    free(yrot as *mut ::core::ffi::c_void);
-    free(zrot as *mut ::core::ffi::c_void);
-    free(idx as *mut ::core::ffi::c_void);
-    free(idy as *mut ::core::ffi::c_void);
-    free(ringStart as *mut ::core::ffi::c_void);
-    free(numInSquare as *mut ::core::ffi::c_void);
-    free(squareInd as *mut ::core::ffi::c_void);
-    free(pointLists as *mut ::core::ffi::c_void);
-    free(steepNeigh as *mut ::core::ffi::c_void);
-    free(sortInd as *mut ::core::ffi::c_void);
-    free(squareDone as *mut ::core::ffi::c_void);
-    free(steepAngle as *mut ::core::ffi::c_void);
-    free(xfit as *mut ::core::ffi::c_void);
-    free(yfit as *mut ::core::ffi::c_void);
-    free(zfit as *mut ::core::ffi::c_void);
-    free(grpfit as *mut ::core::ffi::c_void);
-    free(delZ as *mut ::core::ffi::c_void);
-    free(outlie as *mut ::core::ffi::c_void);
-    free(cluster as *mut ::core::ffi::c_void);
-    free(clusterSY as *mut ::core::ffi::c_void);
-    free(clusterSX as *mut ::core::ffi::c_void);
-    fflush(stdout);
-    return 0 as ::core::ffi::c_int;
+    let _ = ImodFile::Stdout.flush();
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn surface_sort_fortran(
-    mut xyz: *mut ::core::ffi::c_float,
-    mut numPts: *mut ::core::ffi::c_int,
-    mut markersInGroup: *mut ::core::ffi::c_int,
-    mut group: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return surface_sort(xyz, *numPts, *markersInGroup, group);
+
+/// Original `surfacesort` (`surfacesort.c:706`).
+pub fn surfacesort(xyz: &[f32], num_pts: &i32, markers_in_group: &i32, group: &mut [i32]) -> i32 {
+    surface_sort(xyz, *num_pts, *markers_in_group, group)
 }
 
 #[cfg(test)]
@@ -1229,26 +933,23 @@ mod tests {
 
     #[test]
     fn parameter_dispatch_and_small_point_source_path() {
-        unsafe {
-            assert_eq!(set_surf_sort_param(0, 25.), 0);
-            assert_eq!(set_surf_sort_param(14, 0.), 1);
-            let mut xyz = [0_f32; 6];
-            let mut group = [0_i32; 2];
-            assert_eq!(surface_sort(xyz.as_mut_ptr(), 2, 0, group.as_mut_ptr()), 0);
-            assert_eq!(group, [1, 2]);
-        }
+        assert_eq!(set_surf_sort_param(0, 25.), 0);
+        assert_eq!(set_surf_sort_param(14, 0.), 1);
+        let xyz = [0_f32; 6];
+        let mut group = [0_i32; 2];
+        assert_eq!(surface_sort(&xyz, 2, 0, &mut group), 0);
+        assert_eq!(group, [1, 2]);
+        set_surf_sort_param(0, 50.);
     }
 
     #[test]
     fn fortran_parameter_wrapper_preserves_rounding() {
-        unsafe {
-            let mut index = 1;
-            let mut value = 7.6;
-            assert_eq!(set_surf_sort_param_fortran(&mut index, &mut value), 0);
-            assert_eq!(core::ptr::addr_of!(sMaxAngleNeigh).read(), 8);
-            let mut index = 1;
-            let mut value = 50.;
-            set_surf_sort_param_fortran(&mut index, &mut value);
-        }
+        let index = 1;
+        let value = 7.6;
+        assert_eq!(setsurfsortparam(&index, &value), 0);
+        assert_eq!(S_MAX_ANGLE_NEIGH.with(|c| c.get()), 8);
+        let index = 1;
+        let value = 50.;
+        setsurfsortparam(&index, &value);
     }
 }

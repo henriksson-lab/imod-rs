@@ -17,10 +17,10 @@ pub unsafe fn cmplft(x: *mut f32, y: *mut f32, n: i32, dim: *mut i32) {
             n,
             19,
             8,
-            factor.as_mut_ptr(),
-            sym.as_mut_ptr(),
+            &mut factor,
+            &mut sym,
             &mut psym,
-            unsym.as_mut_ptr(),
+            &mut unsym,
             &mut error,
         );
         if error != 0 {
@@ -35,7 +35,21 @@ pub unsafe fn cmplft(x: *mut f32, y: *mut f32, n: i32, dim: *mut i32) {
             );
             std::process::exit(1);
         }
-        mdftkd(n, factor.as_mut_ptr(), dim, x, y);
+        // `mdftkd` walks `x` and `y` as biased pointers into one caller
+        // buffer: every IMOD caller passes `y` inside the same array as `x`,
+        // whose total float count is `d[1]` (`odfft.c:93`, `todfft.c:107,159`,
+        // `realft.c:42`, `hermft.c:85`).  The translated `mdftkd` takes that
+        // buffer as one slice plus the two biases, so rebuild it here.
+        let dim_slice = std::slice::from_raw_parts(dim, 6);
+        let y_bias = y.offset_from(x) as usize;
+        mdftkd(
+            n,
+            &factor,
+            dim_slice,
+            std::slice::from_raw_parts_mut(x, dim_slice[1] as usize),
+            0,
+            y_bias,
+        );
         diprp(n, sym.as_mut_ptr(), psym, unsym.as_mut_ptr(), dim, x, y);
     }
 }

@@ -8,10 +8,12 @@
 
 use std::env;
 use std::ffi::CString;
+use std::io::Write;
+use std::os::fd::FromRawFd;
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
 use crate::imod::libcfshr::b3dutil::{
-    imod_backup_file, imod_copyright, imod_prog_name, imod_version, number_in_list,
+    ImodFile, imod_backup_file, imod_copyright, imod_prog_name, imod_version, number_in_list,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::parselist::parselist;
@@ -87,14 +89,18 @@ pub fn imodinfo() {
         .iter()
         .map(|value| CString::new(value.as_str()).unwrap_or_default())
         .collect();
-    let progname = unsafe { imod_prog_name(arg_strings[0].as_ptr()) };
+    let progname_str = imod_prog_name(&argv[0]);
+    // `imodinfo_usage` and the `printf`/`sprintf` sites below still take the C
+    // string the source passes; this keeps one copy alive for them.
+    let progname_c = CString::new(progname_str.as_str()).unwrap_or_default();
+    let progname = progname_c.as_ptr();
     let mut prefix = [0_i8; 100];
     unsafe {
         libc::sprintf(prefix.as_mut_ptr(), c"ERROR: %s - ".as_ptr(), progname);
-        setExitPrefix(prefix.as_ptr());
+        setExitPrefix(core::ffi::CStr::from_ptr(prefix.as_ptr()).to_bytes());
     }
     if argv.len() == 1 {
-        unsafe { imod_version(progname) };
+        imod_version(Some(&progname_str));
         imod_copyright();
         imodinfo_usage(progname);
         unsafe { libc::exit(0) };
@@ -138,7 +144,7 @@ pub fn imodinfo() {
                             c"Group number %d must be positive".as_ptr(),
                             group_num,
                         );
-                        exit_error(message.as_ptr());
+                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                     }
                 }
                 // The source `case 'g'` has no break and falls into `case 'c'`.
@@ -223,7 +229,7 @@ pub fn imodinfo() {
                             c"Parsing list %s".as_ptr(),
                             value.as_ptr(),
                         );
-                        exit_error(message.as_ptr());
+                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                     }
                 }
                 list = unsafe { std::slice::from_raw_parts(values, count as usize) }.to_vec();
@@ -256,7 +262,7 @@ pub fn imodinfo() {
                             c"Unknown option %s; enter -help for help".as_ptr(),
                             option.as_ptr(),
                         );
-                        exit_error(message.as_ptr());
+                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                     }
                 }
             }
@@ -278,7 +284,7 @@ pub fn imodinfo() {
     }
     if let Some(filename) = out_file.as_ref() {
         let name = CString::new(filename.as_str()).unwrap_or_default();
-        if unsafe { imod_backup_file(name.as_ptr()) } != 0 {
+        if imod_backup_file(filename) != 0 {
             let mut message = [0_i8; 512];
             unsafe {
                 libc::sprintf(
@@ -286,7 +292,7 @@ pub fn imodinfo() {
                     c"Could not make ~ backup of existing output file %s".as_ptr(),
                     name.as_ptr(),
                 );
-                exit_error(message.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
             }
         }
         unsafe {
@@ -298,13 +304,13 @@ pub fn imodinfo() {
                     c"Opening output file %s".as_ptr(),
                     name.as_ptr(),
                 );
-                exit_error(message.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
             }
         }
     }
     if !list.is_empty() && group_num > 0 {
         unsafe {
-            exit_error(c"You cannot enter both an object list and an object group".as_ptr());
+            exit_error(b"You cannot enter both an object list and an object group");
         }
     }
     if hush && verbose == 0 {
@@ -333,7 +339,7 @@ pub fn imodinfo() {
                         c"".as_ptr()
                     },
                 );
-                exit_error(message.as_ptr());
+                exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
             }
             libc::fclose(fin);
         }
@@ -360,7 +366,7 @@ pub fn imodinfo() {
                         c"There are no object groups in model %s".as_ptr(),
                         name.as_ptr(),
                     );
-                    exit_error(message.as_ptr());
+                    exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                 }
             }
             if group_num > model.group_list.len() as i32 {
@@ -373,7 +379,7 @@ pub fn imodinfo() {
                         model.group_list.len() as std::ffi::c_int,
                         name.as_ptr(),
                     );
-                    exit_error(message.as_ptr());
+                    exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                 }
             }
         }
@@ -434,9 +440,7 @@ pub fn imodinfo() {
                 if obj_group_lookup(&model.group_list[group_num as usize - 1], ob as i32) >= 0 {
                     obj_list.push(ob);
                 }
-            } else if unsafe { number_in_list(ob as i32 + 1, list.as_ptr(), list.len() as i32, 1) }
-                != 0
-            {
+            } else if number_in_list(ob as i32 + 1, Some(&list), list.len() as i32, 1) != 0 {
                 obj_list.push(ob);
             }
         }
@@ -448,7 +452,25 @@ pub fn imodinfo() {
         }
         match mode {
             4 => {
-                imod_write_ascii(&model, unsafe { FOUT });
+                // `imodinfo.cpp:452` passes this program's own `fout`.  The
+                // converted `imodWriteAscii` takes an `ImodFile` (NATIVE.md
+                // vocabulary item 1), while this program still writes
+                // everything else on the C stream -- 170 `fprintf(FOUT, ...)`
+                // sites, whose conversion is its own unit of work -- so a
+                // second, independently buffered handle would reorder a
+                // redirected capture.  The C stream is flushed first and the
+                // Rust handle is a `dup` of its descriptor: `dup` shares the
+                // open file *description*, so both share one file offset and
+                // the C stream resumes exactly where these writes ended,
+                // including after `imodWriteAscii`'s own `rewind`.
+                unsafe {
+                    libc::fflush(FOUT);
+                    let mut out = ImodFile::File(std::rc::Rc::new(std::fs::File::from_raw_fd(
+                        libc::dup(libc::fileno(FOUT)),
+                    )));
+                    imod_write_ascii(&model, &mut out);
+                    let _ = out.flush();
+                }
             }
             6 => {
                 for ob in &obj_list {
@@ -653,10 +675,11 @@ pub fn imodinfo_print_model(
             if verbose > 1 {
                 unsafe {
                     libc::fprintf(FOUT, c"\n\t".as_ptr());
-                    // `imodinfo.cpp:540` prints the label to `stdout`, not to
-                    // `fout`.
-                    imod_label_print(cont.label.as_ref(), *(&raw const stdout));
                 }
+                // `imodinfo.cpp:540` prints the label to `stdout`, not to
+                // `fout`.  `ImodFile::Stdout` is that same C stream, so the
+                // two stay in order.
+                imod_label_print(cont.label.as_ref(), &mut ImodFile::Stdout);
             }
             if cont.pts.is_empty() {
                 if verbose >= 0 {

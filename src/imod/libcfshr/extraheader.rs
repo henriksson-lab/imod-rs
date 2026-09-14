@@ -13,6 +13,7 @@ use super::autodoc::{
 use super::b3dutil::{
     b3d_error, b3d_get_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
 };
+use crate::imod::libcfshr::b3dutil::ImodFile;
 
 const MRC_EXT_TYPE_FEI: i32 = 3;
 const RADIANS_PER_DEGREE: f64 = 0.017_453_292_52;
@@ -127,7 +128,16 @@ pub unsafe fn get_extra_header_tilts_fortran(
     {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
 }
@@ -211,7 +221,7 @@ pub unsafe fn get_extra_header_items(
         let value_index = *iz_piece.add(i as usize);
         if value_index < 0 {
             b3d_error(
-                ptr::null_mut(),
+                None,
                 format_args!(
                     "getExtraHeaderItems - Value array not designed for negative Z values"
                 ),
@@ -220,7 +230,7 @@ pub unsafe fn get_extra_header_items(
         }
         if value_index >= max_vals {
             b3d_error(
-                ptr::null_mut(),
+                None,
                 format_args!("getExtraHeaderItems - Array not big enough for data"),
             );
             return 1;
@@ -325,7 +335,16 @@ pub unsafe fn get_extra_header_items_fortran(
     {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
 }
@@ -376,7 +395,7 @@ pub unsafe fn get_metadata_items(
     *num_found = 0;
     if !(1..=9).contains(&data_type) {
         b3d_error(
-            ptr::null_mut(),
+            None,
             format_args!(
                 "getMetadataItems - type value {} is outside allowed range",
                 adoc_type
@@ -431,7 +450,16 @@ pub unsafe fn get_metadata_items_fortran(
     {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
 }
@@ -459,7 +487,7 @@ pub unsafe fn get_metadata_by_key(
     ];
     if adoc_set_current(ind_adoc) != 0 {
         b3d_error(
-            ptr::null_mut(),
+            None,
             format_args!("getMetadataByKey - Failed to set autodoc index"),
         );
         return 1;
@@ -469,7 +497,7 @@ pub unsafe fn get_metadata_by_key(
     if value_type == 0 {
         if val_string.is_null() {
             b3d_error(
-                ptr::null_mut(),
+                None,
                 format_args!(
                     "getMetadataByKey - Requested string items but called with NULL pointer to string array"
                 ),
@@ -484,14 +512,14 @@ pub unsafe fn get_metadata_by_key(
         let output = *iz_piece.add(i as usize);
         if output < 0 {
             b3d_error(
-                ptr::null_mut(),
+                None,
                 format_args!("getMetadataByKey - Value array not designed for negative Z values"),
             );
             return 1;
         }
         if output >= max_vals {
             b3d_error(
-                ptr::null_mut(),
+                None,
                 format_args!("getMetadataByKey - Array not big enough for data"),
             );
             return 1;
@@ -608,7 +636,16 @@ pub unsafe fn get_metadata_by_key_fortran(
     {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
     if *value_type == 0 {
@@ -647,7 +684,7 @@ pub unsafe fn get_extra_header_pieces(
     }
     if nz > max_piece {
         b3d_error(
-            ptr::null_mut(),
+            None,
             format_args!("getExtraHeaderPieces - arrays not large enough for piece lists"),
         );
         return 1;
@@ -699,7 +736,16 @@ pub unsafe fn get_extra_header_pieces_fortran(
     {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
 }
@@ -723,14 +769,14 @@ pub unsafe fn get_metadata_pieces(
     *num_found = 0;
     if nz > max_piece {
         b3d_error(
-            ptr::null_mut(),
+            None,
             format_args!("getMetadataPieces - Arrays not large enough for piece lists"),
         );
         return 1;
     }
     if adoc_set_current(ind_adoc) != 0 {
         b3d_error(
-            ptr::null_mut(),
+            None,
             format_args!("get_metadata_pieces - Failed to set autodoc index"),
         );
         return 1;
@@ -783,7 +829,16 @@ pub unsafe fn get_metadata_pieces_fortran(
     {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
 }
@@ -832,7 +887,7 @@ pub unsafe fn get_metadata_weighting_doses(
     }
     if num_found < nz {
         b3d_error(
-            ptr::null_mut(),
+            None,
             format_args!(
                 "getMetadataWeightingDoses - {} entries were found in autodoc file for ExposureDose",
                 if num_found != 0 { "Not enough" } else { "No" }
@@ -843,7 +898,7 @@ pub unsafe fn get_metadata_weighting_doses(
     for i in 0..nz {
         if *sec_dose.add(i as usize) <= 0. && min_dose <= 0. {
             b3d_error(
-                ptr::null_mut(),
+                None,
                 format_args!(
                     "getMetadataWeightingDoses - Some sections have 0 for ExposureDose in the autodoc file"
                 ),
@@ -999,7 +1054,16 @@ pub unsafe fn get_metadata_weighting_doses_fortran(
     if error > 0 {
         // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
         // writes through libc stdout and exits, it does not unwind.
-        libc::printf(c"\nERROR: %s\n".as_ptr(), b3d_get_error());
+        {
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
+                crate::imod::libcfshr::b3dutil::c_format(
+                    "\nERROR: %s\n",
+                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
+                )
+                .as_bytes(),
+            );
+        }
         libc::exit(1);
     }
     error

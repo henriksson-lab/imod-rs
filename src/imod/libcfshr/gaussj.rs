@@ -1,180 +1,146 @@
 //! Translation of `IMOD/libcfshr/gaussj.c`.
 #![allow(dead_code)]
 
+/// C `MSIZ` (`gaussj.c:26`).
+const MSIZ: i32 = 2000;
+
 /// Original `gaussj` (`gaussj.c:40`).
-pub unsafe fn gaussj(
-    matrix: *mut f32,
-    dimension: i32,
-    matrix_pitch: i32,
-    right_hand: *mut f32,
-    vectors: i32,
-    right_hand_pitch: i32,
-) -> i32 {
-    unsafe {
-        let mut determinant = 0.0;
-        gaussj_det(
-            matrix,
-            dimension,
-            matrix_pitch,
-            right_hand,
-            vectors,
-            right_hand_pitch,
-            &mut determinant,
-        )
-    }
+///
+/// Solves the linear matrix equation A X = B by Gauss-Jordan elimination.
+/// A is a square matrix of size [n] by [n] in array [a], dimensioned to [np]
+/// columns.  B is a matrix with one row per row of A and [m] columns in array
+/// [b], dimensioned to [mp] columns.  The columns of [b] are replaced by the
+/// [m] solution vectors while [a] is reduced to a unit matrix.  The matrices
+/// must be in row-major order.  The routine returns -1 if [n] exceeds 2000 and
+/// 1 if the A matrix is singular.
+pub fn gaussj(a: &mut [f32], n: i32, np: i32, b: &mut [f32], m: i32, mp: i32) -> i32 {
+    let mut determ = 0.0f32;
+    gaussj_det(a, n, np, b, m, mp, &mut determ)
 }
 
 /// Original `gaussjDet` (`gaussj.c:49`).
-pub unsafe fn gaussj_det(
-    matrix: *mut f32,
-    dimension: i32,
-    matrix_pitch: i32,
-    right_hand: *mut f32,
-    vectors: i32,
-    right_hand_pitch: i32,
-    determinant: *mut f32,
+///
+/// Version of `gaussj` that returns a determinant value.
+pub fn gaussj_det(
+    a: &mut [f32],
+    n: i32,
+    np: i32,
+    b: &mut [f32],
+    m: i32,
+    mp: i32,
+    determ: &mut f32,
 ) -> i32 {
-    unsafe {
-        let mut index = [[0_i16; 2]; 2000];
-        let mut pivot = [0_f32; 2000];
-        let mut pivot_count = [0_i16; 2000];
-        *determinant = 1.0;
-        if dimension > 2000 {
-            return -1;
-        }
-        for column in 0..dimension {
-            pivot_count[column as usize] = 0;
-        }
-        for row_iteration in 0..dimension {
-            let mut maximum = 0.0_f32;
-            let mut pivot_row = 0;
-            let mut pivot_column = 0;
-            for row in 0..dimension {
-                if pivot_count[row as usize] != 1 {
-                    for column in 0..dimension {
-                        if pivot_count[column as usize] == 0 {
-                            let mut absolute = *matrix.add((row * matrix_pitch + column) as usize);
-                            if absolute < 0.0 {
-                                absolute = -absolute;
-                            }
-                            if maximum < absolute {
-                                pivot_row = row;
-                                pivot_column = column;
-                                maximum = absolute;
-                            }
-                        } else if pivot_count[column as usize] > 1 {
-                            return 1;
-                        }
-                    }
-                }
-            }
-            pivot_count[pivot_column as usize] += 1;
-            if pivot_row != pivot_column {
-                *determinant = -*determinant;
-                for column in 0..dimension {
-                    let temporary = *matrix.add((pivot_row * matrix_pitch + column) as usize);
-                    *matrix.add((pivot_row * matrix_pitch + column) as usize) =
-                        *matrix.add((pivot_column * matrix_pitch + column) as usize);
-                    *matrix.add((pivot_column * matrix_pitch + column) as usize) = temporary;
-                }
-                for column in 0..vectors {
-                    let temporary =
-                        *right_hand.add((pivot_row * right_hand_pitch + column) as usize);
-                    *right_hand.add((pivot_row * right_hand_pitch + column) as usize) =
-                        *right_hand.add((pivot_column * right_hand_pitch + column) as usize);
-                    *right_hand.add((pivot_column * right_hand_pitch + column) as usize) =
-                        temporary;
-                }
-            }
-            index[row_iteration as usize][0] = pivot_row as i16;
-            index[row_iteration as usize][1] = pivot_column as i16;
-            let pivot_multiple = *matrix.add((pivot_column * matrix_pitch + pivot_column) as usize);
-            pivot[row_iteration as usize] = pivot_multiple;
-            *determinant *= pivot_multiple;
-            *matrix.add((pivot_column * matrix_pitch + pivot_column) as usize) = 1.0;
-            for column in 0..dimension {
-                *matrix.add((pivot_column * matrix_pitch + column) as usize) /= pivot_multiple;
-            }
-            for column in 0..vectors {
-                *right_hand.add((pivot_column * right_hand_pitch + column) as usize) /=
-                    pivot_multiple;
-            }
-            for other_row in 0..dimension {
-                let temporary = *matrix.add((other_row * matrix_pitch + pivot_column) as usize);
-                if temporary != 0.0 && other_row != pivot_column {
-                    *matrix.add((other_row * matrix_pitch + pivot_column) as usize) = 0.0;
-                    for column in 0..dimension {
-                        *matrix.add((other_row * matrix_pitch + column) as usize) -= *matrix
-                            .add((pivot_column * matrix_pitch + column) as usize)
-                            * temporary;
-                    }
-                    for column in 0..vectors {
-                        *right_hand.add((other_row * right_hand_pitch + column) as usize) -=
-                            *right_hand.add((pivot_column * right_hand_pitch + column) as usize)
-                                * temporary;
-                    }
-                }
-            }
-        }
-        for row_iteration in 0..dimension {
-            let reverse = dimension - 1 - row_iteration;
-            if index[reverse as usize][0] != index[reverse as usize][1] {
-                let pivot_row = index[reverse as usize][0] as i32;
-                let pivot_column = index[reverse as usize][1] as i32;
-                for row in 0..dimension {
-                    let temporary = *matrix.add((row * matrix_pitch + pivot_row) as usize);
-                    *matrix.add((row * matrix_pitch + pivot_row) as usize) =
-                        *matrix.add((row * matrix_pitch + pivot_column) as usize);
-                    *matrix.add((row * matrix_pitch + pivot_column) as usize) = temporary;
-                }
-            }
-        }
-        0
+    let mut index = [[0i16; 2]; MSIZ as usize];
+    let mut pivot = [0f32; MSIZ as usize];
+    let mut ipivot = [0i16; MSIZ as usize];
+    // `irow` and `icolum` are uninitialised in the source until the pivot
+    // search sets them, and an all-zero submatrix leaves them so.
+    let mut irow: i32 = 0;
+    let mut icolum: i32 = 0;
+
+    *determ = 1.;
+    if n > MSIZ {
+        return -1;
     }
+    for j in 0..n {
+        ipivot[j as usize] = 0;
+    }
+    for i in 0..n {
+        let mut amax = 0f32;
+        for j in 0..n {
+            if ipivot[j as usize] != 1 {
+                for k in 0..n {
+                    if ipivot[k as usize] == 0 {
+                        let mut abstmp = a[(j * np + k) as usize];
+                        if abstmp < 0. {
+                            abstmp = -abstmp;
+                        }
+                        if amax < abstmp {
+                            irow = j;
+                            icolum = k;
+                            amax = abstmp;
+                        }
+                    } else if ipivot[k as usize] > 1 {
+                        /* write(*,*) 'Singular matrix' */
+                        return 1;
+                    }
+                }
+            }
+        }
+        ipivot[icolum as usize] += 1;
+        if irow != icolum {
+            *determ = -*determ;
+            for l in 0..n {
+                let t = a[(irow * np + l) as usize];
+                a[(irow * np + l) as usize] = a[(icolum * np + l) as usize];
+                a[(icolum * np + l) as usize] = t;
+            }
+            for l in 0..m {
+                let t = b[(irow * mp + l) as usize];
+                b[(irow * mp + l) as usize] = b[(icolum * mp + l) as usize];
+                b[(icolum * mp + l) as usize] = t;
+            }
+        }
+        index[i as usize][0] = irow as i16;
+        index[i as usize][1] = icolum as i16;
+        let pivotmp = a[(icolum * np + icolum) as usize];
+        /*    if(abs(pivotmp) < 1.e-30) write(*,*) 'small pivot',pivotmp */
+        pivot[i as usize] = pivotmp;
+        *determ *= pivotmp;
+        a[(icolum * np + icolum) as usize] = 1.;
+        /*      worried about that step! */
+        for l in 0..n {
+            a[(icolum * np + l) as usize] = a[(icolum * np + l) as usize] / pivotmp;
+        }
+        for l in 0..m {
+            b[(icolum * mp + l) as usize] = b[(icolum * mp + l) as usize] / pivotmp;
+        }
+        for l1 in 0..n {
+            let t = a[(l1 * np + icolum) as usize];
+            if t != 0. && l1 != icolum {
+                a[(l1 * np + icolum) as usize] = 0.;
+                for l in 0..n {
+                    a[(l1 * np + l) as usize] =
+                        a[(l1 * np + l) as usize] - a[(icolum * np + l) as usize] * t;
+                }
+                for l in 0..m {
+                    b[(l1 * mp + l) as usize] =
+                        b[(l1 * mp + l) as usize] - b[(icolum * mp + l) as usize] * t;
+                }
+            }
+        }
+    }
+    for i in 0..n {
+        let l = n - 1 - i;
+        if index[l as usize][0] != index[l as usize][1] {
+            irow = index[l as usize][0] as i32;
+            icolum = index[l as usize][1] as i32;
+            for k in 0..n {
+                let t = a[(k * np + irow) as usize];
+                a[(k * np + irow) as usize] = a[(k * np + icolum) as usize];
+                a[(k * np + icolum) as usize] = t;
+            }
+        }
+    }
+    0
 }
 
 /// Original Fortran wrapper `gaussjfw` (`gaussj.c:137`).
-pub unsafe fn gaussjfw(
-    matrix: *mut f32,
-    dimension: *mut i32,
-    matrix_pitch: *mut i32,
-    right_hand: *mut f32,
-    vectors: *mut i32,
-    right_hand_pitch: *mut i32,
-) -> i32 {
-    unsafe {
-        gaussj(
-            matrix,
-            *dimension,
-            *matrix_pitch,
-            right_hand,
-            *vectors,
-            *right_hand_pitch,
-        )
-    }
+pub fn gaussjfw(a: &mut [f32], n: &i32, np: &i32, b: &mut [f32], m: &i32, mp: &i32) -> i32 {
+    gaussj(a, *n, *np, b, *m, *mp)
 }
 
 /// Original Fortran wrapper `gaussjdet` (`gaussj.c:142`).
-pub unsafe fn gaussjdet(
-    matrix: *mut f32,
-    dimension: *mut i32,
-    matrix_pitch: *mut i32,
-    right_hand: *mut f32,
-    vectors: *mut i32,
-    right_hand_pitch: *mut i32,
-    determinant: *mut f32,
+pub fn gaussjdet(
+    a: &mut [f32],
+    n: &i32,
+    np: &i32,
+    b: &mut [f32],
+    m: &i32,
+    mp: &i32,
+    determ: &mut f32,
 ) -> i32 {
-    unsafe {
-        gaussj_det(
-            matrix,
-            *dimension,
-            *matrix_pitch,
-            right_hand,
-            *vectors,
-            *right_hand_pitch,
-            determinant,
-        )
-    }
+    gaussj_det(a, *n, *np, b, *m, *mp, determ)
 }
 
 #[cfg(test)]
@@ -182,36 +148,22 @@ mod tests {
     use super::*;
     #[test]
     fn solves_row_major_system_and_preserves_source_determinant() {
-        unsafe {
-            let mut matrix = [2.0_f32, 1.0, 5.0, 7.0];
-            let mut right_hand = [11.0_f32, 13.0];
-            let mut determinant = 0.0;
-            assert_eq!(
-                gaussj_det(
-                    matrix.as_mut_ptr(),
-                    2,
-                    2,
-                    right_hand.as_mut_ptr(),
-                    1,
-                    1,
-                    &mut determinant
-                ),
-                0
-            );
-            for (actual, expected) in
-                matrix
-                    .iter()
-                    .zip([7.0 / 9.0, -1.0 / 9.0, -5.0 / 9.0, 2.0 / 9.0])
-            {
-                assert!((actual - expected).abs() < 1.0e-6);
-            }
-            assert!((right_hand[0] - 64.0 / 9.0).abs() < 1.0e-5);
-            assert!((right_hand[1] + 29.0 / 9.0).abs() < 1.0e-5);
-            assert_eq!(determinant, 9.0);
-            assert_eq!(
-                gaussj(core::ptr::null_mut(), 2001, 0, core::ptr::null_mut(), 0, 0),
-                -1
-            );
+        let mut matrix = [2.0_f32, 1.0, 5.0, 7.0];
+        let mut right_hand = [11.0_f32, 13.0];
+        let mut determinant = 0.0;
+        assert_eq!(
+            gaussj_det(&mut matrix, 2, 2, &mut right_hand, 1, 1, &mut determinant),
+            0
+        );
+        for (actual, expected) in matrix
+            .iter()
+            .zip([7.0 / 9.0, -1.0 / 9.0, -5.0 / 9.0, 2.0 / 9.0])
+        {
+            assert!((actual - expected).abs() < 1.0e-6);
         }
+        assert!((right_hand[0] - 64.0 / 9.0).abs() < 1.0e-5);
+        assert!((right_hand[1] + 29.0 / 9.0).abs() < 1.0e-5);
+        assert_eq!(determinant, 9.0);
+        assert_eq!(gaussj(&mut [], 2001, 0, &mut [], 0, 0), -1);
     }
 }

@@ -24,13 +24,15 @@ fn newstack_streams_real_mrc_sections() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
         (*header).nlabl = 1;
         (&mut (*header).labels[0])[..24].copy_from_slice(b"acquisition source label");
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut first = [1.0_f32, 2.0, 3.0, 4.0];
         let mut second = [5.0_f32, 6.0, 7.0, 8.0];
         assert_eq!(
@@ -45,7 +47,6 @@ fn newstack_streams_real_mrc_sections() {
     }
     unsafe {
         let file = ii_open(input_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let mut pixels = [0.0_f32; 4];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 1),
@@ -72,8 +73,7 @@ fn newstack_streams_real_mrc_sections() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 1));
         assert_eq!(header.nlabl, 2);
@@ -102,11 +102,13 @@ fn newstack_reorders_real_tilt_stack_from_explicit_angle_file() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 4, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for (section, value) in [10.0_f32, 20.0, 30.0, 40.0].into_iter().enumerate() {
             let mut pixel = [value];
             assert_eq!(
@@ -139,7 +141,6 @@ fn newstack_reorders_real_tilt_stack_from_explicit_angle_file() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         for (section, expected) in [20.0_f32, 30.0, 10.0, 40.0].into_iter().enumerate() {
             let mut pixel = [f32::NAN];
             assert_eq!(
@@ -168,11 +169,13 @@ fn newstack_inserts_tilts_as_generic_mrc_extended_header_reals() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for (section, value) in [10.0_f32, 20.0].into_iter().enumerate() {
             let mut pixel = [value];
             assert_eq!(
@@ -201,8 +204,7 @@ fn newstack_inserts_tilts_as_generic_mrc_extended_header_reals() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.next, header.nint, header.nreal), (8, 0, 1));
         ii_close(file);
@@ -233,7 +235,6 @@ fn newstack_replaces_generic_extended_header_tilts_for_selected_sections() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 3, 2), 0);
         (*header).nint = 0;
@@ -241,7 +242,10 @@ fn newstack_replaces_generic_extended_header_tilts_for_selected_sections() {
         (*header).next = 12;
         (*header).header_size = 1036;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut initial_angles = [-60.0_f32, 0.0, 60.0];
         assert_eq!(
             mrc_write_extra_header(header, initial_angles.as_mut_ptr().cast(), 12),
@@ -337,7 +341,6 @@ fn newstack_replaces_selected_serialem_extended_header_tilts() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 3, 2), 0);
         // SerialEM represents these fields as bytes per section and flags.
@@ -347,7 +350,10 @@ fn newstack_replaces_selected_serialem_extended_header_tilts() {
         (*header).next = 24;
         (*header).header_size = 1048;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut serialem = [0_u8; 24];
         for (record, angle) in [-6000_i16, 0, 6000].into_iter().enumerate() {
             serialem[8 * record..8 * record + 2].copy_from_slice(&angle.to_le_bytes());
@@ -439,7 +445,10 @@ fn newstack_format_of_output_file_writes_native_tiff() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixel = [7_f32];
         assert_eq!(
             ii_write_section_float(file, pixel.as_mut_ptr().cast(), 0),
@@ -484,11 +493,13 @@ fn newstack_bytes_signed_output_option_controls_real_byte_mrc_header() {
     unsafe {
         let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 1, 1, 0), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 255.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -514,8 +525,7 @@ fn newstack_bytes_signed_output_option_controls_real_byte_mrc_header() {
     unsafe {
         let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.bytes_signed, 0);
         let mut pixels = [0.0_f32; 2];
@@ -540,7 +550,6 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 1, 2), 0);
         (*header).xlen = 10.0;
@@ -553,7 +562,10 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
         (*header).yorg = 2.5;
         (*header).zorg = 3.5;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32; 16];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -580,8 +592,7 @@ fn newstack_size_preserves_real_mrc_sampling_and_cell_geometry() {
     unsafe {
         let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.mx, header.my, header.mz), (2, 3, 1));
         assert_eq!((header.xlen, header.ylen, header.zlen), (5.0, 9.0, 7.0));
@@ -610,11 +621,13 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for (section, value) in [10.0_f32, 20.0].into_iter().enumerate() {
             let mut pixel = [value];
             assert_eq!(
@@ -671,8 +684,7 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.mx, header.my, header.mz), (1, 1, 1));
         assert_eq!((header.xlen, header.ylen, header.zlen), (4.0, 4.0, 4.0));
@@ -682,8 +694,7 @@ fn newstack_pixel_from_mdoc_uses_first_selected_zvalue_spacing() {
         unsafe {
             let name = CString::new(native_output.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-            assert!(!file.is_null());
-            let mut header = std::mem::zeroed::<MrcHeader>();
+            let mut header = MrcHeader::default();
             assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
             assert_eq!((header.mx, header.my, header.mz), (1, 1, 1));
             assert_eq!((header.xlen, header.ylen, header.zlen), (4.0, 4.0, 4.0));
@@ -703,11 +714,13 @@ fn newstack_print_size_exits_after_real_mrc_header() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 3, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         ii_close(file);
     }
     let result = common::imod_cmd("newstack")
@@ -765,11 +778,13 @@ fn newstack_expand_derives_output_dimensions_from_real_mrc() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -795,8 +810,7 @@ fn newstack_expand_derives_output_dimensions_from_real_mrc() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (4, 4));
         ii_close(file);
@@ -814,11 +828,13 @@ fn newstack_rotate_transposes_default_real_mrc_dimensions() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 3, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -844,8 +860,7 @@ fn newstack_rotate_transposes_default_real_mrc_dimensions() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (3, 2));
         ii_close(file);
@@ -866,7 +881,10 @@ fn newstack_bin_averages_real_mrc_blocks() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 16] = core::array::from_fn(|index| index as f32 + 1.0);
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -892,7 +910,7 @@ fn newstack_bin_averages_real_mrc_blocks() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (2, 2));
         let mut pixels = [0.0_f32; 4];
@@ -919,7 +937,10 @@ fn newstack_allow_odd_even_changes_binned_real_mrc_size() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 9, 9, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32; 81];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -946,7 +967,7 @@ fn newstack_allow_odd_even_changes_binned_real_mrc_size() {
         unsafe {
             let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-            let mut header = std::mem::zeroed::<MrcHeader>();
+            let mut header = MrcHeader::default();
             assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
             assert_eq!((header.nx, header.ny), expected);
             ii_close(file);
@@ -971,7 +992,10 @@ fn newstack_affine_bin_interpolates_binned_real_mrc() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 16] = core::array::from_fn(|index| index as f32 + 1.0);
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1031,11 +1055,13 @@ fn newstack_routes_repeated_input_files_to_repeated_outputs() {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         unsafe {
             let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-            assert!(!file.is_null());
             let header = (*file).header.cast::<MrcHeader>();
             assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
             ii_sync_from_mrc_header(file, header);
-            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            assert_eq!(
+                mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+                0
+            );
             for (z, section) in sections.into_iter().enumerate() {
                 let mut section = section;
                 assert_eq!(
@@ -1079,8 +1105,7 @@ fn newstack_routes_repeated_input_files_to_repeated_outputs() {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         unsafe {
             let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-            assert!(!file.is_null());
-            let mut header = std::mem::zeroed::<MrcHeader>();
+            let mut header = MrcHeader::default();
             assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
             assert_eq!(header.nz, expected.len() as i32);
             for (z, expected) in expected.into_iter().enumerate() {
@@ -1115,11 +1140,13 @@ fn newstack_routes_source_shaped_input_and_output_list_files() {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         unsafe {
             let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-            assert!(!file.is_null());
             let header = (*file).header.cast::<MrcHeader>();
             assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
             ii_sync_from_mrc_header(file, header);
-            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            assert_eq!(
+                mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+                0
+            );
             let mut pixels = pixels;
             assert_eq!(
                 ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1158,7 +1185,6 @@ fn newstack_routes_source_shaped_input_and_output_list_files() {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         unsafe {
             let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-            assert!(!file.is_null());
             let mut actual = [0.0_f32; 4];
             assert_eq!(
                 ii_read_section_float(file, actual.as_mut_ptr().cast(), 0),
@@ -1192,7 +1218,10 @@ fn newstack_applies_identity_transform_file_to_real_mrc() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 5, 5, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = (0..25).map(|value| value as f32).collect::<Vec<_>>();
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1257,11 +1286,13 @@ fn newstack_applies_repeated_offsets_in_source_composition_order() {
     let second = (100..149).map(|value| value as f32).collect::<Vec<_>>();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 7, 7, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut section = first.clone();
         assert_eq!(
             ii_write_section_float(file, section.as_mut_ptr().cast(), 0),
@@ -1300,7 +1331,6 @@ fn newstack_applies_repeated_offsets_in_source_composition_order() {
     let read_sections = |path: &std::path::Path| unsafe {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let mut output = [[0.0_f32; 49]; 2];
         for (index, section) in output.iter_mut().enumerate() {
             assert_eq!(
@@ -1364,7 +1394,6 @@ fn newstack_memory_limit_chunks_ordinary_affine_mrc() {
     }
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 512, 512, 1, 2), 0);
         (*header).xlen = 1024.0;
@@ -1374,7 +1403,10 @@ fn newstack_memory_limit_chunks_ordinary_affine_mrc() {
         (*header).nystart = 5;
         (*header).nzstart = 6;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
             0
@@ -1414,8 +1446,7 @@ fn newstack_memory_limit_chunks_ordinary_affine_mrc() {
     let read_output = |path: &std::path::Path| unsafe {
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (200, 150));
         // `iiuTransHeader` keeps the input's titles and the final
@@ -1459,11 +1490,13 @@ fn newstack_blank_accepts_out_of_range_sections_and_writes_zero_metadata() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 3, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [3.0_f32; 6];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1490,7 +1523,6 @@ fn newstack_blank_accepts_out_of_range_sections_and_writes_zero_metadata() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!((*header).nz, 2);
         assert_eq!((*header).amin, 0.0);
@@ -1520,11 +1552,13 @@ fn newstack_multadd_uses_pip_factor_and_constant_on_real_mrc() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1550,7 +1584,6 @@ fn newstack_multadd_uses_pip_factor_and_constant_on_real_mrc() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let mut pixels = [0.0_f32; 4];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1572,11 +1605,13 @@ fn newstack_reports_source_truncations_for_scaled_byte_output() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1649,7 +1684,6 @@ fn newstack_reports_source_truncations_for_scaled_byte_output() {
     unsafe {
         let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let mut pixels = [0.0_f32; 4];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1671,14 +1705,16 @@ fn newstack_scale_maps_source_header_range_on_real_mrc() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         (*header).amin = 1.0;
         (*header).amax = 4.0;
         (*header).amean = 2.5;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1706,8 +1742,7 @@ fn newstack_scale_maps_source_header_range_on_real_mrc() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(&header.labels[0][36..54], b", densities scaled");
         let mut pixels = [0.0_f32; 4];
@@ -1738,7 +1773,10 @@ fn newstack_contrast_converts_black_white_to_source_scale_range() {
         (*header).amin = 1.0;
         (*header).amax = 4.0;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 4.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1764,7 +1802,7 @@ fn newstack_contrast_converts_black_white_to_source_scale_range() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(&header.labels[0][36..54], b", densities scaled");
         let mut pixels = [0.0_f32; 2];
@@ -1788,11 +1826,13 @@ fn newstack_float_three_prescans_sections_then_shifts_to_shared_mean() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 1, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut first = [1.0_f32, 3.0];
         let mut second = [10.0_f32, 14.0];
         assert_eq!(
@@ -1823,7 +1863,6 @@ fn newstack_float_three_prescans_sections_then_shifts_to_shared_mean() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let mut pixels = [0.0_f32; 2];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -1853,7 +1892,10 @@ fn newstack_float_four_prescans_and_scales_shifted_global_range() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 1, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut first = [1.0_f32, 3.0];
         let mut second = [10.0_f32, 14.0];
         assert_eq!(
@@ -1915,7 +1957,10 @@ fn newstack_float_two_uses_mad_filtered_global_z_range() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 10, 10, 9, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..8 {
             let mut pixels = (0..100).map(|value| value as f32).collect::<Vec<_>>();
             pixels[99] += section as f32;
@@ -1987,7 +2032,10 @@ fn newstack_meansd_uses_float_two_section_statistics() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 1, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 3.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -2043,7 +2091,10 @@ fn newstack_float_one_maps_header_range_to_float_range() {
         (*header).amin = 1.0;
         (*header).amax = 3.0;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 3.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -2094,11 +2145,13 @@ fn newstack_fixrange_retains_source_legality_errors_on_real_mrc() {
     let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut values = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, values.as_mut_ptr().cast(), 0),
@@ -2163,14 +2216,16 @@ fn newstack_fixrange_scans_interpolated_real_mrc_and_scales_low_sd_values() {
     let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         (*header).amin = 1.0;
         (*header).amax = 4.0;
         (*header).amean = 2.5;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut values = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, values.as_mut_ptr().cast(), 0),
@@ -2245,14 +2300,16 @@ fn newstack_fixrange_uses_source_signed_mode_shift_after_low_sd_scan() {
     let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 1), 0);
         (*header).amin = -30000.0;
         (*header).amax = -30000.0;
         (*header).amean = -30000.0;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut values = [-30000.0_f32; 4];
         assert_eq!(
             ii_write_section_float(file, values.as_mut_ptr().cast(), 0),
@@ -2334,7 +2391,10 @@ fn newstack_size_to_output_centres_real_mrc_crop_and_edge_median_padding() {
         assert_eq!(mrc_head_new(&mut *header, 5, 5, 1, 2), 0);
         (*header).amean = 999.0;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut values: [f32; 25] = core::array::from_fn(|index| {
             let (x, y) = (index % 5, index / 5);
             if x == 0 || x == 4 || y == 0 || y == 4 {
@@ -2388,7 +2448,7 @@ fn newstack_size_to_output_centres_real_mrc_crop_and_edge_median_padding() {
         let output_name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         unsafe {
             let file = ii_open(output_name.as_ptr(), c"rb".as_ptr());
-            let mut header = std::mem::zeroed::<MrcHeader>();
+            let mut header = MrcHeader::default();
             assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
             let mut values = vec![0.0_f32; expected.len()];
             assert_eq!(
@@ -2418,7 +2478,6 @@ fn newstack_prints_source_unit_and_header_reports_for_stream_copy() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 2, 2, 2), 0);
         (*header).amin = 1.0;
@@ -2430,7 +2489,10 @@ fn newstack_prints_source_unit_and_header_reports_for_stream_copy() {
         (*header).labels[0] = [b' '; 81];
         (&mut (*header).labels[0])[..20].copy_from_slice(b"source fixture label");
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut first = [1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let mut second = [9.0_f32, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0];
         assert_eq!(
@@ -2515,14 +2577,16 @@ fn newstack_bin_streams_every_section_and_scales_cell_by_read_reduction() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 3, 2), 0);
         (*header).amin = 0.0;
         (*header).amax = 47.0;
         (*header).amean = 23.5;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..3_i32 {
             let mut pixels = [0.0_f32; 16];
             for (index, pixel) in pixels.iter_mut().enumerate() {
@@ -2555,8 +2619,7 @@ fn newstack_bin_streams_every_section_and_scales_cell_by_read_reduction() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 3));
         assert_eq!((header.mx, header.my, header.mz), (2, 2, 3));
@@ -2596,7 +2659,6 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
         (*header).amin = 1.0;
@@ -2609,7 +2671,10 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
         let mut extra = [7_u8; 64];
         assert_eq!(mrc_write_extra_header(header, extra.as_mut_ptr(), 64), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut first = [1.0_f32, 2.0, 3.0, 4.0];
         let mut second = [5.0_f32, 6.0, 7.0, 8.0];
         assert_eq!(
@@ -2638,8 +2703,7 @@ fn newstack_drops_unsupported_extended_header_and_resets_imod_flags() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.next, 0);
         assert_eq!((header.nint, header.nreal), (0, 0));
@@ -2700,7 +2764,10 @@ fn newstack_pip_and_section_errors_exit_one_on_stdout() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 3, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32; 12];
         for section in 0..2 {
             assert_eq!(
@@ -2780,7 +2847,10 @@ fn newstack_blank_section_fills_with_input_mean_or_fill_value() {
         (*header).amax = 3.0;
         (*header).amean = 3.0;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [3.0_f32; 6];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -2875,7 +2945,10 @@ fn newstack_mode_change_rescales_input_mode_range_without_float() {
         (*header).amax = 21899.0;
         (*header).amean = 12812.0;
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [4204.0_f32, 10000.0, 16000.0, 21899.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -2935,7 +3008,10 @@ fn newstack_float_two_reports_extreme_range_note() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 10, 10, 9, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..8 {
             let mut pixels = (0..100).map(|value| value as f32).collect::<Vec<_>>();
             pixels[99] += section as f32;
@@ -2998,7 +3074,10 @@ fn newstack_dopen_announces_opened_transform_file() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels = [1.0_f32, 2.0, 3.0, 4.0];
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -3066,7 +3145,10 @@ fn newstack_accepts_bin_triplet_onexform_and_numout() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 2, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..2 {
             let mut pixels = (0..16).map(|value| value as f32).collect::<Vec<_>>();
             assert_eq!(
@@ -3127,11 +3209,13 @@ fn newstack_rotate_90_resamples_pixels_as_native_does() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 8, 6, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 48] =
             core::array::from_fn(|i| (10 * (i % 8) + 3 * (i / 8)) as f32 + 0.5);
         assert_eq!(
@@ -3164,8 +3248,7 @@ fn newstack_rotate_90_resamples_pixels_as_native_does() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (6, 8));
         let mut pixels = [0.0_f32; 48];
@@ -3192,11 +3275,13 @@ fn newstack_rotate_180_reverses_both_axes_as_native_does() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 8, 6, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 48] =
             core::array::from_fn(|i| (10 * (i % 8) + 3 * (i / 8)) as f32 + 0.5);
         assert_eq!(
@@ -3229,8 +3314,7 @@ fn newstack_rotate_180_reverses_both_axes_as_native_does() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (8, 6));
         let mut pixels = [0.0_f32; 48];
@@ -3260,11 +3344,13 @@ fn newstack_ftreduce_fourier_crops_as_native_does() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 16, 12, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 192] = core::array::from_fn(|i| {
             let (x, y) = ((i % 16) as f32, (i / 16) as f32);
             100.0 + 30.0 * (x / 3.0).sin() * (y / 2.0).cos() + x - y
@@ -3343,8 +3429,7 @@ fn newstack_ftreduce_fourier_crops_as_native_does() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (8, 6));
         let mut pixels = [0.0_f32; 48];
@@ -3372,11 +3457,13 @@ fn newstack_ftexpand_fourier_expands_as_native_does() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 16] = core::array::from_fn(|i| (i * i % 13) as f32 + 1.0);
         assert_eq!(
             ii_write_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -3468,8 +3555,7 @@ fn newstack_ftexpand_fourier_expands_as_native_does() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (8, 8));
         let mut pixels = [0.0_f32; 64];
@@ -3500,11 +3586,13 @@ fn newstack_fill_outside_image_uses_edge_median_not_file_mean() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 16] = core::array::from_fn(|i| {
             let (x, y) = (i % 4, i / 4);
             if x == 0 || x == 3 || y == 0 || y == 3 {
@@ -3542,8 +3630,7 @@ fn newstack_fill_outside_image_uses_edge_median_not_file_mean() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (6, 6));
         let mut pixels = [0.0_f32; 36];
@@ -3576,11 +3663,13 @@ fn newstack_phase_shifts_in_fourier_space_as_native_does() {
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 8, 6, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         let mut pixels: [f32; 48] =
             core::array::from_fn(|i| (10 * (i % 8) + 3 * (i / 8)) as f32 + 0.5);
         assert_eq!(
@@ -3658,8 +3747,7 @@ fn newstack_phase_shifts_in_fourier_space_as_native_does() {
     unsafe {
         let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny), (8, 6));
         let mut pixels = [0.0_f32; 48];
@@ -3692,7 +3780,10 @@ fn newstack_output_section_counts_follow_source_three_way_branch() {
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 5, 2), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..5 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -3995,9 +4086,10 @@ fn newstack_tiff_stack_repeats_description_and_min_max_on_every_directory() {
     let output = base.with_extension("output.tif");
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        assert!(!file.is_null());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 3, 3, 2), 0);
         // A range deliberately wider than the data, so the directories that
         // take the input header's range are told apart from the last one.
@@ -4011,14 +4103,21 @@ fn newstack_tiff_stack_repeats_description_and_min_max_on_every_directory() {
         header.labels[1][..80].copy_from_slice(
             b"second label line                                                               ",
         );
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
         let pixels: Vec<f32> = (0..36).map(|value| value as f32).collect();
         assert_eq!(
-            libc::fwrite(pixels.as_ptr().cast(), 4, pixels.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
+                unsafe {
+                    core::slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), 4 * (pixels.len()))
+                },
+                4,
+                pixels.len(),
+                &mut file,
+            ),
             36
         );
-        libc::fclose(file);
+        drop(file);
     }
     assert!(
         common::imod_cmd("newstack")
@@ -4082,7 +4181,6 @@ fn newstack_copies_serialem_typed_extended_header_for_selected_sections() {
     }
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 6, 2), 0);
         (*header).nint = 12;
@@ -4090,7 +4188,10 @@ fn newstack_copies_serialem_typed_extended_header_for_selected_sections() {
         let mut bytes = extra;
         assert_eq!(mrc_write_extra_header(header, bytes.as_mut_ptr(), 72), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..6 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -4119,8 +4220,7 @@ fn newstack_copies_serialem_typed_extended_header_for_selected_sections() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.next, 36);
         assert_eq!((header.nint, header.nreal), (12, 7));
@@ -4150,7 +4250,6 @@ fn newstack_strip_keeps_serialem_type_fields_with_no_extended_data() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
         (*header).nint = 12;
@@ -4158,7 +4257,10 @@ fn newstack_strip_keeps_serialem_type_fields_with_no_extended_data() {
         let mut extra = [3_u8; 24];
         assert_eq!(mrc_write_extra_header(header, extra.as_mut_ptr(), 24), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..2 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -4185,8 +4287,7 @@ fn newstack_strip_keeps_serialem_type_fields_with_no_extended_data() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header = std::mem::zeroed::<MrcHeader>();
+        let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.next, 0);
         assert_eq!((header.nint, header.nreal), (12, 7));
@@ -4219,7 +4320,6 @@ fn newstack_tilt_replaces_serialem_tilt_short_and_keeps_the_rest() {
     }
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
         (*header).nint = 12;
@@ -4227,7 +4327,10 @@ fn newstack_tilt_replaces_serialem_tilt_short_and_keeps_the_rest() {
         let mut bytes = extra;
         assert_eq!(mrc_write_extra_header(header, bytes.as_mut_ptr(), 24), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..2 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -4289,7 +4392,6 @@ fn newstack_reorder_uses_extended_header_tilt_angles() {
     }
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 3, 2), 0);
         (*header).nint = 12;
@@ -4297,7 +4399,10 @@ fn newstack_reorder_uses_extended_header_tilt_angles() {
         let mut bytes = extra;
         assert_eq!(mrc_write_extra_header(header, bytes.as_mut_ptr(), 36), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..3 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -4332,7 +4437,6 @@ fn newstack_reorder_uses_extended_header_tilt_angles() {
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
         let mut pixels = [0.0_f32; 4];
         assert_eq!(
             ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
@@ -4368,14 +4472,16 @@ fn newstack_refuses_saving_tilt_angles_into_an_fei1_extended_header() {
     }
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
         (*header).ext_type = *b"FEI1";
         (*header).nversion = 20140;
         assert_eq!(mrc_write_extra_header(header, extra.as_mut_ptr(), 48), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..2 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -4427,7 +4533,6 @@ fn newstack_refuses_tilt_angles_for_a_serialem_header_without_the_tilt_flag() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-        assert!(!file.is_null());
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
         (*header).nint = 10;
@@ -4435,7 +4540,10 @@ fn newstack_refuses_tilt_angles_for_a_serialem_header_without_the_tilt_flag() {
         let mut extra = [5_u8; 20];
         assert_eq!(mrc_write_extra_header(header, extra.as_mut_ptr(), 20), 0);
         ii_sync_from_mrc_header(file, header);
-        assert_eq!(mrc_head_write((*file).fp, header), 0);
+        assert_eq!(
+            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+            0
+        );
         for section in 0..2 {
             let mut pixels = [section as f32, 1.0, 2.0, 3.0];
             assert_eq!(
@@ -5096,11 +5204,13 @@ fn newstack_rustfft_fourier_options_match_the_parity_output() {
         unsafe {
             let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
             let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
-            assert!(!file.is_null());
             let header = (*file).header.cast::<MrcHeader>();
             assert_eq!(mrc_head_new(&mut *header, nx, ny, 1, 2), 0);
             ii_sync_from_mrc_header(file, header);
-            assert_eq!(mrc_head_write((*file).fp, header), 0);
+            assert_eq!(
+                mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
+                0
+            );
             let mut pixels = (0..nx * ny)
                 .map(|index| {
                     let (x, y) = ((index % nx) as f32, (index / nx) as f32);
@@ -5133,8 +5243,7 @@ fn newstack_rustfft_fourier_options_match_the_parity_output() {
             unsafe {
                 let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
                 let file = ii_open(name.as_ptr(), c"rb".as_ptr());
-                assert!(!file.is_null());
-                let mut header = std::mem::zeroed::<MrcHeader>();
+                let mut header = MrcHeader::default();
                 assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
                 let mut pixels = vec![0.0_f32; (header.nx * header.ny) as usize];
                 assert_eq!(

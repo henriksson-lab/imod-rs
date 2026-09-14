@@ -41,6 +41,18 @@ pub unsafe fn find_transform(
             return -1;
         }
         let mut array = vec![0_f32; array_tot as usize];
+        // Window lengths within `array` for the slice-taking regression
+        // routines; each runs to the end of the allocation, as the C pointers
+        // effectively do.
+        let len_from = |off: i32| (array_tot - off) as usize;
+        let off_sum_x = 0;
+        let off_x_mean = icol_y;
+        let off_sd = 2 * icol_y;
+        let off_ss_mat = 3 * icol_y;
+        let off_ss_dev = off_ss_mat + icol_y * icol_y;
+        let off_d_mat = off_ss_dev + icol_y * icol_y;
+        let off_r_mat = off_d_mat + icol_y * icol_y;
+        let x_mat_len = (num_points * m_size) as usize;
         let sum_x = array.as_mut_ptr();
         let x_mean = sum_x.add(icol_y as usize);
         let sd = x_mean.add(icol_y as usize);
@@ -61,20 +73,20 @@ pub unsafe fn find_transform(
             let mut isol = 1;
             if S_KFACTOR != 0. {
                 isol = robust_regress(
-                    x_mat,
+                    core::slice::from_raw_parts_mut(x_mat, x_mat_len),
                     m_size,
                     1,
                     2,
                     num_points,
                     2,
-                    b_mat.as_mut_ptr(),
+                    &mut b_mat,
                     2,
-                    c_vec.as_mut_ptr(),
-                    x_mean,
-                    sd,
-                    ss_mat,
+                    Some(&mut c_vec),
+                    core::slice::from_raw_parts_mut(x_mean, len_from(off_x_mean)),
+                    core::slice::from_raw_parts_mut(sd, len_from(off_sd)),
+                    core::slice::from_raw_parts_mut(ss_mat, len_from(off_ss_mat)),
                     S_KFACTOR,
-                    ipnt_max,
+                    &mut *ipnt_max,
                     S_MAX_ITER,
                     S_MAX_ZERO_WGT,
                     S_MAX_CHANGE,
@@ -83,19 +95,19 @@ pub unsafe fn find_transform(
             }
             if isol != 0 {
                 isol = mult_regress(
-                    x_mat,
+                    core::slice::from_raw_parts(x_mat, x_mat_len),
                     m_size,
                     1,
                     2,
                     num_points,
                     2,
                     0,
-                    b_mat.as_mut_ptr(),
+                    &mut b_mat,
                     2,
-                    c_vec.as_mut_ptr(),
-                    x_mean,
-                    sd,
-                    ss_mat,
+                    Some(&mut c_vec),
+                    core::slice::from_raw_parts_mut(x_mean, len_from(off_x_mean)),
+                    core::slice::from_raw_parts_mut(sd, len_from(off_sd)),
+                    core::slice::from_raw_parts_mut(ss_mat, len_from(off_ss_mat)),
                 );
                 for i in 0..num_points {
                     *x_mat.add((i * m_size + 4) as usize) = 1.;
@@ -131,8 +143,20 @@ pub unsafe fn find_transform(
             }
         } else {
             stat_matrices(
-                x_mat, m_size, 1, icol_y, icol_y, num_points, sum_x, ss_mat, ss_dev, d_mat, r_mat,
-                x_mean, sd, 1,
+                core::slice::from_raw_parts(x_mat, x_mat_len),
+                m_size,
+                1,
+                icol_y,
+                icol_y,
+                num_points,
+                core::slice::from_raw_parts_mut(sum_x, len_from(off_sum_x)),
+                core::slice::from_raw_parts_mut(ss_mat, len_from(off_ss_mat)),
+                core::slice::from_raw_parts_mut(ss_dev, len_from(off_ss_dev)),
+                core::slice::from_raw_parts_mut(d_mat, len_from(off_d_mat)),
+                core::slice::from_raw_parts_mut(r_mat, len_from(off_r_mat)),
+                core::slice::from_raw_parts_mut(x_mean, len_from(off_x_mean)),
+                core::slice::from_raw_parts_mut(sd, len_from(off_sd)),
+                1,
             );
             let theta = -((*ss_dev.add(((icol_x - 1) * icol_y + 1) as usize)
                 - *ss_dev.add((icol_x * icol_y) as usize))

@@ -1,7 +1,18 @@
-//! Scaffold for `IMOD/clip/CorrectDefects.cpp`.
+//! Translation of `IMOD/clip/CorrectDefects.cpp` and its paired
+//! `IMOD/include/CorrectDefects.h`.
+//!
+//! Two boundaries are still C-shaped and are marked where they occur:
+//! `libcfshr/mxmlwrap.rs`, which returns `strdup`'d C strings, and
+//! `libiimod/iitif.rs`'s `tiffGetArray`, which returns the TIFF tag payload as
+//! a malloc'd pointer.  Both go away when those modules convert.
 #![allow(dead_code)]
 
+use crate::imod::clip::clip::{ScanArg, fscanf};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use std::io::{Read as _, Write as _};
+
 /// C++ `CameraDefects` from `include/CorrectDefects.h`, in declaration order.
+#[derive(Clone)]
 pub struct CameraDefects {
     pub was_scaled: i32,
     pub rotation_flip: i32,
@@ -29,9 +40,49 @@ pub struct CameraDefects {
     pub pix_use_mean: Vec<i8>,
 }
 
+impl CameraDefects {
+    /// The state a default-constructed C++ `CameraDefects` has: every
+    /// `std::vector` empty and every `int` member zero, which is what
+    /// `clip.cpp:192`'s `ClipOptions opt;` gives its `defects` member.
+    pub fn new() -> CameraDefects {
+        CameraDefects {
+            was_scaled: 0,
+            rotation_flip: 0,
+            k2_type: 0,
+            falcon_type: 0,
+            usable_top: 0,
+            usable_left: 0,
+            usable_bottom: 0,
+            usable_right: 0,
+            num_avg_super_res: 0,
+            bad_column_start: Vec::new(),
+            bad_column_width: Vec::new(),
+            partial_bad_col: Vec::new(),
+            partial_bad_width: Vec::new(),
+            partial_bad_start_y: Vec::new(),
+            partial_bad_end_y: Vec::new(),
+            bad_row_start: Vec::new(),
+            bad_row_height: Vec::new(),
+            partial_bad_row: Vec::new(),
+            partial_bad_height: Vec::new(),
+            partial_bad_start_x: Vec::new(),
+            partial_bad_end_x: Vec::new(),
+            bad_pixel_x: Vec::new(),
+            bad_pixel_y: Vec::new(),
+            pix_use_mean: Vec::new(),
+        }
+    }
+}
+
+impl Default for CameraDefects {
+    fn default() -> CameraDefects {
+        CameraDefects::new()
+    }
+}
+
 /// C++ `CorDefCorrectDefects` (`CorrectDefects.cpp:78`).
 pub unsafe fn cor_def_correct_defects(
-    defects: *const crate::imod::clip::clip::CameraDefects,
+    defects: &crate::imod::clip::clip::CameraDefects,
     array: *mut core::ffi::c_void,
     data_type: i32,
     binning: i32,
@@ -1007,7 +1058,7 @@ pub unsafe fn correct_jumbo_pixel(
 }
 /// C++ `CorrectPixels3Ways` (`CorrectDefects.cpp:843`).
 pub unsafe fn correct_pixels_3_ways(
-    defects: *const crate::imod::clip::clip::CameraDefects,
+    defects: &crate::imod::clip::clip::CameraDefects,
     array: *mut core::ffi::c_void,
     data_type: i32,
     size_x: i32,
@@ -1842,37 +1893,63 @@ pub fn cor_def_defects_to_string(
     camera_size_x: i32,
     camera_size_y: i32,
 ) {
-    output.push_str(&format!(
-        "CameraSizeX {camera_size_x}\nCameraSizeY {camera_size_y}\n"
+    output.push_str(&c_format(
+        "CameraSizeX %d\n",
+        &[CArg::Int(camera_size_x as i64)],
     ));
-    output.push_str(&format!(
-        "RotationAndFlip {}\nWasScaled {}\nK2Type {}\nFalconType {}\n",
-        defects.rotation_flip, defects.was_scaled, defects.k2_type, defects.falcon_type
+    output.push_str(&c_format(
+        "CameraSizeY %d\n",
+        &[CArg::Int(camera_size_y as i64)],
     ));
-    output.push_str(&format!(
-        "NumToAvgSuperRes {}\nUsableArea {} {} {} {}\n",
-        defects.num_avg_super_res,
-        defects.usable_top,
-        defects.usable_left,
-        defects.usable_bottom,
-        defects.usable_right
+    output.push_str(&c_format(
+        "RotationAndFlip %d\n",
+        &[CArg::Int(defects.rotation_flip as i64)],
+    ));
+    output.push_str(&c_format(
+        "WasScaled %d\n",
+        &[CArg::Int(defects.was_scaled as i64)],
+    ));
+    output.push_str(&c_format(
+        "K2Type %d\n",
+        &[CArg::Int(defects.k2_type as i64)],
+    ));
+    output.push_str(&c_format(
+        "FalconType %d\n",
+        &[CArg::Int(defects.falcon_type as i64)],
+    ));
+    output.push_str(&c_format(
+        "NumToAvgSuperRes %d\n",
+        &[CArg::Int(defects.num_avg_super_res as i64)],
+    ));
+    output.push_str(&c_format(
+        "UsableArea %d %d %d %d\n",
+        &[
+            CArg::Int(defects.usable_top as i64),
+            CArg::Int(defects.usable_left as i64),
+            CArg::Int(defects.usable_bottom as i64),
+            CArg::Int(defects.usable_right as i64),
+        ],
     ));
     for index in 0..defects.partial_bad_col.len() {
-        output.push_str(&format!(
-            "PartialBadColumn {} {} {} {}\n",
-            defects.partial_bad_col[index],
-            defects.partial_bad_width[index],
-            defects.partial_bad_start_y[index],
-            defects.partial_bad_end_y[index]
+        output.push_str(&c_format(
+            "PartialBadColumn %d %d %d %d\n",
+            &[
+                CArg::Int(defects.partial_bad_col[index] as i64),
+                CArg::Int(defects.partial_bad_width[index] as i64),
+                CArg::Int(defects.partial_bad_start_y[index] as i64),
+                CArg::Int(defects.partial_bad_end_y[index] as i64),
+            ],
         ));
     }
     for index in 0..defects.partial_bad_row.len() {
-        output.push_str(&format!(
-            "PartialBadRow {} {} {} {}\n",
-            defects.partial_bad_row[index],
-            defects.partial_bad_height[index],
-            defects.partial_bad_start_x[index],
-            defects.partial_bad_end_x[index]
+        output.push_str(&c_format(
+            "PartialBadRow %d %d %d %d\n",
+            &[
+                CArg::Int(defects.partial_bad_row[index] as i64),
+                CArg::Int(defects.partial_bad_height[index] as i64),
+                CArg::Int(defects.partial_bad_start_x[index] as i64),
+                CArg::Int(defects.partial_bad_end_x[index] as i64),
+            ],
         ));
     }
     let mut count = 0;
@@ -1881,9 +1958,12 @@ pub fn cor_def_defects_to_string(
         if count == 0 {
             buffer = "BadPixels".to_owned();
         }
-        buffer.push_str(&format!(
-            " {} {}",
-            defects.bad_pixel_x[index], defects.bad_pixel_y[index]
+        buffer.push_str(&c_format(
+            " %d %d",
+            &[
+                CArg::Int(defects.bad_pixel_x[index] as i64),
+                CArg::Int(defects.bad_pixel_y[index] as i64),
+            ],
         ));
         count += 1;
         if count == 10 || index == defects.bad_pixel_x.len() - 1 {
@@ -1914,7 +1994,10 @@ pub fn bad_rows_or_cols_to_string(starts: &[u16], widths: &[i16], output: &mut S
             if count == 0 {
                 buffer = name.to_owned();
             }
-            buffer.push_str(&format!(" {}", starts[index] as i32 + column as i32));
+            buffer.push_str(&c_format(
+                " %d",
+                &[CArg::Int((starts[index] as i32 + column as i32) as i64)],
+            ));
             count += 1;
             if count == 20 {
                 buffer.push('\n');
@@ -1987,23 +2070,19 @@ pub fn cor_def_parse_defects(
             continue;
         };
         let tag = &line[..end_tag];
-        let value_string = match std::ffi::CString::new(&line[end_tag..]) {
-            Ok(value) => value,
-            Err(_) => return 2,
-        };
+        let value_string: &[u8] = line[end_tag..].as_bytes();
         // `CorrectDefects.cpp:1619` MAX_VALUES is 50.
         let mut value_array = [0_i32; 50];
         let mut number_to_get = 0;
-        let pip_error = unsafe {
-            crate::imod::libcfshr::parse_params::pip_get_line_of_values(
-                c" ".as_ptr(),
-                value_string.as_ptr(),
-                value_array.as_mut_ptr().cast(),
-                1,
-                &mut number_to_get,
-                value_array.len() as i32,
-            )
-        };
+        let value_len = value_array.len() as i32;
+        let pip_error = crate::imod::libcfshr::parse_params::pip_get_line_of_values(
+            b" ",
+            value_string,
+            crate::imod::libcfshr::parse_params::PipValueArray::Int(&mut value_array),
+            1,
+            &mut number_to_get,
+            value_len,
+        );
         // `CorrectDefects.cpp:1704` keeps going after a PipGetLineOfValues
         // error; only a recognised tag turns it into a return of 2, so a line
         // whose tag is not known is skipped whatever its content.
@@ -2196,20 +2275,38 @@ pub fn clear_defect_list(defects: &mut crate::imod::clip::clip::CameraDefects) {
     defects.pix_use_mean.clear();
 }
 /// C++ `CorDefParseFeiXml` (`CorrectDefects.cpp:1802`).
-pub unsafe fn cor_def_parse_fei_xml(
-    text: *const core::ffi::c_char,
-    defects: &mut CameraDefects,
-    mut pad: i32,
-) -> i32 {
+pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: i32) -> i32 {
     let column_pad = pad / 10;
     pad %= 10;
     clear_defect_list(defects);
-    let mut root = core::ptr::null_mut();
-    let xml_ind = unsafe { crate::imod::libcfshr::mxmlwrap::ixml_load_string(text, 0, &mut root) };
+    // `mxmlwrap.rs` is not yet converted: it still takes and returns C strings
+    // that it allocated with `strdup`, so the NUL-terminated copies and the
+    // `free` calls below belong to that boundary and go away with it.
+    let mut nul_text = text.to_vec();
+    nul_text.push(0);
+    let mut root: *mut core::ffi::c_char = core::ptr::null_mut();
+    let xml_ind = unsafe {
+        crate::imod::libcfshr::mxmlwrap::ixml_load_string(nul_text.as_ptr().cast(), 0, &mut root)
+    };
     if xml_ind < 0 {
         return xml_ind;
     }
-    if root.is_null() || unsafe { libc::strcmp(root, c"defects".as_ptr()) } != 0 {
+    /* strcmp(root, "defects") */
+    let root_is_defects = !root.is_null() && {
+        let want = b"defects\0";
+        let mut i = 0usize;
+        loop {
+            let got = unsafe { *root.add(i) } as u8;
+            if got != want[i] {
+                break false;
+            }
+            if got == 0 {
+                break true;
+            }
+            i += 1;
+        }
+    };
+    if !root_is_defects {
         unsafe {
             libc::free(root.cast());
             crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
@@ -2219,13 +2316,13 @@ pub unsafe fn cor_def_parse_fei_xml(
     unsafe {
         libc::free(root.cast());
     }
-    let tags = [
-        c"row".as_ptr(),
-        c"col".as_ptr(),
-        c"area".as_ptr(),
-        c"nonmaskingpoint".as_ptr(),
-        c"point".as_ptr(),
-        c"nonmaskingpoint".as_ptr(),
+    let tags: [&[u8]; 6] = [
+        b"row\0",
+        b"col\0",
+        b"area\0",
+        b"nonmaskingpoint\0",
+        b"point\0",
+        b"nonmaskingpoint\0",
     ];
     for tag_ind in 0..6 {
         let mut start_ind = 0;
@@ -2234,7 +2331,7 @@ pub unsafe fn cor_def_parse_fei_xml(
             crate::imod::libcfshr::mxmlwrap::ixml_find_elements(
                 xml_ind,
                 0,
-                tags[tag_ind],
+                tags[tag_ind].as_ptr().cast(),
                 &mut start_ind,
                 &mut number,
             )
@@ -2264,7 +2361,21 @@ pub unsafe fn cor_def_parse_fei_xml(
                 }
                 return -err;
             }
-            if unsafe { !libc::strchr(value, b'/' as i32).is_null() } {
+            /* strchr(value, '/') */
+            let has_slash = {
+                let mut i = 0usize;
+                loop {
+                    let got = unsafe { *value.add(i) } as u8;
+                    if got == 0 {
+                        break false;
+                    }
+                    if got == b'/' {
+                        break true;
+                    }
+                    i += 1;
+                }
+            };
+            if has_slash {
                 unsafe {
                     libc::free(value.cast());
                 }
@@ -2349,18 +2460,19 @@ pub unsafe fn cor_def_process_fei_defects(
     flip_y: bool,
     super_fac: i32,
     fei_def_pad: i32,
-    dump_defect_name: *const core::ffi::c_char,
-    mess_buf: *mut core::ffi::c_char,
+    dump_defect_name: Option<&str>,
+    mess_buf: &mut String,
     buf_len: i32,
 ) -> i32 {
     let mut count = 0_u32;
+    // `iitif.rs` still returns the tag payload as a malloc'd C pointer.
     let mut text: *mut core::ffi::c_char = core::ptr::null_mut();
     if unsafe {
         crate::imod::libiimod::iitif::tiff_get_array(
             ii_file,
             65_100,
             &mut count,
-            (&mut text).cast(),
+            (&mut text as *mut *mut core::ffi::c_char).cast(),
         )
     } <= 0
         || count == 0
@@ -2368,35 +2480,41 @@ pub unsafe fn cor_def_process_fei_defects(
         return -1;
     }
     let bytes = unsafe { core::slice::from_raw_parts(text.cast::<u8>(), count as usize) };
-    let mut copy = Vec::with_capacity(count as usize + 1);
-    copy.extend_from_slice(bytes);
-    copy.push(0);
-    let parsed = cor_def_parse_fei_xml(copy.as_ptr().cast(), defects, fei_def_pad);
+    let parsed = cor_def_parse_fei_xml(bytes, defects, fei_def_pad);
     if parsed != 0 {
-        libc::snprintf(
-            mess_buf,
-            buf_len as usize,
-            c"Parsing defect string from TIFF file (error %d)".as_ptr(),
-            parsed,
+        /* snprintf(messBuf, bufLen, ...) truncates at bufLen - 1 bytes. */
+        *mess_buf = c_format(
+            "Parsing defect string from TIFF file (error %d)",
+            &[CArg::Int(parsed as i64)],
         );
+        /* snprintf writes at most bufLen - 1 bytes plus the NUL. */
+        let limit = (buf_len.max(1) as usize) - 1;
+        let mut cut = limit.min(mess_buf.len());
+        while cut > 0 && !mess_buf.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        mess_buf.truncate(cut);
         return 1;
     }
-    if !dump_defect_name.is_null() {
+    if let Some(dump_defect_name) = dump_defect_name {
         let mut text = String::new();
         cor_def_defects_to_string(defects, &mut text, nx, ny);
         crate::imod::libcfshr::b3dutil::imod_backup_file(dump_defect_name);
-        let file = libc::fopen(dump_defect_name, c"w".as_ptr());
-        if file.is_null() {
-            libc::snprintf(
-                mess_buf,
-                buf_len as usize,
-                c"Opening file to write defects to, %s".as_ptr(),
-                dump_defect_name,
+        let file = ImodFile::open(dump_defect_name, "w");
+        let Some(mut file) = file else {
+            *mess_buf = c_format(
+                "Opening file to write defects to, %s",
+                &[CArg::Str(dump_defect_name)],
             );
+            let limit = (buf_len.max(1) as usize) - 1;
+            let mut cut = limit.min(mess_buf.len());
+            while cut > 0 && !mess_buf.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            mess_buf.truncate(cut);
             return 1;
-        }
-        libc::fputs(std::ffi::CString::new(text).unwrap().as_ptr(), file);
-        libc::fclose(file);
+        };
+        let _ = file.write_all(text.as_bytes());
     }
     if flip_y {
         cor_def_flip_defects_in_y(defects, nx, ny, 0);
@@ -2409,7 +2527,7 @@ pub unsafe fn cor_def_process_fei_defects(
 }
 /// Matches C++ `CorDefFillDefectArray`.
 pub unsafe fn cor_def_fill_defect_array(
-    defects: *const crate::imod::clip::clip::CameraDefects,
+    defects: &crate::imod::clip::clip::CameraDefects,
     camera_size_x: i32,
     camera_size_y: i32,
     array: *mut u8,
@@ -2668,18 +2786,25 @@ pub fn cor_def_read_super_gain(
     y_start: &mut i32,
     y_spacing: &mut i32,
 ) -> i32 {
-    let name = match std::ffi::CString::new(filename) {
-        Ok(value) => value,
-        Err(_) => return 1,
+    // `CorrectDefects.cpp:2168` reads the whole file with `fscanf`; the byte
+    // buffer plus a cursor is that `FILE *`.
+    let Some(mut file) = ImodFile::open(filename, "r") else {
+        return 1;
     };
-    let file = unsafe { libc::fopen(name.as_ptr(), c"r".as_ptr()) };
-    if file.is_null() {
+    let mut buf: Vec<u8> = Vec::new();
+    if file.read_to_end(&mut buf).is_err() {
         return 1;
     }
+    let mut at = 0usize;
     let mut version = 0;
     let mut done_at_fac = 0;
-    let scan = unsafe { libc::fscanf(file, c"%d %d".as_ptr(), &mut version, &mut done_at_fac) };
-    if scan == libc::EOF {
+    let scan = fscanf(
+        &buf,
+        &mut at,
+        "%d %d",
+        &mut [ScanArg::Int(&mut version), ScanArg::Int(&mut done_at_fac)],
+    );
+    if scan == -1 {
         return 2;
     }
     if scan != 0 && scan < 2 {
@@ -2689,19 +2814,23 @@ pub fn cor_def_read_super_gain(
         return 3;
     }
     let mut header = [0_i32; 6];
-    let scan = unsafe {
-        libc::fscanf(
-            file,
-            c"%d %d %d %d %d %d".as_ptr(),
-            header.as_mut_ptr().add(0),
-            header.as_mut_ptr().add(1),
-            header.as_mut_ptr().add(2),
-            header.as_mut_ptr().add(3),
-            header.as_mut_ptr().add(4),
-            header.as_mut_ptr().add(5),
+    let scan = {
+        let [a, b, c, d, e, f] = &mut header;
+        fscanf(
+            &buf,
+            &mut at,
+            "%d %d %d %d %d %d",
+            &mut [
+                ScanArg::Int(a),
+                ScanArg::Int(b),
+                ScanArg::Int(c),
+                ScanArg::Int(d),
+                ScanArg::Int(e),
+                ScanArg::Int(f),
+            ],
         )
     };
-    if scan == libc::EOF {
+    if scan == -1 {
         return 2;
     }
     if scan != 0 && scan < 6 {
@@ -2713,44 +2842,45 @@ pub fn cor_def_read_super_gain(
         header[0], header[1], header[2], header[3], header[4], header[5],
     );
     biases.clear();
+    let mut bias4 = vec![0.0f32; 4];
+    let mut bias16 = vec![0.0f32; 16];
     if super_fac != done_at_fac {
-        let divisor = super_fac / done_at_fac;
-        *x_start /= divisor;
-        *y_start /= divisor;
-        *x_spacing /= divisor;
-        *y_spacing /= divisor;
+        *x_start /= super_fac / done_at_fac;
+        *y_start /= super_fac / done_at_fac;
+        *x_spacing /= super_fac / done_at_fac;
+        *y_spacing /= super_fac / done_at_fac;
     }
     for _ in 0..*num_in_y {
         for _ in 0..*num_in_x {
-            let mut bias16 = Vec::with_capacity(16);
-            for _ in 0..16 {
-                let mut value = 0.;
-                let scan = unsafe { libc::fscanf(file, c"%f".as_ptr(), &mut value) };
-                if scan == libc::EOF {
-                    return 2;
-                }
-                if scan != 0 && scan < 1 {
-                    return 4;
-                }
-                bias16.push(value);
+            let mut targets: Vec<ScanArg> = bias16.iter_mut().map(ScanArg::Flt).collect();
+            let scan = fscanf(
+                &buf,
+                &mut at,
+                "%f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f",
+                &mut targets,
+            );
+            drop(targets);
+            if scan == -1 {
+                return 2;
             }
-            let mut bias4 = Vec::with_capacity(4);
-            for _ in 0..4 {
-                let mut value = 0.;
-                let scan = unsafe { libc::fscanf(file, c"%f".as_ptr(), &mut value) };
-                if scan == libc::EOF {
-                    return 2;
-                }
-                if scan != 0 && scan < 1 {
-                    return 4;
-                }
-                bias4.push(value);
+            if scan != 0 && scan < 16 {
+                return 4;
             }
-            biases.push(if super_fac == 2 { bias4 } else { bias16 });
+            let mut targets: Vec<ScanArg> = bias4.iter_mut().map(ScanArg::Flt).collect();
+            let scan = fscanf(&buf, &mut at, "%f %f %f %f", &mut targets);
+            drop(targets);
+            if scan == -1 {
+                return 2;
+            }
+            if scan != 0 && scan < 4 {
+                return 4;
+            }
+            if super_fac == 2 {
+                biases.push(bias4.clone());
+            } else {
+                biases.push(bias16.clone());
+            }
         }
-    }
-    unsafe {
-        libc::fclose(file);
     }
     0
 }
@@ -2883,16 +3013,16 @@ pub unsafe fn cor_def_find_drift_corr_edges(
     let mut median = 0_f32;
     let mut madn = 0_f32;
     crate::imod::libcfshr::robuststat::rs_median(
-        ratio.as_mut_ptr(),
+        &ratio,
         4 * max_width,
-        temporary.as_mut_ptr(),
+        &mut temporary,
         &mut median,
     );
     crate::imod::libcfshr::robuststat::rs_madn(
-        ratio.as_mut_ptr(),
+        &ratio,
         4 * max_width,
         median,
-        temporary.as_mut_ptr(),
+        &mut temporary,
         &mut madn,
     );
     for index in (0..4 * max_width).rev() {
@@ -2919,8 +3049,8 @@ pub unsafe fn cor_def_sample_mean_sd_1(
     data_type: i32,
     nx: i32,
     ny: i32,
-    mean: *mut f32,
-    sd: *mut f32,
+    mean: &mut f32,
+    sd: &mut f32,
 ) {
     unsafe {
         cor_def_sample_mean_sd_2(array, data_type, nx, nx, ny, mean, sd);
@@ -2933,8 +3063,8 @@ pub unsafe fn cor_def_sample_mean_sd_2(
     nxdim: i32,
     nx: i32,
     ny: i32,
-    mean: *mut f32,
-    sd: *mut f32,
+    mean: &mut f32,
+    sd: &mut f32,
 ) {
     unsafe {
         cor_def_sample_mean_sd_3(array, data_type, nxdim, nx, ny, 0, 0, nx, ny, mean, sd);
@@ -2951,8 +3081,8 @@ pub unsafe fn cor_def_sample_mean_sd_3(
     iy_start: i32,
     nx_use: i32,
     ny_use: i32,
-    mean: *mut f32,
-    sd: *mut f32,
+    mean: &mut f32,
+    sd: &mut f32,
 ) {
     unsafe {
         let (call_type, dsize) = match data_type {
@@ -2962,15 +3092,29 @@ pub unsafe fn cor_def_sample_mean_sd_3(
             2 => (6, 4),
             _ => return,
         };
-        let lines = crate::imod::libcfshr::b3dutil::make_line_pointers(array, nxdim, ny, dsize);
-        if lines.is_null() {
-            return;
-        }
+        // `makeLinePointers` becomes the line byte views the translated
+        // `sampleMeanSD` takes.
+        let bytes = core::slice::from_raw_parts(
+            array.cast::<u8>(),
+            nxdim as usize * ny as usize * dsize as usize,
+        );
+        let lines: Vec<&[u8]> = (0..ny as usize)
+            .map(|index| &bytes[(nxdim as usize * index * dsize as usize)..])
+            .collect();
         let sample = (30000. / (nx * ny) as f32).min(1.);
         crate::imod::libcfshr::samplemeansd::sample_mean_sd(
-            lines, call_type, nx, ny, sample, ix_start, iy_start, nx_use, ny_use, mean, sd,
+            Some(&lines),
+            call_type,
+            nx,
+            ny,
+            sample,
+            ix_start,
+            iy_start,
+            nx_use,
+            ny_use,
+            Some(&mut *mean),
+            Some(&mut *sd),
         );
-        libc::free(lines.cast());
     }
 }
 /// Matches C++ `CorDefSetupToCorrect`.
@@ -3023,9 +3167,12 @@ pub fn cor_def_setup_to_correct(
         || (scale_defects != 0 && defects.was_scaled <= 0)
     {
         if !(scale_defects != 0 && defects.was_scaled <= 0) && bin_option.is_some() {
-            println!(
-                "Scaling defect list up by 2 because images are larger than camera size in list\n"
+            // `CorrectDefects.cpp:2635` writes the text (which ends in a
+            // newline) and then `std::endl`, so two newlines and a flush.
+            let _ = ImodFile::Stdout.write_all(
+                b"Scaling defect list up by 2 because images are larger than camera size in list\n\n",
             );
+            let _ = ImodFile::Stdout.flush();
         }
         cor_def_scale_defects_for_k2(defects, false);
         *camera_size_x *= 2;
@@ -3041,17 +3188,25 @@ pub fn cor_def_setup_to_correct(
         }
         if *use_binning > 1 && bin_option.is_some() {
             let bin_text = if scaled_for_k2 {
-                format!("{:.1}", *use_binning as f32 / 2.)
+                c_format("%.1f", &[CArg::Dbl(*use_binning as f64 / 2.)])
             } else {
-                use_binning.to_string()
+                c_format("%d", &[CArg::Int(*use_binning as i64)])
             };
-            println!(
-                "Assuming binning of {bin_text} for defect correction instead of a small subarea;\n    use the {} option to set a binning if this is incorrect.",
-                bin_option.unwrap()
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "Assuming binning of %s for defect correction instead of a small subarea;\n    use the %s option to set a binning if this is incorrect.\n",
+                    &[CArg::Str(&bin_text), CArg::Str(bin_option.unwrap())],
+                )
+                .as_bytes(),
             );
+            let _ = ImodFile::Stdout.flush();
         }
     } else {
-        *use_binning = ((if scaled_for_k2 { 2. } else { 1. }) * set_binning + 0.02).round() as i32;
+        // `CorrectDefects.cpp:2663`: `(scaledForK2 ? 2 : 1) * setBinning` is
+        // `int * float`, so the product is single precision and only the
+        // `+ 0.02` widens it; `B3DNINT` is `floor(x + 0.5)`.
+        let product = (if scaled_for_k2 { 2 } else { 1 }) as f32 * set_binning;
+        *use_binning = (product as f64 + 0.02 + 0.5).floor() as i32;
     }
     0
 }
@@ -3345,11 +3500,8 @@ mod tests {
             bad_pixel_y: vec![],
             pix_use_mean: vec![],
         };
-        let xml = c"<defects><row>3,4</row><col>6,7</col><area>1,2,4,3</area><point>8,9</point></defects>";
-        assert_eq!(
-            unsafe { cor_def_parse_fei_xml(xml.as_ptr(), &mut defects, 56) },
-            0
-        );
+        let xml = b"<defects><row>3,4</row><col>6,7</col><area>1,2,4,3</area><point>8,9</point></defects>";
+        assert_eq!(cor_def_parse_fei_xml(xml, &mut defects, 56), 0);
         assert_eq!(defects.falcon_type, 1);
         assert_eq!(defects.num_avg_super_res, 4);
         assert_eq!(

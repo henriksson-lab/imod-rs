@@ -6,6 +6,7 @@
 //! into the crate.
 #![allow(dead_code, unused_variables)]
 
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, b3d_fread, b3d_rewind, c_format};
 use crate::imod::libcfshr::b3dutil::{
     b3d_error, b3d_shift_bytes, group_limits_remainder_at_end, make_all_big_tiff, num_omp_threads,
 };
@@ -34,7 +35,6 @@ use core::ffi::{CStr, c_char, c_void};
 use core::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
 
 unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
     // `warningHandler` formats libtiff's own `va_list` message.  On this ABI a
     // `va_list` argument decays to a pointer, so the source call is direct.
     fn vsnprintf(str: *mut c_char, size: usize, format: *const c_char, ap: *mut c_void) -> i32;
@@ -302,7 +302,6 @@ static mut S_XTIFF_FIELD_INFO: [TiffFieldInfo; 8] = [
 /// C `iiTIFFCheck` (`iitif.c:111`).
 pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     let tif: *mut Tiff;
-    let fp: *mut libc::FILE;
     let mut buf: u16 = 0;
     let mut dirnum = 0i32;
     let mut file_dir_num = 0i32;
@@ -435,16 +434,15 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     if in_file.is_null() {
         return IIERR_BAD_CALL;
     }
-    fp = (*in_file).fp;
-    if fp.is_null() {
+    let Some(mut fp) = (*in_file).fp.clone() else {
         return IIERR_BAD_CALL;
-    }
+    };
 
     if S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst) < 0
         && S_ANTIALIAS_EER.load(Ordering::SeqCst) == 0
     {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: iiTIFFCheck - A negative super-resolution factor can be used only with antialiased EER reading\n"
             ),
@@ -452,23 +450,26 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_BAD_CALL;
     }
 
-    libc::rewind(fp);
-    if libc::fread((&raw mut buf).cast(), core::mem::size_of::<u16>(), 1, fp) < 1 {
+    b3d_rewind(&mut fp);
+    let mut stamp = [0u8; 2];
+    if b3d_fread(&mut stamp, core::mem::size_of::<u16>(), 1, &mut fp) < 1 {
         err = IIERR_IO_ERROR;
     }
+    buf = u16::from_ne_bytes(stamp);
     if err == 0 && buf != 0x4949 && buf != 0x4d4d {
         err = IIERR_NOT_FORMAT;
     }
-    if err == 0 && libc::fread((&raw mut buf).cast(), core::mem::size_of::<u16>(), 1, fp) < 1 {
+    if err == 0 && b3d_fread(&mut stamp, core::mem::size_of::<u16>(), 1, &mut fp) < 1 {
         err = IIERR_IO_ERROR;
     }
+    buf = u16::from_ne_bytes(stamp);
     if err == 0 && buf != 0x002a && buf != 0x2a00 && buf != 0x002b && buf != 0x2b00 {
         err = IIERR_NOT_FORMAT;
     }
     if err != 0 {
         if err == IIERR_IO_ERROR {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: iiTIFFCheck - Reading file {}\n",
                     CStr::from_ptr((*in_file).filename).to_string_lossy()
@@ -479,13 +480,16 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     }
 
     /* Close file now, but reopen it if there is a TIFF failure */
-    libc::fclose(fp);
-    (*in_file).fp = core::ptr::null_mut();
+    drop(fp);
+    (*in_file).fp = None;
     tif = open_without_b_mode(in_file);
     if tif.is_null() {
-        (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
+        (*in_file).fp = ImodFile::open(
+            &CStr::from_ptr((*in_file).filename).to_string_lossy(),
+            &CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+        );
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: iiTIFFCheck - Calling TIFFOpen on file {}\n",
                 CStr::from_ptr((*in_file).filename).to_string_lossy()
@@ -500,11 +504,13 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     (*in_file).multiple_sizes = 0;
     (*in_file).planes_per_image = 1;
     (*in_file).contig_samples = 1;
-    (*in_file).directory_nums = ilist_new(core::mem::size_of::<i32>() as i32, 4).cast();
+    (*in_file).directory_nums = ilist_new(core::mem::size_of::<i32>() as i32, 4)
+        .map_or(core::ptr::null_mut(), Box::into_raw)
+        .cast();
     if (*in_file).directory_nums.is_null() {
         return IIERR_MEMORY_ERR;
     }
-    ilist_quantum((*in_file).directory_nums.cast(), 20);
+    ilist_quantum(&mut *(*in_file).directory_nums.cast::<Ilist>(), 20);
     resvar = libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr());
     if !resvar.is_null() {
         pixel_limit = libc::atof(resvar) as f32;
@@ -712,8 +718,11 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             dirnum = 1;
             (*(*in_file).directory_nums.cast::<Ilist>()).size = 0;
             if ilist_append(
-                (*in_file).directory_nums.cast(),
-                (&raw mut file_dir_num).cast(),
+                &mut *(*in_file).directory_nums.cast::<Ilist>(),
+                core::slice::from_raw_parts(
+                    (&raw const file_dir_num).cast::<u8>(),
+                    core::mem::size_of::<i32>(),
+                ),
             ) != 0
             {
                 close_with_error(in_file, c"Memory error adding to directory list\n".as_ptr());
@@ -722,8 +731,11 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         } else if nxim == (*in_file).nx && nyim == (*in_file).ny && skip_file == 0 {
             dirnum += 1;
             if ilist_append(
-                (*in_file).directory_nums.cast(),
-                (&raw mut file_dir_num).cast(),
+                &mut *(*in_file).directory_nums.cast::<Ilist>(),
+                core::slice::from_raw_parts(
+                    (&raw const file_dir_num).cast::<u8>(),
+                    core::mem::size_of::<i32>(),
+                ),
             ) != 0
             {
                 close_with_error(in_file, c"Memory error adding to directory list\n".as_ptr());
@@ -1117,10 +1129,13 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         if TIFFGetField(tif, TIFFTAG_STRIPOFFSETS, &raw mut offsets) > 0 {
             info.header_size = *offsets as i32;
             TIFFClose(tif);
-            (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
-            if (*in_file).fp.is_null() {
+            (*in_file).fp = ImodFile::open(
+                &CStr::from_ptr((*in_file).filename).to_string_lossy(),
+                &CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+            );
+            if (*in_file).fp.is_none() {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiTIFFCheck - Reopening file {} for treatment as MRC-like\n",
                         CStr::from_ptr((*in_file).filename).to_string_lossy()
@@ -1135,7 +1150,9 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     /* Otherwise proceed to return as a TIFF file */
     (*in_file).header_size = 8;
     (*in_file).section_skip = 0;
-    (*in_file).fp = tif.cast();
+    // `iitif.c:670`: `(FILE *)tif` — the libtiff handle used as this file's
+    // identity in `sOpenedFiles`, never for I/O.
+    (*in_file).fp = Some(ImodFile::Token(tif as usize));
     (*in_file).clean_up = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile),
         unsafe extern "C" fn(*mut ImodImageFile),
@@ -1167,7 +1184,7 @@ pub unsafe fn tiff_reopen(in_file: *mut ImodImageFile) -> i32 {
     (*in_file).header_size = 8;
     (*in_file).section_skip = 0;
     (*in_file).header = tif.cast();
-    (*in_file).fp = tif.cast();
+    (*in_file).fp = Some(ImodFile::Token(tif as usize));
     0
 }
 /// C `tiffClose` (`iitif.c:692`).
@@ -1187,12 +1204,13 @@ pub unsafe fn tiff_close(in_file: *mut ImodImageFile) {
         TIFFClose(tif);
     }
     (*in_file).header = core::ptr::null_mut();
-    (*in_file).fp = core::ptr::null_mut();
+    (*in_file).fp = None;
 }
 /// C `tiffDelete` (`iitif.c:708`).
 pub unsafe fn tiff_delete(in_file: *mut ImodImageFile) {
     if !in_file.is_null() {
-        ilist_delete((*in_file).directory_nums.cast());
+        let directory_list = (*in_file).directory_nums.cast::<Ilist>();
+        ilist_delete((!directory_list.is_null()).then(|| Box::from_raw(directory_list)));
         (*in_file).directory_nums = core::ptr::null_mut();
         tiff_close(in_file);
     }
@@ -1223,7 +1241,7 @@ pub unsafe fn tiff_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcH
         (*in_file).yscale as f64,
         (*in_file).zscale as f64,
     );
-    (*hdata).fp = (*in_file).fp.cast();
+    (*hdata).fp = (*in_file).fp.clone();
     (*hdata).packed4bits = (*in_file).packed4bits;
     (*hdata).half_floats = 0;
     if (*hdata).packed4bits == PACKED_4BIT_MODE {
@@ -1405,15 +1423,24 @@ unsafe extern "C" fn warning_handler(
     /* It didn't work to call the old handler with some errors, so print it
     ourselves to stderr.  It was "unknown" in libtiff 3 and "Unknown" in 4 */
     if libc::strstr(buffer.as_ptr(), c"nknown field with tag".as_ptr()).is_null() {
+        use std::io::Write;
+        let text = CStr::from_ptr(buffer.as_ptr())
+            .to_string_lossy()
+            .into_owned();
         if !module.is_null() {
-            libc::fprintf(
-                stderr,
-                c"%s: Warning, %s\n".as_ptr(),
-                module,
-                buffer.as_ptr(),
+            let _ = ImodFile::Stderr.write_all(
+                c_format(
+                    "%s: Warning, %s\n",
+                    &[
+                        CArg::Str(&CStr::from_ptr(module).to_string_lossy()),
+                        CArg::Str(&text),
+                    ],
+                )
+                .as_bytes(),
             );
         } else {
-            libc::fprintf(stderr, c"Warning, %s\n".as_ptr(), buffer.as_ptr());
+            let _ = ImodFile::Stderr
+                .write_all(c_format("Warning, %s\n", &[CArg::Str(&text)]).as_bytes());
         }
     }
 }
@@ -1527,7 +1554,10 @@ unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i3
     let directory = if (*in_file).directory_nums.is_null() {
         core::ptr::null_mut()
     } else {
-        ilist_item((*in_file).directory_nums.cast(), dirnum).cast::<i32>()
+        ilist_item((*in_file).directory_nums.cast::<Ilist>().as_mut(), dirnum)
+            .map_or(core::ptr::null_mut(), |item| {
+                item.as_mut_ptr().cast::<i32>()
+            })
     };
     if directory.is_null() {
         return 1;
@@ -1537,9 +1567,12 @@ unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i3
 /// C `closeWithError` (`iitif.c:994`).
 unsafe fn close_with_error(in_file: *mut ImodImageFile, message: *const c_char) {
     TIFFClose((*in_file).header.cast());
-    (*in_file).fp = libc::fopen((*in_file).filename, (*in_file).fmode.as_ptr());
+    (*in_file).fp = ImodFile::open(
+        &CStr::from_ptr((*in_file).filename).to_string_lossy(),
+        &CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+    );
     b3d_error(
-        stderr,
+        Some(&mut ImodFile::Stderr),
         format_args!("{}", CStr::from_ptr(message).to_string_lossy()),
     );
 }
@@ -1673,7 +1706,7 @@ unsafe fn read_section(
     let mut tif = (*in_file).header.cast::<Tiff>();
     if (*in_file).axis == 2 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: tiffReadSection - Cannot read Y planes from a TIFF file\n"),
         );
         return -1;
@@ -1704,7 +1737,7 @@ unsafe fn read_section(
             != 0
     {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: tiffReadSection - Cannot set flags for summing frames when autogrouping an EER file\n"
             ),
@@ -1769,7 +1802,7 @@ unsafe fn read_section(
     row = in_section / ((*in_file).planes_per_image * samples);
     if auto_group_eer == 0 && set_matching_directory(in_file, row) != 0 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: TIFF ReadSection - Cannot find directory {}\n", row),
         );
         return -1;
@@ -1912,7 +1945,7 @@ unsafe fn read_section(
             ) != 0
             {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!("ERROR: tiffReadSection - Setting up antialias filter\n"),
                 );
                 return -1;
@@ -1928,7 +1961,7 @@ unsafe fn read_section(
         while row <= sec_end {
             if auto_group_eer != 0 && set_matching_directory(in_file, row) != 0 {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!("ERROR: tiffReadSection - Cannot find directory {}\n", row),
                 );
                 cleanup_from_eer(
@@ -2489,7 +2522,7 @@ unsafe fn decode_eer_image(
     *num_electrons = n_electron as i32;
     if n_pix != eer_image_pixels as u32 && S_IGNORE_BAD_EER_END.load(Ordering::SeqCst) == 0 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: TIFFReadSection - Final pixel position in EER image is not right ({} instead of {})\n.",
                 n_pix as i32, eer_image_pixels
@@ -3551,7 +3584,7 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_IO_ERROR;
     }
     (*in_file).header = tif.cast();
-    (*in_file).fp = tif.cast();
+    (*in_file).fp = Some(ImodFile::Token(tif as usize));
     (*in_file).state = IISTATE_READY;
     (*in_file).clean_up = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile),
@@ -3972,14 +4005,14 @@ unsafe fn tiff_write_section_any(
     }
     if (*in_file).pad_left != 0 || (*in_file).pad_right != 0 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: tiffWriteSectionAny - Cannot write from a subset of an array\n"),
         );
         return -1;
     }
     if in_section != (*in_file).last_written_z + 1 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: tiffWriteSectionAny - Can only write sequential sections to a TIFF file (last Z = {}, requested Z = {})\n",
                 (*in_file).last_written_z,
@@ -3994,14 +4027,14 @@ unsafe fn tiff_write_section_any(
         || (*in_file).ury != (*in_file).ny - 1
     {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: tiffWriteSectionAny - Can only write a whole section at once\n"),
         );
         return -1;
     }
     if (*in_file).format == IIFORMAT_COMPLEX {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: tiffWriteSectionAny - Cannot write complex data\n"),
         );
         return -1;
@@ -4350,7 +4383,7 @@ pub unsafe fn tiff_parallel_write(
     S_SETTING_UP_PARALLEL.store(0, Ordering::SeqCst);
     if err == 0 && num_strips != cumulative_strips {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "tiffParallelWrite: number of strips for full file ({}) not equal to total for temp files ({})\n",
                 num_strips, cumulative_strips
@@ -4443,7 +4476,7 @@ pub unsafe fn tiff_parallel_write(
                     );
                     if bytes <= 0 {
                         b3d_error(
-                            stderr,
+                            Some(&mut ImodFile::Stderr),
                             format_args!(
                                 "tiffParallelWrite: Read error getting raw strip {} from file {}\n",
                                 strip_index, file
@@ -4460,7 +4493,7 @@ pub unsafe fn tiff_parallel_write(
                     ) <= 0
                     {
                         b3d_error(
-                            stderr,
+                            Some(&mut ImodFile::Stderr),
                             format_args!(
                                 "tiffParallelWrite: Error rewriting raw strip {} from file {}\n",
                                 strip_index, file
@@ -5027,7 +5060,8 @@ mod tests {
             let reader = ii_new();
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as c_char, b'b' as c_char, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             // Super-resolution 2 quadruples each sensor axis.
             assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (32, 32, 1));
@@ -5090,7 +5124,8 @@ mod tests {
             let reader = ii_new();
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as c_char, b'b' as c_char, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!((*reader).type_, IITYPE_USHORT);
             // The source builds a short-to-byte map from slope and offset when
@@ -5554,7 +5589,8 @@ mod tests {
             assert!(!reader.is_null());
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             let mut minimum = 0.0f64;
             let mut maximum = 0.0f64;
@@ -5655,7 +5691,8 @@ mod tests {
             assert!(!reader.is_null());
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!(
                 (
@@ -5719,11 +5756,15 @@ mod tests {
             let reader = ii_new();
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (2, 2, 1));
             assert_eq!(
-                *(ilist_item((*reader).directory_nums.cast(), 0).cast::<i32>()),
+                *(ilist_item((*reader).directory_nums.cast::<Ilist>().as_mut(), 0)
+                    .unwrap()
+                    .as_mut_ptr()
+                    .cast::<i32>()),
                 1
             );
             let mut decoded = [0_u8; 4];
@@ -5846,7 +5887,8 @@ mod tests {
             assert!(!reader.is_null());
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             let mut minimum = 0.0_f64;
             let mut maximum = 0.0_f64;
@@ -5911,7 +5953,8 @@ mod tests {
             let reader = ii_new();
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             let mut decoded = [0_u8; 4];
             assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);
@@ -6023,7 +6066,8 @@ mod tests {
             let reader = ii_new();
             (*reader).filename = libc::strdup(name.as_ptr());
             (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp = libc::fopen(name.as_ptr(), c"rb".as_ptr());
+            (*reader).fp =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             let mut decoded = vec![0_u8; pixels.len()];
             assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);

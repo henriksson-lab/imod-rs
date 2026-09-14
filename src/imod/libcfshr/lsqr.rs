@@ -95,18 +95,34 @@ pub unsafe fn lsqr(
         unsafe { dload(n, 0., se) };
     }
     let mut alpha = 0.;
-    let mut beta = unsafe { cblas_dnrm2(m, u, 1) };
+    let mut beta = unsafe { cblas_dnrm2(m, core::slice::from_raw_parts(u, m as usize), 1) };
     if beta > 0. {
         unsafe {
-            cblas_dscal(m, 1. / beta, u, 1);
+            cblas_dscal(
+                m,
+                1. / beta,
+                core::slice::from_raw_parts_mut(u, m as usize),
+                1,
+            );
             aprod(2, m, n, v, u, user_work);
         }
-        alpha = unsafe { cblas_dnrm2(n, v, 1) };
+        alpha = unsafe { cblas_dnrm2(n, core::slice::from_raw_parts(v, n as usize), 1) };
     }
     if alpha > 0. {
         unsafe {
-            cblas_dscal(n, 1. / alpha, v, 1);
-            cblas_dcopy(n, v, 1, w, 1);
+            cblas_dscal(
+                n,
+                1. / alpha,
+                core::slice::from_raw_parts_mut(v, n as usize),
+                1,
+            );
+            cblas_dcopy(
+                n,
+                core::slice::from_raw_parts(v, n as usize),
+                1,
+                core::slice::from_raw_parts_mut(w, n as usize),
+                1,
+            );
         }
     }
     let mut arnorm = alpha * beta;
@@ -141,21 +157,33 @@ pub unsafe fn lsqr(
         loop {
             itn += 1;
             unsafe {
-                cblas_dscal(m, -alpha, u, 1);
+                cblas_dscal(m, -alpha, core::slice::from_raw_parts_mut(u, m as usize), 1);
                 aprod(1, m, n, v, u, user_work);
             }
-            beta = unsafe { cblas_dnrm2(m, u, 1) };
+            beta = unsafe { cblas_dnrm2(m, core::slice::from_raw_parts(u, m as usize), 1) };
             let temp = d2norm(d2norm(alpha, beta), damp);
             anorm = d2norm(anorm, temp);
             if beta > 0. {
                 unsafe {
-                    cblas_dscal(m, 1. / beta, u, 1);
-                    cblas_dscal(n, -beta, v, 1);
+                    cblas_dscal(
+                        m,
+                        1. / beta,
+                        core::slice::from_raw_parts_mut(u, m as usize),
+                        1,
+                    );
+                    cblas_dscal(n, -beta, core::slice::from_raw_parts_mut(v, n as usize), 1);
                     aprod(2, m, n, v, u, user_work);
                 }
-                alpha = unsafe { cblas_dnrm2(n, v, 1) };
+                alpha = unsafe { cblas_dnrm2(n, core::slice::from_raw_parts(v, n as usize), 1) };
                 if alpha > 0. {
-                    unsafe { cblas_dscal(n, 1. / alpha, v, 1) };
+                    unsafe {
+                        cblas_dscal(
+                            n,
+                            1. / alpha,
+                            core::slice::from_raw_parts_mut(v, n as usize),
+                            1,
+                        )
+                    };
                 }
             }
             let mut rhbar1 = rhobar;

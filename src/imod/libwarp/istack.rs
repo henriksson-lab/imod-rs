@@ -1,84 +1,87 @@
 //! Translation of `IMOD/libwarp/istack.c` and `istack.h`.
+//!
+//! The source's `int* v` grown by `realloc` becomes a `Vec<i32>`, but the
+//! `n`/`nallocated` pair stays: `istack_push` doubles `nallocated` only when
+//! `n` reaches it, and keeping that policy is what lets the translation still
+//! read like the source even though `Vec` would grow on its own.
 #![allow(dead_code)]
 
+/// C `STACK_NSTART` (`istack.c:17`).
+const STACK_NSTART: i32 = 50;
+/// C `STACK_NINC` (`istack.c:18`); declared by the source and unused by it.
+const STACK_NINC: i32 = 50;
+
 /// C `struct istack` (`istack.h`).
-#[repr(C)]
 pub struct Istack {
     pub n: i32,
     pub nallocated: i32,
-    pub v: *mut i32,
+    pub v: Vec<i32>,
 }
 
 /// Original `istack_create` (`istack.c:28`).
-pub unsafe fn istack_create() -> *mut Istack {
-    unsafe {
-        let stack = libc::malloc(core::mem::size_of::<Istack>()).cast::<Istack>();
-        (*stack).n = 0;
-        (*stack).nallocated = 50;
-        (*stack).v = libc::malloc(50 * core::mem::size_of::<i32>()).cast();
-        stack
-    }
+pub fn istack_create() -> Box<Istack> {
+    let mut s = Box::new(Istack {
+        n: 0,
+        nallocated: 0,
+        v: Vec::new(),
+    });
+
+    s.n = 0;
+    s.nallocated = STACK_NSTART;
+    // `malloc(STACK_NSTART * sizeof(int))`: the source leaves the elements
+    // past `n` uninitialised and never reads them.
+    s.v = vec![0; STACK_NSTART as usize];
+    s
 }
 
 /// Original `istack_destroy` (`istack.c:38`).
-pub unsafe fn istack_destroy(stack: *mut Istack) {
-    unsafe {
-        if !stack.is_null() {
-            libc::free((*stack).v.cast());
-            libc::free(stack.cast());
-        }
+pub fn istack_destroy(s: Option<Box<Istack>>) {
+    if s.is_some() {
+        // `free(s->v)` then `free(s)`.
+        drop(s);
     }
 }
 
 /// Original `istack_reset` (`istack.c:47`).
-pub unsafe fn istack_reset(stack: *mut Istack) {
-    unsafe { (*stack).n = 0 }
+pub fn istack_reset(s: &mut Istack) {
+    s.n = 0;
 }
 
 /// Original `istack_contains` (`istack.c:52`).
-pub unsafe fn istack_contains(stack: *mut Istack, value: i32) -> i32 {
-    unsafe {
-        for index in 0..(*stack).n {
-            if *(*stack).v.add(index as usize) == value {
-                return 1;
-            }
+pub fn istack_contains(s: &Istack, v: i32) -> i32 {
+    for i in 0..s.n {
+        if s.v[i as usize] == v {
+            return 1;
         }
-        0
     }
+    0
 }
 
 /// Original `istack_push` (`istack.c:63`).
-pub unsafe fn istack_push(stack: *mut Istack, value: i32) {
-    unsafe {
-        if (*stack).n == (*stack).nallocated {
-            (*stack).nallocated *= 2;
-            (*stack).v = libc::realloc(
-                (*stack).v.cast(),
-                (*stack).nallocated as usize * core::mem::size_of::<i32>(),
-            )
-            .cast();
-        }
-        *(*stack).v.add((*stack).n as usize) = value;
-        (*stack).n += 1;
+pub fn istack_push(s: &mut Istack, v: i32) {
+    if s.n == s.nallocated {
+        s.nallocated *= 2;
+        s.v.resize(s.nallocated as usize, 0);
     }
+
+    s.v[s.n as usize] = v;
+    s.n += 1;
 }
 
 /// Original `istack_pop` (`istack.c:74`).
-pub unsafe fn istack_pop(stack: *mut Istack) -> i32 {
-    unsafe {
-        (*stack).n -= 1;
-        *(*stack).v.add((*stack).n as usize)
-    }
+pub fn istack_pop(s: &mut Istack) -> i32 {
+    s.n -= 1;
+    s.v[s.n as usize]
 }
 
 /// Original `istack_getnentries` (`istack.c:80`).
-pub unsafe fn istack_getnentries(stack: *mut Istack) -> i32 {
-    unsafe { (*stack).n }
+pub fn istack_getnentries(s: &Istack) -> i32 {
+    s.n
 }
 
 /// Original `istack_getentries` (`istack.c:85`).
-pub unsafe fn istack_getentries(stack: *mut Istack) -> *mut i32 {
-    unsafe { (*stack).v }
+pub fn istack_getentries(s: &Istack) -> &[i32] {
+    &s.v
 }
 
 #[cfg(test)]
@@ -87,18 +90,20 @@ mod tests {
 
     #[test]
     fn grows_in_source_sized_increments_and_lifo_order() {
-        unsafe {
-            let stack = istack_create();
-            for value in 0..51 {
-                istack_push(stack, value);
-            }
-            assert_eq!((*stack).nallocated, 100);
-            assert_eq!(istack_getnentries(stack), 51);
-            assert_eq!(istack_contains(stack, 17), 1);
-            assert_eq!(istack_pop(stack), 50);
-            istack_reset(stack);
-            assert_eq!(istack_getnentries(stack), 0);
-            istack_destroy(stack);
+        let mut stack = istack_create();
+        for value in 0..51 {
+            istack_push(&mut stack, value);
         }
+        assert_eq!(stack.nallocated, 100);
+        assert_eq!(istack_getnentries(&stack), 51);
+        assert_eq!(istack_contains(&stack, 17), 1);
+        assert_eq!(istack_contains(&stack, 51), 0);
+        assert_eq!(istack_getentries(&stack)[17], 17);
+        assert_eq!(istack_pop(&mut stack), 50);
+        istack_reset(&mut stack);
+        assert_eq!(istack_getnentries(&stack), 0);
+        istack_destroy(Some(stack));
+        istack_destroy(None);
+        assert_eq!(STACK_NINC, 50);
     }
 }

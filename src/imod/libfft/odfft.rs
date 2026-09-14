@@ -9,7 +9,16 @@ pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i
         let idir = *idirp;
         match crate::imod::backends::fft_backend() {
             Ok(crate::imod::backends::FftBackend::Rustfft) => {
-                if let Err(error) = super::rustfft_backend::odfft(array, nx, ny, idir) {
+                // The backend indexes the caller's buffer by the layout the
+                // direction implies: `2 * nx * ny` interleaved floats for the
+                // complex directions, `ny` rows of `nx + 2` for the real ones.
+                let len = match idir {
+                    -1 | -2 if nx > 0 && ny > 0 => 2 * nx as usize * ny as usize,
+                    0 | 1 if nx > 0 && ny > 0 => (nx as usize + 2) * ny as usize,
+                    _ => 0,
+                };
+                let buffer = std::slice::from_raw_parts_mut(array, len);
+                if let Err(error) = super::rustfft_backend::odfft(buffer, nx, ny, idir) {
                     eprintln!("ERROR: Rust-native backend - {error}");
                 }
                 return;

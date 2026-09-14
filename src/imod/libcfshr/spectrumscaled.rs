@@ -138,14 +138,35 @@ pub unsafe fn spectrum_scaled(
             }
         }
         crate::imod::libcfshr::taperpad::slice_taper_in_pad(
-            image,
+            match typ {
+                0 => crate::imod::libcfshr::taperpad::PadIn::Byte(core::slice::from_raw_parts(
+                    image.cast::<u8>(),
+                    (nx * ny) as usize,
+                )),
+                1 => crate::imod::libcfshr::taperpad::PadIn::Short(core::slice::from_raw_parts(
+                    image.cast::<i16>(),
+                    (nx * ny) as usize,
+                )),
+                6 => crate::imod::libcfshr::taperpad::PadIn::UShort(core::slice::from_raw_parts(
+                    image.cast::<u16>(),
+                    (nx * ny) as usize,
+                )),
+                16 => crate::imod::libcfshr::taperpad::PadIn::Rgb(core::slice::from_raw_parts(
+                    image.cast::<u8>(),
+                    (3 * nx * ny) as usize,
+                )),
+                _ => crate::imod::libcfshr::taperpad::PadIn::Float(core::slice::from_raw_parts(
+                    image.cast::<f32>(),
+                    (nx * ny) as usize,
+                )),
+            },
             typ,
             nx,
             0,
             nx - 1,
             0,
             ny - 1,
-            fft,
+            core::slice::from_raw_parts_mut(fft, (padx * pad_size) as usize),
             padx,
             pad_size,
             pad_size,
@@ -173,15 +194,21 @@ pub unsafe fn spectrum_scaled(
                 two_d_fft(crop, &mut px, &mut py, &mut idir);
                 let shift = 0.5 * (pad_size as f32 / final_size as f32 - 1.);
                 crate::imod::libcfshr::filtxcorr::fourier_reduce_image(
-                    crop,
+                    core::slice::from_raw_parts(crop, (padx * pad_size) as usize),
                     pad_size,
                     pad_size,
-                    spectrum.cast(),
+                    core::slice::from_raw_parts_mut(
+                        spectrum.cast::<f32>(),
+                        ((final_size + 2) * final_size) as usize,
+                    ),
                     final_size,
                     final_size,
                     shift,
                     shift,
-                    fft,
+                    Some(core::slice::from_raw_parts_mut(
+                        fft,
+                        (padx * pad_size) as usize,
+                    )),
                 );
                 let (mut fx, mut fy, mut inv) = (final_size, final_size, 1);
                 two_d_fft(spectrum.cast(), &mut fx, &mut fy, &mut inv);
@@ -264,8 +291,15 @@ pub unsafe fn spectrum_scaled(
         *stemp.add((pad_size * pad_size / 2 + pad_size / 2) as usize) = 32000;
         let mut ret = 0;
         if reducing {
+            // `zoomWithFilter` takes typed line and output slices now; the
+            // `makeLinePointers` block above still runs for its error-5 path.
+            let line_vec: Vec<&[i16]> = (0..pad_size as usize)
+                .map(|i| {
+                    core::slice::from_raw_parts(temp.add(i * pad_size as usize), pad_size as usize)
+                })
+                .collect();
             ret = crate::imod::libcfshr::zoomdown::zoom_with_filter(
-                lines,
+                crate::imod::libcfshr::zoomdown::ZoomLines::Short(&line_vec),
                 pad_size,
                 pad_size,
                 0.,
@@ -275,9 +309,18 @@ pub unsafe fn spectrum_scaled(
                 final_size,
                 0,
                 1,
-                if bkgd_gray > 0 { fft.cast() } else { spectrum },
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
+                &mut crate::imod::libcfshr::zoomdown::ZoomOut::Short(
+                    core::slice::from_raw_parts_mut(
+                        if bkgd_gray > 0 {
+                            fft.cast::<i16>()
+                        } else {
+                            spectrum.cast::<i16>()
+                        },
+                        (final_size * final_size) as usize,
+                    ),
+                ),
+                None,
+                None,
             );
         }
         if ret == 0 && bkgd_gray > 0 {

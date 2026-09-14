@@ -429,11 +429,13 @@ pub unsafe fn slice_median_filter(sl_out: *mut Islice, stack: *mut Istack, size:
                     }
                 }
                 if is_float {
+                    let f_vals = core::slice::from_raw_parts_mut(f_vals, num_vals.max(0) as usize);
                     value = percentile_float(select, f_vals, num_vals);
                     if num_vals % 2 == 0 {
                         value = 0.5 * (value + percentile_float(select + 1, f_vals, num_vals));
                     }
                 } else {
+                    let i_vals = core::slice::from_raw_parts_mut(i_vals, num_vals.max(0) as usize);
                     value = percentile_int(select, i_vals, num_vals) as f32;
                     if num_vals % 2 == 0 {
                         value = 0.5 * (value + percentile_int(select + 1, i_vals, num_vals) as f32);

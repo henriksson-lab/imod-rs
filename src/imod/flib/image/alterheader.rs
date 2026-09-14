@@ -240,18 +240,14 @@ pub fn alterheader() {
             if num_non_opt_arg == 0 {
                 exit_error("Image filename must be entered");
             }
-            let mut name = core::ptr::null_mut();
-            pip_get_non_option_arg(0, &raw mut name);
-            in_file = core::ffi::CStr::from_ptr(name)
-                .to_string_lossy()
-                .into_owned();
+            let mut name: Vec<u8> = Vec::new();
+            pip_get_non_option_arg(0, &mut name);
+            in_file = String::from_utf8_lossy(&name).into_owned();
             ind_pip_opt = 0;
-            let mut copy_name = core::ptr::null_mut();
-            copy_from = pip_get_string(c"CopyFromImage".as_ptr(), &raw mut copy_name) == 0;
+            let mut copy_name: Vec<u8> = Vec::new();
+            copy_from = pip_get_string(b"CopyFromImage", &mut copy_name) == 0;
             if copy_from {
-                string = core::ffi::CStr::from_ptr(copy_name)
-                    .to_string_lossy()
-                    .into_owned();
+                string = String::from_utf8_lossy(&copy_name).into_owned();
             }
             if copy_from && num_opt_arg > 1 {
                 exit_error("No other options can be entered with -copy");
@@ -316,116 +312,98 @@ pub fn alterheader() {
                     goto_label = 0;
                     match ind_pip_opt {
                         1 => {
-                            if pip_get_three_floats(
-                                c"Origin".as_ptr(),
-                                &raw mut origx,
-                                &raw mut origy,
-                                &raw mut origz,
-                            ) == 0
+                            if pip_get_three_floats(b"Origin", &mut origx, &mut origy, &mut origz)
+                                == 0
                             {
                                 goto_label = 1;
                             }
                         }
                         2 => {
                             iiu_ret_cell(2, cell.as_mut_ptr());
-                            if pip_get_three_floats(
-                                c"CellSize".as_ptr(),
-                                &raw mut cell[0],
-                                &raw mut cell[1],
-                                &raw mut cell[2],
-                            ) == 0
+                            if {
+                                let [cell_0, cell_1, cell_2, ..] = &mut cell;
+                                pip_get_three_floats(b"CellSize", cell_0, cell_1, cell_2)
+                            } == 0
                             {
                                 goto_label = 2;
                             }
                         }
                         3 => {
-                            if pip_get_three_floats(
-                                c"PixelSize".as_ptr(),
-                                &raw mut delt[0],
-                                &raw mut delt[1],
-                                &raw mut delt[2],
-                            ) == 0
+                            if {
+                                let [delt_0, delt_1, delt_2, ..] = &mut delt;
+                                pip_get_three_floats(b"PixelSize", delt_0, delt_1, delt_2)
+                            } == 0
                             {
                                 goto_label = 4;
                             }
                         }
                         4 => {
-                            if pip_get_three_integers(
-                                c"MapIndexes".as_ptr(),
-                                &raw mut mcrs[0],
-                                &raw mut mcrs[1],
-                                &raw mut mcrs[2],
-                            ) == 0
+                            if {
+                                let [mcrs_0, mcrs_1, mcrs_2, ..] = &mut mcrs;
+                                pip_get_three_integers(b"MapIndexes", mcrs_0, mcrs_1, mcrs_2)
+                            } == 0
                             {
                                 goto_label = 5;
                             }
                         }
                         5 => {
-                            if pip_get_three_integers(
-                                c"SampleSize".as_ptr(),
-                                &raw mut mxyz[0],
-                                &raw mut mxyz[1],
-                                &raw mut mxyz[2],
-                            ) == 0
+                            if {
+                                let [mxyz_0, mxyz_1, mxyz_2, ..] = &mut mxyz;
+                                pip_get_three_integers(b"SampleSize", mxyz_0, mxyz_1, mxyz_2)
+                            } == 0
                             {
                                 goto_label = 6;
                             }
                         }
                         6 => {
-                            if pip_get_three_floats(
-                                c"TiltCurrent".as_ptr(),
-                                &raw mut tilt[0],
-                                &raw mut tilt[1],
-                                &raw mut tilt[2],
-                            ) == 0
+                            if {
+                                let [tilt_0, tilt_1, tilt_2, ..] = &mut tilt;
+                                pip_get_three_floats(b"TiltCurrent", tilt_0, tilt_1, tilt_2)
+                            } == 0
                             {
                                 goto_label = 7;
                             }
                         }
                         7 => {
-                            if pip_get_three_floats(
-                                c"TiltOriginal".as_ptr(),
-                                &raw mut tilt[0],
-                                &raw mut tilt[1],
-                                &raw mut tilt[2],
-                            ) == 0
+                            if {
+                                let [tilt_0, tilt_1, tilt_2, ..] = &mut tilt;
+                                pip_get_three_floats(b"TiltOriginal", tilt_0, tilt_1, tilt_2)
+                            } == 0
                             {
                                 goto_label = 8;
                             }
                         }
                         8 => {
-                            if pip_get_three_floats(
-                                c"RotateTilt".as_ptr(),
-                                &raw mut tilt[0],
-                                &raw mut tilt[1],
-                                &raw mut tilt[2],
-                            ) == 0
+                            if {
+                                let [tilt_0, tilt_1, tilt_2, ..] = &mut tilt;
+                                pip_get_three_floats(b"RotateTilt", tilt_0, tilt_1, tilt_2)
+                            } == 0
                             {
                                 goto_label = 9;
                             }
                         }
                         9 => {
-                            pip_get_boolean(c"MinMaxMean".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"MinMaxMean", &mut if_ok);
                             iwhich = 11;
                             if if_ok > 0 {
                                 goto_label = 11;
                             }
                         }
                         10 => {
-                            pip_get_boolean(c"RootMeanSquare".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"RootMeanSquare", &mut if_ok);
                             iwhich = 12;
                             if if_ok > 0 {
                                 goto_label = 16;
                             }
                         }
                         11 => {
-                            pip_get_boolean(c"FixPixel".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"FixPixel", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 12;
                             }
                         }
                         12 => {
-                            if pip_get_integer(c"FeiPixel".as_ptr(), &raw mut if_ok) == 0 {
+                            if pip_get_integer(b"FeiPixel", &mut if_ok) == 0 {
                                 if if_ok <= 0 {
                                     if_ok = -1;
                                 }
@@ -433,79 +411,77 @@ pub fn alterheader() {
                             }
                         }
                         13 => {
-                            pip_get_boolean(c"FixExtra".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"FixExtra", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 13;
                             }
                         }
                         14 => {
-                            pip_get_boolean(c"FixMode".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"FixMode", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 17;
                             }
                         }
                         15 => {
-                            pip_get_boolean(c"InvertOrigin".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"InvertOrigin", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 20;
                             }
                         }
                         16 => {
                             if pip_get_three_floats(
-                                c"SetMinMaxMean".as_ptr(),
-                                &raw mut dmin,
-                                &raw mut dmax,
-                                &raw mut dmean,
+                                b"SetMinMaxMean",
+                                &mut dmin,
+                                &mut dmax,
+                                &mut dmean,
                             ) == 0
                             {
                                 goto_label = 18;
                             }
                         }
                         17 => {
-                            pip_get_boolean(c"RealMode".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"RealMode", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 21;
                             }
                         }
                         18 => {
-                            pip_get_boolean(c"ComplexMode".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"ComplexMode", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 22;
                             }
                         }
                         19 => {
-                            if pip_get_integer(c"SpaceGroup".as_ptr(), &raw mut iflags) == 0 {
+                            if pip_get_integer(b"SpaceGroup", &mut iflags) == 0 {
                                 goto_label = 23;
                             }
                         }
                         20 => {
-                            if pip_get_integer(c"VolumeStack".as_ptr(), &raw mut iflags) == 0 {
+                            if pip_get_integer(b"VolumeStack", &mut iflags) == 0 {
                                 goto_label = 29;
                             }
                         }
                         21 => {
-                            if pip_get_integer(c"Change4BitMode".as_ptr(), &raw mut iflags) == 0 {
+                            if pip_get_integer(b"Change4BitMode", &mut iflags) == 0 {
                                 goto_label = 24;
                             }
                         }
                         22 => {
-                            pip_get_boolean(c"ToggleOrigin".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"ToggleOrigin", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 25;
                             }
                         }
                         23 => {
-                            pip_get_boolean(c"FixGrid".as_ptr(), &raw mut if_ok);
+                            pip_get_boolean(b"FixGrid", &mut if_ok);
                             if if_ok > 0 {
                                 goto_label = 26;
                             }
                         }
                         24 => {
-                            let mut list = core::ptr::null_mut();
-                            if pip_get_string(c"RemoveTitles".as_ptr(), &raw mut list) == 0 {
-                                string = core::ffi::CStr::from_ptr(list)
-                                    .to_string_lossy()
-                                    .into_owned();
+                            let mut list: Vec<u8> = Vec::new();
+                            if pip_get_string(b"RemoveTitles", &mut list) == 0 {
+                                string = String::from_utf8_lossy(&list).into_owned();
                                 let _ = parselist2(&string, &mut listdel, &mut ndel, &mut 1000);
                                 if ndel == 1 && listdel[0] <= 0 {
                                     exit_error("Title number to remove must be positive");
@@ -515,7 +491,7 @@ pub fn alterheader() {
                         }
                         25 => {
                             let mut j = 0_i32;
-                            if pip_get_integer(c"PositionForTitle".as_ptr(), &raw mut j) == 0 {
+                            if pip_get_integer(b"PositionForTitle", &mut j) == 0 {
                                 if j <= 0 {
                                     exit_error("Position for title to add must be positive");
                                 }
@@ -525,14 +501,12 @@ pub fn alterheader() {
                             }
                         }
                         26 => {
-                            let mut text = core::ptr::null_mut();
-                            if pip_get_string(c"TitleToAdd".as_ptr(), &raw mut text) == 0 {
+                            let mut text: Vec<u8> = Vec::new();
+                            if pip_get_string(b"TitleToAdd", &mut text) == 0 {
                                 // `PipGetString('TitleToAdd', string)` fills the
                                 // shared `string` variable that label 10 reads
                                 // the new label from.
-                                string = core::ffi::CStr::from_ptr(text)
-                                    .to_string_lossy()
-                                    .into_owned();
+                                string = String::from_utf8_lossy(&text).into_owned();
                                 title[0] = [b' '; 80];
                                 let bytes = string.as_bytes();
                                 let len = bytes.len().min(80);
@@ -993,19 +967,19 @@ pub fn alterheader() {
                             let (mut dmins, mut dmaxs, mut sums, mut sumsqs, mut sd) =
                                 (0.0_f32, 0.0_f32, 0.0_f64, 0.0_f64, 0.0_f32);
                             array_min_max_mean_sd_fortran(
-                                array.as_ptr(),
-                                &raw const nxyz[0],
-                                &raw const num_lines,
+                                &array,
+                                &nxyz[0],
+                                &num_lines,
                                 &1,
-                                &raw const nxyz[0],
+                                &nxyz[0],
                                 &1,
-                                &raw const num_lines,
-                                &raw mut dmins,
-                                &raw mut dmaxs,
-                                &raw mut sums,
-                                &raw mut sumsqs,
-                                &raw mut dmean,
-                                &raw mut sd,
+                                &num_lines,
+                                &mut dmins,
+                                &mut dmaxs,
+                                &mut sums,
+                                &mut sumsqs,
+                                &mut dmean,
+                                &mut sd,
                             );
                             dmin = dmin.min(dmins);
                             dmax = dmax.max(dmaxs);

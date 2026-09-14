@@ -3,6 +3,7 @@
 
 use crate::imod::clip::clip::{ClipOptions, show_error, show_status};
 use crate::imod::clip::fft::mrc_to_dfft;
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::islice::{
     Islice, Istack, slice_create, slice_free, slice_get_pixel_magnitude, slice_get_val, slice_init,
     slice_put_val,
@@ -15,6 +16,7 @@ use crate::imod::libiimod::mrcslice::{
     corr_conj, slice_add_const, slice_box, slice_box_in, slice_float, slice_mmm,
     slice_reduce_mirrored_fft, slice_resize_in,
 };
+use std::io::Write as _;
 
 /// Matches C++ `corr_getmax`.
 pub unsafe fn corr_getmax(
@@ -22,8 +24,8 @@ pub unsafe fn corr_getmax(
     sa: i32,
     xm: i32,
     ym: i32,
-    x: *mut f32,
-    y: *mut f32,
+    x: &mut f32,
+    y: &mut f32,
 ) {
     unsafe {
         let slice = slice_box(islice, xm - sa, ym - sa, xm + sa + 1, ym + sa + 1);
@@ -72,7 +74,7 @@ pub unsafe fn clip_padcorr(slice: *mut Islice, pad: i32) {
     unsafe {
         if slice.is_null() || pad == 0 || (*slice).mode == MRC_MODE_COMPLEX_FLOAT {
             if !slice.is_null() && pad == 0 {
-                libc::printf(c"no padding\n".as_ptr());
+                let _ = ImodFile::Stdout.write_all(b"no padding\n");
             }
             return;
         }
@@ -167,17 +169,20 @@ pub unsafe fn clip_slice_corr(mut slice1: *mut Islice, mut slice2: *mut Islice) 
 }
 /// Matches C++ `clip_corr3d`.
 pub unsafe fn clip_corr3d(
-    input1: *mut MrcHeader,
-    input2: *mut MrcHeader,
-    output: *mut MrcHeader,
-    options: *mut ClipOptions,
+    input1: &mut MrcHeader,
+    input2: &mut MrcHeader,
+    output: &mut MrcHeader,
+    options: &mut ClipOptions,
 ) -> i32 {
     unsafe {
-        if (*input1).mode == MRC_MODE_COMPLEX_FLOAT {
+        if input1.mode == MRC_MODE_COMPLEX_FLOAT {
             return grap_3dcorr(input1, input2, output, options);
         }
-        // C++ performs a bytewise option copy; ManuallyDrop preserves its ownership model.
-        let mut second_options = core::mem::ManuallyDrop::new(core::ptr::read(options));
+        // `correlation.cpp:229` is `memcpy(&opt2, opt, sizeof(ClipOptions))`,
+        // a struct copy that shares `secs` and the name pointers with the
+        // original; nothing below writes through either copy's vectors, so a
+        // clone is the same thing with Rust's ownership.
+        let mut second_options = options.clone();
         let first = crate::imod::clip::file_io::grap_volume_read(input1, options);
         if first.is_null() {
             return -1;
@@ -185,69 +190,95 @@ pub unsafe fn clip_corr3d(
         let (mut min, mut max, mut mean) = (0_f32, 0_f32, 0_f32);
         let (mut xmax, mut ymax, mut zmax) = (0_i32, 0_i32, 0_i32);
         crate::imod::clip::processing::clip_get_stat3d(
-            first, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
+            &mut *first,
+            &mut min,
+            &mut max,
+            &mut mean,
+            &mut xmax,
+            &mut ymax,
+            &mut zmax,
         );
-        libc::printf(c"stats on vol 1:\n".as_ptr());
-        libc::printf(
-            c"max = %g, min = %g, mean = %g\n".as_ptr(),
-            max as core::ffi::c_double,
-            min as core::ffi::c_double,
-            mean as core::ffi::c_double,
+        let _ = ImodFile::Stdout.write_all(b"stats on vol 1:\n");
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "max = %g, min = %g, mean = %g\n",
+                &[
+                    CArg::Dbl((max as core::ffi::c_double) as f64),
+                    CArg::Dbl((min as core::ffi::c_double) as f64),
+                    CArg::Dbl((mean as core::ffi::c_double) as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::printf(
-            c"location of max pixel = (%d, %d %d)\n".as_ptr(),
-            xmax,
-            ymax,
-            zmax,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "location of max pixel = (%d, %d %d)\n",
+                &[
+                    CArg::Int((xmax) as i64),
+                    CArg::Int((ymax) as i64),
+                    CArg::Int((zmax) as i64),
+                ],
+            )
+            .as_bytes(),
         );
-        if (*options).val as i32 == crate::imod::clip::clip::IP_DEFAULT {
-            (*options).val = 1.;
+        if options.val as i32 == crate::imod::clip::clip::IP_DEFAULT {
+            options.val = 1.;
         }
-        if (*options).val == 1. && padfloat_volume(first, mean) != 0 {
+        if options.val == 1. && padfloat_volume(&mut *first, mean) != 0 {
             crate::imod::clip::file_io::grap_volume_free(first);
             return -1;
         }
-        libc::printf(c"\n".as_ptr());
-        let autocorrelation = (*options).infiles != 2;
+        let _ = ImodFile::Stdout.write_all(b"\n");
+        let autocorrelation = options.infiles != 2;
         let second = if autocorrelation {
-            libc::printf(c"Auto-Correlation\n".as_ptr());
+            let _ = ImodFile::Stdout.write_all(b"Auto-Correlation\n");
             first
         } else {
-            libc::printf(c"Cross-Correlation\n".as_ptr());
-            let v = crate::imod::clip::file_io::grap_volume_read(input2, &mut *second_options);
+            let _ = ImodFile::Stdout.write_all(b"Cross-Correlation\n");
+            let v = crate::imod::clip::file_io::grap_volume_read(input2, &mut second_options);
             if v.is_null() {
                 crate::imod::clip::file_io::grap_volume_free(first);
                 return -1;
             }
             crate::imod::clip::processing::clip_get_stat3d(
-                v, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
+                &mut *v, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
             );
-            libc::printf(c"stats on vol 2:\n".as_ptr());
-            libc::printf(
-                c"max = %g, min = %g, mean = %g\n".as_ptr(),
-                max as core::ffi::c_double,
-                min as core::ffi::c_double,
-                mean as core::ffi::c_double,
+            let _ = ImodFile::Stdout.write_all(b"stats on vol 2:\n");
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "max = %g, min = %g, mean = %g\n",
+                    &[
+                        CArg::Dbl((max as core::ffi::c_double) as f64),
+                        CArg::Dbl((min as core::ffi::c_double) as f64),
+                        CArg::Dbl((mean as core::ffi::c_double) as f64),
+                    ],
+                )
+                .as_bytes(),
             );
-            libc::printf(
-                c"location of max pixel = (%d, %d %d)\n".as_ptr(),
-                xmax,
-                ymax,
-                zmax,
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "location of max pixel = (%d, %d %d)\n",
+                    &[
+                        CArg::Int((xmax) as i64),
+                        CArg::Int((ymax) as i64),
+                        CArg::Int((zmax) as i64),
+                    ],
+                )
+                .as_bytes(),
             );
-            if (*options).val == 1. && padfloat_volume(v, mean) != 0 {
+            if options.val == 1. && padfloat_volume(&mut *v, mean) != 0 {
                 crate::imod::clip::file_io::grap_volume_free(v);
                 crate::imod::clip::file_io::grap_volume_free(first);
                 return -1;
             }
-            libc::printf(c"\n".as_ptr());
+            let _ = ImodFile::Stdout.write_all(b"\n");
             v
         };
-        libc::printf(c"Calculating fft 1".as_ptr());
-        if crate::imod::clip::fft::clip_fftvol(first) != 0 {
+        let _ = ImodFile::Stdout.write_all(b"Calculating fft 1");
+        if crate::imod::clip::fft::clip_fftvol(&mut *first) != 0 {
             return -1;
         }
-        let fp = (*output).fp;
+        let fp = output.fp.clone();
         mrc_head_new(
             &mut *output,
             (*(*(*first).vol)).xsize,
@@ -255,10 +286,10 @@ pub unsafe fn clip_corr3d(
             (*first).zsize,
             (*(*(*first).vol)).mode,
         );
-        (*output).fp = fp;
+        output.fp = fp.clone();
         if !autocorrelation {
-            libc::printf(c"\rCalculating fft 2".as_ptr());
-            if crate::imod::clip::fft::clip_fftvol(second) != 0 {
+            let _ = ImodFile::Stdout.write_all(b"\rCalculating fft 2");
+            if crate::imod::clip::fft::clip_fftvol(&mut *second) != 0 {
                 return -1;
             }
         }
@@ -270,19 +301,27 @@ pub unsafe fn clip_corr3d(
                 size,
             );
         }
-        libc::printf(c"\rCalculating inverse fft".as_ptr());
-        if crate::imod::clip::fft::clip_fftvol(first) != 0 || clip_cor_scalevol(first) != 0 {
+        let _ = ImodFile::Stdout.write_all(b"\rCalculating inverse fft");
+        if crate::imod::clip::fft::clip_fftvol(&mut *first) != 0
+            || clip_cor_scalevol(&mut *first) != 0
+        {
             return -1;
         }
-        libc::printf(c"\n".as_ptr());
+        let _ = ImodFile::Stdout.write_all(b"\n");
         crate::imod::clip::processing::clip_get_stat3d(
-            first, &mut min, &mut max, &mut mean, &mut xmax, &mut ymax, &mut zmax,
+            &mut *first,
+            &mut min,
+            &mut max,
+            &mut mean,
+            &mut xmax,
+            &mut ymax,
+            &mut zmax,
         );
         let mut peak_x = 0.;
         let mut peak_y = 0.;
         let mut peak_z = 0.;
         crate::imod::clip::processing::clip_parxyz(
-            first,
+            &mut *first,
             xmax,
             ymax,
             zmax,
@@ -299,23 +338,38 @@ pub unsafe fn clip_corr3d(
         if peak_z > ((*first).zsize / 2) as f32 {
             peak_z -= (*first).zsize as f32;
         }
-        libc::printf(
-            c"max = %g  min = %g  mean = %g\n".as_ptr(),
-            max as core::ffi::c_double,
-            min as core::ffi::c_double,
-            mean as core::ffi::c_double,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "max = %g  min = %g  mean = %g\n",
+                &[
+                    CArg::Dbl((max as core::ffi::c_double) as f64),
+                    CArg::Dbl((min as core::ffi::c_double) as f64),
+                    CArg::Dbl((mean as core::ffi::c_double) as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::printf(
-            c"location of max pixel ( %d, %d, %d) is \n".as_ptr(),
-            xmax,
-            ymax,
-            zmax,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "location of max pixel ( %d, %d, %d) is \n",
+                &[
+                    CArg::Int((xmax) as i64),
+                    CArg::Int((ymax) as i64),
+                    CArg::Int((zmax) as i64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::printf(
-            c"( %.2f, %.2f, %.2f)\n".as_ptr(),
-            peak_x as core::ffi::c_double,
-            peak_y as core::ffi::c_double,
-            peak_z as core::ffi::c_double,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "( %.2f, %.2f, %.2f)\n",
+                &[
+                    CArg::Dbl((peak_x as core::ffi::c_double) as f64),
+                    CArg::Dbl((peak_y as core::ffi::c_double) as f64),
+                    CArg::Dbl((peak_z as core::ffi::c_double) as f64),
+                ],
+            )
+            .as_bytes(),
         );
         mrc_head_new(
             &mut *output,
@@ -324,9 +378,9 @@ pub unsafe fn clip_corr3d(
             (*first).zsize,
             (*(*(*first).vol)).mode,
         );
-        (*output).fp = fp;
+        output.fp = fp.clone();
         mrc_head_label(&mut *output, b"Clip: 3D Correlation");
-        let result = crate::imod::clip::file_io::grap_volume_write(first, output, options);
+        let result = crate::imod::clip::file_io::grap_volume_write(&mut *first, output, options);
         crate::imod::clip::file_io::grap_volume_free(first);
         if !autocorrelation {
             crate::imod::clip::file_io::grap_volume_free(second);
@@ -336,40 +390,33 @@ pub unsafe fn clip_corr3d(
 }
 /// C++ `grap_3dcorr` (`correlation.cpp:319`).
 pub unsafe fn grap_3dcorr(
-    input1: *mut MrcHeader,
-    input2: *mut MrcHeader,
-    output: *mut MrcHeader,
-    options: *mut ClipOptions,
+    input1: &mut MrcHeader,
+    input2: &mut MrcHeader,
+    output: &mut MrcHeader,
+    options: &mut ClipOptions,
 ) -> i32 {
     unsafe {
         show_status("Doing 3d correlation...\n");
-        if (*options).infiles > 2 {
+        if options.infiles > 2 {
             show_error("3dcorr, Only two input files allowed.\n");
             return -1;
         }
-        let autocorr = (*options).infiles == 1;
-        if (*input1).mode != MRC_MODE_COMPLEX_FLOAT {
+        let autocorr = options.infiles == 1;
+        if input1.mode != MRC_MODE_COMPLEX_FLOAT {
             show_error("corr, Input file must be complex float.\n");
             return -1;
         }
         if !autocorr {
-            if (*input2).mode != MRC_MODE_COMPLEX_FLOAT || (*input1).mode != MRC_MODE_COMPLEX_FLOAT
-            {
+            if input2.mode != MRC_MODE_COMPLEX_FLOAT || input1.mode != MRC_MODE_COMPLEX_FLOAT {
                 show_error("corr, Both input files must be complex float.\n");
                 return -1;
             }
-            if (*input1).nx != (*input2).nx || (*input1).ny != (*input2).ny {
+            if input1.nx != input2.nx || input1.ny != input2.ny {
                 show_error("corr, input files must be same size.\n");
                 return -1;
             }
         }
-        mrc_head_new(
-            &mut *output,
-            (*input1).nx,
-            (*input1).ny,
-            (*input1).nz,
-            (*input1).mode,
-        );
+        mrc_head_new(&mut *output, input1.nx, input1.ny, input1.nz, input1.mode);
         mrc_head_label(
             &mut *output,
             if autocorr {
@@ -378,24 +425,24 @@ pub unsafe fn grap_3dcorr(
                 b"clip: Cross correlation."
             },
         );
-        let size = (*input1).nx * (*input1).ny;
-        let slice1 = slice_create((*input1).nx, (*input1).ny, MRC_MODE_COMPLEX_FLOAT);
+        let size = input1.nx * input1.ny;
+        let slice1 = slice_create(input1.nx, input1.ny, MRC_MODE_COMPLEX_FLOAT);
         if slice1.is_null() {
             return -1;
         }
         let slice2 = if autocorr {
             slice1
         } else {
-            slice_create((*input1).nx, (*input1).ny, MRC_MODE_COMPLEX_FLOAT)
+            slice_create(input1.nx, input1.ny, MRC_MODE_COMPLEX_FLOAT)
         };
         if slice2.is_null() {
             slice_free(slice1);
             return -1;
         }
-        for z in 0..(*input1).nz {
+        for z in 0..input1.nz {
             if mrc_read_slice(
                 (*slice1).data.b.cast(),
-                (*input1).fp.cast(),
+                &mut input1.fp.clone().unwrap(),
                 input1,
                 z,
                 b'z' as i8,
@@ -410,7 +457,7 @@ pub unsafe fn grap_3dcorr(
             if !autocorr
                 && mrc_read_slice(
                     (*slice2).data.b.cast(),
-                    (*input2).fp.cast(),
+                    &mut input2.fp.clone().unwrap(),
                     input2,
                     z,
                     b'z' as i8,
@@ -423,7 +470,7 @@ pub unsafe fn grap_3dcorr(
             corr_conj((*slice1).data.f, (*slice2).data.f, size);
             if mrc_write_slice(
                 (*slice1).data.b.cast(),
-                (*output).fp.cast(),
+                &mut output.fp.clone().unwrap(),
                 output,
                 z,
                 b'z' as i8,
@@ -440,52 +487,52 @@ pub unsafe fn grap_3dcorr(
             slice_free(slice2);
         }
         slice_free(slice1);
-        mrc_head_write((*output).fp.cast(), output)
+        mrc_head_write(&mut output.fp.clone().unwrap(), output)
     }
 }
 /// Matches C++ `grap_corr`.
 pub unsafe fn grap_corr(
-    input1: *mut MrcHeader,
-    input2: *mut MrcHeader,
-    output: *mut MrcHeader,
-    options: *mut ClipOptions,
+    input1: &mut MrcHeader,
+    input2: &mut MrcHeader,
+    output: &mut MrcHeader,
+    options: &mut ClipOptions,
 ) -> i32 {
     unsafe {
         use crate::imod::clip::clip::{IP_APPEND_ADD, IP_APPEND_OVERWRITE, IP_DEFAULT};
-        if (*options).dim == 3 {
+        if options.dim == 3 {
             return clip_corr3d(input1, input2, output, options);
         }
-        if (*options).infiles > 2 {
+        if options.infiles > 2 {
             show_error("corr, Only two input files are allowed.\n");
             return -1;
         }
-        let mut autocorrelation = (*options).infiles != 2;
+        let mut autocorrelation = options.infiles != 2;
         let mut z1 = 0;
         let mut z2 = 0;
-        if (*options).nofsecs > 0 {
-            z1 = *(*options).secs;
+        if options.nofsecs > 0 {
+            z1 = options.secs[0];
         }
-        if (*options).nofsecs > 1 {
+        if options.nofsecs > 1 {
             autocorrelation = false;
-            z2 = *(*options).secs.add(1);
+            z2 = options.secs[(1) as usize];
         }
-        if (*options).val == IP_DEFAULT as f32 {
-            (*options).val = 1.;
+        if options.val == IP_DEFAULT as f32 {
+            options.val = 1.;
         }
-        if (*input1).mode == MRC_MODE_COMPLEX_FLOAT || (*input1).mode == MRC_MODE_COMPLEX_FLOAT {
+        if input1.mode == MRC_MODE_COMPLEX_FLOAT || input1.mode == MRC_MODE_COMPLEX_FLOAT {
             show_error("corr, fourier transform input not allowed");
             return -1;
         }
-        if (*options).add2file != 0 {
-            if (*output).mode != MRC_MODE_FLOAT {
+        if options.add2file != 0 {
+            if output.mode != MRC_MODE_FLOAT {
                 show_error("corr, add or append to float file only.\n");
                 return -1;
             }
         } else {
-            mrc_head_new(&mut *output, (*input1).nx, (*input1).ny, 1, MRC_MODE_FLOAT);
+            mrc_head_new(&mut *output, input1.nx, input1.ny, 1, MRC_MODE_FLOAT);
         }
         let buffer1 = crate::imod::libiimod::mrcfiles::mrc_mread_slice(
-            (*input1).fp.cast(),
+            &mut input1.fp.clone().unwrap(),
             input1,
             z1,
             b'z' as i8,
@@ -494,12 +541,13 @@ pub unsafe fn grap_corr(
             show_error("corr, error getting slice 1.\n");
             return -1;
         }
+        let mut fp2 = if autocorrelation {
+            input1.fp.clone().unwrap()
+        } else {
+            input2.fp.clone().unwrap()
+        };
         let buffer2 = crate::imod::libiimod::mrcfiles::mrc_mread_slice(
-            if autocorrelation {
-                (*input1).fp.cast()
-            } else {
-                (*input2).fp.cast()
-            },
+            &mut fp2,
             if autocorrelation { input1 } else { input2 },
             if autocorrelation { z1 } else { z2 },
             b'z' as i8,
@@ -514,48 +562,48 @@ pub unsafe fn grap_corr(
         } else {
             show_status("Clip: Doing 2D auto-correlation...\n");
         }
-        if (*options).ix == IP_DEFAULT {
-            (*options).ix = (*input1).nx;
+        if options.ix == IP_DEFAULT {
+            options.ix = input1.nx;
         }
-        if (*options).iy == IP_DEFAULT {
-            (*options).iy = (*input1).ny;
+        if options.iy == IP_DEFAULT {
+            options.iy = input1.ny;
         }
-        if (*options).cx == IP_DEFAULT as f32 {
-            (*options).cx = (*input1).nx as f32 / 2.;
+        if options.cx == IP_DEFAULT as f32 {
+            options.cx = input1.nx as f32 / 2.;
         }
-        if (*options).cy == IP_DEFAULT as f32 {
-            (*options).cy = (*input1).ny as f32 / 2.;
+        if options.cy == IP_DEFAULT as f32 {
+            options.cy = input1.ny as f32 / 2.;
         }
         let (llx, lly) = (
-            (*options).cx as i32 - (*options).ix / 2,
-            (*options).cy as i32 - (*options).iy / 2,
+            options.cx as i32 - options.ix / 2,
+            options.cy as i32 - options.iy / 2,
         );
-        let (urx, ury) = (llx + (*options).ix, lly + (*options).iy);
+        let (urx, ury) = (llx + options.ix, lly + options.iy);
         let mut first: Islice = core::mem::zeroed();
         let mut second: Islice = core::mem::zeroed();
         if slice_init(
             &mut first,
-            (*input1).nx,
-            (*input1).ny,
-            (*input1).mode,
+            input1.nx,
+            input1.ny,
+            input1.mode,
             buffer1.cast(),
         ) != 0
             || slice_init(
                 &mut second,
                 if autocorrelation {
-                    (*input1).nx
+                    input1.nx
                 } else {
-                    (*input2).nx
+                    input2.nx
                 },
                 if autocorrelation {
-                    (*input1).ny
+                    input1.ny
                 } else {
-                    (*input2).ny
+                    input2.ny
                 },
                 if autocorrelation {
-                    (*input1).mode
+                    input1.mode
                 } else {
-                    (*input2).mode
+                    input2.mode
                 },
                 buffer2.cast(),
             ) != 0
@@ -570,21 +618,31 @@ pub unsafe fn grap_corr(
         slice_mmm(&mut second);
         slice_box_in(&mut second, llx, lly, urx, ury);
         slice_mmm(&mut second);
-        if (*options).pad != IP_DEFAULT as f32 {
-            first.mean = (*options).pad;
-            second.mean = (*options).pad;
+        if options.pad != IP_DEFAULT as f32 {
+            first.mean = options.pad;
+            second.mean = options.pad;
         }
-        clip_padcorr(&mut first, (*options).val as i32);
-        clip_padcorr(&mut second, (*options).val as i32);
-        libc::printf(
-            c"image 1 size %d by %d\n".as_ptr(),
-            first.xsize,
-            first.ysize,
+        clip_padcorr(&mut first, options.val as i32);
+        clip_padcorr(&mut second, options.val as i32);
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "image 1 size %d by %d\n",
+                &[
+                    CArg::Int((first.xsize) as i64),
+                    CArg::Int((first.ysize) as i64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::printf(
-            c"image 2 size %d by %d\n".as_ptr(),
-            second.xsize,
-            second.ysize,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "image 2 size %d by %d\n",
+                &[
+                    CArg::Int((second.xsize) as i64),
+                    CArg::Int((second.ysize) as i64),
+                ],
+            )
+            .as_bytes(),
         );
         let correlation = clip_slice_corr(&mut first, &mut second);
         if correlation.is_null() {
@@ -602,67 +660,72 @@ pub unsafe fn grap_corr(
             crop_y + (*correlation).ysize / 2,
         );
         slice_mmm(correlation);
-        libc::printf(
-            c"image c size %d by %d\n".as_ptr(),
-            (*correlation).xsize,
-            (*correlation).ysize,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "image c size %d by %d\n",
+                &[
+                    CArg::Int(((*correlation).xsize) as i64),
+                    CArg::Int(((*correlation).ysize) as i64),
+                ],
+            )
+            .as_bytes(),
         );
-        if (*options).add2file == IP_APPEND_ADD {
-            slice_resize_in(correlation, (*output).nx, (*output).ny);
-            (*output).nz += 1;
+        if options.add2file == IP_APPEND_ADD {
+            slice_resize_in(correlation, output.nx, output.ny);
+            output.nz += 1;
             if mrc_write_slice(
                 (*correlation).data.f.cast(),
-                (*output).fp.cast(),
+                &mut output.fp.clone().unwrap(),
                 output,
-                (*output).nz - 1,
+                output.nz - 1,
                 b'z' as i8,
             ) != 0
             {
                 return -1;
             }
-            (*output).amin = (*output).amin.min((*correlation).min);
-            (*output).amax = (*output).amax.max((*correlation).max);
-            (*output).amean = ((*output).amean * ((*output).nz - 1) as f32 + (*correlation).mean)
-                / (*output).nz as f32;
-            if mrc_head_write((*output).fp.cast(), output) != 0 {
+            output.amin = output.amin.min((*correlation).min);
+            output.amax = output.amax.max((*correlation).max);
+            output.amean =
+                (output.amean * (output.nz - 1) as f32 + (*correlation).mean) / output.nz as f32;
+            if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
                 return -1;
             }
-        } else if (*options).add2file == IP_APPEND_OVERWRITE {
-            slice_resize_in(correlation, (*output).nx, (*output).ny);
+        } else if options.add2file == IP_APPEND_OVERWRITE {
+            slice_resize_in(correlation, output.nx, output.ny);
             if mrc_write_slice(
                 (*correlation).data.f.cast(),
-                (*output).fp.cast(),
+                &mut output.fp.clone().unwrap(),
                 output,
-                (*output).nz - 1,
+                output.nz - 1,
                 b'z' as i8,
             ) != 0
             {
                 return -1;
             }
         } else {
-            (*output).nz = 1;
-            (*output).amin = (*correlation).min;
-            (*output).amax = (*correlation).max;
-            (*output).amean = (*correlation).mean;
-            if (*options).ox != IP_DEFAULT || (*options).oy != IP_DEFAULT {
-                if (*options).ox != IP_DEFAULT {
-                    (*options).ox = (*correlation).xsize;
+            output.nz = 1;
+            output.amin = (*correlation).min;
+            output.amax = (*correlation).max;
+            output.amean = (*correlation).mean;
+            if options.ox != IP_DEFAULT || options.oy != IP_DEFAULT {
+                if options.ox != IP_DEFAULT {
+                    options.ox = (*correlation).xsize;
                 }
-                if (*options).oy != IP_DEFAULT {
-                    (*options).oy = (*correlation).ysize;
+                if options.oy != IP_DEFAULT {
+                    options.oy = (*correlation).ysize;
                 }
-                slice_resize_in(correlation, (*options).ox, (*options).oy);
-                (*output).nx = (*options).ox;
-                (*output).ny = (*options).oy;
+                slice_resize_in(correlation, options.ox, options.oy);
+                output.nx = options.ox;
+                output.ny = options.oy;
             } else {
-                (*output).nx = (*correlation).xsize;
-                (*output).ny = (*correlation).ysize;
+                output.nx = (*correlation).xsize;
+                output.ny = (*correlation).ysize;
             }
             mrc_head_label(&mut *output, b"clip: 2d correlation calculated.");
-            if mrc_head_write((*output).fp.cast(), output) != 0
+            if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0
                 || mrc_write_slice(
                     (*correlation).data.f.cast(),
-                    (*output).fp.cast(),
+                    &mut output.fp.clone().unwrap(),
                     output,
                     0,
                     b'z' as i8,
@@ -683,7 +746,13 @@ pub unsafe fn grap_corr(
                 }
             }
         }
-        libc::printf(c"pixel max at ( %d, %d)\n".as_ptr(), xmax, ymax);
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "pixel max at ( %d, %d)\n",
+                &[CArg::Int((xmax) as i64), CArg::Int((ymax) as i64)],
+            )
+            .as_bytes(),
+        );
         let mut patch = [[0_f64; 3]; 3];
         for dy in -1..=1 {
             for dx in -1..=1 {
@@ -703,12 +772,17 @@ pub unsafe fn grap_corr(
         x -= (*correlation).xsize as f32 * 0.5;
         x -= 1.0;
         y -= (*correlation).ysize as f32 * 0.5;
-        libc::printf(
-            c"Maximum at ( %.2f, %.2f), transformation ( %.2f, %.2f)\n".as_ptr(),
-            x as core::ffi::c_double,
-            y as core::ffi::c_double,
-            -x as core::ffi::c_double,
-            -y as core::ffi::c_double,
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "Maximum at ( %.2f, %.2f), transformation ( %.2f, %.2f)\n",
+                &[
+                    CArg::Dbl((x as core::ffi::c_double) as f64),
+                    CArg::Dbl((y as core::ffi::c_double) as f64),
+                    CArg::Dbl((-x as core::ffi::c_double) as f64),
+                    CArg::Dbl((-y as core::ffi::c_double) as f64),
+                ],
+            )
+            .as_bytes(),
         );
         slice_free(correlation);
         libc::free(first.data.b.cast());
@@ -717,16 +791,17 @@ pub unsafe fn grap_corr(
     }
 }
 /// C++ `padfloat_volume` (`correlation.cpp:627`).
-pub unsafe fn padfloat_volume(volume: *mut Istack, pad: f32) -> i32 {
+pub unsafe fn padfloat_volume(volume: &mut Istack, pad: f32) -> i32 {
     unsafe {
-        if volume.is_null() || (*volume).vol.is_null() || (*volume).zsize <= 0 {
+        // `correlation.cpp:629` guards on `!v`; a reference is never null.
+        if volume.vol.is_null() || volume.zsize <= 0 {
             return -1;
         }
-        let old_zsize = (*volume).zsize;
+        let old_zsize = volume.zsize;
         let low_z = old_zsize / 2;
         let high_z = low_z + old_zsize;
         let zsize = old_zsize * 2;
-        let first = *(*volume).vol;
+        let first = *volume.vol;
         let xsize = (*first).xsize * 2;
         let ysize = (*first).ysize * 2;
         let xysize = xsize * ysize;
@@ -736,7 +811,7 @@ pub unsafe fn padfloat_volume(volume: *mut Istack, pad: f32) -> i32 {
             return -1;
         }
         for k in 0..old_zsize {
-            let slice = *(*volume).vol.add(k as usize);
+            let slice = *volume.vol.add(k as usize);
             (*slice).mean = pad;
             if slice_resize_in(slice, xsize, ysize) != 0 || slice_float(slice) != 0 {
                 libc::free(new_volume.cast());
@@ -755,7 +830,7 @@ pub unsafe fn padfloat_volume(volume: *mut Istack, pad: f32) -> i32 {
             *new_volume.add(k as usize) = slice;
         }
         for k in low_z..high_z {
-            *new_volume.add(k as usize) = *(*volume).vol.add((k - low_z) as usize);
+            *new_volume.add(k as usize) = *volume.vol.add((k - low_z) as usize);
         }
         for k in high_z..zsize {
             let slice = slice_create(xsize, ysize, MRC_MODE_FLOAT);
@@ -768,9 +843,9 @@ pub unsafe fn padfloat_volume(volume: *mut Istack, pad: f32) -> i32 {
             }
             *new_volume.add(k as usize) = slice;
         }
-        libc::free((*volume).vol.cast());
-        (*volume).vol = new_volume;
-        (*volume).zsize = zsize;
+        libc::free(volume.vol.cast());
+        volume.vol = new_volume;
+        volume.zsize = zsize;
         0
     }
 }
@@ -781,14 +856,14 @@ pub unsafe fn padfloat_volume(volume: *mut Istack, pad: f32) -> i32 {
 /// `volume` must be an IMOD `Istack` with `zsize` valid slices, each holding
 /// a contiguous floating-point plane.  This is the same ownership and layout
 /// requirement as the C++ routine.
-pub unsafe fn clip_cor_scalevol(volume: *mut Istack) -> i32 {
+pub unsafe fn clip_cor_scalevol(volume: &mut Istack) -> i32 {
     unsafe {
-        let first_slice = *(*volume).vol;
+        let first_slice = *volume.vol;
         let xysize = (*first_slice).xsize * (*first_slice).ysize;
-        let zsize = (*volume).zsize;
+        let zsize = volume.zsize;
         let scale = (xysize * zsize) as f32;
         for k in 0..zsize {
-            let slice = *(*volume).vol.add(k as usize);
+            let slice = *volume.vol.add(k as usize);
             for i in 0..xysize {
                 *(*slice).data.f.add(i as usize) /= scale;
             }

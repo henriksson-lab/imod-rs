@@ -9,7 +9,7 @@
     unused_variables
 )]
 use crate::imod::libcfshr::b3dutil::{
-    b3d_error, b3d_fread as b3dFread, b3d_fseek as b3dFseek, b3d_rewind as b3dRewind,
+    ImodFile, b3d_error, b3d_fread as b3dFread, b3d_fseek as b3dFseek, b3d_rewind as b3dRewind,
     wall_time as wallTime,
 };
 use crate::imod::libcfshr::ilist::{
@@ -37,7 +37,6 @@ pub struct _IO_marker {
 }
 unsafe extern "C" {
     static mut stdout: *mut FILE;
-    static mut stderr: *mut FILE;
     fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
     fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
     fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
@@ -184,15 +183,16 @@ unsafe extern "C" fn init_check_list() -> ::core::ffi::c_int {
     checkList = ilistNew(
         ::core::mem::size_of::<CheckEntry>() as ::core::ffi::c_int,
         6 as ::core::ffi::c_int,
-    );
+    )
+    .map_or(::core::ptr::null_mut(), Box::into_raw);
     if checkList.is_null() {
         return 1 as ::core::ffi::c_int;
     }
     ii_add_raw_check_function(
         Some(
             check_em
-                as unsafe extern "C" fn(
-                    *mut FILE,
+                as unsafe fn(
+                    &mut ImodFile,
                     *mut ::core::ffi::c_char,
                     *mut RawImageInfo,
                 ) -> ::core::ffi::c_int,
@@ -202,8 +202,8 @@ unsafe extern "C" fn init_check_list() -> ::core::ffi::c_int {
     ii_add_raw_check_function(
         Some(
             check_dm3
-                as unsafe extern "C" fn(
-                    *mut FILE,
+                as unsafe fn(
+                    &mut ImodFile,
                     *mut ::core::ffi::c_char,
                     *mut RawImageInfo,
                 ) -> ::core::ffi::c_int,
@@ -213,8 +213,8 @@ unsafe extern "C" fn init_check_list() -> ::core::ffi::c_int {
     ii_add_raw_check_function(
         Some(
             check_fei_raw
-                as unsafe extern "C" fn(
-                    *mut FILE,
+                as unsafe fn(
+                    &mut ImodFile,
                     *mut ::core::ffi::c_char,
                     *mut RawImageInfo,
                 ) -> ::core::ffi::c_int,
@@ -224,8 +224,8 @@ unsafe extern "C" fn init_check_list() -> ::core::ffi::c_int {
     ii_add_raw_check_function(
         Some(
             check_winkler
-                as unsafe extern "C" fn(
-                    *mut FILE,
+                as unsafe fn(
+                    &mut ImodFile,
                     *mut ::core::ffi::c_char,
                     *mut RawImageInfo,
                 ) -> ::core::ffi::c_int,
@@ -235,8 +235,8 @@ unsafe extern "C" fn init_check_list() -> ::core::ffi::c_int {
     ii_add_raw_check_function(
         Some(
             check_pif
-                as unsafe extern "C" fn(
-                    *mut FILE,
+                as unsafe fn(
+                    &mut ImodFile,
                     *mut ::core::ffi::c_char,
                     *mut RawImageInfo,
                 ) -> ::core::ffi::c_int,
@@ -259,8 +259,11 @@ pub unsafe extern "C" fn ii_add_raw_check_function(
         return;
     }
     ilistInsert(
-        checkList,
-        &raw mut item as *mut ::core::ffi::c_void,
+        &mut *checkList,
+        ::core::slice::from_raw_parts(
+            (&raw const item).cast::<u8>(),
+            ::core::mem::size_of::<CheckEntry>(),
+        ),
         0 as ::core::ffi::c_int,
     );
 }
@@ -271,18 +274,19 @@ pub unsafe extern "C" fn ii_delete_raw_check_list() {
         return;
     }
     i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(checkList) {
-        item = ilistItem(checkList, i) as *mut CheckEntry;
+    while i < ilistSize(checkList.as_ref()) {
+        item = ilistItem(checkList.as_mut(), i).map_or(::core::ptr::null_mut(), |entry| {
+            entry.as_mut_ptr().cast::<CheckEntry>()
+        });
         if !(*item).name.is_null() {
             free((*item).name as *mut ::core::ffi::c_void);
         }
         i += 1;
     }
-    ilistDelete(checkList);
+    ilistDelete(Some(Box::from_raw(checkList)));
     checkList = ::core::ptr::null_mut::<Ilist>();
 }
 pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::core::ffi::c_int {
-    let mut fp: *mut FILE = ::core::ptr::null_mut::<FILE>();
     let mut i: ::core::ffi::c_int = 0;
     let mut info: RawImageInfo = RawImageInfo {
         type_: 0,
@@ -310,19 +314,20 @@ pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::
     if inFile.is_null() {
         return IIERR_BAD_CALL;
     }
-    fp = (*inFile).fp;
-    if fp.is_null() {
+    let Some(mut fp) = (*inFile).fp.clone() else {
         return IIERR_BAD_CALL;
-    }
+    };
     if init_check_list() != 0 {
         return IIERR_BAD_CALL;
     }
     i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(checkList) {
-        item = ilistItem(checkList, i) as *mut CheckEntry;
+    while i < ilistSize(checkList.as_ref()) {
+        item = ilistItem(checkList.as_mut(), i).map_or(::core::ptr::null_mut(), |entry| {
+            entry.as_mut_ptr().cast::<CheckEntry>()
+        });
         err = Some((*item).func.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            fp, (*inFile).filename, &raw mut info
+            &mut fp, (*inFile).filename, &raw mut info
         );
         if err == 0 {
             return ii_setup_raw_headers(inFile, &raw mut info);
@@ -330,7 +335,7 @@ pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::
         if err != IIERR_NOT_FORMAT {
             if err == IIERR_IO_ERROR {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiCheckLikeMRC - reading from file {}\n",
                         CStr::from_ptr((*inFile).filename).to_string_lossy()
@@ -338,7 +343,7 @@ pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::
                 );
             } else if err == IIERR_NO_SUPPORT {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiCheckLikeMRC - unsupported data mode of {}-type file.\n",
                         CStr::from_ptr((*item).name).to_string_lossy()
@@ -365,10 +370,12 @@ pub unsafe extern "C" fn ii_setup_raw_headers(
         MRC_MODE_RGB,
     ];
     let mut hdr: *mut MrcHeader = ::core::ptr::null_mut::<MrcHeader>();
-    hdr = malloc(::core::mem::size_of::<MrcHeader>() as size_t) as *mut MrcHeader;
+    // `Box`, not `malloc`: `MrcHeader.fp` is a non-`Copy` `Option<ImodFile>`,
+    // so assigning it over `malloc` residue drops garbage.
+    hdr = Box::into_raw(Box::new(MrcHeader::default()));
     if hdr.is_null() {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: iiSetupRawHeaders - Getting memory for header"),
         );
         return IIERR_MEMORY_ERR;
@@ -392,7 +399,7 @@ pub unsafe extern "C" fn ii_setup_raw_headers(
     };
     (*hdr).packed4bits = 0 as ::core::ffi::c_int;
     (*hdr).half_floats = 0 as ::core::ffi::c_int;
-    (*hdr).fp = (*inFile).fp.cast();
+    (*hdr).fp = (*inFile).fp.clone();
     (*hdr).amin = (*info).amin as b3dFloat;
     (*hdr).amax = (*info).amax as b3dFloat;
     (*hdr).amean = (((*info).amin + (*info).amax) as ::core::ffi::c_double / 2.0f64) as b3dFloat;
@@ -422,11 +429,11 @@ pub unsafe extern "C" fn ii_setup_raw_headers(
 }
 pub unsafe extern "C" fn ii_like_mrc_delete(mut inFile: *mut ImodImageFile) {
     if !(*inFile).header.is_null() {
-        free((*inFile).header as *mut ::core::ffi::c_void);
+        drop(Box::from_raw((*inFile).header as *mut MrcHeader));
     }
 }
-unsafe extern "C" fn check_winkler(
-    mut fp: *mut FILE,
+unsafe fn check_winkler(
+    fp: &mut ImodFile,
     mut filename: *mut ::core::ffi::c_char,
     mut info: *mut RawImageInfo,
 ) -> ::core::ffi::c_int {
@@ -434,7 +441,10 @@ unsafe extern "C" fn check_winkler(
     let mut ivals: [b3dInt32; 12] = [0; 12];
     b3dRewind(fp);
     if b3dFread(
-        &raw mut svals as *mut b3dUInt16 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut svals as *mut b3dUInt16 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((2) as usize) * ((2) as usize),
+        ),
         2 as size_t,
         2 as size_t,
         fp,
@@ -464,7 +474,10 @@ unsafe extern "C" fn check_winkler(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut svals as *mut b3dUInt16 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut svals as *mut b3dUInt16 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((2) as usize) * ((4) as usize),
+        ),
         2 as size_t,
         4 as size_t,
         fp,
@@ -505,7 +518,10 @@ unsafe extern "C" fn check_winkler(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize) * ((1) as usize),
+        ),
         4 as size_t,
         1 as size_t,
         fp,
@@ -521,7 +537,12 @@ unsafe extern "C" fn check_winkler(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize)
+                * ((svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+                    * 4 as ::core::ffi::c_int) as usize),
+        ),
         4 as size_t,
         (svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int * 4 as ::core::ffi::c_int)
             as size_t,
@@ -547,8 +568,8 @@ unsafe extern "C" fn check_winkler(
     (*info).amax = 0.0f32;
     return 0 as ::core::ffi::c_int;
 }
-unsafe extern "C" fn check_pif(
-    mut fp: *mut FILE,
+unsafe fn check_pif(
+    fp: &mut ImodFile,
     mut filename: *mut ::core::ffi::c_char,
     mut info: *mut RawImageInfo,
 ) -> ::core::ffi::c_int {
@@ -558,7 +579,10 @@ unsafe extern "C" fn check_pif(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut cvals as *mut b3dByte as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut cvals as *mut b3dByte as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((1) as usize) * ((5) as usize),
+        ),
         1 as size_t,
         5 as size_t,
         fp,
@@ -580,7 +604,10 @@ unsafe extern "C" fn check_pif(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize) * ((1) as usize),
+        ),
         4 as size_t,
         1 as size_t,
         fp,
@@ -601,7 +628,10 @@ unsafe extern "C" fn check_pif(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize) * ((1) as usize),
+        ),
         4 as size_t,
         1 as size_t,
         fp,
@@ -617,7 +647,10 @@ unsafe extern "C" fn check_pif(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize) * ((5) as usize),
+        ),
         4 as size_t,
         5 as size_t,
         fp,
@@ -673,8 +706,8 @@ pub unsafe extern "C" fn ii_assume_dmfile_matches(mut inVal: ::core::ffi::c_int)
     sAssumeDMmatch = inVal;
 }
 pub const DOC_CHECK_BUF: ::core::ffi::c_int = 832 as ::core::ffi::c_int;
-unsafe extern "C" fn check_dm3(
-    mut fp: *mut FILE,
+unsafe fn check_dm3(
+    fp: &mut ImodFile,
     mut filename: *mut ::core::ffi::c_char,
     mut info: *mut RawImageInfo,
 ) -> ::core::ffi::c_int {
@@ -690,7 +723,10 @@ unsafe extern "C" fn check_dm3(
     let mut testLen: ::core::ffi::c_int = strlen(testString) as ::core::ffi::c_int;
     b3dRewind(fp);
     if b3dFread(
-        &raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((1) as usize) * ((4) as usize),
+        ),
         1 as size_t,
         4 as size_t,
         fp,
@@ -705,7 +741,10 @@ unsafe extern "C" fn check_dm3(
     }
     dmf = bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
     if b3dFread(
-        &raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((1) as usize) * ((DOC_CHECK_BUF) as usize),
+        ),
         1 as size_t,
         DOC_CHECK_BUF as size_t,
         fp,
@@ -780,7 +819,7 @@ unsafe extern "C" fn check_dm3(
 }
 pub const MAX_TYPES: ::core::ffi::c_int = 13 as ::core::ffi::c_int;
 pub unsafe extern "C" fn analyze_dm3(
-    mut fp: *mut FILE,
+    fp: &mut ImodFile,
     mut filename: *mut ::core::ffi::c_char,
     mut dmformat: ::core::ffi::c_int,
     mut info: *mut RawImageInfo,
@@ -911,14 +950,14 @@ pub unsafe extern "C" fn analyze_dm3(
     dmind = dmformat - 3 as ::core::ffi::c_int;
     if dmind < 0 as ::core::ffi::c_int || dmind > 1 as ::core::ffi::c_int {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!("ERROR: analyzeDM3 - DM format {} not supported\n", dmformat),
         );
         return IIERR_NO_SUPPORT;
     }
     if stat(filename, &raw mut statbuf) != 0 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: analyzeDM3 - Doing stat of {}\n",
                 CStr::from_ptr(filename).to_string_lossy()
@@ -977,7 +1016,7 @@ pub unsafe extern "C" fn analyze_dm3(
         ) != 0
         {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: analyzeDM3 - Seeking to end of {}\n",
                     CStr::from_ptr(filename).to_string_lossy()
@@ -986,15 +1025,19 @@ pub unsafe extern "C" fn analyze_dm3(
             return IIERR_IO_ERROR;
         }
         if b3dFread(
-            (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
+            core::slice::from_raw_parts_mut(
+                ((&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
+                    as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void)
+                    .cast::<u8>(),
+                ((1) as usize) * ((maxUseC - c) as usize),
+            ),
             1 as size_t,
             (maxUseC - c) as size_t,
             fp,
         ) == 0
         {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: analyzeDM3 - Error Reading tail end of {}\n",
                     CStr::from_ptr(filename).to_string_lossy()
@@ -1058,7 +1101,7 @@ pub unsafe extern "C" fn analyze_dm3(
                             zsize = 1 as ::core::ffi::c_int;
                         } else {
                             b3d_error(
-                                stderr,
+                                Some(&mut ImodFile::Stderr),
                                 format_args!(
                                     "ERROR: analyzeDM3 - The number of dimensions seemsto be {}, not 2 or 3, in {}\n",
                                     lowbyte,
@@ -1142,7 +1185,7 @@ pub unsafe extern "C" fn analyze_dm3(
     }
     if xsize == 0 || ysize == 0 || type_ < 0 as ::core::ffi::c_int {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: analyzeDM3 - Dimensions or type not found in {}\n",
                 CStr::from_ptr(filename).to_string_lossy()
@@ -1187,15 +1230,19 @@ pub unsafe extern "C" fn analyze_dm3(
         }
         b3dFseek(fp, c, SEEK_SET);
         if b3dFread(
-            (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
+            core::slice::from_raw_parts_mut(
+                ((&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
+                    as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void)
+                    .cast::<u8>(),
+                ((1) as usize) * ((maxUseC - c) as usize),
+            ),
             1 as size_t,
             (maxUseC - c) as size_t,
             fp,
         ) == 0
         {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: analyzeDM3 - Reading beginning of {}\n",
                     CStr::from_ptr(filename).to_string_lossy()
@@ -1482,7 +1529,7 @@ pub unsafe extern "C" fn analyze_dm3(
     }
     if offset == 0 {
         b3d_error(
-            stderr,
+            Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: analyzeDM3 - Data string not found in {}\n",
                 CStr::from_ptr(filename).to_string_lossy()
@@ -1555,8 +1602,8 @@ unsafe extern "C" fn found_dm_tag(
     }
     return found;
 }
-unsafe extern "C" fn check_fei_raw(
-    mut fp: *mut FILE,
+unsafe fn check_fei_raw(
+    fp: &mut ImodFile,
     mut filename: *mut ::core::ffi::c_char,
     mut info: *mut RawImageInfo,
 ) -> ::core::ffi::c_int {
@@ -1564,7 +1611,10 @@ unsafe extern "C" fn check_fei_raw(
     let mut ivals: [::core::ffi::c_int; 9] = [0; 9];
     b3dRewind(fp);
     if b3dFread(
-        &raw mut label as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut label as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((1) as usize) * ((13) as usize),
+        ),
         1 as size_t,
         13 as size_t,
         fp,
@@ -1581,7 +1631,10 @@ unsafe extern "C" fn check_fei_raw(
         return IIERR_NOT_FORMAT;
     }
     if b3dFread(
-        &raw mut ivals as *mut ::core::ffi::c_int as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut ::core::ffi::c_int as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize) * ((9) as usize),
+        ),
         4 as size_t,
         9 as size_t,
         fp,
@@ -1621,8 +1674,8 @@ unsafe extern "C" fn check_fei_raw(
     (*info).amax = 0.0f32;
     return 0 as ::core::ffi::c_int;
 }
-unsafe extern "C" fn check_em(
-    mut fp: *mut FILE,
+unsafe fn check_em(
+    fp: &mut ImodFile,
     mut filename: *mut ::core::ffi::c_char,
     mut info: *mut RawImageInfo,
 ) -> ::core::ffi::c_int {
@@ -1630,7 +1683,10 @@ unsafe extern "C" fn check_em(
     let mut ivals: [b3dInt32; 12] = [0; 12];
     b3dRewind(fp);
     if b3dFread(
-        &raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((1) as usize) * ((4) as usize),
+        ),
         1 as size_t,
         4 as size_t,
         fp,
@@ -1639,7 +1695,10 @@ unsafe extern "C" fn check_em(
         return IIERR_IO_ERROR;
     }
     if b3dFread(
-        &raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void,
+        core::slice::from_raw_parts_mut(
+            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
+            ((4) as usize) * ((3) as usize),
+        ),
         4 as size_t,
         3 as size_t,
         fp,
@@ -1714,21 +1773,20 @@ mod tests {
     fn fei_raw_dispatch_constructs_native_mrc_access_state() {
         unsafe {
             ii_delete_raw_check_list();
-            let fp = libc::tmpfile();
-            assert!(!fp.is_null());
+            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut bytes = b"FEI RawImage\0".to_vec();
             for value in [0_i32, 4, 3, 0, 16, 1, 100, 0, 0] {
                 bytes.extend_from_slice(&value.to_ne_bytes());
             }
             assert_eq!(
-                libc::fwrite(bytes.as_ptr().cast(), 1, bytes.len(), fp),
+                crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
                 bytes.len()
             );
-            libc::rewind(fp);
+            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
 
             let image = ii_new();
             assert!(!image.is_null());
-            (*image).fp = fp;
+            (*image).fp = Some(fp.clone());
             (*image).filename = c"synthetic-fei.raw".as_ptr().cast_mut();
             assert_eq!(ii_like_mrc_check(image.cast()), 0);
             let header = (*image).header.cast::<MrcHeader>();
@@ -1736,8 +1794,8 @@ mod tests {
             assert_eq!(((*header).nx, (*header).ny, (*header).nz), (4, 3, 1));
             assert_eq!(((*header).header_size, (*header).y_inverted), (149, 1));
             ii_like_mrc_delete(image.cast());
-            libc::fclose(fp);
-            libc::free(image.cast());
+            drop(fp);
+            drop(Box::from_raw(image));
             ii_delete_raw_check_list();
         }
     }
@@ -1745,19 +1803,18 @@ mod tests {
     #[test]
     fn em_checker_accepts_little_endian_dimensions_and_rejects_unknown_type() {
         unsafe {
-            let fp = libc::tmpfile();
-            assert!(!fp.is_null());
+            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut bytes = vec![6_u8, 0, 0, 2];
             for value in [8_i32, 7, 2] {
                 bytes.extend_from_slice(&value.to_ne_bytes());
             }
             assert_eq!(
-                libc::fwrite(bytes.as_ptr().cast(), 1, bytes.len(), fp),
+                crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
                 bytes.len()
             );
-            libc::rewind(fp);
+            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
             let mut info: RawImageInfo = core::mem::zeroed();
-            assert_eq!(check_em(fp, core::ptr::null_mut(), &mut info), 0);
+            assert_eq!(check_em(&mut fp, core::ptr::null_mut(), &mut info), 0);
             assert_eq!(
                 (info.nx, info.ny, info.nz, info.type_, info.header_size),
                 (8, 7, 2, RAW_MODE_SHORT, 512)
@@ -1765,32 +1822,30 @@ mod tests {
 
             let mut unsupported = bytes;
             unsupported[3] = 3;
-            let unsupported_fp = libc::tmpfile();
-            assert!(!unsupported_fp.is_null());
+            let mut unsupported_fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             assert_eq!(
-                libc::fwrite(
-                    unsupported.as_ptr().cast(),
+                crate::imod::libcfshr::b3dutil::b3d_fwrite(
+                    &unsupported,
                     1,
                     unsupported.len(),
-                    unsupported_fp
+                    &mut unsupported_fp
                 ),
                 unsupported.len()
             );
-            libc::rewind(unsupported_fp);
+            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut unsupported_fp);
             assert_eq!(
-                check_em(unsupported_fp, core::ptr::null_mut(), &mut info),
+                check_em(&mut unsupported_fp, core::ptr::null_mut(), &mut info),
                 IIERR_NO_SUPPORT
             );
-            libc::fclose(unsupported_fp);
-            libc::fclose(fp);
+            drop(unsupported_fp);
+            drop(fp);
         }
     }
 
     #[test]
     fn pif_checker_reads_bsoft_header_fields() {
         unsafe {
-            let fp = libc::tmpfile();
-            assert!(!fp.is_null());
+            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
             let mut bytes = vec![0_u8; 84];
             bytes[24..28].copy_from_slice(&3_i32.to_ne_bytes());
             bytes[28..32].copy_from_slice(&0_i32.to_ne_bytes());
@@ -1800,11 +1855,11 @@ mod tests {
                 bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
             }
             assert_eq!(
-                libc::fwrite(bytes.as_ptr().cast(), 1, bytes.len(), fp),
+                crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
                 bytes.len()
             );
             let mut info: RawImageInfo = core::mem::zeroed();
-            assert_eq!(check_pif(fp, core::ptr::null_mut(), &mut info), 0);
+            assert_eq!(check_pif(&mut fp, core::ptr::null_mut(), &mut info), 0);
             assert_eq!(
                 (
                     info.nx,
@@ -1817,7 +1872,7 @@ mod tests {
                 ),
                 (4, 3, 3, RAW_MODE_FLOAT, 1024, 512, 0)
             );
-            libc::fclose(fp);
+            drop(fp);
         }
     }
 }

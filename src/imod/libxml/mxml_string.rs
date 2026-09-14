@@ -6,78 +6,68 @@
 //! part of the vendored library.  Only `_mxml_strdupf` and `_mxml_vstrdupf`
 //! are compiled, and both are translated below.
 //!
-//! Stable Rust cannot *define* a C-variadic function, so `_mxml_strdupf` takes
-//! its single variable argument explicitly.  That covers every call in the
-//! vendored library: `_mxml_strdupf("![CDATA[%s]]", data)` in `mxml-node.c`
-//! and `mxml-set.c`, and the `va_list` that `mxmlSetTextf` forwards.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
-
-use core::ffi::{c_char, c_int, c_void};
-
-/// Matches C `__va_list_tag`, the element type of `va_list` in the
-/// x86-64 System V ABI.  `_mxml_vstrdupf` needs it to express `va_copy`.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct VaListTag {
-    pub gp_offset: u32,
-    pub fp_offset: u32,
-    pub overflow_arg_area: *mut c_void,
-    pub reg_save_area: *mut c_void,
-}
-
-unsafe extern "C" {
-    fn vsnprintf(s: *mut c_char, maxlen: usize, format: *const c_char, arg: *mut c_void) -> c_int;
-}
+//! Stable Rust cannot *define* a C-variadic function, so both take their single
+//! variable argument explicitly, as an already-converted byte string.  That
+//! covers every call in the vendored library: `_mxml_strdupf("![CDATA[%s]]",
+//! data)` in `mxml-node.c` and `mxml-set.c`, and the `va_list` that
+//! `mxmlNewTextf` and `mxmlSetTextf` forward.  A caller with a numeric
+//! conversion (`mxmlwrap.c:375` passes `"%d"`) must convert its argument
+//! through the shared C-format writer first; reproducing `vsnprintf`'s
+//! specifier set here would duplicate that writer, which NATIVE.md keeps in
+//! `b3dutil` as one verified boundary translation.
+#![allow(dead_code)]
 
 /// Matches C `_mxml_strdupf` (`mxml-string.c:89`).
-///
-/// The C function is `_mxml_strdupf(const char *format, ...)`; it starts a
-/// `va_list` and hands it to `_mxml_vstrdupf`.  Here the one variable argument
-/// is passed through to `snprintf` directly, which is the same formatting for
-/// the single-argument formats the library uses.
-pub unsafe fn _mxml_strdupf(format: *const c_char, arg: *mut c_void) -> *mut c_char {
-    let mut temp: [c_char; 256] = [0; 256];
-    let bytes: c_int = libc::snprintf(
-        temp.as_mut_ptr(),
-        core::mem::size_of::<[c_char; 256]>(),
-        format,
-        arg,
-    );
+pub fn _mxml_strdupf(format: &[u8], arg: &[u8]) -> Vec<u8> {
+    /*
+     * Get a pointer to the additional arguments, format the string,
+     * and return it...
+     */
 
-    if (bytes as usize) < core::mem::size_of::<[c_char; 256]>() {
-        return libc::strdup(temp.as_ptr());
-    }
-
-    let buffer = libc::calloc(1, (bytes + 1) as usize) as *mut c_char;
-    if !buffer.is_null() {
-        libc::snprintf(buffer, (bytes + 1) as usize, format, arg);
-    }
-    buffer
+    _mxml_vstrdupf(format, arg)
 }
 
 /// Matches C `_mxml_vstrdupf` (`mxml-string.c:425`).
-pub unsafe fn _mxml_vstrdupf(format: *const c_char, ap: *mut c_void) -> *mut c_char {
-    let bytes: c_int;
-    let buffer: *mut c_char;
-    let mut temp: [c_char; 256] = [0; 256];
+///
+/// The C function formats into a 256-byte stack buffer, `strdup`s it when it
+/// fitted and otherwise `calloc`s `bytes + 1` and formats again; both arms
+/// produce the same string, and the owned `Vec` replaces both allocations.
+pub fn _mxml_vstrdupf(format: &[u8], arg: &[u8]) -> Vec<u8> {
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut used = false;
+    let mut i = 0;
 
-    /* va_copy(apcopy, ap) -- va_list is an array of one __va_list_tag. */
-    let mut apcopy: [VaListTag; 1] = [*(ap as *const VaListTag)];
+    while i < format.len() {
+        if format[i] != b'%' {
+            buffer.push(format[i]);
+            i += 1;
+            continue;
+        }
 
-    bytes = vsnprintf(
-        temp.as_mut_ptr(),
-        core::mem::size_of::<[c_char; 256]>(),
-        format,
-        apcopy.as_mut_ptr() as *mut c_void,
-    );
+        /*
+         * A conversion: "%%" is a literal percent, anything else consumes the
+         * one variable argument.
+         */
 
-    if (bytes as usize) < core::mem::size_of::<[c_char; 256]>() {
-        return libc::strdup(temp.as_ptr());
+        i += 1;
+        if i < format.len() && format[i] == b'%' {
+            buffer.push(b'%');
+            i += 1;
+            continue;
+        }
+
+        while i < format.len() && !format[i].is_ascii_alphabetic() {
+            i += 1;
+        }
+        if i < format.len() {
+            i += 1;
+        }
+
+        if !used {
+            buffer.extend_from_slice(arg);
+            used = true;
+        }
     }
 
-    buffer = libc::calloc(1, (bytes + 1) as usize) as *mut c_char;
-    if !buffer.is_null() {
-        vsnprintf(buffer, (bytes + 1) as usize, format, ap);
-    }
     buffer
 }

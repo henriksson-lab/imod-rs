@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::CString;
 use std::io::Write;
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
     imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
 };
@@ -19,7 +20,7 @@ use crate::imod::libimod::iview::imod_view_use;
 
 /// Original: `usage` (`imodjoin.c:18`).
 pub fn usage() -> ! {
-    unsafe { imod_version(c"imodjoin".as_ptr()) };
+    imod_version(Some("imodjoin"));
     imod_copyright();
     unsafe { libc::fflush(std::ptr::null_mut()) };
     println!("Usage: imodjoin [options] model_1 [-o list] model_2 [more models] out_model");
@@ -63,7 +64,7 @@ pub fn readerr(mod_number: i32) -> ! {
             c"Error reading file for model %d".as_ptr(),
             mod_number,
         );
-        exit_error(message.as_ptr());
+        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
     }
     std::process::exit(1)
 }
@@ -77,7 +78,7 @@ pub fn objerr(object_number: i32, mod_number: i32) -> ! {
             object_number,
             mod_number,
         );
-        exit_error(message.as_ptr());
+        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
     }
     std::process::exit(1)
 }
@@ -92,7 +93,7 @@ pub fn imodjoin() {
             c"ERROR: %s - ".as_ptr(),
             c"imodjoin".as_ptr(),
         );
-        setExitPrefix(prefix.as_ptr());
+        setExitPrefix(core::ffi::CStr::from_ptr(prefix.as_ptr()).to_bytes());
     }
     if argv.len() < 3 {
         usage();
@@ -144,8 +145,11 @@ pub fn imodjoin() {
                     optionerr(1)
                 };
                 let image_name = CString::new(image.as_str()).unwrap_or_else(|_| optionerr(1));
-                let fin = unsafe { libc::fopen(image_name.as_ptr(), c"rb".as_ptr()) };
-                if fin.is_null() {
+                // `mrcHeadRead` now takes `&mut ImodFile` (the `libiimod`
+                // conversion in flight); this is the minimal call-site edit for
+                // that, not a conversion of `imodjoin`.
+                let fin = ImodFile::open(image, "rb");
+                if fin.is_none() {
                     let mut message = [0_i8; 512];
                     unsafe {
                         libc::sprintf(
@@ -153,12 +157,13 @@ pub fn imodjoin() {
                             c"Couldn't open %s".as_ptr(),
                             image_name.as_ptr(),
                         );
-                        exit_error(message.as_ptr());
+                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                     }
                 }
-                let mut hdata = unsafe { std::mem::zeroed::<MrcHeader>() };
-                if unsafe { mrc_head_read(fin, &mut hdata) } != 0 {
-                    unsafe { libc::fclose(fin) };
+                let mut fin = fin.unwrap();
+                let mut hdata = MrcHeader::default();
+                if unsafe { mrc_head_read(&mut fin, &mut hdata) } != 0 {
+                    drop(fin);
                     let mut message = [0_i8; 512];
                     unsafe {
                         libc::sprintf(
@@ -166,10 +171,10 @@ pub fn imodjoin() {
                             c"Reading header from %s".as_ptr(),
                             image_name.as_ptr(),
                         );
-                        exit_error(message.as_ptr());
+                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
                     }
                 }
-                unsafe { libc::fclose(fin) };
+                drop(fin);
                 let mut reference = Iref_image::default();
                 reference.ctrans = Ipoint {
                     x: hdata.xorg,
@@ -346,7 +351,7 @@ pub fn imodjoin() {
         njoin += 1;
         if njoin > 2 && replace {
             unsafe {
-                exit_error(c"You cannot use -r with more than 2 input models".as_ptr());
+                exit_error(b"You cannot use -r with more than 2 input models");
             }
         }
         let mut list2 = Vec::<usize>::new();
@@ -588,14 +593,12 @@ pub fn imodjoin() {
     in_model.zmax = (in_model.zmax as f32).max(newmax.z) as i32;
     let output = &argv[argv.len() - 1];
     let output_name = CString::new(output.as_str()).unwrap_or_else(|_| unsafe {
-        exit_error(c"Fatal error opening new model".as_ptr());
+        exit_error(b"Fatal error opening new model");
         std::process::exit(1)
     });
-    unsafe {
-        imod_backup_file(output_name.as_ptr());
-    }
+    imod_backup_file(output_name.to_string_lossy().as_ref());
     imod_file_write(&in_model, output).unwrap_or_else(|_| unsafe {
-        exit_error(c"Fatal error opening new model".as_ptr());
+        exit_error(b"Fatal error opening new model");
         std::process::exit(1)
     });
 }

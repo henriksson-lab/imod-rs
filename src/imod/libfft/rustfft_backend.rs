@@ -2,17 +2,19 @@
 //!
 //! The callers retain IMOD's `nx + 2` real-array padding and interleaved
 //! complex representation.  This module only converts at the execution
-//! boundary.
+//! boundary.  `array` is the caller's whole float buffer; the layout the
+//! direction implies (`2 * nx * ny` interleaved floats, or `ny` rows of
+//! `nx + 2`) is indexed out of it here.
 
 #[cfg(feature = "rustfft-backend")]
 use num_complex::Complex32;
 
 /// Executes IMOD `odfft` layouts with RustFFT.
 #[cfg(feature = "rustfft-backend")]
-pub unsafe fn odfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(), String> {
+pub fn odfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) -> Result<(), String> {
     use rustfft::FftPlanner;
 
-    if array.is_null() || nx <= 0 || ny <= 0 || (idir >= 0 && nx & 1 != 0) {
+    if nx <= 0 || ny <= 0 || (idir >= 0 && nx & 1 != 0) {
         return Ok(());
     }
     let nx = nx as usize;
@@ -21,7 +23,7 @@ pub unsafe fn odfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(), 
     let mut planner = FftPlanner::<f32>::new();
     match idir {
         -1 | -2 => {
-            let data = unsafe { std::slice::from_raw_parts_mut(array, 2 * nx * ny) };
+            let data = &mut array[..2 * nx * ny];
             let fft = if idir == -1 {
                 planner.plan_fft_forward(nx)
             } else {
@@ -55,7 +57,7 @@ pub unsafe fn odfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(), 
         }
         0 | 1 => {
             let stride = nx + 2;
-            let data = unsafe { std::slice::from_raw_parts_mut(array, stride * ny) };
+            let data = &mut array[..stride * ny];
             let half = nx / 2 + 1;
             if idir == 0 {
                 let fft = planner.plan_fft_forward(nx);
@@ -98,17 +100,17 @@ pub unsafe fn odfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(), 
 
 /// Executes IMOD `todfft` layouts with RustFFT.
 #[cfg(feature = "rustfft-backend")]
-pub unsafe fn todfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(), String> {
+pub fn todfft(array: &mut [f32], nx: i32, ny: i32, idir: i32) -> Result<(), String> {
     use rustfft::FftPlanner;
 
-    if array.is_null() || nx <= 0 || ny <= 0 || nx & 1 != 0 {
+    if nx <= 0 || ny <= 0 || nx & 1 != 0 {
         return Ok(());
     }
     let nx = nx as usize;
     let ny = ny as usize;
     let stride = nx + 2;
     let half = nx / 2 + 1;
-    let data = unsafe { std::slice::from_raw_parts_mut(array, stride * ny) };
+    let data = &mut array[..stride * ny];
     let scale = 1.0 / ((nx * ny) as f32).sqrt();
     let mut planner = FftPlanner::<f32>::new();
     if idir == 0 {
@@ -184,11 +186,11 @@ pub unsafe fn todfft(array: *mut f32, nx: i32, ny: i32, idir: i32) -> Result<(),
 }
 
 #[cfg(not(feature = "rustfft-backend"))]
-pub unsafe fn odfft(_array: *mut f32, _nx: i32, _ny: i32, _idir: i32) -> Result<(), String> {
+pub fn odfft(_array: &mut [f32], _nx: i32, _ny: i32, _idir: i32) -> Result<(), String> {
     Err("RustFFT backend requires Cargo feature rustfft-backend".into())
 }
 
 #[cfg(not(feature = "rustfft-backend"))]
-pub unsafe fn todfft(_array: *mut f32, _nx: i32, _ny: i32, _idir: i32) -> Result<(), String> {
+pub fn todfft(_array: &mut [f32], _nx: i32, _ny: i32, _idir: i32) -> Result<(), String> {
     Err("RustFFT backend requires Cargo feature rustfft-backend".into())
 }

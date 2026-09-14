@@ -1,690 +1,500 @@
-#![allow(
-    dead_code,
-    non_snake_case,
-    non_camel_case_types,
-    unused_mut,
-    unused_assignments,
-    unsafe_op_in_unsafe_fn
-)]
-//! Mechanical C2Rust baseline of `IMOD/libcfshr/find_piece_shifts.c`, wired to direct robust-statistics dependencies.
+//! Translation of `IMOD/libcfshr/find_piece_shifts.c`: finds piece shifts by
+//! iteration.
+//!
+//! The source carves its scratch arrays out of the caller's `work` array with
+//! reinterpreting casts — `int *ivarToList = (int *)work;` and an
+//! `unsigned char *` view further along it (`find_piece_shifts.c:110-118`,
+//! `:508-514`).  Rust cannot retype a slice's elements without `unsafe`, so
+//! each of those windows is a local `Vec` of its own element type here, laid
+//! out in the same order and with the same lengths.  Nothing but the first
+//! `2 * nvar` floats of `work` is read back by a caller — those are the
+//! per-edge mean weights the documentation describes, and they are written to
+//! `work` exactly as the source writes them.
+#![allow(dead_code)]
 
 use super::robuststat::{rs_madn, rs_median, rs_trimmed_mean};
 
-pub enum _IO_wide_data {}
-pub enum _IO_codecvt {}
-pub enum _IO_marker {}
-unsafe extern "C" {
-    static mut stdout: *mut FILE;
-    fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn sqrt(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn fabs(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-}
-pub type size_t = usize;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    pub _flags2: ::core::ffi::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub __pad5: size_t,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused2: [::core::ffi::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn find_piece_shifts(
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut nvar: ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut ixpclist: *mut ::core::ffi::c_int,
-    mut iypclist: *mut ::core::ffi::c_int,
-    mut dxedge: *mut ::core::ffi::c_float,
-    mut dyedge: *mut ::core::ffi::c_float,
-    mut idir: ::core::ffi::c_int,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut edgeStep: ::core::ffi::c_int,
-    mut dxyvar: *mut ::core::ffi::c_float,
-    mut varStep: ::core::ffi::c_int,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pcStep: ::core::ffi::c_int,
-    mut work: *mut ::core::ffi::c_float,
-    mut fort: ::core::ffi::c_int,
-    mut leaveInd: ::core::ffi::c_int,
-    mut skipCrit: ::core::ffi::c_int,
-    mut robustCrit: ::core::ffi::c_float,
-    mut critMaxMove: ::core::ffi::c_float,
-    mut critMoveDiff: ::core::ffi::c_float,
-    mut maxIter: ::core::ffi::c_int,
-    mut numAvgForTest: ::core::ffi::c_int,
-    mut intervalForTest: ::core::ffi::c_int,
-    mut numIter: *mut ::core::ffi::c_int,
-    mut wErrMean: *mut ::core::ffi::c_float,
-    mut wErrMax: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    let mut iedge: ::core::ffi::c_int = 0;
-    let mut ipc: ::core::ffi::c_int = 0;
-    let mut numNeigh: ::core::ffi::c_int = 0;
-    let mut isign: ::core::ffi::c_int = 0;
-    let mut iter: ::core::ffi::c_int = 0;
-    let mut nay: ::core::ffi::c_int = 0;
-    let mut list: ::core::ffi::c_int = 0;
-    let mut nsum: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut ivar: ::core::ffi::c_int = 0;
-    let mut xyStep: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut ixy: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut numMedian: ::core::ffi::c_int = 0;
-    let mut didWeights: ::core::ffi::c_int = 0;
-    let mut computeWeights: ::core::ffi::c_int = 0;
-    let mut weightInterval: ::core::ffi::c_int = 0;
-    let mut numEdge: [::core::ffi::c_int; 2] = [0; 2];
-    let mut debug: ::core::ffi::c_int = 0;
-    let mut edgeMedCrit: ::core::ffi::c_int = 6 as ::core::ffi::c_int;
-    let mut edgeTrMeanX: [::core::ffi::c_float; 2] = [0.; 2];
-    let mut edgeTrMeanY: [::core::ffi::c_float; 2] = [0.; 2];
-    let mut edgeDevMed: [::core::ffi::c_float; 2] = [0.; 2];
-    let mut edgeDevMADN: [::core::ffi::c_float; 2] = [0.; 2];
-    let mut xmovemax: ::core::ffi::c_float = 0.;
-    let mut ymovemax: ::core::ffi::c_float = 0.;
-    let mut xsum: ::core::ffi::c_float = 0.;
-    let mut ysum: ::core::ffi::c_float = 0.;
-    let mut ex: ::core::ffi::c_float = 0.;
-    let mut ey: ::core::ffi::c_float = 0.;
-    let mut erx: [::core::ffi::c_float; 4] = [0.; 4];
-    let mut ery: [::core::ffi::c_float; 4] = [0.; 4];
-    let mut errd: [::core::ffi::c_float; 4] = [0.; 4];
-    let mut xlow: ::core::ffi::c_float = 0.;
-    let mut xsec: ::core::ffi::c_float = 0.;
-    let mut xthr: ::core::ffi::c_float = 0.;
-    let mut ylow: ::core::ffi::c_float = 0.;
-    let mut ysec: ::core::ffi::c_float = 0.;
-    let mut ythr: ::core::ffi::c_float = 0.;
-    let mut elow: ::core::ffi::c_float = 0.;
-    let mut esec: ::core::ffi::c_float = 0.;
-    let mut ethr: ::core::ffi::c_float = 0.;
-    let mut uu: ::core::ffi::c_float = 0.;
-    let mut wsum: ::core::ffi::c_float = 0.;
-    let mut wgt: ::core::ffi::c_float = 0.;
-    let mut MAD: ::core::ffi::c_float = 0.;
-    let mut Ktune: ::core::ffi::c_float = 2.0f32 * 4.685f32 * 0.6745f32 * robustCrit;
-    let mut medThresh: ::core::ffi::c_float = 2.0f32 * robustCrit;
-    let mut sumxmove: ::core::ffi::c_double = 0.;
-    let mut sumymove: ::core::ffi::c_double = 0.;
-    let mut dxsum: ::core::ffi::c_double = 0.;
-    let mut dysum: ::core::ffi::c_double = 0.;
-    let mut errsum: ::core::ffi::c_double = 0.;
-    let mut errmax: ::core::ffi::c_double = 0.;
-    let mut medSum: ::core::ffi::c_double = 0.;
-    let mut xmoveAvg: ::core::ffi::c_float = 0.;
-    let mut ymoveAvg: ::core::ffi::c_float = 0.;
-    let mut xmoveLast: ::core::ffi::c_float = 0.;
-    let mut ymoveLast: ::core::ffi::c_float = 0.;
-    let mut ivarToList: *mut ::core::ffi::c_int = work as *mut ::core::ffi::c_int;
-    let mut listToVar: *mut ::core::ffi::c_int = ivarToList.offset(nvar as isize);
-    let mut neighInd: *mut ::core::ffi::c_int = listToVar.offset(nvar as isize);
-    let mut neighList: *mut ::core::ffi::c_int = neighInd
-        .offset(nvar as isize)
-        .offset(1 as ::core::ffi::c_int as isize);
-    let mut dxyEdge: *mut ::core::ffi::c_float =
-        neighList.offset((4 as ::core::ffi::c_int * nvar) as isize) as *mut ::core::ffi::c_float;
-    let mut neighWgt: *mut ::core::ffi::c_float =
-        dxyEdge.offset((8 as ::core::ffi::c_int * nvar) as isize);
-    let mut edgeDir: *mut ::core::ffi::c_uchar =
-        neighWgt.offset((4 as ::core::ffi::c_int * nvar) as isize) as *mut ::core::ffi::c_uchar;
-    let mut placed: *mut ::core::ffi::c_uchar =
-        edgeDir.offset((4 as ::core::ffi::c_int * nvar) as isize);
-    if edgeStep == 1 as ::core::ffi::c_int
-        && pcStep == 1 as ::core::ffi::c_int
-        && varStep == 1 as ::core::ffi::c_int
-    {
-        xyStep = 2 as ::core::ffi::c_int;
-    } else if edgeStep > 1 as ::core::ffi::c_int
-        && pcStep > 1 as ::core::ffi::c_int
-        && varStep > 1 as ::core::ffi::c_int
-    {
-        xyStep = 1 as ::core::ffi::c_int;
+/// Original `findPieceShifts` (`find_piece_shifts.c:88`).
+#[allow(clippy::too_many_arguments)]
+pub fn find_piece_shifts(
+    ivarpc: &[i32],
+    nvar: i32,
+    indvar: &[i32],
+    ixpclist: &[i32],
+    iypclist: &[i32],
+    dxedge: &[f32],
+    dyedge: &[f32],
+    idir: i32,
+    piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    edge_step: i32,
+    dxyvar: &mut [f32],
+    var_step: i32,
+    edge_lower: &[i32],
+    edge_upper: &[i32],
+    pc_step: i32,
+    work: &mut [f32],
+    mut fort: i32,
+    leave_ind: i32,
+    skip_crit: i32,
+    robust_crit: f32,
+    crit_max_move: f32,
+    crit_move_diff: f32,
+    max_iter: i32,
+    num_avg_for_test: i32,
+    interval_for_test: i32,
+    num_iter: &mut i32,
+    w_err_mean: &mut f32,
+    w_err_max: &mut f32,
+) -> i32 {
+    let edge_med_crit = 6;
+    let mut num_edge = [0i32; 2];
+    let mut edge_tr_mean_x = [0.0f32; 2];
+    let mut edge_tr_mean_y = [0.0f32; 2];
+    let mut edge_dev_med = [0.0f32; 2];
+    let mut edge_dev_madn = [0.0f32; 2];
+    let mut erx = [0.0f32; 4];
+    let mut ery = [0.0f32; 4];
+    let mut errd = [0.0f32; 4];
+    // The source leaves these six uninitialised; `findLowestThree` sets them
+    // all before they are read on any path that has at least three neighbours.
+    let (mut xlow, mut xsec, mut xthr) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut ylow, mut ysec, mut ythr) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut elow, mut esec, mut ethr) = (0.0f32, 0.0f32, 0.0f32);
+    let mut mad: f32 = 0.;
+    let ktune: f32 = 2.0f32 * 4.685f32 * 0.6745f32 * robust_crit;
+    let med_thresh: f32 = 2.0f32 * robust_crit;
+
+    /* Set pointers to temporary arrays from the work array */
+    let mut ivar_to_list = vec![0i32; nvar as usize];
+    let mut list_to_var = vec![0i32; nvar as usize];
+    let mut neigh_ind = vec![0i32; (nvar + 1) as usize];
+    let mut neigh_list = vec![0i32; (4 * nvar) as usize];
+    let mut dxy_edge = vec![0.0f32; (8 * nvar) as usize];
+    let mut neigh_wgt = vec![0.0f32; (4 * nvar) as usize];
+    let mut edge_dir = vec![0u8; (4 * nvar) as usize];
+    let mut placed = vec![0u8; (2 * nvar) as usize]; // placed needs 2 * nvar bytes
+
+    /* Set the xy stride parameter */
+    let xy_step: i32;
+    if edge_step == 1 && pc_step == 1 && var_step == 1 {
+        xy_step = 2;
+    } else if edge_step > 1 && pc_step > 1 && var_step > 1 {
+        xy_step = 1;
     } else {
-        return 1 as ::core::ffi::c_int;
+        return 1;
     }
     if fort != 0 {
-        fort = 1 as ::core::ffi::c_int;
+        fort = 1;
     }
-    if robustCrit as ::core::ffi::c_double > 0.0f64 {
-        ixy = 0 as ::core::ffi::c_int;
-        while ixy < 2 as ::core::ffi::c_int {
-            nsum = 0 as ::core::ffi::c_int;
-            ivar = 0 as ::core::ffi::c_int;
-            while ivar < nvar {
-                ipc = *ivarpc.offset(ivar as isize) - fort;
-                iedge = *edgeUpper.offset((xyStep * ipc + pcStep * ixy) as isize) - fort;
-                ind = xyStep * iedge + edgeStep * ixy;
-                if iedge >= 0 as ::core::ffi::c_int
-                    && *ifskipEdge.offset(ind as isize) < skipCrit
-                    && ind != leaveInd - fort
+
+    /* If doing robust, get median edge displacement and median deviation */
+    if robust_crit > 0. {
+        for ixy in 0..2usize {
+            let mut nsum = 0i32;
+
+            /* Find the X or Y edges and save them in array */
+            for ivar in 0..nvar as usize {
+                let ipc = ivarpc[ivar] - fort;
+                let iedge = edge_upper[(xy_step * ipc + pc_step * ixy as i32) as usize] - fort;
+                let ind = xy_step * iedge + edge_step * ixy as i32;
+                if iedge >= 0 && ifskip_edge[ind as usize] < skip_crit && ind != leave_ind - fort {
+                    dxy_edge[nsum as usize] = -idir as f32 * dxedge[ind as usize];
+                    dxy_edge[(nsum + nvar) as usize] = -idir as f32 * dyedge[ind as usize];
+                    nsum += 1;
+                }
+            }
+            num_edge[ixy] = nsum;
+
+            /* If there are enough, get a trimmed mean vector, the deviations from
+            the mean, and the median and MADN of those deviations */
+            if nsum >= edge_med_crit {
                 {
-                    *dxyEdge.offset(nsum as isize) =
-                        -idir as ::core::ffi::c_float * *dxedge.offset(ind as isize);
-                    let fresh0 = nsum;
-                    nsum = nsum + 1;
-                    *dxyEdge.offset((fresh0 + nvar) as isize) =
-                        -idir as ::core::ffi::c_float * *dyedge.offset(ind as isize);
+                    let (head, tail) = dxy_edge.split_at_mut((2 * nvar) as usize);
+                    rs_trimmed_mean(head, nsum, 0.2f32, tail, &mut edge_tr_mean_x[ixy]);
+                    rs_trimmed_mean(
+                        &head[nvar as usize..],
+                        nsum,
+                        0.2f32,
+                        tail,
+                        &mut edge_tr_mean_y[ixy],
+                    );
                 }
-                ivar += 1;
-            }
-            numEdge[ixy as usize] = nsum;
-            if nsum >= edgeMedCrit {
-                rs_trimmed_mean(
-                    dxyEdge,
-                    nsum,
-                    0.2f32,
-                    dxyEdge.offset((2 as ::core::ffi::c_int * nvar) as isize)
-                        as *mut ::core::ffi::c_float,
-                    (&raw mut edgeTrMeanX as *mut ::core::ffi::c_float).offset(ixy as isize)
-                        as *mut ::core::ffi::c_float,
-                );
-                rs_trimmed_mean(
-                    dxyEdge.offset(nvar as isize) as *mut ::core::ffi::c_float,
-                    nsum,
-                    0.2f32,
-                    dxyEdge.offset((2 as ::core::ffi::c_int * nvar) as isize)
-                        as *mut ::core::ffi::c_float,
-                    (&raw mut edgeTrMeanY as *mut ::core::ffi::c_float).offset(ixy as isize)
-                        as *mut ::core::ffi::c_float,
-                );
-                i = 0 as ::core::ffi::c_int;
-                while i < nsum {
-                    ex = *dxyEdge.offset(i as isize) - edgeTrMeanX[ixy as usize];
-                    ey = *dxyEdge.offset((i + nvar) as isize) - edgeTrMeanY[ixy as usize];
-                    *dxyEdge.offset((i + 2 as ::core::ffi::c_int * nvar) as isize) = sqrt(
-                        ex as ::core::ffi::c_double * ex as ::core::ffi::c_double
-                            + (ey * ey) as ::core::ffi::c_double,
-                    )
-                        as ::core::ffi::c_float;
-                    i += 1;
+                for i in 0..nsum as usize {
+                    let ex = dxy_edge[i] - edge_tr_mean_x[ixy];
+                    let ey = dxy_edge[i + nvar as usize] - edge_tr_mean_y[ixy];
+                    // `(float)sqrt((double)ex * ex + ey * ey)`: the first term
+                    // is a double product, the second a single-precision one.
+                    dxy_edge[i + (2 * nvar) as usize] =
+                        (ex as f64 * ex as f64 + (ey * ey) as f64).sqrt() as f32;
+                    /* printf("%d %.2f,%.2f  %.2f,%.2f  %.3f\n", i, dxyEdge[i],
+                    dxyEdge[i+nvar], ex, ey, dxyEdge[i + 2 * nvar]); */
                 }
-                rs_median(
-                    dxyEdge.offset((2 as ::core::ffi::c_int * nvar) as isize)
-                        as *mut ::core::ffi::c_float,
-                    nsum,
-                    dxyEdge,
-                    (&raw mut edgeDevMed as *mut ::core::ffi::c_float).offset(ixy as isize)
-                        as *mut ::core::ffi::c_float,
-                );
-                rs_madn(
-                    dxyEdge.offset((2 as ::core::ffi::c_int * nvar) as isize)
-                        as *mut ::core::ffi::c_float,
-                    nsum,
-                    edgeDevMed[ixy as usize],
-                    dxyEdge,
-                    (&raw mut edgeDevMADN as *mut ::core::ffi::c_float).offset(ixy as isize)
-                        as *mut ::core::ffi::c_float,
-                );
+                {
+                    let (head, tail) = dxy_edge.split_at_mut((2 * nvar) as usize);
+                    rs_median(tail, nsum, head, &mut edge_dev_med[ixy]);
+                    rs_madn(tail, nsum, edge_dev_med[ixy], head, &mut edge_dev_madn[ixy]);
+                }
+                /*printf("%d %s edges: trMean %.2f, %.2f, median dev %.3f MADN %.3f\n",
+                nsum, ixy ?"Y":"X",  edgeTrMeanX[ixy],  edgeTrMeanY[ixy],
+                edgeDevMed[ixy], edgeDevMADN[ixy]); */
             }
-            ixy += 1;
         }
     }
+
     initialize(
-        ixpclist, iypclist, ivarpc, edgeLower, edgeUpper, pieceLower, pieceUpper, ifskipEdge,
-        dxedge, dyedge, dxyEdge, dxyvar, neighInd, neighWgt, edgeDir, neighList, placed,
-        ivarToList, listToVar, indvar, nvar, fort, idir, leaveInd, skipCrit, xyStep, edgeStep,
-        pcStep,
+        ixpclist,
+        iypclist,
+        ivarpc,
+        edge_lower,
+        edge_upper,
+        piece_lower,
+        piece_upper,
+        ifskip_edge,
+        dxedge,
+        Some(dyedge),
+        &mut dxy_edge,
+        dxyvar,
+        &mut neigh_ind,
+        Some(&mut neigh_wgt),
+        &mut edge_dir,
+        &mut neigh_list,
+        &mut placed,
+        &mut ivar_to_list,
+        &mut list_to_var,
+        indvar,
+        nvar,
+        fort,
+        idir,
+        leave_ind,
+        skip_crit,
+        xy_step,
+        edge_step,
+        pc_step,
     );
-    numNeigh = *neighInd.offset(nvar as isize);
-    xmoveLast = 1.0e10f32;
-    xmoveAvg = 0.0f32;
-    ymoveLast = 1.0e10f32;
-    ymoveAvg = 0.0f32;
-    MAD = 0.0f32;
-    weightInterval = if 1 as ::core::ffi::c_int
-        > (if (nvar / 2 as ::core::ffi::c_int) < maxIter / 10 as ::core::ffi::c_int {
-            nvar / 2 as ::core::ffi::c_int
+
+    let _num_neigh = neigh_ind[nvar as usize];
+
+    /* Iterate */
+    let mut xmove_last: f32 = 1.0e10;
+    let mut xmove_avg: f32 = 0.;
+    let mut ymove_last: f32 = 1.0e10;
+    let mut ymove_avg: f32 = 0.;
+    mad = 0.;
+    let weight_interval = {
+        let inner = if nvar / 2 < max_iter / 10 {
+            nvar / 2
         } else {
-            maxIter / 10 as ::core::ffi::c_int
-        }) {
-        1 as ::core::ffi::c_int
-    } else if (nvar / 2 as ::core::ffi::c_int) < maxIter / 10 as ::core::ffi::c_int {
-        nvar / 2 as ::core::ffi::c_int
-    } else {
-        maxIter / 10 as ::core::ffi::c_int
+            max_iter / 10
+        };
+        if 1 > inner { 1 } else { inner }
     };
-    computeWeights = 0 as ::core::ffi::c_int;
-    didWeights = 0 as ::core::ffi::c_int;
-    iter = 1 as ::core::ffi::c_int;
-    while iter <= maxIter {
-        sumxmove = 0.0f64;
-        sumymove = 0.0f64;
-        xmovemax = 0.0f32;
-        ymovemax = 0.0f32;
-        dxsum = 0.0f64;
-        dysum = 0.0f64;
-        if robustCrit as ::core::ffi::c_double > 0.0f64 && iter % weightInterval == 0 {
-            computeWeights = 1 as ::core::ffi::c_int;
+    let mut compute_weights = 0;
+    let mut did_weights = 0;
+    let mut iter = 1;
+    while iter <= max_iter {
+        let mut sumxmove = 0.0f64;
+        let mut sumymove = 0.0f64;
+        let mut xmovemax = 0.0f32;
+        let mut ymovemax = 0.0f32;
+        let mut dxsum = 0.0f64;
+        let mut dysum = 0.0f64;
+        if robust_crit > 0. && iter % weight_interval == 0 {
+            compute_weights = 1;
         }
-        errsum = 0.0f64;
-        errmax = 0.0f64;
-        if computeWeights != 0 {
-            numMedian = 0 as ::core::ffi::c_int;
-            medSum = 0.0f64;
-            list = 0 as ::core::ffi::c_int;
-            while list < nvar {
-                xsum = 0.0f32;
-                ysum = 0.0f32;
-                debug = 0 as ::core::ffi::c_int;
-                i = *neighInd.offset(list as isize);
-                while i < *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize) {
-                    j = i - *neighInd.offset(list as isize);
-                    nay = *neighList.offset(i as isize);
-                    erx[j as usize] = *dxyvar.offset((2 as ::core::ffi::c_int * nay) as isize)
-                        - *dxyvar.offset((2 as ::core::ffi::c_int * list) as isize)
-                        - *dxyEdge.offset((2 as ::core::ffi::c_int * i) as isize);
-                    ery[j as usize] = *dxyvar
-                        .offset((2 as ::core::ffi::c_int * nay + 1 as ::core::ffi::c_int) as isize)
-                        - *dxyvar.offset(
-                            (2 as ::core::ffi::c_int * list + 1 as ::core::ffi::c_int) as isize,
-                        )
-                        - *dxyEdge.offset(
-                            (2 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize,
-                        );
-                    find_lowest_three(
-                        erx[j as usize],
-                        j,
-                        &raw mut xlow,
-                        &raw mut xsec,
-                        &raw mut xthr,
-                    );
-                    find_lowest_three(
-                        ery[j as usize],
-                        j,
-                        &raw mut ylow,
-                        &raw mut ysec,
-                        &raw mut ythr,
-                    );
-                    xsum += erx[j as usize];
-                    ysum += ery[j as usize];
-                    i += 1;
+
+        if compute_weights != 0 {
+            let mut num_median = 0i32;
+            let mut med_sum = 0.0f64;
+            for list in 0..nvar as usize {
+                for i in neigh_ind[list]..neigh_ind[list + 1] {
+                    let j = (i - neigh_ind[list]) as usize;
+                    let nay = neigh_list[i as usize];
+                    erx[j] = dxyvar[2 * nay as usize] - dxyvar[2 * list] - dxy_edge[2 * i as usize];
+                    ery[j] = dxyvar[2 * nay as usize + 1]
+                        - dxyvar[2 * list + 1]
+                        - dxy_edge[2 * i as usize + 1];
+                    find_lowest_three(erx[j], j as i32, &mut xlow, &mut xsec, &mut xthr);
+                    find_lowest_three(ery[j], j as i32, &mut ylow, &mut ysec, &mut ythr);
                 }
-                nsum = if 1 as ::core::ffi::c_int
-                    > *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize)
-                        - *neighInd.offset(list as isize)
-                {
-                    1 as ::core::ffi::c_int
-                } else {
-                    *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize)
-                        - *neighInd.offset(list as isize)
+                let nsum = {
+                    let n = neigh_ind[list + 1] - neigh_ind[list];
+                    if 1 > n { 1 } else { n }
                 };
-                if nsum >= 3 as ::core::ffi::c_int {
-                    if nsum > 3 as ::core::ffi::c_int {
-                        xsec = ((xsec + xthr) as ::core::ffi::c_double / 2.0f64)
-                            as ::core::ffi::c_float;
-                        ysec = ((ysec + ythr) as ::core::ffi::c_double / 2.0f64)
-                            as ::core::ffi::c_float;
+                if nsum >= 3 {
+                    /* Get the median into xsec, ysec if 4 points */
+                    if nsum > 3 {
+                        xsec = ((xsec + xthr) as f64 / 2.) as f32;
+                        ysec = ((ysec + ythr) as f64 / 2.) as f32;
                     }
-                    j = 0 as ::core::ffi::c_int;
-                    while j < nsum {
-                        ex = erx[j as usize] - xsec;
-                        ey = ery[j as usize] - ysec;
-                        errd[j as usize] = sqrt((ex * ex + ey * ey) as ::core::ffi::c_double)
-                            as ::core::ffi::c_float;
-                        find_lowest_three(
-                            errd[j as usize],
-                            j,
-                            &raw mut elow,
-                            &raw mut esec,
-                            &raw mut ethr,
-                        );
-                        j += 1;
+
+                    /* Find deviation from median and get a median deviation */
+                    for j in 0..nsum as usize {
+                        let ex = erx[j] - xsec;
+                        let ey = ery[j] - ysec;
+                        errd[j] = ((ex * ex + ey * ey) as f64).sqrt() as f32;
+                        find_lowest_three(errd[j], j as i32, &mut elow, &mut esec, &mut ethr);
                     }
-                    if nsum > 3 as ::core::ffi::c_int {
-                        esec = ((esec + ethr) as ::core::ffi::c_double / 2.0f64)
-                            as ::core::ffi::c_float;
+                    if nsum > 3 {
+                        esec = ((esec + ethr) as f64 / 2.) as f32;
                     }
-                    medSum += esec as ::core::ffi::c_double;
-                    numMedian += 1;
-                    if MAD as ::core::ffi::c_double > 0.0f64 {
-                        esec = if MAD > esec { MAD } else { esec };
-                        j = 0 as ::core::ffi::c_int;
-                        while j < nsum {
-                            uu = (errd[j as usize] - medThresh * MAD) / (Ktune * esec);
-                            wgt = 0.0f32;
-                            if (uu as ::core::ffi::c_double) < 1.0f64 {
-                                wgt = (if uu <= 0 as ::core::ffi::c_int as ::core::ffi::c_float {
-                                    1.0f64
+                    med_sum += esec as f64;
+                    num_median += 1;
+
+                    /* Get the bisquare weighting factor and compute a weight */
+                    if mad > 0. {
+                        esec = if mad > esec { mad } else { esec };
+                        for j in 0..nsum as usize {
+                            let uu = (errd[j] - med_thresh * mad) / (ktune * esec);
+                            let mut wgt = 0.0f32;
+                            if uu < 1. {
+                                // `uu <= 0 ? 1.f : (1. - uu * uu) * (1. - uu * uu)`
+                                // -- the second arm is a double expression.
+                                wgt = if uu <= 0. {
+                                    1.0f32
                                 } else {
-                                    (1.0f64 - (uu * uu) as ::core::ffi::c_double)
-                                        * (1.0f64 - (uu * uu) as ::core::ffi::c_double)
-                                }) as ::core::ffi::c_float;
+                                    ((1. - (uu * uu) as f64) * (1. - (uu * uu) as f64)) as f32
+                                };
                             }
-                            *neighWgt.offset((*neighInd.offset(list as isize) + j) as isize) = wgt;
-                            j += 1;
+                            neigh_wgt[(neigh_ind[list] + j as i32) as usize] = wgt;
                         }
                     }
-                } else if nsum == 2 as ::core::ffi::c_int
-                    && (if numEdge[0 as ::core::ffi::c_int as usize]
-                        < numEdge[1 as ::core::ffi::c_int as usize]
-                    {
-                        numEdge[0 as ::core::ffi::c_int as usize]
+                } else if nsum == 2
+                    && (if num_edge[0] < num_edge[1] {
+                        num_edge[0]
                     } else {
-                        numEdge[1 as ::core::ffi::c_int as usize]
-                    }) > edgeMedCrit
-                    && (if edgeDevMADN[0 as ::core::ffi::c_int as usize]
-                        < edgeDevMADN[1 as ::core::ffi::c_int as usize]
-                    {
-                        edgeDevMADN[0 as ::core::ffi::c_int as usize]
+                        num_edge[1]
+                    }) > edge_med_crit
+                    && (if edge_dev_madn[0] < edge_dev_madn[1] {
+                        edge_dev_madn[0]
                     } else {
-                        edgeDevMADN[1 as ::core::ffi::c_int as usize]
-                    }) as ::core::ffi::c_double
-                        > 1.0e-6f64
+                        edge_dev_madn[1]
+                    }) > 1.0e-6
                 {
-                    j = 0 as ::core::ffi::c_int;
-                    while j < 2 as ::core::ffi::c_int {
-                        i = *neighInd.offset(list as isize) + j;
-                        ixy = *edgeDir.offset(i as isize) as ::core::ffi::c_int
-                            / 2 as ::core::ffi::c_int;
-                        isign = if *edgeDir.offset(i as isize) as ::core::ffi::c_int
-                            % 2 as ::core::ffi::c_int
-                            != 0
-                        {
-                            1 as ::core::ffi::c_int
-                        } else {
-                            -(1 as ::core::ffi::c_int)
-                        };
-                        ex = *dxyEdge.offset((2 as ::core::ffi::c_int * i) as isize)
-                            - isign as ::core::ffi::c_float * edgeTrMeanX[ixy as usize];
-                        ey = *dxyEdge.offset(
-                            (2 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize,
-                        ) - isign as ::core::ffi::c_float * edgeTrMeanY[ixy as usize];
-                        esec = sqrt((ex * ex + ey * ey) as ::core::ffi::c_double)
-                            as ::core::ffi::c_float;
-                        uu = (esec - edgeDevMed[ixy as usize])
-                            / (edgeDevMADN[ixy as usize] * 4.685f32);
-                        *neighWgt.offset(i as isize) = 0.0f32;
-                        if (uu as ::core::ffi::c_double) < 1.0f64 {
-                            *neighWgt.offset(i as isize) =
-                                (if uu as ::core::ffi::c_double <= 0.0f64 {
-                                    1.0f64
-                                } else {
-                                    (1.0f64 - (uu * uu) as ::core::ffi::c_double)
-                                        * (1.0f64 - (uu * uu) as ::core::ffi::c_double)
-                                }) as ::core::ffi::c_float;
+                    /* For two edges, get their deviation from the median edge vector */
+                    let mut i = 0i32;
+                    for j in 0..2 {
+                        i = neigh_ind[list] + j;
+                        let ixy = (edge_dir[i as usize] / 2) as usize;
+                        let isign = if edge_dir[i as usize] % 2 != 0 { 1 } else { -1 };
+                        let ex = dxy_edge[2 * i as usize] - isign as f32 * edge_tr_mean_x[ixy];
+                        let ey = dxy_edge[2 * i as usize + 1] - isign as f32 * edge_tr_mean_y[ixy];
+                        let esec2 = ((ex * ex + ey * ey) as f64).sqrt() as f32;
+                        let uu = (esec2 - edge_dev_med[ixy]) / (edge_dev_madn[ixy] * 4.685f32);
+                        neigh_wgt[i as usize] = 0.;
+                        if uu < 1. {
+                            neigh_wgt[i as usize] = if uu <= 0. {
+                                1.0f32
+                            } else {
+                                ((1. - (uu * uu) as f64) * (1. - (uu * uu) as f64)) as f32
+                            };
                         }
-                        j += 1;
                     }
-                    if ((if *neighWgt.offset((i - 1 as ::core::ffi::c_int) as isize)
-                        > *neighWgt.offset(i as isize)
-                    {
-                        *neighWgt.offset((i - 1 as ::core::ffi::c_int) as isize)
-                    } else {
-                        *neighWgt.offset(i as isize)
-                    }) as ::core::ffi::c_double)
-                        < 1.0e-2f64
-                    {
-                        let ref mut fresh1 = *neighWgt.offset(i as isize);
-                        *fresh1 = 1.0f32;
-                        *neighWgt.offset((i - 1 as ::core::ffi::c_int) as isize) = *fresh1;
+                    let a = neigh_wgt[(i - 1) as usize];
+                    let b = neigh_wgt[i as usize];
+                    if (if a > b { a } else { b }) < 1.0e-2 {
+                        neigh_wgt[i as usize] = 1.;
+                        neigh_wgt[(i - 1) as usize] = 1.;
                     }
                 }
-                list += 1;
             }
-            if MAD as ::core::ffi::c_double > 0.0f64 {
-                didWeights = 1 as ::core::ffi::c_int;
-                computeWeights = 0 as ::core::ffi::c_int;
+            if mad > 0. {
+                did_weights = 1;
+                compute_weights = 0;
             }
-            MAD = 0.0f32;
-            if numMedian != 0 {
-                MAD = (if 1.0e-5f64 > medSum / numMedian as ::core::ffi::c_double {
-                    1.0e-5f64
-                } else {
-                    medSum / numMedian as ::core::ffi::c_double
-                }) as ::core::ffi::c_float;
+
+            mad = 0.;
+            if num_median != 0 {
+                let q = med_sum / num_median as f64;
+                mad = (if 1.0e-5f64 > q { 1.0e-5f64 } else { q }) as f32;
             }
         }
-        list = 0 as ::core::ffi::c_int;
-        while list < nvar {
-            xsum = 0.0f32;
-            ysum = 0.0f32;
-            wsum = 0.0f32;
-            i = *neighInd.offset(list as isize);
-            while i < *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize) {
-                nay = *neighList.offset(i as isize);
-                wgt = *neighWgt.offset(i as isize);
-                ex = *dxyvar.offset((2 as ::core::ffi::c_int * nay) as isize)
-                    - *dxyvar.offset((2 as ::core::ffi::c_int * list) as isize)
-                    - *dxyEdge.offset((2 as ::core::ffi::c_int * i) as isize);
-                ey = *dxyvar
-                    .offset((2 as ::core::ffi::c_int * nay + 1 as ::core::ffi::c_int) as isize)
-                    - *dxyvar.offset(
-                        (2 as ::core::ffi::c_int * list + 1 as ::core::ffi::c_int) as isize,
-                    )
-                    - *dxyEdge
-                        .offset((2 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize);
+
+        /* Loop on pieces, adjusting each one by weighted average error in edges */
+        for list in 0..nvar as usize {
+            let mut xsum = 0.0f32;
+            let mut ysum = 0.0f32;
+            let mut wsum = 0.0f32;
+            for i in neigh_ind[list]..neigh_ind[list + 1] {
+                let nay = neigh_list[i as usize];
+                let wgt = neigh_wgt[i as usize];
+                let ex = dxyvar[2 * nay as usize] - dxyvar[2 * list] - dxy_edge[2 * i as usize];
+                let ey = dxyvar[2 * nay as usize + 1]
+                    - dxyvar[2 * list + 1]
+                    - dxy_edge[2 * i as usize + 1];
                 xsum += ex * wgt;
                 ysum += ey * wgt;
                 wsum += wgt;
-                i += 1;
             }
-            if wsum as ::core::ffi::c_double > 1.0e-6f64 {
+            if wsum > 1.0e-6 {
                 xsum /= wsum;
                 ysum /= wsum;
             }
-            *dxyvar.offset((2 as ::core::ffi::c_int * list) as isize) += xsum;
-            *dxyvar.offset((2 as ::core::ffi::c_int * list + 1 as ::core::ffi::c_int) as isize) +=
-                ysum;
-            dxsum +=
-                *dxyvar.offset((2 as ::core::ffi::c_int * list) as isize) as ::core::ffi::c_double;
-            dysum += *dxyvar
-                .offset((2 as ::core::ffi::c_int * list + 1 as ::core::ffi::c_int) as isize)
-                as ::core::ffi::c_double;
-            sumxmove += fabs(xsum as ::core::ffi::c_double);
-            sumymove += fabs(ysum as ::core::ffi::c_double);
-            xmovemax = (if xmovemax as ::core::ffi::c_double > fabs(xsum as ::core::ffi::c_double) {
-                xmovemax as ::core::ffi::c_double
+            dxyvar[2 * list] += xsum;
+            dxyvar[2 * list + 1] += ysum;
+            dxsum += dxyvar[2 * list] as f64;
+            dysum += dxyvar[2 * list + 1] as f64;
+            sumxmove += (xsum as f64).abs();
+            sumymove += (ysum as f64).abs();
+            // `B3DMAX(xmovemax, fabs((double)xsum))` is a double comparison
+            // whose result is rounded back to the float `xmovemax`.
+            let ax = (xsum as f64).abs();
+            xmovemax = (if xmovemax as f64 > ax {
+                xmovemax as f64
             } else {
-                fabs(xsum as ::core::ffi::c_double)
-            }) as ::core::ffi::c_float;
-            ymovemax = (if ymovemax as ::core::ffi::c_double > fabs(ysum as ::core::ffi::c_double) {
-                ymovemax as ::core::ffi::c_double
+                ax
+            }) as f32;
+            let ay = (ysum as f64).abs();
+            ymovemax = (if ymovemax as f64 > ay {
+                ymovemax as f64
             } else {
-                fabs(ysum as ::core::ffi::c_double)
-            }) as ::core::ffi::c_float;
-            list += 1;
+                ay
+            }) as f32;
         }
-        ex = (dxsum / nvar as ::core::ffi::c_double) as ::core::ffi::c_float;
-        ey = (dysum / nvar as ::core::ffi::c_double) as ::core::ffi::c_float;
-        list = 0 as ::core::ffi::c_int;
-        while list < nvar {
-            *dxyvar.offset((2 as ::core::ffi::c_int * list) as isize) -= ex;
-            *dxyvar.offset((2 as ::core::ffi::c_int * list + 1 as ::core::ffi::c_int) as isize) -=
-                ey;
-            list += 1;
+
+        /* Shift to zero mean */
+        let ex = (dxsum / nvar as f64) as f32;
+        let ey = (dysum / nvar as f64) as f32;
+        for list in 0..nvar as usize {
+            dxyvar[2 * list] -= ex;
+            dxyvar[2 * list + 1] -= ey;
         }
-        if xmovemax < critMaxMove && ymovemax < critMaxMove {
-            if robustCrit as ::core::ffi::c_double <= 0.0f64 || didWeights != 0 {
+
+        /* stop if change was low */
+        if xmovemax < crit_max_move && ymovemax < crit_max_move {
+            if robust_crit <= 0. || did_weights != 0 {
                 break;
             }
-            computeWeights = 1 as ::core::ffi::c_int;
+            compute_weights = 1;
         }
-        if iter % intervalForTest >= intervalForTest - numAvgForTest {
-            xmoveAvg = (xmoveAvg as ::core::ffi::c_double
-                + sumxmove / nvar as ::core::ffi::c_double)
-                as ::core::ffi::c_float;
-            ymoveAvg = (ymoveAvg as ::core::ffi::c_double
-                + sumymove / nvar as ::core::ffi::c_double)
-                as ::core::ffi::c_float;
+        /* Average the mean moves over some iterations, and test for a change
+        in it periodically */
+        if iter % interval_for_test >= interval_for_test - num_avg_for_test {
+            xmove_avg += (sumxmove / nvar as f64) as f32;
+            ymove_avg += (sumymove / nvar as f64) as f32;
         }
-        if iter % intervalForTest == intervalForTest - 1 as ::core::ffi::c_int {
-            xmoveAvg /= numAvgForTest as ::core::ffi::c_float;
-            ymoveAvg /= numAvgForTest as ::core::ffi::c_float;
-            if xmoveLast - xmoveAvg < critMoveDiff && ymoveLast - ymoveAvg < critMoveDiff {
-                if robustCrit as ::core::ffi::c_double <= 0.0f64 || didWeights != 0 {
+        if iter % interval_for_test == interval_for_test - 1 {
+            xmove_avg /= num_avg_for_test as f32;
+            ymove_avg /= num_avg_for_test as f32;
+            if xmove_last - xmove_avg < crit_move_diff && ymove_last - ymove_avg < crit_move_diff {
+                if robust_crit <= 0. || did_weights != 0 {
                     break;
                 }
-                computeWeights = 1 as ::core::ffi::c_int;
+                compute_weights = 1;
             }
-            xmoveLast = xmoveAvg;
-            xmoveAvg = 0.0f32;
-            ymoveLast = ymoveAvg;
-            ymoveAvg = 0.0f32;
+            xmove_last = xmove_avg;
+            xmove_avg = 0.;
+            ymove_last = ymove_avg;
+            ymove_avg = 0.;
         }
         iter += 1;
     }
-    errsum = 0.0f64;
-    errmax = 0.0f64;
-    nsum = 0 as ::core::ffi::c_int;
-    list = 0 as ::core::ffi::c_int;
-    while list < nvar {
-        i = *neighInd.offset(list as isize);
-        while i < *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize) {
-            nay = *neighList.offset(i as isize);
-            ex = *dxyvar.offset((2 as ::core::ffi::c_int * nay) as isize)
-                - *dxyvar.offset((2 as ::core::ffi::c_int * list) as isize)
-                - *dxyEdge.offset((2 as ::core::ffi::c_int * i) as isize);
-            ey = *dxyvar.offset((2 as ::core::ffi::c_int * nay + 1 as ::core::ffi::c_int) as isize)
-                - *dxyvar
-                    .offset((2 as ::core::ffi::c_int * list + 1 as ::core::ffi::c_int) as isize)
-                - *dxyEdge.offset((2 as ::core::ffi::c_int * i + 1 as ::core::ffi::c_int) as isize);
-            ex = sqrt(
-                ex as ::core::ffi::c_double * ex as ::core::ffi::c_double
-                    + (ey * ey) as ::core::ffi::c_double,
-            ) as ::core::ffi::c_float
-                * *neighWgt.offset(i as isize);
-            errsum += ex as ::core::ffi::c_double;
-            errmax = if errmax > ex as ::core::ffi::c_double {
+
+    // Compute weighted error mean and max
+    let mut errsum = 0.0f64;
+    let mut errmax = 0.0f64;
+    let mut nsum = 0i32;
+    for list in 0..nvar as usize {
+        for i in neigh_ind[list]..neigh_ind[list + 1] {
+            let nay = neigh_list[i as usize];
+            let exf = dxyvar[2 * nay as usize] - dxyvar[2 * list] - dxy_edge[2 * i as usize];
+            let ey =
+                dxyvar[2 * nay as usize + 1] - dxyvar[2 * list + 1] - dxy_edge[2 * i as usize + 1];
+            // `(float)sqrt((double)ex*ex+ey*ey) * neighWgt[i]`.
+            let ex = ((exf as f64 * exf as f64 + (ey * ey) as f64).sqrt()
+                * neigh_wgt[i as usize] as f64) as f32;
+            errsum += ex as f64;
+            errmax = if errmax > ex as f64 {
                 errmax
             } else {
-                ex as ::core::ffi::c_double
+                ex as f64
             };
             nsum += 1;
-            i += 1;
         }
-        list += 1;
     }
-    *wErrMax = errmax as ::core::ffi::c_float;
-    *wErrMean = (errsum
-        / (if 1 as ::core::ffi::c_int > nsum {
-            1 as ::core::ffi::c_int
-        } else {
-            nsum
-        }) as ::core::ffi::c_double) as ::core::ffi::c_float;
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < 2 as ::core::ffi::c_int * nvar {
-        *dxyEdge.offset(ivar as isize) = *dxyvar.offset(ivar as isize);
-        ivar += 1;
+    *w_err_max = errmax as f32;
+    *w_err_mean = (errsum / (if 1 > nsum { 1 } else { nsum }) as f64) as f32;
+
+    /* Rearrange the data */
+    for ivar in 0..(2 * nvar) as usize {
+        dxy_edge[ivar] = dxyvar[ivar];
     }
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < nvar {
-        *dxyvar.offset((xyStep * ivar) as isize) =
-            *dxyEdge.offset((2 as ::core::ffi::c_int * *ivarToList.offset(ivar as isize)) as isize);
-        *dxyvar.offset((xyStep * ivar + varStep) as isize) = *dxyEdge.offset(
-            (2 as ::core::ffi::c_int * *ivarToList.offset(ivar as isize) + 1 as ::core::ffi::c_int)
-                as isize,
-        );
-        ivar += 1;
+    for ivar in 0..nvar as usize {
+        dxyvar[(xy_step * ivar as i32) as usize] = dxy_edge[2 * ivar_to_list[ivar] as usize];
+        dxyvar[(xy_step * ivar as i32 + var_step) as usize] =
+            dxy_edge[2 * ivar_to_list[ivar] as usize + 1];
     }
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < 2 as ::core::ffi::c_int * nvar {
-        *dxyEdge.offset(ivar as isize) = 0.0f32;
-        *placed.offset(ivar as isize) = 0 as ::core::ffi::c_uchar;
-        ivar += 1;
+
+    for ivar in 0..(2 * nvar) as usize {
+        dxy_edge[ivar] = 0.;
+        placed[ivar] = 0;
     }
-    *numIter = iter;
-    list = 0 as ::core::ffi::c_int;
-    while list < nvar {
-        i = *neighInd.offset(list as isize);
-        while i < *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize) {
-            nay = *neighList.offset(i as isize);
-            ipc = list;
-            ixy = *edgeDir.offset(i as isize) as ::core::ffi::c_int / 2 as ::core::ffi::c_int;
-            if *edgeDir.offset(i as isize) as ::core::ffi::c_int % 2 as ::core::ffi::c_int != 0 {
-                ipc = nay;
-                nay = list;
+
+    *num_iter = iter;
+
+    // Get the mean weight for each edge
+    for list in 0..nvar as usize {
+        for i in neigh_ind[list]..neigh_ind[list + 1] {
+            let mut nay = neigh_list[i as usize];
+            let mut _ipc = list as i32;
+            let ixy = (edge_dir[i as usize] / 2) as i32;
+            if edge_dir[i as usize] % 2 != 0 {
+                _ipc = nay;
+                nay = list as i32;
             }
-            ivar = *listToVar.offset(nay as isize);
-            *dxyEdge.offset((2 as ::core::ffi::c_int * ivar + ixy) as isize) +=
-                *neighWgt.offset(i as isize);
-            let ref mut fresh2 = *placed.offset((2 as ::core::ffi::c_int * ivar + ixy) as isize);
-            *fresh2 = (*fresh2).wrapping_add(1);
-            i += 1;
+            let ivar = list_to_var[nay as usize];
+            dxy_edge[(2 * ivar + ixy) as usize] += neigh_wgt[i as usize];
+            placed[(2 * ivar + ixy) as usize] = placed[(2 * ivar + ixy) as usize].wrapping_add(1);
         }
-        list += 1;
     }
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < 2 as ::core::ffi::c_int * nvar {
-        if *placed.offset(ivar as isize) != 0 {
-            *work.offset(ivar as isize) = *dxyEdge.offset(ivar as isize)
-                / *placed.offset(ivar as isize) as ::core::ffi::c_int as ::core::ffi::c_float;
+
+    // Repack them into the work array, use -1 if no edge
+    for ivar in 0..(2 * nvar) as usize {
+        if placed[ivar] != 0 {
+            work[ivar] = dxy_edge[ivar] / placed[ivar] as f32;
         } else {
-            *work.offset(ivar as isize) = -1.0f64 as ::core::ffi::c_float;
+            work[ivar] = -1.;
         }
-        ivar += 1;
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn find_piece_shifts_fortran(
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut nvar: *mut ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut ixpclist: *mut ::core::ffi::c_int,
-    mut iypclist: *mut ::core::ffi::c_int,
-    mut dxedge: *mut ::core::ffi::c_float,
-    mut dyedge: *mut ::core::ffi::c_float,
-    mut idir: *mut ::core::ffi::c_int,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut edgeStep: *mut ::core::ffi::c_int,
-    mut dxyvar: *mut ::core::ffi::c_float,
-    mut varStep: *mut ::core::ffi::c_int,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pcStep: *mut ::core::ffi::c_int,
-    mut work: *mut ::core::ffi::c_float,
-    mut fort: *mut ::core::ffi::c_int,
-    mut leaveInd: *mut ::core::ffi::c_int,
-    mut skipCrit: *mut ::core::ffi::c_int,
-    mut robustCrit: *mut ::core::ffi::c_float,
-    mut critMaxMove: *mut ::core::ffi::c_float,
-    mut critMoveDiff: *mut ::core::ffi::c_float,
-    mut maxIter: *mut ::core::ffi::c_int,
-    mut numAvgForTest: *mut ::core::ffi::c_int,
-    mut intervalForTest: *mut ::core::ffi::c_int,
-    mut numIter: *mut ::core::ffi::c_int,
-    mut wErrMean: *mut ::core::ffi::c_float,
-    mut wErrMax: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    return find_piece_shifts(
+
+/// Original `findpieceshifts` (`find_piece_shifts.c:447`).
+#[allow(clippy::too_many_arguments)]
+pub fn findpieceshifts(
+    ivarpc: &[i32],
+    nvar: &i32,
+    indvar: &[i32],
+    ixpclist: &[i32],
+    iypclist: &[i32],
+    dxedge: &[f32],
+    dyedge: &[f32],
+    idir: &i32,
+    piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    edge_step: &i32,
+    dxyvar: &mut [f32],
+    var_step: &i32,
+    edge_lower: &[i32],
+    edge_upper: &[i32],
+    pc_step: &i32,
+    work: &mut [f32],
+    fort: &i32,
+    leave_ind: &i32,
+    skip_crit: &i32,
+    robust_crit: &f32,
+    crit_max_move: &f32,
+    crit_move_diff: &f32,
+    max_iter: &i32,
+    num_avg_for_test: &i32,
+    interval_for_test: &i32,
+    num_iter: &mut i32,
+    w_err_mean: &mut f32,
+    w_err_max: &mut f32,
+) -> i32 {
+    find_piece_shifts(
         ivarpc,
         *nvar,
         indvar,
@@ -693,274 +503,240 @@ pub unsafe extern "C" fn find_piece_shifts_fortran(
         dxedge,
         dyedge,
         *idir,
-        pieceLower,
-        pieceUpper,
-        ifskipEdge,
-        *edgeStep,
+        piece_lower,
+        piece_upper,
+        ifskip_edge,
+        *edge_step,
         dxyvar,
-        *varStep,
-        edgeLower,
-        edgeUpper,
-        *pcStep,
+        *var_step,
+        edge_lower,
+        edge_upper,
+        *pc_step,
         work,
         *fort,
-        *leaveInd,
-        *skipCrit,
-        *robustCrit,
-        *critMaxMove,
-        *critMoveDiff,
-        *maxIter,
-        *numAvgForTest,
-        *intervalForTest,
-        numIter,
-        wErrMean,
-        wErrMax,
-    );
+        *leave_ind,
+        *skip_crit,
+        *robust_crit,
+        *crit_max_move,
+        *crit_move_diff,
+        *max_iter,
+        *num_avg_for_test,
+        *interval_for_test,
+        num_iter,
+        w_err_mean,
+        w_err_max,
+    )
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn find_piece_scalings(
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut nvar: ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut ixpclist: *mut ::core::ffi::c_int,
-    mut iypclist: *mut ::core::ffi::c_int,
-    mut ddenEdge: *mut ::core::ffi::c_float,
-    mut idir: ::core::ffi::c_int,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut edgeStep: ::core::ffi::c_int,
-    mut ddenVar: *mut ::core::ffi::c_float,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pcStep: ::core::ffi::c_int,
-    mut work: *mut ::core::ffi::c_float,
-    mut fort: ::core::ffi::c_int,
-    mut leaveInd: ::core::ffi::c_int,
-    mut skipCrit: ::core::ffi::c_int,
-    mut critMaxMove: ::core::ffi::c_float,
-    mut critMoveDiff: ::core::ffi::c_float,
-    mut maxIter: ::core::ffi::c_int,
-    mut numAvgForTest: ::core::ffi::c_int,
-    mut intervalForTest: ::core::ffi::c_int,
-    mut numIter: *mut ::core::ffi::c_int,
-    mut wErrMean: *mut ::core::ffi::c_float,
-    mut wErrMax: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    let mut iedge: ::core::ffi::c_int = 0;
-    let mut ipc: ::core::ffi::c_int = 0;
-    let mut numNeigh: ::core::ffi::c_int = 0;
-    let mut isign: ::core::ffi::c_int = 0;
-    let mut iter: ::core::ffi::c_int = 0;
-    let mut nay: ::core::ffi::c_int = 0;
-    let mut list: ::core::ffi::c_int = 0;
-    let mut nsum: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut ivar: ::core::ffi::c_int = 0;
-    let mut xyStep: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut ixy: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut numEdge: [::core::ffi::c_int; 2] = [0; 2];
-    let mut debug: ::core::ffi::c_int = 0;
-    let mut xmovemax: ::core::ffi::c_float = 0.;
-    let mut xsum: ::core::ffi::c_float = 0.;
-    let mut ex: ::core::ffi::c_float = 0.;
-    let mut wsum: ::core::ffi::c_float = 0.;
-    let mut sumxmove: ::core::ffi::c_double = 0.;
-    let mut dxsum: ::core::ffi::c_double = 0.;
-    let mut errsum: ::core::ffi::c_double = 0.;
-    let mut errmax: ::core::ffi::c_double = 0.;
-    let mut medSum: ::core::ffi::c_double = 0.;
-    let mut xmoveAvg: ::core::ffi::c_float = 0.;
-    let mut xmoveLast: ::core::ffi::c_float = 0.;
-    let mut ivarToList: *mut ::core::ffi::c_int = work as *mut ::core::ffi::c_int;
-    let mut listToVar: *mut ::core::ffi::c_int = ivarToList.offset(nvar as isize);
-    let mut neighInd: *mut ::core::ffi::c_int = listToVar.offset(nvar as isize);
-    let mut neighList: *mut ::core::ffi::c_int = neighInd
-        .offset(nvar as isize)
-        .offset(1 as ::core::ffi::c_int as isize);
-    let mut dtmpEdge: *mut ::core::ffi::c_float =
-        neighList.offset((4 as ::core::ffi::c_int * nvar) as isize) as *mut ::core::ffi::c_float;
-    let mut edgeDir: *mut ::core::ffi::c_uchar =
-        dtmpEdge.offset((4 as ::core::ffi::c_int * nvar) as isize) as *mut ::core::ffi::c_uchar;
-    let mut placed: *mut ::core::ffi::c_uchar =
-        edgeDir.offset((4 as ::core::ffi::c_int * nvar) as isize);
-    if edgeStep == 1 as ::core::ffi::c_int && pcStep == 1 as ::core::ffi::c_int {
-        xyStep = 2 as ::core::ffi::c_int;
-    } else if edgeStep > 1 as ::core::ffi::c_int && pcStep > 1 as ::core::ffi::c_int {
-        xyStep = 1 as ::core::ffi::c_int;
+
+/// Original `findPieceScalings` (`find_piece_shifts.c:487`).
+#[allow(clippy::too_many_arguments)]
+pub fn find_piece_scalings(
+    ivarpc: &[i32],
+    nvar: i32,
+    indvar: &[i32],
+    ixpclist: &[i32],
+    iypclist: &[i32],
+    dden_edge: &[f32],
+    idir: i32,
+    piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    edge_step: i32,
+    dden_var: &mut [f32],
+    edge_lower: &[i32],
+    edge_upper: &[i32],
+    pc_step: i32,
+    _work: &mut [f32],
+    mut fort: i32,
+    leave_ind: i32,
+    skip_crit: i32,
+    crit_max_move: f32,
+    crit_move_diff: f32,
+    max_iter: i32,
+    num_avg_for_test: i32,
+    interval_for_test: i32,
+    num_iter: &mut i32,
+    w_err_mean: &mut f32,
+    w_err_max: &mut f32,
+) -> i32 {
+    /* Set pointers to temporary arrays from the work array */
+    let mut ivar_to_list = vec![0i32; nvar as usize];
+    let mut list_to_var = vec![0i32; nvar as usize];
+    let mut neigh_ind = vec![0i32; (nvar + 1) as usize];
+    let mut neigh_list = vec![0i32; (4 * nvar) as usize];
+    let mut dtmp_edge = vec![0.0f32; (4 * nvar) as usize];
+    let mut edge_dir = vec![0u8; (4 * nvar) as usize];
+    let mut placed = vec![0u8; (2 * nvar) as usize];
+
+    /* Set the xy stride parameter */
+    let xy_step: i32;
+    if edge_step == 1 && pc_step == 1 {
+        xy_step = 2;
+    } else if edge_step > 1 && pc_step > 1 {
+        xy_step = 1;
     } else {
-        return 1 as ::core::ffi::c_int;
+        return 1;
     }
     if fort != 0 {
-        fort = 1 as ::core::ffi::c_int;
+        fort = 1;
     }
+
     initialize(
         ixpclist,
         iypclist,
         ivarpc,
-        edgeLower,
-        edgeUpper,
-        pieceLower,
-        pieceUpper,
-        ifskipEdge,
-        ddenEdge,
-        ::core::ptr::null_mut::<::core::ffi::c_float>(),
-        dtmpEdge,
-        ddenVar,
-        neighInd,
-        ::core::ptr::null_mut::<::core::ffi::c_float>(),
-        edgeDir,
-        neighList,
-        placed,
-        ivarToList,
-        listToVar,
+        edge_lower,
+        edge_upper,
+        piece_lower,
+        piece_upper,
+        ifskip_edge,
+        dden_edge,
+        None,
+        &mut dtmp_edge,
+        dden_var,
+        &mut neigh_ind,
+        None,
+        &mut edge_dir,
+        &mut neigh_list,
+        &mut placed,
+        &mut ivar_to_list,
+        &mut list_to_var,
         indvar,
         nvar,
         fort,
         idir,
-        leaveInd,
-        skipCrit,
-        xyStep,
-        edgeStep,
-        pcStep,
+        leave_ind,
+        skip_crit,
+        xy_step,
+        edge_step,
+        pc_step,
     );
-    numNeigh = *neighInd.offset(nvar as isize);
-    xmoveLast = 1.0e10f32;
-    xmoveAvg = 0.0f32;
-    iter = 1 as ::core::ffi::c_int;
-    while iter <= maxIter {
-        sumxmove = 0.0f64;
-        xmovemax = 0.0f32;
-        dxsum = 0.0f64;
-        errsum = 0.0f64;
-        errmax = 0.0f64;
-        list = 0 as ::core::ffi::c_int;
-        while list < nvar {
-            xsum = 0.0f32;
-            wsum = 0.0f32;
-            i = *neighInd.offset(list as isize);
-            while i < *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize) {
-                nay = *neighList.offset(i as isize);
-                ex = *ddenVar.offset(nay as isize)
-                    - *ddenVar.offset(list as isize)
-                    - *dtmpEdge.offset(i as isize);
+
+    let _num_neigh = neigh_ind[nvar as usize];
+
+    /* Iterate */
+    let mut xmove_last: f32 = 1.0e10;
+    let mut xmove_avg: f32 = 0.;
+    let mut iter = 1;
+    while iter <= max_iter {
+        let mut sumxmove = 0.0f64;
+        let mut xmovemax = 0.0f32;
+        let mut dxsum = 0.0f64;
+
+        /* Loop on pieces, adjusting each one by weighted average error in edges */
+        for list in 0..nvar as usize {
+            let mut xsum = 0.0f32;
+            let mut wsum = 0.0f32;
+            for i in neigh_ind[list]..neigh_ind[list + 1] {
+                let nay = neigh_list[i as usize];
+                let ex = dden_var[nay as usize] - dden_var[list] - dtmp_edge[i as usize];
                 xsum += ex;
-                wsum = (wsum as ::core::ffi::c_double + 1.0f64) as ::core::ffi::c_float;
-                i += 1;
+                wsum += 1.;
             }
-            if wsum as ::core::ffi::c_double > 1.0e-6f64 {
+            if wsum > 1.0e-6 {
                 xsum /= wsum;
             }
-            *ddenVar.offset(list as isize) += xsum;
-            dxsum += *ddenVar.offset(list as isize) as ::core::ffi::c_double;
-            sumxmove += fabs(xsum as ::core::ffi::c_double);
-            xmovemax = (if xmovemax as ::core::ffi::c_double > fabs(xsum as ::core::ffi::c_double) {
-                xmovemax as ::core::ffi::c_double
+            dden_var[list] += xsum;
+            dxsum += dden_var[list] as f64;
+            sumxmove += (xsum as f64).abs();
+            let ax = (xsum as f64).abs();
+            xmovemax = (if xmovemax as f64 > ax {
+                xmovemax as f64
             } else {
-                fabs(xsum as ::core::ffi::c_double)
-            }) as ::core::ffi::c_float;
-            list += 1;
+                ax
+            }) as f32;
         }
-        ex = (dxsum / nvar as ::core::ffi::c_double) as ::core::ffi::c_float;
-        list = 0 as ::core::ffi::c_int;
-        while list < nvar {
-            *ddenVar.offset(list as isize) -= ex;
-            list += 1;
+
+        /* Shift to zero mean */
+        let ex = (dxsum / nvar as f64) as f32;
+        for list in 0..nvar as usize {
+            dden_var[list] -= ex;
         }
-        if xmovemax < critMaxMove {
+
+        /* stop if change was low */
+        if xmovemax < crit_max_move {
             break;
         }
-        if iter % intervalForTest >= intervalForTest - numAvgForTest {
-            xmoveAvg = (xmoveAvg as ::core::ffi::c_double
-                + sumxmove / nvar as ::core::ffi::c_double)
-                as ::core::ffi::c_float;
+        /* Average the mean moves over some iterations, and test for a change
+        in it periodically */
+        if iter % interval_for_test >= interval_for_test - num_avg_for_test {
+            xmove_avg += (sumxmove / nvar as f64) as f32;
         }
-        if iter % intervalForTest == intervalForTest - 1 as ::core::ffi::c_int {
-            xmoveAvg /= numAvgForTest as ::core::ffi::c_float;
-            if xmoveLast - xmoveAvg < critMoveDiff {
+        if iter % interval_for_test == interval_for_test - 1 {
+            xmove_avg /= num_avg_for_test as f32;
+            if xmove_last - xmove_avg < crit_move_diff {
                 break;
             }
-            xmoveLast = xmoveAvg;
-            xmoveAvg = 0.0f32;
+            xmove_last = xmove_avg;
+            xmove_avg = 0.;
         }
         iter += 1;
     }
-    errsum = 0.0f64;
-    errmax = 0.0f64;
-    nsum = 0 as ::core::ffi::c_int;
-    list = 0 as ::core::ffi::c_int;
-    while list < nvar {
-        i = *neighInd.offset(list as isize);
-        while i < *neighInd.offset((list + 1 as ::core::ffi::c_int) as isize) {
-            nay = *neighList.offset(i as isize);
-            ex = *ddenVar.offset(nay as isize)
-                - *ddenVar.offset(list as isize)
-                - *dtmpEdge.offset(i as isize);
-            errsum += fabs(ex as ::core::ffi::c_double);
-            errmax = if errmax > ex as ::core::ffi::c_double {
+
+    // Compute weighted error mean and max
+    let mut errsum = 0.0f64;
+    let mut errmax = 0.0f64;
+    let mut nsum = 0i32;
+    for list in 0..nvar as usize {
+        for i in neigh_ind[list]..neigh_ind[list + 1] {
+            let nay = neigh_list[i as usize];
+            let ex = dden_var[nay as usize] - dden_var[list] - dtmp_edge[i as usize];
+            errsum += (ex as f64).abs();
+            errmax = if errmax > ex as f64 {
                 errmax
             } else {
-                ex as ::core::ffi::c_double
+                ex as f64
             };
             nsum += 1;
-            i += 1;
         }
-        list += 1;
     }
-    *wErrMax = errmax as ::core::ffi::c_float;
-    *wErrMean = (errsum
-        / (if 1 as ::core::ffi::c_int > nsum {
-            1 as ::core::ffi::c_int
-        } else {
-            nsum
-        }) as ::core::ffi::c_double) as ::core::ffi::c_float;
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < nvar {
-        *dtmpEdge.offset(ivar as isize) = *ddenVar.offset(ivar as isize);
-        ivar += 1;
+    *w_err_max = errmax as f32;
+    *w_err_mean = (errsum / (if 1 > nsum { 1 } else { nsum }) as f64) as f32;
+
+    /* Rearrange the data */
+    for ivar in 0..nvar as usize {
+        dtmp_edge[ivar] = dden_var[ivar];
     }
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < nvar {
-        *ddenVar.offset(ivar as isize) =
-            *dtmpEdge.offset(*ivarToList.offset(ivar as isize) as isize);
-        ivar += 1;
+    for ivar in 0..nvar as usize {
+        dden_var[ivar] = dtmp_edge[ivar_to_list[ivar] as usize];
     }
-    *numIter = iter;
-    return 0 as ::core::ffi::c_int;
+
+    *num_iter = iter;
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn find_piece_scalings_fortran(
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut nvar: *mut ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut ixpclist: *mut ::core::ffi::c_int,
-    mut iypclist: *mut ::core::ffi::c_int,
-    mut ddenedge: *mut ::core::ffi::c_float,
-    mut idir: *mut ::core::ffi::c_int,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut edgeStep: *mut ::core::ffi::c_int,
-    mut ddenvar: *mut ::core::ffi::c_float,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pcStep: *mut ::core::ffi::c_int,
-    mut work: *mut ::core::ffi::c_float,
-    mut fort: *mut ::core::ffi::c_int,
-    mut leaveInd: *mut ::core::ffi::c_int,
-    mut skipCrit: *mut ::core::ffi::c_int,
-    mut critMaxMove: *mut ::core::ffi::c_float,
-    mut critMoveDiff: *mut ::core::ffi::c_float,
-    mut maxIter: *mut ::core::ffi::c_int,
-    mut numAvgForTest: *mut ::core::ffi::c_int,
-    mut intervalForTest: *mut ::core::ffi::c_int,
-    mut numIter: *mut ::core::ffi::c_int,
-    mut wErrMean: *mut ::core::ffi::c_float,
-    mut wErrMax: *mut ::core::ffi::c_float,
-) -> ::core::ffi::c_int {
-    return find_piece_scalings(
+
+/// Original `findpiecescalings` (`find_piece_shifts.c:635`).
+#[allow(clippy::too_many_arguments)]
+pub fn findpiecescalings(
+    ivarpc: &[i32],
+    nvar: &i32,
+    indvar: &[i32],
+    ixpclist: &[i32],
+    iypclist: &[i32],
+    ddenedge: &[f32],
+    idir: &i32,
+    piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    edge_step: &i32,
+    ddenvar: &mut [f32],
+    edge_lower: &[i32],
+    edge_upper: &[i32],
+    pc_step: &i32,
+    work: &mut [f32],
+    fort: &i32,
+    leave_ind: &i32,
+    skip_crit: &i32,
+    crit_max_move: &f32,
+    crit_move_diff: &f32,
+    max_iter: &i32,
+    num_avg_for_test: &i32,
+    interval_for_test: &i32,
+    num_iter: &mut i32,
+    w_err_mean: &mut f32,
+    w_err_max: &mut f32,
+) -> i32 {
+    find_piece_scalings(
         ivarpc,
         *nvar,
         indvar,
@@ -968,726 +744,468 @@ pub unsafe extern "C" fn find_piece_scalings_fortran(
         iypclist,
         ddenedge,
         *idir,
-        pieceLower,
-        pieceUpper,
-        ifskipEdge,
-        *edgeStep,
+        piece_lower,
+        piece_upper,
+        ifskip_edge,
+        *edge_step,
         ddenvar,
-        edgeLower,
-        edgeUpper,
-        *pcStep,
+        edge_lower,
+        edge_upper,
+        *pc_step,
         work,
         *fort,
-        *leaveInd,
-        *skipCrit,
-        *critMaxMove,
-        *critMoveDiff,
-        *maxIter,
-        *numAvgForTest,
-        *intervalForTest,
-        numIter,
-        wErrMean,
-        wErrMax,
-    );
+        *leave_ind,
+        *skip_crit,
+        *crit_max_move,
+        *crit_move_diff,
+        *max_iter,
+        *num_avg_for_test,
+        *interval_for_test,
+        num_iter,
+        w_err_mean,
+        w_err_max,
+    )
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pick_alternative_shifts(
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut nvar: ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut dxedge: *mut ::core::ffi::c_float,
-    mut dyedge: *mut ::core::ffi::c_float,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut edgeStep: ::core::ffi::c_int,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pcStep: ::core::ffi::c_int,
-    mut fort: ::core::ffi::c_int,
-    mut altDxys: *mut ::core::ffi::c_float,
-    mut numAlts: ::core::ffi::c_int,
-    mut altIxy: ::core::ffi::c_int,
-    mut errThresh: ::core::ffi::c_float,
-    mut reduceFac: ::core::ffi::c_float,
-    mut newThresh: ::core::ffi::c_float,
-    mut fixedEdges: *mut ::core::ffi::c_int,
-    mut numFixed: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut ixy: ::core::ffi::c_int = 0;
-    let mut iyx: ::core::ffi::c_int = 0;
-    let mut ipc: ::core::ffi::c_int = 0;
-    let mut iedge: ::core::ffi::c_int = 0;
-    let mut neigh: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut ivar: ::core::ffi::c_int = 0;
-    let mut varStart: ::core::ffi::c_int = 0;
-    let mut varEnd: ::core::ffi::c_int = 0;
-    let mut idir: ::core::ffi::c_int = 0;
-    let mut prm1st: [::core::ffi::c_int; 2] = [0; 2];
-    let mut prm2nd: [::core::ffi::c_int; 2] = [0; 2];
-    let mut alt1st: [::core::ffi::c_int; 2] = [0; 2];
-    let mut alt2nd: [::core::ffi::c_int; 2] = [0; 2];
-    let mut ind1: ::core::ffi::c_int = 0;
-    let mut ind2: ::core::ffi::c_int = 0;
-    let mut ind3: ::core::ffi::c_int = 0;
-    let mut ind4: ::core::ffi::c_int = 0;
-    let mut minInd1: ::core::ffi::c_int = 0;
-    let mut numFull: ::core::ffi::c_int = 0;
-    let mut xyStep: ::core::ffi::c_int = 0;
-    let mut aStep: ::core::ffi::c_int = 0;
-    let mut minInd2: ::core::ffi::c_int = 0;
-    let mut minInd3: ::core::ffi::c_int = 0;
-    let mut minInd4: ::core::ffi::c_int = 0;
-    let mut ftmp: ::core::ffi::c_float = 0.;
-    let mut minErr: ::core::ffi::c_float = 0.;
-    let mut delx: ::core::ffi::c_float = 0.;
-    let mut dely: ::core::ffi::c_float = 0.;
-    let mut err: ::core::ffi::c_float = 0.;
-    let mut firstErr: ::core::ffi::c_float = 0.;
-    let mut altStep: ::core::ffi::c_int = 2 as ::core::ffi::c_int * numAlts;
-    if edgeStep == 1 as ::core::ffi::c_int && pcStep == 1 as ::core::ffi::c_int {
-        xyStep = 2 as ::core::ffi::c_int;
-    } else if edgeStep > 1 as ::core::ffi::c_int && pcStep > 1 as ::core::ffi::c_int {
-        xyStep = 1 as ::core::ffi::c_int;
+
+/// Original `pickAlternativeShifts` (`find_piece_shifts.c:710`).
+#[allow(clippy::too_many_arguments)]
+pub fn pick_alternative_shifts(
+    ivarpc: &[i32],
+    nvar: i32,
+    indvar: &[i32],
+    dxedge: &mut [f32],
+    dyedge: &mut [f32],
+    _piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    edge_step: i32,
+    _edge_lower: &[i32],
+    edge_upper: &[i32],
+    pc_step: i32,
+    mut fort: i32,
+    alt_dxys: &mut [f32],
+    num_alts: i32,
+    alt_ixy: i32,
+    err_thresh: f32,
+    reduce_fac: f32,
+    new_thresh: f32,
+    mut fixed_edges: Option<&mut [i32]>,
+    num_fixed: &mut i32,
+) -> i32 {
+    let mut prm1st = [0i32; 2];
+    let mut prm2nd = [0i32; 2];
+    let mut alt1st = [0i32; 2];
+    let mut alt2nd = [0i32; 2];
+    let alt_step = 2 * num_alts;
+
+    /* Set the xy stride parameter */
+    let xy_step: i32;
+    if edge_step == 1 && pc_step == 1 {
+        xy_step = 2;
+    } else if edge_step > 1 && pc_step > 1 {
+        xy_step = 1;
     } else {
-        return 1 as ::core::ffi::c_int;
+        return 1;
     }
     if fort != 0 {
-        fort = 1 as ::core::ffi::c_int;
+        fort = 1;
     }
-    varStart = nvar / 2 as ::core::ffi::c_int;
-    varEnd = 0 as ::core::ffi::c_int;
-    idir = -(1 as ::core::ffi::c_int);
-    while idir <= 1 as ::core::ffi::c_int {
-        ivar = varStart;
-        while idir * (ivar - varEnd) <= 0 as ::core::ffi::c_int {
-            ipc = *ivarpc.offset(ivar as isize) - fort;
-            numFull = 0 as ::core::ffi::c_int;
-            ixy = 0 as ::core::ffi::c_int;
-            while ixy < 2 as ::core::ffi::c_int {
-                iyx = 1 as ::core::ffi::c_int - ixy;
-                iedge = *edgeUpper.offset((xyStep * ipc + pcStep * ixy) as isize) - fort;
-                ind = xyStep * iedge + edgeStep * ixy;
-                if iedge >= 0 as ::core::ffi::c_int && *ifskipEdge.offset(ind as isize) == 0 {
-                    neigh = *pieceUpper.offset(ind as isize) - fort;
-                    if *indvar.offset(neigh as isize) >= 0 as ::core::ffi::c_int {
-                        prm1st[ixy as usize] = ind;
-                        alt1st[ixy as usize] = altStep * iedge + altIxy * ixy;
-                        iedge = *edgeUpper.offset((xyStep * neigh + pcStep * iyx) as isize) - fort;
-                        ind = xyStep * iedge + edgeStep * iyx;
-                        if iedge >= 0 as ::core::ffi::c_int && *ifskipEdge.offset(ind as isize) == 0
-                        {
-                            neigh = *pieceUpper.offset(ind as isize) - fort;
-                            if *indvar.offset(neigh as isize) >= 0 as ::core::ffi::c_int {
-                                prm2nd[ixy as usize] = ind;
-                                alt2nd[ixy as usize] = altStep * iedge + altIxy * iyx;
-                                numFull += 1;
+
+    // Look at each piece as a lower left corner; start in middle FWIW
+    let mut var_start = nvar / 2;
+    let mut var_end = 0;
+    let mut idir = -1;
+    while idir <= 1 {
+        let mut ivar = var_start;
+        while idir * (ivar - var_end) <= 0 {
+            let ipc = ivarpc[ivar as usize] - fort;
+            let mut num_full = 0;
+
+            // Look for two edges starting in each direction
+            for ixy in 0..2usize {
+                let iyx = 1 - ixy;
+                let mut iedge = edge_upper[(xy_step * ipc + pc_step * ixy as i32) as usize] - fort;
+                let mut ind = xy_step * iedge + edge_step * ixy as i32;
+                if iedge >= 0 && ifskip_edge[ind as usize] == 0 {
+                    let mut neigh = piece_upper[ind as usize] - fort;
+                    if indvar[neigh as usize] >= 0 {
+                        // Got first edge, save it, look for the second edge in other direction
+                        prm1st[ixy] = ind;
+                        alt1st[ixy] = alt_step * iedge + alt_ixy * ixy as i32;
+                        iedge =
+                            edge_upper[(xy_step * neigh + pc_step * iyx as i32) as usize] - fort;
+                        ind = xy_step * iedge + edge_step * iyx as i32;
+                        if iedge >= 0 && ifskip_edge[ind as usize] == 0 {
+                            neigh = piece_upper[ind as usize] - fort;
+                            if indvar[neigh as usize] >= 0 {
+                                prm2nd[ixy] = ind;
+                                alt2nd[ixy] = alt_step * iedge + alt_ixy * iyx as i32;
+                                num_full += 1;
                             }
                         }
                     }
                 }
-                ixy += 1;
             }
-            if !(numFull < 2 as ::core::ffi::c_int) {
-                minErr = 1.0e10f32;
-                firstErr = -1.0f64 as ::core::ffi::c_float;
-                ind1 = -(1 as ::core::ffi::c_int);
-                while ind1 < numAlts {
-                    ind2 = -(1 as ::core::ffi::c_int);
-                    while ind2 < numAlts {
-                        ind3 = -(1 as ::core::ffi::c_int);
-                        while ind3 < numAlts {
-                            ind4 = -(1 as ::core::ffi::c_int);
-                            while ind4 < numAlts {
-                                if !((if ind1 < 0 as ::core::ffi::c_int {
-                                    0 as ::core::ffi::c_int
-                                } else {
-                                    1 as ::core::ffi::c_int
-                                }) + (if ind2 < 0 as ::core::ffi::c_int {
-                                    0 as ::core::ffi::c_int
-                                } else {
-                                    1 as ::core::ffi::c_int
-                                }) + (if ind3 < 0 as ::core::ffi::c_int {
-                                    0 as ::core::ffi::c_int
-                                } else {
-                                    1 as ::core::ffi::c_int
-                                }) + (if ind4 < 0 as ::core::ffi::c_int {
-                                    0 as ::core::ffi::c_int
-                                } else {
-                                    1 as ::core::ffi::c_int
-                                }) > 1 as ::core::ffi::c_int)
-                                {
-                                    if !(ind1 >= 0 as ::core::ffi::c_int
-                                        && (*altDxys.offset(
-                                            (alt1st[0 as ::core::ffi::c_int as usize]
-                                                + 2 as ::core::ffi::c_int * ind1)
-                                                as isize,
-                                        )
-                                            as ::core::ffi::c_double)
-                                            < -1.0e20f64
-                                        || ind2 >= 0 as ::core::ffi::c_int
-                                            && (*altDxys.offset(
-                                                (alt2nd[0 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind2)
-                                                    as isize,
-                                            )
-                                                as ::core::ffi::c_double)
-                                                < -1.0e20f64
-                                        || ind3 >= 0 as ::core::ffi::c_int
-                                            && (*altDxys.offset(
-                                                (alt1st[1 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind3)
-                                                    as isize,
-                                            )
-                                                as ::core::ffi::c_double)
-                                                < -1.0e20f64
-                                        || ind4 >= 0 as ::core::ffi::c_int
-                                            && (*altDxys.offset(
-                                                (alt2nd[1 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind4)
-                                                    as isize,
-                                            )
-                                                as ::core::ffi::c_double)
-                                                < -1.0e20f64)
-                                    {
-                                        delx = (if ind1 < 0 as ::core::ffi::c_int {
-                                            *dxedge.offset(
-                                                prm1st[0 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt1st[0 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind1)
-                                                    as isize,
-                                            )
-                                        }) + (if ind2 < 0 as ::core::ffi::c_int {
-                                            *dxedge.offset(
-                                                prm2nd[0 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt2nd[0 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind2)
-                                                    as isize,
-                                            )
-                                        }) - ((if ind3 < 0 as ::core::ffi::c_int {
-                                            *dxedge.offset(
-                                                prm1st[1 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt1st[1 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind3)
-                                                    as isize,
-                                            )
-                                        }) + (if ind4 < 0 as ::core::ffi::c_int {
-                                            *dxedge.offset(
-                                                prm2nd[1 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt2nd[1 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind4)
-                                                    as isize,
-                                            )
-                                        }));
-                                        dely = (if ind1 < 0 as ::core::ffi::c_int {
-                                            *dyedge.offset(
-                                                prm1st[0 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt1st[0 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind1
-                                                    + 1 as ::core::ffi::c_int)
-                                                    as isize,
-                                            )
-                                        }) + (if ind2 < 0 as ::core::ffi::c_int {
-                                            *dyedge.offset(
-                                                prm2nd[0 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt2nd[0 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind2
-                                                    + 1 as ::core::ffi::c_int)
-                                                    as isize,
-                                            )
-                                        }) - ((if ind3 < 0 as ::core::ffi::c_int {
-                                            *dyedge.offset(
-                                                prm1st[1 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt1st[1 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind3
-                                                    + 1 as ::core::ffi::c_int)
-                                                    as isize,
-                                            )
-                                        }) + (if ind4 < 0 as ::core::ffi::c_int {
-                                            *dyedge.offset(
-                                                prm2nd[1 as ::core::ffi::c_int as usize] as isize,
-                                            )
-                                        } else {
-                                            *altDxys.offset(
-                                                (alt2nd[1 as ::core::ffi::c_int as usize]
-                                                    + 2 as ::core::ffi::c_int * ind4
-                                                    + 1 as ::core::ffi::c_int)
-                                                    as isize,
-                                            )
-                                        }));
-                                        err = sqrt(
-                                            (delx * delx + dely * dely) as ::core::ffi::c_double,
-                                        )
-                                            as ::core::ffi::c_float;
-                                        if firstErr
-                                            < 0 as ::core::ffi::c_int as ::core::ffi::c_float
-                                        {
-                                            firstErr = err;
-                                        }
-                                        if err < minErr {
-                                            minErr = err;
-                                            minInd1 = ind1;
-                                            minInd2 = ind2;
-                                            minInd3 = ind3;
-                                            minInd4 = ind4;
-                                        }
-                                    }
-                                }
-                                ind4 += 1;
+
+            if num_full < 2 {
+                ivar += idir;
+                continue;
+            }
+
+            // Find minimum error, allowing up to 2 to be substituted; keep track of original
+            // error
+            let mut min_err: f32 = 1.0e10;
+            let mut first_err: f32 = -1.;
+            let (mut min_ind1, mut min_ind2, mut min_ind3, mut min_ind4) = (0i32, 0i32, 0i32, 0i32);
+            for ind1 in -1..num_alts {
+                for ind2 in -1..num_alts {
+                    for ind3 in -1..num_alts {
+                        for ind4 in -1..num_alts {
+                            if i32::from(ind1 >= 0)
+                                + i32::from(ind2 >= 0)
+                                + i32::from(ind3 >= 0)
+                                + i32::from(ind4 >= 0)
+                                > 1
+                            {
+                                continue;
                             }
-                            ind3 += 1;
+                            if (ind1 >= 0 && alt_dxys[(alt1st[0] + 2 * ind1) as usize] < -1.0e20)
+                                || (ind2 >= 0
+                                    && alt_dxys[(alt2nd[0] + 2 * ind2) as usize] < -1.0e20)
+                                || (ind3 >= 0
+                                    && alt_dxys[(alt1st[1] + 2 * ind3) as usize] < -1.0e20)
+                                || (ind4 >= 0
+                                    && alt_dxys[(alt2nd[1] + 2 * ind4) as usize] < -1.0e20)
+                            {
+                                continue;
+                            }
+
+                            // The error is edge 1 plus edge 2 - (edge 3 + edge 4)
+                            let delx = (if ind1 < 0 {
+                                dxedge[prm1st[0] as usize]
+                            } else {
+                                alt_dxys[(alt1st[0] + 2 * ind1) as usize]
+                            }) + (if ind2 < 0 {
+                                dxedge[prm2nd[0] as usize]
+                            } else {
+                                alt_dxys[(alt2nd[0] + 2 * ind2) as usize]
+                            }) - ((if ind3 < 0 {
+                                dxedge[prm1st[1] as usize]
+                            } else {
+                                alt_dxys[(alt1st[1] + 2 * ind3) as usize]
+                            }) + (if ind4 < 0 {
+                                dxedge[prm2nd[1] as usize]
+                            } else {
+                                alt_dxys[(alt2nd[1] + 2 * ind4) as usize]
+                            }));
+                            let dely = (if ind1 < 0 {
+                                dyedge[prm1st[0] as usize]
+                            } else {
+                                alt_dxys[(alt1st[0] + 2 * ind1 + 1) as usize]
+                            }) + (if ind2 < 0 {
+                                dyedge[prm2nd[0] as usize]
+                            } else {
+                                alt_dxys[(alt2nd[0] + 2 * ind2 + 1) as usize]
+                            }) - ((if ind3 < 0 {
+                                dyedge[prm1st[1] as usize]
+                            } else {
+                                alt_dxys[(alt1st[1] + 2 * ind3 + 1) as usize]
+                            }) + (if ind4 < 0 {
+                                dyedge[prm2nd[1] as usize]
+                            } else {
+                                alt_dxys[(alt2nd[1] + 2 * ind4 + 1) as usize]
+                            }));
+                            let err = ((delx * delx + dely * dely) as f64).sqrt() as f32;
+                            if first_err < 0. {
+                                first_err = err;
+                            }
+                            if err < min_err {
+                                min_err = err;
+                                min_ind1 = ind1;
+                                min_ind2 = ind2;
+                                min_ind3 = ind3;
+                                min_ind4 = ind4;
+                            }
                         }
-                        ind2 += 1;
                     }
-                    ind1 += 1;
                 }
-                if firstErr > errThresh && minErr < firstErr * reduceFac && minErr <= newThresh {
-                    if minInd1 >= 0 as ::core::ffi::c_int {
-                        ftmp = *dxedge.offset(prm1st[0 as ::core::ffi::c_int as usize] as isize);
-                        *dxedge.offset(prm1st[0 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt1st[0 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd1)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt1st[0 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd1)
-                                as isize,
-                        ) = ftmp;
-                        ftmp = *dyedge.offset(prm1st[0 as ::core::ffi::c_int as usize] as isize);
-                        *dyedge.offset(prm1st[0 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt1st[0 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd1
-                                    + 1 as ::core::ffi::c_int)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt1st[0 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd1
-                                + 1 as ::core::ffi::c_int) as isize,
-                        ) = ftmp;
-                        if !fixedEdges.is_null() {
-                            let fresh6 = *numFixed;
-                            *numFixed = *numFixed + 1;
-                            *fixedEdges.offset(fresh6 as isize) =
-                                prm1st[0 as ::core::ffi::c_int as usize];
-                        }
-                    }
-                    if minInd2 >= 0 as ::core::ffi::c_int {
-                        ftmp = *dxedge.offset(prm2nd[0 as ::core::ffi::c_int as usize] as isize);
-                        *dxedge.offset(prm2nd[0 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt2nd[0 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd2)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt2nd[0 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd2)
-                                as isize,
-                        ) = ftmp;
-                        ftmp = *dyedge.offset(prm2nd[0 as ::core::ffi::c_int as usize] as isize);
-                        *dyedge.offset(prm2nd[0 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt2nd[0 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd2
-                                    + 1 as ::core::ffi::c_int)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt2nd[0 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd2
-                                + 1 as ::core::ffi::c_int) as isize,
-                        ) = ftmp;
-                        if !fixedEdges.is_null() {
-                            let fresh7 = *numFixed;
-                            *numFixed = *numFixed + 1;
-                            *fixedEdges.offset(fresh7 as isize) =
-                                prm2nd[0 as ::core::ffi::c_int as usize];
-                        }
-                    }
-                    if minInd3 >= 0 as ::core::ffi::c_int {
-                        ftmp = *dxedge.offset(prm1st[1 as ::core::ffi::c_int as usize] as isize);
-                        *dxedge.offset(prm1st[1 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt1st[1 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd3)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt1st[1 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd3)
-                                as isize,
-                        ) = ftmp;
-                        ftmp = *dyedge.offset(prm1st[1 as ::core::ffi::c_int as usize] as isize);
-                        *dyedge.offset(prm1st[1 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt1st[1 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd3
-                                    + 1 as ::core::ffi::c_int)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt1st[1 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd3
-                                + 1 as ::core::ffi::c_int) as isize,
-                        ) = ftmp;
-                        if !fixedEdges.is_null() {
-                            let fresh8 = *numFixed;
-                            *numFixed = *numFixed + 1;
-                            *fixedEdges.offset(fresh8 as isize) =
-                                prm1st[1 as ::core::ffi::c_int as usize];
-                        }
-                    }
-                    if minInd4 >= 0 as ::core::ffi::c_int {
-                        ftmp = *dxedge.offset(prm2nd[1 as ::core::ffi::c_int as usize] as isize);
-                        *dxedge.offset(prm2nd[1 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt2nd[1 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd4)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt2nd[1 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd4)
-                                as isize,
-                        ) = ftmp;
-                        ftmp = *dyedge.offset(prm2nd[1 as ::core::ffi::c_int as usize] as isize);
-                        *dyedge.offset(prm2nd[1 as ::core::ffi::c_int as usize] as isize) =
-                            *altDxys.offset(
-                                (alt2nd[1 as ::core::ffi::c_int as usize]
-                                    + 2 as ::core::ffi::c_int * minInd4
-                                    + 1 as ::core::ffi::c_int)
-                                    as isize,
-                            );
-                        *altDxys.offset(
-                            (alt2nd[1 as ::core::ffi::c_int as usize]
-                                + 2 as ::core::ffi::c_int * minInd4
-                                + 1 as ::core::ffi::c_int) as isize,
-                        ) = ftmp;
-                        if !fixedEdges.is_null() {
-                            let fresh9 = *numFixed;
-                            *numFixed = *numFixed + 1;
-                            *fixedEdges.offset(fresh9 as isize) =
-                                prm2nd[1 as ::core::ffi::c_int as usize];
+            }
+            // Replace whatever came out better
+            if first_err > err_thresh && min_err < first_err * reduce_fac && min_err <= new_thresh {
+                // `REPLACE_DXY(mnd, prm, alt)` (`find_piece_shifts.c:865`).
+                for (mnd, prm, alt) in [
+                    (min_ind1, prm1st[0], alt1st[0]),
+                    (min_ind2, prm2nd[0], alt2nd[0]),
+                    (min_ind3, prm1st[1], alt1st[1]),
+                    (min_ind4, prm2nd[1], alt2nd[1]),
+                ] {
+                    if mnd >= 0 {
+                        let ftmp = dxedge[prm as usize];
+                        dxedge[prm as usize] = alt_dxys[(alt + 2 * mnd) as usize];
+                        alt_dxys[(alt + 2 * mnd) as usize] = ftmp;
+                        let ftmp = dyedge[prm as usize];
+                        dyedge[prm as usize] = alt_dxys[(alt + 2 * mnd + 1) as usize];
+                        alt_dxys[(alt + 2 * mnd + 1) as usize] = ftmp;
+                        if let Some(fixed) = fixed_edges.as_deref_mut() {
+                            fixed[*num_fixed as usize] = prm;
+                            *num_fixed += 1;
                         }
                     }
                 }
             }
             ivar += idir;
         }
-        varStart = nvar / 2 as ::core::ffi::c_int + 1 as ::core::ffi::c_int;
-        varEnd = nvar - 1 as ::core::ffi::c_int;
-        idir += 2 as ::core::ffi::c_int;
+        var_start = nvar / 2 + 1;
+        var_end = nvar - 1;
+        idir += 2;
     }
-    fflush(stdout);
-    return 0 as ::core::ffi::c_int;
+    0
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pick_alternative_shifts_fortran(
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut nvar: *mut ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut dxedge: *mut ::core::ffi::c_float,
-    mut dyedge: *mut ::core::ffi::c_float,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut edgeStep: *mut ::core::ffi::c_int,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pcStep: *mut ::core::ffi::c_int,
-    mut fort: *mut ::core::ffi::c_int,
-    mut altDxys: *mut ::core::ffi::c_float,
-    mut numAlts: *mut ::core::ffi::c_int,
-    mut altIxy: *mut ::core::ffi::c_int,
-    mut errThresh: *mut ::core::ffi::c_float,
-    mut reduceFac: *mut ::core::ffi::c_float,
-    mut newThresh: *mut ::core::ffi::c_float,
-    mut fixedEdges: *mut ::core::ffi::c_int,
-    mut numFixed: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return pick_alternative_shifts(
-        ivarpc, *nvar, indvar, dxedge, dyedge, pieceLower, pieceUpper, ifskipEdge, *edgeStep,
-        edgeLower, edgeUpper, *pcStep, *fort, altDxys, *numAlts, *altIxy, *errThresh, *reduceFac,
-        *newThresh, fixedEdges, numFixed,
-    );
+
+/// Original `pickalternativeshifts` (`find_piece_shifts.c:846`).
+#[allow(clippy::too_many_arguments)]
+pub fn pickalternativeshifts(
+    ivarpc: &[i32],
+    nvar: &i32,
+    indvar: &[i32],
+    dxedge: &mut [f32],
+    dyedge: &mut [f32],
+    piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    edge_step: &i32,
+    edge_lower: &[i32],
+    edge_upper: &[i32],
+    pc_step: &i32,
+    fort: &i32,
+    alt_dxys: &mut [f32],
+    num_alts: &i32,
+    alt_ixy: &i32,
+    err_thresh: &f32,
+    reduce_fac: &f32,
+    new_thresh: &f32,
+    fixed_edges: Option<&mut [i32]>,
+    num_fixed: &mut i32,
+) -> i32 {
+    pick_alternative_shifts(
+        ivarpc,
+        *nvar,
+        indvar,
+        dxedge,
+        dyedge,
+        piece_lower,
+        piece_upper,
+        ifskip_edge,
+        *edge_step,
+        edge_lower,
+        edge_upper,
+        *pc_step,
+        *fort,
+        alt_dxys,
+        *num_alts,
+        *alt_ixy,
+        *err_thresh,
+        *reduce_fac,
+        *new_thresh,
+        fixed_edges,
+        num_fixed,
+    )
 }
-unsafe extern "C" fn find_lowest_three(
-    mut val: ::core::ffi::c_float,
-    mut ind: ::core::ffi::c_int,
-    mut lowest: *mut ::core::ffi::c_float,
-    mut second: *mut ::core::ffi::c_float,
-    mut third: *mut ::core::ffi::c_float,
-) {
+
+/// Original `findLowestThree` (`find_piece_shifts.c:864`).
+fn find_lowest_three(val: f32, ind: i32, lowest: &mut f32, second: &mut f32, third: &mut f32) {
     if ind == 0 {
         *lowest = val;
     } else if val < *lowest {
-        if ind > 1 as ::core::ffi::c_int {
+        if ind > 1 {
             *third = *second;
         }
         *second = *lowest;
         *lowest = val;
-        return;
-    } else if ind <= 1 as ::core::ffi::c_int || val < *second {
-        if ind > 1 as ::core::ffi::c_int {
+    } else if ind <= 1 || val < *second {
+        if ind > 1 {
             *third = *second;
         }
         *second = val;
-    } else if ind <= 2 as ::core::ffi::c_int || val < *third {
+    } else if ind <= 2 || val < *third {
         *third = val;
     }
 }
-unsafe extern "C" fn initialize(
-    mut ixpclist: *mut ::core::ffi::c_int,
-    mut iypclist: *mut ::core::ffi::c_int,
-    mut ivarpc: *mut ::core::ffi::c_int,
-    mut edgeLower: *mut ::core::ffi::c_int,
-    mut edgeUpper: *mut ::core::ffi::c_int,
-    mut pieceLower: *mut ::core::ffi::c_int,
-    mut pieceUpper: *mut ::core::ffi::c_int,
-    mut ifskipEdge: *mut ::core::ffi::c_int,
-    mut dxedge: *mut ::core::ffi::c_float,
-    mut dyedge: *mut ::core::ffi::c_float,
-    mut dxyEdge: *mut ::core::ffi::c_float,
-    mut dxyvar: *mut ::core::ffi::c_float,
-    mut neighInd: *mut ::core::ffi::c_int,
-    mut neighWgt: *mut ::core::ffi::c_float,
-    mut edgeDir: *mut ::core::ffi::c_uchar,
-    mut neighList: *mut ::core::ffi::c_int,
-    mut placed: *mut ::core::ffi::c_uchar,
-    mut ivarToList: *mut ::core::ffi::c_int,
-    mut listToVar: *mut ::core::ffi::c_int,
-    mut indvar: *mut ::core::ffi::c_int,
-    mut nvar: ::core::ffi::c_int,
-    mut fort: ::core::ffi::c_int,
-    mut idir: ::core::ffi::c_int,
-    mut leaveInd: ::core::ffi::c_int,
-    mut skipCrit: ::core::ffi::c_int,
-    mut xyStep: ::core::ffi::c_int,
-    mut edgeStep: ::core::ffi::c_int,
-    mut pcStep: ::core::ffi::c_int,
+
+/// Original `initialize` (`find_piece_shifts.c:885`).
+///
+/// Initialize either of those routines: figure out the division of pieces into
+/// groups and initialize the shifts or scaling differences by summing all the
+/// edge differences that involve one piece.
+#[allow(clippy::too_many_arguments)]
+fn initialize(
+    ixpclist: &[i32],
+    iypclist: &[i32],
+    ivarpc: &[i32],
+    edge_lower: &[i32],
+    edge_upper: &[i32],
+    piece_lower: &[i32],
+    piece_upper: &[i32],
+    ifskip_edge: &[i32],
+    dxedge: &[f32],
+    dyedge: Option<&[f32]>,
+    dxy_edge: &mut [f32],
+    dxyvar: &mut [f32],
+    neigh_ind: &mut [i32],
+    mut neigh_wgt: Option<&mut [f32]>,
+    edge_dir: &mut [u8],
+    neigh_list: &mut [i32],
+    placed: &mut [u8],
+    ivar_to_list: &mut [i32],
+    list_to_var: &mut [i32],
+    indvar: &[i32],
+    nvar: i32,
+    fort: i32,
+    idir: i32,
+    leave_ind: i32,
+    skip_crit: i32,
+    xy_step: i32,
+    edge_step: i32,
+    pc_step: i32,
 ) {
-    let mut minxpc: ::core::ffi::c_int = 0;
-    let mut minypc: ::core::ffi::c_int = 0;
-    let mut maxxpc: ::core::ffi::c_int = 0;
-    let mut maxypc: ::core::ffi::c_int = 0;
-    let mut imin: ::core::ffi::c_int = 0;
-    let mut numOnList: ::core::ffi::c_int = 0;
-    let mut listInd: ::core::ffi::c_int = 0;
-    let mut iedge: ::core::ffi::c_int = 0;
-    let mut ipc: ::core::ffi::c_int = 0;
-    let mut numNeigh: ::core::ffi::c_int = 0;
-    let mut isign: ::core::ffi::c_int = 0;
-    let mut iter: ::core::ffi::c_int = 0;
-    let mut nay: ::core::ffi::c_int = 0;
-    let mut list: ::core::ffi::c_int = 0;
-    let mut nsum: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut ivar: ::core::ffi::c_int = 0;
-    let mut ind: ::core::ffi::c_int = 0;
-    let mut ixy: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut lowup: ::core::ffi::c_int = 0;
-    let mut neighpc: ::core::ffi::c_int = 0;
-    let mut neighvar: ::core::ffi::c_int = 0;
-    let mut distmin: ::core::ffi::c_float = 0.;
-    let mut dist: ::core::ffi::c_float = 0.;
-    let mut xmovemax: ::core::ffi::c_float = 0.;
-    let mut ymovemax: ::core::ffi::c_float = 0.;
-    let mut xsum: ::core::ffi::c_float = 0.;
-    let mut ysum: ::core::ffi::c_float = 0.;
-    let mut dx: ::core::ffi::c_float = 0.;
-    let mut dy: ::core::ffi::c_float = 0.;
-    let mut ex: ::core::ffi::c_float = 0.;
-    let mut ey: ::core::ffi::c_float = 0.;
-    let mut bigint: ::core::ffi::c_int = 100000000 as ::core::ffi::c_int;
-    let mut dxyDim: ::core::ffi::c_int = if !dyedge.is_null() {
-        2 as ::core::ffi::c_int
-    } else {
-        1 as ::core::ffi::c_int
-    };
-    ivar = 0 as ::core::ffi::c_int;
-    while ivar < nvar {
-        *placed.offset(ivar as isize) = 0 as ::core::ffi::c_uchar;
-        *ivarToList.offset(ivar as isize) = -(1 as ::core::ffi::c_int);
-        ivar += 1;
+    let bigint = 100000000;
+    let dxy_dim = if dyedge.is_some() { 2 } else { 1 };
+
+    /* Initialize stuff */
+    for ivar in 0..nvar as usize {
+        placed[ivar] = 0;
+        ivar_to_list[ivar] = -1;
     }
-    numNeigh = 0 as ::core::ffi::c_int;
-    numOnList = 0 as ::core::ffi::c_int;
+    let mut num_neigh = 0i32;
+    let mut num_on_list = 0i32;
+
+    /* Set up initial placement of pieces, loop on possibly unconnected sets */
     loop {
-        minxpc = bigint;
-        minypc = bigint;
-        maxxpc = -bigint;
-        maxypc = -bigint;
-        ivar = 0 as ::core::ffi::c_int;
-        while ivar < nvar {
-            if *placed.offset(ivar as isize) == 0 {
-                minxpc =
-                    if minxpc < *ixpclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize) {
-                        minxpc
-                    } else {
-                        *ixpclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize)
-                    };
-                maxxpc =
-                    if maxxpc > *ixpclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize) {
-                        maxxpc
-                    } else {
-                        *ixpclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize)
-                    };
-                minypc =
-                    if minypc < *iypclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize) {
-                        minypc
-                    } else {
-                        *iypclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize)
-                    };
-                maxypc =
-                    if maxypc > *iypclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize) {
-                        maxypc
-                    } else {
-                        *iypclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize)
-                    };
+        /* find min/max coordinates of the unplaced pieces and the piece nearest
+        the middle of this */
+        let mut minxpc = bigint;
+        let mut minypc = bigint;
+        let mut maxxpc = -bigint;
+        let mut maxypc = -bigint;
+        for ivar in 0..nvar as usize {
+            if placed[ivar] == 0 {
+                let x = ixpclist[(ivarpc[ivar] - fort) as usize];
+                let y = iypclist[(ivarpc[ivar] - fort) as usize];
+                minxpc = if minxpc < x { minxpc } else { x };
+                maxxpc = if maxxpc > x { maxxpc } else { x };
+                minypc = if minypc < y { minypc } else { y };
+                maxypc = if maxypc > y { maxypc } else { y };
             }
-            ivar += 1;
         }
         if minxpc == bigint {
             break;
         }
-        distmin = 1.0e30f32;
-        ivar = 0 as ::core::ffi::c_int;
-        while ivar < nvar {
-            if *placed.offset(ivar as isize) == 0 {
-                dx = (*ixpclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize)
-                    as ::core::ffi::c_double
-                    - 0.5f64 * (maxxpc + minxpc) as ::core::ffi::c_double)
-                    as ::core::ffi::c_float;
-                dy = (*iypclist.offset((*ivarpc.offset(ivar as isize) - fort) as isize)
-                    as ::core::ffi::c_double
-                    - 0.5f64 * (maxypc + minypc) as ::core::ffi::c_double)
-                    as ::core::ffi::c_float;
-                dist = dx * dx + dy * dy;
+
+        let mut distmin: f32 = 1.0e30;
+        let mut imin = 0i32;
+        for ivar in 0..nvar as usize {
+            if placed[ivar] == 0 {
+                // `ixpclist[...] - 0.5 * (maxxpc + minxpc)` is an int minus a
+                // double, so `dx` and `dy` are floats holding a double result.
+                let dx = (ixpclist[(ivarpc[ivar] - fort) as usize] as f64
+                    - 0.5 * (maxxpc + minxpc) as f64) as f32;
+                let dy = (iypclist[(ivarpc[ivar] - fort) as usize] as f64
+                    - 0.5 * (maxypc + minypc) as f64) as f32;
+                let dist = dx * dx + dy * dy;
                 if dist < distmin {
                     distmin = dist;
-                    imin = ivar;
+                    imin = ivar as i32;
                 }
             }
-            ivar += 1;
         }
-        *ivarToList.offset(imin as isize) = numOnList;
-        *listToVar.offset(numOnList as isize) = imin;
-        let fresh3 = numOnList;
-        numOnList = numOnList + 1;
-        listInd = fresh3;
-        while listInd < numOnList {
-            xsum = 0.0f32;
-            ysum = 0.0f32;
-            nsum = 0 as ::core::ffi::c_int;
-            ipc = *ivarpc.offset(*listToVar.offset(listInd as isize) as isize) - fort;
-            *neighInd.offset(listInd as isize) = numNeigh;
-            ixy = 0 as ::core::ffi::c_int;
-            while ixy < 2 as ::core::ffi::c_int {
-                lowup = 0 as ::core::ffi::c_int;
-                while lowup < 2 as ::core::ffi::c_int {
-                    isign = 2 as ::core::ffi::c_int * lowup - 1 as ::core::ffi::c_int;
-                    if lowup != 0 {
-                        iedge = *edgeUpper.offset((xyStep * ipc + pcStep * ixy) as isize) - fort;
+
+        /* Add this one to the list of variables then start searching */
+        ivar_to_list[imin as usize] = num_on_list;
+        list_to_var[num_on_list as usize] = imin;
+        let mut list_ind = num_on_list;
+        num_on_list += 1;
+        while list_ind < num_on_list {
+            let mut xsum = 0.0f32;
+            let mut ysum = 0.0f32;
+            let mut nsum = 0i32;
+
+            /* Look at a piece and its edges for neighbors */
+            let ipc = ivarpc[list_to_var[list_ind as usize] as usize] - fort;
+            neigh_ind[list_ind as usize] = num_neigh;
+            for ixy in 0..2i32 {
+                for lowup in 0..2i32 {
+                    let isign = 2 * lowup - 1;
+                    let iedge = if lowup != 0 {
+                        edge_upper[(xy_step * ipc + pc_step * ixy) as usize] - fort
                     } else {
-                        iedge = *edgeLower.offset((xyStep * ipc + pcStep * ixy) as isize) - fort;
-                    }
-                    ind = xyStep * iedge + edgeStep * ixy;
-                    if iedge >= 0 as ::core::ffi::c_int
-                        && *ifskipEdge.offset(ind as isize) < skipCrit
-                        && ind != leaveInd - fort
+                        edge_lower[(xy_step * ipc + pc_step * ixy) as usize] - fort
+                    };
+                    let ind = xy_step * iedge + edge_step * ixy;
+                    if iedge >= 0
+                        && ifskip_edge[ind as usize] < skip_crit
+                        && ind != leave_ind - fort
                     {
-                        if lowup != 0 {
-                            neighpc = *pieceUpper.offset(ind as isize) - fort;
+                        let neighpc = if lowup != 0 {
+                            piece_upper[ind as usize] - fort
                         } else {
-                            neighpc = *pieceLower.offset(ind as isize) - fort;
+                            piece_lower[ind as usize] - fort
+                        };
+                        let neighvar = indvar[neighpc as usize] - fort;
+                        if neighvar < 0 {
+                            continue;
                         }
-                        neighvar = *indvar.offset(neighpc as isize) - fort;
-                        if !(neighvar < 0 as ::core::ffi::c_int) {
-                            if *ivarToList.offset(neighvar as isize) < 0 as ::core::ffi::c_int {
-                                *listToVar.offset(numOnList as isize) = neighvar;
-                                let fresh4 = numOnList;
-                                numOnList = numOnList + 1;
-                                *ivarToList.offset(neighvar as isize) = fresh4;
+                        /* If neighbor is not on var list yet, add it */
+                        if ivar_to_list[neighvar as usize] < 0 {
+                            list_to_var[num_on_list as usize] = neighvar;
+                            ivar_to_list[neighvar as usize] = num_on_list;
+                            num_on_list += 1;
+                        }
+
+                        /* Add neighbor to neighbor list and also the edge shift with the
+                        right polarity */
+                        let nay = ivar_to_list[neighvar as usize];
+                        let ex = -idir as f32 * isign as f32 * dxedge[ind as usize];
+                        dxy_edge[(dxy_dim * num_neigh) as usize] = ex;
+                        let mut ey = 0.0f32;
+                        if let Some(dyedge) = dyedge {
+                            ey = -idir as f32 * isign as f32 * dyedge[ind as usize];
+                            dxy_edge[(2 * num_neigh + 1) as usize] = ey;
+                        }
+                        if let Some(neigh_wgt) = neigh_wgt.as_deref_mut() {
+                            neigh_wgt[num_neigh as usize] = 1.;
+                        }
+                        edge_dir[num_neigh as usize] = (lowup + 2 * ixy) as u8;
+                        neigh_list[num_neigh as usize] = nay;
+                        num_neigh += 1;
+
+                        /* if the neighbor is placed, add estimated piece shift to sum */
+                        /* dxyvar is indexed as in C for convenience and then rearranged
+                        to correct indexing for the return */
+                        if placed[neighvar as usize] != 0 {
+                            xsum += dxyvar[(dxy_dim * nay) as usize] - ex;
+                            if dyedge.is_some() {
+                                ysum += dxyvar[(2 * nay + 1) as usize] - ey;
                             }
-                            nay = *ivarToList.offset(neighvar as isize);
-                            ex = (-idir * isign) as ::core::ffi::c_float
-                                * *dxedge.offset(ind as isize);
-                            *dxyEdge.offset((dxyDim * numNeigh) as isize) = ex;
-                            if !dyedge.is_null() {
-                                ey = (-idir * isign) as ::core::ffi::c_float
-                                    * *dyedge.offset(ind as isize);
-                                *dxyEdge.offset(
-                                    (2 as ::core::ffi::c_int * numNeigh + 1 as ::core::ffi::c_int)
-                                        as isize,
-                                ) = ey;
-                            }
-                            if !neighWgt.is_null() {
-                                *neighWgt.offset(numNeigh as isize) = 1.0f32;
-                            }
-                            *edgeDir.offset(numNeigh as isize) =
-                                (lowup + 2 as ::core::ffi::c_int * ixy) as ::core::ffi::c_uchar;
-                            let fresh5 = numNeigh;
-                            numNeigh = numNeigh + 1;
-                            *neighList.offset(fresh5 as isize) = nay;
-                            if *placed.offset(neighvar as isize) != 0 {
-                                xsum += *dxyvar.offset((dxyDim * nay) as isize) - ex;
-                                if !dyedge.is_null() {
-                                    ysum += *dxyvar.offset(
-                                        (2 as ::core::ffi::c_int * nay + 1 as ::core::ffi::c_int)
-                                            as isize,
-                                    ) - ey;
-                                }
-                                nsum += 1;
-                            }
+                            nsum += 1;
                         }
                     }
-                    lowup += 1;
                 }
-                ixy += 1;
             }
+
+            /* Get average piece shift and place this piece */
             if nsum != 0 {
-                xsum /= nsum as ::core::ffi::c_float;
-                ysum /= nsum as ::core::ffi::c_float;
+                xsum /= nsum as f32;
+                ysum /= nsum as f32;
             }
-            *dxyvar.offset((dxyDim * listInd) as isize) = xsum;
-            if !dyedge.is_null() {
-                *dxyvar.offset(
-                    (2 as ::core::ffi::c_int * listInd + 1 as ::core::ffi::c_int) as isize,
-                ) = ysum;
+            dxyvar[(dxy_dim * list_ind) as usize] = xsum;
+            if dyedge.is_some() {
+                dxyvar[(2 * list_ind + 1) as usize] = ysum;
             }
-            *placed.offset(*listToVar.offset(listInd as isize) as isize) =
-                1 as ::core::ffi::c_uchar;
-            listInd += 1;
+            placed[list_to_var[list_ind as usize] as usize] = 1;
+            list_ind += 1;
         }
     }
-    *neighInd.offset(nvar as isize) = numNeigh;
+    neigh_ind[nvar as usize] = num_neigh;
 }
 
 #[cfg(test)]
@@ -1696,259 +1214,251 @@ mod tests {
 
     #[test]
     fn lowest_three_preserves_source_ordered_insertions() {
-        unsafe {
-            let mut low = 100.;
-            let mut second = 100.;
-            let mut third = 100.;
-            find_lowest_three(4., 0, &mut low, &mut second, &mut third);
-            find_lowest_three(2., 1, &mut low, &mut second, &mut third);
-            find_lowest_three(3., 2, &mut low, &mut second, &mut third);
-            assert_eq!((low, second, third), (2., 3., 4.));
-        }
+        let mut low = 100.;
+        let mut second = 100.;
+        let mut third = 100.;
+        find_lowest_three(4., 0, &mut low, &mut second, &mut third);
+        find_lowest_three(2., 1, &mut low, &mut second, &mut third);
+        find_lowest_three(3., 2, &mut low, &mut second, &mut third);
+        assert_eq!((low, second, third), (2., 3., 4.));
     }
 
     #[test]
     fn find_piece_shifts_solves_and_centers_a_two_piece_overlap() {
-        unsafe {
-            // Compact C layout: X edge 0 joins piece 0 to piece 1; all
-            // other lower/upper edge slots are absent.
-            let mut ivarpc = [0_i32, 1];
-            let mut indvar = [0_i32, 1];
-            let mut ixpclist = [0_i32, 1];
-            let mut iypclist = [0_i32, 0];
-            let mut piece_lower = [0_i32, 1];
-            let mut edge_lower = [-1_i32, -1, 0, -1];
-            let mut edge_upper = [0_i32, -1, -1, -1];
-            let mut if_skip_edge = [0_i32, 0];
-            let mut dxedge = [4.0_f32, 0.0];
-            let mut dyedge = [0.0_f32, 0.0];
-            let mut piece_upper = [1_i32, 0];
-            let mut dxyvar = [0.0_f32; 4];
-            let mut work = [0.0_f32; 64];
-            let mut num_iter = 0_i32;
-            let mut error_mean = 0.0_f32;
-            let mut error_max = 0.0_f32;
+        // Compact C layout: X edge 0 joins piece 0 to piece 1; all
+        // other lower/upper edge slots are absent.
+        let ivarpc = [0_i32, 1];
+        let indvar = [0_i32, 1];
+        let ixpclist = [0_i32, 1];
+        let iypclist = [0_i32, 0];
+        let piece_lower = [0_i32, 1];
+        let edge_lower = [-1_i32, -1, 0, -1];
+        let edge_upper = [0_i32, -1, -1, -1];
+        let if_skip_edge = [0_i32, 0];
+        let dxedge = [4.0_f32, 0.0];
+        let dyedge = [0.0_f32, 0.0];
+        let piece_upper = [1_i32, 0];
+        let mut dxyvar = [0.0_f32; 4];
+        let mut work = [0.0_f32; 64];
+        let mut num_iter = 0_i32;
+        let mut error_mean = 0.0_f32;
+        let mut error_max = 0.0_f32;
 
-            assert_eq!(
-                find_piece_shifts(
-                    ivarpc.as_mut_ptr(),
-                    2,
-                    indvar.as_mut_ptr(),
-                    ixpclist.as_mut_ptr(),
-                    iypclist.as_mut_ptr(),
-                    dxedge.as_mut_ptr(),
-                    dyedge.as_mut_ptr(),
-                    1,
-                    piece_lower.as_mut_ptr(),
-                    piece_upper.as_mut_ptr(),
-                    if_skip_edge.as_mut_ptr(),
-                    1,
-                    dxyvar.as_mut_ptr(),
-                    1,
-                    edge_lower.as_mut_ptr(),
-                    edge_upper.as_mut_ptr(),
-                    1,
-                    work.as_mut_ptr(),
-                    0,
-                    -1,
-                    1,
-                    0.0,
-                    1.0e-6,
-                    1.0e-6,
-                    50,
-                    1,
-                    1,
-                    &mut num_iter,
-                    &mut error_mean,
-                    &mut error_max,
-                ),
-                0
-            );
-            assert!(num_iter > 0);
-            assert!((dxyvar[0] - 2.0).abs() < 1.0e-5);
-            assert!((dxyvar[2] + 2.0).abs() < 1.0e-5);
-            assert!(dxyvar[1].abs() < 1.0e-5 && dxyvar[3].abs() < 1.0e-5);
-            assert!(error_mean.abs() < 1.0e-5 && error_max.abs() < 1.0e-5);
+        assert_eq!(
+            find_piece_shifts(
+                &ivarpc,
+                2,
+                &indvar,
+                &ixpclist,
+                &iypclist,
+                &dxedge,
+                &dyedge,
+                1,
+                &piece_lower,
+                &piece_upper,
+                &if_skip_edge,
+                1,
+                &mut dxyvar,
+                1,
+                &edge_lower,
+                &edge_upper,
+                1,
+                &mut work,
+                0,
+                -1,
+                1,
+                0.0,
+                1.0e-6,
+                1.0e-6,
+                50,
+                1,
+                1,
+                &mut num_iter,
+                &mut error_mean,
+                &mut error_max,
+            ),
+            0
+        );
+        assert!(num_iter > 0);
+        assert!((dxyvar[0] - 2.0).abs() < 1.0e-5);
+        assert!((dxyvar[2] + 2.0).abs() < 1.0e-5);
+        assert!(dxyvar[1].abs() < 1.0e-5 && dxyvar[3].abs() < 1.0e-5);
+        assert!(error_mean.abs() < 1.0e-5 && error_max.abs() < 1.0e-5);
 
-            assert_eq!(
-                find_piece_shifts(
-                    ivarpc.as_mut_ptr(),
-                    2,
-                    indvar.as_mut_ptr(),
-                    ixpclist.as_mut_ptr(),
-                    iypclist.as_mut_ptr(),
-                    dxedge.as_mut_ptr(),
-                    dyedge.as_mut_ptr(),
-                    1,
-                    piece_lower.as_mut_ptr(),
-                    piece_upper.as_mut_ptr(),
-                    if_skip_edge.as_mut_ptr(),
-                    1,
-                    dxyvar.as_mut_ptr(),
-                    2,
-                    edge_lower.as_mut_ptr(),
-                    edge_upper.as_mut_ptr(),
-                    1,
-                    work.as_mut_ptr(),
-                    0,
-                    -1,
-                    1,
-                    0.0,
-                    1.0e-6,
-                    1.0e-6,
-                    1,
-                    1,
-                    1,
-                    &mut num_iter,
-                    &mut error_mean,
-                    &mut error_max,
-                ),
-                1
-            );
-        }
+        assert_eq!(
+            find_piece_shifts(
+                &ivarpc,
+                2,
+                &indvar,
+                &ixpclist,
+                &iypclist,
+                &dxedge,
+                &dyedge,
+                1,
+                &piece_lower,
+                &piece_upper,
+                &if_skip_edge,
+                1,
+                &mut dxyvar,
+                2,
+                &edge_lower,
+                &edge_upper,
+                1,
+                &mut work,
+                0,
+                -1,
+                1,
+                0.0,
+                1.0e-6,
+                1.0e-6,
+                1,
+                1,
+                1,
+                &mut num_iter,
+                &mut error_mean,
+                &mut error_max,
+            ),
+            1
+        );
     }
 
     #[test]
     fn find_piece_scalings_solves_and_centers_a_two_piece_overlap() {
-        unsafe {
-            let mut ivarpc = [0_i32, 1];
-            let mut indvar = [0_i32, 1];
-            let mut ixpclist = [0_i32, 1];
-            let mut iypclist = [0_i32, 0];
-            let mut piece_lower = [0_i32, 1];
-            let mut edge_lower = [-1_i32, -1, 0, -1];
-            let mut edge_upper = [0_i32, -1, -1, -1];
-            let mut if_skip_edge = [0_i32, 0];
-            let mut dden_edge = [0.2_f32, 0.0];
-            let mut piece_upper = [1_i32, 0];
-            let mut dden_var = [0.0_f32; 2];
-            let mut work = [0.0_f32; 64];
-            let mut num_iter = 0_i32;
-            let mut error_mean = 0.0_f32;
-            let mut error_max = 0.0_f32;
+        let ivarpc = [0_i32, 1];
+        let indvar = [0_i32, 1];
+        let ixpclist = [0_i32, 1];
+        let iypclist = [0_i32, 0];
+        let piece_lower = [0_i32, 1];
+        let edge_lower = [-1_i32, -1, 0, -1];
+        let edge_upper = [0_i32, -1, -1, -1];
+        let if_skip_edge = [0_i32, 0];
+        let dden_edge = [0.2_f32, 0.0];
+        let piece_upper = [1_i32, 0];
+        let mut dden_var = [0.0_f32; 2];
+        let mut work = [0.0_f32; 64];
+        let mut num_iter = 0_i32;
+        let mut error_mean = 0.0_f32;
+        let mut error_max = 0.0_f32;
 
-            assert_eq!(
-                find_piece_scalings(
-                    ivarpc.as_mut_ptr(),
-                    2,
-                    indvar.as_mut_ptr(),
-                    ixpclist.as_mut_ptr(),
-                    iypclist.as_mut_ptr(),
-                    dden_edge.as_mut_ptr(),
-                    1,
-                    piece_lower.as_mut_ptr(),
-                    piece_upper.as_mut_ptr(),
-                    if_skip_edge.as_mut_ptr(),
-                    1,
-                    dden_var.as_mut_ptr(),
-                    edge_lower.as_mut_ptr(),
-                    edge_upper.as_mut_ptr(),
-                    1,
-                    work.as_mut_ptr(),
-                    0,
-                    -1,
-                    1,
-                    1.0e-6,
-                    1.0e-6,
-                    50,
-                    1,
-                    1,
-                    &mut num_iter,
-                    &mut error_mean,
-                    &mut error_max,
-                ),
-                0
-            );
-            assert!(num_iter > 0);
-            assert!((dden_var[0] - 0.1).abs() < 1.0e-5);
-            assert!((dden_var[1] + 0.1).abs() < 1.0e-5);
-            assert!(error_mean.abs() < 1.0e-5 && error_max.abs() < 1.0e-5);
+        assert_eq!(
+            find_piece_scalings(
+                &ivarpc,
+                2,
+                &indvar,
+                &ixpclist,
+                &iypclist,
+                &dden_edge,
+                1,
+                &piece_lower,
+                &piece_upper,
+                &if_skip_edge,
+                1,
+                &mut dden_var,
+                &edge_lower,
+                &edge_upper,
+                1,
+                &mut work,
+                0,
+                -1,
+                1,
+                1.0e-6,
+                1.0e-6,
+                50,
+                1,
+                1,
+                &mut num_iter,
+                &mut error_mean,
+                &mut error_max,
+            ),
+            0
+        );
+        assert!(num_iter > 0);
+        assert!((dden_var[0] - 0.1).abs() < 1.0e-5);
+        assert!((dden_var[1] + 0.1).abs() < 1.0e-5);
+        assert!(error_mean.abs() < 1.0e-5 && error_max.abs() < 1.0e-5);
 
-            assert_eq!(
-                find_piece_scalings(
-                    ivarpc.as_mut_ptr(),
-                    2,
-                    indvar.as_mut_ptr(),
-                    ixpclist.as_mut_ptr(),
-                    iypclist.as_mut_ptr(),
-                    dden_edge.as_mut_ptr(),
-                    1,
-                    piece_lower.as_mut_ptr(),
-                    piece_upper.as_mut_ptr(),
-                    if_skip_edge.as_mut_ptr(),
-                    1,
-                    dden_var.as_mut_ptr(),
-                    edge_lower.as_mut_ptr(),
-                    edge_upper.as_mut_ptr(),
-                    2,
-                    work.as_mut_ptr(),
-                    0,
-                    -1,
-                    1,
-                    1.0e-6,
-                    1.0e-6,
-                    1,
-                    1,
-                    1,
-                    &mut num_iter,
-                    &mut error_mean,
-                    &mut error_max,
-                ),
-                1
-            );
-        }
+        assert_eq!(
+            find_piece_scalings(
+                &ivarpc,
+                2,
+                &indvar,
+                &ixpclist,
+                &iypclist,
+                &dden_edge,
+                1,
+                &piece_lower,
+                &piece_upper,
+                &if_skip_edge,
+                1,
+                &mut dden_var,
+                &edge_lower,
+                &edge_upper,
+                2,
+                &mut work,
+                0,
+                -1,
+                1,
+                1.0e-6,
+                1.0e-6,
+                1,
+                1,
+                1,
+                &mut num_iter,
+                &mut error_mean,
+                &mut error_max,
+            ),
+            1
+        );
     }
 
     #[test]
     fn pick_alternative_shifts_replaces_the_single_bad_cycle_edge() {
-        unsafe {
-            // 2 by 2 piece square.  Compact edge slots are X0, Y0, X1, Y1;
-            // only X0 has an inconsistent displacement, and its one supplied
-            // alternative closes the cycle exactly.
-            let mut ivarpc = [0_i32, 1, 2, 3];
-            let mut indvar = [0_i32, 1, 2, 3];
-            let mut dxedge = [5.0_f32, 0.0, 1.0, 0.0];
-            let mut dyedge = [0.0_f32; 4];
-            let mut piece_lower = [0_i32, 0, 2, 1];
-            let mut piece_upper = [1_i32, 2, 3, 3];
-            let mut if_skip_edge = [0_i32; 4];
-            let mut edge_lower = [-1_i32, -1, 0, -1, -1, 0, 1, 1];
-            let mut edge_upper = [0_i32, 0, -1, 1, 1, -1, -1, -1];
-            // X alternatives occupy 0..4 and Y alternatives begin at 4.
-            let mut alternatives = [1.0_f32, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-            let mut fixed_edges = [0_i32; 4];
-            let mut num_fixed = 0_i32;
+        // 2 by 2 piece square.  Compact edge slots are X0, Y0, X1, Y1;
+        // only X0 has an inconsistent displacement, and its one supplied
+        // alternative closes the cycle exactly.
+        let ivarpc = [0_i32, 1, 2, 3];
+        let indvar = [0_i32, 1, 2, 3];
+        let mut dxedge = [5.0_f32, 0.0, 1.0, 0.0];
+        let mut dyedge = [0.0_f32; 4];
+        let piece_lower = [0_i32, 0, 2, 1];
+        let piece_upper = [1_i32, 2, 3, 3];
+        let if_skip_edge = [0_i32; 4];
+        let edge_lower = [-1_i32, -1, 0, -1, -1, 0, 1, 1];
+        let edge_upper = [0_i32, 0, -1, 1, 1, -1, -1, -1];
+        // X alternatives occupy 0..4 and Y alternatives begin at 4.
+        let mut alternatives = [1.0_f32, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let mut fixed_edges = [0_i32; 4];
+        let mut num_fixed = 0_i32;
 
-            assert_eq!(
-                pick_alternative_shifts(
-                    ivarpc.as_mut_ptr(),
-                    4,
-                    indvar.as_mut_ptr(),
-                    dxedge.as_mut_ptr(),
-                    dyedge.as_mut_ptr(),
-                    piece_lower.as_mut_ptr(),
-                    piece_upper.as_mut_ptr(),
-                    if_skip_edge.as_mut_ptr(),
-                    1,
-                    edge_lower.as_mut_ptr(),
-                    edge_upper.as_mut_ptr(),
-                    1,
-                    0,
-                    alternatives.as_mut_ptr(),
-                    1,
-                    4,
-                    1.0,
-                    0.5,
-                    0.1,
-                    fixed_edges.as_mut_ptr(),
-                    &mut num_fixed,
-                ),
-                0
-            );
-            assert_eq!(num_fixed, 1);
-            assert_eq!(fixed_edges[0], 0);
-            assert_eq!(dxedge[0], 1.0);
-            assert_eq!(alternatives[0], 5.0);
-        }
+        assert_eq!(
+            pick_alternative_shifts(
+                &ivarpc,
+                4,
+                &indvar,
+                &mut dxedge,
+                &mut dyedge,
+                &piece_lower,
+                &piece_upper,
+                &if_skip_edge,
+                1,
+                &edge_lower,
+                &edge_upper,
+                1,
+                0,
+                &mut alternatives,
+                1,
+                4,
+                1.0,
+                0.5,
+                0.1,
+                Some(&mut fixed_edges),
+                &mut num_fixed,
+            ),
+            0
+        );
+        assert_eq!(num_fixed, 1);
+        assert_eq!(fixed_edges[0], 0);
+        assert_eq!(dxedge[0], 1.0);
+        assert_eq!(alternatives[0], 5.0);
     }
 }

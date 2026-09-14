@@ -252,9 +252,7 @@ pub fn ifg_color_changed(
     blue: i32,
     boundary: &mut dyn FinegrainControllerBoundary,
 ) {
-    data.store.value = StoreUnion {
-        b: [red as u8, green as u8, blue as u8, 0],
-    };
+    data.store.value = StoreUnion::from_b([red as u8, green as u8, blue as u8, 0]);
     data.store.flags = 3 << 2;
     insert_and_update(data, type_, boundary);
 }
@@ -287,7 +285,7 @@ pub fn ifg_int_changed(
     value: i32,
     boundary: &mut dyn FinegrainControllerBoundary,
 ) {
-    data.store.value = StoreUnion { i: value };
+    data.store.value = StoreUnion::from_i(value);
     data.store.flags = 0;
     insert_and_update(data, type_, boundary);
 }
@@ -337,7 +335,7 @@ pub fn ifg_symtype_changed(
     if filled {
         symtype = -1 - symtype;
     }
-    data.store.value = StoreUnion { i: symtype };
+    data.store.value = StoreUnion::from_i(symtype);
     data.store.flags = 0;
     data.last_change_type = 6;
     insert_and_update(data, GEN_STORE_SYMTYPE, boundary);
@@ -842,16 +840,16 @@ pub fn ifg_cont_trans_match(
     let current = *cursor;
     for store in contour.store.iter().skip(current) {
         if store.flags & (GEN_STORE_NOINDEX | 3) != 0
-            || unsafe { store.index.i } >= contour.pts.len() as i32
+            || (store.index.i()) >= contour.pts.len() as i32
         {
             break;
         }
         let revert = store.flags & GEN_STORE_REVERT != 0;
         if store.type_ == GEN_STORE_TRANS
-            && ((!revert && ((unsafe { store.value.i } != 0) as i32) == draw_trans)
+            && ((!revert && (((store.value.i()) != 0) as i32) == draw_trans)
                 || (revert && ((cont_props.trans != 0) as i32) == draw_trans))
         {
-            *match_pt = unsafe { store.index.i };
+            *match_pt = (store.index.i());
             *cursor = current;
             let mut next_change = 0;
             while next_change >= 0 && next_change <= *match_pt {
@@ -904,11 +902,11 @@ pub fn ifg_mesh_trans_match(
             if st.flags & (GEN_STORE_NOINDEX | 3) != 0 {
                 break;
             }
-            if unsafe { st.index.i } != index {
-                index = unsafe { st.index.i };
+            if (st.index.i()) != index {
+                index = (st.index.i());
                 current = i;
             }
-            if st.type_ == GEN_STORE_TRANS && ((unsafe { st.value.i } != 0) as i32) == draw_trans {
+            if st.type_ == GEN_STORE_TRANS && (((st.value.i()) != 0) as i32) == draw_trans {
                 *mesh_ind = index;
                 *cursor = current;
                 return index;
@@ -922,12 +920,12 @@ pub fn ifg_mesh_trans_match(
             if st.flags & (GEN_STORE_NOINDEX | 3) != 0 {
                 break;
             }
-            if unsafe { st.index.i } != index {
+            if (st.index.i()) != index {
                 if !trans_set {
                     *cursor = current;
                     return index;
                 }
-                index = unsafe { st.index.i };
+                index = (st.index.i());
                 current = i;
                 trans_set = false;
                 *mesh_ind += 1;
@@ -945,7 +943,7 @@ pub fn ifg_mesh_trans_match(
             if st.type_ == GEN_STORE_TRANS {
                 trans_set = true;
             }
-            if st.type_ == GEN_STORE_TRANS && ((unsafe { st.value.i } != 0) as i32) == draw_trans {
+            if st.type_ == GEN_STORE_TRANS && (((st.value.i()) != 0) as i32) == draw_trans {
                 *cursor = current;
                 return index;
             }
@@ -1102,8 +1100,8 @@ pub fn ifg_toggle_gap(contour: &mut Icont, point_index: i32, enabled: bool) -> i
         let item = Istore {
             type_: GEN_STORE_GAP,
             flags: GEN_STORE_ONEPOINT,
-            index: StoreUnion { i: point_index },
-            value: StoreUnion { i: 0 },
+            index: StoreUnion::from_i(point_index),
+            value: StoreUnion::from_i(0),
         };
         crate::imod::libimod::istore::istore_add_one_index_item(&mut contour.store, item)
     } else {
@@ -1121,20 +1119,20 @@ pub fn find_next_change(list: &[Istore], index: i32, surf_flag: i32, previous: b
     if list.is_empty() {
         return -1;
     }
-    let mut after = list.partition_point(|st| unsafe { st.index.i } <= index);
+    let mut after = list.partition_point(|st| (st.index.i()) <= index);
     if previous && after > list.len() - 1 {
         after = list.len() - 1;
     }
     if previous {
         for st in list[..=after].iter().rev() {
-            if unsafe { st.index.i } >= index {
+            if (st.index.i()) >= index {
                 continue;
             }
             if st.flags & (GEN_STORE_NOINDEX | 3) != 0 {
                 return -1;
             }
             if (st.flags & GEN_STORE_SURFACE != 0) == (surf_flag != 0) {
-                return unsafe { st.index.i };
+                return (st.index.i());
             }
         }
     } else {
@@ -1143,7 +1141,7 @@ pub fn find_next_change(list: &[Istore], index: i32, surf_flag: i32, previous: b
                 return -1;
             }
             if (st.flags & GEN_STORE_SURFACE != 0) == (surf_flag != 0) {
-                return unsafe { st.index.i };
+                return (st.index.i());
             }
         }
     };

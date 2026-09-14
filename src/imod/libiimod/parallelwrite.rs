@@ -6,10 +6,8 @@
     dead_code,
     unused_variables
 )]
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libiimod::mrcfiles::MrcHeader;
-unsafe extern "C" {
-    static mut stdout: *mut libc::FILE;
-}
 pub type FILE = libc::FILE;
 pub type fortStrLen_t = i32;
 #[derive(Copy, Clone)]
@@ -102,7 +100,11 @@ pub unsafe extern "C" fn par_wrt_initialize(
         return 0;
     }
     if nxin < 0 {
-        (*bi).hdf_index = crate::imod::libcfshr::b3dutil::b3d_open_lock_file(filename);
+        (*bi).hdf_index = crate::imod::libcfshr::b3dutil::b3d_open_lock_file(
+            core::ffi::CStr::from_ptr(filename)
+                .to_string_lossy()
+                .as_ref(),
+        );
         if (*bi).hdf_index < 0 {
             return 6;
         }
@@ -124,17 +126,22 @@ pub unsafe extern "C" fn par_wrt_initialize(
         s_num_infos += 1;
         return 0;
     }
-    let fp = libc::fopen(filename, c"r".as_ptr());
-    if fp.is_null() {
+    let fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+        core::ffi::CStr::from_ptr(filename)
+            .to_string_lossy()
+            .as_ref(),
+        "r",
+    );
+    let Some(mut fp) = fp else {
         return 1;
-    }
-    let mut line = [0i8; MAXLINE as usize];
-    if crate::imod::libcfshr::b3dutil::fgetline(fp, line.as_mut_ptr(), MAXLINE) <= 0 {
+    };
+    let mut line = [0u8; MAXLINE as usize];
+    if crate::imod::libcfshr::b3dutil::fgetline(&mut fp, &mut line, MAXLINE) <= 0 {
         return 2;
     }
     let mut version = 0;
     libc::sscanf(
-        line.as_mut_ptr(),
+        line.as_mut_ptr().cast(),
         c"%d %d %d %d %d".as_ptr(),
         &raw mut version,
         &raw mut (*bi).every_sec,
@@ -151,19 +158,19 @@ pub unsafe extern "C" fn par_wrt_initialize(
         return 4;
     }
     for i in 0..(*bi).num_files {
-        if crate::imod::libcfshr::b3dutil::fgetline(fp, line.as_mut_ptr(), MAXLINE) <= 0 {
+        if crate::imod::libcfshr::b3dutil::fgetline(&mut fp, &mut line, MAXLINE) <= 0 {
             return 2;
         }
         let region = (*bi).regions.add(i as usize);
-        (*region).file = libc::strdup(line.as_mut_ptr());
+        (*region).file = libc::strdup(line.as_mut_ptr().cast());
         if (*region).file.is_null() {
             return 4;
         }
-        if crate::imod::libcfshr::b3dutil::fgetline(fp, line.as_mut_ptr(), MAXLINE) <= 0 {
+        if crate::imod::libcfshr::b3dutil::fgetline(&mut fp, &mut line, MAXLINE) <= 0 {
             return 2;
         }
         libc::sscanf(
-            line.as_mut_ptr(),
+            line.as_mut_ptr().cast(),
             c"%d %d %d %d".as_ptr(),
             (*region).section.as_mut_ptr(),
             (*region).start_line.as_mut_ptr(),
@@ -174,7 +181,8 @@ pub unsafe extern "C" fn par_wrt_initialize(
             (*region).start_line[1] = nyin - (*bi).num_bound_lines;
         }
     }
-    libc::fclose(fp);
+    // `fclose(fp)`: the handle closes when it leaves scope.
+    drop(fp);
     (*bi).ny = nyin;
     s_cur_info = s_num_infos;
     s_num_infos += 1;
@@ -240,21 +248,33 @@ pub unsafe extern "C" fn parwrtclose_() {
 }
 pub unsafe extern "C" fn parallel_write_slice(
     buf: *mut ::core::ffi::c_void,
-    mut fout: *mut FILE,
+    fout: &mut ImodFile,
     hdata: *mut MrcHeader,
     slice: i32,
 ) -> ::core::ffi::c_int {
-    static mut S_HBOUND: MrcHeader = unsafe { core::mem::zeroed() };
+    // `parallelwrite.c:245` `static MrcHeader hbound;`.  A file-scope C struct
+    // is zero-initialised once and keeps its address; `Option` in a `static`
+    // gives the same lifetime and address without `mem::zeroed`, which is
+    // undefined for a type holding an `ImodFile` (NATIVE.md 4b).
+    static mut S_HBOUND: Option<MrcHeader> = None;
     static mut DSIZE: i32 = 0;
     static mut CSIZE: i32 = 0;
     static mut S_LINES_BOUND: i32 = -1;
     static mut S_SECTIONS: [i32; 2] = [0; 2];
     static mut S_START_LINES: [i32; 2] = [0; 2];
-    static mut S_FP_BOUND: *mut FILE = ::core::ptr::null_mut();
+    static mut S_FP_BOUND: Option<ImodFile> = None;
     let mut allsec = 0;
     let mut nfiles = 0;
     let mut filename = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let ii_file = fout.cast::<ImodImageFile>();
+    // `parallelwrite.c:251` `(ImodImageFile *)fout` — the reverse of the HDF
+    // identity token: for an HDF file `iiFile->fp` *is* `(FILE *)iiFile`, so
+    // casting back recovers the struct.
+    let ii_file = match fout {
+        ImodFile::Token(address) => *address as *mut ImodImageFile,
+        _ => ::core::ptr::null_mut(),
+    };
+    let hbound = (&mut *(&raw mut S_HBOUND)).get_or_insert_with(MrcHeader::default);
+    let mut fout = fout.clone();
     let parallel_hdf = s_cur_info >= 0 && s_infos[s_cur_info as usize].hdf_index >= 0;
     if parallel_hdf {
         crate::imod::libiimod::mrcfiles::mrc_getdcsize(
@@ -281,10 +301,10 @@ pub unsafe extern "C" fn parallel_write_slice(
         if err >= 0 {
             return err;
         }
-        fout = (*ii_file).fp;
+        fout = (*ii_file).fp.clone().unwrap();
     }
     let mut err =
-        crate::imod::libiimod::mrcfiles::mrc_write_slice(buf, fout, hdata, slice, b'Z' as i8);
+        crate::imod::libiimod::mrcfiles::mrc_write_slice(buf, &mut fout, hdata, slice, b'Z' as i8);
     if parallel_hdf && par_wrt_reclose_hdf(ii_file, hdata) != 0 {
         return 1;
     }
@@ -299,7 +319,7 @@ pub unsafe extern "C" fn parallel_write_slice(
             return 0;
         }
         crate::imod::libiimod::mrcfiles::mrc_head_new(
-            &mut *(&raw mut S_HBOUND),
+            hbound,
             (*hdata).nx,
             S_LINES_BOUND,
             2,
@@ -315,7 +335,7 @@ pub unsafe extern "C" fn parallel_write_slice(
         );
         if err != 0 {
             crate::imod::libcfshr::b3dutil::b3d_error(
-                stdout,
+                Some(&mut ImodFile::Stdout),
                 format_args!(
                     "ERROR: sliceWriteParallel - finding parallel writing region for slice {} (err {})\n",
                     slice, err
@@ -330,16 +350,20 @@ pub unsafe extern "C" fn parallel_write_slice(
         ) != 0
         {
             crate::imod::libcfshr::b3dutil::b3d_error(
-                stdout,
+                Some(&mut ImodFile::Stdout),
                 format_args!("ERROR: sliceWriteParallel - unknown mode.\n"),
             );
             return 1;
         }
-        crate::imod::libcfshr::b3dutil::imod_backup_file(filename);
-        S_FP_BOUND = libc::fopen(filename, c"wb".as_ptr());
-        if S_FP_BOUND.is_null() {
+        crate::imod::libcfshr::b3dutil::imod_backup_file(
+            core::ffi::CStr::from_ptr(filename)
+                .to_string_lossy()
+                .as_ref(),
+        );
+        S_FP_BOUND = ImodFile::open(&core::ffi::CStr::from_ptr(filename).to_string_lossy(), "wb");
+        if (&*(&raw const S_FP_BOUND)).is_none() {
             crate::imod::libcfshr::b3dutil::b3d_error(
-                stdout,
+                Some(&mut ImodFile::Stdout),
                 format_args!(
                     "ERROR: sliceWriteParallel - opening boundary file {}\n",
                     core::ffi::CStr::from_ptr(filename).to_string_lossy()
@@ -347,7 +371,11 @@ pub unsafe extern "C" fn parallel_write_slice(
             );
             return 1;
         }
-        if crate::imod::libiimod::mrcfiles::mrc_head_write(S_FP_BOUND, &raw mut S_HBOUND) != 0 {
+        if crate::imod::libiimod::mrcfiles::mrc_head_write(
+            (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
+            hbound,
+        ) != 0
+        {
             return 1;
         }
     }
@@ -357,17 +385,17 @@ pub unsafe extern "C" fn parallel_write_slice(
     for ib in 0..2usize {
         if S_SECTIONS[ib] >= 0 && slice == S_SECTIONS[ib] {
             crate::imod::libcfshr::b3dutil::b3d_fseek(
-                S_FP_BOUND,
-                S_HBOUND.header_size + ib as i32 * S_HBOUND.nx * S_LINES_BOUND * CSIZE * DSIZE,
+                (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
+                hbound.header_size + ib as i32 * hbound.nx * S_LINES_BOUND * CSIZE * DSIZE,
                 SEEK_SET,
             );
             let data = buf
                 .cast::<::core::ffi::c_char>()
-                .add((S_HBOUND.nx * S_START_LINES[ib] * CSIZE * DSIZE) as usize);
+                .add((hbound.nx * S_START_LINES[ib] * CSIZE * DSIZE) as usize);
             err = crate::imod::libiimod::mrcfiles::mrc_write_slice(
                 data.cast(),
-                S_FP_BOUND,
-                &raw mut S_HBOUND,
+                (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
+                hbound,
                 ib as i32,
                 b'Z' as i8,
             );
@@ -450,10 +478,13 @@ pub unsafe extern "C" fn par_wrt_reclose_hdf(
     static mut WALL_SUM: f64 = 0.0;
     let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
     if !hdata.is_null()
-        && crate::imod::libiimod::mrcfiles::mrc_head_write((*ii_file).fp, hdata) != 0
+        && crate::imod::libiimod::mrcfiles::mrc_head_write(
+            &mut (*ii_file).fp.clone().unwrap(),
+            &mut *hdata,
+        ) != 0
     {
         crate::imod::libcfshr::b3dutil::b3d_error(
-            stdout,
+            Some(&mut ImodFile::Stdout),
             format_args!("ERROR:parWrtRecloseHDF  - Rewriting header of HDF file\n"),
         );
         return 1;
@@ -463,7 +494,7 @@ pub unsafe extern "C" fn par_wrt_reclose_hdf(
         crate::imod::libcfshr::b3dutil::b3d_unlock_file(s_infos[s_cur_info as usize].hdf_index);
     if err != 0 {
         crate::imod::libcfshr::b3dutil::b3d_error(
-            stdout,
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "ERROR: parWrtRecloseHDF - Releasing file lock for HDF file (err {})\n",
                 err
@@ -975,7 +1006,7 @@ unsafe extern "C" fn par_wrt_prepare_hdf(ii_file: *mut ImodImageFile) -> i32 {
     let err = crate::imod::libcfshr::b3dutil::b3d_lock_file(s_infos[s_cur_info as usize].hdf_index);
     if err != 0 {
         crate::imod::libcfshr::b3dutil::b3d_error(
-            stdout,
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: parWrtPrepareHDF - Obtaining file lock for HDF file (err {})\n",
                 err
@@ -987,7 +1018,7 @@ unsafe extern "C" fn par_wrt_prepare_hdf(ii_file: *mut ImodImageFile) -> i32 {
     let err = crate::imod::libiimod::iimage::ii_reopen(ii_file);
     if err != 0 {
         crate::imod::libcfshr::b3dutil::b3d_error(
-            stdout,
+            Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: parWrtPrepareHDF - Reopening HDF file (err {})\n",
                 err
@@ -1311,29 +1342,37 @@ mod tests {
         unsafe {
             s_num_infos = 0;
             s_cur_info = -1;
-            let file = libc::tmpfile();
-            assert!(!file.is_null());
-
-            let mut header: MrcHeader = core::mem::zeroed();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
+            let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 3, 2, 1, MRC_MODE_BYTE), 0);
-            assert_eq!(mrc_head_write(file, &mut header), 0);
+            assert_eq!(mrc_head_write(&mut file, &mut header), 0);
             let mut pixels = [3u8, 1, 4, 1, 5, 9];
             assert_eq!(
-                parallel_write_slice(pixels.as_mut_ptr().cast(), file, &mut header, 0),
+                parallel_write_slice(pixels.as_mut_ptr().cast(), &mut file, &mut header, 0),
                 0
             );
-            assert_eq!(libc::fflush(file), 0);
-            assert_eq!(libc::fseek(file, header.header_size as i64, SEEK_SET), 0);
+            {
+                use std::io::Write;
+                file.flush().unwrap();
+            }
+            assert_eq!(
+                crate::imod::libcfshr::b3dutil::b3d_fseek(
+                    &mut file,
+                    header.header_size as i32,
+                    SEEK_SET
+                ),
+                0
+            );
             let mut written = [0u8; 6];
             assert_eq!(
-                libc::fread(written.as_mut_ptr().cast(), 1, written.len(), file),
+                crate::imod::libcfshr::b3dutil::b3d_fread(&mut written, 1, 6, &mut file),
                 written.len()
             );
             // `mrc_head_new` inherits IMOD's signed-byte output convention.
             // `mrc_write_z`, reached directly by `parallel_write_slice`, stores
             // signed byte samples with the source's +128 disk offset.
             assert_eq!(written, [131, 129, 132, 129, 133, 137]);
-            assert_eq!(libc::fclose(file), 0);
+            drop(file);
         }
     }
 }

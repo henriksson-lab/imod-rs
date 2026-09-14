@@ -14,21 +14,29 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
         let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
         let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
-        assert!(!file.is_null());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
         header.amin = 1.;
         header.amax = 4.;
         header.amean = 2.5;
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
         let pixels = [1_u8, 2, 3, 4];
         assert_eq!(
-            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
+                unsafe {
+                    core::slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), 1 * (pixels.len()))
+                },
+                1,
+                pixels.len(),
+                &mut file,
+            ),
             pixels.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert!(
             common::imod_cmd("mrc2tif")
                 .arg("-o")
@@ -52,24 +60,39 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
             String::from_utf8_lossy(&result.stdout)
                 .contains(&format!("Opening {} for input\n", tiff.display()))
         );
-        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut written: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut written), 0);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
+                .unwrap();
+        let mut written = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!(
             (written.nx, written.ny, written.nz, written.mode),
             (2, 2, 1, MRC_MODE_BYTE)
         );
         let mut bytes = [0_u8; 4];
         assert_eq!(
-            libc::fseek(file, written.header_size as i64, libc::SEEK_SET),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut file,
+                written.header_size as i32,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET
+            ),
             0
         );
         assert_eq!(
-            libc::fread(bytes.as_mut_ptr().cast(), 1, bytes.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fread(
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        bytes.as_mut_ptr().cast::<u8>(),
+                        1 * (bytes.len()),
+                    )
+                },
+                1,
+                bytes.len(),
+                &mut file,
+            ),
             bytes.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert_eq!(bytes, pixels);
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(tiff).unwrap();
@@ -85,13 +108,15 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
         let tiff_c = CString::new(tiff.as_os_str().as_encoded_bytes()).unwrap();
         let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(tiff_c.as_ptr(), c"wb".as_ptr());
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&tiff_c.to_string_lossy(), "wb")
+                .unwrap();
         let mut ifd = 0;
         let mut data_offset = 0;
         let rgb = [30_u8, 60, 90, 9, 12, 15];
         assert_eq!(
             imod_rs::imod::mrc::tiff::tiff_write_image(
-                file,
+                &mut file,
                 2,
                 1,
                 MRC_MODE_RGB,
@@ -106,7 +131,7 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
         let rgb_second = [0_u8, 3, 6, 30, 33, 36];
         assert_eq!(
             imod_rs::imod::mrc::tiff::tiff_write_image(
-                file,
+                &mut file,
                 2,
                 1,
                 MRC_MODE_RGB,
@@ -118,7 +143,7 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
             ),
             0
         );
-        libc::fclose(file);
+        drop(file);
         assert!(
             common::imod_cmd("tif2mrc")
                 .arg("-g")
@@ -128,23 +153,39 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
                 .unwrap()
                 .success()
         );
-        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
-        let mut written: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut written), 0);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
+                .unwrap();
+        let mut written = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!(
             (written.nx, written.ny, written.nz, written.mode),
             (2, 1, 2, MRC_MODE_BYTE)
         );
         assert_eq!(
-            libc::fseek(file, written.header_size as i64, libc::SEEK_SET),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut file,
+                written.header_size as i32,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET
+            ),
             0
         );
         let mut gray = [0_u8; 4];
         assert_eq!(
-            libc::fread(gray.as_mut_ptr().cast(), 1, gray.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fread(
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        gray.as_mut_ptr().cast::<u8>(),
+                        1 * (gray.len()),
+                    )
+                },
+                1,
+                gray.len(),
+                &mut file,
+            ),
             gray.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert_eq!(gray, [188, 140, 131, 161]);
         std::fs::remove_file(tiff).unwrap();
         std::fs::remove_file(output).unwrap();
@@ -198,20 +239,36 @@ fn tif2mrc_converts_signed_32_bit_tiff_through_the_source_float_path() {
     );
     unsafe {
         let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut header), 0);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
+                .unwrap();
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz, header.mode), (2, 2, 1, 2));
         assert_eq!(
-            libc::fseek(file, header.header_size as i64, libc::SEEK_SET),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut file,
+                header.header_size as i32,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET
+            ),
             0
         );
         let mut values = [0_f32; 4];
         assert_eq!(
-            libc::fread(values.as_mut_ptr().cast(), 4, values.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fread(
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        values.as_mut_ptr().cast::<u8>(),
+                        4 * (values.len()),
+                    )
+                },
+                4,
+                values.len(),
+                &mut file,
+            ),
             values.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert_eq!(values, [-300_000_000., 400_000_000., -1., 2.]);
     }
     std::fs::remove_file(tiff).unwrap();
@@ -227,17 +284,26 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
         let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
         let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(input_c.as_ptr(), c"wb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
+                .unwrap();
+        let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_BYTE), 0);
-        header.fp = file.cast();
-        assert_eq!(mrc_head_write(file, &mut header), 0);
+        header.fp = Some(file.clone());
+        assert_eq!(mrc_head_write(&mut file, &mut header), 0);
         let pixels = [1_u8, 2, 3, 4, 5, 6, 7, 8];
         assert_eq!(
-            libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
+                unsafe {
+                    core::slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), 1 * (pixels.len()))
+                },
+                1,
+                pixels.len(),
+                &mut file,
+            ),
             pixels.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert!(
             common::imod_cmd("mrc2tif")
                 .arg("-o")
@@ -277,20 +343,36 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
             stdout.contains("Min = 129, Max = 136, Mean = 132.5"),
             "{stdout}"
         );
-        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
-        let mut written: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut written), 0);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
+                .unwrap();
+        let mut written = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!((written.nx, written.ny, written.nz), (2, 2, 2));
         assert_eq!(
-            libc::fseek(file, written.header_size as i64, libc::SEEK_SET),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut file,
+                written.header_size as i32,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET
+            ),
             0
         );
         let mut bytes = [0_u8; 8];
         assert_eq!(
-            libc::fread(bytes.as_mut_ptr().cast(), 1, bytes.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fread(
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        bytes.as_mut_ptr().cast::<u8>(),
+                        1 * (bytes.len()),
+                    )
+                },
+                1,
+                bytes.len(),
+                &mut file,
+            ),
             bytes.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert_eq!(bytes, pixels);
         let backup = std::path::PathBuf::from(format!("{}~", output.display()));
         assert_eq!(
@@ -317,16 +399,28 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
             (&background, [1_u8, 2, 3, 4]),
         ] {
             let name = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-            let mut header: MrcHeader = core::mem::zeroed();
+            let mut file =
+                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                    .unwrap();
+            let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
-            header.fp = file.cast();
-            assert_eq!(mrc_head_write(file, &mut header), 0);
+            header.fp = Some(file.clone());
+            assert_eq!(mrc_head_write(&mut file, &mut header), 0);
             assert_eq!(
-                libc::fwrite(pixels.as_ptr().cast(), 1, pixels.len(), file),
+                imod_rs::imod::libcfshr::b3dutil::b3d_fwrite(
+                    unsafe {
+                        core::slice::from_raw_parts(
+                            pixels.as_ptr().cast::<u8>(),
+                            1 * (pixels.len()),
+                        )
+                    },
+                    1,
+                    pixels.len(),
+                    &mut file,
+                ),
                 pixels.len()
             );
-            libc::fclose(file);
+            drop(file);
         }
         assert!(
             common::imod_cmd("mrc2tif")
@@ -357,19 +451,35 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
                 .success()
         );
         let output_name = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(output_name.as_ptr(), c"rb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut header), 0);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_name.to_string_lossy(), "rb")
+                .unwrap();
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
-            libc::fseek(file, header.header_size as i64, libc::SEEK_SET),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut file,
+                header.header_size as i32,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET
+            ),
             0
         );
         let mut pixels = [0_u8; 4];
         assert_eq!(
-            libc::fread(pixels.as_mut_ptr().cast(), 1, pixels.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fread(
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        pixels.as_mut_ptr().cast::<u8>(),
+                        1 * (pixels.len()),
+                    )
+                },
+                1,
+                pixels.len(),
+                &mut file,
+            ),
             pixels.len()
         );
-        libc::fclose(file);
+        drop(file);
         assert_eq!(pixels, [13, 13, 13, 13]);
         for path in [input, background, input_tiff, background_tiff, output] {
             std::fs::remove_file(path).unwrap();
@@ -411,14 +521,15 @@ fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let name = CString::new(tiff.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"wb".as_ptr());
-        assert!(!file.is_null());
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                .unwrap();
         let mut ifd = 0;
         let mut data_offset = 0;
         for pixels in [[1_u8, 2], [3, 4]] {
             assert_eq!(
                 imod_rs::imod::mrc::tiff::tiff_write_image(
-                    file,
+                    &mut file,
                     2,
                     1,
                     MRC_MODE_BYTE,
@@ -431,7 +542,7 @@ fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
                 0
             );
         }
-        libc::fclose(file);
+        drop(file);
         let result = common::imod_cmd("tif2mrc")
             .args(["-b", tiff.to_str().unwrap()])
             .arg(&tiff)
@@ -461,14 +572,15 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
         let output = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff_c = CString::new(tiff.as_os_str().as_encoded_bytes()).unwrap();
         let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(tiff_c.as_ptr(), c"wb".as_ptr());
-        assert!(!file.is_null());
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&tiff_c.to_string_lossy(), "wb")
+                .unwrap();
         let mut ifd = 0;
         let mut data_offset = 0;
         let pixels = [5_u8, 8];
         assert_eq!(
             imod_rs::imod::mrc::tiff::tiff_write_image(
-                file,
+                &mut file,
                 2,
                 1,
                 MRC_MODE_BYTE,
@@ -480,7 +592,7 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
             ),
             0
         );
-        libc::fclose(file);
+        drop(file);
         let result = common::imod_cmd("tif2mrc")
             .args(["-t", "-1"])
             .arg(&tiff)
@@ -492,24 +604,40 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
             "{}",
             String::from_utf8_lossy(&result.stdout)
         );
-        let file = libc::fopen(output_c.as_ptr(), c"rb".as_ptr());
-        let mut header: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut header), 0);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
+                .unwrap();
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
             (header.nx, header.ny, header.nz, header.mode),
             (2, 1, 1, MRC_MODE_BYTE)
         );
         assert_ne!(header.bytes_signed, 0);
         assert_eq!(
-            libc::fseek(file, header.header_size as i64, libc::SEEK_SET),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut file,
+                header.header_size as i32,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET
+            ),
             0
         );
         let mut written = [0_u8; 2];
         assert_eq!(
-            libc::fread(written.as_mut_ptr().cast(), 1, written.len(), file),
+            imod_rs::imod::libcfshr::b3dutil::b3d_fread(
+                unsafe {
+                    core::slice::from_raw_parts_mut(
+                        written.as_mut_ptr().cast::<u8>(),
+                        1 * (written.len()),
+                    )
+                },
+                1,
+                written.len(),
+                &mut file,
+            ),
             written.len()
         );
-        libc::fclose(file);
+        drop(file);
         // Source byte-mode output is signed and therefore shifts the raw
         // storage by 128 while preserving logical image values 5 and 8.
         assert_eq!(written, [133, 136]);
@@ -599,11 +727,12 @@ fn convert_one_fixture_with_environment(
     let bytes = std::fs::read(&output).unwrap();
     let header = unsafe {
         let name = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let file = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-        assert!(!file.is_null());
-        let mut header: MrcHeader = core::mem::zeroed();
-        assert_eq!(mrc_head_read(file, &mut header), 0);
-        libc::fclose(file);
+        let mut file =
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                .unwrap();
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut file, &mut header), 0);
+        drop(file);
         header
     };
     std::fs::remove_file(tiff).unwrap();

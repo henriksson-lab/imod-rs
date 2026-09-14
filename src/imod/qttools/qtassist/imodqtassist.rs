@@ -5,7 +5,6 @@
 //! of this executable's source closure.  It retains the actual Qt Assistant
 //! remote-control protocol instead of attempting to reproduce its GUI.
 
-use std::ffi::CStr;
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -126,11 +125,7 @@ impl ImodAssistant {
         pref_absolute: bool,
     ) -> Self {
         let mut assumed_imod = 0;
-        let imod_dir = unsafe {
-            CStr::from_ptr(imod_dir_or_default(&mut assumed_imod))
-                .to_string_lossy()
-                .into_owned()
-        };
+        let imod_dir = unsafe { imod_dir_or_default(Some(&mut assumed_imod)) };
         let path = if absolute {
             path.to_owned()
         } else {

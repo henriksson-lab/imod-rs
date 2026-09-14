@@ -4,6 +4,7 @@ mod common;
 
 use std::ffi::CString;
 
+use imod_rs::imod::libcfshr::b3dutil::ImodFile;
 use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
 use imod_rs::imod::libimod::imodel::{
     IMODF_FLIPYZ, Icont, Imod, Iobj, Iobjview, Ipoint, Iref_image, Iview, imod_contour_get,
@@ -192,10 +193,7 @@ fn replacement_keeps_colors_and_transfers_expanded_object_views() {
     assert!(status.success());
     let output = imod_read(&output_path).expect("joined model must decode");
     assert_eq!(output.obj.len(), 1);
-    assert_eq!(
-        unsafe { std::ffi::CStr::from_ptr(output.obj[0].name.as_ptr()) },
-        c"second"
-    );
+    assert_eq!(&output.obj[0].name[..b"second".len() + 1], b"second\0");
     assert_eq!(
         (output.obj[0].red, output.obj[0].green, output.obj[0].blue),
         (0.1, 0.2, 0.3)
@@ -377,15 +375,16 @@ fn image_reference_header_scale_controls_different_volume_transform() {
     };
     imod_file_write(&first, &first_path).unwrap();
     imod_file_write(&second, &second_path).unwrap();
-    let image_name = CString::new(image_path.to_string_lossy().as_bytes()).unwrap();
-    let image_file = unsafe { libc::fopen(image_name.as_ptr(), c"wb".as_ptr()) };
-    assert!(!image_file.is_null());
-    let mut header = unsafe { std::mem::zeroed::<MrcHeader>() };
+    // `mrcHeadWrite` takes `&mut ImodFile` since the `libiimod` conversion;
+    // this is the minimal call-site edit for that.
+    let mut image_file =
+        ImodFile::open(&image_path.to_string_lossy(), "wb").expect("image file must open");
+    let mut header = MrcHeader::default();
     assert_eq!(mrc_head_new(&mut header, 10, 1, 1, 2), 0);
     header.mx = 10;
     header.xlen = 20.;
-    assert_eq!(unsafe { mrc_head_write(image_file, &mut header) }, 0);
-    unsafe { libc::fclose(image_file) };
+    assert_eq!(mrc_head_write(&mut image_file, &mut header), 0);
+    drop(image_file);
     let status = common::imod_cmd("imodjoin")
         .arg("-i")
         .arg(&image_path)
@@ -589,8 +588,8 @@ fn existing_output_is_backed_up_before_the_joined_model_is_written() {
         .expect("imodjoin executable must start");
     assert!(status.success());
     assert_eq!(
-        unsafe { std::ffi::CStr::from_ptr(imod_read(&backup).unwrap().name.as_ptr()) },
-        c"model replaced by imodjoin"
+        &imod_read(&backup).unwrap().name[..b"model replaced by imodjoin".len() + 1],
+        b"model replaced by imodjoin\0"
     );
     assert!(!imod_read(&output).unwrap().obj.is_empty());
     let _ = std::fs::remove_file(output);
@@ -1046,10 +1045,10 @@ fn read_error_uses_the_source_exit_prefix_on_stdout() {
 }
 
 /// Test-only: builds a fixed-size NUL-padded model/object name array.
-fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+fn name_array<const N: usize>(text: &str) -> [u8; N] {
     let mut name = [0; N];
     for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
-        *slot = *byte as std::ffi::c_char;
+        *slot = *byte;
     }
     name
 }

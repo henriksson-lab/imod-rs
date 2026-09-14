@@ -2,6 +2,7 @@
 //! `IMOD/include/iview.h`.
 #![allow(dead_code)]
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -156,7 +157,7 @@ so the array elements after the first have to be written at end */
 /// Clip points are scaled by [scale] and normals by its inverse.  The model
 /// clip chunk likewise writes all `count` normals and then all `count` points,
 /// not normal/point pairs.
-pub fn imod_view_write(vw: &Iview, fout: &mut File, scale: &Ipoint) -> i32 {
+pub fn imod_view_write(vw: &Iview, fout: &mut ImodFile, scale: &Ipoint) -> i32 {
     let mut id: u32;
     let nbwrite: i32;
     let mut clip_out: u8;
@@ -545,7 +546,7 @@ fn clips_assign(to: &mut Iclip_planes, from: &Iclip_planes) {
 /// `bytesRead` is not tracked separately here: the source uses it only to
 /// compute the final `fseek(fin, lbuf - bytesRead, SEEK_CUR)`, which lands on
 /// the byte after the chunk, and this seeks there directly.
-pub fn imod_view_model_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_view_model_read(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
     let lbuf = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
 
     /* only current value selected. */
@@ -715,7 +716,7 @@ pub fn imod_view_model_read(imod: &mut Imod, file: &mut File) -> Result<(), i32>
 ///
 /// Delegates to `imodClipsRead` (`iplane.c:166`), which sizes the read from
 /// the chunk length and reads all the normals before all the points.
-pub fn imod_view_clip_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_view_clip_read(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
     let last = match imod.view.len().checked_sub(1) {
         Some(last) => last,
         None => return Err(IMOD_ERROR_CORRUPT),
@@ -724,7 +725,7 @@ pub fn imod_view_clip_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> 
     Ok(())
 }
 /// Original: `imodIMNXRead` (`iview.c:598`).
-pub fn imod_imnx_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_imnx_read(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
     if imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? != 72 {
         return Err(IMOD_ERROR_CORRUPT);
     }
@@ -751,7 +752,7 @@ pub fn imod_imnx_read(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
 /// `(mod->xybin, mod->xybin, mod->zbin)`; only `3dmod` ever moves those off 1
 /// and `Imod` here carries no such member (see the deviation note on
 /// `imodDefault`), so the identity is passed.
-pub fn imod_view_model_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_view_model_write(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
     if imod.view.len() < 2 {
         return Ok(());
     }
@@ -770,7 +771,7 @@ pub fn imod_view_model_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
     Ok(())
 }
 /// Original: `imodIMNXWrite` (`iview.c:625`).
-pub fn imod_imnx_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_imnx_write(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
     let Some(reference) = imod.ref_image else {
         return Ok(());
     };

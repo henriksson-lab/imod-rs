@@ -1,5 +1,6 @@
 //! Binary-model coverage for source-shaped `imodel.c` operations.
 
+use imod_rs::imod::libcfshr::b3dutil::ImodFile;
 use imod_rs::imod::libimod::ilabel::{
     Ilabel, imod_label_dup, imod_label_item_add, imod_label_item_delete, imod_label_item_get,
     imod_label_item_match, imod_label_item_move, imod_label_match, imod_label_name,
@@ -163,10 +164,7 @@ fn imodel_scalar_accessors_preserve_binary_model_header_fields() {
     assert_eq!(imod_get_max_object(&model), 2);
     assert_eq!(imod_get_z_scale(&model), 2.5);
     assert_eq!(imod_get_pixel_size(&model), 1.25);
-    assert_eq!(
-        unsafe { std::ffi::CStr::from_ptr(imod_get_filename(&model)) },
-        c"accessor-model"
-    );
+    assert_eq!(imod_get_filename(&model), b"accessor-model");
     assert_eq!(imod_get_flipped(&model), IMODF_FLIPYZ);
     std::fs::remove_file(path).unwrap();
 }
@@ -603,8 +601,8 @@ fn model_and_object_name_bytes_past_the_nul_and_csum_survive_a_binary_round_trip
     let fixture = root.join("IMOD/Etomo/uitestData/BB/BBa_erase.fid");
     let raw = std::fs::read(&fixture).unwrap();
     let model = imod_read(&fixture).unwrap();
-    let name: Vec<u8> = model.name.iter().map(|byte| *byte as u8).collect();
-    assert_eq!(&name[..], &raw[8..8 + 128]);
+    let name: &[u8] = &model.name;
+    assert_eq!(name, &raw[8..8 + 128]);
     assert_eq!(name[13], 0);
     assert_eq!(name[14..].iter().filter(|byte| **byte != 0).count(), 35);
     assert_eq!(model.csum, 0);
@@ -632,10 +630,10 @@ fn model_and_object_name_bytes_past_the_nul_and_csum_survive_a_binary_round_trip
 }
 
 /// Test-only: builds a fixed-size NUL-padded model/object name array.
-fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+fn name_array<const N: usize>(text: &str) -> [u8; N] {
     let mut name = [0; N];
     for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
-        *slot = *byte as std::ffi::c_char;
+        *slot = *byte;
     }
     name
 }
@@ -775,11 +773,11 @@ fn hex_bytes(text: &str) -> Vec<u8> {
 }
 
 /// Test-only: renders a `char[]` field the way `printf("%s")` does.
-fn c_string(bytes: &[std::ffi::c_char]) -> String {
+fn c_string(bytes: &[u8]) -> String {
     bytes
         .iter()
         .take_while(|c| **c != 0)
-        .map(|c| *c as u8 as char)
+        .map(|c| *c as char)
         .collect()
 }
 
@@ -1082,7 +1080,9 @@ fn imod_write_skip_mesh_drops_meshes_by_object_kind() {
     // so a skipped mesh comes back as an allocated but empty `Imesh`.
     for (skip, contour_verts, isosurface_verts) in [(0, 1, 1), (1, 0, 1), (2, 1, 0), (3, 0, 0)] {
         let path = dir.join(format!("skip{}.mod", skip));
-        let mut file = std::fs::File::create(&path).unwrap();
+        let mut file = ImodFile::open(path.to_str().unwrap(), "wb")
+            .ok_or(())
+            .unwrap();
         imod_write_skip_mesh(&model, &mut file, skip).unwrap();
         drop(file);
         let back = imod_read(&path).unwrap();
@@ -1136,7 +1136,9 @@ fn imodel_write_mesh_omits_paired_thickness_meshes() {
 fn imod_fgetline_skips_comments_and_blank_lines_and_signals_eof() {
     let path = std::env::temp_dir().join(format!("imod-rs-fgetline-{}.txt", std::process::id()));
     std::fs::write(&path, b"# a comment\r\n\nreal line\nlast").unwrap();
-    let mut file = std::fs::File::open(&path).unwrap();
+    let mut file = ImodFile::open(path.to_str().unwrap(), "rb")
+        .ok_or(())
+        .unwrap();
     let mut line = [0u8; 81];
     assert_eq!(imod_fgetline(&mut file, &mut line, 81), 10);
     assert_eq!(&line[..10], b"real line\n");
@@ -1171,7 +1173,9 @@ fn low_level_get_and_put_helpers_round_trip_big_endian_arrays() {
         z: -1.,
     };
     {
-        let mut file = std::fs::File::create(&path).unwrap();
+        let mut file = ImodFile::open(path.to_str().unwrap(), "wb")
+            .ok_or(())
+            .unwrap();
         imod_put_ints(&mut file, &ints, 4).unwrap();
         imod_put_floats(&mut file, &floats, 4).unwrap();
         imod_put_bytes(&mut file, &bytes, 4).unwrap();
@@ -1181,7 +1185,9 @@ fn low_level_get_and_put_helpers_round_trip_big_endian_arrays() {
     // Every word is written most significant byte first.
     assert_eq!(&raw[..4], &[0, 0, 0, 1]);
     assert_eq!(&raw[8..12], &[1, 2, 3, 4]);
-    let mut file = std::fs::File::open(&path).unwrap();
+    let mut file = ImodFile::open(path.to_str().unwrap(), "rb")
+        .ok_or(())
+        .unwrap();
     let mut back_ints = [0_i32; 4];
     imod_get_ints(&mut file, &mut back_ints, 4).unwrap();
     assert_eq!(back_ints, ints);
@@ -1466,17 +1472,13 @@ fn ilabel_matches_native_libimod_driver() {
     let dup = imod_label_dup(Some(&lab));
     out.push_str(&show_label("dup", dup.as_ref()));
 
-    /* imodLabelPrint writes through libc; capture it from a tmpfile */
+    /* `imodLabelPrint` takes the C `FILE *fout`; the translation takes any
+    `std::io::Write`, so the text goes straight into a buffer here. */
     out.push_str("print:\n");
-    unsafe {
-        let tmp = libc::tmpfile();
-        imod_label_print(Some(&lab), tmp);
-        libc::fflush(tmp);
-        libc::rewind(tmp);
-        let mut buf = [0_u8; 4096];
-        let n = libc::fread(buf.as_mut_ptr() as *mut libc::c_void, 1, buf.len(), tmp);
-        out.push_str(std::str::from_utf8(&buf[..n]).unwrap());
-        libc::fclose(tmp);
+    {
+        let mut captured: Vec<u8> = Vec::new();
+        imod_label_print(Some(&lab), &mut captured);
+        out.push_str(std::str::from_utf8(&captured).unwrap());
     }
 
     /* matching */
@@ -1498,7 +1500,9 @@ fn ilabel_matches_native_libimod_driver() {
 
     /* write */
     let p1 = dir.join("ilab.bin");
-    let mut f = std::fs::File::create(&p1).unwrap();
+    let mut f = ImodFile::open(p1.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "write={}",
@@ -1509,7 +1513,9 @@ fn ilabel_matches_native_libimod_driver() {
     out.push_str(&dump_label_file(&p1, "write"));
 
     /* read back, skipping the 4 byte tag */
-    let mut f = std::fs::File::open(&p1).unwrap();
+    let mut f = ImodFile::open(p1.to_str().unwrap(), "rb")
+        .ok_or(())
+        .unwrap();
     f.seek(SeekFrom::Start(4)).unwrap();
     let mut err = 0;
     let rd = imod_label_read(&mut f, &mut err);
@@ -1519,7 +1525,9 @@ fn ilabel_matches_native_libimod_driver() {
 
     /* rewrite what was read */
     let p2 = dir.join("ilab2.bin");
-    let mut f = std::fs::File::create(&p2).unwrap();
+    let mut f = ImodFile::open(p2.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "write2={}",
@@ -1532,7 +1540,9 @@ fn ilabel_matches_native_libimod_driver() {
     /* empty label round trip */
     let e = imod_label_new();
     let p3 = dir.join("ilab3.bin");
-    let mut f = std::fs::File::create(&p3).unwrap();
+    let mut f = ImodFile::open(p3.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "write3={}",
@@ -1541,7 +1551,9 @@ fn ilabel_matches_native_libimod_driver() {
     .unwrap();
     drop(f);
     out.push_str(&dump_label_file(&p3, "write3"));
-    let mut f = std::fs::File::open(&p3).unwrap();
+    let mut f = ImodFile::open(p3.to_str().unwrap(), "rb")
+        .ok_or(())
+        .unwrap();
     f.seek(SeekFrom::Start(4)).unwrap();
     let mut err3 = 0;
     let rd3 = imod_label_read(&mut f, &mut err3);
@@ -1575,7 +1587,9 @@ fn ilabel_matches_native_libimod_driver() {
 
     /* write after delete */
     let p4 = dir.join("ilab4.bin");
-    let mut f = std::fs::File::create(&p4).unwrap();
+    let mut f = ImodFile::open(p4.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "write4={}",
@@ -1585,14 +1599,16 @@ fn ilabel_matches_native_libimod_driver() {
     drop(f);
     out.push_str(&dump_label_file(&p4, "write4"));
 
-    let mut sink = std::fs::File::create(dir.join("sink.bin")).unwrap();
+    let mut sink = ImodFile::open(dir.join("sink.bin").to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "writeNull={}",
         imod_label_write(None, ID_LABL, &mut sink)
     )
     .unwrap();
-    imod_label_print(None, std::ptr::null_mut());
+    imod_label_print(None, &mut Vec::new());
     writeln!(out, "nameNullLabel={}", imod_label_name(None, Some(b"a\0"))).unwrap();
     writeln!(out, "nameNullVal={}", imod_label_name(Some(&mut lab), None)).unwrap();
 
@@ -3167,7 +3183,9 @@ fn iview_matches_native_libimod_driver() {
         z: 3.5,
     };
     let p1 = dir.join("iview1.bin");
-    let mut f = std::fs::File::create(&p1).unwrap();
+    let mut f = ImodFile::open(p1.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "viewWrite={}",
@@ -3184,7 +3202,9 @@ fn iview_matches_native_libimod_driver() {
     model.view[2].objview[1].clips.flags = 1;
     model.view[2].clips.count = 0;
     let p2 = dir.join("iview2.bin");
-    let mut f = std::fs::File::create(&p2).unwrap();
+    let mut f = ImodFile::open(p2.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(
         out,
         "viewWrite2={}",
@@ -3199,7 +3219,9 @@ fn iview_matches_native_libimod_driver() {
     imod_view_default(&mut one);
     one.clips.count = 0;
     let p3 = dir.join("iview3.bin");
-    let mut f = std::fs::File::create(&p3).unwrap();
+    let mut f = ImodFile::open(p3.to_str().unwrap(), "wb")
+        .ok_or(())
+        .unwrap();
     writeln!(out, "viewWrite3={}", imod_view_write(&one, &mut f, &scale)).unwrap();
     drop(f);
     out.push_str(&dump_view_file(&p3, "write3"));

@@ -3,6 +3,7 @@
 
 use std::io::BufRead;
 
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::b3d_error;
 
 static STANDARD_RAMP_DATA: [i32; 57] = [
@@ -15,10 +16,6 @@ static INVERTED_RAMP_DATA: [i32; 57] = [
     255, 0, 229, 239, 255, 0, 240, 191, 255, 0, 259, 90, 255, 60, 305, 0, 207, 78, 361, 0, 191,
     143, 383, 0, 175, 177, 400, 60, 96, 255, 469, 100, 75, 200, 530,
 ];
-
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
 
 /// Original `cmapStandardRamp` (`colormap.c:58`).
 pub fn cmap_standard_ramp() -> &'static [i32; 57] {
@@ -69,7 +66,7 @@ pub fn cmap_read_convert(filename: &str, table: &mut [[u8; 256]; 3]) -> i32 {
         Err(_) => {
             unsafe {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!("cmapReadConvert: error opening file {}\n", filename),
                 );
             }
@@ -88,7 +85,7 @@ pub fn cmap_read_convert(filename: &str, table: &mut [[u8; 256]; 3]) -> i32 {
         if nlines == 0 || nlines > 256 {
             unsafe {
                 b3d_error(
-                    stderr,
+                    Some(&mut ImodFile::Stderr),
                     format_args!(
                         "cmapReadConvert: invalid number of lines ({}) in {}\n",
                         nlines, filename
@@ -157,14 +154,14 @@ pub fn cmap_read_convert(filename: &str, table: &mut [[u8; 256]; 3]) -> i32 {
     if error == 2 {
         unsafe {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("cmapReadConvert: error reading file {}\n", filename),
             );
         }
     } else if error == 4 {
         unsafe {
             b3d_error(
-                stderr,
+                Some(&mut ImodFile::Stderr),
                 format_args!("cmapReadConvert: memory allocation error"),
             )
         }

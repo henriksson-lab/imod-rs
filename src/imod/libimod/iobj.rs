@@ -529,12 +529,10 @@ pub fn imod_object_sort_by_surf(obj: &mut Iobj, if_by_surf: i32) -> i32 {
                 if stp.flags & (1 << 6) != 0 {
                     continue;
                 }
-                unsafe {
-                    if stp.index.i == i as i32 {
-                        stp.index.i = sindex as i32;
-                    } else if stp.index.i == sindex as i32 {
-                        stp.index.i = i as i32;
-                    }
+                if stp.index.i() == i as i32 {
+                    stp.index.set_i(sindex as i32);
+                } else if stp.index.i() == sindex as i32 {
+                    stp.index.set_i(i as i32);
                 }
             }
         }
@@ -856,11 +854,18 @@ pub fn imod_object_get_max_points(in_object: Option<&Iobj>) -> i32 {
 }
 
 /// Original: `imodObjectGetName` (`iobj.c:984`).
-pub fn imod_object_get_name(in_object: Option<&Iobj>) -> *const std::ffi::c_char {
-    let Some(in_object) = in_object else {
-        return std::ptr::null();
-    };
-    in_object.name.as_ptr()
+///
+/// The C returns `inObject->name`, a `char *` into the fixed 64-byte array, or
+/// NULL for a NULL object.  The slice stops at the first NUL, which is what
+/// every caller's `strlen`/`%s` does with it, and `None` is the NULL return.
+pub fn imod_object_get_name(in_object: Option<&Iobj>) -> Option<&[u8]> {
+    let in_object = in_object?;
+    let end = in_object
+        .name
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(IOBJ_STRSIZE);
+    Some(&in_object.name[..end])
 }
 
 /// Original: `imodObjectSetName` (`iobj.c:994`).
@@ -875,7 +880,7 @@ pub fn imod_object_set_name(obj: &mut Iobj, in_name: &[u8]) -> i32 {
         retval += 1;
     }
     for i in 0..len {
-        obj.name[i] = in_name[i] as std::ffi::c_char;
+        obj.name[i] = in_name[i];
     }
     retval
 }
@@ -1340,10 +1345,8 @@ N set 0 []
             let st = Istore {
                 type_: 3,
                 flags: 0,
-                index: StoreUnion {
-                    i: (k * 3) % if ncont != 0 { ncont } else { 1 },
-                },
-                value: StoreUnion { i: 10 * k + 1 },
+                index: StoreUnion::from_i((k * 3) % if ncont != 0 { ncont } else { 1 }),
+                value: StoreUnion::from_i(10 * k + 1),
             };
             istore_insert(&mut o.store, st);
         }
@@ -1353,14 +1356,15 @@ N set 0 []
     fn dumpstore(out: &mut String, tag: &str, o: &Iobj) {
         write!(out, "{tag} store").unwrap();
         for st in &o.store {
-            unsafe {
-                write!(
-                    out,
-                    " [{},{},{},{}]",
-                    st.type_, st.flags, st.index.i, st.value.i
-                )
-                .unwrap();
-            }
+            write!(
+                out,
+                " [{},{},{},{}]",
+                st.type_,
+                st.flags,
+                st.index.i(),
+                st.value.i()
+            )
+            .unwrap();
         }
         writeln!(out).unwrap();
     }

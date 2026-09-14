@@ -3,6 +3,9 @@
 //!
 #![allow(dead_code, unused_variables)]
 
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::icont::imodel_contour_check_wild;
 use crate::imod::libimod::imodel::{ICONT_WILD, Icont, Iobj, Iplane, Ipoint};
 use crate::imod::libimod::iplane::imod_planes_clip;
@@ -176,9 +179,7 @@ pub fn imod_point_line_distance(ln: &Ipoint, p: &Ipoint) -> f32 {
     if d != 0. {
         (((l * l) / d) as f64).sqrt() as f32
     } else {
-        unsafe {
-            libc::printf(c"ipd00:\n".as_ptr());
-        }
+        let _ = ImodFile::Stdout.write_all(c_format("ipd00:\n", &[]).as_bytes());
         0.0
     }
 }
@@ -683,17 +684,10 @@ mod tests {
     use crate::imod::libimod::iplane::imod_plane_init;
 
     fn g9(v: f64) -> String {
-        let mut buf = [0u8; 64];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr() as *mut std::ffi::c_char,
-                buf.len(),
-                c"%.9g".as_ptr(),
-                v,
-            );
-        }
-        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
+        crate::imod::libcfshr::b3dutil::c_format(
+            "%.9g",
+            &[crate::imod::libcfshr::b3dutil::CArg::Dbl(v)],
+        )
     }
 
     fn mkcont(xy: &[f32], z: f32) -> Icont {

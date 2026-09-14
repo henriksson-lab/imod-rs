@@ -737,8 +737,8 @@ fn ascii_file_mode_writes_implemented_binary_model_categories_and_backup() {
             store: vec![Istore {
                 type_: 10,
                 flags: 4,
-                index: StoreUnion { i: 0 },
-                value: StoreUnion { f: 3.5 },
+                index: StoreUnion::from_i(0),
+                value: StoreUnion::from_f(3.5),
             }],
             cont: vec![Icont {
                 pts: vec![Ipoint::default()],
@@ -930,10 +930,10 @@ fn ascii_mode_rewinds_over_the_preliminary_report_and_formats_with_g() {
 }
 
 /// Test-only: builds a fixed-size NUL-padded model/object name array.
-fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+fn name_array<const N: usize>(text: &str) -> [u8; N] {
     let mut name = [0; N];
     for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
-        *slot = *byte as std::ffi::c_char;
+        *slot = *byte;
     }
     name
 }

@@ -5,7 +5,9 @@
 //! source boundaries; no alternate image renderer is introduced here.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::zoomdown::{SLICE_MODE_RGB, select_zoom_filter, zoom_with_filter};
+use crate::imod::libcfshr::zoomdown::{
+    SLICE_MODE_RGB, ZoomLines, ZoomOut, select_zoom_filter, zoom_with_filter,
+};
 use crate::imod::libimod::imat::{
     B3D_X, B3D_Y, B3D_Z, imod_mat_new, imod_mat_rot, imod_mat_transform,
 };
@@ -558,28 +560,26 @@ pub fn imodv_draw_timage(
     if !state.zoom_buffer.is_empty() && state.zoom_scale < 1.0 {
         let nx = ((width as f64 * state.zoom_scale).floor() as i32).clamp(1, state.tex_image_size);
         let ny = ((height as f64 * state.zoom_scale).floor() as i32).clamp(1, state.tex_image_size);
-        let mut lines: Vec<*mut u8> = (0..height)
-            .map(|row| unsafe { upload.as_mut_ptr().add((row * width * 4) as usize) })
+        let lines: Vec<&[u8]> = (0..height)
+            .map(|row| &upload[(row * width * 4) as usize..])
             .collect();
         let mut reduced = vec![0u8; (nx * ny * 4) as usize];
         let dtype = -(SLICE_MODE_RGB + if state.falsecolor != 0 { 2 } else { 3 });
-        let err = unsafe {
-            zoom_with_filter(
-                lines.as_mut_ptr(),
-                width,
-                height,
-                0.,
-                0.,
-                nx,
-                ny,
-                nx,
-                0,
-                dtype,
-                reduced.as_mut_ptr().cast(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        };
+        let err = zoom_with_filter(
+            ZoomLines::Byte(&lines),
+            width,
+            height,
+            0.,
+            0.,
+            nx,
+            ny,
+            nx,
+            0,
+            dtype,
+            &mut ZoomOut::Byte(&mut reduced),
+            None,
+            None,
+        );
         if err == 0 {
             upload = reduced;
             upload_width = nx;

@@ -5,6 +5,9 @@
 //! removed/uncompiled `imodContourTracer`.
 #![allow(dead_code, unused_variables)]
 
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libimod::imat::{
     B3D_X, B3D_Z, imod_mat_delete, imod_mat_new, imod_mat_rot, imod_mat_transform,
     imod_mat_transform2d,
@@ -570,13 +573,13 @@ pub fn imodel_contour_centroid(icont: Option<&Icont>, rcp: &mut Ipoint, rtw: &mu
 
         /* check for odd amount of scans, shouldn't happen! */
         if (endpt - bgnpt) % 2 == 0 {
-            unsafe {
-                libc::printf(
-                    c" (Error scan line %d,%d)\n".as_ptr(),
-                    scanline as std::ffi::c_int,
-                    y as std::ffi::c_int,
-                );
-            }
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    " (Error scan line %d,%d)\n",
+                    &[CArg::Int(scanline as i64), CArg::Int(y as i64)],
+                )
+                .as_bytes(),
+            );
         } else {
             /* add all points in each scan. */
             let mut j = bgnpt;
@@ -1292,9 +1295,7 @@ pub fn imod_contour_join(
             /* GEN_STORE_GAP (`istore.h:41`), GEN_STORE_ONEPOINT (`istore.h:32`) */
             type_: 4,
             flags: 1 << 7,
-            index: StoreUnion {
-                i: c2.pts.len() as i32 - 1,
-            },
+            index: StoreUnion::from_i(c2.pts.len() as i32 - 1),
             value: StoreUnion::default(),
         };
         istore_add_one_index_item(&mut c2.store, item);
@@ -3101,13 +3102,13 @@ pub fn imod_contour_check_nesting(
     /* Exact duplicates actually print as 0.999999 */
     if frac1 > 0.99998 && frac2 > 0.99998 {
         if *numwarn >= 0 {
-            unsafe {
-                libc::printf(
-                    c"WARNING: Contours %d and %d are duplicates\n".as_ptr(),
-                    co + 1,
-                    eco + 1,
-                );
-            }
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "WARNING: Contours %d and %d are duplicates\n",
+                    &[CArg::Int((co + 1) as i64), CArg::Int((eco + 1) as i64)],
+                )
+                .as_bytes(),
+            );
         }
         need_warn = 1;
     } else if frac1 > 0.99 || frac2 > 0.99 {
@@ -3159,23 +3160,28 @@ pub fn imod_contour_check_nesting(
         nest.inside.push(inco);
         nest.ninside += 1;
     } else if (frac1 > 0.1 || frac2 > 0.1) && *numwarn >= 0 {
-        unsafe {
-            libc::printf(
-                c"WARNING: Contours %d and %d overlap by %.3f and %.3f\n".as_ptr(),
-                co + 1,
-                eco + 1,
-                frac1 as std::ffi::c_double,
-                frac2 as std::ffi::c_double,
-            );
-        }
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "WARNING: Contours %d and %d overlap by %.3f and %.3f\n",
+                &[
+                    CArg::Int((co + 1) as i64),
+                    CArg::Int((eco + 1) as i64),
+                    CArg::Dbl(frac1 as f64),
+                    CArg::Dbl(frac2 as f64),
+                ],
+            )
+            .as_bytes(),
+        );
         need_warn = 1;
     }
     if need_warn != 0 && *numwarn == 0 {
-        unsafe {
-            libc::printf(
-                c"To find these contours in 3dmod, you may first have to remove empty contours\n with the menu command Edit-Object-Clean\n".as_ptr(),
-            );
-        }
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "To find these contours in 3dmod, you may first have to remove empty contours\n with the menu command Edit-Object-Clean\n",
+                &[],
+            )
+            .as_bytes(),
+        );
         *numwarn = 1;
     }
     0
@@ -3724,17 +3730,10 @@ mod tests {
     #[test]
     fn source_c_driver_differential() {
         fn g9(v: f64) -> String {
-            let mut buf = [0u8; 64];
-            unsafe {
-                libc::snprintf(
-                    buf.as_mut_ptr() as *mut std::ffi::c_char,
-                    buf.len(),
-                    c"%.9g".as_ptr(),
-                    v,
-                );
-            }
-            let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-            String::from_utf8_lossy(&buf[..end]).into_owned()
+            crate::imod::libcfshr::b3dutil::c_format(
+                "%.9g",
+                &[crate::imod::libcfshr::b3dutil::CArg::Dbl(v)],
+            )
         }
 
         fn mkcont(xy: &[f32], z: f32) -> Icont {
@@ -4130,17 +4129,10 @@ mod source_driver_group2 {
     use crate::imod::libimod::iobj::imod_object_add_contour;
 
     fn g9(v: f64) -> String {
-        let mut buf = [0u8; 64];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr() as *mut std::ffi::c_char,
-                buf.len(),
-                c"%.9g".as_ptr(),
-                v,
-            );
-        }
-        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
+        crate::imod::libcfshr::b3dutil::c_format(
+            "%.9g",
+            &[crate::imod::libcfshr::b3dutil::CArg::Dbl(v)],
+        )
     }
 
     fn mkcont(xy: &[f32], z: f32) -> Icont {
@@ -4998,17 +4990,10 @@ mod source_driver_store {
     use crate::imod::libimod::istore::istore_insert_change;
 
     fn g9(v: f64) -> String {
-        let mut buf = [0u8; 64];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr() as *mut std::ffi::c_char,
-                buf.len(),
-                c"%.9g".as_ptr(),
-                v,
-            );
-        }
-        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
+        crate::imod::libcfshr::b3dutil::c_format(
+            "%.9g",
+            &[crate::imod::libcfshr::b3dutil::CArg::Dbl(v)],
+        )
     }
 
     fn mkcont(xy: &[f32], z: f32) -> Icont {
@@ -5030,8 +5015,8 @@ mod source_driver_store {
         let st = Istore {
             type_,
             flags: 0,
-            index: StoreUnion { i: index },
-            value: StoreUnion { i: val },
+            index: StoreUnion::from_i(index),
+            value: StoreUnion::from_i(val),
         };
         istore_insert_change(&mut c.store, st);
     }
@@ -5041,8 +5026,8 @@ mod source_driver_store {
         let st = Istore {
             type_: 4,
             flags: 1 << 7,
-            index: StoreUnion { i: index },
-            value: StoreUnion { i: 0 },
+            index: StoreUnion::from_i(index),
+            value: StoreUnion::from_i(0),
         };
         istore_add_one_index_item(&mut c.store, st);
     }
@@ -5072,8 +5057,8 @@ mod source_driver_store {
                 "{tag} st {i} type={} flags={} index={} value={}\n",
                 st.type_,
                 st.flags,
-                unsafe { st.index.i },
-                unsafe { st.value.i }
+                (st.index.i()),
+                (st.value.i())
             ));
         }
     }

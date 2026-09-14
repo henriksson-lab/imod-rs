@@ -298,7 +298,7 @@ pub fn imodv_objed_name(a: &mut ImodvApp, name: &str) {
     if let Some(obj) = objed_object(a) {
         obj.name = [0; 64];
         for (out, b) in obj.name.iter_mut().zip(name.bytes().take(63)) {
-            *out = b as i8;
+            *out = b;
         }
         imodv_register_object_chg(index);
         imodv_finish_chg_unit();

@@ -9,7 +9,15 @@ pub unsafe fn todfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut 
         let idir = *idirp;
         match crate::imod::backends::fft_backend() {
             Ok(crate::imod::backends::FftBackend::Rustfft) => {
-                if let Err(error) = super::rustfft_backend::todfft(array, nx, ny, idir) {
+                // The backend indexes `ny` rows of `nx + 2` floats out of
+                // the caller's buffer.
+                let len = if nx > 0 && ny > 0 && nx & 1 == 0 {
+                    (nx as usize + 2) * ny as usize
+                } else {
+                    0
+                };
+                let buffer = std::slice::from_raw_parts_mut(array, len);
+                if let Err(error) = super::rustfft_backend::todfft(buffer, nx, ny, idir) {
                     eprintln!("ERROR: Rust-native backend - {error}");
                 }
                 return;

@@ -2,7 +2,6 @@
 //!
 //! IMOD binary chunks are big-endian irrespective of the host byte order.
 
-use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
@@ -34,10 +33,8 @@ use super::istore::{
 use super::iview::{VIEW_STRSIZE, imod_imnx_new, imod_view_model_new};
 use crate::imod::libcfshr::b3dutil::b3d_error;
 
-unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-}
 use super::objgroup::{obj_group_list_write, obj_group_read};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 
 const ID_IMOD: u32 = u32::from_be_bytes(*b"IMOD");
 const IMOD_V12: u32 = u32::from_be_bytes(*b"V1.2");
@@ -70,33 +67,37 @@ const ANGLE_STRSIZE: usize = 32;
 const MAXLINE: i32 = 81;
 
 /// Original: `writeAsciiClips` (`imodel_files.c:1834`).
-pub fn write_ascii_clips(
-    file: *mut libc::FILE,
-    clips: &super::imodel::Iclip_planes,
-    prefix: *const std::ffi::c_char,
-) {
+pub fn write_ascii_clips(file: &mut ImodFile, clips: &super::imodel::Iclip_planes, prefix: &str) {
     if clips.count != 0 {
-        unsafe {
-            libc::fprintf(
-                file,
-                c"%s %d %d %d %d\n".as_ptr(),
-                prefix,
-                clips.count as std::ffi::c_int,
-                clips.flags as std::ffi::c_int,
-                clips.trans as std::ffi::c_int,
-                clips.plane as std::ffi::c_int,
+        {
+            let _ = file.write_all(
+                c_format(
+                    "%s %d %d %d %d\n",
+                    &[
+                        CArg::Str(prefix),
+                        CArg::Int(clips.count as i64),
+                        CArg::Int(clips.flags as i64),
+                        CArg::Int(clips.trans as i64),
+                        CArg::Int(clips.plane as i64),
+                    ],
+                )
+                .as_bytes(),
             );
             // `IMOD_CLIPSIZE` bounds the source arrays.
             for i in 0..(clips.count as usize).min(clips.normal.len()) {
-                libc::fprintf(
-                    file,
-                    c"%g %g %g %g %g %g\n".as_ptr(),
-                    clips.normal[i].x as std::ffi::c_double,
-                    clips.normal[i].y as std::ffi::c_double,
-                    clips.normal[i].z as std::ffi::c_double,
-                    clips.point[i].x as std::ffi::c_double,
-                    clips.point[i].y as std::ffi::c_double,
-                    clips.point[i].z as std::ffi::c_double,
+                let _ = file.write_all(
+                    c_format(
+                        "%g %g %g %g %g %g\n",
+                        &[
+                            CArg::Dbl(clips.normal[i].x as f64),
+                            CArg::Dbl(clips.normal[i].y as f64),
+                            CArg::Dbl(clips.normal[i].z as f64),
+                            CArg::Dbl(clips.point[i].x as f64),
+                            CArg::Dbl(clips.point[i].y as f64),
+                            CArg::Dbl(clips.point[i].z as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
             }
         }
@@ -104,198 +105,242 @@ pub fn write_ascii_clips(
 }
 
 /// Original: `imodWriteAscii` (`imodel_files.c:1631`).
-pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
-    unsafe {
-        libc::rewind(file);
-        libc::fprintf(file, c"# imod ascii file version 2.0\n\n".as_ptr());
-        libc::fprintf(
-            file,
-            c"imod %d\n".as_ptr(),
-            imod.obj.len() as std::ffi::c_int,
+pub fn imod_write_ascii(imod: &Imod, file: &mut ImodFile) -> i32 {
+    {
+        // `imodel_files.c:1645` `rewind(imod->file)`.
+        let _ = file.rewind();
+        let _ = file.write_all(c_format("# imod ascii file version 2.0\n\n", &[]).as_bytes());
+        let _ =
+            file.write_all(c_format("imod %d\n", &[CArg::Int(imod.obj.len() as i64)]).as_bytes());
+        let _ = file.write_all(
+            c_format(
+                "max %d %d %d\n",
+                &[
+                    CArg::Int(imod.xmax as i64),
+                    CArg::Int(imod.ymax as i64),
+                    CArg::Int(imod.zmax as i64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(
-            file,
-            c"max %d %d %d\n".as_ptr(),
-            imod.xmax,
-            imod.ymax,
-            imod.zmax,
+        let _ = file.write_all(
+            c_format(
+                "offsets %g %g %g\n",
+                &[
+                    CArg::Dbl(imod.xoffset as f64),
+                    CArg::Dbl(imod.yoffset as f64),
+                    CArg::Dbl(imod.zoffset as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(
-            file,
-            c"offsets %g %g %g\n".as_ptr(),
-            imod.xoffset as std::ffi::c_double,
-            imod.yoffset as std::ffi::c_double,
-            imod.zoffset as std::ffi::c_double,
+        let _ = file.write_all(
+            c_format(
+                "angles %g %g %g\n",
+                &[
+                    CArg::Dbl(imod.alpha as f64),
+                    CArg::Dbl(imod.beta as f64),
+                    CArg::Dbl(imod.gamma as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(
-            file,
-            c"angles %g %g %g\n".as_ptr(),
-            imod.alpha as std::ffi::c_double,
-            imod.beta as std::ffi::c_double,
-            imod.gamma as std::ffi::c_double,
+        let _ = file.write_all(
+            c_format(
+                "scale %g %g %g\n",
+                &[
+                    CArg::Dbl(imod.xscale as f64),
+                    CArg::Dbl(imod.yscale as f64),
+                    CArg::Dbl(imod.zscale as f64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(
-            file,
-            c"scale %g %g %g\n".as_ptr(),
-            imod.xscale as std::ffi::c_double,
-            imod.yscale as std::ffi::c_double,
-            imod.zscale as std::ffi::c_double,
+        let _ = file
+            .write_all(c_format("mousemode  %d\n", &[CArg::Int(imod.mousemode as i64)]).as_bytes());
+        let _ = file
+            .write_all(c_format("drawmode   %d\n", &[CArg::Int(imod.drawmode as i64)]).as_bytes());
+        let _ = file.write_all(
+            c_format(
+                "b&w_level  %d,%d\n",
+                &[
+                    CArg::Int(imod.blacklevel as i64),
+                    CArg::Int(imod.whitelevel as i64),
+                ],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(file, c"mousemode  %d\n".as_ptr(), imod.mousemode);
-        libc::fprintf(file, c"drawmode   %d\n".as_ptr(), imod.drawmode);
-        libc::fprintf(
-            file,
-            c"b&w_level  %d,%d\n".as_ptr(),
-            imod.blacklevel,
-            imod.whitelevel,
-        );
-        libc::fprintf(file, c"resolution %d\n".as_ptr(), imod.res);
-        libc::fprintf(file, c"threshold  %d\n".as_ptr(), imod.thresh);
-        libc::fprintf(
-            file,
-            c"pixsize    %g\n".as_ptr(),
-            imod.pixsize as std::ffi::c_double,
-        );
+        let _ =
+            file.write_all(c_format("resolution %d\n", &[CArg::Int(imod.res as i64)]).as_bytes());
+        let _ = file
+            .write_all(c_format("threshold  %d\n", &[CArg::Int(imod.thresh as i64)]).as_bytes());
+        let _ = file
+            .write_all(c_format("pixsize    %g\n", &[CArg::Dbl(imod.pixsize as f64)]).as_bytes());
         // `imodUnits` (`imodel.c:1360`) selects the name from the IMOD_UNIT_*
         // codes in `imodel.h:39-47`.
-        libc::fprintf(
-            file,
-            c"units      %s\n".as_ptr(),
-            match imod.units {
-                0 => c"pixels".as_ptr(),
-                3 => c"km".as_ptr(),
-                1 => c"m".as_ptr(),
-                -2 => c"cm".as_ptr(),
-                -3 => c"mm".as_ptr(),
-                -6 => c"um".as_ptr(),
-                -9 => c"nm".as_ptr(),
-                -10 => c"A".as_ptr(),
-                -12 => c"pm".as_ptr(),
-                _ => c"unknown units".as_ptr(),
-            },
+        let _ = file.write_all(
+            c_format(
+                "units      %s\n",
+                &[CArg::Str(match imod.units {
+                    0 => "pixels",
+                    3 => "km",
+                    1 => "m",
+                    -2 => "cm",
+                    -3 => "mm",
+                    -6 => "um",
+                    -9 => "nm",
+                    -10 => "A",
+                    -12 => "pm",
+                    _ => "unknown units",
+                })],
+            )
+            .as_bytes(),
         );
-        libc::fprintf(
-            file,
-            c"flipped    %d\n".as_ptr(),
-            if imod.flags & super::imodel::IMODF_FLIPYZ != 0 {
-                1
-            } else {
-                0
-            } as std::ffi::c_int,
+        let _ = file.write_all(
+            c_format(
+                "flipped    %d\n",
+                &[CArg::Int(
+                    (if imod.flags & super::imodel::IMODF_FLIPYZ != 0 {
+                        1
+                    } else {
+                        0
+                    }) as i64,
+                )],
+            )
+            .as_bytes(),
         );
         if let Some(reference) = imod.ref_image {
-            libc::fprintf(
-                file,
-                c"refcurscale %g %g %g\n".as_ptr(),
-                reference.cscale.x as std::ffi::c_double,
-                reference.cscale.y as std::ffi::c_double,
-                reference.cscale.z as std::ffi::c_double,
+            let _ = file.write_all(
+                c_format(
+                    "refcurscale %g %g %g\n",
+                    &[
+                        CArg::Dbl(reference.cscale.x as f64),
+                        CArg::Dbl(reference.cscale.y as f64),
+                        CArg::Dbl(reference.cscale.z as f64),
+                    ],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"refcurtrans %g %g %g\n".as_ptr(),
-                reference.ctrans.x as std::ffi::c_double,
-                reference.ctrans.y as std::ffi::c_double,
-                reference.ctrans.z as std::ffi::c_double,
+            let _ = file.write_all(
+                c_format(
+                    "refcurtrans %g %g %g\n",
+                    &[
+                        CArg::Dbl(reference.ctrans.x as f64),
+                        CArg::Dbl(reference.ctrans.y as f64),
+                        CArg::Dbl(reference.ctrans.z as f64),
+                    ],
+                )
+                .as_bytes(),
             );
             if imod.flags & super::imodel::IMODF_TILTOK != 0 {
-                libc::fprintf(
-                    file,
-                    c"refcurrot %g %g %g\n".as_ptr(),
-                    reference.crot.x as std::ffi::c_double,
-                    reference.crot.y as std::ffi::c_double,
-                    reference.crot.z as std::ffi::c_double,
+                let _ = file.write_all(
+                    c_format(
+                        "refcurrot %g %g %g\n",
+                        &[
+                            CArg::Dbl(reference.crot.x as f64),
+                            CArg::Dbl(reference.crot.y as f64),
+                            CArg::Dbl(reference.crot.z as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
             }
             if imod.flags & super::imodel::IMODF_OTRANS_ORIGIN != 0 {
-                libc::fprintf(
-                    file,
-                    c"refoldtrans %g %g %g\n".as_ptr(),
-                    reference.otrans.x as std::ffi::c_double,
-                    reference.otrans.y as std::ffi::c_double,
-                    reference.otrans.z as std::ffi::c_double,
+                let _ = file.write_all(
+                    c_format(
+                        "refoldtrans %g %g %g\n",
+                        &[
+                            CArg::Dbl(reference.otrans.x as f64),
+                            CArg::Dbl(reference.otrans.y as f64),
+                            CArg::Dbl(reference.otrans.z as f64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
             }
         }
         for angle in &imod.slicer_ang {
-            let label_text = String::from_utf8_lossy(
-                &angle.label[..angle
-                    .label
-                    .iter()
-                    .position(|byte| *byte == 0)
-                    .unwrap_or(angle.label.len())],
-            )
-            .into_owned();
-            let label = std::ffi::CString::new(label_text).unwrap_or_default();
-            libc::fprintf(
-                file,
-                c"slicerAngle %d %g %g %g %g %g %g %s\n".as_ptr(),
-                angle.time,
-                angle.angles[0] as std::ffi::c_double,
-                angle.angles[1] as std::ffi::c_double,
-                angle.angles[2] as std::ffi::c_double,
-                angle.center.x as std::ffi::c_double,
-                angle.center.y as std::ffi::c_double,
-                angle.center.z as std::ffi::c_double,
-                label.as_ptr(),
-            );
+            // C `%s` copies the bytes of `slanp->label` through unchanged;
+            // `String::from_utf8_lossy` would substitute U+FFFD for any that
+            // are not UTF-8, so the raw bytes go to `CArg::Bytes`.
+            let label_text = &angle.label[..angle
+                .label
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(angle.label.len())];
+            let _ = file.write_all(&c_format_bytes(
+                "slicerAngle %d %g %g %g %g %g %g %s\n",
+                &[
+                    CArg::Int(angle.time as i64),
+                    CArg::Dbl(angle.angles[0] as f64),
+                    CArg::Dbl(angle.angles[1] as f64),
+                    CArg::Dbl(angle.angles[2] as f64),
+                    CArg::Dbl(angle.center.x as f64),
+                    CArg::Dbl(angle.center.y as f64),
+                    CArg::Dbl(angle.center.z as f64),
+                    CArg::Bytes(label_text),
+                ],
+            ));
         }
-        libc::fprintf(file, c"currentview  %d\n".as_ptr(), imod.cview);
+        let _ = file
+            .write_all(c_format("currentview  %d\n", &[CArg::Int(imod.cview as i64)]).as_bytes());
         for (iv, view) in imod.view.iter().enumerate().skip(1) {
-            libc::fprintf(file, c"view %d\n".as_ptr(), iv as std::ffi::c_int);
-            libc::fprintf(
-                file,
-                c"viewfovy  %g\n".as_ptr(),
-                view.fovy as std::ffi::c_double,
+            let _ = file.write_all(c_format("view %d\n", &[CArg::Int(iv as i64)]).as_bytes());
+            let _ = file
+                .write_all(c_format("viewfovy  %g\n", &[CArg::Dbl(view.fovy as f64)]).as_bytes());
+            let _ = file
+                .write_all(c_format("viewcnear %g\n", &[CArg::Dbl(view.cnear as f64)]).as_bytes());
+            let _ = file
+                .write_all(c_format("viewcfar  %g\n", &[CArg::Dbl(view.cfar as f64)]).as_bytes());
+            let _ = file
+                .write_all(c_format("viewflags %u\n", &[CArg::Uint(view.world as u64)]).as_bytes());
+            let _ = file.write_all(
+                c_format(
+                    "viewtrans %g %g %g\n",
+                    &[
+                        CArg::Dbl(view.trans.x as f64),
+                        CArg::Dbl(view.trans.y as f64),
+                        CArg::Dbl(view.trans.z as f64),
+                    ],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"viewcnear %g\n".as_ptr(),
-                view.cnear as std::ffi::c_double,
+            let _ = file.write_all(
+                c_format(
+                    "viewrot %g %g %g\n",
+                    &[
+                        CArg::Dbl(view.rot.x as f64),
+                        CArg::Dbl(view.rot.y as f64),
+                        CArg::Dbl(view.rot.z as f64),
+                    ],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"viewcfar  %g\n".as_ptr(),
-                view.cfar as std::ffi::c_double,
+            let _ = file.write_all(
+                c_format(
+                    "viewlight %g %g\n",
+                    &[CArg::Dbl(view.lightx as f64), CArg::Dbl(view.lighty as f64)],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(file, c"viewflags %u\n".as_ptr(), view.world);
-            libc::fprintf(
-                file,
-                c"viewtrans %g %g %g\n".as_ptr(),
-                view.trans.x as std::ffi::c_double,
-                view.trans.y as std::ffi::c_double,
-                view.trans.z as std::ffi::c_double,
+            let _ = file.write_all(
+                c_format(
+                    "depthcue %g %g\n",
+                    &[CArg::Dbl(view.dcstart as f64), CArg::Dbl(view.dcend as f64)],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"viewrot %g %g %g\n".as_ptr(),
-                view.rot.x as std::ffi::c_double,
-                view.rot.y as std::ffi::c_double,
-                view.rot.z as std::ffi::c_double,
-            );
-            libc::fprintf(
-                file,
-                c"viewlight %g %g\n".as_ptr(),
-                view.lightx as std::ffi::c_double,
-                view.lighty as std::ffi::c_double,
-            );
-            libc::fprintf(
-                file,
-                c"depthcue %g %g\n".as_ptr(),
-                view.dcstart as std::ffi::c_double,
-                view.dcend as std::ffi::c_double,
-            );
-            let label_text = String::from_utf8_lossy(
-                &view.label[..view
-                    .label
-                    .iter()
-                    .position(|byte| *byte == 0)
-                    .unwrap_or(view.label.len())],
-            )
-            .into_owned();
-            let label = std::ffi::CString::new(label_text).unwrap_or_default();
-            libc::fprintf(file, c"viewlabel %s\n".as_ptr(), label.as_ptr());
-            write_ascii_clips(file, &view.clips, c"globalclips".as_ptr());
+            // C `%s` copies the bytes of `view->label` through unchanged.
+            let label_text = &view.label[..view
+                .label
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(view.label.len())];
+            let _ = file.write_all(&c_format_bytes(
+                "viewlabel %s\n",
+                &[CArg::Bytes(label_text)],
+            ));
+            write_ascii_clips(file, &view.clips, "globalclips");
         }
         for (ob, obj) in imod.obj.iter().enumerate() {
             let num_real = obj
@@ -303,127 +348,122 @@ pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
                 .iter()
                 .filter(|mesh| (mesh.flag >> 24) & 0x3f == 0)
                 .count();
-            libc::fprintf(
-                file,
-                c"\nobject %d %d %d\n".as_ptr(),
-                ob as std::ffi::c_int,
-                obj.cont.len() as std::ffi::c_int,
-                num_real as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format(
+                    "\nobject %d %d %d\n",
+                    &[
+                        CArg::Int(ob as i64),
+                        CArg::Int(obj.cont.len() as i64),
+                        CArg::Int(num_real as i64),
+                    ],
+                )
+                .as_bytes(),
             );
-            libc::fprintf(file, c"name %s\n".as_ptr(), obj.name.as_ptr());
-            libc::fprintf(
-                file,
-                c"color %g %g %g %d\n".as_ptr(),
-                obj.red as std::ffi::c_double,
-                obj.green as std::ffi::c_double,
-                obj.blue as std::ffi::c_double,
-                obj.trans as std::ffi::c_int,
+            let _ = file.write_all(&c_format_bytes(
+                "name %s\n",
+                &[CArg::Bytes(
+                    &obj.name[..obj
+                        .name
+                        .iter()
+                        .position(|byte| *byte == 0)
+                        .unwrap_or(IOBJ_STRSIZE)],
+                )],
+            ));
+            let _ = file.write_all(
+                c_format(
+                    "color %g %g %g %d\n",
+                    &[
+                        CArg::Dbl(obj.red as f64),
+                        CArg::Dbl(obj.green as f64),
+                        CArg::Dbl(obj.blue as f64),
+                        CArg::Int(obj.trans as i64),
+                    ],
+                )
+                .as_bytes(),
             );
             if obj.fillred != 0 || obj.fillgreen != 0 || obj.fillblue != 0 {
-                libc::fprintf(
-                    file,
-                    c"Fillcolor %d %d %d\n".as_ptr(),
-                    obj.fillred as std::ffi::c_int,
-                    obj.fillgreen as std::ffi::c_int,
-                    obj.fillblue as std::ffi::c_int,
+                let _ = file.write_all(
+                    c_format(
+                        "Fillcolor %d %d %d\n",
+                        &[
+                            CArg::Int(obj.fillred as i64),
+                            CArg::Int(obj.fillgreen as i64),
+                            CArg::Int(obj.fillblue as i64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
             }
             for (flag, line) in [
-                (super::imodel::IMOD_OBJFLAG_OPEN, c"open\n"),
-                (super::imodel::IMOD_OBJFLAG_SCAT, c"scattered\n"),
-                (super::imodel::IMOD_OBJFLAG_OFF, c"nodraw\n"),
-                (super::imodel::IMOD_OBJFLAG_OUT, c"insideout\n"),
-                (1 << 8, c"fill\n"),
-                (1 << 10, c"drawmesh\n"),
-                (1 << 11, c"nolines\n"),
-                (1 << 19, c"bothsides\n"),
-                (1 << 14, c"usefill\n"),
-                (1 << 6, c"pntusefill\n"),
-                (1 << 7, c"pntonsec\n"),
-                (1 << 15, c"antialias\n"),
-                (1 << 18, c"hastimes\n"),
-                (1 << 12, c"usevalue\n"),
-                (1 << 17, c"valcolor\n"),
+                (super::imodel::IMOD_OBJFLAG_OPEN, "open\n"),
+                (super::imodel::IMOD_OBJFLAG_SCAT, "scattered\n"),
+                (super::imodel::IMOD_OBJFLAG_OFF, "nodraw\n"),
+                (super::imodel::IMOD_OBJFLAG_OUT, "insideout\n"),
+                (1 << 8, "fill\n"),
+                (1 << 10, "drawmesh\n"),
+                (1 << 11, "nolines\n"),
+                (1 << 19, "bothsides\n"),
+                (1 << 14, "usefill\n"),
+                (1 << 6, "pntusefill\n"),
+                (1 << 7, "pntonsec\n"),
+                (1 << 15, "antialias\n"),
+                (1 << 18, "hastimes\n"),
+                (1 << 12, "usevalue\n"),
+                (1 << 17, "valcolor\n"),
             ] {
                 if obj.flags & flag != 0 {
-                    libc::fprintf(file, line.as_ptr());
+                    let _ = file.write_all(c_format(line, &[]).as_bytes());
                 }
             }
-            libc::fprintf(
-                file,
-                c"linewidth %d\n".as_ptr(),
-                obj.linewidth as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("linewidth %d\n", &[CArg::Int(obj.linewidth as i64)]).as_bytes(),
             );
-            libc::fprintf(file, c"surfsize  %d\n".as_ptr(), obj.surfsize);
-            libc::fprintf(file, c"pointsize %d\n".as_ptr(), obj.pdrawsize);
-            libc::fprintf(file, c"axis      %d\n".as_ptr(), obj.axis);
-            libc::fprintf(file, c"drawmode  %d\n".as_ptr(), obj.drawmode);
-            libc::fprintf(
-                file,
-                c"width2D   %d\n".as_ptr(),
-                obj.linewidth2 as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("surfsize  %d\n", &[CArg::Int(obj.surfsize as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"symbol    %d\n".as_ptr(),
-                obj.symbol as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("pointsize %d\n", &[CArg::Int(obj.pdrawsize as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"symsize   %d\n".as_ptr(),
-                obj.symsize as std::ffi::c_int,
+            let _ = file
+                .write_all(c_format("axis      %d\n", &[CArg::Int(obj.axis as i64)]).as_bytes());
+            let _ = file.write_all(
+                c_format("drawmode  %d\n", &[CArg::Int(obj.drawmode as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"symflags  %d\n".as_ptr(),
-                obj.symflags as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("width2D   %d\n", &[CArg::Int(obj.linewidth2 as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"ambient   %d\n".as_ptr(),
-                obj.ambient as std::ffi::c_int,
+            let _ = file
+                .write_all(c_format("symbol    %d\n", &[CArg::Int(obj.symbol as i64)]).as_bytes());
+            let _ = file
+                .write_all(c_format("symsize   %d\n", &[CArg::Int(obj.symsize as i64)]).as_bytes());
+            let _ = file.write_all(
+                c_format("symflags  %d\n", &[CArg::Int(obj.symflags as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"diffuse   %d\n".as_ptr(),
-                obj.diffuse as std::ffi::c_int,
+            let _ = file
+                .write_all(c_format("ambient   %d\n", &[CArg::Int(obj.ambient as i64)]).as_bytes());
+            let _ = file
+                .write_all(c_format("diffuse   %d\n", &[CArg::Int(obj.diffuse as i64)]).as_bytes());
+            let _ = file.write_all(
+                c_format("specular  %d\n", &[CArg::Int(obj.specular as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"specular  %d\n".as_ptr(),
-                obj.specular as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("shininess %d\n", &[CArg::Int(obj.shininess as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"shininess %d\n".as_ptr(),
-                obj.shininess as std::ffi::c_int,
+            let _ = file
+                .write_all(c_format("obquality %d\n", &[CArg::Int(obj.quality as i64)]).as_bytes());
+            let _ = file.write_all(
+                c_format("valblack  %d\n", &[CArg::Int(obj.valblack as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"obquality %d\n".as_ptr(),
-                obj.quality as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("valwhite  %d\n", &[CArg::Int(obj.valwhite as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"valblack  %d\n".as_ptr(),
-                obj.valblack as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("meshthick %d\n", &[CArg::Int(obj.mesh_thickness as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"valwhite  %d\n".as_ptr(),
-                obj.valwhite as std::ffi::c_int,
+            let _ = file.write_all(
+                c_format("matflags2 %d\n", &[CArg::Int(obj.matflags2 as i64)]).as_bytes(),
             );
-            libc::fprintf(
-                file,
-                c"meshthick %d\n".as_ptr(),
-                obj.mesh_thickness as std::ffi::c_int,
-            );
-            libc::fprintf(
-                file,
-                c"matflags2 %d\n".as_ptr(),
-                obj.matflags2 as std::ffi::c_int,
-            );
-            write_ascii_clips(file, &obj.clips, c"objclips".as_ptr());
+            write_ascii_clips(file, &obj.clips, "objclips");
             let mut valmin = 0.;
             let mut valmax = 0.;
             if super::istore::istore_get_min_max(
@@ -434,11 +474,12 @@ pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
                 &mut valmax,
             ) != 0
             {
-                libc::fprintf(
-                    file,
-                    c"valminmax %g %g\n".as_ptr(),
-                    valmin as std::ffi::c_double,
-                    valmax as std::ffi::c_double,
+                let _ = file.write_all(
+                    c_format(
+                        "valminmax %g %g\n",
+                        &[CArg::Dbl(valmin as f64), CArg::Dbl(valmax as f64)],
+                    )
+                    .as_bytes(),
                 );
             }
             let mut def_props = super::istore::DrawProps::default();
@@ -456,33 +497,39 @@ pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
                     &mut cont_state,
                     &mut surf_state,
                 );
-                libc::fprintf(
-                    file,
-                    c"contour %d %d %d".as_ptr(),
-                    co as std::ffi::c_int,
-                    cont.surf,
-                    cont.pts.len() as std::ffi::c_int,
+                let _ = file.write_all(
+                    c_format(
+                        "contour %d %d %d",
+                        &[
+                            CArg::Int(co as i64),
+                            CArg::Int(cont.surf as i64),
+                            CArg::Int(cont.pts.len() as i64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
                 if cont_state & (1 << 9) != 0 {
-                    libc::fprintf(
-                        file,
-                        c" %g".as_ptr(),
-                        cont_props.value1 as std::ffi::c_double,
+                    let _ = file.write_all(
+                        c_format(" %g", &[CArg::Dbl(cont_props.value1 as f64)]).as_bytes(),
                     );
                 }
-                libc::fprintf(file, c"\n".as_ptr());
+                let _ = file.write_all(c_format("\n", &[]).as_bytes());
                 let mut cursor = 0;
                 let mut state = 0;
                 let mut changes = 0;
                 let mut props = super::istore::DrawProps::default();
                 let mut next = super::istore::istore_first_change_index(&cont.store);
                 for (pt, point) in cont.pts.iter().enumerate() {
-                    libc::fprintf(
-                        file,
-                        c"%g %g %g".as_ptr(),
-                        point.x as std::ffi::c_double,
-                        point.y as std::ffi::c_double,
-                        point.z as std::ffi::c_double,
+                    let _ = file.write_all(
+                        c_format(
+                            "%g %g %g",
+                            &[
+                                CArg::Dbl(point.x as f64),
+                                CArg::Dbl(point.y as f64),
+                                CArg::Dbl(point.z as f64),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                     if pt as i32 == next {
                         next = super::istore::istore_next_change(
@@ -499,22 +546,28 @@ pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
                         size = cont.sizes[pt];
                     }
                     if size >= 0. && state & (1 << 9) == 0 {
-                        libc::fprintf(file, c" %g".as_ptr(), size as std::ffi::c_double);
+                        let _ =
+                            file.write_all(c_format(" %g", &[CArg::Dbl(size as f64)]).as_bytes());
                     } else if state & (1 << 9) != 0 {
-                        libc::fprintf(
-                            file,
-                            c" %g %g".as_ptr(),
-                            size as std::ffi::c_double,
-                            props.value1 as std::ffi::c_double,
+                        let _ = file.write_all(
+                            c_format(
+                                " %g %g",
+                                &[CArg::Dbl(size as f64), CArg::Dbl(props.value1 as f64)],
+                            )
+                            .as_bytes(),
                         );
                     }
-                    libc::fprintf(file, c"\n".as_ptr());
+                    let _ = file.write_all(c_format("\n", &[]).as_bytes());
                 }
                 if cont.flags != 0 {
-                    libc::fprintf(file, c"contflags %u\n".as_ptr(), cont.flags);
+                    let _ = file.write_all(
+                        c_format("contflags %u\n", &[CArg::Uint(cont.flags as u64)]).as_bytes(),
+                    );
                 }
                 if cont.time != 0 {
-                    libc::fprintf(file, c"conttime %d\n".as_ptr(), cont.time);
+                    let _ = file.write_all(
+                        c_format("conttime %d\n", &[CArg::Int(cont.time as i64)]).as_bytes(),
+                    );
                 }
             }
             let mut num_real = 0;
@@ -522,46 +575,53 @@ pub fn imod_write_ascii(imod: &Imod, file: *mut libc::FILE) -> i32 {
                 if (mesh.flag >> 24) & 0x3f != 0 {
                     continue;
                 }
-                libc::fprintf(
-                    file,
-                    c"mesh %d %d %d\n".as_ptr(),
-                    num_real as std::ffi::c_int,
-                    mesh.vert.len() as std::ffi::c_int,
-                    mesh.list.len() as std::ffi::c_int,
+                let _ = file.write_all(
+                    c_format(
+                        "mesh %d %d %d\n",
+                        &[
+                            CArg::Int(num_real as i64),
+                            CArg::Int(mesh.vert.len() as i64),
+                            CArg::Int(mesh.list.len() as i64),
+                        ],
+                    )
+                    .as_bytes(),
                 );
                 num_real += 1;
                 for point in &mesh.vert {
-                    libc::fprintf(
-                        file,
-                        c"%g %g %g\n".as_ptr(),
-                        point.x as std::ffi::c_double,
-                        point.y as std::ffi::c_double,
-                        point.z as std::ffi::c_double,
+                    let _ = file.write_all(
+                        c_format(
+                            "%g %g %g\n",
+                            &[
+                                CArg::Dbl(point.x as f64),
+                                CArg::Dbl(point.y as f64),
+                                CArg::Dbl(point.z as f64),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                 }
                 for index in &mesh.list {
-                    libc::fprintf(file, c"%d\n".as_ptr(), *index);
+                    let _ =
+                        file.write_all(c_format("%d\n", &[CArg::Int((*index) as i64)]).as_bytes());
                 }
                 if mesh.flag != 0 {
-                    libc::fprintf(file, c"Meshflags %u\n".as_ptr(), mesh.flag);
+                    let _ = file.write_all(
+                        c_format("Meshflags %u\n", &[CArg::Uint(mesh.flag as u64)]).as_bytes(),
+                    );
                 }
                 if mesh.time != 0 {
-                    libc::fprintf(
-                        file,
-                        c"Meshtime %d\n".as_ptr(),
-                        mesh.time as std::ffi::c_int,
+                    let _ = file.write_all(
+                        c_format("Meshtime %d\n", &[CArg::Int(mesh.time as i64)]).as_bytes(),
                     );
                 }
                 if mesh.surf != 0 {
-                    libc::fprintf(
-                        file,
-                        c"Meshsurf %d\n".as_ptr(),
-                        mesh.surf as std::ffi::c_int,
+                    let _ = file.write_all(
+                        c_format("Meshsurf %d\n", &[CArg::Int(mesh.surf as i64)]).as_bytes(),
                     );
                 }
             }
         }
-        libc::fprintf(file, c"# end of IMOD model\n".as_ptr());
+        let _ = file.write_all(c_format("# end of IMOD model\n", &[]).as_bytes());
     }
     0
 }
@@ -569,50 +629,50 @@ const ID_IMNX: u32 = u32::from_be_bytes(*b"MINX");
 const ID_IEOF: u32 = u32::from_be_bytes(*b"IEOF");
 
 /// Original: `imodGetInt` (`imodel_files.c:2074`).
-pub fn imod_get_int(file: &mut File) -> io::Result<i32> {
+pub fn imod_get_int(file: &mut ImodFile) -> io::Result<i32> {
     let mut bytes = [0_u8; 4];
     file.read_exact(&mut bytes)?;
     Ok(i32::from_be_bytes(bytes))
 }
 
 /// Original: `imodGetFloat` (`imodel_files.c:2018`).
-pub fn imod_get_float(file: &mut File) -> io::Result<f32> {
+pub fn imod_get_float(file: &mut ImodFile) -> io::Result<f32> {
     let mut bytes = [0_u8; 4];
     file.read_exact(&mut bytes)?;
     Ok(f32::from_bits(u32::from_be_bytes(bytes)))
 }
 
 /// Original: `imodGetShort` (`imodel_files.c:2106`).
-pub fn imod_get_short(file: &mut File) -> io::Result<i16> {
+pub fn imod_get_short(file: &mut ImodFile) -> io::Result<i16> {
     let mut bytes = [0_u8; 2];
     file.read_exact(&mut bytes)?;
     Ok(i16::from_be_bytes(bytes))
 }
 
 /// Original: `imodGetByte` (`imodel_files.c:2129`).
-pub fn imod_get_byte(file: &mut File) -> io::Result<u8> {
+pub fn imod_get_byte(file: &mut ImodFile) -> io::Result<u8> {
     let mut bytes = [0_u8; 1];
     file.read_exact(&mut bytes)?;
     Ok(bytes[0])
 }
 
 /// Original: `imodPutInt` (`imodel_files.c:2090`).
-pub fn imod_put_int(file: &mut File, value: i32) -> io::Result<()> {
+pub fn imod_put_int(file: &mut ImodFile, value: i32) -> io::Result<()> {
     file.write_all(&value.to_be_bytes())
 }
 
 /// Original: `imodPutFloat` (`imodel_files.c:2039`).
-pub fn imod_put_float(file: &mut File, value: f32) -> io::Result<()> {
+pub fn imod_put_float(file: &mut ImodFile, value: f32) -> io::Result<()> {
     file.write_all(&value.to_bits().to_be_bytes())
 }
 
 /// Original: `imodPutShort` (`imodel_files.c:2115`).
-pub fn imod_put_short(file: &mut File, value: i16) -> io::Result<()> {
+pub fn imod_put_short(file: &mut ImodFile, value: i16) -> io::Result<()> {
     file.write_all(&value.to_be_bytes())
 }
 
 /// Original: `imodPutByte` (`imodel_files.c:2146`).
-pub fn imod_put_byte(file: &mut File, value: u8) -> io::Result<()> {
+pub fn imod_put_byte(file: &mut ImodFile, value: u8) -> io::Result<()> {
     file.write_all(&[value])
 }
 
@@ -655,7 +715,12 @@ const BUF_SIZE: usize = 256;
 ///
 /// The source's scratch array is a file-level `static int buf[BUF_SIZE]`; a
 /// local array of the same size is used here.
-pub fn convert_write(convert_func: fn(&mut [u8], i32), fp: &mut File, data: &[u8], mut size: i32) {
+pub fn convert_write(
+    convert_func: fn(&mut [u8], i32),
+    fp: &mut ImodFile,
+    data: &[u8],
+    mut size: i32,
+) {
     let mut buf = [0u8; 4 * BUF_SIZE];
     let mut chunk;
     let mut base = 0usize;
@@ -725,7 +790,7 @@ pub fn imod_from_vms_floats(data: &mut [u8], amt: i32) {
 }
 
 /// Original: `imodGetFloats` (`imodel_files.c:2025`).
-pub fn imod_get_floats(fp: &mut File, buf: &mut [f32], size: i32) -> io::Result<()> {
+pub fn imod_get_floats(fp: &mut ImodFile, buf: &mut [f32], size: i32) -> io::Result<()> {
     let mut bytes = vec![0u8; 4 * size.max(0) as usize];
     fp.read_exact(&mut bytes)?;
     swap_longs(&mut bytes, size);
@@ -741,7 +806,7 @@ pub fn imod_get_floats(fp: &mut File, buf: &mut [f32], size: i32) -> io::Result<
 }
 
 /// Original: `imodPutFloats` (`imodel_files.c:2044`).
-pub fn imod_put_floats(fp: &mut File, buf: &[f32], size: i32) -> io::Result<()> {
+pub fn imod_put_floats(fp: &mut ImodFile, buf: &[f32], size: i32) -> io::Result<()> {
     let mut bytes = Vec::with_capacity(4 * size.max(0) as usize);
     for value in buf.iter().take(size.max(0) as usize) {
         bytes.extend_from_slice(&value.to_ne_bytes());
@@ -752,7 +817,7 @@ pub fn imod_put_floats(fp: &mut File, buf: &[f32], size: i32) -> io::Result<()> 
 
 /// Original: `imodPutScaledPoints` (`imodel_files.c:2058`).
 pub fn imod_put_scaled_points(
-    fp: &mut File,
+    fp: &mut ImodFile,
     buf: &[Ipoint],
     size: i32,
     scale: &Ipoint,
@@ -768,7 +833,7 @@ pub fn imod_put_scaled_points(
 }
 
 /// Original: `imodGetInts` (`imodel_files.c:2081`).
-pub fn imod_get_ints(fp: &mut File, buf: &mut [i32], size: i32) -> io::Result<()> {
+pub fn imod_get_ints(fp: &mut ImodFile, buf: &mut [i32], size: i32) -> io::Result<()> {
     let mut bytes = vec![0u8; 4 * size.max(0) as usize];
     fp.read_exact(&mut bytes)?;
     swap_longs(&mut bytes, size);
@@ -784,7 +849,7 @@ pub fn imod_get_ints(fp: &mut File, buf: &mut [i32], size: i32) -> io::Result<()
 }
 
 /// Original: `imodPutInts` (`imodel_files.c:2095`).
-pub fn imod_put_ints(fp: &mut File, buf: &[i32], size: i32) -> io::Result<()> {
+pub fn imod_put_ints(fp: &mut ImodFile, buf: &[i32], size: i32) -> io::Result<()> {
     let mut bytes = Vec::with_capacity(4 * size.max(0) as usize);
     for value in buf.iter().take(size.max(0) as usize) {
         bytes.extend_from_slice(&value.to_ne_bytes());
@@ -794,17 +859,17 @@ pub fn imod_put_ints(fp: &mut File, buf: &[i32], size: i32) -> io::Result<()> {
 }
 
 /// Original: `imodGetBytes` (`imodel_files.c:2135`).
-pub fn imod_get_bytes(fp: &mut File, buf: &mut [u8], size: i32) -> io::Result<()> {
+pub fn imod_get_bytes(fp: &mut ImodFile, buf: &mut [u8], size: i32) -> io::Result<()> {
     fp.read_exact(&mut buf[..size.max(0) as usize])
 }
 
 /// Original: `imodPutBytes` (`imodel_files.c:2141`).
-pub fn imod_put_bytes(fp: &mut File, buf: &[u8], size: i32) -> io::Result<()> {
+pub fn imod_put_bytes(fp: &mut ImodFile, buf: &[u8], size: i32) -> io::Result<()> {
     fp.write_all(&buf[..size.max(0) as usize])
 }
 
 /// Original: `imodFgetline` (`imodel_files.c:1847`).
-pub fn imod_fgetline(fp: &mut File, s: &mut [u8], limit: i32) -> i32 {
+pub fn imod_fgetline(fp: &mut ImodFile, s: &mut [u8], limit: i32) -> i32 {
     let mut c: i32;
     let i: i32;
 
@@ -856,7 +921,12 @@ pub fn imod_fgetline(fp: &mut File, s: &mut [u8], limit: i32) -> i32 {
 /// a short line leaves them holding stack garbage; they are zeroed here.  The
 /// `imod->file` argument is passed explicitly because the translated `Imod`
 /// carries no `file` member.
-pub fn read_ascii_clips(fp: &mut File, line: &mut [u8], clips: &mut Iclip_planes, prefix: &str) {
+pub fn read_ascii_clips(
+    fp: &mut ImodFile,
+    line: &mut [u8],
+    clips: &mut Iclip_planes,
+    prefix: &str,
+) {
     let mut idata = 0i32;
     let mut idata2 = 0i32;
     let mut idata3 = 0i32;
@@ -907,14 +977,12 @@ pub fn read_ascii_clips(fp: &mut File, line: &mut [u8], clips: &mut Iclip_planes
 /// The translated `Imod` has no `objsize` member — the object array is the
 /// `obj` vector — so the object count read from the header is returned to the
 /// caller instead of being stored.
-pub fn imodel_read_header(imod: &mut Imod, file: &mut File) -> Result<i32, i32> {
+pub fn imodel_read_header(imod: &mut Imod, file: &mut ImodFile) -> Result<i32, i32> {
     // `imodel_files.c:837` reads IMOD_STRSIZE bytes into the fixed `char name[]`
     // array and keeps every one of them; `%s` output stops at the first NUL but
     // the bytes past it are written back out verbatim by `imodel_write`.
-    file.read_exact(unsafe {
-        std::slice::from_raw_parts_mut(imod.name.as_mut_ptr() as *mut u8, IMOD_STRSIZE)
-    })
-    .map_err(|_| IMOD_ERROR_READ)?;
+    file.read_exact(&mut imod.name)
+        .map_err(|_| IMOD_ERROR_READ)?;
     imod.xmax = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.ymax = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     imod.zmax = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
@@ -952,14 +1020,12 @@ pub fn imodel_read_header(imod: &mut Imod, file: &mut File) -> Result<i32, i32> 
 /// The translated `Iobj` has no `contsize`/`meshsize` members — the contour and
 /// mesh arrays are vectors — so those two counts are returned to the caller,
 /// which allocates the arrays exactly as `imodel_read` does in the source.
-pub fn imodel_read_object(obj: &mut Iobj, file: &mut File) -> Result<(i32, i32), i32> {
+pub fn imodel_read_object(obj: &mut Iobj, file: &mut ImodFile) -> Result<(i32, i32), i32> {
     // `imodel_files.c:862` reads IOBJ_STRSIZE bytes into `char name[]` and keeps
     // all of them; `%s` output stops at the first NUL but `imodel_write_object`
     // writes the whole array back out.
-    file.read_exact(unsafe {
-        std::slice::from_raw_parts_mut(obj.name.as_mut_ptr() as *mut u8, IOBJ_STRSIZE)
-    })
-    .map_err(|_| IMOD_ERROR_READ)?;
+    file.read_exact(&mut obj.name)
+        .map_err(|_| IMOD_ERROR_READ)?;
     for value in &mut obj.extra {
         *value = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
     }
@@ -998,7 +1064,7 @@ pub fn imodel_read_object(obj: &mut Iobj, file: &mut File) -> Result<(i32, i32),
 /// the 128 bytes are read and only the first `IOBJ_STRSIZE` are kept.
 ///
 /// Returns the contour count, which the translated `Iobj` does not carry.
-pub fn imodel_read_object_v01(obj: &mut Iobj, file: &mut File) -> Result<i32, i32> {
+pub fn imodel_read_object_v01(obj: &mut Iobj, file: &mut ImodFile) -> Result<i32, i32> {
     loop {
         /* allow for extra chunks after model data */
         let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
@@ -1014,7 +1080,7 @@ pub fn imodel_read_object_v01(obj: &mut Iobj, file: &mut File) -> Result<i32, i3
     let mut name = [0u8; IMOD_STRSIZE];
     imod_get_bytes(file, &mut name, IMOD_STRSIZE as i32).map_err(|_| IMOD_ERROR_READ)?;
     for i in 0..IOBJ_STRSIZE {
-        obj.name[i] = name[i] as std::ffi::c_char;
+        obj.name[i] = name[i];
     }
     obj.name[IOBJ_STRSIZE - 1] = 0x00;
     for i in 0..obj.extra.len() {
@@ -1073,7 +1139,7 @@ pub fn imodel_read_object_v01(obj: &mut Iobj, file: &mut File) -> Result<i32, i3
 }
 
 /// Original: `imodel_read_contour_v01` (`imodel_files.c:952`).
-pub fn imodel_read_contour_v01(cont: &mut Icont, file: &mut File) -> Result<(), i32> {
+pub fn imodel_read_contour_v01(cont: &mut Icont, file: &mut ImodFile) -> Result<(), i32> {
     loop {
         /* allow for extra chunks after object data */
         let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
@@ -1093,16 +1159,17 @@ pub fn imodel_read_contour_v01(cont: &mut Icont, file: &mut File) -> Result<(), 
     cont.surf = head[3];
     let id = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
     if id != ID_PNTS {
-        unsafe { b3d_error(stderr, format_args!("IMOD: Error Reading Points.\n")) };
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("IMOD: Error Reading Points.\n"),
+        );
         return Err(-1);
     }
     if psize < 0 {
-        unsafe {
-            b3d_error(
-                stderr,
-                format_args!("IMOD: Error getting memory for points.\n"),
-            )
-        };
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("IMOD: Error getting memory for points.\n"),
+        );
         return Err(-1);
     }
     cont.pts = vec![Ipoint::default(); psize as usize];
@@ -1117,7 +1184,7 @@ pub fn imodel_read_contour_v01(cont: &mut Icont, file: &mut File) -> Result<(), 
 }
 
 /// Original: `imodel_read_contour` (`imodel_files.c:984`).
-pub fn imodel_read_contour(cont: &mut Icont, file: &mut File) -> Result<(), i32> {
+pub fn imodel_read_contour(cont: &mut Icont, file: &mut ImodFile) -> Result<(), i32> {
     let size = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     cont.flags = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
     cont.time = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
@@ -1136,7 +1203,7 @@ pub fn imodel_read_contour(cont: &mut Icont, file: &mut File) -> Result<(), i32>
 }
 
 /// Original: `imodel_read_ptsizes` (`imodel_files.c:1022`).
-pub fn imodel_read_ptsizes(cont: &mut Icont, file: &mut File) -> Result<(), i32> {
+pub fn imodel_read_ptsizes(cont: &mut Icont, file: &mut ImodFile) -> Result<(), i32> {
     let byte_count = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     if byte_count != (cont.pts.len() * 4) as i32 {
         return Err(IMOD_ERROR_CORRUPT);
@@ -1149,7 +1216,7 @@ pub fn imodel_read_ptsizes(cont: &mut Icont, file: &mut File) -> Result<(), i32>
 }
 
 /// Original: `imodel_read_mesh` (`imodel_files.c:1043`).
-pub fn imodel_read_mesh(mesh: &mut Imesh, file: &mut File) -> Result<(), i32> {
+pub fn imodel_read_mesh(mesh: &mut Imesh, file: &mut ImodFile) -> Result<(), i32> {
     let vertices = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     let lists = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     mesh.flag = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32;
@@ -1173,7 +1240,7 @@ pub fn imodel_read_mesh(mesh: &mut Imesh, file: &mut File) -> Result<(), i32> {
 }
 
 /// Original: `imodel_read_imat` (`imodel_files.c:1106`).
-pub fn imodel_read_imat(object: &mut Iobj, file: &mut File, flags: u32) -> Result<(), i32> {
+pub fn imodel_read_imat(object: &mut Iobj, file: &mut ImodFile, flags: u32) -> Result<(), i32> {
     let _ = imod_get_int(file).map_err(|_| IMOD_ERROR_READ)?;
     let mut value = [0; 4];
     file.read_exact(&mut value).map_err(|_| IMOD_ERROR_READ)?;
@@ -1217,7 +1284,7 @@ pub fn imodel_read_imat(object: &mut Iobj, file: &mut File, flags: u32) -> Resul
 /// read from the chunk length and reads all the normals before all the points,
 /// then to `imodClipsFixCount` (`iplane.c:186`).  Its return value is the read
 /// error, which `imodel_read` discards.
-pub fn imodel_read_clip(object: &mut Iobj, file: &mut File, flags: u32) -> i32 {
+pub fn imodel_read_clip(object: &mut Iobj, file: &mut ImodFile, flags: u32) -> i32 {
     let error = crate::imod::libimod::iplane::imod_clips_read(&mut object.clips, file);
     crate::imod::libimod::iplane::imod_clips_fix_count(&mut object.clips, flags);
     error
@@ -1229,7 +1296,7 @@ pub fn imodel_read_clip(object: &mut Iobj, file: &mut File, flags: u32) -> i32 {
 /// belongs to the untranslated `imesh.c` unit), so the nine integers and ten
 /// floats of the chunk are read and discarded.  `capSkipNz` is returned because
 /// `imodel_read_meshskip` validates its chunk size against it.
-pub fn imodel_read_meshparm(_obj: &mut Iobj, fin: &mut File) -> Result<i32, i32> {
+pub fn imodel_read_meshparm(_obj: &mut Iobj, fin: &mut ImodFile) -> Result<i32, i32> {
     let _ = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
     let mut ints = [0i32; 9];
     imod_get_ints(fin, &mut ints, 9).map_err(|_| IMOD_ERROR_READ)?;
@@ -1244,7 +1311,7 @@ pub fn imodel_read_meshparm(_obj: &mut Iobj, fin: &mut File) -> Result<i32, i32>
 /// `imodel_read_meshparm`; the Z list itself is read and discarded.
 pub fn imodel_read_meshskip(
     _obj: &mut Iobj,
-    fin: &mut File,
+    fin: &mut ImodFile,
     cap_skip_nz: Option<i32>,
 ) -> Result<(), i32> {
     let size = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)? / 4;
@@ -1257,7 +1324,7 @@ pub fn imodel_read_meshskip(
 }
 
 /// Original: `imodel_read_sliceang` (`imodel_files.c:1155`).
-pub fn imodel_read_sliceang(imod: &mut Imod, fin: &mut File) -> Result<(), i32> {
+pub fn imodel_read_sliceang(imod: &mut Imod, fin: &mut ImodFile) -> Result<(), i32> {
     let mut slan = Slicer_angles::default();
     let _ = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
     slan.time = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
@@ -1275,21 +1342,22 @@ pub fn imodel_read_sliceang(imod: &mut Imod, fin: &mut File) -> Result<(), i32> 
 }
 
 /// Original: `imodel_read_v01` (`imodel_files.c:512`).
-pub fn imodel_read_v01(imod: &mut Imod, fin: &mut File) -> Result<(), i32> {
+pub fn imodel_read_v01(imod: &mut Imod, fin: &mut ImodFile) -> Result<(), i32> {
     fin.seek(SeekFrom::Start(0)).map_err(|_| IMOD_ERROR_READ)?;
     let id = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)? as u32;
     if id != ID_IMOD {
-        unsafe { b3d_error(stderr, format_args!("Read Imod: Not an imod file.\n")) };
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("Read Imod: Not an imod file.\n"),
+        );
         return Err(-1);
     }
     let id = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)? as u32;
     if id != IMOD_01 {
-        unsafe {
-            b3d_error(
-                stderr,
-                format_args!("Read Imod: Imod file version unknown.\n"),
-            )
-        };
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("Read Imod: Imod file version unknown.\n"),
+        );
         return Err(-1);
     }
 
@@ -1311,7 +1379,7 @@ pub fn imodel_read_v01(imod: &mut Imod, fin: &mut File) -> Result<(), i32> {
 /// The source's loop is `while (!feof(fin) && !ieof)` and relies on a failed
 /// `imodGetInt` leaving an indeterminate chunk id behind; a failed read of the
 /// chunk id is reported as `IMOD_ERROR_READ` here instead.
-pub fn imodel_read(imod: &mut Imod, file: &mut File, version: u32) -> Result<(), i32> {
+pub fn imodel_read(imod: &mut Imod, file: &mut ImodFile, version: u32) -> Result<(), i32> {
     let mut obj_ind: i32 = -1;
     let mut cont_ind: i32 = -1;
     let mut mesh_ind: i32 = -1;
@@ -1587,7 +1655,7 @@ pub fn imodel_read(imod: &mut Imod, file: &mut File, version: u32) -> Result<(),
 }
 
 /// Original: `imodReadFile` (`imodel_files.c:131`).
-pub fn imod_read_file(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_read_file(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
     file.seek(SeekFrom::Start(0)).map_err(|_| IMOD_ERROR_READ)?;
     if imod_get_int(file).map_err(|_| IMOD_ERROR_READ)? as u32 != ID_IMOD {
         return imod_read_ascii(imod, file);
@@ -1612,7 +1680,7 @@ pub fn imod_read_file(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
 /// The translated `Imod` has no `objsize`, `slicerAng` or `fileName` member;
 /// the object count read from the header sizes `imod.obj` directly, and
 /// `slicerAngle` records append to `imod.slicer_ang`.
-pub fn imod_read_ascii(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_read_ascii(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
     let mut line = [0u8; MAXLINE as usize];
     let mut ob: i32 = -1;
     let mut co: i32 = -1;
@@ -1724,8 +1792,8 @@ pub fn imod_read_ascii(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
                 let mut store = Istore::default();
                 store.type_ = store_type;
                 store.flags = store_flags;
-                store.index.i = co;
-                store.value.f = value;
+                store.index.set_i(co);
+                store.value.set_f(value);
                 if istore_insert(&mut imod.obj[obj_ind].store, store) != 0 {
                     return Err(-1);
                 }
@@ -1754,8 +1822,8 @@ pub fn imod_read_ascii(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
                     let mut store = Istore::default();
                     store.type_ = store_type;
                     store.flags = store_flags;
-                    store.index.i = pt;
-                    store.value.f = value;
+                    store.index.set_i(pt);
+                    store.value.set_f(value);
                     if istore_insert_change(&mut imod.obj[obj_ind].cont[co as usize].store, store)
                         != 0
                     {
@@ -2181,7 +2249,7 @@ pub fn imod_read_ascii(imod: &mut Imod, file: &mut File) -> Result<(), i32> {
                 && bytes[i + 5] != b'\r'
                 && bytes[i + 5] != b'\n'
             {
-                obj.name[i] = bytes[i + 5] as std::ffi::c_char;
+                obj.name[i] = bytes[i + 5];
                 i += 1;
             }
             if i < IOBJ_STRSIZE {
@@ -2427,13 +2495,14 @@ pub fn imod_read(path: impl AsRef<Path>) -> Result<Imod, i32> {
         Some(imod) => imod,
         None => return Err(IMOD_ERROR_MEMORY),
     };
-    let mut file = File::open(path).map_err(|_| IMOD_ERROR_READ)?;
+    let mut file =
+        ImodFile::open(path.as_ref().to_str().unwrap_or(""), "rb").ok_or(IMOD_ERROR_READ)?;
     imod_read_file(&mut imod, &mut file)?;
     Ok(imod)
 }
 
 /// Original: `imodel_write_contour` (`imodel_files.c:449`).
-pub fn imodel_write_contour(cont: &Icont, file: &mut File) -> Result<(), i32> {
+pub fn imodel_write_contour(cont: &Icont, file: &mut ImodFile) -> Result<(), i32> {
     imod_put_int(file, ID_CONT as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, cont.pts.len() as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, cont.flags as i32).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -2461,7 +2530,7 @@ pub fn imodel_write_contour(cont: &Icont, file: &mut File) -> Result<(), i32> {
 }
 
 /// Original: `imodel_write_mesh` (`imodel_files.c:480`).
-pub fn imodel_write_mesh(mesh: &Imesh, file: &mut File) -> Result<(), i32> {
+pub fn imodel_write_mesh(mesh: &Imesh, file: &mut ImodFile) -> Result<(), i32> {
     // imeshThickness (`imesh.h:54`): paired thickness meshes are not written.
     if (mesh.flag & (63 << 24)) >> 24 != 0 {
         return Ok(());
@@ -2487,7 +2556,7 @@ pub fn imodel_write_mesh(mesh: &Imesh, file: &mut File) -> Result<(), i32> {
 }
 
 /// Original: `imodel_write_object` (`imodel_files.c:345`).
-pub fn imodel_write_object(object: &Iobj, file: &mut File, skip_mesh: i32) -> Result<(), i32> {
+pub fn imodel_write_object(object: &Iobj, file: &mut ImodFile, skip_mesh: i32) -> Result<(), i32> {
     // `imodel_files.c:352` writes the number of meshes that have no thickness
     // in their flag word, not the size of the mesh array.
     let mut num_real = 0;
@@ -2500,10 +2569,7 @@ pub fn imodel_write_object(object: &Iobj, file: &mut File, skip_mesh: i32) -> Re
     imod_put_int(file, ID_OBJT as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     // `imodel_files.c:352` writes the whole IOBJ_STRSIZE array, including any
     // bytes past the terminating NUL.
-    file.write_all(unsafe {
-        std::slice::from_raw_parts(object.name.as_ptr() as *const u8, IOBJ_STRSIZE)
-    })
-    .map_err(|_| IMOD_ERROR_WRITE)?;
+    file.write_all(&object.name).map_err(|_| IMOD_ERROR_WRITE)?;
     for value in object.extra {
         imod_put_int(file, value as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     }
@@ -2603,17 +2669,14 @@ pub fn imodel_write_object(object: &Iobj, file: &mut File, skip_mesh: i32) -> Re
 }
 
 /// Original: `imodel_write` (`imodel_files.c:276`).
-pub fn imodel_write(imod: &Imod, file: &mut File, skip_mesh: i32) -> Result<(), i32> {
+pub fn imodel_write(imod: &Imod, file: &mut ImodFile, skip_mesh: i32) -> Result<(), i32> {
     file.seek(SeekFrom::Start(0))
         .map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, ID_IMOD as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, IMOD_V12 as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     // `imodel_files.c:300` writes the whole IMOD_STRSIZE array, including any
     // bytes past the terminating NUL.
-    file.write_all(unsafe {
-        std::slice::from_raw_parts(imod.name.as_ptr() as *const u8, IMOD_STRSIZE)
-    })
-    .map_err(|_| IMOD_ERROR_WRITE)?;
+    file.write_all(&imod.name).map_err(|_| IMOD_ERROR_WRITE)?;
     // `imodel_files.c:286` sets these bits before serializing the header.
     // They declare the byte material fields, multiple clip-plane support, and
     // mesh-thickness field emitted by this writer.
@@ -2670,7 +2733,7 @@ pub fn imodel_write(imod: &Imod, file: &mut File, skip_mesh: i32) -> Result<(), 
 }
 
 /// Original: `imodWrite` (`imodel_files.c:249`).
-pub fn imod_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_write(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
     imod_write_skip_mesh(imod, file, 0)
 }
 
@@ -2678,7 +2741,7 @@ pub fn imod_write(imod: &Imod, file: &mut File) -> Result<(), i32> {
 ///
 /// The source saves and restores `imod->file` around the write; the translated
 /// `Imod` carries no `file` member, so there is nothing to save.
-pub fn imod_write_skip_mesh(imod: &Imod, fout: &mut File, which_skip: i32) -> Result<(), i32> {
+pub fn imod_write_skip_mesh(imod: &Imod, fout: &mut ImodFile, which_skip: i32) -> Result<(), i32> {
     if imodel_write(imod, fout, which_skip).is_err() {
         return Err(-1);
     }
@@ -2689,13 +2752,14 @@ pub fn imod_write_skip_mesh(imod: &Imod, fout: &mut File, which_skip: i32) -> Re
 ///
 /// The source writes to the `FILE *` stored in `imod->file`; that member has no
 /// counterpart here, so the destination is passed explicitly.
-pub fn imod_write_file(imod: &Imod, file: &mut File) -> Result<(), i32> {
+pub fn imod_write_file(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
     imodel_write(imod, file, 0)
 }
 
 /// Original: `imodFileWrite` (`imodel_files.c:77`).
 pub fn imod_file_write(imod: &Imod, path: impl AsRef<Path>) -> Result<(), i32> {
-    let mut file = File::create(path).map_err(|_| IMOD_ERROR_WRITE)?;
+    let mut file =
+        ImodFile::open(path.as_ref().to_str().unwrap_or(""), "wb").ok_or(IMOD_ERROR_WRITE)?;
     imod_write(imod, &mut file)
 }
 
@@ -2711,29 +2775,15 @@ pub fn imod_file_read(filename: impl AsRef<Path>) -> Result<Imod, i32> {
 /// member, so the opened handle is returned to the caller and `imod` is left
 /// alone.  `mode` is the `fopen` mode string: the first character selects read,
 /// write or append and a `+` adds the other direction.
-pub fn imod_open_file(filename: &str, mode: &str, _imod: &mut Imod) -> Result<File, i32> {
-    let update = mode.contains('+');
-    let mut options = OpenOptions::new();
-    match mode.as_bytes().first() {
-        Some(b'r') => {
-            options.read(true).write(update);
-        }
-        Some(b'w') => {
-            options.write(true).read(update).create(true).truncate(true);
-        }
-        Some(b'a') => {
-            options.append(true).read(update).create(true);
-        }
-        _ => return Err(-1),
-    }
-    options.open(filename).map_err(|_| -1)
+pub fn imod_open_file(filename: &str, mode: &str, _imod: &mut Imod) -> Result<ImodFile, i32> {
+    ImodFile::open(filename, mode).ok_or(-1)
 }
 
 /// Original: `imodCloseFile` (`imodel_files.c:115`).
 ///
 /// The source closes `imod->file`; that member has no counterpart here, so the
 /// handle opened by `imod_open_file` is passed back in.
-pub fn imod_close_file(file: Option<File>) -> i32 {
+pub fn imod_close_file(file: Option<ImodFile>) -> i32 {
     let Some(file) = file else {
         return -1;
     };
@@ -2749,7 +2799,7 @@ pub fn imod_close_file(file: Option<File>) -> i32 {
 pub fn imod_test_if_model_file(filename: impl AsRef<Path>) -> i32 {
     let mut ret = 0;
     let mut line = [0u8; MAXLINE as usize];
-    let Ok(mut fp) = File::open(filename) else {
+    let Some(mut fp) = ImodFile::open(filename.as_ref().to_str().unwrap_or(""), "r") else {
         return 1;
     };
     let id = imod_get_int(&mut fp).unwrap_or(0) as u32;
@@ -2781,10 +2831,10 @@ mod tests {
     use super::*;
 
     /// Test-only: builds a fixed-size NUL-padded model/object name array.
-    fn name_array<const N: usize>(text: &str) -> [std::ffi::c_char; N] {
+    fn name_array<const N: usize>(text: &str) -> [u8; N] {
         let mut name = [0; N];
         for (slot, byte) in name.iter_mut().zip(text.as_bytes()) {
-            *slot = *byte as std::ffi::c_char;
+            *slot = *byte;
         }
         name
     }
@@ -2811,7 +2861,7 @@ mod tests {
             "imod-rs-imodel-write-default-view-{}",
             std::process::id()
         ));
-        let mut file = File::create(&path).unwrap();
+        let mut file = ImodFile::open(path.to_str().unwrap(), "wb").unwrap();
         imodel_write(&Imod::default(), &mut file, 0).unwrap();
         drop(file);
         let bytes = std::fs::read(&path).unwrap();
@@ -2887,8 +2937,8 @@ mod tests {
         let store = super::super::istore::Istore {
             type_: 10,
             flags: 1 << 2,
-            index: super::super::istore::StoreUnion { i: 1 },
-            value: super::super::istore::StoreUnion { f: 2.5 },
+            index: super::super::istore::StoreUnion::from_i(1),
+            value: super::super::istore::StoreUnion::from_f(2.5),
         };
         let model = Imod {
             store: vec![store],
@@ -2918,7 +2968,7 @@ mod tests {
         ] {
             assert_eq!(list.len(), 1);
             assert_eq!(list[0].type_, 10);
-            assert_eq!(unsafe { list[0].value.f }, 2.5);
+            assert_eq!((list[0].value.f()), 2.5);
         }
     }
 
@@ -2993,8 +3043,8 @@ mod tests {
         let output = imod_read(&path).unwrap();
         std::fs::remove_file(path).unwrap();
         assert_eq!(
-            unsafe { std::ffi::CStr::from_ptr(output.obj[0].name.as_ptr()) },
-            c"old model object"
+            &output.obj[0].name[..b"old model object".len() + 1],
+            b"old model object\0"
         );
         assert_eq!(output.obj[0].cont[0].pts.len(), 2);
         assert_eq!(output.obj[0].cont[0].sizes, vec![4., 8.]);

@@ -1,15 +1,25 @@
 //! Translation of `IMOD/libcfshr/filtxcorr.c`.
 //!
-//! The public routines retain the C source's raw-pointer contracts.  This is
-//! intentional: callers pass padded FFT lines and aliased work buffers.
+//! Every buffer is a slice here.  Two of the source's contracts do not survive
+//! that on their own and are named instead of being lost: `XCorrFilterPart`'s
+//! `array` "can be the same as [fft]" (`filtxcorr.c:265`), which [`FilterIn`]
+//! spells; and `fourierRingCorr`'s `temp`, which the source both retypes as
+//! `int *` partway along and allows to be the same array as `ringCorrs`
+//! (`filtxcorr.c:2287`, `:2296-2299`) -- that one is a local allocation here,
+//! documented at the point of deviation.
 #![allow(dead_code, unused_variables)]
 
-use core::ffi::c_char;
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use std::io::Write;
+
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 
 use super::robuststat::{rs_set_sort_index_offset, rs_sort_indexed_floats};
 
 // C file-scope state for the peak-finder API (`filtxcorr.c:443-450`).
+/// `MAX_SPCP_THREADS` (`filtxcorr.c:1254`).
+pub const MAX_SPCP_THREADS: i32 = 8;
+
 static S_APPLY_LIMITS: AtomicI32 = AtomicI32::new(0);
 static S_LIMIT_XLO: AtomicI32 = AtomicI32::new(0);
 static S_LIMIT_XHI: AtomicI32 = AtomicI32::new(0);
@@ -35,133 +45,178 @@ pub fn nice_frame(num: i32, idnum: i32, limit: i32) -> i32 {
         numin += idnum;
     }
 }
-pub unsafe fn niceframe(num: *const i32, idnum: *const i32, limit: *const i32) -> i32 {
-    unsafe { nice_frame(*num, *idnum, *limit) }
+pub fn niceframe(num: &i32, idnum: &i32, limit: &i32) -> i32 {
+    nice_frame(*num, *idnum, *limit)
 }
 
 /// `XCorrSetCTFnoScl` (`filtxcorr.c:159`).
-pub unsafe fn xcorr_set_ctf_no_scl(
+pub fn xcorr_set_ctf_no_scl(
     sigma1: f32,
     sigma2: f32,
     radius1: f32,
     radius2: f32,
-    ctf: *mut f32,
+    ctf: &mut [f32],
     nx: i32,
     ny: i32,
-    delta: *mut f32,
-    nsize_out: *mut i32,
+    delta: &mut f32,
+    nsize_out: &mut i32,
 ) {
-    unsafe {
-        *delta = 0.;
-        if sigma1 == 0. && sigma2 == 0. {
-            return;
-        }
-        let mut nsize = (2 * nx).max(2 * ny).max(1024).min(8192);
-        let asize = nsize as f32;
-        nsize += 1;
-        let alpha = if sigma1.abs() > 1.0e-6 {
-            -0.5 / (sigma1 * sigma1)
-        } else {
-            0.
-        };
-        let beta1 = if sigma2.abs() > 1.0e-6 {
-            -0.5 / (sigma2 * sigma2)
-        } else {
-            0.
-        };
-        *delta = 1. / (0.71 * asize);
-        let (radius1p, radius1n) = if radius1 >= 0. {
-            (radius1, 0.)
-        } else {
-            (0., -radius1)
-        };
-        let mut delmax: f32 = 0.;
-        if sigma1 < -1.0e-6 {
-            for j in 0..nsize {
-                let s = j as f32 * *delta;
-                delmax = delmax.max(s * s * (alpha * s * s).exp());
+    // `double beta1, beta2, alpha;` -- these are doubles in the source, and
+    // every `exp` argument they appear in is therefore a double expression.
+    let mut alpha = 0.0f64;
+    let mut beta1 = 0.0f64;
+    let mut delmax = 0.0f32;
+
+    *delta = 0.;
+    if sigma1 == 0. && sigma2 == 0. {
+        return;
+    }
+
+    let mut nsize = 1024i32;
+    if 2 * nx > nsize {
+        nsize = 2 * nx;
+    }
+    if 2 * ny > nsize {
+        nsize = 2 * ny;
+    }
+    if nsize > 8192 {
+        nsize = 8192;
+    }
+
+    let asize = nsize as f32;
+    nsize += 1;
+    if (if sigma1 >= 0. { sigma1 } else { -sigma1 }) > 1.0e-6 {
+        alpha = -0.5 / (sigma1 * sigma1) as f64;
+    }
+    if (if sigma2 >= 0. { sigma2 } else { -sigma2 }) > 1.0e-6 {
+        beta1 = -0.5 / (sigma2 * sigma2) as f64;
+    }
+    let beta2 = beta1;
+
+    /* Yes, delta is twice as big as it should be and values are generated
+    out to 1.41.  Maybe it should have been 0.71/asize, but since it goes
+    past 0.866 it is good for 3D filtering too. */
+    *delta = 1.0f32 / (0.71f32 * asize);
+    let (radius1p, radius1n) = if radius1 >= 0. {
+        (radius1, 0.0f32)
+    } else {
+        (0.0f32, -radius1)
+    };
+
+    /* For negative sigma1, find the maximum to allow scaling to maximum of 1 */
+    // `s` is accumulated by `delta` in each of the source's four loops, never
+    // recomputed as `j * delta`; the two differ by an ulp that grows with j.
+    if sigma1 < -1.0e-6 {
+        let mut s = 0.0f32;
+        for _j in 0..nsize {
+            let ssqrd = s * s;
+            let deltmp = (ssqrd as f64 * (alpha * ssqrd as f64).exp()) as f32;
+            if delmax < deltmp {
+                delmax = deltmp;
             }
+            s += *delta;
         }
-        for j in 0..nsize {
-            let s = j as f32 * *delta;
-            let mut value = if s < radius1p {
-                (beta1 * (s - radius1p) * (s - radius1p)).exp()
-            } else if s > radius2 {
-                (beta1 * (s - radius2) * (s - radius2)).exp()
+    }
+
+    let mut s = 0.0f32;
+    for j in 0..nsize as usize {
+        if s < radius1p {
+            ctf[j] = (beta1 * (s - radius1p) as f64 * (s - radius1p) as f64).exp() as f32;
+        } else if s > radius2 {
+            ctf[j] = (beta2 * (s - radius2) as f64 * (s - radius2) as f64).exp() as f32;
+        } else {
+            ctf[j] = 1.0;
+        }
+
+        s += *delta;
+        if sigma2 < -1.0e-6 {
+            ctf[j] = 1.0f32 - ctf[j];
+        }
+    }
+    if sigma1 > 1.0e-6 {
+        let mut s = 0.0f32;
+        for j in 0..nsize as usize {
+            if s < radius1n {
+                ctf[j] = 0.;
             } else {
-                1.
-            };
-            if sigma2 < -1.0e-6 {
-                value = 1. - value;
+                // `(float)exp(...)` is rounded to float before the subtraction.
+                ctf[j] = ctf[j]
+                    * (1.0f32
+                        - (alpha * (s - radius1n) as f64 * (s - radius1n) as f64).exp() as f32);
             }
-            if sigma1 > 1.0e-6 {
-                value = if s < radius1n {
-                    0.
-                } else {
-                    value * (1. - (alpha * (s - radius1n) * (s - radius1n)).exp())
-                };
-            } else if sigma1 < -1.0e-6 {
-                value *= s * s * (alpha * s * s).exp() / delmax;
-            }
-            *ctf.add(j as usize) = if value < 1.0e-6 { 0. } else { value };
+            s += *delta;
         }
-        *nsize_out = nsize;
+    } else if sigma1 < -1.0e-6 {
+        let mut s = 0.0f32;
+        for j in 0..nsize as usize {
+            let ssqrd = s * s;
+            ctf[j] =
+                ((ctf[j] * ssqrd) as f64 * (alpha * ssqrd as f64).exp() / delmax as f64) as f32;
+            s += *delta;
+        }
     }
+
+    // Set small numbers to zero to avoid numerical problems and slow inverse
+    // FFT's in 3D or 2D
+    for j in 0..nsize as usize {
+        if ctf[j] < 1.0e-6 {
+            ctf[j] = 0.;
+        }
+    }
+    *nsize_out = nsize;
 }
-pub unsafe fn xcorr_set_ctf(
+pub fn xcorr_set_ctf(
     sigma1: f32,
     sigma2: f32,
     radius1: f32,
     radius2: f32,
-    ctf: *mut f32,
+    ctf: &mut [f32],
     nx: i32,
     ny: i32,
-    delta: *mut f32,
+    delta: &mut f32,
 ) {
-    unsafe {
-        let mut nsize = 0;
-        xcorr_set_ctf_no_scl(
-            sigma1, sigma2, radius1, radius2, ctf, nx, ny, delta, &mut nsize,
-        );
-        if *delta == 0. {
-            return;
-        }
-        let mut sum = 0.;
-        for j in 1..nsize {
-            sum += *ctf.add(j as usize);
-        }
-        for j in 1..nsize {
-            *ctf.add(j as usize) *= (nsize - 1) as f32 / sum;
-        }
+    let mut nsize = 0;
+    xcorr_set_ctf_no_scl(
+        sigma1, sigma2, radius1, radius2, ctf, nx, ny, delta, &mut nsize,
+    );
+    if *delta == 0. {
+        return;
+    }
+    let mut sum = 0.;
+    for j in 1..nsize {
+        sum += ctf[j as usize];
+    }
+    for j in 1..nsize {
+        ctf[j as usize] *= (nsize - 1) as f32 / sum;
     }
 }
-pub unsafe fn setctfwsr(
-    s1: *const f32,
-    s2: *const f32,
-    r1: *const f32,
-    r2: *const f32,
-    ctf: *mut f32,
-    nx: *const i32,
-    ny: *const i32,
-    delta: *mut f32,
+pub fn setctfwsr(
+    s1: &f32,
+    s2: &f32,
+    r1: &f32,
+    r2: &f32,
+    ctf: &mut [f32],
+    nx: &i32,
+    ny: &i32,
+    delta: &mut f32,
 ) {
-    unsafe { xcorr_set_ctf(*s1, *s2, *r1, *r2, ctf, *nx, *ny, delta) }
+    xcorr_set_ctf(*s1, *s2, *r1, *r2, ctf, *nx, *ny, delta)
 }
-pub unsafe fn setctfnoscl(
-    s1: *const f32,
-    s2: *const f32,
-    r1: *const f32,
-    r2: *const f32,
-    ctf: *mut f32,
-    nx: *const i32,
-    ny: *const i32,
-    delta: *mut f32,
-    nsize: *mut i32,
+pub fn setctfnoscl(
+    s1: &f32,
+    s2: &f32,
+    r1: &f32,
+    r2: &f32,
+    ctf: &mut [f32],
+    nx: &i32,
+    ny: &i32,
+    delta: &mut f32,
+    nsize: &mut i32,
 ) {
-    unsafe { xcorr_set_ctf_no_scl(*s1, *s2, *r1, *r2, ctf, *nx, *ny, delta, nsize) }
+    xcorr_set_ctf_no_scl(*s1, *s2, *r1, *r2, ctf, *nx, *ny, delta, nsize)
 }
 
-pub unsafe fn dose_filter_value(
+pub fn dose_filter_value(
     _start: f32,
     end: f32,
     frequency: f32,
@@ -169,26 +224,30 @@ pub unsafe fn dose_filter_value(
     mut bfac: f32,
     mut cfac: f32,
     scale: f32,
-    atten: *mut f32,
+    atten: &mut f32,
 ) {
-    unsafe {
-        if afac == 0. {
-            afac = 0.24499
-        };
-        if bfac == 0. {
-            bfac = -1.6649
-        };
-        if cfac == 0. {
-            cfac = 2.8141
-        };
-        *atten = 1.;
-        if frequency != 0. {
-            let critical = scale * (afac * frequency.powf(bfac) + cfac);
-            *atten = (-0.5 * end / critical).exp();
-        }
+    if afac == 0. {
+        afac = 0.24499
+    };
+    if bfac == 0. {
+        bfac = -1.6649
+    };
+    if cfac == 0. {
+        cfac = 2.8141
+    };
+    *atten = 1.;
+    if frequency != 0. {
+        /* 4/18/18: Removed complete attenuation above "optimal" dose per Ben Himes 2/24/18
+        advice that it seems to hurt, and not doing it is current Grigorieff lab thinking */
+        // `pow` is the double routine and `-0.5` is a double literal, so both
+        // expressions are evaluated in double and rounded once on store.
+        let critical = (scale as f64
+            * (afac as f64 * (frequency as f64).powf(bfac as f64) + cfac as f64))
+            as f32;
+        *atten = (-0.5 * end as f64 / critical as f64).exp() as f32;
     }
 }
-pub unsafe fn dose_weight_filter(
+pub fn dose_weight_filter(
     start: f32,
     end: f32,
     pixel: f32,
@@ -196,67 +255,67 @@ pub unsafe fn dose_weight_filter(
     b: f32,
     c: f32,
     scale: f32,
-    ctf: *mut f32,
+    ctf: &mut [f32],
     n: i32,
     max: f32,
-    delta: *mut f32,
+    delta: &mut f32,
 ) {
-    unsafe {
-        *delta = max / (n - 1) as f32;
-        for i in 0..n {
-            dose_filter_value(
-                start,
-                end,
-                *delta * i as f32 / pixel,
-                a,
-                b,
-                c,
-                scale,
-                ctf.add(i as usize),
-            );
-        }
+    *delta = max / (n - 1) as f32;
+    for i in 0..n {
+        dose_filter_value(
+            start,
+            end,
+            *delta * i as f32 / pixel,
+            a,
+            b,
+            c,
+            scale,
+            &mut ctf[i as usize],
+        );
     }
 }
-pub unsafe fn doseweightfilter(
-    start: *const f32,
-    end: *const f32,
-    pixel: *const f32,
-    a: *const f32,
-    b: *const f32,
-    c: *const f32,
-    scale: *const f32,
-    ctf: *mut f32,
-    n: *const i32,
-    max: *const f32,
-    delta: *mut f32,
+pub fn doseweightfilter(
+    start: &f32,
+    end: &f32,
+    pixel: &f32,
+    a: &f32,
+    b: &f32,
+    c: &f32,
+    scale: &f32,
+    ctf: &mut [f32],
+    n: &i32,
+    max: &f32,
+    delta: &mut f32,
 ) {
-    unsafe {
-        dose_weight_filter(
-            *start, *end, *pixel, *a, *b, *c, *scale, ctf, *n, *max, delta,
-        )
-    }
+    dose_weight_filter(
+        *start, *end, *pixel, *a, *b, *c, *scale, ctf, *n, *max, delta,
+    )
 }
 
 /// `XCorrMeanZero` (`filtxcorr.c:415`).
-pub unsafe fn xcorr_mean_zero(array: *mut f32, nxdim: i32, nx: i32, ny: i32) {
-    unsafe {
-        let mut sum = 0.;
-        for y in 0..ny {
-            for x in 0..nx {
-                sum += *array.add((x + y * nxdim) as usize);
-            }
+pub fn xcorr_mean_zero(array: &mut [f32], nxdim: i32, nx: i32, ny: i32) {
+    // The source sums each row into `tsum` and adds the row totals into `sum`;
+    // a single flat accumulation is a different order and a different mean.
+    let mut sum = 0.0f32;
+    for iy in 0..ny {
+        let mut tsum = 0.0f32;
+        let ixbase = iy * nxdim;
+        for ix in 0..nx {
+            tsum += array[(ix + ixbase) as usize];
         }
-        let mean = sum / (nx * ny) as f32;
-        for y in 0..ny {
-            for x in 0..nx {
-                let p = array.add((x + y * nxdim) as usize);
-                *p -= mean;
-            }
+        sum += tsum;
+    }
+    let dmean = sum / (nx * ny) as f32;
+
+    for iy in 0..ny {
+        let ixbase = iy * nxdim;
+        for ix in 0..nx {
+            array[(ix + ixbase) as usize] -= dmean;
         }
     }
 }
-pub unsafe fn meanzero(a: *mut f32, d: *const i32, x: *const i32, y: *const i32) {
-    unsafe { xcorr_mean_zero(a, *d, *x, *y) }
+pub fn meanzero(a: &mut [f32], d: &i32, x: &i32, y: &i32) {
+    xcorr_mean_zero(a, *d, *x, *y)
 }
 
 pub fn parabolic_fit_position(y1: f32, y2: f32, y3: f32) -> f64 {
@@ -269,28 +328,26 @@ pub fn parabolic_fit_position(y1: f32, y2: f32, y3: f32) -> f64 {
     cx = cx.clamp(-0.5, 0.5);
     cx
 }
-pub unsafe fn parabolicfitposition(a: *const f32, b: *const f32, c: *const f32) -> f64 {
-    unsafe { parabolic_fit_position(*a, *b, *c) }
+pub fn parabolicfitposition(a: &f32, b: &f32, c: &f32) -> f64 {
+    parabolic_fit_position(*a, *b, *c)
 }
-pub unsafe fn conjugate_product(a: *mut f32, b: *const f32, nx: i32, ny: i32) {
-    unsafe {
-        for j in (0..ny * (nx + 2)).step_by(2) {
-            let ar = *a.add(j as usize);
-            let ai = *a.add((j + 1) as usize);
-            let br = *b.add(j as usize);
-            let bi = *b.add((j + 1) as usize);
-            *a.add(j as usize) = ar * br + ai * bi;
-            *a.add((j + 1) as usize) = ai * br - ar * bi;
-        }
+pub fn conjugate_product(a: &mut [f32], b: &[f32], nx: i32, ny: i32) {
+    for j in (0..ny * (nx + 2)).step_by(2) {
+        let ar = a[j as usize];
+        let ai = a[(j + 1) as usize];
+        let br = b[j as usize];
+        let bi = b[(j + 1) as usize];
+        a[j as usize] = ar * br + ai * bi;
+        a[(j + 1) as usize] = ai * br - ar * bi;
     }
 }
-pub unsafe fn conjugateproduct(a: *mut f32, b: *const f32, nx: *const i32, ny: *const i32) {
-    unsafe { conjugate_product(a, b, *nx, *ny) }
+pub fn conjugateproduct(a: &mut [f32], b: &[f32], nx: &i32, ny: &i32) {
+    conjugate_product(a, b, *nx, *ny)
 }
 
-pub unsafe fn subarea_cc_coefficient(
-    a: *const f32,
-    b: *const f32,
+pub fn subarea_cc_coefficient(
+    a: &[f32],
+    b: &[f32],
     d: i32,
     x0: i32,
     x1: i32,
@@ -299,31 +356,29 @@ pub unsafe fn subarea_cc_coefficient(
     dx: i32,
     dy: i32,
 ) -> f64 {
-    unsafe {
-        let n = ((x1 + 1 - x0) * (y1 + 1 - y0)) as f64;
-        let (mut asum, mut bsum, mut csum, mut asq, mut bsq) = (0., 0., 0., 0., 0.);
-        for y in y0..=y1 {
-            for x in x0..=x1 {
-                let av = *a.add((x + y * d) as usize) as f64;
-                let bv = *b.add((x - dx + (y - dy) * d) as usize) as f64;
-                asum += av;
-                bsum += bv;
-                csum += av * bv;
-                asq += av * av;
-                bsq += bv * bv;
-            }
-        }
-        let den = (n * asq - asum * asum) * (n * bsq - bsum * bsum);
-        if den <= 0. {
-            0.
-        } else {
-            (n * csum - asum * bsum) / den.sqrt()
+    let n = ((x1 + 1 - x0) * (y1 + 1 - y0)) as f64;
+    let (mut asum, mut bsum, mut csum, mut asq, mut bsq) = (0., 0., 0., 0., 0.);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let av = a[(x + y * d) as usize] as f64;
+            let bv = b[(x - dx + (y - dy) * d) as usize] as f64;
+            asum += av;
+            bsum += bv;
+            csum += av * bv;
+            asq += av * av;
+            bsq += bv * bv;
         }
     }
+    let den = (n * asq - asum * asum) * (n * bsq - bsum * bsum);
+    if den <= 0. {
+        0.
+    } else {
+        (n * csum - asum * bsum) / den.sqrt()
+    }
 }
-pub unsafe fn cc_coefficient_two_pads(
-    a: *const f32,
-    b: *const f32,
+pub fn cc_coefficient_two_pads(
+    a: &[f32],
+    b: &[f32],
     d: i32,
     nx: i32,
     ny: i32,
@@ -334,26 +389,24 @@ pub unsafe fn cc_coefficient_two_pads(
     nxpb: i32,
     nypb: i32,
     min: i32,
-    nsum: *mut i32,
+    nsum: &mut i32,
 ) -> f64 {
-    unsafe {
-        let dx = (xpeak + 0.5).floor() as i32;
-        let dy = (ypeak + 0.5).floor() as i32;
-        let xs = nxpa.max(nxpb + dx);
-        let xe = (nx - nxpa).min(nx - nxpb + dx);
-        let ys = nypa.max(nypb + dy);
-        let ye = (ny - nypa).min(ny - nypb + dy);
-        *nsum = (xe - xs).max(0) * (ye - ys).max(0);
-        if xe < xs || ye < ys || *nsum < min {
-            0.
-        } else {
-            subarea_cc_coefficient(a, b, d, xs, xe - 1, ys, ye - 1, dx, dy)
-        }
+    let dx = (xpeak + 0.5).floor() as i32;
+    let dy = (ypeak + 0.5).floor() as i32;
+    let xs = nxpa.max(nxpb + dx);
+    let xe = (nx - nxpa).min(nx - nxpb + dx);
+    let ys = nypa.max(nypb + dy);
+    let ye = (ny - nypa).min(ny - nypb + dy);
+    *nsum = (xe - xs).max(0) * (ye - ys).max(0);
+    if xe < xs || ye < ys || *nsum < min {
+        0.
+    } else {
+        subarea_cc_coefficient(a, b, d, xs, xe - 1, ys, ye - 1, dx, dy)
     }
 }
-pub unsafe fn xcorr_cc_coefficient(
-    a: *const f32,
-    b: *const f32,
+pub fn xcorr_cc_coefficient(
+    a: &[f32],
+    b: &[f32],
     d: i32,
     nx: i32,
     ny: i32,
@@ -361,395 +414,414 @@ pub unsafe fn xcorr_cc_coefficient(
     y: f32,
     px: i32,
     py: i32,
-    n: *mut i32,
+    n: &mut i32,
 ) -> f64 {
-    unsafe { cc_coefficient_two_pads(a, b, d, nx, ny, x, y, px, py, px, py, 25, n) }
+    cc_coefficient_two_pads(a, b, d, nx, ny, x, y, px, py, px, py, 25, n)
 }
-pub unsafe fn weighted_corr_from_sums(
+pub fn weighted_corr_from_sums(
     a: f64,
     asq: f64,
     b: f64,
     bsq: f64,
     ab: f64,
     w: f64,
-    sums: *mut f64,
-    _desc: *const c_char,
+    sums: Option<&mut [f64]>,
+    desc: &str,
 ) -> f64 {
-    unsafe {
-        if !sums.is_null() {
-            for (i, v) in [a, asq, b, bsq, ab, w].into_iter().enumerate() {
-                *sums.add(i) = v;
-            }
+    // `if (descrip && strlen(descrip)) printf(...)` -- a NULL `descrip` and
+    // an empty one behave the same, so `&str` covers both.
+    if !desc.is_empty() {
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "%s %g %g %g %g %g %g\n",
+                &[
+                    CArg::Str(desc),
+                    CArg::Dbl(a),
+                    CArg::Dbl(asq),
+                    CArg::Dbl(bsq),
+                    CArg::Dbl(b),
+                    CArg::Dbl(ab),
+                    CArg::Dbl(w),
+                ],
+            )
+            .as_bytes(),
+        );
+    }
+    if let Some(sums) = sums {
+        for (i, v) in [a, asq, b, bsq, ab, w].into_iter().enumerate() {
+            sums[i] = v;
         }
-        let am = a / w;
-        let bm = b / w;
-        let den = (asq / w - am * am) * (bsq / w - bm * bm);
-        if den <= 0. {
-            0.
-        } else {
-            (ab / w - am * bm) / den.sqrt()
-        }
+    }
+    let am = a / w;
+    let bm = b / w;
+    let den = (asq / w - am * am) * (bsq / w - bm * bm);
+    if den <= 0. {
+        0.
+    } else {
+        (ab / w - am * bm) / den.sqrt()
     }
 }
 
-pub unsafe fn slice_gaussian_kernel(mat: *mut f32, dim: i32, sigma: f32) {
-    unsafe {
-        // `filtxcorr.c:376-385`: `mid` is a double, so `i - mid` and `j - mid`
-        // are double, `sigma * sigma` is computed in float and then widened by
-        // the division, and `exp` is the double routine whose result is cast to
-        // float once at the end.  Evaluating the whole expression in f32
-        // instead shifts the kernel weights by an ulp or two, which is visible
-        // in every pixel of a Gaussian-smoothed image.
-        let mid = (dim - 1) as f64 / 2.;
-        let mut sum = 0_f32;
-        for y in 0..dim {
-            for x in 0..dim {
-                let sigma_squared = sigma * sigma;
-                let v = (-((x as f64 - mid) * (x as f64 - mid)
-                    + (y as f64 - mid) * (y as f64 - mid))
-                    / sigma_squared as f64)
-                    .exp() as f32;
-                *mat.add((x + y * dim) as usize) = v;
-                sum += v;
-            }
-        }
-        for i in 0..dim * dim {
-            *mat.add(i as usize) /= sum;
+pub fn slice_gaussian_kernel(mat: &mut [f32], dim: i32, sigma: f32) {
+    // `filtxcorr.c:376-385`: `mid` is a double, so `i - mid` and `j - mid`
+    // are double, `sigma * sigma` is computed in float and then widened by
+    // the division, and `exp` is the double routine whose result is cast to
+    // float once at the end.  Evaluating the whole expression in f32
+    // instead shifts the kernel weights by an ulp or two, which is visible
+    // in every pixel of a Gaussian-smoothed image.
+    let mid = (dim - 1) as f64 / 2.;
+    let mut sum = 0_f32;
+    for y in 0..dim {
+        for x in 0..dim {
+            let sigma_squared = sigma * sigma;
+            let v = (-((x as f64 - mid) * (x as f64 - mid) + (y as f64 - mid) * (y as f64 - mid))
+                / sigma_squared as f64)
+                .exp() as f32;
+            mat[(x + y * dim) as usize] = v;
+            sum += v;
         }
     }
-}
-pub unsafe fn scaled_gaussian_kernel(mat: *mut f32, dim: *mut i32, limit: i32, sigma: f32) {
-    unsafe {
-        // `filtxcorr.c:392` casts ceil() to int first, then does the doubling
-        // and the +1 in integer arithmetic.
-        *dim = 2 * (sigma as f64).ceil() as i32 + 1;
-        *dim = (*dim).min(limit);
-        slice_gaussian_kernel(mat, *dim, sigma)
+    for i in 0..dim * dim {
+        mat[i as usize] /= sum;
     }
 }
-pub unsafe fn apply_kernel_filter(
-    a: *const f32,
-    b: *mut f32,
+pub fn scaled_gaussian_kernel(mat: &mut [f32], dim: &mut i32, limit: i32, sigma: f32) {
+    // `filtxcorr.c:392` casts ceil() to int first, then does the doubling
+    // and the +1 in integer arithmetic.
+    *dim = 2 * (sigma as f64).ceil() as i32 + 1;
+    *dim = (*dim).min(limit);
+    slice_gaussian_kernel(mat, *dim, sigma)
+}
+pub fn apply_kernel_filter(
+    a: &[f32],
+    b: &mut [f32],
     d: i32,
     nx: i32,
     ny: i32,
-    mat: *const f32,
+    mat: &[f32],
     k: i32,
 ) {
-    unsafe {
-        let below = k / 2;
-        for oy in 0..ny {
-            for ox in 0..nx {
-                let mut sum = 0.;
-                for iy in 0..k {
-                    for ix in 0..k {
-                        let x = (ox + ix - below).clamp(0, nx - 1);
-                        let y = (oy + iy - below).clamp(0, ny - 1);
-                        sum += *mat.add((ix + iy * k) as usize) * *a.add((x + y * d) as usize);
-                    }
+    let below = k / 2;
+    for oy in 0..ny {
+        for ox in 0..nx {
+            let mut sum = 0.;
+            for iy in 0..k {
+                for ix in 0..k {
+                    let x = (ox + ix - below).clamp(0, nx - 1);
+                    let y = (oy + iy - below).clamp(0, ny - 1);
+                    sum += mat[(ix + iy * k) as usize] * a[(x + y * d) as usize];
                 }
-                *b.add((ox + oy * d) as usize) = sum;
             }
+            b[(ox + oy * d) as usize] = sum;
         }
     }
 }
 
 /// `indicesForFFTwrap` (`filtxcorr.c:1881`).
-pub unsafe fn indices_for_fft_wrap(
+pub fn indices_for_fft_wrap(
     ny: i32,
     direction: i32,
-    iy_out: *mut i32,
-    iy_low: *mut i32,
-    iy_high: *mut i32,
+    iy_out: &mut i32,
+    iy_low: &mut i32,
+    iy_high: &mut i32,
 ) -> i32 {
-    unsafe {
-        *iy_out = 0;
-        *iy_low = 0;
-        *iy_high = ny / 2;
-        if ny % 2 == 0 {
-            return 1;
-        }
-        if direction != 0 {
-            *iy_out = ny - 1;
-            *iy_low = ny - 2;
-            *iy_high = *iy_low - ny / 2;
-            -1
-        } else {
-            *iy_low = 1;
-            *iy_high = *iy_low + ny / 2;
-            1
-        }
+    *iy_out = 0;
+    *iy_low = 0;
+    *iy_high = ny / 2;
+    if ny % 2 == 0 {
+        return 1;
+    }
+    if direction != 0 {
+        *iy_out = ny - 1;
+        *iy_low = ny - 2;
+        *iy_high = *iy_low - ny / 2;
+        -1
+    } else {
+        *iy_low = 1;
+        *iy_high = *iy_low + ny / 2;
+        1
     }
 }
 /// `wrapFFTslice` (`filtxcorr.c:1842`).
-pub unsafe fn wrap_fft_slice(array: *mut f32, tmp: *mut f32, nx: i32, ny: i32, direction: i32) {
-    unsafe {
-        let mut out = 0;
-        let mut low = 0;
-        let mut high = 0;
-        let inc = indices_for_fft_wrap(ny, direction, &mut out, &mut low, &mut high);
-        let width = (2 * nx) as usize;
-        if ny % 2 != 0 {
-            core::ptr::copy_nonoverlapping(array.add((2 * nx * out) as usize), tmp, width);
-            for _ in 0..ny / 2 {
-                core::ptr::copy(
-                    array.add((2 * nx * high) as usize),
-                    array.add((2 * nx * out) as usize),
-                    width,
-                );
-                core::ptr::copy(
-                    array.add((2 * nx * low) as usize),
-                    array.add((2 * nx * high) as usize),
-                    width,
-                );
-                out += inc;
-                low += inc;
-                high += inc;
-            }
-            core::ptr::copy_nonoverlapping(tmp, array.add((2 * nx * out) as usize), width);
-        } else {
-            for _ in 0..ny / 2 {
-                core::ptr::copy_nonoverlapping(array.add((2 * nx * low) as usize), tmp, width);
-                core::ptr::copy(
-                    array.add((2 * nx * high) as usize),
-                    array.add((2 * nx * low) as usize),
-                    width,
-                );
-                core::ptr::copy_nonoverlapping(tmp, array.add((2 * nx * high) as usize), width);
-                low += 1;
-                high += 1;
-            }
+pub fn wrap_fft_slice(array: &mut [f32], tmp: &mut [f32], nx: i32, ny: i32, direction: i32) {
+    let mut out = 0;
+    let mut low = 0;
+    let mut high = 0;
+    let inc = indices_for_fft_wrap(ny, direction, &mut out, &mut low, &mut high);
+    let width = (2 * nx) as usize;
+    if ny % 2 != 0 {
+        let o = (2 * nx * out) as usize;
+        tmp[..width].copy_from_slice(&array[o..o + width]);
+        for _ in 0..ny / 2 {
+            array.copy_within(
+                (2 * nx * high) as usize..(2 * nx * high) as usize + width,
+                (2 * nx * out) as usize,
+            );
+            array.copy_within(
+                (2 * nx * low) as usize..(2 * nx * low) as usize + width,
+                (2 * nx * high) as usize,
+            );
+            out += inc;
+            low += inc;
+            high += inc;
+        }
+        let o = (2 * nx * out) as usize;
+        array[o..o + width].copy_from_slice(&tmp[..width]);
+    } else {
+        for _ in 0..ny / 2 {
+            let l = (2 * nx * low) as usize;
+            tmp[..width].copy_from_slice(&array[l..l + width]);
+            array.copy_within(
+                (2 * nx * high) as usize..(2 * nx * high) as usize + width,
+                l,
+            );
+            let h = (2 * nx * high) as usize;
+            array[h..h + width].copy_from_slice(&tmp[..width]);
+            low += 1;
+            high += 1;
         }
     }
 }
-pub unsafe fn wrapfftslice(
-    a: *mut f32,
-    t: *mut f32,
-    nx: *const i32,
-    ny: *const i32,
-    dir: *const i32,
-) {
-    unsafe { wrap_fft_slice(a, t, *nx, *ny, *dir) }
+pub fn wrapfftslice(a: &mut [f32], t: &mut [f32], nx: &i32, ny: &i32, dir: &i32) {
+    wrap_fft_slice(a, t, *nx, *ny, *dir)
 }
 
 /// `fourierShiftImage` (`filtxcorr.c:1906`).
-pub unsafe fn fourier_shift_image(
-    fft: *mut f32,
-    nx: i32,
-    ny: i32,
-    dx: f32,
-    dy: f32,
-    temp: *mut f32,
-) {
-    unsafe {
-        // `float pi = 3.141593;` -- not the full-precision constant.
-        let pi: f32 = 3.141593;
-        if dx == 0. && dy == 0. {
-            return;
+pub fn fourier_shift_image(fft: &mut [f32], nx: i32, ny: i32, dx: f32, dy: f32, temp: &mut [f32]) {
+    // `float pi = 3.141593;` -- not the full-precision constant.
+    let pi: f32 = 3.141593;
+    if dx == 0. && dy == 0. {
+        return;
+    }
+    let nxfft = nx / 2 + 1;
+    let ndim = nx + 2;
+    for x in 0..nxfft {
+        // `freq = 0.5 * ix / (nxFFT - 1.);` is a double expression stored into a float.
+        let freq = (0.5 * x as f64 / (nxfft as f64 - 1.)) as f32;
+        // `arg` is a double and cos/sin are the double routines, cast to float once.
+        let arg = -2. * pi as f64 * freq as f64 * dx as f64;
+        temp[(2 * x) as usize] = arg.cos() as f32;
+        temp[(2 * x + 1) as usize] = arg.sin() as f32;
+    }
+    for y in 0..ny {
+        let mut fy = y as f32 / ny as f32;
+        if fy > 0.5 {
+            fy = (fy as f64 - 1.) as f32;
         }
-        let nxfft = nx / 2 + 1;
-        let ndim = nx + 2;
+        let arg = -2. * pi as f64 * fy as f64 * dy as f64;
+        let (c, s) = (arg.cos() as f32, arg.sin() as f32);
         for x in 0..nxfft {
-            // `freq = 0.5 * ix / (nxFFT - 1.);` is a double expression stored into a float.
-            let freq = (0.5 * x as f64 / (nxfft as f64 - 1.)) as f32;
-            // `arg` is a double and cos/sin are the double routines, cast to float once.
-            let arg = -2. * pi as f64 * freq as f64 * dx as f64;
-            *temp.add((2 * x) as usize) = arg.cos() as f32;
-            *temp.add((2 * x + 1) as usize) = arg.sin() as f32;
-        }
-        for y in 0..ny {
-            let mut fy = y as f32 / ny as f32;
-            if fy > 0.5 {
-                fy = (fy as f64 - 1.) as f32;
-            }
-            let arg = -2. * pi as f64 * fy as f64 * dy as f64;
-            let (c, s) = (arg.cos() as f32, arg.sin() as f32);
-            for x in 0..nxfft {
-                let q = 2 * x;
-                let pr = *temp.add(q as usize) * c - *temp.add((q + 1) as usize) * s;
-                let pi = *temp.add((q + 1) as usize) * c + *temp.add(q as usize) * s;
-                let p = (q + y * ndim) as usize;
-                let re = *fft.add(p);
-                let im = *fft.add(p + 1);
-                *fft.add(p) = pr * re - pi * im;
-                *fft.add(p + 1) = pi * re + pr * im;
-            }
+            let q = 2 * x;
+            let pr = temp[q as usize] * c - temp[(q + 1) as usize] * s;
+            let pi = temp[(q + 1) as usize] * c + temp[q as usize] * s;
+            let p = (q + y * ndim) as usize;
+            let re = fft[p];
+            let im = fft[p + 1];
+            fft[p] = pr * re - pi * im;
+            fft[p + 1] = pi * re + pr * im;
         }
     }
 }
-pub unsafe fn fourier_reduce_image(
-    input: *mut f32,
+pub fn fourier_reduce_image(
+    input: &[f32],
     nxi: i32,
     nyi: i32,
-    out: *mut f32,
+    out: &mut [f32],
     nxo: i32,
     nyo: i32,
     dx: f32,
     dy: f32,
-    temp: *mut f32,
+    temp: Option<&mut [f32]>,
 ) {
-    unsafe {
-        let fac = nxi as f32 / nxo as f32;
-        // `float dxy = -(redFac - 1) / (2. * redFac);` -- the `2. *` makes the divide double.
-        let d = ((-(fac - 1.)) as f64 / (2. * fac as f64)) as f32;
-        let mut dst = out;
-        for loopi in 0..2 {
-            let (start, end) = if loopi == 0 {
-                (0, nyo - nyo / 2)
-            } else {
-                (nyi - nyo / 2, nyi)
-            };
-            for y in start..end {
-                for x in 0..nxo + 2 {
-                    *dst = *input.add((y * (nxi + 2) + x) as usize) / fac;
-                    dst = dst.add(1);
-                }
+    let fac = nxi as f32 / nxo as f32;
+    // `float dxy = -(redFac - 1) / (2. * redFac);` -- the `2. *` makes the divide double.
+    let d = ((-(fac - 1.)) as f64 / (2. * fac as f64)) as f32;
+    let mut dst = 0usize;
+    for loopi in 0..2 {
+        let (start, end) = if loopi == 0 {
+            (0, nyo - nyo / 2)
+        } else {
+            (nyi - nyo / 2, nyi)
+        };
+        for y in start..end {
+            for x in 0..nxo + 2 {
+                out[dst] = input[(y * (nxi + 2) + x) as usize] / fac;
+                dst += 1;
             }
         }
-        if !temp.is_null() {
-            fourier_shift_image(out, nxo, nyo, dx / fac + d, dy / fac + d, temp)
-        }
+    }
+    if let Some(temp) = temp {
+        fourier_shift_image(out, nxo, nyo, dx / fac + d, dy / fac + d, temp)
     }
 }
-pub unsafe fn fourier_expand_image(
-    input: *mut f32,
+pub fn fourier_expand_image(
+    input: &mut [f32],
     nxi: i32,
     nyi: i32,
-    out: *mut f32,
+    out: &mut [f32],
     nxo: i32,
     nyo: i32,
     dx: f32,
     dy: f32,
-    temp: *mut f32,
+    temp: Option<&mut [f32]>,
 ) {
-    unsafe {
-        let fac = nxo as f32 / nxi as f32;
-        // `float dxy = (expFac - 1) / (2. * expFac);` -- integer 1 here, but a double divide.
-        let d = ((fac - 1.) as f64 / (2. * fac as f64)) as f32;
-        core::ptr::write_bytes(out, 0, ((nxo + 2) * nyo) as usize);
-        if !temp.is_null() {
-            fourier_shift_image(input, nxi, nyi, dx + d, dy + d, temp)
-        }
-        let mut src = input;
-        for loopi in 0..2 {
-            let (start, end) = if loopi == 0 {
-                (0, nyi - nyi / 2)
-            } else {
-                (nyo - nyi / 2, nyo)
-            };
-            for y in start..end {
-                for x in 0..nxi + 2 {
-                    *out.add((y * (nxo + 2) + x) as usize) = *src * fac;
-                    src = src.add(1);
-                }
+    let fac = nxo as f32 / nxi as f32;
+    // `float dxy = (expFac - 1) / (2. * expFac);` -- integer 1 here, but a double divide.
+    let d = ((fac - 1.) as f64 / (2. * fac as f64)) as f32;
+    out[..((nxo + 2) * nyo) as usize].fill(0.);
+    if let Some(temp) = temp {
+        fourier_shift_image(input, nxi, nyi, dx + d, dy + d, temp)
+    }
+    let mut src = 0usize;
+    for loopi in 0..2 {
+        let (start, end) = if loopi == 0 {
+            (0, nyi - nyi / 2)
+        } else {
+            (nyo - nyi / 2, nyo)
+        };
+        for y in start..end {
+            for x in 0..nxi + 2 {
+                out[(y * (nxo + 2) + x) as usize] = input[src] * fac;
+                src += 1;
             }
         }
     }
 }
-pub unsafe fn fourier_crop_sizes(
+pub fn fourier_crop_sizes(
     size: i32,
     factor: f32,
     pad: f32,
     min_pad: i32,
     limit: i32,
-    full: *mut i32,
-    crop: *mut i32,
-    actual: *mut f32,
+    full: &mut i32,
+    crop: &mut i32,
+    actual: &mut f32,
 ) -> i32 {
-    unsafe {
-        if factor == 1. {
-            return 1;
-        }
-        // `useFac = 1. / factor;` is a double divide stored into a float.
-        let usefac = if factor < 1. {
-            (1. / factor as f64) as f32
-        } else {
-            factor
-        };
-        let mut denom = 0;
-        let mut numer = 0;
-        for d in [1, 2, 3, 4, 5, 6, 8, 10] {
-            // `B3DNINT(a)` is `(int)floor((a) + 0.5)`, evaluated in double.
-            let n = ((usefac * d as f32) as f64 + 0.5).floor() as i32;
-            *actual = n as f32 / d as f32;
-            if (usefac - *actual).abs() < 0.001 {
-                denom = d;
-                numer = n;
-                break;
-            }
-        }
-        if denom == 0 {
-            return 2;
-        }
-        if factor < 1. {
-            *actual = (1. / *actual as f64) as f32;
-            core::mem::swap(&mut denom, &mut numer);
-        }
-        let p = (min_pad as f32).max(pad * size as f32) as i32;
-        let divisor = 2 * numer;
-        let base = divisor * ((size + 2 * p + divisor - 1) / divisor);
-        let f = nice_frame(base, divisor, limit);
-        *crop = f * denom / numer;
-        *full = f;
-        0
+    if factor == 1. {
+        return 1;
     }
+    // `useFac = 1. / factor;` is a double divide stored into a float.
+    let usefac = if factor < 1. {
+        (1. / factor as f64) as f32
+    } else {
+        factor
+    };
+    let mut denom = 0;
+    let mut numer = 0;
+    for d in [1, 2, 3, 4, 5, 6, 8, 10] {
+        // `B3DNINT(a)` is `(int)floor((a) + 0.5)`, evaluated in double.
+        let n = ((usefac * d as f32) as f64 + 0.5).floor() as i32;
+        *actual = n as f32 / d as f32;
+        if (usefac - *actual).abs() < 0.001 {
+            denom = d;
+            numer = n;
+            break;
+        }
+    }
+    if denom == 0 {
+        return 2;
+    }
+    if factor < 1. {
+        *actual = (1. / *actual as f64) as f32;
+        core::mem::swap(&mut denom, &mut numer);
+    }
+    let p = (min_pad as f32).max(pad * size as f32) as i32;
+    let divisor = 2 * numer;
+    let base = divisor * ((size + 2 * p + divisor - 1) / divisor);
+    let f = nice_frame(base, divisor, limit);
+    *crop = f * denom / numer;
+    *full = f;
+    0
+}
+
+/// The source's `XCorrFilterPart` input transform, whose documentation says
+/// `array` "can be the same as [fft]" (`filtxcorr.c:265-267`).  Both of this
+/// tree's callers do exactly that, and Rust cannot hold a `&` and a `&mut` to
+/// one buffer, so `InPlace` names the aliased case; the filter is applied
+/// element by element at matching indexes, which is why it works in place.
+#[derive(Copy, Clone)]
+pub enum FilterIn<'a> {
+    Fft(&'a [f32]),
+    InPlace,
 }
 
 /// `XCorrFilterPart` (`filtxcorr.c:271`).
-pub unsafe fn xcorr_filter_part(
-    fft: *const f32,
-    array: *mut f32,
+pub fn xcorr_filter_part(
+    fft: FilterIn,
+    array: &mut [f32],
     nx: i32,
     ny: i32,
-    ctf: *const f32,
+    ctf: &[f32],
     delta: f32,
 ) {
-    unsafe {
-        let nx2 = nx / 2;
-        let nx2p1 = nx2 + 1;
-        let dx = 1.0 / nx as f32;
-        let dy = 1.0 / ny as f32;
-        let mut last = (0.707 / delta) as i32;
-        while last > 1 && *ctf.add(last as usize) == 0. {
-            last -= 1;
+    let nx2 = nx / 2;
+    let nx2p1 = nx2 + 1;
+    let dx = (1.0 / nx as f64) as f32;
+    let dy = (1.0 / ny as f64) as f32;
+
+    /* Find last non-zero filter value in range that matters */
+    // `for (ix = 0.707 / delta; ...)` -- `0.707` is a double literal, so
+    // the quotient is a double truncated to `int`.
+    let mut last = (0.707 / delta as f64) as i32;
+    while last > 1 && ctf[last as usize] == 0. {
+        last -= 1;
+    }
+
+    /* Get a frequency limit to apply in Y and a limit to X indexes */
+    let maxf = (last + 1) as f32 * delta;
+    // `B3DCLAMP(nxMax, 1, nxDiv2)` is `MAX(1, MIN(nxDiv2, nxMax))`, in
+    // that nesting; `i32::clamp` panics when `nxDiv2 < 1`.
+    let mut nxmax = (maxf / dx + 1.0) as i32;
+    nxmax = if nx2 < nxmax { nx2 } else { nxmax };
+    nxmax = if 1 > nxmax { 1 } else { nxmax };
+
+    /*   apply filter function on fft, put result in array */
+    for iy in 0..=ny - 1 {
+        let mut fy = iy as f32 * dy;
+        let index = iy * nx2p1;
+        if fy > 0.5 {
+            fy = 1.0f32 - fy;
         }
-        let maxf = (last + 1) as f32 * delta;
-        let nxmax = ((maxf / dx + 1.0) as i32).clamp(1, nx2);
-        for iy in 0..ny {
-            let mut fy = iy as f32 * dy;
-            if fy > 0.5 {
-                fy = 1. - fy;
+        if fy > maxf {
+            for ix in 0..=nx2 {
+                let ind = 2 * (index + ix);
+                array[ind as usize] = 0.;
+                array[(ind + 1) as usize] = 0.;
             }
-            let base = iy * nx2p1;
-            if fy > maxf {
-                for ix in 0..=nx2 {
-                    let ind = 2 * (base + ix);
-                    *array.add(ind as usize) = 0.;
-                    *array.add((ind + 1) as usize) = 0.;
-                }
-            } else {
-                for ix in 0..=nxmax {
-                    let ind = 2 * (base + ix);
-                    let freq = ((ix as f32 * dx).powi(2) + fy * fy).sqrt();
-                    let f = *ctf.add((freq / delta + 0.5) as usize);
-                    *array.add(ind as usize) = *fft.add(ind as usize) * f;
-                    *array.add((ind + 1) as usize) = *fft.add((ind + 1) as usize) * f;
-                }
-                // C deliberately stops at nxDiv2 (exclusive), retaining the
-                // Nyquist pair when it is not visited by either loop.
-                for ix in nxmax + 1..nx2 {
-                    let ind = 2 * (base + ix);
-                    *array.add(ind as usize) = 0.;
-                    *array.add((ind + 1) as usize) = 0.;
-                }
+        } else {
+            // `double ysq = y * y;` -- the product is single precision and
+            // then widens, and `x` is *accumulated* by `delx` rather than
+            // recomputed as `ix * delx`.
+            let ysq = (fy * fy) as f64;
+            let mut x = 0.0f32;
+            for ix in 0..=nxmax {
+                let ind = 2 * (index + ix);
+                let indp1 = ind + 1;
+                let s = ((x * x) as f64 + ysq).sqrt() as f32;
+                let indf = (s / delta + 0.5f32) as i32;
+                let f = ctf[indf as usize];
+                let (a, b) = match fft {
+                    FilterIn::Fft(fft) => (fft[ind as usize], fft[indp1 as usize]),
+                    FilterIn::InPlace => (array[ind as usize], array[indp1 as usize]),
+                };
+                array[ind as usize] = a * f;
+                array[indp1 as usize] = b * f;
+                x += dx;
+            }
+            // C deliberately stops at nxDiv2 (exclusive), retaining the
+            // Nyquist pair when it is not visited by either loop.
+            for ix in nxmax + 1..nx2 {
+                let ind = 2 * (index + ix);
+                array[ind as usize] = 0.;
+                array[(ind + 1) as usize] = 0.;
             }
         }
     }
 }
 
 /// Original static `peakHalfWidth` (`filtxcorr.c:841`).
-unsafe fn peak_half_width(
-    array: *mut f32,
+fn peak_half_width(
+    array: &[f32],
     ix_peak: i32,
     iy_peak: i32,
     nx: i32,
@@ -757,395 +829,520 @@ unsafe fn peak_half_width(
     delx: i32,
     dely: i32,
 ) -> f32 {
-    unsafe {
-        let nxdim = nx + 2;
-        let peak = *array.add((ix_peak + iy_peak * nxdim) as usize);
-        let scale = ((delx * delx + dely * dely) as f32).sqrt();
-        let mut last_val = peak;
-        let mut dist = 1;
-        while dist < nx.min(ny) / 4 {
-            let ix = (ix_peak + dist * delx + nx) % nx;
-            let iy = (iy_peak + dist * dely + ny) % ny;
-            let val = *array.add((ix + iy * nxdim) as usize);
-            if val < peak / 2. {
-                return scale * (dist as f32 + (last_val - peak / 2.) / (last_val - val) - 1.);
-            }
-            last_val = val;
-            dist += 1;
+    let nxdim = nx + 2;
+    let peak = array[(ix_peak + iy_peak * nxdim) as usize];
+    // `(float)sqrt((double)delx * delx + dely * dely)`.
+    let scale = ((delx as f64 * delx as f64 + (dely * dely) as f64).sqrt()) as f32;
+    let mut last_val = peak;
+    let mut dist = 1;
+    while dist < (if nx < ny { nx } else { ny }) / 4 {
+        let ix = (ix_peak + dist * delx + nx) % nx;
+        let iy = (iy_peak + dist * dely + ny) % ny;
+        let val = array[(ix + iy * nxdim) as usize];
+        // `peak / 2.` is a double, so the comparison and the interpolation
+        // below are both done in double and rounded once by the `(float)`.
+        if (val as f64) < peak as f64 / 2. {
+            return scale
+                * ((dist as f64 + (last_val as f64 - peak as f64 / 2.) / (last_val - val) as f64
+                    - 1.) as f32);
         }
-        scale * dist as f32
+        last_val = val;
+        dist += 1;
     }
+    scale * dist as f32
 }
 
 /// Original static `accumRotatedCorner` (`filtxcorr.c:861`).
-unsafe fn accum_rotated_corner(
+fn accum_rotated_corner(
     limit_x: i32,
     limit_y: i32,
     cosine: f32,
     sine: f32,
-    lim_xlo: *mut i32,
-    lim_xhi: *mut i32,
-    lim_ylo: *mut i32,
-    lim_yhi: *mut i32,
+    lim_xlo: &mut i32,
+    lim_xhi: &mut i32,
+    lim_ylo: &mut i32,
+    lim_yhi: &mut i32,
 ) {
-    unsafe {
-        let idx = (cosine * limit_x as f32 - sine * limit_y as f32) as i32;
-        let idy = (sine * limit_x as f32 + cosine * limit_y as f32) as i32;
-        *lim_xlo = (*lim_xlo).min(idx);
-        *lim_xhi = (*lim_xhi).max(idx);
-        *lim_ylo = (*lim_ylo).min(idy);
-        *lim_yhi = (*lim_yhi).max(idy);
-    }
+    let idx = (cosine * limit_x as f32 - sine * limit_y as f32) as i32;
+    let idy = (sine * limit_x as f32 + cosine * limit_y as f32) as i32;
+    // `ACCUM_MIN(a, b)` is `a = a < b ? a : b`, which keeps the second operand
+    // when the comparison is false.
+    *lim_xlo = if *lim_xlo < idx { *lim_xlo } else { idx };
+    *lim_xhi = if *lim_xhi > idx { *lim_xhi } else { idx };
+    *lim_ylo = if *lim_ylo < idy { *lim_ylo } else { idy };
+    *lim_yhi = if *lim_yhi > idy { *lim_yhi } else { idy };
 }
 
 /// Original static `computeTestLimits` (`filtxcorr.c:873`).
-unsafe fn compute_test_limits(
+fn compute_test_limits(
     nx: i32,
     ny: i32,
-    test_xlo: *mut i32,
-    test_xhi: *mut i32,
-    test_ylo: *mut i32,
-    test_yhi: *mut i32,
-    cos_lim: *mut f32,
-    sin_lim: *mut f32,
+    test_xlo: &mut i32,
+    test_xhi: &mut i32,
+    test_ylo: &mut i32,
+    test_yhi: &mut i32,
+    cos_lim: &mut f32,
+    sin_lim: &mut f32,
 ) {
-    unsafe {
-        *test_xlo = (-nx / 2).max(S_LIMIT_XLO.load(Ordering::SeqCst));
-        *test_xhi = (nx / 2 - 1).min(S_LIMIT_XHI.load(Ordering::SeqCst));
-        *test_ylo = (-ny / 2).max(S_LIMIT_YLO.load(Ordering::SeqCst));
-        *test_yhi = (ny / 2 - 1).min(S_LIMIT_YHI.load(Ordering::SeqCst));
-        let angle = f32::from_bits(S_LIMIT_ANGLE.load(Ordering::SeqCst));
-        if angle != 0. {
-            *cos_lim = (angle * 0.017453292519943295).cos();
-            *sin_lim = (angle * 0.017453292519943295).sin();
-            *test_xlo = 2_000_000_000;
-            *test_xhi = -2_000_000_000;
-            *test_ylo = 2_000_000_000;
-            *test_yhi = -2_000_000_000;
-            let xlo = S_LIMIT_XLO.load(Ordering::SeqCst);
-            let xhi = S_LIMIT_XHI.load(Ordering::SeqCst);
-            let ylo = S_LIMIT_YLO.load(Ordering::SeqCst);
-            let yhi = S_LIMIT_YHI.load(Ordering::SeqCst);
-            accum_rotated_corner(
-                xhi + 1,
-                yhi + 1,
-                *cos_lim,
-                *sin_lim,
-                test_xlo,
-                test_xhi,
-                test_ylo,
-                test_yhi,
-            );
-            accum_rotated_corner(
-                xhi + 1,
-                ylo - 1,
-                *cos_lim,
-                *sin_lim,
-                test_xlo,
-                test_xhi,
-                test_ylo,
-                test_yhi,
-            );
-            accum_rotated_corner(
-                xlo - 1,
-                yhi + 1,
-                *cos_lim,
-                *sin_lim,
-                test_xlo,
-                test_xhi,
-                test_ylo,
-                test_yhi,
-            );
-            accum_rotated_corner(
-                xlo - 1,
-                ylo - 1,
-                *cos_lim,
-                *sin_lim,
-                test_xlo,
-                test_xhi,
-                test_ylo,
-                test_yhi,
-            );
-            *test_xlo = (-nx / 2).max(*test_xlo - 1);
-            *test_xhi = (nx / 2 - 1).min(*test_xhi + 1);
-            *test_ylo = (-ny / 2).max(*test_ylo - 1);
-            *test_yhi = (ny / 2 - 1).min(*test_yhi + 1);
-        }
-    }
-}
-pub unsafe fn xcorr_peak_find_width(
-    array: *mut f32,
-    nxdim: i32,
-    ny: i32,
-    xpeak: *mut f32,
-    ypeak: *mut f32,
-    peak: *mut f32,
-    width: *mut f32,
-    width_min: *mut f32,
-    max_peaks: i32,
-    min_strength: f32,
-) {
-    unsafe {
-        let nx = nxdim - 2;
-        S_PEAK_FIND_ERROR.store(0, Ordering::SeqCst);
-        for i in 0..max_peaks {
-            *peak.add(i as usize) = -1.0e30;
-            *xpeak.add(i as usize) = 0.;
-            *ypeak.add(i as usize) = 0.;
-        }
-        // This is deliberately the same two-pass selection as XCorrPeakFindWidth:
-        // find the global value first when it sets a strength threshold, then retain
-        // only eight-neighbour local maxima.  The C implementation parallelizes the
-        // scans; the ordering here is serial but the comparisons and ties are identical.
-        let apply = S_APPLY_LIMITS.load(Ordering::SeqCst);
+    *test_xlo = (-nx / 2).max(S_LIMIT_XLO.load(Ordering::SeqCst));
+    *test_xhi = (nx / 2 - 1).min(S_LIMIT_XHI.load(Ordering::SeqCst));
+    *test_ylo = (-ny / 2).max(S_LIMIT_YLO.load(Ordering::SeqCst));
+    *test_yhi = (ny / 2 - 1).min(S_LIMIT_YHI.load(Ordering::SeqCst));
+    let angle = f32::from_bits(S_LIMIT_ANGLE.load(Ordering::SeqCst));
+    if angle != 0. {
+        *cos_lim = (angle * 0.017453292519943295).cos();
+        *sin_lim = (angle * 0.017453292519943295).sin();
+        *test_xlo = 2_000_000_000;
+        *test_xhi = -2_000_000_000;
+        *test_ylo = 2_000_000_000;
+        *test_yhi = -2_000_000_000;
         let xlo = S_LIMIT_XLO.load(Ordering::SeqCst);
         let xhi = S_LIMIT_XHI.load(Ordering::SeqCst);
         let ylo = S_LIMIT_YLO.load(Ordering::SeqCst);
         let yhi = S_LIMIT_YHI.load(Ordering::SeqCst);
-        let angle = f32::from_bits(S_LIMIT_ANGLE.load(Ordering::SeqCst));
-        let test_angle = apply != 0 && angle != 0.;
-        let mut cosine = 1.;
-        let mut sine = 0.;
-        let (mut txlo, mut txhi, mut tylo, mut tyhi) = (xlo, xhi, ylo, yhi);
-        if apply != 0 {
-            compute_test_limits(
-                nx,
-                ny,
-                &mut txlo,
-                &mut txhi,
-                &mut tylo,
-                &mut tyhi,
-                &mut cosine,
-                &mut sine,
-            );
-        }
-        let xcen = 0.5 * (xlo + xhi) as f32;
-        let ycen = 0.5 * (ylo + yhi) as f32;
-        let xrad_sq = ((xhi - xlo) as f32 / 2.).max(1.).powi(2);
-        let yrad_sq = ((yhi - ylo) as f32 / 2.).max(1.).powi(2);
-        let mut threshold = 0.;
-        if max_peaks < 2 || min_strength > 0. {
-            let mut best = -1e30_f32;
-            let mut bix = 0;
-            let mut biy = 0;
-            let ystart = if apply != 0 { tylo } else { 0 };
-            let yend = if apply != 0 { tyhi } else { ny - 1 };
-            for idy_line in ystart..=yend {
-                let iy = if idy_line < 0 {
-                    idy_line + ny
-                } else {
-                    idy_line
-                };
-                for ix in 0..nx {
-                    let mut idx = if ix > nx / 2 { ix - nx } else { ix };
-                    let mut idy = idy_line;
-                    if apply != 0 {
-                        if idx < txlo || idx > txhi {
-                            continue;
-                        }
-                        if test_angle {
-                            let ixrot = (idx as f32 * cosine + idy as f32 * sine).round() as i32;
-                            idy = (-idx as f32 * sine + idy as f32 * cosine).round() as i32;
-                            idx = ixrot;
-                            if idy < ylo || idy > yhi {
-                                continue;
-                            }
-                        }
-                        if idx < xlo || idx > xhi {
-                            continue;
-                        }
-                        if apply < 0 {
-                            let cx = idx as f32 - xcen;
-                            let cy = idy as f32 - ycen;
-                            if cx * cx / xrad_sq + cy * cy / yrad_sq > 1. {
-                                continue;
-                            }
-                        }
-                    }
-                    let val = *array.add((ix + iy * nxdim) as usize);
-                    if val > best {
-                        best = val;
-                        bix = ix;
-                        biy = iy;
-                    }
-                }
-            }
-            if best > -0.9e30 {
-                *peak = best;
-                *xpeak = bix as f32;
-                *ypeak = biy as f32;
-            }
-            threshold = min_strength * *peak;
-        }
-        if max_peaks > 1 {
-            // C stores at most maxPeaks maxima per line then obtains the same top set.
-            // Keeping the line cap here preserves its bounded candidate semantics.
-            let mut candidates: Vec<(f32, i32, i32)> = Vec::new();
-            let ystart = if apply != 0 { tylo } else { -ny / 2 };
-            let yend = if apply != 0 { tyhi } else { ny / 2 - 1 };
-            for idy_line in ystart..=yend {
-                let iy = if idy_line < 0 {
-                    idy_line + ny
-                } else {
-                    idy_line
-                };
-                let mut line: Vec<(f32, i32)> = Vec::new();
-                for ix in 0..nx {
-                    let mut idx = if ix > nx / 2 { ix - nx } else { ix };
-                    let mut idy = idy_line;
-                    if apply != 0 {
-                        if idx < txlo || idx > txhi {
-                            continue;
-                        }
-                        if test_angle {
-                            let ixrot = (idx as f32 * cosine + idy as f32 * sine).round() as i32;
-                            idy = (-idx as f32 * sine + idy as f32 * cosine).round() as i32;
-                            idx = ixrot;
-                            if idy < ylo || idy > yhi {
-                                continue;
-                            }
-                        }
-                        if idx < xlo || idx > xhi {
-                            continue;
-                        }
-                        if apply < 0 {
-                            let cx = idx as f32 - xcen;
-                            let cy = idy as f32 - ycen;
-                            if cx * cx / xrad_sq + cy * cy / yrad_sq > 1. {
-                                continue;
-                            }
-                        }
-                    }
-                    let val = *array.add((ix + iy * nxdim) as usize);
-                    if val <= threshold {
-                        continue;
-                    }
-                    let xm = (ix + nx - 1) % nx;
-                    let xp = (ix + 1) % nx;
-                    let ym = (iy + ny - 1) % ny;
-                    let yp = (iy + 1) % ny;
-                    if val > *array.add((xm + ym * nxdim) as usize)
-                        && val >= *array.add((xp + ym * nxdim) as usize)
-                        && val > *array.add((xm + iy * nxdim) as usize)
-                        && val >= *array.add((xp + iy * nxdim) as usize)
-                        && val > *array.add((xm + yp * nxdim) as usize)
-                        && val >= *array.add((xp + yp * nxdim) as usize)
-                        && val > *array.add((ix + ym * nxdim) as usize)
-                        && val >= *array.add((ix + yp * nxdim) as usize)
-                    {
-                        line.push((val, ix));
-                        if line.len() > max_peaks as usize {
-                            let low = line
-                                .iter()
-                                .enumerate()
-                                .min_by(|a, b| a.1.0.total_cmp(&b.1.0))
-                                .unwrap()
-                                .0;
-                            line.remove(low);
-                        }
-                    }
-                }
-                candidates.extend(line.into_iter().map(|(v, x)| (v, x, iy)));
-            }
-            candidates.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
-            for (i, (v, x, y)) in candidates.into_iter().take(max_peaks as usize).enumerate() {
-                *peak.add(i) = v;
-                *xpeak.add(i) = x as f32;
-                *ypeak.add(i) = y as f32;
-            }
-        }
-        for i in 0..max_peaks {
-            if *peak.add(i as usize) < -0.9e30 {
-                continue;
-            }
-            let ix = *xpeak.add(i as usize) as i32;
-            let iy = *ypeak.add(i as usize) as i32;
-            let cx = parabolic_fit_position(
-                *array.add(((ix + nx - 1) % nx + iy * nxdim) as usize),
-                *peak.add(i as usize),
-                *array.add(((ix + 1) % nx + iy * nxdim) as usize),
-            ) as f32;
-            let cy = parabolic_fit_position(
-                *array.add((ix + ((iy + ny - 1) % ny) * nxdim) as usize),
-                *peak.add(i as usize),
-                *array.add((ix + ((iy + 1) % ny) * nxdim) as usize),
-            ) as f32;
-            let mut px = ix as f32 + cx;
-            let mut py = iy as f32 + cy;
-            if px > nx as f32 / 2. {
-                px -= nx as f32;
-            }
-            if py > ny as f32 / 2. {
-                py -= ny as f32;
-            }
-            *xpeak.add(i as usize) = px;
-            *ypeak.add(i as usize) = py;
-            if !width.is_null() && !width_min.is_null() {
-                let values = [
-                    peak_half_width(array, ix, iy, nx, ny, 1, 0)
-                        + peak_half_width(array, ix, iy, nx, ny, -1, 0),
-                    peak_half_width(array, ix, iy, nx, ny, 0, 1)
-                        + peak_half_width(array, ix, iy, nx, ny, 0, -1),
-                    peak_half_width(array, ix, iy, nx, ny, 1, 1)
-                        + peak_half_width(array, ix, iy, nx, ny, -1, -1),
-                    peak_half_width(array, ix, iy, nx, ny, 1, -1)
-                        + peak_half_width(array, ix, iy, nx, ny, -1, 1),
-                ];
-                *width.add(i as usize) = values.iter().sum::<f32>() / 4.;
-                *width_min.add(i as usize) = values.into_iter().fold(f32::INFINITY, f32::min);
-            }
-        }
-        S_APPLY_LIMITS.store(0, Ordering::SeqCst);
-        S_LIMIT_ANGLE.store(0, Ordering::SeqCst);
-        S_WILL_CHECK_ERROR.store(0, Ordering::SeqCst);
+        accum_rotated_corner(
+            xhi + 1,
+            yhi + 1,
+            *cos_lim,
+            *sin_lim,
+            test_xlo,
+            test_xhi,
+            test_ylo,
+            test_yhi,
+        );
+        accum_rotated_corner(
+            xhi + 1,
+            ylo - 1,
+            *cos_lim,
+            *sin_lim,
+            test_xlo,
+            test_xhi,
+            test_ylo,
+            test_yhi,
+        );
+        accum_rotated_corner(
+            xlo - 1,
+            yhi + 1,
+            *cos_lim,
+            *sin_lim,
+            test_xlo,
+            test_xhi,
+            test_ylo,
+            test_yhi,
+        );
+        accum_rotated_corner(
+            xlo - 1,
+            ylo - 1,
+            *cos_lim,
+            *sin_lim,
+            test_xlo,
+            test_xhi,
+            test_ylo,
+            test_yhi,
+        );
+        *test_xlo = (-nx / 2).max(*test_xlo - 1);
+        *test_xhi = (nx / 2 - 1).min(*test_xhi + 1);
+        *test_ylo = (-ny / 2).max(*test_ylo - 1);
+        *test_yhi = (ny / 2 - 1).min(*test_yhi + 1);
     }
 }
-pub unsafe fn get_peak_find_test_limits(
-    nx: i32,
+pub fn xcorr_peak_find_width(
+    array: &[f32],
+    nxdim: i32,
     ny: i32,
-    lim_xlo: *mut i32,
-    lim_xhi: *mut i32,
-    lim_ylo: *mut i32,
-    lim_yhi: *mut i32,
+    xpeak: &mut [f32],
+    ypeak: &mut [f32],
+    peak: &mut [f32],
+    mut width: Option<&mut [f32]>,
+    mut width_min: Option<&mut [f32]>,
+    max_peaks: i32,
+    min_strength: f32,
 ) {
-    unsafe {
-        let mut cosine = 0.;
-        let mut sine = 0.;
+    let nx = nxdim - 2;
+    let apply = S_APPLY_LIMITS.load(Ordering::SeqCst);
+    let s_limit_xlo = S_LIMIT_XLO.load(Ordering::SeqCst);
+    let s_limit_xhi = S_LIMIT_XHI.load(Ordering::SeqCst);
+    let s_limit_ylo = S_LIMIT_YLO.load(Ordering::SeqCst);
+    let s_limit_yhi = S_LIMIT_YHI.load(Ordering::SeqCst);
+    let s_limit_angle = f32::from_bits(S_LIMIT_ANGLE.load(Ordering::SeqCst));
+    let test_angle = apply != 0 && s_limit_angle != 0.;
+    let mut cos_lim_ang = 1.0f32;
+    let mut sin_lim_ang = 0.0f32;
+    let mut threshold = 0.0f32;
+    let mut test_lim_xlo = s_limit_xlo;
+    let mut test_lim_xhi = s_limit_xhi;
+    let mut test_lim_ylo = s_limit_ylo;
+    let mut test_lim_yhi = s_limit_yhi;
+    // `B3DNINT(a)` is `(int)floor(a + 0.5)`, not `round()`.
+    let nint = |v: f32| (v as f64 + 0.5).floor() as i32;
+
+    S_PEAK_FIND_ERROR.store(0, Ordering::SeqCst);
+    let ixm_alloc = (ny * max_peaks) as usize;
+    // The source carves `peakTemp`, `tempCopy`, `ixTemp`, `iyTemp` and
+    // `numInLine` out of one `B3DMALLOC(float, 4 * ny * maxPeaks + ny)`, with
+    // the last three reinterpreted as ints; the allocation cannot fail here,
+    // so the `sWillCheckError` / exit path is unreachable.
+    let mut peak_temp = vec![0.0f32; ixm_alloc.max(ny as usize)];
+    let mut ix_temp = vec![0i32; ixm_alloc.max(ny as usize)];
+    let mut iy_temp = vec![0i32; ixm_alloc.max(ny as usize)];
+    let mut num_in_line = vec![0i32; ny as usize];
+
+    /* If using elliptical limits, compute center and squares of radii */
+    let mut x_lim_cen = 0.0f32;
+    let mut y_lim_cen = 0.0f32;
+    let mut x_lim_rad_sq = 0.0f32;
+    let mut y_lim_rad_sq = 0.0f32;
+    if apply < 0 {
+        x_lim_cen = (0.5 * (s_limit_xlo + s_limit_xhi) as f64) as f32;
+        let cx = {
+            let v = (s_limit_xhi - s_limit_xlo) as f64 / 2.;
+            (if 1.0f64 > v { 1.0f64 } else { v }) as f32
+        };
+        x_lim_rad_sq = cx * cx;
+        y_lim_cen = (0.5 * (s_limit_ylo + s_limit_yhi) as f64) as f32;
+        let cy = {
+            let v = (s_limit_yhi - s_limit_ylo) as f64 / 2.;
+            (if 1.0f64 > v { 1.0f64 } else { v }) as f32
+        };
+        y_lim_rad_sq = cy * cy;
+    }
+    if apply != 0 {
         compute_test_limits(
             nx,
             ny,
-            lim_xlo,
-            lim_xhi,
-            lim_ylo,
-            lim_yhi,
-            &mut cosine,
-            &mut sine,
+            &mut test_lim_xlo,
+            &mut test_lim_xhi,
+            &mut test_lim_ylo,
+            &mut test_lim_yhi,
+            &mut cos_lim_ang,
+            &mut sin_lim_ang,
         );
     }
+    // The `numOMPthreads` count only sizes the OpenMP team; the scans here are
+    // serial and their comparison order is the same.
+
+    /* find peaks */
+    for i in 0..max_peaks as usize {
+        peak[i] = -1.0e30;
+        xpeak[i] = 0.;
+        ypeak[i] = 0.;
+    }
+
+    /* Look for highest peak if looking for one peak or if there is a minimum strength */
+    if max_peaks < 2 || min_strength > 0. {
+        for i in 0..ny as usize {
+            peak_temp[i] = -1.0e30;
+            ix_temp[i] = 0;
+            iy_temp[i] = 0;
+            num_in_line[i] = 0;
+        }
+
+        /* Find one peak within the limits */
+        if apply != 0 {
+            for idy_line in test_lim_ylo..=test_lim_yhi {
+                let iy = if idy_line < 0 {
+                    idy_line + ny
+                } else {
+                    idy_line
+                };
+                // The source sets `idy` once per line and the angle branch below
+                // *overwrites* it, so later columns on the line see the rotated
+                // value.  That is reproduced here.
+                let mut idy = idy_line;
+                for ix in 0..nx {
+                    let mut idx = if ix > nx / 2 { ix - nx } else { ix };
+                    if idx < test_lim_xlo || idx > test_lim_xhi {
+                        continue;
+                    }
+                    if test_angle {
+                        if array[(ix + iy * nxdim) as usize] < peak_temp[iy as usize] {
+                            continue;
+                        }
+                        let ixrot = nint(idx as f32 * cos_lim_ang + idy as f32 * sin_lim_ang);
+                        idy = nint(-idx as f32 * sin_lim_ang + idy as f32 * cos_lim_ang);
+                        idx = ixrot;
+                        if idy < s_limit_ylo || idy > s_limit_yhi {
+                            continue;
+                        }
+                    }
+                    if idx >= s_limit_xlo
+                        && idx <= s_limit_xhi
+                        && array[(ix + iy * nxdim) as usize] > peak_temp[iy as usize]
+                    {
+                        if apply < 0 {
+                            let cx = idx as f32 - x_lim_cen;
+                            let cy = idy as f32 - y_lim_cen;
+                            if cx * cx / x_lim_rad_sq + cy * cy / y_lim_rad_sq > 1. {
+                                continue;
+                            }
+                        }
+                        peak_temp[iy as usize] = array[(ix + iy * nxdim) as usize];
+                        ix_temp[iy as usize] = ix;
+                        iy_temp[iy as usize] = iy;
+                    }
+                }
+            }
+        } else {
+            /* Or just find the one peak in the whole area */
+            for iy in 0..ny {
+                for ix in iy * nxdim..nx + iy * nxdim {
+                    if array[ix as usize] > peak_temp[iy as usize] {
+                        peak_temp[iy as usize] = array[ix as usize];
+                        ix_temp[iy as usize] = ix - iy * nxdim;
+                        iy_temp[iy as usize] = iy;
+                    }
+                }
+            }
+        }
+
+        let mut ixpeak = 0;
+        let mut iypeak = 0;
+        for iy in 0..ny as usize {
+            if peak_temp[iy] > peak[0] {
+                peak[0] = peak_temp[iy];
+                ixpeak = ix_temp[iy];
+                iypeak = iy_temp[iy];
+            }
+        }
+
+        if peak[0] > -0.9e30 {
+            xpeak[0] = ixpeak as f32;
+            ypeak[0] = iypeak as f32;
+        }
+
+        threshold = min_strength * peak[0];
+    }
+
+    /* Now find all requested peaks */
+    if max_peaks > 1 {
+        for i in 0..ny as usize {
+            num_in_line[i] = 0;
+        }
+
+        // Look for local peaks and keep track of all on each line
+        let ystart = if apply != 0 { test_lim_ylo } else { -ny / 2 };
+        let yend = if apply != 0 { test_lim_yhi } else { ny / 2 - 1 };
+        for idy_line in ystart..=yend {
+            let iy = if idy_line < 0 {
+                idy_line + ny
+            } else {
+                idy_line
+            };
+            for ix in 0..nx {
+                if apply != 0 {
+                    let mut idx = if ix > nx / 2 { ix - nx } else { ix };
+                    let mut idy = idy_line;
+                    if test_angle {
+                        let ixrot = nint(idx as f32 * cos_lim_ang + idy as f32 * sin_lim_ang);
+                        let iyrot = nint(-idx as f32 * sin_lim_ang + idy as f32 * cos_lim_ang);
+                        idx = ixrot;
+                        idy = iyrot;
+                        if idy < s_limit_ylo || idy > s_limit_yhi {
+                            continue;
+                        }
+                    }
+                    if idx < s_limit_xlo || idx > s_limit_xhi {
+                        continue;
+                    }
+
+                    // Apply elliptical test
+                    if apply < 0 {
+                        let cx = idx as f32 - x_lim_cen;
+                        let cy = idy as f32 - y_lim_cen;
+                        if cx * cx / x_lim_rad_sq + cy * cy / y_lim_rad_sq > 1. {
+                            continue;
+                        }
+                    }
+                }
+                let local = array[(ix + iy * nxdim) as usize];
+                if local > threshold {
+                    // evaluate point for truly being local peak
+                    // Allow equality on one side, otherwise identical adjacent values are lost
+                    let ixm = (ix + nx - 1) % nx;
+                    let ixp = (ix + 1) % nx;
+                    let iyb = iy * nxdim;
+                    let iybp = ((iy + 1) % ny) * nxdim;
+                    let iybm = ((iy + ny - 1) % ny) * nxdim;
+
+                    if local > array[(ix + iybm) as usize]
+                        && local >= array[(ix + iybp) as usize]
+                        && local > array[(ixm + iyb) as usize]
+                        && local >= array[(ixp + iyb) as usize]
+                        && local > array[(ixm + iybp) as usize]
+                        && local >= array[(ixp + iybm) as usize]
+                        && local > array[(ixp + iybp) as usize]
+                        && local >= array[(ixm + iybm) as usize]
+                    {
+                        // Add peak to list for this line
+                        if num_in_line[iy as usize] < max_peaks {
+                            let idx2 = (iy * max_peaks + num_in_line[iy as usize]) as usize;
+                            num_in_line[iy as usize] += 1;
+                            peak_temp[idx2] = local;
+                            ix_temp[idx2] = ix;
+                        } else {
+                            // Or find the lowest peak and replace - should be very rare
+                            let mut lowest = local;
+                            let mut idx2: i32 = -1;
+                            for i in 0..num_in_line[iy as usize] {
+                                if peak_temp[(iy * max_peaks + i) as usize] < lowest {
+                                    idx2 = iy * max_peaks + i;
+                                    lowest = peak_temp[idx2 as usize];
+                                }
+                            }
+                            if idx2 >= 0 {
+                                peak_temp[idx2 as usize] = local;
+                                ix_temp[idx2 as usize] = ix;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Consolidate the lists
+        let mut num_peaks = 0usize;
+        for iy in 0..ny {
+            for i in 0..num_in_line[iy as usize] {
+                let idx2 = (iy * max_peaks + i) as usize;
+                peak_temp[num_peaks] = peak_temp[idx2];
+                ix_temp[num_peaks] = ix_temp[idx2];
+                iy_temp[num_peaks] = iy;
+                num_peaks += 1;
+            }
+        }
+
+        // Get the maxPeaks + 1 highest value fast
+        let mut temp_copy = peak_temp[..num_peaks].to_vec();
+        let sel = {
+            let v = num_peaks as i32 - max_peaks;
+            if 1 > v { 1 } else { v }
+        };
+        let val = crate::imod::libcfshr::percentile::percentile_float(
+            sel,
+            &mut temp_copy,
+            num_peaks as i32,
+        );
+
+        // Loop on peaks and test against that after removing top peak from list
+        peak[0] = -1.0e30;
+        for ix in 0..num_peaks {
+            if peak_temp[ix] >= val && peak_temp[ix] > peak[(max_peaks - 1) as usize] {
+                // Insert peak into the list
+                for i in 0..max_peaks as usize {
+                    if peak[i] < peak_temp[ix] {
+                        let mut j = max_peaks as usize - 1;
+                        while j > i {
+                            peak[j] = peak[j - 1];
+                            xpeak[j] = xpeak[j - 1];
+                            ypeak[j] = ypeak[j - 1];
+                            j -= 1;
+                        }
+                        peak[i] = peak_temp[ix];
+                        xpeak[i] = ix_temp[ix] as f32;
+                        ypeak[i] = iy_temp[ix] as f32;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for i in 0..max_peaks {
+        if peak[i as usize] < -0.9e30 {
+            continue;
+        }
+        let ix = xpeak[i as usize] as i32;
+        let iy = ypeak[i as usize] as i32;
+        let cx = parabolic_fit_position(
+            array[((ix + nx - 1) % nx + iy * nxdim) as usize],
+            peak[i as usize],
+            array[((ix + 1) % nx + iy * nxdim) as usize],
+        ) as f32;
+        let cy = parabolic_fit_position(
+            array[(ix + ((iy + ny - 1) % ny) * nxdim) as usize],
+            peak[i as usize],
+            array[(ix + ((iy + 1) % ny) * nxdim) as usize],
+        ) as f32;
+        let mut px = ix as f32 + cx;
+        let mut py = iy as f32 + cy;
+        if px > nx as f32 / 2. {
+            px -= nx as f32;
+        }
+        if py > ny as f32 / 2. {
+            py -= ny as f32;
+        }
+        xpeak[i as usize] = px;
+        ypeak[i as usize] = py;
+        if let (Some(width), Some(width_min)) = (width.as_deref_mut(), width_min.as_deref_mut()) {
+            let values = [
+                peak_half_width(array, ix, iy, nx, ny, 1, 0)
+                    + peak_half_width(array, ix, iy, nx, ny, -1, 0),
+                peak_half_width(array, ix, iy, nx, ny, 0, 1)
+                    + peak_half_width(array, ix, iy, nx, ny, 0, -1),
+                peak_half_width(array, ix, iy, nx, ny, 1, 1)
+                    + peak_half_width(array, ix, iy, nx, ny, -1, -1),
+                peak_half_width(array, ix, iy, nx, ny, 1, -1)
+                    + peak_half_width(array, ix, iy, nx, ny, -1, 1),
+            ];
+            // `avgSD(widthTemp, 4, &width[i], &cx, &cy)` refines the mean
+            // with a second pass; a plain `sum / 4` is not the same value.
+            let (mut cx2, mut cy2) = (0.0f32, 0.0f32);
+            crate::imod::libcfshr::simplestat::avg_sd(
+                &values,
+                4,
+                &mut width[i as usize],
+                &mut cx2,
+                &mut cy2,
+            );
+            // `B3DMIN` chained from the first pair, not from an infinity
+            // seed: it keeps the second operand when the test is false.
+            let mut wmin = if values[0] < values[1] {
+                values[0]
+            } else {
+                values[1]
+            };
+            wmin = if wmin < values[2] { wmin } else { values[2] };
+            wmin = if wmin < values[3] { wmin } else { values[3] };
+            width_min[i as usize] = wmin;
+        }
+    }
+    S_APPLY_LIMITS.store(0, Ordering::SeqCst);
+    S_LIMIT_ANGLE.store(0, Ordering::SeqCst);
+    S_WILL_CHECK_ERROR.store(0, Ordering::SeqCst);
 }
-pub unsafe fn xcorr_peak_find(
-    array: *mut f32,
+pub fn get_peak_find_test_limits(
+    nx: i32,
+    ny: i32,
+    lim_xlo: &mut i32,
+    lim_xhi: &mut i32,
+    lim_ylo: &mut i32,
+    lim_yhi: &mut i32,
+) {
+    let mut cosine = 0.;
+    let mut sine = 0.;
+    compute_test_limits(
+        nx,
+        ny,
+        lim_xlo,
+        lim_xhi,
+        lim_ylo,
+        lim_yhi,
+        &mut cosine,
+        &mut sine,
+    );
+}
+pub fn xcorr_peak_find(
+    array: &[f32],
     nxdim: i32,
     ny: i32,
-    xpeak: *mut f32,
-    ypeak: *mut f32,
-    peak: *mut f32,
+    xpeak: &mut [f32],
+    ypeak: &mut [f32],
+    peak: &mut [f32],
     max_peaks: i32,
 ) {
-    unsafe {
-        xcorr_peak_find_width(
-            array,
-            nxdim,
-            ny,
-            xpeak,
-            ypeak,
-            peak,
-            core::ptr::null_mut(),
-            core::ptr::null_mut(),
-            max_peaks,
-            0.,
-        )
-    }
+    xcorr_peak_find_width(
+        array, nxdim, ny, xpeak, ypeak, peak, None, None, max_peaks, 0.,
+    )
 }
 pub fn store_peak_find_error(value: i32) {
     S_WILL_CHECK_ERROR.store(value, Ordering::SeqCst);
@@ -1174,442 +1371,535 @@ pub fn set_peak_find_angle(angle: f32) {
 /// itself is deliberately asymmetric — `>` against the lower/left neighbours
 /// and `>=` against the upper/right ones — so ties resolve to one particular
 /// pixel.
-pub unsafe fn find_many_xcorr_peaks(
-    array: *mut f32,
+pub fn find_many_xcorr_peaks(
+    array: &[f32],
     nxdim: i32,
     ny: i32,
     ix_offset: i32,
     iy_offset: i32,
-    xpeak: *mut f32,
-    ypeak: *mut f32,
-    peak: *mut f32,
+    xpeak: &mut [f32],
+    ypeak: &mut [f32],
+    peak: &mut [f32],
     max_peaks: i32,
     max_grow: i32,
-    num_found: *mut i32,
+    num_found: &mut i32,
 ) -> i32 {
-    unsafe {
-        let mut threshold = -1.0e30_f32;
-        let mut min_found = 1.0e30_f32;
-        let mut num_peaks = 0_i32;
-        let mut use_temp2 = 1_i32;
-        let mut if_first = 1_i32;
+    let mut threshold = -1.0e30_f32;
+    let mut min_found = 1.0e30_f32;
+    let mut num_peaks = 0_i32;
+    let mut use_temp2 = 1_i32;
+    let mut if_first = 1_i32;
 
-        if max_grow as f32 <= 1.05 * max_peaks as f32 {
-            return 1;
-        }
+    if max_grow as f32 <= 1.05 * max_peaks as f32 {
+        return 1;
+    }
 
-        let indexes = libc::malloc(max_grow as usize * core::mem::size_of::<i32>()).cast::<i32>();
-        let ix_temp1 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
-        let ix_temp2 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
-        let iy_temp1 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
-        let iy_temp2 = libc::malloc(max_grow as usize * core::mem::size_of::<i16>()).cast::<i16>();
-        let peak_temp1 =
-            libc::malloc(max_grow as usize * core::mem::size_of::<f32>()).cast::<f32>();
-        let peak_temp2 =
-            libc::malloc(max_grow as usize * core::mem::size_of::<f32>()).cast::<f32>();
-        if ix_temp1.is_null()
-            || ix_temp2.is_null()
-            || iy_temp1.is_null()
-            || iy_temp2.is_null()
-            || peak_temp1.is_null()
-            || peak_temp2.is_null()
-            || indexes.is_null()
-        {
-            libc::free(indexes.cast());
-            libc::free(ix_temp1.cast());
-            libc::free(ix_temp2.cast());
-            libc::free(iy_temp1.cast());
-            libc::free(iy_temp2.cast());
-            libc::free(peak_temp1.cast());
-            libc::free(peak_temp2.cast());
-            return -1;
-        }
+    /* Allocate arrays and test them */
+    // The source's seven `B3DMALLOC` failure returns (-1) are unreachable
+    // here.  `ixTemp1`/`ixTemp2` and their partners are the two halves of
+    // a ping-pong pair, indexed by `cur` instead of by a swapped pointer.
+    let mut indexes = vec![0i32; max_grow as usize];
+    let mut ix_temp: [Vec<i16>; 2] = [vec![0i16; max_grow as usize], vec![0i16; max_grow as usize]];
+    let mut iy_temp: [Vec<i16>; 2] = [vec![0i16; max_grow as usize], vec![0i16; max_grow as usize]];
+    let mut peak_temp: [Vec<f32>; 2] = [
+        vec![0.0f32; max_grow as usize],
+        vec![0.0f32; max_grow as usize],
+    ];
 
-        let mut ix_temp = ix_temp1;
-        let mut iy_temp = iy_temp1;
-        let mut peak_temp = peak_temp1;
-        let ix_start = 0.max(ix_offset + 1);
-        let mut ix_end = nxdim.min(nxdim - ix_offset - 1);
-        if ix_offset < -1 {
-            ix_end = nxdim - 2;
-        }
-        let iy_start = 0.max(iy_offset + 1);
-        let iy_end = ny.min(ny - iy_offset - 1);
+    /* Set initial pointers */
+    let mut cur = 0usize;
+    let ix_start = 0.max(ix_offset + 1);
+    let mut ix_end = nxdim.min(nxdim - ix_offset - 1);
+    if ix_offset < -1 {
+        ix_end = nxdim - 2;
+    }
+    let iy_start = 0.max(iy_offset + 1);
+    let iy_end = ny.min(ny - iy_offset - 1);
 
-        for iy in iy_start..iy_end {
-            let ybase = nxdim * iy;
-            let yprev = (iy + ny - 1) % ny;
-            let ynext = (iy + 1) % ny;
-            for ix in ix_start..ix_end {
-                let xbase = ybase + ix;
-                let val = *array.add(xbase as usize);
+    for iy in iy_start..iy_end {
+        let ybase = nxdim * iy;
+        let yprev = (iy + ny - 1) % ny;
+        let ynext = (iy + 1) % ny;
+        for ix in ix_start..ix_end {
+            let xbase = ybase + ix;
+            let val = array[xbase as usize];
 
-                // Ignore anything below the lowest peak currently retained.
-                if val < threshold {
-                    continue;
-                }
-
-                let mut is_peak = 0;
-                if iy_offset < 0 && (iy == 0 || iy == ny - 1 || ix == 0 || ix == ix_end - 1) {
-                    let xprev = (ix + ix_end - 1) % ix_end;
-                    let xnext = (ix + 1) % ix_end;
-                    if val < *array.add((xprev + iy * nxdim) as usize)
-                        || val < *array.add((xnext + iy * nxdim) as usize)
-                        || val < *array.add((xprev + yprev * nxdim) as usize)
-                        || val < *array.add((ix + yprev * nxdim) as usize)
-                        || val < *array.add((xnext + yprev * nxdim) as usize)
-                        || val < *array.add((xprev + ynext * nxdim) as usize)
-                        || val < *array.add((ix + ynext * nxdim) as usize)
-                        || val < *array.add((xnext + ynext * nxdim) as usize)
-                    {
-                        continue;
-                    }
-                    is_peak = 1;
-                }
-
-                if is_peak != 0
-                    || (val > *array.add((xbase - nxdim) as usize)
-                        && val >= *array.add((xbase + nxdim) as usize)
-                        && val > *array.add((xbase - 1) as usize)
-                        && val >= *array.add((xbase + 1) as usize)
-                        && val > *array.add((xbase + nxdim - 1) as usize)
-                        && val >= *array.add((xbase + 1 - nxdim) as usize)
-                        && val > *array.add((xbase + nxdim + 1) as usize)
-                        && val >= *array.add((xbase - 1 - nxdim) as usize))
-                {
-                    *ix_temp.add(num_peaks as usize) = ix as i16;
-                    *iy_temp.add(num_peaks as usize) = iy as i16;
-                    *peak_temp.add(num_peaks as usize) = -val;
-                    *indexes.add(num_peaks as usize) = num_peaks;
-                    num_peaks += 1;
-
-                    if num_peaks <= max_peaks && val < min_found {
-                        min_found = val;
-                    }
-                    if num_peaks == max_peaks {
-                        threshold = min_found;
-                    }
-
-                    if num_peaks == max_grow {
-                        sort_and_repack(
-                            indexes,
-                            ix_temp,
-                            iy_temp,
-                            peak_temp,
-                            max_peaks,
-                            num_peaks,
-                            if use_temp2 != 0 { ix_temp2 } else { ix_temp1 },
-                            if use_temp2 != 0 { iy_temp2 } else { iy_temp1 },
-                            if use_temp2 != 0 {
-                                peak_temp2
-                            } else {
-                                peak_temp1
-                            },
-                            if_first,
-                        );
-                        if_first = 0;
-                        num_peaks = max_peaks;
-                        ix_temp = if use_temp2 != 0 { ix_temp2 } else { ix_temp1 };
-                        iy_temp = if use_temp2 != 0 { iy_temp2 } else { iy_temp1 };
-                        peak_temp = if use_temp2 != 0 {
-                            peak_temp2
-                        } else {
-                            peak_temp1
-                        };
-                        use_temp2 = 1 - use_temp2;
-                        threshold = -*peak_temp.add((max_peaks - 1) as usize);
-                    }
-                }
+            // Ignore anything below the lowest peak currently retained.
+            if val < threshold {
+                continue;
             }
-        }
 
-        sort_and_repack(
-            indexes,
-            ix_temp,
-            iy_temp,
-            peak_temp,
-            max_peaks,
-            num_peaks,
-            if use_temp2 != 0 { ix_temp2 } else { ix_temp1 },
-            if use_temp2 != 0 { iy_temp2 } else { iy_temp1 },
-            if use_temp2 != 0 {
-                peak_temp2
-            } else {
-                peak_temp1
-            },
-            if_first,
-        );
-        ix_temp = if use_temp2 != 0 { ix_temp2 } else { ix_temp1 };
-        iy_temp = if use_temp2 != 0 { iy_temp2 } else { iy_temp1 };
-        peak_temp = if use_temp2 != 0 {
-            peak_temp2
-        } else {
-            peak_temp1
-        };
-        num_peaks = num_peaks.min(max_peaks);
-
-        for ind in 0..num_peaks {
-            *peak.add(ind as usize) = -*peak_temp.add(ind as usize);
-            let ix = *ix_temp.add(ind as usize) as i32;
-            let iy = *iy_temp.add(ind as usize) as i32;
-            let xbase = ix + iy * nxdim;
-            let (cx, cy);
-            if iy_offset < 0 && (ix == 0 || iy == 0 || ix == ix_end - 1 || iy == ny - 1) {
+            let mut is_peak = 0;
+            if iy_offset < 0 && (iy == 0 || iy == ny - 1 || ix == 0 || ix == ix_end - 1) {
                 let xprev = (ix + ix_end - 1) % ix_end;
                 let xnext = (ix + 1) % ix_end;
-                let yprev = (iy + ny - 1) % ny;
-                let ynext = (iy + 1) % ny;
-                cx = parabolic_fit_position(
-                    *array.add((xprev + iy * nxdim) as usize),
-                    *array.add(xbase as usize),
-                    *array.add((xnext + iy * nxdim) as usize),
-                ) as f32;
-                cy = parabolic_fit_position(
-                    *array.add((ix + yprev * nxdim) as usize),
-                    *array.add(xbase as usize),
-                    *array.add((ix + ynext * nxdim) as usize),
-                ) as f32;
-            } else {
-                cx = parabolic_fit_position(
-                    *array.add((xbase - 1) as usize),
-                    *array.add(xbase as usize),
-                    *array.add((xbase + 1) as usize),
-                ) as f32;
-                cy = parabolic_fit_position(
-                    *array.add((xbase - nxdim) as usize),
-                    *array.add(xbase as usize),
-                    *array.add((xbase + nxdim) as usize),
-                ) as f32;
-            }
-            *xpeak.add(ind as usize) = ix as f32 + cx;
-            *ypeak.add(ind as usize) = iy as f32 + cy;
-        }
-        *num_found = num_peaks;
-
-        if iy_offset < 0 {
-            for ind in 0..num_peaks {
-                if *xpeak.add(ind as usize) > (ix_end / 2) as f32 {
-                    *xpeak.add(ind as usize) -= ix_end as f32;
+                if val < array[(xprev + iy * nxdim) as usize]
+                    || val < array[(xnext + iy * nxdim) as usize]
+                    || val < array[(xprev + yprev * nxdim) as usize]
+                    || val < array[(ix + yprev * nxdim) as usize]
+                    || val < array[(xnext + yprev * nxdim) as usize]
+                    || val < array[(xprev + ynext * nxdim) as usize]
+                    || val < array[(ix + ynext * nxdim) as usize]
+                    || val < array[(xnext + ynext * nxdim) as usize]
+                {
+                    continue;
                 }
-                if *ypeak.add(ind as usize) > (ny / 2) as f32 {
-                    *ypeak.add(ind as usize) -= ny as f32;
+                is_peak = 1;
+            }
+
+            if is_peak != 0
+                || (val > array[(xbase - nxdim) as usize]
+                    && val >= array[(xbase + nxdim) as usize]
+                    && val > array[(xbase - 1) as usize]
+                    && val >= array[(xbase + 1) as usize]
+                    && val > array[(xbase + nxdim - 1) as usize]
+                    && val >= array[(xbase + 1 - nxdim) as usize]
+                    && val > array[(xbase + nxdim + 1) as usize]
+                    && val >= array[(xbase - 1 - nxdim) as usize])
+            {
+                ix_temp[cur][num_peaks as usize] = ix as i16;
+                iy_temp[cur][num_peaks as usize] = iy as i16;
+                peak_temp[cur][num_peaks as usize] = -val;
+                indexes[num_peaks as usize] = num_peaks;
+                num_peaks += 1;
+
+                if num_peaks <= max_peaks && val < min_found {
+                    min_found = val;
+                }
+                if num_peaks == max_peaks {
+                    threshold = min_found;
+                }
+
+                if num_peaks == max_grow {
+                    let dst = if use_temp2 != 0 { 1usize } else { 0usize };
+                    {
+                        let (ixa, ixb) = ix_temp.split_at_mut(1);
+                        let (iya, iyb) = iy_temp.split_at_mut(1);
+                        let (pka, pkb) = peak_temp.split_at_mut(1);
+                        let (ix_f, ix_t) = if cur == 0 {
+                            (&ixa[0][..], &mut ixb[0])
+                        } else {
+                            (&ixb[0][..], &mut ixa[0])
+                        };
+                        let (iy_f, iy_t) = if cur == 0 {
+                            (&iya[0][..], &mut iyb[0])
+                        } else {
+                            (&iyb[0][..], &mut iya[0])
+                        };
+                        let (pk_f, pk_t) = if cur == 0 {
+                            (&pka[0][..], &mut pkb[0])
+                        } else {
+                            (&pkb[0][..], &mut pka[0])
+                        };
+                        debug_assert_ne!(cur, dst);
+                        sort_and_repack(
+                            &mut indexes,
+                            ix_f,
+                            iy_f,
+                            pk_f,
+                            max_peaks,
+                            num_peaks,
+                            ix_t,
+                            iy_t,
+                            pk_t,
+                            if_first,
+                        );
+                    }
+                    if_first = 0;
+                    num_peaks = max_peaks;
+                    cur = dst;
+                    use_temp2 = 1 - use_temp2;
+                    threshold = -peak_temp[cur][(max_peaks - 1) as usize];
                 }
             }
         }
-
-        libc::free(indexes.cast());
-        libc::free(ix_temp1.cast());
-        libc::free(ix_temp2.cast());
-        libc::free(iy_temp1.cast());
-        libc::free(iy_temp2.cast());
-        libc::free(peak_temp1.cast());
-        libc::free(peak_temp2.cast());
-        0
     }
+
+    let dst = if use_temp2 != 0 { 1usize } else { 0usize };
+    {
+        let (ixa, ixb) = ix_temp.split_at_mut(1);
+        let (iya, iyb) = iy_temp.split_at_mut(1);
+        let (pka, pkb) = peak_temp.split_at_mut(1);
+        let (ix_f, ix_t) = if cur == 0 {
+            (&ixa[0][..], &mut ixb[0])
+        } else {
+            (&ixb[0][..], &mut ixa[0])
+        };
+        let (iy_f, iy_t) = if cur == 0 {
+            (&iya[0][..], &mut iyb[0])
+        } else {
+            (&iyb[0][..], &mut iya[0])
+        };
+        let (pk_f, pk_t) = if cur == 0 {
+            (&pka[0][..], &mut pkb[0])
+        } else {
+            (&pkb[0][..], &mut pka[0])
+        };
+        sort_and_repack(
+            &mut indexes,
+            ix_f,
+            iy_f,
+            pk_f,
+            max_peaks,
+            num_peaks,
+            ix_t,
+            iy_t,
+            pk_t,
+            if_first,
+        );
+    }
+    cur = dst;
+    num_peaks = num_peaks.min(max_peaks);
+
+    for ind in 0..num_peaks {
+        peak[ind as usize] = -peak_temp[cur][ind as usize];
+        let ix = ix_temp[cur][ind as usize] as i32;
+        let iy = iy_temp[cur][ind as usize] as i32;
+        let xbase = ix + iy * nxdim;
+        let (cx, cy);
+        if iy_offset < 0 && (ix == 0 || iy == 0 || ix == ix_end - 1 || iy == ny - 1) {
+            let xprev = (ix + ix_end - 1) % ix_end;
+            let xnext = (ix + 1) % ix_end;
+            let yprev = (iy + ny - 1) % ny;
+            let ynext = (iy + 1) % ny;
+            cx = parabolic_fit_position(
+                array[(xprev + iy * nxdim) as usize],
+                array[xbase as usize],
+                array[(xnext + iy * nxdim) as usize],
+            ) as f32;
+            cy = parabolic_fit_position(
+                array[(ix + yprev * nxdim) as usize],
+                array[xbase as usize],
+                array[(ix + ynext * nxdim) as usize],
+            ) as f32;
+        } else {
+            cx = parabolic_fit_position(
+                array[(xbase - 1) as usize],
+                array[xbase as usize],
+                array[(xbase + 1) as usize],
+            ) as f32;
+            cy = parabolic_fit_position(
+                array[(xbase - nxdim) as usize],
+                array[xbase as usize],
+                array[(xbase + nxdim) as usize],
+            ) as f32;
+        }
+        xpeak[ind as usize] = ix as f32 + cx;
+        ypeak[ind as usize] = iy as f32 + cy;
+    }
+    *num_found = num_peaks;
+
+    if iy_offset < 0 {
+        for ind in 0..num_peaks {
+            if xpeak[ind as usize] > (ix_end / 2) as f32 {
+                xpeak[ind as usize] -= ix_end as f32;
+            }
+            if ypeak[ind as usize] > (ny / 2) as f32 {
+                ypeak[ind as usize] -= ny as f32;
+            }
+        }
+    }
+
+    0
 }
 
 /// `sortAndRepack` (`filtxcorr.c:1204`), the file-static helper that sorts the
 /// new part of the peak arrays and repacks the ones being kept into a different
 /// set of arrays.  `COPY_FROM_TO` (`filtxcorr.c:1198`) is expanded at each of
 /// its three use sites.
-unsafe fn sort_and_repack(
-    indexes: *mut i32,
-    ix_from: *const i16,
-    iy_from: *const i16,
-    peak_from: *mut f32,
+fn sort_and_repack(
+    indexes: &mut [i32],
+    ix_from: &[i16],
+    iy_from: &[i16],
+    peak_from: &[f32],
     keep_peaks: i32,
     num_peaks: i32,
-    ix_to: *mut i16,
-    iy_to: *mut i16,
-    peak_to: *mut f32,
+    ix_to: &mut [i16],
+    iy_to: &mut [i16],
+    peak_to: &mut [f32],
     if_first: i32,
 ) {
-    unsafe {
-        let mut ind: i32;
-        let mut from: i32;
-        let mut low: i32;
-        let mut high: i32;
+    let mut ind: i32;
+    let mut from: i32;
+    let mut low: i32;
+    let mut high: i32;
 
-        /* First time or not enough peaks, just sort and repack */
-        if if_first > 0 || num_peaks <= keep_peaks {
-            rs_sort_indexed_floats(peak_from, indexes, num_peaks);
-            ind = 0;
-            while ind
-                < if keep_peaks < num_peaks {
-                    keep_peaks
-                } else {
-                    num_peaks
-                }
+    /* First time or not enough peaks, just sort and repack */
+    if if_first > 0 || num_peaks <= keep_peaks {
+        rs_sort_indexed_floats(peak_from, indexes, num_peaks);
+        ind = 0;
+        while ind
+            < if keep_peaks < num_peaks {
+                keep_peaks
+            } else {
+                num_peaks
+            }
+        {
+            from = indexes[ind as usize];
+            ix_to[ind as usize] = ix_from[from as usize];
+            iy_to[ind as usize] = iy_from[from as usize];
+            peak_to[ind as usize] = peak_from[from as usize];
+            indexes[ind as usize] = ind;
+            ind += 1;
+        }
+    } else {
+        /* Otherwise sort the upper part of the array, setting index offset
+        appropriately */
+        rs_set_sort_index_offset(keep_peaks);
+        rs_sort_indexed_floats(
+            &peak_from[keep_peaks as usize..],
+            &mut indexes[keep_peaks as usize..],
+            num_peaks - keep_peaks,
+        );
+
+        /* Merge the two sections by taking the lowest value from each eat each step */
+        low = 0;
+        high = keep_peaks;
+        ind = 0;
+        while ind < keep_peaks && low < keep_peaks && high < num_peaks {
+            if peak_from[indexes[low as usize] as usize]
+                < peak_from[indexes[high as usize] as usize]
             {
-                from = *indexes.add(ind as usize);
-                *ix_to.add(ind as usize) = *ix_from.add(from as usize);
-                *iy_to.add(ind as usize) = *iy_from.add(from as usize);
-                *peak_to.add(ind as usize) = *peak_from.add(from as usize);
-                *indexes.add(ind as usize) = ind;
-                ind += 1;
-            }
-        } else {
-            /* Otherwise sort the upper part of the array, setting index offset
-            appropriately */
-            rs_set_sort_index_offset(keep_peaks);
-            rs_sort_indexed_floats(
-                peak_from.add(keep_peaks as usize),
-                indexes.add(keep_peaks as usize),
-                num_peaks - keep_peaks,
-            );
-
-            /* Merge the two sections by taking the lowest value from each eat each step */
-            low = 0;
-            high = keep_peaks;
-            ind = 0;
-            while ind < keep_peaks && low < keep_peaks && high < num_peaks {
-                if *peak_from.add(*indexes.add(low as usize) as usize)
-                    < *peak_from.add(*indexes.add(high as usize) as usize)
-                {
-                    from = *indexes.add(low as usize);
-                    low += 1;
-                } else {
-                    from = *indexes.add(high as usize);
-                    high += 1;
-                }
-                *ix_to.add(ind as usize) = *ix_from.add(from as usize);
-                *iy_to.add(ind as usize) = *iy_from.add(from as usize);
-                *peak_to.add(ind as usize) = *peak_from.add(from as usize);
-                *indexes.add(ind as usize) = ind;
-                ind += 1;
-            }
-
-            /* Finish up with one or the other if deficient */
-            low = if low < keep_peaks { low } else { high };
-            while ind < keep_peaks {
-                from = *indexes.add(low as usize);
+                from = indexes[low as usize];
                 low += 1;
-                *ix_to.add(ind as usize) = *ix_from.add(from as usize);
-                *iy_to.add(ind as usize) = *iy_from.add(from as usize);
-                *peak_to.add(ind as usize) = *peak_from.add(from as usize);
-                *indexes.add(ind as usize) = ind;
-                ind += 1;
+            } else {
+                from = indexes[high as usize];
+                high += 1;
             }
+            ix_to[ind as usize] = ix_from[from as usize];
+            iy_to[ind as usize] = iy_from[from as usize];
+            peak_to[ind as usize] = peak_from[from as usize];
+            indexes[ind as usize] = ind;
+            ind += 1;
+        }
+
+        /* Finish up with one or the other if deficient */
+        low = if low < keep_peaks { low } else { high };
+        while ind < keep_peaks {
+            from = indexes[low as usize];
+            low += 1;
+            ix_to[ind as usize] = ix_from[from as usize];
+            iy_to[ind as usize] = iy_from[from as usize];
+            peak_to[ind as usize] = peak_from[from as usize];
+            indexes[ind as usize] = ind;
+            ind += 1;
         }
     }
 }
 
-pub unsafe fn find_spaced_xcorr_peaks(
-    array: *mut f32,
+pub fn find_spaced_xcorr_peaks(
+    array: &[f32],
     nxdim: i32,
     ix_min: i32,
     ix_max: i32,
     iy_min: i32,
     iy_max: i32,
-    xpeak: *mut f32,
-    ypeak: *mut f32,
-    peak: *mut f32,
+    xpeak: &mut [f32],
+    ypeak: &mut [f32],
+    peak: &mut [f32],
     max_peaks: i32,
     min_spacing: f32,
-    num_peaks: *mut i32,
+    num_peaks: &mut i32,
     min_strength: f32,
 ) -> i32 {
-    unsafe {
-        // Match the source's block reduction: one locally maximal candidate is
-        // retained from each minSpacing/sqrt(2) square before the spacing pass.
-        let block_size = (min_spacing / 2_f32.sqrt()) as i32;
-        if block_size <= 0 {
-            *num_peaks = 0;
-            return 0;
+    let block_size = (min_spacing as f64 / 2.0f64.sqrt()) as i32;
+    let nblocks_x = ((ix_max - (ix_min + 1)) + block_size - 1) / block_size;
+    let nblocks_y = ((iy_max - (iy_min + 1)) + block_size - 1) / block_size;
+    let tot_blocks = nblocks_x * nblocks_y;
+
+    // Tested up to 12 threads, ~80% efficient at 8 on somewhat less than 2K images
+    let mut num_threads = {
+        let v = (0.005 * ((ix_max - ix_min) as f64 * (iy_max - iy_min) as f64).sqrt()) as i32;
+        if MAX_SPCP_THREADS < v {
+            MAX_SPCP_THREADS
+        } else {
+            v
         }
-        let nblocks_x = ((ix_max - (ix_min + 1)) + block_size - 1) / block_size;
-        let nblocks_y = ((iy_max - (iy_min + 1)) + block_size - 1) / block_size;
-        let mut candidates: Vec<(f32, i32, i32, i32, i32)> = Vec::new();
-        for iby in 0..nblocks_y {
-            let ys = iy_min + 1 + iby * block_size;
-            let ye = (ys + block_size).min(iy_max);
-            for ibx in 0..nblocks_x {
-                let xs = ix_min + 1 + ibx * block_size;
-                let xe = (xs + block_size).min(ix_max);
-                let mut value = -1e30_f32;
-                let mut px = -1;
-                let mut py = 0;
-                for iy in ys..ye {
-                    for ix in xs..xe {
-                        let val = *array.add((ix + iy * nxdim) as usize);
-                        if val < value {
-                            continue;
-                        }
-                        if val > *array.add((ix + (iy - 1) * nxdim) as usize)
-                            && val >= *array.add((ix + (iy + 1) * nxdim) as usize)
-                            && val > *array.add((ix - 1 + iy * nxdim) as usize)
-                            && val >= *array.add((ix + 1 + iy * nxdim) as usize)
-                            && val > *array.add((ix - 1 + (iy - 1) * nxdim) as usize)
-                            && val >= *array.add((ix + 1 + (iy - 1) * nxdim) as usize)
-                            && val > *array.add((ix + 1 + (iy + 1) * nxdim) as usize)
-                            && val >= *array.add((ix - 1 + (iy + 1) * nxdim) as usize)
-                        {
-                            px = ix;
-                            py = iy;
-                            value = val;
-                        }
+    };
+    num_threads = crate::imod::libcfshr::b3dutil::num_omp_threads(num_threads);
+    // The `#pragma omp parallel for` over `iyBlock` is run serially here, so
+    // every block lands in thread 0's slice; the repack below then walks the
+    // blocks in `iyBlock`, `ixBlock` order exactly as one thread would.
+    let lanes = if num_threads > 1 { num_threads } else { 1 };
+    let ind_alloc = (tot_blocks * lanes) as usize;
+    // The five `B3DMALLOC`s cannot fail here, so the source's -1 return is
+    // unreachable.
+    let mut ix_all = vec![0i16; ind_alloc];
+    let mut iy_all = vec![0i16; ind_alloc];
+    let mut peak_all = vec![0.0f32; ind_alloc];
+    let mut indexes = vec![0i32; ind_alloc];
+    let mut box_ind_all = vec![-1i32; ind_alloc];
+
+    let mut num_pk_thread = vec![0i32; lanes as usize];
+    let mut ix_thread = vec![0i16; ind_alloc];
+    let mut iy_thread = vec![0i16; ind_alloc];
+    let mut peak_thread = vec![0.0f32; ind_alloc];
+    let mut box_ind_thread = vec![-1i32; ind_alloc];
+
+    for iy_block in 0..nblocks_y {
+        let thrd = crate::imod::libcfshr::b3dutil::b3d_omp_thread_num();
+
+        // Block start and end in Y
+        let iy_start = iy_min + 1 + iy_block * block_size;
+        let iy_end = if iy_start + block_size < iy_max {
+            iy_start + block_size
+        } else {
+            iy_max
+        };
+
+        for ix_block in 0..nblocks_x {
+            // Block start and end in X
+            let ix_start = ix_min + 1 + ix_block * block_size;
+            let ix_end = if ix_start + block_size < ix_max {
+                ix_start + block_size
+            } else {
+                ix_max
+            };
+
+            let mut max_val = -1.0e30f32;
+            let mut ix_peak = -1;
+            let mut iy_peak = 0;
+            for iy in iy_start..iy_end {
+                let ybase = nxdim * iy;
+                for ix in ix_start..ix_end {
+                    let xbase = ybase + ix;
+                    let val = array[xbase as usize];
+                    if val < max_val {
+                        continue;
+                    }
+
+                    /* Test for actual peak value */
+                    if val > array[(xbase - nxdim) as usize]
+                        && val >= array[(xbase + nxdim) as usize]
+                        && val > array[(xbase - 1) as usize]
+                        && val >= array[(xbase + 1) as usize]
+                        && val > array[(xbase + nxdim - 1) as usize]
+                        && val >= array[(xbase + 1 - nxdim) as usize]
+                        && val > array[(xbase + nxdim + 1) as usize]
+                        && val >= array[(xbase - 1 - nxdim) as usize]
+                    {
+                        /* Found a peak above the current max: save it */
+                        ix_peak = ix;
+                        iy_peak = iy;
+                        max_val = val;
                     }
                 }
-                if px > 0 {
-                    candidates.push((-value, px, py, ibx, iby));
-                }
+            }
+
+            // Found a peak in the block, add it to arrays
+            if ix_peak > 0 {
+                let base = (thrd * tot_blocks) as usize;
+                let ind = num_pk_thread[thrd as usize];
+                num_pk_thread[thrd as usize] += 1;
+                ix_thread[base + ind as usize] = ix_peak as i16;
+                iy_thread[base + ind as usize] = iy_peak as i16;
+                peak_thread[base + ind as usize] = max_val;
+                box_ind_thread[base + (ix_block + iy_block * nblocks_x) as usize] = ind;
             }
         }
-        candidates.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-        // peak values are inverted like C's peakAll.  Mark lower neighbouring
-        // block representatives dead before emitting the sorted survivors.
-        let criterion = min_spacing * min_spacing;
-        for index in 0..candidates.len().saturating_sub(1) {
-            if candidates[index].0 > 1e29 {
-                continue;
-            }
-            let (_, x, y, bx, by) = candidates[index];
-            for other in index + 1..candidates.len() {
-                if candidates[other].0 > 1e29 {
-                    continue;
-                }
-                if (candidates[other].3 - bx).abs() > 2 || (candidates[other].4 - by).abs() > 2 {
-                    continue;
-                }
-                let dx = (x - candidates[other].1) as f32;
-                let dy = (y - candidates[other].2) as f32;
-                if dx * dx + dy * dy < criterion {
-                    candidates[other].0 = 1e30;
-                }
-            }
-        }
-        let mut used = 0;
-        for (negative, ix, iy, _, _) in candidates {
-            if used >= max_peaks || negative > 1e29 {
-                continue;
-            }
-            let value = -negative;
-            if used != 0 && min_strength > 0. && value < min_strength * *peak {
-                break;
-            }
-            let base = ix + iy * nxdim;
-            *peak.add(used as usize) = value;
-            *xpeak.add(used as usize) = ix as f32
-                + parabolic_fit_position(
-                    *array.add((base - 1) as usize),
-                    value,
-                    *array.add((base + 1) as usize),
-                ) as f32;
-            *ypeak.add(used as usize) = iy as f32
-                + parabolic_fit_position(
-                    *array.add((base - nxdim) as usize),
-                    value,
-                    *array.add((base + nxdim) as usize),
-                ) as f32;
-            used += 1;
-        }
-        *num_peaks = used as i32;
-        0
     }
+
+    // Repack to be contiguous for sorting and invert peak for sorting too
+    let mut num_found = 0usize;
+    for thrd in 0..lanes {
+        let base = (thrd * tot_blocks) as usize;
+        let xbase = num_found as i32;
+        for ind in 0..num_pk_thread[thrd as usize] as usize {
+            indexes[num_found] = num_found as i32;
+            ix_all[num_found] = ix_thread[base + ind];
+            iy_all[num_found] = iy_thread[base + ind];
+            peak_all[num_found] = -peak_thread[base + ind];
+            num_found += 1;
+        }
+        for ind in 0..tot_blocks as usize {
+            if box_ind_thread[base + ind] >= 0 {
+                box_ind_all[ind] = box_ind_thread[base + ind] + xbase;
+            }
+        }
+    }
+    rs_sort_indexed_floats(&peak_all, &mut indexes, num_found as i32);
+
+    /* Eliminate any lesser peaks too close to stronger one */
+    let space_crit = min_spacing * min_spacing;
+    for sind in 0..num_found.saturating_sub(1) {
+        let ind = indexes[sind] as usize;
+        if peak_all[ind] > 1.0e29 {
+            continue;
+        }
+
+        /* Need to loop up to 2 blocks away except for corner blocks but it costs more to
+        test if in corner */
+        let ix_block = (ix_all[ind] as i32 - (ix_min + 1)) / block_size;
+        let iy_block = (iy_all[ind] as i32 - (iy_min + 1)) / block_size;
+        let ix_start = if 0 > ix_block - 2 { 0 } else { ix_block - 2 };
+        let ix_end = if nblocks_x < ix_block + 3 {
+            nblocks_x
+        } else {
+            ix_block + 3
+        };
+        let iy_start = if 0 > iy_block - 2 { 0 } else { iy_block - 2 };
+        let iy_end = if nblocks_y < iy_block + 3 {
+            nblocks_y
+        } else {
+            iy_block + 3
+        };
+        for iy in iy_start..iy_end {
+            for ix in ix_start..ix_end {
+                if ix == ix_block && iy == iy_block {
+                    continue;
+                }
+                let jnd = box_ind_all[(ix + iy * nblocks_x) as usize];
+                if jnd >= 0
+                    && peak_all[jnd as usize] < 1.0e29
+                    && peak_all[jnd as usize] >= peak_all[ind]
+                {
+                    let dx = (ix_all[ind] as i32 - ix_all[jnd as usize] as i32) as f32;
+                    let dy = (iy_all[ind] as i32 - iy_all[jnd as usize] as i32) as f32;
+                    if dx * dx + dy * dy < space_crit {
+                        peak_all[jnd as usize] = 1.0e30;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Get interpolated position for each and return into arrays */
+    let mut ind_out = 0usize;
+    for sind in 0..num_found {
+        if ind_out >= max_peaks as usize {
+            break;
+        }
+        let ind = indexes[sind] as usize;
+        if peak_all[ind] > 1.0e29 {
+            continue;
+        }
+        if ind_out != 0 && min_strength > 0. && -peak_all[ind] < min_strength * peak[0] {
+            break;
+        }
+        peak[ind_out] = -peak_all[ind];
+        let ix = ix_all[ind] as i32;
+        let iy = iy_all[ind] as i32;
+        let xbase = ix + iy * nxdim;
+        let cx = parabolic_fit_position(
+            array[(xbase - 1) as usize],
+            array[xbase as usize],
+            array[(xbase + 1) as usize],
+        ) as f32;
+        let cy = parabolic_fit_position(
+            array[(xbase - nxdim) as usize],
+            array[xbase as usize],
+            array[(xbase + nxdim) as usize],
+        ) as f32;
+        xpeak[ind_out] = ix as f32 + cx;
+        ypeak[ind_out] = iy as f32 + cy;
+        ind_out += 1;
+    }
+    *num_peaks = ind_out as i32;
+    0
 }
-pub unsafe fn weighted_cc_coefficient(
-    a: *const f32,
-    b: *const f32,
+pub fn weighted_cc_coefficient(
+    a: &[f32],
+    b: &[f32],
     nx_dim: i32,
     ix0: i32,
     ix1: i32,
@@ -1617,529 +1907,512 @@ pub unsafe fn weighted_cc_coefficient(
     iy1: i32,
     dx: i32,
     dy: i32,
-    aw: *const f32,
-    bw: *const f32,
+    aw: &[f32],
+    bw: &[f32],
     nx_weight: i32,
     bin: i32,
     xoffset: i32,
     yoffset: i32,
 ) -> f64 {
-    unsafe {
-        let (mut wsum, mut asum, mut bsum, mut asq, mut bsq, mut ab) =
-            (0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
-        for iy in iy0..=iy1 {
-            let abase = iy * nx_dim;
-            let bbase = (iy - dy) * nx_dim - dx;
-            let awbase = (iy / bin + yoffset) * nx_weight + xoffset;
-            let bwbase = ((iy - dy) / bin + yoffset) * nx_weight + xoffset;
-            for ix in ix0..=ix1 {
-                let av = *a.add((ix + abase) as usize) as f64;
-                let bv = *b.add((ix + bbase) as usize) as f64;
-                let weight = (*aw.add((ix / bin + awbase) as usize)
-                    * *bw.add(((ix - dx) / bin + bwbase) as usize))
-                    as f64;
-                wsum += weight;
-                asum += av * weight;
-                bsum += bv * weight;
-                asq += av * av * weight;
-                bsq += bv * bv * weight;
-                ab += av * bv * weight;
-            }
+    let (mut wsum, mut asum, mut bsum, mut asq, mut bsq, mut ab) =
+        (0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
+    for iy in iy0..=iy1 {
+        let abase = iy * nx_dim;
+        let bbase = (iy - dy) * nx_dim - dx;
+        let awbase = (iy / bin + yoffset) * nx_weight + xoffset;
+        let bwbase = ((iy - dy) / bin + yoffset) * nx_weight + xoffset;
+        // The source accumulates each row into its own double and adds the row
+        // totals into the grand sums; one flat accumulation is a different
+        // order.  Every product inside the row is single precision -- `aval`,
+        // `bval` and `wgt` are all `float` -- and widens only for the `+=`.
+        let (mut wgt_tmp, mut aw_tmp, mut bw_tmp) = (0f64, 0f64, 0f64);
+        let (mut aw_tmp_sq, mut bw_tmp_sq, mut abw_tmp) = (0f64, 0f64, 0f64);
+        for ix in ix0..=ix1 {
+            let aval = a[(ix + abase) as usize];
+            let bval = b[(ix + bbase) as usize];
+            let awgt = aw[(ix / bin + awbase) as usize];
+            let bwgt = bw[((ix - dx) / bin + bwbase) as usize];
+            let wgt = awgt * bwgt;
+            wgt_tmp += wgt as f64;
+            aw_tmp += (aval * wgt) as f64;
+            bw_tmp += (bval * wgt) as f64;
+            aw_tmp_sq += (aval * aval * wgt) as f64;
+            bw_tmp_sq += (bval * bval * wgt) as f64;
+            abw_tmp += (aval * bval * wgt) as f64;
         }
-        weighted_corr_from_sums(
-            asum,
-            asq,
-            bsum,
-            bsq,
-            ab,
-            wsum,
-            core::ptr::null_mut(),
-            core::ptr::null(),
-        )
+        wsum += wgt_tmp;
+        asum += aw_tmp;
+        bsum += bw_tmp;
+        asq += aw_tmp_sq;
+        bsq += bw_tmp_sq;
+        ab += abw_tmp;
     }
+    weighted_corr_from_sums(asum, asq, bsum, bsq, ab, wsum, None, "")
 }
 /// `fourierShiftVolume` (`filtxcorr.c:2070`).
-pub unsafe fn fourier_shift_volume(
-    fft: *mut f32,
+pub fn fourier_shift_volume(
+    fft: &mut [f32],
     nx_pad: i32,
     ny_pad: i32,
     nz_pad: i32,
     dx: f32,
     dy: f32,
     dz: f32,
-    temp: *mut f32,
+    temp: &mut [f32],
 ) {
-    unsafe {
-        // `float pi = 3.141593;` -- not the full-precision constant.
-        let pi: f32 = 3.141593;
-        if dx == 0. && dy == 0. && dz == 0. {
-            return;
+    // `float pi = 3.141593;` -- not the full-precision constant.
+    let pi: f32 = 3.141593;
+    if dx == 0. && dy == 0. && dz == 0. {
+        return;
+    }
+    let nx_fft = nx_pad / 2 + 1;
+    let nx_dim = nx_pad + 2;
+    for ix in 0..nx_fft {
+        // `freq = 0.5 * ix / (nxFFT - 1.);` is a double expression stored into a float.
+        let freq = (0.5 * ix as f64 / (nx_fft as f64 - 1.)) as f32;
+        // `arg` is a double and cos/sin are the double routines, cast to float once.
+        let arg = -2.0 * pi as f64 * freq as f64 * dx as f64;
+        temp[(2 * ix) as usize] = arg.cos() as f32;
+        temp[(2 * ix + 1) as usize] = arg.sin() as f32;
+    }
+    for iz in 0..nz_pad {
+        let mut zfreq = iz as f32 / nz_pad as f32;
+        if zfreq > 0.5 {
+            zfreq = (zfreq as f64 - 1.0) as f32;
         }
-        let nx_fft = nx_pad / 2 + 1;
-        let nx_dim = nx_pad + 2;
-        for ix in 0..nx_fft {
-            // `freq = 0.5 * ix / (nxFFT - 1.);` is a double expression stored into a float.
-            let freq = (0.5 * ix as f64 / (nx_fft as f64 - 1.)) as f32;
-            // `arg` is a double and cos/sin are the double routines, cast to float once.
-            let arg = -2.0 * pi as f64 * freq as f64 * dx as f64;
-            *temp.add((2 * ix) as usize) = arg.cos() as f32;
-            *temp.add((2 * ix + 1) as usize) = arg.sin() as f32;
-        }
-        for iz in 0..nz_pad {
-            let mut zfreq = iz as f32 / nz_pad as f32;
-            if zfreq > 0.5 {
-                zfreq = (zfreq as f64 - 1.0) as f32;
+        let zarg = -2.0 * pi as f64 * zfreq as f64 * dz as f64;
+        let (zcos, zsin) = (zarg.cos() as f32, zarg.sin() as f32);
+        for iy in 0..ny_pad {
+            let mut yfreq = iy as f32 / ny_pad as f32;
+            if yfreq > 0.5 {
+                yfreq = (yfreq as f64 - 1.0) as f32;
             }
-            let zarg = -2.0 * pi as f64 * zfreq as f64 * dz as f64;
-            let (zcos, zsin) = (zarg.cos() as f32, zarg.sin() as f32);
-            for iy in 0..ny_pad {
-                let mut yfreq = iy as f32 / ny_pad as f32;
-                if yfreq > 0.5 {
-                    yfreq = (yfreq as f64 - 1.0) as f32;
-                }
-                let yarg = -2.0 * pi as f64 * yfreq as f64 * dy as f64;
-                let (ycos, ysin) = (yarg.cos() as f32, yarg.sin() as f32);
-                let yzre = ycos * zcos - ysin * zsin;
-                let yzim = ycos * zsin + ysin * zcos;
-                let base = (iy * nx_dim + iz * nx_dim * ny_pad) as usize;
-                for ix in 0..nx_fft {
-                    let xind = 2 * ix;
-                    let pre =
-                        *temp.add(xind as usize) * yzre - *temp.add((xind + 1) as usize) * yzim;
-                    let pim =
-                        *temp.add((xind + 1) as usize) * yzre + *temp.add(xind as usize) * yzim;
-                    let ind = base + xind as usize;
-                    let real = *fft.add(ind);
-                    let imag = *fft.add(ind + 1);
-                    *fft.add(ind) = pre * real - pim * imag;
-                    *fft.add(ind + 1) = pim * real + pre * imag;
-                }
+            let yarg = -2.0 * pi as f64 * yfreq as f64 * dy as f64;
+            let (ycos, ysin) = (yarg.cos() as f32, yarg.sin() as f32);
+            let yzre = ycos * zcos - ysin * zsin;
+            let yzim = ycos * zsin + ysin * zcos;
+            let base = (iy * nx_dim + iz * nx_dim * ny_pad) as usize;
+            for ix in 0..nx_fft {
+                let xind = 2 * ix;
+                let pre = temp[xind as usize] * yzre - temp[(xind + 1) as usize] * yzim;
+                let pim = temp[(xind + 1) as usize] * yzre + temp[xind as usize] * yzim;
+                let ind = base + xind as usize;
+                let real = fft[ind];
+                let imag = fft[ind + 1];
+                fft[ind] = pre * real - pim * imag;
+                fft[ind + 1] = pim * real + pre * imag;
             }
         }
     }
 }
 /// `fourierReduceVolume` (`filtxcorr.c:2158`).
-pub unsafe fn fourier_reduce_volume(
-    input: *mut f32,
+pub fn fourier_reduce_volume(
+    input: &[f32],
     nxi: i32,
     nyi: i32,
     nzi: i32,
-    out: *mut f32,
+    out: &mut [f32],
     nxo: i32,
     nyo: i32,
     nzo: i32,
     dx: f32,
     dy: f32,
     dz: f32,
-    temp: *mut f32,
+    temp: Option<&mut [f32]>,
 ) {
-    unsafe {
-        let xfac = nxi as f32 / nxo as f32;
-        // `float dxy = -(redFac - 1) / (2. * redFac);` -- the `2. *` makes the divide double.
-        let dxy = ((-(xfac - 1.0)) as f64 / (2.0 * xfac as f64)) as f32;
-        let zfac = nzi as f32 / nzo as f32;
-        let zd = ((-(zfac - 1.0)) as f64 / (2.0 * zfac as f64)) as f32;
-        // `1. / pow(redFac * redFac * zRedFac, 1./3.)` -- the double `pow`, rounded once.
-        let scale = (1.0 / ((xfac * xfac * zfac) as f64).powf(1.0 / 3.0)) as f32;
-        let mut dst = out;
-        for zloop in 0..2 {
-            let (zs, ze) = if zloop == 0 {
-                (0, nzo - nzo / 2)
-            } else {
-                (nzi - nzo / 2, nzi)
-            };
-            for iz in zs..ze {
-                for yloop in 0..2 {
-                    let (ys, ye) = if yloop == 0 {
-                        (0, nyo - nyo / 2)
-                    } else {
-                        (nyi - nyo / 2, nyi)
-                    };
-                    for iy in ys..ye {
-                        let base = iy * (nxi + 2) + iz * nyi * (nxi + 2);
-                        for ix in 0..nxo + 2 {
-                            *dst = *input.add((base + ix) as usize) * scale;
-                            dst = dst.add(1);
-                        }
+    let xfac = nxi as f32 / nxo as f32;
+    // `float dxy = -(redFac - 1) / (2. * redFac);` -- the `2. *` makes the divide double.
+    let dxy = ((-(xfac - 1.0)) as f64 / (2.0 * xfac as f64)) as f32;
+    let zfac = nzi as f32 / nzo as f32;
+    let zd = ((-(zfac - 1.0)) as f64 / (2.0 * zfac as f64)) as f32;
+    // `1. / pow(redFac * redFac * zRedFac, 1./3.)` -- the double `pow`, rounded once.
+    let scale = (1.0 / ((xfac * xfac * zfac) as f64).powf(1.0 / 3.0)) as f32;
+    let mut dst = 0usize;
+    for zloop in 0..2 {
+        let (zs, ze) = if zloop == 0 {
+            (0, nzo - nzo / 2)
+        } else {
+            (nzi - nzo / 2, nzi)
+        };
+        for iz in zs..ze {
+            for yloop in 0..2 {
+                let (ys, ye) = if yloop == 0 {
+                    (0, nyo - nyo / 2)
+                } else {
+                    (nyi - nyo / 2, nyi)
+                };
+                for iy in ys..ye {
+                    let base = iy * (nxi + 2) + iz * nyi * (nxi + 2);
+                    for ix in 0..nxo + 2 {
+                        out[dst] = input[(base + ix) as usize] * scale;
+                        dst += 1;
                     }
                 }
             }
         }
-        if !temp.is_null() {
-            fourier_shift_volume(
-                out,
-                nxo,
-                nyo,
-                nzo,
-                dx / xfac + dxy,
-                dy / xfac + dxy,
-                dz / zfac + zd,
-                temp,
-            );
-        }
+    }
+    if let Some(temp) = temp {
+        fourier_shift_volume(
+            out,
+            nxo,
+            nyo,
+            nzo,
+            dx / xfac + dxy,
+            dy / xfac + dxy,
+            dz / zfac + zd,
+            temp,
+        );
     }
 }
 /// `fourierExpandVolume` (`filtxcorr.c:2226`).
-pub unsafe fn fourier_expand_volume(
-    input: *mut f32,
+pub fn fourier_expand_volume(
+    input: &mut [f32],
     nxi: i32,
     nyi: i32,
     nzi: i32,
-    out: *mut f32,
+    out: &mut [f32],
     nxo: i32,
     nyo: i32,
     nzo: i32,
     dx: f32,
     dy: f32,
     dz: f32,
-    temp: *mut f32,
+    temp: Option<&mut [f32]>,
 ) {
-    unsafe {
-        let xfac = nxo as f32 / nxi as f32;
-        let zfac = nzo as f32 / nzi as f32;
-        // `float dxy = (expFac - 1.) / (2. * expFac);` -- a wholly double expression.
-        let dxy = ((xfac as f64 - 1.0) / (2.0 * xfac as f64)) as f32;
-        let zd = ((zfac as f64 - 1.0) / (2.0 * zfac as f64)) as f32;
-        core::ptr::write_bytes(out, 0, ((nxo + 2) * nyo * nzo) as usize);
-        if !temp.is_null() {
-            fourier_shift_volume(input, nxi, nyi, nzi, dx + dxy, dy + dxy, dz + zd, temp);
-        }
-        let mut src = input;
-        for zloop in 0..2 {
-            let (zs, ze) = if zloop == 0 {
-                (0, nzi - nzi / 2)
-            } else {
-                (nzo - nzi / 2, nzo)
-            };
-            for iz in zs..ze {
-                for yloop in 0..2 {
-                    let (ys, ye) = if yloop == 0 {
-                        (0, nyi - nyi / 2)
-                    } else {
-                        (nyo - nyi / 2, nyo)
-                    };
-                    for iy in ys..ye {
-                        let base = iy * (nxo + 2) + iz * nyo * (nxo + 2);
-                        for ix in 0..nxi + 2 {
-                            *out.add((base + ix) as usize) = *src * xfac;
-                            src = src.add(1);
-                        }
+    let xfac = nxo as f32 / nxi as f32;
+    let zfac = nzo as f32 / nzi as f32;
+    // `float dxy = (expFac - 1.) / (2. * expFac);` -- a wholly double expression.
+    let dxy = ((xfac as f64 - 1.0) / (2.0 * xfac as f64)) as f32;
+    let zd = ((zfac as f64 - 1.0) / (2.0 * zfac as f64)) as f32;
+    out[..((nxo + 2) * nyo * nzo) as usize].fill(0.);
+    if let Some(temp) = temp {
+        fourier_shift_volume(input, nxi, nyi, nzi, dx + dxy, dy + dxy, dz + zd, temp);
+    }
+    let mut src = 0usize;
+    for zloop in 0..2 {
+        let (zs, ze) = if zloop == 0 {
+            (0, nzi - nzi / 2)
+        } else {
+            (nzo - nzi / 2, nzo)
+        };
+        for iz in zs..ze {
+            for yloop in 0..2 {
+                let (ys, ye) = if yloop == 0 {
+                    (0, nyi - nyi / 2)
+                } else {
+                    (nyo - nyi / 2, nyo)
+                };
+                for iy in ys..ye {
+                    let base = iy * (nxo + 2) + iz * nyo * (nxo + 2);
+                    for ix in 0..nxi + 2 {
+                        out[(base + ix) as usize] = input[src] * xfac;
+                        src += 1;
                     }
                 }
             }
         }
     }
 }
-pub unsafe fn fourier_ring_corr(
-    a: *const f32,
-    b: *const f32,
+pub fn fourier_ring_corr(
+    a: &[f32],
+    b: &[f32],
     nx: i32,
     ny: i32,
-    corr: *mut f32,
+    corr: &mut [f32],
     max: i32,
     delta: f32,
-    temp: *mut f32,
+    temp: &mut [f32],
 ) {
-    unsafe {
-        let prod = temp;
-        let asum = prod.add(max as usize);
-        let bsum = asum.add(max as usize);
-        let counts = bsum.add(max as usize).cast::<i32>();
-        for r in 0..max {
-            *prod.add(r as usize) = 0.;
-            *asum.add(r as usize) = 0.;
-            *bsum.add(r as usize) = 0.;
-            *counts.add(r as usize) = 0;
+    // `float *prodReal = temp; asum = prodReal + maxRings;
+    //  bsum = asum + maxRings; int *nsum = (int *)bsum + maxRings`
+    // (`filtxcorr.c:2296-2299`).  The last window is the same `temp`
+    // storage reinterpreted as ints, which Rust cannot do without
+    // `unsafe`, and the documentation allows `temp` to be the same array
+    // as `ringCorrs`, which Rust cannot express as two `&mut` either --
+    // so the four windows are local here and `temp` is left alone.
+    let _ = temp;
+    // `float deltaX = 1. / nxReal;` -- a double quotient stored into a float,
+    // and `xx = ix * deltaX / 2.` multiplies by it rather than dividing again.
+    let delta_x = (1.0 / nx as f64) as f32;
+    let delta_y = (1.0 / ny as f64) as f32;
+    let mut prod = vec![0.0f32; max as usize];
+    let mut asum = vec![0.0f32; max as usize];
+    let mut bsum = vec![0.0f32; max as usize];
+    let mut nsum = vec![0i32; max as usize];
+    for ring in 0..max as usize {
+        asum[ring] = 0.;
+        bsum[ring] = 0.;
+        prod[ring] = 0.;
+        nsum[ring] = 0;
+    }
+
+    /* We are summing only over a half-plane of the full FFT, ignoring the symmetric part
+    Summing over the whole plane would double the real component and the magnitude sums
+    and cancel out the sum of imaginary components, so we don't bother with the latter */
+    for iy in 0..ny {
+        let mut yy = iy as f32 * delta_y;
+        if yy > 0.5 {
+            yy = (1. - yy as f64) as f32;
         }
-        for iy in 0..ny {
-            let mut yy = iy as f32 / ny as f32;
-            if yy > 0.5 {
-                yy = 1. - yy;
+        let yysqr = yy * yy;
+        let base = iy * (nx + 2);
+        let mut ix = 0;
+        while ix < nx + 2 {
+            // `float xx = ix * deltaX / 2.;` -- the `/ 2.` is done in double
+            // but the result is stored back into a float before it is squared.
+            let xx = ((ix as f32 * delta_x) as f64 / 2.) as f32;
+            let freq = ((xx * xx + yysqr) as f64).sqrt() as f32;
+            let ring = (freq / delta) as i32;
+            if ring < max && (ix > 0 || iy >= ny / 2) {
+                let ind = (base + ix) as usize;
+                let a_real = a[ind];
+                let a_imag = a[ind + 1];
+                let b_real = b[ind];
+                let b_imag = b[ind + 1];
+                nsum[ring as usize] += 1;
+                asum[ring as usize] += a_real * a_real + a_imag * a_imag;
+                bsum[ring as usize] += b_real * b_real + b_imag * b_imag;
+                prod[ring as usize] += a_real * b_real + a_imag * b_imag;
             }
-            let base = iy * (nx + 2);
-            for ix in (0..nx + 2).step_by(2) {
-                let xx = ix as f32 / nx as f32 / 2.;
-                let ring = ((xx * xx + yy * yy).sqrt() / delta) as i32;
-                if ring < max && (ix > 0 || iy >= ny / 2) {
-                    let ind = (base + ix) as usize;
-                    let ar = *a.add(ind);
-                    let ai = *a.add(ind + 1);
-                    let br = *b.add(ind);
-                    let bi = *b.add(ind + 1);
-                    *counts.add(ring as usize) += 1;
-                    *asum.add(ring as usize) += ar * ar + ai * ai;
-                    *bsum.add(ring as usize) += br * br + bi * bi;
-                    *prod.add(ring as usize) += ar * br + ai * bi;
-                }
-            }
+            ix += 2;
         }
-        for r in 0..max {
-            let av = *asum.add(r as usize);
-            let bv = *bsum.add(r as usize);
-            *corr.add(r as usize) = if *counts.add(r as usize) != 0 && av * bv > 0. {
-                *prod.add(r as usize) / (av * bv).sqrt()
-            } else {
-                0.
-            };
-        }
+    }
+
+    for ring in 0..max as usize {
+        corr[ring] = if nsum[ring] != 0 && (asum[ring] * bsum[ring]) as f64 > 0. {
+            // `prodReal[ring] / sqrt(asum * bsum)` -- `sqrt` is the double
+            // routine, so the division is done in double.
+            (prod[ring] as f64 / ((asum[ring] * bsum[ring]) as f64).sqrt()) as f32
+        } else {
+            0.
+        };
     }
 }
 
 // Fortran entry points in the same source unit.  The build system historically
 // selects their trailing underscore spelling; Rust keeps the source function names
 // snake-cased while preserving pointer/value calling conventions.
-pub unsafe fn filterpart(
-    a: *const f32,
-    b: *mut f32,
-    nx: *const i32,
-    ny: *const i32,
-    ctf: *const f32,
-    delta: *const f32,
-) {
-    unsafe { xcorr_filter_part(a, b, *nx, *ny, ctf, *delta) }
+pub fn filterpart(a: FilterIn, b: &mut [f32], nx: &i32, ny: &i32, ctf: &[f32], delta: &f32) {
+    xcorr_filter_part(a, b, *nx, *ny, ctf, *delta)
 }
-pub unsafe fn xcorrpeakfindwidth(
-    array: *mut f32,
-    nxdim: *const i32,
-    ny: *const i32,
-    xpeak: *mut f32,
-    ypeak: *mut f32,
-    peak: *mut f32,
-    width: *mut f32,
-    width_min: *mut f32,
-    max_peaks: *const i32,
-    min_strength: *const f32,
+pub fn xcorrpeakfindwidth(
+    array: &[f32],
+    nxdim: &i32,
+    ny: &i32,
+    xpeak: &mut [f32],
+    ypeak: &mut [f32],
+    peak: &mut [f32],
+    width: Option<&mut [f32]>,
+    width_min: Option<&mut [f32]>,
+    max_peaks: &i32,
+    min_strength: &f32,
 ) {
-    unsafe {
-        xcorr_peak_find_width(
-            array,
-            *nxdim,
-            *ny,
-            xpeak,
-            ypeak,
-            peak,
-            width,
-            width_min,
-            *max_peaks,
-            *min_strength,
-        )
-    }
+    xcorr_peak_find_width(
+        array,
+        *nxdim,
+        *ny,
+        xpeak,
+        ypeak,
+        peak,
+        width,
+        width_min,
+        *max_peaks,
+        *min_strength,
+    )
 }
-pub unsafe fn getpeakfindtestlimits(
-    nx: *const i32,
-    ny: *const i32,
-    xlo: *mut i32,
-    xhi: *mut i32,
-    ylo: *mut i32,
-    yhi: *mut i32,
+pub fn getpeakfindtestlimits(
+    nx: &i32,
+    ny: &i32,
+    xlo: &mut i32,
+    xhi: &mut i32,
+    ylo: &mut i32,
+    yhi: &mut i32,
 ) {
-    unsafe { get_peak_find_test_limits(*nx, *ny, xlo, xhi, ylo, yhi) }
+    get_peak_find_test_limits(*nx, *ny, xlo, xhi, ylo, yhi)
 }
-pub unsafe fn xcorrpeakfind(
-    array: *mut f32,
-    nxdim: *const i32,
-    ny: *const i32,
-    xpeak: *mut f32,
-    ypeak: *mut f32,
-    peak: *mut f32,
-    max_peaks: *const i32,
+pub fn xcorrpeakfind(
+    array: &[f32],
+    nxdim: &i32,
+    ny: &i32,
+    xpeak: &mut [f32],
+    ypeak: &mut [f32],
+    peak: &mut [f32],
+    max_peaks: &i32,
 ) {
-    unsafe { xcorr_peak_find(array, *nxdim, *ny, xpeak, ypeak, peak, *max_peaks) }
+    xcorr_peak_find(array, *nxdim, *ny, xpeak, ypeak, peak, *max_peaks)
 }
-pub unsafe fn storepeakfinderror(value: *const i32) {
-    unsafe { store_peak_find_error(*value) }
+pub fn storepeakfinderror(value: &i32) {
+    store_peak_find_error(*value)
 }
 pub fn getpeakfinderror() -> i32 {
     get_peak_find_error()
 }
-pub unsafe fn setpeakfindlimits(
-    xlo: *const i32,
-    xhi: *const i32,
-    ylo: *const i32,
-    yhi: *const i32,
-    ellipse: *const i32,
-) {
-    unsafe { set_peak_find_limits(*xlo, *xhi, *ylo, *yhi, *ellipse) }
+pub fn setpeakfindlimits(xlo: &i32, xhi: &i32, ylo: &i32, yhi: &i32, ellipse: &i32) {
+    set_peak_find_limits(*xlo, *xhi, *ylo, *yhi, *ellipse)
 }
-pub unsafe fn setpeakfindangle(angle: *const f32) {
-    unsafe { set_peak_find_angle(*angle) }
+pub fn setpeakfindangle(angle: &f32) {
+    set_peak_find_angle(*angle)
 }
-pub unsafe fn cccoefficienttwopads(
-    a: *const f32,
-    b: *const f32,
-    nxdim: *const i32,
-    nx: *const i32,
-    ny: *const i32,
-    xpeak: *const f32,
-    ypeak: *const f32,
-    nx_pad_a: *const i32,
-    ny_pad_a: *const i32,
-    nx_pad_b: *const i32,
-    ny_pad_b: *const i32,
-    min_pixels: *const i32,
-    nsum: *mut i32,
+pub fn cccoefficienttwopads(
+    a: &[f32],
+    b: &[f32],
+    nxdim: &i32,
+    nx: &i32,
+    ny: &i32,
+    xpeak: &f32,
+    ypeak: &f32,
+    nx_pad_a: &i32,
+    ny_pad_a: &i32,
+    nx_pad_b: &i32,
+    ny_pad_b: &i32,
+    min_pixels: &i32,
+    nsum: &mut i32,
 ) -> f64 {
-    unsafe {
-        cc_coefficient_two_pads(
-            a,
-            b,
-            *nxdim,
-            *nx,
-            *ny,
-            *xpeak,
-            *ypeak,
-            *nx_pad_a,
-            *ny_pad_a,
-            *nx_pad_b,
-            *ny_pad_b,
-            *min_pixels,
-            nsum,
-        )
-    }
+    cc_coefficient_two_pads(
+        a,
+        b,
+        *nxdim,
+        *nx,
+        *ny,
+        *xpeak,
+        *ypeak,
+        *nx_pad_a,
+        *ny_pad_a,
+        *nx_pad_b,
+        *ny_pad_b,
+        *min_pixels,
+        nsum,
+    )
 }
-pub unsafe fn cccoefficient(
-    a: *const f32,
-    b: *const f32,
-    nxdim: *const i32,
-    nx: *const i32,
-    ny: *const i32,
-    xpeak: *const f32,
-    ypeak: *const f32,
-    nx_pad: *const i32,
-    ny_pad: *const i32,
-    nsum: *mut i32,
+pub fn cccoefficient(
+    a: &[f32],
+    b: &[f32],
+    nxdim: &i32,
+    nx: &i32,
+    ny: &i32,
+    xpeak: &f32,
+    ypeak: &f32,
+    nx_pad: &i32,
+    ny_pad: &i32,
+    nsum: &mut i32,
 ) -> f64 {
-    unsafe {
-        xcorr_cc_coefficient(
-            a, b, *nxdim, *nx, *ny, *xpeak, *ypeak, *nx_pad, *ny_pad, nsum,
-        )
-    }
+    xcorr_cc_coefficient(
+        a, b, *nxdim, *nx, *ny, *xpeak, *ypeak, *nx_pad, *ny_pad, nsum,
+    )
 }
-pub unsafe fn slicegaussiankernel(mat: *mut f32, dim: *const i32, sigma: *const f32) {
-    unsafe { slice_gaussian_kernel(mat, *dim, *sigma) }
+pub fn slicegaussiankernel(mat: &mut [f32], dim: &i32, sigma: &f32) {
+    slice_gaussian_kernel(mat, *dim, *sigma)
 }
-pub unsafe fn scaledgaussiankernel(
-    mat: *mut f32,
-    dim: *mut i32,
-    limit: *const i32,
-    sigma: *const f32,
+pub fn scaledgaussiankernel(mat: &mut [f32], dim: &mut i32, limit: &i32, sigma: &f32) {
+    scaled_gaussian_kernel(mat, dim, *limit, *sigma)
+}
+pub fn applykernelfilter(
+    a: &[f32],
+    b: &mut [f32],
+    d: &i32,
+    x: &i32,
+    y: &i32,
+    mat: &[f32],
+    k: &i32,
 ) {
-    unsafe { scaled_gaussian_kernel(mat, dim, *limit, *sigma) }
+    apply_kernel_filter(a, b, *d, *x, *y, mat, *k)
 }
-pub unsafe fn applykernelfilter(
-    a: *const f32,
-    b: *mut f32,
-    d: *const i32,
-    x: *const i32,
-    y: *const i32,
-    mat: *const f32,
-    k: *const i32,
+pub fn fouriershiftimage(a: &mut [f32], x: &i32, y: &i32, dx: &f32, dy: &f32, t: &mut [f32]) {
+    fourier_shift_image(a, *x, *y, *dx, *dy, t)
+}
+pub fn fourierreduceimage(
+    a: &[f32],
+    xi: &i32,
+    yi: &i32,
+    b: &mut [f32],
+    xo: &i32,
+    yo: &i32,
+    dx: &f32,
+    dy: &f32,
+    t: Option<&mut [f32]>,
 ) {
-    unsafe { apply_kernel_filter(a, b, *d, *x, *y, mat, *k) }
+    fourier_reduce_image(a, *xi, *yi, b, *xo, *yo, *dx, *dy, t)
 }
-pub unsafe fn fouriershiftimage(
-    a: *mut f32,
-    x: *const i32,
-    y: *const i32,
-    dx: *const f32,
-    dy: *const f32,
-    t: *mut f32,
+pub fn fourierexpandimage(
+    a: &mut [f32],
+    xi: &i32,
+    yi: &i32,
+    b: &mut [f32],
+    xo: &i32,
+    yo: &i32,
+    dx: &f32,
+    dy: &f32,
+    t: Option<&mut [f32]>,
 ) {
-    unsafe { fourier_shift_image(a, *x, *y, *dx, *dy, t) }
+    fourier_expand_image(a, *xi, *yi, b, *xo, *yo, *dx, *dy, t)
 }
-pub unsafe fn fourierreduceimage(
-    a: *mut f32,
-    xi: *const i32,
-    yi: *const i32,
-    b: *mut f32,
-    xo: *const i32,
-    yo: *const i32,
-    dx: *const f32,
-    dy: *const f32,
-    t: *mut f32,
+pub fn fouriershiftvolume(
+    a: &mut [f32],
+    x: &i32,
+    y: &i32,
+    z: &i32,
+    dx: &f32,
+    dy: &f32,
+    dz: &f32,
+    t: &mut [f32],
 ) {
-    unsafe { fourier_reduce_image(a, *xi, *yi, b, *xo, *yo, *dx, *dy, t) }
+    fourier_shift_volume(a, *x, *y, *z, *dx, *dy, *dz, t)
 }
-pub unsafe fn fourierexpandimage(
-    a: *mut f32,
-    xi: *const i32,
-    yi: *const i32,
-    b: *mut f32,
-    xo: *const i32,
-    yo: *const i32,
-    dx: *const f32,
-    dy: *const f32,
-    t: *mut f32,
+pub fn fourierreducevolume(
+    a: &[f32],
+    xi: &i32,
+    yi: &i32,
+    zi: &i32,
+    b: &mut [f32],
+    xo: &i32,
+    yo: &i32,
+    zo: &i32,
+    dx: &f32,
+    dy: &f32,
+    dz: &f32,
+    t: Option<&mut [f32]>,
 ) {
-    unsafe { fourier_expand_image(a, *xi, *yi, b, *xo, *yo, *dx, *dy, t) }
+    fourier_reduce_volume(a, *xi, *yi, *zi, b, *xo, *yo, *zo, *dx, *dy, *dz, t)
 }
-pub unsafe fn fouriershiftvolume(
-    a: *mut f32,
-    x: *const i32,
-    y: *const i32,
-    z: *const i32,
-    dx: *const f32,
-    dy: *const f32,
-    dz: *const f32,
-    t: *mut f32,
+pub fn fourierexpandvolume(
+    a: &mut [f32],
+    xi: &i32,
+    yi: &i32,
+    zi: &i32,
+    b: &mut [f32],
+    xo: &i32,
+    yo: &i32,
+    zo: &i32,
+    dx: &f32,
+    dy: &f32,
+    dz: &f32,
+    t: Option<&mut [f32]>,
 ) {
-    unsafe { fourier_shift_volume(a, *x, *y, *z, *dx, *dy, *dz, t) }
+    fourier_expand_volume(a, *xi, *yi, *zi, b, *xo, *yo, *zo, *dx, *dy, *dz, t)
 }
-pub unsafe fn fourierreducevolume(
-    a: *mut f32,
-    xi: *const i32,
-    yi: *const i32,
-    zi: *const i32,
-    b: *mut f32,
-    xo: *const i32,
-    yo: *const i32,
-    zo: *const i32,
-    dx: *const f32,
-    dy: *const f32,
-    dz: *const f32,
-    t: *mut f32,
+pub fn fourierringcorr(
+    a: &[f32],
+    b: &[f32],
+    x: &i32,
+    y: &i32,
+    c: &mut [f32],
+    max: &i32,
+    d: &f32,
+    t: &mut [f32],
 ) {
-    unsafe { fourier_reduce_volume(a, *xi, *yi, *zi, b, *xo, *yo, *zo, *dx, *dy, *dz, t) }
+    fourier_ring_corr(a, b, *x, *y, c, *max, *d, t)
 }
-pub unsafe fn fourierexpandvolume(
-    a: *mut f32,
-    xi: *const i32,
-    yi: *const i32,
-    zi: *const i32,
-    b: *mut f32,
-    xo: *const i32,
-    yo: *const i32,
-    zo: *const i32,
-    dx: *const f32,
-    dy: *const f32,
-    dz: *const f32,
-    t: *mut f32,
-) {
-    unsafe { fourier_expand_volume(a, *xi, *yi, *zi, b, *xo, *yo, *zo, *dx, *dy, *dz, t) }
-}
-pub unsafe fn fourierringcorr(
-    a: *const f32,
-    b: *const f32,
-    x: *const i32,
-    y: *const i32,
-    c: *mut f32,
-    max: *const i32,
-    d: *const f32,
-    t: *mut f32,
-) {
-    unsafe { fourier_ring_corr(a, b, *x, *y, c, *max, *d, t) }
-}
-pub unsafe fn fouriercropsizes(
-    s: *const i32,
-    f: *const f32,
-    p: *const f32,
-    min: *const i32,
-    l: *const i32,
-    full: *mut i32,
-    crop: *mut i32,
-    actual: *mut f32,
+pub fn fouriercropsizes(
+    s: &i32,
+    f: &f32,
+    p: &f32,
+    min: &i32,
+    l: &i32,
+    full: &mut i32,
+    crop: &mut i32,
+    actual: &mut f32,
 ) -> i32 {
-    unsafe { fourier_crop_sizes(*s, *f, *p, *min, *l, full, crop, actual) }
+    fourier_crop_sizes(*s, *f, *p, *min, *l, full, crop, actual)
 }
 
 #[cfg(test)]
@@ -2184,7 +2457,7 @@ mod tests {
             .map(|i| ((i * 37) % 97) as f32 / 7.0 - 3.0)
             .collect::<Vec<f32>>();
         let mut temp = vec![0_f32; 16];
-        unsafe { fourier_shift_volume(fft.as_mut_ptr(), 8, 4, 4, dx, dx, dz, temp.as_mut_ptr()) };
+        fourier_shift_volume(&mut fft, 8, 4, 4, dx, dx, dz, &mut temp);
         assert_eq!(
             fft.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
             SHIFT.to_vec()
@@ -2224,22 +2497,20 @@ mod tests {
             .collect::<Vec<f32>>();
         let mut out = vec![0_f32; 10 * 4 * 4];
         let mut temp = vec![0_f32; 16];
-        unsafe {
-            fourier_expand_volume(
-                input.as_mut_ptr(),
-                4,
-                2,
-                2,
-                out.as_mut_ptr(),
-                8,
-                4,
-                4,
-                0.,
-                0.,
-                0.,
-                temp.as_mut_ptr(),
-            )
-        };
+        fourier_expand_volume(
+            &mut input,
+            4,
+            2,
+            2,
+            &mut out,
+            8,
+            4,
+            4,
+            0.,
+            0.,
+            0.,
+            Some(&mut temp),
+        );
         assert_eq!(
             out.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
             EXPAND.to_vec()
@@ -2304,18 +2575,16 @@ mod tests {
         ];
         for (size, factor, code, full_expect, crop_expect, actual_expect) in CASES {
             let (mut full, mut crop, mut actual) = (-1, -1, -1_f32);
-            let got = unsafe {
-                fourier_crop_sizes(
-                    size,
-                    f32::from_bits(factor),
-                    0.01,
-                    16,
-                    15,
-                    &mut full,
-                    &mut crop,
-                    &mut actual,
-                )
-            };
+            let got = fourier_crop_sizes(
+                size,
+                f32::from_bits(factor),
+                0.01,
+                16,
+                15,
+                &mut full,
+                &mut crop,
+                &mut actual,
+            );
             assert_eq!(
                 (got, full, crop, actual.to_bits()),
                 (code, full_expect, crop_expect, actual_expect),
@@ -2368,18 +2637,7 @@ mod tests {
             .map(|i| ((i * 37) % 97) as f32 / 7.0 - 3.0)
             .collect::<Vec<f32>>();
         let mut temp = vec![0_f32; 16];
-        unsafe {
-            fourier_shift_volume(
-                fft.as_mut_ptr(),
-                8,
-                4,
-                4,
-                -0.375,
-                0.3125,
-                -0.1875,
-                temp.as_mut_ptr(),
-            )
-        };
+        fourier_shift_volume(&mut fft, 8, 4, 4, -0.375, 0.3125, -0.1875, &mut temp);
         let got = fft.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
         assert_eq!(got, SHIFT.to_vec());
 
@@ -2387,22 +2645,20 @@ mod tests {
             .map(|i| ((i * 53) % 89) as f32 / 11.0 - 2.0)
             .collect::<Vec<f32>>();
         let mut out = vec![0_f32; 6 * 2 * 2];
-        unsafe {
-            fourier_reduce_volume(
-                input.as_mut_ptr(),
-                8,
-                4,
-                4,
-                out.as_mut_ptr(),
-                4,
-                2,
-                2,
-                0.,
-                0.,
-                0.,
-                temp.as_mut_ptr(),
-            )
-        };
+        fourier_reduce_volume(
+            &input,
+            8,
+            4,
+            4,
+            &mut out,
+            4,
+            2,
+            2,
+            0.,
+            0.,
+            0.,
+            Some(&mut temp),
+        );
         let got = out.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
         assert_eq!(got, REDUCE.to_vec());
     }
@@ -2411,7 +2667,7 @@ mod tests {
     fn wrap_fft_slice_matches_even_and_odd_source_permutations() {
         let mut even = (0..16).map(|value| value as f32).collect::<Vec<_>>();
         let mut temporary = vec![0.; 4];
-        unsafe { wrap_fft_slice(even.as_mut_ptr(), temporary.as_mut_ptr(), 2, 4, 0) };
+        wrap_fft_slice(&mut even, &mut temporary, 2, 4, 0);
         assert_eq!(
             even,
             vec![
@@ -2420,9 +2676,9 @@ mod tests {
         );
 
         let mut odd = (0..12).map(|value| value as f32).collect::<Vec<_>>();
-        unsafe { wrap_fft_slice(odd.as_mut_ptr(), temporary.as_mut_ptr(), 2, 3, 0) };
+        wrap_fft_slice(&mut odd, &mut temporary, 2, 3, 0);
         assert_eq!(odd, vec![8., 9., 10., 11., 0., 1., 2., 3., 4., 5., 6., 7.]);
-        unsafe { wrap_fft_slice(odd.as_mut_ptr(), temporary.as_mut_ptr(), 2, 3, 1) };
+        wrap_fft_slice(&mut odd, &mut temporary, 2, 3, 1);
         assert_eq!(odd, (0..12).map(|value| value as f32).collect::<Vec<_>>());
     }
 
@@ -2441,25 +2697,24 @@ mod tests {
         array[3 + 3 * 8] = 6.;
         array[2 + 2 * 8] = 5.;
         array[2 + 4 * 8] = 5.;
-        let (mut xp, mut yp, mut value, mut width, mut width_min) = (0., 0., 0., 0., 0.);
-        unsafe {
-            xcorr_peak_find_width(
-                array.as_mut_ptr(),
-                8,
-                6,
-                &mut xp,
-                &mut yp,
-                &mut value,
-                &mut width,
-                &mut width_min,
-                1,
-                0.,
-            )
-        };
-        assert_eq!(value, 10.);
-        assert!((xp - 2.1).abs() < 1.0e-5);
-        assert_eq!(yp, 3.);
-        assert!(width > 0. && width_min > 0.);
+        let (mut xp, mut yp, mut value) = ([0.0f32], [0.0f32], [0.0f32]);
+        let (mut width, mut width_min) = ([0.0f32], [0.0f32]);
+        xcorr_peak_find_width(
+            &array,
+            8,
+            6,
+            &mut xp,
+            &mut yp,
+            &mut value,
+            Some(&mut width),
+            Some(&mut width_min),
+            1,
+            0.,
+        );
+        assert_eq!(value[0], 10.);
+        assert!((xp[0] - 2.1).abs() < 1.0e-5);
+        assert_eq!(yp[0], 3.);
+        assert!(width[0] > 0. && width_min[0] > 0.);
     }
 
     #[test]
@@ -2468,46 +2723,20 @@ mod tests {
         array[3 + 3 * 10] = 9.;
         array[6 + 5 * 10] = 7.;
         let (mut xp, mut yp, mut peaks, mut count) = ([0.; 2], [0.; 2], [0.; 2], 0);
-        unsafe {
-            assert_eq!(
-                find_many_xcorr_peaks(
-                    array.as_mut_ptr(),
-                    10,
-                    8,
-                    0,
-                    0,
-                    xp.as_mut_ptr(),
-                    yp.as_mut_ptr(),
-                    peaks.as_mut_ptr(),
-                    2,
-                    3,
-                    &mut count
-                ),
-                0
-            )
-        };
+        assert_eq!(
+            find_many_xcorr_peaks(
+                &array, 10, 8, 0, 0, &mut xp, &mut yp, &mut peaks, 2, 3, &mut count
+            ),
+            0
+        );
         assert_eq!(count, 2);
         assert_eq!(peaks, [9., 7.]);
-        unsafe {
-            assert_eq!(
-                find_spaced_xcorr_peaks(
-                    array.as_mut_ptr(),
-                    10,
-                    0,
-                    8,
-                    0,
-                    7,
-                    xp.as_mut_ptr(),
-                    yp.as_mut_ptr(),
-                    peaks.as_mut_ptr(),
-                    2,
-                    2.,
-                    &mut count,
-                    0.
-                ),
-                0
-            )
-        };
+        assert_eq!(
+            find_spaced_xcorr_peaks(
+                &array, 10, 0, 8, 0, 7, &mut xp, &mut yp, &mut peaks, 2, 2., &mut count, 0.
+            ),
+            0
+        );
         assert_eq!(count, 2);
         assert_eq!(peaks, [9., 7.]);
     }
@@ -2583,21 +2812,9 @@ mod find_many_peaks_reference {
             let mut yp = [0.0_f32; 64];
             let mut pk = [0.0_f32; 64];
             let mut n = 0_i32;
-            let rc = unsafe {
-                find_many_xcorr_peaks(
-                    a.as_mut_ptr(),
-                    nxdim,
-                    ny,
-                    ix_off,
-                    iy_off,
-                    xp.as_mut_ptr(),
-                    yp.as_mut_ptr(),
-                    pk.as_mut_ptr(),
-                    8,
-                    32,
-                    &mut n,
-                )
-            };
+            let rc = find_many_xcorr_peaks(
+                &a, nxdim, ny, ix_off, iy_off, &mut xp, &mut yp, &mut pk, 8, 32, &mut n,
+            );
             assert_eq!(rc, 0, "case {index}");
             if expected[index].is_empty() {
                 continue;

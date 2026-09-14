@@ -23,7 +23,13 @@ pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: c_char) -> *mu
             return core::ptr::null_mut();
         }
         (*slice).mean = (*hin).amean;
-        let buf = mrc_mread_slice((*hin).fp.cast(), hin, sno, axis);
+        // A *clone* of the handle, not a borrow of `hin.fp`: `mrc_read_slice`
+        // (`mrcfiles.c:1049`) saves and restores `hdata->fp` around its call,
+        // so a `&mut` into that very field would be left aliasing a `None`
+        // the moment the callee takes it.  The C copies the `FILE *` by value
+        // and a clone shares the same open file, which is the same thing.
+        let mut fin = (*hin).fp.clone().unwrap();
+        let buf = mrc_mread_slice(&mut fin, hin, sno, axis);
         if buf.is_null() {
             libc::free(slice.cast());
             return core::ptr::null_mut();
@@ -76,7 +82,7 @@ pub unsafe fn slice_read_subm(
             && urx <= nx
             && ury <= ny
         {
-            let mut li: LoadInfo = core::mem::zeroed();
+            let mut li = LoadInfo::default();
             crate::imod::libiimod::mrcfiles::mrc_init_li(Some(&mut li), None);
             crate::imod::libiimod::mrcfiles::mrc_init_li(Some(&mut li), Some(&*hin));
             li.xmin = llx;
@@ -111,8 +117,12 @@ pub unsafe fn slice_read_subm(
             return slice;
         }
         (*slice).mean = (*hin).amean;
-        let buffer =
-            crate::imod::libiimod::mrcfiles::mrc_mread_slice((*hin).fp.cast(), hin, sec_num, axis);
+        let buffer = crate::imod::libiimod::mrcfiles::mrc_mread_slice(
+            &mut (*hin).fp.clone().unwrap(),
+            hin,
+            sec_num,
+            axis,
+        );
         if buffer.is_null() {
             libc::free(slice.cast());
             return core::ptr::null_mut();
@@ -649,8 +659,8 @@ pub unsafe fn slice_wrap_fft_lines(s: *mut Islice, direction: i32) -> i32 {
         }
         if pixsize == 8 {
             crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
-                (*s).data.f,
-                buffer.cast(),
+                core::slice::from_raw_parts_mut((*s).data.f, (2 * nx * ny) as usize),
+                core::slice::from_raw_parts_mut(buffer.cast::<f32>(), (2 * nx) as usize),
                 nx,
                 ny,
                 direction,
@@ -708,22 +718,24 @@ pub unsafe fn slice_reduce_mirrored_fft(s: *mut Islice) -> i32 {
 /// `sliceWriteMRCfile` from mrcslice.c:903.
 pub unsafe fn slice_write_mrcfile(filename: *const i8, slice: *mut Islice) -> i32 {
     unsafe {
-        let file = libc::fopen(filename, c"wb".as_ptr());
-        if file.is_null() {
+        let Some(mut file) = crate::imod::libcfshr::b3dutil::ImodFile::open(
+            &core::ffi::CStr::from_ptr(filename).to_string_lossy(),
+            "wb",
+        ) else {
             return -1;
-        }
-        let mut hout: MrcHeader = core::mem::zeroed();
+        };
+        let mut hout = MrcHeader::default();
         mrc_head_new(&mut hout, (*slice).xsize, (*slice).ysize, 1, (*slice).mode);
         slice_mmm(slice);
         hout.amin = (*slice).min;
         hout.amax = (*slice).max;
         hout.amean = (*slice).mean;
-        if mrc_head_write(file, &mut hout) != 0 {
-            libc::fclose(file);
+        if mrc_head_write(&mut file, &mut hout) != 0 {
+            drop(file);
             return -2;
         }
-        let error = mrc_write_slice((*slice).data.b.cast(), file, &mut hout, 0, b'z' as i8);
-        libc::fclose(file);
+        let error = mrc_write_slice((*slice).data.b.cast(), &mut file, &mut hout, 0, b'z' as i8);
+        drop(file);
         error
     }
 }
@@ -1042,18 +1054,19 @@ mod tests {
                 slice_put_val(slice, (index % 3) as i32, (index / 3) as i32, [value; 4]);
             }
             assert_eq!(slice_write_mrcfile(path.as_ptr(), slice), 0);
-            let file = libc::fopen(path.as_ptr(), c"rb".as_ptr());
-            assert!(!file.is_null());
-            let mut header: MrcHeader = core::mem::zeroed();
+            let mut file =
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
+                    .unwrap();
+            let mut header = MrcHeader::default();
             assert_eq!(
-                crate::imod::libiimod::mrcfiles::mrc_head_read(file, &mut header),
+                crate::imod::libiimod::mrcfiles::mrc_head_read(&mut file, &mut header),
                 0
             );
             let mut values = [0_u8; 6];
             assert_eq!(
                 crate::imod::libiimod::mrcfiles::mrc_read_slice(
                     values.as_mut_ptr().cast(),
-                    file,
+                    &mut file,
                     &mut header,
                     0,
                     b'Z' as i8,
@@ -1061,7 +1074,7 @@ mod tests {
                 0
             );
             assert_eq!(values, [2, 7, 1, 8, 2, 8]);
-            assert_eq!(libc::fclose(file), 0);
+            drop(file);
             slice_free(slice);
             std::fs::remove_file(path.to_string_lossy().as_ref()).unwrap();
         }

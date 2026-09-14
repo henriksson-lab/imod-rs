@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::imod_backup_file;
-use std::ffi::CString;
 use std::fs::File;
 
 /// Source `common /hushcom/hush` with `data hush /.false./` (`dopen.f:32`).
@@ -23,8 +22,7 @@ pub fn dopen(iunit: i32, fname: &str, itype: &str, iform: &str) -> File {
     // DNM 10/20/03: changed to call subroutine, and clean up old stuff
     //
     if itype == "NEW" || itype == "new" {
-        let name = CString::new(fname.as_bytes()).unwrap_or_default();
-        let ierr = unsafe { imod_backup_file(name.as_ptr()) };
+        let ierr = imod_backup_file(fname);
         if ierr != 0 {
             println!("\nWARNING: DOPEN - Error attempting to rename existing file{fname}");
         }
