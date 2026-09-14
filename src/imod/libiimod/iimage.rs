@@ -8,7 +8,6 @@ use crate::imod::libcfshr::autodoc::{
 };
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_output_file_type};
-use crate::imod::libcfshr::ilist::{Ilist, ilist_dup};
 use crate::imod::libiimod::halffloat::imnp_floatbuf_to_halfs;
 use crate::imod::libiimod::hdf_imageio::{
     hdf_read_section_any as native_hdf_read_section_any,
@@ -112,7 +111,21 @@ thread_local! {
 /// entering foreign code so a callback may safely register a replacement.
 static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe extern "C" fn(i32) -> i32>> = Mutex::new(None);
 
-/// C `ImodImageFile` (`iimage.h`), in declaration order.
+/// One dataset in an HDF image stack.  It is entirely crate-owned state: HDF5
+/// receives the identifier and a temporary C-compatible path separately.
+#[derive(Clone)]
+pub struct StackSetData {
+    pub name: Option<Vec<u8>>,
+    pub dset_id: i64,
+    pub is_open: bool,
+}
+
+/// Crate-owned image-file state, derived from C `ImodImageFile` (`iimage.h`).
+///
+/// This is deliberately not a C-layout type: it contains Rust-owned strings,
+/// collections, and file handles.  The callback pointers are an internal
+/// dispatch table; no foreign library receives this structure by value or
+/// relies on its field offsets.
 ///
 /// `Clone` stands in for `iiCopyOpen`'s `memcpy` (`iimage.c:541`): three of the
 /// fields the source copies bitwise now own heap storage, so a bitwise copy
@@ -120,7 +133,6 @@ static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe extern "C" fn(i32) -> i32>> = Mute
 /// disguise 3).  Cloning duplicates them instead, and the four fields the
 /// source clears right afterwards are cleared just the same.
 #[derive(Clone)]
-#[repr(C)]
 pub struct ImodImageFile {
     /// C `char *filename`, represented as text within Rust.  `None` is the
     /// source's NULL; a NUL-terminated temporary is made only at an external
@@ -211,9 +223,9 @@ pub struct ImodImageFile {
     pub half_floats: i32,
     /// TIFF directory numbers collected while inspecting a multi-directory
     /// file.  This is internal Rust ownership.
-    pub directory_nums: Option<Box<Ilist>>,
+    pub directory_nums: Option<Vec<i32>>,
     /// HDF stack dataset entries owned by this image file.
-    pub stack_set_list: Option<Box<Ilist>>,
+    pub stack_set_list: Option<Vec<StackSetData>>,
     /// Maps Z sections to HDF datasets.  This was a manually managed C array;
     /// it is crate-owned state, so keep it as an owned Rust collection.
     pub z_to_data_set_map: Vec<i32>,
@@ -372,8 +384,10 @@ impl Default for ImodImageFile {
     }
 }
 
-/// C `RawImageInfo` (`iimage.h`), in declaration order.
-#[repr(C)]
+/// Crate-owned raw-image probe result, derived from C `RawImageInfo`.
+///
+/// It is passed only between Rust format probes and setup code, so it has no
+/// foreign-layout contract.
 pub struct RawImageInfo {
     pub type_: i32,
     pub nx: i32,
@@ -435,35 +449,37 @@ pub struct LineProcData {
     pub bytes_since_check: i32,
 }
 
-pub unsafe fn init_check_list() -> i32 {
+pub fn init_check_list() -> i32 {
     let mut checks = S_CHECK_LIST
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if !checks.is_empty() {
         return 0;
     }
-    checks.extend([
-        Some(core::mem::transmute::<
-            unsafe fn(*mut ImodImageFile) -> i32,
-            unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-        >(ii_tiff_check)),
-        Some(ii_mrc_check),
-        Some(core::mem::transmute::<
-            unsafe extern "C" fn(*mut crate::imod::libiimod::iilikemrc::ImodImageFile) -> i32,
-            unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-        >(ii_like_mrc_check)),
-        Some(core::mem::transmute::<
-            unsafe fn(*mut ImodImageFile) -> i32,
-            unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-        >(native_ii_hdf_check)),
-        Some(ii_jpeg_check),
-        Some(ii_adoc_check),
-    ]);
+    checks.extend(unsafe {
+        [
+            Some(core::mem::transmute::<
+                unsafe fn(*mut ImodImageFile) -> i32,
+                unsafe extern "C" fn(*mut ImodImageFile) -> i32,
+            >(ii_tiff_check)),
+            Some(ii_mrc_check),
+            Some(core::mem::transmute::<
+                unsafe extern "C" fn(*mut crate::imod::libiimod::iilikemrc::ImodImageFile) -> i32,
+                unsafe extern "C" fn(*mut ImodImageFile) -> i32,
+            >(ii_like_mrc_check)),
+            Some(core::mem::transmute::<
+                unsafe fn(*mut ImodImageFile) -> i32,
+                unsafe extern "C" fn(*mut ImodImageFile) -> i32,
+            >(native_ii_hdf_check)),
+            Some(ii_jpeg_check),
+            Some(ii_adoc_check),
+        ]
+    });
     drop(checks);
     tiff_filter_warnings();
     0
 }
-pub unsafe fn ii_add_check_function(func: IiFileCheckFunction) {
+pub fn ii_add_check_function(func: IiFileCheckFunction) {
     if init_check_list() == 0 {
         S_CHECK_LIST
             .lock()
@@ -471,7 +487,7 @@ pub unsafe fn ii_add_check_function(func: IiFileCheckFunction) {
             .push(func);
     }
 }
-pub unsafe fn ii_insert_check_function(func: IiFileCheckFunction, index: i32) {
+pub fn ii_insert_check_function(func: IiFileCheckFunction, index: i32) {
     if init_check_list() != 0 {
         return;
     }
@@ -487,18 +503,18 @@ pub unsafe fn ii_insert_check_function(func: IiFileCheckFunction, index: i32) {
         checks.push(func);
     }
 }
-pub unsafe fn ii_delete_check_list() {
+pub fn ii_delete_check_list() {
     S_CHECK_LIST
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clear();
 }
 /// Matches C `iiRegisterQuitCheck(int (*)(int))` (`iimage.c:121`).
-pub unsafe fn ii_register_quit_check(func: Option<unsafe extern "C" fn(i32) -> i32>) {
+pub fn ii_register_quit_check(func: Option<unsafe extern "C" fn(i32) -> i32>) {
     *S_QUIT_CHECK_FUNC.lock().unwrap() = func;
 }
 /// Matches C `iiCheckForQuit(int)` (`iimage.c:130`).
-pub unsafe fn ii_check_for_quit(param: i32) -> i32 {
+pub fn ii_check_for_quit(param: i32) -> i32 {
     let func = *S_QUIT_CHECK_FUNC.lock().unwrap();
     if let Some(func) = func {
         if unsafe { func(param) } != 0 {
@@ -651,7 +667,6 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
         return core::ptr::null_mut();
     }
     unsafe {
-        *libc::__errno_location() = 0;
         (*file).fp = if filename.is_empty() {
             Some(ImodFile::Stdin)
         } else {
@@ -664,8 +679,7 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
                     format_args!(
                         "ERROR: iiOpen - Opening file {} ({})\n",
                         String::from_utf8_lossy(filename),
-                        core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location()))
-                            .to_string_lossy()
+                        std::io::Error::last_os_error()
                     ),
                 );
             } else {
@@ -941,16 +955,8 @@ pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
         );
         return core::ptr::null_mut();
     }
-    if let Some(directory_nums) = (*in_file).directory_nums.as_deref() {
-        (*copy).directory_nums = ilist_dup(Some(directory_nums));
-        if (*copy).directory_nums.is_none() {
-            ii_delete(copy);
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("ERROR: iiCopyOpen - Memory error copying directory list\n"),
-            );
-            return core::ptr::null_mut();
-        }
+    if let Some(directory_nums) = (*in_file).directory_nums.as_ref() {
+        (*copy).directory_nums = Some(directory_nums.clone());
     }
     let err = ii_reopen(copy);
     if err != 0 {
@@ -991,10 +997,10 @@ pub unsafe fn ii_use_tiff_threads(in_file: *mut ImodImageFile, mut max_threads: 
     }
     S_TIFF_THREADS.with(|state| state.borrow().1)
 }
-pub unsafe fn ii_use_tiff_threads_for_fp(fp: &ImodFile, max_threads: i32) -> i32 {
+pub fn ii_use_tiff_threads_for_fp(fp: &ImodFile, max_threads: i32) -> i32 {
     match ii_lookup_file_from_fp(fp) {
         None => 0,
-        Some(file) => ii_use_tiff_threads(file, max_threads),
+        Some(file) => unsafe { ii_use_tiff_threads(file, max_threads) },
     }
 }
 pub unsafe fn ii_close_tiff_copies(in_file: *mut ImodImageFile) {
@@ -1009,9 +1015,9 @@ pub unsafe fn ii_close_tiff_copies(in_file: *mut ImodImageFile) {
         state.1 = 0;
     });
 }
-pub unsafe fn ii_close_tiff_copies_for_fp(fp: &ImodFile) {
+pub fn ii_close_tiff_copies_for_fp(fp: &ImodFile) {
     if let Some(file) = ii_lookup_file_from_fp(fp) {
-        ii_close_tiff_copies(file);
+        unsafe { ii_close_tiff_copies(file) };
     }
 }
 pub unsafe fn ii_open_copies_for_threads(
@@ -1216,7 +1222,7 @@ pub unsafe fn ii_file_change_address(old_file: *mut ImodImageFile, new_file: *mu
         unsafe { add_to_opened_list(new_file) };
     }
 }
-pub unsafe fn ii_fopen(filename: &[u8], mode: &str) -> Option<ImodFile> {
+pub fn ii_fopen(filename: &[u8], mode: &str) -> Option<ImodFile> {
     let file = unsafe { ii_open(filename, mode) };
     if file.is_null() {
         None
@@ -1324,53 +1330,42 @@ pub fn ii_allow_multi_volume(allow: i32) {
 }
 
 /// Matches C `iiSetChunkSizes(ImodImageFile *, int, int, int)` (`iimage.c:970`).
-pub unsafe fn ii_set_chunk_sizes(
-    in_file: *mut ImodImageFile,
+pub fn ii_set_chunk_sizes(
+    in_file: &mut ImodImageFile,
     x_size: i32,
     y_size: i32,
     z_size: i32,
 ) -> i32 {
-    if in_file.is_null()
-        || unsafe { (*in_file).file } != IIFILE_HDF
-        || unsafe { (*in_file).stack_set_list.as_ref() }.is_some()
-    {
-        unsafe {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "ERROR: iiSetChunkSizes - Attempting to set chunk sizes for a non-HDF file or an HDF file with a stack in it\n"
-                ),
-            );
-        }
+    if in_file.file != IIFILE_HDF || in_file.stack_set_list.is_some() {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiSetChunkSizes - Attempting to set chunk sizes for a non-HDF file or an HDF file with a stack in it\n"
+            ),
+        );
         return 1;
     }
-    if unsafe { (*in_file).dataset_name.is_some() } {
-        unsafe {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "ERROR: iiSetChunkSizes - The volume dataset properties have already been set and cannot be changed\n"
-                ),
-            );
-        }
+    if in_file.dataset_name.is_some() {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiSetChunkSizes - The volume dataset properties have already been set and cannot be changed\n"
+            ),
+        );
         return 1;
     }
     if x_size < 0 || y_size < 0 || z_size <= 0 {
-        unsafe {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "ERROR: iiSetChunkSizes - X and Y chunk sizes must be non-negative and Z size must be positive\n"
-                ),
-            );
-        }
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiSetChunkSizes - X and Y chunk sizes must be non-negative and Z size must be positive\n"
+            ),
+        );
         return 1;
     }
-    unsafe {
-        (*in_file).tile_size_x = x_size;
-        (*in_file).tile_size_y = y_size;
-        (*in_file).z_chunk_size = z_size;
-    }
+    in_file.tile_size_x = x_size;
+    in_file.tile_size_y = y_size;
+    in_file.z_chunk_size = z_size;
     0
 }
 pub unsafe fn ii_get_adoc_index(
@@ -1700,7 +1695,7 @@ pub unsafe fn ii_load_pcoord(
             && adoc_get_image_meta_info(&mut montage, &mut num_sect, &mut sect_type) == 0
         {
             crate::imod::libiimod::plist::ii_plist_from_autodoc(
-                adoc_index, 0, li, nx, ny, nz, montage, num_sect, sect_type,
+                adoc_index, 0, &mut *li, nx, ny, nz, montage, num_sect, sect_type,
             );
         }
         return 0;
@@ -1713,13 +1708,9 @@ pub unsafe fn ii_load_pcoord(
     }
     if (*li).plist == 0 && use_mdoc != 0 {
         crate::imod::libiimod::plist::ii_plist_from_metadata(
-            (*in_file)
-                .filename
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
+            (*in_file).filename.as_deref().unwrap_or_default(),
             1,
-            li,
+            &mut *li,
             nx,
             ny,
             nz,
@@ -1988,7 +1979,7 @@ pub unsafe fn hdf_write_section_any(
     native_hdf_write_section_any(in_file, buf, cz, from_float)
 }
 pub unsafe fn init_new_hdffile(in_file: *mut ImodImageFile) -> i32 {
-    native_init_new_hdf_file(in_file)
+    native_init_new_hdf_file(&mut *in_file)
 }
 #[cfg(test)]
 mod tests {
@@ -2230,30 +2221,28 @@ mod tests {
         ii_change_call_count(-9);
         assert_eq!(ii_calling_read_or_write(), 0);
 
-        unsafe {
-            let mut image_file = ImodImageFile::default();
-            image_file.file = IIFILE_HDF;
-            assert_eq!(ii_set_chunk_sizes(&mut image_file, 64, 32, 2), 0);
-            assert_eq!(
-                (
-                    image_file.tile_size_x,
-                    image_file.tile_size_y,
-                    image_file.z_chunk_size
-                ),
-                (64, 32, 2)
-            );
-            crate::imod::libcfshr::b3dutil::b3d_set_store_error(1);
-            assert_eq!(ii_set_chunk_sizes(&mut image_file, -1, 32, 2), 1);
-            crate::imod::libcfshr::b3dutil::b3d_set_store_error(0);
-            assert_eq!(
-                (
-                    image_file.tile_size_x,
-                    image_file.tile_size_y,
-                    image_file.z_chunk_size
-                ),
-                (64, 32, 2)
-            );
-        }
+        let mut image_file = ImodImageFile::default();
+        image_file.file = IIFILE_HDF;
+        assert_eq!(ii_set_chunk_sizes(&mut image_file, 64, 32, 2), 0);
+        assert_eq!(
+            (
+                image_file.tile_size_x,
+                image_file.tile_size_y,
+                image_file.z_chunk_size
+            ),
+            (64, 32, 2)
+        );
+        crate::imod::libcfshr::b3dutil::b3d_set_store_error(1);
+        assert_eq!(ii_set_chunk_sizes(&mut image_file, -1, 32, 2), 1);
+        crate::imod::libcfshr::b3dutil::b3d_set_store_error(0);
+        assert_eq!(
+            (
+                image_file.tile_size_x,
+                image_file.tile_size_y,
+                image_file.z_chunk_size
+            ),
+            (64, 32, 2)
+        );
     }
 
     #[test]

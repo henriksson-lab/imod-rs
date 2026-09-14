@@ -3427,11 +3427,9 @@ impl crate::imod::three_dmod::mv_input::MvInputNativeBoundary for ImodvNativeSin
         let gl = std::rc::Rc::clone(&self.gl);
         let mut gl = gl.borrow_mut();
         let mut state = std::mem::take(&mut gl.state);
-        unsafe {
-            crate::imod::three_dmod::mv_ogl::find_clicked_drawn_element(
-                &mut state, a, cur_obj, mo_num, ob_num, co_num, pt_num,
-            )
-        };
+        crate::imod::three_dmod::mv_ogl::find_clicked_drawn_element(
+            &mut state, a, cur_obj, mo_num, ob_num, co_num, pt_num,
+        );
         gl.state = state;
     }
     /// `a->mainWin->mTimer->start(interval)` then `timerId()`.

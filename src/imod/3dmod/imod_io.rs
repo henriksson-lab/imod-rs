@@ -276,11 +276,7 @@ pub fn saveas_model(
     imod_make_backup(state, &name);
     let Some(file) = ImodFile::open(&name.to_string_lossy(), "w") else {
         imod_undo_backup(state);
-        state.last_error = map_errno(
-            io::Error::last_os_error()
-                .raw_os_error()
-                .unwrap_or_default(),
-        );
+        state.last_error = map_errno(io::Error::last_os_error());
         return state.last_error;
     };
     let ret = write_model(state, model, view, file, &name, native);
@@ -365,11 +361,7 @@ pub fn load_model_file(
         .map(PathBuf::from)
         .or_else(|| native.choose_load_name())?;
     let Some(mut file) = ImodFile::open(&path.to_string_lossy(), "r") else {
-        state.last_error = map_errno(
-            io::Error::last_os_error()
-                .raw_os_error()
-                .unwrap_or_default(),
-        );
+        state.last_error = map_errno(io::Error::last_os_error());
         return None;
     };
     native.print("Loading... ");
@@ -557,11 +549,11 @@ pub fn imod_io_get_error_string(state: &ImodIoState) -> &'static str {
     }
 }
 /// Private `mapErrno`.
-pub fn map_errno(error: i32) -> i32 {
-    match error {
-        x if x == libc::ENOMEM => IMOD_IO_NOMEM,
-        x if x == libc::EACCES => IMOD_IO_NO_ACCESS_ERROR,
-        x if x == libc::ENOENT => IMOD_IO_DOES_NOT_EXIST,
+pub fn map_errno(error: io::Error) -> i32 {
+    match error.kind() {
+        io::ErrorKind::OutOfMemory => IMOD_IO_NOMEM,
+        io::ErrorKind::PermissionDenied => IMOD_IO_NO_ACCESS_ERROR,
+        io::ErrorKind::NotFound => IMOD_IO_DOES_NOT_EXIST,
         _ => IMOD_IO_UNIMPLEMENTED_ERROR,
     }
 }
@@ -615,6 +607,21 @@ mod tests {
                 .bytes()
                 .enumerate()
                 .all(|(index, byte)| index == 2 || index == 5 || byte.is_ascii_digit())
+        );
+    }
+    #[test]
+    fn io_error_kinds_keep_source_error_mapping() {
+        assert_eq!(
+            map_errno(io::Error::from(io::ErrorKind::OutOfMemory)),
+            IMOD_IO_NOMEM
+        );
+        assert_eq!(
+            map_errno(io::Error::from(io::ErrorKind::PermissionDenied)),
+            IMOD_IO_NO_ACCESS_ERROR
+        );
+        assert_eq!(
+            map_errno(io::Error::from(io::ErrorKind::NotFound)),
+            IMOD_IO_DOES_NOT_EXIST
         );
     }
     #[test]

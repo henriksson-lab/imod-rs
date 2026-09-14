@@ -447,7 +447,7 @@ pub fn imod_main(arguments: &[String]) -> Result<i32, String> {
     *APP.lock().unwrap() = Some(app);
     // `imod.cpp:814`: QImage is deliberately appended after the default
     // image checks so registered plugins retain their source precedence.
-    unsafe { ii_add_check_function(Some(super::iiqimage::ii_q_image_check)) };
+    ii_add_check_function(Some(super::iiqimage::ii_q_image_check));
     if launch.imodv {
         // `imod.cpp` calls `imodv_main(argcHere, argv)` here.  `imodv.rs`
         // deliberately retains the source C-compatible entry signature.
@@ -455,7 +455,7 @@ pub fn imod_main(arguments: &[String]) -> Result<i32, String> {
             .iter()
             .map(|argument| argument.as_bytes().to_vec())
             .collect::<Vec<_>>();
-        let status = unsafe { super::imodv::imodv_main(strings.len() as i32, &strings) };
+        let status = super::imodv::imodv_main(strings.len() as i32, &strings);
         if status == 0 {
             return Ok(0);
         }

@@ -1,8 +1,6 @@
 //! Translation of `IMOD/3dmod/form_rawimage.cpp` and `form_rawimage.h`.
 #![allow(dead_code)]
 
-use core::ffi::c_void;
-
 use crate::imod::libiimod::iimage::RawImageInfo;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,15 +18,15 @@ pub trait RawImageNativeBoundary {
     fn setup_ui(&mut self);
     fn set_modal(&mut self, modal: bool);
     fn set_always_show_tool_tips(&mut self);
-    fn create_button_group(&mut self) -> *mut c_void;
-    fn group_add_button(&mut self, group: *mut c_void, button: RawImageDataTypeButton, id: i32);
+    fn create_button_group(&mut self);
+    fn group_add_button(&mut self, button: RawImageDataTypeButton, id: i32);
     fn connect_ok_accept(&mut self);
     fn connect_cancel_reject(&mut self);
     fn connect_scan_toggled_manage_state(&mut self);
-    fn connect_group_clicked_manage_state(&mut self, group: *mut c_void);
+    fn connect_group_clicked_manage_state(&mut self);
     fn retranslate_ui(&mut self);
     fn set_file_label(&mut self, value: String);
-    fn set_group(&mut self, group: *mut c_void, value: i32);
+    fn set_group(&mut self, value: i32);
     fn set_x_size(&mut self, value: i32);
     fn set_y_size(&mut self, value: i32);
     fn set_z_size(&mut self, value: i32);
@@ -39,7 +37,7 @@ pub trait RawImageNativeBoundary {
     fn set_scan_checked(&mut self, value: bool);
     fn set_min_text(&mut self, value: String);
     fn set_max_text(&mut self, value: String);
-    fn checked_group_id(&self, group: *mut c_void) -> Option<i32>;
+    fn checked_group_id(&self) -> Option<i32>;
     fn x_size(&self) -> i32;
     fn y_size(&self) -> i32;
     fn z_size(&self) -> i32;
@@ -58,28 +56,26 @@ pub trait RawImageNativeBoundary {
     fn set_max_enabled(&mut self, value: bool);
 }
 
-pub struct RawImageForm {
-    pub data_type_group: *mut c_void,
-}
+pub struct RawImageForm;
 
 impl RawImageForm {
     pub fn new(modal: bool, native: &mut dyn RawImageNativeBoundary) -> Self {
         native.setup_ui();
         native.set_modal(modal);
         native.set_always_show_tool_tips();
-        let data_type_group = native.create_button_group();
-        native.group_add_button(data_type_group, RawImageDataTypeButton::SbyteButton, 0);
-        native.group_add_button(data_type_group, RawImageDataTypeButton::ByteButton, 1);
-        native.group_add_button(data_type_group, RawImageDataTypeButton::IntButton, 2);
-        native.group_add_button(data_type_group, RawImageDataTypeButton::UintButton, 3);
-        native.group_add_button(data_type_group, RawImageDataTypeButton::FloatButton, 4);
-        native.group_add_button(data_type_group, RawImageDataTypeButton::ComplexButton, 5);
-        native.group_add_button(data_type_group, RawImageDataTypeButton::RgbButton, 6);
+        native.create_button_group();
+        native.group_add_button(RawImageDataTypeButton::SbyteButton, 0);
+        native.group_add_button(RawImageDataTypeButton::ByteButton, 1);
+        native.group_add_button(RawImageDataTypeButton::IntButton, 2);
+        native.group_add_button(RawImageDataTypeButton::UintButton, 3);
+        native.group_add_button(RawImageDataTypeButton::FloatButton, 4);
+        native.group_add_button(RawImageDataTypeButton::ComplexButton, 5);
+        native.group_add_button(RawImageDataTypeButton::RgbButton, 6);
         native.connect_ok_accept();
         native.connect_cancel_reject();
         native.connect_scan_toggled_manage_state();
-        native.connect_group_clicked_manage_state(data_type_group);
-        Self { data_type_group }
+        native.connect_group_clicked_manage_state();
+        Self
     }
 
     pub fn destroy(&mut self) {}
@@ -95,7 +91,7 @@ impl RawImageForm {
         native: &mut dyn RawImageNativeBoundary,
     ) {
         native.set_file_label(format!("File: {file_name}"));
-        native.set_group(self.data_type_group, info.type_);
+        native.set_group(info.type_);
         native.set_x_size(info.nx);
         native.set_y_size(info.ny);
         native.set_z_size(info.nz);
@@ -110,7 +106,7 @@ impl RawImageForm {
     }
 
     pub fn unload(&self, info: &mut RawImageInfo, native: &dyn RawImageNativeBoundary) {
-        if let Some(ind) = native.checked_group_id(self.data_type_group) {
+        if let Some(ind) = native.checked_group_id() {
             info.type_ = ind;
         }
         info.nx = native.x_size();
@@ -126,7 +122,7 @@ impl RawImageForm {
     }
 
     pub fn manage_state(&mut self, native: &mut dyn RawImageNativeBoundary) {
-        let Some(which) = native.checked_group_id(self.data_type_group) else {
+        let Some(which) = native.checked_group_id() else {
             return;
         };
         let enab = which != 6 && !native.scan_checked();
@@ -166,10 +162,8 @@ mod tests {
         fn setup_ui(&mut self) {}
         fn set_modal(&mut self, _: bool) {}
         fn set_always_show_tool_tips(&mut self) {}
-        fn create_button_group(&mut self) -> *mut c_void {
-            core::ptr::dangling_mut()
-        }
-        fn group_add_button(&mut self, _: *mut c_void, button: RawImageDataTypeButton, id: i32) {
+        fn create_button_group(&mut self) {}
+        fn group_add_button(&mut self, button: RawImageDataTypeButton, id: i32) {
             self.buttons.push((button, id));
         }
         fn connect_ok_accept(&mut self) {
@@ -181,14 +175,14 @@ mod tests {
         fn connect_scan_toggled_manage_state(&mut self) {
             self.connections += 1;
         }
-        fn connect_group_clicked_manage_state(&mut self, _: *mut c_void) {
+        fn connect_group_clicked_manage_state(&mut self) {
             self.connections += 1;
         }
         fn retranslate_ui(&mut self) {}
         fn set_file_label(&mut self, value: String) {
             self.label = value;
         }
-        fn set_group(&mut self, _: *mut c_void, value: i32) {
+        fn set_group(&mut self, value: i32) {
             self.group = Some(value);
         }
         fn set_x_size(&mut self, value: i32) {
@@ -221,7 +215,7 @@ mod tests {
         fn set_max_text(&mut self, value: String) {
             self.max = value;
         }
-        fn checked_group_id(&self, _: *mut c_void) -> Option<i32> {
+        fn checked_group_id(&self) -> Option<i32> {
             self.group
         }
         fn x_size(&self) -> i32 {

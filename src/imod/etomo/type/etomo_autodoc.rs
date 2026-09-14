@@ -68,20 +68,11 @@ static DEBUG: AtomicBool = AtomicBool::new(false);
 
 /// Java `getTooltip(String, ReadOnlySection, boolean)`.
 ///
-/// # Safety
-/// `section` must be null or point to a live `ReadOnlySection`.
-pub unsafe fn get_tooltip_add_source(
+pub fn get_tooltip_add_source(
     autodoc_name: Option<&str>,
-    section: *const (dyn ReadOnlySection + '_),
+    section: &dyn ReadOnlySection,
     add_source: bool,
 ) -> Option<String> {
-    if section.is_null() {
-        if DEBUG.load(Ordering::Relaxed) {
-            println!("EtomoAutodoc.getTooltip:section is null");
-        }
-        return None;
-    }
-    let section: &dyn ReadOnlySection = unsafe { &*section };
     let mut text: Option<String> = None;
     let mut attribute: *mut Attribute =
         unsafe { section.get_attribute(Some(TOOLTIP_ATTRIBUTE_NAME)) };
@@ -125,7 +116,7 @@ pub unsafe fn get_tooltip_add_source(
         if add_source {
             let source = format!(
                 "({})",
-                match unsafe { get_source_tooltip_string(autodoc_name, section) } {
+                match get_source_tooltip_string(autodoc_name, section) {
                     None => "null".to_string(),
                     Some(source) => source,
                 }
@@ -143,19 +134,10 @@ pub unsafe fn get_tooltip_add_source(
 
 /// Java `getSourceTooltipString(String, ReadOnlySection)`.
 ///
-/// # Safety
-/// `section` must be null or point to a live `ReadOnlySection`.
-pub unsafe fn get_source_tooltip_string(
+pub fn get_source_tooltip_string(
     autodoc_name: Option<&str>,
-    section: *const (dyn ReadOnlySection + '_),
+    section: &dyn ReadOnlySection,
 ) -> Option<String> {
-    if section.is_null() {
-        if DEBUG.load(Ordering::Relaxed) {
-            println!("EtomoAutodoc.getSourceTooltipString:section is null");
-        }
-        return None;
-    }
-    let section: &dyn ReadOnlySection = unsafe { &*section };
     Some(format!(
         "{}: {}",
         autodoc_name.unwrap_or("null"),
@@ -168,9 +150,7 @@ pub unsafe fn get_source_tooltip_string(
 
 /// Java `getTooltip(String, ReadOnlySection, String)`.
 ///
-/// # Safety
-/// `section` must point to a live `ReadOnlySection`.
-pub unsafe fn get_tooltip_enum_value_name(
+pub fn get_tooltip_enum_value_name(
     autodoc_name: Option<&str>,
     section: &dyn ReadOnlySection,
     enum_value_name: Option<&str>,
@@ -213,9 +193,9 @@ pub unsafe fn get_tooltip_enum_value_name(
             }
             return Some(enum_tooltip + " " + &source + ".");
         }
-        return unsafe { get_tooltip_add_source(autodoc_name, section, true) };
+        return get_tooltip_add_source(autodoc_name, section, true);
     }
-    unsafe { get_tooltip_add_source(autodoc_name, section, true) }
+    get_tooltip_add_source(autodoc_name, section, true)
 }
 
 /// Java `getTooltip(ReadOnlyAutodoc, String)`.
@@ -230,13 +210,18 @@ pub unsafe fn get_tooltip(
         return None;
     }
     let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    unsafe {
-        get_tooltip_add_source(
-            Some(&autodoc.get_autodoc_name()),
-            autodoc.get_section(Some(FIELD_SECTION_NAME), field_name),
-            true,
-        )
+    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    if section.is_null() {
+        if DEBUG.load(Ordering::Relaxed) {
+            println!("EtomoAutodoc.getTooltip:section is null");
+        }
+        return None;
     }
+    get_tooltip_add_source(
+        Some(&autodoc.get_autodoc_name()),
+        unsafe { &*section },
+        true,
+    )
 }
 
 /// Java `getUnformattedTooltip(ReadOnlyAutodoc, String)`.
@@ -251,13 +236,18 @@ pub unsafe fn get_unformatted_tooltip(
         return None;
     }
     let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    unsafe {
-        get_tooltip_add_source(
-            Some(&autodoc.get_autodoc_name()),
-            autodoc.get_section(Some(FIELD_SECTION_NAME), field_name),
-            false,
-        )
+    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    if section.is_null() {
+        if DEBUG.load(Ordering::Relaxed) {
+            println!("EtomoAutodoc.getTooltip:section is null");
+        }
+        return None;
     }
+    get_tooltip_add_source(
+        Some(&autodoc.get_autodoc_name()),
+        unsafe { &*section },
+        false,
+    )
 }
 
 /// Java `getSourceTooltipString(ReadOnlyAutodoc, String)`.
@@ -272,12 +262,14 @@ pub unsafe fn get_source_tooltip_string_autodoc(
         return None;
     }
     let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    unsafe {
-        get_source_tooltip_string(
-            Some(&autodoc.get_autodoc_name()),
-            autodoc.get_section(Some(FIELD_SECTION_NAME), field_name),
-        )
+    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    if section.is_null() {
+        if DEBUG.load(Ordering::Relaxed) {
+            println!("EtomoAutodoc.getSourceTooltipString:section is null");
+        }
+        return None;
     }
+    get_source_tooltip_string(Some(&autodoc.get_autodoc_name()), unsafe { &*section })
 }
 
 /// Java `getTooltip(ReadOnlyAutodoc, String, boolean)`.
@@ -293,13 +285,18 @@ pub unsafe fn get_tooltip_autodoc_add_source(
         return None;
     }
     let autodoc: &dyn ReadOnlyAutodoc = unsafe { &*autodoc };
-    unsafe {
-        get_tooltip_add_source(
-            Some(&autodoc.get_autodoc_name()),
-            autodoc.get_section(Some(FIELD_SECTION_NAME), field_name),
-            add_source,
-        )
+    let section = autodoc.get_section(Some(FIELD_SECTION_NAME), field_name);
+    if section.is_null() {
+        if DEBUG.load(Ordering::Relaxed) {
+            println!("EtomoAutodoc.getTooltip:section is null");
+        }
+        return None;
     }
+    get_tooltip_add_source(
+        Some(&autodoc.get_autodoc_name()),
+        unsafe { &*section },
+        add_source,
+    )
 }
 
 /// Java `removeFormatting(String)`.  Removes formatting strings.
@@ -472,33 +469,38 @@ pub fn format(value: Option<&str>) -> Option<Vec<String>> {
 
 /// Java `getTooltip(String, ReadOnlySection, ConstEtomoNumber)`.
 ///
-/// # Safety
-/// `section` must point to a live `ReadOnlySection`.
-pub unsafe fn get_tooltip_const_etomo_number(
+pub fn get_tooltip_const_etomo_number(
     autodoc_name: Option<&str>,
     section: &dyn ReadOnlySection,
     enum_value_name: &ConstEtomoNumber,
 ) -> Option<String> {
-    unsafe {
-        get_tooltip_enum_value_name(autodoc_name, section, Some(&enum_value_name.to_string()))
-    }
+    get_tooltip_enum_value_name(autodoc_name, section, Some(&enum_value_name.to_string()))
 }
 
 /// Java `getTooltip(String, ReadOnlySection, int)`.
 ///
-/// # Safety
-/// `section` must point to a live `ReadOnlySection`.
-pub unsafe fn get_tooltip_int(
+pub fn get_tooltip_int(
     autodoc_name: Option<&str>,
     section: &dyn ReadOnlySection,
     enum_value_name: i32,
 ) -> Option<String> {
-    unsafe {
-        get_tooltip_enum_value_name(autodoc_name, section, Some(&enum_value_name.to_string()))
-    }
+    get_tooltip_enum_value_name(autodoc_name, section, Some(&enum_value_name.to_string()))
 }
 
 /// Java `setDebug(boolean)`.
 pub fn set_debug(debug: bool) {
     DEBUG.store(debug, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_formatting_preserves_plain_tooltip_text() {
+        assert_eq!(
+            remove_formatting(Some("plain tooltip text")),
+            Some("plain tooltip text".to_string())
+        );
+    }
 }

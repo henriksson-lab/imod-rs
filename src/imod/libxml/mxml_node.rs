@@ -41,10 +41,11 @@ pub fn mxml_add(
 
     match where_ {
         MXML_ADD_BEFORE => {
-            if child.is_none()
-                || child == arena.node(parent).child
-                || arena.node(child.unwrap()).parent != Some(parent)
-            {
+            let child = child.filter(|child| {
+                Some(*child) != arena.node(parent).child
+                    && arena.node(*child).parent == Some(parent)
+            });
+            let Some(child) = child else {
                 /*
                  * Insert as first node under parent...
                  */
@@ -58,12 +59,12 @@ pub fn mxml_add(
                 }
 
                 arena.node_mut(parent).child = Some(node);
-            } else {
+                return;
+            };
+            {
                 /*
                  * Insert node before this child...
                  */
-
-                let child = child.unwrap();
 
                 arena.node_mut(node).next = Some(child);
                 arena.node_mut(node).prev = arena.node(child).prev;
@@ -79,10 +80,11 @@ pub fn mxml_add(
         }
 
         MXML_ADD_AFTER => {
-            if child.is_none()
-                || child == arena.node(parent).last_child
-                || arena.node(child.unwrap()).parent != Some(parent)
-            {
+            let child = child.filter(|child| {
+                Some(*child) != arena.node(parent).last_child
+                    && arena.node(*child).parent == Some(parent)
+            });
+            let Some(child) = child else {
                 /*
                  * Insert as last node under parent...
                  */
@@ -97,12 +99,12 @@ pub fn mxml_add(
                 }
 
                 arena.node_mut(parent).last_child = Some(node);
-            } else {
+                return;
+            };
+            {
                 /*
                  * Insert node after this child...
                  */
-
-                let child = child.unwrap();
 
                 arena.node_mut(node).prev = Some(child);
                 arena.node_mut(node).next = arena.node(child).next;
@@ -212,21 +214,17 @@ pub fn mxml_new_cdata(
     parent: Option<usize>,
     data: Option<&[u8]>,
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Range check input...
      */
 
-    let Some(data) = data else {
-        return None;
-    };
+    let data = data?;
 
     /*
      * Create the node and set the name value...
      */
 
-    node = mxml_new(arena, parent, MXML_ELEMENT);
+    let node = mxml_new(arena, parent, MXML_ELEMENT);
     if let Some(node) = node
         && let MxmlValue::Element(element) = &mut arena.node_mut(node).value
     {
@@ -243,13 +241,11 @@ pub fn mxml_new_custom(
     data: Option<Box<dyn Any>>,
     destroy: MxmlCustomDestroyCb,
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Create the node and set the value...
      */
 
-    node = mxml_new(arena, parent, MXML_CUSTOM);
+    let node = mxml_new(arena, parent, MXML_CUSTOM);
     if let Some(node) = node
         && let MxmlValue::Custom(custom) = &mut arena.node_mut(node).value
     {
@@ -266,21 +262,17 @@ pub fn mxml_new_element(
     parent: Option<usize>,
     name: Option<&[u8]>,
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Range check input...
      */
 
-    let Some(name) = name else {
-        return None;
-    };
+    let name = name?;
 
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(arena, parent, MXML_ELEMENT);
+    let node = mxml_new(arena, parent, MXML_ELEMENT);
     if let Some(node) = node
         && let MxmlValue::Element(element) = &mut arena.node_mut(node).value
     {
@@ -296,13 +288,11 @@ pub fn mxml_new_integer(
     parent: Option<usize>,
     integer: i32,
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(arena, parent, MXML_INTEGER);
+    let node = mxml_new(arena, parent, MXML_INTEGER);
     if let Some(node) = node {
         arena.node_mut(node).value = MxmlValue::Integer(integer);
     }
@@ -316,21 +306,17 @@ pub fn mxml_new_opaque(
     parent: Option<usize>,
     opaque: Option<&[u8]>,
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Range check input...
      */
 
-    let Some(opaque) = opaque else {
-        return None;
-    };
+    let opaque = opaque?;
 
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(arena, parent, MXML_OPAQUE);
+    let node = mxml_new(arena, parent, MXML_OPAQUE);
     if let Some(node) = node {
         arena.node_mut(node).value = MxmlValue::Opaque(Some(opaque.to_vec()));
     }
@@ -340,13 +326,11 @@ pub fn mxml_new_opaque(
 
 /// Matches C `mxmlNewReal` (`mxml-node.c:442`).
 pub fn mxml_new_real(arena: &mut MxmlArena, parent: Option<usize>, real: f64) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Create the node and set the element name...
      */
 
-    node = mxml_new(arena, parent, MXML_REAL);
+    let node = mxml_new(arena, parent, MXML_REAL);
     if let Some(node) = node {
         arena.node_mut(node).value = MxmlValue::Real(real);
     }
@@ -361,21 +345,17 @@ pub fn mxml_new_text(
     whitespace: i32,
     string: Option<&[u8]>,
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Range check input...
      */
 
-    let Some(string) = string else {
-        return None;
-    };
+    let string = string?;
 
     /*
      * Create the node and set the text value...
      */
 
-    node = mxml_new(arena, parent, MXML_TEXT);
+    let node = mxml_new(arena, parent, MXML_TEXT);
     if let Some(node) = node
         && let MxmlValue::Text(text) = &mut arena.node_mut(node).value
     {
@@ -398,21 +378,17 @@ pub fn mxml_new_textf(
     format: Option<&[u8]>,
     arg: &[u8],
 ) -> Option<usize> {
-    let node: Option<usize>;
-
     /*
      * Range check input...
      */
 
-    let Some(format) = format else {
-        return None;
-    };
+    let format = format?;
 
     /*
      * Create the node and set the text value...
      */
 
-    node = mxml_new(arena, parent, MXML_TEXT);
+    let node = mxml_new(arena, parent, MXML_TEXT);
     if let Some(node) = node {
         let string = _mxml_vstrdupf(format, arg);
         if let MxmlValue::Text(text) = &mut arena.node_mut(node).value {

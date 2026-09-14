@@ -14,7 +14,7 @@
 //! (`zoomdown.c:314`) becomes a [`FiltBuf`].
 #![allow(dead_code)]
 
-use crate::imod::libcfshr::b3dutil::{CArg, b3d_omp_thread_num, c_format, num_omp_threads};
+use crate::imod::libcfshr::b3dutil::{b3d_omp_thread_num, num_omp_threads};
 use core::cell::Cell;
 
 pub type B3dInt16 = i16;
@@ -1228,20 +1228,7 @@ fn make_weighttab(
         1. / den
     };
     if zoom_debug > 1 {
-        eprint!(
-            "{}",
-            c_format(
-                "    b=%d cen=%g scale=%g [%d..%d) sc=%g:  ",
-                &[
-                    CArg::Int(b as i64),
-                    CArg::Dbl(cen),
-                    CArg::Dbl(scale),
-                    CArg::Int(i0 as i64),
-                    CArg::Int(i1 as i64),
-                    CArg::Dbl(sc),
-                ]
-            )
-        );
+        eprint!("    b={b} cen={cen} scale={scale} [{i0}..{i1}) sc={sc}:  ");
     }
 
     /* compute the discrete, sampled filter coefficients */
@@ -1316,10 +1303,7 @@ fn make_weighttab(
             }
             let t = WEIGHTONE - sum;
             if zoom_debug > 1 {
-                eprint!(
-                    "{}",
-                    c_format("[%d]+=%d ", &[CArg::Int(i as i64), CArg::Int(t as i64)])
-                );
+                eprint!("[{i}]+={t} ");
             }
             if let WeightBuf::Short(s) = &mut *wgt {
                 let idx = off + (i - i0) as usize;
@@ -1335,7 +1319,7 @@ fn make_weighttab(
                     let mut i = i0;
                     let mut wp = 0usize;
                     while i < i1 {
-                        eprint!("{}", c_format("%5d ", &[CArg::Int(s[off + wp] as i64)]));
+                        eprint!("{:>5} ", s[off + wp]);
                         i += 1;
                         wp += 1;
                     }
@@ -1345,10 +1329,7 @@ fn make_weighttab(
                 if short_wgts == 0 {
                     let mut i = i0;
                     while i < i1 {
-                        eprint!(
-                            "{}",
-                            c_format("%.4f ", &[CArg::Dbl(f[off + (i - i0) as usize] as f64)])
-                        );
+                        eprint!("{:.4} ", f[off + (i - i0) as usize]);
                         i += 1;
                     }
                 }
@@ -1512,5 +1493,21 @@ mod tests {
             0
         );
         assert_eq!(float_out, [3.5, 5.5, 11.5, 13.5]);
+    }
+
+    #[test]
+    fn contiguous_float_slice_entry_point_reduces_image() {
+        let mut width = 0;
+        assert_eq!(select_zoom_filter(0, 0.5, &mut width), 0);
+        let input = [
+            1_f32, 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
+        ];
+        let mut output = [0_f32; 4];
+
+        assert_eq!(
+            zoomwithfilter(&input, &4, &4, &0., &0., &2, &2, &2, &0, &mut output,),
+            0
+        );
+        assert_eq!(output, [3.5, 5.5, 11.5, 13.5]);
     }
 }

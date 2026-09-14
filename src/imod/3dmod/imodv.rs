@@ -397,17 +397,17 @@ pub fn imodv_init(a: &mut ImodvApp) -> i32 {
 ///
 /// This is the state transition used when the model viewer is opened from an
 /// existing 3dmod image view, as opposed to standalone `3dmodv`.
-pub unsafe fn initstruct(vw: &mut ImodView, a: &mut ImodvApp) {
+pub fn initstruct(vw: &mut ImodView, a: &mut ImodvApp) {
     imodv_init(a);
     a.num_mods = 1;
     a.mod_.push(vw.imod);
     a.imod = vw.imod;
-    if !a.imod.is_null()
-        && (*a.imod).cindex.object >= 0
-        && ((*a.imod).cindex.object as usize) < (*a.imod).obj.len()
+    if let Some(imod) = unsafe { a.imod.as_mut() }
+        && imod.cindex.object >= 0
+        && (imod.cindex.object as usize) < imod.obj.len()
     {
-        a.obj_num = (*a.imod).cindex.object;
-        a.obj = &mut (&mut (*a.imod).obj)[a.obj_num as usize];
+        a.obj_num = imod.cindex.object;
+        a.obj = &mut imod.obj[a.obj_num as usize];
     }
     a.fullscreen = 0;
     a.standalone = 0;
@@ -415,25 +415,23 @@ pub unsafe fn initstruct(vw: &mut ImodView, a: &mut ImodvApp) {
     a.tex_trans = 0;
     a.owned_vi = None;
     a.vi = vw;
-    if a.imod.is_null() {
+    let Some(imod) = (unsafe { a.imod.as_mut() }) else {
         return;
-    }
+    };
     let image_max = Ipoint {
         x: vw.xsize as f32,
         y: vw.ysize as f32,
         z: vw.zsize as f32,
     };
     let bin_scale = vw.zbin as f32 / vw.xybin as f32;
-    let view_count = (*a.imod).view.len();
-    for i in 0..view_count {
-        let imod = a.imod as *const Imod;
-        let view = &mut (&mut (*a.imod).view)[i];
-        imod_view_default_scale(&*imod, view, &image_max, bin_scale);
+    let imod_ref = imod as *const Imod;
+    for view in &mut imod.view {
+        unsafe { imod_view_default_scale(&*imod_ref, view, &image_max, bin_scale) };
     }
 }
 
 /// Original static: `load_models` (`imodv.cpp:483`).
-pub unsafe fn load_models(n: i32, fname: &[Vec<u8>], a: &mut ImodvApp) -> i32 {
+pub fn load_models(n: i32, fname: &[Vec<u8>], a: &mut ImodvApp) -> i32 {
     if n < 1 {
         return 0;
     }
@@ -451,20 +449,23 @@ pub unsafe fn load_models(n: i32, fname: &[Vec<u8>], a: &mut ImodvApp) -> i32 {
             .last_mut()
             .expect("model was just pushed")
             .as_mut();
-        let model = model as *mut Imod;
         a.mod_.push(model);
         let image_max = Ipoint::default();
-        let view_count = (*model).view.len();
-        for j in 0..view_count {
-            let imod = model as *const Imod;
-            let view = &mut (&mut (*model).view)[j];
-            imod_view_default_scale(&*imod, view, &image_max, 1.);
+        let view_count = model.view.len();
+        let imod = model as *const Imod;
+        for view in &mut model.view {
+            unsafe { imod_view_default_scale(&*imod, view, &image_max, 1.) };
         }
     }
-    a.imod = a.mod_[0];
-    if (*a.imod).cindex.object >= 0 && ((*a.imod).cindex.object as usize) < (*a.imod).obj.len() {
-        a.obj_num = (*a.imod).cindex.object;
-        a.obj = &mut (&mut (*a.imod).obj)[a.obj_num as usize];
+    let model = a
+        .owned_models
+        .first_mut()
+        .expect("at least one model was loaded")
+        .as_mut();
+    a.imod = model;
+    if model.cindex.object >= 0 && (model.cindex.object as usize) < model.obj.len() {
+        a.obj_num = model.cindex.object;
+        a.obj = &mut model.obj[a.obj_num as usize];
     }
     0
 }
@@ -497,7 +498,7 @@ pub fn open_window(a: &mut ImodvApp) -> i32 {
 }
 
 /// Original: `imodvMain` (`imodv.cpp:536`).
-pub unsafe fn imodv_main(argc: i32, argv: &[Vec<u8>]) -> i32 {
+pub fn imodv_main(argc: i32, argv: &[Vec<u8>]) -> i32 {
     /// Not a status the source returns: it marks that everything before
     /// `qApp->exec()` succeeded and the event loop is still to be entered.
     const ENTER_EVENT_LOOP: i32 = -1;
@@ -579,7 +580,10 @@ pub unsafe fn imodv_main(argc: i32, argv: &[Vec<u8>]) -> i32 {
             if argc - i < 1 || load_models(argc - i, &argv[i as usize..], a) != 0 {
                 return 3;
             }
-            unsafe { (*a.vi).imod = a.imod };
+            a.owned_vi
+                .as_deref_mut()
+                .expect("standalone view was just created")
+                .imod = a.imod;
             a.icon_pixmap = boundary.model_view_icon();
             if boundary.open_model_view(a, once_opened, last_geometry) != 0 {
                 return 3;
@@ -670,13 +674,15 @@ pub fn imodv_close() {
     });
 }
 /// Original: `imodv_draw` (`imodv.cpp:703`).
-pub unsafe fn imodv_draw() {
+pub fn imodv_draw() {
     IMODV_STATE.with(|state| {
         let mut state = state.borrow_mut();
         if state.1 != 0 || state.0.imod.is_null() {
             return;
         }
-        let imod = &mut *state.0.imod;
+        let Some(imod) = (unsafe { state.0.imod.as_mut() }) else {
+            return;
+        };
         if state.0.sync_objed_to_cur_obj != 0
             && state.0.standalone == 0
             && imod.cindex.object >= 0

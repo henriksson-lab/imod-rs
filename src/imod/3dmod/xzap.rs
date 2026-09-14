@@ -15,7 +15,6 @@ use std::cell::{Cell, RefCell};
 use std::ptr;
 
 use crate::imod::libcfshr::b3dutil::{CArg, c_format};
-use crate::imod::libcfshr::ilist::{Ilist, ilist_item, ilist_remove, ilist_size};
 use crate::imod::libimod::icont::{
     ICONT_CURSOR_LIKE, ICONT_DRAW_ALLZ, ICONT_MMODEL_ONLY, ICONT_STIPPLED, Nesting,
 };
@@ -4467,24 +4466,22 @@ impl ZapFuncs {
 
                         // Look through selection list, remove any that do not
                         // fit constraints
-                        let sel_list = unsafe { (*vi).selection_list };
-                        i = unsafe { ilist_size(sel_list.as_ref()) } - 1;
-                        while i >= 0 {
-                            let indp = unsafe {
-                                ilist_item(sel_list.as_mut(), i)
-                                    .map_or(core::ptr::null_mut(), |item| {
-                                        item.as_mut_ptr().cast::<Iindex>()
-                                    })
-                            };
+                        let selection_list = unsafe { &mut (*vi).selection_list };
+                        let mut selection_index = selection_list.len();
+                        while selection_index > 0 {
+                            selection_index -= 1;
+                            let index = selection_list[selection_index];
                             let mut keep = false;
-                            if unsafe { (*indp).object } < unsafe { (&(*imod).obj).len() as i32 } {
+                            if index.object >= 0
+                                && index.object < unsafe { (&(*imod).obj).len() as i32 }
+                            {
                                 obj = unsafe {
-                                    (&mut (*imod).obj).as_mut_ptr().add((*indp).object as usize)
+                                    (&mut (*imod).obj).as_mut_ptr().add(index.object as usize)
                                 };
-                                if unsafe { (*indp).contour }
-                                    < unsafe { (&(*obj).cont).len() as i32 }
+                                if index.contour >= 0
+                                    && index.contour < unsafe { (&(*obj).cont).len() as i32 }
                                 {
-                                    let co = unsafe { (*indp).contour } as usize;
+                                    let co = index.contour as usize;
                                     let cont_ref = unsafe { &(&(*obj).cont)[co] };
                                     if (!lasso.is_null()
                                         && crate::imod::three_dmod::imod_edit::imod_cont_inside_cont(
@@ -4507,9 +4504,8 @@ impl ZapFuncs {
                                 }
                             }
                             if !keep {
-                                unsafe { ilist_remove(&mut *sel_list, i) };
+                                selection_list.remove(selection_index);
                             }
-                            i -= 1;
                         }
 
                         obst = if shifted != 0 {
@@ -6137,7 +6133,7 @@ impl ZapFuncs {
                         {
                             // Crosses.  Select this contour; add current
                             // contour if list empty
-                            if unsafe { ilist_size((*vi).selection_list.as_ref()) } == 0
+                            if unsafe { (*vi).selection_list.is_empty() }
                                 && unsafe { (*imod).cindex.contour } >= 0
                             {
                                 let ind = unsafe { (*imod).cindex };
@@ -9358,11 +9354,9 @@ impl ZapFuncs {
                     } else {
                         // Loop on the inside ones and join ones at next level
                         // if they are truly inside the current useCont
-                        for ind in 0..self.nests[nest as usize].ninside as usize {
-                            let zco = self.nests[nest as usize].inside[ind];
+                        for &zco in &self.nests[nest as usize].inside {
                             if self.nests[self.nest_ind[zco as usize] as usize].level == level + 1 {
-                                let inco = self.conts_at_cur_z.as_ref().unwrap()
-                                    [self.nests[nest as usize].inside[ind] as usize];
+                                let inco = self.conts_at_cur_z.as_ref().unwrap()[zco as usize];
                                 in_cont =
                                     unsafe { (&mut (*obj).cont).as_mut_ptr().add(inco as usize) };
                                 if imod_contour_inside_cont(unsafe { &*in_cont }, unsafe {

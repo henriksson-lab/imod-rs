@@ -6,7 +6,7 @@
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
-    SEEK_CUR, b3d_error, b3d_fread, b3d_fseek, b3d_fwrite, b3d_i_max, mrc_huge_seek,
+    SEEK_CUR, SEEK_SET, b3d_error, b3d_fread, b3d_fseek, b3d_fwrite, b3d_i_max, mrc_huge_seek,
 };
 use crate::imod::libiimod::halffloat::{imnp_halfbits_to_floatbits, imnp_halfbuf_to_floats};
 use crate::imod::libiimod::iimage::IIERR_QUITTING;
@@ -21,7 +21,6 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_SHORT, MRC_MODE_USHORT, get_byte_map, get_short_map, mrc_get_complex_scale,
     mrc_getdcsize, mrc_mirror_source, mrc_swap_floats, mrc_swap_shorts,
 };
-use core::ffi::CStr;
 
 const MRSA_BYTE: i32 = 1;
 const MRSA_FLOAT: i32 = 2;
@@ -29,63 +28,63 @@ const MRSA_USHORT: i32 = 3;
 const MRC_RAMP_EXP: i32 = 2;
 const MRC_RAMP_LOG: i32 = 3;
 
-pub unsafe fn mrc_read_z(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
+pub unsafe fn mrc_read_z(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf, z, 0, 0, Some(ii_read_section)) }
 }
 pub unsafe fn mrc_read_z_byte(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf, z, 0, 1, Some(ii_read_section_byte)) }
 }
 pub unsafe fn mrc_read_z_ushort(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf, z, 0, 3, Some(ii_read_section_ushort)) }
 }
 pub unsafe fn mrc_read_z_float(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut f32,
     z: i32,
 ) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf.cast(), z, 0, 2, Some(ii_read_section_float)) }
 }
-pub unsafe fn mrc_read_y(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
+pub unsafe fn mrc_read_y(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf, z, 1, 0, Some(ii_read_section)) }
 }
 pub unsafe fn mrc_read_y_byte(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf, z, 1, 1, Some(ii_read_section_byte)) }
 }
 pub unsafe fn mrc_read_y_ushort(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf, z, 1, 3, Some(ii_read_section_ushort)) }
 }
 pub unsafe fn mrc_read_y_float(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut f32,
     z: i32,
 ) -> i32 {
     unsafe { call_ii_or_mrsa(hdata, li, buf.cast(), z, 1, 2, Some(ii_read_section_float)) }
 }
 pub unsafe fn mrc_read_section(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
@@ -95,15 +94,15 @@ pub unsafe fn mrc_read_section(
             li,
             buf,
             z,
-            if (*li).axis == 2 { 1 } else { 0 },
+            if li.axis == 2 { 1 } else { 0 },
             0,
             Some(ii_read_section),
         )
     }
 }
 pub unsafe fn mrc_read_section_byte(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
@@ -113,15 +112,15 @@ pub unsafe fn mrc_read_section_byte(
             li,
             buf,
             z,
-            if (*li).axis == 2 { 1 } else { 0 },
+            if li.axis == 2 { 1 } else { 0 },
             1,
             Some(ii_read_section_byte),
         )
     }
 }
 pub unsafe fn mrc_read_section_ushort(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
 ) -> i32 {
@@ -131,15 +130,15 @@ pub unsafe fn mrc_read_section_ushort(
             li,
             buf,
             z,
-            if (*li).axis == 2 { 1 } else { 0 },
+            if li.axis == 2 { 1 } else { 0 },
             3,
             Some(ii_read_section_ushort),
         )
     }
 }
 pub unsafe fn mrc_read_section_float(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut f32,
     z: i32,
 ) -> i32 {
@@ -149,15 +148,15 @@ pub unsafe fn mrc_read_section_float(
             li,
             buf.cast(),
             z,
-            if (*li).axis == 2 { 1 } else { 0 },
+            if li.axis == 2 { 1 } else { 0 },
             2,
             Some(ii_read_section_float),
         )
     }
 }
 pub unsafe fn call_ii_or_mrsa(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     z: i32,
     read_y: i32,
@@ -182,35 +181,31 @@ pub unsafe fn call_ii_or_mrsa(
     unsafe { mrc_read_section_any(hdata, li, buf, z, read_y, type_) }
 }
 pub unsafe fn mrc_read_section_any(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     cz: i32,
     read_y: i32,
     mut type_: i32,
 ) -> i32 {
-    let mut fin = unsafe { (*hdata).fp.clone().unwrap() };
+    let mut fin = hdata.fp.clone().unwrap();
     let mut d = LineProcData::default();
-    let mut y_end = if read_y != 0 {
-        unsafe { (*li).zmax }
-    } else {
-        unsafe { (*li).ymax }
-    };
-    if type_ == 0 && unsafe { (*hdata).mode == MRC_MODE_FLOAT && (*hdata).half_floats != 0 } {
+    let mut y_end = if read_y != 0 { li.zmax } else { li.ymax };
+    if type_ == 0 && hdata.mode == MRC_MODE_FLOAT && hdata.half_floats != 0 {
         type_ = MRSA_FLOAT;
     }
     d.type_ = type_;
     d.read_y = read_y;
     d.cz = cz;
-    d.swapped = unsafe { (*hdata).swapped };
+    d.swapped = hdata.swapped;
     let init = unsafe {
         ii_init_read_section_any(hdata, li, buf, &mut d, &mut y_end, "mrcReadSectionAny")
     };
     if init != 0 {
         return init;
     }
-    let pad_left = unsafe { (*li).pad_left.max(0) };
-    let pad_right = unsafe { (*li).pad_right.max(0) };
+    let pad_left = li.pad_left.max(0);
+    let pad_right = li.pad_right.max(0);
     d.x_dimension = d.xsize + pad_left + pad_right;
     let mut pix_size_buf = [0, 1, 4, 2];
     // `mrcsec.c:230`: entry 0 (MRSA_NOPROC) is filled in from the pixel size of
@@ -222,8 +217,8 @@ pub unsafe fn mrc_read_section_any(
     if d.x_dimension > d.xsize {
         d.need_data = 1;
     }
-    if unsafe { (*hdata).y_inverted } != 0 {
-        if unsafe { (*li).mirror_fft } != 0 {
+    if hdata.y_inverted != 0 {
+        if li.mirror_fft != 0 {
             // `mrcsec.c:264-267`: this combination has no source transform.
             b3d_error(
                 Some(&mut ImodFile::Stderr),
@@ -233,7 +228,7 @@ pub unsafe fn mrc_read_section_any(
             );
             return 1;
         }
-        let ny = unsafe { (*hdata).ny };
+        let ny = hdata.ny;
         let old_start = d.y_start;
         d.y_start = ny - 1 - y_end;
         y_end = ny - 1 - old_start;
@@ -251,14 +246,14 @@ pub unsafe fn mrc_read_section_any(
             .add((pix_size_buf[type_ as usize] * pad_left) as usize);
     }
     d.pix_index = d.pix_index.wrapping_add(pad_left as u32);
-    let nx = unsafe { (*hdata).nx };
-    let ny = unsafe { (*hdata).ny };
+    let nx = hdata.nx;
+    let ny = hdata.ny;
     let nx_seek = if d.packed4bits != 0 { (nx + 1) / 2 } else { nx };
     let target_lines = (2_000_000_f32 / (d.pix_size * nx_seek) as f32 + 0.5) as i32;
     let mut chunk_lines = 1_i32;
     if read_y == 0
-        && !(d.convert != 0 && unsafe { (*li).mirror_fft } != 0)
-        && unsafe { (*hdata).y_inverted } == 0
+        && !(d.convert != 0 && li.mirror_fft != 0)
+        && hdata.y_inverted == 0
         && d.xsize as f32 / nx as f32 > 0.5
         && (target_lines > 1 || (d.need_data == 0 && nx == d.xsize))
     {
@@ -299,24 +294,20 @@ pub unsafe fn mrc_read_section_any(
     };
     // `mrcsec.c:320-332`: seekEndY is set for the axis being read before the
     // loop; iiProcessReadLine may then retarget it for FFT mirroring.
-    let seek_skip = if read_y != 0 {
-        unsafe { (*hdata).section_skip }
-    } else {
-        0
-    };
+    let seek_skip = if read_y != 0 { hdata.section_skip } else { 0 };
     let seek_error = if read_y != 0 {
         d.seek_end_y = ny - 1;
         unsafe {
             mrc_huge_seek(
                 &mut fin,
-                (*hdata).header_size + (*hdata).section_skip * d.y_start,
+                hdata.header_size + hdata.section_skip * d.y_start,
                 0,
                 d.cz,
                 d.y_start,
                 nx_seek,
                 ny,
                 d.pix_size,
-                libc::SEEK_SET,
+                SEEK_SET,
             )
         }
     } else {
@@ -324,14 +315,14 @@ pub unsafe fn mrc_read_section_any(
         unsafe {
             mrc_huge_seek(
                 &mut fin,
-                (*hdata).header_size + (*hdata).section_skip * d.cz,
+                hdata.header_size + hdata.section_skip * d.cz,
                 0,
                 d.y_start,
                 d.cz,
                 nx_seek,
                 ny,
                 d.pix_size,
-                libc::SEEK_SET,
+                SEEK_SET,
             )
         }
     };
@@ -440,7 +431,7 @@ pub unsafe fn mrc_read_section_any(
                     nx_seek,
                     ny,
                     d.pix_size,
-                    libc::SEEK_CUR,
+                    SEEK_CUR,
                 )
             } != 0
         {
@@ -451,16 +442,16 @@ pub unsafe fn mrc_read_section_any(
     0
 }
 pub unsafe fn ii_init_read_section_any(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &MrcHeader,
+    li: &LoadInfo,
     buf: *mut u8,
-    data: *mut LineProcData,
-    y_end: *mut i32,
+    data: &mut LineProcData,
+    y_end: &mut i32,
     caller: &str,
 ) -> i32 {
-    let h = unsafe { &*hdata };
-    let l = unsafe { &*li };
-    let d = unsafe { &mut *data };
+    let h = hdata;
+    let l = li;
+    let d = data;
     d.x_start = l.xmin;
     d.x_end = l.xmax;
     d.y_start = if d.read_y != 0 { l.zmin } else { l.ymin };
@@ -568,7 +559,7 @@ pub unsafe fn ii_init_read_section_any(
     if d.cz < 0
         || d.cz >= if d.read_y != 0 { h.ny } else { h.nz }
         || d.y_start < 0
-        || unsafe { *y_end } >= if d.read_y != 0 { h.nz } else { h.ny }
+        || *y_end >= if d.read_y != 0 { h.nz } else { h.ny }
     {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -649,15 +640,15 @@ pub unsafe fn ii_init_read_section_any(
     0
 }
 pub unsafe fn ii_process_read_line(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
-    data: *mut LineProcData,
+    hdata: &MrcHeader,
+    li: &LoadInfo,
+    data: &mut LineProcData,
     bdata_in: *mut u8,
     bufp_in: *mut u8,
 ) -> i32 {
-    let h = unsafe { &*hdata };
-    let l = unsafe { &*li };
-    let d = unsafe { &mut *data };
+    let h = hdata;
+    let l = li;
+    let d = data;
     let passed = !bdata_in.is_null() && !bufp_in.is_null();
     let bdata = if passed { bdata_in } else { d.bdata };
     let mut bufp = if passed { bufp_in } else { d.bufp };
@@ -1032,7 +1023,7 @@ pub unsafe fn ii_process_read_line(
     }
     0
 }
-pub unsafe fn mrc_write_z(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
+pub unsafe fn mrc_write_z(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: *mut u8, z: i32) -> i32 {
     let mut save = ImodImageFile::default();
     let file = unsafe { lookup_ii_file(hdata, li, 3, &mut save) };
     if !file.is_null() {
@@ -1044,7 +1035,7 @@ pub unsafe fn mrc_write_z(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8
                 // `copy_nonoverlapping`: `MrcHeader.fp` owns an `Rc<File>`, so
                 // a bitwise duplicate leaves two owners at refcount one and
                 // the second drop corrupts the heap.
-                *(*file).header.cast::<MrcHeader>() = (*hdata).clone();
+                *(*file).header.cast::<MrcHeader>() = hdata.clone();
             }
         }
         let answer = unsafe {
@@ -1057,11 +1048,11 @@ pub unsafe fn mrc_write_z(hdata: *mut MrcHeader, li: *mut LoadInfo, buf: *mut u8
             crate::imod::libiimod::iimage::ii_restore_load_params(answer, file, &mut save)
         };
     }
-    unsafe { mrc_write_section_any(hdata, li, buf, z, (*hdata).mode) }
+    unsafe { mrc_write_section_any(hdata, li, buf, z, hdata.mode) }
 }
 pub unsafe fn mrc_write_z_float(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut f32,
     z: i32,
 ) -> i32 {
@@ -1076,7 +1067,7 @@ pub unsafe fn mrc_write_z_float(
                 // `copy_nonoverlapping`: `MrcHeader.fp` owns an `Rc<File>`, so
                 // a bitwise duplicate leaves two owners at refcount one and
                 // the second drop corrupts the heap.
-                *(*file).header.cast::<MrcHeader>() = (*hdata).clone();
+                *(*file).header.cast::<MrcHeader>() = hdata.clone();
             }
         }
         let answer = unsafe {
@@ -1095,8 +1086,8 @@ pub unsafe fn mrc_write_z_float(
             li,
             buf.cast(),
             z,
-            if (*hdata).mode == MRC_MODE_COMPLEX_FLOAT || (*hdata).mode == MRC_MODE_COMPLEX_SHORT {
-                (*hdata).mode
+            if hdata.mode == MRC_MODE_COMPLEX_FLOAT || hdata.mode == MRC_MODE_COMPLEX_SHORT {
+                hdata.mode
             } else {
                 MRC_MODE_FLOAT
             },
@@ -1104,14 +1095,14 @@ pub unsafe fn mrc_write_z_float(
     }
 }
 pub unsafe fn mrc_write_section_any(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     buf: *mut u8,
     cz: i32,
     buf_mode: i32,
 ) -> i32 {
-    let h = unsafe { &*hdata };
-    let l = unsafe { &*li };
+    let h = hdata;
+    let l = li;
     let mut fin = h.fp.clone().unwrap();
     if l.xmin != 0 || l.xmax != h.nx - 1 {
         // `mrcsec.c:1174-1176`
@@ -1205,7 +1196,7 @@ pub unsafe fn mrc_write_section_any(
             nx_seek,
             h.ny,
             pix_out,
-            libc::SEEK_SET,
+            SEEK_SET,
         )
     } != 0
     {
@@ -1290,7 +1281,6 @@ pub unsafe fn mrc_write_section_any(
         };
         if lines_in_chunk == chunk_lines || last_line {
             let data_size = (nx_seek * lines_in_chunk) as usize;
-            unsafe { *libc::__errno_location() = 0 };
             if b3d_fwrite(
                 unsafe {
                     core::slice::from_raw_parts(
@@ -1309,10 +1299,7 @@ pub unsafe fn mrc_write_section_any(
                     format_args!(
                         "ERROR: mrcWriteSectionAny - writing data ({} bytes) to file (system message: {})\n",
                         data_size,
-                        unsafe {
-                            core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location()))
-                                .to_string_lossy()
-                        }
+                        std::io::Error::last_os_error()
                     ),
                 );
                 return 3;
@@ -1324,36 +1311,36 @@ pub unsafe fn mrc_write_section_any(
     0
 }
 pub unsafe fn lookup_ii_file(
-    hdata: *mut MrcHeader,
-    li: *mut LoadInfo,
+    hdata: &mut MrcHeader,
+    li: &mut LoadInfo,
     axis: i32,
-    ii_save: *mut ImodImageFile,
+    ii_save: &mut ImodImageFile,
 ) -> *mut ImodImageFile {
     unsafe {
         if ii_calling_read_or_write() != 0 {
             return core::ptr::null_mut();
         }
-        let Some(ii_file) = (*hdata).fp.as_ref().and_then(ii_lookup_file_from_fp) else {
+        let Some(ii_file) = hdata.fp.as_ref().and_then(ii_lookup_file_from_fp) else {
             return core::ptr::null_mut();
         };
         if (*ii_file).file == IIFILE_MRC || (*ii_file).file == IIFILE_RAW {
             return core::ptr::null_mut();
         }
         ii_save_load_params(ii_file, ii_save);
-        (*ii_file).llx = (*li).xmin;
-        (*ii_file).urx = (*li).xmax;
+        (*ii_file).llx = li.xmin;
+        (*ii_file).urx = li.xmax;
         if axis == 3 {
-            (*ii_file).lly = (*li).ymin;
-            (*ii_file).ury = (*li).ymax;
+            (*ii_file).lly = li.ymin;
+            (*ii_file).ury = li.ymax;
         } else {
-            (*ii_file).llz = (*li).zmin;
-            (*ii_file).urz = (*li).zmax;
+            (*ii_file).llz = li.zmin;
+            (*ii_file).urz = li.zmax;
         }
         (*ii_file).axis = axis;
-        (*ii_file).pad_left = (*li).pad_left;
-        (*ii_file).pad_right = (*li).pad_right;
-        (*ii_file).slope = (*li).slope;
-        (*ii_file).offset = (*li).offset;
+        (*ii_file).pad_left = li.pad_left;
+        (*ii_file).pad_right = li.pad_right;
+        (*ii_file).slope = li.slope;
+        (*ii_file).offset = li.offset;
         ii_file
     }
 }

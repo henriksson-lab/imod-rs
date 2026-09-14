@@ -448,20 +448,24 @@ pub fn adoc_open_image_metadata(
     num_sect: &mut i32,
     sect_type: &mut i32,
 ) -> i32 {
-    let mut usename: Vec<u8> = filename.to_vec();
+    // Filesystem access already uses a lossy Rust `String` below, so keep the
+    // path as owned text while attaching the optional metadata suffix.  The
+    // autodoc contents themselves remain bytes: unlike paths at this boundary,
+    // they can contain non-UTF-8 data that must round-trip unchanged.
+    let mut usename = String::from_utf8_lossy(filename).into_owned();
     let series: i32;
     let index: i32;
 
     /* Attach extension to file if requested */
     if add_mdoc > 0 {
-        usename = c_format_bytes("%s.mdoc", &[CArg::Bytes(filename)]);
+        usename.push_str(".mdoc");
     }
 
     /* Return -2 if it does not exist, -1 if error reading it */
-    if std::fs::metadata(String::from_utf8_lossy(&usename).as_ref()).is_err() {
+    if std::fs::metadata(&usename).is_err() {
         index = -2;
     } else {
-        index = adoc_read(&usename);
+        index = adoc_read(usename.as_bytes());
     }
     if index < 0 {
         return index;
@@ -2566,11 +2570,8 @@ pub fn write_xml_file(filename: &[u8]) -> i32 {
     xml = mxml_new_xml(arena, Some(b"1.0"));
     let result = S_AUTODOCS.with_borrow(|adocs| {
         let adoc = &adocs[cur as usize];
-        let root: Vec<u8> = match &adoc.root_element {
-            Some(root) => root.clone(),
-            None => b"autodoc".to_vec(),
-        };
-        let top = mxml_new_element(arena, xml, Some(&root));
+        let root = adoc.root_element.as_deref().unwrap_or(b"autodoc");
+        let top = mxml_new_element(arena, xml, Some(root));
         ind = 0;
         while ind < adoc.num_sections {
             use_ind = if ordered_write != 0 {

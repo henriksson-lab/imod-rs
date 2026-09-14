@@ -1,109 +1,94 @@
 //! Translation of `IMOD/libcfshr/coresprocsthreads.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(dead_code)]
 
 use core::sync::atomic::{AtomicI32, Ordering};
 
-use super::b3dutil::{ImodFile, fgetline};
-use super::parse_params::strtol;
-
-const CPUINFO_LINE: i32 = 80;
 const MAX_CPU_SOCKETS: usize = 64;
 static S_CPU_IS_AMD: AtomicI32 = AtomicI32::new(-1);
+
+/// Physical-core and logical-processor counts reported by the operating system.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProcessorCounts {
+    pub physical: i32,
+    pub logical: i32,
+}
 
 /// C `numCoresAndLogicalProcs` (`coresprocsthreads.c:40`).
 ///
 /// The crate is built without `_OPENMP`; this is the Linux `/proc/cpuinfo`
 /// branch selected by the vendored source on the current target.
-pub unsafe fn num_cores_and_logical_procs(physical: *mut i32, logical: *mut i32) -> i32 {
+///
+/// A malformed or unavailable CPU description yields the same zero, partial,
+/// or negative-physical sentinel count that the C function would have written
+/// through its output pointers.
+pub fn num_cores_and_logical_procs() -> ProcessorCounts {
     let mut processor_core_count = 0;
     let mut logical_processor_count = 0;
-    let filename = "/proc/cpuinfo";
-    let mode = "r";
-    let file = ImodFile::open(filename, mode);
-    if let Some(mut file) = file {
-        let mut socket_flags = [0_u8; MAX_CPU_SOCKETS];
-        let mut line = [0_u8; CPUINFO_LINE as usize];
-        let mut current_id = -1;
-        let mut current_cores = -1;
-        let mut error = 0;
-        loop {
-            error = 0;
-            let length = fgetline(&mut file, &mut line, CPUINFO_LINE);
-            if length == 0 {
-                continue;
+    let mut parse_error = false;
+    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo");
+    if let Ok(cpuinfo) = cpuinfo {
+        let mut socket_flags = [false; MAX_CPU_SOCKETS];
+        let mut current_id = None;
+        let mut current_cores = None;
+
+        for line in cpuinfo.lines() {
+            if S_CPU_IS_AMD.load(Ordering::SeqCst) < 0 && line.contains("vendor_id") {
+                S_CPU_IS_AMD.store(line.contains("AuthenticAMD") as i32, Ordering::SeqCst);
             }
-            if length == -2 {
-                break;
-            }
-            error = 1;
-            if length == -1 {
-                break;
-            }
-            // `strstr`/`strchr` read the C string, which ends at the NUL
-            // `fgetline` wrote, not the whole buffer.
-            let text = &line[..line.iter().position(|&b| b == 0).unwrap_or(line.len())];
-            if S_CPU_IS_AMD.load(Ordering::SeqCst) < 0 && text.windows(9).any(|w| w == b"vendor_id")
-            {
-                S_CPU_IS_AMD.store(
-                    text.windows(12).any(|w| w == b"AuthenticAMD") as i32,
-                    Ordering::SeqCst,
-                );
-            }
-            if text.windows(11).any(|w| w == b"physical id") {
-                if current_id >= 0 {
+            if line.contains("physical id") {
+                if current_id.is_some() {
+                    parse_error = true;
                     break;
                 }
-                let colon = text.iter().position(|&b| b == b':');
-                if let Some(colon) = colon {
-                    let mut scanned = 0usize;
-                    current_id = strtol(&text[colon + 1..], &mut scanned, 10) as i32;
-                }
-                if colon.is_none() || current_id < 0 || current_id as usize >= MAX_CPU_SOCKETS {
+                let Some((_, value)) = line.split_once(':') else {
+                    parse_error = true;
+                    break;
+                };
+                let id = value.trim().parse::<i32>().unwrap_or(0);
+                if !(0..MAX_CPU_SOCKETS as i32).contains(&id) {
+                    parse_error = true;
                     break;
                 }
+                current_id = Some(id);
             }
-            if text.windows(9).any(|w| w == b"cpu cores") {
-                if current_cores >= 0 {
+            if line.contains("cpu cores") {
+                if current_cores.is_some() {
+                    parse_error = true;
                     break;
                 }
-                let colon = text.iter().position(|&b| b == b':');
-                if let Some(colon) = colon {
-                    let mut scanned = 0usize;
-                    current_cores = strtol(&text[colon + 1..], &mut scanned, 10) as i32;
-                }
-                if colon.is_none() || current_cores <= 0 {
+                let Some((_, value)) = line.split_once(':') else {
+                    parse_error = true;
+                    break;
+                };
+                let cores = value.trim().parse::<i32>().unwrap_or(0);
+                if cores <= 0 {
+                    parse_error = true;
                     break;
                 }
+                current_cores = Some(cores);
             }
-            if current_id >= 0 && current_cores > 0 {
+            if let (Some(id), Some(cores)) = (current_id, current_cores) {
                 logical_processor_count += 1;
-                if socket_flags[current_id as usize] == 0 {
-                    processor_core_count += current_cores;
+                if !socket_flags[id as usize] {
+                    processor_core_count += cores;
+                    socket_flags[id as usize] = true;
                 }
-                socket_flags[current_id as usize] = 1;
-                current_id = -1;
-                current_cores = -1;
-            }
-            error = 0;
-            if length < 0 {
-                break;
+                current_id = None;
+                current_cores = None;
             }
         }
-        if error != 0 {
+        if parse_error {
             processor_core_count *= -1;
         }
-        // `fclose(file)`: the handle closes when it leaves scope.
     }
     if S_CPU_IS_AMD.load(Ordering::SeqCst) < 0 {
         S_CPU_IS_AMD.store(0, Ordering::SeqCst);
     }
-    *physical = processor_core_count;
-    *logical = logical_processor_count;
-    if processor_core_count <= 0 || logical_processor_count < 0 {
-        1
-    } else {
-        0
-    }
+    let counts = ProcessorCounts {
+        physical: processor_core_count,
+        logical: logical_processor_count,
+    };
+    counts
 }
 
 /// C `numOMPthreads` (`coresprocsthreads.c:193`).
@@ -148,12 +133,10 @@ mod tests {
     }
     #[test]
     fn linux_cpuinfo_parser_preserves_result_contract() {
-        let mut physical = 0;
-        let mut logical = 0;
-        let error = unsafe { num_cores_and_logical_procs(&mut physical, &mut logical) };
-        assert!(error == 0 || error == 1);
-        if error == 0 {
-            assert!(physical > 0 && logical >= 0);
+        let counts = num_cores_and_logical_procs();
+        assert!(counts.logical >= 0);
+        if counts.physical > 0 {
+            assert!(counts.logical > 0);
         }
     }
 }

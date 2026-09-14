@@ -36,7 +36,6 @@ pub const IMOD_CLIPSIZE: usize = 6;
 pub const SIZE_CLIP: i32 = 28;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Ipoint {
     pub x: f32,
     pub y: f32,
@@ -44,7 +43,6 @@ pub struct Ipoint {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Iplane {
     pub a: f32,
     pub b: f32,
@@ -54,7 +52,6 @@ pub struct Iplane {
 
 /// Original: `Iindex` (`include/imodel.h`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Iindex {
     pub object: i32,
     pub contour: i32,
@@ -63,7 +60,6 @@ pub struct Iindex {
 
 /// Original: `IobjGroup` (`include/objgroup.h`).
 #[derive(Clone, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Iobj_group {
     pub obj_list: Vec<i32>,
     pub name: [u8; 32],
@@ -71,7 +67,6 @@ pub struct Iobj_group {
 
 /// Original: `IclipPlanes` (`include/imodel.h`).
 #[derive(Clone, Debug, PartialEq)]
-#[repr(C)]
 pub struct Iclip_planes {
     pub count: u8,
     pub flags: u8,
@@ -96,7 +91,6 @@ impl Default for Iclip_planes {
 
 /// Original: `Iobjview` (`include/imodel.h`).
 #[derive(Clone, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Iobjview {
     pub flags: u32,
     pub red: f32,
@@ -124,7 +118,6 @@ pub struct Iobjview {
 
 /// Original: `Iview` (`include/imodel.h`).
 #[derive(Clone, Debug, PartialEq)]
-#[repr(C)]
 pub struct Iview {
     pub fovy: f32,
     pub rad: f32,
@@ -182,7 +175,6 @@ impl Default for Iview {
 
 /// Original: `IrefImage` (`include/imodel.h`).
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
 pub struct Iref_image {
     pub oscale: Ipoint,
     pub otrans: Ipoint,
@@ -194,7 +186,6 @@ pub struct Iref_image {
 
 /// Original: `SlicerAngles` (`include/imodel.h`).
 #[derive(Clone, Debug, PartialEq)]
-#[repr(C)]
 pub struct Slicer_angles {
     pub time: i32,
     pub angles: [f32; 3],
@@ -234,7 +225,6 @@ impl Default for Iref_image {
 
 /// Original: `Mod_Contour` (`include/imodel.h`).
 #[derive(Clone, Debug, Default)]
-#[repr(C)]
 pub struct Icont {
     pub temp_val: f64,
     pub pts: Vec<Ipoint>,
@@ -249,7 +239,6 @@ pub struct Icont {
 
 /// Original: `Mod_Mesh` (`include/imodel.h`).
 #[derive(Clone, Debug, Default)]
-#[repr(C)]
 pub struct Imesh {
     pub vert: Vec<Ipoint>,
     pub list: Vec<i32>,
@@ -262,7 +251,6 @@ pub struct Imesh {
 /// Original: `Mod_Object` (`include/imodel.h`), with fields consumed by
 /// `imodinfo.cpp` retained in source order.
 #[derive(Clone, Debug)]
-#[repr(C)]
 pub struct Iobj {
     pub cont: Vec<Icont>,
     pub mesh: Vec<Imesh>,
@@ -358,7 +346,6 @@ impl Default for Iobj {
 /// Original: `Mod_Model` (`include/imodel.h`), fields consumed by
 /// `imodinfo.cpp`.
 #[derive(Clone, Debug)]
-#[repr(C)]
 pub struct Imod {
     pub obj: Vec<Iobj>,
     /// `Mod_Model::ctime` (`imodel.h:457`), the current time index.

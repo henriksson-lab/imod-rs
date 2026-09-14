@@ -6,9 +6,10 @@ use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use crate::imod::libcfshr::islice::{Islice, slice_create, slice_put_val};
 use crate::imod::libiimod::mrcfiles::MrcHeader;
 use std::io::Write as _;
+use std::mem::size_of;
 
 /// C++ `thresholdWithMinSize`.
-pub unsafe fn threshold_with_min_size(
+pub fn threshold_with_min_size(
     hin: &mut MrcHeader,
     hout: &mut MrcHeader,
     opt: &mut ClipOptions,
@@ -16,294 +17,309 @@ pub unsafe fn threshold_with_min_size(
     thresh_hi: f32,
     mut z_write: i32,
 ) -> i32 {
-    unsafe {
-        crate::imod::libiimod::mrcfiles::mrc_head_label(
-            &mut *hout,
-            b"clip: thresholded with minimum size constraint",
-        );
-        if opt.min_size == 0 {
-            crate::imod::clip::clip::show_error("CLIP - The minimum size entry must be non-zero");
+    crate::imod::libiimod::mrcfiles::mrc_head_label(
+        hout,
+        b"clip: thresholded with minimum size constraint",
+    );
+    if opt.min_size == 0 {
+        crate::imod::clip::clip::show_error("CLIP - The minimum size entry must be non-zero");
+        return -1;
+    }
+    let mut min_size = opt.min_size;
+    let mut direction = 1.;
+    let mut thresh = opt.thresh;
+    let (fill, set) = if min_size < 0 {
+        min_size = -min_size;
+        direction = -1.;
+        (thresh_hi, thresh_lo)
+    } else {
+        thresh *= 1.0000006;
+        (thresh_lo, thresh_hi)
+    };
+    let (nx, ny) = (opt.ix, opt.iy);
+    let mut shift = 0_u32;
+    let mut mask = 0_u32;
+    let mut nyleft = ny - 1;
+    let mut nxcheck = nx - 1;
+    while nyleft > 0 {
+        shift += 1;
+        nyleft >>= 1;
+        nxcheck <<= 1;
+        mask = (mask << 1) | 1;
+        if nyleft > 0 && (nxcheck as u32 & 0x80000000) != 0 {
+            crate::imod::clip::clip::show_error(
+                "CLIP - Images are too large in X and Y for the thresholding procedure",
+            );
             return -1;
         }
-        let mut min_size = opt.min_size;
-        let mut direction = 1.;
-        let mut thresh = opt.thresh;
-        let (fill, set) = if min_size < 0 {
-            min_size = -min_size;
-            direction = -1.;
-            (thresh_hi, thresh_lo)
-        } else {
-            thresh *= 1.0000006;
-            (thresh_lo, thresh_hi)
-        };
-        let (nx, ny) = (opt.ix, opt.iy);
-        let mut shift = 0_u32;
-        let mut mask = 0_u32;
-        let mut nyleft = ny - 1;
-        let mut nxcheck = nx - 1;
-        while nyleft > 0 {
-            shift += 1;
-            nyleft >>= 1;
-            nxcheck <<= 1;
-            mask = (mask << 1) | 1;
-            if nyleft > 0 && (nxcheck as u32 & 0x80000000) != 0 {
-                crate::imod::clip::clip::show_error(
-                    "CLIP - Images are too large in X and Y for the thresholding procedure",
+    }
+    let mut out = match slice_create(nx, ny, opt.mode) {
+        Some(slice) => slice,
+        None => {
+            // `threshminsize.cpp:126-129`.  Note the doubled space in the
+            // source's text.
+            let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - Allocating  memory\n");
+            return -1;
+        }
+    };
+    // The source's two `catch` blocks (`threshminsize.cpp:358-365`,
+    // `std::bad_alloc` and `exception&`) have no counterpart: Rust has no
+    // exceptions, and the STL containers they guard are `Vec`s here.  Their
+    // texts are therefore unreachable rather than omitted.
+    let mut grouped = vec![0_u8; (nx * ny) as usize];
+    let mut planes: Vec<Vec<PlaneConnectedPoints>> = (0..opt.nofsecs).map(|_| Vec::new()).collect();
+    let mut sets: Vec<ZConnectedSets> = Vec::new();
+    let offset = if opt.dim == 3 { 1 } else { 0 };
+    let mut kout = 0;
+    let mut next: Option<Box<Islice>> = None;
+    let mut last: Option<Box<Islice>> = None;
+    let mut input: Option<Box<Islice>> = None;
+    for kin in -offset..opt.nofsecs {
+        if kin + offset < opt.nofsecs {
+            let z = opt.secs[(kin + offset) as usize];
+            next = crate::imod::libiimod::mrcslice::slice_read_subm(
+                hin,
+                z,
+                b'z',
+                nx,
+                ny,
+                opt.cx as i32,
+                opt.cy as i32,
+            );
+            if next
+                .as_deref_mut()
+                .is_none_or(|slice| crate::imod::libiimod::mrcslice::slice_float(slice) < 0)
+            {
+                // `threshminsize.cpp:143`: the first `%s` is chosen by
+                // `nextSlice` and the third by `inSlice`, which are not the
+                // same test -- a conversion failure on the very first slice
+                // prints "Converting slice N from file".
+                let _ = ImodFile::Stdout.write_all(
+                    c_format(
+                        "ERROR: CLIP - %s slice %d %s\n",
+                        &[
+                            CArg::Str(if next.is_some() {
+                                "Converting"
+                            } else {
+                                "Reading"
+                            }),
+                            CArg::Int(z as i64),
+                            CArg::Str(if input.is_some() {
+                                "to floating point"
+                            } else {
+                                "from file"
+                            }),
+                        ],
+                    )
+                    .as_bytes(),
                 );
                 return -1;
+            }
+            if offset == 0 || kin == -1 {
+                input = next.take()
+            }
+            if kin == -1 {
+                continue;
             }
         }
-        let mut out = match slice_create(nx, ny, opt.mode) {
-            Some(slice) => slice,
-            None => {
-                // `threshminsize.cpp:126-129`.  Note the doubled space in the
-                // source's text.
-                let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - Allocating  memory\n");
-                return -1;
-            }
-        };
-        // The source's two `catch` blocks (`threshminsize.cpp:358-365`,
-        // `std::bad_alloc` and `exception&`) have no counterpart: Rust has no
-        // exceptions, and the STL containers they guard are `Vec`s here.  Their
-        // texts are therefore unreachable rather than omitted.
-        let mut grouped = vec![0_u8; (nx * ny) as usize];
-        let mut planes: Vec<Vec<PlaneConnectedPoints>> =
-            (0..opt.nofsecs).map(|_| Vec::new()).collect();
-        let mut sets: Vec<ZConnectedSets> = Vec::new();
-        let offset = if opt.dim == 3 { 1 } else { 0 };
-        let mut kout = 0;
-        let mut next: Option<Box<Islice>> = None;
-        let mut last: Option<Box<Islice>> = None;
-        let mut input: Option<Box<Islice>> = None;
-        for kin in -offset..opt.nofsecs {
-            if kin + offset < opt.nofsecs {
-                let z = opt.secs[(kin + offset) as usize];
-                next = crate::imod::libiimod::mrcslice::slice_read_subm(
-                    hin,
-                    z,
-                    b'z',
-                    nx,
-                    ny,
-                    opt.cx as i32,
-                    opt.cy as i32,
-                );
-                if next
-                    .as_deref_mut()
-                    .is_none_or(|slice| crate::imod::libiimod::mrcslice::slice_float(slice) < 0)
+        let data = &input.as_ref().expect("input slice set above").data;
+        grouped.fill(0);
+        for ly in 0..ny {
+            for lx in 0..nx {
+                let li = lx + nx * ly;
+                if grouped[li as usize] != 0
+                    || direction
+                        * (f32::from_ne_bytes(
+                            data[li as usize * size_of::<f32>()
+                                ..(li as usize + 1) * size_of::<f32>()]
+                                .try_into()
+                                .expect("floating-point slice has four bytes per pixel"),
+                        ) - thresh)
+                        < 0.
                 {
-                    // `threshminsize.cpp:143`: the first `%s` is chosen by
-                    // `nextSlice` and the third by `inSlice`, which are not the
-                    // same test -- a conversion failure on the very first slice
-                    // prints "Converting slice N from file".
-                    let _ = ImodFile::Stdout.write_all(
-                        c_format(
-                            "ERROR: CLIP - %s slice %d %s\n",
-                            &[
-                                CArg::Str(if next.is_some() {
-                                    "Converting"
-                                } else {
-                                    "Reading"
-                                }),
-                                CArg::Int(z as i64),
-                                CArg::Str(if input.is_some() {
-                                    "to floating point"
-                                } else {
-                                    "from file"
-                                }),
-                            ],
-                        )
-                        .as_bytes(),
-                    );
-                    return -1;
-                }
-                if offset == 0 || kin == -1 {
-                    input = next.take()
-                }
-                if kin == -1 {
                     continue;
                 }
-            }
-            let data = input
-                .as_ref()
-                .expect("input slice set above")
-                .data
-                .as_ptr()
-                .cast::<f32>();
-            grouped.fill(0);
-            for ly in 0..ny {
-                for lx in 0..nx {
-                    let li = lx + nx * ly;
-                    if grouped[li as usize] != 0
-                        || direction * (*data.add(li as usize) - thresh) < 0.
-                    {
-                        continue;
-                    }
-                    let mut checks = vec![((lx as u32) << shift) | ly as u32];
-                    let mut plane = PlaneConnectedPoints {
-                        points: std::collections::BTreeSet::new(),
-                        xmin: lx,
-                        xmax: lx,
-                        ymin: ly,
-                        ymax: ly,
-                    };
-                    plane.points.insert(checks[0]);
-                    grouped[li as usize] = 1;
-                    let mut ci = 0;
-                    while ci < checks.len() {
-                        let combo = checks[ci];
-                        let (x, y) = ((combo >> shift) as i32, (combo & mask) as i32);
-                        for (cx, cy) in [
-                            (0.max(x - 1), y),
-                            ((nx - 1).min(x + 1), y),
-                            (x, 0.max(y - 1)),
-                            (x, (ny - 1).min(y + 1)),
-                        ] {
-                            let ind = cx + nx * cy;
-                            if grouped[ind as usize] == 0
-                                && direction * (*data.add(ind as usize) - thresh) >= 0.
-                            {
-                                let xy = ((cx as u32) << shift) | cy as u32;
-                                checks.push(xy);
-                                plane.points.insert(xy);
-                                plane.xmin = plane.xmin.min(cx);
-                                plane.xmax = plane.xmax.max(cx);
-                                plane.ymin = plane.ymin.min(cy);
-                                plane.ymax = plane.ymax.max(cy);
-                                grouped[ind as usize] = 1;
-                            }
-                        }
-                        ci += 1;
-                    }
-                    let lone = if ci == 1 && last.is_some() && next.is_some() {
-                        let last_value =
-                            *(last.as_ref().unwrap().data.as_ptr().cast::<f32>()).add(li as usize);
-                        let next_value =
-                            *(next.as_ref().unwrap().data.as_ptr().cast::<f32>()).add(li as usize);
-                        direction * (last_value - thresh) < 0.
-                            && direction * (next_value - thresh) < 0.
-                    } else {
-                        false
-                    };
-                    if !lone {
-                        planes[kin as usize].push(plane)
-                    }
-                }
-            }
-            if offset != 0 {
-                last = input;
-                input = next.take();
-            } else {
-                input = None
-            }
-            for pi in 0..planes[kin as usize].len() {
-                let plane = &planes[kin as usize][pi];
-                let mut first: Option<usize> = None;
-                let mut si = 0;
-                while si < sets.len() {
-                    let overlaps = !(sets[si].xmax < plane.xmin
-                        || sets[si].xmin > plane.xmax
-                        || sets[si].ymax < plane.ymin
-                        || sets[si].ymin > plane.ymax);
-                    let joins = opt.dim == 3
-                        && overlaps
-                        && (0..sets[si].index.len()).any(|n| {
-                            sets[si].plane_z[n] == kin - 1
-                                && plane.points.iter().any(|p| {
-                                    planes[(kin - 1) as usize][sets[si].index[n] as usize]
-                                        .points
-                                        .contains(p)
-                                })
-                        });
-                    if joins {
-                        if let Some(fi) = first {
-                            let other = sets.remove(si);
-                            let main = &mut sets[fi];
-                            main.plane_z.extend(other.plane_z);
-                            main.index.extend(other.index);
-                            main.xmin = main.xmin.min(other.xmin);
-                            main.xmax = main.xmax.max(other.xmax);
-                            main.ymin = main.ymin.min(other.ymin);
-                            main.ymax = main.ymax.max(other.ymax);
-                            main.zmin = main.zmin.min(other.zmin);
-                            main.num_points += other.num_points;
-                            continue;
-                        } else {
-                            let z = &mut sets[si];
-                            z.plane_z.push(kin);
-                            z.index.push(pi as i32);
-                            z.xmin = z.xmin.min(plane.xmin);
-                            z.xmax = z.xmax.max(plane.xmax);
-                            z.ymin = z.ymin.min(plane.ymin);
-                            z.ymax = z.ymax.max(plane.ymax);
-                            z.zmax = kin;
-                            z.num_points += plane.points.len() as i32;
-                            first = Some(si);
+                let mut checks = vec![((lx as u32) << shift) | ly as u32];
+                let mut plane = PlaneConnectedPoints {
+                    points: std::collections::BTreeSet::new(),
+                    xmin: lx,
+                    xmax: lx,
+                    ymin: ly,
+                    ymax: ly,
+                };
+                plane.points.insert(checks[0]);
+                grouped[li as usize] = 1;
+                let mut ci = 0;
+                while ci < checks.len() {
+                    let combo = checks[ci];
+                    let (x, y) = ((combo >> shift) as i32, (combo & mask) as i32);
+                    for (cx, cy) in [
+                        (0.max(x - 1), y),
+                        ((nx - 1).min(x + 1), y),
+                        (x, 0.max(y - 1)),
+                        (x, (ny - 1).min(y + 1)),
+                    ] {
+                        let ind = cx + nx * cy;
+                        if grouped[ind as usize] == 0
+                            && direction
+                                * (f32::from_ne_bytes(
+                                    data[ind as usize * size_of::<f32>()
+                                        ..(ind as usize + 1) * size_of::<f32>()]
+                                        .try_into()
+                                        .expect("floating-point slice has four bytes per pixel"),
+                                ) - thresh)
+                                >= 0.
+                        {
+                            let xy = ((cx as u32) << shift) | cy as u32;
+                            checks.push(xy);
+                            plane.points.insert(xy);
+                            plane.xmin = plane.xmin.min(cx);
+                            plane.xmax = plane.xmax.max(cx);
+                            plane.ymin = plane.ymin.min(cy);
+                            plane.ymax = plane.ymax.max(cy);
+                            grouped[ind as usize] = 1;
                         }
                     }
-                    si += 1;
+                    ci += 1;
                 }
-                if first.is_none() {
-                    sets.push(ZConnectedSets {
-                        plane_z: vec![kin],
-                        index: vec![pi as i32],
-                        xmin: plane.xmin,
-                        xmax: plane.xmax,
-                        ymin: plane.ymin,
-                        ymax: plane.ymax,
-                        zmin: kin,
-                        zmax: kin,
-                        num_points: plane.points.len() as i32,
-                    })
+                let lone = if ci == 1 && last.is_some() && next.is_some() {
+                    let last_data = &last.as_ref().unwrap().data;
+                    let last_value = f32::from_ne_bytes(
+                        last_data
+                            [li as usize * size_of::<f32>()..(li as usize + 1) * size_of::<f32>()]
+                            .try_into()
+                            .expect("floating-point slice has four bytes per pixel"),
+                    );
+                    let next_data = &next.as_ref().unwrap().data;
+                    let next_value = f32::from_ne_bytes(
+                        next_data
+                            [li as usize * size_of::<f32>()..(li as usize + 1) * size_of::<f32>()]
+                            .try_into()
+                            .expect("floating-point slice has four bytes per pixel"),
+                    );
+                    direction * (last_value - thresh) < 0. && direction * (next_value - thresh) < 0.
+                } else {
+                    false
+                };
+                if !lone {
+                    planes[kin as usize].push(plane)
                 }
             }
-            let active = if kin < opt.nofsecs - 1 {
-                kin
-            } else {
-                opt.nofsecs
-            };
-            while kout < active {
-                if sets.iter().any(|z| z.zmin <= kout && z.zmax == active) {
-                    break;
-                }
-                for y in 0..ny {
-                    for x in 0..nx {
-                        slice_put_val(out.as_mut(), x, y, [fill; 4]);
-                    }
-                }
-                for z in &sets {
-                    if z.num_points >= min_size && z.zmin <= kout && z.zmax >= kout {
-                        for n in 0..z.index.len() {
-                            if z.plane_z[n] == kout {
-                                for p in &planes[kout as usize][z.index[n] as usize].points {
-                                    slice_put_val(
-                                        out.as_mut(),
-                                        (p >> shift) as i32,
-                                        (p & mask) as i32,
-                                        [set; 4],
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                if crate::imod::clip::file_io::clip_write_slice(
-                    out.as_mut(),
-                    hout,
-                    opt,
-                    kout,
-                    &mut z_write,
-                    0,
-                ) != 0
-                {
-                    return -1;
-                }
-                planes[kout as usize].clear();
-                kout += 1
-            }
-            sets.retain(|z| !((z.num_points < min_size && z.zmax < active) || z.zmax < kout));
         }
-        crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
+        if offset != 0 {
+            last = input;
+            input = next.take();
+        } else {
+            input = None
+        }
+        for pi in 0..planes[kin as usize].len() {
+            let plane = &planes[kin as usize][pi];
+            let mut first: Option<usize> = None;
+            let mut si = 0;
+            while si < sets.len() {
+                let overlaps = !(sets[si].xmax < plane.xmin
+                    || sets[si].xmin > plane.xmax
+                    || sets[si].ymax < plane.ymin
+                    || sets[si].ymin > plane.ymax);
+                let joins = opt.dim == 3
+                    && overlaps
+                    && (0..sets[si].index.len()).any(|n| {
+                        sets[si].plane_z[n] == kin - 1
+                            && plane.points.iter().any(|p| {
+                                planes[(kin - 1) as usize][sets[si].index[n] as usize]
+                                    .points
+                                    .contains(p)
+                            })
+                    });
+                if joins {
+                    if let Some(fi) = first {
+                        let other = sets.remove(si);
+                        let main = &mut sets[fi];
+                        main.plane_z.extend(other.plane_z);
+                        main.index.extend(other.index);
+                        main.xmin = main.xmin.min(other.xmin);
+                        main.xmax = main.xmax.max(other.xmax);
+                        main.ymin = main.ymin.min(other.ymin);
+                        main.ymax = main.ymax.max(other.ymax);
+                        main.zmin = main.zmin.min(other.zmin);
+                        main.num_points += other.num_points;
+                        continue;
+                    } else {
+                        let z = &mut sets[si];
+                        z.plane_z.push(kin);
+                        z.index.push(pi as i32);
+                        z.xmin = z.xmin.min(plane.xmin);
+                        z.xmax = z.xmax.max(plane.xmax);
+                        z.ymin = z.ymin.min(plane.ymin);
+                        z.ymax = z.ymax.max(plane.ymax);
+                        z.zmax = kin;
+                        z.num_points += plane.points.len() as i32;
+                        first = Some(si);
+                    }
+                }
+                si += 1;
+            }
+            if first.is_none() {
+                sets.push(ZConnectedSets {
+                    plane_z: vec![kin],
+                    index: vec![pi as i32],
+                    xmin: plane.xmin,
+                    xmax: plane.xmax,
+                    ymin: plane.ymin,
+                    ymax: plane.ymax,
+                    zmin: kin,
+                    zmax: kin,
+                    num_points: plane.points.len() as i32,
+                })
+            }
+        }
+        let active = if kin < opt.nofsecs - 1 {
+            kin
+        } else {
+            opt.nofsecs
+        };
+        while kout < active {
+            if sets.iter().any(|z| z.zmin <= kout && z.zmax == active) {
+                break;
+            }
+            for y in 0..ny {
+                for x in 0..nx {
+                    slice_put_val(out.as_mut(), x, y, [fill; 4]);
+                }
+            }
+            for z in &sets {
+                if z.num_points >= min_size && z.zmin <= kout && z.zmax >= kout {
+                    for n in 0..z.index.len() {
+                        if z.plane_z[n] == kout {
+                            for p in &planes[kout as usize][z.index[n] as usize].points {
+                                slice_put_val(
+                                    out.as_mut(),
+                                    (p >> shift) as i32,
+                                    (p & mask) as i32,
+                                    [set; 4],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if crate::imod::clip::file_io::clip_write_slice(
+                out.as_mut(),
+                hout,
+                opt,
+                kout,
+                &mut z_write,
+                0,
+            ) != 0
+            {
+                return -1;
+            }
+            planes[kout as usize].clear();
+            kout += 1
+        }
+        sets.retain(|z| !((z.num_points < min_size && z.zmax < active) || z.zmax < kout));
     }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 
 #[cfg(test)]
@@ -408,7 +424,7 @@ mod tests {
             scale_defects: 0,
         };
         assert_eq!(
-            unsafe { threshold_with_min_size(&mut hin, &mut hout, &mut opt, 0., 1., 0) },
+            threshold_with_min_size(&mut hin, &mut hout, &mut opt, 0., 1., 0),
             -1
         );
     }

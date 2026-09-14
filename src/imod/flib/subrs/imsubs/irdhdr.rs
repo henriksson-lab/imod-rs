@@ -126,9 +126,11 @@ pub unsafe fn irdhdr(
             &mut vd2,
         );
         iiu_ret_delta(iunit, delta.as_mut_ptr());
-        iiu_ret_cell(iunit, cell.as_mut_ptr());
-        iiu_ret_axis_map(iunit, mapcrs.as_mut_ptr());
-        iiu_ret_origin(iunit, &mut xorig, &mut yorig, &mut zorig);
+        iiu_ret_cell(iunit, &mut cell);
+        iiu_ret_axis_map(iunit, &mut mapcrs);
+        let mut origin = [0.; 3];
+        iiu_ret_origin(iunit, &mut origin);
+        (xorig, yorig, zorig) = (origin[0], origin[1], origin[2]);
         iiu_ret_labels(iunit, labels.as_mut_ptr().cast(), &mut num_labels);
         iiu_ret_tilt(iunit, tilt.as_mut_ptr());
         iiu_ret_tilt_orig(iunit, tilt_orig.as_mut_ptr());

@@ -54,7 +54,7 @@ use super::istore::{
     istore_lookup,
 };
 use super::iview::{imod_objview_complete, imod_objviews_free};
-use crate::imod::libcfshr::b3dutil::{ImodFile, c2f_string, fortran_string};
+use crate::imod::libcfshr::b3dutil::{ImodFile, fortran_string};
 
 /// Original: `fortStrLen_t` (`imodel.h` via `b3dutil.h`).
 pub type FortStrLenT = i32;
@@ -167,7 +167,7 @@ struct FortranModelState {
     max_values: i32,
     names_put: Vec<NameStruct>,
     last_open_error: i32,
-    write_as_wimp: i32,
+    write_as_wimp: bool,
     obj: usize,
     cont: usize,
 }
@@ -452,12 +452,20 @@ pub unsafe fn openimoddata(fname: *const c_char, fsize: FortStrLenT) -> i32 {
 pub unsafe fn imodopenerror(error: *mut c_char, errlen: FortStrLenT) {
     FWRAP_STATE.with(|state| unsafe {
         let last_open_error = state.borrow().last_open_error;
-        if last_open_error > -1 || last_open_error <= FWRAP_PAST_ERRORS {
-            c2f_string(c"".as_ptr(), error, errlen);
+        let text = if last_open_error > -1 || last_open_error <= FWRAP_PAST_ERRORS {
+            ""
         } else {
-            let text = S_ERROR_STRINGS[(-1 - last_open_error) as usize];
-            let cstr = std::ffi::CString::new(text).unwrap();
-            c2f_string(cstr.as_ptr(), error, errlen);
+            S_ERROR_STRINGS[(-1 - last_open_error) as usize]
+        };
+        let limit = errlen.max(0) as usize;
+        let mut index = 0usize;
+        while index < text.len() && index < limit {
+            *error.add(index) = text.as_bytes()[index] as c_char;
+            index += 1;
+        }
+        while index < limit {
+            *error.add(index) = b' ' as c_char;
+            index += 1;
         }
     });
 }
@@ -1033,7 +1041,8 @@ pub unsafe fn getobjsurfaces(ob: i32, sort_surfs: i32, surfs: *mut i32) -> i32 {
         if co != 0 {
             return co;
         }
-        let obj = &mut state.imod.as_mut().unwrap().obj[state.obj];
+        let obj_index = state.obj;
+        let obj = &mut state.imod.as_mut().unwrap().obj[obj_index];
         if sort_surfs > 0 && !obj.cont.is_empty() {
             /* Duplicate the contour array so that surfaces can be assigned in it */
             let mut cont_save: Vec<Icont> = Vec::with_capacity(obj.cont.len());
@@ -1130,82 +1139,95 @@ pub unsafe fn putpointvalue(ob: i32, co: i32, pt: i32, value: f32) -> i32 {
 
 /// Original: `clearimodobjstore` (`imodel_fwrap.c:1148`).
 pub unsafe fn clearimodobjstore(ob: i32) -> i32 {
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    imod.obj[S_OBJ].store = Vec::new();
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        let object = &mut state.imod.as_mut().unwrap().obj[obj_index];
+        object.store.clear();
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `deleteimodmeshes` (`imodel_fwrap.c:1162`).
 pub unsafe fn deleteimodmeshes(ob: i32) -> i32 {
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    imod.obj[S_OBJ].mesh = Vec::new();
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        let object = &mut state.imod.as_mut().unwrap().obj[obj_index];
+        object.mesh.clear();
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `deleteimodcont` (`imodel_fwrap.c:1178`).
 pub unsafe fn deleteimodcont(ob: i32, co: i32) -> i32 {
-    let err = check_assign_obj_cont(ob, co);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    imod_set_index(imod, ob - 1, co - 1, -1);
-    if imod_delete_contour(imod, co - 1) < 0 {
-        return FWRAP_ERROR_FROM_CALL;
-    }
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_obj_cont(&mut state, ob, co);
+        if err != 0 {
+            return err;
+        }
+        let imod = state.imod.as_mut().unwrap();
+        imod_set_index(imod, ob - 1, co - 1, -1);
+        if imod_delete_contour(imod, co - 1) < 0 {
+            return FWRAP_ERROR_FROM_CALL;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `deletelistofconts` (`imodel_fwrap.c:1194`).
 pub unsafe fn deletelistofconts(ob: i32, contours: *mut i32, num_cont: i32) -> i32 {
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    imod_set_index(imod, ob - 1, -1, -1);
-    for ind in 0..num_cont as usize {
-        *contours.add(ind) -= 1;
-    }
-    let list = std::slice::from_raw_parts(contours, num_cont.max(0) as usize).to_vec();
-    let err = imod_delete_list_of_conts(imod, &list, num_cont);
-    for ind in 0..num_cont as usize {
-        *contours.add(ind) += 1;
-    }
-    if err < 0 {
-        return FWRAP_ERROR_FROM_CALL;
-    }
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let imod = state.imod.as_mut().unwrap();
+        imod_set_index(imod, ob - 1, -1, -1);
+        for ind in 0..num_cont as usize {
+            *contours.add(ind) -= 1;
+        }
+        let list = std::slice::from_raw_parts(contours, num_cont.max(0) as usize).to_vec();
+        let err = imod_delete_list_of_conts(imod, &list, num_cont);
+        for ind in 0..num_cont as usize {
+            *contours.add(ind) += 1;
+        }
+        if err < 0 {
+            return FWRAP_ERROR_FROM_CALL;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `deleteimodpoint` (`imodel_fwrap.c:1214`).
 pub unsafe fn deleteimodpoint(ob: i32, co: i32, pt: i32) -> i32 {
-    let err = check_assign_obj_cont(ob, co);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    let obj_index = S_OBJ;
-    let cont_index = S_CONT;
-    if pt < 1 || pt > imod.obj[obj_index].cont[cont_index].pts.len() as i32 {
-        return FWRAP_ERROR_BAD_OBJNUM;
-    }
-    if crate::imod::libimod::ipoint::imod_point_delete(
-        &mut imod.obj[obj_index].cont[cont_index],
-        pt - 1,
-    ) < 0
-    {
-        return FWRAP_ERROR_FROM_CALL;
-    }
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_obj_cont(&mut state, ob, co);
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        let cont_index = state.cont;
+        let contour = &mut state.imod.as_mut().unwrap().obj[obj_index].cont[cont_index];
+        if pt < 1 || pt > contour.pts.len() as i32 {
+            return FWRAP_ERROR_BAD_OBJNUM;
+        }
+        if crate::imod::libimod::ipoint::imod_point_delete(contour, pt - 1) < 0 {
+            return FWRAP_ERROR_FROM_CALL;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `addimodpoint` (`imodel_fwrap.c:1236`).
@@ -1218,93 +1240,99 @@ pub unsafe fn addimodpoint(
     y: f32,
     z: f32,
 ) -> i32 {
-    /* B3DNINT (`b3dutil.h:33`) */
-    let mut pt = (if pt_or_z as f64 >= 0. {
-        (pt_or_z as f64 + 0.5).floor()
-    } else {
-        (pt_or_z as f64 - 0.5).ceil()
-    }) as i32
-        - 1;
-    let err = check_assign_obj_cont(ob, co);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    let obj_index = S_OBJ;
-    let cont_index = S_CONT;
-    if pt < 0 && if_by_z == 0 {
-        return FWRAP_ERROR_BAD_OBJNUM;
-    }
-    let psize = imod.obj[obj_index].cont[cont_index].pts.len() as i32;
-    if if_by_z != 0 {
-        pt = 0;
-        while pt < psize {
-            if imod.obj[obj_index].cont[cont_index].pts[pt as usize].z >= pt_or_z {
-                break;
-            }
-            pt += 1;
+    FWRAP_STATE.with(|state| unsafe {
+        /* B3DNINT (`b3dutil.h:33`) */
+        let mut pt = (if pt_or_z as f64 >= 0. {
+            (pt_or_z as f64 + 0.5).floor()
+        } else {
+            (pt_or_z as f64 - 0.5).ceil()
+        }) as i32
+            - 1;
+        let mut state = state.borrow_mut();
+        let err = check_assign_obj_cont(&mut state, ob, co);
+        if err != 0 {
+            return err;
         }
-    }
-    pt = if pt < psize { pt } else { psize };
-    let point = Ipoint { x, y, z };
-    if imod_point_add(&mut imod.obj[obj_index].cont[cont_index], Some(point), pt) == 0 {
-        return FWRAP_ERROR_FROM_CALL;
-    }
-    FWRAP_NOERROR
+        let obj_index = state.obj;
+        let cont_index = state.cont;
+        let contour = &mut state.imod.as_mut().unwrap().obj[obj_index].cont[cont_index];
+        if pt < 0 && if_by_z == 0 {
+            return FWRAP_ERROR_BAD_OBJNUM;
+        }
+        let psize = contour.pts.len() as i32;
+        if if_by_z != 0 {
+            pt = 0;
+            while pt < psize {
+                if contour.pts[pt as usize].z >= pt_or_z {
+                    break;
+                }
+                pt += 1;
+            }
+        }
+        pt = if pt < psize { pt } else { psize };
+        let point = Ipoint { x, y, z };
+        if imod_point_add(contour, Some(point), pt) == 0 {
+            return FWRAP_ERROR_FROM_CALL;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getobjvaluethresh` (`imodel_fwrap.c:1265`).
 pub unsafe fn getobjvaluethresh(ob: i32, thresh: &mut f32) -> i32 {
-    let mut vmin = 0f32;
-    let mut vmax = 0f32;
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw const S_IMOD)).as_ref().unwrap();
-    let obj = &imod.obj[S_OBJ];
-    if istore_get_min_max(
-        &obj.store,
-        obj.cont.len() as i32,
-        GEN_STORE_MINMAX1,
-        &mut vmin,
-        &mut vmax,
-    ) == 0
-    {
-        return FWRAP_ERROR_NO_VALUE;
-    }
-    *thresh = (obj.valblack as f64 * (vmax - vmin) as f64 / 255. + vmin as f64) as f32;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut vmin = 0f32;
+        let mut vmax = 0f32;
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let obj = &state.imod.as_ref().unwrap().obj[state.obj];
+        if istore_get_min_max(
+            &obj.store,
+            obj.cont.len() as i32,
+            GEN_STORE_MINMAX1,
+            &mut vmin,
+            &mut vmax,
+        ) == 0
+        {
+            return FWRAP_ERROR_NO_VALUE;
+        }
+        *thresh = (obj.valblack as f64 * (vmax - vmin) as f64 / 255. + vmin as f64) as f32;
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getobjskiplowvalues` (`imodel_fwrap.c:1281`).
 pub unsafe fn getobjskiplowvalues(ob: i32) -> i32 {
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw const S_IMOD)).as_ref().unwrap();
-    let obj = &imod.obj[S_OBJ];
-    if (obj.flags & IMOD_OBJFLAG_USE_VALUE) != 0 && (obj.matflags2 as u32 & MATFLAGS2_SKIP_LOW) != 0
-    {
-        1
-    } else {
-        0
-    }
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let obj = &state.imod.as_ref().unwrap().obj[state.obj];
+        ((obj.flags & IMOD_OBJFLAG_USE_VALUE) != 0
+            && (obj.matflags2 as u32 & MATFLAGS2_SKIP_LOW) != 0) as i32
+    })
 }
 
 /// Original: `findaddminmax1value` (`imodel_fwrap.c:1294`).
 pub unsafe fn findaddminmax1value(ob: i32) -> i32 {
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    let err = istore_find_add_min_max1(&mut imod.obj[S_OBJ]);
-    if err > 0 {
-        return FWRAP_ERROR_FROM_CALL;
-    }
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        let object = &mut state.imod.as_mut().unwrap().obj[obj_index];
+        if istore_find_add_min_max1(object) > 0 {
+            return FWRAP_ERROR_FROM_CALL;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `putimod` (`imodel_fwrap.c:1334`).
@@ -1317,592 +1345,620 @@ pub unsafe fn putimod(
     _npoint: i32,
     nobject: i32,
 ) -> i32 {
-    let mut nobj = 0usize;
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let mut nobj = 0usize;
+        let names_put = state.names_put.clone();
 
-    if (*(&raw const S_IMOD)).is_none() {
-        *(&raw mut S_IMOD) = imod_new();
-        (*(&raw mut S_IMOD)).as_mut().unwrap().obj = Vec::new();
-    }
-
-    let mut mincolor = 256 - (*(&raw const S_IMOD)).as_ref().unwrap().obj.len() as i32;
-
-    /* Find minimum color, and maximum object #; get arrays */
-    /* Skip empty contours unless we are in partial mode, where they are needed
-    to signal that an existing object is now empty */
-    for object in 0..nobject as usize {
-        if *npt.add(object) == 0 && S_PARTIAL_MODE == 0 {
-            continue;
+        if state.imod.is_none() {
+            state.imod = imod_new();
+            state.imod.as_mut().unwrap().obj.clear();
         }
-        if mincolor > (*color.add(object))[1] {
-            mincolor = (*color.add(object))[1];
-        }
-    }
-    let maxobj = 256 - mincolor;
 
-    let mut objlookup: Vec<i32> = vec![0; maxobj.max(0) as usize];
-    let mut nsaved: Vec<i32> = vec![0; maxobj.max(0) as usize];
+        let mut mincolor = 256 - state.imod.as_ref().unwrap().obj.len() as i32;
 
-    /*
-     * Mark obj lookup array to empty=-2 or used=-1 for new data passed in
-     * or index >= 0 for an existing object.
-     */
-    for ob in 0..maxobj as usize {
-        objlookup[ob] = OBJ_EMPTY;
-        nsaved[ob] = 0;
-    }
-
-    /* Fill lookup table for existing objects; if in partial mode set nsaved
-    to full count to keep contours from being deleted later */
-    let objsize = (*(&raw const S_IMOD)).as_ref().unwrap().obj.len();
-    for ob in 0..objsize {
-        objlookup[((255 - mincolor) - ob as i32) as usize] = ob as i32;
-        nobj += 1;
-        if S_PARTIAL_MODE != 0 {
-            nsaved[ob] = (*(&raw const S_IMOD)).as_ref().unwrap().obj[ob].cont.len() as i32;
-        }
-    }
-
-    /* For all non-empty contours passed back, mark an empty object as having
-    data. */
-    for object in 0..nobject as usize {
-        if *npt.add(object) == 0 && S_PARTIAL_MODE == 0 {
-            continue;
-        }
-        let ob = ((*color.add(object))[1] - mincolor) as usize;
-        if objlookup[ob] >= 0 {
-            nsaved[objlookup[ob] as usize] = 0;
-        }
-        if *npt.add(object) == 0 {
-            continue;
-        }
-        if objlookup[ob] == OBJ_EMPTY {
-            objlookup[ob] = OBJ_HAS_DATA;
-        }
-    }
-
-    /*  Do not remove old object data yet */
-
-    /*
-     * Create additional imod objects if needed.
-     */
-    for ob in (0..maxobj as usize).rev() {
-        if objlookup[ob] != OBJ_HAS_DATA {
-            continue;
-        }
-        let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-        objlookup[ob] = imod.obj.len() as i32;
-        imod_new_object(imod);
-        let wimpno = ob as i32 + mincolor;
-
-        /* Just use top 6 colors and let new color scheme hold after that */
-        if wimpno >= 250 {
-            imod.obj[nobj].red = WMOD_COLORS[(wimpno - 247) as usize][0];
-            imod.obj[nobj].green = WMOD_COLORS[(wimpno - 247) as usize][1];
-            imod.obj[nobj].blue = WMOD_COLORS[(wimpno - 247) as usize][2];
-        }
-        imod.obj[nobj].flags |= IMOD_OBJFLAG_OPEN;
-
-        /* Find object name in list if any */
-        let mut ci = 0;
-        for pt in 0..(*(&raw const S_NAMES_PUT)).len() {
-            if (&(*(&raw const S_NAMES_PUT)))[pt].ob == 255 - (ob as i32 + mincolor) {
-                let src = (&(*(&raw const S_NAMES_PUT)))[pt].name.as_bytes();
-                if !src.is_empty() {
-                    // `imodel_fwrap.c:1412` `strncpy(name, src, IOBJ_STRSIZE - 1)`.
-                    // `Iobj::name` is `[u8; N]` now (NATIVE.md §3), so the C
-                    // string is copied byte for byte with the same bound.
-                    let count = src.len().min(IOBJ_STRSIZE - 1);
-                    imod.obj[nobj].name[..count].copy_from_slice(&src[..count]);
-                }
-                imod.obj[nobj].name[IOBJ_STRSIZE - 1] = 0;
-                ci = 1;
+        /* Find minimum color, and maximum object #; get arrays */
+        /* Skip empty contours unless we are in partial mode, where they are needed
+        to signal that an existing object is now empty */
+        for object in 0..nobject as usize {
+            if *npt.add(object) == 0 && state.partial_mode == 0 {
+                continue;
+            }
+            if mincolor > (*color.add(object))[1] {
+                mincolor = (*color.add(object))[1];
             }
         }
-        if ci == 0 {
-            let name = format!("Fmod # {wimpno}");
-            let bytes = name.as_bytes();
-            let count = bytes.len().min(IOBJ_STRSIZE - 1);
-            imod.obj[nobj].name[..count].copy_from_slice(&bytes[..count]);
-            imod.obj[nobj].name[count] = 0;
-        }
-        nobj += 1;
-    }
+        let maxobj = 256 - mincolor;
 
-    /*
-     * Copy all wimp objects to imod contours.
-     */
-    for object in 0..nobject as usize {
-        /* Don't even look up if empty and out of range */
-        if *npt.add(object) == 0
-            && ((*color.add(object))[1] < mincolor || (*color.add(object))[1] > 255)
-        {
-            continue;
+        let mut objlookup: Vec<i32> = vec![0; maxobj.max(0) as usize];
+        let mut nsaved: Vec<i32> = vec![0; maxobj.max(0) as usize];
+
+        /*
+         * Mark obj lookup array to empty=-2 or used=-1 for new data passed in
+         * or index >= 0 for an existing object.
+         */
+        for ob in 0..maxobj as usize {
+            objlookup[ob] = OBJ_EMPTY;
+            nsaved[ob] = 0;
         }
-        let ob = objlookup[((*color.add(object))[1] - mincolor) as usize];
-        if ob < 0 {
-            if *npt.add(object) != 0 {
+
+        /* Fill lookup table for existing objects; if in partial mode set nsaved
+        to full count to keep contours from being deleted later */
+        let objsize = state.imod.as_ref().unwrap().obj.len();
+        for ob in 0..objsize {
+            objlookup[((255 - mincolor) - ob as i32) as usize] = ob as i32;
+            nobj += 1;
+            if state.partial_mode != 0 {
+                nsaved[ob] = state.imod.as_ref().unwrap().obj[ob].cont.len() as i32;
+            }
+        }
+
+        /* For all non-empty contours passed back, mark an empty object as having
+        data. */
+        for object in 0..nobject as usize {
+            if *npt.add(object) == 0 && state.partial_mode == 0 {
+                continue;
+            }
+            let ob = ((*color.add(object))[1] - mincolor) as usize;
+            if objlookup[ob] >= 0 {
+                nsaved[objlookup[ob] as usize] = 0;
+            }
+            if *npt.add(object) == 0 {
+                continue;
+            }
+            if objlookup[ob] == OBJ_EMPTY {
+                objlookup[ob] = OBJ_HAS_DATA;
+            }
+        }
+
+        /*  Do not remove old object data yet */
+
+        /*
+         * Create additional imod objects if needed.
+         */
+        for ob in (0..maxobj as usize).rev() {
+            if objlookup[ob] != OBJ_HAS_DATA {
+                continue;
+            }
+            let imod = state.imod.as_mut().unwrap();
+            objlookup[ob] = imod.obj.len() as i32;
+            imod_new_object(imod);
+            let wimpno = ob as i32 + mincolor;
+
+            /* Just use top 6 colors and let new color scheme hold after that */
+            if wimpno >= 250 {
+                imod.obj[nobj].red = WMOD_COLORS[(wimpno - 247) as usize][0];
+                imod.obj[nobj].green = WMOD_COLORS[(wimpno - 247) as usize][1];
+                imod.obj[nobj].blue = WMOD_COLORS[(wimpno - 247) as usize][2];
+            }
+            imod.obj[nobj].flags |= IMOD_OBJFLAG_OPEN;
+
+            /* Find object name in list if any */
+            let mut ci = 0;
+            for name_put in &names_put {
+                if name_put.ob == 255 - (ob as i32 + mincolor) {
+                    let src = name_put.name.as_bytes();
+                    if !src.is_empty() {
+                        // `imodel_fwrap.c:1412` `strncpy(name, src, IOBJ_STRSIZE - 1)`.
+                        // `Iobj::name` is `[u8; N]` now (NATIVE.md §3), so the C
+                        // string is copied byte for byte with the same bound.
+                        let count = src.len().min(IOBJ_STRSIZE - 1);
+                        imod.obj[nobj].name[..count].copy_from_slice(&src[..count]);
+                    }
+                    imod.obj[nobj].name[IOBJ_STRSIZE - 1] = 0;
+                    ci = 1;
+                }
+            }
+            if ci == 0 {
+                let name = format!("Fmod # {wimpno}");
+                let bytes = name.as_bytes();
+                let count = bytes.len().min(IOBJ_STRSIZE - 1);
+                imod.obj[nobj].name[..count].copy_from_slice(&bytes[..count]);
+                imod.obj[nobj].name[count] = 0;
+            }
+            nobj += 1;
+        }
+
+        /*
+         * Copy all wimp objects to imod contours.
+         */
+        for object in 0..nobject as usize {
+            /* Don't even look up if empty and out of range */
+            if *npt.add(object) == 0
+                && ((*color.add(object))[1] < mincolor || (*color.add(object))[1] > 255)
+            {
+                continue;
+            }
+            let ob = objlookup[((*color.add(object))[1] - mincolor) as usize];
+            if ob < 0 {
+                if *npt.add(object) != 0 {
+                    eprintln!("putimod warning: bad object bounds {ob}");
+                }
+                continue;
+            }
+            let imod = state.imod.as_mut().unwrap();
+            if ob > imod.obj.len() as i32 {
                 eprintln!("putimod warning: bad object bounds {ob}");
+                continue;
             }
-            continue;
-        }
-        let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-        if ob > imod.obj.len() as i32 {
-            eprintln!("putimod warning: bad object bounds {ob}");
-            continue;
-        }
-        let ob = ob as usize;
+            let ob = ob as usize;
 
-        if nsaved[ob] < imod.obj[ob].cont.len() as i32 {
-            /* Existing contour */
-            let cont_index = nsaved[ob] as usize;
-            let want = *npt.add(object) as usize;
-            let cont = &mut imod.obj[ob].cont[cont_index];
+            if nsaved[ob] < imod.obj[ob].cont.len() as i32 {
+                /* Existing contour */
+                let cont_index = nsaved[ob] as usize;
+                let want = *npt.add(object) as usize;
+                let cont = &mut imod.obj[ob].cont[cont_index];
 
-            /* For empty contour, clear out existing data */
-            if want == 0 && !cont.pts.is_empty() {
-                imod_contour_clear(cont);
-            } else if want != cont.pts.len() {
-                cont.pts.resize(want, Ipoint::default());
-                if !cont.sizes.is_empty() {
-                    cont.sizes.resize(want, 0.);
+                /* For empty contour, clear out existing data */
+                if want == 0 && !cont.pts.is_empty() {
+                    imod_contour_clear(cont);
+                } else if want != cont.pts.len() {
+                    cont.pts.resize(want, Ipoint::default());
+                    if !cont.sizes.is_empty() {
+                        cont.sizes.resize(want, 0.);
+                    }
                 }
-            }
-            cont.pts.resize(want, Ipoint::default());
-            for pt in 0..want {
-                let ci = *cindex.add(*ibase.add(object) as usize + pt) - 1;
-                cont.pts[pt].x = (*coord.add(ci as usize))[0];
-                cont.pts[pt].y = (*coord.add(ci as usize))[1];
-                cont.pts[pt].z = (*coord.add(ci as usize))[2];
-            }
-        } else {
-            /* otherwise, if # saved = # of contours, add a new contour */
-            let mut cont = Icont::default();
-            let want = *npt.add(object) as usize;
-            cont.pts = vec![Ipoint::default(); want];
+                cont.pts.resize(want, Ipoint::default());
+                for pt in 0..want {
+                    let ci = *cindex.add(*ibase.add(object) as usize + pt) - 1;
+                    cont.pts[pt].x = (*coord.add(ci as usize))[0];
+                    cont.pts[pt].y = (*coord.add(ci as usize))[1];
+                    cont.pts[pt].z = (*coord.add(ci as usize))[2];
+                }
+            } else {
+                /* otherwise, if # saved = # of contours, add a new contour */
+                let mut cont = Icont::default();
+                let want = *npt.add(object) as usize;
+                cont.pts = vec![Ipoint::default(); want];
 
-            for pt in 0..want {
-                let ci = *cindex.add(*ibase.add(object) as usize + pt) - 1;
-                cont.pts[pt].x = (*coord.add(ci as usize))[0];
-                cont.pts[pt].y = (*coord.add(ci as usize))[1];
-                cont.pts[pt].z = (*coord.add(ci as usize))[2];
-            }
+                for pt in 0..want {
+                    let ci = *cindex.add(*ibase.add(object) as usize + pt) - 1;
+                    cont.pts[pt].x = (*coord.add(ci as usize))[0];
+                    cont.pts[pt].y = (*coord.add(ci as usize))[1];
+                    cont.pts[pt].z = (*coord.add(ci as usize))[2];
+                }
 
-            imod_object_add_contour(&mut imod.obj[ob], cont);
+                imod_object_add_contour(&mut imod.obj[ob], cont);
+            }
+            nsaved[ob] += 1;
         }
-        nsaved[ob] += 1;
-    }
 
-    /*
-     *  Remove old contours that were not replaced
-     */
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    for ob in 0..imod.obj.len() {
-        if imod_contours_delete_to_end(&mut imod.obj[ob], nsaved[ob]) != 0 {
-            return FWRAP_ERROR_MEMORY;
+        /*
+         *  Remove old contours that were not replaced
+         */
+        let imod = state.imod.as_mut().unwrap();
+        for ob in 0..imod.obj.len() {
+            if imod_contours_delete_to_end(&mut imod.obj[ob], nsaved[ob]) != 0 {
+                return FWRAP_ERROR_MEMORY;
+            }
         }
-    }
-    FWRAP_NOERROR
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `writeimod` (`imodel_fwrap.c:1546`).
 pub unsafe fn writeimod(fname: *const c_char, fsize: FortStrLenT) -> i32 {
-    let filename = fortran_string(fname, fsize);
-    if (*(&raw const S_IMOD)).is_none() {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-    let path = filename;
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let filename = fortran_string(fname, fsize);
+        if state.imod.is_none() {
+            return FWRAP_ERROR_NO_MODEL;
+        }
+        let flags_put = state.flags_put.clone();
+        let sizes_put = state.sizes_put.clone();
+        let values_put = state.values_put.clone();
+        let maxes_put = state.maxes_put;
+        let (xmax_put, ymax_put, zmax_put) = (state.xmax_put, state.ymax_put, state.zmax_put);
+        let zscale_put = state.zscale_put;
+        let rotation_put = state.rotation_put;
+        let write_as_wimp = std::mem::replace(&mut state.write_as_wimp, false);
+        let path = filename;
 
-    /*
-     *  Translate coordinates to match reference image.
-     */
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    if let Some(iref) = imod.ref_image {
-        let mut mat = match imod_mat_new(3) {
-            Some(mat) => mat,
-            None => return FWRAP_ERROR_MEMORY,
-        };
+        /*
+         *  Translate coordinates to match reference image.
+         */
+        let imod = state.imod.as_mut().unwrap();
+        if let Some(iref) = imod.ref_image {
+            let mut mat = match imod_mat_new(3) {
+                Some(mat) => mat,
+                None => return FWRAP_ERROR_MEMORY,
+            };
 
-        imod_mat_trans(&mut mat, &iref.ctrans);
+            imod_mat_trans(&mut mat, &iref.ctrans);
 
-        let pnt = Ipoint {
-            x: 1.0 / iref.cscale.x,
-            y: 1.0 / iref.cscale.y,
-            z: 1.0 / iref.cscale.z,
-        };
-        imod_mat_scale(&mut mat, &pnt);
+            let pnt = Ipoint {
+                x: 1.0 / iref.cscale.x,
+                y: 1.0 / iref.cscale.y,
+                z: 1.0 / iref.cscale.z,
+            };
+            imod_mat_scale(&mut mat, &pnt);
 
-        imod_transform(Some(imod), Some(&mat));
-        imod_mat_delete(&mut mat);
-    }
+            imod_transform(Some(imod), Some(&mat));
+            imod_mat_delete(&mut mat);
+        }
 
-    /* Reflip data back if necessary */
-    if imod.flags & IMODF_FLIPYZ != 0 {
-        imod_flip_yz(imod);
-    }
+        /* Reflip data back if necessary */
+        if imod.flags & IMODF_FLIPYZ != 0 {
+            imod_flip_yz(imod);
+        }
 
-    /* Put out the flag data */
-    let flagmask = (1 << FLAG_VALUE_SHIFT) - 1;
-    let num_flags = (*(&raw const S_FLAGS_PUT)).len() / 2;
-    for i in 0..num_flags {
-        let ob = (&(*(&raw const S_FLAGS_PUT)))[2 * i];
-        let mut flag = (&(*(&raw const S_FLAGS_PUT)))[2 * i + 1];
-        let value = flag >> FLAG_VALUE_SHIFT;
-        flag &= flagmask;
-        if ob >= 0 && ob < imod.obj.len() as i32 {
-            /* Save some data in the current view if it has an object view for
-            this object */
-            let ob = ob as usize;
-            let cview = imod.cview;
-            let has_objview = cview > 0
-                && cview < imod.view.len() as i32
-                && imod.view[cview as usize].objview.len() > ob;
+        /* Put out the flag data */
+        let flagmask = (1 << FLAG_VALUE_SHIFT) - 1;
+        let num_flags = flags_put.len() / 2;
+        for i in 0..num_flags {
+            let ob = flags_put[2 * i];
+            let mut flag = flags_put[2 * i + 1];
+            let value = flag >> FLAG_VALUE_SHIFT;
+            flag &= flagmask;
+            if ob >= 0 && ob < imod.obj.len() as i32 {
+                /* Save some data in the current view if it has an object view for
+                this object */
+                let ob = ob as usize;
+                let cview = imod.cview;
+                let has_objview = cview > 0
+                    && cview < imod.view.len() as i32
+                    && imod.view[cview as usize].objview.len() > ob;
 
-            match flag {
-                0 => {
-                    imod.obj[ob].flags &= !IMOD_OBJFLAG_OPEN;
-                    imod.obj[ob].flags &= !IMOD_OBJFLAG_SCAT;
-                    if has_objview {
-                        let f = imod.obj[ob].flags;
-                        imod.view[cview as usize].objview[ob].flags = f;
+                match flag {
+                    0 => {
+                        imod.obj[ob].flags &= !IMOD_OBJFLAG_OPEN;
+                        imod.obj[ob].flags &= !IMOD_OBJFLAG_SCAT;
+                        if has_objview {
+                            let f = imod.obj[ob].flags;
+                            imod.view[cview as usize].objview[ob].flags = f;
+                        }
                     }
-                }
-                1 => {
-                    imod.obj[ob].flags |= IMOD_OBJFLAG_OPEN;
-                    imod.obj[ob].flags &= !IMOD_OBJFLAG_SCAT;
-                    if has_objview {
-                        let f = imod.obj[ob].flags;
-                        imod.view[cview as usize].objview[ob].flags = f;
+                    1 => {
+                        imod.obj[ob].flags |= IMOD_OBJFLAG_OPEN;
+                        imod.obj[ob].flags &= !IMOD_OBJFLAG_SCAT;
+                        if has_objview {
+                            let f = imod.obj[ob].flags;
+                            imod.view[cview as usize].objview[ob].flags = f;
+                        }
                     }
-                }
-                2 => {
-                    imod.obj[ob].flags &= !IMOD_OBJFLAG_OPEN;
-                    imod.obj[ob].flags |= IMOD_OBJFLAG_SCAT;
-                    if has_objview {
-                        let f = imod.obj[ob].flags;
-                        imod.view[cview as usize].objview[ob].flags = f;
+                    2 => {
+                        imod.obj[ob].flags &= !IMOD_OBJFLAG_OPEN;
+                        imod.obj[ob].flags |= IMOD_OBJFLAG_SCAT;
+                        if has_objview {
+                            let f = imod.obj[ob].flags;
+                            imod.view[cview as usize].objview[ob].flags = f;
+                        }
                     }
-                }
-                SCAT_SIZE_FLAG => {
-                    imod.obj[ob].pdrawsize = value;
-                    if has_objview {
-                        let v = imod.obj[ob].pdrawsize;
-                        imod.view[cview as usize].objview[ob].pdrawsize = v;
+                    SCAT_SIZE_FLAG => {
+                        imod.obj[ob].pdrawsize = value;
+                        if has_objview {
+                            let v = imod.obj[ob].pdrawsize;
+                            imod.view[cview as usize].objview[ob].pdrawsize = v;
+                        }
                     }
-                }
-                SYMBOL_SIZE_FLAG => imod.obj[ob].symsize = value as u8,
-                SYMBOL_TYPE_FLAG => imod.obj[ob].symbol = value as u8,
-                SYMBOL_FLAGS_FLAG => imod.obj[ob].symflags = value as u8,
-                SYMBOL_WIDTH_FLAG => imod.obj[ob].linewidth2 = value as u8,
-                OBJECT_COLOR_FLAG => {
-                    imod.obj[ob].red = ((value & 255) as f64 / 255.) as f32;
-                    imod.obj[ob].green = (((value >> 8) & 255) as f64 / 255.) as f32;
-                    imod.obj[ob].blue = (((value >> 16) & 255) as f64 / 255.) as f32;
-                    if has_objview {
-                        let (r, g, b) = (imod.obj[ob].red, imod.obj[ob].green, imod.obj[ob].blue);
-                        imod.view[cview as usize].objview[ob].red = r;
-                        imod.view[cview as usize].objview[ob].green = g;
-                        imod.view[cview as usize].objview[ob].blue = b;
+                    SYMBOL_SIZE_FLAG => imod.obj[ob].symsize = value as u8,
+                    SYMBOL_TYPE_FLAG => imod.obj[ob].symbol = value as u8,
+                    SYMBOL_FLAGS_FLAG => imod.obj[ob].symflags = value as u8,
+                    SYMBOL_WIDTH_FLAG => imod.obj[ob].linewidth2 = value as u8,
+                    OBJECT_COLOR_FLAG => {
+                        imod.obj[ob].red = ((value & 255) as f64 / 255.) as f32;
+                        imod.obj[ob].green = (((value >> 8) & 255) as f64 / 255.) as f32;
+                        imod.obj[ob].blue = (((value >> 16) & 255) as f64 / 255.) as f32;
+                        if has_objview {
+                            let (r, g, b) =
+                                (imod.obj[ob].red, imod.obj[ob].green, imod.obj[ob].blue);
+                            imod.view[cview as usize].objview[ob].red = r;
+                            imod.view[cview as usize].objview[ob].green = g;
+                            imod.view[cview as usize].objview[ob].blue = b;
+                        }
                     }
-                }
-                USE_VALUE_FLAGS => {
-                    imod.obj[ob].flags |= IMOD_OBJFLAG_USE_VALUE;
-                    imod.obj[ob].matflags2 |= (MATFLAGS2_CONSTANT | MATFLAGS2_SKIP_LOW) as u8;
-                    if has_objview {
-                        let f = imod.obj[ob].flags;
-                        let m = imod.obj[ob].matflags2;
-                        imod.view[cview as usize].objview[ob].flags = f;
-                        imod.view[cview as usize].objview[ob].matflags2 = m;
+                    USE_VALUE_FLAGS => {
+                        imod.obj[ob].flags |= IMOD_OBJFLAG_USE_VALUE;
+                        imod.obj[ob].matflags2 |= (MATFLAGS2_CONSTANT | MATFLAGS2_SKIP_LOW) as u8;
+                        if has_objview {
+                            let f = imod.obj[ob].flags;
+                            let m = imod.obj[ob].matflags2;
+                            imod.view[cview as usize].objview[ob].flags = f;
+                            imod.view[cview as usize].objview[ob].matflags2 = m;
+                        }
                     }
-                }
-                VAL_BLACKWHITE_FLAG => {
-                    imod.obj[ob].valblack = (value & 255) as u8;
-                    imod.obj[ob].valwhite = ((value >> 8) & 255) as u8;
-                    if has_objview {
-                        let (bl, wh) = (imod.obj[ob].valblack, imod.obj[ob].valwhite);
-                        imod.view[cview as usize].objview[ob].valblack = bl;
-                        imod.view[cview as usize].objview[ob].valwhite = wh;
+                    VAL_BLACKWHITE_FLAG => {
+                        imod.obj[ob].valblack = (value & 255) as u8;
+                        imod.obj[ob].valwhite = ((value >> 8) & 255) as u8;
+                        if has_objview {
+                            let (bl, wh) = (imod.obj[ob].valblack, imod.obj[ob].valwhite);
+                            imod.view[cview as usize].objview[ob].valblack = bl;
+                            imod.view[cview as usize].objview[ob].valwhite = wh;
+                        }
                     }
-                }
-                PNT_ON_SEC_FLAG => {
-                    imod.obj[ob].flags |= IMOD_OBJFLAG_PNT_ON_SEC;
-                    if has_objview {
-                        let f = imod.obj[ob].flags;
-                        imod.view[cview as usize].objview[ob].flags = f;
+                    PNT_ON_SEC_FLAG => {
+                        imod.obj[ob].flags |= IMOD_OBJFLAG_PNT_ON_SEC;
+                        if has_objview {
+                            let f = imod.obj[ob].flags;
+                            imod.view[cview as usize].objview[ob].flags = f;
+                        }
                     }
-                }
-                THICKEN_CONT_FLAG => {
-                    imod.obj[ob].flags |= IMOD_OBJFLAG_THICK_CONT;
-                    if has_objview {
-                        let f = imod.obj[ob].flags;
-                        imod.view[cview as usize].objview[ob].flags = f;
+                    THICKEN_CONT_FLAG => {
+                        imod.obj[ob].flags |= IMOD_OBJFLAG_THICK_CONT;
+                        if has_objview {
+                            let f = imod.obj[ob].flags;
+                            imod.view[cview as usize].objview[ob].flags = f;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
-    }
 
-    if S_MAXES_PUT != 0 {
-        imod.xmax = S_XMAX_PUT;
-        imod.ymax = S_YMAX_PUT;
-        imod.zmax = S_ZMAX_PUT;
-    }
-
-    /* Save Zscale, save rotation in current view if there is one */
-    if S_ZSCALE_PUT != NO_VALUE_PUT {
-        imod.zscale = S_ZSCALE_PUT;
-    }
-    if imod.cview > 0 && S_ROTATION_PUT.x != NO_VALUE_PUT {
-        let cview = imod.cview as usize;
-        imod.view[cview].rot = S_ROTATION_PUT;
-    }
-
-    /* Put out the sizes into the contours */
-    for i in 0..(*(&raw const S_SIZES_PUT)).len() {
-        /* Ignore illegal object or contour numbers */
-        let put_ob = (&(*(&raw const S_SIZES_PUT)))[i].ob;
-        if put_ob < 0 || put_ob >= imod.obj.len() as i32 {
-            continue;
-        }
-        let put_co = (&(*(&raw const S_SIZES_PUT)))[i].co;
-        if put_co < 0 || put_co >= imod.obj[put_ob as usize].cont.len() as i32 {
-            continue;
+        if maxes_put != 0 {
+            imod.xmax = xmax_put;
+            imod.ymax = ymax_put;
+            imod.zmax = zmax_put;
         }
 
-        /* Fill up to the limit on the number of point in array and contour */
-        let cont = &mut imod.obj[put_ob as usize].cont[put_co as usize];
-        let num = (&(*(&raw const S_SIZES_PUT)))[i].num;
-        let value = if num < cont.pts.len() as i32 {
-            num
-        } else {
-            cont.pts.len() as i32
-        };
-        for j in 0..value as usize {
-            let size = (&(*(&raw const S_SIZES_PUT)))[i].sizes[j];
-            if size >= 0. {
-                imod_point_set_size(cont, j as i32, size);
-            }
+        /* Save Zscale, save rotation in current view if there is one */
+        if zscale_put != NO_VALUE_PUT {
+            imod.zscale = zscale_put;
         }
-    }
+        if imod.cview > 0 && rotation_put.x != NO_VALUE_PUT {
+            let cview = imod.cview as usize;
+            imod.view[cview].rot = rotation_put;
+        }
 
-    /* Put out general values */
-    if !(*(&raw const S_VALUES_PUT)).is_empty() {
-        let mut store = Istore {
-            type_: GEN_STORE_VALUE1,
-            flags: (GEN_STORE_FLOAT << 2) | GEN_STORE_ONEPOINT,
-            index: StoreUnion::from_i(0),
-            value: StoreUnion::from_i(0),
-        };
-        for i in 0..(*(&raw const S_VALUES_PUT)).len() {
-            let entry = (&(*(&raw const S_VALUES_PUT)))[i];
-
+        /* Put out the sizes into the contours */
+        for entry in &sizes_put {
             /* Ignore illegal object or contour numbers */
-            if entry.ob < 0 || entry.ob >= imod.obj.len() as i32 {
+            let put_ob = entry.ob;
+            if put_ob < 0 || put_ob >= imod.obj.len() as i32 {
                 continue;
             }
-            if entry.co < 0 || entry.co >= imod.obj[entry.ob as usize].cont.len() as i32 {
+            let put_co = entry.co;
+            if put_co < 0 || put_co >= imod.obj[put_ob as usize].cont.len() as i32 {
                 continue;
             }
 
-            /* Insert value into contour or object stores */
-            store.value = StoreUnion::from_f(entry.value);
-            if entry.pt < 0 {
-                store.index = StoreUnion::from_i(entry.co);
-                istore_insert_change(&mut imod.obj[entry.ob as usize].store, store);
+            /* Fill up to the limit on the number of point in array and contour */
+            let cont = &mut imod.obj[put_ob as usize].cont[put_co as usize];
+            let num = entry.num;
+            let value = if num < cont.pts.len() as i32 {
+                num
             } else {
-                let cont = &mut imod.obj[entry.ob as usize].cont[entry.co as usize];
-                if entry.pt > cont.pts.len() as i32 {
+                cont.pts.len() as i32
+            };
+            for j in 0..value as usize {
+                let size = entry.sizes[j];
+                if size >= 0. {
+                    imod_point_set_size(cont, j as i32, size);
+                }
+            }
+        }
+
+        /* Put out general values */
+        if !values_put.is_empty() {
+            let mut store = Istore {
+                type_: GEN_STORE_VALUE1,
+                flags: (GEN_STORE_FLOAT << 2) | GEN_STORE_ONEPOINT,
+                index: StoreUnion::from_i(0),
+                value: StoreUnion::from_i(0),
+            };
+            for entry in values_put {
+                /* Ignore illegal object or contour numbers */
+                if entry.ob < 0 || entry.ob >= imod.obj.len() as i32 {
                     continue;
                 }
-                store.index = StoreUnion::from_i(entry.pt);
-                istore_insert_change(&mut cont.store, store);
+                if entry.co < 0 || entry.co >= imod.obj[entry.ob as usize].cont.len() as i32 {
+                    continue;
+                }
+
+                /* Insert value into contour or object stores */
+                store.value = StoreUnion::from_f(entry.value);
+                if entry.pt < 0 {
+                    store.index = StoreUnion::from_i(entry.co);
+                    istore_insert_change(&mut imod.obj[entry.ob as usize].store, store);
+                } else {
+                    let cont = &mut imod.obj[entry.ob as usize].cont[entry.co as usize];
+                    if entry.pt > cont.pts.len() as i32 {
+                        continue;
+                    }
+                    store.index = StoreUnion::from_i(entry.pt);
+                    istore_insert_change(&mut cont.store, store);
+                }
+            }
+
+            /* Now need to set min/maxes for all stores */
+            for ob in 0..imod.obj.len() {
+                istore_find_add_min_max1(&mut imod.obj[ob]);
             }
         }
 
-        /* Now need to set min/maxes for all stores */
-        for ob in 0..imod.obj.len() {
-            istore_find_add_min_max1(&mut imod.obj[ob]);
+        /* Complete the set of object views just before writing */
+        imod_objview_complete(imod);
+        let retcode;
+        if write_as_wimp {
+            let mut out = match ImodFile::open(&path, "wb") {
+                Some(out) => out,
+                None => {
+                    return FWRAP_ERROR_OPENING_FILE;
+                }
+            };
+            retcode = match imod_to_wmod(imod, &mut out, &path) {
+                Ok(()) => 0,
+                Err(code) => code,
+            };
+        } else {
+            let mut out = match ImodFile::open(&path, "wb") {
+                Some(out) => out,
+                None => {
+                    return FWRAP_ERROR_OPENING_FILE;
+                }
+            };
+            retcode = match imod_write_file(imod, &mut out) {
+                Ok(()) => 0,
+                Err(code) => code,
+            };
         }
-    }
-
-    /* Complete the set of object views just before writing */
-    imod_objview_complete(imod);
-    let retcode;
-    if S_WRITE_AS_WIMP != 0 {
-        let mut out = match ImodFile::open(&path, "wb") {
-            Some(out) => out,
-            None => {
-                return FWRAP_ERROR_OPENING_FILE;
-            }
-        };
-        retcode = match imod_to_wmod(imod, &mut out, &path) {
-            Ok(()) => 0,
-            Err(code) => code,
-        };
-        S_WRITE_AS_WIMP = 0;
-    } else {
-        let mut out = match ImodFile::open(&path, "wb") {
-            Some(out) => out,
-            None => {
-                return FWRAP_ERROR_OPENING_FILE;
-            }
-        };
-        retcode = match imod_write_file(imod, &mut out) {
-            Ok(()) => 0,
-            Err(code) => code,
-        };
-    }
-    retcode
+        retcode
+    })
 }
 
 /// Original: `imodwriteaswimp` (`imodel_fwrap.c:1774`).
 pub unsafe fn imodwriteaswimp(fname: *const c_char, fsize: FortStrLenT) -> i32 {
-    S_WRITE_AS_WIMP = 1;
+    FWRAP_STATE.with(|state| state.borrow_mut().write_as_wimp = true);
     writeimod(fname, fsize)
 }
 
 /// Original: `putimodscat` (`imodel_fwrap.c:1784`).
 pub unsafe fn putimodscat(ob: i32, verts: *const f32) -> i32 {
-    let co = check_assign_object(ob);
-    if co != 0 {
-        return co;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    if iobj_scat(imod.obj[S_OBJ].flags) == 0 {
-        return 2;
-    }
-
-    let mut v = 0usize;
-    let obj_index = S_OBJ;
-    for co in 0..imod.obj[obj_index].cont.len() {
-        let psize = imod.obj[obj_index].cont[co].pts.len();
-        for pt in 0..psize {
-            imod.obj[obj_index].cont[co].pts[pt].x = *verts.add(v);
-            v += 1;
-            imod.obj[obj_index].cont[co].pts[pt].y = *verts.add(v);
-            v += 1;
-            imod.obj[obj_index].cont[co].pts[pt].z = *verts.add(v);
-            v += 1;
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let co = check_assign_object(&mut state, ob);
+        if co != 0 {
+            return co;
         }
-    }
-    0
+        let obj_index = state.obj;
+        let object = &mut state.imod.as_mut().unwrap().obj[obj_index];
+        if iobj_scat(object.flags) == 0 {
+            return 2;
+        }
+        let mut v = 0usize;
+        for contour in &mut object.cont {
+            for point in &mut contour.pts {
+                point.x = *verts.add(v);
+                v += 1;
+                point.y = *verts.add(v);
+                v += 1;
+                point.z = *verts.add(v);
+                v += 1;
+            }
+        }
+        0
+    })
 }
 
 /// Original: `putimodmesh` (`imodel_fwrap.c:1808`).
 pub unsafe fn putimodmesh(mut verts: *const f32) -> i32 {
-    let mut trans = Ipoint::default();
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let mut trans = Ipoint::default();
+        if get_mesh_trans(&state, &mut trans) != 0 {
+            return FWRAP_ERROR_NO_MODEL;
+        }
+        let imod = state.imod.as_mut().unwrap();
+        let ob = imod.cindex.object as usize;
 
-    if get_mesh_trans(&mut trans) != 0 {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    let ob = imod.cindex.object as usize;
+        imod.obj[ob].mesh[0].flag |= IMESH_FLAG_NMAG;
+        let mi = imod.obj[ob].mesh[0].vert.len();
 
-    imod.obj[ob].mesh[0].flag |= IMESH_FLAG_NMAG;
-    let mi = imod.obj[ob].mesh[0].vert.len();
-
-    let mut i = 0usize;
-    while i < mi {
-        imod.obj[ob].mesh[0].vert[i].x = *verts - trans.x;
-        verts = verts.add(1);
-        imod.obj[ob].mesh[0].vert[i].y = *verts - trans.y;
-        verts = verts.add(1);
-        imod.obj[ob].mesh[0].vert[i].z = *verts - trans.z;
-        verts = verts.add(1);
-        imod.obj[ob].mesh[0].vert[i + 1].x = *verts;
-        verts = verts.add(1);
-        imod.obj[ob].mesh[0].vert[i + 1].y = *verts;
-        verts = verts.add(1);
-        imod.obj[ob].mesh[0].vert[i + 1].z = *verts;
-        verts = verts.add(1);
-        i += 2;
-    }
-    FWRAP_NOERROR
+        let mut i = 0usize;
+        while i < mi {
+            imod.obj[ob].mesh[0].vert[i].x = *verts - trans.x;
+            verts = verts.add(1);
+            imod.obj[ob].mesh[0].vert[i].y = *verts - trans.y;
+            verts = verts.add(1);
+            imod.obj[ob].mesh[0].vert[i].z = *verts - trans.z;
+            verts = verts.add(1);
+            imod.obj[ob].mesh[0].vert[i + 1].x = *verts;
+            verts = verts.add(1);
+            imod.obj[ob].mesh[0].vert[i + 1].y = *verts;
+            verts = verts.add(1);
+            imod.obj[ob].mesh[0].vert[i + 1].z = *verts;
+            verts = verts.add(1);
+            i += 2;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `newimod` (`imodel_fwrap.c:1836`).
 pub unsafe fn newimod() -> i32 {
-    delete_fimod();
-    *(&raw mut S_IMOD) = imod_new();
-    if (*(&raw const S_IMOD)).is_none() {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-    (*(&raw mut S_IMOD)).as_mut().unwrap().obj = Vec::new();
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        delete_fimod(&mut state);
+        state.imod = imod_new();
+        let Some(imod) = state.imod.as_mut() else {
+            return FWRAP_ERROR_NO_MODEL;
+        };
+        imod.obj.clear();
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `deleteimod` (`imodel_fwrap.c:1850`).
 pub unsafe fn deleteimod() -> i32 {
-    if (*(&raw const S_IMOD)).is_none() {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-    delete_fimod();
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        if state.imod.is_none() {
+            return FWRAP_ERROR_NO_MODEL;
+        }
+        delete_fimod(&mut state);
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `deleteiobj` (`imodel_fwrap.c:1861`).
 pub unsafe fn deleteiobj() -> i32 {
-    if (*(&raw const S_IMOD)).is_none() {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    imod_objviews_free(imod);
-    imod_objects_delete(&mut imod.obj);
-    imod.obj = Vec::new();
-
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let Some(imod) = state.imod.as_mut() else {
+            return FWRAP_ERROR_NO_MODEL;
+        };
+        imod_objviews_free(imod);
+        imod_objects_delete(&mut imod.obj);
+        imod.obj.clear();
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getimodobjsize` (`imodel_fwrap.c:1878`).
 pub unsafe fn getimodobjsize() -> i32 {
-    match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod.obj.len() as i32,
-        None => -1,
-    }
+    FWRAP_STATE.with(|state| {
+        state
+            .borrow()
+            .imod
+            .as_ref()
+            .map_or(-1, |imod| imod.obj.len() as i32)
+    })
 }
 
 /// Original: `getimodheado` (`imodel_fwrap.c:1889`).
 pub unsafe fn getimodheado(um: &mut f32, zscale: &mut f32) -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-
-    if imod.units == IMOD_UNIT_PIXEL {
-        return FWRAP_ERROR_NO_PIXEL_SIZE;
-    }
-
-    let exval = imod.units + 6;
-    *um = (imod.pixsize as f64 * 10.0f64.powf(exval as f64)) as f32;
-    *zscale = imod.zscale;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| {
+        let state = state.borrow();
+        let imod = match state.imod.as_ref() {
+            Some(imod) => imod,
+            None => return FWRAP_ERROR_NO_MODEL,
+        };
+        if imod.units == IMOD_UNIT_PIXEL {
+            return FWRAP_ERROR_NO_PIXEL_SIZE;
+        }
+        let exval = imod.units + 6;
+        *um = (imod.pixsize as f64 * 10.0f64.powf(exval as f64)) as f32;
+        *zscale = imod.zscale;
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getimodmaxes` (`imodel_fwrap.c:1908`).
 pub unsafe fn getimodmaxes(xmax: &mut i32, ymax: &mut i32, zmax: &mut i32) -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-
-    *xmax = imod.xmax;
-    *ymax = imod.ymax;
-    *zmax = imod.zmax;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| {
+        let state = state.borrow();
+        let imod = match state.imod.as_ref() {
+            Some(imod) => imod,
+            None => return FWRAP_ERROR_NO_MODEL,
+        };
+        *xmax = imod.xmax;
+        *ymax = imod.ymax;
+        *zmax = imod.zmax;
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getzfromminuspt5` (`imodel_fwrap.c:1923`).
 pub unsafe fn getzfromminuspt5() -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-    if imod.flags & IMODF_Z_FROM_MINUSPT5 != 0 {
-        1
-    } else {
-        0
-    }
+    FWRAP_STATE.with(|state| {
+        state
+            .borrow()
+            .imod
+            .as_ref()
+            .map_or(FWRAP_ERROR_NO_MODEL, |imod| {
+                (imod.flags & IMODF_Z_FROM_MINUSPT5 != 0) as i32
+            })
+    })
 }
 
 /// Original: `getimodhead` (`imodel_fwrap.c:1935`).
@@ -1918,232 +1974,268 @@ pub unsafe fn getimodhead(
     zoffset: &mut f32,
     ifflip: &mut i32,
 ) -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
+    FWRAP_STATE.with(|state| unsafe {
+        let state = state.borrow();
+        let imod = match state.imod.as_ref() {
+            Some(imod) => imod,
+            None => return FWRAP_ERROR_NO_MODEL,
+        };
 
-    let exval = imod.units + 6;
-    *um = (imod.pixsize as f64 * 10.0f64.powf(exval as f64)) as f32;
-    *zscale = imod.zscale;
+        let exval = imod.units + 6;
+        *um = (imod.pixsize as f64 * 10.0f64.powf(exval as f64)) as f32;
+        *zscale = imod.zscale;
 
-    let iref = imod.ref_image;
+        let iref = imod.ref_image;
 
-    /* DNM 7/20/02: If image origin has been stored in otrans, return that
-    because that is what is needed to get to full volume index coords */
-    match iref {
-        None => {
-            *xoffset = 0.;
-            *yoffset = 0.;
-            *zoffset = 0.;
-        }
-        Some(iref) => {
-            if imod.flags & IMODF_OTRANS_ORIGIN != 0 {
-                *xoffset = -iref.otrans.x;
-                *yoffset = -iref.otrans.y;
-                *zoffset = -iref.otrans.z;
-            } else {
-                *xoffset = -iref.ctrans.x;
-                *yoffset = -iref.ctrans.y;
-                *zoffset = -iref.ctrans.z;
+        /* DNM 7/20/02: If image origin has been stored in otrans, return that
+        because that is what is needed to get to full volume index coords */
+        match iref {
+            None => {
+                *xoffset = 0.;
+                *yoffset = 0.;
+                *zoffset = 0.;
+            }
+            Some(iref) => {
+                if imod.flags & IMODF_OTRANS_ORIGIN != 0 {
+                    *xoffset = -iref.otrans.x;
+                    *yoffset = -iref.otrans.y;
+                    *zoffset = -iref.otrans.z;
+                } else {
+                    *xoffset = -iref.ctrans.x;
+                    *yoffset = -iref.ctrans.y;
+                    *zoffset = -iref.ctrans.z;
+                }
             }
         }
-    }
 
-    if imod.flags & IMODF_FLIPYZ != 0 {
-        *ifflip = 1;
-    } else {
-        *ifflip = 0;
-    }
-    FWRAP_NOERROR
+        if imod.flags & IMODF_FLIPYZ != 0 {
+            *ifflip = 1;
+        } else {
+            *ifflip = 0;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getimodscales` (`imodel_fwrap.c:1981`).
 pub unsafe fn getimodscales(ximscale: &mut f32, yimscale: &mut f32, zimscale: &mut f32) -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-
-    match imod.ref_image {
-        Some(iref) => {
-            *ximscale = iref.cscale.x;
-            *yimscale = iref.cscale.y;
-            *zimscale = iref.cscale.z;
+    FWRAP_STATE.with(|state| {
+        let state = state.borrow();
+        let imod = match state.imod.as_ref() {
+            Some(imod) => imod,
+            None => return FWRAP_ERROR_NO_MODEL,
+        };
+        match imod.ref_image {
+            Some(iref) => {
+                *ximscale = iref.cscale.x;
+                *yimscale = iref.cscale.y;
+                *zimscale = iref.cscale.z;
+            }
+            None => {
+                *ximscale = 1.;
+                *yimscale = 1.;
+                *zimscale = 1.;
+            }
         }
-        None => {
-            *ximscale = 1.;
-            *yimscale = 1.;
-            *zimscale = 1.;
-        }
-    }
-    FWRAP_NOERROR
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `putimageref` (`imodel_fwrap.c:2006`).
 pub unsafe fn putimageref(delta: *const f32, origin: *const f32, tilt: *const f32) -> i32 {
-    if (*(&raw const S_IMOD)).is_none() {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    if imod.ref_image.is_none() {
-        imod.ref_image = Some(Iref_image {
-            oscale: Ipoint::default(),
-            otrans: Ipoint::default(),
-            orot: Ipoint::default(),
-            cscale: Ipoint::default(),
-            ctrans: Ipoint::default(),
-            crot: Ipoint::default(),
-        });
-    }
-    let iref = imod.ref_image.as_mut().unwrap();
-    iref.cscale.x = *delta.add(0);
-    iref.cscale.y = *delta.add(1);
-    iref.cscale.z = *delta.add(2);
-    iref.ctrans.x = *origin.add(0);
-    iref.ctrans.y = *origin.add(1);
-    iref.ctrans.z = *origin.add(2);
-    iref.otrans = iref.ctrans;
-    iref.crot.x = *tilt.add(0);
-    iref.crot.y = *tilt.add(1);
-    iref.crot.z = *tilt.add(2);
-    imod.flags |= IMODF_OTRANS_ORIGIN | IMODF_TILTOK;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let Some(imod) = state.imod.as_mut() else {
+            return FWRAP_ERROR_NO_MODEL;
+        };
+        if imod.ref_image.is_none() {
+            imod.ref_image = Some(Iref_image {
+                oscale: Ipoint::default(),
+                otrans: Ipoint::default(),
+                orot: Ipoint::default(),
+                cscale: Ipoint::default(),
+                ctrans: Ipoint::default(),
+                crot: Ipoint::default(),
+            });
+        }
+        let iref = imod.ref_image.as_mut().unwrap();
+        iref.cscale.x = *delta.add(0);
+        iref.cscale.y = *delta.add(1);
+        iref.cscale.z = *delta.add(2);
+        iref.ctrans.x = *origin.add(0);
+        iref.ctrans.y = *origin.add(1);
+        iref.ctrans.z = *origin.add(2);
+        iref.otrans = iref.ctrans;
+        iref.crot.x = *tilt.add(0);
+        iref.crot.y = *tilt.add(1);
+        iref.crot.z = *tilt.add(2);
+        imod.flags |= IMODF_OTRANS_ORIGIN | IMODF_TILTOK;
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `imodhasimageref` (`imodel_fwrap.c:2036`).
 pub unsafe fn imodhasimageref() -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-    if imod.ref_image.is_some() { 1 } else { 0 }
+    FWRAP_STATE.with(|state| {
+        state
+            .borrow()
+            .imod
+            .as_ref()
+            .map_or(FWRAP_ERROR_NO_MODEL, |imod| imod.ref_image.is_some() as i32)
+    })
 }
 
 /// Original: `getimodflags` (`imodel_fwrap.c:2048`).
 pub unsafe fn getimodflags(flags: *mut i32, limflags: i32) -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-    if imod.obj.len() as i32 > limflags {
-        eprintln!("getimodflags: Too many objects for Fortran program");
-        return FWRAP_ERROR_FILE_TO_BIG;
-    }
-    for i in 0..limflags as usize {
-        *flags.add(i) = -1;
-    }
-    for i in 0..imod.obj.len() {
-        if imod.obj[i].cont.is_empty() {
-            continue;
+    FWRAP_STATE.with(|state| unsafe {
+        let state = state.borrow();
+        let imod = match state.imod.as_ref() {
+            Some(imod) => imod,
+            None => return FWRAP_ERROR_NO_MODEL,
+        };
+        if imod.obj.len() as i32 > limflags {
+            eprintln!("getimodflags: Too many objects for Fortran program");
+            return FWRAP_ERROR_FILE_TO_BIG;
         }
-        *flags.add(i) = 0;
-        if imod.obj[i].flags & IMOD_OBJFLAG_OPEN != 0 {
-            *flags.add(i) = 1;
+        for i in 0..limflags as usize {
+            *flags.add(i) = -1;
         }
-        if imod.obj[i].flags & IMOD_OBJFLAG_SCAT != 0 {
-            *flags.add(i) = 2;
+        for i in 0..imod.obj.len() {
+            if imod.obj[i].cont.is_empty() {
+                continue;
+            }
+            *flags.add(i) = 0;
+            if imod.obj[i].flags & IMOD_OBJFLAG_OPEN != 0 {
+                *flags.add(i) = 1;
+            }
+            if imod.obj[i].flags & IMOD_OBJFLAG_SCAT != 0 {
+                *flags.add(i) = 2;
+            }
+            if !imod.obj[i].mesh.is_empty() {
+                *flags.add(i) += 4;
+            }
         }
-        if !imod.obj[i].mesh.is_empty() {
-            *flags.add(i) += 4;
-        }
-    }
-    FWRAP_NOERROR
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getmodelname` (`imodel_fwrap.c:2077`).
 pub unsafe fn getmodelname(fname: *mut c_char, fsize: FortStrLenT) -> i32 {
-    let imod = match (*(&raw const S_IMOD)).as_ref() {
-        Some(imod) => imod,
-        None => return FWRAP_ERROR_NO_MODEL,
-    };
-    if c2f_string(imod.name.as_ptr().cast::<c_char>(), fname, fsize) != 0 {
-        return FWRAP_ERROR_STRING_LEN;
-    }
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let state = state.borrow();
+        let imod = match state.imod.as_ref() {
+            Some(imod) => imod,
+            None => return FWRAP_ERROR_NO_MODEL,
+        };
+        let limit = fsize.max(0) as usize;
+        let mut index = 0usize;
+        while index < imod.name.len() && index < limit && imod.name[index] != 0 {
+            *fname.add(index) = imod.name[index] as c_char;
+            index += 1;
+        }
+        if index < imod.name.len() && imod.name[index] != 0 {
+            return FWRAP_ERROR_STRING_LEN;
+        }
+        while index < limit {
+            *fname.add(index) = b' ' as c_char;
+            index += 1;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getimodobjname` (`imodel_fwrap.c:2090`).
 pub unsafe fn getimodobjname(ob: i32, fname: *mut c_char, fsize: FortStrLenT) -> i32 {
-    let err = check_assign_object(ob);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw const S_IMOD)).as_ref().unwrap();
-    let obj = &imod.obj[S_OBJ];
-    let mut i = 0i32;
-    while i < fsize && (i as usize) < IOBJ_STRSIZE && obj.name[i as usize] != 0 {
-        *fname.add(i as usize) = obj.name[i as usize] as c_char;
-        i += 1;
-    }
-    while i < fsize {
-        *fname.add(i as usize) = 0x20;
-        i += 1;
-    }
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let err = check_assign_object(&mut state, ob);
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        let obj = &state.imod.as_ref().unwrap().obj[obj_index];
+        let mut i = 0i32;
+        while i < fsize && (i as usize) < IOBJ_STRSIZE && obj.name[i as usize] != 0 {
+            *fname.add(i as usize) = obj.name[i as usize] as c_char;
+            i += 1;
+        }
+        while i < fsize {
+            *fname.add(i as usize) = 0x20;
+            i += 1;
+        }
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `getimodclip` (`imodel_fwrap.c:2108`).
 pub unsafe fn getimodclip(objnum: i32, clip: *mut f32) -> i32 {
-    let mut iout = 0usize;
-    let err = check_assign_object(objnum);
-    if err != 0 {
-        return err;
-    }
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let mut iout = 0usize;
+        let err = check_assign_object(&mut state, objnum);
+        if err != 0 {
+            return err;
+        }
 
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    imod.cindex.object = objnum - 1;
+        let obj_index = state.obj;
+        let imod = state.imod.as_mut().unwrap();
+        imod.cindex.object = objnum - 1;
+        /* DNM 9/19/04: modified for multiple clip planes */
+        let obj = &imod.obj[obj_index];
+        let mut nout = obj.clips.count as i32;
+        if nout > FWRAP_MAX_CLIP_PLANES {
+            nout = FWRAP_MAX_CLIP_PLANES;
+        }
 
-    /* DNM 9/19/04: modified for multiple clip planes */
-    let obj = &imod.obj[S_OBJ];
-    let mut nout = obj.clips.count as i32;
-    if nout > FWRAP_MAX_CLIP_PLANES {
-        nout = FWRAP_MAX_CLIP_PLANES;
-    }
-
-    for i in 0..nout as usize {
-        *clip.add(iout) = obj.clips.normal[i].x;
-        iout += 1;
-        *clip.add(iout) = obj.clips.normal[i].y;
-        iout += 1;
-        *clip.add(iout) = obj.clips.normal[i].z / imod.zscale;
-        iout += 1;
-        *clip.add(iout) = (obj.clips.normal[i].x * obj.clips.point[i].x)
-            + (obj.clips.normal[i].y * obj.clips.point[i].y)
-            + (obj.clips.normal[i].z * obj.clips.point[i].z);
-        *clip.add(iout) *= imod.pixsize;
-        iout += 1;
-    }
-    nout
+        for i in 0..nout as usize {
+            *clip.add(iout) = obj.clips.normal[i].x;
+            iout += 1;
+            *clip.add(iout) = obj.clips.normal[i].y;
+            iout += 1;
+            *clip.add(iout) = obj.clips.normal[i].z / imod.zscale;
+            iout += 1;
+            *clip.add(iout) = (obj.clips.normal[i].x * obj.clips.point[i].x)
+                + (obj.clips.normal[i].y * obj.clips.point[i].y)
+                + (obj.clips.normal[i].z * obj.clips.point[i].z);
+            *clip.add(iout) *= imod.pixsize;
+            iout += 1;
+        }
+        nout
+    })
 }
 
 /* DNM 6/8/01: change this to save the values until a model is written */
 /// Original: `putimodmaxes` (`imodel_fwrap.c:2137`).
 pub unsafe fn putimodmaxes(xmax: i32, ymax: i32, zmax: i32) -> i32 {
-    S_XMAX_PUT = xmax;
-    S_YMAX_PUT = ymax;
-    S_ZMAX_PUT = zmax;
-    S_MAXES_PUT = 1;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.xmax_put = xmax;
+        state.ymax_put = ymax;
+        state.zmax_put = zmax;
+        state.maxes_put = 1;
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `putimodflag` (`imodel_fwrap.c:2153`).
 pub unsafe fn putimodflag(objnum: i32, flag: i32) {
-    let flags = &mut *(&raw mut S_FLAGS_PUT);
-    flags.push(objnum - 1);
-    flags.push(flag);
+    FWRAP_STATE.with(|state| state.borrow_mut().flags_put.extend([objnum - 1, flag]));
 }
 
 /// Original: `putimodzscale` (`imodel_fwrap.c:2174`).
 pub unsafe fn putimodzscale(zscale: f32) {
-    S_ZSCALE_PUT = zscale;
+    FWRAP_STATE.with(|state| state.borrow_mut().zscale_put = zscale);
 }
 
 /// Original: `putimodrotation` (`imodel_fwrap.c:2182`).
 pub unsafe fn putimodrotation(xrot: f32, yrot: f32, zrot: f32) {
-    S_ROTATION_PUT.x = xrot;
-    S_ROTATION_PUT.y = yrot;
-    S_ROTATION_PUT.z = zrot;
+    FWRAP_STATE.with(|state| {
+        state.borrow_mut().rotation_put = Ipoint {
+            x: xrot,
+            y: yrot,
+            z: zrot,
+        };
+    });
 }
 
 /* DNM 12/3/01: added so that old wimp models can be converted */
@@ -2154,13 +2246,16 @@ pub fn fromvmsfloats(data: &mut [u8], amt: i32) {
 
 /// Original: `getscatsize` (`imodel_fwrap.c:2198`).
 pub unsafe fn getscatsize(objnum: i32, size: &mut i32) -> i32 {
-    let err = check_assign_object(objnum);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw const S_IMOD)).as_ref().unwrap();
-    *size = imod.obj[S_OBJ].pdrawsize;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let err = unsafe { check_assign_object(&mut state, objnum) };
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        *size = state.imod.as_ref().unwrap().obj[obj_index].pdrawsize;
+        FWRAP_NOERROR
+    })
 }
 
 /* DNM 5/15/02: put scattered point sizes out in flags with an offset */
@@ -2190,17 +2285,20 @@ pub unsafe fn putlinewidth(objnum: i32, width: i32) {
 
 /// Original: `getobjcolor` (`imodel_fwrap.c:2249`).
 pub unsafe fn getobjcolor(objnum: i32, red: &mut i32, green: &mut i32, blue: &mut i32) -> i32 {
-    let err = check_assign_object(objnum);
-    if err != 0 {
-        return err;
-    }
-    let imod = (*(&raw const S_IMOD)).as_ref().unwrap();
-    let obj = &imod.obj[S_OBJ];
-    /* B3DNINT (`b3dutil.h:33`) */
-    *red = b3d_nint_local(255. * obj.red as f64);
-    *green = b3d_nint_local(255. * obj.green as f64);
-    *blue = b3d_nint_local(255. * obj.blue as f64);
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let err = unsafe { check_assign_object(&mut state, objnum) };
+        if err != 0 {
+            return err;
+        }
+        let obj_index = state.obj;
+        let obj = &state.imod.as_ref().unwrap().obj[obj_index];
+        /* B3DNINT (`b3dutil.h:33`) */
+        *red = b3d_nint_local(255. * obj.red as f64);
+        *green = b3d_nint_local(255. * obj.green as f64);
+        *blue = b3d_nint_local(255. * obj.blue as f64);
+        FWRAP_NOERROR
+    })
 }
 
 /// `B3DNINT` (`b3dutil.h:33`): `floor(x + 0.5)` for non-negative, `ceil(x - 0.5)`
@@ -2240,23 +2338,27 @@ pub unsafe fn putvalblackwhite(objnum: i32, black: i32, white: i32) {
 
 /// Original: `putmodelname` (`imodel_fwrap.c:2299`).
 pub unsafe fn putmodelname(fname: *const c_char, fsize: FortStrLenT) -> i32 {
-    if (*(&raw const S_IMOD)).is_none() {
-        return FWRAP_ERROR_NO_MODEL;
-    }
-    let tmpstr = fortran_string(fname, fsize);
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    let bytes = tmpstr.as_bytes();
-    let count = bytes.len().min(IMOD_STRSIZE - 1);
-    imod.name[..count].copy_from_slice(&bytes[..count]);
-    imod.name[IMOD_STRSIZE - 1] = 0;
-    FWRAP_NOERROR
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let Some(imod) = state.imod.as_mut() else {
+            return FWRAP_ERROR_NO_MODEL;
+        };
+        let tmpstr = fortran_string(fname, fsize);
+        let bytes = tmpstr.as_bytes();
+        let count = bytes.len().min(IMOD_STRSIZE - 1);
+        imod.name[..count].copy_from_slice(&bytes[..count]);
+        imod.name[IMOD_STRSIZE - 1] = 0;
+        FWRAP_NOERROR
+    })
 }
 
 /// Original: `putimodobjname` (`imodel_fwrap.c:2316`).
 pub unsafe fn putimodobjname(objnum: i32, fname: *const c_char, fsize: FortStrLenT) {
-    (*(&raw mut S_NAMES_PUT)).push(NameStruct {
-        ob: objnum - 1,
-        name: fortran_string(fname, fsize),
+    FWRAP_STATE.with(|state| {
+        state.borrow_mut().names_put.push(NameStruct {
+            ob: objnum - 1,
+            name: fortran_string(fname, fsize),
+        });
     });
 }
 
@@ -2271,153 +2373,157 @@ pub unsafe fn getimodnesting(
     out_cont: *mut i32,
     array_size: i32,
 ) -> i32 {
-    let mut contz: Vec<i32> = Vec::new();
-    let mut numatz: Vec<i32> = Vec::new();
-    let mut contatz: Vec<Vec<i32>> = Vec::new();
-    let mut zlist: Vec<i32> = Vec::new();
-    let mut zmin = 0;
-    let mut zmax = 0;
-    let mut zlsize = 0;
-    let mut nummax = 0;
-    let mut numnests = 0;
-    let mut numwarn = -1;
+    FWRAP_STATE.with(|state| unsafe {
+        let mut state = state.borrow_mut();
+        let mut contz: Vec<i32> = Vec::new();
+        let mut numatz: Vec<i32> = Vec::new();
+        let mut contatz: Vec<Vec<i32>> = Vec::new();
+        let mut zlist: Vec<i32> = Vec::new();
+        let mut zmin = 0;
+        let mut zmax = 0;
+        let mut zlsize = 0;
+        let mut nummax = 0;
+        let mut numnests = 0;
+        let mut numwarn = -1;
 
-    let co = check_assign_object(ob);
-    if co != 0 {
-        return co;
-    }
-    let imod = (*(&raw mut S_IMOD)).as_mut().unwrap();
-    let obj_index = S_OBJ;
-    if array_size <= imod.obj[obj_index].cont.len() as i32 {
-        return FWRAP_ERROR_FILE_TO_BIG;
-    }
-    if imod_contour_make_z_tables(
-        &mut imod.obj[obj_index],
-        1,
-        0,
-        &mut contz,
-        &mut zlist,
-        &mut numatz,
-        &mut contatz,
-        &mut zmin,
-        &mut zmax,
-        &mut zlsize,
-        &mut nummax,
-    ) != 0
-    {
-        return FWRAP_ERROR_MEMORY;
-    }
-
-    let contsize = imod.obj[obj_index].cont.len();
-
-    /* Allocate lists of mins, max's, and scan contours */
-    let mut pmin: Vec<Ipoint> = vec![Ipoint::default(); contsize];
-    let mut pmax: Vec<Ipoint> = vec![Ipoint::default(); contsize];
-    /* The C keeps `Icont *scancont[]` pointing into the object; the translated
-    `imodContourCheckNesting` takes `&mut [Icont]`, so the contours are cloned
-    here.  The source never writes a scan contour back into the object either. */
-    let mut scancont: Vec<Icont> = imod.obj[obj_index].cont.clone();
-    let mut nestind: Vec<i32> = vec![0; contsize];
-    let mut nests: Vec<Nesting> = Vec::new();
-
-    /* Get mins, maxes, set addresses into scan contour list */
-    for co in 0..contsize {
-        *level.add(co) = 0;
-        nestind[co] = -1;
-        if !imod.obj[obj_index].cont[co].pts.is_empty() {
-            imod_contour_get_bbox(
-                Some(&imod.obj[obj_index].cont[co]),
-                &mut pmin[co],
-                &mut pmax[co],
-            );
+        let co = check_assign_object(&mut state, ob);
+        if co != 0 {
+            return co;
         }
-    }
+        let obj_index = state.obj;
+        let imod = state.imod.as_mut().unwrap();
+        if array_size <= imod.obj[obj_index].cont.len() as i32 {
+            return FWRAP_ERROR_FILE_TO_BIG;
+        }
+        if imod_contour_make_z_tables(
+            &mut imod.obj[obj_index],
+            1,
+            0,
+            &mut contz,
+            &mut zlist,
+            &mut numatz,
+            &mut contatz,
+            &mut zmin,
+            &mut zmax,
+            &mut zlsize,
+            &mut nummax,
+        ) != 0
+        {
+            return FWRAP_ERROR_MEMORY;
+        }
 
-    /* Loop on contours to find inside and outside pairs */
-    for indz in 0..(zmax + 1 - zmin).max(0) as usize {
-        for kis in 0..(numatz[indz] - 1).max(0) as usize {
-            let co = contatz[indz][kis];
-            if imod.obj[obj_index].cont[co as usize].pts.is_empty() {
-                continue;
+        let contsize = imod.obj[obj_index].cont.len();
+
+        /* Allocate lists of mins, max's, and scan contours */
+        let mut pmin: Vec<Ipoint> = vec![Ipoint::default(); contsize];
+        let mut pmax: Vec<Ipoint> = vec![Ipoint::default(); contsize];
+        /* The C keeps `Icont *scancont[]` pointing into the object; the translated
+        `imodContourCheckNesting` takes `&mut [Icont]`, so the contours are cloned
+        here.  The source never writes a scan contour back into the object either. */
+        let mut scancont: Vec<Icont> = imod.obj[obj_index].cont.clone();
+        let mut nestind: Vec<i32> = vec![0; contsize];
+        let mut nests: Vec<Nesting> = Vec::new();
+
+        /* Get mins, maxes, set addresses into scan contour list */
+        for co in 0..contsize {
+            *level.add(co) = 0;
+            nestind[co] = -1;
+            if !imod.obj[obj_index].cont[co].pts.is_empty() {
+                imod_contour_get_bbox(
+                    Some(&imod.obj[obj_index].cont[co]),
+                    &mut pmin[co],
+                    &mut pmax[co],
+                );
             }
-            for lis in (kis + 1)..numatz[indz] as usize {
-                let eco = contatz[indz][lis];
-                if imod.obj[obj_index].cont[eco as usize].pts.is_empty() {
+        }
+
+        /* Loop on contours to find inside and outside pairs */
+        for indz in 0..(zmax + 1 - zmin).max(0) as usize {
+            for kis in 0..(numatz[indz] - 1).max(0) as usize {
+                let co = contatz[indz][kis];
+                if imod.obj[obj_index].cont[co as usize].pts.is_empty() {
                     continue;
                 }
+                for lis in (kis + 1)..numatz[indz] as usize {
+                    let eco = contatz[indz][lis];
+                    if imod.obj[obj_index].cont[eco as usize].pts.is_empty() {
+                        continue;
+                    }
 
-                if imod_contour_check_nesting(
-                    co,
-                    eco,
-                    &mut scancont,
-                    &pmin,
-                    &pmax,
-                    &mut nests,
-                    &mut nestind,
-                    &mut numnests,
-                    &mut numwarn,
-                ) != 0
-                {
-                    return FWRAP_ERROR_MEMORY;
+                    if imod_contour_check_nesting(
+                        co,
+                        eco,
+                        &mut scancont,
+                        &pmin,
+                        &pmax,
+                        &mut nests,
+                        &mut nestind,
+                        &mut numnests,
+                        &mut numwarn,
+                    ) != 0
+                    {
+                        return FWRAP_ERROR_MEMORY;
+                    }
                 }
             }
         }
-    }
 
-    /* Analyze inside and outside contours to determine level */
-    imod_contour_nest_levels(&mut nests, &nestind, numnests);
+        /* Analyze inside and outside contours to determine level */
+        imod_contour_nest_levels(&mut nests, &nestind, numnests);
 
-    let mut intot = 0usize;
-    let mut outtot = 0usize;
-    *in_index.add(0) = 1;
-    if in_only == 0 {
-        *out_index.add(0) = 1;
-    }
-
-    /* Fill arrays with the inside and outside lists and indexes to lists */
-    for co in 0..contsize {
-        if nestind[co] >= 0 {
-            let nest = &nests[nestind[co] as usize];
-            if intot as i32 + nest.ninside >= array_size
-                || outtot as i32 + nest.noutside >= array_size
-            {
-                return FWRAP_ERROR_FILE_TO_BIG;
-            }
-            for lis in 0..nest.ninside as usize {
-                *in_cont.add(intot) = nest.inside[lis] + 1;
-                intot += 1;
-            }
-            if in_only == 0 {
-                for lis in 0..nest.noutside as usize {
-                    *out_cont.add(outtot) = nest.outside[lis] + 1;
-                    outtot += 1;
-                }
-            }
-            *level.add(co) = nest.level;
-        }
-        *in_index.add(co + 1) = intot as i32 + 1;
+        let mut intot = 0usize;
+        let mut outtot = 0usize;
+        *in_index.add(0) = 1;
         if in_only == 0 {
-            *out_index.add(co + 1) = outtot as i32 + 1;
+            *out_index.add(0) = 1;
         }
-    }
 
-    /* clean up everything */
-    imod_contour_free_nests(&mut nests, numnests);
-    for co in 0..contsize {
-        if !imod.obj[obj_index].cont[co].pts.is_empty()
-            && (scancont[co].flags & ICONT_SCANLINE) != 0
-        {
-            scancont[co] = Icont::default();
+        /* Fill arrays with the inside and outside lists and indexes to lists */
+        for co in 0..contsize {
+            if nestind[co] >= 0 {
+                let nest = &nests[nestind[co] as usize];
+                if array_size <= 0
+                    || intot + nest.inside.len() >= array_size as usize
+                    || outtot + nest.outside.len() >= array_size as usize
+                {
+                    return FWRAP_ERROR_FILE_TO_BIG;
+                }
+                for &inside in &nest.inside {
+                    *in_cont.add(intot) = inside + 1;
+                    intot += 1;
+                }
+                if in_only == 0 {
+                    for &outside in &nest.outside {
+                        *out_cont.add(outtot) = outside + 1;
+                        outtot += 1;
+                    }
+                }
+                *level.add(co) = nest.level;
+            }
+            *in_index.add(co + 1) = intot as i32 + 1;
+            if in_only == 0 {
+                *out_index.add(co + 1) = outtot as i32 + 1;
+            }
         }
-    }
-    imod_contour_free_z_tables(
-        &mut numatz,
-        &mut contatz,
-        &mut contz,
-        &mut zlist,
-        zmin,
-        zmax,
-    );
 
-    FWRAP_NOERROR
+        /* clean up everything */
+        imod_contour_free_nests(&mut nests, numnests);
+        for co in 0..contsize {
+            if !imod.obj[obj_index].cont[co].pts.is_empty()
+                && (scancont[co].flags & ICONT_SCANLINE) != 0
+            {
+                scancont[co] = Icont::default();
+            }
+        }
+        imod_contour_free_z_tables(
+            &mut numatz,
+            &mut contatz,
+            &mut contz,
+            &mut zlist,
+            zmin,
+            zmax,
+        );
+
+        FWRAP_NOERROR
+    })
 }

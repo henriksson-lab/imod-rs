@@ -10,9 +10,7 @@ pub fn mxml_get_cdata(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]> {
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
     if arena.node(node).type_ != MXML_ELEMENT {
         return None;
     }
@@ -37,9 +35,7 @@ pub fn mxml_get_custom(arena: &MxmlArena, node: Option<usize>) -> Option<&dyn An
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
 
     /*
      * Return the custom value...
@@ -69,9 +65,7 @@ pub fn mxml_get_element(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]>
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
     if arena.node(node).type_ != MXML_ELEMENT {
         return None;
     }
@@ -92,9 +86,7 @@ pub fn mxml_get_first_child(arena: &MxmlArena, node: Option<usize>) -> Option<us
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
     if arena.node(node).type_ != MXML_ELEMENT {
         return None;
     }
@@ -144,9 +136,7 @@ pub fn mxml_get_last_child(arena: &MxmlArena, node: Option<usize>) -> Option<usi
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
     if arena.node(node).type_ != MXML_ELEMENT {
         return None;
     }
@@ -164,9 +154,7 @@ pub fn mxml_get_next_sibling(arena: &MxmlArena, node: Option<usize>) -> Option<u
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
 
     /*
      * Return the node type...
@@ -181,9 +169,7 @@ pub fn mxml_get_opaque(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]> 
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
 
     /*
      * Return the opaque value...
@@ -213,9 +199,7 @@ pub fn mxml_get_parent(arena: &MxmlArena, node: Option<usize>) -> Option<usize> 
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
 
     /*
      * Return the parent node...
@@ -230,9 +214,7 @@ pub fn mxml_get_prev_sibling(arena: &MxmlArena, node: Option<usize>) -> Option<u
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
 
     /*
      * Return the previous sibling node...
@@ -348,9 +330,7 @@ pub fn mxml_get_user_data(arena: &MxmlArena, node: Option<usize>) -> Option<&dyn
      * Range check input...
      */
 
-    let Some(node) = node else {
-        return None;
-    };
+    let node = node?;
 
     /*
      * Return the user data pointer...

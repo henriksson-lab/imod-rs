@@ -321,7 +321,7 @@ pub unsafe fn get_instance(
         return Ok(autodoc);
     }
     autodoc = unsafe { Autodoc::new(Some(name), std::ptr::null_mut()) };
-    unsafe { set_instance(name, autodoc) };
+    set_instance(name, autodoc);
     unsafe { (*autodoc).set_debug_to(debug) };
     if name == UITEST {
         unsafe { Autodoc::initialize_ui_test_instance(autodoc, manager, Some(name), axis_id)? };
@@ -550,7 +550,7 @@ pub unsafe fn get_instance_file_autodoc_name(
     } {
         Ok(()) => {
             if let Some(autodoc_name) = autodoc_name {
-                unsafe { set_instance(autodoc_name, autodoc) };
+                set_instance(autodoc_name, autodoc);
             }
             Ok(autodoc)
         }
@@ -1048,9 +1048,7 @@ pub fn reset_instance(name: &str) {
 ///
 /// Override an old autodoc instance with a new one.
 ///
-/// # Safety
-/// `autodoc` must be null or point to a live `Autodoc`.
-pub unsafe fn set_instance(name: &str, autodoc: *mut Autodoc) -> bool {
+pub fn set_instance(name: &str, autodoc: *mut Autodoc) -> bool {
     if name == TILTXCORR {
         TILTXCORR_INSTANCE.with(|instance| instance.set(autodoc));
     } else if name == TEST {

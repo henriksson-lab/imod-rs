@@ -1296,7 +1296,7 @@ pub fn clip() {
     if options.add2file == IP_APPEND_FALSE
         && let Some(fp) = input.fp.as_mut()
     {
-        unsafe { iimage::ii_use_tiff_threads_for_fp(fp, 0) };
+        iimage::ii_use_tiff_threads_for_fp(fp, 0);
     }
     mrcfiles::mrc_init_output_header(&mut output);
     if options.infiles > 1 {
@@ -1384,20 +1384,19 @@ WARNING: This file is not a readable MRC file.\n\
             // `clip.cpp:781` hands `viewcmd` to CorDefProcessFeiDefects as the
             // 1024-byte message buffer, with a 1000-byte usable length.
             let mut message = String::new();
-            if unsafe {
-                crate::imod::clip::correct_defects::cor_def_process_fei_defects(
-                    ii_file,
-                    &mut options.defects,
-                    second.nx,
-                    second.ny,
-                    true,
-                    super_fac,
-                    fei_def_pad,
-                    dump_defect_name.as_deref(),
-                    &mut message,
-                    1000,
-                )
-            } != 0
+            let ii_file = unsafe { ii_file.as_mut().unwrap() };
+            if crate::imod::clip::correct_defects::cor_def_process_fei_defects(
+                ii_file,
+                &mut options.defects,
+                second.nx,
+                second.ny,
+                true,
+                super_fac,
+                fei_def_pad,
+                dump_defect_name.as_deref(),
+                &mut message,
+                1000,
+            ) != 0
             {
                 exit_error(message.as_bytes());
             }
@@ -1542,7 +1541,7 @@ WARNING: This file is not a readable MRC file.\n\
     if process != IP_BLANKFILE
         && let Some(fp) = input.fp.as_mut()
     {
-        unsafe { iimage::ii_close_tiff_copies_for_fp(fp) };
+        iimage::ii_close_tiff_copies_for_fp(fp);
         iimage::ii_fclose(fp);
     }
     if procout

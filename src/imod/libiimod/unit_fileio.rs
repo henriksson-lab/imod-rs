@@ -1,108 +1,3 @@
-#[repr(C)]
-pub struct _IO_wide_data {
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct _IO_codecvt {
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct _IO_marker {
-    _private: [u8; 0],
-}
-
-unsafe extern "C" {
-    fn remove(__filename: *const ::core::ffi::c_char) -> i32;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> i32;
-    fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> i32;
-    fn memset(__s: *mut ::core::ffi::c_void, __c: i32, __n: size_t) -> *mut ::core::ffi::c_void;
-    fn strrchr(__s: *const ::core::ffi::c_char, __c: i32) -> *mut ::core::ffi::c_char;
-    fn strerror(__errnum: i32) -> *mut ::core::ffi::c_char;
-    fn exit(__status: i32) -> !;
-    fn getenv(__name: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn __errno_location() -> *mut i32;
-}
-pub type size_t = usize;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __uint64_t = u64;
-pub type __dev_t = ::core::ffi::c_ulong;
-pub type __uid_t = ::core::ffi::c_uint;
-pub type __gid_t = ::core::ffi::c_uint;
-pub type __ino_t = ::core::ffi::c_ulong;
-pub type __mode_t = ::core::ffi::c_uint;
-pub type __nlink_t = ::core::ffi::c_ulong;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-pub type __time_t = ::core::ffi::c_long;
-pub type __blksize_t = ::core::ffi::c_long;
-pub type __blkcnt_t = ::core::ffi::c_long;
-pub type __syscall_slong_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: i32,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: i32,
-    pub _flags2: i32,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub __pad5: size_t,
-    pub _mode: i32,
-    pub _unused2: [::core::ffi::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = _IO_FILE;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct timespec {
-    pub tv_sec: __time_t,
-    pub tv_nsec: __syscall_slong_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct stat {
-    pub st_dev: __dev_t,
-    pub st_ino: __ino_t,
-    pub st_nlink: __nlink_t,
-    pub st_mode: __mode_t,
-    pub st_uid: __uid_t,
-    pub st_gid: __gid_t,
-    pub __pad0: i32,
-    pub st_rdev: __dev_t,
-    pub st_size: __off_t,
-    pub st_blksize: __blksize_t,
-    pub st_blocks: __blkcnt_t,
-    pub st_atim: timespec,
-    pub st_mtim: timespec,
-    pub st_ctim: timespec,
-    pub __glibc_reserved: [__syscall_slong_t; 3],
-}
-pub type b3dByte = ::core::ffi::c_char;
-pub type b3dUByte = ::core::ffi::c_uchar;
-pub type b3dInt16 = ::core::ffi::c_short;
-pub type b3dInt32 = i32;
-pub type b3dFloat = ::core::ffi::c_float;
 pub type fortStrLen_t = i32;
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
@@ -128,6 +23,7 @@ use crate::imod::libiimod::iitif::tiff_set_string_tag_to_print as tiffSetStringT
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_getdcsize};
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
+use std::process::exit;
 
 pub struct Unit {
     pub ii_file: *mut ImodImageFile,
@@ -140,9 +36,9 @@ pub struct Unit {
     /// the C or in this translation ever reads the field.
     pub tail_name: usize,
     pub attribute: i32,
-    pub being_used: ::core::ffi::c_uchar,
-    pub read_only: ::core::ffi::c_uchar,
-    pub no_convert: ::core::ffi::c_uchar,
+    pub being_used: u8,
+    pub read_only: u8,
+    pub no_convert: u8,
 }
 
 /// A unit either owns the header synthesized for a non-MRC image format, or
@@ -165,9 +61,8 @@ struct UnitTable {
     map: Vec<i32>,
     no_convert_units: Vec<i16>,
 }
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const IIUNIT_SWAPPED: ::core::ffi::c_long = (1 as ::core::ffi::c_long) << 0 as i32;
-pub const IIUNIT_BYTES_SIGNED: ::core::ffi::c_long = (1 as ::core::ffi::c_long) << 1 as i32;
+pub const IIUNIT_SWAPPED: i32 = 1;
+pub const IIUNIT_BYTES_SIGNED: i32 = 2;
 pub const IIFILE_DEFAULT: i32 = -(1 as i32);
 pub const IIFILE_TIFF: i32 = 1 as i32;
 pub const IIFILE_MRC: i32 = 2 as i32;
@@ -213,92 +108,65 @@ impl UnitOptions {
         }
     }
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_open(
-    mut iunit: i32,
-    mut name: *const ::core::ffi::c_char,
-    mut attribute: *const ::core::ffi::c_char,
-) -> i32 {
+/// Opens a unit through the crate-owned image I/O path.
+///
+/// The native API owns ordinary Rust text. [`iiu_open_ffi`] is the sole C
+/// string adapter for callers which still use the legacy exported symbol.
+pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
     let mut mode: i32 = 0;
-    let mut errSave: i32 = 0;
     // `unit_fileio.c:207`: the `fopen` mode strings.  `iiFOpen`/`iiOpenNew`
     // now take the mode as a `&str`, so the table is plain Rust.
     let modes: [&str; 4] = ["rb", "rb+", "wb", "wb+"];
-    let mut tailback: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
     u = find_new_unit(iunit);
-    iiu_memory_error(
-        u as *mut ::core::ffi::c_void,
-        "ERROR: iiuOpen - Allocating new unit",
-    );
-    (*u).being_used = 1 as ::core::ffi::c_uchar;
-    (*u).read_only = 0 as ::core::ffi::c_uchar;
+    iiu_memory_error(u, "ERROR: iiuOpen - Allocating new unit");
+    (*u).being_used = 1;
+    (*u).read_only = 0;
     (*u).current_sec = 0 as i32;
     (*u).current_line = 0 as i32;
-    if *attribute.offset(0 as i32 as isize) as i32 == 'R' as i32
-        || *attribute.offset(0 as i32 as isize) as i32 == 'r' as i32
-    {
+    if matches!(attribute.as_bytes().first(), Some(b'R' | b'r')) {
         mode = 0 as i32;
         (*u).attribute = UNIT_ATBUT_RO;
-        (*u).read_only = 1 as ::core::ffi::c_uchar;
+        (*u).read_only = 1;
     }
-    if name.is_null() || *name.offset(0 as i32 as isize) as i32 == 0 as i32 {
+    if name.is_empty() {
         iiInsertCheckFunction(
             Some(iiMRCCheck as unsafe extern "C" fn(*mut ImodImageFile) -> i32),
             0 as i32,
         );
     }
-    if *attribute.offset(0 as i32 as isize) as i32 == 'N' as i32
-        || *attribute.offset(0 as i32 as isize) as i32 == 'n' as i32
-    {
+    if matches!(attribute.as_bytes().first(), Some(b'N' | b'n')) {
         if std::env::var_os("IMOD_NO_IMAGE_BACKUP").is_none() {
-            *__errno_location() = 0 as i32;
-            if imodBackupFile(::core::ffi::CStr::from_ptr(name).to_string_lossy().as_ref()) != 0 {
-                errSave = *__errno_location();
-                let name_bytes = core::ffi::CStr::from_ptr(name).to_bytes();
-                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-                    "\nWARNING: iiuOpen - Could not rename '%s' to '%s~'\n",
-                    &[CArg::Bytes(name_bytes), CArg::Bytes(name_bytes)],
-                ));
-                if errSave != 0 {
-                    // `strerror` is the C library's own errno table and its
-                    // exact wording is part of the acceptance target, so the
-                    // call stays; the result is walked to its NUL as bytes
-                    // rather than through `CStr`.
-                    let msg = strerror(errSave);
-                    let mut len = 0usize;
-                    while *msg.add(len) != 0 {
-                        len += 1;
-                    }
-                    let msg = core::slice::from_raw_parts(msg.cast::<u8>(), len);
-                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-                        "WARNING: from system - %s\n",
-                        &[CArg::Bytes(msg)],
-                    ));
+            if imodBackupFile(name) != 0 {
+                // `imod_backup_file` currently retains its historical integer
+                // status, so take the OS diagnostic immediately after it
+                // fails instead of reaching through libc's errno/strerror
+                // globals.  This is the same operation that supplied errno
+                // to the C caller.
+                let system_error = std::io::Error::last_os_error();
+                let _ = ImodFile::Stdout.write_all(
+                    format!("\nWARNING: iiuOpen - Could not rename '{name}' to '{name}~'\n")
+                        .as_bytes(),
+                );
+                if system_error.raw_os_error().is_some_and(|code| code != 0) {
+                    let _ = ImodFile::Stdout
+                        .write_all(format!("WARNING: from system - {system_error}\n").as_bytes());
                 }
             }
         }
         mode = 3 as i32;
         (*u).attribute = UNIT_ATBUT_NEW;
     }
-    if *attribute.offset(0 as i32 as isize) as i32 == 'O' as i32
-        || *attribute.offset(0 as i32 as isize) as i32 == 'o' as i32
-    {
+    if matches!(attribute.as_bytes().first(), Some(b'O' | b'o')) {
         mode = 1 as i32;
         (*u).attribute = UNIT_ATBUT_OLD;
     }
-    if *attribute.offset(0 as i32 as isize) as i32 == 'S' as i32
-        || *attribute.offset(0 as i32 as isize) as i32 == 's' as i32
-    {
+    if matches!(attribute.as_bytes().first(), Some(b'S' | b's')) {
         mode = 3 as i32;
         (*u).attribute = UNIT_ATBUT_SCRATCH;
     }
     if mode == 3 as i32 {
-        (*u).ii_file = iiOpenNew(
-            core::ffi::CStr::from_ptr(name).to_bytes(),
-            modes[mode as usize],
-            IIFILE_DEFAULT,
-        );
+        (*u).ii_file = iiOpenNew(name.as_bytes(), modes[mode as usize], IIFILE_DEFAULT);
         if (*u).ii_file.is_null() {
             b3d_error(
                 Some(&mut ImodFile::Stdout),
@@ -316,25 +184,17 @@ pub unsafe extern "C" fn iiu_open(
                 "\n NEW image file on unit %3d : %s\n",
                 &[
                     crate::imod::libcfshr::b3dutil::CArg::Int(iunit as i64),
-                    crate::imod::libcfshr::b3dutil::CArg::Bytes(
-                        core::ffi::CStr::from_ptr(name).to_bytes(),
-                    ),
+                    crate::imod::libcfshr::b3dutil::CArg::Bytes(name.as_bytes()),
                 ],
             ));
         }
         let _ = ImodFile::Stdout.flush();
     } else {
-        (*u).ii_file = iiOpen(
-            core::ffi::CStr::from_ptr(name).to_bytes(),
-            modes[mode as usize],
-        );
+        (*u).ii_file = iiOpen(name.as_bytes(), modes[mode as usize]);
         if (*u).ii_file.is_null() {
             b3d_error(
                 Some(&mut ImodFile::Stdout),
-                format_args!(
-                    "\nERROR: iiuOpen - Could not open '{}'\n",
-                    core::ffi::CStr::from_ptr(name).to_string_lossy()
-                ),
+                format_args!("\nERROR: iiuOpen - Could not open '{}'\n", name),
             );
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
                 exit(1 as i32);
@@ -350,7 +210,7 @@ pub unsafe extern "C" fn iiu_open(
                 Some(&mut ImodFile::Stdout),
                 format_args!(
                     "\nERROR: iiuOpen - Non-MRC-type file '{}' with no write function must be opened read-only\n",
-                    core::ffi::CStr::from_ptr(name).to_string_lossy()
+                    name
                 ),
             );
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
@@ -365,7 +225,7 @@ pub unsafe extern "C" fn iiu_open(
                     Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: iiuOpen - TIFF file '{}' has a data type that is not supported\n",
-                        core::ffi::CStr::from_ptr(name).to_string_lossy()
+                        name
                     ),
                 );
                 if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
@@ -387,7 +247,7 @@ pub unsafe extern "C" fn iiu_open(
                 Some(&mut ImodFile::Stdout),
                 format_args!(
                     "\nERROR: iiuOpen - file '{}' is not a format that provides an MRC-like header and cannot be read\n",
-                    core::ffi::CStr::from_ptr(name).to_string_lossy()
+                    name
                 ),
             );
             if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
@@ -409,7 +269,32 @@ pub unsafe extern "C" fn iiu_open(
         Some(pos) => pos + 1,
         None => 0,
     };
-    return 0 as i32;
+    0
+}
+
+/// C ABI entry point for legacy callers.  C-string decoding is deliberately
+/// contained here; the implementation above has no C-string storage.
+#[unsafe(export_name = "iiu_open")]
+pub unsafe extern "C" fn iiu_open_ffi(
+    iunit: i32,
+    name: *const ::core::ffi::c_char,
+    attribute: *const ::core::ffi::c_char,
+) -> i32 {
+    let name = if name.is_null() {
+        String::new()
+    } else {
+        core::ffi::CStr::from_ptr(name)
+            .to_string_lossy()
+            .into_owned()
+    };
+    let attribute = if attribute.is_null() {
+        String::new()
+    } else {
+        core::ffi::CStr::from_ptr(attribute)
+            .to_string_lossy()
+            .into_owned()
+    };
+    iiu_open(iunit, &name, &attribute)
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuopen_(
@@ -419,11 +304,9 @@ pub unsafe extern "C" fn iiuopen_(
     mut name_l: fortStrLen_t,
     mut attr_l: fortStrLen_t,
 ) -> i32 {
-    let cname = fortran_string(name, name_l as i32);
-    let cattr = fortran_string(attribute, attr_l as i32);
-    let cname = std::ffi::CString::new(cname).unwrap_or_default();
-    let cattr = std::ffi::CString::new(cattr).unwrap_or_default();
-    iiu_open(*iunit, cname.as_ptr().cast_mut(), cattr.as_ptr().cast_mut())
+    let name = fortran_string(name, name_l as i32);
+    let attribute = fortran_string(attribute, attr_l as i32);
+    iiu_open(*iunit, &name, &attribute)
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_close(mut iunit: i32) {
@@ -441,7 +324,7 @@ pub unsafe extern "C" fn iiu_close(mut iunit: i32) {
             let index = table.map[unit as usize] as usize;
             u = table.units[index].as_mut();
             if (*u).being_used != 0 {
-                (*u).being_used = 0 as ::core::ffi::c_uchar;
+                (*u).being_used = 0;
                 iiClose((*u).ii_file);
                 if (*u).attribute == UNIT_ATBUT_SCRATCH {
                     trial = 0 as i32;
@@ -497,14 +380,11 @@ pub unsafe extern "C" fn iiu_volume_open(
 ) -> i32 {
     let fp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
     let mut unew: *mut Unit = find_new_unit(newUnit);
-    iiu_memory_error(
-        unew as *mut ::core::ffi::c_void,
-        "ERROR:  - Allocating new unit",
-    );
+    iiu_memory_error(unew, "ERROR:  - Allocating new unit");
     // `find_new_unit` can grow the owned unit vector, so obtain the main
     // unit only after its storage is stable for this operation.
     let mut u: *mut Unit = lookup_unit(mainUnit, "iiuOpenVolume", 1 as i32, 0 as i32);
-    (*unew).being_used = 1 as ::core::ffi::c_uchar;
+    (*unew).being_used = 1;
     (*unew).read_only = (*u).read_only;
     (*unew).current_sec = 0 as i32;
     (*unew).current_line = 0 as i32;
@@ -610,7 +490,7 @@ pub unsafe extern "C" fn iiu_alt_chunk_sizes(
     mut zSize: i32,
 ) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiuAltChunkSize", 1 as i32, 0 as i32);
-    return iiSetChunkSizes((*u).ii_file, xSize, ySize, zSize);
+    return iiSetChunkSizes(&mut *(*u).ii_file, xSize, ySize, zSize);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiualtchunksizes_(
@@ -1083,32 +963,6 @@ pub unsafe extern "C" fn iiu_file_info(
     mut fileType: *mut i32,
     mut flags: *mut i32,
 ) {
-    let mut buf: stat = stat {
-        st_dev: 0,
-        st_ino: 0,
-        st_nlink: 0,
-        st_mode: 0,
-        st_uid: 0,
-        st_gid: 0,
-        __pad0: 0,
-        st_rdev: 0,
-        st_size: 0,
-        st_blksize: 0,
-        st_blocks: 0,
-        st_atim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_mtim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_ctim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        __glibc_reserved: [0; 3],
-    };
     let mut u: *mut Unit = lookup_unit(iunit, "iiuFileSize", 0 as i32, 0 as i32);
     *flags = 0 as i32;
     *fileType = IIFILE_MRC;
@@ -1118,13 +972,11 @@ pub unsafe extern "C" fn iiu_file_info(
     }
     let name = (*(*u).ii_file).filename.clone().unwrap_or_default();
     if (*(*u).ii_file).file == IIFILE_SHR_MEM {
-        *fileSize = (iiShrMemCheckSize(&name) as ::core::ffi::c_double / 1024.0f64) as i32;
+        *fileSize = (iiShrMemCheckSize(&name) as f64 / 1024.0) as i32;
     } else {
-        // `unit_fileio.c:1080` is `stat(…, &buf)`; `stat` takes a `char *`, so
-        // the terminator is added at that call.
-        let cname = std::ffi::CString::new(name).unwrap_or_default();
-        stat(cname.as_ptr(), &raw mut buf);
-        *fileSize = (buf.st_size as ::core::ffi::c_double / 1024.0f64) as i32;
+        *fileSize = std::fs::metadata(&name)
+            .map(|metadata| (metadata.len() / 1024) as i32)
+            .unwrap_or(-1);
     }
     *fileType = (*(*u).ii_file).file;
     let header = match &mut (*u).header {
@@ -1132,17 +984,17 @@ pub unsafe extern "C" fn iiu_file_info(
         UnitHeader::Borrowed(header) => &mut **header,
         UnitHeader::None => unreachable!("an open unit always has a header"),
     };
-    *flags = (header.iiu_flags as ::core::ffi::c_long
-        | (if header.swapped != 0 {
+    *flags = header.iiu_flags
+        | if header.swapped != 0 {
             IIUNIT_SWAPPED
         } else {
-            0 as ::core::ffi::c_long
-        })
-        | (if header.bytes_signed != 0 {
+            0
+        }
+        | if header.bytes_signed != 0 {
             IIUNIT_BYTES_SIGNED
         } else {
-            0 as ::core::ffi::c_long
-        })) as i32;
+            0
+        };
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiufileinfo_(
@@ -1261,10 +1113,12 @@ pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: i32) {
 pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_reassign_header_ptr", 1 as i32, 0 as i32);
     if (*(*u).ii_file).file != IIFILE_HDF {
-        printf(
-            b"ERROR: iiuReassignHeaderPtr - File on unit %d is not HDF\n\0" as *const u8
-                as *const ::core::ffi::c_char,
-            iunit,
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!(
+                "ERROR: iiuReassignHeaderPtr - File on unit {} is not HDF\n",
+                iunit
+            ),
         );
         exit(1 as i32);
     }
@@ -1313,12 +1167,14 @@ pub unsafe extern "C" fn move_(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zero_(mut a: *mut ::core::ffi::c_char, mut n: *mut i32) {
-    memset(a as *mut ::core::ffi::c_void, 0 as i32, *n as size_t);
+    if let Ok(length) = usize::try_from(*n) {
+        core::slice::from_raw_parts_mut(a.cast::<u8>(), length).fill(0);
+    }
 }
 /// `unit_fileio.c:1465`.  `message` is a literal diagnostic, not a Fortran
 /// string, so it is a `&str`; the write stays on the **C** stdout stream,
 /// which is what `fprintf(stdout, …)` used.
-pub unsafe fn iiu_memory_error(mut ptr: *mut ::core::ffi::c_void, message: &str) {
+pub unsafe fn iiu_memory_error(ptr: *const Unit, message: &str) {
     if !ptr.is_null() {
         return;
     }
@@ -1415,7 +1271,7 @@ unsafe fn lookup_unit(
                 function, unit
             ),
         );
-        return exit_or_null(doExit) as *mut Unit;
+        return exit_or_null(doExit);
     }
     let found = UNIT_TABLE.with(|unit_table| {
         let mut table = unit_table.borrow_mut();
@@ -1423,7 +1279,7 @@ unsafe fn lookup_unit(
             let index = table.map[unit as usize - 1] as usize;
             let no_convert = table.no_convert_units.contains(&(unit as i16));
             u = table.units[index].as_mut();
-            (*u).no_convert = no_convert as ::core::ffi::c_uchar;
+            (*u).no_convert = no_convert as u8;
             true
         } else {
             false
@@ -1431,7 +1287,7 @@ unsafe fn lookup_unit(
     });
     if found {
         if (*(*u).ii_file).format == IIFORMAT_COMPLEX {
-            (*u).no_convert = 1 as ::core::ffi::c_uchar;
+            (*u).no_convert = 1;
         }
         if (*u).being_used != 0 {
             if checkRW > 1 as i32 && (*u).read_only as i32 != 0 {
@@ -1442,7 +1298,7 @@ unsafe fn lookup_unit(
                         function, unit
                     ),
                 );
-                return exit_or_null(doExit) as *mut Unit;
+                return exit_or_null(doExit);
             }
             if checkRW == 1 as i32
                 && ((*u).no_convert as i32 != 0 && (*(*u).ii_file).read_section.is_none()
@@ -1461,7 +1317,7 @@ unsafe fn lookup_unit(
                         unit
                     ),
                 );
-                return exit_or_null(doExit) as *mut Unit;
+                return exit_or_null(doExit);
             }
             if checkRW > 1 as i32
                 && ((*u).no_convert as i32 != 0 && (*(*u).ii_file).write_section.is_none()
@@ -1480,7 +1336,7 @@ unsafe fn lookup_unit(
                         unit
                     ),
                 );
-                return exit_or_null(doExit) as *mut Unit;
+                return exit_or_null(doExit);
             }
             return u;
         }
@@ -1489,13 +1345,13 @@ unsafe fn lookup_unit(
         Some(&mut ImodFile::Stdout),
         format_args!("\nERROR: {} - unit {} is not open.\n", function, unit),
     );
-    return exit_or_null(doExit) as *mut Unit;
+    exit_or_null(doExit)
 }
-unsafe extern "C" fn exit_or_null(mut doExit: i32) -> *mut ::core::ffi::c_void {
-    if doExit != 0 {
+unsafe fn exit_or_null(do_exit: i32) -> *mut Unit {
+    if do_exit != 0 {
         exit(3 as i32);
     }
-    return NULL;
+    core::ptr::null_mut()
 }
 #[cfg(test)]
 mod tests {

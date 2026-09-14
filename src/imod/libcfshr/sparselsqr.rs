@@ -37,18 +37,28 @@ pub unsafe fn lsqrfw(
     } else {
         None
     };
-    let se_call = if unsafe { *ifse > 0 } {
-        se
-    } else {
-        core::ptr::null_mut()
-    };
+    let m = unsafe { *m as usize };
+    let n = unsafe { *n as usize };
+    let u = unsafe { core::slice::from_raw_parts_mut(u, m) };
+    let v = unsafe { core::slice::from_raw_parts_mut(v, n) };
+    let w = unsafe { core::slice::from_raw_parts_mut(w, n) };
+    let x = unsafe { core::slice::from_raw_parts_mut(x, n) };
+    let se_call = (unsafe { *ifse > 0 }).then(|| unsafe { core::slice::from_raw_parts_mut(se, n) });
     unsafe {
         lsqr(
-            *m,
-            *n,
-            aprod,
+            m,
+            n,
+            |mode, x, y| {
+                aprod(
+                    mode,
+                    m as i32,
+                    n as i32,
+                    x.as_mut_ptr(),
+                    y.as_mut_ptr(),
+                    user_work,
+                )
+            },
             *damp,
-            user_work,
             u,
             v,
             w,
@@ -59,13 +69,13 @@ pub unsafe fn lsqrfw(
             *conlim,
             *itnlim,
             output.as_mut(),
-            istop_out,
-            itn_out,
-            anorm_out,
-            acond_out,
-            rnorm_out,
-            arnorm_out,
-            xnorm_out,
+            &mut *istop_out,
+            &mut *itn_out,
+            &mut *anorm_out,
+            &mut *acond_out,
+            &mut *rnorm_out,
+            &mut *arnorm_out,
+            &mut *xnorm_out,
         );
     }
 }
@@ -100,142 +110,133 @@ pub unsafe extern "C" fn sparse_prod(
 }
 
 /// Original `addValueToRow` (`sparselsqr.c:100`).
-pub unsafe fn add_value_to_row(
+pub fn add_value_to_row(
     val: f32,
     icol: i32,
-    val_row: *mut f32,
-    icol_row: *mut i32,
-    num_in_row: *mut i32,
+    val_row: &mut [f32],
+    icol_row: &mut [i32],
+    num_in_row: &mut usize,
 ) {
-    unsafe {
-        *val_row.add(*num_in_row as usize) = val;
-        *icol_row.add(*num_in_row as usize) = icol;
-        *num_in_row += 1;
-    }
+    val_row[*num_in_row] = val;
+    icol_row[*num_in_row] = icol;
+    *num_in_row += 1;
 }
 
 /// Original `addvaluetorow` (`sparselsqr.c:109`).
-pub unsafe fn addvaluetorow(
-    val: *mut f32,
-    icol: *mut i32,
-    val_row: *mut f32,
-    icol_row: *mut i32,
-    num_in_row: *mut i32,
+pub fn addvaluetorow(
+    val: f32,
+    icol: i32,
+    val_row: &mut [f32],
+    icol_row: &mut [i32],
+    num_in_row: &mut i32,
 ) {
-    unsafe {
-        add_value_to_row(*val, *icol, val_row, icol_row, num_in_row);
-    }
+    val_row[*num_in_row as usize] = val;
+    icol_row[*num_in_row as usize] = icol;
+    *num_in_row += 1;
 }
 
 /// Original `addRowToMatrix` (`sparselsqr.c:125`).
-pub unsafe fn add_row_to_matrix(
-    val_row: *mut f32,
-    icol_row: *mut i32,
-    num_in_row: i32,
-    rwrk: *mut f32,
-    ia: *mut i32,
-    ja: *mut i32,
-    num_rows: *mut i32,
-    max_rows: i32,
-    max_vals: i32,
+pub fn add_row_to_matrix(
+    val_row: &[f32],
+    icol_row: &[i32],
+    num_in_row: usize,
+    rwrk: &mut [f32],
+    ia: &mut [i32],
+    ja: &mut [i32],
+    num_rows: &mut usize,
+    max_rows: usize,
+    max_vals: usize,
 ) -> i32 {
-    let mut ind = unsafe { *ia.add(*num_rows as usize) - 1 };
-    unsafe {
-        *num_rows += 1;
-    }
-    if unsafe { *num_rows >= max_rows } {
+    let mut ind = (ia[*num_rows] - 1) as usize;
+    *num_rows += 1;
+    if *num_rows >= max_rows {
         return 1;
     }
-    for i in 0..num_in_row as usize {
-        unsafe {
-            *rwrk.add(ind as usize) = *val_row.add(i);
-            *ja.add(ind as usize) = *icol_row.add(i);
-        }
+    for i in 0..num_in_row {
+        rwrk[ind] = val_row[i];
+        ja[ind] = icol_row[i];
         ind += 1;
         if ind >= max_vals {
             return 2;
         }
     }
-    unsafe {
-        *ia.add(*num_rows as usize) = ind + 1;
-    }
+    ia[*num_rows] = (ind + 1) as i32;
     0
 }
 
 /// Original `addrowtomatrix` (`sparselsqr.c:144`).
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn addrowtomatrix(
-    val_row: *mut f32,
-    icol_row: *mut i32,
-    num_in_row: *mut i32,
-    rwrk: *mut f32,
-    ia: *mut i32,
-    ja: *mut i32,
-    num_rows: *mut i32,
-    max_rows: *mut i32,
-    max_vals: *mut i32,
+pub fn addrowtomatrix(
+    val_row: &[f32],
+    icol_row: &[i32],
+    num_in_row: i32,
+    rwrk: &mut [f32],
+    ia: &mut [i32],
+    ja: &mut [i32],
+    num_rows: &mut i32,
+    max_rows: i32,
+    max_vals: i32,
 ) -> i32 {
-    unsafe {
-        add_row_to_matrix(
-            val_row,
-            icol_row,
-            *num_in_row,
-            rwrk,
-            ia,
-            ja,
-            num_rows,
-            *max_rows,
-            *max_vals,
-        )
-    }
+    let max_rows = max_rows as usize;
+    let max_vals = max_vals as usize;
+    let mut rows = *num_rows as usize;
+    let status = add_row_to_matrix(
+        &val_row[..num_in_row as usize],
+        &icol_row[..num_in_row as usize],
+        num_in_row as usize,
+        &mut rwrk[..max_vals],
+        &mut ia[..max_rows],
+        &mut ja[..max_vals],
+        &mut rows,
+        max_rows,
+        max_vals,
+    );
+    *num_rows = rows as i32;
+    status
 }
 
 /// Original `normalizeColumns` (`sparselsqr.c:162`).
-pub unsafe fn normalize_columns(
-    rwrk: *mut f32,
-    ia: *mut i32,
-    ja: *mut i32,
-    num_vars: i32,
-    num_rows: i32,
-    sum_entries: *mut f32,
+pub fn normalize_columns(
+    rwrk: &mut [f32],
+    ia: &[i32],
+    ja: &[i32],
+    num_vars: usize,
+    num_rows: usize,
+    sum_entries: &mut [f32],
 ) {
-    for icol in 0..num_vars as usize {
-        unsafe {
-            *sum_entries.add(icol) = 0.;
-        }
+    sum_entries[..num_vars].fill(0.);
+    let end = (ia[num_rows] - 1) as usize;
+    for j in 0..end {
+        let icol = (ja[j] - 1) as usize;
+        sum_entries[icol] += rwrk[j] * rwrk[j];
     }
-    let end = unsafe { *ia.add(num_rows as usize) - 1 };
-    for j in 0..end as usize {
-        let icol = unsafe { *ja.add(j) - 1 } as usize;
-        unsafe {
-            *sum_entries.add(icol) += *rwrk.add(j) * *rwrk.add(j);
-        }
+    for value in &mut sum_entries[..num_vars] {
+        *value = (*value as f64).sqrt() as f32;
     }
-    for icol in 0..num_vars as usize {
-        unsafe {
-            *sum_entries.add(icol) = (*sum_entries.add(icol) as f64).sqrt() as f32;
-        }
-    }
-    for j in 0..end as usize {
-        let icol = unsafe { *ja.add(j) - 1 } as usize;
-        unsafe {
-            *rwrk.add(j) /= *sum_entries.add(icol);
-        }
+    for j in 0..end {
+        let icol = (ja[j] - 1) as usize;
+        rwrk[j] /= sum_entries[icol];
     }
 }
 
 /// Original `normalizecolumns` (`sparselsqr.c:184`).
-pub unsafe fn normalizecolumns(
-    rwrk: *mut f32,
-    ia: *mut i32,
-    ja: *mut i32,
-    num_vars: *mut i32,
-    num_rows: *mut i32,
-    sum_entries: *mut f32,
+pub fn normalizecolumns(
+    rwrk: &mut [f32],
+    ia: &[i32],
+    ja: &[i32],
+    num_vars: i32,
+    num_rows: i32,
+    sum_entries: &mut [f32],
 ) {
-    unsafe {
-        normalize_columns(rwrk, ia, ja, *num_vars, *num_rows, sum_entries);
-    }
+    let end = ia[num_rows as usize] as usize - 1;
+    normalize_columns(
+        &mut rwrk[..end],
+        &ia[..num_rows as usize + 1],
+        &ja[..end],
+        num_vars as usize,
+        num_rows as usize,
+        &mut sum_entries[..num_vars as usize],
+    );
 }
 
 #[cfg(test)]
@@ -247,41 +248,28 @@ mod tests {
         let mut values = [0.; 3];
         let mut columns = [0; 3];
         let mut rows = [1, 1, 1];
-        let mut count = 0;
-        unsafe {
-            add_value_to_row(3., 1, values.as_mut_ptr(), columns.as_mut_ptr(), &mut count);
-            add_value_to_row(4., 2, values.as_mut_ptr(), columns.as_mut_ptr(), &mut count);
-        }
+        let mut count = 0_i32;
+        addvaluetorow(3., 1, &mut values, &mut columns, &mut count);
+        addvaluetorow(4., 2, &mut values, &mut columns, &mut count);
         let mut matrix = [0.; 3];
         let mut ja = [0; 3];
         let mut num_rows = 0;
         assert_eq!(
-            unsafe {
-                add_row_to_matrix(
-                    values.as_mut_ptr(),
-                    columns.as_mut_ptr(),
-                    count,
-                    matrix.as_mut_ptr(),
-                    rows.as_mut_ptr(),
-                    ja.as_mut_ptr(),
-                    &mut num_rows,
-                    3,
-                    3,
-                )
-            },
+            addrowtomatrix(
+                &values,
+                &columns,
+                count,
+                &mut matrix,
+                &mut rows,
+                &mut ja,
+                &mut num_rows,
+                3,
+                3,
+            ),
             0
         );
         let mut norms = [0.; 2];
-        unsafe {
-            normalize_columns(
-                matrix.as_mut_ptr(),
-                rows.as_mut_ptr(),
-                ja.as_mut_ptr(),
-                2,
-                num_rows,
-                norms.as_mut_ptr(),
-            );
-        }
+        normalizecolumns(&mut matrix, &rows, &ja, 2, num_rows, &mut norms);
         assert_eq!(norms, [3., 4.]);
         assert_eq!(&matrix[..2], &[1., 1.]);
     }

@@ -3452,7 +3452,7 @@ pub fn imodv_unproject_picked_point(app: &mut ImodvApp, mo: i32, gl: &mut dyn Mv
     );
 }
 /// `findClickedDrawnElement` (`mv_ogl.cpp:3202`).
-pub unsafe fn find_clicked_drawn_element(
+pub fn find_clicked_drawn_element(
     state: &mut MvOglState,
     app: &mut ImodvApp,
     cur_obj: bool,
@@ -4624,11 +4624,9 @@ mod tests {
         app.imod = app.mod_[0];
         let mut state = MvOglState::default();
         let (mut mo, mut ob, mut co, mut pt) = (-1, -1, -1, -1);
-        let found = unsafe {
-            find_clicked_drawn_element(
-                &mut state, &mut app, false, &mut mo, &mut ob, &mut co, &mut pt,
-            )
-        };
+        let found = find_clicked_drawn_element(
+            &mut state, &mut app, false, &mut mo, &mut ob, &mut co, &mut pt,
+        );
         assert_eq!(found, 1);
         assert_eq!((mo, ob, co, pt), (0, 0, 0, 1));
     }

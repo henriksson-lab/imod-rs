@@ -18,16 +18,20 @@ use crate::imod::libiimod::mrcfiles::{
     mrc_head_new,
 };
 
-/// C `Tf_header` (`b3dtiff.h`).
-#[repr(C)]
+/// Legacy TIFF header state (`b3dtiff.h`'s `Tf_header`).
+///
+/// This is decoded field by field from its eight on-disk bytes, so it has no
+/// Rust/C layout contract.
 #[derive(Clone, Copy, Default)]
 pub struct TfHeader {
     pub byteorder: i16,
     pub version: i16,
     pub first_ifd_offset: i32,
 }
-/// C `Tf_entry` (`b3dtiff.h`).
-#[repr(C)]
+/// Legacy TIFF directory-entry state (`b3dtiff.h`'s `Tf_entry`).
+///
+/// TIFF entries are likewise read and written one field at a time; their Rust
+/// memory layout is never part of the file representation.
 #[derive(Clone, Copy, Default)]
 pub struct TfEntry {
     pub tagfield: i16,
@@ -35,8 +39,10 @@ pub struct TfEntry {
     pub length: i32,
     pub value: i32,
 }
-/// C `Im_info` (`b3dtiff.h`).
-#[repr(C)]
+/// Legacy image-information state (`b3dtiff.h`'s `Im_info`).
+///
+/// This crate-owned record is not passed to C code or serialized as a Rust
+/// struct, so it has no ABI layout requirement.
 #[derive(Clone, Copy)]
 pub struct ImInfo {
     pub func: i16,
@@ -65,8 +71,10 @@ impl Default for ImInfo {
         }
     }
 }
-/// C `Tf_info` (`b3dtiff.h`).
-#[repr(C)]
+/// TIFF reader state (`b3dtiff.h`'s `Tf_info`).
+///
+/// It owns Rust vectors and optional handles and is only shared between Rust
+/// modules, so a C representation would be both unnecessary and misleading.
 pub struct TfInfo {
     pub header: TfHeader,
     pub numentries: i16,
@@ -736,27 +744,19 @@ pub unsafe fn tiff_close_file(tif: &mut TfInfo) {
 }
 
 /// C `tiff_write_entry` (`tiff.c:76`).
-pub unsafe fn tiff_write_entry(
-    tag: i16,
-    type_: i16,
-    length: i32,
-    mut offset: u32,
-    fout: &mut ImodFile,
-) {
-    unsafe {
-        b3d_fwrite(&tag.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout);
-        b3d_fwrite(&type_.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout);
-        b3d_fwrite(&length.to_ne_bytes(), core::mem::size_of::<i32>(), 1, fout);
-        // The C source moves short inline values only on a big-endian host.
-        if cfg!(target_endian = "big") && length == 1 {
-            if type_ == 1 {
-                offset <<= 24;
-            } else if type_ == 3 {
-                offset <<= 16;
-            }
+pub fn tiff_write_entry(tag: i16, type_: i16, length: i32, mut offset: u32, fout: &mut ImodFile) {
+    b3d_fwrite(&tag.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout);
+    b3d_fwrite(&type_.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout);
+    b3d_fwrite(&length.to_ne_bytes(), core::mem::size_of::<i32>(), 1, fout);
+    // The C source moves short inline values only on a big-endian host.
+    if cfg!(target_endian = "big") && length == 1 {
+        if type_ == 1 {
+            offset <<= 24;
+        } else if type_ == 3 {
+            offset <<= 16;
         }
-        b3d_fwrite(&offset.to_ne_bytes(), core::mem::size_of::<u32>(), 1, fout);
     }
+    b3d_fwrite(&offset.to_ne_bytes(), core::mem::size_of::<u32>(), 1, fout);
 }
 
 /// C `tiff_write_image` (`tiff.c:733`).

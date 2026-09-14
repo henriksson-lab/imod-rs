@@ -242,8 +242,9 @@ thread_local! {
     static S_ERROR_STRING: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
     /* static char *sUsageString = NULL; */
     static S_USAGE_STRING: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
-    /* static char sExitPrefix[PREFIX_SIZE] = ""; -- fixed buffer, NUL-terminated */
-    static S_EXIT_PREFIX: RefCell<[u8; PREFIX_SIZE]> = const { RefCell::new([0; PREFIX_SIZE]) };
+    /* static char sExitPrefix[PREFIX_SIZE] = ""; Rust owns the prefix, so it
+    does not need a fixed buffer or a trailing NUL. */
+    static S_EXIT_PREFIX: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
     /* static int sErrorDest = 0; */
     static S_ERROR_DEST: Cell<i32> = const { Cell::new(0) };
     /* static int sNextOption = 0; */
@@ -374,20 +375,16 @@ pub fn pip_warn_unused_non_opt_args() -> i32 {
 pub fn pip_exit_on_error(use_std_err: i32, prefix: &[u8]) -> i32 {
     /* Get rid of existing string; and if called with null string,
     this cancels an existing exit on error */
-    S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = 0x00);
+    S_EXIT_PREFIX.with_borrow_mut(|p| *p = None);
 
     if prefix.is_empty() {
         return 0;
     }
 
     S_ERROR_DEST.set(use_std_err);
-    /* strncpy(sExitPrefix, prefix, PREFIX_SIZE - 1); sExitPrefix[PREFIX_SIZE - 1] = 0; */
-    S_EXIT_PREFIX.with_borrow_mut(|p| {
-        *p = [0; PREFIX_SIZE];
-        let n = prefix.len().min(PREFIX_SIZE - 1);
-        p[..n].copy_from_slice(&prefix[..n]);
-        p[PREFIX_SIZE - 1] = 0x00;
-    });
+    /* Keep C's observable truncation without retaining its fixed buffer. */
+    S_EXIT_PREFIX
+        .with_borrow_mut(|p| *p = Some(prefix[..prefix.len().min(PREFIX_SIZE - 1)].to_vec()));
     0
 }
 
@@ -1472,15 +1469,10 @@ pub fn pip_get_error(err_string: &mut Vec<u8>) -> i32 {
 pub fn pip_set_error(err_string: &[u8]) -> i32 {
     S_ERROR_STRING.with_borrow_mut(|e| *e = Some(err_string.to_vec()));
 
-    let has_prefix = S_EXIT_PREFIX.with_borrow(|p| p[0] != 0);
-    if has_prefix {
+    if let Some(prefix) = S_EXIT_PREFIX.with_borrow(|p| p.clone()) {
         /* `fprintf(outFile, "%s ", sExitPrefix)` -- the space is a second one
         after a prefix that already ends in one -- then `"%s\n"` with the
         message, on *stdout* unless sErrorDest was set. */
-        let prefix = S_EXIT_PREFIX.with_borrow(|p| {
-            let n = p.iter().position(|&c| c == 0).unwrap_or(PREFIX_SIZE);
-            p[..n].to_vec()
-        });
         let mut out: Box<dyn Write> = if S_ERROR_DEST.get() != 0 {
             Box::new(io::stderr())
         } else {
@@ -2274,8 +2266,8 @@ pub fn pip_read_prog_defaults(prog_name: &[u8]) {
     }
 
     /* Save and clear out the first character of exit prefix to prevent exit */
-    let save_prefix = S_EXIT_PREFIX.with_borrow(|p| p[0]);
-    S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = 0x00);
+    let save_prefix = S_EXIT_PREFIX.with_borrow(|p| p.clone());
+    S_EXIT_PREFIX.with_borrow_mut(|p| *p = None);
     /* sprintf(sTempStr, "%s%c%s%c%s", pipDir, PATH_SEPARATOR, DEFAULTS_DIR, PATH_SEPARATOR,
     DEFAULTS_FILE); */
     let temp = S_TEMP_STR.with_borrow_mut(|t| {
@@ -2308,7 +2300,7 @@ pub fn pip_read_prog_defaults(prog_name: &[u8]) {
         }
         crate::imod::libcfshr::autodoc::adoc_clear(adoc_ind);
     }
-    S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = save_prefix);
+    S_EXIT_PREFIX.with_borrow_mut(|p| *p = save_prefix);
 }
 
 /// Original C `PipGetInOutFile` (`parse_params.c:1650`).

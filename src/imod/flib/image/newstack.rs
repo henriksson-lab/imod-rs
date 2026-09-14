@@ -2892,7 +2892,7 @@ pub fn newstack() {
                     // autodoc block below is the source's `newstack.f90:1535-1565,1663-1665`;
                     // nothing here touches an autodoc, so the two are independent.
                     //
-                    iiu_ret_num_extended(1, &raw mut n_byte_sym_in);
+                    iiu_ret_num_extended(1, &mut n_byte_sym_in);
                     let mut itype = 0_i32;
                     num_int_or_bytes_in = 0;
                     i_flag_extra_in = 0;
@@ -2920,11 +2920,9 @@ pub fn newstack() {
                             &raw mut n_byte_sym_in,
                             extra_in.as_mut_ptr().cast(),
                         );
-                        iiu_ret_extended_type(
-                            1,
-                            &raw mut num_int_or_bytes_in,
-                            &raw mut i_flag_extra_in,
-                        );
+                        let mut extended_type = [0; 2];
+                        iiu_ret_extended_type(1, &mut extended_type);
+                        [num_int_or_bytes_in, i_flag_extra_in] = extended_type;
                         //
                         // DNM 4/18/02: if these numbers do not represent bytes and
                         // flags, then number of bytes is 4 times nint + nreal
@@ -3465,12 +3463,12 @@ pub fn newstack() {
                         (*chunk_header).nreal = 1;
                     } else {
                         get_extra_header_max_sec_size(
-                            extra_in.as_mut_ptr().cast(),
+                            &extra_in,
                             n_byte_sym_in,
                             num_int_or_bytes_in,
                             i_flag_extra_in,
                             header.nz,
-                            &raw mut n_byte_extra_out,
+                            &mut n_byte_extra_out,
                         );
                     }
                     n_byte_sym_out = num_output_sections[output_index] * n_byte_extra_out;
@@ -3804,12 +3802,12 @@ pub fn newstack() {
                         (*out_header).nreal = 1;
                     } else {
                         get_extra_header_max_sec_size(
-                            extra_in.as_mut_ptr().cast(),
+                            &extra_in,
                             n_byte_sym_in,
                             num_int_or_bytes_in,
                             i_flag_extra_in,
                             header.nz,
-                            &raw mut n_byte_extra_out,
+                            &mut n_byte_extra_out,
                         );
                     }
                     n_byte_sym_out = num_output_sections[output_index] * n_byte_extra_out;
@@ -4042,7 +4040,7 @@ pub fn newstack() {
                         // autodoc block below is the source's `newstack.f90:1535-1565,1663-1665`;
                         // nothing here touches an autodoc, so the two are independent.
                         //
-                        iiu_ret_num_extended(1, &raw mut n_byte_sym_in);
+                        iiu_ret_num_extended(1, &mut n_byte_sym_in);
                         let mut itype = 0_i32;
                         num_int_or_bytes_in = 0;
                         i_flag_extra_in = 0;
@@ -4070,11 +4068,9 @@ pub fn newstack() {
                                 &raw mut n_byte_sym_in,
                                 extra_in.as_mut_ptr().cast(),
                             );
-                            iiu_ret_extended_type(
-                                1,
-                                &raw mut num_int_or_bytes_in,
-                                &raw mut i_flag_extra_in,
-                            );
+                            let mut extended_type = [0; 2];
+                            iiu_ret_extended_type(1, &mut extended_type);
+                            [num_int_or_bytes_in, i_flag_extra_in] = extended_type;
                             //
                             // DNM 4/18/02: if these numbers do not represent bytes and
                             // flags, then number of bytes is 4 times nint + nreal
@@ -5127,8 +5123,8 @@ pub fn newstack() {
                             }
                         } else if !has_warp && if_mag_grad == 0 {
                             cubinterp(
-                                input.as_mut_ptr(),
-                                output.as_mut_ptr(),
+                                &input,
+                                &mut output,
                                 bin_nx,
                                 num_y_load,
                                 output_nx,
@@ -5515,13 +5511,13 @@ pub fn newstack() {
                             let mut move_offset = 0_i32;
                             let mut n_byte_extra_in = 0_i32;
                             if get_extra_header_sec_offset(
-                                extra_in.as_mut_ptr().cast(),
+                                &extra_in,
                                 n_byte_sym_in,
                                 num_int_or_bytes_in,
                                 i_flag_extra_in,
                                 in_section,
-                                &raw mut move_offset,
-                                &raw mut n_byte_extra_in,
+                                &mut move_offset,
+                                &mut n_byte_extra_in,
                             ) != 0
                             {
                                 exit_error(
@@ -5532,14 +5528,12 @@ pub fn newstack() {
                                 //
                                 // FEI type, call the copy function
                                 if copy_extra_header_section(
-                                    extra_in.as_mut_ptr().cast(),
-                                    n_byte_sym_in,
-                                    extra_out.as_mut_ptr().cast(),
-                                    n_byte_sym_out,
+                                    &extra_in,
+                                    &mut extra_out,
                                     num_int_or_bytes_in,
                                     i_flag_extra_in,
                                     in_section,
-                                    &raw mut ind_extra_out,
+                                    &mut ind_extra_out,
                                 ) != 0
                                 {
                                     exit_error(
@@ -6666,8 +6660,8 @@ pub fn newstack() {
                                 }
                             } else if !has_warp && if_mag_grad == 0 {
                                 cubinterp(
-                                    input.as_mut_ptr(),
-                                    array[base..end].as_mut_ptr(),
+                                    &input,
+                                    &mut array[base..end],
                                     nx_bin_sec,
                                     num_y_load,
                                     output_nx,
@@ -6790,7 +6784,7 @@ pub fn newstack() {
                                 // `newstack.f90:2451`.
                                 taper_time +=
                                     crate::imod::libcfshr::b3dutil::wall_time() - wall_start;
-                                todfft_c(fft.as_mut_ptr(), nx_fspad, ny_fspad, 0);
+                                todfft_c(&mut fft, nx_fspad, ny_fspad, 0);
                                 let shift_x =
                                     x_offsets[offset_index].round() - x_offsets[offset_index];
                                 let shift_y =
@@ -6841,7 +6835,7 @@ pub fn newstack() {
                                 if phase_shift {
                                     cropped = fft;
                                 }
-                                todfft_c(cropped.as_mut_ptr(), nx_fcrop_pad, ny_fcrop_pad, 1);
+                                todfft_c(&mut cropped, nx_fcrop_pad, ny_fcrop_pad, 1);
                                 //
                                 // Replicate last real column of image into the extra
                                 // two elements
@@ -6932,12 +6926,11 @@ pub fn newstack() {
                             let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
                             // SLICE_MODE_FLOAT (`mrcslice.h:19`).
                             if crate::imod::libcfshr::taperatfill::taper_at_fill(
-                                array[base..end].as_mut_ptr().cast(),
-                                2,
+                                &mut array[base..end],
                                 output_nx,
                                 output_ny,
                                 num_taper,
-                                inside_taper,
+                                inside_taper != 0,
                             ) != 0
                             {
                                 exit_error("Memory allocation error tapering image");
@@ -7304,13 +7297,13 @@ pub fn newstack() {
                         let mut move_offset = 0_i32;
                         let mut n_byte_extra_in = 0_i32;
                         if get_extra_header_sec_offset(
-                            extra_in.as_mut_ptr().cast(),
+                            &extra_in,
                             n_byte_sym_in,
                             num_int_or_bytes_in,
                             i_flag_extra_in,
                             in_section,
-                            &raw mut move_offset,
-                            &raw mut n_byte_extra_in,
+                            &mut move_offset,
+                            &mut n_byte_extra_in,
                         ) != 0
                         {
                             exit_error(
@@ -7321,14 +7314,12 @@ pub fn newstack() {
                             //
                             // FEI type, call the copy function
                             if copy_extra_header_section(
-                                extra_in.as_mut_ptr().cast(),
-                                n_byte_sym_in,
-                                extra_out.as_mut_ptr().cast(),
-                                n_byte_sym_out,
+                                &extra_in,
+                                &mut extra_out,
                                 num_int_or_bytes_in,
                                 i_flag_extra_in,
                                 in_section,
-                                &raw mut ind_extra_out,
+                                &mut ind_extra_out,
                             ) != 0
                             {
                                 exit_error(

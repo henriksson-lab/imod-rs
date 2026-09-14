@@ -330,7 +330,7 @@ pub fn header() {
                 }
                 if do_origin {
                     let mut delta = [0.0_f32; 3];
-                    iiu_ret_origin(im_unit, &mut delta[0], &mut delta[1], &mut delta[2]);
+                    iiu_ret_origin(im_unit, &mut delta);
                     println!(
                         "{}{}{}",
                         g_edit(delta[0], 15, 5),
@@ -374,9 +374,9 @@ pub fn header() {
                     memory_error(ierr, "array for extended header");
                     array.resize(nbsym as usize / 4 + 10, 0.0);
                     iiu_ret_extended_data(im_unit, &mut nbsym, array.as_mut_ptr().cast());
-                    let mut num_int = 0;
-                    let mut num_real = 0;
-                    iiu_ret_extended_type(im_unit, &mut num_int, &mut num_real);
+                    let mut extended_type = [0; 2];
+                    iiu_ret_extended_type(im_unit, &mut extended_type);
+                    let [mut num_int, mut num_real] = extended_type;
                     if extra_is_nbytes_and_flags(num_int, num_real) == 0 && num_real >= 12 {
                         //
                         // Agard/old FEI type
@@ -461,8 +461,14 @@ pub fn header() {
                         let mut j = 0_i32;
                         let mut tiltaxis = 0.0_f32;
                         let mut axis8 = 0.0_f64;
+                        let array_bytes = unsafe {
+                            core::slice::from_raw_parts(
+                                array.as_ptr().cast::<u8>(),
+                                core::mem::size_of_val(array.as_slice()),
+                            )
+                        };
                         if get_extra_header_value(
-                            array.as_mut_ptr().cast(),
+                            array_bytes,
                             8,
                             3,
                             &mut byte_value,
@@ -472,7 +478,7 @@ pub fn header() {
                             &mut axis8,
                         ) == 0
                             && get_extra_header_value(
-                                array.as_mut_ptr().cast(),
+                                array_bytes,
                                 140,
                                 4,
                                 &mut byte_value,
@@ -483,9 +489,7 @@ pub fn header() {
                             ) == 0
                             && mask & (1 << 12) != 0
                         {
-                            tiltaxis = (axis8
-                                * get_fei_ext_head_angle_scale(array.as_mut_ptr().cast()))
-                                as f32;
+                            tiltaxis = (axis8 * get_fei_ext_head_angle_scale(array_bytes)) as f32;
                             if (-360.0..=360.0).contains(&tiltaxis) {
                                 if tiltaxis < -180.0 {
                                     tiltaxis += 360.0;

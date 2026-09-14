@@ -27,39 +27,33 @@ use std::io::Write as _;
 /// process routine.  Rust cannot hold that second, aliasing path, so the fields
 /// are gone from [`ClipOptions`] and the headers come in as arguments; every
 /// caller already has both in scope.
-pub unsafe fn set_mrc_coords(
-    input: &MrcHeader,
-    output: &mut MrcHeader,
-    options: &ClipOptions,
-) -> i32 {
-    unsafe {
-        mrc_coord_cp(output, input);
-        let (sx, sy, sz) = mrc_get_scale(output);
-        output.nxstart = input.nxstart;
-        output.nystart = input.nystart;
-        output.nzstart = input.nzstart;
-        let mut tx = (options.cx as i32 - options.ix / 2) as f32;
-        tx += ((options.ix - options.ox) / 2) as f32;
-        if sx != 0. {
-            tx *= sx;
-        }
-        output.xorg -= tx;
-        let mut ty = (options.cy as i32 - options.iy / 2) as f32;
-        ty += ((options.iy - options.oy) / 2) as f32;
-        if sy != 0. {
-            ty *= sy;
-        }
-        output.yorg -= ty;
-        if options.dim == 3 {
-            let mut tz = (options.cz as f64 - options.iz as f64 / 2.).floor() as i32 as f32;
-            tz += ((options.iz - options.oz) / 2) as f32;
-            if sz != 0. {
-                tz *= sz;
-            }
-            output.zorg -= tz;
-        }
-        mrc_head_write(&mut output.fp.clone().unwrap(), output)
+pub fn set_mrc_coords(input: &MrcHeader, output: &mut MrcHeader, options: &ClipOptions) -> i32 {
+    mrc_coord_cp(output, input);
+    let (sx, sy, sz) = mrc_get_scale(output);
+    output.nxstart = input.nxstart;
+    output.nystart = input.nystart;
+    output.nzstart = input.nzstart;
+    let mut tx = (options.cx as i32 - options.ix / 2) as f32;
+    tx += ((options.ix - options.ox) / 2) as f32;
+    if sx != 0. {
+        tx *= sx;
     }
+    output.xorg -= tx;
+    let mut ty = (options.cy as i32 - options.iy / 2) as f32;
+    ty += ((options.iy - options.oy) / 2) as f32;
+    if sy != 0. {
+        ty *= sy;
+    }
+    output.yorg -= ty;
+    if options.dim == 3 {
+        let mut tz = (options.cz as f64 - options.iz as f64 / 2.).floor() as i32 as f32;
+        tz += ((options.iz - options.oz) / 2) as f32;
+        if sz != 0. {
+            tz *= sz;
+        }
+        output.zorg -= tz;
+    }
+    mrc_head_write(&mut output.fp.clone().unwrap(), output)
 }
 /// C++ `set_input_options` (`file_io.cpp:79`).
 ///
@@ -175,582 +169,556 @@ pub fn set_input_options(
     }
 }
 /// C++ `set_output_options` (`file_io.cpp:202`).
-pub unsafe fn set_output_options(options: &mut ClipOptions, output: &mut MrcHeader) -> i32 {
-    unsafe {
-        let mut z = 0;
-        let limits = [0i32; 3];
-        let mut tile_sizes = [0i32; 3];
-        let mut num_tiles = [0i32; 3];
-        if options.add2file == IP_APPEND_FALSE {
-            mrc_head_new(
-                &mut *output,
-                options.ox,
-                options.oy,
-                options.oz,
-                options.mode,
-            );
-            if set_chunk_output(options, output, &limits, &mut num_tiles, &mut tile_sizes) != 0
-                || mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0
-            {
-                return -1;
-            }
+pub fn set_output_options(options: &mut ClipOptions, output: &mut MrcHeader) -> i32 {
+    let mut z = 0;
+    let limits = [0i32; 3];
+    let mut tile_sizes = [0i32; 3];
+    let mut num_tiles = [0i32; 3];
+    if options.add2file == IP_APPEND_FALSE {
+        mrc_head_new(output, options.ox, options.oy, options.oz, options.mode);
+        if set_chunk_output(options, output, &limits, &mut num_tiles, &mut tile_sizes) != 0
+            || mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0
+        {
+            return -1;
+        }
+    } else {
+        if options.ox != output.nx || options.oy != output.ny {
+            options.ox = output.nx;
+            options.oy = output.ny;
+            show_warning("clip - Appended file can't change size.");
+        }
+        if options.mode != output.mode {
+            options.mode = output.mode;
+            show_warning("clip - Appended file can't change mode.");
+        }
+        if options.add2file == IP_APPEND_ADD {
+            z = output.nz;
+            output.nz += options.oz;
+            output.amean = z as f32 * output.amean / output.nz as f32;
         } else {
-            if options.ox != output.nx || options.oy != output.ny {
-                options.ox = output.nx;
-                options.oy = output.ny;
-                show_warning("clip - Appended file can't change size.");
-            }
-            if options.mode != output.mode {
-                options.mode = output.mode;
-                show_warning("clip - Appended file can't change mode.");
-            }
-            if options.add2file == IP_APPEND_ADD {
-                z = output.nz;
-                output.nz += options.oz;
-                output.amean = z as f32 * output.amean / output.nz as f32;
+            z = options.isec;
+            if options.add2file == IP_APPEND_OVERWRITE {
+                output.nz = output.nz.max(options.oz + options.isec);
             } else {
-                z = options.isec;
-                if options.add2file == IP_APPEND_OVERWRITE {
-                    output.nz = output.nz.max(options.oz + options.isec);
-                } else {
-                    output.nz = options.oz + options.isec;
-                }
-            }
-            if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
-                return -1;
+                output.nz = options.oz + options.isec;
             }
         }
-        z
+        if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
+            return -1;
+        }
     }
+    z
 }
 /// C++ `set_options` (`file_io.cpp:244`).
-pub unsafe fn set_options(
+pub fn set_options(
     options: &mut ClipOptions,
     input: &mut MrcHeader,
     output: &mut MrcHeader,
 ) -> i32 {
-    unsafe {
-        set_input_options(options, input);
-        let z = set_output_options(options, output);
-        mrc_head_label_cp(&*input, &mut *output);
-        z
-    }
+    set_input_options(options, input);
+    let z = set_output_options(options, output);
+    mrc_head_label_cp(input, output);
+    z
 }
 /// C++ `set_multifile_input_options` (`file_io.cpp:255`).
-pub unsafe fn set_multifile_input_options(options: &mut ClipOptions, input: &mut MrcHeader) {
-    unsafe {
-        if options.infiles > 1 {
-            if options.add2file != 0 {
+pub fn set_multifile_input_options(options: &mut ClipOptions, input: &mut MrcHeader) {
+    if options.infiles > 1 {
+        if options.add2file != 0 {
+            exit_error(b"Multiple input files can not be entered with appending or overwriting");
+        }
+        for file_index in 0..options.infiles {
+            let name = &options.fnames[file_index as usize];
+            let fp = ii_fopen(name.as_bytes(), "rb");
+            let Some(mut fp) = fp else {
+                exit_error(c_format("Opening %s.", &[CArg::Str(name)]).as_bytes());
+            };
+            let mut header = MrcHeader::default();
+            if mrc_head_read(&mut fp, &mut header) != 0 {
+                exit_error(c_format("Reading header of %s.", &[CArg::Str(name)]).as_bytes());
+            }
+            if input.nx != header.nx
+                || input.ny != header.ny
+                || input.nz != header.nz
+                || input.mode != header.mode
+            {
                 exit_error(
-                    b"Multiple input files can not be entered with appending or overwriting",
+                    c_format(
+                        "Files must be same mode and same size in X, Y, and Z; %s differs",
+                        &[CArg::Str(name)],
+                    )
+                    .as_bytes(),
                 );
             }
-            for file_index in 0..options.infiles {
-                let name = &options.fnames[file_index as usize];
-                let fp = ii_fopen(name.as_bytes(), "rb");
-                let Some(mut fp) = fp else {
-                    exit_error(c_format("Opening %s.", &[CArg::Str(name)]).as_bytes());
-                };
-                let mut header = MrcHeader::default();
-                if mrc_head_read(&mut fp, &mut header) != 0 {
-                    exit_error(c_format("Reading header of %s.", &[CArg::Str(name)]).as_bytes());
-                }
-                if input.nx != header.nx
-                    || input.ny != header.ny
-                    || input.nz != header.nz
-                    || input.mode != header.mode
-                {
-                    exit_error(
-                        c_format(
-                            "Files must be same mode and same size in X, Y, and Z; %s differs",
-                            &[CArg::Str(name)],
-                        )
-                        .as_bytes(),
-                    );
-                }
-                ii_fclose(&mut fp);
-            }
+            ii_fclose(&mut fp);
         }
-        set_input_options(options, input);
-        if options.infiles > 1 {
-            if options.out_before != IP_DEFAULT || options.out_after != IP_DEFAULT {
-                exit_error(b"Blank slices cannot be output with multiple input files");
-            }
-            options.out_before = -1;
-        }
-        options.oz *= options.infiles;
     }
+    set_input_options(options, input);
+    if options.infiles > 1 {
+        if options.out_before != IP_DEFAULT || options.out_after != IP_DEFAULT {
+            exit_error(b"Blank slices cannot be output with multiple input files");
+        }
+        options.out_before = -1;
+    }
+    options.oz *= options.infiles;
 }
 /// C++ `setChunkOutput` (`file_io.cpp:292`).
-pub unsafe fn set_chunk_output(
+pub fn set_chunk_output(
     options: &mut ClipOptions,
     output: &mut MrcHeader,
     limits: &[i32; 3],
     num_tiles: &mut [i32; 3],
     tile_sizes: &mut [i32; 3],
 ) -> i32 {
-    unsafe {
-        let out_sizes = [output.nx, output.ny, output.nz];
-        tile_sizes[0] = options.chunk_x;
-        tile_sizes[1] = options.chunk_y;
-        tile_sizes[2] = options.chunk_z;
-        for ind in 0..3usize {
-            if tile_sizes[ind] == IP_DEFAULT || tile_sizes[ind] >= out_sizes[ind] {
-                num_tiles[ind] = 1;
-                tile_sizes[ind] = if ind == 2 { 1 } else { 0 };
-            } else {
-                ii_limited_tile_size(
-                    out_sizes[ind],
-                    &mut tile_sizes[ind],
-                    &mut num_tiles[ind],
-                    2,
-                    limits[ind],
-                );
-            }
-        }
-        if num_tiles[0] * num_tiles[1] * num_tiles[2] == 1 {
-            return 0;
-        }
-        let Some(ii_file) = ii_lookup_file_from_fp(&output.fp.clone().unwrap()) else {
-            let _ = ImodFile::Stderr.write_all(b"iiLookupFileFromFP cannot find iiFile from fp\n");
-            return -1;
-        };
-        let mut dsize = 0;
-        let mut csize = 0;
-        mrc_getdcsize(output.mode, &mut dsize, &mut csize);
-        let chunk_xy = (if tile_sizes[0] == 0 {
-            out_sizes[0]
+    let out_sizes = [output.nx, output.ny, output.nz];
+    tile_sizes[0] = options.chunk_x;
+    tile_sizes[1] = options.chunk_y;
+    tile_sizes[2] = options.chunk_z;
+    for ind in 0..3usize {
+        if tile_sizes[ind] == IP_DEFAULT || tile_sizes[ind] >= out_sizes[ind] {
+            num_tiles[ind] = 1;
+            tile_sizes[ind] = if ind == 2 { 1 } else { 0 };
         } else {
-            tile_sizes[0]
+            ii_limited_tile_size(
+                out_sizes[ind],
+                &mut tile_sizes[ind],
+                &mut num_tiles[ind],
+                2,
+                limits[ind],
+            );
+        }
+    }
+    if num_tiles[0] * num_tiles[1] * num_tiles[2] == 1 {
+        return 0;
+    }
+    let Some(ii_file) = ii_lookup_file_from_fp(&output.fp.clone().unwrap()) else {
+        let _ = ImodFile::Stderr.write_all(b"iiLookupFileFromFP cannot find iiFile from fp\n");
+        return -1;
+    };
+    let mut dsize = 0;
+    let mut csize = 0;
+    mrc_getdcsize(output.mode, &mut dsize, &mut csize);
+    let chunk_xy = (if tile_sizes[0] == 0 {
+        out_sizes[0]
+    } else {
+        tile_sizes[0]
+    }) as f32
+        * (if tile_sizes[1] == 0 {
+            out_sizes[1]
+        } else {
+            tile_sizes[1]
         }) as f32
-            * (if tile_sizes[1] == 0 {
-                out_sizes[1]
-            } else {
-                tile_sizes[1]
-            }) as f32
-            * csize as f32
-            * dsize as f32;
-        let max_z = (3.0e9_f32 / chunk_xy) as i32;
-        if max_z < 1 {
-            let _ = ImodFile::Stderr.write_all(
+        * csize as f32
+        * dsize as f32;
+    let max_z = (3.0e9_f32 / chunk_xy) as i32;
+    if max_z < 1 {
+        let _ = ImodFile::Stderr.write_all(
                 b"Output tile or image size in X and Y too large to fit in one chunk; enter smaller chunk sizes\n",
             );
-            return -1;
-        }
-        if max_z == 1 {
-            tile_sizes[2] = 1;
-            num_tiles[2] = output.nz;
-        } else if tile_sizes[2] > max_z || (options.chunk_z == IP_DEFAULT && out_sizes[2] > max_z) {
-            tile_sizes[2] = max_z;
-            // `file_io.cpp:330` passes `outSizes[ind]`, and `ind` is 3 here --
-            // one past the end of `int outSizes[3]`, so native reads whatever
-            // is next on its stack.  There is no value to reproduce; the third
-            // element, which every other line of the routine uses, is passed.
-            ii_limited_tile_size(
-                out_sizes[2],
-                &mut tile_sizes[2],
-                &mut num_tiles[2],
-                2,
-                max_z,
-            );
-        } else if options.chunk_z == IP_DEFAULT {
-            tile_sizes[2] = out_sizes[2];
-        }
-        if ii_set_chunk_sizes(ii_file, tile_sizes[0], tile_sizes[1], tile_sizes[2]) != 0 {
-            return -1;
-        }
-        let _ = ImodFile::Stdout.write_all(
-            c_format(
-                "Chunk size set to %d %d %d\n",
-                &[
-                    CArg::Int(tile_sizes[0] as i64),
-                    CArg::Int(tile_sizes[1] as i64),
-                    CArg::Int(tile_sizes[2] as i64),
-                ],
-            )
-            .as_bytes(),
-        );
-        0
+        return -1;
     }
+    if max_z == 1 {
+        tile_sizes[2] = 1;
+        num_tiles[2] = output.nz;
+    } else if tile_sizes[2] > max_z || (options.chunk_z == IP_DEFAULT && out_sizes[2] > max_z) {
+        tile_sizes[2] = max_z;
+        // `file_io.cpp:330` passes `outSizes[ind]`, and `ind` is 3 here --
+        // one past the end of `int outSizes[3]`, so native reads whatever
+        // is next on its stack.  There is no value to reproduce; the third
+        // element, which every other line of the routine uses, is passed.
+        ii_limited_tile_size(
+            out_sizes[2],
+            &mut tile_sizes[2],
+            &mut num_tiles[2],
+            2,
+            max_z,
+        );
+    } else if options.chunk_z == IP_DEFAULT {
+        tile_sizes[2] = out_sizes[2];
+    }
+    if unsafe { ii_set_chunk_sizes(&mut *ii_file, tile_sizes[0], tile_sizes[1], tile_sizes[2]) }
+        != 0
+    {
+        return -1;
+    }
+    let _ = ImodFile::Stdout.write_all(
+        c_format(
+            "Chunk size set to %d %d %d\n",
+            &[
+                CArg::Int(tile_sizes[0] as i64),
+                CArg::Int(tile_sizes[1] as i64),
+                CArg::Int(tile_sizes[2] as i64),
+            ],
+        )
+        .as_bytes(),
+    );
+    0
 }
 /// C++ `clipWriteSlice` (`file_io.cpp:344`).
-pub unsafe fn clip_write_slice(
+pub fn clip_write_slice(
     slice: &mut Islice,
     output: &mut MrcHeader,
     options: &mut ClipOptions,
     ksec: i32,
-    z_write: *mut i32,
+    z_write: &mut i32,
     _free_slice: i32,
 ) -> i32 {
-    unsafe {
-        if ksec < (options.nofsecs - options.oz) / 2
-            || ksec >= (options.nofsecs - options.oz) / 2 + options.oz
-        {
-            return 0;
+    if ksec < (options.nofsecs - options.oz) / 2
+        || ksec >= (options.nofsecs - options.oz) / 2 + options.oz
+    {
+        return 0;
+    }
+    let mut blank_before = 0;
+    let mut blank_after = 0;
+    let mut blank: Option<Box<Islice>> = None;
+    if options.oz > options.nofsecs && options.out_before != -1 {
+        if ksec == 0 {
+            blank_before = if options.out_before == IP_DEFAULT {
+                (options.oz - options.nofsecs) / 2
+            } else {
+                options.out_before
+            };
         }
-        let mut blank_before = 0;
-        let mut blank_after = 0;
-        let mut blank: Option<Box<Islice>> = None;
-        if options.oz > options.nofsecs && options.out_before != -1 {
-            if ksec == 0 {
-                blank_before = if options.out_before == IP_DEFAULT {
-                    (options.oz - options.nofsecs) / 2
-                } else {
-                    options.out_before
-                };
-            }
-            if ksec == options.nofsecs - 1 {
-                blank_after = if options.out_after == IP_DEFAULT {
-                    options.oz - options.nofsecs - (options.oz - options.nofsecs) / 2
-                } else {
-                    options.out_after
-                };
-            }
-            if blank_before != 0 || blank_after != 0 {
-                blank = clip_blank_slice(output, options);
-                if blank.is_none() {
-                    return -1;
-                }
-            }
+        if ksec == options.nofsecs - 1 {
+            blank_after = if options.out_after == IP_DEFAULT {
+                options.oz - options.nofsecs - (options.oz - options.nofsecs) / 2
+            } else {
+                options.out_after
+            };
         }
-        for _ in 0..blank_before {
-            if mrc_write_slice(
-                blank.as_mut().unwrap().data.as_mut_ptr().cast(),
-                &mut output.fp.clone().unwrap(),
-                output,
-                *z_write,
-                b'z',
-            ) != 0
-            {
+        if blank_before != 0 || blank_after != 0 {
+            blank = clip_blank_slice(output, options);
+            if blank.is_none() {
                 return -1;
             }
-            *z_write += 1;
         }
-        if slice.mode != options.mode && slice_new_mode(slice, options.mode) < 0 {
+    }
+    for _ in 0..blank_before {
+        if mrc_write_slice(
+            &blank.as_mut().unwrap().data,
+            &mut output.fp.clone().unwrap(),
+            output,
+            *z_write,
+            b'z',
+        ) != 0
+        {
             return -1;
         }
-        if options.ox != slice.xsize || options.oy != slice.ysize {
-            slice.mean = options.pad;
-            let Some(mut resized) = mrc_slice_resize(slice, options.ox, options.oy) else {
-                let _ = ImodFile::Stderr.write_all(b"clipWriteSlice: error resizing slice.\n");
-                return -1;
-            };
-            slice_mmm(resized.as_mut());
-            output.amin = output.amin.min(resized.min);
-            output.amax = output.amax.max(resized.max);
-            if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
-                output.amean += (resized.mean + (blank_before + blank_after) as f32 * options.pad)
-                    / output.nz as f32;
-            }
-            if mrc_write_slice(
-                resized.data.as_mut_ptr().cast(),
-                &mut output.fp.clone().unwrap(),
-                output,
-                *z_write,
-                b'z',
-            ) != 0
-            {
-                return -1;
-            }
-        } else {
-            slice_mmm(slice);
-            output.amin = output.amin.min(slice.min);
-            output.amax = output.amax.max(slice.max);
-            if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
-                output.amean += (slice.mean + (blank_before + blank_after) as f32 * options.pad)
-                    / output.nz as f32;
-            }
-            if mrc_write_slice(
-                slice.data.as_mut_ptr().cast(),
-                &mut output.fp.clone().unwrap(),
-                output,
-                *z_write,
-                b'z',
-            ) != 0
-            {
-                return -1;
-            }
+        *z_write += 1;
+    }
+    if slice.mode != options.mode && slice_new_mode(slice, options.mode) < 0 {
+        return -1;
+    }
+    if options.ox != slice.xsize || options.oy != slice.ysize {
+        slice.mean = options.pad;
+        let Some(mut resized) = mrc_slice_resize(slice, options.ox, options.oy) else {
+            let _ = ImodFile::Stderr.write_all(b"clipWriteSlice: error resizing slice.\n");
+            return -1;
+        };
+        slice_mmm(resized.as_mut());
+        output.amin = output.amin.min(resized.min);
+        output.amax = output.amax.max(resized.max);
+        if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
+            output.amean += (resized.mean + (blank_before + blank_after) as f32 * options.pad)
+                / output.nz as f32;
+        }
+        if mrc_write_slice(
+            &resized.data,
+            &mut output.fp.clone().unwrap(),
+            output,
+            *z_write,
+            b'z',
+        ) != 0
+        {
+            return -1;
+        }
+    } else {
+        slice_mmm(slice);
+        output.amin = output.amin.min(slice.min);
+        output.amax = output.amax.max(slice.max);
+        if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
+            output.amean +=
+                (slice.mean + (blank_before + blank_after) as f32 * options.pad) / output.nz as f32;
+        }
+        if mrc_write_slice(
+            &slice.data,
+            &mut output.fp.clone().unwrap(),
+            output,
+            *z_write,
+            b'z',
+        ) != 0
+        {
+            return -1;
+        }
+    }
+    *z_write += 1;
+    for _ in 0..blank_after {
+        if mrc_write_slice(
+            &blank.as_mut().unwrap().data,
+            &mut output.fp.clone().unwrap(),
+            output,
+            *z_write,
+            b'z',
+        ) != 0
+        {
+            return -1;
         }
         *z_write += 1;
-        for _ in 0..blank_after {
-            if mrc_write_slice(
-                blank.as_mut().unwrap().data.as_mut_ptr().cast(),
-                &mut output.fp.clone().unwrap(),
-                output,
-                *z_write,
-                b'z',
-            ) != 0
-            {
-                return -1;
-            }
-            *z_write += 1;
-        }
-        0
     }
+    0
 }
 /// C++ `grap_volume_read` (`file_io.cpp:421`).
-pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Option<Istack> {
-    unsafe {
-        if options.dim == 2 {
-            if options.iz == IP_DEFAULT {
-                options.iz = 0;
-            }
-            if options.iz2 == IP_DEFAULT {
-                options.iz2 = input.nz - 1;
-            }
-            if options.iz2 == 0 || options.iz2 < options.iz {
-                options.iz2 = options.iz;
-            }
-            options.cz = (options.iz2 + options.iz) as f32 / 2.;
-            options.iz = options.iz2 - options.iz + 1;
-        }
-        if options.ix == IP_DEFAULT {
-            options.ix = input.nx;
-        }
-        if options.iy == IP_DEFAULT {
-            options.iy = input.ny;
-        }
+pub fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Option<Istack> {
+    if options.dim == 2 {
         if options.iz == IP_DEFAULT {
-            options.iz = input.nz;
+            options.iz = 0;
         }
-        if options.cx == IP_DEFAULT as f32 {
-            options.cx = input.nx as f32 / 2.;
+        if options.iz2 == IP_DEFAULT {
+            options.iz2 = input.nz - 1;
         }
-        if options.cy == IP_DEFAULT as f32 {
-            options.cy = input.ny as f32 / 2.;
+        if options.iz2 == 0 || options.iz2 < options.iz {
+            options.iz2 = options.iz;
         }
-        if options.cz == IP_DEFAULT as f32 {
-            options.cz = input.nz as f32 / 2.;
-        }
-        let pad = if options.pad == IP_DEFAULT as f32 {
-            input.amean
-        } else {
-            options.pad
-        };
-        let Ok(zsize) = usize::try_from(options.iz) else {
+        options.cz = (options.iz2 + options.iz) as f32 / 2.;
+        options.iz = options.iz2 - options.iz + 1;
+    }
+    if options.ix == IP_DEFAULT {
+        options.ix = input.nx;
+    }
+    if options.iy == IP_DEFAULT {
+        options.iy = input.ny;
+    }
+    if options.iz == IP_DEFAULT {
+        options.iz = input.nz;
+    }
+    if options.cx == IP_DEFAULT as f32 {
+        options.cx = input.nx as f32 / 2.;
+    }
+    if options.cy == IP_DEFAULT as f32 {
+        options.cy = input.ny as f32 / 2.;
+    }
+    if options.cz == IP_DEFAULT as f32 {
+        options.cz = input.nz as f32 / 2.;
+    }
+    let pad = if options.pad == IP_DEFAULT as f32 {
+        input.amean
+    } else {
+        options.pad
+    };
+    let Ok(zsize) = usize::try_from(options.iz) else {
+        return None;
+    };
+    let mut slices = Vec::new();
+    if slices.try_reserve_exact(zsize).is_err() {
+        return None;
+    }
+    for z in 0..options.iz {
+        let Some(mut out) = slice_create(options.ix, options.iy, input.mode) else {
             return None;
         };
-        let mut slices = Vec::new();
-        if slices.try_reserve_exact(zsize).is_err() {
-            return None;
-        }
-        for z in 0..options.iz {
-            let Some(mut out) = slice_create(options.ix, options.iy, input.mode) else {
-                return None;
-            };
-            for y in 0..options.iy {
-                for x in 0..options.ix {
-                    slice_put_val(out.as_mut(), x, y, [pad; 4]);
-                }
+        for y in 0..options.iy {
+            for x in 0..options.ix {
+                slice_put_val(out.as_mut(), x, y, [pad; 4]);
             }
-            out.mean = input.amean;
-            out.max = input.amax;
-            out.min = input.amin;
-            slices.push(out);
         }
-        let mut volume = Istack { slices };
-        let Some(mut source) = slice_create(input.nx, input.ny, input.mode) else {
+        out.mean = input.amean;
+        out.max = input.amax;
+        out.min = input.amin;
+        slices.push(out);
+    }
+    let mut volume = Istack { slices };
+    let Some(mut source) = slice_create(input.nx, input.ny, input.mode) else {
+        return None;
+    };
+    let start_z = (options.cz - options.iz as f32 * 0.5f32).floor() as i32;
+    for z in 0..options.iz {
+        let file_z = start_z + z;
+        if file_z < 0 || file_z >= input.nz {
+            continue;
+        }
+        if mrc_read_slice(
+            &mut source.data,
+            &mut input.fp.clone().unwrap(),
+            input,
+            file_z,
+            b'z',
+        ) != 0
+        {
             return None;
-        };
-        let start_z = (options.cz - options.iz as f32 * 0.5f32).floor() as i32;
-        for z in 0..options.iz {
-            let file_z = start_z + z;
-            if file_z < 0 || file_z >= input.nz {
+        }
+        let start_y = (options.cy as f64 - options.iy as f64 / 2.).floor() as i32;
+        for y in 0..options.iy {
+            let from_y = start_y + y;
+            if from_y < 0 || from_y >= input.ny {
                 continue;
             }
-            if mrc_read_slice(
-                source.data.as_mut_ptr().cast(),
-                &mut input.fp.clone().unwrap(),
-                input,
-                file_z,
-                b'z',
-            ) != 0
-            {
-                return None;
-            }
-            let start_y = (options.cy as f64 - options.iy as f64 / 2.).floor() as i32;
-            for y in 0..options.iy {
-                let from_y = start_y + y;
-                if from_y < 0 || from_y >= input.ny {
+            let start_x = (options.cx as f64 - options.ix as f64 / 2.).floor() as i32;
+            for x in 0..options.ix {
+                let from_x = start_x + x;
+                if from_x < 0 || from_x >= input.nx {
                     continue;
                 }
-                let start_x = (options.cx as f64 - options.ix as f64 / 2.).floor() as i32;
-                for x in 0..options.ix {
-                    let from_x = start_x + x;
-                    if from_x < 0 || from_x >= input.nx {
-                        continue;
-                    }
-                    let mut value = [0.; 4];
-                    crate::imod::libcfshr::islice::slice_get_val(
-                        source.as_mut(),
-                        from_x,
-                        from_y,
-                        &mut value,
-                    );
-                    slice_put_val(volume.slices[z as usize].as_mut(), x, y, value);
-                }
+                let mut value = [0.; 4];
+                crate::imod::libcfshr::islice::slice_get_val(
+                    source.as_mut(),
+                    from_x,
+                    from_y,
+                    &mut value,
+                );
+                slice_put_val(volume.slices[z as usize].as_mut(), x, y, value);
             }
         }
-        Some(volume)
     }
+    Some(volume)
 }
 /// C++ `grap_volume_write` (`file_io.cpp:507`).
-pub unsafe fn grap_volume_write(
+pub fn grap_volume_write(
     volume: &mut Istack,
     output: &mut MrcHeader,
     options: &mut ClipOptions,
 ) -> i32 {
-    unsafe {
-        let Some(first) = volume.slices.first() else {
-            return -1;
-        };
-        if options.mode == IP_DEFAULT {
-            options.mode = first.mode;
-        }
-        if options.ox == IP_DEFAULT {
-            options.ox = first.xsize;
-        }
-        if options.oy == IP_DEFAULT {
-            options.oy = first.ysize;
-        }
-        if options.oz == IP_DEFAULT {
-            options.oz = volume.slices.len() as i32;
-        }
-        if first.mode != options.mode {
-            for slice in &mut volume.slices {
-                slice_new_mode(slice.as_mut(), options.mode);
-            }
-        }
-        for slice in &mut volume.slices {
-            slice_mmm(slice.as_mut());
-        }
-        let mut min = volume.slices[0].min;
-        let mut max = volume.slices[0].max;
-        let mut mean = volume.slices[0].mean;
-        for slice in &volume.slices[1..] {
-            min = min.min(slice.min);
-            max = max.max(slice.max);
-            mean += slice.mean;
-        }
-        mean /= volume.slices.len() as f32;
-        let first_mode = volume.slices[0].mode;
-        let ks: i32;
-        match options.add2file {
-            IP_APPEND_TRUNCATE | IP_APPEND_OVERWRITE => {
-                ks = options.isec;
-                if options.add2file == IP_APPEND_TRUNCATE {
-                    output.nz = ks + options.oz;
-                } else {
-                    output.nz = output.nz.max(ks + options.oz);
-                }
-                options.ox = output.nx;
-                options.oy = output.ny;
-                if output.mode != first_mode {
-                    let _ = ImodFile::Stderr
-                        .write_all(b"overwriting requires data modes to be the same.\n");
-                    return -1;
-                }
-                output.amin = output.amin.min(min);
-                output.amax = output.amax.max(max);
-                let zscale = output.zlen / output.mz as f32;
-                output.mz = output.nz;
-                output.zlen = output.mz as f32 * zscale;
-            }
-            IP_APPEND_ADD => {
-                ks = output.nz;
-                output.nz += options.oz;
-                options.ox = output.nx;
-                options.oy = output.ny;
-                if output.mode != first_mode {
-                    let _ = ImodFile::Stderr
-                        .write_all(b"inserting requires data modes to be the same.\n");
-                    return -1;
-                }
-                output.amin = output.amin.min(min);
-                output.amax = output.amax.max(max);
-                output.amean =
-                    (output.amean * ks as f32 + mean * options.oz as f32) / output.nz as f32;
-                let zscale = output.zlen / output.mz as f32;
-                output.mz = output.nz;
-                output.zlen = output.mz as f32 * zscale;
-            }
-            _ => {
-                let labels = output.nlabl;
-                mrc_head_new(&mut *output, options.ox, options.oy, options.oz, first_mode);
-                output.nlabl = labels;
-                output.amin = min;
-                output.amax = max;
-                output.amean = mean;
-                ks = 0;
-            }
-        }
-        if options.pad == IP_DEFAULT as f32 {
-            options.pad = output.amean;
-        }
-        if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
-            return -1;
-        }
-        let zs = (volume.slices.len() as i32 - options.oz) / 2;
-        let mut blank: Option<Box<Islice>> = None;
-        for (out_z, source_z) in (ks..output.nz).zip(zs..) {
-            if source_z < 0 || source_z >= volume.slices.len() as i32 {
-                if blank.is_none() {
-                    blank = clip_blank_slice(output, options);
-                }
-                let Some(blank) = blank.as_mut() else {
-                    return -1;
-                };
-                if mrc_write_slice(
-                    blank.data.as_mut_ptr().cast(),
-                    &mut output.fp.clone().unwrap(),
-                    output,
-                    out_z,
-                    b'z',
-                ) != 0
-                {
-                    return -1;
-                }
-            } else {
-                let source = volume.slices[source_z as usize].as_mut();
-                let resized = if options.ox != source.xsize || options.oy != source.ysize {
-                    source.mean = options.pad;
-                    mrc_slice_resize(source, options.ox, options.oy)
-                } else {
-                    None
-                };
-                let write_slice = resized.as_deref().unwrap_or(source);
-                if mrc_write_slice(
-                    write_slice.data.as_ptr().cast_mut().cast(),
-                    &mut output.fp.clone().unwrap(),
-                    output,
-                    out_z,
-                    b'z',
-                ) != 0
-                {
-                    return -1;
-                }
-            }
-        }
-        0
+    let Some(first) = volume.slices.first() else {
+        return -1;
+    };
+    if options.mode == IP_DEFAULT {
+        options.mode = first.mode;
     }
+    if options.ox == IP_DEFAULT {
+        options.ox = first.xsize;
+    }
+    if options.oy == IP_DEFAULT {
+        options.oy = first.ysize;
+    }
+    if options.oz == IP_DEFAULT {
+        options.oz = volume.slices.len() as i32;
+    }
+    if first.mode != options.mode {
+        for slice in &mut volume.slices {
+            slice_new_mode(slice.as_mut(), options.mode);
+        }
+    }
+    for slice in &mut volume.slices {
+        slice_mmm(slice.as_mut());
+    }
+    let mut min = volume.slices[0].min;
+    let mut max = volume.slices[0].max;
+    let mut mean = volume.slices[0].mean;
+    for slice in &volume.slices[1..] {
+        min = min.min(slice.min);
+        max = max.max(slice.max);
+        mean += slice.mean;
+    }
+    mean /= volume.slices.len() as f32;
+    let first_mode = volume.slices[0].mode;
+    let ks: i32;
+    match options.add2file {
+        IP_APPEND_TRUNCATE | IP_APPEND_OVERWRITE => {
+            ks = options.isec;
+            if options.add2file == IP_APPEND_TRUNCATE {
+                output.nz = ks + options.oz;
+            } else {
+                output.nz = output.nz.max(ks + options.oz);
+            }
+            options.ox = output.nx;
+            options.oy = output.ny;
+            if output.mode != first_mode {
+                let _ = ImodFile::Stderr
+                    .write_all(b"overwriting requires data modes to be the same.\n");
+                return -1;
+            }
+            output.amin = output.amin.min(min);
+            output.amax = output.amax.max(max);
+            let zscale = output.zlen / output.mz as f32;
+            output.mz = output.nz;
+            output.zlen = output.mz as f32 * zscale;
+        }
+        IP_APPEND_ADD => {
+            ks = output.nz;
+            output.nz += options.oz;
+            options.ox = output.nx;
+            options.oy = output.ny;
+            if output.mode != first_mode {
+                let _ =
+                    ImodFile::Stderr.write_all(b"inserting requires data modes to be the same.\n");
+                return -1;
+            }
+            output.amin = output.amin.min(min);
+            output.amax = output.amax.max(max);
+            output.amean = (output.amean * ks as f32 + mean * options.oz as f32) / output.nz as f32;
+            let zscale = output.zlen / output.mz as f32;
+            output.mz = output.nz;
+            output.zlen = output.mz as f32 * zscale;
+        }
+        _ => {
+            let labels = output.nlabl;
+            mrc_head_new(&mut *output, options.ox, options.oy, options.oz, first_mode);
+            output.nlabl = labels;
+            output.amin = min;
+            output.amax = max;
+            output.amean = mean;
+            ks = 0;
+        }
+    }
+    if options.pad == IP_DEFAULT as f32 {
+        options.pad = output.amean;
+    }
+    if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
+        return -1;
+    }
+    let zs = (volume.slices.len() as i32 - options.oz) / 2;
+    let mut blank: Option<Box<Islice>> = None;
+    for (out_z, source_z) in (ks..output.nz).zip(zs..) {
+        if source_z < 0 || source_z >= volume.slices.len() as i32 {
+            if blank.is_none() {
+                blank = clip_blank_slice(output, options);
+            }
+            let Some(blank) = blank.as_mut() else {
+                return -1;
+            };
+            if mrc_write_slice(
+                &blank.data,
+                &mut output.fp.clone().unwrap(),
+                output,
+                out_z,
+                b'z',
+            ) != 0
+            {
+                return -1;
+            }
+        } else {
+            let source = volume.slices[source_z as usize].as_mut();
+            let resized = if options.ox != source.xsize || options.oy != source.ysize {
+                source.mean = options.pad;
+                mrc_slice_resize(source, options.ox, options.oy)
+            } else {
+                None
+            };
+            let write_slice = resized.as_deref().unwrap_or(source);
+            if mrc_write_slice(
+                &write_slice.data,
+                &mut output.fp.clone().unwrap(),
+                output,
+                out_z,
+                b'z',
+            ) != 0
+            {
+                return -1;
+            }
+        }
+    }
+    0
 }
 /// C++ static `clipBlankSlice` (`file_io.cpp:626`).
-pub unsafe fn clip_blank_slice(
-    output: &mut MrcHeader,
-    options: &mut ClipOptions,
-) -> Option<Box<Islice>> {
-    unsafe {
-        let Some(mut slice) = slice_create(output.nx, output.ny, output.mode) else {
-            let _ = ImodFile::Stderr.write_all(b"clipBlankSlice:  error getting slice\n");
-            return None;
-        };
-        for y in 0..output.ny {
-            for x in 0..output.nx {
-                slice_put_val(slice.as_mut(), x, y, [options.pad; 4]);
-            }
+pub fn clip_blank_slice(output: &mut MrcHeader, options: &mut ClipOptions) -> Option<Box<Islice>> {
+    let Some(mut slice) = slice_create(output.nx, output.ny, output.mode) else {
+        let _ = ImodFile::Stderr.write_all(b"clipBlankSlice:  error getting slice\n");
+        return None;
+    };
+    for y in 0..output.ny {
+        for x in 0..output.nx {
+            slice_put_val(slice.as_mut(), x, y, [options.pad; 4]);
         }
-        Some(slice)
     }
+    Some(slice)
 }
 /// C++ `grap_volume_free` (`file_io.cpp:646`).
 pub fn grap_volume_free(_volume: Istack) -> i32 {

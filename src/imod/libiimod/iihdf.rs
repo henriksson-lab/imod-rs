@@ -19,15 +19,14 @@ use crate::imod::libcfshr::autodoc::{
     adoc_set_two_floats, adoc_set_two_integers,
 };
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
-use crate::imod::libcfshr::ilist::{ilist_append, ilist_delete, ilist_item, ilist_new, ilist_size};
 use crate::imod::libiimod::hdf_imageio::{
     hdf_read_section_any, hdf_write_section_any, init_new_hdf_file,
 };
 use crate::imod::libiimod::iimage::{
     IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_HDF, IIFORMAT_COMPLEX, IIFORMAT_LUMINANCE,
     IIFORMAT_RGB, IISTATE_NOTINIT, IISTATE_UNUSED, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_SHORT,
-    IITYPE_UBYTE, IITYPE_USHORT, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_USHORT, ii_close,
-    ii_default_min_max_mean, ii_new_box, ii_sync_from_mrc_header,
+    IITYPE_UBYTE, IITYPE_USHORT, ImodImageFile, MRSA_BYTE, MRSA_FLOAT, MRSA_USHORT, StackSetData,
+    ii_close, ii_default_min_max_mean, ii_new_box, ii_sync_from_mrc_header,
 };
 use crate::imod::libiimod::iimrc::ii_mrc_fill_header;
 use crate::imod::libiimod::mrcfiles::{
@@ -127,18 +126,8 @@ const H5T_STRING: i32 = 3;
 const H5T_SGN_2: i32 = 1;
 const H5S_SIMPLE: i32 = 1;
 
-/// C `StackSetData` (`hdfP.h`).  `char *name` is owned by the entry, so it is
-/// an owned `Vec<u8>` and `NULL` is `None`.  `hdf_imageio.rs` declares the same
-/// struct, as both units include `hdfP.h`; the two must stay identical.
-#[repr(C)]
-pub struct StackSetData {
-    pub name: Option<Vec<u8>>,
-    pub dset_id: HidT,
-    pub is_open: i32,
-}
-/// C `GroupData` (`iihdf.c:62`).  No longer `Copy`: `name` owns its bytes, so
-/// the bitwise copy into `sGroups` is a move and the source local is forgotten.
-#[repr(C)]
+/// A discovered HDF group.  This is crate-owned scan state, not an HDF ABI
+/// object.  It is kept in [`HdfScanState`] and its path owns its bytes.
 struct GroupData {
     group_id: HidT,
     name: Option<Vec<u8>>,
@@ -150,8 +139,8 @@ struct GroupData {
     adoc_collection: i16,
     num_attributes: i32,
 }
-/// C `DatasetData` (`iihdf.c:75`).  See [`GroupData`] for why it is not `Copy`.
-#[repr(C)]
+/// A discovered HDF dataset.  This is crate-owned scan state, not an HDF ABI
+/// object.  See [`GroupData`] for the owned path representation.
 struct DatasetData {
     dset_id: HidT,
     name: Option<Vec<u8>>,
@@ -321,11 +310,11 @@ unsafe extern "C" {
 }
 
 /// C `iiTestIfHDF` (`iihdf.c:125`).
-pub unsafe fn ii_test_if_hdf(filename: &[u8]) -> i32 {
+pub fn ii_test_if_hdf(filename: &[u8]) -> i32 {
     // H5Fis_hdf5 is intentionally an HDF5 ABI call, and it takes the file name
     // as `char *`.
     let name = std::ffi::CString::new(filename).unwrap();
-    H5Fis_hdf5(name.as_ptr())
+    unsafe { H5Fis_hdf5(name.as_ptr()) }
 }
 /// C `iiHDFCheck` (`iihdf.c:133`).
 pub unsafe fn ii_hdf_check(in_file: *mut ImodImageFile) -> i32 {
@@ -418,35 +407,18 @@ pub unsafe fn ii_hdf_check(in_file: *mut ImodImageFile) -> i32 {
         (*in_file).ny = ny_stack;
         (*in_file).nz = state.datasets.len() as i32;
         (*in_file).type_ = stack_type as i32;
-        (*in_file).stack_set_list =
-            ilist_new(core::mem::size_of::<StackSetData>() as i32, (*in_file).nz);
-        if (*in_file).stack_set_list.is_none() {
-            cleanup_from_open(&mut state, file_id, 1, 1, in_file);
-            return 3;
-        }
+        (*in_file).stack_set_list = Some(Vec::with_capacity((*in_file).nz as usize));
         for set in 0..(*in_file).nz {
             let dataset = state.datasets.as_mut_ptr().add(set as usize);
-            let stack_set = StackSetData {
-                name: None,
-                dset_id: (*dataset).dset_id,
-                is_open: 1,
-            };
-            let appended = ilist_append(
-                (*in_file).stack_set_list.as_deref_mut().unwrap(),
-                core::slice::from_raw_parts(
-                    (&raw const stack_set).cast::<u8>(),
-                    core::mem::size_of::<StackSetData>(),
-                ),
-            );
-            if appended != 0 {
-                cleanup_from_open(&mut state, file_id, 1, 1, in_file);
-                return 3;
-            }
-            let stack_set = ilist_item((*in_file).stack_set_list.as_deref_mut(), set)
-                .unwrap()
-                .as_mut_ptr()
-                .cast::<StackSetData>();
-            (*stack_set).name = (*dataset).name.take();
+            (*in_file)
+                .stack_set_list
+                .as_mut()
+                .expect("stack storage was initialized")
+                .push(StackSetData {
+                    name: (*dataset).name.take(),
+                    dset_id: (*dataset).dset_id,
+                    is_open: true,
+                });
         }
     } else {
         for set in 0..state.datasets.len() {
@@ -545,11 +517,12 @@ pub unsafe fn ii_hdf_check(in_file: *mut ImodImageFile) -> i32 {
         let mut sect_ind = 0;
         let mut collection: &[u8] = ADOC_GLOBAL_NAME;
         let dataset_name = if single_image_stack {
-            let stack_set = ilist_item((*in_file).stack_set_list.as_deref_mut(), set)
-                .map_or(core::ptr::null_mut(), |item| {
-                    item.as_mut_ptr().cast::<StackSetData>()
-                });
-            String::from_utf8_lossy((*stack_set).name.as_deref().unwrap_or_default()).into_owned()
+            let stack_set = (*in_file)
+                .stack_set_list
+                .as_deref()
+                .and_then(|stacks| stacks.get(set as usize))
+                .expect("stack dataset index is valid");
+            String::from_utf8_lossy(stack_set.name.as_deref().unwrap_or_default()).into_owned()
         } else {
             (*((&(*in_file).ii_volumes)[set as usize]))
                 .dataset_name
@@ -1131,15 +1104,17 @@ unsafe fn scan_group(
     let list_index = state.groups.len();
     state.groups.push(group);
     let group_ptr = state.groups.as_mut_ptr().add(list_index);
-    let mut object_info = core::mem::zeroed::<H5OInfo>();
-    if H5Oget_info(group_id, &mut object_info) < 0 {
+    let mut object_info = core::mem::MaybeUninit::<H5OInfo>::uninit();
+    if H5Oget_info(group_id, object_info.as_mut_ptr()) < 0 {
         return IIERR_IO_ERROR;
     }
+    let mut object_info = object_info.assume_init();
     (*group_ptr).num_attributes = object_info.num_attrs as i32;
-    let mut group_info = core::mem::zeroed::<H5GInfo>();
-    if H5Gget_info(group_id, &mut group_info) < 0 {
+    let mut group_info = core::mem::MaybeUninit::<H5GInfo>::uninit();
+    if H5Gget_info(group_id, group_info.as_mut_ptr()) < 0 {
         return IIERR_IO_ERROR;
     }
+    let group_info = group_info.assume_init();
     let mut num_sets = 0;
     for ind in 0..group_info.nlinks {
         let size = H5Lget_name_by_idx(
@@ -1455,13 +1430,16 @@ pub unsafe fn ii_reorder_hdf_stack(in_file: *mut ImodImageFile, sect_order: *mut
             continue;
         }
         let new_z = *sect_order.add(ord_ind as usize);
-        let stack = ilist_item((*in_file).stack_set_list.as_deref_mut(), ds_ind)
-            .map_or(core::ptr::null_mut(), |item| {
-                item.as_mut_ptr().cast::<StackSetData>()
-            });
+        let Some(stack) = (*in_file)
+            .stack_set_list
+            .as_deref_mut()
+            .and_then(|stacks| stacks.get_mut(ds_ind as usize))
+        else {
+            return 1;
+        };
         // C `strcpy(tempName, stack->name)` then truncating the trailing
         // `/image`, and `sprintf(newName, "/MDF/images/Reordered%d", newZ)`.
-        let mut temp_name = (*stack).name.clone().unwrap_or_default();
+        let mut temp_name = stack.name.clone().unwrap_or_default();
         temp_name.truncate(temp_name.len() - 6);
         let new_name = c_format("/MDF/images/Reordered%d", &[CArg::Int(new_z as i64)]);
         let temp_c = std::ffi::CString::new(temp_name).unwrap();
@@ -1479,10 +1457,13 @@ pub unsafe fn ii_reorder_hdf_stack(in_file: *mut ImodImageFile, sect_order: *mut
             continue;
         }
         let new_z = *sect_order.add(ord_ind as usize);
-        let stack = ilist_item((*in_file).stack_set_list.as_deref_mut(), ds_ind)
-            .map_or(core::ptr::null_mut(), |item| {
-                item.as_mut_ptr().cast::<StackSetData>()
-            });
+        let Some(stack) = (*in_file)
+            .stack_set_list
+            .as_deref_mut()
+            .and_then(|stacks| stacks.get_mut(ds_ind as usize))
+        else {
+            return 1;
+        };
         let temp_c = std::ffi::CString::new(c_format(
             "/MDF/images/Reordered%d",
             &[CArg::Int(new_z as i64)],
@@ -1495,7 +1476,7 @@ pub unsafe fn ii_reorder_hdf_stack(in_file: *mut ImodImageFile, sect_order: *mut
         }
         // C `strcat(newName, "/image")`.
         new_name.extend_from_slice(b"/image");
-        (*stack).name = Some(new_name);
+        stack.name = Some(new_name);
         if adoc_secs[ord_ind as usize] >= 0 {
             let section_name = c_format("%d", &[CArg::Int(new_z as i64)]).into_bytes();
             if adoc_change_section_name(
@@ -1536,7 +1517,7 @@ unsafe fn remove_attributes(group_id: HidT) -> i32 {
 unsafe extern "C" fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
     if (*in_file).stack_set_list.is_none()
         && (*in_file).dataset_name.is_none()
-        && init_new_hdf_file(in_file) != 0
+        && init_new_hdf_file(&mut *in_file) != 0
     {
         return 1;
     }
@@ -1673,12 +1654,16 @@ unsafe extern "C" fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
             if section < 0 {
                 continue;
             }
-            let stack = ilist_item((*in_file).stack_set_list.as_deref_mut(), ind)
-                .map_or(core::ptr::null_mut(), |item| {
-                    item.as_mut_ptr().cast::<StackSetData>()
-                });
+            let Some(stack) = (*in_file)
+                .stack_set_list
+                .as_deref()
+                .and_then(|stacks| stacks.get(ind as usize))
+            else {
+                error = 1;
+                continue;
+            };
             let section_group =
-                open_dataset_group(in_file, (*stack).name.as_deref().unwrap_or_default());
+                open_dataset_group(in_file, stack.name.as_deref().unwrap_or_default());
             if section_group < 0 {
                 error = 1;
             } else {
@@ -1790,15 +1775,11 @@ unsafe extern "C" fn hdf_close(in_file: *mut ImodImageFile) {
         }
     }
     if num_left == 0 && (*in_file).fp.is_some() {
-        for ind in 0..ilist_size((*in_file).stack_set_list.as_deref()) {
-            let stack = ilist_item((*in_file).stack_set_list.as_deref_mut(), ind)
-                .map_or(core::ptr::null_mut(), |item| {
-                    item.as_mut_ptr().cast::<StackSetData>()
-                });
-            if (*stack).is_open != 0 {
-                H5Dclose((*stack).dset_id);
+        for stack in (*in_file).stack_set_list.iter_mut().flatten() {
+            if stack.is_open {
+                H5Dclose(stack.dset_id);
             }
-            (*stack).is_open = 0;
+            stack.is_open = false;
         }
         H5Fclose((*in_file).hdf_file_id);
     }
@@ -1875,15 +1856,8 @@ unsafe extern "C" fn hdf_delete(in_file: *mut ImodImageFile) {
         adoc_clear((*in_file).adoc_index);
     }
     (*in_file).dataset_name = None;
-    for ind in 0..ilist_size((*in_file).stack_set_list.as_deref()) {
-        let stack = ilist_item((*in_file).stack_set_list.as_deref_mut(), ind)
-            .map_or(core::ptr::null_mut(), |item| {
-                item.as_mut_ptr().cast::<StackSetData>()
-            });
-        // C `free(stack->name)`; dropping the owned bytes is the same release.
-        (*stack).name = None;
-    }
-    ilist_delete((*in_file).stack_set_list.take());
+    // Dropping the owned vector releases each dataset path.
+    (*in_file).stack_set_list = None;
     (*in_file).z_to_data_set_map.clear();
     (*in_file).z_map_size = 0;
     (*in_file).mrc_header = None;

@@ -59,6 +59,13 @@ pub struct CameraDefects {
     pub pix_use_mean: Vec<i8>,
 }
 
+pub enum PixelData<'a> {
+    Byte(&'a mut [u8]),
+    Short(&'a mut [i16]),
+    UShort(&'a mut [u16]),
+    Float(&'a mut [f32]),
+}
+
 impl CameraDefects {
     /// The state a default-constructed C++ `CameraDefects` has: every
     /// `std::vector` empty and every `int` member zero, which is what
@@ -100,9 +107,9 @@ impl Default for CameraDefects {
 }
 
 /// C++ `CorDefCorrectDefects` (`CorrectDefects.cpp:78`).
-pub unsafe fn cor_def_correct_defects(
+pub fn cor_def_correct_defects(
     defects: &crate::imod::clip::clip::CameraDefects,
-    array: *mut core::ffi::c_void,
+    array: &mut [u8],
     data_type: i32,
     binning: i32,
     top: i32,
@@ -114,7 +121,7 @@ pub unsafe fn cor_def_correct_defects(
     let size_y = bottom - top;
     let sum_x = ((size_x + 9) / 10).min(50);
     let sum_y = ((size_y + 9) / 10).min(50);
-    let defects_ref = unsafe { &*defects };
+    let defects_ref = defects;
     let super_fac = if defects_ref.falcon_type != 0 && defects_ref.was_scaled == 1 {
         2
     } else if defects_ref.falcon_type != 0 && defects_ref.was_scaled == 2 {
@@ -125,70 +132,137 @@ pub unsafe fn cor_def_correct_defects(
     if !defects_ref.pix_use_mean.is_empty() {
         let mut mean = 0.;
         let mut sd = 0.;
-        unsafe { cor_def_sample_mean_sd_1(array, data_type, size_x, size_y, &mut mean, &mut sd) };
-        unsafe {
-            correct_pixels_3_ways(
-                defects, array, data_type, size_x, size_y, binning, top, left, 1, mean,
-            )
+        let bytes_per_pixel = match data_type {
+            0 => 1,
+            1 | 6 => 2,
+            2 => 4,
+            _ => return,
         };
+        let Some(byte_len) = usize::try_from(size_x)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(size_y)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
+        else {
+            return;
+        };
+        let Some(bytes) = array.get(..byte_len) else {
+            return;
+        };
+        cor_def_sample_mean_sd_1(bytes, data_type, size_x, size_y, &mut mean, &mut sd);
+        let mut pixel_data = match data_type {
+            0 => PixelData::Byte(&mut array[..byte_len]),
+            1 => PixelData::Short(unsafe {
+                std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), byte_len / 2)
+            }),
+            6 => PixelData::UShort(unsafe {
+                std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), byte_len / 2)
+            }),
+            2 => PixelData::Float(unsafe {
+                std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), byte_len / 4)
+            }),
+            _ => return,
+        };
+        correct_pixels_3_ways(
+            defects_ref,
+            &mut pixel_data,
+            size_x,
+            size_y,
+            binning,
+            top,
+            left,
+            1,
+            mean,
+        );
     }
+    let Some(pixel_count) = usize::try_from(size_x).ok().and_then(|width| {
+        usize::try_from(size_y)
+            .ok()
+            .and_then(|height| width.checked_mul(height))
+    }) else {
+        return;
+    };
+    let bytes_per_pixel = match data_type {
+        0 => 1,
+        1 | 6 => 2,
+        2 => 4,
+        _ => return,
+    };
+    let Some(required_bytes) = pixel_count.checked_mul(bytes_per_pixel) else {
+        return;
+    };
+    if array.len() < required_bytes {
+        return;
+    }
+    let mut edge_data = match data_type {
+        0 => PixelData::Byte(&mut array[..pixel_count]),
+        1 => PixelData::Short(unsafe {
+            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
+        }),
+        6 => PixelData::UShort(unsafe {
+            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
+        }),
+        2 => PixelData::Float(unsafe {
+            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
+        }),
+        _ => return,
+    };
     let mut num_bad = (defects_ref.usable_top - 1) / binning + 1 - top;
     if defects_ref.usable_top > 0 && num_bad > 0 {
-        unsafe {
-            correct_edge(
-                array,
-                data_type,
-                num_bad,
-                5,
-                size_x,
-                sum_x,
-                num_bad * size_x,
-                1,
-                -size_x,
-            )
-        };
+        correct_edge(
+            &mut edge_data,
+            num_bad,
+            5,
+            size_x,
+            sum_x,
+            num_bad * size_x,
+            1,
+            -size_x,
+        );
     }
     let mut first_bad = (defects_ref.usable_bottom + 1) / binning - top;
     num_bad = size_y - first_bad;
     if defects_ref.usable_bottom > 0 && num_bad > 0 {
-        unsafe {
-            correct_edge(
-                array,
-                data_type,
-                num_bad,
-                5,
-                size_x,
-                sum_x,
-                (first_bad - 1) * size_x,
-                1,
-                size_x,
-            )
-        };
+        correct_edge(
+            &mut edge_data,
+            num_bad,
+            5,
+            size_x,
+            sum_x,
+            (first_bad - 1) * size_x,
+            1,
+            size_x,
+        );
     }
     num_bad = (defects_ref.usable_left - 1) / binning + 1 - left;
     if defects_ref.usable_left > 0 && num_bad > 0 {
-        unsafe {
-            correct_edge(
-                array, data_type, num_bad, 5, size_y, sum_y, num_bad, size_x, -1,
-            )
-        };
+        correct_edge(
+            &mut edge_data,
+            num_bad,
+            5,
+            size_y,
+            sum_y,
+            num_bad,
+            size_x,
+            -1,
+        );
     }
     first_bad = (defects_ref.usable_right + 1) / binning - left;
     num_bad = size_x - first_bad;
     if defects_ref.usable_right > 0 && num_bad > 0 {
-        unsafe {
-            correct_edge(
-                array,
-                data_type,
-                num_bad,
-                5,
-                size_y,
-                sum_y,
-                first_bad - 1,
-                size_x,
-                1,
-            )
-        };
+        correct_edge(
+            &mut edge_data,
+            num_bad,
+            5,
+            size_y,
+            sum_y,
+            first_bad - 1,
+            size_x,
+            1,
+        );
     }
     for i in 0..defects_ref.bad_column_start.len() {
         let start = defects_ref.bad_column_start[i] as i32 / binning;
@@ -197,7 +271,7 @@ pub unsafe fn cor_def_correct_defects(
             / binning;
         unsafe {
             correct_column(
-                array,
+                array.as_mut_ptr().cast(),
                 data_type,
                 size_x,
                 size_y,
@@ -222,7 +296,7 @@ pub unsafe fn cor_def_correct_defects(
         if ys < size_y && ye >= 0 && ys <= ye {
             unsafe {
                 correct_column(
-                    array,
+                    array.as_mut_ptr().cast(),
                     data_type,
                     size_x,
                     size_y,
@@ -244,7 +318,7 @@ pub unsafe fn cor_def_correct_defects(
             / binning;
         unsafe {
             correct_column(
-                array,
+                array.as_mut_ptr().cast(),
                 data_type,
                 size_y,
                 size_x,
@@ -269,7 +343,7 @@ pub unsafe fn cor_def_correct_defects(
         if ys < size_x && ye >= 0 && ys <= ye {
             unsafe {
                 correct_column(
-                    array,
+                    array.as_mut_ptr().cast(),
                     data_type,
                     size_y,
                     size_x,
@@ -285,16 +359,34 @@ pub unsafe fn cor_def_correct_defects(
             };
         }
     }
-    unsafe {
-        correct_pixels_3_ways(
-            defects, array, data_type, size_x, size_y, binning, top, left, 0, 0.,
-        )
+    let mut pixel_data = match data_type {
+        0 => PixelData::Byte(&mut array[..pixel_count]),
+        1 => PixelData::Short(unsafe {
+            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
+        }),
+        6 => PixelData::UShort(unsafe {
+            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
+        }),
+        2 => PixelData::Float(unsafe {
+            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
+        }),
+        _ => return,
     };
+    correct_pixels_3_ways(
+        defects_ref,
+        &mut pixel_data,
+        size_x,
+        size_y,
+        binning,
+        top,
+        left,
+        0,
+        0.,
+    );
 }
 /// C++ `CorrectEdge` (`CorrectDefects.cpp:190`).
-pub unsafe fn correct_edge(
-    array: *mut core::ffi::c_void,
-    data_type: i32,
+fn correct_edge(
+    array: &mut PixelData<'_>,
     num_bad: i32,
     taper: i32,
     length: i32,
@@ -303,128 +395,142 @@ pub unsafe fn correct_edge(
     step_along: i32,
     step_between: i32,
 ) {
-    unsafe {
-        if sum_length > length {
-            sum_length = length;
+    if sum_length > length {
+        sum_length = length;
+    }
+    let add_start = sum_length / 2;
+    let add_end = length - (sum_length - sum_length / 2);
+    match array {
+        PixelData::Byte(data) => {
+            for row in 0..num_bad {
+                let mut sum: f64 = (0..sum_length)
+                    .map(|i| data[(ind_start + i * step_along) as usize] as f64)
+                    .sum();
+                let (mut ind_drop, mut ind_add, mut ind_dest) = (
+                    ind_start,
+                    ind_start + sum_length * step_along,
+                    ind_start + (row + 1) * step_between,
+                );
+                let fraction = if taper > 0 {
+                    ((taper as f64 - row as f64 - 1.) / taper as f64).max(0.) as f32
+                } else {
+                    1.
+                };
+                let sum_factor = if taper > 0 {
+                    (1. - fraction as f64) / sum_length as f64
+                } else {
+                    0.
+                };
+                for i in 0..length {
+                    if i >= add_start && i < add_end {
+                        sum += data[ind_add as usize] as f64 - data[ind_drop as usize] as f64;
+                        ind_add += step_along;
+                        ind_drop += step_along;
+                    }
+                    let value = fraction * data[(ind_start + i * step_along) as usize] as f32
+                        + (sum_factor * sum) as f32;
+                    data[ind_dest as usize] = random_int_fill_from_float(value) as u8;
+                    ind_dest += step_along;
+                }
+            }
         }
-        let add_start = sum_length / 2;
-        let add_end = length - (sum_length - sum_length / 2);
-        for row in 0..num_bad {
-            let mut sum = 0_f64;
-            match data_type {
-                0 => {
-                    for i in 0..sum_length {
-                        sum += *array
-                            .cast::<u8>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f64
+        PixelData::Short(data) => {
+            for row in 0..num_bad {
+                let mut sum: f64 = (0..sum_length)
+                    .map(|i| data[(ind_start + i * step_along) as usize] as f64)
+                    .sum();
+                let (mut ind_drop, mut ind_add, mut ind_dest) = (
+                    ind_start,
+                    ind_start + sum_length * step_along,
+                    ind_start + (row + 1) * step_between,
+                );
+                let fraction = if taper > 0 {
+                    ((taper as f64 - row as f64 - 1.) / taper as f64).max(0.) as f32
+                } else {
+                    1.
+                };
+                let sum_factor = if taper > 0 {
+                    (1. - fraction as f64) / sum_length as f64
+                } else {
+                    0.
+                };
+                for i in 0..length {
+                    if i >= add_start && i < add_end {
+                        sum += data[ind_add as usize] as f64 - data[ind_drop as usize] as f64;
+                        ind_add += step_along;
+                        ind_drop += step_along;
                     }
+                    let value = fraction * data[(ind_start + i * step_along) as usize] as f32
+                        + (sum_factor * sum) as f32;
+                    data[ind_dest as usize] = random_int_fill_from_float(value) as i16;
+                    ind_dest += step_along;
                 }
-                1 => {
-                    for i in 0..sum_length {
-                        sum += *array
-                            .cast::<i16>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f64
-                    }
-                }
-                6 => {
-                    for i in 0..sum_length {
-                        sum += *array
-                            .cast::<u16>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f64
-                    }
-                }
-                2 => {
-                    for i in 0..sum_length {
-                        sum += *array
-                            .cast::<f32>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f64
-                    }
-                }
-                _ => return,
             }
-            let mut ind_drop = ind_start;
-            let mut ind_add = ind_start + sum_length * step_along;
-            let mut ind_dest = ind_start + (row + 1) * step_between;
-            let mut fraction = 1_f32;
-            let mut sum_factor = 0_f64;
-            if taper > 0 {
-                // `CorrectDefects.cpp:252`: (float)((taper - row - 1.) / taper)
-                // is a double quotient narrowed to float.
-                fraction = ((taper as f64 - row as f64 - 1.) / taper as f64) as f32;
-                if fraction < 0. {
-                    fraction = 0.;
+        }
+        PixelData::UShort(data) => {
+            for row in 0..num_bad {
+                let mut sum: f64 = (0..sum_length)
+                    .map(|i| data[(ind_start + i * step_along) as usize] as f64)
+                    .sum();
+                let (mut ind_drop, mut ind_add, mut ind_dest) = (
+                    ind_start,
+                    ind_start + sum_length * step_along,
+                    ind_start + (row + 1) * step_between,
+                );
+                let fraction = if taper > 0 {
+                    ((taper as f64 - row as f64 - 1.) / taper as f64).max(0.) as f32
+                } else {
+                    1.
+                };
+                let sum_factor = if taper > 0 {
+                    (1. - fraction as f64) / sum_length as f64
+                } else {
+                    0.
+                };
+                for i in 0..length {
+                    if i >= add_start && i < add_end {
+                        sum += data[ind_add as usize] as f64 - data[ind_drop as usize] as f64;
+                        ind_add += step_along;
+                        ind_drop += step_along;
+                    }
+                    let value = fraction * data[(ind_start + i * step_along) as usize] as f32
+                        + (sum_factor * sum) as f32;
+                    data[ind_dest as usize] = random_int_fill_from_float(value) as u16;
+                    ind_dest += step_along;
                 }
-                sum_factor = (1. - fraction as f64) / sum_length as f64;
             }
-            for i in 0..length {
-                if i >= add_start && i < add_end {
-                    match data_type {
-                        0 => {
-                            sum += *array.cast::<u8>().offset(ind_add as isize) as f64
-                                - *array.cast::<u8>().offset(ind_drop as isize) as f64
-                        }
-                        1 => {
-                            sum += *array.cast::<i16>().offset(ind_add as isize) as f64
-                                - *array.cast::<i16>().offset(ind_drop as isize) as f64
-                        }
-                        6 => {
-                            sum += *array.cast::<u16>().offset(ind_add as isize) as f64
-                                - *array.cast::<u16>().offset(ind_drop as isize) as f64
-                        }
-                        // `CorrectDefects.cpp:207`: csty is `float` for the
-                        // float instantiation, so the difference is computed in
-                        // single precision before it joins the double sum.
-                        2 => {
-                            sum += (*array.cast::<f32>().offset(ind_add as isize)
-                                - *array.cast::<f32>().offset(ind_drop as isize))
-                                as f64
-                        }
-                        _ => unreachable!(),
+        }
+        PixelData::Float(data) => {
+            for row in 0..num_bad {
+                let mut sum: f64 = (0..sum_length)
+                    .map(|i| data[(ind_start + i * step_along) as usize] as f64)
+                    .sum();
+                let (mut ind_drop, mut ind_add, mut ind_dest) = (
+                    ind_start,
+                    ind_start + sum_length * step_along,
+                    ind_start + (row + 1) * step_between,
+                );
+                let fraction = if taper > 0 {
+                    ((taper as f64 - row as f64 - 1.) / taper as f64).max(0.) as f32
+                } else {
+                    1.
+                };
+                let sum_factor = if taper > 0 {
+                    (1. - fraction as f64) / sum_length as f64
+                } else {
+                    0.
+                };
+                for i in 0..length {
+                    if i >= add_start && i < add_end {
+                        sum += (data[ind_add as usize] - data[ind_drop as usize]) as f64;
+                        ind_add += step_along;
+                        ind_drop += step_along;
                     }
-                    ind_add += step_along;
-                    ind_drop += step_along;
+                    data[ind_dest as usize] = fraction
+                        * data[(ind_start + i * step_along) as usize]
+                        + (sum_factor * sum) as f32;
+                    ind_dest += step_along;
                 }
-                let value = fraction
-                    * match data_type {
-                        0 => *array
-                            .cast::<u8>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f32,
-                        1 => *array
-                            .cast::<i16>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f32,
-                        6 => *array
-                            .cast::<u16>()
-                            .offset((ind_start + i * step_along) as isize)
-                            as f32,
-                        2 => *array
-                            .cast::<f32>()
-                            .offset((ind_start + i * step_along) as isize),
-                        _ => unreachable!(),
-                    }
-                    + (sum_factor * sum) as f32;
-                match data_type {
-                    0 => {
-                        *array.cast::<u8>().offset(ind_dest as isize) =
-                            random_int_fill_from_float(value) as u8
-                    }
-                    1 => {
-                        *array.cast::<i16>().offset(ind_dest as isize) =
-                            random_int_fill_from_float(value) as i16
-                    }
-                    6 => {
-                        *array.cast::<u16>().offset(ind_dest as isize) =
-                            random_int_fill_from_float(value) as u16
-                    }
-                    2 => *array.cast::<f32>().offset(ind_dest as isize) = value,
-                    _ => unreachable!(),
-                }
-                ind_dest += step_along;
             }
         }
     }
@@ -731,9 +837,8 @@ pub fn random_int_fill_from_float(value: f32) -> i32 {
     result
 }
 /// C++ `CorrectPixel` (`CorrectDefects.cpp:581`).
-pub unsafe fn correct_pixel(
-    array: *mut core::ffi::c_void,
-    data_type: i32,
+pub fn correct_pixel(
+    array: &mut PixelData<'_>,
     nxdim: i32,
     nx: i32,
     ny: i32,
@@ -742,111 +847,141 @@ pub unsafe fn correct_pixel(
     use_mean: i32,
     mean: f32,
 ) {
-    unsafe {
-        let index = xpix + ypix * nxdim;
-        if use_mean != 0 {
-            match data_type {
-                0 => {
-                    *array.cast::<u8>().offset(index as isize) =
-                        random_int_fill_from_float(mean) as u8
-                }
-                1 => {
-                    *array.cast::<i16>().offset(index as isize) =
-                        random_int_fill_from_float(mean) as i16
-                }
-                6 => {
-                    *array.cast::<u16>().offset(index as isize) =
-                        random_int_fill_from_float(mean) as u16
-                }
-                2 => *array.cast::<f32>().offset(index as isize) = mean,
-                _ => {}
+    if nxdim <= 0 || nx <= 0 || ny <= 0 || xpix < 0 || ypix < 0 || xpix >= nx || ypix >= ny {
+        return;
+    }
+    let Some(length) = usize::try_from(nxdim).ok().and_then(|width| {
+        usize::try_from(ny)
+            .ok()
+            .and_then(|height| width.checked_mul(height))
+    }) else {
+        return;
+    };
+    let index = (xpix + ypix * nxdim) as usize;
+    let interior = xpix > 0 && xpix < nx - 1 && ypix > 0 && ypix < ny - 1;
+    match array {
+        PixelData::Byte(data) => {
+            if data.len() < length {
+                return;
             }
-            return;
+            if use_mean != 0 {
+                data[index] = random_int_fill_from_float(mean) as u8;
+                return;
+            }
+            if interior {
+                data[index] = random_int_fill_from_int_sum(
+                    data[index - 1] as i32
+                        + data[index + 1] as i32
+                        + data[index - nxdim as usize] as i32
+                        + data[index + nxdim as usize] as i32,
+                    4,
+                ) as u8;
+                return;
+            }
+            let mut count = 0;
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if x >= 0 && x < nx && y >= 0 && y < ny {
+                    count += 1;
+                }
+            }
+            data[index] = random_int_fill_from_int_sum(0, count) as u8;
         }
-        if xpix > 0 && xpix < nx - 1 && ypix > 0 && ypix < ny - 1 {
-            match data_type {
-                0 => {
-                    let data = array.cast::<u8>();
-                    *data.offset(index as isize) = random_int_fill_from_int_sum(
-                        *data.offset((index - 1) as isize) as i32
-                            + *data.offset((index + 1) as isize) as i32
-                            + *data.offset((index - nxdim) as isize) as i32
-                            + *data.offset((index + nxdim) as isize) as i32,
-                        4,
-                    ) as u8;
-                }
-                1 => {
-                    let data = array.cast::<i16>();
-                    *data.offset(index as isize) = random_int_fill_from_int_sum(
-                        *data.offset((index - 1) as isize) as i32
-                            + *data.offset((index + 1) as isize) as i32
-                            + *data.offset((index - nxdim) as isize) as i32
-                            + *data.offset((index + nxdim) as isize) as i32,
-                        4,
-                    ) as i16;
-                }
-                6 => {
-                    let data = array.cast::<u16>();
-                    *data.offset(index as isize) = random_int_fill_from_int_sum(
-                        *data.offset((index - 1) as isize) as i32
-                            + *data.offset((index + 1) as isize) as i32
-                            + *data.offset((index - nxdim) as isize) as i32
-                            + *data.offset((index + nxdim) as isize) as i32,
-                        4,
-                    ) as u16;
-                }
-                2 => {
-                    let data = array.cast::<f32>();
-                    *data.offset(index as isize) = (*data.offset((index - 1) as isize)
-                        + *data.offset((index + 1) as isize)
-                        + *data.offset((index - nxdim) as isize)
-                        + *data.offset((index + nxdim) as isize))
-                        / 4.;
-                }
-                _ => {}
+        PixelData::Short(data) => {
+            if data.len() < length {
+                return;
             }
-            return;
+            if use_mean != 0 {
+                data[index] = random_int_fill_from_float(mean) as i16;
+                return;
+            }
+            if interior {
+                data[index] = random_int_fill_from_int_sum(
+                    data[index - 1] as i32
+                        + data[index + 1] as i32
+                        + data[index - nxdim as usize] as i32
+                        + data[index + nxdim as usize] as i32,
+                    4,
+                ) as i16;
+                return;
+            }
+            let mut sum = 0;
+            let mut count = 0;
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if x >= 0 && x < nx && y >= 0 && y < ny {
+                    sum += data[(x + y * nxdim) as usize] as i32;
+                    count += 1;
+                }
+            }
+            data[index] = random_int_fill_from_int_sum(sum, count) as i16;
         }
-        let mut integer_sum = 0_i32;
-        let mut float_sum = 0_f32;
-        let mut count = 0_i32;
-        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-            let x = xpix + dx;
-            let y = ypix + dy;
-            if x >= 0 && x < nx && y >= 0 && y < ny {
-                count += 1;
-                let ind = x + y * nxdim;
-                match data_type {
-                    1 => integer_sum += *array.cast::<i16>().offset(ind as isize) as i32,
-                    6 => integer_sum += *array.cast::<u16>().offset(ind as isize) as i32,
-                    2 => float_sum += *array.cast::<f32>().offset(ind as isize),
-                    _ => {}
+        PixelData::UShort(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
+                data[index] = random_int_fill_from_float(mean) as u16;
+                return;
+            }
+            if interior {
+                data[index] = random_int_fill_from_int_sum(
+                    data[index - 1] as i32
+                        + data[index + 1] as i32
+                        + data[index - nxdim as usize] as i32
+                        + data[index + nxdim as usize] as i32,
+                    4,
+                ) as u16;
+                return;
+            }
+            let mut sum = 0;
+            let mut count = 0;
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if x >= 0 && x < nx && y >= 0 && y < ny {
+                    sum += data[(x + y * nxdim) as usize] as i32;
+                    count += 1;
                 }
             }
+            data[index] = random_int_fill_from_int_sum(sum, count) as u16;
         }
-        match data_type {
-            0 => {
-                *array.cast::<u8>().offset(index as isize) =
-                    random_int_fill_from_int_sum(integer_sum, count) as u8
+        PixelData::Float(data) => {
+            if data.len() < length {
+                return;
             }
-            1 => {
-                *array.cast::<i16>().offset(index as isize) =
-                    random_int_fill_from_int_sum(integer_sum, count) as i16
+            if use_mean != 0 {
+                data[index] = mean;
+                return;
             }
-            6 => {
-                *array.cast::<u16>().offset(index as isize) =
-                    random_int_fill_from_int_sum(integer_sum, count) as u16
+            if interior {
+                data[index] = (data[index - 1]
+                    + data[index + 1]
+                    + data[index - nxdim as usize]
+                    + data[index + nxdim as usize])
+                    / 4.;
+                return;
             }
-            2 => *array.cast::<f32>().offset(index as isize) = float_sum / count as f32,
-            _ => {}
+            let mut sum = 0.;
+            let mut count = 0;
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if x >= 0 && x < nx && y >= 0 && y < ny {
+                    sum += data[(x + y * nxdim) as usize];
+                    count += 1;
+                }
+            }
+            data[index] = sum / count as f32;
         }
     }
 }
 
 /// C++ `CorrectSuperPixel` (`CorrectDefects.cpp:651`).
-pub unsafe fn correct_super_pixel(
-    array: *mut core::ffi::c_void,
-    data_type: i32,
+pub fn correct_super_pixel(
+    array: &mut PixelData<'_>,
     nxdim: i32,
     nx: i32,
     ny: i32,
@@ -855,141 +990,178 @@ pub unsafe fn correct_super_pixel(
     use_mean: i32,
     mean: f32,
 ) {
-    unsafe {
-        let index = xpix + ypix * nxdim;
-        let destinations = [index, index + 1, index + nxdim, index + nxdim + 1];
-        if use_mean != 0 {
-            match data_type {
-                0 => {
-                    for ind in destinations {
-                        *array.cast::<u8>().offset(ind as isize) =
-                            random_int_fill_from_float(mean) as u8
-                    }
-                }
-                1 => {
-                    for ind in destinations {
-                        *array.cast::<i16>().offset(ind as isize) =
-                            random_int_fill_from_float(mean) as i16
-                    }
-                }
-                6 => {
-                    for ind in destinations {
-                        *array.cast::<u16>().offset(ind as isize) =
-                            random_int_fill_from_float(mean) as u16
-                    }
-                }
-                2 => {
-                    for ind in destinations {
-                        *array.cast::<f32>().offset(ind as isize) = mean
-                    }
-                }
-                _ => {}
+    if nxdim <= 0 || nx <= 1 || ny <= 1 || xpix < 0 || ypix < 0 || xpix + 1 >= nx || ypix + 1 >= ny
+    {
+        return;
+    }
+    let Some(length) = usize::try_from(nxdim).ok().and_then(|width| {
+        usize::try_from(ny)
+            .ok()
+            .and_then(|height| width.checked_mul(height))
+    }) else {
+        return;
+    };
+    let index = (xpix + ypix * nxdim) as usize;
+    let destinations = [
+        index,
+        index + 1,
+        index + nxdim as usize,
+        index + nxdim as usize + 1,
+    ];
+    let deltas = [
+        (-2, 0),
+        (-1, 0),
+        (2, 0),
+        (3, 0),
+        (-2, 1),
+        (-1, 1),
+        (2, 1),
+        (3, 1),
+        (0, -2),
+        (1, -2),
+        (0, -1),
+        (1, -1),
+        (0, 2),
+        (1, 2),
+        (0, 3),
+        (1, 3),
+    ];
+    let interior = xpix > 1 && xpix < nx - 3 && ypix > 1 && ypix < ny - 3;
+    match array {
+        PixelData::Byte(data) => {
+            if data.len() < length {
+                return;
             }
-            return;
-        }
-        let deltas = [
-            (-2, 0),
-            (-1, 0),
-            (2, 0),
-            (3, 0),
-            (-2, 1),
-            (-1, 1),
-            (2, 1),
-            (3, 1),
-            (0, -2),
-            (1, -2),
-            (0, -1),
-            (1, -1),
-            (0, 2),
-            (1, 2),
-            (0, 3),
-            (1, 3),
-        ];
-        let interior = xpix > 1 && xpix < nx - 3 && ypix > 1 && ypix < ny - 3;
-        if interior && data_type == 2 {
-            // `CorrectDefects.cpp:697-700` sums the sixteen float neighbours in
-            // its own order, which is not the `idx`/`idy` order used below, and
-            // divides by the literal 16.
-            let fdata = array.cast::<f32>();
-            let ipn = index + nxdim;
-            let imn = index - nxdim;
-            let im2n = index - 2 * nxdim;
-            let ip2n = index + 2 * nxdim;
-            let ip3n = index + 3 * nxdim;
-            let fsum = (*fdata.offset((index - 1) as isize)
-                + *fdata.offset((index - 2) as isize)
-                + *fdata.offset((ipn - 1) as isize)
-                + *fdata.offset((ipn - 2) as isize)
-                + *fdata.offset((index + 2) as isize)
-                + *fdata.offset((index + 3) as isize)
-                + *fdata.offset((ipn + 2) as isize)
-                + *fdata.offset((ipn + 3) as isize)
-                + *fdata.offset(imn as isize)
-                + *fdata.offset((imn + 1) as isize)
-                + *fdata.offset(im2n as isize)
-                + *fdata.offset((im2n + 1) as isize)
-                + *fdata.offset(ip2n as isize)
-                + *fdata.offset((ip2n + 1) as isize)
-                + *fdata.offset(ip3n as isize)
-                + *fdata.offset((ip3n + 1) as isize))
-                / 16.;
+            if use_mean != 0 {
+                for ind in destinations {
+                    data[ind] = random_int_fill_from_float(mean) as u8;
+                }
+                return;
+            }
+            let mut sum = 0;
+            let mut count = 0;
+            for (dx, dy) in deltas {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if interior || (x >= 0 && x < nx && y >= 0 && y < ny) {
+                    sum += data[(x + y * nxdim) as usize] as i32;
+                    count += 1;
+                }
+            }
+            let value = random_int_fill_from_int_sum(sum, count) as u8;
             for ind in destinations {
-                *fdata.offset(ind as isize) = fsum;
-            }
-            return;
-        }
-        let mut integer_sum = 0_i32;
-        let mut float_sum = 0_f32;
-        let mut count = 0_i32;
-        for (dx, dy) in deltas {
-            let x = xpix + dx;
-            let y = ypix + dy;
-            if interior || (x >= 0 && x < nx && y >= 0 && y < ny) {
-                let ind = x + y * nxdim;
-                match data_type {
-                    0 => integer_sum += *array.cast::<u8>().offset(ind as isize) as i32,
-                    1 => integer_sum += *array.cast::<i16>().offset(ind as isize) as i32,
-                    6 => integer_sum += *array.cast::<u16>().offset(ind as isize) as i32,
-                    2 => float_sum += *array.cast::<f32>().offset(ind as isize),
-                    _ => {}
-                }
-                count += 1;
+                data[ind] = value;
             }
         }
-        match data_type {
-            0 => {
-                let value = random_int_fill_from_int_sum(integer_sum, count) as u8;
+        PixelData::Short(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
                 for ind in destinations {
-                    *array.cast::<u8>().offset(ind as isize) = value
+                    data[ind] = random_int_fill_from_float(mean) as i16;
+                }
+                return;
+            }
+            let mut sum = 0;
+            let mut count = 0;
+            for (dx, dy) in deltas {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if interior || (x >= 0 && x < nx && y >= 0 && y < ny) {
+                    sum += data[(x + y * nxdim) as usize] as i32;
+                    count += 1;
                 }
             }
-            1 => {
-                let value = random_int_fill_from_int_sum(integer_sum, count) as i16;
+            let value = random_int_fill_from_int_sum(sum, count) as i16;
+            for ind in destinations {
+                data[ind] = value;
+            }
+        }
+        PixelData::UShort(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
                 for ind in destinations {
-                    *array.cast::<i16>().offset(ind as isize) = value
+                    data[ind] = random_int_fill_from_float(mean) as u16;
+                }
+                return;
+            }
+            let mut sum = 0;
+            let mut count = 0;
+            for (dx, dy) in deltas {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if interior || (x >= 0 && x < nx && y >= 0 && y < ny) {
+                    sum += data[(x + y * nxdim) as usize] as i32;
+                    count += 1;
                 }
             }
-            6 => {
-                let value = random_int_fill_from_int_sum(integer_sum, count) as u16;
+            let value = random_int_fill_from_int_sum(sum, count) as u16;
+            for ind in destinations {
+                data[ind] = value;
+            }
+        }
+        PixelData::Float(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
                 for ind in destinations {
-                    *array.cast::<u16>().offset(ind as isize) = value
+                    data[ind] = mean;
+                }
+                return;
+            }
+            if interior {
+                let ipn = index + nxdim as usize;
+                let imn = index - nxdim as usize;
+                let im2n = index - 2 * nxdim as usize;
+                let ip2n = index + 2 * nxdim as usize;
+                let ip3n = index + 3 * nxdim as usize;
+                let value = (data[index - 1]
+                    + data[index - 2]
+                    + data[ipn - 1]
+                    + data[ipn - 2]
+                    + data[index + 2]
+                    + data[index + 3]
+                    + data[ipn + 2]
+                    + data[ipn + 3]
+                    + data[imn]
+                    + data[imn + 1]
+                    + data[im2n]
+                    + data[im2n + 1]
+                    + data[ip2n]
+                    + data[ip2n + 1]
+                    + data[ip3n]
+                    + data[ip3n + 1])
+                    / 16.;
+                for ind in destinations {
+                    data[ind] = value;
+                }
+                return;
+            }
+            let mut sum = 0.;
+            let mut count = 0;
+            for (dx, dy) in deltas {
+                let x = xpix + dx;
+                let y = ypix + dy;
+                if x >= 0 && x < nx && y >= 0 && y < ny {
+                    sum += data[(x + y * nxdim) as usize];
+                    count += 1;
                 }
             }
-            2 => {
-                let value = float_sum / count as f32;
-                for ind in destinations {
-                    *array.cast::<f32>().offset(ind as isize) = value
-                }
+            let value = sum / count as f32;
+            for ind in destinations {
+                data[ind] = value;
             }
-            _ => {}
         }
     }
 }
 
 /// C++ `CorrectJumboPixel` (`CorrectDefects.cpp:755`).
-pub unsafe fn correct_jumbo_pixel(
-    array: *mut core::ffi::c_void,
-    data_type: i32,
+pub fn correct_jumbo_pixel(
+    array: &mut PixelData<'_>,
     nxdim: i32,
     nx: i32,
     ny: i32,
@@ -998,89 +1170,155 @@ pub unsafe fn correct_jumbo_pixel(
     use_mean: i32,
     mean: f32,
 ) {
-    unsafe {
-        let index = xpix + ypix * nxdim;
-        if use_mean != 0 {
-            for y in 0..4 {
-                for x in 0..4 {
-                    let ind = index + x + y * nxdim;
-                    match data_type {
-                        0 => {
-                            *array.cast::<u8>().offset(ind as isize) =
-                                random_int_fill_from_float(mean) as u8
+    if nxdim <= 0 || nx < 4 || ny < 4 || xpix < 0 || ypix < 0 || xpix + 3 >= nx || ypix + 3 >= ny {
+        return;
+    }
+    let Some(length) = usize::try_from(nxdim).ok().and_then(|width| {
+        usize::try_from(ny)
+            .ok()
+            .and_then(|height| width.checked_mul(height))
+    }) else {
+        return;
+    };
+    let index = (xpix + ypix * nxdim) as usize;
+    let interior = xpix > 5 && xpix < nx - 7 && ypix > 5 && ypix < ny - 7;
+    match array {
+        PixelData::Byte(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        data[index + x + y * nxdim as usize] =
+                            random_int_fill_from_float(mean) as u8;
+                    }
+                }
+                return;
+            }
+            let (mut sum, mut count) = (0, 0);
+            for (base_x, base_y) in [(-4, 0), (4, 0), (0, -4), (0, 4)] {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        let xx = xpix + base_x + x;
+                        let yy = ypix + base_y + y;
+                        if interior || (xx >= 0 && xx < nx && yy >= 0 && yy < ny) {
+                            sum += data[(xx + yy * nxdim) as usize] as i32;
+                            count += 1;
                         }
-                        1 => {
-                            *array.cast::<i16>().offset(ind as isize) =
-                                random_int_fill_from_float(mean) as i16
-                        }
-                        6 => {
-                            *array.cast::<u16>().offset(ind as isize) =
-                                random_int_fill_from_float(mean) as u16
-                        }
-                        2 => *array.cast::<f32>().offset(ind as isize) = mean,
-                        _ => {}
                     }
                 }
             }
-            return;
-        }
-        let mut deltas = [(0_i32, 0_i32); 64];
-        let mut at = 0;
-        for (base_x, base_y) in [(-4, 0), (4, 0), (0, -4), (0, 4)] {
             for y in 0..4 {
                 for x in 0..4 {
-                    deltas[at] = (base_x + x, base_y + y);
-                    at += 1;
+                    data[index + x + y * nxdim as usize] =
+                        random_int_fill_from_int_sum(sum, count) as u8;
                 }
             }
         }
-        let interior = xpix > 5 && xpix < nx - 7 && ypix > 5 && ypix < ny - 7;
-        let mut integer_sum = 0_i32;
-        let mut float_sum = 0_f32;
-        let mut count = 0_i32;
-        for (dx, dy) in deltas {
-            let x = xpix + dx;
-            let y = ypix + dy;
-            if interior || (x >= 0 && x < nx && y >= 0 && y < ny) {
-                let ind = x + y * nxdim;
-                match data_type {
-                    0 => integer_sum += *array.cast::<u8>().offset(ind as isize) as i32,
-                    1 => integer_sum += *array.cast::<i16>().offset(ind as isize) as i32,
-                    6 => integer_sum += *array.cast::<u16>().offset(ind as isize) as i32,
-                    2 => float_sum += *array.cast::<f32>().offset(ind as isize),
-                    _ => {}
-                };
-                count += 1;
+        PixelData::Short(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        data[index + x + y * nxdim as usize] =
+                            random_int_fill_from_float(mean) as i16;
+                    }
+                }
+                return;
+            }
+            let (mut sum, mut count) = (0, 0);
+            for (base_x, base_y) in [(-4, 0), (4, 0), (0, -4), (0, 4)] {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        let xx = xpix + base_x + x;
+                        let yy = ypix + base_y + y;
+                        if interior || (xx >= 0 && xx < nx && yy >= 0 && yy < ny) {
+                            sum += data[(xx + yy * nxdim) as usize] as i32;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            for y in 0..4 {
+                for x in 0..4 {
+                    data[index + x + y * nxdim as usize] =
+                        random_int_fill_from_int_sum(sum, count) as i16;
+                }
             }
         }
-        for y in 0..4 {
-            for x in 0..4 {
-                let ind = index + x + y * nxdim;
-                match data_type {
-                    0 => {
-                        *array.cast::<u8>().offset(ind as isize) =
-                            random_int_fill_from_int_sum(integer_sum, count) as u8
+        PixelData::UShort(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        data[index + x + y * nxdim as usize] =
+                            random_int_fill_from_float(mean) as u16;
                     }
-                    1 => {
-                        *array.cast::<i16>().offset(ind as isize) =
-                            random_int_fill_from_int_sum(integer_sum, count) as i16
+                }
+                return;
+            }
+            let (mut sum, mut count) = (0, 0);
+            for (base_x, base_y) in [(-4, 0), (4, 0), (0, -4), (0, 4)] {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        let xx = xpix + base_x + x;
+                        let yy = ypix + base_y + y;
+                        if interior || (xx >= 0 && xx < nx && yy >= 0 && yy < ny) {
+                            sum += data[(xx + yy * nxdim) as usize] as i32;
+                            count += 1;
+                        }
                     }
-                    6 => {
-                        *array.cast::<u16>().offset(ind as isize) =
-                            random_int_fill_from_int_sum(integer_sum, count) as u16
+                }
+            }
+            for y in 0..4 {
+                for x in 0..4 {
+                    data[index + x + y * nxdim as usize] =
+                        random_int_fill_from_int_sum(sum, count) as u16;
+                }
+            }
+        }
+        PixelData::Float(data) => {
+            if data.len() < length {
+                return;
+            }
+            if use_mean != 0 {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        data[index + x + y * nxdim as usize] = mean;
                     }
-                    2 => *array.cast::<f32>().offset(ind as isize) = float_sum / count as f32,
-                    _ => {}
+                }
+                return;
+            }
+            let (mut sum, mut count) = (0., 0);
+            for (base_x, base_y) in [(-4, 0), (4, 0), (0, -4), (0, 4)] {
+                for y in 0..4 {
+                    for x in 0..4 {
+                        let xx = xpix + base_x + x;
+                        let yy = ypix + base_y + y;
+                        if interior || (xx >= 0 && xx < nx && yy >= 0 && yy < ny) {
+                            sum += data[(xx + yy * nxdim) as usize];
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            for y in 0..4 {
+                for x in 0..4 {
+                    data[index + x + y * nxdim as usize] = sum / count as f32;
                 }
             }
         }
     }
 }
 /// C++ `CorrectPixels3Ways` (`CorrectDefects.cpp:843`).
-pub unsafe fn correct_pixels_3_ways(
+pub fn correct_pixels_3_ways(
     defects: &crate::imod::clip::clip::CameraDefects,
-    array: *mut core::ffi::c_void,
-    data_type: i32,
+    array: &mut PixelData<'_>,
     size_x: i32,
     size_y: i32,
     binning: i32,
@@ -1089,37 +1327,31 @@ pub unsafe fn correct_pixels_3_ways(
     use_mean: i32,
     mean: f32,
 ) {
-    unsafe {
-        let defects = &*defects;
-        for i in 0..defects.bad_pixel_x.len() {
-            if (i < defects.pix_use_mean.len() && defects.pix_use_mean[i] == use_mean as i8)
-                || (i >= defects.pix_use_mean.len() && use_mean == 0)
-            {
-                let x = defects.bad_pixel_x[i] as i32 / binning - left;
-                let y = defects.bad_pixel_y[i] as i32 / binning - top;
-                if x >= 0 && y >= 0 && x < size_x && y < size_y {
-                    if defects.was_scaled > 1 {
-                        correct_jumbo_pixel(
-                            array, data_type, size_x, size_x, size_y, x, y, use_mean, mean,
-                        );
-                    }
-                    if defects.was_scaled > 0 && binning == 1 {
-                        correct_super_pixel(
-                            array, data_type, size_x, size_x, size_y, x, y, use_mean, mean,
-                        );
-                    } else {
-                        correct_pixel(
-                            array, data_type, size_x, size_x, size_y, x, y, use_mean, mean,
-                        );
-                    }
+    if size_x <= 0 || size_y <= 0 || binning <= 0 {
+        return;
+    }
+    for i in 0..defects.bad_pixel_x.len() {
+        if (i < defects.pix_use_mean.len() && defects.pix_use_mean[i] == use_mean as i8)
+            || (i >= defects.pix_use_mean.len() && use_mean == 0)
+        {
+            let x = defects.bad_pixel_x[i] as i32 / binning - left;
+            let y = defects.bad_pixel_y[i] as i32 / binning - top;
+            if x >= 0 && y >= 0 && x < size_x && y < size_y {
+                if defects.was_scaled > 1 {
+                    correct_jumbo_pixel(array, size_x, size_x, size_y, x, y, use_mean, mean);
+                }
+                if defects.was_scaled > 0 && binning == 1 {
+                    correct_super_pixel(array, size_x, size_x, size_y, x, y, use_mean, mean);
+                } else {
+                    correct_pixel(array, size_x, size_x, size_y, x, y, use_mean, mean);
                 }
             }
         }
     }
 }
 /// Matches C++ `CorDefSurroundingMean`.
-pub unsafe fn cor_def_surrounding_mean(
-    frame: *const core::ffi::c_void,
+pub fn cor_def_surrounding_mean(
+    frame: &[u8],
     pixel_type: i32,
     nx: i32,
     ny: i32,
@@ -1127,32 +1359,64 @@ pub unsafe fn cor_def_surrounding_mean(
     ix: i32,
     iy: i32,
 ) -> f32 {
-    unsafe {
-        let ix_start = (ix - 3).max(0);
-        let ix_end = (ix + 3).min(nx - 1);
-        let iy_start = (iy - 3).max(0);
-        let iy_end = (iy + 3).min(ny - 1);
-        let mut number_pixels = 0;
-        let mut sum = 0.;
-        for ay in iy_start..=iy_end {
-            for ax in ix_start..=ix_end {
-                if (ax - ix).abs() > 1 || (ay - iy).abs() > 1 {
-                    let value = match pixel_type {
-                        0 => *frame.cast::<u8>().add((ax + ay * nx) as usize) as f32,
-                        1 => *frame.cast::<i16>().add((ax + ay * nx) as usize) as f32,
-                        6 => *frame.cast::<u16>().add((ax + ay * nx) as usize) as f32,
-                        2 => *frame.cast::<f32>().add((ax + ay * nx) as usize),
-                        _ => 0.,
-                    };
-                    if value <= truncation_limit {
-                        sum += value;
-                        number_pixels += 1;
-                    }
+    if nx <= 0 || ny <= 0 || ix < 0 || iy < 0 || ix >= nx || iy >= ny {
+        return 0.;
+    }
+    let Some(pixel_count) = nx
+        .checked_mul(ny)
+        .and_then(|count| usize::try_from(count).ok())
+    else {
+        return 0.;
+    };
+    let bytes_per_pixel = match pixel_type {
+        0 => 1,
+        1 | 6 => core::mem::size_of::<i16>(),
+        2 => core::mem::size_of::<f32>(),
+        _ => 0,
+    };
+    if bytes_per_pixel != 0 && frame.len() != pixel_count * bytes_per_pixel {
+        return 0.;
+    }
+    let ix_start = (ix - 3).max(0);
+    let ix_end = (ix + 3).min(nx - 1);
+    let iy_start = (iy - 3).max(0);
+    let iy_end = (iy + 3).min(ny - 1);
+    let mut number_pixels = 0;
+    let mut sum = 0.;
+    for ay in iy_start..=iy_end {
+        for ax in ix_start..=ix_end {
+            if (ax - ix).abs() > 1 || (ay - iy).abs() > 1 {
+                let index = (ax + ay * nx) as usize;
+                let value = match pixel_type {
+                    0 => frame[index] as f32,
+                    1 => i16::from_ne_bytes(
+                        frame[index * core::mem::size_of::<i16>()
+                            ..(index + 1) * core::mem::size_of::<i16>()]
+                            .try_into()
+                            .unwrap(),
+                    ) as f32,
+                    6 => u16::from_ne_bytes(
+                        frame[index * core::mem::size_of::<u16>()
+                            ..(index + 1) * core::mem::size_of::<u16>()]
+                            .try_into()
+                            .unwrap(),
+                    ) as f32,
+                    2 => f32::from_ne_bytes(
+                        frame[index * core::mem::size_of::<f32>()
+                            ..(index + 1) * core::mem::size_of::<f32>()]
+                            .try_into()
+                            .unwrap(),
+                    ),
+                    _ => 0.,
+                };
+                if value <= truncation_limit {
+                    sum += value;
+                    number_pixels += 1;
                 }
             }
         }
-        sum / number_pixels.max(1) as f32
     }
+    sum / number_pixels.max(1) as f32
 }
 /// C++ `CorDefScaleDefectsForK2` (`CorrectDefects.cpp:933`).
 pub fn cor_def_scale_defects_for_k2(
@@ -2323,15 +2587,13 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
     for tag_ind in 0..6 {
         let mut start_ind = 0;
         let mut number = 0;
-        let err = unsafe {
-            crate::imod::libcfshr::mxmlwrap::ixml_find_elements(
-                xml_ind,
-                0,
-                tags[tag_ind],
-                &mut start_ind,
-                &mut number,
-            )
-        };
+        let err = crate::imod::libcfshr::mxmlwrap::ixml_find_elements(
+            xml_ind,
+            0,
+            tags[tag_ind],
+            &mut start_ind,
+            &mut number,
+        );
         if err != 0 {
             unsafe {
                 crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
@@ -2430,8 +2692,8 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
     0
 }
 /// C++ `CorDefProcessFeiDefects` (`CorrectDefects.cpp:1916`).
-pub unsafe fn cor_def_process_fei_defects(
-    ii_file: *mut crate::imod::libiimod::iimage::ImodImageFile,
+pub fn cor_def_process_fei_defects(
+    ii_file: &mut crate::imod::libiimod::iimage::ImodImageFile,
     defects: &mut crate::imod::clip::clip::CameraDefects,
     nx: i32,
     ny: i32,
@@ -2454,6 +2716,7 @@ pub unsafe fn cor_def_process_fei_defects(
         )
     } <= 0
         || count == 0
+        || text.is_null()
     {
         return -1;
     }
@@ -2504,204 +2767,204 @@ pub unsafe fn cor_def_process_fei_defects(
     0
 }
 /// Matches C++ `CorDefFillDefectArray`.
-pub unsafe fn cor_def_fill_defect_array(
+pub fn cor_def_fill_defect_array(
     defects: &crate::imod::clip::clip::CameraDefects,
     camera_size_x: i32,
     camera_size_y: i32,
-    array: *mut u8,
+    array: &mut [u8],
     nx: i32,
     ny: i32,
     do_falcon_pad: bool,
 ) -> i32 {
-    unsafe {
-        let defects = &*defects;
-        if nx <= 0 || ny <= 0 || camera_size_x <= 0 || camera_size_y <= 0 {
-            return 1;
-        }
-        core::ptr::write_bytes(array, 0, (nx * ny) as usize);
-        let ix_offset = (nx - camera_size_x) / 2;
-        let iy_offset = (ny - camera_size_y) / 2;
-        let number_pixels = if (*defects).was_scaled > 1 { 4 } else { 2 };
-        let do_falcon_pad = do_falcon_pad
-            && (*defects).falcon_type != 0
-            && (*defects).num_avg_super_res > 0
-            && (*defects).was_scaled != 0;
-        let (mut x_low_extra, mut x_high_extra) = (0, camera_size_x);
-        let (mut y_low_extra, mut y_high_extra) = (0, camera_size_y);
-        if ix_offset > 0 {
-            x_low_extra = -ix_offset;
-            x_high_extra = nx - ix_offset;
-        }
-        if iy_offset > 0 {
-            y_low_extra = -iy_offset;
-            y_high_extra = ny - iy_offset;
-        }
-        macro_rules! set_pixel {
-            ($x:expr, $y:expr, $value:expr) => {{
-                let ix = $x + ix_offset;
-                let iy = $y + iy_offset;
-                if ix >= 0 && ix < nx && iy >= 0 && iy < ny {
-                    *array.add((ix + iy * nx) as usize) = $value;
+    if nx <= 0
+        || ny <= 0
+        || camera_size_x <= 0
+        || camera_size_y <= 0
+        || array.len() < (nx * ny) as usize
+    {
+        return 1;
+    }
+    array[..(nx * ny) as usize].fill(0);
+    let ix_offset = (nx - camera_size_x) / 2;
+    let iy_offset = (ny - camera_size_y) / 2;
+    let number_pixels = if defects.was_scaled > 1 { 4 } else { 2 };
+    let do_falcon_pad = do_falcon_pad
+        && defects.falcon_type != 0
+        && defects.num_avg_super_res > 0
+        && defects.was_scaled != 0;
+    let (mut x_low_extra, mut x_high_extra) = (0, camera_size_x);
+    let (mut y_low_extra, mut y_high_extra) = (0, camera_size_y);
+    if ix_offset > 0 {
+        x_low_extra = -ix_offset;
+        x_high_extra = nx - ix_offset;
+    }
+    if iy_offset > 0 {
+        y_low_extra = -iy_offset;
+        y_high_extra = ny - iy_offset;
+    }
+    macro_rules! set_pixel {
+        ($x:expr, $y:expr, $value:expr) => {{
+            let ix = $x + ix_offset;
+            let iy = $y + iy_offset;
+            if ix >= 0 && ix < nx && iy >= 0 && iy < ny {
+                array[(ix + iy * nx) as usize] = $value;
+            }
+        }};
+    }
+    for index in 0..defects.bad_pixel_x.len() {
+        let bad_x = defects.bad_pixel_x[index] as i32;
+        let bad_y = defects.bad_pixel_y[index] as i32;
+        if defects.was_scaled > 0 {
+            for jy in 0..number_pixels {
+                for jx in 0..number_pixels {
+                    set_pixel!(bad_x + jx, bad_y + jy, 1);
                 }
-            }};
+            }
+        } else {
+            set_pixel!(bad_x, bad_y, 1);
         }
-        for index in 0..(*defects).bad_pixel_x.len() {
-            let bad_x = (*defects).bad_pixel_x[index] as i32;
-            let bad_y = (*defects).bad_pixel_y[index] as i32;
-            if (*defects).was_scaled > 0 {
-                for jy in 0..number_pixels {
-                    for jx in 0..number_pixels {
-                        set_pixel!(bad_x + jx, bad_y + jy, 1);
-                    }
-                }
-            } else {
+    }
+    for column in 0..defects.bad_column_start.len() {
+        for offset in 0..defects.bad_column_width[column] as i32 {
+            let bad_x = defects.bad_column_start[column] as i32 + offset;
+            for bad_y in y_low_extra..y_high_extra {
                 set_pixel!(bad_x, bad_y, 1);
             }
         }
-        for column in 0..(*defects).bad_column_start.len() {
-            for offset in 0..(*defects).bad_column_width[column] as i32 {
-                let bad_x = (*defects).bad_column_start[column] as i32 + offset;
-                for bad_y in y_low_extra..y_high_extra {
-                    set_pixel!(bad_x, bad_y, 1);
-                }
-            }
-            if do_falcon_pad {
-                for offset in 0..(*defects).num_avg_super_res {
-                    let bad_x =
-                        (*defects).bad_column_start[column] as i32 - (offset + 1) * number_pixels;
-                    if bad_x >= 0 {
-                        for bad_y in y_low_extra..y_high_extra {
-                            set_pixel!(bad_x, bad_y, 254);
-                        }
+        if do_falcon_pad {
+            for offset in 0..defects.num_avg_super_res {
+                let bad_x = defects.bad_column_start[column] as i32 - (offset + 1) * number_pixels;
+                if bad_x >= 0 {
+                    for bad_y in y_low_extra..y_high_extra {
+                        set_pixel!(bad_x, bad_y, 254);
                     }
-                    let bad_x = (*defects).bad_column_start[column] as i32
-                        + (*defects).bad_column_width[column] as i32
-                        + offset * number_pixels;
-                    if bad_x < nx {
-                        for bad_y in y_low_extra..y_high_extra {
-                            set_pixel!(bad_x, bad_y, 254);
-                        }
+                }
+                let bad_x = defects.bad_column_start[column] as i32
+                    + defects.bad_column_width[column] as i32
+                    + offset * number_pixels;
+                if bad_x < nx {
+                    for bad_y in y_low_extra..y_high_extra {
+                        set_pixel!(bad_x, bad_y, 254);
                     }
                 }
             }
         }
-        for row in 0..(*defects).bad_row_start.len() {
-            for offset in 0..(*defects).bad_row_height[row] as i32 {
-                let bad_y = (*defects).bad_row_start[row] as i32 + offset;
-                for bad_x in x_low_extra..x_high_extra {
-                    set_pixel!(bad_x, bad_y, 1);
-                }
-            }
-            if do_falcon_pad {
-                for offset in 0..(*defects).num_avg_super_res {
-                    let bad_y = (*defects).bad_row_start[row] as i32 - (offset + 1) * number_pixels;
-                    if bad_y >= 0 {
-                        for bad_x in x_low_extra..x_high_extra {
-                            set_pixel!(bad_x, bad_y, 255);
-                        }
-                    }
-                    let bad_y = (*defects).bad_row_start[row] as i32
-                        + (*defects).bad_row_height[row] as i32
-                        + offset * number_pixels;
-                    if bad_y < ny {
-                        for bad_x in x_low_extra..x_high_extra {
-                            set_pixel!(bad_x, bad_y, 255);
-                        }
-                    }
-                }
+    }
+    for row in 0..defects.bad_row_start.len() {
+        for offset in 0..defects.bad_row_height[row] as i32 {
+            let bad_y = defects.bad_row_start[row] as i32 + offset;
+            for bad_x in x_low_extra..x_high_extra {
+                set_pixel!(bad_x, bad_y, 1);
             }
         }
-        for column in 0..(*defects).partial_bad_col.len() {
-            for offset in 0..(*defects).partial_bad_width[column] as i32 {
-                let bad_x = (*defects).partial_bad_col[column] as i32 + offset;
-                for bad_y in (*defects).partial_bad_start_y[column] as i32
-                    ..=(*defects).partial_bad_end_y[column] as i32
-                {
-                    set_pixel!(bad_x, bad_y, 1);
-                }
-            }
-            if do_falcon_pad {
-                for offset in 0..(*defects).num_avg_super_res {
-                    let bad_x =
-                        (*defects).bad_column_start[column] as i32 - (offset + 1) * number_pixels;
-                    if bad_x >= 0 {
-                        for bad_y in (*defects).partial_bad_start_y[column] as i32
-                            ..=(*defects).partial_bad_end_y[column] as i32
-                        {
-                            set_pixel!(bad_x, bad_y, 254);
-                        }
+        if do_falcon_pad {
+            for offset in 0..defects.num_avg_super_res {
+                let bad_y = defects.bad_row_start[row] as i32 - (offset + 1) * number_pixels;
+                if bad_y >= 0 {
+                    for bad_x in x_low_extra..x_high_extra {
+                        set_pixel!(bad_x, bad_y, 255);
                     }
-                    let bad_x = (*defects).bad_column_start[column] as i32
-                        + (*defects).bad_column_width[column] as i32
-                        + offset * number_pixels;
-                    if bad_x < nx {
-                        for bad_y in (*defects).partial_bad_start_y[column] as i32
-                            ..=(*defects).partial_bad_end_y[column] as i32
-                        {
-                            set_pixel!(bad_x, bad_y, 254);
-                        }
+                }
+                let bad_y = defects.bad_row_start[row] as i32
+                    + defects.bad_row_height[row] as i32
+                    + offset * number_pixels;
+                if bad_y < ny {
+                    for bad_x in x_low_extra..x_high_extra {
+                        set_pixel!(bad_x, bad_y, 255);
                     }
                 }
             }
         }
-        for row in 0..(*defects).partial_bad_row.len() {
-            for offset in 0..(*defects).partial_bad_height[row] as i32 {
-                let bad_y = (*defects).partial_bad_row[row] as i32 + offset;
-                for bad_x in (*defects).partial_bad_start_x[row] as i32
-                    ..=(*defects).partial_bad_end_x[row] as i32
-                {
-                    set_pixel!(bad_x, bad_y, 1);
-                }
+    }
+    for column in 0..defects.partial_bad_col.len() {
+        for offset in 0..defects.partial_bad_width[column] as i32 {
+            let bad_x = defects.partial_bad_col[column] as i32 + offset;
+            for bad_y in defects.partial_bad_start_y[column] as i32
+                ..=defects.partial_bad_end_y[column] as i32
+            {
+                set_pixel!(bad_x, bad_y, 1);
             }
-            if do_falcon_pad {
-                for offset in 0..(*defects).num_avg_super_res {
-                    let bad_y = (*defects).bad_row_start[row] as i32 - (offset + 1) * number_pixels;
-                    if bad_y >= 0 {
-                        for bad_x in (*defects).partial_bad_start_x[row] as i32
-                            ..=(*defects).partial_bad_end_x[row] as i32
-                        {
-                            set_pixel!(bad_x, bad_y, 255);
-                        }
-                    }
-                    let bad_y = (*defects).bad_row_start[row] as i32
-                        + (*defects).bad_row_height[row] as i32
-                        + offset * number_pixels;
-                    if bad_y < ny {
-                        for bad_x in (*defects).partial_bad_start_x[row] as i32
-                            ..=(*defects).partial_bad_end_x[row] as i32
-                        {
-                            set_pixel!(bad_x, bad_y, 255);
-                        }
+        }
+        if do_falcon_pad {
+            for offset in 0..defects.num_avg_super_res {
+                let bad_x = defects.bad_column_start[column] as i32 - (offset + 1) * number_pixels;
+                if bad_x >= 0 {
+                    for bad_y in defects.partial_bad_start_y[column] as i32
+                        ..=defects.partial_bad_end_y[column] as i32
+                    {
+                        set_pixel!(bad_x, bad_y, 254);
                     }
                 }
-            }
-        }
-        if (*defects).usable_left > 0 {
-            for bad_x in x_low_extra..(*defects).usable_left {
-                for bad_y in y_low_extra..y_high_extra {
-                    set_pixel!(bad_x, bad_y, 1);
+                let bad_x = defects.bad_column_start[column] as i32
+                    + defects.bad_column_width[column] as i32
+                    + offset * number_pixels;
+                if bad_x < nx {
+                    for bad_y in defects.partial_bad_start_y[column] as i32
+                        ..=defects.partial_bad_end_y[column] as i32
+                    {
+                        set_pixel!(bad_x, bad_y, 254);
+                    }
                 }
             }
         }
-        if (*defects).usable_right > 0 {
-            for bad_x in (*defects).usable_right + 1..x_high_extra {
-                for bad_y in y_low_extra..y_high_extra {
-                    set_pixel!(bad_x, bad_y, 1);
+    }
+    for row in 0..defects.partial_bad_row.len() {
+        for offset in 0..defects.partial_bad_height[row] as i32 {
+            let bad_y = defects.partial_bad_row[row] as i32 + offset;
+            for bad_x in
+                defects.partial_bad_start_x[row] as i32..=defects.partial_bad_end_x[row] as i32
+            {
+                set_pixel!(bad_x, bad_y, 1);
+            }
+        }
+        if do_falcon_pad {
+            for offset in 0..defects.num_avg_super_res {
+                let bad_y = defects.bad_row_start[row] as i32 - (offset + 1) * number_pixels;
+                if bad_y >= 0 {
+                    for bad_x in defects.partial_bad_start_x[row] as i32
+                        ..=defects.partial_bad_end_x[row] as i32
+                    {
+                        set_pixel!(bad_x, bad_y, 255);
+                    }
+                }
+                let bad_y = defects.bad_row_start[row] as i32
+                    + defects.bad_row_height[row] as i32
+                    + offset * number_pixels;
+                if bad_y < ny {
+                    for bad_x in defects.partial_bad_start_x[row] as i32
+                        ..=defects.partial_bad_end_x[row] as i32
+                    {
+                        set_pixel!(bad_x, bad_y, 255);
+                    }
                 }
             }
         }
-        if (*defects).usable_top > 0 {
-            for bad_y in y_low_extra..(*defects).usable_top {
-                for bad_x in x_low_extra..x_high_extra {
-                    set_pixel!(bad_x, bad_y, 1);
-                }
+    }
+    if defects.usable_left > 0 {
+        for bad_x in x_low_extra..defects.usable_left {
+            for bad_y in y_low_extra..y_high_extra {
+                set_pixel!(bad_x, bad_y, 1);
             }
         }
-        if (*defects).usable_bottom > 0 {
-            for bad_y in (*defects).usable_bottom + 1..x_high_extra {
-                for bad_x in x_low_extra..x_high_extra {
-                    set_pixel!(bad_x, bad_y, 1);
-                }
+    }
+    if defects.usable_right > 0 {
+        for bad_x in defects.usable_right + 1..x_high_extra {
+            for bad_y in y_low_extra..y_high_extra {
+                set_pixel!(bad_x, bad_y, 1);
+            }
+        }
+    }
+    if defects.usable_top > 0 {
+        for bad_y in y_low_extra..defects.usable_top {
+            for bad_x in x_low_extra..x_high_extra {
+                set_pixel!(bad_x, bad_y, 1);
+            }
+        }
+    }
+    if defects.usable_bottom > 0 {
+        for bad_y in defects.usable_bottom + 1..x_high_extra {
+            for bad_x in x_low_extra..x_high_extra {
+                set_pixel!(bad_x, bad_y, 1);
             }
         }
     }
@@ -2709,45 +2972,43 @@ pub unsafe fn cor_def_fill_defect_array(
 }
 /// C++ `CorDefExpandGainReference` (`CorrectDefects.cpp:2125`).
 ///
-/// # Safety
-///
-/// `reference_in` contains `nx_in * ny_in` floats and `reference_out` contains
-/// `(nx_in * factor) * (ny_in * factor)` floats.
-pub unsafe fn cor_def_expand_gain_reference(
-    reference_in: *const f32,
+pub fn cor_def_expand_gain_reference(
+    reference_in: &[f32],
     nx_in: i32,
     ny_in: i32,
     factor: i32,
-    reference_out: *mut f32,
+    reference_out: &mut [f32],
 ) {
-    unsafe {
-        let nx_out = nx_in * factor;
-        for iy in (0..ny_in).rev() {
-            let input_line = reference_in.add((iy * nx_in) as usize);
-            let output_line = reference_out.add(((iy * factor + factor - 1) * nx_out) as usize);
-            let mut output = output_line;
-            for ix in 0..nx_in {
-                for _ in 0..factor {
-                    *output = *input_line.add(ix as usize);
-                    output = output.add(1);
-                }
-            }
-            core::ptr::copy_nonoverlapping(
-                output_line,
-                output_line.sub(nx_out as usize),
-                nx_out as usize,
-            );
-            if factor > 2 {
-                core::ptr::copy_nonoverlapping(
-                    output_line,
-                    output_line.sub((2 * nx_out) as usize),
-                    nx_out as usize,
-                );
-                core::ptr::copy_nonoverlapping(
-                    output_line,
-                    output_line.sub((3 * nx_out) as usize),
-                    nx_out as usize,
-                );
+    let Some(nx_out) = nx_in.checked_mul(factor) else {
+        return;
+    };
+    let Some(ny_out) = ny_in.checked_mul(factor) else {
+        return;
+    };
+    let (Ok(nx_in), Ok(ny_in), Ok(factor), Ok(nx_out), Ok(ny_out)) = (
+        usize::try_from(nx_in),
+        usize::try_from(ny_in),
+        usize::try_from(factor),
+        usize::try_from(nx_out),
+        usize::try_from(ny_out),
+    ) else {
+        return;
+    };
+    let Some(input_len) = nx_in.checked_mul(ny_in) else {
+        return;
+    };
+    let Some(output_len) = nx_out.checked_mul(ny_out) else {
+        return;
+    };
+    if reference_in.len() != input_len || reference_out.len() != output_len {
+        return;
+    }
+    for iy in 0..ny_in {
+        let input_line = &reference_in[iy * nx_in..(iy + 1) * nx_in];
+        for iy_out in iy * factor..(iy + 1) * factor {
+            let output_line = &mut reference_out[iy_out * nx_out..(iy_out + 1) * nx_out];
+            for (ix, value) in input_line.iter().enumerate() {
+                output_line[ix * factor..(ix + 1) * factor].fill(*value);
             }
         }
     }
@@ -2897,8 +3158,8 @@ pub fn cor_def_refine_super_res_ref(
     }
 }
 /// C++ `CorDefFindDriftCorrEdges` (`CorrectDefects.cpp:2286`).
-pub unsafe fn cor_def_find_drift_corr_edges(
-    array: *const core::ffi::c_void,
+pub fn cor_def_find_drift_corr_edges(
+    array: &[u8],
     data_type: i32,
     nx: i32,
     ny: i32,
@@ -2914,6 +3175,30 @@ pub unsafe fn cor_def_find_drift_corr_edges(
     if !matches!(data_type, 1 | 6 | 2) {
         return 1;
     }
+    let pixel_count = match usize::try_from(nx).ok().zip(usize::try_from(ny).ok()) {
+        Some((nx, ny)) => nx.saturating_mul(ny),
+        None => return 1,
+    };
+    let values: Vec<f32> = match data_type {
+        1 => array
+            .chunks_exact(2)
+            .take(pixel_count)
+            .map(|value| i16::from_ne_bytes(value.try_into().unwrap()) as f32)
+            .collect(),
+        6 => array
+            .chunks_exact(2)
+            .take(pixel_count)
+            .map(|value| u16::from_ne_bytes(value.try_into().unwrap()) as f32)
+            .collect(),
+        _ => array
+            .chunks_exact(4)
+            .take(pixel_count)
+            .map(|value| f32::from_ne_bytes(value.try_into().unwrap()))
+            .collect(),
+    };
+    if values.len() != pixel_count {
+        return 1;
+    }
     let x_start = (nx / 2 - analyze_len / 2).max(0);
     let y_start = (ny / 2 - analyze_len / 2).max(0);
     let x_end = (x_start + analyze_len).min(nx);
@@ -2922,15 +3207,6 @@ pub unsafe fn cor_def_find_drift_corr_edges(
     let mut diff_mean = vec![0_f32; (4 * max_width) as usize];
     let mut diff_sd = vec![0_f32; (4 * max_width) as usize];
     let mut ratio = vec![0_f32; (4 * max_width) as usize];
-    macro_rules! value {
-        ($index:expr) => {
-            match data_type {
-                1 => unsafe { *array.cast::<i16>().add($index as usize) as f32 },
-                6 => unsafe { *array.cast::<u16>().add($index as usize) as f32 },
-                _ => unsafe { *array.cast::<f32>().add($index as usize) },
-            }
-        };
-    }
     for wid in 0..max_width {
         for idir in 0..2 {
             let iy = if idir != 0 { ny - 1 - wid } else { wid };
@@ -2939,8 +3215,8 @@ pub unsafe fn cor_def_find_drift_corr_edges(
             let mut dsum = 0_f64;
             let mut dsq = 0_f64;
             for ix in x_start..x_end {
-                let current = value!(ix + iy * nx) as f64;
-                let difference = value!(ix + (iy + step) * nx) as f64 - current;
+                let current = values[(ix + iy * nx) as usize] as f64;
+                let difference = values[(ix + (iy + step) * nx) as usize] as f64 - current;
                 sum += current;
                 dsum += difference;
                 dsq += difference * difference;
@@ -2967,8 +3243,8 @@ pub unsafe fn cor_def_find_drift_corr_edges(
             let mut dsq = 0_f64;
             for iy in y_start..y_end {
                 let ix = if loop_index != 0 { nx - 1 - wid } else { wid };
-                let current = value!(ix + iy * nx) as f64;
-                let difference = value!(ix + idir + iy * nx) as f64 - current;
+                let current = values[(ix + iy * nx) as usize] as f64;
+                let difference = values[(ix + idir + iy * nx) as usize] as f64 - current;
                 sum += current;
                 dsum += difference;
                 dsq += difference * difference;
@@ -3022,21 +3298,19 @@ pub unsafe fn cor_def_find_drift_corr_edges(
     0
 }
 /// C++ overload 1 `CorDefSampleMeanSD` (`CorrectDefects.cpp:2551`).
-pub unsafe fn cor_def_sample_mean_sd_1(
-    array: *mut core::ffi::c_void,
+pub fn cor_def_sample_mean_sd_1(
+    array: &[u8],
     data_type: i32,
     nx: i32,
     ny: i32,
     mean: &mut f32,
     sd: &mut f32,
 ) {
-    unsafe {
-        cor_def_sample_mean_sd_2(array, data_type, nx, nx, ny, mean, sd);
-    }
+    cor_def_sample_mean_sd_2(array, data_type, nx, nx, ny, mean, sd);
 }
 /// C++ overload 2 `CorDefSampleMeanSD` (`CorrectDefects.cpp:2557`).
-pub unsafe fn cor_def_sample_mean_sd_2(
-    array: *mut core::ffi::c_void,
+pub fn cor_def_sample_mean_sd_2(
+    array: &[u8],
     data_type: i32,
     nxdim: i32,
     nx: i32,
@@ -3044,13 +3318,11 @@ pub unsafe fn cor_def_sample_mean_sd_2(
     mean: &mut f32,
     sd: &mut f32,
 ) {
-    unsafe {
-        cor_def_sample_mean_sd_3(array, data_type, nxdim, nx, ny, 0, 0, nx, ny, mean, sd);
-    }
+    cor_def_sample_mean_sd_3(array, data_type, nxdim, nx, ny, 0, 0, nx, ny, mean, sd);
 }
 /// C++ overload 3 `CorDefSampleMeanSD` (`CorrectDefects.cpp:2564`).
-pub unsafe fn cor_def_sample_mean_sd_3(
-    array: *mut core::ffi::c_void,
+pub fn cor_def_sample_mean_sd_3(
+    array: &[u8],
     data_type: i32,
     nxdim: i32,
     nx: i32,
@@ -3062,38 +3334,47 @@ pub unsafe fn cor_def_sample_mean_sd_3(
     mean: &mut f32,
     sd: &mut f32,
 ) {
-    unsafe {
-        let (call_type, dsize) = match data_type {
-            0 => (0, 1),
-            1 => (3, 2),
-            6 => (2, 2),
-            2 => (6, 4),
-            _ => return,
-        };
-        // `makeLinePointers` becomes the line byte views the translated
-        // `sampleMeanSD` takes.
-        let bytes = core::slice::from_raw_parts(
-            array.cast::<u8>(),
-            nxdim as usize * ny as usize * dsize as usize,
-        );
-        let lines: Vec<&[u8]> = (0..ny as usize)
-            .map(|index| &bytes[(nxdim as usize * index * dsize as usize)..])
-            .collect();
-        let sample = (30000. / (nx * ny) as f32).min(1.);
-        crate::imod::libcfshr::samplemeansd::sample_mean_sd(
-            Some(&lines),
-            call_type,
-            nx,
-            ny,
-            sample,
-            ix_start,
-            iy_start,
-            nx_use,
-            ny_use,
-            Some(&mut *mean),
-            Some(&mut *sd),
-        );
-    }
+    let (call_type, dsize) = match data_type {
+        0 => (0, 1),
+        1 => (3, 2),
+        6 => (2, 2),
+        2 => (6, 4),
+        _ => return,
+    };
+    let Some(row_bytes) = usize::try_from(nxdim)
+        .ok()
+        .and_then(|width| width.checked_mul(dsize))
+    else {
+        return;
+    };
+    let Some(byte_len) = usize::try_from(ny)
+        .ok()
+        .and_then(|height| height.checked_mul(row_bytes))
+    else {
+        return;
+    };
+    let Some(bytes) = array.get(..byte_len) else {
+        return;
+    };
+    // `makeLinePointers` becomes the line byte views the translated
+    // `sampleMeanSD` takes.
+    let lines: Vec<&[u8]> = (0..ny as usize)
+        .map(|index| &bytes[(row_bytes * index)..])
+        .collect();
+    let sample = (30000. / (nx * ny) as f32).min(1.);
+    crate::imod::libcfshr::samplemeansd::sample_mean_sd(
+        Some(&lines),
+        call_type,
+        nx,
+        ny,
+        sample,
+        ix_start,
+        iy_start,
+        nx_use,
+        ny_use,
+        Some(mean),
+        Some(sd),
+    );
 }
 /// Matches C++ `CorDefSetupToCorrect`.
 pub fn cor_def_setup_to_correct(
@@ -3342,38 +3623,82 @@ pub fn cor_def_rotate_coords_ccw(
 #[cfg(test)]
 mod tests {
     use super::{
-        cor_def_correct_defects, cor_def_defects_to_string, cor_def_fill_defect_array,
-        cor_def_find_drift_corr_edges, cor_def_parse_defects, cor_def_parse_fei_xml,
-        cor_def_read_super_gain, cor_def_sample_mean_sd_1, cor_def_setup_to_correct, correct_edge,
-        correct_pixel,
+        PixelData, cor_def_correct_defects, cor_def_defects_to_string,
+        cor_def_expand_gain_reference, cor_def_fill_defect_array, cor_def_find_drift_corr_edges,
+        cor_def_parse_defects, cor_def_parse_fei_xml, cor_def_read_super_gain,
+        cor_def_sample_mean_sd_1, cor_def_setup_to_correct, cor_def_surrounding_mean, correct_edge,
+        correct_jumbo_pixel, correct_pixel, correct_super_pixel,
     };
     use crate::imod::clip::clip::CameraDefects;
 
     #[test]
     fn correct_edge_copies_good_float_row_without_taper() {
         let mut image = [10_f32, 20., 30., 0., 0., 0.];
-        unsafe {
-            correct_edge(image.as_mut_ptr().cast(), 2, 1, 0, 3, 3, 0, 1, 3);
-        }
+        correct_edge(&mut PixelData::Float(&mut image), 1, 0, 3, 3, 0, 1, 3);
         assert_eq!(image, [10., 20., 30., 10., 20., 30.]);
+    }
+
+    #[test]
+    fn expand_gain_reference_repeats_float_pixels_in_both_axes() {
+        let input = [1_f32, 2., 3., 4.];
+        let mut output = [0_f32; 16];
+        cor_def_expand_gain_reference(&input, 2, 2, 2, &mut output);
+        assert_eq!(
+            output,
+            [
+                1., 1., 2., 2., 1., 1., 2., 2., 3., 3., 4., 4., 3., 3., 4., 4.,
+            ]
+        );
+    }
+
+    #[test]
+    fn surrounding_mean_uses_outer_neighborhood_and_truncation() {
+        let frame = (0..25)
+            .map(|value| (value as f32).to_ne_bytes())
+            .flatten()
+            .collect::<Vec<_>>();
+        let mean = cor_def_surrounding_mean(&frame, 2, 5, 5, 20., 2, 2);
+        assert_eq!(mean, 102. / 12.);
     }
 
     #[test]
     fn correct_edge_uses_source_double_sum_factor_before_float_store() {
         let mut image = [10_f32, 20., 30., 0., 0., 0.];
-        unsafe {
-            correct_edge(image.as_mut_ptr().cast(), 2, 1, 5, 3, 3, 0, 1, 3);
-        }
+        correct_edge(&mut PixelData::Float(&mut image), 1, 5, 3, 3, 0, 1, 3);
         assert_eq!(image, [10., 20., 30., 12., 20., 28.]);
+    }
+
+    #[test]
+    fn correct_edge_copies_integer_rows_through_each_typed_branch() {
+        let mut bytes = [1_u8, 2, 3, 0, 0, 0];
+        correct_edge(&mut PixelData::Byte(&mut bytes), 1, 0, 3, 3, 0, 1, 3);
+        assert_eq!(bytes, [1, 2, 3, 1, 2, 3]);
+
+        let mut shorts = [-2_i16, 3, 9, 0, 0, 0];
+        correct_edge(&mut PixelData::Short(&mut shorts), 1, 0, 3, 3, 0, 1, 3);
+        assert_eq!(shorts, [-2, 3, 9, -2, 3, 9]);
+
+        let mut unsigned = [2_u16, 7, 11, 0, 0, 0];
+        correct_edge(&mut PixelData::UShort(&mut unsigned), 1, 0, 3, 3, 0, 1, 3);
+        assert_eq!(unsigned, [2, 7, 11, 2, 7, 11]);
     }
 
     #[test]
     fn correct_pixel_preserves_source_byte_edge_path() {
         let mut image = [9_u8, 8, 7, 6];
-        unsafe {
-            correct_pixel(image.as_mut_ptr().cast(), 0, 2, 2, 2, 0, 0, 0, 0.);
-        }
+        correct_pixel(&mut PixelData::Byte(&mut image), 2, 2, 2, 0, 0, 0, 0.);
         assert_eq!(image[0], 0);
+    }
+
+    #[test]
+    fn super_and_jumbo_pixel_write_typed_owned_slices() {
+        let mut floats = [0_f32; 25];
+        correct_super_pixel(&mut PixelData::Float(&mut floats), 5, 5, 5, 1, 1, 1, 3.5);
+        assert_eq!([floats[6], floats[7], floats[11], floats[12]], [3.5; 4]);
+
+        let mut unsigned = [0_u16; 16];
+        correct_jumbo_pixel(&mut PixelData::UShort(&mut unsigned), 4, 4, 4, 0, 0, 1, 17.);
+        assert_eq!(unsigned, [17; 16]);
     }
 
     #[test]
@@ -3405,9 +3730,7 @@ mod tests {
             bad_pixel_y: vec![0],
             pix_use_mean: vec![],
         };
-        unsafe {
-            cor_def_correct_defects(&defects, image.as_mut_ptr().cast(), 0, 1, 0, 0, 3, 3);
-        }
+        cor_def_correct_defects(&defects, &mut image, 0, 1, 0, 0, 3, 3);
         assert_eq!(image, [0, 2, 3, 4, 99, 6, 7, 8, 9]);
     }
 
@@ -3444,7 +3767,17 @@ mod tests {
         };
         list.bad_column_start.push(2);
         list.bad_column_width.push(1);
-        unsafe { cor_def_correct_defects(&list, image.as_mut_ptr().cast(), 2, 1, 0, 0, 3, 5) };
+        let mut bytes = image
+            .iter()
+            .flat_map(|value| value.to_ne_bytes())
+            .collect::<Vec<_>>();
+        cor_def_correct_defects(&list, &mut bytes, 2, 1, 0, 0, 3, 5);
+        image = bytes
+            .chunks_exact(core::mem::size_of::<f32>())
+            .map(|value| f32::from_ne_bytes(value.try_into().unwrap()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         assert_eq!(image[2], 3.);
         assert_eq!(image[7], 3.);
         assert_eq!(image[12], 3.);
@@ -3668,7 +4001,7 @@ mod tests {
         };
         let mut map = [0_u8; 64];
         assert_eq!(
-            unsafe { cor_def_fill_defect_array(&defects, 8, 8, map.as_mut_ptr(), 8, 8, true) },
+            cor_def_fill_defect_array(&defects, 8, 8, &mut map, 8, 8, true),
             0
         );
         assert_eq!(map[4 + 2 * 8], 1);
@@ -3681,11 +4014,12 @@ mod tests {
 
     #[test]
     fn sample_mean_sd_uses_source_slice_type_mapping() {
-        let mut image = [1_f32, 2., 3., 4., 5., 6., 7., 8., 9.];
+        let image: Vec<u8> = [1_f32, 2., 3., 4., 5., 6., 7., 8., 9.]
+            .iter()
+            .flat_map(|value| value.to_ne_bytes())
+            .collect();
         let (mut mean, mut sd) = (0_f32, 0_f32);
-        unsafe {
-            cor_def_sample_mean_sd_1(image.as_mut_ptr().cast(), 2, 3, 3, &mut mean, &mut sd);
-        }
+        cor_def_sample_mean_sd_1(&image, 2, 3, 3, &mut mean, &mut sd);
         assert_eq!(mean, 5.);
         assert!((sd - 2.738_613).abs() < 1.0e-5);
     }
@@ -3738,24 +4072,15 @@ mod tests {
 
     #[test]
     fn drift_edges_uniform_image_has_full_good_limits() {
-        let image = [4_f32; 64];
+        let image = [4_f32; 64]
+            .into_iter()
+            .flat_map(f32::to_ne_bytes)
+            .collect::<Vec<_>>();
         let (mut xl, mut xh, mut yl, mut yh) = (-1, -1, -1, -1);
         assert_eq!(
-            unsafe {
-                cor_def_find_drift_corr_edges(
-                    image.as_ptr().cast(),
-                    2,
-                    8,
-                    8,
-                    4,
-                    2,
-                    3.,
-                    &mut xl,
-                    &mut xh,
-                    &mut yl,
-                    &mut yh,
-                )
-            },
+            cor_def_find_drift_corr_edges(
+                &image, 2, 8, 8, 4, 2, 3., &mut xl, &mut xh, &mut yl, &mut yh,
+            ),
             0
         );
         assert_eq!((xl, xh, yl, yh), (0, 7, 0, 7));

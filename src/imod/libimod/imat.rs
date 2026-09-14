@@ -19,7 +19,6 @@ pub const B3D_Z: i32 = 2;
 
 /// Original: `Imat` / `struct imodel_matrix` (`include/imat.h:11`).
 #[derive(Clone, Debug, PartialEq)]
-#[repr(C)]
 pub struct Imat {
     pub data: Vec<f32>,
     /// is 2D or 3D

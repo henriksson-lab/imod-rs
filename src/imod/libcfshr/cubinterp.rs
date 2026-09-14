@@ -23,14 +23,14 @@ use crate::imod::libcfshr::b3dutil::num_omp_threads;
 ///
 /// OpenMP is not represented: every output line is independent, so the
 /// `numThreads` computation is carried for fidelity but changes no pixel.
-pub unsafe fn cubinterp(
-    array: *mut f32,
-    bray: *mut f32,
+pub fn cubinterp(
+    array: &[f32],
+    bray: &mut [f32],
     nxa: i32,
     nya: i32,
     nxb: i32,
     nyb: i32,
-    amat: *const [[f32; 2]; 2],
+    amat: &[[f32; 2]; 2],
     xc: f32,
     yc: f32,
     xt: f32,
@@ -39,341 +39,339 @@ pub unsafe fn cubinterp(
     dmean: f32,
     linear: i32,
 ) {
-    unsafe {
-        let amat = *amat;
-        let xcen: f32;
-        let ycen: f32;
-        let xco: f32;
-        let yco: f32;
-        let denom: f32;
-        let a11: f32;
-        let a12: f32;
-        let a22: f32;
-        let a21: f32;
-        let mut dyo: f32;
-        let mut xbase: f32;
-        let mut ybase: f32;
-        let mut xst: f32;
-        let mut xnd: f32;
-        let mut xlft: f32;
-        let mut xrt: f32;
-        let mut xp: f32;
-        let mut yp: f32;
-        let mut dennew: f32;
-        let mut dx: f32;
-        let mut dy: f32;
-        let (mut v2, mut v4, mut v6, mut v8, mut v5): (f32, f32, f32, f32, f32);
-        let (mut a, mut b, mut c, mut d): (f32, f32, f32, f32);
-        let mut dxm1: f32;
-        let mut dxdxm1: f32;
-        let (mut fx1, mut fx2, mut fx3, mut fx4): (f32, f32, f32, f32);
-        let mut dym1: f32;
-        let mut dydym1: f32;
-        let (mut v1, mut v3): (f32, f32);
-        let mut vmin: f32;
-        let mut vmax: f32;
-        let (mut ixp, mut ixpp1, mut iyp, mut iypp1, mut ixpm1, mut iypm1): (
-            i32,
-            i32,
-            i32,
-            i32,
-            i32,
-            i32,
-        );
-        let mut linefb: i32;
-        let (mut ixnd, mut ixst, mut ixfbst, mut ixfbnd, mut iqst, mut iqnd): (
-            i32,
-            i32,
-            i32,
-            i32,
-            i32,
-            i32,
-        );
-        let mut ixbase: isize;
-        let llnxa: isize;
-        let mut ind: isize;
-        let mut indpnxa: isize;
-        let mut indmnxa: isize;
-        let mut indpnxa2: isize;
-        let num_threads: i32;
+    let amat = *amat;
+    let xcen: f32;
+    let ycen: f32;
+    let xco: f32;
+    let yco: f32;
+    let denom: f32;
+    let a11: f32;
+    let a12: f32;
+    let a22: f32;
+    let a21: f32;
+    let mut dyo: f32;
+    let mut xbase: f32;
+    let mut ybase: f32;
+    let mut xst: f32;
+    let mut xnd: f32;
+    let mut xlft: f32;
+    let mut xrt: f32;
+    let mut xp: f32;
+    let mut yp: f32;
+    let mut dennew: f32;
+    let mut dx: f32;
+    let mut dy: f32;
+    let (mut v2, mut v4, mut v6, mut v8, mut v5): (f32, f32, f32, f32, f32);
+    let (mut a, mut b, mut c, mut d): (f32, f32, f32, f32);
+    let mut dxm1: f32;
+    let mut dxdxm1: f32;
+    let (mut fx1, mut fx2, mut fx3, mut fx4): (f32, f32, f32, f32);
+    let mut dym1: f32;
+    let mut dydym1: f32;
+    let (mut v1, mut v3): (f32, f32);
+    let mut vmin: f32;
+    let mut vmax: f32;
+    let (mut ixp, mut ixpp1, mut iyp, mut iypp1, mut ixpm1, mut iypm1): (
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+    );
+    let mut linefb: i32;
+    let (mut ixnd, mut ixst, mut ixfbst, mut ixfbnd, mut iqst, mut iqnd): (
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+    );
+    let mut ixbase: usize;
+    let llnxa: usize;
+    let mut ind: usize;
+    let mut indpnxa: usize;
+    let mut indmnxa: usize;
+    let mut indpnxa2: usize;
+    let num_threads: i32;
 
-        // Calc inverse transformation
-        xcen = (nxb as f64 / 2. + xt as f64 + 0.5) as f32;
-        ycen = (nyb as f64 / 2. + yt as f64 + 0.5) as f32;
-        xco = (xc as f64 + 0.5) as f32;
-        yco = (yc as f64 + 0.5) as f32;
-        denom = amat[0][0] * amat[1][1] - amat[1][0] * amat[0][1];
-        a11 = amat[1][1] / denom;
-        a12 = -amat[1][0] / denom;
-        a21 = -amat[0][1] / denom;
-        a22 = amat[0][0] / denom;
-        llnxa = nxa as isize;
+    // Calc inverse transformation
+    xcen = (nxb as f64 / 2. + xt as f64 + 0.5) as f32;
+    ycen = (nyb as f64 / 2. + yt as f64 + 0.5) as f32;
+    xco = (xc as f64 + 0.5) as f32;
+    yco = (yc as f64 + 0.5) as f32;
+    denom = amat[0][0] * amat[1][1] - amat[1][0] * amat[0][1];
+    a11 = amat[1][1] / denom;
+    a12 = -amat[1][0] / denom;
+    a21 = -amat[0][1] / denom;
+    a22 = amat[0][0] / denom;
+    llnxa = nxa as usize;
+    assert!(array.len() >= nxa as usize * nya as usize);
+    assert!(bray.len() >= nxb as usize * nyb as usize);
 
-        // Limit the number of threads based on measurements indicating that
-        // this formula gives at least 75% parallel efficiency
-        num_threads = ((0.04 * (nxb as f64 * nyb as f64).sqrt()) + 0.5).floor() as i32;
-        let _num_threads = num_omp_threads(num_threads);
+    // Limit the number of threads based on measurements indicating that
+    // this formula gives at least 75% parallel efficiency
+    num_threads = ((0.04 * (nxb as f64 * nyb as f64).sqrt()) + 0.5).floor() as i32;
+    let _num_threads = num_omp_threads(num_threads);
 
-        // loop over output image
-        for iy in 1..=nyb {
-            ixbase = (iy as isize - 1) * nxb as isize - 1;
-            dyo = iy as f32 - ycen;
-            xbase = a12 * dyo + xco - a11 * xcen;
-            ybase = a22 * dyo + yco - a21 * xcen;
-            xst = 1.;
-            xnd = nxb as f32;
-            linefb = 0;
+    // loop over output image
+    for iy in 1..=nyb {
+        ixbase = (iy as usize - 1) * nxb as usize;
+        dyo = iy as f32 - ycen;
+        xbase = a12 * dyo + xco - a11 * xcen;
+        ybase = a22 * dyo + yco - a21 * xcen;
+        xst = 1.;
+        xnd = nxb as f32;
+        linefb = 0;
 
-            // Solve for limits in X of region that comes from safe range in X,
-            // or set up the line not to be done or to be done as fallback if
-            // the source in X is determined by xbase
-            if (a11 as f64).abs() > 1.0e-10 {
-                xlft = ((2.01 - xbase as f64) / a11 as f64) as f32;
-                xrt = ((nxa as f64 - 1.01 - xbase as f64) / a11 as f64) as f32;
-                let tmin = if xlft < xrt { xlft } else { xrt };
-                xst = if xst > tmin { xst } else { tmin };
-                let tmax = if xlft > xrt { xlft } else { xrt };
-                xnd = if xnd < tmax { xnd } else { tmax };
-            } else if (xbase as f64) < 2. || xbase as f64 >= nxa as f64 - 1. {
-                xst = nxb as f32;
-                xnd = 1.;
-                if xbase as f64 >= 0.5 || xbase as f64 <= nxa as f64 + 0.5 {
-                    linefb = 1;
-                }
+        // Solve for limits in X of region that comes from safe range in X,
+        // or set up the line not to be done or to be done as fallback if
+        // the source in X is determined by xbase
+        if (a11 as f64).abs() > 1.0e-10 {
+            xlft = ((2.01 - xbase as f64) / a11 as f64) as f32;
+            xrt = ((nxa as f64 - 1.01 - xbase as f64) / a11 as f64) as f32;
+            let tmin = if xlft < xrt { xlft } else { xrt };
+            xst = if xst > tmin { xst } else { tmin };
+            let tmax = if xlft > xrt { xlft } else { xrt };
+            xnd = if xnd < tmax { xnd } else { tmax };
+        } else if (xbase as f64) < 2. || xbase as f64 >= nxa as f64 - 1. {
+            xst = nxb as f32;
+            xnd = 1.;
+            if xbase as f64 >= 0.5 || xbase as f64 <= nxa as f64 + 0.5 {
+                linefb = 1;
             }
+        }
 
-            // Solve for limits in X of region from safe range in Y and combine
-            // these with the previous limits, or use the value of ybase
-            if (a21 as f64).abs() > 1.0e-10 {
-                xlft = ((2.01 - ybase as f64) / a21 as f64) as f32;
-                xrt = ((nya as f64 - 1.01 - ybase as f64) / a21 as f64) as f32;
-                let tmin = if xlft < xrt { xlft } else { xrt };
-                xst = if xst > tmin { xst } else { tmin };
-                let tmax = if xlft > xrt { xlft } else { xrt };
-                xnd = if xnd < tmax { xnd } else { tmax };
-            } else if (ybase as f64) < 2. || ybase as f64 >= nya as f64 - 1. {
-                xst = nxb as f32;
-                xnd = 1.;
-                if ybase as f64 >= 0.5 || ybase as f64 <= nya as f64 + 0.5 {
-                    linefb = 1;
-                }
+        // Solve for limits in X of region from safe range in Y and combine
+        // these with the previous limits, or use the value of ybase
+        if (a21 as f64).abs() > 1.0e-10 {
+            xlft = ((2.01 - ybase as f64) / a21 as f64) as f32;
+            xrt = ((nya as f64 - 1.01 - ybase as f64) / a21 as f64) as f32;
+            let tmin = if xlft < xrt { xlft } else { xrt };
+            xst = if xst > tmin { xst } else { tmin };
+            let tmax = if xlft > xrt { xlft } else { xrt };
+            xnd = if xnd < tmax { xnd } else { tmax };
+        } else if (ybase as f64) < 2. || ybase as f64 >= nya as f64 - 1. {
+            xst = nxb as f32;
+            xnd = 1.;
+            if ybase as f64 >= 0.5 || ybase as f64 <= nya as f64 + 0.5 {
+                linefb = 1;
             }
+        }
 
-            // Truncate the ending value down and the starting value up but do
-            // not pay any attention to xst bigger than nxb + 1
-            ixnd = (if -1.0e5f64 > xnd as f64 {
-                -1.0e5f64
+        // Truncate the ending value down and the starting value up but do
+        // not pay any attention to xst bigger than nxb + 1
+        ixnd = (if -1.0e5f64 > xnd as f64 {
+            -1.0e5f64
+        } else {
+            xnd as f64
+        }) as i32;
+        ixst = nxb + 1
+            - ((nxb as f64 + 1.
+                - (if (xst as f64) < nxb as f64 + 1. {
+                    xst as f64
+                } else {
+                    nxb as f64 + 1.
+                })) as i32);
+
+        // If they're crossed, set them up so fill will do whole line.
+        // Otherwise, set up fallback region limits to do 2 pixels if not
+        // doing whole line.  Then if doing fallback for whole line, set
+        // that up
+        ixfbst = 0;
+        ixfbnd = 0;
+        if ixst > ixnd {
+            ixst = nxb / 2;
+            ixnd = ixst - 1;
+            ixfbst = ixst;
+            ixfbnd = ixnd;
+        } else if linefb == 0 {
+            ixfbst = if 1 > ixst - 2 { 1 } else { ixst - 2 };
+            ixfbnd = if nxb < ixnd + 2 { nxb } else { ixnd + 2 };
+        }
+        if linefb != 0 {
+            ixfbst = 1;
+            ixfbnd = nxb;
+        }
+
+        // Do fill outside of fallback
+        for ix in 1..=ixfbst - 1 {
+            bray[ixbase + ix as usize - 1] = dmean;
+        }
+        for ix in ixfbnd + 1..=nxb {
+            bray[ixbase + ix as usize - 1] = dmean;
+        }
+
+        // Do fallback cubic to quadratic, or linear/nearest, with tests
+        iqst = ixfbst;
+        iqnd = ixst - 1;
+        for _ifall in 1..=2 {
+            if linear == 0 {
+                // Do quadratic interpolation
+                for ix in iqst..=iqnd {
+                    xp = a11 * ix as f32 + xbase;
+                    yp = a21 * ix as f32 + ybase;
+                    ixp = (xp as f64 + 0.5).floor() as i32;
+                    iyp = (yp as f64 + 0.5).floor() as i32;
+                    dennew = dmean;
+                    if ixp >= 1 && ixp <= nxa && iyp >= 1 && iyp <= nya {
+                        dx = xp - ixp as f32;
+                        dy = yp - iyp as f32;
+                        ixpp1 = ixp + 1;
+                        ixpm1 = ixp - 1;
+                        iypp1 = iyp + 1;
+                        iypm1 = iyp - 1;
+                        if ixpm1 < 1 {
+                            ixpm1 = 1;
+                        }
+                        if iypm1 < 1 {
+                            iypm1 = 1;
+                        }
+                        if ixpp1 > nxa {
+                            ixpp1 = nxa;
+                        }
+                        if iypp1 > nya {
+                            iypp1 = nya;
+                        }
+
+                        // set up terms for quadratic interpolation
+                        v2 = array[ixp as usize - 1 + (iypm1 as usize - 1) * llnxa];
+                        v4 = array[ixpm1 as usize - 1 + (iyp as usize - 1) * llnxa];
+                        v5 = array[ixp as usize - 1 + (iyp as usize - 1) * llnxa];
+                        v6 = array[ixpp1 as usize - 1 + (iyp as usize - 1) * llnxa];
+                        v8 = array[ixp as usize - 1 + (iypp1 as usize - 1) * llnxa];
+                        vmax = if v2 > v4 { v2 } else { v4 };
+                        vmax = if vmax > v5 { vmax } else { v5 };
+                        vmax = if vmax > v6 { vmax } else { v6 };
+                        vmax = if vmax > v8 { vmax } else { v8 };
+                        vmin = if v2 < v4 { v2 } else { v4 };
+                        vmin = if vmin < v5 { vmin } else { v5 };
+                        vmin = if vmin < v6 { vmin } else { v6 };
+                        vmin = if vmin < v8 { vmin } else { v8 };
+
+                        a = (v6 + v4) * 0.5f32 - v5;
+                        b = (v8 + v2) * 0.5f32 - v5;
+                        c = (v6 - v4) * 0.5f32;
+                        d = (v8 - v2) * 0.5f32;
+
+                        dennew = scale * (a * dx * dx + b * dy * dy + c * dx + d * dy + v5);
+                        if dennew > vmax {
+                            dennew = vmax;
+                        }
+                        if dennew < vmin {
+                            dennew = vmin;
+                        }
+                    }
+                    bray[ixbase + ix as usize - 1] = dennew;
+                }
             } else {
-                xnd as f64
-            }) as i32;
-            ixst = nxb + 1
-                - ((nxb as f64 + 1.
-                    - (if (xst as f64) < nxb as f64 + 1. {
-                        xst as f64
-                    } else {
-                        nxb as f64 + 1.
-                    })) as i32);
-
-            // If they're crossed, set them up so fill will do whole line.
-            // Otherwise, set up fallback region limits to do 2 pixels if not
-            // doing whole line.  Then if doing fallback for whole line, set
-            // that up
-            ixfbst = 0;
-            ixfbnd = 0;
-            if ixst > ixnd {
-                ixst = nxb / 2;
-                ixnd = ixst - 1;
-                ixfbst = ixst;
-                ixfbnd = ixnd;
-            } else if linefb == 0 {
-                ixfbst = if 1 > ixst - 2 { 1 } else { ixst - 2 };
-                ixfbnd = if nxb < ixnd + 2 { nxb } else { ixnd + 2 };
-            }
-            if linefb != 0 {
-                ixfbst = 1;
-                ixfbnd = nxb;
-            }
-
-            // Do fill outside of fallback
-            for ix in 1..=ixfbst - 1 {
-                *bray.offset(ix as isize + ixbase) = dmean;
-            }
-            for ix in ixfbnd + 1..=nxb {
-                *bray.offset(ix as isize + ixbase) = dmean;
-            }
-
-            // Do fallback cubic to quadratic, or linear/nearest, with tests
-            iqst = ixfbst;
-            iqnd = ixst - 1;
-            for _ifall in 1..=2 {
-                if linear == 0 {
-                    // Do quadratic interpolation
-                    for ix in iqst..=iqnd {
-                        xp = a11 * ix as f32 + xbase;
-                        yp = a21 * ix as f32 + ybase;
-                        ixp = (xp as f64 + 0.5).floor() as i32;
-                        iyp = (yp as f64 + 0.5).floor() as i32;
-                        dennew = dmean;
-                        if ixp >= 1 && ixp <= nxa && iyp >= 1 && iyp <= nya {
+                // fallback to linear
+                for ix in iqst..=iqnd {
+                    xp = a11 * ix as f32 + xbase;
+                    yp = a21 * ix as f32 + ybase;
+                    dennew = dmean;
+                    if linear > 0 {
+                        ixp = xp as i32;
+                        iyp = yp as i32;
+                        if ixp >= 1 && ixp < nxa && iyp >= 1 && iyp < nya {
                             dx = xp - ixp as f32;
                             dy = yp - iyp as f32;
-                            ixpp1 = ixp + 1;
-                            ixpm1 = ixp - 1;
-                            iypp1 = iyp + 1;
-                            iypm1 = iyp - 1;
-                            if ixpm1 < 1 {
-                                ixpm1 = 1;
-                            }
-                            if iypm1 < 1 {
-                                iypm1 = 1;
-                            }
-                            if ixpp1 > nxa {
-                                ixpp1 = nxa;
-                            }
-                            if iypp1 > nya {
-                                iypp1 = nya;
-                            }
-
-                            // set up terms for quadratic interpolation
-                            v2 = *array.offset(ixp as isize + (iypm1 as isize - 1) * llnxa - 1);
-                            v4 = *array.offset(ixpm1 as isize + (iyp as isize - 1) * llnxa - 1);
-                            v5 = *array.offset(ixp as isize + (iyp as isize - 1) * llnxa - 1);
-                            v6 = *array.offset(ixpp1 as isize + (iyp as isize - 1) * llnxa - 1);
-                            v8 = *array.offset(ixp as isize + (iypp1 as isize - 1) * llnxa - 1);
-                            vmax = if v2 > v4 { v2 } else { v4 };
-                            vmax = if vmax > v5 { vmax } else { v5 };
-                            vmax = if vmax > v6 { vmax } else { v6 };
-                            vmax = if vmax > v8 { vmax } else { v8 };
-                            vmin = if v2 < v4 { v2 } else { v4 };
-                            vmin = if vmin < v5 { vmin } else { v5 };
-                            vmin = if vmin < v6 { vmin } else { v6 };
-                            vmin = if vmin < v8 { vmin } else { v8 };
-
-                            a = (v6 + v4) * 0.5f32 - v5;
-                            b = (v8 + v2) * 0.5f32 - v5;
-                            c = (v6 - v4) * 0.5f32;
-                            d = (v8 - v2) * 0.5f32;
-
-                            dennew = scale * (a * dx * dx + b * dy * dy + c * dx + d * dy + v5);
-                            if dennew > vmax {
-                                dennew = vmax;
-                            }
-                            if dennew < vmin {
-                                dennew = vmin;
-                            }
+                            ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
+                            dennew = ((1. - dy as f64)
+                                * ((1. - dx as f64) * array[ind] as f64
+                                    + (dx * array[ind + 1]) as f64)
+                                + dy as f64
+                                    * ((1. - dx as f64) * array[ind + llnxa] as f64
+                                        + (dx * array[ind + llnxa + 1]) as f64))
+                                as f32;
                         }
-                        *bray.offset(ix as isize + ixbase) = dennew;
-                    }
-                } else {
-                    // fallback to linear
-                    for ix in iqst..=iqnd {
-                        xp = a11 * ix as f32 + xbase;
-                        yp = a21 * ix as f32 + ybase;
-                        dennew = dmean;
-                        if linear > 0 {
-                            ixp = xp as i32;
-                            iyp = yp as i32;
-                            if ixp >= 1 && ixp < nxa && iyp >= 1 && iyp < nya {
-                                dx = xp - ixp as f32;
-                                dy = yp - iyp as f32;
-                                ind = ixp as isize + (iyp as isize - 1) * llnxa - 1;
-                                dennew = ((1. - dy as f64)
-                                    * ((1. - dx as f64) * *array.offset(ind) as f64
-                                        + (dx * *array.offset(ind + 1)) as f64)
-                                    + dy as f64
-                                        * ((1. - dx as f64) * *array.offset(ind + llnxa) as f64
-                                            + (dx * *array.offset(ind + llnxa + 1)) as f64))
-                                    as f32;
-                            }
-                        } else {
-                            ixp = (xp as f64 + 0.5) as i32;
-                            iyp = (yp as f64 + 0.5) as i32;
-                            if ixp >= 1 && ixp <= nxa && iyp >= 1 && iyp <= nya {
-                                dennew =
-                                    *array.offset(ixp as isize + (iyp as isize - 1) * llnxa - 1);
-                            }
+                    } else {
+                        ixp = (xp as f64 + 0.5) as i32;
+                        iyp = (yp as f64 + 0.5) as i32;
+                        if ixp >= 1 && ixp <= nxa && iyp >= 1 && iyp <= nya {
+                            dennew = array[ixp as usize - 1 + (iyp as usize - 1) * llnxa];
                         }
-                        *bray.offset(ix as isize + ixbase) = dennew;
                     }
+                    bray[ixbase + ix as usize - 1] = dennew;
                 }
-                iqst = ixnd + 1;
-                iqnd = ixfbnd;
             }
+            iqst = ixnd + 1;
+            iqnd = ixfbnd;
+        }
 
-            if linear == 0 {
-                // Do cubic interpolation on the central region
-                for ix in ixst..=ixnd {
-                    xp = a11 * ix as f32 + xbase;
-                    yp = a21 * ix as f32 + ybase;
-                    ixp = xp as i32;
-                    iyp = yp as i32;
-                    dx = xp - ixp as f32;
-                    dy = yp - iyp as f32;
+        if linear == 0 {
+            // Do cubic interpolation on the central region
+            for ix in ixst..=ixnd {
+                xp = a11 * ix as f32 + xbase;
+                yp = a21 * ix as f32 + ybase;
+                ixp = xp as i32;
+                iyp = yp as i32;
+                dx = xp - ixp as f32;
+                dy = yp - iyp as f32;
 
-                    dxm1 = (dx as f64 - 1.) as f32;
-                    dxdxm1 = dx * dxm1;
-                    fx1 = -dxm1 * dxdxm1;
-                    fx4 = dx * dxdxm1;
-                    fx2 = (1. + (dx * dx) as f64 * (dx as f64 - 2.)) as f32;
-                    fx3 = (dx as f64 * (1. - dxdxm1 as f64)) as f32;
+                dxm1 = (dx as f64 - 1.) as f32;
+                dxdxm1 = dx * dxm1;
+                fx1 = -dxm1 * dxdxm1;
+                fx4 = dx * dxdxm1;
+                fx2 = (1. + (dx * dx) as f64 * (dx as f64 - 2.)) as f32;
+                fx3 = (dx as f64 * (1. - dxdxm1 as f64)) as f32;
 
-                    dym1 = (dy as f64 - 1.) as f32;
-                    dydym1 = dy * dym1;
-                    ind = ixp as isize + (iyp as isize - 1) * llnxa - 1;
-                    indmnxa = ind - llnxa;
-                    indpnxa = ind + llnxa;
-                    indpnxa2 = ind + 2 * llnxa;
-                    v1 = fx1 * *array.offset(indmnxa - 1)
-                        + fx2 * *array.offset(indmnxa)
-                        + fx3 * *array.offset(indmnxa + 1)
-                        + fx4 * *array.offset(indmnxa + 2);
-                    v2 = fx1 * *array.offset(ind - 1)
-                        + fx2 * *array.offset(ind)
-                        + fx3 * *array.offset(ind + 1)
-                        + fx4 * *array.offset(ind + 2);
-                    v3 = fx1 * *array.offset(indpnxa - 1)
-                        + fx2 * *array.offset(indpnxa)
-                        + fx3 * *array.offset(indpnxa + 1)
-                        + fx4 * *array.offset(indpnxa + 2);
-                    v4 = fx1 * *array.offset(indpnxa2 - 1)
-                        + fx2 * *array.offset(indpnxa2)
-                        + fx3 * *array.offset(indpnxa2 + 1)
-                        + fx4 * *array.offset(indpnxa2 + 2);
+                dym1 = (dy as f64 - 1.) as f32;
+                dydym1 = dy * dym1;
+                ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
+                indmnxa = ind - llnxa;
+                indpnxa = ind + llnxa;
+                indpnxa2 = ind + 2 * llnxa;
+                v1 = fx1 * array[indmnxa - 1]
+                    + fx2 * array[indmnxa]
+                    + fx3 * array[indmnxa + 1]
+                    + fx4 * array[indmnxa + 2];
+                v2 = fx1 * array[ind - 1]
+                    + fx2 * array[ind]
+                    + fx3 * array[ind + 1]
+                    + fx4 * array[ind + 2];
+                v3 = fx1 * array[indpnxa - 1]
+                    + fx2 * array[indpnxa]
+                    + fx3 * array[indpnxa + 1]
+                    + fx4 * array[indpnxa + 2];
+                v4 = fx1 * array[indpnxa2 - 1]
+                    + fx2 * array[indpnxa2]
+                    + fx3 * array[indpnxa2 + 1]
+                    + fx4 * array[indpnxa2 + 2];
 
-                    *bray.offset(ix as isize + ixbase) = ((-dym1 * dydym1 * v1) as f64
-                        + (1. + (dy * dy) as f64 * (dy as f64 - 2.)) * v2 as f64
-                        + dy as f64 * (1. - dydym1 as f64) * v3 as f64
-                        + (dy * dydym1 * v4) as f64)
-                        as f32;
-                }
-            } else if linear > 0 {
-                // do linear interpolation
-                for ix in ixst..=ixnd {
-                    xp = a11 * ix as f32 + xbase;
-                    yp = a21 * ix as f32 + ybase;
-                    ixp = xp as i32;
-                    iyp = yp as i32;
-                    dx = xp - ixp as f32;
-                    dy = yp - iyp as f32;
-                    ind = ixp as isize + (iyp as isize - 1) * llnxa - 1;
-                    *bray.offset(ix as isize + ixbase) = ((1. - dy as f64)
-                        * ((1. - dx as f64) * *array.offset(ind) as f64
-                            + (dx * *array.offset(ind + 1)) as f64)
-                        + dy as f64
-                            * ((1. - dx as f64) * *array.offset(ind + llnxa) as f64
-                                + (dx * *array.offset(ind + llnxa + 1)) as f64))
-                        as f32;
-                }
-            } else {
-                // do nearest neighbor interpolation
-                for ix in ixst..=ixnd {
-                    xp = a11 * ix as f32 + xbase;
-                    yp = a21 * ix as f32 + ybase;
-                    ixp = (xp as f64 + 0.5) as i32;
-                    iyp = (yp as f64 + 0.5) as i32;
-                    ind = ixp as isize + (iyp as isize - 1) * llnxa - 1;
-                    *bray.offset(ix as isize + ixbase) = *array.offset(ind);
-                }
+                bray[ixbase + ix as usize - 1] = ((-dym1 * dydym1 * v1) as f64
+                    + (1. + (dy * dy) as f64 * (dy as f64 - 2.)) * v2 as f64
+                    + dy as f64 * (1. - dydym1 as f64) * v3 as f64
+                    + (dy * dydym1 * v4) as f64)
+                    as f32;
+            }
+        } else if linear > 0 {
+            // do linear interpolation
+            for ix in ixst..=ixnd {
+                xp = a11 * ix as f32 + xbase;
+                yp = a21 * ix as f32 + ybase;
+                ixp = xp as i32;
+                iyp = yp as i32;
+                dx = xp - ixp as f32;
+                dy = yp - iyp as f32;
+                ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
+                bray[ixbase + ix as usize - 1] = ((1. - dy as f64)
+                    * ((1. - dx as f64) * array[ind] as f64 + (dx * array[ind + 1]) as f64)
+                    + dy as f64
+                        * ((1. - dx as f64) * array[ind + llnxa] as f64
+                            + (dx * array[ind + llnxa + 1]) as f64))
+                    as f32;
+            }
+        } else {
+            // do nearest neighbor interpolation
+            for ix in ixst..=ixnd {
+                xp = a11 * ix as f32 + xbase;
+                yp = a21 * ix as f32 + ybase;
+                ixp = (xp as f64 + 0.5) as i32;
+                iyp = (yp as f64 + 0.5) as i32;
+                ind = ixp as usize - 1 + (iyp as usize - 1) * llnxa;
+                bray[ixbase + ix as usize - 1] = array[ind];
             }
         }
     }
@@ -402,8 +400,11 @@ pub unsafe fn cubinterpfwrap(
         cmat[0][1] = *amat.add(1);
         cmat[1][0] = *amat.add(2);
         cmat[1][1] = *amat.add(3);
+        let (nxa, nya, nxb, nyb) = (*nxa, *nya, *nxb, *nyb);
+        let array = core::slice::from_raw_parts(array, nxa as usize * nya as usize);
+        let bray = core::slice::from_raw_parts_mut(bray, nxb as usize * nyb as usize);
         cubinterp(
-            array, bray, *nxa, *nya, *nxb, *nyb, &cmat, *xc, *yc, *xt, *yt, *scale, *dmean, *linear,
+            array, bray, nxa, nya, nxb, nyb, &cmat, *xc, *yc, *xt, *yt, *scale, *dmean, *linear,
         );
     }
 }
@@ -475,26 +476,24 @@ mod tests {
     }
 
     fn run(linear: i32, amat: &[[f32; 2]; 2], xt: f32, yt: f32, scale: f32) -> Vec<f32> {
-        let mut input = (0..8 * 6).map(src).collect::<Vec<f32>>();
+        let input = (0..8 * 6).map(src).collect::<Vec<f32>>();
         let mut output = vec![-12345.0f32; 10 * 8];
-        unsafe {
-            cubinterp(
-                input.as_mut_ptr(),
-                output.as_mut_ptr(),
-                8,
-                6,
-                10,
-                8,
-                amat,
-                4.0,
-                3.0,
-                xt,
-                yt,
-                scale,
-                -7.25,
-                linear,
-            )
-        };
+        cubinterp(
+            &input,
+            &mut output,
+            8,
+            6,
+            10,
+            8,
+            amat,
+            4.0,
+            3.0,
+            xt,
+            yt,
+            scale,
+            -7.25,
+            linear,
+        );
         output
     }
 
@@ -575,24 +574,22 @@ mod tests {
         let matrix = [[1., 0.], [0., 1.]];
         for mode in [-1, 1] {
             let mut output = vec![-1.; 25];
-            unsafe {
-                cubinterp(
-                    input.as_ptr().cast_mut(),
-                    output.as_mut_ptr(),
-                    5,
-                    5,
-                    5,
-                    5,
-                    &matrix,
-                    2.5,
-                    2.5,
-                    0.,
-                    0.,
-                    1.,
-                    -99.,
-                    mode,
-                )
-            };
+            cubinterp(
+                &input,
+                &mut output,
+                5,
+                5,
+                5,
+                5,
+                &matrix,
+                2.5,
+                2.5,
+                0.,
+                0.,
+                1.,
+                -99.,
+                mode,
+            );
             assert_eq!(output[2 + 2 * 5], input[2 + 2 * 5]);
         }
     }
@@ -631,24 +628,22 @@ mod tests {
         let input = vec![3.; 25];
         let mut output = vec![0.; 25];
         let matrix = [[1., 0.], [0., 1.]];
-        unsafe {
-            cubinterp(
-                input.as_ptr().cast_mut(),
-                output.as_mut_ptr(),
-                5,
-                5,
-                5,
-                5,
-                &matrix,
-                2.5,
-                2.5,
-                10.,
-                0.,
-                1.,
-                -7.,
-                1,
-            )
-        };
+        cubinterp(
+            &input,
+            &mut output,
+            5,
+            5,
+            5,
+            5,
+            &matrix,
+            2.5,
+            2.5,
+            10.,
+            0.,
+            1.,
+            -7.,
+            1,
+        );
         assert!(output.iter().all(|value| *value == -7.));
     }
 }

@@ -9,7 +9,7 @@ use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::b3d_error;
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_NO_SUPPORT, IIERR_NOT_FORMAT, IIFILE_QIMAGE, IIFORMAT_LUMINANCE,
-    IIFORMAT_RGB, IITYPE_UBYTE, ImodImageFile, ii_reopen, ii_simple_fill_mrc_header,
+    IIFORMAT_RGB, IITYPE_UBYTE, ImodImageFile, ii_simple_fill_mrc_header,
 };
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB, get_byte_map};
 use core::ffi::{c_char, c_void};
@@ -150,7 +150,15 @@ pub unsafe extern "C" fn qimage_read_section_byte(
     in_section: i32,
 ) -> i32 {
     let _ = in_section;
-    unsafe { read_section(in_file, buf, 1) }
+    let file = unsafe { &mut *in_file };
+    let xmax = if file.urx < 0 { file.nx - 1 } else { file.urx };
+    let ymax = if file.ury < 0 { file.ny - 1 } else { file.ury };
+    let pixels = (xmax - file.llx + 1).max(0) * (ymax - file.lly + 1).max(0);
+    read_section(
+        file,
+        unsafe { core::slice::from_raw_parts_mut(buf, pixels as usize) },
+        1,
+    )
 }
 
 /// Matches C `qimageReadSectionFloat` (`iiqimage.cpp:99`).
@@ -160,7 +168,15 @@ pub unsafe extern "C" fn qimage_read_section_float(
     in_section: i32,
 ) -> i32 {
     let _ = in_section;
-    unsafe { read_section(in_file, buf, 2) }
+    let file = unsafe { &mut *in_file };
+    let xmax = if file.urx < 0 { file.nx - 1 } else { file.urx };
+    let ymax = if file.ury < 0 { file.ny - 1 } else { file.ury };
+    let pixels = (xmax - file.llx + 1).max(0) * (ymax - file.lly + 1).max(0);
+    read_section(
+        file,
+        unsafe { core::slice::from_raw_parts_mut(buf, pixels as usize * 4) },
+        2,
+    )
 }
 
 /// Matches C `qimageReadSection` (`iiqimage.cpp:104`).
@@ -170,7 +186,20 @@ pub unsafe extern "C" fn qimage_read_section(
     in_section: i32,
 ) -> i32 {
     let _ = in_section;
-    unsafe { read_section(in_file, buf, 0) }
+    let file = unsafe { &mut *in_file };
+    let xmax = if file.urx < 0 { file.nx - 1 } else { file.urx };
+    let ymax = if file.ury < 0 { file.ny - 1 } else { file.ury };
+    let pixels = (xmax - file.llx + 1).max(0) * (ymax - file.lly + 1).max(0);
+    let bytes_per_pixel = if file.format == IIFORMAT_LUMINANCE {
+        1
+    } else {
+        3
+    };
+    read_section(
+        file,
+        unsafe { core::slice::from_raw_parts_mut(buf, pixels as usize * bytes_per_pixel) },
+        0,
+    )
 }
 
 /// Matches C `qimageReopen` (`iiqimage.cpp:109`).
@@ -210,17 +239,15 @@ pub unsafe extern "C" fn qimage_close(in_file: *mut ImodImageFile) {
 }
 
 /// Matches file-local C `ReadSection` (`iiqimage.cpp:134`).
-unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> i32 {
-    let ysize = unsafe { (*in_file).ny };
-    if unsafe { (*in_file).axis } == 2
-        || (byte > 1 && unsafe { (*in_file).format } != IIFORMAT_LUMINANCE)
-    {
+fn read_section(in_file: &mut ImodImageFile, buf: &mut [u8], byte: i32) -> i32 {
+    let ysize = in_file.ny;
+    if in_file.axis == 2 || (byte > 1 && in_file.format != IIFORMAT_LUMINANCE) {
         return -1;
     }
-    if unsafe { (*in_file).header }.is_null() && unsafe { ii_reopen(in_file) } != 0 {
+    if in_file.header.is_null() && unsafe { qimage_reopen(in_file) } != 0 {
         return -1;
     }
-    let image = unsafe { (*in_file).header.cast::<c_void>() };
+    let image = in_file.header.cast::<c_void>();
     let depth = unsafe { iiqimage_depth(image) };
     let direct_bytes = byte == 0 && depth == 8 && unsafe { iiqimage_is_grayscale(image) } != 0;
     let color_count = unsafe { iiqimage_color_count(image) };
@@ -228,26 +255,24 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> 
     for index in 0..color_count {
         colors.push(unsafe { iiqimage_color(image, index) });
     }
-    let xmin = unsafe { (*in_file).llx };
-    let ymin = unsafe { (*in_file).lly };
-    let xmax = if unsafe { (*in_file).urx } < 0 {
-        unsafe { (*in_file).nx - 1 }
+    let xmin = in_file.llx;
+    let ymin = in_file.lly;
+    let xmax = if in_file.urx < 0 {
+        in_file.nx - 1
     } else {
-        unsafe { (*in_file).urx }
+        in_file.urx
     };
-    let ymax = if unsafe { (*in_file).ury } < 0 {
-        unsafe { (*in_file).ny - 1 }
+    let ymax = if in_file.ury < 0 {
+        in_file.ny - 1
     } else {
-        unsafe { (*in_file).ury }
+        in_file.ury
     };
     let mut map = [0_u8; 256];
     let mut map2 = [0_u8; 256];
     if byte != 0 || direct_bytes {
         if byte != 0 {
-            let source_map = get_byte_map((*in_file).slope, (*in_file).offset, 0, 255, 0);
-            unsafe {
-                core::ptr::copy_nonoverlapping(source_map, map2.as_mut_ptr(), 256);
-            }
+            let source_map = get_byte_map(in_file.slope, in_file.offset, 0, 255, 0);
+            map2.copy_from_slice(unsafe { core::slice::from_raw_parts(source_map, 256) });
         }
         let maxind = (colors.len() as i32 - 1).max(0) as usize;
         for index in 0..256_usize {
@@ -263,17 +288,35 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> 
             };
         }
     }
-    let width = unsafe { (*in_file).nx } as usize;
+    let width = in_file.nx as usize;
     let mut indexes = vec![0_u8; width];
     let mut rgb = vec![0_u8; width * 3];
-    let mut out = buf;
+    let output_bytes = if byte != 0 && in_file.format != IIFORMAT_LUMINANCE {
+        1
+    } else if byte == 1 || direct_bytes {
+        1
+    } else if byte == 2 {
+        core::mem::size_of::<f32>()
+    } else {
+        3
+    };
+    let pixels = (xmax - xmin + 1) as usize * (ymax - ymin + 1) as usize;
+    if xmin < 0
+        || ymin < 0
+        || xmax >= in_file.nx
+        || ymax >= in_file.ny
+        || buf.len() < pixels * output_bytes
+    {
+        return -1;
+    }
+    let mut out = 0usize;
     for y in ymin..=ymax {
         if depth == 8 {
             unsafe { iiqimage_index_row(image, ysize - 1 - y, indexes.as_mut_ptr(), width as i32) };
         } else {
             unsafe { iiqimage_rgb_row(image, ysize - 1 - y, rgb.as_mut_ptr(), width as i32) };
         }
-        if byte != 0 && unsafe { (*in_file).format } != IIFORMAT_LUMINANCE {
+        if byte != 0 && in_file.format != IIFORMAT_LUMINANCE {
             for x in xmin..=xmax {
                 let (r, g, b) = if depth == 8 {
                     let value = colors[indexes[x as usize] as usize];
@@ -283,45 +326,35 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> 
                     (rgb[p], rgb[p + 1], rgb[p + 2])
                 };
                 let gray = (0.3 * r as f32 + 0.59 * g as f32 + 0.11 * b as f32) as u8;
-                unsafe {
-                    out.write(map2[gray as usize]);
-                    out = out.add(1);
-                }
+                buf[out] = map2[gray as usize];
+                out += 1;
             }
         } else if byte == 1 || direct_bytes {
             for x in xmin..=xmax {
-                unsafe {
-                    out.write(map[indexes[x as usize] as usize]);
-                    out = out.add(1);
-                }
+                buf[out] = map[indexes[x as usize] as usize];
+                out += 1;
             }
         } else if byte == 2 {
             for x in xmin..=xmax {
-                unsafe {
-                    out.cast::<f32>()
-                        .write(map[indexes[x as usize] as usize] as f32);
-                    out = out.add(core::mem::size_of::<f32>());
-                }
+                buf[out..][..4]
+                    .copy_from_slice(&(map[indexes[x as usize] as usize] as f32).to_ne_bytes());
+                out += core::mem::size_of::<f32>();
             }
         } else if depth == 8 {
             for x in xmin..=xmax {
                 let value = colors[indexes[x as usize] as usize];
-                unsafe {
-                    out.write((value >> 16) as u8);
-                    out.add(1).write((value >> 8) as u8);
-                    out.add(2).write(value as u8);
-                    out = out.add(3);
-                }
+                buf[out..][..3].copy_from_slice(&[
+                    (value >> 16) as u8,
+                    (value >> 8) as u8,
+                    value as u8,
+                ]);
+                out += 3;
             }
         } else {
             for x in xmin..=xmax {
                 let p = 3 * x as usize;
-                unsafe {
-                    out.write(rgb[p]);
-                    out.add(1).write(rgb[p + 1]);
-                    out.add(2).write(rgb[p + 2]);
-                    out = out.add(3);
-                }
+                buf[out..][..3].copy_from_slice(&rgb[p..][..3]);
+                out += 3;
             }
         }
     }

@@ -30,9 +30,7 @@ pub fn mxml_index_enum(ind: Option<&mut MxmlIndex>) -> Option<usize> {
      * Range check input...
      */
 
-    let Some(ind) = ind else {
-        return None;
-    };
+    let ind = ind?;
 
     /*
      * Return the next node...
@@ -62,9 +60,7 @@ pub fn mxml_index_find(
      * Range check input...
      */
 
-    let Some(ind) = ind else {
-        return None;
-    };
+    let ind = ind?;
     if ind.attr.is_none() && value.is_some() {
         return None;
     }
@@ -258,9 +254,7 @@ pub fn mxml_index_reset(ind: Option<&mut MxmlIndex>) -> Option<usize> {
      * Range check input...
      */
 
-    let Some(ind) = ind else {
-        return None;
-    };
+    let ind = ind?;
 
     /*
      * Set the index to the first element...
@@ -350,7 +344,7 @@ pub fn index_find(
         }
         .expect("mxml: index_find dereferences the element name the C strcmps");
 
-        let diff = element.cmp(&name);
+        let diff = element.cmp(name);
         if !diff.is_eq() {
             return diff;
         }
@@ -364,7 +358,7 @@ pub fn index_find(
         let attr = mxml_element_get_attr(arena, Some(node), ind.attr.as_deref())
             .expect("mxml: index_find dereferences the attribute the C strcmps");
 
-        let diff = value.cmp(&attr);
+        let diff = value.cmp(attr);
         if !diff.is_eq() {
             return diff;
         }

@@ -3,16 +3,16 @@
 
 use std::cell::Cell;
 
-/// C `NN_RULE` (`nn.h:26`).
-#[repr(C)]
+/// Nearest-neighbour interpolation rule, translated from C `NN_RULE`
+/// (`nn.h:26`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NnRule {
     Sibson = 0,
     NonSibsonian = 1,
 }
 
-/// C `point` (`nn.h:31`).
-#[repr(C)]
+/// A three-dimensional interpolation point, translated from C `point`
+/// (`nn.h:31`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {
     pub x: f64,

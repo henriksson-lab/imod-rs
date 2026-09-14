@@ -28,13 +28,16 @@ const IIERR_IO_ERROR: i32 = 2;
 
 /// Matches C `iiMRCCheck(ImodImageFile *)` (`iimrc.c:31`).
 pub unsafe extern "C" fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
-    if iif.is_null() || unsafe { (*iif).fp.is_none() } {
+    let Some(image) = (unsafe { iif.as_mut() }) else {
         return IIERR_BAD_CALL;
-    }
+    };
+    let Some(mut fp) = image.fp.clone() else {
+        return IIERR_BAD_CALL;
+    };
     // Keep the allocation in the image record; `header` below is only the
     // erased legacy ABI alias used by callbacks.
     let mut hdr = Box::new(MrcHeader::default());
-    let err = unsafe { mrc_head_read(&mut (*iif).fp.clone().unwrap(), &mut hdr) };
+    let err = unsafe { mrc_head_read(&mut fp, &mut hdr) };
     if err != 0 {
         return if err < 0 {
             IIERR_IO_ERROR
@@ -42,120 +45,126 @@ pub unsafe extern "C" fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
             IIERR_NOT_FORMAT
         };
     }
-    unsafe {
-        (*iif).mrc_header = Some(hdr);
-        let hdr = (*iif).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader;
-        (*iif).header = hdr.cast();
-        (*iif).file = IIFILE_MRC;
-        ii_mrc_mode_to_format_type(iif, (*hdr).mode, (*hdr).bytes_signed);
-        ii_sync_from_mrc_header(iif, hdr);
-        (*iif).smin = (*iif).amin;
-        (*iif).smax = (*iif).amax;
-        (*iif).has_piece_coords = ii_mrc_check_pcoord(hdr);
-        ii_mrc_set_io_funcs(iif, 0);
-    }
+    image.mrc_header = Some(hdr);
+    let header = image
+        .mrc_header
+        .as_deref_mut()
+        .expect("header just installed");
+    image.header = core::ptr::from_mut(header).cast();
+    image.file = IIFILE_MRC;
+    ii_mrc_mode_to_format_type(iif, header.mode, header.bytes_signed);
+    ii_sync_from_mrc_header(iif, header);
+    image.smin = image.amin;
+    image.smax = image.amax;
+    image.has_piece_coords = ii_mrc_check_pcoord(core::ptr::from_mut(header));
+    ii_mrc_set_io_funcs(iif, 0);
     0
 }
 
 /// Matches C `iiMRCmodeToFormatType` (`iimrc.c:69`).
 pub unsafe fn ii_mrc_mode_to_format_type(iif: *mut ImodImageFile, mode: i32, bytes_signed: i32) {
-    unsafe {
-        match mode {
-            MRC_MODE_BYTE => {
-                (*iif).format = IIFORMAT_LUMINANCE;
-                (*iif).type_ = if bytes_signed != 0 {
-                    IITYPE_BYTE
-                } else {
-                    IITYPE_UBYTE
-                };
-            }
-            MRC_MODE_SHORT => {
-                (*iif).format = IIFORMAT_LUMINANCE;
-                (*iif).type_ = IITYPE_SHORT;
-            }
-            MRC_MODE_USHORT => {
-                (*iif).format = IIFORMAT_LUMINANCE;
-                (*iif).type_ = IITYPE_USHORT;
-            }
-            MRC_MODE_FLOAT => {
-                (*iif).format = IIFORMAT_LUMINANCE;
-                (*iif).type_ = IITYPE_FLOAT;
-            }
-            MRC_MODE_COMPLEX_SHORT => {
-                (*iif).format = IIFORMAT_COMPLEX;
-                (*iif).type_ = IITYPE_SHORT;
-            }
-            MRC_MODE_COMPLEX_FLOAT => {
-                (*iif).format = IIFORMAT_COMPLEX;
-                (*iif).type_ = IITYPE_FLOAT;
-            }
-            MRC_MODE_RGB => {
-                (*iif).format = IIFORMAT_RGB;
-                (*iif).type_ = IITYPE_UBYTE;
-            }
-            _ => {}
+    let Some(image) = (unsafe { iif.as_mut() }) else {
+        return;
+    };
+    match mode {
+        MRC_MODE_BYTE => {
+            image.format = IIFORMAT_LUMINANCE;
+            image.type_ = if bytes_signed != 0 {
+                IITYPE_BYTE
+            } else {
+                IITYPE_UBYTE
+            };
         }
-        (*iif).mode = mode;
+        MRC_MODE_SHORT => {
+            image.format = IIFORMAT_LUMINANCE;
+            image.type_ = IITYPE_SHORT;
+        }
+        MRC_MODE_USHORT => {
+            image.format = IIFORMAT_LUMINANCE;
+            image.type_ = IITYPE_USHORT;
+        }
+        MRC_MODE_FLOAT => {
+            image.format = IIFORMAT_LUMINANCE;
+            image.type_ = IITYPE_FLOAT;
+        }
+        MRC_MODE_COMPLEX_SHORT => {
+            image.format = IIFORMAT_COMPLEX;
+            image.type_ = IITYPE_SHORT;
+        }
+        MRC_MODE_COMPLEX_FLOAT => {
+            image.format = IIFORMAT_COMPLEX;
+            image.type_ = IITYPE_FLOAT;
+        }
+        MRC_MODE_RGB => {
+            image.format = IIFORMAT_RGB;
+            image.type_ = IITYPE_UBYTE;
+        }
+        _ => {}
     }
+    image.mode = mode;
 }
 
 /// Matches C `iiMRCsetIOFuncs(ImodImageFile *, int)` (`iimrc.c:105`).
 pub unsafe extern "C" fn ii_mrc_set_io_funcs(in_file: *mut ImodImageFile, raw_file: i32) {
-    unsafe {
-        (*in_file).read_section = Some(ii_mrc_read_section);
-        (*in_file).read_section_byte = Some(ii_mrc_read_section_byte);
-        (*in_file).read_section_ushort = Some(ii_mrc_read_section_ushort);
-        (*in_file).read_section_float = Some(ii_mrc_read_section_float);
-        (*in_file).fill_mrc_header = Some(ii_mrc_fill_header);
-        if raw_file != 0 {
-            return;
-        }
-        (*in_file).clean_up = Some(ii_mrc_delete);
-        (*in_file).write_section = Some(ii_mrc_write_section);
-        (*in_file).write_section_float = Some(ii_mrc_write_section_float);
+    let Some(image) = (unsafe { in_file.as_mut() }) else {
+        return;
+    };
+    image.read_section = Some(ii_mrc_read_section);
+    image.read_section_byte = Some(ii_mrc_read_section_byte);
+    image.read_section_ushort = Some(ii_mrc_read_section_ushort);
+    image.read_section_float = Some(ii_mrc_read_section_float);
+    image.fill_mrc_header = Some(ii_mrc_fill_header);
+    if raw_file == 0 {
+        image.clean_up = Some(ii_mrc_delete);
+        image.write_section = Some(ii_mrc_write_section);
+        image.write_section_float = Some(ii_mrc_write_section_float);
     }
 }
 /// Matches C `iiMRCdelete(ImodImageFile *)` (`iimrc.c:118`).
 pub unsafe extern "C" fn ii_mrc_delete(in_file: *mut ImodImageFile) {
-    unsafe {
-        (*in_file).mrc_header = None;
-        (*in_file).header = core::ptr::null_mut();
+    if let Some(image) = unsafe { in_file.as_mut() } {
+        image.mrc_header = None;
+        image.header = core::ptr::null_mut();
     }
 }
 /// Matches C `iiMRCopenNew(ImodImageFile *, const char *)` (`iimrc.c:125`).
 pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
-    unsafe {
-        let name = (*in_file).filename.clone().unwrap_or_default();
-        (*in_file).fp = ImodFile::open(&name, mode);
-        if (*in_file).fp.is_none() {
-            // `ImodFile::open` is implemented with Rust's file API, so retain
-            // the operating-system failure as a Rust error value.
-            let error = std::io::Error::last_os_error();
-            let message = error.to_string();
-            let has_os_error = error.raw_os_error().is_some();
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "ERROR: iiMRCopenNew - Could not open {}{}{}\n",
-                    name,
-                    if has_os_error {
-                        " - system message: "
-                    } else {
-                        ""
-                    },
-                    message
-                ),
-            );
-            return 1;
-        }
-        (*in_file).mrc_header = Some(Box::new(MrcHeader::default()));
-        let header = (*in_file).mrc_header.as_deref_mut().unwrap();
-        mrc_head_new(header, 1, 1, 1, 0);
-        ii_mrc_set_io_funcs(in_file, 0);
-        header.fp = (*in_file).fp.clone();
-        (*in_file).header = (header as *mut MrcHeader).cast();
-        (*in_file).file = IIFILE_MRC;
+    let Some(image) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    let name = image.filename.clone().unwrap_or_default();
+    image.fp = ImodFile::open(&name, mode);
+    if image.fp.is_none() {
+        // `ImodFile::open` is implemented with Rust's file API, so retain
+        // the operating-system failure as a Rust error value.
+        let error = std::io::Error::last_os_error();
+        let message = error.to_string();
+        let has_os_error = error.raw_os_error().is_some();
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiMRCopenNew - Could not open {}{}{}\n",
+                name,
+                if has_os_error {
+                    " - system message: "
+                } else {
+                    ""
+                },
+                message
+            ),
+        );
+        return 1;
     }
+    image.mrc_header = Some(Box::new(MrcHeader::default()));
+    let header = image
+        .mrc_header
+        .as_deref_mut()
+        .expect("header just installed");
+    mrc_head_new(header, 1, 1, 1, 0);
+    header.fp = image.fp.clone();
+    image.header = core::ptr::from_mut(header).cast();
+    image.file = IIFILE_MRC;
+    ii_mrc_set_io_funcs(in_file, 0);
     0
 }
 /// Matches C `iiMRCfillHeader(ImodImageFile *, MrcHeader *)` (`iimrc.c:145`).
@@ -163,50 +172,63 @@ pub unsafe extern "C" fn ii_mrc_fill_header(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
-    unsafe {
-        if in_file.is_null() || (*in_file).header.is_null() {
-            return 1;
-        }
-        let source = (*in_file).header.cast::<MrcHeader>();
-        if hdata != source {
+    let (Some(image), Some(destination)) = (unsafe { in_file.as_ref() }, unsafe { hdata.as_mut() })
+    else {
+        return 1;
+    };
+    if image.header.is_null() {
+        return 1;
+    }
+    // MRC owns its header directly.  The erased `header` pointer remains only
+    // for the image dispatch ABI and can point at a non-MRC backend elsewhere.
+    if let Some(source) = image.mrc_header.as_deref().filter(|source| {
+        image.header.cast::<MrcHeader>() == core::ptr::from_ref(*source).cast_mut()
+    }) {
+        if !core::ptr::eq(source, destination) {
             // `iimrc.c:150` is `*hdata = *(MrcHeader *)inFile->header`, a
             // whole-struct assignment.  It has to be a `clone` here, not a
             // bitwise copy: `MrcHeader.fp` owns an `Rc<File>`, so duplicating
             // its bits leaves two owners at refcount one and the second drop
             // corrupts the heap.
-            *hdata = (*source).clone();
+            *destination = source.clone();
+        }
+    } else {
+        let source = unsafe { &*image.header.cast::<MrcHeader>() };
+        if !core::ptr::eq(source, destination) {
+            *destination = source.clone();
         }
     }
     0
 }
 /// Matches C `iiMRCsetLoadInfo(ImodImageFile *, IloadInfo *)` (`iimrc.c:157`).
 pub unsafe extern "C" fn ii_mrc_set_load_info(in_file: *mut ImodImageFile, li: *mut LoadInfo) {
-    unsafe {
-        mrc_init_li(Some(&mut *li), None);
-        (*li).xmin = (*in_file).llx;
-        (*li).ymin = (*in_file).lly;
-        (*li).zmin = (*in_file).llz;
-        (*li).xmax = if (*in_file).urx < 0 {
-            (*in_file).nx - 1
-        } else {
-            (*in_file).urx
-        };
-        (*li).ymax = if (*in_file).ury < 0 {
-            (*in_file).ny - 1
-        } else {
-            (*in_file).ury
-        };
-        (*li).zmax = if (*in_file).urz < 0 {
-            (*in_file).nz - 1
-        } else {
-            (*in_file).urz
-        };
-        (*li).slope = (*in_file).slope;
-        (*li).offset = (*in_file).offset;
-        (*li).axis = (*in_file).axis;
-        (*li).pad_left = (*in_file).pad_left;
-        (*li).pad_right = (*in_file).pad_right;
-    }
+    let (Some(image), Some(li)) = (unsafe { in_file.as_ref() }, unsafe { li.as_mut() }) else {
+        return;
+    };
+    mrc_init_li(Some(li), None);
+    li.xmin = image.llx;
+    li.ymin = image.lly;
+    li.zmin = image.llz;
+    li.xmax = if image.urx < 0 {
+        image.nx - 1
+    } else {
+        image.urx
+    };
+    li.ymax = if image.ury < 0 {
+        image.ny - 1
+    } else {
+        image.ury
+    };
+    li.zmax = if image.urz < 0 {
+        image.nz - 1
+    } else {
+        image.urz
+    };
+    li.slope = image.slope;
+    li.offset = image.offset;
+    li.axis = image.axis;
+    li.pad_left = image.pad_left;
+    li.pad_right = image.pad_right;
 }
 /// Matches C static `iiMRCreadSection` (`iimrc.c:192`).
 unsafe extern "C" fn ii_mrc_read_section(
@@ -232,24 +254,27 @@ unsafe fn read_section_unscaled(
     as_float: i32,
 ) -> i32 {
     let mut li = LoadInfo::default();
-    let h = unsafe { (*in_file).header.cast::<MrcHeader>() };
-    unsafe {
-        ii_mrc_set_load_info(in_file, &mut li);
-        li.outmin = (*in_file).smin.clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
-        li.outmax = (*in_file).smax.clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
-        li.black = 0;
-        li.white = 255;
-        li.mirror_fft = 0;
-        (*h).fp = (*in_file).fp.clone();
-        ii_change_call_count(1);
-        let err = if as_float != 0 {
-            mrc_read_section_float(h, &mut li, buf.cast(), in_section)
-        } else {
-            mrc_read_section(h, &mut li, buf.cast(), in_section)
-        };
-        ii_change_call_count(-1);
-        err
-    }
+    let Some(image) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    ii_mrc_set_load_info(in_file, &mut li);
+    li.outmin = image.smin.clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+    li.outmax = image.smax.clamp(-2_000_000_000.0, 2_000_000_000.0) as i32;
+    li.black = 0;
+    li.white = 255;
+    li.mirror_fft = 0;
+    let Some(header) = image.mrc_header.as_deref_mut() else {
+        return IIERR_BAD_CALL;
+    };
+    header.fp = image.fp.clone();
+    ii_change_call_count(1);
+    let err = if as_float != 0 {
+        mrc_read_section_float(header, &mut li, buf.cast(), in_section)
+    } else {
+        mrc_read_section(header, &mut li, buf.cast(), in_section)
+    };
+    ii_change_call_count(-1);
+    err
 }
 /// Matches C static `iiMRCreadSectionByte` (`iimrc.c:223`).
 unsafe extern "C" fn ii_mrc_read_section_byte(
@@ -275,22 +300,25 @@ unsafe fn read_section_scaled(
     outmax: i32,
 ) -> i32 {
     let mut li = LoadInfo::default();
-    let h = unsafe { (*in_file).header.cast::<MrcHeader>() };
-    unsafe {
-        ii_mrc_set_load_info(in_file, &mut li);
-        li.outmin = 0;
-        li.outmax = outmax;
-        li.mirror_fft = (*in_file).mirror_fft;
-        (*h).fp = (*in_file).fp.clone();
-        ii_change_call_count(1);
-        let err = if outmax > 255 {
-            mrc_read_section_ushort(h, &mut li, buf.cast(), in_section)
-        } else {
-            mrc_read_section_byte(h, &mut li, buf.cast(), in_section)
-        };
-        ii_change_call_count(-1);
-        err
-    }
+    let Some(image) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    ii_mrc_set_load_info(in_file, &mut li);
+    li.outmin = 0;
+    li.outmax = outmax;
+    li.mirror_fft = image.mirror_fft;
+    let Some(header) = image.mrc_header.as_deref_mut() else {
+        return IIERR_BAD_CALL;
+    };
+    header.fp = image.fp.clone();
+    ii_change_call_count(1);
+    let err = if outmax > 255 {
+        mrc_read_section_ushort(header, &mut li, buf.cast(), in_section)
+    } else {
+        mrc_read_section_byte(header, &mut li, buf.cast(), in_section)
+    };
+    ii_change_call_count(-1);
+    err
 }
 /// Matches C static `iiMRCwriteSection` (`iimrc.c:255`).
 unsafe extern "C" fn ii_mrc_write_section(
@@ -316,35 +344,39 @@ unsafe fn write_section(
     as_float: i32,
 ) -> i32 {
     let mut li = LoadInfo::default();
-    let h = unsafe { (*in_file).header.cast::<MrcHeader>() };
-    unsafe {
-        ii_mrc_set_load_info(in_file, &mut li);
-        (*h).fp = (*in_file).fp.clone();
-        if (*in_file).axis != 3 {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("ERROR: iiMRCwriteSection - attempting to write Y slices\n"),
-            );
-            return 1;
-        }
-        ii_change_call_count(1);
-        let err = if as_float != 0 {
-            mrc_write_z_float(h, &mut li, buf.cast(), in_section)
-        } else {
-            mrc_write_z(h, &mut li, buf.cast(), in_section)
-        };
-        ii_change_call_count(-1);
-        err
+    let Some(image) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    ii_mrc_set_load_info(in_file, &mut li);
+    if image.axis != 3 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: iiMRCwriteSection - attempting to write Y slices\n"),
+        );
+        return 1;
     }
+    let Some(header) = image.mrc_header.as_deref_mut() else {
+        return IIERR_BAD_CALL;
+    };
+    header.fp = image.fp.clone();
+    ii_change_call_count(1);
+    let err = if as_float != 0 {
+        mrc_write_z_float(header, &mut li, buf.cast(), in_section)
+    } else {
+        mrc_write_z(header, &mut li, buf.cast(), in_section)
+    };
+    ii_change_call_count(-1);
+    err
 }
 /// Matches C `iiMRCcheckPCoord(MrcHeader *)` (`iimrc.c:283`).
-pub unsafe extern "C" fn ii_mrc_check_pcoord(hdr: *mut MrcHeader) -> i32 {
-    unsafe {
-        if (*hdr).next == 0 || ((*hdr).nreal & 2) == 0 || (*hdr).creatid == -16224 {
-            return 0;
-        }
-        extra_is_nbytes_and_flags((*hdr).nint as i32, (*hdr).nreal as i32)
+pub unsafe extern "C" fn ii_mrc_check_pcoord(hdr: *const MrcHeader) -> i32 {
+    let Some(header) = (unsafe { hdr.as_ref() }) else {
+        return 0;
+    };
+    if header.next == 0 || (header.nreal & 2) == 0 || header.creatid == -16224 {
+        return 0;
     }
+    extra_is_nbytes_and_flags(header.nint as i32, header.nreal as i32)
 }
 /// Matches C `iiMRCLoadPCoord(ImodImageFile *, IloadInfo *, int, int, int)` (`iimrc.c:294`).
 pub unsafe extern "C" fn ii_mrc_load_pcoord(
@@ -356,11 +388,16 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
 ) -> i32 {
     let mut offset = 1024;
     let mut nread = nz;
-    let hdr = unsafe { (*in_file).header.cast::<MrcHeader>() };
-    let iflag = unsafe { (*hdr).nreal as i32 };
-    let nbytes = unsafe { (*hdr).nint as i32 };
-    let nextra = unsafe { (*hdr).next };
-    if unsafe { ii_mrc_check_pcoord(hdr) } == 0 {
+    let (Some(image), Some(li)) = (unsafe { in_file.as_ref() }, unsafe { li.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(header) = image.mrc_header.as_deref() else {
+        return IIERR_BAD_CALL;
+    };
+    let iflag = header.nreal as i32;
+    let nbytes = header.nint as i32;
+    let nextra = header.next;
+    if ii_mrc_check_pcoord(core::ptr::from_ref(header)) == 0 {
         return 0;
     }
     if iflag & 1 != 0 {
@@ -378,9 +415,11 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
             )
         };
     }
-    unsafe {
-        (*li).pcoords = Some(vec![0i32; 3 * nz as usize]);
-        let mut fp = (*in_file).fp.clone().unwrap();
+    {
+        li.pcoords = Some(vec![0i32; 3 * nz as usize]);
+        let Some(mut fp) = image.fp.clone() else {
+            return IIERR_BAD_CALL;
+        };
         b3d_fseek(&mut fp, offset, SEEK_SET);
         for i in 0..nread {
             let mut pcoordxy = [0_u8; 4];
@@ -392,7 +431,7 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
                 u16::from_ne_bytes([pcoordxy[2], pcoordxy[3]]),
             ];
             let mut z = i16::from_ne_bytes(pcoordz);
-            if (*hdr).swapped != 0 {
+            if header.swapped != 0 {
                 mrc_swap_shorts(
                     core::slice::from_raw_parts_mut(xy.as_mut_ptr().cast::<i16>(), 2),
                     2,
@@ -413,7 +452,7 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
                 );
                 break;
             }
-            let pcoords = (&mut (*li).pcoords).as_mut().unwrap();
+            let pcoords = li.pcoords.as_mut().expect("piece coordinates installed");
             pcoords[(i * 3) as usize] = xy[0] as i32;
             pcoords[(i * 3 + 1) as usize] = xy[1] as i32;
             pcoords[(i * 3 + 2) as usize] = z as i32;
@@ -422,11 +461,11 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
                 b3d_fseek(&mut fp, offset, SEEK_CUR);
             }
         }
-        (*li).plist = nread;
+        li.plist = nread;
     }
     // `mrc_plist_proc` belongs to the complete source file `plist.c`, whose
     // translation supplies this cross-file call.
-    crate::imod::libiimod::plist::mrc_plist_proc(li, nx, ny, nz)
+    crate::imod::libiimod::plist::mrc_plist_proc(&mut *li, nx, ny, nz)
 }
 
 #[cfg(test)]

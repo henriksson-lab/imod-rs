@@ -180,6 +180,7 @@ pub struct MxmlNode {
 /// from `malloc`.  `nodes` is the slot table — a `None` slot is freed memory —
 /// and `free` is the list of slots `mxml_free` released, which `mxml_new`
 /// reuses the way `malloc` reuses a freed block.
+#[derive(Default)]
 pub struct MxmlArena {
     pub nodes: Vec<Option<MxmlNode>>,
     pub free: Vec<usize>,
@@ -188,10 +189,7 @@ pub struct MxmlArena {
 impl MxmlArena {
     /// A heap with no nodes in it.
     pub fn new() -> MxmlArena {
-        MxmlArena {
-            nodes: Vec::new(),
-            free: Vec::new(),
-        }
+        Self::default()
     }
 
     /// The node in slot `index`, the arena's stand-in for `*node`.

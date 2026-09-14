@@ -92,7 +92,7 @@ mod implementation {
         }
     }
 
-    pub unsafe fn open_file(filename: &[u8], tif: &mut TfInfo, any_tif_pixel: i32) -> i32 {
+    pub fn open_file(filename: &[u8], tif: &mut TfInfo, any_tif_pixel: i32) -> i32 {
         let Ok(path) = std::str::from_utf8(filename) else {
             return 1;
         };
@@ -621,7 +621,7 @@ mod implementation {
         }
     }
 
-    pub unsafe fn read_section(tif: &mut TfInfo, section: i32) -> Option<Vec<u8>> {
+    pub fn read_section(tif: &mut TfInfo, section: i32) -> Option<Vec<u8>> {
         let files = FILES.lock().unwrap();
         Some(
             files
@@ -640,7 +640,7 @@ mod implementation {
             .contains_key(&(tif as *mut TfInfo as usize))
     }
 
-    pub unsafe fn close_file(tif: &mut TfInfo) -> bool {
+    pub fn close_file(tif: &mut TfInfo) -> bool {
         FILES
             .lock()
             .unwrap()
@@ -662,20 +662,21 @@ mod implementation {
             let short_path = std::env::temp_dir().join(format!("{stem}-short.tif"));
             let rgb_path = std::env::temp_dir().join(format!("{stem}-rgb.tif"));
             let shorts = [1_i16, 2, 3, 4];
-            unsafe {
-                write_image(
-                    short_path.to_str().unwrap(),
-                    2,
-                    2,
-                    MRC_MODE_SHORT,
-                    IICOMPRESSION_NONE,
-                    -1,
-                    0,
-                    shorts.as_ptr().cast(),
-                    core::mem::size_of_val(&shorts),
-                )
-                .unwrap();
-            }
+            let short_bytes: Vec<u8> = shorts
+                .iter()
+                .flat_map(|value| value.to_ne_bytes())
+                .collect();
+            write_image(
+                short_path.to_str().unwrap(),
+                2,
+                2,
+                MRC_MODE_SHORT,
+                IICOMPRESSION_NONE,
+                -1,
+                0,
+                &short_bytes,
+            )
+            .unwrap();
             let mut decoder = Decoder::new(File::open(&short_path).unwrap()).unwrap();
             match decoder.read_image().unwrap() {
                 DecodingResult::I16(values) => assert_eq!(values, vec![3, 4, 1, 2]),
@@ -683,20 +684,17 @@ mod implementation {
             }
 
             let rgb = [1_u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-            unsafe {
-                write_image(
-                    rgb_path.to_str().unwrap(),
-                    2,
-                    2,
-                    MRC_MODE_RGB,
-                    IICOMPRESSION_NONE,
-                    -1,
-                    0,
-                    rgb.as_ptr(),
-                    rgb.len(),
-                )
-                .unwrap();
-            }
+            write_image(
+                rgb_path.to_str().unwrap(),
+                2,
+                2,
+                MRC_MODE_RGB,
+                IICOMPRESSION_NONE,
+                -1,
+                0,
+                &rgb,
+            )
+            .unwrap();
             let mut decoder = Decoder::new(File::open(&rgb_path).unwrap()).unwrap();
             match decoder.read_image().unwrap() {
                 DecodingResult::U8(values) => {
@@ -769,12 +767,12 @@ pub use implementation::{close_file, contains, open_file, read_section};
 pub use implementation::{write_image, write_stack};
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn open_file(_filename: &[u8], _tif: &mut TfInfo, _any_tif_pixel: i32) -> i32 {
+pub fn open_file(_filename: &[u8], _tif: &mut TfInfo, _any_tif_pixel: i32) -> i32 {
     1
 }
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn read_section(_tif: &mut TfInfo, _section: i32) -> Option<Vec<u8>> {
+pub fn read_section(_tif: &mut TfInfo, _section: i32) -> Option<Vec<u8>> {
     None
 }
 
@@ -784,7 +782,7 @@ pub fn contains(_tif: &mut TfInfo) -> bool {
 }
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn close_file(_tif: &mut TfInfo) -> bool {
+pub fn close_file(_tif: &mut TfInfo) -> bool {
     false
 }
 

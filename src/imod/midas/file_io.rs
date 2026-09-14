@@ -290,13 +290,7 @@ mod tests {
             header.amean = 1.5;
             assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
             assert_eq!(
-                mrc_write_slice(
-                    [0_u8, 1, 2, 3].as_ptr().cast_mut().cast(),
-                    &mut fp,
-                    &mut header,
-                    0,
-                    b'z'
-                ),
+                mrc_write_slice(&[0_u8, 1, 2, 3], &mut fp, &mut header, 0, b'z'),
                 0
             );
             drop(fp);

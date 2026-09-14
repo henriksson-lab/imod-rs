@@ -8,26 +8,11 @@
     unused_variables
 )]
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_with_filter};
-unsafe extern "C" {
-    fn ceil(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn floor(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
-    fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-}
-pub type size_t = usize;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __uint64_t = u64;
-pub type b3dUInt32 = ::core::ffi::c_uint;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 pub const SLICE_MODE_FLOAT: i32 = 2 as i32;
 pub unsafe extern "C" fn iiu_read_binned(
     mut imUnit: i32,
     mut iz: i32,
-    mut array: *mut ::core::ffi::c_float,
+    mut array: *mut f32,
     mut ixDim: i32,
     mut iyDim: i32,
     mut ixUBstart: i32,
@@ -35,7 +20,7 @@ pub unsafe extern "C" fn iiu_read_binned(
     mut nbin: i32,
     mut nxBin: i32,
     mut nyBin: i32,
-    mut temp: *mut ::core::ffi::c_float,
+    mut temp: *mut f32,
     mut lenTemp: i32,
     mut ierr: *mut i32,
 ) {
@@ -74,8 +59,8 @@ pub unsafe extern "C" fn iiu_read_binned(
     let mut iCheckEnd: i32 = 0;
     let mut iCheck: i32 = 0;
     let mut nsum: i32 = 0;
-    let mut sum: ::core::ffi::c_float = 0.;
-    let mut binsq: ::core::ffi::c_float = 0.;
+    let mut sum: f32 = 0.;
+    let mut binsq: f32 = 0.;
     crate::imod::libiimod::unit_header::iiu_ret_size(
         imUnit,
         &raw mut nxyz as *mut i32,
@@ -118,14 +103,11 @@ pub unsafe extern "C" fn iiu_read_binned(
     if nbin == 1 as i32 {
         crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0 as i32);
         if ixDim == nx && nxBin == nx && nyBin == ny {
-            *ierr = crate::imod::libiimod::unit_fileio::iiu_read_section(
-                imUnit,
-                array as *mut ::core::ffi::c_void,
-            );
+            *ierr = crate::imod::libiimod::unit_fileio::iiu_read_section(imUnit, array.cast());
         } else {
             *ierr = crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
                 imUnit,
-                array as *mut ::core::ffi::c_void,
+                array.cast(),
                 ixDim,
                 ix0,
                 ix1,
@@ -135,8 +117,8 @@ pub unsafe extern "C" fn iiu_read_binned(
         }
         return;
     }
-    binsq = (nbin * nbin) as ::core::ffi::c_float;
-    if (lenTemp as ::core::ffi::c_float) < binsq {
+    binsq = (nbin * nbin) as f32;
+    if (lenTemp as f32) < binsq {
         {
             // Still on the C stream: this program's other output goes through
             // libc stdio and a Rust write here would reorder a redirected
@@ -177,7 +159,7 @@ pub unsafe extern "C" fn iiu_read_binned(
             crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0 as i32);
             *ierr = crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
                 imUnit,
-                temp as *mut ::core::ffi::c_void,
+                temp.cast(),
                 nxLoad,
                 ixStart,
                 ixStart + nxLoad - 1 as i32,
@@ -247,7 +229,7 @@ pub unsafe extern "C" fn iiu_read_binned(
                         }
                         *array.offset(
                             (ixDone + ixb - 1 as i32 + ixDim * (iyDone + iyb - 1 as i32)) as isize,
-                        ) = sum / nsum as ::core::ffi::c_float;
+                        ) = sum / nsum as f32;
                         ixb += 1;
                     }
                     iCheckStrt = iFastEnd + 1 as i32;
@@ -268,7 +250,7 @@ pub unsafe extern "C" fn iiu_read_binned(
 pub unsafe extern "C" fn iiureadbinned_(
     mut imUnit: *mut i32,
     mut iz: *mut i32,
-    mut array: *mut ::core::ffi::c_float,
+    mut array: *mut f32,
     mut ixDim: *mut i32,
     mut iyDim: *mut i32,
     mut ixUBstart: *mut i32,
@@ -276,7 +258,7 @@ pub unsafe extern "C" fn iiureadbinned_(
     mut nbin: *mut i32,
     mut nxBin: *mut i32,
     mut nyBin: *mut i32,
-    mut temp: *mut ::core::ffi::c_float,
+    mut temp: *mut f32,
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
@@ -288,7 +270,7 @@ pub unsafe extern "C" fn iiureadbinned_(
 pub unsafe extern "C" fn irdbinned_(
     mut imUnit: *mut i32,
     mut iz: *mut i32,
-    mut array: *mut ::core::ffi::c_float,
+    mut array: *mut f32,
     mut ixDim: *mut i32,
     mut iyDim: *mut i32,
     mut ixUBstart: *mut i32,
@@ -296,7 +278,7 @@ pub unsafe extern "C" fn irdbinned_(
     mut nbin: *mut i32,
     mut nxBin: *mut i32,
     mut nyBin: *mut i32,
-    mut temp: *mut ::core::ffi::c_float,
+    mut temp: *mut f32,
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
@@ -308,15 +290,15 @@ pub unsafe extern "C" fn irdbinned_(
 pub unsafe extern "C" fn iiu_read_reduced(
     mut imUnit: i32,
     mut iz: i32,
-    mut array: *mut ::core::ffi::c_float,
+    mut array: *mut f32,
     mut nxDim: i32,
-    mut xUBstart: ::core::ffi::c_float,
-    mut yUBstart: ::core::ffi::c_float,
-    mut redFac: ::core::ffi::c_float,
+    mut xUBstart: f32,
+    mut yUBstart: f32,
+    mut redFac: f32,
     mut nxRed: i32,
     mut nyRed: i32,
     mut ifiltType: i32,
-    mut temp: *mut ::core::ffi::c_float,
+    mut temp: *mut f32,
     mut lenTemp: i32,
     mut ierr: *mut i32,
 ) {
@@ -329,10 +311,10 @@ pub unsafe extern "C" fn iiu_read_reduced(
     let mut nxyz: [i32; 3] = [0; 3];
     let mut mxyz: [i32; 3] = [0; 3];
     let mut nxyzst: [i32; 3] = [0; 3];
-    let mut chunkYstart: ::core::ffi::c_float = 0.;
-    let mut zoomFac: ::core::ffi::c_float = 0.;
-    let mut xUseStart: ::core::ffi::c_float = 0.;
-    let mut yUseStart: ::core::ffi::c_float = 0.;
+    let mut chunkYstart: f32 = 0.;
+    let mut zoomFac: f32 = 0.;
+    let mut xUseStart: f32 = 0.;
+    let mut yUseStart: f32 = 0.;
     let mut nxLoad: i32 = 0;
     let mut nyLoad: i32 = 0;
     let mut maxLineLoad: i32 = 0;
@@ -372,21 +354,21 @@ pub unsafe extern "C" fn iiu_read_reduced(
     );
     nx = nxyz[0 as i32 as usize];
     ny = nxyz[1 as i32 as usize];
-    zoomFac = (1.0f64 / redFac as ::core::ffi::c_double) as ::core::ffi::c_float;
+    zoomFac = (1.0 / redFac as f64) as f32;
     ird_red_sizes_for_load(
         xUBstart,
         redFac,
         nxRed,
         nx,
-        &raw mut xUseStart,
-        &raw mut nxRedUse,
-        &raw mut ibXoffset,
-        &raw mut fillXend,
-        &raw mut nbin,
-        &raw mut loadXoffset,
-        &raw mut loadXextra,
-        &raw mut ixEdgeOffset,
-        ierr,
+        &mut xUseStart,
+        &mut nxRedUse,
+        &mut ibXoffset,
+        &mut fillXend,
+        &mut nbin,
+        &mut loadXoffset,
+        &mut loadXextra,
+        &mut ixEdgeOffset,
+        &mut *ierr,
     );
     if *ierr != 0 as i32 {
         return;
@@ -396,54 +378,42 @@ pub unsafe extern "C" fn iiu_read_reduced(
         redFac,
         nyRed,
         ny,
-        &raw mut yUseStart,
-        &raw mut nyRedUse,
-        &raw mut ibYoffset,
-        &raw mut fillYend,
-        &raw mut nbin,
-        &raw mut loadYoffset,
-        &raw mut loadYextra,
-        &raw mut iyEdgeOffset,
-        ierr,
+        &mut yUseStart,
+        &mut nyRedUse,
+        &mut ibYoffset,
+        &mut fillYend,
+        &mut nbin,
+        &mut loadYoffset,
+        &mut loadYextra,
+        &mut iyEdgeOffset,
+        &mut *ierr,
     );
     if *ierr != 0 as i32 {
         return;
     }
     iyEdgeStart = 1 as i32;
-    *ierr = select_zoom_filter(ifiltType, zoomFac as ::core::ffi::c_double, &mut ifiltWidth);
+    *ierr = select_zoom_filter(ifiltType, zoomFac as f64, &mut ifiltWidth);
     if *ierr != 0 as i32 {
         return;
     }
     ihalfWidth = (ifiltWidth + 3 as i32) / 2 as i32;
-    ix0 = (if 0 as i32 as ::core::ffi::c_double
-        > floor((xUseStart - ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double)
-    {
-        0 as i32 as ::core::ffi::c_double
+    ix0 = (if 0.0 > (xUseStart - ihalfWidth as f32).floor() as f64 {
+        0.0
     } else {
-        floor((xUseStart - ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double)
+        (xUseStart - ihalfWidth as f32).floor() as f64
     }) as i32;
-    ix1 = (if ((nx - 1 as i32) as ::core::ffi::c_double)
-        < ceil(
-            (xUseStart
-                + redFac * nxRedUse as ::core::ffi::c_float
-                + ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double,
-        ) {
-        (nx - 1 as i32) as ::core::ffi::c_double
+    ix1 = (if ((nx - 1) as f64)
+        < ((xUseStart + redFac * nxRedUse as f32 + ihalfWidth as f32).ceil() as f64)
+    {
+        (nx - 1) as f64
     } else {
-        ceil(
-            (xUseStart
-                + redFac * nxRedUse as ::core::ffi::c_float
-                + ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double,
-        )
+        ((xUseStart + redFac * nxRedUse as f32 + ihalfWidth as f32).ceil() as f64)
     }) as i32;
     nxLoad = ix1 + 1 as i32 - ix0;
     maxLineLoad = lenTemp / nxLoad;
-    maxChunkLines =
-        (zoomFac * (maxLineLoad - 2 as i32 * ihalfWidth) as ::core::ffi::c_float) as i32;
+    maxChunkLines = (zoomFac * (maxLineLoad - 2 * ihalfWidth) as f32) as i32;
     *ierr = 3 as i32;
-    if redFac <= 32 as i32 as ::core::ffi::c_float && maxChunkLines < 10 as i32
-        || maxChunkLines < 2 as i32
-    {
+    if redFac <= 32.0 && maxChunkLines < 10 || maxChunkLines < 2 as i32 {
         return;
     }
     *ierr = 5 as i32;
@@ -455,49 +425,26 @@ pub unsafe extern "C" fn iiu_read_reduced(
         } else {
             iyStart + maxChunkLines
         };
-        iy0 = (if 0 as i32 as ::core::ffi::c_double
-            > floor(
-                (yUseStart + redFac * iyStart as ::core::ffi::c_float
-                    - ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double,
-            ) {
-            0 as i32 as ::core::ffi::c_double
+        iy0 = (if 0.0 > (yUseStart + redFac * iyStart as f32 - ihalfWidth as f32).floor() as f64 {
+            0.0
         } else {
-            floor(
-                (yUseStart + redFac * iyStart as ::core::ffi::c_float
-                    - ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double,
-            )
+            (yUseStart + redFac * iyStart as f32 - ihalfWidth as f32).floor() as f64
         }) as i32;
-        iy1 = (if ((ny - 1 as i32) as ::core::ffi::c_double)
-            < ceil(
-                (yUseStart
-                    + redFac * iyEnd as ::core::ffi::c_float
-                    + ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double,
-            ) {
-            (ny - 1 as i32) as ::core::ffi::c_double
+        iy1 = (if ((ny - 1) as f64)
+            < (yUseStart + redFac * iyEnd as f32 + ihalfWidth as f32).ceil() as f64
+        {
+            (ny - 1) as f64
         } else {
-            ceil(
-                (yUseStart
-                    + redFac * iyEnd as ::core::ffi::c_float
-                    + ihalfWidth as ::core::ffi::c_float) as ::core::ffi::c_double,
-            )
+            (yUseStart + redFac * iyEnd as f32 + ihalfWidth as f32).ceil() as f64
         }) as i32;
         while iy1 >= iy0 + maxLineLoad {
             iyEnd -= 1;
-            iy1 = (if ((ny - 1 as i32) as ::core::ffi::c_double)
-                < ceil(
-                    (yUseStart
-                        + redFac * iyEnd as ::core::ffi::c_float
-                        + ihalfWidth as ::core::ffi::c_float)
-                        as ::core::ffi::c_double,
-                ) {
-                (ny - 1 as i32) as ::core::ffi::c_double
+            iy1 = (if ((ny - 1) as f64)
+                < (yUseStart + redFac * iyEnd as f32 + ihalfWidth as f32).ceil() as f64
+            {
+                (ny - 1) as f64
             } else {
-                ceil(
-                    (yUseStart
-                        + redFac * iyEnd as ::core::ffi::c_float
-                        + ihalfWidth as ::core::ffi::c_float)
-                        as ::core::ffi::c_double,
-                )
+                (yUseStart + redFac * iyEnd as f32 + ihalfWidth as f32).ceil() as f64
             }) as i32;
         }
         indStart = 1 as i32;
@@ -519,8 +466,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
         *ierr = -(1 as i32);
         ierr2 = crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
             imUnit,
-            temp.offset((indStart - 1 as i32) as isize) as *mut ::core::ffi::c_float
-                as *mut ::core::ffi::c_void,
+            temp.offset((indStart - 1) as isize).cast(),
             nxLoad,
             ix0,
             ix1,
@@ -530,18 +476,17 @@ pub unsafe extern "C" fn iiu_read_reduced(
         if ierr2 != 0 as i32 {
             return;
         }
-        chunkYstart =
-            yUseStart + iyStart as ::core::ffi::c_float * redFac - iy0 as ::core::ffi::c_float;
+        chunkYstart = yUseStart + iyStart as f32 * redFac - iy0 as f32;
         // `zoomWithFilter` takes typed line and output slices now; the
         // `makeLinePointers` block above still runs for its error-5 path.
-        let linePtrVec: Vec<&[::core::ffi::c_float]> = (0..(iy1 + 1 - iy0) as usize)
+        let linePtrVec: Vec<&[f32]> = (0..(iy1 + 1 - iy0) as usize)
             .map(|i| ::core::slice::from_raw_parts(temp.add(i * nxLoad as usize), nxLoad as usize))
             .collect();
         *ierr = zoom_with_filter(
             crate::imod::libcfshr::zoomdown::ZoomLines::Float(&linePtrVec),
             nxLoad,
             iy1 + 1 as i32 - iy0,
-            xUseStart - ix0 as ::core::ffi::c_float,
+            xUseStart - ix0 as f32,
             chunkYstart,
             nxRedUse,
             iyEnd - iyStart,
@@ -561,7 +506,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             return;
         }
         if nbin > 0 as i32 {
-            iyEdgeStart = floor(chunkYstart as ::core::ffi::c_double + 0.5f64) as i32 + 1 as i32;
+            iyEdgeStart = (chunkYstart as f64 + 0.5).floor() as i32 + 1;
             if iyStart == 0 as i32 && loadYoffset > 0 as i32 {
                 iyEdgeStart = 1 as i32;
             }
@@ -575,7 +520,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if iyStart == 0 as i32 && loadYoffset > 0 as i32 {
                 ird_red_bin_edge(
-                    temp,
+                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -584,7 +529,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     0 as i32,
                     nbin,
                     loadYoffset,
-                    array,
+                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
                     nxDim,
                     1 as i32,
                     nxRed,
@@ -594,7 +539,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if loadXoffset > 0 as i32 {
                 ird_red_bin_edge(
-                    temp,
+                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -603,7 +548,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     iyEdgeOffset,
                     loadXoffset,
                     nbin,
-                    array,
+                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
                     nxDim,
                     1 as i32,
                     1 as i32,
@@ -613,7 +558,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if loadXextra > 0 as i32 {
                 ird_red_bin_edge(
-                    temp,
+                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     nxLoad + 1 as i32 - loadXextra,
@@ -622,7 +567,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     iyEdgeOffset,
                     loadXoffset,
                     nbin,
-                    array,
+                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
                     nxDim,
                     nxRed,
                     nxRed,
@@ -632,7 +577,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if iyEnd >= nyRedUse && loadYextra > 0 as i32 {
                 ird_red_bin_edge(
-                    temp,
+                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -641,7 +586,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     0 as i32,
                     nbin,
                     loadYextra,
-                    array,
+                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
                     nxDim,
                     1 as i32,
                     nxRed,
@@ -654,26 +599,17 @@ pub unsafe extern "C" fn iiu_read_reduced(
         iyStart = iyEnd;
     }
     if nbin == 0 as i32 {
-        if yUBstart < 0 as i32 as ::core::ffi::c_float {
-            memcpy(
-                array as *mut ::core::ffi::c_void,
-                array.offset(nxDim as isize) as *mut ::core::ffi::c_float
-                    as *const ::core::ffi::c_void,
-                (nxRed as size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
-            );
+        if yUBstart < 0.0 {
+            core::ptr::copy_nonoverlapping(array.add(nxDim as usize), array, nxRed as usize);
         }
         if fillYend != 0 {
-            memcpy(
-                array.offset((nxDim * (nyRed - 1 as i32)) as isize) as *mut ::core::ffi::c_float
-                    as *mut ::core::ffi::c_void,
-                array.offset((nxDim * (nyRed - 2 as i32)) as isize) as *mut ::core::ffi::c_float
-                    as *const ::core::ffi::c_void,
-                (nxRed as size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_float>() as size_t),
+            core::ptr::copy_nonoverlapping(
+                array.add((nxDim * (nyRed - 2)) as usize),
+                array.add((nxDim * (nyRed - 1)) as usize),
+                nxRed as usize,
             );
         }
-        if xUBstart < 0 as i32 as ::core::ffi::c_float {
+        if xUBstart < 0.0 {
             ix = 0 as i32;
             while ix < nyRed {
                 *array.offset((ix * nxDim) as isize) =
@@ -695,15 +631,15 @@ pub unsafe extern "C" fn iiu_read_reduced(
 pub unsafe extern "C" fn irdreduced_(
     mut imUnit: *mut i32,
     mut iz: *mut i32,
-    mut array: *mut ::core::ffi::c_float,
+    mut array: *mut f32,
     mut nxDim: *mut i32,
-    mut xUBstart: *mut ::core::ffi::c_float,
-    mut yUBstart: *mut ::core::ffi::c_float,
-    mut redFac: *mut ::core::ffi::c_float,
+    mut xUBstart: *mut f32,
+    mut yUBstart: *mut f32,
+    mut redFac: *mut f32,
     mut nxRed: *mut i32,
     mut nyRed: *mut i32,
     mut ifiltType: *mut i32,
-    mut temp: *mut ::core::ffi::c_float,
+    mut temp: *mut f32,
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
@@ -715,15 +651,15 @@ pub unsafe extern "C" fn irdreduced_(
 pub unsafe extern "C" fn iiureadreduced_(
     mut imUnit: *mut i32,
     mut iz: *mut i32,
-    mut array: *mut ::core::ffi::c_float,
+    mut array: *mut f32,
     mut nxDim: *mut i32,
-    mut xUBstart: *mut ::core::ffi::c_float,
-    mut yUBstart: *mut ::core::ffi::c_float,
-    mut redFac: *mut ::core::ffi::c_float,
+    mut xUBstart: *mut f32,
+    mut yUBstart: *mut f32,
+    mut redFac: *mut f32,
     mut nxRed: *mut i32,
     mut nyRed: *mut i32,
     mut ifiltType: *mut i32,
-    mut temp: *mut ::core::ffi::c_float,
+    mut temp: *mut f32,
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
@@ -732,81 +668,79 @@ pub unsafe extern "C" fn iiureadreduced_(
         temp, *lenTemp, ierr,
     );
 }
-unsafe extern "C" fn ird_red_sizes_for_load(
-    mut xUBstart: ::core::ffi::c_float,
-    mut redFac: ::core::ffi::c_float,
-    mut nxRed: i32,
-    mut nx: i32,
-    mut xUseStart: *mut ::core::ffi::c_float,
-    mut nxRedUse: *mut i32,
-    mut ibXoffset: *mut i32,
-    mut fillEnd: *mut i32,
-    mut nbin: *mut i32,
-    mut loadOffset: *mut i32,
-    mut loadExtra: *mut i32,
-    mut ixEdgeOffset: *mut i32,
-    mut ierr: *mut i32,
+fn ird_red_sizes_for_load(
+    x_ub_start: f32,
+    red_fac: f32,
+    nx_red: i32,
+    nx: i32,
+    x_use_start: &mut f32,
+    nx_red_use: &mut i32,
+    ib_x_offset: &mut i32,
+    fill_end: &mut i32,
+    nbin: &mut i32,
+    load_offset: &mut i32,
+    load_extra: &mut i32,
+    ix_edge_offset: &mut i32,
+    ierr: &mut i32,
 ) {
-    *xUseStart = xUBstart;
-    *nxRedUse = nxRed;
-    *ibXoffset = 0 as i32;
-    *nbin = 0 as i32;
-    *loadOffset = 0 as i32;
-    *loadExtra = 0 as i32;
-    *ixEdgeOffset = 0 as i32;
-    *fillEnd = 0 as i32;
-    *ierr = 4 as i32;
-    if (xUBstart as ::core::ffi::c_double) < -(redFac as ::core::ffi::c_double - 0.99f64)
-        || (xUBstart + redFac * nxRed as ::core::ffi::c_float) as i32 as ::core::ffi::c_double
-            > (nx as ::core::ffi::c_float + redFac) as ::core::ffi::c_double - 0.99f64
+    *x_use_start = x_ub_start;
+    *nx_red_use = nx_red;
+    *ib_x_offset = 0;
+    *nbin = 0;
+    *load_offset = 0;
+    *load_extra = 0;
+    *ix_edge_offset = 0;
+    *fill_end = 0;
+    *ierr = 4;
+    if (x_ub_start as f64) < -(red_fac as f64 - 0.99)
+        || (x_ub_start + red_fac * nx_red as f32) as i32 as f64
+            > (nx as f32 + red_fac) as f64 - 0.99
     {
         return;
     }
-    *ierr = 0 as i32;
-    if ((if floor(redFac as ::core::ffi::c_double + 0.5f64) as i32 as ::core::ffi::c_float - redFac
-        >= 0 as i32 as ::core::ffi::c_float
-    {
-        floor(redFac as ::core::ffi::c_double + 0.5f64) as i32 as ::core::ffi::c_float - redFac
+    *ierr = 0;
+    if ((if (red_fac as f64 + 0.5).floor() as i32 as f32 - red_fac >= 0.0 {
+        (red_fac as f64 + 0.5).floor() as i32 as f32 - red_fac
     } else {
-        -(floor(redFac as ::core::ffi::c_double + 0.5f64) as i32 as ::core::ffi::c_float - redFac)
-    }) as ::core::ffi::c_double)
-        < 1.0e-4f64
+        -((red_fac as f64 + 0.5).floor() as i32 as f32 - red_fac)
+    }) as f64)
+        < 1.0e-4
     {
-        *nbin = floor(redFac as ::core::ffi::c_double + 0.5f64) as i32;
+        *nbin = (red_fac as f64 + 0.5).floor() as i32;
     }
-    if xUBstart < 0 as i32 as ::core::ffi::c_float {
-        *xUseStart = xUBstart + redFac;
-        *nxRedUse = nxRed - 1 as i32;
-        *ibXoffset = 1 as i32;
-        if *nbin > 0 as i32 {
-            *loadOffset = floor(*xUseStart as ::core::ffi::c_double + 0.5f64) as i32;
-            *ixEdgeOffset = *nbin - *loadOffset;
+    if x_ub_start < 0.0 {
+        *x_use_start = x_ub_start + red_fac;
+        *nx_red_use = nx_red - 1;
+        *ib_x_offset = 1;
+        if *nbin > 0 {
+            *load_offset = (*x_use_start as f64 + 0.5).floor() as i32;
+            *ix_edge_offset = *nbin - *load_offset;
         }
     }
-    if (*xUseStart + redFac * *nxRedUse as ::core::ffi::c_float) as i32 > nx {
-        *nxRedUse -= 1 as i32;
-        *fillEnd = 1 as i32;
-        if *nbin > 0 as i32 {
-            *loadExtra = nx - (*xUseStart + redFac * *nxRedUse as ::core::ffi::c_float) as i32;
+    if (*x_use_start + red_fac * *nx_red_use as f32) as i32 > nx {
+        *nx_red_use -= 1;
+        *fill_end = 1;
+        if *nbin > 0 {
+            *load_extra = nx - (*x_use_start + red_fac * *nx_red_use as f32) as i32;
         }
     }
 }
-unsafe extern "C" fn ird_red_bin_edge(
-    mut temp: *mut ::core::ffi::c_float,
-    mut nxIn: i32,
-    mut nyIn: i32,
-    mut ixInStart: i32,
-    mut ixInOffset: i32,
-    mut iyInStart: i32,
-    mut iyInOffset: i32,
-    mut nbinX: i32,
-    mut nbinY: i32,
-    mut array: *mut ::core::ffi::c_float,
-    mut nxDimOut: i32,
-    mut ixOutStart: i32,
-    mut ixOutEnd: i32,
-    mut iyOutStart: i32,
-    mut iyOutEnd: i32,
+fn ird_red_bin_edge(
+    temp: &[f32],
+    nx_in: i32,
+    ny_in: i32,
+    ix_in_start: i32,
+    ix_in_offset: i32,
+    iy_in_start: i32,
+    iy_in_offset: i32,
+    nbin_x: i32,
+    nbin_y: i32,
+    array: &mut [f32],
+    nx_dim_out: i32,
+    ix_out_start: i32,
+    ix_out_end: i32,
+    iy_out_start: i32,
+    iy_out_end: i32,
 ) {
     let mut ix: i32 = 0;
     let mut iy: i32 = 0;
@@ -818,27 +752,27 @@ unsafe extern "C" fn ird_red_bin_edge(
     let mut iyEnd: i32 = 0;
     let mut ixUse: i32 = 0;
     let mut iyUse: i32 = 0;
-    let mut sum: ::core::ffi::c_float = 0.;
-    iyStart = iyInStart - iyInOffset;
-    iyb = iyOutStart;
-    while iyb <= iyOutEnd {
-        ixStart = ixInStart - ixInOffset;
-        iyEnd = if nyIn < iyStart + nbinY - 1 as i32 {
-            nyIn
+    let mut sum: f32 = 0.;
+    iyStart = iy_in_start - iy_in_offset;
+    iyb = iy_out_start;
+    while iyb <= iy_out_end {
+        ixStart = ix_in_start - ix_in_offset;
+        iyEnd = if ny_in < iyStart + nbin_y - 1 {
+            ny_in
         } else {
-            iyStart + nbinY - 1 as i32
+            iyStart + nbin_y - 1
         };
         iyUse = if 1 as i32 > iyStart {
             1 as i32
         } else {
             iyStart
         };
-        ixb = ixOutStart;
-        while ixb <= ixOutEnd {
-            ixEnd = if nxIn < ixStart + nbinX - 1 as i32 {
-                nxIn
+        ixb = ix_out_start;
+        while ixb <= ix_out_end {
+            ixEnd = if nx_in < ixStart + nbin_x - 1 {
+                nx_in
             } else {
-                ixStart + nbinX - 1 as i32
+                ixStart + nbin_x - 1
             };
             ixUse = if 1 as i32 > ixStart {
                 1 as i32
@@ -850,17 +784,17 @@ unsafe extern "C" fn ird_red_bin_edge(
             while iy <= iyEnd {
                 ix = ixUse;
                 while ix <= ixEnd {
-                    sum += *temp.offset(((iy - 1 as i32) * nxIn + ix - 1 as i32) as isize);
+                    sum += temp[((iy - 1) * nx_in + ix - 1) as usize];
                     ix += 1;
                 }
                 iy += 1;
             }
-            *array.offset((ixb + (iyb - 1 as i32) * nxDimOut - 1 as i32) as isize) = sum
-                / ((ixEnd + 1 as i32 - ixUse) * (iyEnd + 1 as i32 - iyUse)) as ::core::ffi::c_float;
-            ixStart += nbinX;
+            array[(ixb + (iyb - 1) * nx_dim_out - 1) as usize] =
+                sum / ((ixEnd + 1 - ixUse) * (iyEnd + 1 - iyUse)) as f32;
+            ixStart += nbin_x;
             ixb += 1;
         }
-        iyStart += nbinY;
+        iyStart += nbin_y;
         iyb += 1;
     }
 }
@@ -871,7 +805,7 @@ mod tests {
 
     #[test]
     fn reduced_load_sizes_retain_integer_negative_and_end_edge_adjustments() {
-        unsafe {
+        {
             let mut x_use = 0.;
             let mut n_use = 0;
             let mut bin_offset = 0;
@@ -921,26 +855,10 @@ mod tests {
 
     #[test]
     fn reduced_edge_binning_uses_one_based_source_limits_and_partial_averages() {
-        unsafe {
-            let mut input: Vec<f32> = (1..=16).map(|value| value as f32).collect();
+        {
+            let input: Vec<f32> = (1..=16).map(|value| value as f32).collect();
             let mut output = [0.; 4];
-            ird_red_bin_edge(
-                input.as_mut_ptr(),
-                4,
-                4,
-                1,
-                0,
-                1,
-                0,
-                2,
-                2,
-                output.as_mut_ptr(),
-                2,
-                1,
-                2,
-                1,
-                2,
-            );
+            ird_red_bin_edge(&input, 4, 4, 1, 0, 1, 0, 2, 2, &mut output, 2, 1, 2, 1, 2);
             assert_eq!(output, [3.5, 5.5, 11.5, 13.5]);
         }
     }

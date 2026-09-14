@@ -2615,10 +2615,9 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
             binning: IP_DEFAULT as f32,
             scale_defects: 0,
         };
-        let volume = grap_volume_read(&mut *header, &mut options);
-        assert!(!volume.is_null());
-        assert_eq!((*volume).zsize, 3);
-        let middle = *(*volume).vol.add(1);
+        let mut volume = grap_volume_read(&mut *header, &mut options).expect("volume allocation");
+        assert_eq!(volume.slices.len(), 3);
+        let middle = volume.slices[1].as_ref();
         let values: Vec<f32> = (0..3)
             .flat_map(|y| (0..3).map(move |x| slice_get_pixel_magnitude(middle, x, y)))
             .collect();
@@ -2629,7 +2628,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         let output_header = (*output_file).header.cast::<MrcHeader>();
         assert_eq!(
             imod_rs::imod::clip::file_io::grap_volume_write(
-                &mut *volume,
+                &mut volume,
                 &mut *output_header,
                 &mut options
             ),
@@ -2649,7 +2648,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         options.add2file = IP_APPEND_ADD;
         assert_eq!(
             imod_rs::imod::clip::file_io::grap_volume_write(
-                &mut *volume,
+                &mut volume,
                 &mut *append_header,
                 &mut options
             ),
@@ -2670,7 +2669,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         options.isec = 1;
         assert_eq!(
             imod_rs::imod::clip::file_io::grap_volume_write(
-                &mut *volume,
+                &mut volume,
                 &mut *truncate_header,
                 &mut options
             ),
@@ -2691,7 +2690,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         options.isec = 3;
         assert_eq!(
             imod_rs::imod::clip::file_io::grap_volume_write(
-                &mut *volume,
+                &mut volume,
                 &mut *overwrite_header,
                 &mut options
             ),
@@ -2718,7 +2717,7 @@ fn grap_volume_read_pads_and_crops_real_mrc_with_source_coordinates() {
         options.isec = 0;
         assert_eq!(
             imod_rs::imod::clip::file_io::grap_volume_write(
-                &mut *volume,
+                &mut volume,
                 &mut *mismatch_header,
                 &mut options
             ),

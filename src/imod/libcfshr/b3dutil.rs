@@ -28,9 +28,9 @@ use std::sync::Mutex;
 // lose data. When the last `printf` in a program is gone these arms can move
 // to `std::io`; until then this is the correct boundary and it is one file.
 unsafe extern "C" {
-    static mut stderr: *mut libc::FILE;
-    static mut stdout: *mut libc::FILE;
-    static mut stdin: *mut libc::FILE;
+    static stderr: *mut libc::FILE;
+    static stdout: *mut libc::FILE;
+    static stdin: *mut libc::FILE;
 }
 
 /// `b3dutil.h:27`.
@@ -1209,21 +1209,14 @@ pub fn b3d_open_file(name: &str, mode: &str) -> ImodFile {
     let fp = ImodFile::open(name, mode);
     let Some(fp) = fp else {
         // `strerror(errno)` is the C library's own message text and the source
-        // prints exactly that, so it stays a call into libc: `std::io::Error`'s
-        // Display appends " (os error N)", which the reference does not print.
-        // `c_format_bytes`, not `c_format`: `strerror` is locale-dependent and
-        // its bytes need not be valid UTF-8, which the lossy view would
-        // replace with U+FFFD (NATIVE.md §7c).
-        let message = c_format_bytes(
-            "Opening %s, %s: %s",
-            &[
-                CArg::Str(descrip[desc_ind]),
-                CArg::Str(name),
-                CArg::Bytes(unsafe {
-                    core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_bytes()
-                }),
-            ],
-        );
+        // prints exactly that. `std::io::Error` appends " (os error N)", so it
+        // cannot provide byte-identical output. This is an immediate view of a
+        // foreign OS-error string, never crate-owned C-string storage.
+        let mut message = format!("Opening {}, {}: ", descrip[desc_ind], name).into_bytes();
+        let error_text = unsafe {
+            core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_bytes()
+        };
+        message.extend_from_slice(error_text);
         crate::imod::libcfshr::parse_params::exit_error(&message);
     };
     let _ =

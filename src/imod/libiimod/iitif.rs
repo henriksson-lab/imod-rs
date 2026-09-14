@@ -13,7 +13,6 @@ use crate::imod::libcfshr::b3dutil::{
     b3d_error, b3d_shift_bytes, group_limits_remainder_at_end, imod_getpid, make_all_big_tiff,
     num_omp_threads,
 };
-use crate::imod::libcfshr::ilist::{Ilist, ilist_append, ilist_item, ilist_new, ilist_quantum};
 use crate::imod::libcfshr::parse_params::{strtod, strtol};
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_raw_filt_value};
 use crate::imod::libiimod::iilikemrc::{
@@ -564,11 +563,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     (*in_file).multiple_sizes = 0;
     (*in_file).planes_per_image = 1;
     (*in_file).contig_samples = 1;
-    (*in_file).directory_nums = ilist_new(core::mem::size_of::<i32>() as i32, 4);
-    let Some(directory_nums) = (*in_file).directory_nums.as_deref_mut() else {
-        return IIERR_MEMORY_ERR;
-    };
-    ilist_quantum(directory_nums, 20);
+    (*in_file).directory_nums = Some(Vec::with_capacity(20));
     if let Some(resvar) = std::env::var_os("TIFF_RES_PIXEL_LIMIT") {
         end = 0;
         pixel_limit = strtod(resvar.as_encoded_bytes(), &mut end) as f32;
@@ -798,39 +793,19 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 (*in_file).multiple_sizes = 1;
             }
             dirnum = 1;
-            let Some(directory_nums) = (*in_file).directory_nums.as_deref_mut() else {
+            let Some(directory_nums) = (*in_file).directory_nums.as_mut() else {
                 close_with_error(in_file, "Memory error adding to directory list\n");
                 return IIERR_MEMORY_ERR;
             };
-            directory_nums.size = 0;
-            if ilist_append(
-                directory_nums,
-                core::slice::from_raw_parts(
-                    (&raw const file_dir_num).cast::<u8>(),
-                    core::mem::size_of::<i32>(),
-                ),
-            ) != 0
-            {
-                close_with_error(in_file, "Memory error adding to directory list\n");
-                return IIERR_MEMORY_ERR;
-            }
+            directory_nums.clear();
+            directory_nums.push(file_dir_num);
         } else if nxim == (*in_file).nx && nyim == (*in_file).ny && skip_file == 0 {
             dirnum += 1;
-            let Some(directory_nums) = (*in_file).directory_nums.as_deref_mut() else {
+            let Some(directory_nums) = (*in_file).directory_nums.as_mut() else {
                 close_with_error(in_file, "Memory error adding to directory list\n");
                 return IIERR_MEMORY_ERR;
             };
-            if ilist_append(
-                directory_nums,
-                core::slice::from_raw_parts(
-                    (&raw const file_dir_num).cast::<u8>(),
-                    core::mem::size_of::<i32>(),
-                ),
-            ) != 0
-            {
-                close_with_error(in_file, "Memory error adding to directory list\n");
-                return IIERR_MEMORY_ERR;
-            }
+            directory_nums.push(file_dir_num);
 
             /* If size matches, check that everything matches */
             if bits_im != bits
@@ -1664,19 +1639,13 @@ unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i3
     if in_file.is_null() || (*in_file).header.is_null() || dirnum < 0 {
         return 1;
     }
-    let Some(directory_list) = (*in_file).directory_nums.as_deref_mut() else {
+    let Some(directory_list) = (*in_file).directory_nums.as_ref() else {
         return 1;
     };
-    let Some(directory) = ilist_item(Some(directory_list), dirnum) else {
+    let Some(&directory) = directory_list.get(dirnum as usize) else {
         return 1;
     };
-    let Ok(directory) = <[u8; core::mem::size_of::<i32>()]>::try_from(&*directory) else {
-        return 1;
-    };
-    (TIFFSetDirectory(
-        (*in_file).header.cast(),
-        i32::from_ne_bytes(directory) as u16,
-    ) == 0) as i32
+    (TIFFSetDirectory((*in_file).header.cast(), directory as u16) == 0) as i32
 }
 /// C `closeWithError` (`iitif.c:994`).
 unsafe fn close_with_error(in_file: *mut ImodImageFile, message: &str) {
@@ -5834,15 +5803,7 @@ mod tests {
             (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&name, "rb");
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (2, 2, 1));
-            assert_eq!(
-                i32::from_ne_bytes(
-                    ilist_item((*reader).directory_nums.as_deref_mut(), 0)
-                        .unwrap()
-                        .try_into()
-                        .unwrap(),
-                ),
-                1
-            );
+            assert_eq!((*reader).directory_nums.as_ref().unwrap()[0], 1);
             let mut decoded = [0_u8; 4];
             assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);
             assert_eq!(decoded, science);

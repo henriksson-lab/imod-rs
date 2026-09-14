@@ -14,7 +14,7 @@
 //! rather than silently dropping the action.
 #![allow(dead_code, unused_variables)]
 
-use core::ffi::{CStr, c_void};
+use core::ffi::c_void;
 use core::ptr;
 use std::cell::{Cell, RefCell};
 use std::io::{Read, Write};
@@ -25,7 +25,6 @@ use crate::imod::libcfshr::autodoc::{
     adoc_set_current,
 };
 use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_addressable_memory, set_or_clear_flags};
-use crate::imod::libcfshr::ilist::{Ilist, ilist_new};
 use crate::imod::libcfshr::islice::{Islice, slice_create};
 use crate::imod::libcfshr::reduce_by_binning::reduce_by_binning;
 use crate::imod::libiimod::iimage::{
@@ -52,8 +51,8 @@ use crate::imod::libimod::icont::imod_contours_delete;
 use crate::imod::libimod::imesh::imod_meshes_delete;
 use crate::imod::libimod::imodel::{
     ICONT_WILD, IMOD_UNIT_PIXEL, IMODF_FLIPYZ, IMODF_OTRANS_ORIGIN, IMODF_ROT90X, IMODF_TILTOK,
-    Icont, Imod, Iobj, Ipoint, Iref_image, imod_contour_get, imod_flip_yz, imod_insert_point,
-    imod_new_contour, imod_object_get, imod_rot90x, imod_trans_from_ref_image,
+    Icont, Iindex, Imod, Iobj, Ipoint, Iref_image, imod_contour_get, imod_flip_yz,
+    imod_insert_point, imod_new_contour, imod_object_get, imod_rot90x, imod_trans_from_ref_image,
 };
 use crate::imod::libimod::iobj::{
     IOBJ_EX_PNT_LIMIT, imod_object_default, imod_object_new, iobj_flag_time,
@@ -104,8 +103,11 @@ pub struct IvwSlice {
 }
 
 /// C `struct imod_showslice_struct` (`imodP.h:106`).
+///
+/// This is viewer-owned coordinate state. It is not passed to a foreign
+/// function or read as bytes, so its field order is an implementation detail
+/// of the Rust view rather than a C ABI contract.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
 pub struct ImodShowsliceStruct {
     pub zx1: i32,
     pub zx2: i32,
@@ -131,7 +133,11 @@ pub struct ImodShowsliceStruct {
 /// buffer; and `ctrlist` is the translated `ImodControlList` value that
 /// `control.rs` already owns.  `numExtraObj` is retained as a field so the
 /// source's own bookkeeping is reproduced rather than inferred.
-#[repr(C)]
+///
+/// `ImodView` is never transferred across an FFI boundary: the raw view
+/// pointers in the surrounding 3dmod code are Rust-internal cursors. Its
+/// owned `Vec`, `Box`, and `Option` members also make a C layout actively
+/// misleading, so this is a native Rust aggregate.
 pub struct ImodView {
     /// `ViewInfo::idata`.
     pub idata: *mut *mut u8,
@@ -215,16 +221,17 @@ pub struct ImodView {
     pub slice: ImodShowsliceStruct,
     pub lslice: ImodShowsliceStruct,
     pub cramp: *mut Cramp,
-    /// Viewer-owned ramp pointer list. Its entries are legacy viewer cursors,
-    /// while the list allocation itself belongs to this view.
-    pub time_ramps: Option<Box<Ilist>>,
+    /// Viewer-owned ramp pointers.  The pointed-to ramps remain legacy viewer
+    /// cursors; the view owns only this pointer table.
+    pub time_ramps: Vec<*mut Cramp>,
     pub imod: *mut Imod,
     /// `ViewInfo::extraObj`; see the type note above.
     pub extra_obj: Vec<Iobj>,
     pub num_extra_obj: i32,
     /// `ViewInfo::extraObjInUse`; see the type note above.
     pub extra_obj_in_use: Vec<i32>,
-    pub selection_list: *mut Ilist,
+    /// `ViewInfo::selectionList`, with each selection stored as its native index.
+    pub selection_list: Vec<Iindex>,
     pub num_tilt_angles: i32,
     /// `ViewInfo::tiltAngles`; see the type note above.
     pub tilt_angles: Vec<f32>,
@@ -358,12 +365,12 @@ impl Default for ImodView {
             slice: ImodShowsliceStruct::default(),
             lslice: ImodShowsliceStruct::default(),
             cramp: ptr::null_mut(),
-            time_ramps: None,
+            time_ramps: Vec::new(),
             imod: ptr::null_mut(),
             extra_obj: Vec::new(),
             num_extra_obj: 0,
             extra_obj_in_use: Vec::new(),
-            selection_list: ptr::null_mut(),
+            selection_list: Vec::new(),
             num_tilt_angles: 0,
             tilt_angles: Vec::new(),
             line_ptrs: Vec::new(),
@@ -991,7 +998,7 @@ pub fn ivw_init(vi: &mut ImodView, modview: bool) {
     // Initialize things needed for model view and then stop if model view only
     // Standalone model view puts vi under Imodv not App
     vi.imod = ptr::null_mut();
-    vi.selection_list = ptr::null_mut();
+    vi.selection_list.clear();
     vi.extra_obj.clear();
     vi.num_extra_obj = 0;
     vi.extra_obj_in_use.clear();
@@ -1042,7 +1049,7 @@ pub fn ivw_init(vi: &mut ImodView, modview: bool) {
     vi.num_tilt_angles = 0;
     vi.tilt_angles.clear();
     vi.bapc_xsize = 0;
-    vi.time_ramps = unsafe { ilist_new(core::mem::size_of::<*mut Cramp>() as i32, 4) };
+    vi.time_ramps = Vec::with_capacity(4);
 
     vi.movie_interval = 17;
     vi.movie_running = 0;
@@ -4014,7 +4021,7 @@ pub unsafe fn ivw_load_imod_ifd(
                 }
                 ii_plist_load_f(
                     (&mut (*vi).fp).as_mut().unwrap(),
-                    li,
+                    &mut *li,
                     (*image).nx,
                     (*image).ny,
                     (*image).nz,
@@ -4067,7 +4074,6 @@ pub unsafe fn ivw_load_imod_ifd(
                     None => cleaned,
                 };
 
-                *libc::__errno_location() = 0;
                 let native = with_boundary(|n| n.qdir_to_native_separators(&filename));
                 image = ii_open(native.as_bytes(), "rb");
                 if image.is_null() {
@@ -4084,16 +4090,9 @@ pub unsafe fn ivw_load_imod_ifd(
                         std::process::exit(3);
                     }
                     wprint(&format!("Warning: couldn't open {filename}\n\r"));
-                    let errno = *libc::__errno_location();
-                    let sys = if errno != 0 {
-                        format!(
-                            "System error: {}",
-                            // `strerror` is the C library's own locale
-                            // message table; matching native's text needs it,
-                            // and there is no `std` equivalent that yields the
-                            // bare message.  The one foreign call in this unit.
-                            CStr::from_ptr(libc::strerror(errno)).to_string_lossy()
-                        )
+                    let error = std::io::Error::last_os_error();
+                    let sys = if error.raw_os_error().is_some_and(|code| code != 0) {
+                        format!("System error: {error}")
                     } else {
                         String::new()
                     };
@@ -4116,7 +4115,7 @@ pub unsafe fn ivw_load_imod_ifd(
                     || get_valid_scale(image, None, None) == 0)
                     && smin >= smax
                 {
-                    ii_raw_scan(image);
+                    ii_raw_scan(&mut *image);
                 }
                 if smin < smax {
                     (*image).smin = smin;
@@ -4224,7 +4223,7 @@ fn line_tail(line: &[u8], offset: usize) -> &str {
 
 /// `ivwLoadIFDpieceList` (`imodview.cpp:2592`).
 pub unsafe fn ivw_load_ifd_piece_list(
-    pl_name: &[u8],
+    pl_name: &str,
     li: *mut LoadInfo,
     nx: i32,
     ny: i32,
@@ -4235,7 +4234,7 @@ pub unsafe fn ivw_load_ifd_piece_list(
         if !ifd_path.is_empty() {
             with_boundary(|n| n.qdir_set_current(&ifd_path));
         }
-        let retval = ii_plist_load(pl_name, li, nx, ny, nz);
+        let retval = ii_plist_load(pl_name, &mut *li, nx, ny, nz);
         if !ifd_path.is_empty() {
             let cwd = IMOD_CWD_PATH.lock().unwrap().clone();
             with_boundary(|n| n.qdir_set_current(&cwd));
@@ -4339,7 +4338,7 @@ pub unsafe fn ivw_multiple_files(
                 /* set up scaling for this image, scanning if needed */
                 if (((*image).file == IIFILE_RAW && (*image).amin == 0. && (*image).amax == 0.)
                     || get_valid_scale(image, None, None) == 0)
-                    && ii_raw_scan(image) != 0
+                    && ii_raw_scan(&mut *image) != 0
                 {
                     let entered = String::from_utf8_lossy(arg);
                     let error = crate::imod::libcfshr::b3dutil::b3d_get_error();

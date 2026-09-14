@@ -22,7 +22,6 @@ use super::imodel_files::{imod_get_bytes, imod_get_int, imod_put_bytes, imod_put
 ///
 /// `name` is the malloc'd NUL-terminated buffer, `len` its allocated size.
 #[derive(Clone, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct IlabelItem {
     pub name: Option<Vec<u8>>,
     pub len: i32,
@@ -31,7 +30,6 @@ pub struct IlabelItem {
 
 /// Original: `Ilabel` (`imodel.h:325`).
 #[derive(Clone, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Ilabel {
     pub name: Option<Vec<u8>>,
     pub len: i32,

@@ -69,21 +69,15 @@ pub const ICONT_FIND_SORTXY: i32 = 3;
 /// Original: `Nesting` / `struct Nest_struct` (`icont.h:49`).
 ///
 /// The source's `int *inside` / `int *outside` pointer-plus-count pairs become
-/// `Vec`s here; `ninside` and `noutside` are kept as they are read back by
-/// `imodContourNestLevels` and by the callers of `imodContourCheckNesting`.
+/// owned vectors. Their lengths are the counts used by the nesting routines.
 #[derive(Clone, Debug, Default)]
-#[repr(C)]
 pub struct Nesting {
     /// contour number
     pub co: i32,
     /// Level in from outside-most
     pub level: i32,
-    /// Number inside
-    pub ninside: i32,
     /// Numbers of contours inside
     pub inside: Vec<i32>,
-    /// Number outside
-    pub noutside: i32,
     /// Numbers of contours outside
     pub outside: Vec<i32>,
     /// Scan contour of object interior, for odd levels
@@ -3132,14 +3126,11 @@ pub fn imod_contour_check_nesting(
             let nest = &mut nests[nind as usize];
             nest.co = inco;
             nest.level = 0;
-            nest.ninside = 0;
-            nest.noutside = 0;
             nest.inscan = None;
         }
         let nest = &mut nests[nind as usize];
 
         nest.outside.push(outco);
-        nest.noutside += 1;
 
         /* now add inside one to outside's list */
         let mut nind = nestind[outco as usize];
@@ -3151,14 +3142,11 @@ pub fn imod_contour_check_nesting(
             let nest = &mut nests[nind as usize];
             nest.co = outco;
             nest.level = 0;
-            nest.ninside = 0;
-            nest.noutside = 0;
             nest.inscan = None;
         }
         let nest = &mut nests[nind as usize];
 
         nest.inside.push(inco);
-        nest.ninside += 1;
     } else if (frac1 > 0.1 || frac2 > 0.1) && *numwarn >= 0 {
         let _ = ImodFile::Stdout.write_all(
             c_format(
@@ -3196,18 +3184,14 @@ pub fn imod_contour_free_nests(nests: &mut Vec<Nesting>, numnests: i32) {
             break;
         }
         let nest = &mut nests[nind];
-        if nest.ninside > 0 && nest.inscan.is_some() {
+        if !nest.inside.is_empty() && nest.inscan.is_some() {
             if let Some(inscan) = nest.inscan.as_mut() {
                 imod_contour_delete(inscan);
             }
             nest.inscan = None;
         }
-        if nest.ninside != 0 && !nest.inside.is_empty() {
-            nest.inside = Vec::new();
-        }
-        if nest.noutside != 0 && !nest.outside.is_empty() {
-            nest.outside = Vec::new();
-        }
+        nest.inside.clear();
+        nest.outside.clear();
     }
     if numnests != 0 && !nests.is_empty() {
         nests.clear();
@@ -3230,8 +3214,8 @@ pub fn imod_contour_nest_levels(nests: &mut [Nesting], nestind: &[i32], numnests
             /* if the only contours outside have level assigned but lower
             than the current level, then this contour can be assigned to
             the current level */
-            for i in 0..nests[nind].noutside as usize {
-                let oind = nestind[nests[nind].outside[i] as usize];
+            for &outside in &nests[nind].outside {
+                let oind = nestind[outside as usize];
                 if nests[oind as usize].level == 0 || nests[oind as usize].level >= level {
                     more = 1;
                     ready = 0;
@@ -4608,13 +4592,16 @@ mod source_driver_group2 {
             for i in 0..numnests as usize {
                 out.push_str(&format!(
                     "nest {i} co {} level {} nin {} nout {}",
-                    nests[i].co, nests[i].level, nests[i].ninside, nests[i].noutside
+                    nests[i].co,
+                    nests[i].level,
+                    nests[i].inside.len(),
+                    nests[i].outside.len()
                 ));
-                for j in 0..nests[i].ninside as usize {
-                    out.push_str(&format!(" in{}", nests[i].inside[j]));
+                for &inside in &nests[i].inside {
+                    out.push_str(&format!(" in{inside}"));
                 }
-                for j in 0..nests[i].noutside as usize {
-                    out.push_str(&format!(" out{}", nests[i].outside[j]));
+                for &outside in &nests[i].outside {
+                    out.push_str(&format!(" out{outside}"));
                 }
                 out.push('\n');
             }

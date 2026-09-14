@@ -330,10 +330,10 @@ pub fn binvol() {
                 z_cen_offset = bin_z / 2.0 - extra_pix / 2.0;
 
                 // Add to the origin half the extra pixels
-                let (mut x_origin, mut y_origin, mut z_origin) = (0.0_f32, 0.0_f32, 0.0_f32);
-                iiu_ret_origin(1, &raw mut x_origin, &raw mut y_origin, &raw mut z_origin);
-                z_origin += delta[2] * extra_pix / 2.0;
-                iiu_alt_origin(3, x_origin, y_origin, z_origin);
+                let mut origin = [0.; 3];
+                iiu_ret_origin(1, &mut origin);
+                origin[2] += delta[2] * extra_pix / 2.0;
+                iiu_alt_origin(3, &origin);
             }
         }
         nxyz_bin[2] = nz_bin;
@@ -414,14 +414,7 @@ pub fn binvol() {
             //
             // Take FFT, reduce or expand with 0 shift, inverse FFT
             let (mut fx, mut fy, mut fz, mut idir) = (nfs_pad[0], nfs_pad[1], nfs_pad[2], 0);
-            thrdfft(
-                fft_in.as_mut_ptr(),
-                fft_work.as_mut_ptr(),
-                &raw mut fx,
-                &raw mut fy,
-                &raw mut fz,
-                &raw mut idir,
-            );
+            thrdfft(&mut fft_in, &mut fft_work, fx, fy, fz, idir);
             if ft_crop {
                 fourier_reduce_volume(
                     &fft_in,
@@ -454,14 +447,7 @@ pub fn binvol() {
                 );
             }
             let (mut cx, mut cy, mut cz, mut idir) = (ncrop_pad[0], ncrop_pad[1], ncrop_pad[2], -1);
-            thrdfft(
-                fft_out.as_mut_ptr(),
-                fft_work.as_mut_ptr(),
-                &raw mut cx,
-                &raw mut cy,
-                &raw mut cz,
-                &raw mut idir,
-            );
+            thrdfft(&mut fft_out, &mut fft_work, cx, cy, cz, idir);
             //
             // Write the planes
             dmean_sum = 0.0;

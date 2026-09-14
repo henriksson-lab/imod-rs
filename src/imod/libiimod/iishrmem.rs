@@ -443,8 +443,8 @@ unsafe fn shm_read_section_any(
         li.outmax = if typ == MRSA_USHORT { 65535 } else { 255 };
         let mut free_map = 0;
         let err = ii_init_read_section_any(
-            h,
-            &mut li,
+            &*h,
+            &li,
             buf.cast(),
             &mut d,
             &mut y_end,
@@ -491,7 +491,7 @@ unsafe fn shm_read_section_any(
                     MRSA_USHORT => d.bufp.add(iy as usize * d.x_dimension as usize * 2),
                     _ => d.bufp.add(iy as usize * d.x_dimension as usize),
                 };
-                ii_process_read_line(h, &mut li, &mut d, line, output);
+                ii_process_read_line(&*h, &li, &mut d, line, output);
             } else {
                 let output = d.bufp.add(
                     iy as usize * d.x_dimension as usize * pix_size_buf[typ as usize] as usize,

@@ -4135,15 +4135,17 @@ impl Lock {
                         table.push(key);
                         drop(table);
                         unsafe {
-                            let mut flock: libc::flock = std::mem::zeroed();
-                            flock.l_type = if shared {
-                                libc::F_RDLCK as libc::c_short
-                            } else {
-                                libc::F_WRLCK as libc::c_short
+                            let mut flock = libc::flock {
+                                l_type: if shared {
+                                    libc::F_RDLCK as libc::c_short
+                                } else {
+                                    libc::F_WRLCK as libc::c_short
+                                },
+                                l_whence: libc::SEEK_SET as libc::c_short,
+                                l_start: 0,
+                                l_len: 0,
+                                l_pid: 0,
                             };
-                            flock.l_whence = libc::SEEK_SET as libc::c_short;
-                            flock.l_start = 0;
-                            flock.l_len = 0;
                             // A refusal here is another process's lock, which `tryLock`
                             // reports by returning null - the source then falls through to
                             // its `return`.

@@ -7,7 +7,6 @@ use crate::imod::libiimod::unit_fileio::{
     iiu_read_section, iiu_ret_brief, iiu_ret_chunk_sizes, iiu_ret_print,
 };
 use crate::imod::libiimod::unit_header::iiu_ret_size;
-use std::ffi::CString;
 
 /// Original `imopen` (`wrap_iiunit.f90:11`).
 pub unsafe fn imopen(iunit: i32, name: &str, attribute: &str) {
@@ -16,13 +15,7 @@ pub unsafe fn imopen(iunit: i32, name: &str, attribute: &str) {
 
 /// Original `iiuOpenPrint` (`wrap_iiunit.f90:22`).
 pub unsafe fn iiu_open_print(iunit: i32, name: &str, attribute: &str) -> i32 {
-    // `iiuOpen` (`unit_fileio.c:195`) is still `extern "C"` with `*const
-    // c_char`, because the Fortran bridge calls it under that name; this is
-    // the boundary adaptation for a signature this unit does not own.
-    let (Ok(name), Ok(attribute)) = (CString::new(name), CString::new(attribute)) else {
-        return 1;
-    };
-    let ierr = iiu_open(iunit, name.as_ptr(), attribute.as_ptr());
+    let ierr = iiu_open(iunit, name, attribute);
     if ierr != 0 {
         return ierr;
     }
@@ -47,22 +40,14 @@ pub unsafe fn iiu_open_print(iunit: i32, name: &str, attribute: &str) -> i32 {
     }
     let do_print = iiu_ret_print() > 0;
     let do_extra = iiu_ret_brief() == 0 && do_print;
-    let attrib = attribute.to_string_lossy().to_ascii_uppercase();
+    let attrib = attribute.to_ascii_uppercase();
     if !attrib.starts_with('N') && do_print {
         if attrib.starts_with('S') || num_kbytes < 0 {
-            println!(
-                "\n {} image file on unit{:4} : {}",
-                attrib,
-                iunit,
-                name.to_string_lossy()
-            );
+            println!("\n {} image file on unit{:4} : {}", attrib, iunit, name);
         } else {
             println!(
                 "\n {} image file on unit{:4} : {}     Size= {:10} K",
-                attrib,
-                iunit,
-                name.to_string_lossy(),
-                num_kbytes
+                attrib, iunit, name, num_kbytes
             );
         }
     }
@@ -190,11 +175,7 @@ mod tests {
             );
             ii_close(file);
 
-            // `iiuOpen` (`unit_fileio.c`) is still the C-shaped entry point
-            // that the Fortran bridge calls; this is the boundary adaptation
-            // for a signature this unit does not own.
-            let name_c = std::ffi::CString::new(name.as_bytes()).unwrap();
-            assert_eq!(iiu_open(97, name_c.as_ptr(), c"RO".as_ptr()), 0);
+            assert_eq!(iiu_open(97, &name, "RO"), 0);
             iiu_set_position(97, 1, 0);
             let mut read = [0.0_f32; 4];
             assert_eq!(irdsec(97, &mut read), Ok(()));

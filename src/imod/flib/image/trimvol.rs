@@ -476,8 +476,8 @@ pub fn trimvol() -> i32 {
             write_info.ymax = final_ny - 1;
             (*out_header).fp = (*output).fp.clone();
             if mrc_write_section_any(
-                out_header,
-                &raw mut write_info,
+                &mut *out_header,
+                &mut write_info,
                 written.as_mut_ptr().cast(),
                 final_z,
                 MRC_MODE_FLOAT,

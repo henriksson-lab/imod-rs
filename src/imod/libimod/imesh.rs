@@ -93,7 +93,6 @@ pub const IMESH_CAP_ALL: i32 = 2;
 
 /// Original: `MeshParams` / `struct Meshing_Param` (`imodel.h:335`).
 #[derive(Clone, Debug, PartialEq)]
-#[repr(C)]
 pub struct MeshParams {
     pub flags: u32,
     pub cap: i32,

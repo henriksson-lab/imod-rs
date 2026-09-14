@@ -21,7 +21,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 /// `istore.h:91-95`, with a setter and a constructor each, and nothing else.
 /// `to_ne_bytes`/`from_ne_bytes` is a bit-for-bit reinterpretation, exactly what
 /// the union does, so no byte moves and no value changes.
-#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct StoreUnion {
     /// The union's four bytes, in the machine's byte order.
@@ -116,7 +115,6 @@ impl PartialEq for StoreUnion {
     }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct Istore {
     pub type_: i16,
     pub flags: u16,
@@ -124,7 +122,6 @@ pub struct Istore {
     pub value: StoreUnion,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct DrawProps {
     pub red: f32,
     pub green: f32,

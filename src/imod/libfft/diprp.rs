@@ -52,78 +52,68 @@ pub unsafe extern "C" fn diprp(
     let mut l = 0;
     let mut m = 0;
     let mut n = 0;
-    nest = 14 as ::core::ffi::c_int;
+    nest = 14;
     nt = dim[1];
     sep = dim[2];
     p2 = dim[3];
     size = dim[4] - 1;
     p4 = dim[5];
     if sym[1] != 0 {
-        j = 1 as ::core::ffi::c_int;
+        j = 1;
         while j <= nest {
-            u[j as usize] = 1 as ::core::ffi::c_int;
-            s[j as usize] = 1 as ::core::ffi::c_int;
+            u[j as usize] = 1;
+            s[j as usize] = 1;
             j += 1;
         }
         n = pts;
-        j = 1 as ::core::ffi::c_int;
+        j = 1;
         while j <= nest {
             if sym[j as usize] == 0 {
                 break;
             }
-            jj = nest + 1 as ::core::ffi::c_int - j;
+            jj = nest + 1 - j;
             u[jj as usize] = n;
             s[jj as usize] = n / sym[j as usize];
             n /= sym[j as usize];
             j += 1;
         }
-        jj = 0 as ::core::ffi::c_int;
-        a = 1 as ::core::ffi::c_int;
-        while a <= u[1 as ::core::ffi::c_int as usize] {
+        jj = 0;
+        a = 1;
+        while a <= u[1] {
             b = a;
-            while b <= u[2 as ::core::ffi::c_int as usize] {
+            while b <= u[2] {
                 c = b;
-                while c <= u[3 as ::core::ffi::c_int as usize] {
+                while c <= u[3] {
                     d = c;
-                    while d <= u[4 as ::core::ffi::c_int as usize] {
+                    while d <= u[4] {
                         e = d;
-                        while e <= u[5 as ::core::ffi::c_int as usize] {
+                        while e <= u[5] {
                             f = e;
-                            while f <= u[6 as ::core::ffi::c_int as usize] {
+                            while f <= u[6] {
                                 g = f;
-                                while g <= u[7 as ::core::ffi::c_int as usize] {
+                                while g <= u[7] {
                                     h = g;
-                                    while h <= u[8 as ::core::ffi::c_int as usize] {
+                                    while h <= u[8] {
                                         i = h;
-                                        while i <= u[9 as ::core::ffi::c_int as usize] {
+                                        while i <= u[9] {
                                             j = i;
-                                            while j <= u[10 as ::core::ffi::c_int as usize] {
+                                            while j <= u[10] {
                                                 k = j;
-                                                while k <= u[11 as ::core::ffi::c_int as usize] {
+                                                while k <= u[11] {
                                                     l = k;
-                                                    while l <= u[12 as ::core::ffi::c_int as usize]
-                                                    {
+                                                    while l <= u[12] {
                                                         m = l;
-                                                        while m
-                                                            <= u[13 as ::core::ffi::c_int as usize]
-                                                        {
+                                                        while m <= u[13] {
                                                             n = m;
-                                                            while n
-                                                                <= u[14 as ::core::ffi::c_int
-                                                                    as usize]
-                                                            {
-                                                                jj = jj + 1 as ::core::ffi::c_int;
+                                                            while n <= u[14] {
+                                                                jj += 1;
                                                                 if !(jj >= n) {
                                                                     delta = (n - jj) * sep;
-                                                                    p1 = (jj
-                                                                        - 1 as ::core::ffi::c_int)
-                                                                        * sep
-                                                                        + 1 as ::core::ffi::c_int;
+                                                                    p1 = (jj - 1) * sep + 1;
                                                                     p0 = p1;
                                                                     while p0 <= nt {
                                                                         p3 = p0 + size;
-                                                                        p = p0 - 1
-                                                                            as ::core::ffi::c_int;
+                                                                        p = p0 - 1;
                                                                         while p < p3 {
                                                                             p5 = p + delta;
                                                                             t = *x
@@ -149,33 +139,31 @@ pub unsafe extern "C" fn diprp(
                                                                         p0 += p2;
                                                                     }
                                                                 }
-                                                                n += s[14 as ::core::ffi::c_int
-                                                                    as usize];
+                                                                n += s[14];
                                                             }
-                                                            m += s
-                                                                [13 as ::core::ffi::c_int as usize];
+                                                            m += s[13];
                                                         }
-                                                        l += s[12 as ::core::ffi::c_int as usize];
+                                                        l += s[12];
                                                     }
-                                                    k += s[11 as ::core::ffi::c_int as usize];
+                                                    k += s[11];
                                                 }
-                                                j += s[10 as ::core::ffi::c_int as usize];
+                                                j += s[10];
                                             }
-                                            i += s[9 as ::core::ffi::c_int as usize];
+                                            i += s[9];
                                         }
-                                        h += s[8 as ::core::ffi::c_int as usize];
+                                        h += s[8];
                                     }
-                                    g += s[7 as ::core::ffi::c_int as usize];
+                                    g += s[7];
                                 }
-                                f += s[6 as ::core::ffi::c_int as usize];
+                                f += s[6];
                             }
-                            e += s[5 as ::core::ffi::c_int as usize];
+                            e += s[5];
                         }
-                        d += s[4 as ::core::ffi::c_int as usize];
+                        d += s[4];
                     }
-                    c += s[3 as ::core::ffi::c_int as usize];
+                    c += s[3];
                 }
-                b += s[2 as ::core::ffi::c_int as usize];
+                b += s[2];
             }
             a += 1;
         }
@@ -185,10 +173,10 @@ pub unsafe extern "C" fn diprp(
     }
     punsym = pts / (psym * psym);
     mult = punsym / unsym[1];
-    test = (unsym[1] * unsym[2] - 1 as ::core::ffi::c_int) * mult * psym;
+    test = (unsym[1] * unsym[2] - 1) * mult * psym;
     lk = mult;
     dk = mult;
-    k = 2 as ::core::ffi::c_int;
+    k = 2;
     while k <= nest {
         if unsym[k as usize] == 0 {
             break;
@@ -199,37 +187,34 @@ pub unsafe extern "C" fn diprp(
         mods = k;
         k += 1;
     }
-    onemod = (mods < 3 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    onemod = i32::from(mods < 3);
     if onemod == 0 {
-        j = 3 as ::core::ffi::c_int;
+        j = 3;
         while j <= mods {
-            jj = mods + 3 as ::core::ffi::c_int - j;
+            jj = mods + 3 - j;
             modulo[jj as usize] = u[j as usize];
             j += 1;
         }
     }
-    modulo[2 as ::core::ffi::c_int as usize] = u[2 as ::core::ffi::c_int as usize];
-    u[10 as ::core::ffi::c_int as usize] = (punsym - 3 as ::core::ffi::c_int) * psym;
-    s[13 as ::core::ffi::c_int as usize] = punsym * psym;
+    modulo[2] = u[2];
+    u[10] = (punsym - 3) * psym;
+    s[13] = punsym * psym;
     j = psym;
-    while j <= u[10 as ::core::ffi::c_int as usize] {
+    while j <= u[10] {
         k = j;
         loop {
             k = k * mult;
             if onemod == 0 {
-                i = 3 as ::core::ffi::c_int;
+                i = 3;
                 while i <= mods {
                     k = k - k / modulo[i as usize] * modulo[i as usize];
                     i += 1;
                 }
             }
             if k < test {
-                k = k - k / modulo[2 as ::core::ffi::c_int as usize]
-                    * modulo[2 as ::core::ffi::c_int as usize];
+                k = k - k / modulo[2] * modulo[2];
             } else {
-                k = k - k / modulo[2 as ::core::ffi::c_int as usize]
-                    * modulo[2 as ::core::ffi::c_int as usize]
-                    + modulo[2 as ::core::ffi::c_int as usize];
+                k = k - k / modulo[2] * modulo[2] + modulo[2];
             }
             if !(k < j) {
                 break;
@@ -237,15 +222,15 @@ pub unsafe extern "C" fn diprp(
         }
         if k != j {
             delta = (k - j) * sep;
-            l = 1 as ::core::ffi::c_int;
+            l = 1;
             while l <= psym {
                 m = l;
                 while m <= pts {
-                    p1 = (m + j - 1 as ::core::ffi::c_int) * sep + 1 as ::core::ffi::c_int;
+                    p1 = (m + j - 1) * sep + 1;
                     p0 = p1;
                     while p0 <= nt {
                         p3 = p0 + size;
-                        jj = p0 - 1 as ::core::ffi::c_int;
+                        jj = p0 - 1;
                         while jj < p3 {
                             kk = jj + delta;
                             t = *x.offset(jj as isize);
@@ -258,7 +243,7 @@ pub unsafe extern "C" fn diprp(
                         }
                         p0 += p2;
                     }
-                    m += s[13 as ::core::ffi::c_int as usize];
+                    m += s[13];
                 }
                 l += 1;
             }

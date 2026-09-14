@@ -322,12 +322,12 @@ pub fn read_line<R: BufRead>(input: &mut R, line: &mut String) -> usize {
 pub fn imodqtassist(arguments: &[String]) -> i32 {
     let mut index = 1;
     if arguments.len() == 2 && arguments[index] == "-t" {
-        let mut physical = 0;
-        let mut logical = 0;
-        unsafe { num_cores_and_logical_procs(&mut physical, &mut logical) };
+        let counts = num_cores_and_logical_procs();
         let ideal = thread::available_parallelism().map_or(1, usize::from);
         println!(
-            "Qt ideal thread count = {ideal}   physical cores = {physical}   logical processors = {logical}   system memory {:.0} MB",
+            "Qt ideal thread count = {ideal}   physical cores = {}   logical processors = {}   system memory {:.0} MB",
+            counts.physical,
+            counts.logical,
             b3d_physical_memory() / (1024. * 1024.)
         );
         return 0;

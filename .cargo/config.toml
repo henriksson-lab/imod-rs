@@ -1,0 +1,9 @@
+[env]
+# This crate is a line-faithful translation, so it keeps the C sources'
+# file-scope statics: the autodoc collection, the Clarkson hull working
+# arrays, the zoom-filter caches, the taper-pad RNG, the unit-number tables.
+# Those are process-global exactly as in IMOD, and several unit tests also
+# redirect the process's real stdout to capture `printf` output.  Running the
+# test binaries' cases concurrently corrupts that shared state, so the gate is
+# serial.  It costs about eight seconds over the whole suite.
+RUST_TEST_THREADS = "1"
