@@ -1570,10 +1570,13 @@ WARNING: This file is not a readable MRC file.\n\
     if view {
         // `clip.cpp:989-990`: sprintf into viewcmd, then system().
         let view_command = c_format("3dmod %s", &[CArg::Str(&raw[raw.len() - 1])]);
-        let _ = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(&view_command)
-            .status();
+        // glibc's `system()` is `execl("/bin/sh", "sh", "-c", line, NULL)`:
+        // the program is `/bin/sh` but `argv[0]` is `sh`, which is what the
+        // shell puts in front of its own diagnostics.
+        use std::os::unix::process::CommandExt as _;
+        let mut shell = std::process::Command::new("/bin/sh");
+        shell.arg0("sh").arg("-c").arg(&view_command);
+        let _ = shell.status();
     }
     std::process::exit(0);
 }

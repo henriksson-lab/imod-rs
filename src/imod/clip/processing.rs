@@ -3772,32 +3772,9 @@ pub unsafe fn clip_unpack(
                 for ind in 0..opt.ix * opt.iy {
                     *(*reference).data.f.add(ind as usize) *= scale;
                 }
-            } else {
-                crate::imod::libiimod::iitif::tiff_gain_reference_for_eer((*reference).data.f);
             }
         }
         let offset = if hout.mode == 2 { 0. } else { 0.5 };
-        if antialias_eer {
-            let kernel = (*image_file).eerkernel_scale as f32;
-            if kernel == 0. {
-                return -1;
-            }
-            scale /= kernel;
-        }
-        if antialias_eer {
-            do_ref = false;
-        }
-        let threshold = if opt.high == IP_DEFAULT as f32 {
-            f32::INFINITY
-        } else {
-            opt.high
-                * scale
-                * if antialias_eer {
-                    (*image_file).eerkernel_scale as f32
-                } else {
-                    1.
-                }
-        };
         let out = crate::imod::libcfshr::islice::slice_create(opt.ix, opt.iy, hout.mode);
         if out.is_null() {
             return -1;
@@ -3814,6 +3791,22 @@ pub unsafe fn clip_unpack(
             )
             .as_bytes(),
         );
+        // `processing.cpp:2810`: `float truncThresh, unscaledThresh = 1.e30;`
+        // -- the *unscaled* threshold is what `CorDefSurroundingMean` is given,
+        // and `truncThresh` is it times the scale.
+        let mut unscaled_thresh = 1.0e30_f32;
+        if opt.high != IP_DEFAULT as f32 {
+            unscaled_thresh = opt.high;
+        }
+        if antialias_eer {
+            if do_ref {
+                crate::imod::libiimod::iitif::tiff_gain_reference_for_eer((*reference).data.f);
+            }
+            do_ref = false;
+            scale /= (*image_file).eerkernel_scale as f32;
+            unscaled_thresh *= (*image_file).eerkernel_scale as f32;
+        }
+        let trunc_thresh = unscaled_thresh * scale;
         for k in 0..opt.nofsecs {
             let _ = ImodFile::Stdout.write_all(
                 c_format(
@@ -3846,18 +3839,14 @@ pub unsafe fn clip_unpack(
                         scale
                     };
                     v[0] = v[0] * gain + offset;
-                    if v[0] > threshold {
+                    if v[0] > trunc_thresh {
                         v[0] = if opt.low == IP_DEFAULT as f32 {
                             crate::imod::clip::correct_defects::cor_def_surrounding_mean(
                                 (*input).data.b.cast(),
                                 (*input).mode,
                                 (*input).xsize,
                                 (*input).ysize,
-                                if scale == 0. {
-                                    f32::INFINITY
-                                } else {
-                                    threshold / gain
-                                },
+                                unscaled_thresh,
                                 x,
                                 y,
                             ) * gain
@@ -4529,9 +4518,6 @@ pub unsafe fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             let _ = ImodFile::Stdout.write_all(b"slice|   min   |(   x,   y)|    max  |(      x,      y)|   mean    |  std dev.\n-----|---------|-----------|---------|-----------------|-----------|----------\n");
         }
         crate::imod::clip::file_io::set_input_options(opt, hin);
-        let mut total_sum = 0_f64;
-        let mut total_sq = 0_f64;
-        let mut total_n = 0_i64;
         // `processing.cpp:3480` float ptnum, `:3481` double vmean/vsumsq.
         let mut ptnum = 0_f32;
         let mut vmean = 0_f64;
@@ -4576,28 +4562,60 @@ pub unsafe fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             let mut ymax = 0;
             let mut sum = 0_f64;
             let mut square = 0_f64;
-            for y in 0..(*s).ysize {
-                for x in 0..(*s).xsize {
-                    let value = slice_get_pixel_magnitude(s, x, y);
-                    if value < min {
-                        min = value;
-                        xmin = x;
-                        ymin = y;
+            // `processing.cpp:3575-3586`: a preliminary mean from 64 widely
+            // spaced samples, which every pixel is then measured against.  The
+            // source added it on 5/19/17 precisely because summing the raw
+            // values loses the SD when it is small beside the mean, so dropping
+            // it is not a simplification -- `clip stats` on a short volume with
+            // mean 2009 and SD 5779 already prints a different last digit.
+            let ptnum_slice = ((*s).xsize * (*s).ysize) as f32;
+            let mut prelim_mean = center as f64;
+            if (*s).xsize > 10 && (*s).ysize > 10 {
+                let mut tsum = 0_f64;
+                for j in 1..9 {
+                    for i in 1..9 {
+                        tsum += slice_get_pixel_magnitude(
+                            s,
+                            (i * (*s).xsize) / 10,
+                            (j * (*s).ysize) / 10,
+                        ) as f64;
                     }
-                    if value > max {
-                        max = value;
+                }
+                prelim_mean = tsum / 64.;
+            }
+            for y in 0..(*s).ysize {
+                // `processing.cpp:3587-3624` accumulates a row at a time, so
+                // the summation order is per row, not over the whole slice.
+                let mut tsum = 0_f64;
+                let mut tsumsq = 0_f64;
+                for x in 0..(*s).xsize {
+                    // `float m` -- the subtraction rounds back to single
+                    // precision and `m * m` is a single-precision product that
+                    // only then widens for the accumulation.
+                    let mut m = slice_get_pixel_magnitude(s, x, y);
+                    if m > max {
+                        max = m;
                         xmax = x;
                         ymax = y;
                     }
-                    sum += value as f64;
-                    square += (value as f64) * (value as f64);
+                    if m < min {
+                        min = m;
+                        xmin = x;
+                        ymin = y;
+                    }
+                    m = (m as f64 - prelim_mean) as f32;
+                    tsum += m as f64;
+                    tsumsq += (m * m) as f64;
                 }
+                sum += tsum;
+                square += tsumsq;
             }
-            let n = ((*s).xsize * (*s).ysize) as f64;
-            let mean = sum / n;
-            let sd = ((square - n * mean * mean) / 1_f64.max(n - 1.))
-                .max(0.)
-                .sqrt();
+            let mut mean = sum / ptnum_slice as f64;
+            let sd = ((square - ptnum_slice as f64 * mean * mean)
+                / 1_f64.max(ptnum_slice as f64 - 1.))
+            .max(0.)
+            .sqrt();
+            mean += prelim_mean;
             // `processing.cpp:3636-3649`: refine the maximum with the same
             // source-mapped 3x3 parabolic fit before applying output coordinates.
             let mut data = [[0_f64; 3]; 3];
@@ -4680,9 +4698,6 @@ pub unsafe fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             }
             vmean += mean;
             ptnum = ((*s).xsize * (*s).ysize) as f32;
-            total_sum += sum;
-            total_sq += square;
-            total_n += n as i64;
             allmins.push(min);
             allmaxes.push(max);
             stat_rows.push((iz, xmin, ymin, peak_x, peak_y, mean, sd));
