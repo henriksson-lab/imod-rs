@@ -17,11 +17,11 @@ use crate::imod::libiimod::iimrc::ii_mrc_mode_to_format_type;
 use crate::imod::libiimod::mrcfiles::{
     MRC_LABEL_SIZE, MrcHeader, fix_title_padding, mrc_set_scale,
 };
-use core::ffi::c_char;
 
 /// Matches C `IIADOC_IMAGE` (`iiadoc.c:14`).  `ADOC_GLOBAL_NAME` comes from
 /// `autodoc.h` ("PreData"), which `iiadoc.c` includes.
-const IIADOC_IMAGE: &core::ffi::CStr = c"Image";
+///
+const IIADOC_IMAGE: &[u8] = b"Image";
 
 /// Matches C `iiADOCCheck(ImodImageFile *)` (`iiadoc.c:30`).
 pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
@@ -36,13 +36,9 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
         let mut montage = 0;
         let mut num_sect = 0;
         let mut sect_type = 0;
-        (*in_file).adoc_index = adoc_open_image_metadata(
-            (*in_file).filename,
-            0,
-            &mut montage,
-            &mut num_sect,
-            &mut sect_type,
-        );
+        let name = (*in_file).filename.clone().unwrap_or_default();
+        (*in_file).adoc_index =
+            adoc_open_image_metadata(&name, 0, &mut montage, &mut num_sect, &mut sect_type);
         if (*in_file).adoc_index >= 0 && sect_type != 2 {
             adoc_clear((*in_file).adoc_index);
             (*in_file).adoc_index = -1;
@@ -51,18 +47,13 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
 
         if (*in_file).adoc_index >= 0 {
             if adoc_get_two_integers(
-                ADOC_GLOBAL_NAME.as_ptr(),
+                ADOC_GLOBAL_NAME,
                 0,
-                c"ImageSize".as_ptr(),
+                b"ImageSize",
                 &mut (*in_file).nx,
                 &mut (*in_file).ny,
             ) != 0
-                || adoc_get_integer(
-                    ADOC_GLOBAL_NAME.as_ptr(),
-                    0,
-                    c"DataMode".as_ptr(),
-                    &mut (*in_file).mode,
-                ) != 0
+                || adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"DataMode", &mut (*in_file).mode) != 0
             {
                 adoc_clear((*in_file).adoc_index);
                 (*in_file).adoc_index = -1;
@@ -71,8 +62,11 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
         }
 
         (*in_file).fp = ImodFile::open(
-            &core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy(),
-            &core::ffi::CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+            &String::from_utf8_lossy(&name),
+            &String::from_utf8_lossy({
+                let fmode = &(*in_file).fmode;
+                &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
+            }),
         );
         if (*in_file).fp.is_none() {
             b3d_error(
@@ -100,9 +94,9 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
             let mut tmax = 0.0;
             let mut tmean = 0.0;
             if adoc_get_three_floats(
-                IIADOC_IMAGE.as_ptr(),
+                IIADOC_IMAGE,
                 ind,
-                c"MinMaxMean".as_ptr(),
+                b"MinMaxMean",
                 &mut tmin,
                 &mut tmax,
                 &mut tmean,
@@ -125,13 +119,7 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
         (*in_file).amean = ((*in_file).amax + (*in_file).amin) / 2.0;
         (*in_file).smin = (*in_file).amin;
         (*in_file).smax = (*in_file).amax;
-        if adoc_get_float(
-            ADOC_GLOBAL_NAME.as_ptr(),
-            0,
-            c"PixelSpacing".as_ptr(),
-            &mut (*in_file).xscale,
-        ) == 0
-        {
+        if adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut (*in_file).xscale) == 0 {
             (*in_file).yscale = (*in_file).xscale;
         }
         (*in_file).fill_mrc_header = Some(adoc_fill_mrc_header);
@@ -162,10 +150,14 @@ unsafe extern "C" fn adoc_close(in_file: *mut ImodImageFile) {
 /// Matches C static `adocReopen` (`iiadoc.c:116`).
 unsafe extern "C" fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
     unsafe {
-        (*in_file).adoc_index = adoc_read((*in_file).filename);
+        let name = (*in_file).filename.clone().unwrap_or_default();
+        (*in_file).adoc_index = adoc_read(&name);
         (*in_file).fp = ImodFile::open(
-            &core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy(),
-            &core::ffi::CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+            &String::from_utf8_lossy(&name),
+            &String::from_utf8_lossy({
+                let fmode = &(*in_file).fmode;
+                &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
+            }),
         );
         if (*in_file).fp.is_none() {
             b3d_error(
@@ -195,18 +187,21 @@ unsafe extern "C" fn adoc_fill_mrc_header(
             (*in_file).yscale as f64,
             (*in_file).zscale as f64,
         );
-        (*hdata).nlabl = adoc_get_number_of_sections(c"T".as_ptr());
+        (*hdata).nlabl = adoc_get_number_of_sections(b"T");
         for ind in 0..(*hdata).nlabl {
-            let mut label = core::ptr::null_mut();
-            if adoc_get_section_name(c"T".as_ptr(), ind, &mut label) != 0 {
+            let mut label = Vec::new();
+            if adoc_get_section_name(b"T", ind, &mut label) != 0 {
                 return 1;
             }
-            libc::strncpy(
-                (*hdata).labels[ind as usize].as_mut_ptr().cast(),
-                label,
-                MRC_LABEL_SIZE,
-            );
-            libc::free(label.cast());
+            // `iiadoc.c:142` is `strncpy(hdata->labels[ind], label,
+            // MRC_LABEL_SIZE)`: at most 80 bytes, NUL-padded to that length if
+            // the name is shorter, and byte 80 left as it was.
+            let count = label.len().min(MRC_LABEL_SIZE);
+            let slot = &mut (*hdata).labels[ind as usize];
+            slot[..count].copy_from_slice(&label[..count]);
+            for byte in slot[count..MRC_LABEL_SIZE].iter_mut() {
+                *byte = 0;
+            }
             fix_title_padding(&mut (*hdata).labels[ind as usize]);
         }
     }
@@ -216,49 +211,40 @@ unsafe extern "C" fn adoc_fill_mrc_header(
 /// Matches C static `readSectionFile` (`iiadoc.c:151`).
 unsafe fn read_section_file(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     section: i32,
     func: IiSectionFunc,
 ) -> i32 {
     unsafe {
-        let mut filename = core::ptr::null_mut();
-        if adoc_get_section_name(IIADOC_IMAGE.as_ptr(), section, &mut filename) != 0 {
+        let mut filename = Vec::new();
+        if adoc_get_section_name(IIADOC_IMAGE, section, &mut filename) != 0 {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: iiadoc - Getting filename for section {}", section),
             );
             return 1;
         }
-        let slash = libc::strrchr((*in_file).filename, b'/' as i32);
-        let back_slash = libc::strrchr((*in_file).filename, b'\\' as i32);
+        let own_name = (*in_file).filename.clone().unwrap_or_default();
+        // `iiadoc.c:161-167`: the last '/' and the last '\', whichever is later.
         let mut slash_ind = -1_isize;
         let mut bs_ind = -1_isize;
-        if !slash.is_null() {
-            slash_ind = slash.offset_from((*in_file).filename);
+        if let Some(pos) = own_name.iter().rposition(|b| *b == b'/') {
+            slash_ind = pos as isize;
         }
-        if !back_slash.is_null() {
-            bs_ind = back_slash.offset_from((*in_file).filename);
+        if let Some(pos) = own_name.iter().rposition(|b| *b == b'\\') {
+            bs_ind = pos as isize;
         }
         slash_ind = slash_ind.max(bs_ind);
-        let mut use_name = filename;
-        if slash_ind >= 0 {
-            let full_len = slash_ind as usize + libc::strlen(filename) + 4;
-            use_name = libc::malloc(full_len).cast();
-            if use_name.is_null() {
-                b3d_error(
-                    Some(&mut ImodFile::Stderr),
-                    format_args!("ERROR: iiadoc - Allocating memory for filename\n"),
-                );
-                return 1;
-            }
-            libc::strncpy(use_name, (*in_file).filename, slash_ind as usize + 1);
-            libc::strcpy(use_name.add(slash_ind as usize + 1), filename);
-        }
-        let sect_file = ii_open(use_name, c"rb".as_ptr());
-        libc::free(filename.cast());
-        if slash_ind >= 0 {
-            libc::free(use_name.cast());
-        }
+        let use_name = if slash_ind >= 0 {
+            // `iiadoc.c:172-177`: the directory part of the idoc name, up to
+            // and including the separator, then the section's file name.
+            let mut composed = own_name[..slash_ind as usize + 1].to_vec();
+            composed.extend_from_slice(&filename);
+            composed
+        } else {
+            filename
+        };
+        let sect_file = ii_open(&use_name, "rb");
         if sect_file.is_null() {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
@@ -306,7 +292,7 @@ unsafe fn read_section_file(
 /// Matches C static `adocReadSectionByte` (`iiadoc.c:221`).
 unsafe extern "C" fn adoc_read_section_byte(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section_byte)) }
@@ -315,7 +301,7 @@ unsafe extern "C" fn adoc_read_section_byte(
 /// Matches C static `adocReadSectionUShort` (`iiadoc.c:226`).
 unsafe extern "C" fn adoc_read_section_ushort(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section_ushort)) }
@@ -324,7 +310,7 @@ unsafe extern "C" fn adoc_read_section_ushort(
 /// Matches C static `adocReadSectionFloat` (`iiadoc.c:231`).
 unsafe extern "C" fn adoc_read_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section_float)) }
@@ -333,7 +319,7 @@ unsafe extern "C" fn adoc_read_section_float(
 /// Matches C static `adocReadSection` (`iiadoc.c:236`).
 unsafe extern "C" fn adoc_read_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section)) }

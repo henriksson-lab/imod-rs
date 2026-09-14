@@ -14,6 +14,10 @@ use crate::imod::libiimod::iimage::{
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB, get_byte_map};
 use core::ffi::{c_char, c_void};
 
+/// The Qt C++ ABI of `iiqimage_qt.cpp`, compiled by `build.rs` and linked
+/// statically.  This is the one boundary in this unit that keeps a C string:
+/// `QImage::load` takes one, and the file name is handed over with a
+/// terminator appended at the call site and nowhere else.
 #[cfg(feature = "qt")]
 unsafe extern "C" {
     fn iiqimage_open(filename: *const c_char) -> *mut c_void;
@@ -73,7 +77,11 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
     if in_file.is_null() {
         return IIERR_BAD_CALL;
     }
-    let image = unsafe { iiqimage_open((*in_file).filename) };
+    // `iiqimage_qt.cpp` is the Qt C++ ABI and takes a C string; the
+    // terminator is added here, at the boundary, and nowhere else.
+    let mut name = unsafe { (*in_file).filename.clone().unwrap_or_default() };
+    name.push(0);
+    let image = unsafe { iiqimage_open(name.as_ptr().cast()) };
     if unsafe { iiqimage_is_null(image) } != 0 {
         unsafe { iiqimage_delete(image) };
         return IIERR_NOT_FORMAT;
@@ -85,7 +93,7 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
                 None,
                 format_args!(
                     "{} is a recognized file type but data type is not supported\n",
-                    core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy()
+                    String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b""))
                 ),
             );
         }
@@ -132,7 +140,7 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
 /// Matches C `qimageReadSectionByte` (`iiqimage.cpp:94`).
 pub unsafe extern "C" fn qimage_read_section_byte(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     let _ = in_section;
@@ -142,7 +150,7 @@ pub unsafe extern "C" fn qimage_read_section_byte(
 /// Matches C `qimageReadSectionFloat` (`iiqimage.cpp:99`).
 pub unsafe extern "C" fn qimage_read_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     let _ = in_section;
@@ -152,7 +160,7 @@ pub unsafe extern "C" fn qimage_read_section_float(
 /// Matches C `qimageReadSection` (`iiqimage.cpp:104`).
 pub unsafe extern "C" fn qimage_read_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     let _ = in_section;
@@ -161,7 +169,9 @@ pub unsafe extern "C" fn qimage_read_section(
 
 /// Matches C `qimageReopen` (`iiqimage.cpp:109`).
 pub unsafe extern "C" fn qimage_reopen(in_file: *mut ImodImageFile) -> i32 {
-    let image = unsafe { iiqimage_open((*in_file).filename) };
+    let mut name = unsafe { (*in_file).filename.clone().unwrap_or_default() };
+    name.push(0);
+    let image = unsafe { iiqimage_open(name.as_ptr().cast()) };
     if unsafe { iiqimage_is_null(image) } != 0 {
         unsafe { iiqimage_delete(image) };
         return 1;
@@ -191,7 +201,7 @@ pub unsafe extern "C" fn qimage_close(in_file: *mut ImodImageFile) {
 }
 
 /// Matches file-local C `ReadSection` (`iiqimage.cpp:134`).
-unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut c_char, byte: i32) -> i32 {
+unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> i32 {
     let ysize = unsafe { (*in_file).ny };
     if unsafe { (*in_file).axis } == 2
         || (byte > 1 && unsafe { (*in_file).format } != IIFORMAT_LUMINANCE)
@@ -248,7 +258,7 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut c_char, byte: i32)
     let width = unsafe { (*in_file).nx } as usize;
     let mut indexes = vec![0_u8; width];
     let mut rgb = vec![0_u8; width * 3];
-    let mut out = buf.cast::<u8>();
+    let mut out = buf;
     for y in ymin..=ymax {
         if depth == 8 {
             unsafe { iiqimage_index_row(image, ysize - 1 - y, indexes.as_mut_ptr(), width as i32) };
@@ -314,8 +324,6 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut c_char, byte: i32)
 mod tests {
     use super::{ii_q_image_check, iiqimage_index_row, qimage_close, qimage_read_section};
     use crate::imod::libiimod::iimage::{IIFORMAT_LUMINANCE, ImodImageFile};
-    use core::ffi::c_char;
-    use std::ffi::CString;
 
     #[test]
     fn qrgb_component_layout_matches_qt_qrgb() {
@@ -329,14 +337,10 @@ mod tests {
     #[cfg(feature = "qt")]
     #[test]
     fn source_qimage_png_path_sets_up_and_reads_bottom_to_top() {
-        let filename = CString::new("fixtures/mrc2tif-float-scaled.png").unwrap();
-        let mode = CString::new("rb").unwrap();
+        let filename = "fixtures/mrc2tif-float-scaled.png";
         let mut file = ImodImageFile::default();
-        file.filename = filename.as_ptr().cast_mut();
-        file.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
-            &filename.to_string_lossy(),
-            &mode.to_string_lossy(),
-        );
+        file.filename = Some(filename.as_bytes().to_vec());
+        file.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(filename, "rb");
         assert!(file.fp.is_some());
         assert_eq!(unsafe { ii_q_image_check(&mut file) }, 0);
         assert_eq!(file.format, IIFORMAT_LUMINANCE);
@@ -347,7 +351,7 @@ mod tests {
         file.ury = -1;
         let mut read = vec![0_u8; (file.nx * file.ny) as usize];
         assert_eq!(
-            unsafe { qimage_read_section(&mut file, read.as_mut_ptr().cast::<c_char>(), 0) },
+            unsafe { qimage_read_section(&mut file, read.as_mut_ptr(), 0) },
             0
         );
         let mut expected = vec![0_u8; read.len()];

@@ -905,14 +905,23 @@ pub fn binvol() {
 
         let mut dat = [b' '; 9];
         b3d_date(&mut dat);
-        let mut now = 0_i64;
-        let mut local = core::mem::zeroed::<libc::tm>();
-        libc::time(&raw mut now);
-        libc::localtime_r(&raw const now, &raw mut local);
-        let tim = format!(
-            "{:02}:{:02}:{:02}",
-            local.tm_hour, local.tm_min, local.tm_sec
-        );
+        // `call time(tim)`.  Converting epoch seconds to local civil time is
+        // the same foreign boundary `b3ddate.rs` documents -- Rust's standard
+        // library carries no timezone database -- and nothing else here is C.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as libc::time_t;
+        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+        let tim = if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
+            String::new()
+        } else {
+            let local = local.assume_init();
+            format!(
+                "{:02}:{:02}:{:02}",
+                local.tm_hour, local.tm_min, local.tm_sec
+            )
+        };
         //
         let mut titlech = [b' '; MRC_LABEL_SIZE + 1];
         let head = if ft_crop {

@@ -6,13 +6,17 @@
 //! into the crate.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, b3d_fread, b3d_rewind, c_format};
 use crate::imod::libcfshr::b3dutil::{
-    b3d_error, b3d_shift_bytes, group_limits_remainder_at_end, make_all_big_tiff, num_omp_threads,
+    CArg, ImodFile, b3d_fread, b3d_rewind, c_format, c_format_bytes,
+};
+use crate::imod::libcfshr::b3dutil::{
+    b3d_error, b3d_shift_bytes, group_limits_remainder_at_end, imod_getpid, make_all_big_tiff,
+    num_omp_threads,
 };
 use crate::imod::libcfshr::ilist::{
     Ilist, ilist_append, ilist_delete, ilist_item, ilist_new, ilist_quantum,
 };
+use crate::imod::libcfshr::parse_params::{strtod, strtol};
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_raw_filt_value};
 use crate::imod::libiimod::iilikemrc::{
     RAW_MODE_BYTE, RAW_MODE_FLOAT, RAW_MODE_SBYTE, RAW_MODE_SHORT, RAW_MODE_USHORT,
@@ -31,8 +35,12 @@ use crate::imod::libiimod::mrcfiles::{
     PACKED_HALF_XSIZE, fix_title_padding, get_byte_map, get_short_map, mrc_head_new, mrc_set_scale,
     size_can_be_4_bit_k2_super_res,
 };
-use core::ffi::{CStr, c_char, c_void};
+// `c_char` survives only below the libtiff line: the `TIFF*` entry points, the
+// `TIFFFieldInfo` libtiff itself reads, and the `va_list` message handler.
+use core::ffi::{c_char, c_void};
 use core::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+use std::io::Write;
+use std::sync::Mutex;
 
 unsafe extern "C" {
     // `warningHandler` formats libtiff's own `va_list` message.  On this ABI a
@@ -196,7 +204,7 @@ static S_TAG_TO_PRINT: AtomicI32 = AtomicI32::new(0);
 static S_IGNORE_FROM_VAR: AtomicI32 = AtomicI32::new(-999);
 static S_FILE_BUF_SIZE: AtomicI32 = AtomicI32::new(0);
 static S_SETTING_UP_PARALLEL: AtomicI32 = AtomicI32::new(0);
-static mut S_FILE_BUF: [*mut c_char; MAX_TIFF_THREADS] = [core::ptr::null_mut(); MAX_TIFF_THREADS];
+static mut S_FILE_BUF: [*mut u8; MAX_TIFF_THREADS] = [core::ptr::null_mut(); MAX_TIFF_THREADS];
 static mut S_CUR_BUF_IND: [u64; MAX_TIFF_THREADS] = [0; MAX_TIFF_THREADS];
 static mut S_MAX_BUF_IND: [u64; MAX_TIFF_THREADS] = [0; MAX_TIFF_THREADS];
 static mut S_ROWS_PER_STRIP: i32 = 0;
@@ -208,14 +216,20 @@ static mut S_NUM_STRIPS: i32 = 0;
 static mut S_ALREADY_INVERTED: i32 = 0;
 static mut S_PIX_SIZE: i32 = 0;
 static mut S_NUM_X_TILES: i32 = 0;
-static mut S_TMP_BUF: *mut c_char = core::ptr::null_mut();
-static mut S_DESCRIPTION: *mut c_char = core::ptr::null_mut();
+static mut S_TMP_BUF: *mut u8 = core::ptr::null_mut();
+/// C `static char *sDescription` (`iitif.c:2448`): the `ImageDescription`
+/// waiting to be written into the next directory.  It is held as bytes and
+/// keeps the terminating NUL `strdup` copies, because the only thing done with
+/// it is to hand its pointer to `TIFFSetField`.
+static S_DESCRIPTION: Mutex<Option<Vec<u8>>> = Mutex::new(None);
 static mut S_ALL_FILTERS: *mut i32 = core::ptr::null_mut();
 static mut S_FILTER_PTRS: *mut *mut i32 = core::ptr::null_mut();
 static mut S_FILT_X_START: *mut i32 = core::ptr::null_mut();
 static mut S_FILT_Y_START: *mut i32 = core::ptr::null_mut();
 static mut S_PARENT_EXTENDER: Option<unsafe extern "C" fn(*mut Tiff)> = None;
 static S_AUGMENTED_TAGS: AtomicI32 = AtomicI32::new(0);
+/// C `xtiffFieldInfo` (`iitif.c:3170`).  Below the libtiff line: libtiff reads
+/// these `TIFFFieldInfo` entries itself, so `field_name` is a C string.
 static mut S_XTIFF_FIELD_INFO: [TiffFieldInfo; 8] = [
     TiffFieldInfo {
         field_tag: TIFFTAG_DM_UINFO_POWER_0,
@@ -347,15 +361,16 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     let mut redp: *mut u16 = core::ptr::null_mut();
     let mut greenp: *mut u16 = core::ptr::null_mut();
     let mut bluep: *mut u16 = core::ptr::null_mut();
-    let mut resvar: *mut c_char;
     let tvips_tag: u16 = 37708;
     let mut pixel_limit: f32 = 3.;
-    let mut description: *mut c_char = core::ptr::null_mut();
-    let mut ptr: *const c_char;
-    let mut blank: *const c_char;
-    let mut colon: *const c_char;
-    let pr_copy: *mut c_char;
-    let mut pr_strng: *mut c_char = core::ptr::null_mut();
+    // `description` and `prStrng` are the `char *` libtiff fills in; the bytes
+    // behind them are read as bytes the moment the call returns.
+    let mut description: *mut u8 = core::ptr::null_mut();
+    let mut ptr: usize;
+    let mut blank: Option<usize>;
+    let mut colon: Option<usize>;
+    let mut pr_strng: *mut u8 = core::ptr::null_mut();
+    let mut end: usize;
     let mut image_j = 0i32;
     let mut im_jslices = 0i32;
     let mut im_jimages = 0i32;
@@ -403,9 +418,12 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             Ordering::SeqCst,
         );
         S_AUTOGROUP_EER.store(1, Ordering::SeqCst);
-        resvar = libc::getenv(c"IMOD_READ_EER_SUPER_RES".as_ptr());
-        if !resvar.is_null() {
-            S_READ_EER_AS_SUPER_RES.store(libc::atoi(resvar), Ordering::SeqCst);
+        if let Some(resvar) = std::env::var_os("IMOD_READ_EER_SUPER_RES") {
+            end = 0;
+            S_READ_EER_AS_SUPER_RES.store(
+                strtol(resvar.as_encoded_bytes(), &mut end, 10) as i32,
+                Ordering::SeqCst,
+            );
             S_READ_EER_AS_SUPER_RES.store(
                 S_READ_EER_AS_SUPER_RES.load(Ordering::SeqCst).clamp(
                     S_MIN_EER_SUPER_RESOLUTION.load(Ordering::SeqCst),
@@ -417,13 +435,16 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 S_ANTIALIAS_EER.store(4, Ordering::SeqCst);
             }
         }
-        resvar = libc::getenv(c"IMOD_READ_EER_Z_SUMMING".as_ptr());
-        if !resvar.is_null() {
-            S_AUTOGROUP_EER.store(libc::atoi(resvar), Ordering::SeqCst);
+        if let Some(resvar) = std::env::var_os("IMOD_READ_EER_Z_SUMMING") {
+            end = 0;
+            S_AUTOGROUP_EER.store(
+                strtol(resvar.as_encoded_bytes(), &mut end, 10) as i32,
+                Ordering::SeqCst,
+            );
         }
-        resvar = libc::getenv(c"IMOD_READ_EER_ANTIALIASED".as_ptr());
-        if !resvar.is_null() {
-            red_fac = libc::atoi(resvar);
+        if let Some(resvar) = std::env::var_os("IMOD_READ_EER_ANTIALIASED") {
+            end = 0;
+            red_fac = strtol(resvar.as_encoded_bytes(), &mut end, 10) as i32;
             if red_fac != 0 {
                 red_fac = red_fac.clamp(1, 2);
                 S_ANTIALIAS_EER.store(5 - red_fac, Ordering::SeqCst);
@@ -472,7 +493,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: iiTIFFCheck - Reading file {}\n",
-                    CStr::from_ptr((*in_file).filename).to_string_lossy()
+                    String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b""))
                 ),
             );
         }
@@ -485,14 +506,17 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     tif = open_without_b_mode(in_file);
     if tif.is_null() {
         (*in_file).fp = ImodFile::open(
-            &CStr::from_ptr((*in_file).filename).to_string_lossy(),
-            &CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+            &String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b"")),
+            &String::from_utf8_lossy({
+                let fmode = &(*in_file).fmode;
+                &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
+            }),
         );
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: iiTIFFCheck - Calling TIFFOpen on file {}\n",
-                CStr::from_ptr((*in_file).filename).to_string_lossy()
+                String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b""))
             ),
         );
         return IIERR_IO_ERROR;
@@ -511,16 +535,19 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_MEMORY_ERR;
     }
     ilist_quantum(&mut *(*in_file).directory_nums.cast::<Ilist>(), 20);
-    resvar = libc::getenv(c"TIFF_RES_PIXEL_LIMIT".as_ptr());
-    if !resvar.is_null() {
-        pixel_limit = libc::atof(resvar) as f32;
+    if let Some(resvar) = std::env::var_os("TIFF_RES_PIXEL_LIMIT") {
+        end = 0;
+        pixel_limit = strtod(resvar.as_encoded_bytes(), &mut end) as f32;
     }
 
     // If no tag to print set by program, look for environment variable
     if S_TAG_TO_PRINT.load(Ordering::SeqCst) == 0 {
-        resvar = libc::getenv(c"TIFF_STRING_TAG_TO_PRINT".as_ptr());
-        if !resvar.is_null() {
-            S_TAG_TO_PRINT.store(libc::atoi(resvar), Ordering::SeqCst);
+        if let Some(resvar) = std::env::var_os("TIFF_STRING_TAG_TO_PRINT") {
+            end = 0;
+            S_TAG_TO_PRINT.store(
+                strtol(resvar.as_encoded_bytes(), &mut end, 10) as i32,
+                Ordering::SeqCst,
+            );
         }
     }
 
@@ -534,17 +561,20 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         ) > 0
             && pr_count != 0
         {
-            pr_copy = libc::malloc(pr_count as usize + 1).cast();
-            if !pr_copy.is_null() {
-                libc::strncpy(pr_copy, pr_strng, pr_count as usize);
-                *pr_copy.add(pr_count as usize) = 0;
-                libc::printf(
-                    c"Tag %d: %s\n".as_ptr(),
-                    S_TAG_TO_PRINT.load(Ordering::SeqCst),
-                    pr_copy,
-                );
-                libc::free(pr_copy.cast());
+            // `iitif.c:227-232` copies `prCount` bytes with `strncpy` and
+            // terminates them, so what `%s` prints is the tag's bytes up to
+            // `prCount` or to an earlier NUL, whichever comes first.
+            let mut pr_len = 0usize;
+            while pr_len < pr_count as usize && *pr_strng.add(pr_len) != 0 {
+                pr_len += 1;
             }
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "Tag %d: %s\n",
+                &[
+                    CArg::Int(S_TAG_TO_PRINT.load(Ordering::SeqCst) as i64),
+                    CArg::Bytes(core::slice::from_raw_parts(pr_strng, pr_len)),
+                ],
+            ));
         }
     }
 
@@ -593,48 +623,66 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         If so look for various values that are useful.
         Also check for SerialEMCCD title for packed 4 bit data */
         if dirnum == 0 && TIFFGetField(tif, TIFFTAG_IMAGE_DESCRIPTION, &raw mut description) != 0 {
-            if !libc::strstr(description, c"SerialEMCCD".as_ptr()).is_null()
-                && !libc::strstr(description, c"4 bits packed".as_ptr()).is_null()
+            // The tag's value is libtiff's own NUL-terminated buffer; length it
+            // once here and do the rest of `iitif.c:274-308` on the bytes.
+            let mut desc_len = 0usize;
+            while *description.add(desc_len) != 0 {
+                desc_len += 1;
+            }
+            let text = core::slice::from_raw_parts(description, desc_len);
+            if text
+                .windows(b"SerialEMCCD".len())
+                .any(|w| w == b"SerialEMCCD")
+                && text
+                    .windows(b"4 bits packed".len())
+                    .any(|w| w == b"4 bits packed")
             {
                 from_semccd = 1;
 
                 /* But if you find it, check for multiple titles from other programs, i.e.,
                 a line that has a colon before a blank */
-                ptr = description;
-                while !libc::strchr(ptr, '\n' as i32).is_null() {
-                    ptr = libc::strchr(ptr, '\n' as i32).add(1);
-                    blank = libc::strchr(ptr, ' ' as i32);
-                    colon = libc::strchr(ptr, ':' as i32);
-                    if !colon.is_null()
-                        && !blank.is_null()
-                        && blank.offset_from(ptr) > colon.offset_from(ptr)
-                    {
-                        from_semccd = 0;
-                        break;
+                ptr = 0;
+                while let Some(newline) = text[ptr..].iter().position(|byte| *byte == b'\n') {
+                    ptr = ptr + newline + 1;
+                    blank = text[ptr..].iter().position(|byte| *byte == b' ');
+                    colon = text[ptr..].iter().position(|byte| *byte == b':');
+                    if let (Some(colon), Some(blank)) = (colon, blank) {
+                        if blank > colon {
+                            from_semccd = 0;
+                            break;
+                        }
                     }
                 }
             }
-            if libc::strstr(description, c"ImageJ=".as_ptr()) == description {
+            if text.starts_with(b"ImageJ=") {
                 image_j = 1;
-                ptr = libc::strstr(description, c"slices=".as_ptr());
-                if !ptr.is_null() {
-                    im_jslices = libc::atoi(ptr.add(7));
+                if let Some(found) = text.windows(b"slices=".len()).position(|w| w == b"slices=") {
+                    end = 0;
+                    im_jslices = strtol(&text[found + 7..], &mut end, 10) as i32;
                 }
-                ptr = libc::strstr(description, c"images=".as_ptr());
-                if !ptr.is_null() {
-                    im_jimages = libc::atoi(ptr.add(7));
+                if let Some(found) = text.windows(b"images=".len()).position(|w| w == b"images=") {
+                    end = 0;
+                    im_jimages = strtol(&text[found + 7..], &mut end, 10) as i32;
                 }
-                ptr = libc::strstr(description, c"min=".as_ptr());
-                if !ptr.is_null() {
-                    im_jmin = libc::atoi(ptr.add(4)) as f32;
+                if let Some(found) = text.windows(b"min=".len()).position(|w| w == b"min=") {
+                    end = 0;
+                    im_jmin = strtol(&text[found + 4..], &mut end, 10) as i32 as f32;
                 }
-                ptr = libc::strstr(description, c"max=".as_ptr());
-                if !ptr.is_null() {
-                    im_jmax = libc::atoi(ptr.add(4)) as f32;
+                if let Some(found) = text.windows(b"max=".len()).position(|w| w == b"max=") {
+                    end = 0;
+                    im_jmax = strtol(&text[found + 4..], &mut end, 10) as i32 as f32;
                 }
-                ptr = libc::strstr(description, c"spacing=".as_ptr());
-                if !ptr.is_null() && !libc::strstr(description, c"unit=micron".as_ptr()).is_null() {
-                    im_jpixel = (1.0e4 * libc::atof(ptr.add(8))) as f32;
+                if let Some(found) = text
+                    .windows(b"spacing=".len())
+                    .position(|w| w == b"spacing=")
+                {
+                    if text
+                        .windows(b"unit=micron".len())
+                        .any(|w| w == b"unit=micron")
+                    {
+                        end = 0;
+                        im_jpixel = (1.0e4 * strtod(&text[found + 8..], &mut end)) as f32;
+                    }
                 }
             }
         }
@@ -725,7 +773,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 ),
             ) != 0
             {
-                close_with_error(in_file, c"Memory error adding to directory list\n".as_ptr());
+                close_with_error(in_file, "Memory error adding to directory list\n");
                 return IIERR_MEMORY_ERR;
             }
         } else if nxim == (*in_file).nx && nyim == (*in_file).ny && skip_file == 0 {
@@ -738,7 +786,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 ),
             ) != 0
             {
-                close_with_error(in_file, c"Memory error adding to directory list\n".as_ptr());
+                close_with_error(in_file, "Memory error adding to directory list\n");
                 return IIERR_MEMORY_ERR;
             }
 
@@ -765,7 +813,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     if skip_eer != 0 && num_non_eer_images == 0 {
         close_with_error(
             in_file,
-            c"ERROR: iiTIFFCheck - No non-EER images present in EER file\n".as_ptr(),
+            "ERROR: iiTIFFCheck - No non-EER images present in EER file\n",
         );
         return IIERR_NOT_PRESENT;
     }
@@ -823,7 +871,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     {
         close_with_error(
             in_file,
-            c"ERROR: iiTIFFCheck - Unsupported type of TIFF file\n".as_ptr(),
+            "ERROR: iiTIFFCheck - Unsupported type of TIFF file\n",
         );
         return IIERR_NO_SUPPORT;
     }
@@ -915,20 +963,20 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
 
     /* 11/22/08: define this for all types, not just for 3-sample data */
     (*in_file).read_section = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
     >(tiff_read_section));
     (*in_file).read_section_ushort = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
     >(tiff_read_section_ushort));
     (*in_file).read_section_byte = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
     >(tiff_read_section_byte));
     (*in_file).read_section_float = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
     >(tiff_read_section_float));
 
     /* Set up file mode and default properties; fill in mode for raw info at same time */
@@ -971,7 +1019,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             if (*in_file).colormap.is_null() {
                 close_with_error(
                     in_file,
-                    c"ERROR: iiTIFFCheck - Getting memory for colormap\n".as_ptr(),
+                    "ERROR: iiTIFFCheck - Getting memory for colormap\n",
                 );
                 return IIERR_MEMORY_ERR;
             }
@@ -980,7 +1028,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 if set_matching_directory(in_file, j) != 0 {
                     close_with_error(
                         in_file,
-                        c"ERROR: iiTIFFCheck - getting directory for colormap\n".as_ptr(),
+                        "ERROR: iiTIFFCheck - getting directory for colormap\n",
                     );
                     return IIERR_IO_ERROR;
                 }
@@ -1052,7 +1100,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             } else {
                 close_with_error(
                     in_file,
-                    c"ERROR: iiTIFFCheck - 32-bit TIFF file with no data type defined\n".as_ptr(),
+                    "ERROR: iiTIFFCheck - 32-bit TIFF file with no data type defined\n",
                 );
                 return IIERR_NO_SUPPORT;
             }
@@ -1130,15 +1178,18 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
             info.header_size = *offsets as i32;
             TIFFClose(tif);
             (*in_file).fp = ImodFile::open(
-                &CStr::from_ptr((*in_file).filename).to_string_lossy(),
-                &CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+                &String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b"")),
+                &String::from_utf8_lossy({
+                    let fmode = &(*in_file).fmode;
+                    &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
+                }),
             );
             if (*in_file).fp.is_none() {
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiTIFFCheck - Reopening file {} for treatment as MRC-like\n",
-                        CStr::from_ptr((*in_file).filename).to_string_lossy()
+                        String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b""))
                     ),
                 );
                 return IIERR_IO_ERROR;
@@ -1251,14 +1302,20 @@ pub unsafe fn tiff_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcH
         (*hdata).iiu_flags |= IIUNIT_HALF_XSIZE;
     }
     let tif = (*in_file).header.cast::<Tiff>();
-    let mut description: *mut c_char = core::ptr::null_mut();
+    let mut description: *mut u8 = core::ptr::null_mut();
     if !tif.is_null()
         && TIFFSetDirectory(tif, 0) != 0
         && TIFFGetField(tif, TIFFTAG_IMAGE_DESCRIPTION, &mut description) != 0
         && !description.is_null()
     {
         (*hdata).nlabl = 0;
-        let description = CStr::from_ptr(description).to_bytes();
+        // `iitif.c:741` takes `strlen(description)` of libtiff's buffer and
+        // then indexes it; the bytes are read as bytes from here on.
+        let mut desc_len = 0usize;
+        while *description.add(desc_len) != 0 {
+            desc_len += 1;
+        }
+        let description = core::slice::from_raw_parts(description, desc_len);
         let mut start_ind = 0;
         while (*hdata).nlabl < MRC_NLABELS as i32 && start_ind < description.len() {
             let mut end_ind = start_ind;
@@ -1299,15 +1356,15 @@ unsafe fn tiff_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut Mrc
     if in_file.is_null() || hdata.is_null() {
         return IIERR_BAD_CALL;
     }
-    libc::free((*in_file).description.cast());
-    (*in_file).description = core::ptr::null_mut();
+    (*in_file).description = None;
     if (*hdata).nlabl == 0 {
         return 0;
     }
-    (*in_file).description = libc::malloc((*hdata).nlabl as usize * (MRC_LABEL_SIZE + 1)).cast();
-    if (*in_file).description.is_null() {
-        return 1;
-    }
+    // `iitif.c:780`'s `malloc(nlabl * (MRC_LABEL_SIZE + 1))`.  The source leaves
+    // the tail uninitialised and a `Vec` zeroes it, which is the recorded
+    // `malloc`-residue deviation; nothing past `outInd` is ever read.
+    (*in_file).description = Some(vec![0u8; (*hdata).nlabl as usize * (MRC_LABEL_SIZE + 1)]);
+    let description = (*in_file).description.as_mut().unwrap();
     let mut out_ind = 0;
     for lab in 0..(*hdata).nlabl as usize {
         let mut true_len = 0;
@@ -1322,36 +1379,33 @@ unsafe fn tiff_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut Mrc
         if true_len != 0 {
             let start_ind = out_ind;
             for ind in 0..true_len {
-                *(*in_file).description.add(out_ind) = (*hdata).labels[lab][ind] as c_char;
+                description[out_ind] = (*hdata).labels[lab][ind];
                 out_ind += 1;
             }
-            let description = core::slice::from_raw_parts_mut(
-                (*in_file).description.cast::<u8>().add(start_ind),
-                true_len,
-            );
-            if let Some(bit_ind) = description
+            let line = &mut description[start_ind..start_ind + true_len];
+            if let Some(bit_ind) = line
                 .windows(b"4 bits packed".len())
                 .position(|part| part == b"4 bits packed")
             {
-                if description
+                if line
                     .windows(b"SerialEMCCD".len())
                     .any(|part| part == b"SerialEMCCD")
                 {
-                    description[bit_ind + 1] = b'-';
+                    line[bit_ind + 1] = b'-';
                 }
             }
-            *(*in_file).description.add(out_ind) = if lab == (*hdata).nlabl as usize - 1 {
+            description[out_ind] = if lab == (*hdata).nlabl as usize - 1 {
                 0
             } else {
-                b'\n' as c_char
+                b'\n'
             };
             out_ind += 1;
         } else if lab == (*hdata).nlabl as usize - 1 {
-            *(*in_file).description.add(out_ind) = 0;
+            description[out_ind] = 0;
             out_ind += 1;
         }
     }
-    tiff_add_description((*in_file).description);
+    tiff_add_description((*in_file).description.as_deref());
     0
 }
 /// C `tiffGetField` (`iitif.c:814`).
@@ -1416,31 +1470,38 @@ unsafe extern "C" fn warning_handler(
     format: *const c_char,
     ap: *mut c_void,
 ) {
-    let mut buffer = [0 as c_char; 160];
-    vsnprintf(buffer.as_mut_ptr(), 159, format, ap);
+    // `vsnprintf` and the `va_list` it reads are libtiff's own message format,
+    // the one thing in this unit that has to stay a C string; the bytes it
+    // leaves in `buffer` are bytes from here on.
+    let mut buffer = [0u8; 160];
+    vsnprintf(buffer.as_mut_ptr().cast(), 159, format, ap);
     /* va_end(ap) is a no-op in this ABI */
 
     /* It didn't work to call the old handler with some errors, so print it
     ourselves to stderr.  It was "unknown" in libtiff 3 and "Unknown" in 4 */
-    if libc::strstr(buffer.as_ptr(), c"nknown field with tag".as_ptr()).is_null() {
-        use std::io::Write;
-        let text = CStr::from_ptr(buffer.as_ptr())
-            .to_string_lossy()
-            .into_owned();
+    let text = &buffer[..buffer
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(buffer.len())];
+    if !text
+        .windows(b"nknown field with tag".len())
+        .any(|part| part == b"nknown field with tag")
+    {
         if !module.is_null() {
-            let _ = ImodFile::Stderr.write_all(
-                c_format(
-                    "%s: Warning, %s\n",
-                    &[
-                        CArg::Str(&CStr::from_ptr(module).to_string_lossy()),
-                        CArg::Str(&text),
-                    ],
-                )
-                .as_bytes(),
-            );
+            let mut mod_len = 0usize;
+            while *module.add(mod_len) != 0 {
+                mod_len += 1;
+            }
+            let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+                "%s: Warning, %s\n",
+                &[
+                    CArg::Bytes(core::slice::from_raw_parts(module.cast::<u8>(), mod_len)),
+                    CArg::Bytes(text),
+                ],
+            ));
         } else {
-            let _ = ImodFile::Stderr
-                .write_all(c_format("Warning, %s\n", &[CArg::Str(&text)]).as_bytes());
+            let _ =
+                ImodFile::Stderr.write_all(&c_format_bytes("Warning, %s\n", &[CArg::Bytes(text)]));
         }
     }
 }
@@ -1467,9 +1528,12 @@ pub fn tiff_set_mapping(value: i32) {
 /// invocations, and can be overridden by an environment variable.
 pub fn tiff_set_eer_read_properties(super_res: i32, autogroup: i32, flags: i32) {
     if S_IGNORE_FROM_VAR.load(Ordering::SeqCst) == -999 {
-        let ignore_var = unsafe { libc::getenv(c"IGNORE_BAD_EER_ENDING".as_ptr()) };
-        if !ignore_var.is_null() {
-            S_IGNORE_FROM_VAR.store(unsafe { libc::atoi(ignore_var) }, Ordering::SeqCst);
+        if let Some(ignore_var) = std::env::var_os("IGNORE_BAD_EER_ENDING") {
+            let mut end = 0usize;
+            S_IGNORE_FROM_VAR.store(
+                strtol(ignore_var.as_encoded_bytes(), &mut end, 10) as i32,
+                Ordering::SeqCst,
+            );
         } else {
             S_IGNORE_FROM_VAR.store(-997, Ordering::SeqCst);
         }
@@ -1519,16 +1583,20 @@ pub fn tiff_set_string_tag_to_print(tag: i32) {
 }
 /// C `openWithoutBMode` (`iitif.c:944`).
 unsafe fn open_without_b_mode(in_file: *mut ImodImageFile) -> *mut Tiff {
-    if in_file.is_null() || (*in_file).filename.is_null() {
+    if in_file.is_null() {
         return core::ptr::null_mut();
     }
-    let mode = CStr::from_ptr((*in_file).fmode.as_ptr()).to_bytes();
+    let Some(filename) = (&(*in_file).filename).as_deref() else {
+        return core::ptr::null_mut();
+    };
+    let fmode = &(*in_file).fmode;
+    let mode = &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)];
     if mode.is_empty() {
         return core::ptr::null_mut();
     }
     if S_USE_MAPPING.load(Ordering::SeqCst) == 2 {
         S_USE_MAPPING.store(
-            if libc::getenv(c"IMOD_NO_TIFF_MEM_MAP".as_ptr()).is_null() {
+            if std::env::var_os("IMOD_NO_TIFF_MEM_MAP").is_none() {
                 1
             } else {
                 0
@@ -1544,7 +1612,11 @@ unsafe fn open_without_b_mode(in_file: *mut ImodImageFile) -> *mut Tiff {
         open_mode.push(b'm');
     }
     open_mode.push(0);
-    TIFFOpen((*in_file).filename, open_mode.as_ptr().cast())
+    // The libtiff line: the name and the mode become C strings here, and
+    // nowhere above this call.
+    let mut name = filename.to_vec();
+    name.push(0);
+    TIFFOpen(name.as_ptr().cast(), open_mode.as_ptr().cast())
 }
 /// C `setMatchingDirectory` (`iitif.c:984`).
 unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i32 {
@@ -1565,16 +1637,16 @@ unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i3
     (TIFFSetDirectory((*in_file).header.cast(), *directory as u16) == 0) as i32
 }
 /// C `closeWithError` (`iitif.c:994`).
-unsafe fn close_with_error(in_file: *mut ImodImageFile, message: *const c_char) {
+unsafe fn close_with_error(in_file: *mut ImodImageFile, message: &str) {
     TIFFClose((*in_file).header.cast());
     (*in_file).fp = ImodFile::open(
-        &CStr::from_ptr((*in_file).filename).to_string_lossy(),
-        &CStr::from_ptr((*in_file).fmode.as_ptr()).to_string_lossy(),
+        &String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b"")),
+        &String::from_utf8_lossy({
+            let fmode = &(*in_file).fmode;
+            &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
+        }),
     );
-    b3d_error(
-        Some(&mut ImodFile::Stderr),
-        format_args!("{}", CStr::from_ptr(message).to_string_lossy()),
-    );
+    b3d_error(Some(&mut ImodFile::Stderr), format_args!("{}", message));
 }
 /// C `countEERBytesAndElectrons` (`iitif.c:1005`).
 unsafe fn count_eer_bytes_and_electrons(
@@ -1605,7 +1677,7 @@ unsafe fn count_eer_bytes_and_electrons(
 /// tiffReadSectionByte call a common routine to reduce duplicate code.
 unsafe fn read_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     convert: i32,
 ) -> i32 {
@@ -3431,7 +3503,7 @@ unsafe fn copy_line(
 /// C `tiffReadSectionByte` (`iitif.c:2294`).
 pub unsafe fn tiff_read_section_byte(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     read_section(in_file, buf, in_section, MRSA_BYTE)
@@ -3439,7 +3511,7 @@ pub unsafe fn tiff_read_section_byte(
 /// C `tiffReadSectionUShort` (`iitif.c:2299`).
 pub unsafe fn tiff_read_section_ushort(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     read_section(in_file, buf, in_section, MRSA_USHORT)
@@ -3447,17 +3519,13 @@ pub unsafe fn tiff_read_section_ushort(
 /// C `tiffReadSectionFloat` (`iitif.c:2304`).
 pub unsafe fn tiff_read_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     read_section(in_file, buf, in_section, MRSA_FLOAT)
 }
 /// C `tiffReadSection` (`iitif.c:2309`).
-pub unsafe fn tiff_read_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut c_char,
-    in_section: i32,
-) -> i32 {
+pub unsafe fn tiff_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     read_section(in_file, buf, in_section, MRSA_NOPROC)
 }
 /// C `bufReadProc` (`iitif.c:2329`).
@@ -3492,7 +3560,7 @@ unsafe extern "C" fn buf_write_proc(fd: *mut c_void, buf: *mut c_void, size: isi
         return -1;
     }
     core::ptr::copy_nonoverlapping(
-        buf.cast::<c_char>(),
+        buf.cast::<u8>(),
         S_FILE_BUF[fd].add(S_CUR_BUF_IND[fd] as usize),
         size as usize,
     );
@@ -3537,9 +3605,12 @@ unsafe extern "C" fn buf_size_proc(fd: *mut c_void) -> u64 {
 }
 /// C `tiffOpenNew` (`iitif.c:2406`).
 pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
-    if in_file.is_null() || (*in_file).filename.is_null() {
+    if in_file.is_null() {
         return IIERR_BAD_CALL;
     }
+    let Some(filename) = (&(*in_file).filename).as_deref() else {
+        return IIERR_BAD_CALL;
+    };
     augment_libtiff_with_custom_tags();
     let mut minor = 0;
     let mut pixel_size = 1;
@@ -3558,18 +3629,17 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
             * pixel_size as f64)
             > 4.0e9
             || make_all_big_tiff() != 0);
-    let mode = if use_w8 {
-        c"w8".as_ptr()
-    } else {
-        c"w".as_ptr()
-    };
+    // The libtiff line: the name and the mode become C strings here.
+    let mode: &[u8] = if use_w8 { b"w8\0" } else { b"w\0" };
+    let mut name = filename.to_vec();
+    name.push(0);
     let tif = if S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) <= 0 {
-        TIFFOpen((*in_file).filename, mode)
+        TIFFOpen(name.as_ptr().cast(), mode.as_ptr().cast())
     } else {
         let file_number = (S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) - 1) as usize;
         TIFFClientOpen(
-            (*in_file).filename,
-            mode,
+            name.as_ptr().cast(),
+            mode.as_ptr().cast(),
             file_number as *mut c_void,
             Some(buf_read_proc),
             Some(buf_write_proc),
@@ -3603,12 +3673,12 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
         unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
     >(tiff_sync_from_mrc_header));
     (*in_file).write_section = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
     >(ii_tiff_write_section));
     (*in_file).write_section_float = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut c_char, i32) -> i32,
+        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
+        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
     >(ii_tiff_write_section_float));
     0
 }
@@ -3720,23 +3790,17 @@ pub unsafe fn tiff_write_setup(
         TIFFSetField(tif, TIFFTAG_DM_ORIGIN_0 + 1, 0.0_f64);
         TIFFSetField(tif, TIFFTAG_DM_UINFO_POWER_0, 1);
         TIFFSetField(tif, TIFFTAG_DM_UINFO_POWER_0 + 1, 1);
-        TIFFSetField(
-            tif,
-            TIFFTAG_DM_UINFO_UNIT_0,
-            if nano != 0 {
-                c"nanometer".as_ptr()
-            } else {
-                c"micrometer".as_ptr()
-            },
-        );
+        // Below the libtiff line: an ASCII tag value is a C string.
+        let unit: &[u8] = if nano != 0 {
+            b"nanometer\0"
+        } else {
+            b"micrometer\0"
+        };
+        TIFFSetField(tif, TIFFTAG_DM_UINFO_UNIT_0, unit.as_ptr().cast::<c_char>());
         TIFFSetField(
             tif,
             TIFFTAG_DM_UINFO_UNIT_0 + 1,
-            if nano != 0 {
-                c"nanometer".as_ptr()
-            } else {
-                c"micrometer".as_ptr()
-            },
+            unit.as_ptr().cast::<c_char>(),
         );
         if suppressed != 0 {
             tiff_restore_errors();
@@ -3771,12 +3835,22 @@ pub unsafe fn tiff_write_setup(
     }
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, photometric);
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, samples);
-    if !S_DESCRIPTION.is_null() && S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) <= 0 {
-        TIFFSetField(tif, TIFFTAG_IMAGE_DESCRIPTION, S_DESCRIPTION);
-    }
-    if S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) == 0 && !S_DESCRIPTION.is_null() {
-        libc::free(S_DESCRIPTION.cast());
-        S_DESCRIPTION = core::ptr::null_mut();
+    {
+        let mut description = S_DESCRIPTION.lock().unwrap();
+        if let Some(text) = description.as_deref() {
+            if S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) <= 0 {
+                // Below the libtiff line: the stored bytes already carry the
+                // terminator `strdup` copied.
+                TIFFSetField(
+                    tif,
+                    TIFFTAG_IMAGE_DESCRIPTION,
+                    text.as_ptr().cast::<c_char>(),
+                );
+            }
+        }
+        if S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) == 0 {
+            *description = None;
+        }
     }
     S_PIX_SIZE = samples * bits / 8;
     if !tile_size_x.is_null() && *tile_size_x != 0 {
@@ -3827,17 +3901,17 @@ pub unsafe fn tiff_write_setup(
     libc::time(&mut current_time);
     let time_info = libc::localtime(&current_time);
     if !time_info.is_null() {
-        let datetime = std::ffi::CString::new(format!(
-            "{:04}:{:02}:{:02} {:02}:{:02}:{:02}",
+        // Below the libtiff line: an ASCII tag value is a C string.
+        let datetime = format!(
+            "{:04}:{:02}:{:02} {:02}:{:02}:{:02}\0",
             (*time_info).tm_year + 1900,
             (*time_info).tm_mon,
             (*time_info).tm_mday,
             (*time_info).tm_hour,
             (*time_info).tm_min,
             (*time_info).tm_sec,
-        ))
-        .unwrap();
-        TIFFSetField(tif, TIFFTAG_DATETIME, datetime.as_ptr());
+        );
+        TIFFSetField(tif, TIFFTAG_DATETIME, datetime.as_ptr().cast::<c_char>());
     }
     S_TMP_BUF = if inverted == 0 || S_X_TILE_SIZE != 0 {
         _TIFFmalloc(S_STRIP_BYTES as isize).cast()
@@ -3881,7 +3955,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
                     lines - line - 1
                 };
                 core::ptr::copy_nonoverlapping(
-                    buf.cast::<c_char>()
+                    buf.cast::<u8>()
                         .add((source_line * (*in_file).nx * S_PIX_SIZE + x_offset) as usize),
                     S_TMP_BUF.add((line * S_LINE_BYTES) as usize),
                     num_bytes as usize,
@@ -3915,11 +3989,11 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
         return 0;
     }
     let output = if S_ALREADY_INVERTED != 0 {
-        buf.cast::<c_char>()
+        buf.cast::<u8>()
     } else {
         for line in 0..lines as usize {
             core::ptr::copy_nonoverlapping(
-                buf.cast::<c_char>()
+                buf.cast::<u8>()
                     .add((lines as usize - line - 1) * S_LINE_BYTES as usize),
                 S_TMP_BUF.add(line * S_LINE_BYTES as usize),
                 S_LINE_BYTES as usize,
@@ -3969,7 +4043,7 @@ pub unsafe fn tiff_write_finish(in_file: *mut ImodImageFile) {
 /// C `iiTiffWriteSection` (`iitif.c:2721`).
 pub unsafe fn ii_tiff_write_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     tiff_write_section_any(in_file, buf, in_section, 0)
@@ -3977,26 +4051,31 @@ pub unsafe fn ii_tiff_write_section(
 /// C `iiTiffWriteSectionFloat` (`iitif.c:2726`).
 pub unsafe fn ii_tiff_write_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     tiff_write_section_any(in_file, buf, in_section, 1)
 }
 /// C `tiffAddDescription` (`iitif.c:2732`).
-pub unsafe fn tiff_add_description(text: *const c_char) {
-    if !S_DESCRIPTION.is_null() {
-        libc::free(S_DESCRIPTION.cast());
+pub fn tiff_add_description(text: Option<&[u8]>) {
+    let mut description = S_DESCRIPTION.lock().unwrap();
+    *description = None;
+    if let Some(text) = text {
+        // `strdup` copies through the first NUL, and the stored copy keeps it
+        // because `TIFFSetField` reads a C string.
+        let end = text
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(text.len());
+        let mut copy = text[..end].to_vec();
+        copy.push(0);
+        *description = Some(copy);
     }
-    S_DESCRIPTION = if text.is_null() {
-        core::ptr::null_mut()
-    } else {
-        libc::strdup(text)
-    };
 }
 /// C `tiffWriteSectionAny` (`iitif.c:2738`).
 unsafe fn tiff_write_section_any(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     if_float: i32,
 ) -> i32 {
@@ -4045,7 +4124,7 @@ unsafe fn tiff_write_section_any(
         buf,
         if_float,
         &mut inverted,
-        c"tiffWriteSectionAny".as_ptr(),
+        "tiffWriteSectionAny",
     );
     if use_buf.is_null() {
         return IIERR_MEMORY_ERR;
@@ -4059,23 +4138,25 @@ unsafe fn tiff_write_section_any(
         // `resolution`.  Dividing in f32 instead rounds first: an `xscale` of
         // 1.5 gives 66666668 where the source gives 66666666, and the
         // `XResolution` rational libtiff writes differs.
-        (if libc::getenv(c"IMOD_TIFF_RESOL_PER_INCH".as_ptr()).is_null() {
+        (if std::env::var_os("IMOD_TIFF_RESOL_PER_INCH").is_none() {
             1.0e8_f64
         } else {
             -2.54e8_f64
         } / (*in_file).xscale as f64) as i32
     };
-    let comp_env = libc::getenv(c"IMOD_TIFF_COMPRESSION".as_ptr());
-    let compression = if comp_env.is_null() {
-        1
-    } else {
-        libc::atoi(comp_env).max(1)
+    let compression = match std::env::var_os("IMOD_TIFF_COMPRESSION") {
+        None => 1,
+        Some(value) => {
+            let mut end = 0usize;
+            (strtol(value.as_encoded_bytes(), &mut end, 10) as i32).max(1)
+        }
     };
-    let quality_env = libc::getenv(c"IMOD_TIFF_QUALITY".as_ptr());
-    let quality = if quality_env.is_null() {
-        -1
-    } else {
-        libc::atoi(quality_env).max(1)
+    let quality = match std::env::var_os("IMOD_TIFF_QUALITY") {
+        None => -1,
+        Some(value) => {
+            let mut end = 0usize;
+            (strtol(value.as_encoded_bytes(), &mut end, 10) as i32).max(1)
+        }
     };
     let result = tiff_write_section(
         in_file,
@@ -4099,7 +4180,13 @@ pub unsafe fn tiff_version(minor: *mut i32) -> i32 {
     if version.is_null() {
         return 0;
     }
-    let bytes = CStr::from_ptr(version).to_bytes();
+    // `TIFFGetVersion` hands back libtiff's own C string; length it here and
+    // read it as bytes.
+    let mut version_len = 0usize;
+    while *version.add(version_len) != 0 {
+        version_len += 1;
+    }
+    let bytes = core::slice::from_raw_parts(version.cast::<u8>(), version_len);
     if bytes.windows(4).any(|word| word == b"IMOD") {
         return 0;
     }
@@ -4161,7 +4248,7 @@ pub unsafe fn tiff_parallel_read(
     lly: i32,
     ury: i32,
     data_size: i32,
-    read_buf: *mut c_char,
+    read_buf: *mut u8,
     iz_read: i32,
     convert: i32,
 ) -> i32 {
@@ -4256,9 +4343,9 @@ pub unsafe fn tiff_parallel_write(
     num_threads = num_threads
         .min(((*in_file).ny / S_ROWS_PER_STRIP) / 4)
         .max(1);
-    let limit = libc::getenv(c"TIFF_WRITE_THREAD_LIMIT".as_ptr());
-    if !limit.is_null() {
-        let thread_limit = libc::atoi(limit);
+    if let Some(limit) = std::env::var_os("TIFF_WRITE_THREAD_LIMIT") {
+        let mut end = 0usize;
+        let thread_limit = strtol(limit.as_encoded_bytes(), &mut end, 10) as i32;
         if thread_limit > 0 {
             num_threads = num_threads.min(thread_limit);
         }
@@ -4311,7 +4398,7 @@ pub unsafe fn tiff_parallel_write(
     let mut temp_files = [core::ptr::null_mut::<ImodImageFile>(); MAX_TIFF_THREADS];
     let mut thread_num_strips = [0_i32; MAX_TIFF_THREADS];
     let mut thread_cum_lines = [0_i32; MAX_TIFF_THREADS];
-    let mut thread_tmp_buf = [core::ptr::null_mut::<c_char>(); MAX_TIFF_THREADS];
+    let mut thread_tmp_buf = [core::ptr::null_mut::<u8>(); MAX_TIFF_THREADS];
     let mut cumulative_lines = 0;
     let mut cumulative_strips = 0;
     let mut last_clean = -1_i32;
@@ -4330,19 +4417,15 @@ pub unsafe fn tiff_parallel_write(
             err = IIERR_MEMORY_ERR;
             break;
         }
-        let temporary_name = match CStr::from_ptr((*in_file).filename).to_str() {
-            Ok(name) => std::ffi::CString::new(format!("{name}.{}.{}", libc::getpid(), file)).ok(),
-            Err(_) => None,
-        };
-        let Some(temporary_name) = temporary_name else {
-            err = IIERR_MEMORY_ERR;
-            break;
-        };
-        (*temp_files[file]).filename = libc::strdup(temporary_name.as_ptr());
-        if (*temp_files[file]).filename.is_null() {
-            err = IIERR_MEMORY_ERR;
-            break;
-        }
+        // `iitif.c:2993`: `sprintf(..., "%s.%d.%d", inFile->filename, imodGetpid(), file)`.
+        (*temp_files[file]).filename = Some(c_format_bytes(
+            "%s.%d.%d",
+            &[
+                CArg::Bytes((&(*in_file).filename).as_deref().unwrap_or(b"")),
+                CArg::Int(imod_getpid() as i64),
+                CArg::Int(file as i64),
+            ],
+        ));
         (*temp_files[file]).nx = (*in_file).nx;
         (*temp_files[file]).ny = number_lines;
         (*temp_files[file]).file = IIFILE_TIFF;
@@ -4518,7 +4601,10 @@ pub unsafe fn tiff_parallel_write(
         for index in 0..=last_clean as usize {
             if !temp_files[index].is_null() {
                 ii_close(temp_files[index]);
-                libc::remove((*temp_files[index]).filename);
+                if let Some(name) = (&(*temp_files[index]).filename).as_deref() {
+                    let _ =
+                        std::fs::remove_file(std::ffi::OsStr::from_encoded_bytes_unchecked(name));
+                }
                 ii_delete(temp_files[index]);
                 if inverted == 0 && !thread_tmp_buf[index].is_null() {
                     _TIFFfree(thread_tmp_buf[index].cast());
@@ -4531,9 +4617,8 @@ pub unsafe fn tiff_parallel_write(
         }
     }
     (*in_file).state = IISTATE_BUSY;
-    if err == 0 && !S_DESCRIPTION.is_null() {
-        libc::free(S_DESCRIPTION.cast());
-        S_DESCRIPTION = core::ptr::null_mut();
+    if err == 0 {
+        *S_DESCRIPTION.lock().unwrap() = None;
     }
     err
 }
@@ -5047,7 +5132,7 @@ mod tests {
                 std::thread::current().id()
             ));
             write_eer_tiff(&path, chip, chip, IICOMPRESSION_EER_7BIT as u32, &[frame]);
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
 
             // Match the source defaults that iiTIFFCheck installs from the
             // environment on its first call in a process.
@@ -5058,10 +5143,12 @@ mod tests {
             S_GAIN_REFERENCE.store(core::ptr::null_mut(), Ordering::SeqCst);
 
             let reader = ii_new();
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as c_char, b'b' as c_char, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             // Super-resolution 2 quadruples each sensor axis.
             assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (32, 32, 1));
@@ -5102,9 +5189,9 @@ mod tests {
                 std::process::id(),
                 std::thread::current().id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 4;
             (*writer).ny = 2;
             (*writer).nz = 1;
@@ -5122,10 +5209,12 @@ mod tests {
             ii_delete(writer);
 
             let reader = ii_new();
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as c_char, b'b' as c_char, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!((*reader).type_, IITYPE_USHORT);
             // The source builds a short-to-byte map from slope and offset when
@@ -5191,9 +5280,9 @@ mod tests {
                 std::process::id(),
                 std::thread::current().id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 2;
             (*writer).ny = 2;
             (*writer).nz = 1;
@@ -5565,10 +5654,10 @@ mod tests {
         unsafe {
             let path =
                 std::env::temp_dir().join(format!("imod-rs-iitif-{}.tif", std::process::id()));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 2;
             (*writer).ny = 2;
             (*writer).nz = 1;
@@ -5587,10 +5676,12 @@ mod tests {
 
             let reader = ii_new();
             assert!(!reader.is_null());
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             let mut minimum = 0.0f64;
             let mut maximum = 0.0f64;
@@ -5649,8 +5740,10 @@ mod tests {
                 "imod-rs-iitif-separate-gray-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let writer = TIFFOpen(name.as_ptr(), c"w".as_ptr());
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
+            let mut tiff_name = name.clone();
+            tiff_name.push(0);
+            let writer = TIFFOpen(tiff_name.as_ptr().cast(), b"w\0".as_ptr().cast());
             assert!(!writer.is_null());
             assert_ne!(TIFFSetField(writer, TIFFTAG_IMAGEWIDTH, 2_u32), 0);
             assert_ne!(TIFFSetField(writer, TIFFTAG_IMAGELENGTH, 2_u32), 0);
@@ -5689,10 +5782,12 @@ mod tests {
 
             let reader = ii_new();
             assert!(!reader.is_null());
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!(
                 (
@@ -5728,10 +5823,10 @@ mod tests {
                 "imod-rs-iitif-thumbnail-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 1;
             (*writer).ny = 1;
             (*writer).nz = 2;
@@ -5754,10 +5849,12 @@ mod tests {
             ii_delete(writer);
 
             let reader = ii_new();
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             assert_eq!(((*reader).nx, (*reader).ny, (*reader).nz), (2, 2, 1));
             assert_eq!(
@@ -5789,10 +5886,10 @@ mod tests {
                 "imod-rs-iitif-complex-reject-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 1;
             (*writer).ny = 1;
             (*writer).nz = 1;
@@ -5826,9 +5923,9 @@ mod tests {
                 "imod-rs-iitif-sequence-reject-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 1;
             (*writer).ny = 1;
             (*writer).nz = 1;
@@ -5862,10 +5959,10 @@ mod tests {
                 "imod-rs-iitif-close-minmax-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 2;
             (*writer).ny = 2;
             (*writer).nz = 1;
@@ -5885,10 +5982,12 @@ mod tests {
 
             let reader = ii_new();
             assert!(!reader.is_null());
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             let mut minimum = 0.0_f64;
             let mut maximum = 0.0_f64;
@@ -5926,9 +6025,9 @@ mod tests {
         unsafe {
             let path =
                 std::env::temp_dir().join(format!("imod-rs-iitif-tile-{}.tif", std::process::id()));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 2;
             (*writer).ny = 2;
             (*writer).nz = 1;
@@ -5951,10 +6050,12 @@ mod tests {
             tiff_close(writer);
             ii_delete(writer);
             let reader = ii_new();
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             let mut decoded = [0_u8; 4];
             assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);
@@ -5978,10 +6079,10 @@ mod tests {
                 "imod-rs-iitif-zip-quality-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 1;
             (*writer).ny = 1;
             (*writer).nz = 1;
@@ -6032,10 +6133,10 @@ mod tests {
         unsafe {
             let path = std::env::temp_dir()
                 .join(format!("imod-rs-iitif-parallel-{}.tif", std::process::id()));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 1024;
             (*writer).ny = 1024;
             (*writer).nz = 1;
@@ -6064,10 +6165,12 @@ mod tests {
             tiff_close(writer);
             ii_delete(writer);
             let reader = ii_new();
-            (*reader).filename = libc::strdup(name.as_ptr());
-            (*reader).fmode = [b'r' as i8, b'b' as i8, 0, 0];
-            (*reader).fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb");
+            (*reader).filename = Some(name.clone());
+            (*reader).fmode = [b'r', b'b', 0, 0];
+            (*reader).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
+                &String::from_utf8_lossy(&name),
+                "rb",
+            );
             assert_eq!(ii_tiff_check(reader), 0);
             let mut decoded = vec![0_u8; pixels.len()];
             assert_eq!(tiff_read_section(reader, decoded.as_mut_ptr().cast(), 0), 0);
@@ -6087,10 +6190,10 @@ mod tests {
                 "imod-rs-iitif-custom-tag-{}.tif",
                 std::process::id()
             ));
-            let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+            let name = path.as_os_str().as_encoded_bytes().to_vec();
             let writer = ii_new();
             assert!(!writer.is_null());
-            (*writer).filename = libc::strdup(name.as_ptr());
+            (*writer).filename = Some(name.clone());
             (*writer).nx = 1;
             (*writer).ny = 1;
             (*writer).nz = 1;
@@ -6122,12 +6225,19 @@ mod tests {
             );
             assert_ne!(TIFFGetField(tif, TIFFTAG_DM_SCALE_0, &mut value), 0);
             assert_eq!(value, 5.);
-            let mut unit = core::ptr::null_mut::<c_char>();
+            let mut unit = core::ptr::null_mut::<u8>();
             assert_ne!(TIFFGetField(tif, TIFFTAG_DM_UINFO_UNIT_0, &mut unit), 0);
-            assert_eq!(CStr::from_ptr(unit).to_bytes(), b"nanometer");
-            let mut datetime = core::ptr::null_mut::<c_char>();
+            assert_eq!(
+                core::slice::from_raw_parts(unit, b"nanometer".len()),
+                b"nanometer"
+            );
+            let mut datetime = core::ptr::null_mut::<u8>();
             assert_ne!(TIFFGetField(tif, TIFFTAG_DATETIME, &mut datetime), 0);
-            assert_eq!(CStr::from_ptr(datetime).to_bytes().len(), 19);
+            let mut datetime_len = 0usize;
+            while *datetime.add(datetime_len) != 0 {
+                datetime_len += 1;
+            }
+            assert_eq!(datetime_len, 19);
             tiff_close(writer);
             ii_delete(writer);
             std::fs::remove_file(path).unwrap();

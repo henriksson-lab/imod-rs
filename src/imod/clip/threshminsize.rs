@@ -79,7 +79,7 @@ pub unsafe fn threshold_with_min_size(
                 next = crate::imod::libiimod::mrcslice::slice_read_subm(
                     hin,
                     z,
-                    b'z' as i8,
+                    b'z',
                     nx,
                     ny,
                     opt.cx as i32,

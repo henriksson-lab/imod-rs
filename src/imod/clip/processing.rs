@@ -239,11 +239,9 @@ pub unsafe fn clip_scaling(
         for f in 0..opt.infiles {
             let mut hdr = MrcHeader::default();
             let input_header = if f != 0 {
-                let mut nul_name = opt.fnames[(f) as usize].clone().into_bytes();
-                nul_name.push(0);
                 hdr.fp = crate::imod::libiimod::iimage::ii_fopen(
-                    nul_name.as_ptr().cast(),
-                    b"rb\0".as_ptr().cast(),
+                    opt.fnames[(f) as usize].as_bytes(),
+                    "rb",
                 );
                 if hdr.fp.is_none() {
                     crate::imod::libcfshr::parse_params::exit_error(
@@ -272,7 +270,7 @@ pub unsafe fn clip_scaling(
                 let slice = crate::imod::libiimod::mrcslice::slice_read_subm(
                     input_header,
                     opt.secs[(k) as usize],
-                    b'z' as i8,
+                    b'z',
                     opt.ix,
                     opt.iy,
                     opt.cx as i32,
@@ -544,7 +542,7 @@ pub unsafe fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
             let source = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -717,7 +715,7 @@ pub unsafe fn clip_convolve(
             let mut s = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -863,7 +861,7 @@ pub unsafe fn clip_median(
                     let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                         hin,
                         sec,
-                        b'z' as i8,
+                        b'z',
                         opt.ix,
                         opt.iy,
                         opt.cx as i32,
@@ -1024,7 +1022,7 @@ pub unsafe fn clip_diffusion(
             let slice = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -1103,7 +1101,7 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     &mut hin.fp.clone().unwrap(),
                     hin,
                     input,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     slice_free(sl);
@@ -1116,14 +1114,14 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     return -1;
                 }
                 if axis != b'z' {
-                    crate::imod::libiimod::mrcslice::slice_mirror(sl, axis as i8);
+                    crate::imod::libiimod::mrcslice::slice_mirror(sl, axis);
                 }
                 if crate::imod::libiimod::mrcfiles::mrc_write_slice(
                     (*sl).data.b.cast(),
                     &mut hout.fp.clone().unwrap(),
                     hout,
                     k,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     slice_free(sl);
@@ -1173,7 +1171,7 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     &mut hin.fp.clone().unwrap(),
                     hin,
                     x,
-                    b'x' as i8,
+                    b'x',
                 ) != 0
                 {
                     slice_free(sl);
@@ -1186,14 +1184,14 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     return -1;
                 }
                 if opt.sano != 0 {
-                    crate::imod::libiimod::mrcslice::slice_mirror(sl, b'y' as i8);
+                    crate::imod::libiimod::mrcslice::slice_mirror(sl, b'y');
                 }
                 if crate::imod::libiimod::mrcfiles::mrc_write_slice(
                     (*sl).data.b.cast(),
                     &mut hout.fp.clone().unwrap(),
                     hout,
                     x,
-                    b'y' as i8,
+                    b'y',
                 ) != 0
                 {
                     slice_free(sl);
@@ -1243,7 +1241,7 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     &mut hin.fp.clone().unwrap(),
                     hin,
                     x,
-                    b'x' as i8,
+                    b'x',
                 ) != 0
                 {
                     return -1;
@@ -1260,7 +1258,7 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     &mut hout.fp.clone().unwrap(),
                     hout,
                     x,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     return -1;
@@ -1336,7 +1334,7 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                         &mut hin.fp.clone().unwrap(),
                         hin,
                         z,
-                        b'z' as i8,
+                        b'z',
                     ) != 0
                     {
                         slice_free(input_slice);
@@ -1354,7 +1352,7 @@ pub unsafe fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut Cli
                     &mut hout.fp.clone().unwrap(),
                     hout,
                     k,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     slice_free(input_slice);
@@ -1470,7 +1468,7 @@ pub unsafe fn clip_quadrant(
             let mut iz = 0;
             for ind in start..end {
                 iz = opt.secs[(ind) as usize];
-                let s = crate::imod::libiimod::mrcslice::slice_read_mrc(hin, iz, b'z' as i8);
+                let s = crate::imod::libiimod::mrcslice::slice_read_mrc(hin, iz, b'z');
                 if s.is_null() {
                     crate::imod::clip::clip::show_error("clip: Error reading slice.");
                     return -1;
@@ -1603,7 +1601,7 @@ pub unsafe fn clip_quadrant(
                 end_out = nz - 1;
             }
             for iz in last_out + 1..=end_out {
-                let s = crate::imod::libiimod::mrcslice::slice_read_mrc(hin, iz, b'z' as i8);
+                let s = crate::imod::libiimod::mrcslice::slice_read_mrc(hin, iz, b'z');
                 if s.is_null() {
                     crate::imod::clip::clip::show_error("clip: Error reading slice.");
                     return -1;
@@ -1630,7 +1628,7 @@ pub unsafe fn clip_quadrant(
                     &mut hout.fp.clone().unwrap(),
                     hout,
                     iz,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     crate::imod::clip::clip::show_error("clip: Error writing slice.");
@@ -1758,7 +1756,7 @@ pub unsafe fn fill_drift_corrected_edges(
             let slice = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -1898,7 +1896,7 @@ pub unsafe fn clip_spectrum(
             let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -2071,7 +2069,7 @@ pub unsafe fn clip2d_color(
             let source = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -2128,12 +2126,7 @@ pub unsafe fn clip_joinrgb(
             return -1;
         }
         let mut headers = [(*h1).clone(), (*h2).clone(), MrcHeader::default()];
-        let mut nul_name = opt.fnames[2].clone().into_bytes();
-        nul_name.push(0);
-        headers[2].fp = crate::imod::libiimod::iimage::ii_fopen(
-            nul_name.as_ptr().cast(),
-            b"rb\0".as_ptr().cast(),
-        );
+        headers[2].fp = crate::imod::libiimod::iimage::ii_fopen(opt.fnames[2].as_bytes(), "rb");
         if headers[2].fp.is_none() {
             let _ = ImodFile::Stdout.write_all(
                 c_format(
@@ -2236,7 +2229,7 @@ pub unsafe fn clip_joinrgb(
                     &mut headers[n].fp.clone().unwrap(),
                     &mut headers[n],
                     k,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     return -1;
@@ -2258,7 +2251,7 @@ pub unsafe fn clip_joinrgb(
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 k + start,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return -1;
@@ -2312,12 +2305,7 @@ pub unsafe fn clip_splitrgb(h1: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                 headers[n].zorg -=
                     opt.secs[(0) as usize] as f32 * headers[n].zlen / headers[n].mz as f32;
             }
-            let mut nul_name = name.clone().into_bytes();
-            nul_name.push(0);
-            headers[n].fp = crate::imod::libiimod::iimage::ii_fopen(
-                nul_name.as_ptr().cast(),
-                b"wb+\0".as_ptr().cast(),
-            );
+            headers[n].fp = crate::imod::libiimod::iimage::ii_fopen(name.as_bytes(), "wb+");
             if headers[n].fp.is_none() {
                 let _ = ImodFile::Stdout.write_all(
                     c_format("ERROR: clip - opening %s\n", &[CArg::Str(&name)]).as_bytes(),
@@ -2353,11 +2341,9 @@ pub unsafe fn clip_splitrgb(h1: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                 MrcHeader::default()
             };
             if file != 0 {
-                let mut nul_name = opt.fnames[(file) as usize].clone().into_bytes();
-                nul_name.push(0);
                 input.fp = crate::imod::libiimod::iimage::ii_fopen(
-                    nul_name.as_ptr().cast(),
-                    b"rb\0".as_ptr().cast(),
+                    opt.fnames[(file) as usize].as_bytes(),
+                    "rb",
                 );
                 if input.fp.is_none()
                     || crate::imod::libiimod::mrcfiles::mrc_head_read(
@@ -2387,7 +2373,7 @@ pub unsafe fn clip_splitrgb(h1: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                     &mut input.fp.clone().unwrap(),
                     &mut input,
                     opt.secs[(k) as usize],
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     return -1;
@@ -2407,7 +2393,7 @@ pub unsafe fn clip_splitrgb(h1: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
                         &mut headers[n].fp.clone().unwrap(),
                         &mut headers[n],
                         file * opt.nofsecs + k,
-                        b'z' as i8,
+                        b'z',
                     ) != 0
                     {
                         return -1;
@@ -2532,12 +2518,8 @@ pub unsafe fn clip_average(
         let hdr: Vec<*mut MrcHeader> = headers.iter_mut().map(|h| h as *mut MrcHeader).collect();
         for f in 0..opt.infiles {
             let h = hdr[f as usize];
-            let mut nul_name = opt.fnames[(f) as usize].clone().into_bytes();
-            nul_name.push(0);
-            (*h).fp = crate::imod::libiimod::iimage::ii_fopen(
-                nul_name.as_ptr().cast(),
-                b"rb\0".as_ptr().cast(),
-            );
+            (*h).fp =
+                crate::imod::libiimod::iimage::ii_fopen(opt.fnames[(f) as usize].as_bytes(), "rb");
             if (*h).fp.is_none() {
                 crate::imod::clip::clip::show_error(&c_format(
                     "clip volume combining: error opening %s.",
@@ -2600,7 +2582,7 @@ pub unsafe fn clip_average(
                 let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                     hdr[file as usize],
                     opt.secs[(k) as usize],
-                    b'z' as i8,
+                    b'z',
                     opt.ix,
                     opt.iy,
                     opt.cx as i32,
@@ -2746,7 +2728,7 @@ pub unsafe fn clip2d_average(
             let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -2841,7 +2823,7 @@ pub unsafe fn clip2d_average(
             &mut hout.fp.clone().unwrap(),
             hout,
             z,
-            b'z' as i8,
+            b'z',
         ) != 0
         {
             return -1;
@@ -2948,7 +2930,7 @@ pub unsafe fn clip_multdiv(
             let out = crate::imod::libiimod::mrcslice::slice_read_subm(
                 h1,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -2972,7 +2954,7 @@ pub unsafe fn clip_multdiv(
                     } else {
                         opt.secs[(k) as usize]
                     },
-                    b'z' as i8,
+                    b'z',
                     opt.ix,
                     opt.iy,
                     opt.cx as i32,
@@ -3124,11 +3106,9 @@ pub unsafe fn clip_planar_fit(
             let input_header = if f == 0 {
                 &raw mut *hin
             } else {
-                let mut nul_name = opt.fnames[(f) as usize].clone().into_bytes();
-                nul_name.push(0);
                 hdr.fp = crate::imod::libiimod::iimage::ii_fopen(
-                    nul_name.as_ptr().cast(),
-                    b"rb\0".as_ptr().cast(),
+                    opt.fnames[(f) as usize].as_bytes(),
+                    "rb",
                 );
                 if hdr.fp.is_none() {
                     crate::imod::libcfshr::parse_params::exit_error(
@@ -3170,7 +3150,7 @@ pub unsafe fn clip_planar_fit(
                 let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                     input_header,
                     opt.secs[(k) as usize],
-                    b'z' as i8,
+                    b'z',
                     opt.ix,
                     opt.iy,
                     opt.cx as i32,
@@ -3536,7 +3516,7 @@ pub unsafe fn clip_planar_fit(
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 0,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 let message = c_format("%s writing image", &[CArg::Str(prefix)]);
@@ -3600,7 +3580,7 @@ pub unsafe fn clip_unpack(
         }
         let mut reference = core::ptr::null_mut();
         if do_ref {
-            reference = crate::imod::libiimod::mrcslice::slice_read_mrc(hin2, 0, b'z' as i8);
+            reference = crate::imod::libiimod::mrcslice::slice_read_mrc(hin2, 0, b'z');
             if reference.is_null() {
                 return -1;
             }
@@ -3819,7 +3799,7 @@ pub unsafe fn clip_unpack(
             let input = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin1,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -4016,7 +3996,7 @@ pub unsafe fn clip_defect_map(
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 0,
-                b'z' as i8,
+                b'z',
             ) != 0
         {
             return -1;
@@ -4046,11 +4026,9 @@ pub unsafe fn clip_super_gain(
         let mut extra = Vec::<MrcHeader>::with_capacity((opt.infiles - 1).max(0) as usize);
         for file_index in 1..opt.infiles {
             let mut header = MrcHeader::default();
-            let mut nul_name = opt.fnames[(file_index) as usize].clone().into_bytes();
-            nul_name.push(0);
             header.fp = crate::imod::libiimod::iimage::ii_fopen(
-                nul_name.as_ptr().cast(),
-                b"rb\0".as_ptr().cast(),
+                opt.fnames[(file_index) as usize].as_bytes(),
+                "rb",
             );
             if header.fp.is_none() {
                 crate::imod::clip::clip::show_error(&c_format(
@@ -4121,7 +4099,7 @@ pub unsafe fn clip_super_gain(
                     &mut (*header).fp.clone().unwrap(),
                     header,
                     z,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     for opened in &extra {
@@ -4428,13 +4406,7 @@ pub unsafe fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
         crate::imod::libiimod::mrcfiles::mrc_init_li(Some(&mut li), None);
         let mut pcoords = Vec::new();
         if let Some(plname) = opt.plname.clone() {
-            // `plist.rs` still takes a C string; the NUL-terminated copy goes
-            // away when that module converts.
-            let mut nul_plname = plname.clone().into_bytes();
-            nul_plname.push(0);
-            if crate::imod::libiimod::plist::mrc_plist_li(&mut li, hin, nul_plname.as_ptr().cast())
-                != 0
-            {
+            if crate::imod::libiimod::plist::mrc_plist_li(&mut li, hin, plname.as_bytes()) != 0 {
                 crate::imod::clip::clip::show_error("stat: error reading piece list file");
                 return -1;
             }
@@ -4538,7 +4510,7 @@ pub unsafe fn clip_stat(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
             let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 iz,
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -4945,7 +4917,7 @@ pub unsafe fn clip_histogram(hin: &mut MrcHeader, opt: &mut ClipOptions) -> i32 
             let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 opt.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -5423,7 +5395,7 @@ pub unsafe fn histogram_peaks_and_dip(hin: &mut MrcHeader, opt: &mut ClipOptions
             let s = crate::imod::libiimod::mrcslice::slice_read_subm(
                 hin,
                 iz,
-                b'z' as i8,
+                b'z',
                 opt.ix,
                 opt.iy,
                 opt.cx as i32,
@@ -5626,7 +5598,7 @@ pub unsafe fn write_vol(vol: &[*mut Islice], hout: &mut MrcHeader) -> i32 {
                 &mut hout.fp.clone().unwrap(),
                 hout,
                 k,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return -1;
@@ -5738,13 +5710,7 @@ mod tests {
             assert_eq!(mrc_head_read(&mut fp, &mut read), 0);
             let mut pixels = [0_f32; 2];
             assert_eq!(
-                mrc_read_slice(
-                    pixels.as_mut_ptr().cast(),
-                    &mut fp,
-                    &mut read,
-                    1,
-                    b'z' as i8
-                ),
+                mrc_read_slice(pixels.as_mut_ptr().cast(), &mut fp, &mut read, 1, b'z'),
                 0
             );
             assert_eq!(pixels, [3., 7.]);

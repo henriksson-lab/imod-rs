@@ -2293,42 +2293,25 @@ pub fn pip_read_prog_defaults(prog_name: &[u8]) {
         t.clone()
     });
 
-    /* The autodoc unit is still C-shaped: this is the one foreign boundary
-    left in this file, and it goes away when `libcfshr::autodoc` is converted. */
     let table_size = S_TABLE_SIZE.get();
-    unsafe {
-        let path = std::ffi::CString::new(temp).unwrap_or_default();
-        let adoc_ind = crate::imod::libcfshr::autodoc::adoc_read(path.as_ptr());
-        if adoc_ind >= 0 {
-            /* Look up the program and then check for each option in its section */
-            let type_name = std::ffi::CString::new("Program").unwrap();
-            let name = std::ffi::CString::new(prog_name).unwrap_or_default();
-            let sect_ind = crate::imod::libcfshr::autodoc::adoc_lookup_section(
-                type_name.as_ptr(),
-                name.as_ptr(),
-            );
-            if sect_ind >= 0 {
-                for i in 0..table_size {
-                    let long_name = S_OPT_TABLE.with_borrow(|t| t[i as usize].long_name.clone());
-                    let key =
-                        std::ffi::CString::new(long_name.unwrap_or_default()).unwrap_or_default();
-                    let mut value: *mut std::ffi::c_char = std::ptr::null_mut();
-                    if crate::imod::libcfshr::autodoc::adoc_get_string(
-                        type_name.as_ptr(),
-                        sect_ind,
-                        key.as_ptr(),
-                        &raw mut value,
-                    ) == 0
-                        && !value.is_null()
-                    {
-                        let bytes = std::ffi::CStr::from_ptr(value).to_bytes().to_vec();
-                        S_OPT_TABLE.with_borrow_mut(|t| t[i as usize].default_val = Some(bytes));
-                        libc::free(value.cast());
-                    }
+    let adoc_ind = crate::imod::libcfshr::autodoc::adoc_read(&temp);
+    if adoc_ind >= 0 {
+        /* Look up the program and then check for each option in its section */
+        let sect_ind = crate::imod::libcfshr::autodoc::adoc_lookup_section(b"Program", prog_name);
+        if sect_ind >= 0 {
+            for i in 0..table_size {
+                let long_name = S_OPT_TABLE.with_borrow(|t| t[i as usize].long_name.clone());
+                let key = long_name.unwrap_or_default();
+                let mut value: Vec<u8> = Vec::new();
+                if crate::imod::libcfshr::autodoc::adoc_get_string(
+                    b"Program", sect_ind, &key, &mut value,
+                ) == 0
+                {
+                    S_OPT_TABLE.with_borrow_mut(|t| t[i as usize].default_val = Some(value));
                 }
             }
-            crate::imod::libcfshr::autodoc::adoc_clear(adoc_ind);
         }
+        crate::imod::libcfshr::autodoc::adoc_clear(adoc_ind);
     }
     S_EXIT_PREFIX.with_borrow_mut(|p| p[0] = save_prefix);
 }
@@ -3198,7 +3181,7 @@ fn check_keyword(
 /// stopped is what the source compares against its own end pointer.  `*end` is
 /// returned as an index into `s`, and is 0 when no conversion was performed, as
 /// C leaves `endptr` at `nptr`.
-fn strtol(s: &[u8], end: &mut usize, base: i32) -> i64 {
+pub(crate) fn strtol(s: &[u8], end: &mut usize, base: i32) -> i64 {
     let mut i = 0usize;
     while i < s.len()
         && (s[i] == b' '
@@ -3265,7 +3248,7 @@ fn strtol(s: &[u8], end: &mut usize, base: i32) -> i64 {
 /// hexadecimal significand with an optional exponent, and `inf`/`infinity`/
 /// `nan` — and reports in `*end` the index in `s` where the scan stopped, which
 /// is 0 when no conversion was performed.
-fn strtod(s: &[u8], end: &mut usize) -> f64 {
+pub(crate) fn strtod(s: &[u8], end: &mut usize) -> f64 {
     let mut i = 0usize;
     while i < s.len()
         && (s[i] == b' '

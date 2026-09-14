@@ -1,42 +1,47 @@
 //! Translation of `IMOD/libcfshr/parselist.c`.
 #![allow(dead_code)]
 
-use core::ffi::c_char;
-use core::ptr;
+use super::parse_params::strtol;
 
-use crate::imod::libcfshr::b3dutil::f2c_string;
-
-/// Original `parselist` (`parselist.c:35`).  The returned allocation has C
-/// ownership and must be released with `libc::free`.
-pub unsafe fn parselist(line: *const c_char, nlist: *mut i32) -> *mut i32 {
-    let mut intern = [0_i8; 10];
+/// Original `parselist` (`parselist.c:35`).
+///
+/// The C returns a `malloc`ed `int *` and reports the count, or an error code,
+/// in `*nlist`; here the allocation is the returned `Vec` and `None` is the
+/// C's NULL, so `*nlist` still carries 0 (empty), -1 (a leading `/`), -2 (the
+/// allocation failed, which cannot happen here) or -3 (a bad character).
+///
+/// `line` is the C string's bytes without its NUL: `nchars` is `strlen(line)`,
+/// and the one place the loop can read at that index sees the terminator, so
+/// an index at or past the end reads 0 exactly as the C does.
+pub fn parselist(line: &[u8], nlist: &mut i32) -> Option<Vec<i32>> {
+    let mut intern = [0_u8; 10];
     let mut dashlast = false;
     let mut negnum = false;
     let mut gotcomma = false;
     let mut gotnum = false;
     let mut got_space = false;
-    let nchars = unsafe { libc::strlen(line) } as i32;
-    let mut list: *mut i32 = ptr::null_mut();
+    let nchars = line.len() as i32;
+    let mut list: Vec<i32> = Vec::new();
 
-    unsafe { *nlist = 0 };
-    if unsafe { *line } == 0 {
-        return ptr::null_mut();
+    *nlist = 0;
+    if line.is_empty() {
+        return None;
     }
-    if unsafe { *line } == b'/' as c_char {
-        unsafe { *nlist = -1 };
-        return ptr::null_mut();
+    if line[0] == b'/' {
+        *nlist = -1;
+        return None;
     }
     let mut ind = 0_i32;
     let mut lastnum = 0_i32;
 
     loop {
-        let next = unsafe { *line.add(ind as usize) } as u8;
+        let next = *line.get(ind as usize).unwrap_or(&0);
         if next.is_ascii_digit() {
             gotnum = true;
             let mut numst = ind;
             loop {
                 ind += 1;
-                let digit = unsafe { *line.add(ind as usize) } as u8;
+                let digit = *line.get(ind as usize).unwrap_or(&0);
                 if !digit.is_ascii_digit() {
                     break;
                 }
@@ -47,18 +52,18 @@ pub unsafe fn parselist(line: *const c_char, nlist: *mut i32) -> *mut i32 {
             }
             let mut i = numst;
             while i < ind && i < numst + 9 {
-                intern[(i - numst) as usize] = unsafe { *line.add(i as usize) };
+                intern[(i - numst) as usize] = line[i as usize];
                 i += 1;
             }
             intern[(i - numst) as usize] = 0;
-            let mut number = 0_i32;
-            unsafe {
-                libc::sscanf(
-                    intern.as_ptr(),
-                    c"%d".as_ptr(),
-                    core::ptr::addr_of_mut!(number),
-                );
-            }
+            // `sscanf(intern, "%d", &number)`: leading white space, an optional
+            // sign, then digits, which is `strtol` in base 10.
+            let mut scanned = 0usize;
+            let number = strtol(
+                &intern[..intern.iter().position(|&b| b == 0).unwrap_or(intern.len())],
+                &mut scanned,
+                10,
+            ) as i32;
 
             let mut loopst = number;
             let mut idir = 1_i32;
@@ -70,23 +75,8 @@ pub unsafe fn parselist(line: *const c_char, nlist: *mut i32) -> *mut i32 {
             }
             let mut value = loopst;
             while idir * value <= idir * number {
-                let byte_count = (unsafe { *nlist } as usize + 1) * core::mem::size_of::<i32>();
-                list = if unsafe { *nlist } != 0 {
-                    unsafe { libc::realloc(list.cast(), byte_count).cast() }
-                } else {
-                    unsafe { libc::malloc(byte_count).cast() }
-                };
-                if list.is_null() {
-                    unsafe {
-                        *nlist = -2;
-                        libc::free(list.cast());
-                    }
-                    return ptr::null_mut();
-                }
-                unsafe {
-                    *list.add(*nlist as usize) = value;
-                    *nlist += 1;
-                }
+                list.push(value);
+                *nlist += 1;
                 value += idir;
             }
             lastnum = number;
@@ -107,11 +97,8 @@ pub unsafe fn parselist(line: *const c_char, nlist: *mut i32) -> *mut i32 {
             if got_space {
                 break;
             }
-            unsafe {
-                *nlist = -3;
-                libc::free(list.cast());
-            }
-            return ptr::null_mut();
+            *nlist = -3;
+            return None;
         }
         if next == b',' {
             gotcomma = true;
@@ -132,92 +119,69 @@ pub unsafe fn parselist(line: *const c_char, nlist: *mut i32) -> *mut i32 {
     }
 
     if gotcomma || negnum || dashlast {
-        unsafe {
-            *nlist = -3;
-            libc::free(list.cast());
-        }
-        return ptr::null_mut();
+        *nlist = -3;
+        return None;
     }
-    list
+    Some(list)
 }
 
 /// Original Fortran wrapper `parselistfw` (`parselist.c:144`).
-pub unsafe fn parselistfw(
-    line: *const c_char,
-    list: *mut i32,
-    nlist: *mut i32,
-    limlist: *mut i32,
-    linelen: i32,
-) -> i32 {
-    let tempstr = unsafe { f2c_string(line, linelen) };
-    if tempstr.is_null() {
-        return 1;
+///
+/// Both sides of this bridge are Rust now — its one caller is `rdlist.rs`,
+/// itself a translated Fortran unit — so the hidden length argument is the
+/// slice's own length and `f2c_string`'s trailing-blank trim
+/// (`b3dutil.c:1189`) is done in place of the copy it made.
+pub fn parselistfw(line: &[u8], list: &mut [i32], nlist: &mut i32, limlist: &mut i32) -> i32 {
+    // `f2c_string`: drop trailing blanks, then NUL-terminate.
+    let mut index = line.len();
+    while index > 0 && line[index - 1] == b' ' {
+        index -= 1;
     }
+    let tempstr = &line[..index];
     let mut ncopy = 0_i32;
-    let retlist = unsafe { parselist(tempstr, &mut ncopy) };
-    unsafe { libc::free(tempstr.cast()) };
-    if retlist.is_null() && ncopy == 0 {
-        unsafe { *nlist = 0 };
-        return 0;
-    }
-    if retlist.is_null() && ncopy < 0 {
+    let retlist = parselist(tempstr, &mut ncopy);
+    let Some(retlist) = retlist else {
+        if ncopy == 0 {
+            *nlist = 0;
+            return 0;
+        }
         return -ncopy - 1;
+    };
+    *nlist = ncopy;
+    if *limlist > 0 && ncopy > *limlist {
+        *nlist = *limlist;
     }
-    unsafe {
-        *nlist = ncopy;
-        if *limlist > 0 && ncopy > *limlist {
-            *nlist = *limlist;
-        }
-        if *nlist > 0 {
-            ptr::copy_nonoverlapping(retlist, list, *nlist as usize);
-        }
-        libc::free(retlist.cast());
-        if *limlist > 0 && ncopy > *limlist {
-            -1
-        } else {
-            0
-        }
+    if *nlist > 0 {
+        list[..*nlist as usize].copy_from_slice(&retlist[..*nlist as usize]);
+    }
+    if *limlist > 0 && ncopy > *limlist {
+        -1
+    } else {
+        0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{parselist, parselistfw};
-    use std::ffi::CString;
 
     #[test]
     fn source_ranges_errors_and_fortran_copy_limit() {
-        let input = CString::new("1-5,7,9,11,15-13").unwrap();
         let mut count = 0;
-        let values = unsafe { parselist(input.as_ptr(), &mut count) };
+        let values = parselist(b"1-5,7,9,11,15-13", &mut count).unwrap();
         assert_eq!(count, 11);
-        assert_eq!(
-            unsafe { std::slice::from_raw_parts(values, count as usize) },
-            &[1, 2, 3, 4, 5, 7, 9, 11, 15, 14, 13]
-        );
-        unsafe { libc::free(values.cast()) };
+        assert_eq!(values, &[1, 2, 3, 4, 5, 7, 9, 11, 15, 14, 13]);
 
-        let slash = CString::new("/").unwrap();
-        assert!(unsafe { parselist(slash.as_ptr(), &mut count) }.is_null());
+        assert!(parselist(b"/", &mut count).is_none());
         assert_eq!(count, -1);
-        let bad = CString::new("1x").unwrap();
-        assert!(unsafe { parselist(bad.as_ptr(), &mut count) }.is_null());
+        assert!(parselist(b"1x", &mut count).is_none());
         assert_eq!(count, -3);
 
-        let fortran = b"1-4  ";
         let mut output = [0; 2];
         let mut out_count = 0;
         let mut limit = 2;
         assert_eq!(
-            unsafe {
-                parselistfw(
-                    fortran.as_ptr().cast(),
-                    output.as_mut_ptr(),
-                    &mut out_count,
-                    &mut limit,
-                    5,
-                )
-            },
+            parselistfw(b"1-4  ", &mut output, &mut out_count, &mut limit),
             -1
         );
         assert_eq!(out_count, 2);

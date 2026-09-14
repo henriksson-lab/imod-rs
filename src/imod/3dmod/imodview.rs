@@ -14,9 +14,10 @@
 //! rather than silently dropping the action.
 #![allow(dead_code, unused_variables)]
 
-use core::ffi::{CStr, c_char, c_void};
+use core::ffi::{CStr, c_void};
 use core::ptr;
 use std::cell::{Cell, RefCell};
+use std::io::{Read, Write};
 
 use crate::imod::libcfshr::autodoc::{
     ADOC_GLOBAL_NAME, adoc_clear, adoc_get_float, adoc_get_image_meta_info, adoc_get_integer,
@@ -848,16 +849,27 @@ pub trait ImodviewNativeBoundary {
             "the drawing utility host of utilities.cpp",
         );
     }
-    /// `imodError(out, format, ...)` (`utilities.cpp:1377`).  A null `out`
-    /// means `dia_err`, the message box of `libdiaqt`; any other stream is
-    /// written directly.
-    fn imod_error(&mut self, out: *mut libc::FILE, message: &str) {
-        if out.is_null() {
-            report_once("dia_err", "the message box of libdiaqt");
-            eprint!("{message}");
-        } else {
-            let text = std::ffi::CString::new(message).unwrap_or_default();
-            unsafe { libc::fprintf(out, c"%s".as_ptr(), text.as_ptr()) };
+    /// `imodError(out, format, ...)` (`utilities.cpp:1377`).  A `None` `out`
+    /// is the source's NULL and means `dia_err`, the message box of
+    /// `libdiaqt`; any other stream is written directly.
+    fn imod_error(&mut self, out: Option<&mut ImodFile>, message: &str) {
+        match out {
+            None => {
+                report_once("dia_err", "the message box of libdiaqt");
+                eprint!("{message}");
+            }
+            // `fprintf(out, "%s", errorMess)`.  The C stream, not
+            // `std::io` — `3dmod` still has `libc::printf` siblings and a
+            // Rust-buffered write would reorder a redirected capture.
+            Some(out) => {
+                let _ = out.write_all(
+                    crate::imod::libcfshr::b3dutil::c_format_bytes(
+                        "%s",
+                        &[crate::imod::libcfshr::b3dutil::CArg::Str(message)],
+                    )
+                    .as_slice(),
+                );
+            }
         }
     }
 }
@@ -1430,7 +1442,7 @@ pub unsafe fn ivw_read_z(vi: *mut ImodView, buf: *mut u8, mut cz: i32) {
                     (*(*vi).image).lly = lly;
                     (*(*vi).image).ury = ury;
 
-                    ivw_read_binned_section(vi, plist_buf.cast::<c_char>(), i);
+                    ivw_read_binned_section(vi, plist_buf, i);
 
                     /* set up size of copy, offsets and skip on each line
                     for copying into image buffer */
@@ -1479,11 +1491,7 @@ pub unsafe fn ivw_read_z(vi: *mut ImodView, buf: *mut u8, mut cz: i32) {
         }
 
         /* DNM 1/2/04: simplify to call one place for raw, regular, or binned read */
-        ivw_read_binned_section(
-            vi,
-            buf.cast::<c_char>(),
-            ivw_adjusted_z_if_vol_stack(vi, zread),
-        );
+        ivw_read_binned_section(vi, buf, ivw_adjusted_z_if_vol_stack(vi, zread));
     }
 }
 
@@ -1558,7 +1566,7 @@ pub unsafe fn ivw_make_line_pointers(
 }
 
 /// `ivwReadBinnedSection(ImodView *, char *, int)` (`imodview.cpp:589`).
-pub unsafe fn ivw_read_binned_section(vi: *mut ImodView, buf: *mut c_char, section: i32) -> i32 {
+pub unsafe fn ivw_read_binned_section(vi: *mut ImodView, buf: *mut u8, section: i32) -> i32 {
     unsafe { ivw_read_binned_section_image(vi, (*vi).image, buf, section) }
 }
 
@@ -1568,7 +1576,7 @@ pub unsafe fn ivw_read_binned_section(vi: *mut ImodView, buf: *mut c_char, secti
 pub unsafe fn ivw_read_binned_section_image(
     vi: *mut ImodView,
     image: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     mut section: i32,
 ) -> i32 {
     unsafe {
@@ -1577,7 +1585,7 @@ pub unsafe fn ivw_read_binned_section_image(
         let (mut z_offset, mut left_zpad, mut right_zpad) = (0i32, 0i32, 0i32);
         let (mut blank_x, mut blank_y, mut blank_z) = (false, false, false);
         let mut buf = buf;
-        let ucbuf = buf.cast::<u8>();
+        let ucbuf = buf;
         let mut usbuf = buf.cast::<u16>();
         let mut binbuf: *mut i32 = ptr::null_mut();
 
@@ -1687,7 +1695,7 @@ pub unsafe fn ivw_read_binned_section_image(
                     im.lly,
                     im.ury,
                     pixsize,
-                    buf,
+                    buf.cast(),
                     section,
                     convert,
                 );
@@ -1741,17 +1749,12 @@ pub unsafe fn ivw_read_binned_section_image(
                         im.lly,
                         im.ury,
                         pixsize,
-                        unbinbuf.cast::<c_char>(),
+                        unbinbuf.cast(),
                         (*vi).zbin * section + iz,
                         convert,
                     );
                 } else {
-                    ii_read_section_any(
-                        &mut im,
-                        unbinbuf.cast::<c_char>(),
-                        (*vi).zbin * section + iz,
-                        convert,
-                    );
+                    ii_read_section_any(&mut im, unbinbuf, (*vi).zbin * section + iz, convert);
                 }
                 reduce_by_binning(
                     core::slice::from_raw_parts(
@@ -1762,7 +1765,7 @@ pub unsafe fn ivw_read_binned_section_image(
                     xsize,
                     ysize,
                     (*vi).xybin,
-                    core::slice::from_raw_parts_mut(buf.cast::<u8>(), xybinned * pixsize as usize),
+                    core::slice::from_raw_parts_mut(buf, xybinned * pixsize as usize),
                     1,
                     &mut ix,
                     &mut iy,
@@ -1790,7 +1793,7 @@ pub unsafe fn ivw_read_binned_section_image(
                     }
                 } else {
                     for i in 0..xybinned {
-                        *buf.add(i) = (*binbuf.add(i) / (*vi).zbin) as c_char;
+                        *buf.add(i) = (*binbuf.add(i) / (*vi).zbin) as u8;
                     }
                 }
             }
@@ -3305,30 +3308,37 @@ pub fn ivw_set_time(vi: &mut ImodView, time: i32) {
 }
 
 /// `ivwGetTimeIndexLabel` (`imodview.cpp:1794`).
-pub unsafe fn ivw_get_time_index_label(
-    in_imod_view: *mut ImodView,
-    in_index: i32,
-) -> *const c_char {
+pub unsafe fn ivw_get_time_index_label<'a>(in_imod_view: *mut ImodView, in_index: i32) -> &'a [u8] {
     unsafe {
         if in_imod_view.is_null() {
-            return c"".as_ptr();
+            return b"";
         }
         if in_index < 1 {
-            return c"".as_ptr();
+            return b"";
         }
         if in_index > (*in_imod_view).num_times {
-            return c"".as_ptr();
+            return b"";
         }
         if (*in_imod_view).fake_image != 0 {
-            return c"".as_ptr();
+            return b"";
         }
-        (*(*in_imod_view).image_list.add((in_index - 1) as usize)).description
+        // The source returns the `char *` itself; a NULL `description` is the
+        // empty borrow the four guards above already return.
+        (*(*in_imod_view).image_list.add((in_index - 1) as usize))
+            .description
+            .as_deref()
+            .unwrap_or(b"")
     }
 }
 
 /// `ivwGetTimeLabel` (`imodview.cpp:1803`).
-pub unsafe fn ivw_get_time_label(in_imod_view: *mut ImodView) -> *const c_char {
-    unsafe { (*(*in_imod_view).image).description }
+pub unsafe fn ivw_get_time_label<'a>(in_imod_view: *mut ImodView) -> &'a [u8] {
+    unsafe {
+        (*(*in_imod_view).image)
+            .description
+            .as_deref()
+            .unwrap_or(b"")
+    }
 }
 
 /// `ivwGetMaxTime` (`imodview.cpp:1808`).
@@ -3923,7 +3933,10 @@ pub unsafe fn imod_image_file_desc(fin: &mut ImodFile) -> i32 {
 
             while crate::imod::libimod::imodel_files::imod_fgetline(fin, &mut buf, 127) > 0 {
                 if buf.starts_with(b"VERSION") {
-                    isifd = libc::atoi(buf.as_ptr().add(8).cast::<c_char>());
+                    // `atoi(&buf[8])`.  The C library's conversion is
+                    // translated in `clip/clip.rs`, which is where this tree
+                    // keeps that boundary.
+                    isifd = crate::imod::clip::clip::atoi_bytes(&buf[8..]);
                     if isifd == 0 {
                         isifd = 1;
                     }
@@ -3992,18 +4005,27 @@ pub unsafe fn ivw_load_imod_ifd(
             }
 
             if line.starts_with(b"VERSION") {
-                version = libc::atoi(line.as_ptr().add(8).cast::<c_char>());
+                version = crate::imod::clip::clip::atoi_bytes(&line[8..]);
                 continue;
             }
 
             /* supply size in case first file is not found. */
             if line.starts_with(b"SIZE") {
-                libc::sscanf(
-                    line.as_ptr().cast::<c_char>(),
-                    c"SIZE %d%*c%d%*c%d\n".as_ptr(),
-                    &mut xsize as *mut i32,
-                    &mut ysize as *mut i32,
-                    &mut zsize as *mut i32,
+                // `sscanf` over the line up to its terminator.  The scan
+                // semantics -- a partial parse leaves the later targets
+                // untouched -- are what the source relies on, so this goes
+                // through the translated `fscanf`, not `str::parse`.
+                let end = line.iter().position(|&b| b == 0).unwrap_or(line.len());
+                let mut pos = 0usize;
+                crate::imod::clip::clip::fscanf(
+                    &line[..end],
+                    &mut pos,
+                    "SIZE %d%*c%d%*c%d\n",
+                    &mut [
+                        crate::imod::clip::clip::ScanArg::Int(&mut xsize),
+                        crate::imod::clip::clip::ScanArg::Int(&mut ysize),
+                        crate::imod::clip::clip::ScanArg::Int(&mut zsize),
+                    ],
                 );
                 continue;
             }
@@ -4017,11 +4039,16 @@ pub unsafe fn ivw_load_imod_ifd(
 
             // Define a scale for images that follow; can be defined again
             if line.starts_with(b"SCALE") {
-                libc::sscanf(
-                    line.as_ptr().cast::<c_char>(),
-                    c"SCALE %f%*c%f\n".as_ptr(),
-                    &mut smin as *mut f32,
-                    &mut smax as *mut f32,
+                let end = line.iter().position(|&b| b == 0).unwrap_or(line.len());
+                let mut pos = 0usize;
+                crate::imod::clip::clip::fscanf(
+                    &line[..end],
+                    &mut pos,
+                    "SCALE %f%*c%f\n",
+                    &mut [
+                        crate::imod::clip::clip::ScanArg::Flt(&mut smin),
+                        crate::imod::clip::clip::ScanArg::Flt(&mut smax),
+                    ],
                 );
                 need_version = 2;
                 continue;
@@ -4044,7 +4071,7 @@ pub unsafe fn ivw_load_imod_ifd(
                 } else {
                     with_boundary(|n| {
                         n.imod_error(
-                            ptr::null_mut(),
+                            None,
                             "3DMOD Error: Image list file must specify one image file before \
                              the XYZ option.\n",
                         )
@@ -4073,12 +4100,20 @@ pub unsafe fn ivw_load_imod_ifd(
                         .map_or(core::ptr::null_mut(), |item| {
                             item.as_mut_ptr().cast::<ImodImageFile>()
                         });
-                    if !(*image).description.is_null() {
-                        libc::free((*image).description.cast());
-                    }
                     let tail = line_tail(&line, 5);
-                    (*image).description =
-                        libc::strdup(std::ffi::CString::new(tail).unwrap().as_ptr());
+                    // `imodview.cpp:2467-2469` frees the old description and
+                    // `strdup`s the new one into the *list's* copy -- but the
+                    // structure the IMAGE branch appended from is still
+                    // `vi->image`, and its `description` is the same pointer,
+                    // so the source's free leaves that alias dangling and
+                    // `ivwGetTimeLabel` reads it.  Dropping the old `Vec` here
+                    // would turn a dangling read into a double free, so the
+                    // old value is leaked instead: same bytes out, no
+                    // use-after-free.
+                    core::mem::forget(core::mem::replace(
+                        &mut (*image).description,
+                        Some(tail.as_bytes().to_vec()),
+                    ));
                 }
                 continue;
             }
@@ -4090,12 +4125,17 @@ pub unsafe fn ivw_load_imod_ifd(
                         .map_or(core::ptr::null_mut(), |item| {
                             item.as_mut_ptr().cast::<ImodImageFile>()
                         });
-                    libc::sscanf(
-                        line.as_ptr().cast::<c_char>(),
-                        c"ORIGIN %f%*c%f%*c%f\n".as_ptr(),
-                        &mut (*image).xtrans as *mut f32,
-                        &mut (*image).ytrans as *mut f32,
-                        &mut (*image).ztrans as *mut f32,
+                    let end = line.iter().position(|&b| b == 0).unwrap_or(line.len());
+                    let mut pos = 0usize;
+                    crate::imod::clip::clip::fscanf(
+                        &line[..end],
+                        &mut pos,
+                        "ORIGIN %f%*c%f%*c%f\n",
+                        &mut [
+                            crate::imod::clip::clip::ScanArg::Flt(&mut (*image).xtrans),
+                            crate::imod::clip::clip::ScanArg::Flt(&mut (*image).ytrans),
+                            crate::imod::clip::clip::ScanArg::Flt(&mut (*image).ztrans),
+                        ],
                     );
                 }
                 need_version = 2;
@@ -4113,13 +4153,12 @@ pub unsafe fn ivw_load_imod_ifd(
 
                 *libc::__errno_location() = 0;
                 let native = with_boundary(|n| n.qdir_to_native_separators(&filename));
-                let native_c = std::ffi::CString::new(native.clone()).unwrap();
-                image = ii_open(native_c.as_ptr(), c"rb".as_ptr());
+                image = ii_open(native.as_bytes(), "rb");
                 if image.is_null() {
                     if xsize == 0 || ysize == 0 {
                         with_boundary(|n| {
                             n.imod_error(
-                                ptr::null_mut(),
+                                None,
                                 &format!(
                                     "3DMOD Error: couldn't open {filename}, first file in image \
                                      list,\n and no SIZE specified before this.\n"
@@ -4133,20 +4172,26 @@ pub unsafe fn ivw_load_imod_ifd(
                     let sys = if errno != 0 {
                         format!(
                             "System error: {}",
+                            // `strerror` is the C library's own locale
+                            // message table; matching native's text needs it,
+                            // and there is no `std` equivalent that yields the
+                            // bare message.  The one foreign call in this unit.
                             CStr::from_ptr(libc::strerror(errno)).to_string_lossy()
                         )
                     } else {
                         String::new()
                     };
-                    let stdout = crate::imod::three_dmod::imodview::c_stdout();
                     with_boundary(|n| {
-                        n.imod_error(stdout, &format!("Warning: couldn't open {filename}\n{sys}"))
+                        n.imod_error(
+                            Some(&mut ImodFile::Stdout),
+                            &format!("Warning: couldn't open {filename}\n{sys}"),
+                        )
                     });
                     image = ii_new();
                     (*image).nx = xsize;
                     (*image).ny = ysize;
                     (*image).nz = zsize;
-                    (*image).filename = libc::strdup(native_c.as_ptr());
+                    (*image).filename = Some(native.as_bytes().to_vec());
                     *any_image_fail = true;
                 }
 
@@ -4175,8 +4220,7 @@ pub unsafe fn ivw_load_imod_ifd(
                 while pathlen > 0 && bytes[pathlen - 1] != b'/' {
                     pathlen -= 1;
                 }
-                (*image).description =
-                    libc::strdup(std::ffi::CString::new(&bytes[pathlen..]).unwrap().as_ptr());
+                (*image).description = Some(bytes[pathlen..].to_vec());
 
                 // `Ilist` stores a struct *by value* as bytes, so this
                 // append is a bitwise duplicate of the handle in `fp` — which
@@ -4223,7 +4267,7 @@ pub unsafe fn ivw_load_imod_ifd(
             let text = line_tail(&line, 0);
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     &format!("3dmod warning: Unknown image list option ({text})\n"),
                 )
             });
@@ -4236,7 +4280,7 @@ pub unsafe fn ivw_load_imod_ifd(
         if version < need_version {
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     &format!(
                         "3DMOD Error: The image list file must specify version {need_version} \
                          or higher\n"
@@ -4259,17 +4303,9 @@ fn line_tail(line: &[u8], offset: usize) -> &str {
     core::str::from_utf8(&bytes[..end]).unwrap_or("")
 }
 
-/// The C `stdout` stream, which `imodError(stdout, ...)` is given.
-pub fn c_stdout() -> *mut libc::FILE {
-    unsafe extern "C" {
-        static mut stdout: *mut libc::FILE;
-    }
-    unsafe { stdout }
-}
-
 /// `ivwLoadIFDpieceList` (`imodview.cpp:2592`).
 pub unsafe fn ivw_load_ifd_piece_list(
-    pl_name: *const c_char,
+    pl_name: &[u8],
     li: *mut LoadInfo,
     nx: i32,
     ny: i32,
@@ -4293,7 +4329,7 @@ pub unsafe fn ivw_load_ifd_piece_list(
 /// from the argument list and compose an image list.
 pub unsafe fn ivw_multiple_files(
     vi: *mut ImodView,
-    argv: *mut *mut c_char,
+    argv: &[Vec<u8>],
     firstfile: i32,
     lastimage: i32,
     any_have_piece_list: &mut bool,
@@ -4303,24 +4339,21 @@ pub unsafe fn ivw_multiple_files(
             .map_or(core::ptr::null_mut(), Box::into_raw);
         let mut image: *mut ImodImageFile;
         let mut base_image: *mut ImodImageFile = ptr::null_mut();
-        let mut convarg: *mut c_char = ptr::null_mut();
+        let mut convarg: Vec<u8> = Vec::new();
         *any_have_piece_list = false;
         ii_allow_multi_volume(1);
 
         for i in firstfile..=lastimage {
-            let arg = *argv.add(i as usize);
+            let arg = argv[i as usize].as_slice();
             let mut num_vols = 1;
-            if *arg != 0 {
-                let entered = CStr::from_ptr(arg).to_string_lossy().into_owned();
+            if !arg.is_empty() && arg[0] != 0 {
+                let entered = String::from_utf8_lossy(arg).into_owned();
                 let cleaned = with_boundary(|n| n.qdir_clean_path(&entered));
-                convarg = libc::strdup(std::ffi::CString::new(cleaned.clone()).unwrap().as_ptr());
+                convarg = cleaned.as_bytes().to_vec();
                 let native = with_boundary(|n| n.qdir_to_native_separators(&cleaned));
-                image = ii_open(
-                    std::ffi::CString::new(native).unwrap().as_ptr(),
-                    c"rb".as_ptr(),
-                );
+                image = ii_open(native.as_bytes(), "rb");
             } else {
-                image = ii_open(arg, c"rb".as_ptr());
+                image = ii_open(arg, "rb");
             }
             let mut ind_vol;
             if !image.is_null() && (*image).num_volumes > 1 {
@@ -4330,12 +4363,7 @@ pub unsafe fn ivw_multiple_files(
                 let mut vol_flag = 0;
                 if adoc_ind >= 0
                     && adoc_set_current(adoc_ind) == 0
-                    && adoc_get_integer(
-                        ADOC_GLOBAL_NAME.as_ptr(),
-                        0,
-                        c"image_pyramid".as_ptr(),
-                        &mut vol_flag,
-                    ) == 0
+                    && adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"image_pyramid", &mut vol_flag) == 0
                     && vol_flag > 0
                 {
                     (*vi).image_pyramid = 1;
@@ -4352,15 +4380,18 @@ pub unsafe fn ivw_multiple_files(
                         image = ptr::null_mut();
                     } else {
                         image = *(*base_image).ii_volumes.add(ind_vol as usize);
-                        convarg = libc::strdup((*image).filename);
+                        convarg = (*image).filename.clone().unwrap_or_default();
                     }
                 }
                 if image.is_null() {
-                    let entered = CStr::from_ptr(arg).to_string_lossy();
+                    let entered = String::from_utf8_lossy(arg);
+                    // `imodview.cpp:2643` prepends `b3dGetError()` to the
+                    // `SPRINTF`ed message before handing it to `imodError`.
+                    let error = crate::imod::libcfshr::b3dutil::b3d_get_error();
                     with_boundary(|n| {
                         n.imod_error(
-                            ptr::null_mut(),
-                            &format!("3DMOD Error: couldn't open image file {entered}.\n"),
+                            None,
+                            &format!("{error}3DMOD Error: couldn't open image file {entered}.\n"),
                         )
                     });
                     std::process::exit(3);
@@ -4371,11 +4402,15 @@ pub unsafe fn ivw_multiple_files(
                     || get_valid_scale(image, None, None) == 0)
                     && ii_raw_scan(image) != 0
                 {
-                    let entered = CStr::from_ptr(arg).to_string_lossy();
+                    let entered = String::from_utf8_lossy(arg);
+                    let error = crate::imod::libcfshr::b3dutil::b3d_get_error();
                     with_boundary(|n| {
                         n.imod_error(
-                            ptr::null_mut(),
-                            &format!("3DMOD Error: Scanning for scaling limits in {entered}.\n"),
+                            None,
+                            &format!(
+                                "{error}3DMOD Error: Scanning for scaling limits in \
+                                 {entered}.\n"
+                            ),
                         )
                     });
                     std::process::exit(3);
@@ -4389,18 +4424,16 @@ pub unsafe fn ivw_multiple_files(
                 (*vi).fp = (*image).fp.clone();
 
                 /* Copy filename with directory stripped to the descriptor */
-                if *arg != 0 {
+                if !arg.is_empty() && arg[0] != 0 {
                     ii_close(image);
-                    let bytes = CStr::from_ptr(convarg).to_bytes();
-                    let mut pathlen = bytes.len();
-                    while pathlen > 0 && bytes[pathlen - 1] != b'/' {
+                    let mut pathlen = convarg.len();
+                    while pathlen > 0 && convarg[pathlen - 1] != b'/' {
                         pathlen -= 1;
                     }
-                    (*image).description =
-                        libc::strdup(std::ffi::CString::new(&bytes[pathlen..]).unwrap().as_ptr());
-                    libc::free(convarg.cast());
+                    (*image).description = Some(convarg[pathlen..].to_vec());
+                    convarg = Vec::new();
                 } else {
-                    (*image).description = libc::strdup(arg);
+                    (*image).description = Some(arg.to_vec());
                 }
                 if (*image).has_piece_coords != 0 {
                     *any_have_piece_list = true;
@@ -4426,7 +4459,13 @@ pub unsafe fn ivw_multiple_files(
                     item.as_mut_ptr().cast::<ImodImageFile>()
                 });
                 ii_file_change_address(image, new_image);
-                drop(Box::from_raw(image));
+                // `free(image)` (`imodview.cpp:2681`) is a *shallow* free: the
+                // structure goes, its `filename`/`description`/`fp` do not,
+                // because `ilistAppend` has just copied them into the list's
+                // copy, which now owns them.  Moving the value out of the box
+                // frees the allocation; forgetting it skips the field drops
+                // that C never performs.
+                core::mem::forget(*Box::from_raw(image));
                 image = new_image;
                 if ind_vol == 0 {
                     base_image = image;
@@ -4495,7 +4534,7 @@ pub unsafe fn ivw_load_image(vi: *mut ImodView) -> i32 {
             if (*(*vi).li).axis == 2 {
                 with_boundary(|n| {
                     n.imod_error(
-                        ptr::null_mut(),
+                        None,
                         "The -Y flag is ignored when loading a model without an image.\nUse \
                          Edit-Image-Flip to flip the model if desired",
                     )
@@ -4535,7 +4574,7 @@ pub unsafe fn ivw_load_image(vi: *mut ImodView) -> i32 {
             if (*(*vi).hdr).mode == MRC_MODE_COMPLEX_SHORT {
                 with_boundary(|n| {
                     n.imod_error(
-                        ptr::null_mut(),
+                        None,
                         "3DMOD Error: Image cache and piece lists do not work with complex \
                          short data.\n",
                     )
@@ -4627,11 +4666,11 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
         let (mut rgbs, mut cmaps, mut all_byte, mut all_can_read_int) = (0, 0, 1, 1);
         let mut any_tiled = false;
         let mut any_tiffs = false;
-        let sect_names: [&CStr; 4] = [
+        let sect_names: [&[u8]; 4] = [
             crate::imod::libcfshr::autodoc::ADOC_ZVALUE_NAME,
-            c"Image",
+            b"Image",
             crate::imod::libcfshr::autodoc::ADOC_ZVALUE_NAME,
-            c"MontSection",
+            b"MontSection",
         ];
 
         if (*ilist).size == 0 {
@@ -4643,7 +4682,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
         if (*vi).pix_size_index.is_null() {
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     "3DMOD Error: Allocating array for pixel size indexes\n",
                 )
             });
@@ -4757,7 +4796,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             {
                 with_boundary(|n| {
                     n.imod_error(
-                        ptr::null_mut(),
+                        None,
                         "3DMOD Error: You cannot cache tiles or strips with complex,\ncolormap, \
                          or RGB data, except when loading RGB as grayscale",
                     )
@@ -4794,7 +4833,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 let mut sect_type = 0;
                 if adoc_ind < 0 {
                     adoc_ind = adoc_open_image_metadata(
-                        (*image).filename,
+                        (*image).filename.as_deref().unwrap_or(b""),
                         if (*image).file == IIFILE_ADOC { 0 } else { 1 },
                         &mut if_montage,
                         &mut num_adoc_sect,
@@ -4811,24 +4850,21 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 {
                     if if_montage > 0 {
                         sect_type = 4;
-                        num_adoc_sect = adoc_get_number_of_sections(
-                            sect_names[(sect_type - 1) as usize].as_ptr(),
-                        );
+                        num_adoc_sect =
+                            adoc_get_number_of_sections(sect_names[(sect_type - 1) as usize]);
                     }
                     for iz in 0..(*image).nz.min(num_adoc_sect) {
                         let mut sect_ind = iz;
                         if sect_type != 2 {
-                            sect_ind = adoc_lookup_by_name_value(
-                                sect_names[(sect_type - 1) as usize].as_ptr(),
-                                iz,
-                            );
+                            sect_ind =
+                                adoc_lookup_by_name_value(sect_names[(sect_type - 1) as usize], iz);
                         }
                         let mut sec_pixel = 0.0f32;
                         if sect_ind >= 0
                             && adoc_get_float(
-                                sect_names[(sect_type - 1) as usize].as_ptr(),
+                                sect_names[(sect_type - 1) as usize],
                                 sect_ind,
-                                c"PixelSpacing".as_ptr(),
+                                b"PixelSpacing",
                                 &mut sec_pixel,
                             ) == 0
                         {
@@ -4868,7 +4904,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
         if (*vi).raw_image_store as i32 == MRC_MODE_USHORT && app_rgba() == 0 {
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     "3DMOD Error: You can not store data as integers with the -ci option.\n",
                 )
             });
@@ -4880,7 +4916,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             } else {
                 with_boundary(|n| {
                     n.imod_error(
-                        ptr::null_mut(),
+                        None,
                         "3DMOD Error: -I option cannot be used because some files cannot be read \
                          from as integers.\n",
                     )
@@ -4908,7 +4944,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 let total = (*ilist).size;
                 with_boundary(|n| {
                     n.imod_error(
-                        ptr::null_mut(),
+                        None,
                         &format!(
                             "3DMOD Error: Only {count} files out of {total} are {kind} type and \
                              all files must be.\n"
@@ -4922,7 +4958,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 let kind = if rgbs != 0 { "RGB" } else { "colormap" };
                 with_boundary(|n| {
                     n.imod_error(
-                        ptr::null_mut(),
+                        None,
                         &format!(
                             "3DMOD Error: You must not start 3dmod with the -ci option to \
                              display {kind} files.\n"
@@ -5014,10 +5050,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                     // Have to reopen to get the fp
                     if ii_reopen(image) != 0 {
                         with_boundary(|n| {
-                            n.imod_error(
-                                ptr::null_mut(),
-                                "3DMOD Error: Reopening volume stack file",
-                            )
+                            n.imod_error(None, "3DMOD Error: Reopening volume stack file")
                         });
                         std::process::exit(3);
                     }
@@ -5060,10 +5093,17 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                             ii_file_change_address(&mut stable_image, new_image);
                         }
                         if err == 0 {
-                            let buffer =
-                                std::ffi::CString::new(format!("Volume {}", i + 1)).unwrap();
-                            (*new_image).description = libc::strdup(buffer.as_ptr());
-                            if (*new_image).description.is_null() {
+                            // `imodview.cpp:3137-3140` overwrites the field
+                            // without freeing it, and every copy on the list
+                            // was bitwise-duplicated from `stableImage`, so
+                            // the old value is leaked rather than dropped --
+                            // dropping it would free a buffer the other copies
+                            // still point at.
+                            core::mem::forget(core::mem::replace(
+                                &mut (*new_image).description,
+                                Some(format!("Volume {}", i + 1).into_bytes()),
+                            ));
+                            if (*new_image).description.is_none() {
                                 err = 1;
                             }
                         }
@@ -5072,7 +5112,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                     if err != 0 {
                         with_boundary(|n| {
                             n.imod_error(
-                                ptr::null_mut(),
+                                None,
                                 "3DMOD Error: Memory error setting up duplicate files for  \
                                  volume stack",
                             )
@@ -5148,7 +5188,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             (*vi).image = ii_new();
             (*vi).hdr = (*vi).image;
             if (*vi).image.is_null() {
-                with_boundary(|n| n.imod_error(ptr::null_mut(), "Not enough memory.\n"));
+                with_boundary(|n| n.imod_error(None, "Not enough memory.\n"));
                 std::process::exit(3);
             }
             libc::memcpy(
@@ -5179,10 +5219,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                     .cast::<ImodImageFile>();
             if (*vi).image_list.is_null() {
                 with_boundary(|n| {
-                    n.imod_error(
-                        ptr::null_mut(),
-                        "Failed to allocate memory for image list.\n",
-                    )
+                    n.imod_error(None, "Failed to allocate memory for image list.\n")
                 });
                 std::process::exit(3);
             }
@@ -5393,7 +5430,7 @@ unsafe fn ivw_check_binning(vi: *mut ImodView, nx: i32, ny: i32, nz: i32) -> i32
         {
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     "This image is too large in X and Y to load on a 32-bit computer.\n",
                 )
             });
@@ -5523,23 +5560,32 @@ unsafe fn ivw_check_binning(vi: *mut ImodView, nx: i32, ny: i32, nz: i32) -> i32
 /* Tilt angle functions */
 
 /// `ivwReadAngleFile` (`imodview.cpp:3455`).
-pub unsafe fn ivw_read_angle_file(vi: *mut ImodView, fname: *const c_char) -> i32 {
+pub unsafe fn ivw_read_angle_file(vi: *mut ImodView, fname: &[u8]) -> i32 {
     unsafe {
-        let fin = libc::fopen(fname, c"r".as_ptr());
-        if fin.is_null() {
-            let name = CStr::from_ptr(fname).to_string_lossy();
+        let name = String::from_utf8_lossy(fname);
+        let Some(mut fin) = ImodFile::open(&name, "r") else {
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     &format!("3dmod warning: could not open angle file {name}"),
                 )
             });
             return 1;
-        }
+        };
         let mut list: Vec<f32> = Vec::new();
+        // `fscanf(fin, "%f", &angle)`: the stream is the file's bytes plus a
+        // cursor, which is what the translated `fscanf` takes.
+        let mut contents = Vec::new();
+        let _ = fin.read_to_end(&mut contents);
+        let mut pos = 0usize;
         loop {
             let mut angle: f32 = 0.;
-            let scanret = libc::fscanf(fin, c"%f".as_ptr(), &mut angle as *mut f32);
+            let scanret = crate::imod::clip::clip::fscanf(
+                &contents,
+                &mut pos,
+                "%f",
+                &mut [crate::imod::clip::clip::ScanArg::Flt(&mut angle)],
+            );
             if scanret != 1 {
                 break;
             }
@@ -5547,7 +5593,7 @@ pub unsafe fn ivw_read_angle_file(vi: *mut ImodView, fname: *const c_char) -> i3
         }
         (*vi).tilt_angles = list;
         (*vi).num_tilt_angles = (*vi).tilt_angles.len() as i32;
-        libc::fclose(fin);
+        drop(fin);
         0
     }
 }
@@ -5568,14 +5614,14 @@ pub unsafe fn ivw_get_tilt_angles(vi: *mut ImodView, num_angles: &mut i32) -> *m
 
 /// `ivwReadAlignedPcCoords` (`imodview.cpp:3496`); read a file of aligned
 /// piece coordinates for finding edge numbers for midas.
-pub unsafe fn ivw_read_aligned_pc_coords(vi: *mut ImodView, fname: *const c_char) -> i32 {
+pub unsafe fn ivw_read_aligned_pc_coords(vi: *mut ImodView, fname: &[u8]) -> i32 {
     unsafe {
         let (mut xsum, mut ysum, mut nxsum, mut nysum) = (0, 0, 0, 0);
-        let path = CStr::from_ptr(fname).to_string_lossy().into_owned();
+        let path = String::from_utf8_lossy(fname).into_owned();
         let Ok(contents) = std::fs::read_to_string(&path) else {
             with_boundary(|n| {
                 n.imod_error(
-                    ptr::null_mut(),
+                    None,
                     &format!("3dmod warning: could not open aligned piece coordinate file {path}"),
                 )
             });
@@ -5589,21 +5635,30 @@ pub unsafe fn ivw_read_aligned_pc_coords(vi: *mut ImodView, fname: *const c_char
 
             // Get as much as could be present on the first line
             let mut vals = [0i32; 9];
-            let line_c = std::ffi::CString::new(qline).unwrap_or_default();
-            let scanret = libc::sscanf(
-                line_c.as_ptr(),
-                c" %d %d %d %d %d %d %d %d %d".as_ptr(),
-                &mut vals[0] as *mut i32,
-                &mut vals[1] as *mut i32,
-                &mut vals[2] as *mut i32,
-                &mut vals[3] as *mut i32,
-                &mut vals[4] as *mut i32,
-                &mut vals[5] as *mut i32,
-                &mut vals[6] as *mut i32,
-                &mut vals[7] as *mut i32,
-                &mut vals[8] as *mut i32,
+            let (v0, rest) = vals.split_at_mut(1);
+            let (v1, rest) = rest.split_at_mut(1);
+            let (v2, rest) = rest.split_at_mut(1);
+            let (v3, rest) = rest.split_at_mut(1);
+            let (v4, rest) = rest.split_at_mut(1);
+            let (v5, rest) = rest.split_at_mut(1);
+            let (v6, rest) = rest.split_at_mut(1);
+            let (v7, v8) = rest.split_at_mut(1);
+            let scanret = crate::imod::clip::clip::sscanf(
+                qline,
+                " %d %d %d %d %d %d %d %d %d",
+                &mut [
+                    crate::imod::clip::clip::ScanArg::Int(&mut v0[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v1[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v2[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v3[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v4[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v5[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v6[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v7[0]),
+                    crate::imod::clip::clip::ScanArg::Int(&mut v8[0]),
+                ],
             );
-            if scanret == libc::EOF {
+            if scanret == -1 {
                 break;
             }
 
@@ -5612,7 +5667,7 @@ pub unsafe fn ivw_read_aligned_pc_coords(vi: *mut ImodView, fname: *const c_char
                 if (*vi).bapc_xsize != 0 {
                     with_boundary(|n| {
                         n.imod_error(
-                            ptr::null_mut(),
+                            None,
                             &format!(
                                 "3dmod warning: aligned piece coordinate file has a line with \
                                  only {scanret} values and is unusable"
@@ -5622,7 +5677,7 @@ pub unsafe fn ivw_read_aligned_pc_coords(vi: *mut ImodView, fname: *const c_char
                 } else {
                     with_boundary(|n| {
                         n.imod_error(
-                            ptr::null_mut(),
+                            None,
                             "3dmod warning: aligned piece coordinate file is from an old version \
                              of Blendmont and is unusable",
                         )
@@ -6194,15 +6249,20 @@ pub unsafe fn ivw_current_image_file(in_imod_view: *mut ImodView, as_entered: bo
         let cur_dir = IMOD_IFD_PATH.lock().unwrap().clone();
         let file;
         if (*in_imod_view).multi_file_z <= 0 {
-            file = CStr::from_ptr((*(*in_imod_view).image).filename)
-                .to_string_lossy()
-                .into_owned();
+            file = String::from_utf8_lossy(
+                (*(*in_imod_view).image).filename.as_deref().unwrap_or(b""),
+            )
+            .into_owned();
         } else {
             let mut cz = ((*in_imod_view).zmouse as f64 + 0.5).floor() as i32;
             cz = cz.clamp(0, (*in_imod_view).multi_file_z - 1);
-            file = CStr::from_ptr((*(*in_imod_view).image_list.add(cz as usize)).filename)
-                .to_string_lossy()
-                .into_owned();
+            file = String::from_utf8_lossy(
+                (*(*in_imod_view).image_list.add(cz as usize))
+                    .filename
+                    .as_deref()
+                    .unwrap_or(b""),
+            )
+            .into_owned();
         }
         if as_entered {
             return file;
@@ -7049,7 +7109,7 @@ mod tests {
             full_zsize: 2,
             ..Default::default()
         };
-        let mut buf = vec![0i8; 16];
+        let mut buf = vec![0u8; 16];
         // Section 5 is past `im.nz / zbin`, so `blankZ` is set and the whole
         // plane comes back as 127 without any read.
         let ret =
@@ -7117,7 +7177,7 @@ mod tests {
         image.amax = 199.971176;
         image.amean = 100.451;
         image.rms = 0.;
-        image.header = (&raw mut header).cast::<c_char>();
+        image.header = (&raw mut header).cast();
         let mut min = 0.0f32;
         let mut max = 0.0f32;
         let ret = unsafe { get_valid_scale(&mut image, Some(&mut min), Some(&mut max)) };
@@ -7146,7 +7206,7 @@ mod tests {
         image.amax = 10.;
         image.amean = 5.;
         image.rms = 0.;
-        image.header = (&raw mut header).cast::<c_char>();
+        image.header = (&raw mut header).cast();
         // With a valid min/max the preference decides; the default preference
         // is min/max, so the return is still 1, but mean/SD is now available.
         assert_eq!(unsafe { get_valid_scale(&mut image, None, None) }, 1);

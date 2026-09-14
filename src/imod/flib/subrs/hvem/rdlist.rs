@@ -61,15 +61,7 @@ pub fn parselist2(
     lim_list: &mut i32,
 ) -> Result<(), i32> {
     let mut source_limit = lim_list.unsigned_abs() as i32;
-    let ierr = unsafe {
-        parselistfw(
-            line.as_ptr().cast(),
-            list.as_mut_ptr(),
-            num_in_list,
-            &mut source_limit,
-            line.len() as i32,
-        )
-    };
+    let ierr = parselistfw(line.as_bytes(), list, num_in_list, &mut source_limit);
     if ierr == 0 {
         if *lim_list < 0 {
             *lim_list = 0;

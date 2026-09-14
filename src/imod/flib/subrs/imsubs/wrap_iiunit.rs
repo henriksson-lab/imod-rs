@@ -16,6 +16,9 @@ pub unsafe fn imopen(iunit: i32, name: &str, attribute: &str) {
 
 /// Original `iiuOpenPrint` (`wrap_iiunit.f90:22`).
 pub unsafe fn iiu_open_print(iunit: i32, name: &str, attribute: &str) -> i32 {
+    // `iiuOpen` (`unit_fileio.c:195`) is still `extern "C"` with `*const
+    // c_char`, because the Fortran bridge calls it under that name; this is
+    // the boundary adaptation for a signature this unit does not own.
     let (Ok(name), Ok(attribute)) = (CString::new(name), CString::new(attribute)) else {
         return 1;
     };
@@ -164,9 +167,9 @@ mod tests {
     fn wrappers_read_a_real_mrc_section_and_preserve_extra_header_test() {
         let path =
             std::env::temp_dir().join(format!("imod-rs-wrap-iiunit-{}.mrc", std::process::id()));
-        let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+        let name = path.to_string_lossy().into_owned();
         unsafe {
-            let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+            let file = ii_open_new(name.as_bytes(), "wb", IIFILE_DEFAULT);
             assert!(!file.is_null());
             let header = (*file).header.cast::<MrcHeader>();
             assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
@@ -187,7 +190,11 @@ mod tests {
             );
             ii_close(file);
 
-            assert_eq!(iiu_open(97, name.as_ptr(), c"RO".as_ptr()), 0);
+            // `iiuOpen` (`unit_fileio.c`) is still the C-shaped entry point
+            // that the Fortran bridge calls; this is the boundary adaptation
+            // for a signature this unit does not own.
+            let name_c = std::ffi::CString::new(name.as_bytes()).unwrap();
+            assert_eq!(iiu_open(97, name_c.as_ptr(), c"RO".as_ptr()), 0);
             iiu_set_position(97, 1, 0);
             let mut read = [0.0_f32; 4];
             assert_eq!(irdsec(97, &mut read), Ok(()));

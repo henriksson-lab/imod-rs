@@ -8,7 +8,7 @@
 
 use crate::imod::libcfshr::autodoc::adoc_new;
 use crate::imod::libcfshr::b3dutil::ImodFile;
-use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_shift_bytes};
+use crate::imod::libcfshr::b3dutil::{CArg, b3d_error, b3d_shift_bytes, c_format};
 use crate::imod::libcfshr::ilist::{Ilist, ilist_append, ilist_item, ilist_new, ilist_size};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
 use crate::imod::libiimod::iimage::{
@@ -35,9 +35,15 @@ const H5T_ORDER_BE: c_int = 1;
 const H5S_UNLIMITED: HsizeT = !0;
 
 /// C `StackSetData` (`hdfP.h`).
+///
+/// C `char *name` is the dataset's full path inside the file.  It is owned by
+/// the entry -- `hdfDelete` frees it -- so it is an owned `Vec<u8>` here, and
+/// `NULL` is `None`.  The declaration is duplicated in `iihdf.rs` exactly as
+/// `hdfP.h` is included by both units; the two must stay identical because the
+/// `Ilist` holding them is written by one and read by the other.
 #[repr(C)]
 struct StackSetData {
-    name: *mut c_char,
+    name: Option<Vec<u8>>,
     dset_id: HidT,
     is_open: i32,
 }
@@ -140,7 +146,7 @@ pub unsafe fn hdf_read_section_any(
         &mut d,
         &mut free_map,
         &mut y_end,
-        c"hdfReadSectionAny".as_ptr(),
+        "hdfReadSectionAny",
     );
     if err != 0 {
         return err;
@@ -430,7 +436,7 @@ pub unsafe fn hdf_write_section_any(
         return 2;
     }
     if (*in_file).stack_set_list.is_null()
-        && (*in_file).dataset_name.is_null()
+        && (*in_file).dataset_name.is_none()
         && init_new_hdf_file(in_file) != 0
     {
         cleanup_tmp(
@@ -473,8 +479,8 @@ pub unsafe fn hdf_write_section_any(
             (*in_file).z_map_size = new_size;
         }
         if *(*in_file).z_to_data_set_map.add(cz as usize) < 0 {
-            let mut name = [0i8; 36];
-            let new_dset = create_group_and_dataset(in_file, cz, name.as_mut_ptr());
+            let mut name = [0u8; 36];
+            let new_dset = create_group_and_dataset(in_file, cz, &mut name);
             if new_dset < 0 {
                 cleanup_tmp(
                     tmp,
@@ -487,18 +493,24 @@ pub unsafe fn hdf_write_section_any(
                 return 1;
             }
             let stack = StackSetData {
-                name: libc::strdup(name.as_ptr()),
+                name: Some(
+                    name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())].to_vec(),
+                ),
                 dset_id: new_dset,
                 is_open: 1,
             };
-            if ilist_append(
+            let appended = ilist_append(
                 &mut *(*in_file).stack_set_list.cast::<Ilist>(),
                 core::slice::from_raw_parts(
                     (&raw const stack).cast::<u8>(),
                     core::mem::size_of::<StackSetData>(),
                 ),
-            ) != 0
-            {
+            );
+            // `ilistAppend` copies the struct bytewise, which moves the name's
+            // ownership into the list; the local must not also drop it.  On a
+            // failed append the C leaks the `strdup`, and so does this.
+            core::mem::forget(stack);
+            if appended != 0 {
                 cleanup_tmp(
                     tmp,
                     -1,
@@ -660,12 +672,13 @@ pub unsafe fn hdf_write_section_any(
 pub unsafe fn init_new_hdf_file(in_file: *mut ImodImageFile) -> i32 {
     let size = (*in_file).nz.max(4);
     if (*in_file).z_chunk_size != 0 {
-        let mut name = [0i8; 36];
-        let ds = create_group_and_dataset(in_file, (*in_file).num_volumes - 1, name.as_mut_ptr());
+        let mut name = [0u8; 36];
+        let ds = create_group_and_dataset(in_file, (*in_file).num_volumes - 1, &mut name);
         if ds < 0 {
             return 1;
         }
-        (*in_file).dataset_name = libc::strdup(name.as_ptr());
+        (*in_file).dataset_name =
+            Some(name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())].to_vec());
         (*in_file).dataset_id = ds;
         (*in_file).dataset_is_open = 1;
         if (*in_file).global_adoc_index < 0 {
@@ -696,7 +709,11 @@ pub unsafe fn init_new_hdf_file(in_file: *mut ImodImageFile) -> i32 {
 }
 
 /// C static `createGroupAndDataset` (`hdf_imageio.c:491`).
-unsafe fn create_group_and_dataset(in_file: *mut ImodImageFile, z: i32, buf: *mut c_char) -> HidT {
+unsafe fn create_group_and_dataset(
+    in_file: *mut ImodImageFile,
+    z: i32,
+    buf: &mut [u8; 36],
+) -> HidT {
     let scale = get_file_xscale((*in_file).format);
     let rank = if (*in_file).z_chunk_size > 0 { 3 } else { 2 };
     let xi = rank - 1;
@@ -714,19 +731,23 @@ unsafe fn create_group_and_dataset(in_file: *mut ImodImageFile, z: i32, buf: *mu
     /* The property-list/chunk-cache logic is retained from the C source: HDF5
     itself, not a Rust image abstraction, selects the physical layout. */
     if (*in_file).hdf_compression < 0 {
-        let comp_env = libc::getenv(c"IMOD_HDF_COMPRESSION".as_ptr());
-        (*in_file).hdf_compression = if comp_env.is_null() {
-            0
-        } else {
-            core::ffi::CStr::from_ptr(comp_env)
-                .to_str()
-                .ok()
-                .and_then(|s| s.parse::<i32>().ok())
-                .unwrap_or(0)
-                .clamp(0, 9)
-        };
+        let comp_env = std::env::var_os("IMOD_HDF_COMPRESSION");
+        (*in_file).hdf_compression = 0;
+        if let Some(value) = comp_env {
+            // C `atoi`, which is `strtol` base 10 truncated to `int`: "3x" is
+            // 3 where `str::parse` would fail.
+            let mut end = 0;
+            (*in_file).hdf_compression =
+                crate::imod::libcfshr::parse_params::strtol(value.as_encoded_bytes(), &mut end, 10)
+                    as i32;
+            (*in_file).hdf_compression = (*in_file).hdf_compression.clamp(0, 9);
+        }
     }
-    let name = std::ffi::CString::new(format!("/MDF/images/{z}")).unwrap();
+    // `hdf_imageio.c:575`: `sprintf(buf, "/MDF/images/%d", zValue)`.
+    let text = c_format("/MDF/images/%d", &[CArg::Int(z as i64)]);
+    buf[..text.len()].copy_from_slice(text.as_bytes());
+    buf[text.len()] = 0;
+    let name = std::ffi::CString::new(text.as_str()).unwrap();
     let group = H5Gcreate2(
         (*in_file).hdf_file_id,
         name.as_ptr(),
@@ -799,6 +820,7 @@ unsafe fn create_group_and_dataset(in_file: *mut ImodImageFile, z: i32, buf: *mu
         }
     }
     let space = H5Screate_simple(rank, fd.as_ptr(), md.as_ptr());
+    // The HDF5 dataset name, at the HDF5 boundary.
     let image = c"image";
     let ds = H5Dcreate2(
         group,
@@ -819,8 +841,10 @@ unsafe fn create_group_and_dataset(in_file: *mut ImodImageFile, z: i32, buf: *mu
     H5Tclose(typ);
     H5Sclose(space);
     H5Gclose(group);
-    let out = std::ffi::CString::new(format!("/MDF/images/{z}/image")).unwrap();
-    core::ptr::copy_nonoverlapping(out.as_ptr(), buf, out.as_bytes_with_nul().len());
+    // `hdf_imageio.c:645`: `sprintf(buf, "/MDF/images/%d/image", zValue)`.
+    let out = c_format("/MDF/images/%d/image", &[CArg::Int(z as i64)]);
+    buf[..out.len()].copy_from_slice(out.as_bytes());
+    buf[out.len()] = 0;
     ds
 }
 
@@ -863,7 +887,8 @@ unsafe fn get_dataset_for_z(in_file: *mut ImodImageFile, cz: i32, no_data: *mut 
         if (*stack).is_open != 0 {
             (*stack).dset_id
         } else {
-            let id = H5Dopen2((*in_file).hdf_file_id, (*stack).name, H5P_DEFAULT);
+            let name = std::ffi::CString::new((*stack).name.clone().unwrap_or_default()).unwrap();
+            let id = H5Dopen2((*in_file).hdf_file_id, name.as_ptr(), H5P_DEFAULT);
             (*stack).dset_id = id;
             (*stack).is_open = 1;
             id
@@ -871,7 +896,9 @@ unsafe fn get_dataset_for_z(in_file: *mut ImodImageFile, cz: i32, no_data: *mut 
     } else if (*in_file).dataset_is_open != 0 {
         (*in_file).dataset_id
     } else {
-        let id = H5Dopen2((*in_file).hdf_file_id, (*in_file).dataset_name, H5P_DEFAULT);
+        let name =
+            std::ffi::CString::new((*in_file).dataset_name.clone().unwrap_or_default()).unwrap();
+        let id = H5Dopen2((*in_file).hdf_file_id, name.as_ptr(), H5P_DEFAULT);
         (*in_file).dataset_id = id;
         (*in_file).dataset_is_open = 1;
         id
@@ -976,8 +1003,8 @@ mod tests {
             assert!(image.dataset_id >= 0);
             assert_eq!(image.dataset_is_open, 1);
             assert_eq!(
-                std::ffi::CStr::from_ptr(image.dataset_name).to_bytes(),
-                b"/MDF/images/1/image"
+                image.dataset_name.as_deref(),
+                Some(&b"/MDF/images/1/image"[..])
             );
             assert!(image.global_adoc_index >= 0);
             assert_eq!(companion.global_adoc_index, image.global_adoc_index);
@@ -1054,7 +1081,7 @@ mod tests {
             assert_eq!(output, [-1.0, 20.0, -1.0, -1.0, 40.0, -1.0]);
             assert_eq!(H5Dclose(image.dataset_id), 0);
             crate::imod::libcfshr::autodoc::adoc_clear(image.global_adoc_index);
-            libc::free(image.dataset_name.cast());
+            image.dataset_name = None;
             assert_eq!(H5Fclose(file), 0);
             std::fs::remove_file(path).unwrap();
         }
@@ -1113,10 +1140,7 @@ mod tests {
                 .unwrap()
                 .as_mut_ptr()
                 .cast::<StackSetData>();
-            assert_eq!(
-                std::ffi::CStr::from_ptr((*stack).name).to_bytes(),
-                b"/MDF/images/3/image"
-            );
+            assert_eq!((*stack).name.as_deref(), Some(&b"/MDF/images/3/image"[..]));
             let mut read = [0.0f32; 4];
             assert_eq!(
                 H5Dread(
@@ -1131,7 +1155,7 @@ mod tests {
             );
             assert_eq!(read, section);
             assert_eq!(H5Dclose((*stack).dset_id), 0);
-            libc::free((*stack).name.cast());
+            (*stack).name = None;
             crate::imod::libcfshr::ilist::ilist_delete(Some(Box::from_raw(
                 image.stack_set_list.cast::<Ilist>(),
             )));

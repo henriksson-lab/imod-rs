@@ -9,14 +9,13 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_head_new, mrc_head_write,
     mrc_mread_slice, mrc_write_slice,
 };
-use core::ffi::c_char;
 
 /// `sliceReadMRC` from `mrcslice.c:945`.
 ///
 /// Returns a slice holding one plane of `hin` at coordinate `sno` along
 /// `axis`, using the file pointer in `hin`.  Calls `mrc_mread_slice`, which
 /// swaps bytes if needed.  Returns null on error.
-pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: c_char) -> *mut Islice {
+pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: u8) -> *mut Islice {
     unsafe {
         let slice = libc::malloc(core::mem::size_of::<Islice>()).cast::<Islice>();
         if slice.is_null() {
@@ -59,7 +58,7 @@ pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: c_char) -> *mu
 pub unsafe fn slice_read_subm(
     hin: *mut MrcHeader,
     sec_num: i32,
-    axis: i8,
+    axis: u8,
     xsize: i32,
     ysize: i32,
     xcen: i32,
@@ -346,7 +345,7 @@ pub unsafe fn full_array_min_max_mean(
     }
 }
 
-pub unsafe fn mrc_slice_getvol(v: *mut Istack, sno: i32, axis: i8) -> *mut Islice {
+pub unsafe fn mrc_slice_getvol(v: *mut Istack, sno: i32, axis: u8) -> *mut Islice {
     unsafe {
         match axis as u8 as char {
             'y' | 'Y' => {
@@ -382,7 +381,7 @@ pub unsafe fn mrc_slice_getvol(v: *mut Istack, sno: i32, axis: i8) -> *mut Islic
     }
 }
 
-pub unsafe fn mrc_slice_putvol(v: *mut Istack, s: *mut Islice, sno: i32, axis: i8) -> i32 {
+pub unsafe fn mrc_slice_putvol(v: *mut Istack, s: *mut Islice, sno: i32, axis: u8) -> i32 {
     unsafe {
         match axis as u8 as char {
             'z' | 'Z' => {
@@ -604,7 +603,7 @@ pub unsafe fn mrc_slice_resize(slin: *mut Islice, nx: i32, ny: i32) -> *mut Isli
         sout
     }
 }
-pub unsafe fn slice_mirror(s: *mut Islice, axis: i8) -> i32 {
+pub unsafe fn slice_mirror(s: *mut Islice, axis: u8) -> i32 {
     unsafe {
         match axis as u8 as char {
             'x' | 'X' => {
@@ -716,10 +715,10 @@ pub unsafe fn slice_reduce_mirrored_fft(s: *mut Islice) -> i32 {
 }
 
 /// `sliceWriteMRCfile` from mrcslice.c:903.
-pub unsafe fn slice_write_mrcfile(filename: *const i8, slice: *mut Islice) -> i32 {
+pub unsafe fn slice_write_mrcfile(filename: &[u8], slice: *mut Islice) -> i32 {
     unsafe {
         let Some(mut file) = crate::imod::libcfshr::b3dutil::ImodFile::open(
-            &core::ffi::CStr::from_ptr(filename).to_string_lossy(),
+            &String::from_utf8_lossy(filename),
             "wb",
         ) else {
             return -1;
@@ -734,7 +733,7 @@ pub unsafe fn slice_write_mrcfile(filename: *const i8, slice: *mut Islice) -> i3
             drop(file);
             return -2;
         }
-        let error = mrc_write_slice((*slice).data.b.cast(), &mut file, &mut hout, 0, b'z' as i8);
+        let error = mrc_write_slice((*slice).data.b.cast(), &mut file, &mut hout, 0, b'z');
         drop(file);
         error
     }
@@ -742,7 +741,7 @@ pub unsafe fn slice_write_mrcfile(filename: *const i8, slice: *mut Islice) -> i3
 
 /// `mrcWriteImageToFile` from mrcslice.c:931.
 pub unsafe fn mrc_write_image_to_file(
-    filename: *const i8,
+    filename: &[u8],
     array: *mut core::ffi::c_void,
     mode: i32,
     nx: i32,
@@ -1042,21 +1041,18 @@ mod tests {
     #[test]
     fn slice_write_mrcfile_round_trips_a_real_mrc_stack() {
         unsafe {
-            let path = std::ffi::CString::new(format!(
+            let path = format!(
                 "/tmp/imod-rs-mrcslice-{}-{}.mrc",
                 std::process::id(),
                 std::thread::current().name().unwrap_or("test")
-            ))
-            .unwrap();
+            );
             let slice = slice_create(3, 2, MRC_MODE_BYTE);
             assert!(!slice.is_null());
             for (index, value) in [2.0_f32, 7.0, 1.0, 8.0, 2.0, 8.0].into_iter().enumerate() {
                 slice_put_val(slice, (index % 3) as i32, (index / 3) as i32, [value; 4]);
             }
-            assert_eq!(slice_write_mrcfile(path.as_ptr(), slice), 0);
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
-                    .unwrap();
+            assert_eq!(slice_write_mrcfile(path.as_bytes(), slice), 0);
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(
                 crate::imod::libiimod::mrcfiles::mrc_head_read(&mut file, &mut header),
@@ -1069,14 +1065,14 @@ mod tests {
                     &mut file,
                     &mut header,
                     0,
-                    b'Z' as i8,
+                    b'Z',
                 ),
                 0
             );
             assert_eq!(values, [2, 7, 1, 8, 2, 8]);
             drop(file);
             slice_free(slice);
-            std::fs::remove_file(path.to_string_lossy().as_ref()).unwrap();
+            std::fs::remove_file(&path).unwrap();
         }
     }
 }

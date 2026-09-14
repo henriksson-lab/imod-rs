@@ -1,8 +1,8 @@
 //! Experimental Rust `tiff`-crate reader for the legacy tif2mrc boundary.
 //!
-//! It decodes supported pages eagerly, then exposes the same malloc-owned
-//! section buffers that `tiff.c` returns to tif2mrc.  The default path never
-//! enters this module.
+//! It decodes supported pages eagerly, then hands back the same owned section
+//! buffers that `tiff.c` returns to tif2mrc.  The default path never enters
+//! this module.
 
 use crate::imod::mrc::tiff::TfInfo;
 
@@ -18,7 +18,6 @@ mod implementation {
         MRC_MODE_BYTE, MRC_MODE_FLOAT, MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT,
     };
     use std::collections::HashMap;
-    use std::ffi::CStr;
     use std::fs::File;
     use std::io::Cursor;
     use std::sync::{LazyLock, Mutex};
@@ -93,11 +92,8 @@ mod implementation {
         }
     }
 
-    pub unsafe fn open_file(filename: *mut i8, tif: *mut TfInfo, any_tif_pixel: i32) -> i32 {
-        if filename.is_null() || tif.is_null() {
-            return 1;
-        }
-        let Ok(path) = unsafe { CStr::from_ptr(filename) }.to_str() else {
+    pub unsafe fn open_file(filename: &[u8], tif: &mut TfInfo, any_tif_pixel: i32) -> i32 {
+        let Ok(path) = std::str::from_utf8(filename) else {
             return 1;
         };
         let Ok(mut file_bytes) = std::fs::read(path) else {
@@ -377,7 +373,16 @@ mod implementation {
             (*iifile).mode = if rgb { MRC_MODE_RGB } else { mode_for(type_) };
             (*iifile).any_tiff_pix_size = any_tif_pixel;
             (*tif).iifile = iifile;
-            (*tif).fp = core::ptr::null_mut();
+            // `tiff.c:262` always leaves `tiff->fp` an open stream, and
+            // `tif2mrc.c:242` copies it out unconditionally, so this backend
+            // has to provide one even though it decodes from its own in-memory
+            // copy.  Previously `core::ptr::null_mut()`, which stopped
+            // compiling when `Tf_info.fp` became `Option<ImodFile>`; leaving
+            // it `None` compiles and then panics in `tif2mrc`.
+            (*tif).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(path, "rb");
+            if (*tif).fp.is_none() {
+                return 1;
+            }
             (*tif).bits_per_sample = bits;
             (*tif).photometric_interpretation = if rgb { 2 } else { 1 };
             (*tif).directory[1].value = width as i32;
@@ -388,7 +393,7 @@ mod implementation {
         FILES
             .lock()
             .unwrap()
-            .insert(tif as usize, FileData { images });
+            .insert(tif as *mut TfInfo as usize, FileData { images });
         0
     }
 
@@ -569,8 +574,8 @@ mod implementation {
         Ok(())
     }
 
-    /// Single-page pointer adapter for the current C-shaped mrc2tif buffer.
-    pub unsafe fn write_image(
+    /// Single-page adapter over [`write_stack`] for one mrc2tif slice.
+    pub fn write_image(
         filename: &str,
         width: i32,
         height: i32,
@@ -578,13 +583,9 @@ mod implementation {
         compression: i32,
         quality: i32,
         resolution: i32,
-        data: *const u8,
-        byte_len: usize,
+        data: &[u8],
     ) -> Result<(), String> {
-        if data.is_null() {
-            return Err("Rust TIFF writer requires a non-null image buffer".into());
-        }
-        let image = unsafe { std::slice::from_raw_parts(data, byte_len) }.to_vec();
+        let image = data.to_vec();
         write_stack(
             filename,
             width,
@@ -606,29 +607,31 @@ mod implementation {
         }
     }
 
-    pub unsafe fn read_section(tif: *mut TfInfo, section: i32) -> Option<*mut u8> {
+    pub unsafe fn read_section(tif: &mut TfInfo, section: i32) -> Option<Vec<u8>> {
         let files = FILES.lock().unwrap();
-        let data = files
-            .get(&(tif as usize))?
-            .images
-            .get(section.max(0) as usize)?
-            .data
-            .as_slice();
-        let output = unsafe { libc::malloc(data.len()).cast::<u8>() };
-        if output.is_null() {
-            return Some(core::ptr::null_mut());
-        }
-        unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), output, data.len()) };
-        unsafe { (*tif).data = output };
-        Some(output)
+        Some(
+            files
+                .get(&(tif as *mut TfInfo as usize))?
+                .images
+                .get(section.max(0) as usize)?
+                .data
+                .clone(),
+        )
     }
 
-    pub fn contains(tif: *mut TfInfo) -> bool {
-        FILES.lock().unwrap().contains_key(&(tif as usize))
+    pub fn contains(tif: &mut TfInfo) -> bool {
+        FILES
+            .lock()
+            .unwrap()
+            .contains_key(&(tif as *mut TfInfo as usize))
     }
 
-    pub unsafe fn close_file(tif: *mut TfInfo) -> bool {
-        FILES.lock().unwrap().remove(&(tif as usize)).is_some()
+    pub unsafe fn close_file(tif: &mut TfInfo) -> bool {
+        FILES
+            .lock()
+            .unwrap()
+            .remove(&(tif as *mut TfInfo as usize))
+            .is_some()
     }
 
     #[cfg(test)]
@@ -752,27 +755,27 @@ pub use implementation::{close_file, contains, open_file, read_section};
 pub use implementation::{write_image, write_stack};
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn open_file(_filename: *mut i8, _tif: *mut TfInfo, _any_tif_pixel: i32) -> i32 {
+pub unsafe fn open_file(_filename: &[u8], _tif: &mut TfInfo, _any_tif_pixel: i32) -> i32 {
     1
 }
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn read_section(_tif: *mut TfInfo, _section: i32) -> Option<*mut u8> {
+pub unsafe fn read_section(_tif: &mut TfInfo, _section: i32) -> Option<Vec<u8>> {
     None
 }
 
 #[cfg(not(feature = "rust-tiff"))]
-pub fn contains(_tif: *mut TfInfo) -> bool {
+pub fn contains(_tif: &mut TfInfo) -> bool {
     false
 }
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn close_file(_tif: *mut TfInfo) -> bool {
+pub unsafe fn close_file(_tif: &mut TfInfo) -> bool {
     false
 }
 
 #[cfg(not(feature = "rust-tiff"))]
-pub unsafe fn write_image(
+pub fn write_image(
     _filename: &str,
     _width: i32,
     _height: i32,
@@ -780,8 +783,7 @@ pub unsafe fn write_image(
     _compression: i32,
     _quality: i32,
     _resolution: i32,
-    _data: *const u8,
-    _byte_len: usize,
+    _data: &[u8],
 ) -> Result<(), String> {
     Err("Rust TIFF backend requires Cargo feature rust-tiff".into())
 }

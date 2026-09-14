@@ -1,5 +1,7 @@
 //! Translation of `IMOD/libfft/todfft.c`.
 use super::{cmplft, hermft, realft};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
+use std::io::Write as _;
 
 /// C `todfft`.
 pub unsafe fn todfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i32) {
@@ -33,10 +35,10 @@ pub unsafe fn todfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut 
         // non-positive `nx` or `ny` -- so neither does this.
         let nxo2 = nx / 2;
         if 2 * nxo2 != nx {
-            libc::printf(
-                c"ERROR: todfft - nx= %d must be even with IMOD FFT routines\n".as_ptr(),
-                nx,
-            );
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "ERROR: todfft - nx= %d must be even with IMOD FFT routines\n",
+                &[CArg::Int(nx as i64)],
+            ));
             std::process::exit(1);
         }
         let stride = nx + 2;

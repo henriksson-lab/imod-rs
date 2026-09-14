@@ -7,7 +7,6 @@ use super::transforms::{rotate_transform, stretch_transform, tramat_copy, tramat
 use crate::imod::libcfshr::reduce_by_binning::{SLICE_MODE_BYTE, reduce_by_binning};
 use crate::imod::libiimod::mrcfiles::{LoadInfo, MrcHeader, mrc_head_read, mrc_init_li};
 use crate::imod::libiimod::mrcsec::mrc_read_z_byte;
-use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 
@@ -120,8 +119,6 @@ pub fn load_angles(view: &mut MidasView) -> Result<(), String> {
 
 /// C `load_image` (`file_io.cpp:28`).
 pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> {
-    let name = CString::new(filename.as_os_str().as_encoded_bytes())
-        .map_err(|_| format!("Couldn't open {}: NUL in pathname", filename.display()))?;
     let Some(mut fp) =
         crate::imod::libcfshr::b3dutil::ImodFile::open(&filename.to_string_lossy(), "rb")
     else {
@@ -154,12 +151,6 @@ pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> 
 }
 /// C `load_refimage` (`file_io.cpp:66`).
 pub fn load_refimage(view: &mut MidasView, filename: &Path) -> Result<i32, String> {
-    let name = CString::new(filename.as_os_str().as_encoded_bytes()).map_err(|_| {
-        format!(
-            "Error opening reference image {}: NUL in pathname",
-            filename.display()
-        )
-    })?;
     let Some(mut fp) =
         crate::imod::libcfshr::b3dutil::ImodFile::open(&filename.to_string_lossy(), "rb")
     else {
@@ -288,10 +279,9 @@ mod tests {
     fn image_header_and_load_info_own_a_real_mrc_file() {
         let path =
             std::env::temp_dir().join(format!("imod-rs-midas-image-{}.mrc", std::process::id()));
-        let name = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
         unsafe {
             let mut fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
+                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
                     .unwrap();
             let mut header = MrcHeader::default();
             mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
@@ -305,7 +295,7 @@ mod tests {
                     &mut fp,
                     &mut header,
                     0,
-                    b'z' as i8
+                    b'z'
                 ),
                 0
             );

@@ -3,6 +3,8 @@
 //! `factor`, `sym` and `unsym` are the caller's `int[16]` scratch arrays,
 //! written from index 1 upward exactly as the source writes them.
 
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
+use std::io::Write as _;
 /// C `srfp`.
 pub fn srfp(
     pts: i32,
@@ -32,28 +34,26 @@ pub fn srfp(
         // emitted neither message; a C-versus-Rust differential over the
         // factorisation put 20 stdout lines on the C side and none on ours.
         //
-        // These go through `libc::printf` rather than Rust's stdout on
-        // purpose.  `cmplft` prints its own `invalid number of points`
-        // message through libc immediately after `srfp` returns with this
-        // flag set, and C stdio is block-buffered under redirection while
-        // Rust's is not — a Rust `print!` here would reorder the two lines in
-        // a captured file while looking correct on a terminal.  The whole
-        // `libfft` output path converts as one unit; see NATIVE.md.
+        // These write to `ImodFile::Stdout`, the **C** stdout stream, not
+        // Rust's, on purpose.  `cmplft` prints its own `invalid number of
+        // points` message on the same stream immediately after `srfp` returns
+        // with this flag set, and C stdio is block-buffered under redirection
+        // while Rust's is not — a Rust `print!` here would reorder the two
+        // lines in a captured file while looking correct on a terminal.  The
+        // whole `libfft` output path is on that stream; NATIVE.md §1, §7b.
         if divisor > pmax {
-            unsafe {
-                libc::printf(c"largest factor exceeds %d.  n = %d.\n".as_ptr(), pmax, pts);
-            }
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "largest factor exceeds %d.  n = %d.\n",
+                &[CArg::Int(pmax as i64), CArg::Int(pts as i64)],
+            ));
             *error = 1;
             return;
         }
         if 2 * p + q >= nest {
-            unsafe {
-                libc::printf(
-                    c"factor count exceeds %d.  n = %d.\n".as_ptr(),
-                    nest as i32,
-                    pts,
-                );
-            }
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "factor count exceeds %d.  n = %d.\n",
+                &[CArg::Int(nest as i64), CArg::Int(pts as i64)],
+            ));
             *error = 1;
             return;
         }

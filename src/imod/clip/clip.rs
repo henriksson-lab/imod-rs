@@ -712,13 +712,8 @@ pub fn clip() {
                     iarg += 1;
                 } else {
                     iarg += 1;
-                    // `islice.rs` still takes a C string; the NUL-terminated
-                    // copy goes away when that module converts.
-                    let mut mode_text = raw.get(iarg).cloned().unwrap_or_default().into_bytes();
-                    mode_text.push(0);
-                    options.mode = unsafe {
-                        crate::imod::libcfshr::islice::slice_mode(mode_text.as_ptr().cast())
-                    };
+                    let mode_text = raw.get(iarg).cloned().unwrap_or_default().into_bytes();
+                    options.mode = crate::imod::libcfshr::islice::slice_mode(&mode_text);
                 }
                 if options.mode == SLICE_MODE_UNDEFINED {
                     exit_error(
@@ -1286,11 +1281,7 @@ pub fn clip() {
         mrcfiles::mrc_head_new(&mut input, options.ox, options.oy, options.oz, options.mode);
         crate::imod::libcfshr::b3dutil::override_all_big_tiff(1);
     } else {
-        // `iimage.rs` still takes C strings; the NUL-terminated copies go
-        // away when that module converts.
-        let mut name = raw[iarg].clone().into_bytes();
-        name.push(0);
-        input.fp = unsafe { iimage::ii_fopen(name.as_ptr().cast(), b"rb\0".as_ptr().cast()) };
+        input.fp = unsafe { iimage::ii_fopen(raw[iarg].as_bytes(), "rb") };
         input.pathname = Some(raw[iarg].clone());
         if input.fp.is_none() {
             exit_error(c_format("Error opening %s", &[CArg::Str(&raw[iarg])]).as_bytes());
@@ -1309,9 +1300,7 @@ pub fn clip() {
     }
     mrcfiles::mrc_init_output_header(&mut output);
     if options.infiles > 1 {
-        let mut name = raw[iarg].clone().into_bytes();
-        name.push(0);
-        second.fp = unsafe { iimage::ii_fopen(name.as_ptr().cast(), b"rb\0".as_ptr().cast()) };
+        second.fp = unsafe { iimage::ii_fopen(raw[iarg].as_bytes(), "rb") };
         second.pathname = Some(raw[iarg].clone());
         if second.fp.is_none() {
             exit_error(c_format("Error opening %s", &[CArg::Str(&raw[iarg])]).as_bytes());
@@ -1425,9 +1414,7 @@ WARNING: This file is not a readable MRC file.\n\
             crate::imod::libcfshr::b3dutil::imod_backup_file(&last);
             output.fp = ImodFile::open(&last, "w");
         } else if options.add2file != IP_APPEND_FALSE {
-            let mut name = last.clone().into_bytes();
-            name.push(0);
-            output.fp = unsafe { iimage::ii_fopen(name.as_ptr().cast(), b"rb+\0".as_ptr().cast()) };
+            output.fp = unsafe { iimage::ii_fopen(last.as_bytes(), "rb+") };
             if output.fp.is_none() {
                 exit_error(c_format("Error finding %s", &[CArg::Str(&last)]).as_bytes());
             }
@@ -1459,9 +1446,7 @@ WARNING: This file is not a readable MRC file.\n\
                 );
                 crate::imod::libcfshr::b3dutil::override_output_type(iimage::IIFILE_MRC);
             }
-            let mut name = last.clone().into_bytes();
-            name.push(0);
-            output.fp = unsafe { iimage::ii_fopen(name.as_ptr().cast(), b"wb+\0".as_ptr().cast()) };
+            output.fp = unsafe { iimage::ii_fopen(last.as_bytes(), "wb+") };
         }
         if output.fp.is_none() {
             exit_error(c_format("Error opening output file %s", &[CArg::Str(&last)]).as_bytes());

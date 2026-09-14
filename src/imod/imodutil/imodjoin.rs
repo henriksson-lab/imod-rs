@@ -1,12 +1,11 @@
 //! `IMOD/imodutil/imodjoin.c`: join selected objects from IMOD model files.
 
 use std::env;
-use std::ffi::CString;
 use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
-    imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
+    CArg, c_format_bytes, imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::parselist::parselist;
@@ -22,79 +21,73 @@ use crate::imod::libimod::iview::imod_view_use;
 pub fn usage() -> ! {
     imod_version(Some("imodjoin"));
     imod_copyright();
-    unsafe { libc::fflush(std::ptr::null_mut()) };
-    println!("Usage: imodjoin [options] model_1 [-o list] model_2 [more models] out_model");
-    println!("Options (before first model):");
-    println!("\t-o list\tList of objects to take from particular model (default is all)");
-    println!("\t-r list\tList of objects in model 1 to REPLACE with objects from model 2");
-    println!("\t-c\tChange colors of objects being copied to first model");
-    println!("\t-d\tModels are from different volumes");
-    println!("\t-i file\tTransform all models to match this image file (implies -d)");
-    println!("\t-s\tIgnore scale differences between models from different volumes");
-    println!("\t-f\tRetain original flip state of each model");
-    println!("\t-n\tDo not transforms models at all");
-    let _ = std::io::stdout().flush();
+    let mut out = ImodFile::Stdout;
+    let _ = out.write_all(
+        b"Usage: imodjoin [options] model_1 [-o list] model_2 [more models] out_model\n",
+    );
+    let _ = out.write_all(b"Options (before first model):\n");
+    let _ = out
+        .write_all(b"\t-o list\tList of objects to take from particular model (default is all)\n");
+    let _ = out
+        .write_all(b"\t-r list\tList of objects in model 1 to REPLACE with objects from model 2\n");
+    let _ = out.write_all(b"\t-c\tChange colors of objects being copied to first model\n");
+    let _ = out.write_all(b"\t-d\tModels are from different volumes\n");
+    let _ =
+        out.write_all(b"\t-i file\tTransform all models to match this image file (implies -d)\n");
+    let _ =
+        out.write_all(b"\t-s\tIgnore scale differences between models from different volumes\n");
+    let _ = out.write_all(b"\t-f\tRetain original flip state of each model\n");
+    let _ = out.write_all(b"\t-n\tDo not transforms models at all\n");
     std::process::exit(3)
 }
 
 /// Original: `parserr` (`imodjoin.c:42`).
 pub fn parserr(mod_number: i32) -> ! {
-    println!("ERROR: imodjoin - Error parsing object list before model {mod_number}");
-    let _ = std::io::stdout().flush();
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+        "ERROR: imodjoin - Error parsing object list before model %d\n",
+        &[CArg::Int(mod_number as i64)],
+    ));
     usage()
 }
 /// Original: `optionerr` (`imodjoin.c:48`).
 pub fn optionerr(mod_number: i32) -> ! {
-    println!("ERROR: imodjoin - Invalid option before model {mod_number}");
-    let _ = std::io::stdout().flush();
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+        "ERROR: imodjoin - Invalid option before model %d\n",
+        &[CArg::Int(mod_number as i64)],
+    ));
     usage()
 }
 /// Original: `doublerr` (`imodjoin.c:53`).
 pub fn doublerr() -> ! {
-    println!("ERROR: imodjoin - You cannot use both -o and -r with model 1");
-    let _ = std::io::stdout().flush();
+    let _ = ImodFile::Stdout
+        .write_all(b"ERROR: imodjoin - You cannot use both -o and -r with model 1\n");
     usage()
 }
 /// Original: `readerr` (`imodjoin.c:59`).
 pub fn readerr(mod_number: i32) -> ! {
-    let mut message = [0_i8; 512];
-    unsafe {
-        libc::sprintf(
-            message.as_mut_ptr(),
-            c"Error reading file for model %d".as_ptr(),
-            mod_number,
-        );
-        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-    }
-    std::process::exit(1)
+    let message = c_format_bytes(
+        "Error reading file for model %d",
+        &[CArg::Int(mod_number as i64)],
+    );
+    exit_error(&message);
 }
 /// Original: `objerr` (`imodjoin.c:63`).
 pub fn objerr(object_number: i32, mod_number: i32) -> ! {
-    let mut message = [0_i8; 512];
-    unsafe {
-        libc::sprintf(
-            message.as_mut_ptr(),
-            c"Invalid object number %d for model %d".as_ptr(),
-            object_number,
-            mod_number,
-        );
-        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-    }
-    std::process::exit(1)
+    let message = c_format_bytes(
+        "Invalid object number %d for model %d",
+        &[
+            CArg::Int(object_number as i64),
+            CArg::Int(mod_number as i64),
+        ],
+    );
+    exit_error(&message);
 }
 
 /// Original: `main` (`imodjoin.c:68`).
 pub fn imodjoin() {
     let argv: Vec<String> = env::args().collect();
-    let mut prefix = [0_i8; 100];
-    unsafe {
-        libc::sprintf(
-            prefix.as_mut_ptr(),
-            c"ERROR: %s - ".as_ptr(),
-            c"imodjoin".as_ptr(),
-        );
-        setExitPrefix(core::ffi::CStr::from_ptr(prefix.as_ptr()).to_bytes());
-    }
+    let prefix = c_format_bytes("ERROR: %s - ", &[CArg::Str("imodjoin")]);
+    setExitPrefix(&prefix);
     if argv.len() < 3 {
         usage();
     }
@@ -117,17 +110,11 @@ pub fn imodjoin() {
                 let Some(text) = argv.get(iarg) else {
                     parserr(1)
                 };
-                let text = CString::new(text.as_str()).unwrap_or_else(|_| parserr(1));
                 let mut nlist1 = 0_i32;
-                let parsed = unsafe { parselist(text.as_ptr(), &mut nlist1) };
-                if parsed.is_null() {
-                    parserr(1);
-                }
-                list1 = unsafe { std::slice::from_raw_parts(parsed, nlist1 as usize) }
-                    .iter()
-                    .map(|&value| value as usize)
-                    .collect();
-                unsafe { libc::free(parsed.cast()) };
+                let Some(parsed) = parselist(text.as_bytes(), &mut nlist1) else {
+                    parserr(1)
+                };
+                list1 = parsed.iter().map(|&value| value as usize).collect();
                 if option == 'r' {
                     replace = true;
                 } else {
@@ -144,35 +131,22 @@ pub fn imodjoin() {
                 let Some(image) = argv.get(iarg) else {
                     optionerr(1)
                 };
-                let image_name = CString::new(image.as_str()).unwrap_or_else(|_| optionerr(1));
                 // `mrcHeadRead` now takes `&mut ImodFile` (the `libiimod`
                 // conversion in flight); this is the minimal call-site edit for
                 // that, not a conversion of `imodjoin`.
                 let fin = ImodFile::open(image, "rb");
                 if fin.is_none() {
-                    let mut message = [0_i8; 512];
-                    unsafe {
-                        libc::sprintf(
-                            message.as_mut_ptr(),
-                            c"Couldn't open %s".as_ptr(),
-                            image_name.as_ptr(),
-                        );
-                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                    }
+                    let message =
+                        c_format_bytes("Couldn't open %s", &[CArg::Bytes(image.as_bytes())]);
+                    exit_error(&message);
                 }
                 let mut fin = fin.unwrap();
                 let mut hdata = MrcHeader::default();
                 if unsafe { mrc_head_read(&mut fin, &mut hdata) } != 0 {
                     drop(fin);
-                    let mut message = [0_i8; 512];
-                    unsafe {
-                        libc::sprintf(
-                            message.as_mut_ptr(),
-                            c"Reading header from %s".as_ptr(),
-                            image_name.as_ptr(),
-                        );
-                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                    }
+                    let message =
+                        c_format_bytes("Reading header from %s", &[CArg::Bytes(image.as_bytes())]);
+                    exit_error(&message);
                 }
                 drop(fin);
                 let mut reference = Iref_image::default();
@@ -213,26 +187,19 @@ pub fn imodjoin() {
     if iarg >= argv.len() {
         usage();
     }
-    let argument_strings: Vec<CString> = argv
+    let mut argument_vector: Vec<Vec<u8>> = argv
         .iter()
-        .map(|argument| CString::new(argument.as_str()).unwrap_or_else(|_| usage()))
+        .map(|argument| argument.as_bytes().to_vec())
         .collect();
-    let argument_pointers: Vec<*const libc::c_char> = argument_strings
-        .iter()
-        .map(|argument| argument.as_ptr())
-        .collect();
-    let mut argument_vector = argument_pointers.as_ptr();
     let mut argument_count = argv.len() as i32;
     let mut first_argument = iarg as i32;
     let mut allocated = 0_i32;
-    if unsafe {
-        replace_file_arg_vec(
-            &mut argument_vector,
-            &mut argument_count,
-            &mut first_argument,
-            &mut allocated,
-        )
-    } != 0
+    if replace_file_arg_vec(
+        &mut argument_vector,
+        &mut argument_count,
+        &mut first_argument,
+        &mut allocated,
+    ) != 0
     {
         std::process::exit(1);
     }
@@ -240,7 +207,8 @@ pub fn imodjoin() {
         doublerr();
     }
     if suppress && diff_vols {
-        println!("ERROR: imodjoin - it makes no sense to use -n with -d or -i");
+        let _ = ImodFile::Stdout
+            .write_all(b"ERROR: imodjoin - it makes no sense to use -n with -d or -i\n");
         usage();
     }
     let mut in_model = imod_read(&argv[iarg]).unwrap_or_else(|_| readerr(1));
@@ -259,7 +227,9 @@ pub fn imodjoin() {
             z: 1.,
         };
         in_model.ref_image = Some(reference);
-        println!("WARNING: Model 1 has no image reference data; transformations may be wrong");
+        let _ = ImodFile::Stdout.write_all(
+            b"WARNING: Model 1 has no image reference data; transformations may be wrong\n",
+        );
         in_model.flags |= IMODF_OTRANS_ORIGIN;
     }
     let mut use_ref = Iref_image::default();
@@ -350,9 +320,7 @@ pub fn imodjoin() {
         }
         njoin += 1;
         if njoin > 2 && replace {
-            unsafe {
-                exit_error(b"You cannot use -r with more than 2 input models");
-            }
+            exit_error(b"You cannot use -r with more than 2 input models");
         }
         let mut list2 = Vec::<usize>::new();
         if argv[iarg].starts_with('-') {
@@ -360,17 +328,12 @@ pub fn imodjoin() {
                 optionerr(njoin);
             }
             iarg += 1;
-            let text = CString::new(argv[iarg].as_str()).unwrap_or_else(|_| parserr(njoin));
+            let text = &argv[iarg];
             let mut nlist2 = 0_i32;
-            let parsed = unsafe { parselist(text.as_ptr(), &mut nlist2) };
-            if parsed.is_null() {
-                parserr(njoin);
-            }
-            list2 = unsafe { std::slice::from_raw_parts(parsed, nlist2 as usize) }
-                .iter()
-                .map(|&value| value as usize)
-                .collect();
-            unsafe { libc::free(parsed.cast()) };
+            let Some(parsed) = parselist(text.as_bytes(), &mut nlist2) else {
+                parserr(njoin)
+            };
+            list2 = parsed.iter().map(|&value| value as usize).collect();
             iarg += 1;
         }
         let mut join_model = imod_read(&argv[iarg]).unwrap_or_else(|_| readerr(njoin));
@@ -411,9 +374,10 @@ pub fn imodjoin() {
                     },
                 );
             } else {
-                println!(
-                    "WARNING: Model {njoin} has no image reference data and will not be transformed"
-                );
+                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                    "WARNING: Model %d has no image reference data and will not be transformed\n",
+                    &[CArg::Int(njoin as i64)],
+                ));
             }
         }
         // Original: `if (flipState != (joinModel->flags & IMODF_FLIPYZ))
@@ -592,13 +556,7 @@ pub fn imodjoin() {
     in_model.ymax = (in_model.ymax as f32).max(newmax.y) as i32;
     in_model.zmax = (in_model.zmax as f32).max(newmax.z) as i32;
     let output = &argv[argv.len() - 1];
-    let output_name = CString::new(output.as_str()).unwrap_or_else(|_| unsafe {
-        exit_error(b"Fatal error opening new model");
-        std::process::exit(1)
-    });
-    imod_backup_file(output_name.to_string_lossy().as_ref());
-    imod_file_write(&in_model, output).unwrap_or_else(|_| unsafe {
-        exit_error(b"Fatal error opening new model");
-        std::process::exit(1)
-    });
+    imod_backup_file(output);
+    imod_file_write(&in_model, output)
+        .unwrap_or_else(|_| exit_error(b"Fatal error opening new model"));
 }

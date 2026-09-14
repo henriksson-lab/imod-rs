@@ -8,8 +8,7 @@
 //! missing rather than silently dropping the action.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::b3dutil::sprintf_arg;
-use std::ffi::{CStr, c_char};
+use crate::imod::libcfshr::b3dutil::{CArg, c_format, sprintf_arg};
 
 use crate::imod::libimod::imat::{
     B3D_X, B3D_Y, B3D_Z, Imat, imod_mat_get_nat_angles, imod_mat_id, imod_mat_mult, imod_mat_new,
@@ -829,7 +828,10 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
     };
     let ctrl = input_test_ctrl(&key_event);
     let mut qstr = String::new();
-    let mut qstr2 = [0 as c_char; 256];
+    // `mv_input.cpp:110` declares `QString qstr, qstr2`; `SPRINTF(qstr2)(...)`
+    // assigns the whole formatted string, so there is no buffer and no
+    // truncation.
+    let mut qstr2: String;
     let scattered_obj: bool;
 
     if input_test_meta_key(&key_event) {
@@ -915,30 +917,26 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
 
                     // DNM 7/31/01 remove pixsize from D
                     let zscale = imod_ref.zscale;
-                    unsafe {
-                        libc::snprintf(
-                            qstr2.as_mut_ptr(),
-                            qstr2.len(),
-                            c"Current %s clip data = (A B C D) = %g %g %g %g.\n".as_ptr(),
-                            if edit_global_clip != 0 {
-                                c"Global".as_ptr()
+                    qstr2 = c_format(
+                        "Current %s clip data = (A B C D) = %g %g %g %g.\n",
+                        &[
+                            CArg::Str(if edit_global_clip != 0 {
+                                "Global"
                             } else {
-                                c"Object".as_ptr()
-                            },
-                            sprintf_arg(clips.normal[ip].x as f64),
-                            sprintf_arg(clips.normal[ip].y as f64),
-                            sprintf_arg((clips.normal[ip].z / zscale) as f64),
-                            sprintf_arg(
+                                "Object"
+                            }),
+                            CArg::Dbl(sprintf_arg(clips.normal[ip].x as f64)),
+                            CArg::Dbl(sprintf_arg(clips.normal[ip].y as f64)),
+                            CArg::Dbl(sprintf_arg((clips.normal[ip].z / zscale) as f64)),
+                            CArg::Dbl(sprintf_arg(
                                 ((clips.normal[ip].x * clips.point[ip].x)
                                     + (clips.normal[ip].y * clips.point[ip].y)
                                     + (clips.normal[ip].z * clips.point[ip].z))
                                     as f64,
-                            ),
-                        );
-                    }
-                    qstr = unsafe { CStr::from_ptr(qstr2.as_ptr()) }
-                        .to_string_lossy()
-                        .into_owned();
+                            )),
+                        ],
+                    );
+                    qstr = qstr2;
                     imod_print_info(&qstr);
                 }
             }
@@ -1274,54 +1272,46 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                         if tstep % 4 == 0 {
                             qstr += "\n";
                         }
-                        unsafe {
-                            libc::snprintf(
-                                qstr2.as_mut_ptr(),
-                                qstr2.len(),
-                                c"%7.3f ".as_ptr(),
-                                sprintf_arg(imod_ref.view[0].mat[tstep as usize] as f64),
-                            );
-                        }
-                        qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
+                        qstr2 = c_format(
+                            "%7.3f ",
+                            &[CArg::Dbl(sprintf_arg(
+                                imod_ref.view[0].mat[tstep as usize] as f64,
+                            ))],
+                        );
+                        qstr += &qstr2;
                         tstep += 1;
                     }
                     qstr += "\n";
                 }
-                unsafe {
-                    libc::snprintf(
-                        qstr2.as_mut_ptr(),
-                        qstr2.len(),
-                        c"Trans (x,y,z) = (%g, %g, %g)\n".as_ptr(),
-                        sprintf_arg(imod_ref.view[0].trans.x as f64),
-                        sprintf_arg(imod_ref.view[0].trans.y as f64),
-                        sprintf_arg(imod_ref.view[0].trans.z as f64),
-                    );
-                }
-                qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
-                unsafe {
-                    libc::snprintf(
-                        qstr2.as_mut_ptr(),
-                        qstr2.len(),
-                        c"Rotate (x,y,z) = (%g, %g, %g)\n".as_ptr(),
-                        sprintf_arg(imod_ref.view[0].rot.x as f64),
-                        sprintf_arg(imod_ref.view[0].rot.y as f64),
-                        sprintf_arg(imod_ref.view[0].rot.z as f64),
-                    );
-                }
-                qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
+                qstr2 = c_format(
+                    "Trans (x,y,z) = (%g, %g, %g)\n",
+                    &[
+                        CArg::Dbl(sprintf_arg(imod_ref.view[0].trans.x as f64)),
+                        CArg::Dbl(sprintf_arg(imod_ref.view[0].trans.y as f64)),
+                        CArg::Dbl(sprintf_arg(imod_ref.view[0].trans.z as f64)),
+                    ],
+                );
+                qstr += &qstr2;
+                qstr2 = c_format(
+                    "Rotate (x,y,z) = (%g, %g, %g)\n",
+                    &[
+                        CArg::Dbl(sprintf_arg(imod_ref.view[0].rot.x as f64)),
+                        CArg::Dbl(sprintf_arg(imod_ref.view[0].rot.y as f64)),
+                        CArg::Dbl(sprintf_arg(imod_ref.view[0].rot.z as f64)),
+                    ],
+                );
+                qstr += &qstr2;
                 if a.movie_frames != 0 {
                     elapsed = (a.movie_current - a.movie_start) as f32 / 1000.0f32;
-                    unsafe {
-                        libc::snprintf(
-                            qstr2.as_mut_ptr(),
-                            qstr2.len(),
-                            c"%d frames / %.3f sec = %.3f FPS\n".as_ptr(),
-                            a.movie_frames,
-                            sprintf_arg(elapsed as f64),
-                            sprintf_arg((a.movie_frames as f32 / elapsed) as f64),
-                        );
-                    }
-                    qstr += &unsafe { CStr::from_ptr(qstr2.as_ptr()) }.to_string_lossy();
+                    qstr2 = c_format(
+                        "%d frames / %.3f sec = %.3f FPS\n",
+                        &[
+                            CArg::Int(a.movie_frames as i64),
+                            CArg::Dbl(sprintf_arg(elapsed as f64)),
+                            CArg::Dbl(sprintf_arg((a.movie_frames as f32 / elapsed) as f64)),
+                        ],
+                    );
+                    qstr += &qstr2;
                 }
                 imod_print_info(&qstr);
             }

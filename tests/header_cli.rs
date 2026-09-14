@@ -259,14 +259,14 @@ fn header_opens_source_hdf_multivolume_and_selects_requested_volume() {
         let input =
             std::env::temp_dir().join(format!("imod-rs-header-volumes-{}.h5", std::process::id()));
         let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let image = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_HDF);
+        let image = ii_open_new(input_c.to_bytes(), "wb", IIFILE_HDF);
         assert!(!image.is_null());
         let header = (*image).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(image, header);
         (*image).z_chunk_size = 1;
         assert_eq!((*image).write_header.unwrap()(image), 0);
-        assert_eq!(ii_hdf_open_new(image, c"wb".as_ptr()), 0);
+        assert_eq!(ii_hdf_open_new(image, "wb"), 0);
         let second_volume = *(*image).ii_volumes.add(1);
         let second_header = (*second_volume).header.cast::<MrcHeader>();
         assert_eq!(

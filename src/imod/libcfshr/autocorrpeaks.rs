@@ -1,6 +1,8 @@
 //! Translation of `IMOD/libcfshr/autocorrpeaks.c`.
 #![allow(dead_code)]
 
+use super::b3dutil::{CArg, c_format};
+
 pub const FIND_ACPK_NO_WAFFLE: i32 = 0x1;
 pub const FIND_ACPK_BOTH_GEOMS: i32 = 0x2;
 pub const FIND_ACPK_HEX_GRID: i32 = 0x4;
@@ -26,7 +28,7 @@ pub unsafe fn find_auto_corr_peaks(
     vectors: *mut f32,
     num: *mut i32,
     near_ind: *mut i32,
-    mess_buf: *mut libc::c_char,
+    mess_buf: &mut String,
     buf_size: i32,
 ) -> i32 {
     unsafe {
@@ -273,11 +275,12 @@ pub unsafe fn find_auto_corr_peaks(
             dist1 = ((del_x[0] * del_x[0] + del_y[0] * del_y[0]) as f64).sqrt();
         }
         if ind1 < 0 {
-            libc::snprintf(
-                mess_buf,
-                buf_size as usize,
-                c"Did not find a peak away from the center of the autocorrelation".as_ptr(),
+            /* snprintf(messBuf, bufSize, ...) truncates at bufSize - 1 bytes. */
+            *mess_buf = c_format(
+                "Did not find a peak away from the center of the autocorrelation",
+                &[],
             );
+            mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
             return -1;
         }
         *near_ind = ind1;
@@ -375,11 +378,11 @@ pub unsafe fn find_auto_corr_peaks(
         }
         let mut ifac = fac_start as usize;
         if ind2_for_fac[ifac] < 0 && (!both_geom || ind2_for_fac[1] < 0 || ind2_for_fac[2] < 0) {
-            libc::snprintf(
-                mess_buf,
-                buf_size as usize,
-                c"Did not find another peak at proper angle away from best one".as_ptr(),
+            *mess_buf = c_format(
+                "Did not find another peak at proper angle away from best one",
+                &[],
             );
+            mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
             return 1;
         }
         if both_geom && ind2_for_fac[0] < 0 {
@@ -408,7 +411,14 @@ pub unsafe fn find_auto_corr_peaks(
             if fac_start != 0 && angle_err[2] > angle_err[1] {
                 ifac = 2;
             }
-            libc::snprintf(mess_buf, buf_size as usize, c"The angle between the two peaks that were found\nis %.1f degrees, not close enough to %d degrees".as_ptr(), angle_for_fac[ifac] as f64, if fac_start != 0 { 60 } else { 90 });
+            *mess_buf = c_format(
+                "The angle between the two peaks that were found\nis %.1f degrees, not close enough to %d degrees",
+                &[
+                    CArg::Dbl(angle_for_fac[ifac] as f64),
+                    CArg::Int(if fac_start != 0 { 60 } else { 90 }),
+                ],
+            );
+            mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
             return 1;
         }
         if angle_err[ifac] > 10. {
@@ -424,7 +434,11 @@ pub unsafe fn find_auto_corr_peaks(
             if fac_start != 0 && dist_err[2] > dist_err[1] {
                 ifac = 2;
             }
-            libc::snprintf(mess_buf, buf_size as usize, c"The distances from the center to the two peaks that were found,\n%.1f and %.1f, differ by more than 20%%".as_ptr(), dist1, dist2_for_fac[ifac] as f64);
+            *mess_buf = c_format(
+                "The distances from the center to the two peaks that were found,\n%.1f and %.1f, differ by more than 20%%",
+                &[CArg::Dbl(dist1), CArg::Dbl(dist2_for_fac[ifac] as f64)],
+            );
+            mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
             return 1;
         }
         if dist_err[ifac] > 0.2 || (both_geom && (dist_err[1] + dist_err[2]) / 2. < dist_err[0]) {
@@ -707,7 +721,7 @@ mod tests {
         let (mut distance1, mut distance2, mut angle, mut near) = (0., 0., 0., 0);
         let mut vectors = [0_f32; 6];
         let mut counts = [0_i32; 3];
-        let mut message = [0_i8; 200];
+        let mut message = String::new();
         let status = unsafe {
             find_auto_corr_peaks(
                 image.as_mut_ptr(),
@@ -728,14 +742,14 @@ mod tests {
                 vectors.as_mut_ptr(),
                 counts.as_mut_ptr(),
                 &mut near,
-                message.as_mut_ptr(),
+                &mut message,
                 200,
             )
         };
         assert_eq!(status, -1);
         assert_eq!(
-            unsafe { std::ffi::CStr::from_ptr(message.as_ptr()) }.to_bytes(),
-            b"Did not find a peak away from the center of the autocorrelation"
+            message,
+            "Did not find a peak away from the center of the autocorrelation"
         );
     }
 }

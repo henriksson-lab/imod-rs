@@ -247,11 +247,7 @@ pub unsafe fn set_multifile_input_options(options: &mut ClipOptions, input: &mut
             }
             for file_index in 0..options.infiles {
                 let name = &options.fnames[file_index as usize];
-                // `iimage.rs` still takes a C string; the NUL-terminated copy
-                // goes away when that module converts.
-                let mut nul_name = name.clone().into_bytes();
-                nul_name.push(0);
-                let fp = ii_fopen(nul_name.as_ptr().cast(), b"rb\0".as_ptr().cast());
+                let fp = ii_fopen(name.as_bytes(), "rb");
                 let Some(mut fp) = fp else {
                     exit_error(c_format("Opening %s.", &[CArg::Str(name)]).as_bytes());
                 };
@@ -426,7 +422,7 @@ pub unsafe fn clip_write_slice(
                 &mut output.fp.clone().unwrap(),
                 output,
                 *z_write,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return -1;
@@ -457,7 +453,7 @@ pub unsafe fn clip_write_slice(
             &mut output.fp.clone().unwrap(),
             output,
             *z_write,
-            b'z' as i8,
+            b'z',
         ) != 0
         {
             return -1;
@@ -475,7 +471,7 @@ pub unsafe fn clip_write_slice(
                 &mut output.fp.clone().unwrap(),
                 output,
                 *z_write,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return -1;
@@ -568,7 +564,7 @@ pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions)
                 &mut input.fp.clone().unwrap(),
                 input,
                 file_z,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return core::ptr::null_mut();
@@ -711,7 +707,7 @@ pub unsafe fn grap_volume_write(
                     &mut output.fp.clone().unwrap(),
                     output,
                     out_z,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     return -1;
@@ -733,7 +729,7 @@ pub unsafe fn grap_volume_write(
                     &mut output.fp.clone().unwrap(),
                     output,
                     out_z,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
                 {
                     return -1;

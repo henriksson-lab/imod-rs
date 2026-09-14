@@ -85,7 +85,7 @@ pub unsafe fn clip_bandpass_filter(
             let slice = slice_read_subm(
                 input,
                 options.secs[(k) as usize],
-                b'z' as i8,
+                b'z',
                 options.ix,
                 options.iy,
                 options.cx as i32,

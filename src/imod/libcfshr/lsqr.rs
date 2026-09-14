@@ -1,12 +1,10 @@
 //! Translation of `IMOD/libcfshr/lsqr.c` and its local `lsqr.h` interface.
 
-use core::ffi::{c_char, c_void};
+use core::ffi::c_void;
+use std::io::Write;
 
+use super::b3dutil::{CArg, ImodFile, c_format};
 use super::lsqrblas::{cblas_dcopy, cblas_dnrm2, cblas_dscal};
-
-unsafe extern "C" {
-    fn fprintf(stream: *mut libc::FILE, format: *const c_char, ...) -> i32;
-}
 
 /// Matrix product callback from `lsqr.h`.
 pub type Aprod = unsafe extern "C" fn(i32, i32, i32, *mut f64, *mut f64, *mut c_void);
@@ -49,7 +47,7 @@ pub unsafe fn lsqr(
     btol: f64,
     conlim: f64,
     itnlim: i32,
-    nout: *mut libc::FILE,
+    nout: Option<&mut ImodFile>,
     istop_out: *mut i32,
     itn_out: *mut i32,
     anorm_out: *mut f64,
@@ -77,14 +75,25 @@ pub unsafe fn lsqr(
     let mut sn2 = 0.;
     let mut z = 0.;
 
-    if !nout.is_null() {
-        unsafe {
-            fprintf(
-                nout,
-                c" %s        Least-squares solution of  Ax = b\n The matrix  A  has %7d rows  and %7d columns\n damp   = %-22.2e    wantse = %10i\n atol   = %-22.2e    conlim = %10.2e\n btol   = %-22.2e    itnlim = %10d\n\n".as_ptr(),
-                c"Enter LSQR.  ".as_ptr(), m, n, damp, wantse as i32, atol, conlim, btol, itnlim,
-            );
-        }
+    let mut nout = nout;
+    if let Some(nout) = nout.as_deref_mut() {
+        let _ = nout.write_all(
+            c_format(
+                " %s        Least-squares solution of  Ax = b\n The matrix  A  has %7d rows  and %7d columns\n damp   = %-22.2e    wantse = %10i\n atol   = %-22.2e    conlim = %10.2e\n btol   = %-22.2e    itnlim = %10d\n\n",
+                &[
+                    CArg::Str("Enter LSQR.  "),
+                    CArg::Int(m as i64),
+                    CArg::Int(n as i64),
+                    CArg::Dbl(damp),
+                    CArg::Int(wantse as i64),
+                    CArg::Dbl(atol),
+                    CArg::Dbl(conlim),
+                    CArg::Dbl(btol),
+                    CArg::Int(itnlim as i64),
+                ],
+            )
+            .as_bytes(),
+        );
     }
 
     unsafe {
@@ -132,27 +141,32 @@ pub unsafe fn lsqr(
     if arnorm != 0. {
         let mut rhobar = alpha;
         let mut phibar = beta;
-        if !nout.is_null() {
-            unsafe {
-                fprintf(
-                    nout,
+        if let Some(nout) = nout.as_deref_mut() {
+            let _ = nout.write_all(
+                c_format(
                     if damped {
-                        c"    Itn       x(1)           Function     Compatible    LS      Norm Abar   Cond Abar\n".as_ptr()
+                        "    Itn       x(1)           Function     Compatible    LS      Norm Abar   Cond Abar\n"
                     } else {
-                        c"    Itn       x(1)           Function     Compatible    LS      Norm A   Cond A\n".as_ptr()
+                        "    Itn       x(1)           Function     Compatible    LS      Norm A   Cond A\n"
                     },
-                );
-                fprintf(
-                    nout,
-                    c" %6d %16.9e %16.9e %9.2e %9.2e\n".as_ptr(),
-                    itn,
-                    *x,
-                    rnorm,
-                    1.,
-                    alpha / beta,
-                );
-                fprintf(nout, c"\n".as_ptr());
-            }
+                    &[],
+                )
+                .as_bytes(),
+            );
+            let _ = nout.write_all(
+                c_format(
+                    " %6d %16.9e %16.9e %9.2e %9.2e\n",
+                    &[
+                        CArg::Int(itn as i64),
+                        CArg::Dbl(unsafe { *x }),
+                        CArg::Dbl(rnorm),
+                        CArg::Dbl(1.),
+                        CArg::Dbl(alpha / beta),
+                    ],
+                )
+                .as_bytes(),
+            );
+            let _ = nout.write_all(b"\n");
         }
         loop {
             itn += 1;
@@ -272,7 +286,7 @@ pub unsafe fn lsqr(
             if test1 <= rtol {
                 istop = 1;
             }
-            if !nout.is_null()
+            if nout.is_some()
                 && (n <= 40
                     || itn <= 10
                     || itn >= itnlim - 10
@@ -282,20 +296,24 @@ pub unsafe fn lsqr(
                     || test1 <= 10. * rtol
                     || istop != 0)
             {
-                unsafe {
-                    fprintf(
-                        nout,
-                        c" %6d %16.9e %16.9e %9.2e %9.2e %8.1e %8.1e\n".as_ptr(),
-                        itn,
-                        *x,
-                        rnorm,
-                        test1,
-                        test2,
-                        anorm,
-                        acond,
+                if let Some(nout) = nout.as_deref_mut() {
+                    let _ = nout.write_all(
+                        c_format(
+                            " %6d %16.9e %16.9e %9.2e %9.2e %8.1e %8.1e\n",
+                            &[
+                                CArg::Int(itn as i64),
+                                CArg::Dbl(unsafe { *x }),
+                                CArg::Dbl(rnorm),
+                                CArg::Dbl(test1),
+                                CArg::Dbl(test2),
+                                CArg::Dbl(anorm),
+                                CArg::Dbl(acond),
+                            ],
+                        )
+                        .as_bytes(),
                     );
                     if itn % 10 == 0 {
-                        fprintf(nout, c"\n".as_ptr());
+                        let _ = nout.write_all(b"\n");
                     }
                 }
             }
@@ -330,34 +348,55 @@ pub unsafe fn lsqr(
     if damped && istop == 2 {
         istop = 3;
     }
-    if !nout.is_null() {
+    if let Some(nout) = nout.as_deref_mut() {
         let message = match istop {
-            0 => c"The exact solution is  x = 0",
-            1 => c"A solution to Ax = b was found, given atol, btol",
-            2 => c"A least-squares solution was found, given atol",
-            3 => c"A damped least-squares solution was found, given atol",
-            4 => c"Cond(Abar) seems to be too large, given conlim",
-            _ => c"The iteration limit was reached",
+            0 => "The exact solution is  x = 0",
+            1 => "A solution to Ax = b was found, given atol, btol",
+            2 => "A least-squares solution was found, given atol",
+            3 => "A damped least-squares solution was found, given atol",
+            4 => "Cond(Abar) seems to be too large, given conlim",
+            _ => "The iteration limit was reached",
         };
-        unsafe {
-            fprintf(nout, c"\n %s       istop  = %-10d      itn    = %-10d\n %s       anorm  = %11.5e     acond  = %11.5e\n %s       vnorm  = %11.5e     xnorm  = %11.5e\n %s       rnorm  = %11.5e     arnorm = %11.5e\n".as_ptr(), c"Exit  LSQR.  ".as_ptr(), istop, itn, c"Exit  LSQR.  ".as_ptr(), anorm, acond, c"Exit  LSQR.  ".as_ptr(), bnorm, xnorm, c"Exit  LSQR.  ".as_ptr(), rnorm, arnorm);
-            fprintf(
-                nout,
-                c" %s       max dx = %7.1e occured at itn %-9d\n %s              = %7.1e*xnorm\n"
-                    .as_ptr(),
-                c"Exit  LSQR.  ".as_ptr(),
-                dxmax,
-                maxdx,
-                c"Exit  LSQR.  ".as_ptr(),
-                dxmax / (xnorm + 1.0e-20),
-            );
-            fprintf(
-                nout,
-                c" %s       %s\n".as_ptr(),
-                c"Exit  LSQR.  ".as_ptr(),
-                message.as_ptr(),
-            );
-        }
+        let _ = nout.write_all(
+            c_format(
+                "\n %s       istop  = %-10d      itn    = %-10d\n %s       anorm  = %11.5e     acond  = %11.5e\n %s       vnorm  = %11.5e     xnorm  = %11.5e\n %s       rnorm  = %11.5e     arnorm = %11.5e\n",
+                &[
+                    CArg::Str("Exit  LSQR.  "),
+                    CArg::Int(istop as i64),
+                    CArg::Int(itn as i64),
+                    CArg::Str("Exit  LSQR.  "),
+                    CArg::Dbl(anorm),
+                    CArg::Dbl(acond),
+                    CArg::Str("Exit  LSQR.  "),
+                    CArg::Dbl(bnorm),
+                    CArg::Dbl(xnorm),
+                    CArg::Str("Exit  LSQR.  "),
+                    CArg::Dbl(rnorm),
+                    CArg::Dbl(arnorm),
+                ],
+            )
+            .as_bytes(),
+        );
+        let _ = nout.write_all(
+            c_format(
+                " %s       max dx = %7.1e occured at itn %-9d\n %s              = %7.1e*xnorm\n",
+                &[
+                    CArg::Str("Exit  LSQR.  "),
+                    CArg::Dbl(dxmax),
+                    CArg::Int(maxdx as i64),
+                    CArg::Str("Exit  LSQR.  "),
+                    CArg::Dbl(dxmax / (xnorm + 1.0e-20)),
+                ],
+            )
+            .as_bytes(),
+        );
+        let _ = nout.write_all(
+            c_format(
+                " %s       %s\n",
+                &[CArg::Str("Exit  LSQR.  "), CArg::Str(message)],
+            )
+            .as_bytes(),
+        );
     }
     unsafe {
         *istop_out = istop;
@@ -418,7 +457,7 @@ mod tests {
                 1.0e-12,
                 1.0e12,
                 20,
-                core::ptr::null_mut(),
+                None,
                 &mut stop,
                 &mut iterations,
                 &mut anorm,
@@ -458,7 +497,7 @@ mod tests {
                 1.0e-12,
                 1.0e12,
                 20,
-                core::ptr::null_mut(),
+                None,
                 &mut stop,
                 &mut iterations,
                 &mut anorm,
@@ -474,8 +513,7 @@ mod tests {
 
     #[test]
     fn writes_source_style_progress_and_final_report() {
-        let output = unsafe { libc::tmpfile() };
-        assert!(!output.is_null());
+        let mut output = ImodFile::tmpfile().unwrap();
         let mut u = [4., 9.];
         let mut v = [0.; 2];
         let mut w = [0.; 2];
@@ -498,7 +536,7 @@ mod tests {
                 1.0e-12,
                 1.0e12,
                 20,
-                output,
+                Some(&mut output),
                 &mut stop,
                 &mut iterations,
                 &mut anorm,
@@ -507,12 +545,12 @@ mod tests {
                 &mut arnorm,
                 &mut xnorm,
             );
-            libc::fflush(output);
-            libc::fseek(output, 0, libc::SEEK_SET);
-            let mut bytes = [0_u8; 4096];
-            let count = libc::fread(bytes.as_mut_ptr().cast(), 1, bytes.len(), output);
-            libc::fclose(output);
-            let report = core::str::from_utf8(&bytes[..count]).unwrap();
+            use std::io::{Read, Seek, SeekFrom};
+            let _ = output.flush();
+            let _ = output.seek(SeekFrom::Start(0));
+            let mut bytes = Vec::new();
+            let _ = output.read_to_end(&mut bytes);
+            let report = core::str::from_utf8(&bytes).unwrap();
             assert!(
                 report.starts_with(" Enter LSQR.          Least-squares solution of  Ax = b\n")
             );

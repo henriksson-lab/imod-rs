@@ -11,6 +11,8 @@
 //! in `mdftkd`, as `x + i * step_along`.  A kernel's `x0[k]` is therefore
 //! `data[x0 + k as usize]`, with the source's index arithmetic unchanged.
 
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
+use std::io::Write as _;
 /// C `mdftkd`.
 pub fn mdftkd(n: i32, factor: &[i32], dim: &[i32], data: &mut [f32], x: usize, y: usize) {
     let mut ind_fac: i32;
@@ -125,15 +127,18 @@ pub fn mdftkd(n: i32, factor: &[i32], dim: &[i32], data: &mut [f32], x: usize, y
                 // splits every composite into primes and regroups only powers
                 // of two -- so this arm is unreachable, and the stream it
                 // would print on is not exercised by any command.
-                // `mdftkd.c:57`.  Through `libc::printf`, not Rust's
-                // stdout: `cmplft` and `srfp` write to the C stream, and C
+                // `mdftkd.c:57`.  On `ImodFile::Stdout`, the **C** stream,
+                // not Rust's: `cmplft` and `srfp` write to the C stream, and C
                 // stdio is block-buffered under redirection while Rust's is
                 // not, so mixing the two reorders a captured file.  The arm
                 // is unreachable in practice — `srfp` splits composites into
                 // primes and regroups only powers of two, so it never emits a
                 // factor of 6 — but the stream is part of the behaviour.
                 unsafe {
-                    libc::printf(c"\ntransfer error detected in mdftkd\n\n".as_ptr());
+                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                        "\ntransfer error detected in mdftkd\n\n",
+                        &[],
+                    ));
                 }
                 return;
             }

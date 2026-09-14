@@ -1,6 +1,5 @@
 //! Translation of `IMOD/libcfshr/gettiltangles.c` and its `cfsemshare.h` APIs.
 
-use core::ffi::{CStr, c_char};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::BufReader;
@@ -77,8 +76,7 @@ pub unsafe fn get_tilt_angles(num_views: *mut i32, tilt: *mut f32, lim_tilt: i32
                 unsafe { *num_views },
                 index
             );
-            let message = std::ffi::CString::new(message).unwrap();
-            unsafe { exit_error(message.to_bytes()) };
+            unsafe { exit_error(message.as_bytes()) };
         }
         return;
     }
@@ -94,9 +92,8 @@ pub unsafe fn read_tilt_file(num_views: *mut i32, filename: &[u8], tilt: *mut f3
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) => {
-            let message =
-                std::ffi::CString::new(format!("Error opening tilt angle file: {error}")).unwrap();
-            unsafe { exit_error(message.to_bytes()) };
+            let message = format!("Error opening tilt angle file: {error}");
+            unsafe { exit_error(message.as_bytes()) };
             unreachable!();
         }
     };
@@ -112,18 +109,16 @@ pub unsafe fn read_tilt_file(num_views: *mut i32, filename: &[u8], tilt: *mut f3
         &mut [ReadValueArray::Floats(output)],
     );
     if ierr == -2 {
-        let message = std::ffi::CString::new(format!(
+        let message = format!(
             "End of file reached after reading {} tilt angles, expected {}\n",
             num_to_get,
             unsafe { *num_views }
-        ))
-        .unwrap();
-        unsafe { exit_error(message.to_bytes()) };
+        );
+        unsafe { exit_error(message.as_bytes()) };
     }
     if ierr != 0 {
         let message = exit_from_value_read_error(ierr, "tilt angles").unwrap_err();
-        let message = std::ffi::CString::new(message).unwrap();
-        unsafe { exit_error(message.to_bytes()) };
+        unsafe { exit_error(message.as_bytes()) };
     }
     if unsafe { *num_views == 0 } {
         unsafe { *num_views = num_to_get };

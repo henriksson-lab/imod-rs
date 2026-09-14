@@ -16,7 +16,6 @@ use crate::imod::libiimod::mrcfiles::{
     LoadInfo, MRC_MODE_FLOAT, MRC_NLABELS, MrcHeader, mrc_head_new, mrc_head_write,
 };
 use crate::imod::libiimod::mrcsec::mrc_write_section_any;
-use std::ffi::CString;
 
 /// Original Python program top level (`pysrc/trimvol:1`).
 pub fn trimvol() -> i32 {
@@ -167,22 +166,10 @@ pub fn trimvol() -> i32 {
         );
         return 1;
     }
-    let input_name = match CString::new(positional[0].as_bytes()) {
-        Ok(v) => v,
-        Err(_) => {
-            println!("ERROR: trimvol - Invalid input file name");
-            return 1;
-        }
-    };
-    let output_name = match CString::new(positional[1].as_bytes()) {
-        Ok(v) => v,
-        Err(_) => {
-            println!("ERROR: trimvol - Invalid output file name");
-            return 1;
-        }
-    };
+    let input_name = positional[0].as_bytes();
+    let output_name = positional[1].as_bytes();
     unsafe {
-        let input = ii_open(input_name.as_ptr(), c"rb".as_ptr());
+        let input = ii_open(input_name, "rb");
         if input.is_null() {
             println!(
                 "ERROR: trimvol - Input file {} does not exist",
@@ -296,7 +283,7 @@ pub fn trimvol() -> i32 {
             ii_close(input);
             return 1;
         }
-        let output = ii_open_new(output_name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let output = ii_open_new(output_name, "wb", IIFILE_DEFAULT);
         if output.is_null() {
             println!("ERROR: trimvol - Opening output file");
             ii_close(input);
@@ -340,18 +327,27 @@ pub fn trimvol() -> i32 {
             let mut date = [b' '; 9];
             b3d_date(&mut date);
             title[56..65].copy_from_slice(&date);
-            let mut now = 0_i64;
-            let mut local = std::mem::zeroed::<libc::tm>();
-            libc::time(&raw mut now);
-            libc::localtime_r(&raw const now, &raw mut local);
-            let mut time = [0_i8; 9];
-            libc::strftime(
-                time.as_mut_ptr(),
-                time.len(),
-                c"%H:%M:%S".as_ptr(),
-                &raw const local,
-            );
-            title[67..75].copy_from_slice(std::slice::from_raw_parts(time.as_ptr().cast(), 8));
+            // `strftime(time, 9, "%H:%M:%S", localtime(&now))`.  The
+            // conversion to local civil time is the same foreign boundary
+            // `b3ddate.rs` documents -- Rust's standard library has no
+            // timezone database -- but the eight characters it produces are
+            // formatted here rather than by the C library.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as libc::time_t;
+            let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+            let time = if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
+                String::new()
+            } else {
+                let local = local.assume_init();
+                format!(
+                    "{:02}:{:02}:{:02}",
+                    local.tm_hour, local.tm_min, local.tm_sec
+                )
+            };
+            let count = time.len().min(8);
+            title[67..67 + count].copy_from_slice(&time.as_bytes()[..count]);
             (&mut (*out_header).labels[((*out_header).nlabl - 1) as usize])[..80]
                 .copy_from_slice(&title);
         }

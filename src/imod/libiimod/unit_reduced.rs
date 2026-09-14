@@ -10,7 +10,6 @@
 use crate::imod::libcfshr::b3dutil::make_line_pointers;
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_with_filter};
 unsafe extern "C" {
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
     fn ceil(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
     fn floor(__x: ::core::ffi::c_double) -> ::core::ffi::c_double;
     fn free(__ptr: *mut ::core::ffi::c_void);
@@ -140,10 +139,14 @@ pub unsafe extern "C" fn iiu_read_binned(
     }
     binsq = (nbin * nbin) as ::core::ffi::c_float;
     if (lenTemp as ::core::ffi::c_float) < binsq {
-        printf(
-            b"\nERROR: iiuReadBinned - Binning too large for temporary array\n\0" as *const u8
-                as *const ::core::ffi::c_char,
-        );
+        {
+            // Still on the C stream: this program's other output goes through
+            // libc stdio and a Rust write here would reorder a redirected
+            // capture.
+            use std::io::Write;
+            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout
+                .write_all(b"\nERROR: iiuReadBinned - Binning too large for temporary array\n");
+        }
         return;
     }
     nxLoad = ix1 + 1 as ::core::ffi::c_int - ix0;

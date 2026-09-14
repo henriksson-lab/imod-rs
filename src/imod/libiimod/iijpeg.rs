@@ -17,7 +17,6 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libiimod::iimage::{IIERR_BAD_CALL, ImodImageFile};
-use core::ffi::c_char;
 
 /// IMOD `IIERR_NO_SUPPORT`.  JPEG needs the C error trampoline described in
 /// this module's documentation before these entry points can enter libjpeg.
@@ -60,7 +59,7 @@ unsafe extern "C" fn jpeg_delete(in_file: *mut ImodImageFile) {
 /// C static `jpegReadSectionByte` (`iijpeg.c:155`).
 unsafe extern "C" fn jpeg_read_section_byte(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     jpeg_read_section_any(in_file, buf, in_section, 1)
@@ -69,7 +68,7 @@ unsafe extern "C" fn jpeg_read_section_byte(
 /// C static `jpegReadSectionUShort` (`iijpeg.c:160`).
 unsafe extern "C" fn jpeg_read_section_ushort(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     jpeg_read_section_any(in_file, buf, in_section, 3)
@@ -78,7 +77,7 @@ unsafe extern "C" fn jpeg_read_section_ushort(
 /// C static `jpegReadSectionFloat` (`iijpeg.c:165`).
 unsafe extern "C" fn jpeg_read_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     jpeg_read_section_any(in_file, buf, in_section, 2)
@@ -87,7 +86,7 @@ unsafe extern "C" fn jpeg_read_section_float(
 /// C static `jpegReadSection` (`iijpeg.c:170`).
 unsafe extern "C" fn jpeg_read_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     jpeg_read_section_any(in_file, buf, in_section, 0)
@@ -96,7 +95,7 @@ unsafe extern "C" fn jpeg_read_section(
 /// C static `jpegReadSectionAny` (`iijpeg.c:177`).
 unsafe extern "C" fn jpeg_read_section_any(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     type_: i32,
 ) -> i32 {
@@ -117,7 +116,7 @@ pub unsafe extern "C" fn jpeg_open_new(in_file: *mut ImodImageFile) -> i32 {
 /// C static `iiJpegWriteSection` (`iijpeg.c:342`).
 unsafe extern "C" fn ii_jpeg_write_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     ii_jpeg_write_section_any(in_file, buf, in_section, 0)
@@ -126,7 +125,7 @@ unsafe extern "C" fn ii_jpeg_write_section(
 /// C static `iiJpegWriteSectionFloat` (`iijpeg.c:347`).
 unsafe extern "C" fn ii_jpeg_write_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     ii_jpeg_write_section_any(in_file, buf, in_section, 1)
@@ -135,7 +134,7 @@ unsafe extern "C" fn ii_jpeg_write_section_float(
 /// C static `iiJpegWriteSectionAny` (`iijpeg.c:356`).
 unsafe extern "C" fn ii_jpeg_write_section_any(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     if_float: i32,
 ) -> i32 {
@@ -148,7 +147,7 @@ unsafe extern "C" fn ii_jpeg_write_section_any(
 /// C `jpegWriteSection` (`iijpeg.c:435`).
 pub unsafe extern "C" fn jpeg_write_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     inverted: i32,
     resolution: i32,
     quality: i32,

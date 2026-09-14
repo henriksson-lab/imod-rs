@@ -1,9 +1,8 @@
 //! Translation of `IMOD/libcfshr/extraheader.c`.
 #![allow(dead_code, unsafe_op_in_unsafe_fn)]
 
-use core::ffi::{c_char, c_void};
+use core::ffi::c_void;
 use core::ptr;
-use std::ffi::CStr;
 use std::sync::Mutex;
 
 use super::autodoc::{
@@ -63,20 +62,22 @@ pub unsafe fn extra_header_sizes(
 }
 
 /// C static `freeValStrings` (`extraheader.c:821`).
-pub unsafe fn free_val_strings(val_strings: *mut *mut *mut c_char, nz: i32) {
-    if (*val_strings).is_null() {
+///
+/// The C frees `nz - 1` of the `strdup`ed strings and then the array; the
+/// strings are `Vec<u8>` now, so emptying the array drops them.
+pub fn free_val_strings(val_strings: &mut Vec<Option<Vec<u8>>>, nz: i32) {
+    if val_strings.is_empty() {
         return;
     }
     for ind in 0..nz - 1 {
-        libc::free((*(*val_strings).add(ind as usize)).cast());
+        val_strings[ind as usize] = None;
     }
-    libc::free((*val_strings).cast());
-    *val_strings = ptr::null_mut();
+    val_strings.clear();
 }
 
 /// C `getExtraHeaderTilts` (`extraheader.c:74`).
 pub unsafe fn get_extra_header_tilts(
-    array: *mut c_char,
+    array: *mut u8,
     num_extra_bytes: i32,
     nbytes: i32,
     iflags: i32,
@@ -103,7 +104,7 @@ pub unsafe fn get_extra_header_tilts(
 
 /// C Fortran wrapper `get_extra_header_tilts` (`extraheader.c:83`).
 pub unsafe fn get_extra_header_tilts_fortran(
-    array: *mut c_char,
+    array: *mut u8,
     num_extra_bytes: *mut i32,
     nbytes: *mut i32,
     iflags: *mut i32,
@@ -144,7 +145,7 @@ pub unsafe fn get_extra_header_tilts_fortran(
 
 /// C `getExtraHeaderItems` (`extraheader.c:117`).
 pub unsafe fn get_extra_header_items(
-    array: *mut c_char,
+    array: *mut u8,
     num_extra_bytes: i32,
     nbytes: i32,
     iflags: i32,
@@ -306,7 +307,7 @@ pub unsafe fn get_extra_header_items(
 
 /// C Fortran wrapper `get_extra_header_items` (`extraheader.c:236`).
 pub unsafe fn get_extra_header_items_fortran(
-    array: *mut c_char,
+    array: *mut u8,
     num_extra_bytes: *mut i32,
     nbytes: *mut i32,
     iflags: *mut i32,
@@ -380,15 +381,15 @@ pub unsafe fn get_metadata_items(
     iz_piece: *mut i32,
 ) -> i32 {
     const KEYS: [&[u8]; 9] = [
-        b"TiltAngle\0",
-        b"N\0",
-        b"StagePosition\0",
-        b"Magnification\0",
-        b"Intensity\0",
-        b"ExposureDose\0",
-        b"PixelSpacing\0",
-        b"Defocus\0",
-        b"ExposureTime\0",
+        b"TiltAngle",
+        b"N",
+        b"StagePosition",
+        b"Magnification",
+        b"Intensity",
+        b"ExposureDose",
+        b"PixelSpacing",
+        b"Defocus",
+        b"ExposureTime",
     ];
     const WHICH: [i32; 9] = [2, 1, 3, 1, 2, 2, 2, 2, 2];
     *num_vals = 0;
@@ -408,12 +409,12 @@ pub unsafe fn get_metadata_items(
         ind_adoc,
         adoc_type,
         nz,
-        KEYS[(data_type - 1) as usize].as_ptr().cast(),
+        KEYS[(data_type - 1) as usize],
         WHICH[(data_type - 1) as usize],
         val1,
         val2,
         &mut val3,
-        ptr::null_mut(),
+        None,
         num_vals,
         num_found,
         max_vals,
@@ -469,22 +470,18 @@ pub unsafe fn get_metadata_by_key(
     ind_adoc: i32,
     adoc_type: i32,
     nz: i32,
-    key: *const c_char,
+    key: &[u8],
     value_type: i32,
     val1: *mut f32,
     val2: *mut f32,
     val3: *mut f32,
-    val_string: *mut *mut c_char,
+    val_string: Option<&mut [Option<Vec<u8>>]>,
     num_vals: *mut i32,
     num_found: *mut i32,
     max_vals: i32,
     iz_piece: *mut i32,
 ) -> i32 {
-    let names = [
-        ADOC_ZVALUE_NAME.as_ptr(),
-        c"Image".as_ptr(),
-        ADOC_ZVALUE_NAME.as_ptr(),
-    ];
+    let names: [&[u8]; 3] = [ADOC_ZVALUE_NAME, b"Image", ADOC_ZVALUE_NAME];
     if adoc_set_current(ind_adoc) != 0 {
         b3d_error(
             None,
@@ -494,8 +491,9 @@ pub unsafe fn get_metadata_by_key(
     }
     *num_vals = 0;
     *num_found = 0;
+    let mut val_string = val_string;
     if value_type == 0 {
-        if val_string.is_null() {
+        if val_string.is_none() {
             b3d_error(
                 None,
                 format_args!(
@@ -504,8 +502,9 @@ pub unsafe fn get_metadata_by_key(
             );
             return 1;
         }
+        let slots = val_string.as_deref_mut().unwrap();
         for i in 0..max_vals {
-            *val_string.add(i as usize) = ptr::null_mut();
+            slots[i as usize] = None;
         }
     }
     for i in 0..nz {
@@ -535,10 +534,9 @@ pub unsafe fn get_metadata_by_key(
         let out = output as usize;
         match value_type {
             0 => {
-                let mut string = ptr::null_mut();
+                let mut string: Vec<u8> = Vec::new();
                 if adoc_get_string(name, section, key, &mut string) == 0 {
-                    libc::free((*val_string.add(out)).cast());
-                    *val_string.add(out) = string;
+                    val_string.as_deref_mut().unwrap()[out] = Some(string);
                     *val1.add(out) = 0.;
                     *num_found += 1;
                 }
@@ -551,12 +549,14 @@ pub unsafe fn get_metadata_by_key(
                 }
             }
             2 => {
-                if adoc_get_float(name, section, key, val1.add(out)) == 0 {
+                if adoc_get_float(name, section, key, &mut *val1.add(out)) == 0 {
                     *num_found += 1;
                 }
             }
             3 => {
-                if adoc_get_two_floats(name, section, key, val1.add(out), val2.add(out)) == 0 {
+                if adoc_get_two_floats(name, section, key, &mut *val1.add(out), &mut *val2.add(out))
+                    == 0
+                {
                     *num_found += 1;
                 }
             }
@@ -565,9 +565,9 @@ pub unsafe fn get_metadata_by_key(
                     name,
                     section,
                     key,
-                    val1.add(out),
-                    val2.add(out),
-                    val3.add(out),
+                    &mut *val1.add(out),
+                    &mut *val2.add(out),
+                    &mut *val3.add(out),
                 ) == 0
                 {
                     *num_found += 1;
@@ -585,12 +585,12 @@ pub unsafe fn get_metadata_by_key_fortran(
     ind_adoc: *mut i32,
     adoc_type: *mut i32,
     nz: *mut i32,
-    key: *mut c_char,
+    key: &[u8],
     value_type: *mut i32,
     val1: *mut f32,
     val2: *mut f32,
     val3: *mut f32,
-    val_string: *mut c_char,
+    val_string: &mut [u8],
     num_vals: *mut i32,
     num_found: *mut i32,
     max_vals: *mut i32,
@@ -601,33 +601,31 @@ pub unsafe fn get_metadata_by_key_fortran(
     b3d_set_store_error(1);
     *num_vals = 0;
     *num_found = 0;
-    let key_bytes = core::slice::from_raw_parts(key.cast::<u8>(), key_size);
+    let key_bytes = &key[..key_size];
     let key_end = key_bytes
         .iter()
         .rposition(|byte| *byte != b' ')
         .map_or(0, |index| index + 1);
-    let key_text =
-        std::ffi::CString::new(&key_bytes[..key_end]).expect("Fortran key has an interior NUL");
-    let mut strings = if *value_type == 0 {
-        vec![ptr::null_mut(); *max_vals as usize]
+    let key_text = key_bytes[..key_end].to_vec();
+    let mut strings: Vec<Option<Vec<u8>>> = if *value_type == 0 {
+        vec![None; *max_vals as usize]
     } else {
         Vec::new()
-    };
-    let strings_ptr = if *value_type == 0 {
-        strings.as_mut_ptr()
-    } else {
-        ptr::null_mut()
     };
     if get_metadata_by_key(
         *ind_adoc - 1,
         *adoc_type,
         *nz,
-        key_text.as_ptr(),
+        &key_text,
         *value_type,
         val1,
         val2,
         val3,
-        strings_ptr,
+        if *value_type == 0 {
+            Some(&mut strings[..])
+        } else {
+            None
+        },
         num_vals,
         num_found,
         *max_vals,
@@ -650,24 +648,19 @@ pub unsafe fn get_metadata_by_key_fortran(
     }
     if *value_type == 0 {
         for ind in 0..*num_found {
-            let destination = val_string.add(ind as usize * val_size);
-            ptr::write_bytes(destination, b' ', val_size);
-            if !strings[ind as usize].is_null() {
-                let source = CStr::from_ptr(strings[ind as usize]).to_bytes();
-                ptr::copy_nonoverlapping(
-                    source.as_ptr().cast::<c_char>(),
-                    destination,
-                    source.len().min(val_size),
-                );
+            let destination = &mut val_string[ind as usize * val_size..][..val_size];
+            destination.fill(b' ');
+            if let Some(source) = strings[ind as usize].as_deref() {
+                let n = source.len().min(val_size);
+                destination[..n].copy_from_slice(&source[..n]);
             }
-            libc::free(strings[ind as usize].cast());
         }
     }
 }
 
 /// C `getExtraHeaderPieces` (`extraheader.c:472`).
 pub unsafe fn get_extra_header_pieces(
-    array: *mut c_char,
+    array: *mut u8,
     num_extra_bytes: i32,
     nbytes: i32,
     iflags: i32,
@@ -709,7 +702,7 @@ pub unsafe fn get_extra_header_pieces(
 
 /// C Fortran wrapper `get_extra_header_pieces` (`extraheader.c:510`).
 pub unsafe fn get_extra_header_pieces_fortran(
-    array: *mut c_char,
+    array: *mut u8,
     num_extra_bytes: *mut i32,
     nbytes: *mut i32,
     iflags: *mut i32,
@@ -761,11 +754,7 @@ pub unsafe fn get_metadata_pieces(
     max_piece: i32,
     num_found: *mut i32,
 ) -> i32 {
-    let names = [
-        ADOC_ZVALUE_NAME.as_ptr(),
-        c"Image".as_ptr(),
-        ADOC_ZVALUE_NAME.as_ptr(),
-    ];
+    let names: [&[u8]; 3] = [ADOC_ZVALUE_NAME, b"Image", ADOC_ZVALUE_NAME];
     *num_found = 0;
     if nz > max_piece {
         b3d_error(
@@ -792,10 +781,10 @@ pub unsafe fn get_metadata_pieces(
         if adoc_get_three_integers(
             names[(adoc_type - 1) as usize],
             section,
-            c"PieceCoordinates".as_ptr(),
-            ix_piece.add(i as usize),
-            iy_piece.add(i as usize),
-            iz_piece.add(i as usize),
+            b"PieceCoordinates",
+            &mut *ix_piece.add(i as usize),
+            &mut *iy_piece.add(i as usize),
+            &mut *iz_piece.add(i as usize),
         ) == 0
         {
             *num_found += 1;
@@ -871,12 +860,12 @@ pub unsafe fn get_metadata_weighting_doses(
         ind_adoc,
         adoc_type,
         nz,
-        c"ExposureDose".as_ptr(),
+        b"ExposureDose",
         2,
         sec_dose,
         &mut dummy1,
         &mut dummy2,
-        ptr::null_mut(),
+        None,
         &mut num_values,
         &mut num_found,
         nz,
@@ -910,12 +899,12 @@ pub unsafe fn get_metadata_weighting_doses(
         ind_adoc,
         adoc_type,
         nz,
-        c"PriorRecordDose".as_ptr(),
+        b"PriorRecordDose",
         2,
         prior_dose,
         &mut dummy1,
         &mut dummy2,
-        ptr::null_mut(),
+        None,
         &mut num_values,
         &mut num_found,
         nz,
@@ -932,26 +921,23 @@ pub unsafe fn get_metadata_weighting_doses(
     if bidir {
         b3d_set_store_error(1);
     }
-    let mut strings = vec![ptr::null_mut(); nz as usize];
+    let mut strings: Vec<Option<Vec<u8>>> = vec![None; nz as usize];
     let ret = get_metadata_by_key(
         ind_adoc,
         adoc_type,
         nz,
-        c"DateTime".as_ptr(),
+        b"DateTime",
         0,
         prior_dose,
         &mut dummy1,
         &mut dummy2,
-        strings.as_mut_ptr(),
+        Some(&mut strings[..]),
         &mut num_values,
         &mut num_found,
         nz,
         iz_piece,
     );
     if ret != 0 || num_found == 0 || num_found < nz {
-        for string in strings {
-            libc::free(string.cast());
-        }
         if bidir {
             prior_doses_from_image_doses(sec_dose, nz, bidir_num_invert, prior_dose);
             b3d_set_store_error(saved_error);
@@ -969,8 +955,8 @@ pub unsafe fn get_metadata_weighting_doses(
     let mut times = Vec::with_capacity(nz as usize);
     let mut bad = false;
     for (i, string) in strings.into_iter().enumerate() {
-        let text = CStr::from_ptr(string).to_string_lossy();
-        libc::free(string.cast());
+        let string = string.unwrap_or_default();
+        let text = String::from_utf8_lossy(&string);
         let parts: Vec<_> = text.split(|c| c == '-' || c == ' ' || c == ':').collect();
         if parts.len() != 6 {
             bad = true;
@@ -1298,7 +1284,10 @@ pub unsafe fn copy_extra_header_section_fortran(
 
 /// C `getFeiExtHeadAngleScale` (`extraheader.c:1037`).
 pub unsafe fn get_fei_ext_head_angle_scale(ext_head: *mut c_void) -> f64 {
-    if CStr::from_ptr(ext_head.cast::<c_char>().add(68)).to_bytes() == b"4.4.0.4981" {
+    /* `strcmp((char *)extHead + 68, "4.4.0.4981")`: the version string in the
+    FEI extended header, NUL-terminated in the file's own bytes. */
+    let version = core::slice::from_raw_parts(ext_head.cast::<u8>().add(68), 11);
+    if version[..10] == *b"4.4.0.4981" && version[10] == 0 {
         RADIANS_PER_DEGREE
     } else {
         1.

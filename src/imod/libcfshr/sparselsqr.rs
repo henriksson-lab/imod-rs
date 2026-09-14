@@ -2,11 +2,8 @@
 
 use core::ffi::c_void;
 
+use super::b3dutil::ImodFile;
 use super::lsqr::{Aprod, lsqr};
-
-unsafe extern "C" {
-    static mut stdout: *mut libc::FILE;
-}
 
 /// Original `lsqrfw` (`sparselsqr.c:18`).
 #[allow(clippy::too_many_arguments)]
@@ -35,10 +32,10 @@ pub unsafe fn lsqrfw(
     arnorm_out: *mut f64,
     xnorm_out: *mut f64,
 ) {
-    let output = if unsafe { *nout > 0 } {
-        unsafe { stdout }
+    let mut output = if unsafe { *nout > 0 } {
+        Some(ImodFile::Stdout)
     } else {
-        core::ptr::null_mut()
+        None
     };
     let se_call = if unsafe { *ifse > 0 } {
         se
@@ -47,8 +44,28 @@ pub unsafe fn lsqrfw(
     };
     unsafe {
         lsqr(
-            *m, *n, aprod, *damp, user_work, u, v, w, x, se_call, *atol, *btol, *conlim, *itnlim,
-            output, istop_out, itn_out, anorm_out, acond_out, rnorm_out, arnorm_out, xnorm_out,
+            *m,
+            *n,
+            aprod,
+            *damp,
+            user_work,
+            u,
+            v,
+            w,
+            x,
+            se_call,
+            *atol,
+            *btol,
+            *conlim,
+            *itnlim,
+            output.as_mut(),
+            istop_out,
+            itn_out,
+            anorm_out,
+            acond_out,
+            rnorm_out,
+            arnorm_out,
+            xnorm_out,
         );
     }
 }

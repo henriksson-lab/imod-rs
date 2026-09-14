@@ -1602,22 +1602,27 @@ impl LogFile {
         }
         // `properties.store(outputStream, null)` writes a `#` line carrying
         // `new Date().toString()` and then one `key=value` line per property.
-        let mut date = [0i8; 64];
+        // `strftime` writes into this buffer and NUL-terminates it.  A `u8`
+        // array, sliced at the NUL, rather than a `CStr`: the foreign call
+        // stays, the C string type does not.  `localtime_r` is a named
+        // boundary — local civil time needs the C library's timezone
+        // database, which Rust's std has no equivalent for.
+        let mut date = [0u8; 64];
         let now = unsafe { libc::time(std::ptr::null_mut()) };
         let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe {
+        let written = unsafe {
             libc::localtime_r(&now, &mut broken_down);
             libc::strftime(
-                date.as_mut_ptr() as *mut libc::c_char,
+                date.as_mut_ptr().cast::<libc::c_char>(),
                 date.len(),
                 c"%a %b %d %H:%M:%S %Z %Y".as_ptr(),
                 &broken_down,
-            );
-        }
-        let date = unsafe { std::ffi::CStr::from_ptr(date.as_ptr() as *const libc::c_char) };
+            )
+        };
+        let date = &date[..written];
         let mut output = String::new();
         output.push('#');
-        output.push_str(&date.to_string_lossy());
+        output.push_str(&String::from_utf8_lossy(date));
         output.push('\n');
         for (key, value) in properties {
             output.push_str(key);

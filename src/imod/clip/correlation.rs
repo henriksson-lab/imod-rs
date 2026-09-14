@@ -445,7 +445,7 @@ pub unsafe fn grap_3dcorr(
                 &mut input1.fp.clone().unwrap(),
                 input1,
                 z,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 if !autocorr {
@@ -460,7 +460,7 @@ pub unsafe fn grap_3dcorr(
                     &mut input2.fp.clone().unwrap(),
                     input2,
                     z,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
             {
                 slice_free(slice2);
@@ -473,7 +473,7 @@ pub unsafe fn grap_3dcorr(
                 &mut output.fp.clone().unwrap(),
                 output,
                 z,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 if !autocorr {
@@ -535,7 +535,7 @@ pub unsafe fn grap_corr(
             &mut input1.fp.clone().unwrap(),
             input1,
             z1,
-            b'z' as i8,
+            b'z',
         );
         if buffer1.is_null() {
             show_error("corr, error getting slice 1.\n");
@@ -550,7 +550,7 @@ pub unsafe fn grap_corr(
             &mut fp2,
             if autocorrelation { input1 } else { input2 },
             if autocorrelation { z1 } else { z2 },
-            b'z' as i8,
+            b'z',
         );
         if buffer2.is_null() {
             show_error("corr, error getting slice 2.\n");
@@ -678,7 +678,7 @@ pub unsafe fn grap_corr(
                 &mut output.fp.clone().unwrap(),
                 output,
                 output.nz - 1,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return -1;
@@ -697,7 +697,7 @@ pub unsafe fn grap_corr(
                 &mut output.fp.clone().unwrap(),
                 output,
                 output.nz - 1,
-                b'z' as i8,
+                b'z',
             ) != 0
             {
                 return -1;
@@ -728,7 +728,7 @@ pub unsafe fn grap_corr(
                     &mut output.fp.clone().unwrap(),
                     output,
                     0,
-                    b'z' as i8,
+                    b'z',
                 ) != 0
             {
                 return -1;

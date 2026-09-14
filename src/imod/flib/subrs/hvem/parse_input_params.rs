@@ -9,13 +9,13 @@
 #![allow(dead_code)]
 
 use crate::imod::libcfshr::autodoc::adoc_set_current;
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
 use crate::imod::libcfshr::parse_params::{
     pip_add_option, pip_allow_comma_defaults, pip_exit_on_error as pip_exit_on_error_fw,
     pip_get_boolean, pip_get_error, pip_get_non_option_arg, pip_get_string, pip_initialize,
     pip_next_arg, pip_number_of_args, pip_print_entries, pip_print_help, pip_read_option_file,
     pip_read_prog_defaults, pip_read_stdin_if_set, pip_set_error,
 };
-use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 
 /// `character*32 prefix` in `common / exitprefix / prefix`
@@ -294,16 +294,15 @@ pub fn exit_error(message: &str) -> ! {
     };
     // `write(*,'(/,a,a,a)') trim(prefix), ' ', trim(message)`
     // (`parse_input_params.f90:236`).
-    let prefix = CString::new(prefix).unwrap_or_default();
-    let text = CString::new(message.trim_end_matches(' ')).unwrap_or_default();
-    unsafe {
-        libc::printf(
-            c"\n%s%s%s\n".as_ptr(),
-            prefix.as_ptr(),
-            c" ".as_ptr(),
-            text.as_ptr(),
-        );
-    }
+    let text = message.trim_end_matches(' ');
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+        "\n%s%s%s\n",
+        &[
+            CArg::Bytes(prefix.as_bytes()),
+            CArg::Str(" "),
+            CArg::Bytes(text.as_bytes()),
+        ],
+    ));
     std::process::exit(1);
 }
 

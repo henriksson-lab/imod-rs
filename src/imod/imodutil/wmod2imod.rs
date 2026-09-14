@@ -1,7 +1,6 @@
 //! `IMOD/imodutil/wmod2imod.c`: convert a legacy ASCII WIMP model to IMOD.
 
 use std::env;
-use std::ffi::CString;
 use std::fs::File;
 
 use crate::imod::libcfshr::b3dutil::{ImodFile, fgetline};
@@ -29,21 +28,69 @@ pub fn wmod2imod() {
             match option {
                 Some(b'x') => {
                     i += 1;
-                    let value =
-                        CString::new(argv.get(i).map(String::as_str).unwrap_or("")).unwrap();
-                    unsafe { libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &mut xscale) };
+                    // `sscanf(argv[++i], "%f", &Xscale)`: `strtof` over the
+                    // longest prefix that converts, after leading white space,
+                    // leaving the variable as it was when nothing does.
+                    let value = argv.get(i).map(String::as_str).unwrap_or("");
+                    let text = value.as_bytes();
+                    let mut start = 0_usize;
+                    while start < text.len() && text[start].is_ascii_whitespace() {
+                        start += 1;
+                    }
+                    let mut end = text.len();
+                    while end > start {
+                        if let Some(scanned) =
+                            value.get(start..end).and_then(|f| f.parse::<f32>().ok())
+                        {
+                            xscale = scanned;
+                            break;
+                        }
+                        end -= 1;
+                    }
                 }
                 Some(b'y') => {
                     i += 1;
-                    let value =
-                        CString::new(argv.get(i).map(String::as_str).unwrap_or("")).unwrap();
-                    unsafe { libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &mut yscale) };
+                    // `sscanf(argv[++i], "%f", &Yscale)`: `strtof` over the
+                    // longest prefix that converts, after leading white space,
+                    // leaving the variable as it was when nothing does.
+                    let value = argv.get(i).map(String::as_str).unwrap_or("");
+                    let text = value.as_bytes();
+                    let mut start = 0_usize;
+                    while start < text.len() && text[start].is_ascii_whitespace() {
+                        start += 1;
+                    }
+                    let mut end = text.len();
+                    while end > start {
+                        if let Some(scanned) =
+                            value.get(start..end).and_then(|f| f.parse::<f32>().ok())
+                        {
+                            yscale = scanned;
+                            break;
+                        }
+                        end -= 1;
+                    }
                 }
                 Some(b'z') => {
                     i += 1;
-                    let value =
-                        CString::new(argv.get(i).map(String::as_str).unwrap_or("")).unwrap();
-                    unsafe { libc::sscanf(value.as_ptr(), c"%f".as_ptr(), &mut zscale) };
+                    // `sscanf(argv[++i], "%f", &Zscale)`: `strtof` over the
+                    // longest prefix that converts, after leading white space,
+                    // leaving the variable as it was when nothing does.
+                    let value = argv.get(i).map(String::as_str).unwrap_or("");
+                    let text = value.as_bytes();
+                    let mut start = 0_usize;
+                    while start < text.len() && text[start].is_ascii_whitespace() {
+                        start += 1;
+                    }
+                    let mut end = text.len();
+                    while end > start {
+                        if let Some(scanned) =
+                            value.get(start..end).and_then(|f| f.parse::<f32>().ok())
+                        {
+                            zscale = scanned;
+                            break;
+                        }
+                        end -= 1;
+                    }
                 }
                 _ => {}
             }
@@ -100,7 +147,7 @@ pub fn imod_from_wmod(fin: &mut ImodFile) -> Option<Imod> {
         [1.0, 0.0, 1.0],
         [0.0, 1.0, 1.0],
     ];
-    let cont_string = c"Object #:";
+    let cont_string = b"Object #:";
     let mut line = [0_u8; MAXLINE as usize];
     let mut objlookup = [0_i32; MAXOBJ];
     let mut nobj = 0_i32;
@@ -109,46 +156,105 @@ pub fn imod_from_wmod(fin: &mut ImodFile) -> Option<Imod> {
     // `struct Mod_Point point` has function scope in the source, so a point
     // line that fails to scan re-adds the previously scanned coordinates.
     let mut point = Ipoint::default();
-    unsafe {
-        loop {
-            let len = fgetline(fin, &mut line, MAXLINE);
-            if len < 0 {
+    loop {
+        let len = fgetline(fin, &mut line, MAXLINE);
+        if len < 0 {
+            break;
+        }
+        if len == 0 {
+            continue;
+        }
+        let terminator = line
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(line.len());
+        let mut tline = None;
+        let mut i = 0_usize;
+        while i < terminator {
+            if line[i] == b'O' {
+                tline = Some(i);
                 break;
             }
-            if len == 0 {
-                continue;
-            }
-            let mut tline = std::ptr::null::<std::ffi::c_char>();
-            let mut i = 0_usize;
-            while line[i] != 0 {
-                if line[i] == b'O' {
-                    tline = line.as_ptr().add(i).cast();
-                    break;
+            i += 1;
+        }
+        let Some(tline) = tline else {
+            continue;
+        };
+        // `substr` (`imodel_from.c:207`) compares the first strlen(ls) bytes.
+        if !line[tline..terminator].starts_with(cont_string) {
+            continue;
+        }
+        fgetline(fin, &mut line, MAXLINE);
+        // `sscanf(line, "%*s %*s %*s %d", &points)`: three suppressed
+        // string fields, each white space then a run of non-white space,
+        // then a decimal integer.  Nothing is stored when the integer does
+        // not convert.
+        {
+            let text = &line[..line
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(line.len())];
+            let mut scan = 0_usize;
+            for _ in 0..3 {
+                while scan < text.len() && text[scan].is_ascii_whitespace() {
+                    scan += 1;
                 }
-                i += 1;
+                while scan < text.len() && !text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
             }
-            if tline.is_null() {
-                continue;
+            while scan < text.len() && text[scan].is_ascii_whitespace() {
+                scan += 1;
             }
-            // `substr` (`imodel_from.c:207`) compares the first strlen(ls) bytes.
-            if libc::strncmp(tline, cont_string.as_ptr(), cont_string.count_bytes()) != 0 {
-                continue;
+            let start = scan;
+            if scan < text.len() && (text[scan] == b'-' || text[scan] == b'+') {
+                scan += 1;
             }
-            fgetline(fin, &mut line, MAXLINE);
-            libc::sscanf(
-                line.as_ptr().cast(),
-                c"%*s %*s %*s %d".as_ptr(),
-                &mut points,
-            );
-            fgetline(fin, &mut line, MAXLINE);
-            libc::sscanf(
-                line.as_ptr().cast(),
-                c"%*s %*s %d".as_ptr(),
-                &mut display_switch,
-            );
-            if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
-                objlookup[display_switch as usize] = 1;
+            while scan < text.len() && text[scan].is_ascii_digit() {
+                scan += 1;
             }
+            if let Ok(scanned) = std::str::from_utf8(&text[start..scan])
+                .unwrap_or("")
+                .parse::<i32>()
+            {
+                points = scanned;
+            }
+        }
+        fgetline(fin, &mut line, MAXLINE);
+        // `sscanf(line, "%*s %*s %d", &display_switch)`.
+        {
+            let text = &line[..line
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(line.len())];
+            let mut scan = 0_usize;
+            for _ in 0..2 {
+                while scan < text.len() && text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
+                while scan < text.len() && !text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
+            }
+            while scan < text.len() && text[scan].is_ascii_whitespace() {
+                scan += 1;
+            }
+            let start = scan;
+            if scan < text.len() && (text[scan] == b'-' || text[scan] == b'+') {
+                scan += 1;
+            }
+            while scan < text.len() && text[scan].is_ascii_digit() {
+                scan += 1;
+            }
+            if let Ok(scanned) = std::str::from_utf8(&text[start..scan])
+                .unwrap_or("")
+                .parse::<i32>()
+            {
+                display_switch = scanned;
+            }
+        }
+        if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
+            objlookup[display_switch as usize] = 1;
         }
     }
     let mut model = Imod::default();
@@ -204,86 +310,185 @@ pub fn imod_from_wmod(fin: &mut ImodFile) -> Option<Imod> {
             objlookup[wimp_number] = -1;
         }
     }
-    unsafe {
-        use std::io::Seek;
-        let _ = fin.rewind();
-        loop {
-            let len = fgetline(fin, &mut line, MAXLINE);
-            if len < 0 {
+    use std::io::Seek;
+    let _ = fin.rewind();
+    loop {
+        let len = fgetline(fin, &mut line, MAXLINE);
+        if len < 0 {
+            break;
+        }
+        if len == 0 {
+            continue;
+        }
+        let terminator = line
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(line.len());
+        let mut tline = None;
+        let mut i = 0_usize;
+        while i < terminator {
+            if line[i] == b'O' {
+                tline = Some(i);
                 break;
             }
-            if len == 0 {
-                continue;
-            }
-            let mut tline = std::ptr::null::<std::ffi::c_char>();
-            let mut i = 0_usize;
-            while line[i] != 0 {
-                if line[i] == b'O' {
-                    tline = line.as_ptr().add(i).cast();
-                    break;
+            i += 1;
+        }
+        let Some(tline) = tline else {
+            continue;
+        };
+        // `substr` (`imodel_from.c:207`) compares the first strlen(ls) bytes.
+        if !line[tline..terminator].starts_with(cont_string) {
+            continue;
+        }
+        fgetline(fin, &mut line, MAXLINE);
+        // `sscanf(line, "%*s %*s %*s %d", &points)`: three suppressed
+        // string fields, each white space then a run of non-white space,
+        // then a decimal integer.  Nothing is stored when the integer does
+        // not convert.
+        {
+            let text = &line[..line
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(line.len())];
+            let mut scan = 0_usize;
+            for _ in 0..3 {
+                while scan < text.len() && text[scan].is_ascii_whitespace() {
+                    scan += 1;
                 }
-                i += 1;
+                while scan < text.len() && !text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
             }
-            if tline.is_null() {
-                continue;
+            while scan < text.len() && text[scan].is_ascii_whitespace() {
+                scan += 1;
             }
-            if libc::strncmp(tline, cont_string.as_ptr(), cont_string.count_bytes()) != 0 {
-                continue;
+            let start = scan;
+            if scan < text.len() && (text[scan] == b'-' || text[scan] == b'+') {
+                scan += 1;
             }
+            while scan < text.len() && text[scan].is_ascii_digit() {
+                scan += 1;
+            }
+            if let Ok(scanned) = std::str::from_utf8(&text[start..scan])
+                .unwrap_or("")
+                .parse::<i32>()
+            {
+                points = scanned;
+            }
+        }
+        fgetline(fin, &mut line, MAXLINE);
+        // `sscanf(line, "%*s %*s %d", &display_switch)`.
+        {
+            let text = &line[..line
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(line.len())];
+            let mut scan = 0_usize;
+            for _ in 0..2 {
+                while scan < text.len() && text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
+                while scan < text.len() && !text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
+            }
+            while scan < text.len() && text[scan].is_ascii_whitespace() {
+                scan += 1;
+            }
+            let start = scan;
+            if scan < text.len() && (text[scan] == b'-' || text[scan] == b'+') {
+                scan += 1;
+            }
+            while scan < text.len() && text[scan].is_ascii_digit() {
+                scan += 1;
+            }
+            if let Ok(scanned) = std::str::from_utf8(&text[start..scan])
+                .unwrap_or("")
+                .parse::<i32>()
+            {
+                display_switch = scanned;
+            }
+        }
+        fgetline(fin, &mut line, MAXLINE);
+        model.cindex.object = if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
+            objlookup[display_switch as usize]
+        } else {
+            0
+        };
+        if model.cindex.object < 0 {
+            model.cindex.object = 0;
+        }
+        let object_index = model.cindex.object as usize;
+        model.cindex.contour = model.obj.get(object_index)?.cont.len() as i32 - 1;
+        if imod_new_contour(&mut model) != 0 {
+            return None;
+        }
+        let contour_index = model.cindex.contour as usize;
+        for i in 0..points {
             fgetline(fin, &mut line, MAXLINE);
-            libc::sscanf(
-                line.as_ptr().cast(),
-                c"%*s %*s %*s %d".as_ptr(),
-                &mut points,
-            );
-            fgetline(fin, &mut line, MAXLINE);
-            libc::sscanf(
-                line.as_ptr().cast(),
-                c"%*s %*s %d".as_ptr(),
-                &mut display_switch,
-            );
-            fgetline(fin, &mut line, MAXLINE);
-            model.cindex.object = if display_switch >= 0 && (display_switch as usize) < MAXOBJ {
-                objlookup[display_switch as usize]
-            } else {
-                0
-            };
-            if model.cindex.object < 0 {
-                model.cindex.object = 0;
+            // `sscanf(line, "%*d %f %f %f", &point.x, &point.y, &point.z)`:
+            // the fields are stored left to right and the scan stops at the
+            // first that does not convert, so a short line leaves the later
+            // coordinates holding the previous point's values.
+            {
+                let text = &line[..line
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(line.len())];
+                let mut scan = 0_usize;
+                while scan < text.len() && text[scan].is_ascii_whitespace() {
+                    scan += 1;
+                }
+                if scan < text.len() && (text[scan] == b'-' || text[scan] == b'+') {
+                    scan += 1;
+                }
+                let digits = scan;
+                while scan < text.len() && text[scan].is_ascii_digit() {
+                    scan += 1;
+                }
+                if scan > digits {
+                    for coordinate in [&mut point.x, &mut point.y, &mut point.z] {
+                        while scan < text.len() && text[scan].is_ascii_whitespace() {
+                            scan += 1;
+                        }
+                        let start = scan;
+                        let mut end = text.len();
+                        let mut scanned = None;
+                        while end > start {
+                            if let Ok(value) = std::str::from_utf8(&text[start..end])
+                                .unwrap_or("")
+                                .parse::<f32>()
+                            {
+                                scanned = Some((value, end));
+                                break;
+                            }
+                            end -= 1;
+                        }
+                        let Some((value, consumed)) = scanned else {
+                            break;
+                        };
+                        *coordinate = value;
+                        scan = consumed;
+                    }
+                }
             }
-            let object_index = model.cindex.object as usize;
-            model.cindex.contour = model.obj.get(object_index)?.cont.len() as i32 - 1;
-            if imod_new_contour(&mut model) != 0 {
+            let contour = model
+                .obj
+                .get_mut(object_index)?
+                .cont
+                .get_mut(contour_index)?;
+            if imod_point_add(contour, Some(point), i) == 0 {
                 return None;
             }
-            let contour_index = model.cindex.contour as usize;
-            for i in 0..points {
-                fgetline(fin, &mut line, MAXLINE);
-                libc::sscanf(
-                    line.as_ptr().cast(),
-                    c"%*d %f %f %f".as_ptr(),
-                    &mut point.x,
-                    &mut point.y,
-                    &mut point.z,
-                );
-                let contour = model
-                    .obj
-                    .get_mut(object_index)?
-                    .cont
-                    .get_mut(contour_index)?;
-                if imod_point_add(contour, Some(point), i) == 0 {
-                    return None;
-                }
-            }
-            // `wmod2imod.c:246` re-asserts the contour size, which the
-            // `points` calls to `imodPointAdd` above have already produced.
-            for object in &mut model.obj {
-                if !object.cont.is_empty() {
-                    if object.cont[0].pts.len() < 2
-                        || object.cont[0].pts[0].z != object.cont[0].pts[1].z
-                    {
-                        object.flags |= IMOD_OBJFLAG_OPEN;
-                    }
+        }
+        // `wmod2imod.c:246` re-asserts the contour size, which the
+        // `points` calls to `imodPointAdd` above have already produced.
+        for object in &mut model.obj {
+            if !object.cont.is_empty() {
+                if object.cont[0].pts.len() < 2
+                    || object.cont[0].pts[0].z != object.cont[0].pts[1].z
+                {
+                    object.flags |= IMOD_OBJFLAG_OPEN;
                 }
             }
         }

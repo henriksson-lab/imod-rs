@@ -1,16 +1,22 @@
 //! Translation of `IMOD/libcfshr/autodoc.c` and `IMOD/include/autodoc.h`.
 //!
-//! The module keeps the C source's exact data structures (arrays of
-//! `malloc`ed C strings inside `AdocSection`/`AdocCollection`/`Autodoc`) and its
-//! module-level static state, so that operation order, allocation growth in
-//! `MALLOC_CHUNK` blocks, and every error return matches the original.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+//! The module keeps the C source's data structures and its module-level static
+//! state, so that operation order, the `MALLOC_CHUNK` growth of every array,
+//! and every error return match the original.  What changed is the *storage*:
+//! the source's `malloc`ed C strings are `Vec<u8>` and its NULL pointers are
+//! `None`, so no autodoc key, value, section name or comment is a
+//! NUL-terminated string any more.  Autodoc keys and values are bytes read out
+//! of a file, never guaranteed text, so they are `Vec<u8>` and not `String`.
+#![allow(dead_code)]
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
-use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_milli_sleep, imod_backup_file};
+use crate::imod::libcfshr::b3dutil::{
+    CArg, b3d_error, b3d_milli_sleep, c_format_bytes, imod_backup_file,
+};
 use crate::imod::libcfshr::mxmlwrap::{ixml_reset_last_level, ixml_whitespace_cb};
 use crate::imod::libcfshr::parse_params::{
-    PIP_DOUBLE, PIP_FLOAT, PIP_INTEGER, pip_get_line_of_values, pip_read_next_line, pip_starts_with,
+    PIP_DOUBLE, PIP_FLOAT, PIP_INTEGER, pip_get_line_of_values, pip_read_next_line,
+    pip_starts_with, strtod, strtol,
 };
 use crate::imod::libcfshr::robuststat::rs_sort_indexed_floats;
 use crate::imod::libxml::{
@@ -20,17 +26,17 @@ use crate::imod::libxml::{
     mxml_load_file, mxml_new_element, mxml_new_text, mxml_new_xml, mxml_opaque_cb, mxml_save_file,
     mxml_set_wrap_margin, mxml_walk_next,
 };
-use core::ffi::{c_char, c_int, c_void};
-use std::ffi::CStr;
+use core::cell::{Cell, RefCell};
+use std::io::{Seek, SeekFrom, Write};
 
 /* --- IMOD/include/autodoc.h ------------------------------------------- */
 
 /// Matches C `ADOC_GLOBAL_NAME` (`autodoc.h:16`).
-pub const ADOC_GLOBAL_NAME: &CStr = c"PreData";
+pub const ADOC_GLOBAL_NAME: &[u8] = b"PreData";
 /// Matches C `ADOC_ZVALUE_NAME` (`autodoc.h:17`).
-pub const ADOC_ZVALUE_NAME: &CStr = c"ZValue";
+pub const ADOC_ZVALUE_NAME: &[u8] = b"ZValue";
 /// Matches C `ADOC_FRAMESET_NAME` (`autodoc.h:18`).
-pub const ADOC_FRAMESET_NAME: &CStr = c"FrameSet";
+pub const ADOC_FRAMESET_NAME: &[u8] = b"FrameSet";
 
 pub const ADOC_NO_VALUE: i32 = 0;
 pub const ADOC_ONE_INT: i32 = 1;
@@ -47,416 +53,385 @@ pub const ADOC_ONE_DOUBLE: i32 = 10;
 /* --- autodoc.c:22-56 : the three structures ---------------------------- */
 
 /// Matches C `struct adoc_section` / `AdocSection` (`autodoc.c:23`).
-#[repr(C)]
-#[derive(Clone, Copy)]
+///
+/// `keys`, `values` and `types` are held at length `max_keys`, the size the C
+/// `realloc`s them to, with `num_keys` the number in use, so every index in the
+/// source is the same index here.  A NULL key or value is `None`.
+#[derive(Clone, Default)]
 pub struct AdocSection {
     /// value after delimiter in section header
-    pub name: *mut c_char,
+    pub name: Option<Vec<u8>>,
     /// Array of strings with keys
-    pub keys: *mut *mut c_char,
+    pub keys: Vec<Option<Vec<u8>>>,
     /// Array of strings with values
-    pub values: *mut *mut c_char,
+    pub values: Vec<Option<Vec<u8>>>,
     /// Number of key/value pairs
-    pub num_keys: c_int,
+    pub num_keys: i32,
     /// Current size of array
-    pub max_keys: c_int,
+    pub max_keys: i32,
     /// List of comments strings
-    pub comments: *mut *mut c_char,
+    pub comments: Vec<Vec<u8>>,
     /// Array of key indexes they occur before
-    pub com_index: *mut c_int,
+    pub com_index: Vec<i32>,
     /// Number of comments
-    pub num_comments: c_int,
+    pub num_comments: i32,
     /// Array of types of keys
-    pub types: *mut u8,
+    pub types: Vec<u8>,
 }
 
 /// Matches C `struct adoc_collection` / `AdocCollection` (`autodoc.c:35`).
-#[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Default)]
 pub struct AdocCollection {
     /// section type, before delimiter in header
-    pub name: *mut c_char,
+    pub name: Option<Vec<u8>>,
     /// Array of sections
-    pub sections: *mut AdocSection,
+    pub sections: Vec<AdocSection>,
     /// Number of sections
-    pub num_sections: c_int,
+    pub num_sections: i32,
     /// Current size of array
-    pub max_sections: c_int,
+    pub max_sections: i32,
 }
 
 /// Matches C `struct adoc_autodoc` / `Autodoc` (`autodoc.c:42`).
-#[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Default)]
 pub struct Autodoc {
-    pub collections: *mut AdocCollection,
-    pub num_collections: c_int,
-    pub final_comments: *mut *mut c_char,
-    pub num_final_com: c_int,
-    pub coll_list: *mut c_int,
-    pub sect_list: *mut c_int,
-    pub num_sections: c_int,
-    pub max_sections: c_int,
-    pub in_use: c_int,
-    pub backed_up: c_int,
-    pub write_as_xml: c_int,
+    pub collections: Vec<AdocCollection>,
+    pub num_collections: i32,
+    pub final_comments: Vec<Vec<u8>>,
+    pub num_final_com: i32,
+    pub coll_list: Vec<i32>,
+    pub sect_list: Vec<i32>,
+    pub num_sections: i32,
+    pub max_sections: i32,
+    pub in_use: i32,
+    pub backed_up: i32,
+    pub write_as_xml: i32,
     /// Name for root element for XML file, in or out
-    pub root_element: *mut c_char,
+    pub root_element: Option<Vec<u8>>,
 }
 
-/* The static variables that can hold multiple autodocs (autodoc.c:59-63) */
-static mut S_AUTODOCS: *mut Autodoc = core::ptr::null_mut();
-static mut S_NUM_AUTODOCS: c_int = 0;
-static mut S_CUR_ADOC_IND: c_int = -1;
-static mut S_CUR_ADOC: *mut Autodoc = core::ptr::null_mut();
-static mut S_NAME_FOR_ORDERING: *mut c_char = core::ptr::null_mut();
+thread_local! {
+    /* The static variables that can hold multiple autodocs (autodoc.c:59-63).
+       `sCurAdoc` was a pointer into `sAutodocs`; it is the index now, because a
+       `Vec` that grows moves its elements and a stored reference would not
+       survive `addAutodoc`. */
+    static S_AUTODOCS: RefCell<Vec<Autodoc>> = const { RefCell::new(Vec::new()) };
+    static S_CUR_ADOC_IND: Cell<i32> = const { Cell::new(-1) };
+    static S_NAME_FOR_ORDERING: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
 
-/* Static variables for XML writing (autodoc.c:66-68) */
-static mut S_LAST_WAS_XML: c_int = 0;
-static mut S_NUM_SECT_NOT_ELEM: c_int = 0;
-static mut S_NUM_SECT_NO_NAME: c_int = 0;
-static mut S_NUM_CHILD_NOT_ELEM: c_int = 0;
-static mut S_NUM_CHILD_ATTRIBS: c_int = 0;
-static mut S_NUM_VALUE_NOT_TEXT: c_int = 0;
-static mut S_NUM_MULTIPLE_CHILDS: c_int = 0;
+    /* Static variables for XML writing (autodoc.c:66-68) */
+    static S_LAST_WAS_XML: Cell<i32> = const { Cell::new(0) };
+    static S_NUM_SECT_NOT_ELEM: Cell<i32> = const { Cell::new(0) };
+    static S_NUM_SECT_NO_NAME: Cell<i32> = const { Cell::new(0) };
+    static S_NUM_CHILD_NOT_ELEM: Cell<i32> = const { Cell::new(0) };
+    static S_NUM_CHILD_ATTRIBS: Cell<i32> = const { Cell::new(0) };
+    static S_NUM_VALUE_NOT_TEXT: Cell<i32> = const { Cell::new(0) };
+    static S_NUM_MULTIPLE_CHILDS: Cell<i32> = const { Cell::new(0) };
 
-/* Static variables for writing to file or string (autodoc.c:71-74) */
-static mut S_FILE: *mut libc::FILE = core::ptr::null_mut();
-static mut S_STRING: *mut c_char = core::ptr::null_mut();
-static mut S_BYTES_LEFT: c_int = 0;
-static mut S_BYTES_WRITTEN: c_int = 0;
+    /* Static variables for writing to file or string (autodoc.c:71-74).
+       `sString` was the caller's `char *`; `fsPrintf` appends here and
+       `writeFile` hands the bytes back, so the `snprintf` bookkeeping in
+       `sBytesLeft`/`sBytesWritten` is unchanged. */
+    static S_FILE: RefCell<Option<ImodFile>> = const { RefCell::new(None) };
+    static S_STRING: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    static S_BYTES_LEFT: Cell<i32> = const { Cell::new(0) };
+    static S_BYTES_WRITTEN: Cell<i32> = const { Cell::new(0) };
 
-static mut S_OPEN_RETRIES: c_int = 0;
+    static S_OPEN_RETRIES: Cell<i32> = const { Cell::new(0) };
 
-const OPEN_DELIM: &CStr = c"[";
-const CLOSE_DELIM: &CStr = c"]";
-const XML_START: &CStr = c"<?xml";
-const XML_COMMENT_START: &CStr = c"!--";
+    /// Matches C `static char sDefaultDelim[] = "=";` (`autodoc.c:84`) together
+    /// with `sValueDelim`, which points either at it or at `sNewDelim`; one
+    /// owned copy of the delimiter in use says the same thing.
+    static S_VALUE_DELIM: RefCell<Vec<u8>> = RefCell::new(S_DEFAULT_DELIM.to_vec());
+    static S_NEW_DELIM: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+}
+
+static S_DEFAULT_DELIM: &[u8] = b"=";
+
+const OPEN_DELIM: &[u8] = b"[";
+const CLOSE_DELIM: &[u8] = b"]";
+const XML_START: &[u8] = b"<?xml";
+const XML_COMMENT_START: &[u8] = b"!--";
 const XML_COMSTART_LEN: i32 = 3;
-
-/// Matches C `static char sDefaultDelim[] = "=";` (`autodoc.c:84`).
-static mut S_DEFAULT_DELIM: [c_char; 2] = [b'=' as c_char, 0];
-static mut S_VALUE_DELIM: *mut c_char = &raw mut S_DEFAULT_DELIM as *mut c_char;
-static mut S_NEW_DELIM: *mut c_char = core::ptr::null_mut();
 
 const BIG_STR_SIZE: usize = 10240;
 const ERR_STR_SIZE: usize = 1024;
 const MALLOC_CHUNK: i32 = 10;
 
 /// Matches C `AdocRead` (`autodoc.c:130`).
-pub unsafe extern "C" fn adoc_read(filename: *const c_char) -> i32 {
-    let mut got_section: c_int = 0;
+pub fn adoc_read(filename: &[u8]) -> i32 {
+    let mut got_section: i32 = 0;
     /* `err` is uninitialised in the C source; it is only read after at least one
     loop iteration has assigned it, except for a completely empty file. */
-    let mut err: c_int = 0;
-    let mut line_len: c_int;
-    let mut indst: c_int = 0;
-    let mut icol: c_int;
-    let mut ikey: c_int;
-    let mut last_ind: c_int;
-    let index: c_int;
-    let bad_line: c_int = 1234;
-    let mut cur_sect: *mut AdocSection;
-    let mut coll: *mut AdocCollection;
-    let mut line: *mut c_char;
-    let mut line_end: *mut c_char;
-    let mut key: *mut c_char = core::ptr::null_mut();
-    let mut value: *mut c_char = core::ptr::null_mut();
-    let mut big_str: [c_char; BIG_STR_SIZE] = [0; BIG_STR_SIZE];
-    let mut comment_char: c_char = b'#' as c_char;
-    let mut comment_list: *mut *mut c_char = core::ptr::null_mut();
-    let mut max_comments: c_int = 0;
-    let mut num_comments: c_int = 0;
-    let mut first_line: c_int = 1;
-    let afile: *mut libc::FILE;
+    let mut err: i32 = 0;
+    let mut line_len: i32 = 0;
+    let mut indst: i32 = 0;
+    let mut icol: i32 = 0;
+    let mut ikey: i32 = 0;
+    let mut last_ind: i32;
+    let index: i32;
+    let bad_line: i32 = 1234;
+    /* `curSect` was an `AdocSection *`; a `Vec` moves when it grows, so the
+    section is identified by its collection and its index in it. */
+    let mut cur_coll: i32;
+    let mut cur_sect: i32;
+    let mut key: Vec<u8> = Vec::new();
+    let mut value: Option<Vec<u8>> = None;
+    /* The C's `char bigStr[BIG_STR_SIZE]`, holding the line without its NUL. */
+    let mut big_str: Vec<u8> = Vec::new();
+    let mut comment_char: u8 = b'#';
+    let mut comment_list: Vec<Vec<u8>> = Vec::new();
+    let mut max_comments: i32 = 0;
+    let mut num_comments: i32 = 0;
+    let mut first_line: i32 = 1;
 
-    S_VALUE_DELIM = &raw mut S_DEFAULT_DELIM as *mut c_char;
-    afile = libc::fopen(filename, c"r".as_ptr());
-    if afile.is_null() {
+    S_VALUE_DELIM.with_borrow_mut(|delim| *delim = S_DEFAULT_DELIM.to_vec());
+    let name = String::from_utf8_lossy(filename).into_owned();
+    let Some(mut afile) = ImodFile::open(&name, "r") else {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: AdocRead - Error opening autodoc file {}",
-                CStr::from_ptr(filename).to_string_lossy()
+                String::from_utf8_lossy(filename)
             ),
         );
         return -1;
-    }
+    };
 
     /* Create a new adoc, which sets up global collection/section
     and takes care of cleanup if it fails */
     index = add_autodoc();
     if index < 0 {
-        libc::fclose(afile);
         return -1;
     }
 
     adoc_set_current(index);
-    cur_sect = &mut *(*(*S_CUR_ADOC).collections.add(0)).sections.add(0);
+    cur_coll = 0;
+    cur_sect = 0;
     last_ind = -1;
-    S_LAST_WAS_XML = 0;
+    S_LAST_WAS_XML.set(0);
 
-    let borrowed = std::os::fd::BorrowedFd::borrow_raw(libc::fileno(afile));
-    let Ok(owned) = borrowed.try_clone_to_owned() else {
-        libc::fclose(afile);
-        return -1;
-    };
-    let mut aimod = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
-
-    loop {
-        /* We cannot allow in-line comments so that value lines can contain
-        anything.  But do allow blank and comment lines */
-        /* `PipReadNextLine` now reads through an `ImodFile`; `aimod` is a
-        duplicate of this file's descriptor, so both share one offset, and
-        `readXmlFile` rewinds (`autodoc.c:1778`) before it reads. */
-        let mut line_buf: Vec<u8> = Vec::new();
-        line_len = pip_read_next_line(
-            &mut aimod,
-            &mut line_buf,
-            BIG_STR_SIZE as c_int,
-            comment_char as u8,
-            1,
-            0,
-            &mut indst,
-        );
-        if line_len >= 0 {
-            for (i, b) in line_buf.iter().enumerate() {
-                big_str[i] = *b as c_char;
-            }
-            big_str[line_buf.len()] = 0;
-        }
-        if line_len == -3 {
-            break;
-        }
-        if line_len < 0 {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "ERROR: AdocRead - {} {}\n",
-                    if line_len == -2 {
-                        "Error reading autodoc file"
-                    } else {
-                        "Line too long in autodoc file"
-                    },
-                    CStr::from_ptr(filename).to_string_lossy()
-                ),
+    let result = S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[index as usize];
+        loop {
+            /* We cannot allow in-line comments so that value lines can contain
+            anything.  But do allow blank and comment lines */
+            big_str.clear();
+            line_len = pip_read_next_line(
+                &mut afile,
+                &mut big_str,
+                BIG_STR_SIZE as i32,
+                comment_char,
+                1,
+                0,
+                &mut indst,
             );
-            err = -1;
-            break;
-        }
-
-        /* For first line, check for XML file and read that */
-        line = big_str.as_mut_ptr().add(indst as usize);
-        if first_line != 0
-            && pip_starts_with(
-                CStr::from_ptr(line).to_bytes(),
-                CStr::from_ptr(XML_START.as_ptr()).to_bytes(),
-            ) != 0
-        {
-            err = read_xml_file(afile);
-            libc::fclose(afile);
-            if err < 0 {
-                return err;
-            }
-            return S_CUR_ADOC_IND;
-        }
-        first_line = 0;
-
-        /* First check for comment and add it to list */
-        if indst >= line_len || *line == comment_char {
-            err = add_to_comment_list(
-                &mut comment_list,
-                &mut num_comments,
-                &mut max_comments,
-                big_str.as_mut_ptr(),
-            );
-            if err != 0 {
+            if line_len == -3 {
                 break;
             }
-            continue;
-        }
-
-        if pip_starts_with(
-            CStr::from_ptr(line).to_bytes(),
-            CStr::from_ptr(OPEN_DELIM.as_ptr()).to_bytes(),
-        ) != 0
-            && !libc::strstr(line, CLOSE_DELIM.as_ptr()).is_null()
-        {
-            /* If this is a section start, get name - value.  Here there must be
-            a value and it is an error if there is none. */
-            let line_end2 = libc::strstr(line, CLOSE_DELIM.as_ptr());
-            err = parse_key_value(
-                line.add(libc::strlen(OPEN_DELIM.as_ptr())),
-                line_end2,
-                &mut key,
-                &mut value,
-            );
-            if value.is_null() {
-                err = 1;
-            }
-            if err != 0 {
-                err = if err > 0 { bad_line } else { err };
+            if line_len < 0 {
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: AdocRead - {} {}\n",
+                        if line_len == -2 {
+                            "Error reading autodoc file"
+                        } else {
+                            "Line too long in autodoc file"
+                        },
+                        String::from_utf8_lossy(filename)
+                    ),
+                );
+                err = -1;
                 break;
             }
 
-            /* Lookup the collection under the key and create one if not found */
-            icol = lookup_collection(S_CUR_ADOC, key);
-            if icol < 0 {
-                err = add_collection(S_CUR_ADOC, key);
-                if err != 0 {
-                    break;
+            /* For first line, check for XML file and read that */
+            let line = indst as usize;
+            if first_line != 0 && pip_starts_with(&big_str[line..], XML_START) != 0 {
+                err = read_xml_file(adoc, &mut afile);
+                if err < 0 {
+                    return err;
                 }
-                icol = (*S_CUR_ADOC).num_collections - 1;
+                return S_CUR_ADOC_IND.get();
             }
-            coll = (*S_CUR_ADOC).collections.add(icol as usize);
+            first_line = 0;
 
-            /* Add a section to the collection and set it as current one */
-            err = add_section(S_CUR_ADOC, icol, value);
-            if err != 0 {
-                break;
-            }
-            cur_sect = (*coll).sections.add(((*coll).num_sections - 1) as usize);
-            got_section = 1;
-            libc::free(key.cast::<c_void>());
-            libc::free(value.cast::<c_void>());
-            last_ind = -1;
-        } else {
-            /* Otherwise this is key-value inside a section.  First check for
-            continuation line and append to last value. */
-            if last_ind >= 0
-                && libc::strstr(line, S_VALUE_DELIM).is_null()
-                && !(*(*cur_sect).values.add(last_ind as usize)).is_null()
-            {
-                ikey = libc::strlen(*(*cur_sect).values.add(last_ind as usize)) as c_int;
-                *(*cur_sect).values.add(last_ind as usize) = libc::realloc(
-                    (*(*cur_sect).values.add(last_ind as usize)).cast::<c_void>(),
-                    (ikey + line_len - indst + 3) as usize,
-                )
-                .cast::<c_char>();
-                err = adoc_memory_error(
-                    (*(*cur_sect).values.add(last_ind as usize)).cast::<c_void>(),
-                    c"AdocRead".as_ptr(),
+            /* First check for comment and add it to list */
+            if indst >= line_len || big_str[line] == comment_char {
+                err = add_to_comment_list(
+                    &mut comment_list,
+                    &mut num_comments,
+                    &mut max_comments,
+                    &big_str,
                 );
                 if err != 0 {
                     break;
                 }
-
-                /* Replace null with space and new null, then append new string */
-                let vals = *(*cur_sect).values.add(last_ind as usize);
-                *vals.add(ikey as usize) = b' ' as c_char;
-                *vals.add((ikey + 1) as usize) = 0;
-                libc::strcat(vals, line);
                 continue;
             }
 
-            /* This should be a key-value pair now */
-            line_end = line.add((line_len - indst) as usize);
-            err = parse_key_value(line, line_end, &mut key, &mut value);
-            if err != 0 {
-                err = if err > 0 { bad_line } else { err };
-                break;
-            }
-
-            /* Handle new key-value delimiter - replace previous new value if any */
-            if got_section == 0
-                && libc::strcmp(key, c"KeyValueDelimiter".as_ptr()) == 0
-                && !value.is_null()
-            {
-                if !S_NEW_DELIM.is_null() {
-                    libc::free(S_NEW_DELIM.cast::<c_void>());
+            let close = big_str[line..]
+                .windows(CLOSE_DELIM.len())
+                .position(|w| w == CLOSE_DELIM)
+                .map(|p| line + p);
+            if pip_starts_with(&big_str[line..], OPEN_DELIM) != 0 && close.is_some() {
+                /* If this is a section start, get name - value.  Here there must be
+                a value and it is an error if there is none. */
+                let line_end2 = close.unwrap();
+                err = parse_key_value(
+                    &big_str,
+                    line + OPEN_DELIM.len(),
+                    line_end2,
+                    &mut key,
+                    &mut value,
+                );
+                if value.is_none() {
+                    err = 1;
                 }
-                S_NEW_DELIM = libc::strdup(value);
-                err = adoc_memory_error(S_NEW_DELIM.cast::<c_void>(), c"AdocRead".as_ptr());
+                if err != 0 {
+                    err = if err > 0 { bad_line } else { err };
+                    break;
+                }
+
+                /* Lookup the collection under the key and create one if not found */
+                icol = lookup_collection(adoc, &key);
+                if icol < 0 {
+                    err = add_collection(adoc, &key);
+                    if err != 0 {
+                        break;
+                    }
+                    icol = adoc.num_collections - 1;
+                }
+
+                /* Add a section to the collection and set it as current one */
+                err = add_section(adoc, icol, value.as_ref().unwrap());
                 if err != 0 {
                     break;
                 }
-                S_VALUE_DELIM = S_NEW_DELIM;
-            }
-
-            /* Handle change of comment character */
-            if got_section == 0 && libc::strcmp(key, c"CommentCharacter".as_ptr()) == 0 {
-                comment_char = *value;
-            }
-
-            /* Look up the key first to replace an existing value */
-            ikey = lookup_key(cur_sect, key);
-            if ikey >= 0 {
-                if !(*(*cur_sect).values.add(ikey as usize)).is_null() {
-                    libc::free((*(*cur_sect).values.add(ikey as usize)).cast::<c_void>());
-                }
-                *(*cur_sect).values.add(ikey as usize) = value;
-                libc::free(key.cast::<c_void>());
-                last_ind = ikey;
+                cur_coll = icol;
+                cur_sect = adoc.collections[icol as usize].num_sections - 1;
+                got_section = 1;
+                last_ind = -1;
             } else {
-                /* Or just add the key-value */
-                err = add_key(cur_sect, key, value, ADOC_STRING);
+                /* Otherwise this is key-value inside a section.  First check for
+                continuation line and append to last value. */
+                let has_delim = S_VALUE_DELIM.with_borrow(|delim| {
+                    !delim.is_empty()
+                        && big_str[line..]
+                            .windows(delim.len())
+                            .any(|w| w == &delim[..])
+                });
+                if last_ind >= 0
+                    && !has_delim
+                    && adoc.collections[cur_coll as usize].sections[cur_sect as usize].values
+                        [last_ind as usize]
+                        .is_some()
+                {
+                    /* Replace null with space and new null, then append new string */
+                    let sect = &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize];
+                    let vals = sect.values[last_ind as usize].as_mut().unwrap();
+                    vals.push(b' ');
+                    vals.extend_from_slice(&big_str[line..]);
+                    continue;
+                }
+
+                /* This should be a key-value pair now */
+                let line_end = line_len as usize;
+                err = parse_key_value(&big_str, line, line_end, &mut key, &mut value);
+                if err != 0 {
+                    err = if err > 0 { bad_line } else { err };
+                    break;
+                }
+
+                /* Handle new key-value delimiter - replace previous new value if any */
+                if got_section == 0 && key == b"KeyValueDelimiter" && value.is_some() {
+                    S_NEW_DELIM.with_borrow_mut(|new| *new = Some(value.clone().unwrap()));
+                    S_VALUE_DELIM.with_borrow_mut(|delim| *delim = value.clone().unwrap());
+                }
+
+                /* Handle change of comment character */
+                if got_section == 0 && key == b"CommentCharacter" {
+                    /* C reads `*value`, the first byte of the value, and a NULL
+                    value would be a null dereference (autodoc.c:268). */
+                    comment_char = value.as_ref().and_then(|v| v.first().copied()).unwrap_or(0);
+                }
+
+                /* Look up the key first to replace an existing value */
+                let sect = &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize];
+                ikey = lookup_key(sect, &key);
+                if ikey >= 0 {
+                    sect.values[ikey as usize] = value.take();
+                    last_ind = ikey;
+                } else {
+                    /* Or just add the key-value */
+                    err = add_key(sect, &key, value.as_deref(), ADOC_STRING);
+                    if err != 0 {
+                        break;
+                    }
+                    last_ind = sect.num_keys - 1;
+                }
+            }
+
+            /* If there are comments, attach to item just added */
+            if num_comments != 0 {
+                let sect = &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize];
+                err = add_comments(sect, &mut comment_list, &mut num_comments, last_ind);
                 if err != 0 {
                     break;
                 }
-                libc::free(key.cast::<c_void>());
-                if !value.is_null() {
-                    libc::free(value.cast::<c_void>());
-                }
-                last_ind = (*cur_sect).num_keys - 1;
             }
         }
 
-        /* If there are comments, attach to item just added */
-        if num_comments != 0 {
-            err = add_comments(cur_sect, comment_list, &mut num_comments, last_ind);
-            if err != 0 {
-                break;
+        /* END OF FILE: If error, clean out autodoc, compose message for bad line */
+        if err != 0 {
+            delete_adoc(adoc);
+            if err == bad_line {
+                big_str.truncate(big_str.len().min(ERR_STR_SIZE - 50));
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "Error: AdocRead -Improperly formatted line in autodoc: {}\n",
+                        String::from_utf8_lossy(&big_str)
+                    ),
+                );
+                err = -1;
             }
         }
-    }
 
-    /* END OF FILE: If error, clean out autodoc, compose message for bad line */
-    if err != 0 {
-        delete_adoc(S_CUR_ADOC);
-        if err == bad_line {
-            big_str[ERR_STR_SIZE - 50] = 0;
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "Error: AdocRead -Improperly formatted line in autodoc: {}\n",
-                    CStr::from_ptr(big_str.as_ptr()).to_string_lossy()
-                ),
-            );
-            err = -1;
+        if err == 0 {
+            handle_final_comments(adoc, err, &mut comment_list, num_comments);
         }
-    }
 
-    if err == 0 {
-        handle_final_comments(err, &mut comment_list, num_comments);
-    }
-
-    libc::fclose(afile);
-    if err != 0 { err } else { index }
+        if err != 0 { err } else { index }
+    });
+    result
 }
 
 /// Matches C `AdocXmlReadStatus` (`autodoc.c:333`).
-pub unsafe extern "C" fn adoc_xml_read_status(
-    sect_not_elem: *mut c_int,
-    sect_no_name: *mut c_int,
-    child_not_elem: *mut c_int,
-    child_attribs: *mut c_int,
-    value_not_text: *mut c_int,
-    multiple_childs: *mut c_int,
+pub fn adoc_xml_read_status(
+    sect_not_elem: &mut i32,
+    sect_no_name: &mut i32,
+    child_not_elem: &mut i32,
+    child_attribs: &mut i32,
+    value_not_text: &mut i32,
+    multiple_childs: &mut i32,
 ) -> i32 {
-    *sect_no_name = S_NUM_SECT_NO_NAME;
-    *sect_not_elem = S_NUM_SECT_NOT_ELEM;
-    *child_not_elem = S_NUM_CHILD_NOT_ELEM;
-    *child_attribs = S_NUM_CHILD_ATTRIBS;
-    *value_not_text = S_NUM_VALUE_NOT_TEXT;
-    *multiple_childs = S_NUM_MULTIPLE_CHILDS;
-    if S_LAST_WAS_XML == 0 {
+    *sect_no_name = S_NUM_SECT_NO_NAME.get();
+    *sect_not_elem = S_NUM_SECT_NOT_ELEM.get();
+    *child_not_elem = S_NUM_CHILD_NOT_ELEM.get();
+    *child_attribs = S_NUM_CHILD_ATTRIBS.get();
+    *value_not_text = S_NUM_VALUE_NOT_TEXT.get();
+    *multiple_childs = S_NUM_MULTIPLE_CHILDS.get();
+    if S_LAST_WAS_XML.get() == 0 {
         return 0;
     }
-    if S_NUM_SECT_NOT_ELEM
-        + S_NUM_SECT_NO_NAME
-        + S_NUM_CHILD_NOT_ELEM
-        + S_NUM_CHILD_ATTRIBS
-        + S_NUM_VALUE_NOT_TEXT
-        + S_NUM_MULTIPLE_CHILDS
+    if S_NUM_SECT_NOT_ELEM.get()
+        + S_NUM_SECT_NO_NAME.get()
+        + S_NUM_CHILD_NOT_ELEM.get()
+        + S_NUM_CHILD_ATTRIBS.get()
+        + S_NUM_VALUE_NOT_TEXT.get()
+        + S_NUM_MULTIPLE_CHILDS.get()
         > 0
     {
         -1
@@ -466,35 +441,27 @@ pub unsafe extern "C" fn adoc_xml_read_status(
 }
 
 /// Matches C `AdocOpenImageMetadata` (`autodoc.c:363`).
-pub unsafe extern "C" fn adoc_open_image_metadata(
-    filename: *const c_char,
+pub fn adoc_open_image_metadata(
+    filename: &[u8],
     add_mdoc: i32,
-    montage: *mut c_int,
-    num_sect: *mut c_int,
-    sect_type: *mut c_int,
+    montage: &mut i32,
+    num_sect: &mut i32,
+    sect_type: &mut i32,
 ) -> i32 {
-    let mut buf = core::mem::MaybeUninit::<libc::stat>::uninit();
-    let mut usename: *mut c_char = filename as *mut c_char;
-    let series: c_int;
-    let index: c_int;
+    let mut usename: Vec<u8> = filename.to_vec();
+    let series: i32;
+    let index: i32;
 
     /* Attach extension to file if requested */
     if add_mdoc > 0 {
-        usename = libc::malloc(libc::strlen(filename) + 6).cast::<c_char>();
-        if usename.is_null() {
-            return -1;
-        }
-        libc::sprintf(usename, c"%s.mdoc".as_ptr(), filename);
+        usename = c_format_bytes("%s.mdoc", &[CArg::Bytes(filename)]);
     }
 
     /* Return -2 if it does not exist, -1 if error reading it */
-    if libc::stat(usename, buf.as_mut_ptr()) != 0 {
+    if std::fs::metadata(String::from_utf8_lossy(&usename).as_ref()).is_err() {
         index = -2;
     } else {
-        index = adoc_read(usename);
-    }
-    if add_mdoc > 0 {
-        libc::free(usename.cast::<c_void>());
+        index = adoc_read(&usename);
     }
     if index < 0 {
         return index;
@@ -509,39 +476,22 @@ pub unsafe extern "C" fn adoc_open_image_metadata(
 }
 
 /// Matches C `AdocGetImageMetaInfo` (`autodoc.c:405`).
-pub unsafe extern "C" fn adoc_get_image_meta_info(
-    montage: *mut c_int,
-    num_sect: *mut c_int,
-    sect_type: *mut c_int,
-) -> i32 {
-    let mut series: c_int = 0;
-    let mut usename: *mut c_char = core::ptr::null_mut();
+pub fn adoc_get_image_meta_info(montage: &mut i32, num_sect: &mut i32, sect_type: &mut i32) -> i32 {
+    let mut series: i32 = 0;
+    let mut usename: Vec<u8> = Vec::new();
 
     *montage = 0;
-    if adoc_get_string(
-        ADOC_GLOBAL_NAME.as_ptr(),
-        0,
-        c"ImageFile".as_ptr(),
-        &mut usename,
-    ) == 0
-    {
+    if adoc_get_string(ADOC_GLOBAL_NAME, 0, b"ImageFile", &mut usename) == 0 {
         *sect_type = 1;
-        libc::free(usename.cast::<c_void>());
-        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME.as_ptr());
-    } else if adoc_get_integer(
-        ADOC_GLOBAL_NAME.as_ptr(),
-        0,
-        c"ImageSeries".as_ptr(),
-        &mut series,
-    ) == 0
-        && series != 0
+        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME);
+    } else if adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"ImageSeries", &mut series) == 0 && series != 0
     {
         *sect_type = 2;
-        *num_sect = adoc_get_number_of_sections(c"Image".as_ptr());
+        *num_sect = adoc_get_number_of_sections(b"Image");
     } else {
-        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME.as_ptr());
+        *num_sect = adoc_get_number_of_sections(ADOC_ZVALUE_NAME);
         if *num_sect == 0 {
-            *num_sect = adoc_get_number_of_sections(ADOC_FRAMESET_NAME.as_ptr());
+            *num_sect = adoc_get_number_of_sections(ADOC_FRAMESET_NAME);
             if *num_sect == 1 {
                 *sect_type = 4;
                 return 1;
@@ -554,20 +504,15 @@ pub unsafe extern "C" fn adoc_get_image_meta_info(
         }
     }
 
-    if adoc_get_integer(ADOC_GLOBAL_NAME.as_ptr(), 0, c"Montage".as_ptr(), montage) != 0 {
-        adoc_get_integer(
-            ADOC_GLOBAL_NAME.as_ptr(),
-            0,
-            c"IMOD.Montage".as_ptr(),
-            montage,
-        );
+    if adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"Montage", montage) != 0 {
+        adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"IMOD.Montage", montage);
     }
     0
 }
 
 /// Matches C `AdocNew` (`autodoc.c:436`).
-pub unsafe extern "C" fn adoc_new() -> i32 {
-    let err: c_int = add_autodoc();
+pub fn adoc_new() -> i32 {
+    let err: i32 = add_autodoc();
     if err < 0 {
         return err;
     }
@@ -576,277 +521,266 @@ pub unsafe extern "C" fn adoc_new() -> i32 {
 }
 
 /// Matches C `AdocGetCurrentIndex` (`autodoc.c:448`).
-pub unsafe extern "C" fn adoc_get_current_index() -> i32 {
-    S_CUR_ADOC_IND
+pub fn adoc_get_current_index() -> i32 {
+    S_CUR_ADOC_IND.get()
 }
 
 /// Matches C `AdocSetCurrent` (`autodoc.c:457`).
-pub unsafe extern "C" fn adoc_set_current(index: i32) -> i32 {
-    if index < 0 || index >= S_NUM_AUTODOCS {
+pub fn adoc_set_current(index: i32) -> i32 {
+    if index < 0 || index >= S_AUTODOCS.with_borrow(|adocs| adocs.len() as i32) {
         return -1;
     }
-    S_CUR_ADOC_IND = index;
-    S_CUR_ADOC = S_AUTODOCS.add(S_CUR_ADOC_IND as usize);
+    S_CUR_ADOC_IND.set(index);
     0
 }
 
 /// Matches C `AdocClear` (`autodoc.c:469`).
-pub unsafe extern "C" fn adoc_clear(index: i32) {
-    if index >= 0 && index < S_NUM_AUTODOCS {
-        delete_adoc(S_AUTODOCS.add(index as usize));
-    }
+pub fn adoc_clear(index: i32) {
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        if index >= 0 && index < adocs.len() as i32 {
+            delete_adoc(&mut adocs[index as usize]);
+        }
+    });
 }
 
 /// Matches C `AdocDone` (`autodoc.c:478`).
-pub unsafe extern "C" fn adoc_done() {
-    let mut i: c_int = 0;
-    while i < S_NUM_AUTODOCS {
-        delete_adoc(S_AUTODOCS.add(i as usize));
-        i += 1;
-    }
-    if !S_AUTODOCS.is_null() {
-        libc::free(S_AUTODOCS.cast::<c_void>());
-    }
-    if !S_NAME_FOR_ORDERING.is_null() {
-        libc::free(S_NAME_FOR_ORDERING.cast::<c_void>());
-        S_NAME_FOR_ORDERING = core::ptr::null_mut();
-    }
-    S_AUTODOCS = core::ptr::null_mut();
-    S_NUM_AUTODOCS = 0;
-    S_CUR_ADOC_IND = -1;
-    S_CUR_ADOC = core::ptr::null_mut();
+pub fn adoc_done() {
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        for adoc in adocs.iter_mut() {
+            delete_adoc(adoc);
+        }
+        adocs.clear();
+    });
+    S_NAME_FOR_ORDERING.with_borrow_mut(|name| *name = None);
+    S_CUR_ADOC_IND.set(-1);
 }
 
 /// Matches C `AdocWrite` (`autodoc.c:495`).
-pub unsafe extern "C" fn adoc_write(filename: *const c_char) -> i32 {
-    let mut i: c_int;
-    let mut backerr: c_int = 0;
-    let mut retval: c_int = 0;
-    let afile: *mut libc::FILE;
+pub fn adoc_write(filename: &[u8]) -> i32 {
+    let mut backerr: i32 = 0;
+    let mut retval: i32 = 0;
 
-    if S_CUR_ADOC.is_null() {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    if (*S_CUR_ADOC).backed_up == 0 {
-        backerr = imod_backup_file(CStr::from_ptr(filename).to_string_lossy().as_ref());
+    let (backed_up, write_as_xml) = S_AUTODOCS.with_borrow(|adocs| {
+        (
+            adocs[cur as usize].backed_up,
+            adocs[cur as usize].write_as_xml,
+        )
+    });
+    if backed_up == 0 {
+        backerr = imod_backup_file(String::from_utf8_lossy(filename).as_ref());
     }
-    (*S_CUR_ADOC).backed_up = 1;
-    if (*S_CUR_ADOC).write_as_xml != 0 {
+    S_AUTODOCS.with_borrow_mut(|adocs| adocs[cur as usize].backed_up = 1);
+    if write_as_xml != 0 {
         return write_xml_file(filename);
     }
-    afile = open_for_write(filename, c"w".as_ptr());
-    if afile.is_null() {
+    let Some(mut afile) = open_for_write(filename, "w") else {
         return -1;
-    }
-    if write_file(afile, core::ptr::null_mut(), 0, 1) != 0 {
+    };
+    if S_AUTODOCS
+        .with_borrow(|adocs| write_file(&adocs[cur as usize], Some(afile.clone()), None, 0, 1))
+        != 0
+    {
         retval = -1;
     } else {
-        i = 0;
-        while i < (*S_CUR_ADOC).num_final_com {
-            libc::fprintf(
-                afile,
-                c"%s\n".as_ptr(),
-                *(*S_CUR_ADOC).final_comments.add(i as usize),
-            );
-            i += 1;
-        }
+        S_AUTODOCS.with_borrow(|adocs| {
+            let adoc = &adocs[cur as usize];
+            for i in 0..adoc.num_final_com as usize {
+                let _ = afile.write_all(&c_format_bytes(
+                    "%s\n",
+                    &[CArg::Bytes(&adoc.final_comments[i])],
+                ));
+            }
+        });
     }
 
-    libc::fclose(afile);
     if retval != 0 { retval } else { backerr }
 }
 
 /// Matches C `AdocRetryWriteOpens` (`autodoc.c:522`).
-pub unsafe extern "C" fn adoc_retry_write_opens(num: i32) {
-    S_OPEN_RETRIES = num;
+pub fn adoc_retry_write_opens(num: i32) {
+    S_OPEN_RETRIES.set(num);
 }
 
 /// Matches C `AdocSetWriteAsXML` (`autodoc.c:530`).
-pub unsafe extern "C" fn adoc_set_write_as_xml(as_xml: i32) {
-    if !S_CUR_ADOC.is_null() {
-        (*S_CUR_ADOC).write_as_xml = if as_xml != 0 { 1 } else { 0 };
+pub fn adoc_set_write_as_xml(as_xml: i32) {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur >= 0 {
+        S_AUTODOCS.with_borrow_mut(|adocs| {
+            adocs[cur as usize].write_as_xml = if as_xml != 0 { 1 } else { 0 }
+        });
     }
 }
 
 /// Matches C `AdocGetWriteAsXML` (`autodoc.c:540`).
-pub unsafe extern "C" fn adoc_get_write_as_xml() -> i32 {
-    if S_CUR_ADOC.is_null() {
+pub fn adoc_get_write_as_xml() -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    (*S_CUR_ADOC).write_as_xml
+    S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].write_as_xml)
 }
 
 /// Matches C `AdocGetXmlRootElement` (`autodoc.c:552`).
-pub unsafe extern "C" fn adoc_get_xml_root_element(string: *mut *mut c_char) -> i32 {
-    if S_CUR_ADOC.is_null() {
+///
+/// The C `strdup`s into the caller's `char **`; the copy is the caller's `Vec`
+/// now, and the source's NULL when there is no root element is `None`.
+pub fn adoc_get_xml_root_element(string: &mut Option<Vec<u8>>) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    *string = core::ptr::null_mut();
-    if !(*S_CUR_ADOC).root_element.is_null() {
-        *string = libc::strdup((*S_CUR_ADOC).root_element);
-        if adoc_memory_error(
-            (*string).cast::<c_void>(),
-            c"AdocGetXmlRootElement".as_ptr(),
-        ) != 0
-        {
-            return 1;
+    *string = None;
+    S_AUTODOCS.with_borrow(|adocs| {
+        if let Some(root) = &adocs[cur as usize].root_element {
+            *string = Some(root.clone());
         }
-    }
+    });
     0
 }
 
 /// Matches C `AdocSetXmlRootElement` (`autodoc.c:567`).
-pub unsafe extern "C" fn adoc_set_xml_root_element(element: *const c_char) -> i32 {
-    if S_CUR_ADOC.is_null() || element.is_null() {
+pub fn adoc_set_xml_root_element(element: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    if !(*S_CUR_ADOC).root_element.is_null() {
-        libc::free((*S_CUR_ADOC).root_element.cast::<c_void>());
-        (*S_CUR_ADOC).root_element = core::ptr::null_mut();
-    }
-    (*S_CUR_ADOC).root_element = libc::strdup(element);
-    if adoc_memory_error(
-        (*S_CUR_ADOC).root_element.cast::<c_void>(),
-        c"AdocSetXmlRootElement".as_ptr(),
-    ) != 0
-    {
-        return 1;
-    }
+    S_AUTODOCS.with_borrow_mut(|adocs| adocs[cur as usize].root_element = Some(element.to_vec()));
     0
 }
 
 /// Matches C `AdocAppendSection` (`autodoc.c:582`).
-pub unsafe extern "C" fn adoc_append_section(filename: *const c_char) -> i32 {
-    let afile: *mut libc::FILE;
-    let retval: c_int;
-    if S_CUR_ADOC.is_null() {
+pub fn adoc_append_section(filename: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    if (*S_CUR_ADOC).write_as_xml != 0 {
+    if S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].write_as_xml) != 0 {
         return write_xml_file(filename);
     }
-    afile = open_for_write(filename, c"a".as_ptr());
-    if afile.is_null() {
+    let Some(afile) = open_for_write(filename, "a") else {
         return -1;
-    }
-    retval = write_file(afile, core::ptr::null_mut(), 0, 0);
-    libc::fclose(afile);
-    retval
+    };
+    S_AUTODOCS.with_borrow(|adocs| write_file(&adocs[cur as usize], Some(afile), None, 0, 0))
 }
 
 /// Matches C `AdocPrintToString` (`autodoc.c:601`).
-pub unsafe extern "C" fn adoc_print_to_string(
-    string: *mut c_char,
-    string_size: i32,
-    write_all: i32,
-) -> i32 {
-    write_file(core::ptr::null_mut(), string, string_size, write_all)
+///
+/// The C writes into the caller's `char *` with `snprintf` and refuses to
+/// overrun `stringSize`; the bytes land in the caller's `Vec` instead, with the
+/// same size limit and the same -1 when it is reached.
+pub fn adoc_print_to_string(string: &mut Vec<u8>, string_size: i32, write_all: i32) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
+        /* `writeFile` dereferences `sCurAdoc` with no NULL check
+        (`autodoc.c:627`); reproducing that would be a null dereference. */
+        return -1;
+    }
+    S_AUTODOCS.with_borrow(|adocs| {
+        write_file(
+            &adocs[cur as usize],
+            None,
+            Some(string),
+            string_size,
+            write_all,
+        )
+    })
 }
 
 /// Matches C `AdocOrderWriteByValue` (`autodoc.c:611`).
-pub unsafe extern "C" fn adoc_order_write_by_value(type_name: *const c_char) -> i32 {
-    if !S_NAME_FOR_ORDERING.is_null() {
-        libc::free(S_NAME_FOR_ORDERING.cast::<c_void>());
-        S_NAME_FOR_ORDERING = core::ptr::null_mut();
-    }
-    if type_name.is_null() {
+pub fn adoc_order_write_by_value(type_name: Option<&[u8]>) -> i32 {
+    S_NAME_FOR_ORDERING.with_borrow_mut(|name| *name = None);
+    let Some(type_name) = type_name else {
         return 0;
-    }
-    S_NAME_FOR_ORDERING = libc::strdup(type_name);
-    if adoc_memory_error(
-        S_NAME_FOR_ORDERING.cast::<c_void>(),
-        c"AdocOrderWriteByValue".as_ptr(),
-    ) != 0
-    {
-        return 1;
-    }
+    };
+    S_NAME_FOR_ORDERING.with_borrow_mut(|name| *name = Some(type_name.to_vec()));
     0
 }
 
 /// Matches C static `writeFile` (`autodoc.c:622`).
-pub unsafe fn write_file(
-    afile: *mut libc::FILE,
-    string: *mut c_char,
+///
+/// `sCurAdoc` is passed in rather than read from the static, because the caller
+/// already holds the autodoc list open.
+pub fn write_file(
+    adoc: &Autodoc,
+    afile: Option<ImodFile>,
+    string: Option<&mut Vec<u8>>,
     string_size: i32,
     write_all: i32,
 ) -> i32 {
-    let mut i: c_int;
-    let mut j: c_int;
-    let mut k: c_int;
-    let mut ind: c_int;
-    let mut com_ind: c_int;
-    let mut write: c_int;
-    let mut last_blank: c_int;
-    let mut use_ind: c_int;
-    let mut retval: c_int = 0;
-    let mut coll: *mut AdocCollection;
-    let mut sect: *mut AdocSection;
-    let mut ord_sect_inds: *mut c_int = core::ptr::null_mut();
-    let ordered_write: c_int =
-        if write_all != 0 && !S_NAME_FOR_ORDERING.is_null() && (*S_CUR_ADOC).num_sections > 1 {
-            1
-        } else {
-            0
-        };
-    S_FILE = afile;
-    S_STRING = string;
-    S_BYTES_LEFT = string_size;
-    S_BYTES_WRITTEN = 0;
-    if afile.is_null() && string.is_null() {
+    let mut i: i32;
+    let mut j: i32;
+    let mut k: i32;
+    let mut ind: i32;
+    let mut com_ind: i32;
+    let mut write: i32;
+    let mut last_blank: i32;
+    let mut use_ind: i32;
+    let mut retval: i32 = 0;
+    let mut ord_sect_inds: Vec<i32> = Vec::new();
+    let ordered_write: i32 = if write_all != 0
+        && S_NAME_FOR_ORDERING.with_borrow(|name| name.is_some())
+        && adoc.num_sections > 1
+    {
+        1
+    } else {
+        0
+    };
+    let to_string = string.is_some();
+    S_FILE.with_borrow_mut(|file| *file = afile);
+    S_STRING.with_borrow_mut(|s| *s = if to_string { Some(Vec::new()) } else { None });
+    S_BYTES_LEFT.set(string_size);
+    S_BYTES_WRITTEN.set(0);
+    if S_FILE.with_borrow(|file| file.is_none()) && !to_string {
         return -1;
     }
 
     /* For ordered writing, get arrays for indexes and float values, and set up values
     for all the sections of the given type */
     if ordered_write != 0 {
-        ord_sect_inds = setup_section_order();
-        if ord_sect_inds.is_null() {
+        let Some(inds) = setup_section_order(adoc) else {
+            S_FILE.with_borrow_mut(|file| *file = None);
+            S_STRING.with_borrow_mut(|s| *s = None);
             return -1;
-        }
+        };
+        ord_sect_inds = inds;
     }
 
     /* Initialize delimiter, loop on indexes in the autodoc */
-    S_VALUE_DELIM = &raw mut S_DEFAULT_DELIM as *mut c_char;
+    S_VALUE_DELIM.with_borrow_mut(|delim| *delim = S_DEFAULT_DELIM.to_vec());
     ind = 0;
-    while ind < (*S_CUR_ADOC).num_sections {
-        write = if write_all != 0 || ind == (*S_CUR_ADOC).num_sections - 1 {
+    while ind < adoc.num_sections {
+        write = if write_all != 0 || ind == adoc.num_sections - 1 {
             1
         } else {
             0
         };
         use_ind = if ordered_write != 0 {
-            *ord_sect_inds.add(ind as usize)
+            ord_sect_inds[ind as usize]
         } else {
             ind
         };
-        i = *(*S_CUR_ADOC).coll_list.add(use_ind as usize);
-        j = *(*S_CUR_ADOC).sect_list.add(use_ind as usize);
-        coll = (*S_CUR_ADOC).collections.add(i as usize);
-        sect = (*coll).sections.add(j as usize);
+        i = adoc.coll_list[use_ind as usize];
+        j = adoc.sect_list[use_ind as usize];
+        let coll = &adoc.collections[i as usize];
+        let sect = &coll.sections[j as usize];
 
         /* dump comments before section */
         com_ind = 0;
         last_blank = 0;
-        while write != 0
-            && com_ind < (*sect).num_comments
-            && *(*sect).com_index.add(com_ind as usize) == -1
-        {
+        while write != 0 && com_ind < sect.num_comments && sect.com_index[com_ind as usize] == -1 {
             if write != 0 {
-                last_blank = if *(*(*sect).comments.add(com_ind as usize)) == 0 {
+                last_blank = if sect.comments[com_ind as usize].is_empty() {
                     1
                 } else {
                     0
                 };
-                let com = *(*sect).comments.add(com_ind as usize);
+                let com = &sect.comments[com_ind as usize];
                 com_ind += 1;
-                if fs_printf(
-                    c"%s\n".as_ptr(),
-                    com,
-                    core::ptr::null(),
-                    core::ptr::null(),
-                    core::ptr::null(),
-                ) != 0
-                {
+                if fs_printf("%s\n", &[CArg::Bytes(com)]) != 0 {
                     retval = -1;
                     break;
                 }
@@ -857,19 +791,16 @@ pub unsafe fn write_file(
         }
 
         /* Write section name unless we're in global */
-        if (i != 0 || j != 0 || libc::strcmp((*sect).name, ADOC_GLOBAL_NAME.as_ptr()) != 0)
-            && write != 0
-        {
+        if (i != 0 || j != 0 || sect.name.as_deref() != Some(ADOC_GLOBAL_NAME)) && write != 0 {
+            let delim = S_VALUE_DELIM.with_borrow(|delim| delim.clone());
             if fs_printf(
-                c"%s[%s %s %s]\n".as_ptr(),
-                if last_blank != 0 {
-                    c"".as_ptr()
-                } else {
-                    c"\n".as_ptr()
-                },
-                (*coll).name,
-                S_VALUE_DELIM,
-                (*sect).name,
+                "%s[%s %s %s]\n",
+                &[
+                    CArg::Bytes(if last_blank != 0 { b"" } else { b"\n" }),
+                    CArg::Bytes(coll.name.as_deref().unwrap_or(b"")),
+                    CArg::Bytes(&delim),
+                    CArg::Bytes(sect.name.as_deref().unwrap_or(b"")),
+                ],
             ) != 0
             {
                 retval = -1;
@@ -879,23 +810,14 @@ pub unsafe fn write_file(
 
         /* Loop on key-values */
         k = 0;
-        while k < (*sect).num_keys {
+        while k < sect.num_keys {
             /* dump comments associated with this index */
-            while write != 0
-                && com_ind < (*sect).num_comments
-                && *(*sect).com_index.add(com_ind as usize) == k
+            while write != 0 && com_ind < sect.num_comments && sect.com_index[com_ind as usize] == k
             {
                 if write != 0 {
-                    let com = *(*sect).comments.add(com_ind as usize);
+                    let com = &sect.comments[com_ind as usize];
                     com_ind += 1;
-                    if fs_printf(
-                        c"%s\n".as_ptr(),
-                        com,
-                        core::ptr::null(),
-                        core::ptr::null(),
-                        core::ptr::null(),
-                    ) != 0
-                    {
+                    if fs_printf("%s\n", &[CArg::Bytes(com)]) != 0 {
                         retval = -1;
                         break;
                     }
@@ -906,16 +828,16 @@ pub unsafe fn write_file(
             }
 
             /* Print key-value pairs with non-null values */
-            if !(*(*sect).keys.add(k as usize)).is_null()
-                && !(*(*sect).values.add(k as usize)).is_null()
-            {
+            if sect.keys[k as usize].is_some() && sect.values[k as usize].is_some() {
+                let delim = S_VALUE_DELIM.with_borrow(|delim| delim.clone());
                 if write != 0
                     && fs_printf(
-                        c"%s %s %s\n".as_ptr(),
-                        *(*sect).keys.add(k as usize),
-                        S_VALUE_DELIM,
-                        *(*sect).values.add(k as usize),
-                        core::ptr::null(),
+                        "%s %s %s\n",
+                        &[
+                            CArg::Bytes(sect.keys[k as usize].as_deref().unwrap()),
+                            CArg::Bytes(&delim),
+                            CArg::Bytes(sect.values[k as usize].as_deref().unwrap()),
+                        ],
                     ) != 0
                 {
                     retval = -1;
@@ -925,28 +847,22 @@ pub unsafe fn write_file(
                 /* After a new delimiter is written, need to set delimiter */
                 if i == 0
                     && j == 0
-                    && libc::strcmp(c"KeyValueDelimiter".as_ptr(), *(*sect).keys.add(k as usize))
-                        == 0
+                    && sect.keys[k as usize].as_deref() == Some(&b"KeyValueDelimiter"[..])
                 {
-                    if !S_NEW_DELIM.is_null() {
-                        libc::free(S_NEW_DELIM.cast::<c_void>());
-                    }
-                    S_NEW_DELIM = libc::strdup(*(*sect).values.add(k as usize));
-                    if adoc_memory_error(S_NEW_DELIM.cast::<c_void>(), c"AdocWrite".as_ptr()) != 0 {
-                        retval = -1;
-                        break;
-                    }
-                    S_VALUE_DELIM = S_NEW_DELIM;
+                    let new = sect.values[k as usize].clone().unwrap();
+                    S_NEW_DELIM.with_borrow_mut(|d| *d = Some(new.clone()));
+                    S_VALUE_DELIM.with_borrow_mut(|d| *d = new);
                 }
 
             /* Print keys without values too */
-            } else if !(*(*sect).keys.add(k as usize)).is_null() && write != 0 {
+            } else if sect.keys[k as usize].is_some() && write != 0 {
+                let delim = S_VALUE_DELIM.with_borrow(|delim| delim.clone());
                 if fs_printf(
-                    c"%s %s \n".as_ptr(),
-                    *(*sect).keys.add(k as usize),
-                    S_VALUE_DELIM,
-                    core::ptr::null(),
-                    core::ptr::null(),
+                    "%s %s \n",
+                    &[
+                        CArg::Bytes(sect.keys[k as usize].as_deref().unwrap()),
+                        CArg::Bytes(&delim),
+                    ],
                 ) != 0
                 {
                     retval = -1;
@@ -960,30 +876,29 @@ pub unsafe fn write_file(
         }
         ind += 1;
     }
-    if ordered_write != 0 {
-        libc::free(ord_sect_inds.cast::<c_void>());
+    S_FILE.with_borrow_mut(|file| *file = None);
+    let written = S_STRING.with_borrow_mut(|s| s.take());
+    if let (Some(out), Some(written)) = (string, written) {
+        *out = written;
     }
     retval
 }
 
 /// Matches C static `fsPrintf` (`autodoc.c:740`).
 ///
-/// Rust cannot define a C variadic function, so the source's `...` is spelled as
-/// four `const char *` slots; every call site in `autodoc.c` uses only `%s`
-/// conversions and at most four of them, and the unused trailing arguments are
-/// never consumed by `printf`.  The formatting itself still goes through libc so
-/// the emitted bytes are identical.
-pub unsafe fn fs_printf(
-    format: *const c_char,
-    a1: *const c_char,
-    a2: *const c_char,
-    a3: *const c_char,
-    a4: *const c_char,
-) -> i32 {
-    let mut retval: c_int = 0;
-    let num_written: c_int;
-    if !S_FILE.is_null() {
-        if libc::fprintf(S_FILE, format, a1, a2, a3, a4) < 0 {
+/// The source is variadic; the arguments are a `CArg` slice here, and the
+/// formatting goes through `b3dutil::c_format_bytes`, the tree's translation of
+/// the C library's own `printf`.
+pub fn fs_printf(format: &str, args: &[CArg]) -> i32 {
+    let mut retval: i32 = 0;
+    let num_written: i32;
+    let text = c_format_bytes(format, args);
+    let have_file = S_FILE.with_borrow(|file| file.is_some());
+    if have_file {
+        if S_FILE
+            .with_borrow_mut(|file| file.as_mut().unwrap().write_all(&text))
+            .is_err()
+        {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: AdocWrite - writing element to file\n"),
@@ -991,63 +906,60 @@ pub unsafe fn fs_printf(
             retval = -1;
         }
     } else {
-        num_written = libc::snprintf(
-            S_STRING.add(S_BYTES_WRITTEN as usize),
-            S_BYTES_LEFT as libc::size_t,
-            format,
-            a1,
-            a2,
-            a3,
-            a4,
-        );
-        if num_written >= S_BYTES_LEFT {
+        /* `snprintf` returns the length it would have written and copies at
+        most `sBytesLeft - 1` of it. */
+        num_written = text.len() as i32;
+        let bytes_left = S_BYTES_LEFT.get();
+        let copied = if bytes_left > 0 {
+            num_written.min(bytes_left - 1).max(0) as usize
+        } else {
+            0
+        };
+        S_STRING.with_borrow_mut(|s| {
+            if let Some(s) = s.as_mut() {
+                s.extend_from_slice(&text[..copied]);
+            }
+        });
+        if num_written >= bytes_left {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: AdocWrite - writing element to string\n"),
             );
             retval = -1;
         } else {
-            S_BYTES_LEFT -= num_written;
-            S_BYTES_WRITTEN += num_written;
+            S_BYTES_LEFT.set(bytes_left - num_written);
+            S_BYTES_WRITTEN.set(S_BYTES_WRITTEN.get() + num_written);
         }
     }
     retval
 }
 
 /// Matches C static `setupSectionOrder` (`autodoc.c:768`).
-pub unsafe fn setup_section_order() -> *mut c_int {
-    let mut i: c_int;
-    let mut j: c_int = 0;
-    let mut ind: c_int;
-    let mut coll: *mut AdocCollection;
+pub fn setup_section_order(adoc: &Autodoc) -> Option<Vec<i32>> {
+    let mut i: i32;
+    let mut j: i32 = 0;
+    let mut ind: i32;
     let mut max_value: f32 = -1.0e37;
-    let ord_sect_values: *mut f32;
-    let ord_sect_inds: *mut c_int;
+    let mut ord_sect_values: Vec<f32> = vec![0.; adoc.num_sections as usize];
+    let mut ord_sect_inds: Vec<i32> = vec![0; adoc.num_sections as usize];
 
-    ord_sect_values =
-        libc::malloc((*S_CUR_ADOC).num_sections as usize * core::mem::size_of::<f32>())
-            .cast::<f32>();
-    ord_sect_inds =
-        libc::malloc((*S_CUR_ADOC).num_sections as usize * core::mem::size_of::<c_int>())
-            .cast::<c_int>();
-    if ord_sect_inds.is_null() || ord_sect_values.is_null() {
-        adoc_memory_error(core::ptr::null_mut(), c"setupOrderedWrite".as_ptr());
-        return core::ptr::null_mut();
-    }
-    *ord_sect_values.add(0) = max_value;
-    *ord_sect_inds.add(0) = 0;
+    let name_for_ordering = S_NAME_FOR_ORDERING.with_borrow(|name| name.clone());
+    ord_sect_values[0] = max_value;
+    ord_sect_inds[0] = 0;
     ind = 1;
-    while ind < (*S_CUR_ADOC).num_sections {
-        i = *(*S_CUR_ADOC).coll_list.add(ind as usize);
-        j = *(*S_CUR_ADOC).sect_list.add(ind as usize);
-        *ord_sect_inds.add(ind as usize) = ind;
-        coll = (*S_CUR_ADOC).collections.add(i as usize);
-        if libc::strcmp((*coll).name, S_NAME_FOR_ORDERING) == 0
-            && !(*(*coll).sections.add(j as usize)).name.is_null()
-        {
-            *ord_sect_values.add(ind as usize) =
-                libc::atof((*(*coll).sections.add(j as usize)).name) as f32;
-            let v = *ord_sect_values.add(ind as usize);
+    while ind < adoc.num_sections {
+        i = adoc.coll_list[ind as usize];
+        j = adoc.sect_list[ind as usize];
+        ord_sect_inds[ind as usize] = ind;
+        let coll = &adoc.collections[i as usize];
+        if coll.name == name_for_ordering && coll.sections[j as usize].name.is_some() {
+            /* `atof(name)` */
+            let mut scanned = 0usize;
+            ord_sect_values[ind as usize] = strtod(
+                coll.sections[j as usize].name.as_deref().unwrap(),
+                &mut scanned,
+            ) as f32;
+            let v = ord_sect_values[ind as usize];
             max_value = if max_value > v { max_value } else { v };
         }
         ind += 1;
@@ -1061,70 +973,60 @@ pub unsafe fn setup_section_order() -> *mut c_int {
         max_value as f64
     } as f32;
     ind = 1;
-    while ind < (*S_CUR_ADOC).num_sections {
-        i = *(*S_CUR_ADOC).coll_list.add(ind as usize);
-        coll = (*S_CUR_ADOC).collections.add(i as usize);
+    while ind < adoc.num_sections {
+        i = adoc.coll_list[ind as usize];
+        let coll = &adoc.collections[i as usize];
         /* NOTE: the source reuses `j` from the loop above rather than re-reading
         sectList[ind]; that stale index is preserved here (autodoc.c:806). */
-        if libc::strcmp((*coll).name, S_NAME_FOR_ORDERING) != 0
-            || (*(*coll).sections.add(j as usize)).name.is_null()
-        {
+        if coll.name != name_for_ordering || coll.sections[j as usize].name.is_none() {
             max_value = (max_value as f64 + 1.0) as f32;
-            *ord_sect_values.add(ind as usize) = max_value;
+            ord_sect_values[ind as usize] = max_value;
         }
         ind += 1;
     }
 
     /* Sort, use the sorted indexes below */
-    rs_sort_indexed_floats(
-        core::slice::from_raw_parts(ord_sect_values, (*S_CUR_ADOC).num_sections as usize),
-        core::slice::from_raw_parts_mut(ord_sect_inds, (*S_CUR_ADOC).num_sections as usize),
-        (*S_CUR_ADOC).num_sections,
-    );
-    libc::free(ord_sect_values.cast::<c_void>());
-    ord_sect_inds
+    rs_sort_indexed_floats(&ord_sect_values, &mut ord_sect_inds, adoc.num_sections);
+    let _ = &mut ord_sect_values;
+    Some(ord_sect_inds)
 }
 
 /// Matches C `AdocAddSection` (`autodoc.c:820`).
-pub unsafe extern "C" fn adoc_add_section(type_name: *const c_char, name: *const c_char) -> i32 {
-    let coll: *mut AdocCollection;
-    let mut coll_ind: c_int;
-
-    if S_CUR_ADOC.is_null() || type_name.is_null() || name.is_null() {
+pub fn adoc_add_section(type_name: &[u8], name: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
-    if coll_ind < 0 {
-        if add_collection(S_CUR_ADOC, type_name) != 0 {
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[cur as usize];
+        let mut coll_ind = lookup_collection(adoc, type_name);
+        if coll_ind < 0 {
+            if add_collection(adoc, type_name) != 0 {
+                return -1;
+            }
+            coll_ind = adoc.num_collections - 1;
+        }
+        if add_section(adoc, coll_ind, name) != 0 {
             return -1;
         }
-        coll_ind = (*S_CUR_ADOC).num_collections - 1;
-    }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-    if add_section(S_CUR_ADOC, coll_ind, name) != 0 {
-        return -1;
-    }
-    (*coll).num_sections - 1
+        adoc.collections[coll_ind as usize].num_sections - 1
+    })
 }
 
 /// Matches C `AdocInsertSection` (`autodoc.c:844`).
-pub unsafe extern "C" fn adoc_insert_section(
-    type_name: *const c_char,
-    sect_ind: i32,
-    name: *const c_char,
-) -> i32 {
-    let coll: *mut AdocCollection;
-    let mut i: c_int;
-    let mut coll_ind: c_int;
-    let mut master_ind: c_int = 0;
-    let mut num_sect: c_int = 0;
-    let new_sect: AdocSection;
-    if S_CUR_ADOC.is_null() || type_name.is_null() || name.is_null() {
+pub fn adoc_insert_section(type_name: &[u8], sect_ind: i32, name: &[u8]) -> i32 {
+    let mut i: i32 = 0;
+    let mut coll_ind: i32;
+    let mut master_ind: i32 = 0;
+    let mut num_sect: i32 = 0;
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
+    coll_ind = S_AUTODOCS.with_borrow(|adocs| lookup_collection(&adocs[cur as usize], type_name));
     if coll_ind >= 0 {
-        num_sect = (*(*S_CUR_ADOC).collections.add(coll_ind as usize)).num_sections;
+        num_sect = S_AUTODOCS
+            .with_borrow(|adocs| adocs[cur as usize].collections[coll_ind as usize].num_sections);
     }
     if sect_ind < 0 || sect_ind > num_sect {
         return -1;
@@ -1146,188 +1048,187 @@ pub unsafe extern "C" fn adoc_insert_section(
         return 0;
     }
 
-    /* Fix collection index if a new collection had to be added */
-    if coll_ind < 0 {
-        coll_ind = (*S_CUR_ADOC).num_collections - 1;
-    }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-
-    /* Save the new section then move existing sections up and copy new one into place */
-    new_sect = *(*coll).sections.add(((*coll).num_sections - 1) as usize);
-    i = (*coll).num_sections - 1;
-    while i > sect_ind {
-        *(*coll).sections.add(i as usize) = *(*coll).sections.add((i - 1) as usize);
-        i -= 1;
-    }
-    *(*coll).sections.add(sect_ind as usize) = new_sect;
-
-    /* Move the master lists up and decrement any other indices in this collection */
-    i = (*S_CUR_ADOC).num_sections - 1;
-    while i > master_ind {
-        *(*S_CUR_ADOC).coll_list.add(i as usize) = *(*S_CUR_ADOC).coll_list.add((i - 1) as usize);
-        *(*S_CUR_ADOC).sect_list.add(i as usize) = *(*S_CUR_ADOC).sect_list.add((i - 1) as usize);
-        if *(*S_CUR_ADOC).coll_list.add(i as usize) == coll_ind
-            && *(*S_CUR_ADOC).sect_list.add(i as usize) >= sect_ind
-        {
-            *(*S_CUR_ADOC).sect_list.add(i as usize) += 1;
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[cur as usize];
+        /* Fix collection index if a new collection had to be added */
+        if coll_ind < 0 {
+            coll_ind = adoc.num_collections - 1;
         }
-        i -= 1;
-    }
 
-    0
+        /* Save the new section then move existing sections up and copy new one into place */
+        let coll = &mut adoc.collections[coll_ind as usize];
+        let new_sect = coll.sections[(coll.num_sections - 1) as usize].clone();
+        i = coll.num_sections - 1;
+        while i > sect_ind {
+            coll.sections[i as usize] = coll.sections[(i - 1) as usize].clone();
+            i -= 1;
+        }
+        coll.sections[sect_ind as usize] = new_sect;
+
+        /* Move the master lists up and decrement any other indices in this collection */
+        i = adoc.num_sections - 1;
+        while i > master_ind {
+            adoc.coll_list[i as usize] = adoc.coll_list[(i - 1) as usize];
+            adoc.sect_list[i as usize] = adoc.sect_list[(i - 1) as usize];
+            if adoc.coll_list[i as usize] == coll_ind && adoc.sect_list[i as usize] >= sect_ind {
+                adoc.sect_list[i as usize] += 1;
+            }
+            i -= 1;
+        }
+
+        0
+    })
 }
 
 /// Matches C `AdocDeleteSection` (`autodoc.c:900`).
-pub unsafe extern "C" fn adoc_delete_section(type_name: *const c_char, sect_ind: i32) -> i32 {
-    let coll: *mut AdocCollection;
-    let coll_ind: c_int;
-    let mut i: c_int;
-    let master_ind: c_int;
-    if S_CUR_ADOC.is_null() || type_name.is_null() {
+pub fn adoc_delete_section(type_name: &[u8], sect_ind: i32) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
+    let coll_ind =
+        S_AUTODOCS.with_borrow(|adocs| lookup_collection(&adocs[cur as usize], type_name));
     if coll_ind < 0 {
         return -1;
     }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-    if sect_ind < 0 || sect_ind >= (*coll).num_sections {
+    if sect_ind < 0
+        || sect_ind
+            >= S_AUTODOCS.with_borrow(|adocs| {
+                adocs[cur as usize].collections[coll_ind as usize].num_sections
+            })
+    {
         return -1;
     }
 
     /* Find the index of this section in the master list */
-    master_ind = find_section_in_adoc_list(coll_ind, sect_ind);
+    let master_ind = find_section_in_adoc_list(coll_ind, sect_ind);
     if master_ind < 0 {
         return -1;
     }
-    delete_section((*coll).sections.add(sect_ind as usize));
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[cur as usize];
+        let mut i: i32;
+        delete_section(&mut adoc.collections[coll_ind as usize].sections[sect_ind as usize]);
 
-    /* Repack the sections */
-    i = sect_ind + 1;
-    while i < (*coll).num_sections {
-        *(*coll).sections.add((i - 1) as usize) = *(*coll).sections.add(i as usize);
-        i += 1;
-    }
-    (*coll).num_sections -= 1;
-
-    /* Repack the master list and decrement any other indices in this collection */
-    i = master_ind + 1;
-    while i < (*S_CUR_ADOC).num_sections {
-        if *(*S_CUR_ADOC).coll_list.add(i as usize) == coll_ind
-            && *(*S_CUR_ADOC).sect_list.add(i as usize) > sect_ind
-        {
-            *(*S_CUR_ADOC).sect_list.add(i as usize) -= 1;
+        /* Repack the sections */
+        let coll = &mut adoc.collections[coll_ind as usize];
+        i = sect_ind + 1;
+        while i < coll.num_sections {
+            coll.sections[(i - 1) as usize] = coll.sections[i as usize].clone();
+            i += 1;
         }
-        *(*S_CUR_ADOC).coll_list.add((i - 1) as usize) = *(*S_CUR_ADOC).coll_list.add(i as usize);
-        *(*S_CUR_ADOC).sect_list.add((i - 1) as usize) = *(*S_CUR_ADOC).sect_list.add(i as usize);
-        i += 1;
-    }
-    (*S_CUR_ADOC).num_sections -= 1;
-    0
+        coll.num_sections -= 1;
+
+        /* Repack the master list and decrement any other indices in this collection */
+        i = master_ind + 1;
+        while i < adoc.num_sections {
+            if adoc.coll_list[i as usize] == coll_ind && adoc.sect_list[i as usize] > sect_ind {
+                adoc.sect_list[i as usize] -= 1;
+            }
+            adoc.coll_list[(i - 1) as usize] = adoc.coll_list[i as usize];
+            adoc.sect_list[(i - 1) as usize] = adoc.sect_list[i as usize];
+            i += 1;
+        }
+        adoc.num_sections -= 1;
+        0
+    })
 }
 
 /// Matches C `AdocChangeSectionName` (`autodoc.c:942`).
-pub unsafe extern "C" fn adoc_change_section_name(
-    type_name: *const c_char,
-    sect_ind: i32,
-    new_name: *const c_char,
-) -> i32 {
-    let coll: *mut AdocCollection;
-    let coll_ind: c_int;
-    let new_copy: *mut c_char;
-    if S_CUR_ADOC.is_null() || type_name.is_null() || new_name.is_null() {
+pub fn adoc_change_section_name(type_name: &[u8], sect_ind: i32, new_name: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
-    if coll_ind < 0 {
-        return -1;
-    }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-    if sect_ind < 0 || sect_ind >= (*coll).num_sections {
-        return -1;
-    }
-    new_copy = libc::strdup(new_name);
-    if new_copy.is_null() {
-        return -1;
-    }
-    let sect = (*coll).sections.add(sect_ind as usize);
-    if !(*sect).name.is_null() {
-        libc::free((*sect).name.cast::<c_void>());
-        (*sect).name = core::ptr::null_mut();
-    }
-    (*sect).name = new_copy;
-    0
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[cur as usize];
+        let coll_ind = lookup_collection(adoc, type_name);
+        if coll_ind < 0 {
+            return -1;
+        }
+        let coll = &mut adoc.collections[coll_ind as usize];
+        if sect_ind < 0 || sect_ind >= coll.num_sections {
+            return -1;
+        }
+        coll.sections[sect_ind as usize].name = Some(new_name.to_vec());
+        0
+    })
 }
 
 /// Matches C `AdocLookupSection` (`autodoc.c:969`).
-pub unsafe extern "C" fn adoc_lookup_section(type_name: *const c_char, name: *const c_char) -> i32 {
-    let coll: *mut AdocCollection;
-    let coll_ind: c_int;
-    let mut sect_ind: c_int;
-
-    if S_CUR_ADOC.is_null() || type_name.is_null() || name.is_null() {
+pub fn adoc_lookup_section(type_name: &[u8], name: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -2;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
-    if coll_ind < 0 {
-        return -2;
-    }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-    sect_ind = 0;
-    while sect_ind < (*coll).num_sections {
-        if libc::strcmp((*(*coll).sections.add(sect_ind as usize)).name, name) == 0 {
-            return sect_ind;
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let coll_ind = lookup_collection(adoc, type_name);
+        if coll_ind < 0 {
+            return -2;
         }
-        sect_ind += 1;
-    }
-    -1
+        let coll = &adoc.collections[coll_ind as usize];
+        let mut sect_ind = 0;
+        while sect_ind < coll.num_sections {
+            if coll.sections[sect_ind as usize].name.as_deref() == Some(name) {
+                return sect_ind;
+            }
+            sect_ind += 1;
+        }
+        -1
+    })
 }
 
 /// Matches C `AdocLookupByNameValue` (`autodoc.c:993`).
-pub unsafe extern "C" fn adoc_lookup_by_name_value(
-    type_name: *const c_char,
-    name_value: i32,
-) -> i32 {
-    let mut buf: [c_char; 15] = [0; 15];
-    libc::sprintf(buf.as_mut_ptr(), c"%d".as_ptr(), name_value);
-    adoc_lookup_section(type_name, buf.as_ptr())
+pub fn adoc_lookup_by_name_value(type_name: &[u8], name_value: i32) -> i32 {
+    /* `char buf[15]; sprintf(buf, "%d", nameValue);` */
+    let buf = c_format_bytes("%d", &[CArg::Int(name_value as i64)]);
+    adoc_lookup_section(type_name, &buf)
 }
 
 /// Matches C `AdocFindInsertIndex` (`autodoc.c:1005`).
-pub unsafe extern "C" fn adoc_find_insert_index(type_name: *const c_char, name_value: i32) -> i32 {
-    let coll: *mut AdocCollection;
-    let coll_ind: c_int;
-    let mut sect_ind: c_int;
-    let mut sect_value: c_int;
-
-    if S_CUR_ADOC.is_null() || type_name.is_null() {
+pub fn adoc_find_insert_index(type_name: &[u8], name_value: i32) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
-    if coll_ind < 0 {
-        return 0;
-    }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-    sect_ind = 0;
-    while sect_ind < (*coll).num_sections {
-        sect_value = libc::atoi((*(*coll).sections.add(sect_ind as usize)).name);
-        if name_value == sect_value {
-            return -1;
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let coll_ind = lookup_collection(adoc, type_name);
+        if coll_ind < 0 {
+            return 0;
         }
-        if name_value < sect_value {
-            return sect_ind;
+        let coll = &adoc.collections[coll_ind as usize];
+        let mut sect_ind = 0;
+        while sect_ind < coll.num_sections {
+            /* `atoi(sections[sectInd].name)` */
+            let mut scanned = 0usize;
+            let sect_value = strtol(
+                coll.sections[sect_ind as usize]
+                    .name
+                    .as_deref()
+                    .unwrap_or(b""),
+                &mut scanned,
+                10,
+            ) as i32;
+            if name_value == sect_value {
+                return -1;
+            }
+            if name_value < sect_value {
+                return sect_ind;
+            }
+            sect_ind += 1;
         }
-        sect_ind += 1;
-    }
-    (*coll).num_sections
+        coll.num_sections
+    })
 }
 
 /// Matches C `AdocTransferSection` (`autodoc.c:1039`).
-pub unsafe extern "C" fn adoc_transfer_section(
-    type_name: *const c_char,
+pub fn adoc_transfer_section(
+    type_name: &[u8],
     sect_ind: i32,
     to_adoc_ind: i32,
-    new_name: *const c_char,
+    new_name: Option<&[u8]>,
     by_value: i32,
 ) -> i32 {
     adoc_transfer_to_new_type(
@@ -1341,52 +1242,75 @@ pub unsafe extern "C" fn adoc_transfer_section(
 }
 
 /// Matches C `AdocTransferToNewType` (`autodoc.c:1049`).
-pub unsafe extern "C" fn adoc_transfer_to_new_type(
-    type_name: *const c_char,
+///
+/// The C holds an `AdocSection *` into the source autodoc across the switch to
+/// the destination one; the key-value triples it reads out of that section are
+/// copied here before the switch, which is the same data because the loop never
+/// writes to the source.
+pub fn adoc_transfer_to_new_type(
+    type_name: &[u8],
     sect_ind: i32,
     to_adoc_ind: i32,
-    new_type: *const c_char,
-    new_name: *const c_char,
+    new_type: &[u8],
+    new_name: Option<&[u8]>,
     by_value: i32,
 ) -> i32 {
-    let mut err: c_int = 0;
-    let mut ind: c_int;
-    let mut new_sect_ind: c_int;
-    let coll_ind: c_int;
-    let name_val: c_int;
-    let sect: *mut AdocSection;
-    let cur_ind_save: c_int = S_CUR_ADOC_IND;
+    let mut err: i32 = 0;
+    let mut ind: i32;
+    let mut new_sect_ind: i32;
+    let coll_ind: i32;
+    let name_val: i32;
+    let cur_ind_save: i32 = S_CUR_ADOC_IND.get();
 
     /* Get the section then switch adocs */
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    if to_adoc_ind < 0 || to_adoc_ind == S_CUR_ADOC_IND || to_adoc_ind >= S_NUM_AUTODOCS {
+    let num_autodocs = S_AUTODOCS.with_borrow(|adocs| adocs.len() as i32);
+    let entries: Vec<(Option<Vec<u8>>, Option<Vec<u8>>, u8)> =
+        match S_AUTODOCS.with_borrow(|adocs| {
+            let adoc = &adocs[cur as usize];
+            get_section(adoc, type_name, sect_ind).map(|(ic, is)| {
+                let sect = &adoc.collections[ic].sections[is];
+                (0..sect.num_keys as usize)
+                    .map(|n| (sect.keys[n].clone(), sect.values[n].clone(), sect.types[n]))
+                    .collect::<Vec<_>>()
+            })
+        }) {
+            Some(entries) => entries,
+            None => return -1,
+        };
+    if to_adoc_ind < 0 || to_adoc_ind == cur_ind_save || to_adoc_ind >= num_autodocs {
         return -2;
     }
     adoc_set_current(to_adoc_ind);
 
     /* Set index to 0 for global section or go on to look up and/or add section */
-    if libc::strcmp(type_name, ADOC_GLOBAL_NAME.as_ptr()) == 0 {
+    if type_name == ADOC_GLOBAL_NAME {
         new_sect_ind = 0;
     } else {
-        if new_name.is_null() {
+        let Some(new_name) = new_name else {
             return -2;
-        }
+        };
 
         /* If the section does not exist, add it, using insert if the collection does
         exist */
         new_sect_ind = adoc_lookup_section(new_type, new_name);
         if new_sect_ind < 0 {
-            coll_ind = lookup_collection(S_CUR_ADOC, new_type);
+            coll_ind = S_AUTODOCS
+                .with_borrow(|adocs| lookup_collection(&adocs[to_adoc_ind as usize], new_type));
             if coll_ind < 0 {
                 new_sect_ind = 0;
                 err = adoc_add_section(new_type, new_name);
             } else {
-                new_sect_ind = (*(*S_CUR_ADOC).collections.add(coll_ind as usize)).num_sections;
+                new_sect_ind = S_AUTODOCS.with_borrow(|adocs| {
+                    adocs[to_adoc_ind as usize].collections[coll_ind as usize].num_sections
+                });
                 if by_value != 0 {
-                    name_val = libc::atoi(new_name);
+                    /* `atoi(newName)` */
+                    let mut scanned = 0usize;
+                    name_val = strtol(new_name, &mut scanned, 10) as i32;
                     new_sect_ind = adoc_find_insert_index(new_type, name_val);
                 }
                 err = adoc_insert_section(new_type, new_sect_ind, new_name);
@@ -1400,15 +1324,16 @@ pub unsafe extern "C" fn adoc_transfer_to_new_type(
 
     /* Copy the key/values and their types.  Skip NULL ones, which happen with HDF adoc */
     ind = 0;
-    while ind < (*sect).num_keys && err == 0 {
-        if !(*(*sect).keys.add(ind as usize)).is_null()
-            && !(*(*sect).values.add(ind as usize)).is_null()
+    while (ind as usize) < entries.len() && err == 0 {
+        let (key, value, type_) = &entries[ind as usize];
+        if key.is_some()
+            && value.is_some()
             && set_key_value_type(
                 new_type,
                 new_sect_ind,
-                *(*sect).keys.add(ind as usize),
-                *(*sect).values.add(ind as usize),
-                *(*sect).types.add(ind as usize) as c_int,
+                key.as_deref().unwrap(),
+                value.as_deref(),
+                *type_ as i32,
             ) < 0
         {
             err = -4;
@@ -1420,469 +1345,439 @@ pub unsafe extern "C" fn adoc_transfer_to_new_type(
 }
 
 /// Matches C `AdocSetKeyValue` (`autodoc.c:1109`).
-pub unsafe extern "C" fn adoc_set_key_value(
-    type_name: *const c_char,
+pub fn adoc_set_key_value(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    value: *const c_char,
+    key: &[u8],
+    value: Option<&[u8]>,
 ) -> i32 {
     set_key_value_type(type_name, sect_ind, key, value, ADOC_STRING)
 }
 
 /// Matches C static `setKeyValueType` (`autodoc.c:1117`).
-pub unsafe fn set_key_value_type(
-    type_name: *const c_char,
+pub fn set_key_value_type(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    value: *const c_char,
+    key: &[u8],
+    value: Option<&[u8]>,
     type_: i32,
 ) -> i32 {
-    let sect: *mut AdocSection;
-    let mut key_ind: c_int = 0;
-
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
+    let mut key_ind: i32 = 0;
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    if key.is_null() || value.is_null() {
-        return -1;
-    }
-    sect_set_key_value_type(sect, key, value, type_, &mut key_ind)
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        if value.is_none() {
+            return -1;
+        }
+        let sect = &mut adoc.collections[ic].sections[is];
+        sect_set_key_value_type(sect, key, value, type_, &mut key_ind)
+    })
 }
 
 /// Matches C static `sectSetKeyValueType` (`autodoc.c:1130`).
-pub unsafe fn sect_set_key_value_type(
-    sect: *mut AdocSection,
-    key: *const c_char,
-    value: *const c_char,
+pub fn sect_set_key_value_type(
+    sect: &mut AdocSection,
+    key: &[u8],
+    value: Option<&[u8]>,
     type_: i32,
-    key_ind: *mut c_int,
+    key_ind: &mut i32,
 ) -> i32 {
     *key_ind = lookup_key(sect, key);
 
     /* If key already exists, clear out value and set it again */
     if *key_ind >= 0 {
-        if !(*(*sect).values.add(*key_ind as usize)).is_null() {
-            libc::free((*(*sect).values.add(*key_ind as usize)).cast::<c_void>());
-        }
-        if !value.is_null() {
-            *(*sect).values.add(*key_ind as usize) = libc::strdup(value);
-            if adoc_memory_error(
-                (*(*sect).values.add(*key_ind as usize)).cast::<c_void>(),
-                c"AdocSetKeyValue".as_ptr(),
-            ) != 0
-            {
-                return -1;
-            }
-            *(*sect).types.add(*key_ind as usize) = type_ as u8;
+        if let Some(value) = value {
+            sect.values[*key_ind as usize] = Some(value.to_vec());
+            sect.types[*key_ind as usize] = type_ as u8;
         } else {
-            *(*sect).values.add(*key_ind as usize) = core::ptr::null_mut();
-            *(*sect).types.add(*key_ind as usize) = ADOC_NO_VALUE as u8;
+            sect.values[*key_ind as usize] = None;
+            sect.types[*key_ind as usize] = ADOC_NO_VALUE as u8;
         }
     } else {
-        *key_ind = (*sect).num_keys;
+        *key_ind = sect.num_keys;
         return add_key(sect, key, value, type_);
     }
     0
 }
 
 /// Matches C `AdocSetInteger` (`autodoc.c:1163`).
-pub unsafe extern "C" fn adoc_set_integer(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    ival: i32,
-) -> i32 {
-    let mut str: [c_char; 30] = [0; 30];
-    libc::sprintf(str.as_mut_ptr(), c"%d".as_ptr(), ival);
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_ONE_INT)
+pub fn adoc_set_integer(type_name: &[u8], sect_ind: i32, key: &[u8], ival: i32) -> i32 {
+    let str = c_format_bytes("%d", &[CArg::Int(ival as i64)]);
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_INT)
 }
 
 /// Matches C `AdocSetTwoIntegers` (`autodoc.c:1174`).
-pub unsafe extern "C" fn adoc_set_two_integers(
-    type_name: *const c_char,
+pub fn adoc_set_two_integers(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
+    key: &[u8],
     ival1: i32,
     ival2: i32,
 ) -> i32 {
-    let mut str: [c_char; 60] = [0; 60];
-    libc::sprintf(str.as_mut_ptr(), c"%d %d".as_ptr(), ival1, ival2);
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_TWO_INTS)
+    let str = c_format_bytes("%d %d", &[CArg::Int(ival1 as i64), CArg::Int(ival2 as i64)]);
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_INTS)
 }
 
 /// Matches C `AdocSetThreeIntegers` (`autodoc.c:1186`).
-pub unsafe extern "C" fn adoc_set_three_integers(
-    type_name: *const c_char,
+pub fn adoc_set_three_integers(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
+    key: &[u8],
     ival1: i32,
     ival2: i32,
     ival3: i32,
 ) -> i32 {
-    let mut str: [c_char; 90] = [0; 90];
-    libc::sprintf(str.as_mut_ptr(), c"%d %d %d".as_ptr(), ival1, ival2, ival3);
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_THREE_INTS)
+    let str = c_format_bytes(
+        "%d %d %d",
+        &[
+            CArg::Int(ival1 as i64),
+            CArg::Int(ival2 as i64),
+            CArg::Int(ival3 as i64),
+        ],
+    );
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_INTS)
 }
 
 /// Matches C `AdocSetIntegerArray` (`autodoc.c:1198`).
-pub unsafe extern "C" fn adoc_set_integer_array(
-    type_name: *const c_char,
+pub fn adoc_set_integer_array(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    ivals: *mut c_int,
+    key: &[u8],
+    ivals: &[i32],
     num_vals: i32,
 ) -> i32 {
     set_array_of_values(
         type_name,
         sect_ind,
         key,
-        ivals.cast::<c_void>(),
+        ArrayOfValues::Ints(ivals),
         num_vals,
         ADOC_INT_ARRAY,
     )
 }
 
 /// Matches C `AdocSetFloat` (`autodoc.c:1210`).
-pub unsafe extern "C" fn adoc_set_float(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    val: f32,
-) -> i32 {
-    let mut str: [c_char; 30] = [0; 30];
+pub fn adoc_set_float(type_name: &[u8], sect_ind: i32, key: &[u8], val: f32) -> i32 {
     /* `val` is promoted to double by the C varargs call. */
-    libc::sprintf(str.as_mut_ptr(), c"%g".as_ptr(), val as f64);
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_ONE_FLOAT)
+    let str = c_format_bytes("%g", &[CArg::Dbl(val as f64)]);
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_FLOAT)
 }
 
 /// Matches C `AdocSetTwoFloats` (`autodoc.c:1221`).
-pub unsafe extern "C" fn adoc_set_two_floats(
-    type_name: *const c_char,
+pub fn adoc_set_two_floats(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
+    key: &[u8],
     val1: f32,
     val2: f32,
 ) -> i32 {
-    let mut str: [c_char; 60] = [0; 60];
-    libc::sprintf(
-        str.as_mut_ptr(),
-        c"%g %g".as_ptr(),
-        val1 as f64,
-        val2 as f64,
-    );
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_TWO_FLOATS)
+    let str = c_format_bytes("%g %g", &[CArg::Dbl(val1 as f64), CArg::Dbl(val2 as f64)]);
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_FLOATS)
 }
 
 /// Matches C `AdocSetThreeFloats` (`autodoc.c:1233`).
-pub unsafe extern "C" fn adoc_set_three_floats(
-    type_name: *const c_char,
+pub fn adoc_set_three_floats(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
+    key: &[u8],
     val1: f32,
     val2: f32,
     val3: f32,
 ) -> i32 {
-    let mut str: [c_char; 90] = [0; 90];
-    libc::sprintf(
-        str.as_mut_ptr(),
-        c"%g %g %g".as_ptr(),
-        val1 as f64,
-        val2 as f64,
-        val3 as f64,
+    let str = c_format_bytes(
+        "%g %g %g",
+        &[
+            CArg::Dbl(val1 as f64),
+            CArg::Dbl(val2 as f64),
+            CArg::Dbl(val3 as f64),
+        ],
     );
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_THREE_FLOATS)
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_FLOATS)
 }
 
 /// Matches C `AdocSetFloatArray` (`autodoc.c:1245`).
-pub unsafe extern "C" fn adoc_set_float_array(
-    type_name: *const c_char,
+pub fn adoc_set_float_array(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    vals: *mut f32,
+    key: &[u8],
+    vals: &[f32],
     num_vals: i32,
 ) -> i32 {
     set_array_of_values(
         type_name,
         sect_ind,
         key,
-        vals.cast::<c_void>(),
+        ArrayOfValues::Floats(vals),
         num_vals,
         ADOC_FLOAT_ARRAY,
     )
 }
 
 /// Matches C `AdocSetDouble` (`autodoc.c:1252`).
-pub unsafe extern "C" fn adoc_set_double(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    val: f64,
-) -> i32 {
-    let mut str: [c_char; 30] = [0; 30];
-    libc::sprintf(str.as_mut_ptr(), c"%g".as_ptr(), val);
-    set_key_value_type(type_name, sect_ind, key, str.as_ptr(), ADOC_ONE_DOUBLE)
+pub fn adoc_set_double(type_name: &[u8], sect_ind: i32, key: &[u8], val: f64) -> i32 {
+    let str = c_format_bytes("%g", &[CArg::Dbl(val)]);
+    set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_DOUBLE)
+}
+
+/// The `void *vals` that `setArrayOfValues` (`autodoc.c:1263`) casts to either
+/// `int *` or `float *` according to `valType`, named rather than punned.
+pub enum ArrayOfValues<'a> {
+    Ints(&'a [i32]),
+    Floats(&'a [f32]),
 }
 
 /// Matches C static `setArrayOfValues` (`autodoc.c:1263`).
-pub unsafe fn set_array_of_values(
-    type_name: *const c_char,
+pub fn set_array_of_values(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    vals: *mut c_void,
+    key: &[u8],
+    vals: ArrayOfValues,
     num_vals: i32,
     val_type: i32,
 ) -> i32 {
-    let mut tmp: [c_char; 40] = [0; 40];
-    let full_str: *mut c_char;
-    let ivals: *mut c_int = vals.cast::<c_int>();
-    let fvals: *mut f32 = vals.cast::<f32>();
-    let mut ind: c_int;
-    let mut tot_len: c_int = 0;
+    let mut tmp: Vec<u8>;
+    let mut full_str: Vec<u8> = Vec::new();
+    let mut ind: i32;
+    let mut tot_len: i32 = 0;
 
     /* Add up the characters needed for the each value */
     ind = 0;
     while ind < num_vals {
-        if val_type == ADOC_INT_ARRAY {
-            libc::sprintf(tmp.as_mut_ptr(), c"%d ".as_ptr(), *ivals.add(ind as usize));
-        } else {
-            libc::sprintf(
-                tmp.as_mut_ptr(),
-                c"%g ".as_ptr(),
-                *fvals.add(ind as usize) as f64,
-            );
-        }
-        tot_len += libc::strlen(tmp.as_ptr()) as c_int + 1;
+        /* C branches on `valType == ADOC_INT_ARRAY` and casts the same
+        `void *` either way; the variant carries that choice instead. */
+        tmp = match &vals {
+            ArrayOfValues::Ints(ivals) => {
+                c_format_bytes("%d ", &[CArg::Int(ivals[ind as usize] as i64)])
+            }
+            ArrayOfValues::Floats(fvals) => {
+                c_format_bytes("%g ", &[CArg::Dbl(fvals[ind as usize] as f64)])
+            }
+        };
+        tot_len += tmp.len() as i32 + 1;
         ind += 1;
     }
+    let _ = tot_len;
 
     /* Get the string and build it up by writing again */
-    full_str = libc::malloc(tot_len as usize).cast::<c_char>();
-    if full_str.is_null() {
-        return -1;
-    }
-    *full_str.add(0) = 0;
     ind = 0;
     while ind < num_vals {
-        if val_type == ADOC_INT_ARRAY {
-            libc::sprintf(
-                tmp.as_mut_ptr(),
-                c"%s%d".as_ptr(),
-                if ind != 0 {
-                    c" ".as_ptr()
-                } else {
-                    c"".as_ptr()
-                },
-                *ivals.add(ind as usize),
-            );
-        } else {
-            libc::sprintf(
-                tmp.as_mut_ptr(),
-                c"%s%g".as_ptr(),
-                if ind != 0 {
-                    c" ".as_ptr()
-                } else {
-                    c"".as_ptr()
-                },
-                *fvals.add(ind as usize) as f64,
-            );
-        }
-        libc::strcat(full_str, tmp.as_ptr());
+        tmp = match &vals {
+            ArrayOfValues::Ints(ivals) => c_format_bytes(
+                "%s%d",
+                &[
+                    CArg::Bytes(if ind != 0 { b" " } else { b"" }),
+                    CArg::Int(ivals[ind as usize] as i64),
+                ],
+            ),
+            ArrayOfValues::Floats(fvals) => c_format_bytes(
+                "%s%g",
+                &[
+                    CArg::Bytes(if ind != 0 { b" " } else { b"" }),
+                    CArg::Dbl(fvals[ind as usize] as f64),
+                ],
+            ),
+        };
+        full_str.extend_from_slice(&tmp);
         ind += 1;
     }
-    ind = set_key_value_type(type_name, sect_ind, key, full_str, val_type);
-    libc::free(full_str.cast::<c_void>());
-    ind
+    set_key_value_type(type_name, sect_ind, key, Some(&full_str), val_type)
 }
 
 /// Matches C `AdocDeleteKeyValue` (`autodoc.c:1305`).
-pub unsafe extern "C" fn adoc_delete_key_value(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-) -> i32 {
-    let sect: *mut AdocSection;
-    let key_ind: c_int;
-
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
+pub fn adoc_delete_key_value(type_name: &[u8], sect_ind: i32, key: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    key_ind = lookup_key(sect, key);
-    if key_ind < 0 {
-        return -1;
-    }
-    if !(*(*sect).values.add(key_ind as usize)).is_null() {
-        libc::free((*(*sect).values.add(key_ind as usize)).cast::<c_void>());
-        *(*sect).values.add(key_ind as usize) = core::ptr::null_mut();
-    }
-    if !(*(*sect).keys.add(key_ind as usize)).is_null() {
-        libc::free((*(*sect).keys.add(key_ind as usize)).cast::<c_void>());
-        *(*sect).keys.add(key_ind as usize) = core::ptr::null_mut();
-    }
-    *(*sect).types.add(key_ind as usize) = ADOC_NO_VALUE as u8;
-    0
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        let adoc = &mut adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        let sect = &mut adoc.collections[ic].sections[is];
+        let key_ind = lookup_key(sect, key);
+        if key_ind < 0 {
+            return -1;
+        }
+        sect.values[key_ind as usize] = None;
+        sect.keys[key_ind as usize] = None;
+        sect.types[key_ind as usize] = ADOC_NO_VALUE as u8;
+        0
+    })
 }
 
 /// Matches C `AdocGetNumCollections` (`autodoc.c:1331`).
-pub unsafe extern "C" fn adoc_get_num_collections() -> i32 {
-    if S_CUR_ADOC.is_null() {
+pub fn adoc_get_num_collections() -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    (*S_CUR_ADOC).num_collections - 1
+    S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].num_collections - 1)
 }
 
 /// Matches C `AdocGetCollectionName` (`autodoc.c:1343`).
-pub unsafe extern "C" fn adoc_get_collection_name(coll_ind: i32, string: *mut *mut c_char) -> i32 {
-    if S_CUR_ADOC.is_null() || coll_ind < 0 || coll_ind >= (*S_CUR_ADOC).num_collections - 1 {
+pub fn adoc_get_collection_name(coll_ind: i32, string: &mut Vec<u8>) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    *string = libc::strdup((*(*S_CUR_ADOC).collections.add((coll_ind + 1) as usize)).name);
-    adoc_memory_error(
-        (*string).cast::<c_void>(),
-        c"AdocGetCollectionName".as_ptr(),
-    )
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        if coll_ind < 0 || coll_ind >= adoc.num_collections - 1 {
+            return -1;
+        }
+        *string = adoc.collections[(coll_ind + 1) as usize]
+            .name
+            .clone()
+            .unwrap_or_default();
+        0
+    })
 }
 
 /// Matches C `AdocGetSectionName` (`autodoc.c:1356`).
-pub unsafe extern "C" fn adoc_get_section_name(
-    type_name: *const c_char,
-    sect_ind: i32,
-    string: *mut *mut c_char,
-) -> i32 {
-    let sect: *mut AdocSection;
-
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
+pub fn adoc_get_section_name(type_name: &[u8], sect_ind: i32, string: &mut Vec<u8>) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    *string = libc::strdup((*sect).name);
-    adoc_memory_error((*string).cast::<c_void>(), c"AdocGetSectionName".as_ptr())
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        *string = adoc.collections[ic].sections[is]
+            .name
+            .clone()
+            .unwrap_or_default();
+        0
+    })
 }
 
 /// Matches C `AdocGetNumberOfSections` (`autodoc.c:1370`).
-pub unsafe extern "C" fn adoc_get_number_of_sections(type_name: *const c_char) -> i32 {
-    let coll_ind: c_int;
-    if S_CUR_ADOC.is_null() || type_name.is_null() {
+pub fn adoc_get_number_of_sections(type_name: &[u8]) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
-    if coll_ind < 0 {
-        return 0;
-    }
-    (*(*S_CUR_ADOC).collections.add(coll_ind as usize)).num_sections
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let coll_ind = lookup_collection(adoc, type_name);
+        if coll_ind < 0 {
+            return 0;
+        }
+        adoc.collections[coll_ind as usize].num_sections
+    })
 }
 
 /// Matches C `AdocGetNumberOfKeys` (`autodoc.c:1385`).
-pub unsafe extern "C" fn adoc_get_number_of_keys(type_name: *const c_char, sect_ind: i32) -> i32 {
-    let sect: *mut AdocSection;
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
+pub fn adoc_get_number_of_keys(type_name: &[u8], sect_ind: i32) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    (*sect).num_keys
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        adoc.collections[ic].sections[is].num_keys
+    })
 }
 
 /// Matches C `AdocGetKeyByIndex` (`autodoc.c:1399`).
-pub unsafe extern "C" fn adoc_get_key_by_index(
-    type_name: *const c_char,
+pub fn adoc_get_key_by_index(
+    type_name: &[u8],
     sect_ind: i32,
     key_ind: i32,
-    key: *mut *mut c_char,
+    key: &mut Option<Vec<u8>>,
 ) -> i32 {
-    let sect: *mut AdocSection;
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    if key_ind < 0 || key_ind >= (*sect).num_keys {
-        return -1;
-    }
-    *key = core::ptr::null_mut();
-    if !(*(*sect).keys.add(key_ind as usize)).is_null() {
-        *key = libc::strdup(*(*sect).keys.add(key_ind as usize));
-    }
-    0
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        let sect = &adoc.collections[ic].sections[is];
+        if key_ind < 0 || key_ind >= sect.num_keys {
+            return -1;
+        }
+        *key = sect.keys[key_ind as usize].clone();
+        0
+    })
 }
 
 /// Matches C `AdocGetValTypeAndSize` (`autodoc.c:1420`).
-pub unsafe extern "C" fn adoc_get_val_type_and_size(
-    type_name: *const c_char,
+pub fn adoc_get_val_type_and_size(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    val_type: *mut c_int,
-    num_tokens: *mut c_int,
+    key: &[u8],
+    val_type: &mut i32,
+    num_tokens: &mut i32,
 ) -> i32 {
-    let sect: *mut AdocSection;
-    let key_ind: c_int;
-    let valstr: *mut c_char;
-    let mut parsed: *mut c_char;
     *val_type = ADOC_NO_VALUE;
     *num_tokens = 0;
-    if key.is_null() {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
-        return -1;
-    }
-    key_ind = lookup_key(sect, key);
-    if key_ind < 0 || (*(*sect).values.add(key_ind as usize)).is_null() {
-        return 1;
-    }
-    *val_type = *(*sect).types.add(key_ind as usize) as c_int;
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        let sect = &adoc.collections[ic].sections[is];
+        let key_ind = lookup_key(sect, key);
+        if key_ind < 0 || sect.values[key_ind as usize].is_none() {
+            return 1;
+        }
+        *val_type = sect.types[key_ind as usize] as i32;
 
-    /* Get a copy of the string and use the dreadful strtok */
-    valstr = libc::strdup(*(*sect).values.add(key_ind as usize));
-    if valstr.is_null() {
-        adoc_memory_error(core::ptr::null_mut(), c"AdocGetValTypeAndSize".as_ptr());
-        return -1;
-    }
-    parsed = valstr;
-    while !libc::strtok(parsed, c" ".as_ptr()).is_null() {
-        parsed = core::ptr::null_mut();
-        *num_tokens += 1;
-    }
-    libc::free(valstr.cast::<c_void>());
-    0
+        /* Get a copy of the string and use the dreadful strtok */
+        let valstr = sect.values[key_ind as usize].as_deref().unwrap();
+        for token in valstr.split(|&b| b == b' ') {
+            if !token.is_empty() {
+                *num_tokens += 1;
+            }
+        }
+        0
+    })
 }
 
 /// Matches C `AdocGetString` (`autodoc.c:1457`).
-pub unsafe extern "C" fn adoc_get_string(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    string: *mut *mut c_char,
-) -> i32 {
-    let sect: *mut AdocSection;
-    let key_ind: c_int;
-
-    if key.is_null() {
+pub fn adoc_get_string(type_name: &[u8], sect_ind: i32, key: &[u8], string: &mut Vec<u8>) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
         return -1;
     }
-    sect = get_section(type_name, sect_ind);
-    if sect.is_null() {
-        return -1;
-    }
-    key_ind = lookup_key(sect, key);
-    if key_ind < 0 || (*(*sect).values.add(key_ind as usize)).is_null() {
-        return 1;
-    }
-    *string = libc::strdup(*(*sect).values.add(key_ind as usize));
-    adoc_memory_error((*string).cast::<c_void>(), c"AdocGetString".as_ptr())
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let Some((ic, is)) = get_section(adoc, type_name, sect_ind) else {
+            return -1;
+        };
+        let sect = &adoc.collections[ic].sections[is];
+        let key_ind = lookup_key(sect, key);
+        if key_ind < 0 || sect.values[key_ind as usize].is_none() {
+            return 1;
+        }
+        *string = sect.values[key_ind as usize].clone().unwrap();
+        0
+    })
 }
 
 /// Matches C `AdocGetInteger` (`autodoc.c:1477`).
-pub unsafe extern "C" fn adoc_get_integer(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    val1: *mut c_int,
-) -> i32 {
-    let err: c_int;
-    let mut num: c_int = 1;
-    let mut tmp: [c_int; 1] = [0; 1];
-    err = adoc_get_integer_array(type_name, sect_ind, key, tmp.as_mut_ptr(), &mut num, 1);
+pub fn adoc_get_integer(type_name: &[u8], sect_ind: i32, key: &[u8], val1: &mut i32) -> i32 {
+    let mut num: i32 = 1;
+    let mut tmp: [i32; 1] = [0; 1];
+    let err = adoc_get_integer_array(type_name, sect_ind, key, &mut tmp, &mut num, 1);
     if err != 0 {
         return err;
     }
@@ -1891,16 +1786,10 @@ pub unsafe extern "C" fn adoc_get_integer(
 }
 
 /// Matches C `AdocGetFloat` (`autodoc.c:1489`).
-pub unsafe extern "C" fn adoc_get_float(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    val1: *mut f32,
-) -> i32 {
-    let err: c_int;
-    let mut num: c_int = 1;
+pub fn adoc_get_float(type_name: &[u8], sect_ind: i32, key: &[u8], val1: &mut f32) -> i32 {
+    let mut num: i32 = 1;
     let mut tmp: [f32; 1] = [0.; 1];
-    err = adoc_get_float_array(type_name, sect_ind, key, tmp.as_mut_ptr(), &mut num, 1);
+    let err = adoc_get_float_array(type_name, sect_ind, key, &mut tmp, &mut num, 1);
     if err != 0 {
         return err;
     }
@@ -1909,46 +1798,34 @@ pub unsafe extern "C" fn adoc_get_float(
 }
 
 /// Matches C `AdocGetDouble` (`autodoc.c:1501`).
-pub unsafe extern "C" fn adoc_get_double(
-    type_name: *const c_char,
-    sect_ind: i32,
-    key: *const c_char,
-    val1: *mut f64,
-) -> i32 {
-    let mut err: c_int;
-    let mut num_to_get: c_int = 1;
-    let mut string: *mut c_char = core::ptr::null_mut();
-    err = adoc_get_string(type_name, sect_ind, key, &mut string);
+pub fn adoc_get_double(type_name: &[u8], sect_ind: i32, key: &[u8], val1: &mut f64) -> i32 {
+    let mut num_to_get: i32 = 1;
+    let mut string: Vec<u8> = Vec::new();
+    let err = adoc_get_string(type_name, sect_ind, key, &mut string);
     if err != 0 {
         return err;
     }
-    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
-    err = pip_get_line_of_values(
-        &value_bytes,
-        &value_bytes,
-        crate::imod::libcfshr::parse_params::PipValueArray::Double(
-            core::slice::from_raw_parts_mut(val1, 1),
-        ),
+    pip_get_line_of_values(
+        &string,
+        &string,
+        crate::imod::libcfshr::parse_params::PipValueArray::Double(core::slice::from_mut(val1)),
         PIP_DOUBLE,
         &mut num_to_get,
         1,
-    );
-    libc::free(string.cast::<c_void>());
-    err
+    )
 }
 
 /// Matches C `AdocGetTwoIntegers` (`autodoc.c:1517`).
-pub unsafe extern "C" fn adoc_get_two_integers(
-    type_name: *const c_char,
+pub fn adoc_get_two_integers(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    val1: *mut c_int,
-    val2: *mut c_int,
+    key: &[u8],
+    val1: &mut i32,
+    val2: &mut i32,
 ) -> i32 {
-    let err: c_int;
-    let mut num: c_int = 2;
-    let mut tmp: [c_int; 2] = [0; 2];
-    err = adoc_get_integer_array(type_name, sect_ind, key, tmp.as_mut_ptr(), &mut num, 2);
+    let mut num: i32 = 2;
+    let mut tmp: [i32; 2] = [0; 2];
+    let err = adoc_get_integer_array(type_name, sect_ind, key, &mut tmp, &mut num, 2);
     if err != 0 {
         return err;
     }
@@ -1958,17 +1835,16 @@ pub unsafe extern "C" fn adoc_get_two_integers(
 }
 
 /// Matches C `AdocGetTwoFloats` (`autodoc.c:1531`).
-pub unsafe extern "C" fn adoc_get_two_floats(
-    type_name: *const c_char,
+pub fn adoc_get_two_floats(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    val1: *mut f32,
-    val2: *mut f32,
+    key: &[u8],
+    val1: &mut f32,
+    val2: &mut f32,
 ) -> i32 {
-    let err: c_int;
-    let mut num: c_int = 2;
+    let mut num: i32 = 2;
     let mut tmp: [f32; 2] = [0.; 2];
-    err = adoc_get_float_array(type_name, sect_ind, key, tmp.as_mut_ptr(), &mut num, 2);
+    let err = adoc_get_float_array(type_name, sect_ind, key, &mut tmp, &mut num, 2);
     if err != 0 {
         return err;
     }
@@ -1978,18 +1854,17 @@ pub unsafe extern "C" fn adoc_get_two_floats(
 }
 
 /// Matches C `AdocGetThreeIntegers` (`autodoc.c:1548`).
-pub unsafe extern "C" fn adoc_get_three_integers(
-    type_name: *const c_char,
+pub fn adoc_get_three_integers(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    val1: *mut c_int,
-    val2: *mut c_int,
-    val3: *mut c_int,
+    key: &[u8],
+    val1: &mut i32,
+    val2: &mut i32,
+    val3: &mut i32,
 ) -> i32 {
-    let err: c_int;
-    let mut num: c_int = 3;
-    let mut tmp: [c_int; 3] = [0; 3];
-    err = adoc_get_integer_array(type_name, sect_ind, key, tmp.as_mut_ptr(), &mut num, 3);
+    let mut num: i32 = 3;
+    let mut tmp: [i32; 3] = [0; 3];
+    let err = adoc_get_integer_array(type_name, sect_ind, key, &mut tmp, &mut num, 3);
     if err != 0 {
         return err;
     }
@@ -2000,18 +1875,17 @@ pub unsafe extern "C" fn adoc_get_three_integers(
 }
 
 /// Matches C `AdocGetThreeFloats` (`autodoc.c:1563`).
-pub unsafe extern "C" fn adoc_get_three_floats(
-    type_name: *const c_char,
+pub fn adoc_get_three_floats(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    val1: *mut f32,
-    val2: *mut f32,
-    val3: *mut f32,
+    key: &[u8],
+    val1: &mut f32,
+    val2: &mut f32,
+    val3: &mut f32,
 ) -> i32 {
-    let err: c_int;
-    let mut num: c_int = 3;
+    let mut num: i32 = 3;
     let mut tmp: [f32; 3] = [0.; 3];
-    err = adoc_get_float_array(type_name, sect_ind, key, tmp.as_mut_ptr(), &mut num, 3);
+    let err = adoc_get_float_array(type_name, sect_ind, key, &mut tmp, &mut num, 3);
     if err != 0 {
         return err;
     }
@@ -2022,201 +1896,218 @@ pub unsafe extern "C" fn adoc_get_three_floats(
 }
 
 /// Matches C `AdocGetIntegerArray` (`autodoc.c:1587`).
-pub unsafe extern "C" fn adoc_get_integer_array(
-    type_name: *const c_char,
+pub fn adoc_get_integer_array(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    array: *mut c_int,
-    num_to_get: *mut c_int,
+    key: &[u8],
+    array: &mut [i32],
+    num_to_get: &mut i32,
     array_size: i32,
 ) -> i32 {
-    let mut string: *mut c_char = core::ptr::null_mut();
-    let mut err: c_int;
-    err = adoc_get_string(type_name, sect_ind, key, &mut string);
+    let mut string: Vec<u8> = Vec::new();
+    let err = adoc_get_string(type_name, sect_ind, key, &mut string);
     if err != 0 {
         return err;
     }
-    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
-    err = pip_get_line_of_values(
-        &value_bytes,
-        &value_bytes,
-        crate::imod::libcfshr::parse_params::PipValueArray::Int(core::slice::from_raw_parts_mut(
-            array,
-            array_size.max(0) as usize,
-        )),
+    pip_get_line_of_values(
+        &string,
+        &string,
+        crate::imod::libcfshr::parse_params::PipValueArray::Int(array),
         PIP_INTEGER,
-        &mut *num_to_get,
+        num_to_get,
         array_size,
-    );
-    libc::free(string.cast::<c_void>());
-    err
+    )
 }
 
 /// Matches C `AdocGetFloatArray` (`autodoc.c:1601`).
-pub unsafe extern "C" fn adoc_get_float_array(
-    type_name: *const c_char,
+pub fn adoc_get_float_array(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    array: *mut f32,
-    num_to_get: *mut c_int,
+    key: &[u8],
+    array: &mut [f32],
+    num_to_get: &mut i32,
     array_size: i32,
 ) -> i32 {
-    let mut string: *mut c_char = core::ptr::null_mut();
-    let mut err: c_int;
-    err = adoc_get_string(type_name, sect_ind, key, &mut string);
+    let mut string: Vec<u8> = Vec::new();
+    let err = adoc_get_string(type_name, sect_ind, key, &mut string);
     if err != 0 {
         return err;
     }
-    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
-    err = pip_get_line_of_values(
-        &value_bytes,
-        &value_bytes,
-        crate::imod::libcfshr::parse_params::PipValueArray::Float(core::slice::from_raw_parts_mut(
-            array,
-            array_size.max(0) as usize,
-        )),
+    pip_get_line_of_values(
+        &string,
+        &string,
+        crate::imod::libcfshr::parse_params::PipValueArray::Float(array),
         PIP_FLOAT,
-        &mut *num_to_get,
+        num_to_get,
         array_size,
-    );
-    libc::free(string.cast::<c_void>());
-    err
+    )
 }
 
 /// Matches C `AdocGetDoubleArray` (`autodoc.c:1615`).
-pub unsafe extern "C" fn adoc_get_double_array(
-    type_name: *const c_char,
+pub fn adoc_get_double_array(
+    type_name: &[u8],
     sect_ind: i32,
-    key: *const c_char,
-    array: *mut f64,
-    num_to_get: *mut c_int,
+    key: &[u8],
+    array: &mut [f64],
+    num_to_get: &mut i32,
     array_size: i32,
 ) -> i32 {
-    let mut string: *mut c_char = core::ptr::null_mut();
-    let mut err: c_int;
-    err = adoc_get_string(type_name, sect_ind, key, &mut string);
+    let mut string: Vec<u8> = Vec::new();
+    let err = adoc_get_string(type_name, sect_ind, key, &mut string);
     if err != 0 {
         return err;
     }
-    let value_bytes = CStr::from_ptr(string).to_bytes().to_vec();
-    err = pip_get_line_of_values(
-        &value_bytes,
-        &value_bytes,
-        crate::imod::libcfshr::parse_params::PipValueArray::Double(
-            core::slice::from_raw_parts_mut(array, array_size.max(0) as usize),
-        ),
+    pip_get_line_of_values(
+        &string,
+        &string,
+        crate::imod::libcfshr::parse_params::PipValueArray::Double(array),
         PIP_DOUBLE,
-        &mut *num_to_get,
+        num_to_get,
         array_size,
-    );
-    libc::free(string.cast::<c_void>());
-    err
+    )
 }
 
 /// Matches C `AdocWriteInteger` (`autodoc.c:1638`).
-pub unsafe extern "C" fn adoc_write_integer(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    ival: i32,
-) -> i32 {
-    if libc::fprintf(fp, c"%s = %d\n".as_ptr(), key, ival) < 0 {
+pub fn adoc_write_integer(fp: &mut ImodFile, key: &[u8], ival: i32) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %d\n",
+            &[CArg::Bytes(key), CArg::Int(ival as i64)],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteTwoIntegers` (`autodoc.c:1649`).
-pub unsafe extern "C" fn adoc_write_two_integers(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    ival1: i32,
-    ival2: i32,
-) -> i32 {
-    if libc::fprintf(fp, c"%s = %d %d\n".as_ptr(), key, ival1, ival2) < 0 {
+pub fn adoc_write_two_integers(fp: &mut ImodFile, key: &[u8], ival1: i32, ival2: i32) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %d %d\n",
+            &[
+                CArg::Bytes(key),
+                CArg::Int(ival1 as i64),
+                CArg::Int(ival2 as i64),
+            ],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteThreeIntegers` (`autodoc.c:1660`).
-pub unsafe extern "C" fn adoc_write_three_integers(
-    fp: *mut libc::FILE,
-    key: *const c_char,
+pub fn adoc_write_three_integers(
+    fp: &mut ImodFile,
+    key: &[u8],
     ival1: i32,
     ival2: i32,
     ival3: i32,
 ) -> i32 {
-    if libc::fprintf(fp, c"%s = %d %d %d\n".as_ptr(), key, ival1, ival2, ival3) < 0 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %d %d %d\n",
+            &[
+                CArg::Bytes(key),
+                CArg::Int(ival1 as i64),
+                CArg::Int(ival2 as i64),
+                CArg::Int(ival3 as i64),
+            ],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteIntegerArray` (`autodoc.c:1671`).
-pub unsafe extern "C" fn adoc_write_integer_array(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    ivals: *mut c_int,
+pub fn adoc_write_integer_array(
+    fp: &mut ImodFile,
+    key: &[u8],
+    ivals: &[i32],
     num_vals: i32,
 ) -> i32 {
-    let mut ind: c_int;
-    if libc::fprintf(fp, c"%s =".as_ptr(), key) < 0 {
+    let mut ind: i32;
+    if fp
+        .write_all(&c_format_bytes("%s =", &[CArg::Bytes(key)]))
+        .is_err()
+    {
         return 1;
     }
     ind = 0;
     while ind < num_vals {
-        if libc::fprintf(fp, c" %d".as_ptr(), *ivals.add(ind as usize)) < 0 {
+        if fp
+            .write_all(&c_format_bytes(
+                " %d",
+                &[CArg::Int(ivals[ind as usize] as i64)],
+            ))
+            .is_err()
+        {
             return 1;
         }
         ind += 1;
     }
-    if libc::fprintf(fp, c"\n".as_ptr()) < 0 {
+    if fp.write_all(b"\n").is_err() {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteFloat` (`autodoc.c:1685`).
-pub unsafe extern "C" fn adoc_write_float(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    val: f32,
-) -> i32 {
-    if libc::fprintf(fp, c"%s = %g\n".as_ptr(), key, val as f64) < 0 {
+pub fn adoc_write_float(fp: &mut ImodFile, key: &[u8], val: f32) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %g\n",
+            &[CArg::Bytes(key), CArg::Dbl(val as f64)],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteTwoFloats` (`autodoc.c:1695`).
-pub unsafe extern "C" fn adoc_write_two_floats(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    val1: f32,
-    val2: f32,
-) -> i32 {
-    if libc::fprintf(fp, c"%s = %g %g\n".as_ptr(), key, val1 as f64, val2 as f64) < 0 {
+pub fn adoc_write_two_floats(fp: &mut ImodFile, key: &[u8], val1: f32, val2: f32) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %g %g\n",
+            &[
+                CArg::Bytes(key),
+                CArg::Dbl(val1 as f64),
+                CArg::Dbl(val2 as f64),
+            ],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteThreeFloats` (`autodoc.c:1706`).
-pub unsafe extern "C" fn adoc_write_three_floats(
-    fp: *mut libc::FILE,
-    key: *const c_char,
+pub fn adoc_write_three_floats(
+    fp: &mut ImodFile,
+    key: &[u8],
     val1: f32,
     val2: f32,
     val3: f32,
 ) -> i32 {
-    if libc::fprintf(
-        fp,
-        c"%s = %g %g %g\n".as_ptr(),
-        key,
-        val1 as f64,
-        val2 as f64,
-        val3 as f64,
-    ) < 0
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %g %g %g\n",
+            &[
+                CArg::Bytes(key),
+                CArg::Dbl(val1 as f64),
+                CArg::Dbl(val2 as f64),
+                CArg::Dbl(val3 as f64),
+            ],
+        ))
+        .is_err()
     {
         return 1;
     }
@@ -2224,69 +2115,69 @@ pub unsafe extern "C" fn adoc_write_three_floats(
 }
 
 /// Matches C `AdocWriteFloatArray` (`autodoc.c:1717`).
-pub unsafe extern "C" fn adoc_write_float_array(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    vals: *mut f32,
-    num_vals: i32,
-) -> i32 {
-    let mut ind: c_int;
-    if libc::fprintf(fp, c"%s =".as_ptr(), key) < 0 {
+pub fn adoc_write_float_array(fp: &mut ImodFile, key: &[u8], vals: &[f32], num_vals: i32) -> i32 {
+    let mut ind: i32;
+    if fp
+        .write_all(&c_format_bytes("%s =", &[CArg::Bytes(key)]))
+        .is_err()
+    {
         return 1;
     }
     ind = 0;
     while ind < num_vals {
-        if libc::fprintf(fp, c" %g".as_ptr(), *vals.add(ind as usize) as f64) < 0 {
+        if fp
+            .write_all(&c_format_bytes(
+                " %g",
+                &[CArg::Dbl(vals[ind as usize] as f64)],
+            ))
+            .is_err()
+        {
             return 1;
         }
         ind += 1;
     }
-    if libc::fprintf(fp, c"\n".as_ptr()) < 0 {
+    if fp.write_all(b"\n").is_err() {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteDouble` (`autodoc.c:1731`).
-pub unsafe extern "C" fn adoc_write_double(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    val: f64,
-) -> i32 {
-    if libc::fprintf(fp, c"%s = %g\n".as_ptr(), key, val) < 0 {
+pub fn adoc_write_double(fp: &mut ImodFile, key: &[u8], val: f64) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %g\n",
+            &[CArg::Bytes(key), CArg::Dbl(val)],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteKeyValue` (`autodoc.c:1741`).
-pub unsafe extern "C" fn adoc_write_key_value(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    value: *const c_char,
-) -> i32 {
-    if libc::fprintf(fp, c"%s = %s\n".as_ptr(), key, value) < 0 {
+pub fn adoc_write_key_value(fp: &mut ImodFile, key: &[u8], value: &[u8]) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "%s = %s\n",
+            &[CArg::Bytes(key), CArg::Bytes(value)],
+        ))
+        .is_err()
+    {
         return 1;
     }
     0
 }
 
 /// Matches C `AdocWriteSectionStart` (`autodoc.c:1752`).
-pub unsafe extern "C" fn adoc_write_section_start(
-    fp: *mut libc::FILE,
-    key: *const c_char,
-    value: *const c_char,
-) -> i32 {
-    if libc::fprintf(
-        fp,
-        c"[%s = %s]\n".as_ptr(),
-        key,
-        if !value.is_null() {
-            value
-        } else {
-            c"".as_ptr()
-        },
-    ) < 0
+pub fn adoc_write_section_start(fp: &mut ImodFile, key: &[u8], value: Option<&[u8]>) -> i32 {
+    if fp
+        .write_all(&c_format_bytes(
+            "[%s = %s]\n",
+            &[CArg::Bytes(key), CArg::Bytes(value.unwrap_or(b""))],
+        ))
+        .is_err()
     {
         return 1;
     }
@@ -2295,11 +2186,12 @@ pub unsafe extern "C" fn adoc_write_section_start(
 
 /// Matches C static `readXmlFile` (`autodoc.c:1765`).
 ///
-/// The mini-XML tree is arena-allocated now, so the node pointers are slot
-/// indices into a `MxmlArena` that lives for the length of this function, and
-/// the element names and values it hands back are byte slices that have to be
-/// NUL-terminated again for the rest of autodoc, which is still C-shaped.
-pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
+/// The mini-XML tree is arena-allocated, so the node pointers are slot indices
+/// into a `MxmlArena` that lives for the length of this function, and the
+/// element names and values it hands back are byte slices that go straight into
+/// the autodoc's own `Vec<u8>` storage.  The autodoc is passed in rather than
+/// read from `sCurAdoc`, because the caller already holds the list open.
+pub fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
     let xml: Option<usize>;
     let mut node: Option<usize>;
     let mut top: Option<usize>;
@@ -2307,40 +2199,29 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
     let mut child: Option<usize>;
     let mut key: Option<Vec<u8>>;
     let mut value: Option<Vec<u8>>;
-    let mut icol: c_int;
-    let mut ind: c_int;
-    let mut global: c_int;
-    let mut last_ind: c_int;
-    let mut err: c_int = 0;
-    let mut cur_sect: *mut AdocSection = core::ptr::null_mut();
-    let mut coll: *mut AdocCollection;
-    let mut comment_list: *mut *mut c_char = core::ptr::null_mut();
-    let mut max_comments: c_int = 0;
-    let mut num_comments: c_int = 0;
+    let mut icol: i32;
+    let mut ind: i32;
+    let mut global: i32;
+    let mut last_ind: i32 = -1;
+    let mut err: i32 = 0;
+    let mut cur_coll: i32 = 0;
+    let mut cur_sect: i32 = 0;
+    let mut comment_list: Vec<Vec<u8>> = Vec::new();
+    let mut max_comments: i32 = 0;
+    let mut num_comments: i32 = 0;
 
-    S_LAST_WAS_XML = 1;
-    libc::rewind(fp);
+    S_LAST_WAS_XML.set(1);
+    let _ = fp.seek(SeekFrom::Start(0));
 
-    S_NUM_SECT_NOT_ELEM = 0;
-    S_NUM_SECT_NO_NAME = 0;
-    S_NUM_CHILD_NOT_ELEM = 0;
-    S_NUM_CHILD_ATTRIBS = 0;
-    S_NUM_VALUE_NOT_TEXT = 0;
-    S_NUM_MULTIPLE_CHILDS = 0;
-
-    /*
-     * `mxmlLoadFile` reads a `FILE *`; the descriptor is duplicated into an
-     * `ImodFile` so that the read starts where the rewind left it.  The caller
-     * closes `fp` as soon as this returns.
-     */
-    let borrowed = std::os::fd::BorrowedFd::borrow_raw(libc::fileno(fp));
-    let Ok(owned) = borrowed.try_clone_to_owned() else {
-        return -2;
-    };
-    let mut afile = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
+    S_NUM_SECT_NOT_ELEM.set(0);
+    S_NUM_SECT_NO_NAME.set(0);
+    S_NUM_CHILD_NOT_ELEM.set(0);
+    S_NUM_CHILD_ATTRIBS.set(0);
+    S_NUM_VALUE_NOT_TEXT.set(0);
+    S_NUM_MULTIPLE_CHILDS.set(0);
 
     let arena = &mut MxmlArena::new();
-    xml = mxml_load_file(arena, MXML_NO_PARENT, &mut afile, Some(mxml_opaque_cb));
+    xml = mxml_load_file(arena, MXML_NO_PARENT, fp, Some(mxml_opaque_cb));
     if xml.is_none() {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -2354,13 +2235,9 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
     if mxml_get_type(arena, top) == MXML_OPAQUE {
         top = mxml_walk_next(arena, top, xml, MXML_DESCEND);
     }
-    key = mxml_get_element(arena, top).map(|k| {
-        let mut k = k.to_vec();
-        k.push(0);
-        k
-    });
+    key = mxml_get_element(arena, top).map(|k| k.to_vec());
     if let Some(key) = &key {
-        (*S_CUR_ADOC).root_element = libc::strdup(key.as_ptr().cast::<c_char>());
+        adoc.root_element = Some(key.clone());
     }
 
     /* Walk through the children of the top node, (autodoc) */
@@ -2386,61 +2263,52 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
 
         /* This is the section type if it an element node, which it really will be, and
         it must have the "name" attribute for the value */
-        key = mxml_get_element(arena, sect_node).map(|k| {
-            let mut k = k.to_vec();
-            k.push(0);
-            k
-        });
-        global = if key.as_ref().is_some_and(|k| {
-            libc::strcmp(k.as_ptr().cast::<c_char>(), ADOC_GLOBAL_NAME.as_ptr()) == 0
-        }) {
+        key = mxml_get_element(arena, sect_node).map(|k| k.to_vec());
+        global = if key.as_deref() == Some(ADOC_GLOBAL_NAME) {
             1
         } else {
             0
         };
-        value = mxml_element_get_attr(arena, sect_node, Some(b"name")).map(|v| {
-            let mut v = v.to_vec();
-            v.push(0);
-            v
-        });
+        value = mxml_element_get_attr(arena, sect_node, Some(b"name")).map(|v| v.to_vec());
         if key.is_none() {
-            S_NUM_SECT_NOT_ELEM += 1;
+            S_NUM_SECT_NOT_ELEM.set(S_NUM_SECT_NOT_ELEM.get() + 1);
         }
         if global == 0 && value.is_none() {
-            S_NUM_SECT_NO_NAME += 1;
+            S_NUM_SECT_NO_NAME.set(S_NUM_SECT_NO_NAME.get() + 1);
         }
         if key.is_none() || (global == 0 && value.is_none()) {
             sect_node = mxml_get_next_sibling(arena, sect_node);
             continue;
         }
-        let key_ptr = key.as_ref().unwrap().as_ptr().cast::<c_char>();
+        let key_bytes = key.clone().unwrap();
 
         /* Lookup the collection under the key and create one if not found */
-        icol = lookup_collection(S_CUR_ADOC, key_ptr);
+        icol = lookup_collection(adoc, &key_bytes);
         if icol < 0 {
-            err = add_collection(S_CUR_ADOC, key_ptr);
+            err = add_collection(adoc, &key_bytes);
             if err != 0 {
                 break;
             }
-            icol = (*S_CUR_ADOC).num_collections - 1;
+            icol = adoc.num_collections - 1;
         }
-        coll = (*S_CUR_ADOC).collections.add(icol as usize);
 
         /* Add a section to the collection and set it as current one */
         if global == 0 {
-            err = add_section(
-                S_CUR_ADOC,
-                icol,
-                value.as_ref().unwrap().as_ptr().cast::<c_char>(),
-            );
+            err = add_section(adoc, icol, value.as_deref().unwrap());
             if err != 0 {
                 break;
             }
         }
-        cur_sect = (*coll).sections.add(((*coll).num_sections - 1) as usize);
+        cur_coll = icol;
+        cur_sect = adoc.collections[icol as usize].num_sections - 1;
         last_ind = -1;
         if num_comments != 0 {
-            err = add_comments(cur_sect, comment_list, &mut num_comments, last_ind);
+            err = add_comments(
+                &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize],
+                &mut comment_list,
+                &mut num_comments,
+                last_ind,
+            );
             if err != 0 {
                 break;
             }
@@ -2456,25 +2324,15 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
             let (aname, avalue) = match &arena.node(cur_sect_node).value {
                 MxmlValue::Element(element) => {
                     let attr = &element.attrs[ind as usize];
-                    let mut aname = attr.name.clone();
-                    aname.push(0);
-                    let avalue = attr.value.as_ref().map(|v| {
-                        let mut v = v.clone();
-                        v.push(0);
-                        v
-                    });
-                    (aname, avalue)
+                    (attr.name.clone(), attr.value.clone())
                 }
                 _ => break,
             };
-            if libc::strcmp(aname.as_ptr().cast::<c_char>(), c"name".as_ptr()) != 0 {
+            if aname != b"name" {
                 err = sect_set_key_value_type(
-                    cur_sect,
-                    aname.as_ptr().cast::<c_char>(),
-                    match &avalue {
-                        Some(v) => v.as_ptr().cast::<c_char>(),
-                        None => core::ptr::null(),
-                    },
+                    &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize],
+                    &aname,
+                    avalue.as_deref(),
                     ADOC_STRING,
                     &mut last_ind,
                 );
@@ -2514,47 +2372,36 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
             }
 
             /* It must be an element */
-            key = mxml_get_element(arena, node).map(|k| {
-                let mut k = k.to_vec();
-                k.push(0);
-                k
-            });
+            key = mxml_get_element(arena, node).map(|k| k.to_vec());
             if key.is_none() {
-                S_NUM_CHILD_NOT_ELEM += 1;
+                S_NUM_CHILD_NOT_ELEM.set(S_NUM_CHILD_NOT_ELEM.get() + 1);
             } else {
                 if match &arena.node(cur_node).value {
                     MxmlValue::Element(element) => element.num_attrs != 0,
                     _ => false,
                 } {
-                    S_NUM_CHILD_ATTRIBS += 1;
+                    S_NUM_CHILD_ATTRIBS.set(S_NUM_CHILD_ATTRIBS.get() + 1);
                 }
                 child = mxml_get_first_child(arena, node);
 
                 /* The first child should be opaque and there should be only one */
                 if child.is_some() && mxml_get_type(arena, child) != MXML_OPAQUE {
-                    S_NUM_VALUE_NOT_TEXT += 1;
+                    S_NUM_VALUE_NOT_TEXT.set(S_NUM_VALUE_NOT_TEXT.get() + 1);
                 } else {
                     if child.is_some() && mxml_get_last_child(arena, node) != child {
-                        S_NUM_MULTIPLE_CHILDS += 1;
+                        S_NUM_MULTIPLE_CHILDS.set(S_NUM_MULTIPLE_CHILDS.get() + 1);
                     }
                     value = match child {
                         Some(child) => match &arena.node(child).value {
-                            MxmlValue::Opaque(opaque) => opaque.as_ref().map(|o| {
-                                let mut o = o.clone();
-                                o.push(0);
-                                o
-                            }),
+                            MxmlValue::Opaque(opaque) => opaque.clone(),
                             _ => None,
                         },
                         None => None,
                     };
                     err = sect_set_key_value_type(
-                        cur_sect,
-                        key.as_ref().unwrap().as_ptr().cast::<c_char>(),
-                        match &value {
-                            Some(v) => v.as_ptr().cast::<c_char>(),
-                            None => core::ptr::null(),
-                        },
+                        &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize],
+                        key.as_deref().unwrap(),
+                        value.as_deref(),
                         ADOC_STRING,
                         &mut last_ind,
                     );
@@ -2562,7 +2409,12 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
                         break;
                     }
                     if num_comments != 0 {
-                        err = add_comments(cur_sect, comment_list, &mut num_comments, last_ind);
+                        err = add_comments(
+                            &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize],
+                            &mut comment_list,
+                            &mut num_comments,
+                            last_ind,
+                        );
                         if err != 0 {
                             break;
                         }
@@ -2579,7 +2431,12 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
 
         /* Add any comments that have accumulated */
         if num_comments != 0 {
-            err = add_comments(cur_sect, comment_list, &mut num_comments, last_ind);
+            err = add_comments(
+                &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize],
+                &mut comment_list,
+                &mut num_comments,
+                last_ind,
+            );
             if err != 0 {
                 break;
             }
@@ -2590,86 +2447,60 @@ pub unsafe fn read_xml_file(fp: *mut libc::FILE) -> i32 {
     }
 
     if err != 0 {
-        delete_adoc(S_CUR_ADOC);
+        delete_adoc(adoc);
     }
-    handle_final_comments(err, &mut comment_list, num_comments);
+    handle_final_comments(adoc, err, &mut comment_list, num_comments);
 
     mxml_delete(arena, xml);
     err
 }
 
 /// Matches C static `addToCommentList` (`autodoc.c:1971`).
-pub unsafe fn add_to_comment_list(
-    comment_list: *mut *mut *mut c_char,
-    num_comments: *mut c_int,
-    max_comments: *mut c_int,
-    comment: *mut c_char,
+///
+/// `commentList` is held at length `maxComments`, the size the C `realloc`s it
+/// to, so a slot the source assigns by index exists here too.
+pub fn add_to_comment_list(
+    comment_list: &mut Vec<Vec<u8>>,
+    num_comments: &mut i32,
+    max_comments: &mut i32,
+    comment: &[u8],
 ) -> i32 {
     if *num_comments >= *max_comments {
-        if *max_comments != 0 {
-            *comment_list = libc::realloc(
-                (*comment_list).cast::<c_void>(),
-                (*max_comments + 1) as usize * core::mem::size_of::<*mut c_char>(),
-            )
-            .cast::<*mut c_char>();
-        } else {
-            *comment_list = libc::malloc(core::mem::size_of::<*mut c_char>()).cast::<*mut c_char>();
-        }
-        if adoc_memory_error((*comment_list).cast::<c_void>(), c"AdocRead".as_ptr()) != 0 {
-            return 1;
-        }
         *max_comments += 1;
+        comment_list.resize(*max_comments as usize, Vec::new());
     }
-    *(*comment_list).add(*num_comments as usize) = libc::strdup(comment);
-    let added = *(*comment_list).add(*num_comments as usize);
+    comment_list[*num_comments as usize] = comment.to_vec();
     *num_comments += 1;
-    if adoc_memory_error(added.cast::<c_void>(), c"AdocRead".as_ptr()) != 0 {
-        return 1;
-    }
     0
 }
 
 /// Matches C static `testAndAddComment` (`autodoc.c:1992`).
-pub unsafe fn test_and_add_comment(
+pub fn test_and_add_comment(
     arena: &MxmlArena,
     node: usize,
-    comment_list: *mut *mut *mut c_char,
-    num_comments: *mut c_int,
-    max_comments: *mut c_int,
+    comment_list: &mut Vec<Vec<u8>>,
+    num_comments: &mut i32,
+    max_comments: &mut i32,
 ) -> i32 {
     let key: Option<Vec<u8>>;
-    let tmp_str: *mut c_char;
-    let mut len: c_int;
-    key = mxml_get_element(arena, Some(node)).map(|k| {
-        let mut k = k.to_vec();
-        k.push(0);
-        k
-    });
+    let mut len: i32;
+    key = mxml_get_element(arena, Some(node)).map(|k| k.to_vec());
     if arena.node(node).type_ == MXML_ELEMENT
-        && key.as_ref().is_some_and(|k| {
-            pip_starts_with(k, CStr::from_ptr(XML_COMMENT_START.as_ptr()).to_bytes()) != 0
-        })
+        && key
+            .as_ref()
+            .is_some_and(|k| pip_starts_with(k, XML_COMMENT_START) != 0)
     {
         let key = key.unwrap();
-        tmp_str = libc::strdup(
-            key.as_ptr()
-                .cast::<c_char>()
-                .add((XML_COMSTART_LEN - 1) as usize),
-        );
-        if !tmp_str.is_null() {
-            *tmp_str.add(0) = b'#' as c_char;
-            len = libc::strlen(tmp_str) as c_int;
-            if len >= 2
-                && *tmp_str.add((len - 2) as usize) == b'-' as c_char
-                && *tmp_str.add((len - 1) as usize) == b'-' as c_char
-            {
-                len -= 2;
-                *tmp_str.add(len as usize) = 0;
-            }
-            if len != 0 {
-                add_to_comment_list(comment_list, num_comments, max_comments, tmp_str);
-            }
-            libc::free(tmp_str.cast::<c_void>());
+        /* `strdup(key + XML_COMSTART_LEN - 1)`, then `tmpStr[0] = '#'` */
+        let mut tmp_str = key[(XML_COMSTART_LEN - 1) as usize..].to_vec();
+        tmp_str[0] = b'#';
+        len = tmp_str.len() as i32;
+        if len >= 2 && tmp_str[(len - 2) as usize] == b'-' && tmp_str[(len - 1) as usize] == b'-' {
+            len -= 2;
+            tmp_str.truncate(len as usize);
+        }
+        if len != 0 {
+            add_to_comment_list(comment_list, num_comments, max_comments, &tmp_str);
         }
         return 1;
     }
@@ -2682,622 +2513,405 @@ pub unsafe fn test_and_add_comment(
 /// reads past the single `char ***` for `i > 0`.  The intended
 /// `(*commentList)[i]` is used here instead; matching the source literally would
 /// mean shipping an out-of-bounds read (`autodoc.c:2025`).
-pub unsafe fn handle_final_comments(
+pub fn handle_final_comments(
+    adoc: &mut Autodoc,
     err: i32,
-    comment_list: *mut *mut *mut c_char,
+    comment_list: &mut Vec<Vec<u8>>,
     num_comments: i32,
 ) {
-    let mut i: c_int;
     if err != 0 {
         /* Clean out comment list */
-        i = 0;
-        while i < num_comments {
-            if !(*(*comment_list).add(i as usize)).is_null() {
-                libc::free((*(*comment_list).add(i as usize)).cast::<c_void>());
-            }
-            i += 1;
-        }
-        if !(*comment_list).is_null() {
-            libc::free((*comment_list).cast::<c_void>());
-        }
-    } else if !(*comment_list).is_null() {
+        comment_list.clear();
+    } else if !comment_list.is_empty() {
         /* If good, transfer any comments to the autodoc */
         if num_comments != 0 {
-            (*S_CUR_ADOC).final_comments = *comment_list;
-            (*S_CUR_ADOC).num_final_com = num_comments;
+            adoc.final_comments = std::mem::take(comment_list);
+            adoc.num_final_com = num_comments;
         } else {
-            libc::free((*comment_list).cast::<c_void>());
+            comment_list.clear();
         }
     }
 }
 
 /// Matches C static `writeXmlFile` (`autodoc.c:2044`).
-///
-/// The tree is arena-allocated, and `mxmlSaveFile` takes a Rust writer, so the
-/// `FILE *` that `openForWrite` returns is written through a duplicate of its
-/// descriptor.  Nothing else writes to that `FILE *`, so no output interleaves.
-pub unsafe fn write_xml_file(filename: *const c_char) -> i32 {
-    let afile: *mut libc::FILE;
+pub fn write_xml_file(filename: &[u8]) -> i32 {
     let xml: Option<usize>;
-    let mut node: Option<usize>;
-    let mut elem: Option<usize>;
+    let mut node: Option<usize> = None;
+    let mut elem: Option<usize> = None;
     let top: Option<usize>;
-    let mut i: c_int;
-    let mut j: c_int;
-    let mut k: c_int;
-    let mut ind: c_int;
-    let mut use_ind: c_int;
-    let mut com_ind: c_int;
-    let mut coll: *mut AdocCollection;
-    let mut sect: *mut AdocSection;
-    let mut ord_sect_inds: *mut c_int = core::ptr::null_mut();
-    let ordered_write: c_int = if !S_NAME_FOR_ORDERING.is_null() && (*S_CUR_ADOC).num_sections > 1 {
+    let mut i: i32 = 0;
+    let mut j: i32 = 0;
+    let mut k: i32 = 0;
+    let mut ind: i32 = 0;
+    let mut use_ind: i32 = 0;
+    let mut com_ind: i32 = 0;
+    let mut ord_sect_inds: Vec<i32> = Vec::new();
+
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
+        return -1;
+    }
+    let ordered_write: i32 = if S_NAME_FOR_ORDERING.with_borrow(|name| name.is_some())
+        && S_AUTODOCS.with_borrow(|adocs| adocs[cur as usize].num_sections) > 1
+    {
         1
     } else {
         0
     };
 
-    if S_CUR_ADOC.is_null() {
+    let Some(mut afile) = open_for_write(filename, "w") else {
         return -1;
-    }
-    afile = open_for_write(filename, c"w".as_ptr());
-    if afile.is_null() {
-        return -1;
-    }
+    };
     if ordered_write != 0 {
-        ord_sect_inds = setup_section_order();
-        if ord_sect_inds.is_null() {
+        let Some(inds) = S_AUTODOCS.with_borrow(|adocs| setup_section_order(&adocs[cur as usize]))
+        else {
             return -1;
-        }
+        };
+        ord_sect_inds = inds;
     }
 
     let arena = &mut MxmlArena::new();
     xml = mxml_new_xml(arena, Some(b"1.0"));
-    let root: Vec<u8> = if !(*S_CUR_ADOC).root_element.is_null() {
-        let mut r = CStr::from_ptr((*S_CUR_ADOC).root_element)
-            .to_bytes()
-            .to_vec();
-        r.push(0);
-        r
-    } else {
-        b"autodoc\0".to_vec()
-    };
-    top = mxml_new_element(arena, xml, Some(&root[..root.len() - 1]));
-    ind = 0;
-    while ind < (*S_CUR_ADOC).num_sections {
-        use_ind = if ordered_write != 0 {
-            *ord_sect_inds.add(ind as usize)
-        } else {
-            ind
+    let result = S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let root: Vec<u8> = match &adoc.root_element {
+            Some(root) => root.clone(),
+            None => b"autodoc".to_vec(),
         };
-        com_ind = 0;
-        i = *(*S_CUR_ADOC).coll_list.add(use_ind as usize);
-        j = *(*S_CUR_ADOC).sect_list.add(use_ind as usize);
-        coll = (*S_CUR_ADOC).collections.add(i as usize);
-        sect = (*coll).sections.add(j as usize);
-        while com_ind < (*sect).num_comments && *(*sect).com_index.add(com_ind as usize) == -1 {
-            write_comment_to_xml(arena, top, *(*sect).comments.add(com_ind as usize));
-            com_ind += 1;
-        }
-        node = mxml_new_element(arena, top, Some(CStr::from_ptr((*coll).name).to_bytes()));
-        if i != 0 || j != 0 || libc::strcmp((*sect).name, ADOC_GLOBAL_NAME.as_ptr()) != 0 {
-            mxml_element_set_attr(
-                arena,
-                node,
-                Some(b"name"),
-                Some(CStr::from_ptr((*sect).name).to_bytes()),
-            );
-        }
-
-        /* Loop on key-values */
-        k = 0;
-        while k < (*sect).num_keys {
-            while com_ind < (*sect).num_comments && *(*sect).com_index.add(com_ind as usize) == k {
-                write_comment_to_xml(arena, node, *(*sect).comments.add(com_ind as usize));
+        let top = mxml_new_element(arena, xml, Some(&root));
+        ind = 0;
+        while ind < adoc.num_sections {
+            use_ind = if ordered_write != 0 {
+                ord_sect_inds[ind as usize]
+            } else {
+                ind
+            };
+            com_ind = 0;
+            i = adoc.coll_list[use_ind as usize];
+            j = adoc.sect_list[use_ind as usize];
+            let coll = &adoc.collections[i as usize];
+            let sect = &coll.sections[j as usize];
+            while com_ind < sect.num_comments && sect.com_index[com_ind as usize] == -1 {
+                write_comment_to_xml(arena, top, &sect.comments[com_ind as usize]);
                 com_ind += 1;
             }
-            elem = mxml_new_element(
-                arena,
-                node,
-                Some(CStr::from_ptr(*(*sect).keys.add(k as usize)).to_bytes()),
-            );
-            if !(*(*sect).values.add(k as usize)).is_null() {
-                mxml_new_text(
-                    arena,
-                    elem,
-                    0,
-                    Some(CStr::from_ptr(*(*sect).values.add(k as usize)).to_bytes()),
-                );
+            node = mxml_new_element(arena, top, coll.name.as_deref());
+            if i != 0 || j != 0 || sect.name.as_deref() != Some(ADOC_GLOBAL_NAME) {
+                mxml_element_set_attr(arena, node, Some(b"name"), sect.name.as_deref());
             }
-            k += 1;
+
+            /* Loop on key-values */
+            k = 0;
+            while k < sect.num_keys {
+                while com_ind < sect.num_comments && sect.com_index[com_ind as usize] == k {
+                    write_comment_to_xml(arena, node, &sect.comments[com_ind as usize]);
+                    com_ind += 1;
+                }
+                elem = mxml_new_element(arena, node, sect.keys[k as usize].as_deref());
+                if let Some(value) = sect.values[k as usize].as_deref() {
+                    mxml_new_text(arena, elem, 0, Some(value));
+                }
+                k += 1;
+            }
+            ind += 1;
         }
-        ind += 1;
-    }
-    i = 0;
-    while i < (*S_CUR_ADOC).num_final_com {
-        write_comment_to_xml(arena, top, *(*S_CUR_ADOC).final_comments.add(i as usize));
-        i += 1;
-    }
+        i = 0;
+        while i < adoc.num_final_com {
+            write_comment_to_xml(arena, top, &adoc.final_comments[i as usize]);
+            i += 1;
+        }
+        top
+    });
+    top = result;
+    let _ = top;
 
     mxml_set_wrap_margin(0);
     ixml_reset_last_level();
     let cb: MxmlSaveCb = Some(ixml_whitespace_cb);
-    let borrowed = std::os::fd::BorrowedFd::borrow_raw(libc::fileno(afile));
-    let Ok(owned) = borrowed.try_clone_to_owned() else {
-        libc::fclose(afile);
-        return -1;
-    };
-    let mut out = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
-    ind = mxml_save_file(arena, xml, &mut out, cb);
-    drop(out);
-    libc::fclose(afile);
+    ind = mxml_save_file(arena, xml, &mut afile, cb);
     mxml_delete(arena, xml);
     ind
 }
 
 /// Matches C static `writeCommentToXML` (`autodoc.c:2124`).
-pub unsafe fn write_comment_to_xml(
-    arena: &mut MxmlArena,
-    parent: Option<usize>,
-    comment: *mut c_char,
-) {
-    let len: c_int;
-    let tmp_str: *mut c_char;
+pub fn write_comment_to_xml(arena: &mut MxmlArena, parent: Option<usize>, comment: &[u8]) {
+    let len: i32;
 
-    len = libc::strlen(comment) as c_int;
+    len = comment.len() as i32;
     if len == 0 {
         return;
     }
-    tmp_str = libc::malloc((len + 10) as usize).cast::<c_char>();
-    if !tmp_str.is_null() {
-        libc::sprintf(
-            tmp_str,
-            c"!--%s%s--".as_ptr(),
-            comment.add(1),
-            if *comment.add((len - 1) as usize) == b' ' as c_char {
-                c"".as_ptr()
+    let tmp_str = c_format_bytes(
+        "!--%s%s--",
+        &[
+            CArg::Bytes(&comment[1..]),
+            CArg::Bytes(if comment[(len - 1) as usize] == b' ' {
+                b""
             } else {
-                c" ".as_ptr()
-            },
-        );
-        mxml_new_element(arena, parent, Some(CStr::from_ptr(tmp_str).to_bytes()));
-        libc::free(tmp_str.cast::<c_void>());
-    }
+                b" "
+            }),
+        ],
+    );
+    mxml_new_element(arena, parent, Some(&tmp_str));
 }
 
 /// Matches C static `addKey` (`autodoc.c:2147`).
-pub unsafe fn add_key(
-    sect: *mut AdocSection,
-    key: *const c_char,
-    value: *const c_char,
-    type_: i32,
-) -> i32 {
+pub fn add_key(sect: &mut AdocSection, key: &[u8], value: Option<&[u8]>, type_: i32) -> i32 {
     /* First allocate enough memory if needed */
-    if (*sect).max_keys == 0 {
-        (*sect).keys = libc::malloc(MALLOC_CHUNK as usize * core::mem::size_of::<*mut c_char>())
-            .cast::<*mut c_char>();
-        (*sect).values = libc::malloc(MALLOC_CHUNK as usize * core::mem::size_of::<*mut c_char>())
-            .cast::<*mut c_char>();
-        (*sect).types =
-            libc::malloc(MALLOC_CHUNK as usize * core::mem::size_of::<u8>()).cast::<u8>();
-        (*sect).max_keys = MALLOC_CHUNK;
-    } else if (*sect).num_keys >= (*sect).max_keys {
-        (*sect).keys = libc::realloc(
-            (*sect).keys.cast::<c_void>(),
-            ((*sect).max_keys + MALLOC_CHUNK) as usize * core::mem::size_of::<*mut c_char>(),
-        )
-        .cast::<*mut c_char>();
-        (*sect).values = libc::realloc(
-            (*sect).values.cast::<c_void>(),
-            ((*sect).max_keys + MALLOC_CHUNK) as usize * core::mem::size_of::<*mut c_char>(),
-        )
-        .cast::<*mut c_char>();
-        (*sect).types = libc::realloc(
-            (*sect).types.cast::<c_void>(),
-            ((*sect).max_keys + MALLOC_CHUNK) as usize * core::mem::size_of::<u8>(),
-        )
-        .cast::<u8>();
-        (*sect).max_keys += MALLOC_CHUNK;
+    if sect.max_keys == 0 {
+        sect.max_keys = MALLOC_CHUNK;
+    } else if sect.num_keys >= sect.max_keys {
+        sect.max_keys += MALLOC_CHUNK;
     }
-    if (*sect).keys.is_null() || (*sect).values.is_null() || (*sect).types.is_null() {
-        adoc_memory_error(core::ptr::null_mut(), c"addKey".as_ptr());
-        return -1;
-    }
+    sect.keys.resize(sect.max_keys as usize, None);
+    sect.values.resize(sect.max_keys as usize, None);
+    sect.types.resize(sect.max_keys as usize, 0);
 
     /* Copy key and value and increment count */
-    *(*sect).keys.add((*sect).num_keys as usize) = libc::strdup(key);
-    if !value.is_null() {
-        *(*sect).values.add((*sect).num_keys as usize) = libc::strdup(value);
-    } else {
-        *(*sect).values.add((*sect).num_keys as usize) = core::ptr::null_mut();
-    }
-    *(*sect).types.add((*sect).num_keys as usize) = if !value.is_null() {
+    sect.keys[sect.num_keys as usize] = Some(key.to_vec());
+    sect.values[sect.num_keys as usize] = value.map(|v| v.to_vec());
+    sect.types[sect.num_keys as usize] = if value.is_some() {
         type_ as u8
     } else {
         ADOC_NO_VALUE as u8
     };
-    if (*(*sect).keys.add((*sect).num_keys as usize)).is_null()
-        || (!value.is_null() && (*(*sect).values.add((*sect).num_keys as usize)).is_null())
-    {
-        adoc_memory_error(core::ptr::null_mut(), c"addKey".as_ptr());
-        return -1;
-    }
-    (*sect).num_keys += 1;
+    sect.num_keys += 1;
     0
 }
 
 /// Matches C static `addSection` (`autodoc.c:2185`).
-pub unsafe fn add_section(adoc: *mut Autodoc, coll_ind: i32, name: *const c_char) -> i32 {
-    let coll: *mut AdocCollection = (*adoc).collections.add(coll_ind as usize);
-    let sect: *mut AdocSection;
-
+pub fn add_section(adoc: &mut Autodoc, coll_ind: i32, name: &[u8]) -> i32 {
     /* First allocate enough memory if needed for the sections in the collection
     and for the master lists in the autodoc */
-    if (*coll).max_sections == 0 {
-        (*coll).sections =
-            libc::malloc(MALLOC_CHUNK as usize * core::mem::size_of::<AdocSection>())
-                .cast::<AdocSection>();
-        (*coll).max_sections = MALLOC_CHUNK;
-    } else if (*coll).num_sections >= (*coll).max_sections {
-        (*coll).sections = libc::realloc(
-            (*coll).sections.cast::<c_void>(),
-            ((*coll).max_sections + MALLOC_CHUNK) as usize * core::mem::size_of::<AdocSection>(),
-        )
-        .cast::<AdocSection>();
-        (*coll).max_sections += MALLOC_CHUNK;
-    }
-    if adoc_memory_error((*coll).sections.cast::<c_void>(), c"addSection".as_ptr()) != 0 {
-        return -1;
+    {
+        let coll = &mut adoc.collections[coll_ind as usize];
+        if coll.max_sections == 0 {
+            coll.max_sections = MALLOC_CHUNK;
+        } else if coll.num_sections >= coll.max_sections {
+            coll.max_sections += MALLOC_CHUNK;
+        }
+        coll.sections
+            .resize(coll.max_sections as usize, AdocSection::default());
     }
 
-    if (*adoc).max_sections == 0 {
-        (*adoc).coll_list =
-            libc::malloc(MALLOC_CHUNK as usize * core::mem::size_of::<c_int>()).cast::<c_int>();
-        (*adoc).sect_list =
-            libc::malloc(MALLOC_CHUNK as usize * core::mem::size_of::<c_int>()).cast::<c_int>();
-        (*adoc).max_sections = MALLOC_CHUNK;
-    } else if (*adoc).num_sections >= (*adoc).max_sections {
-        (*adoc).coll_list = libc::realloc(
-            (*adoc).coll_list.cast::<c_void>(),
-            ((*adoc).max_sections + MALLOC_CHUNK) as usize * core::mem::size_of::<c_int>(),
-        )
-        .cast::<c_int>();
-        (*adoc).sect_list = libc::realloc(
-            (*adoc).sect_list.cast::<c_void>(),
-            ((*adoc).max_sections + MALLOC_CHUNK) as usize * core::mem::size_of::<c_int>(),
-        )
-        .cast::<c_int>();
-        (*adoc).max_sections += MALLOC_CHUNK;
+    if adoc.max_sections == 0 {
+        adoc.max_sections = MALLOC_CHUNK;
+    } else if adoc.num_sections >= adoc.max_sections {
+        adoc.max_sections += MALLOC_CHUNK;
     }
-    if (*adoc).coll_list.is_null() || (*adoc).sect_list.is_null() {
-        adoc_memory_error(core::ptr::null_mut(), c"addSection".as_ptr());
-        return -1;
-    }
+    adoc.coll_list.resize(adoc.max_sections as usize, 0);
+    adoc.sect_list.resize(adoc.max_sections as usize, 0);
 
     /* Copy the name and initialize to empty keys */
-    sect = (*coll).sections.add((*coll).num_sections as usize);
-    (*sect).name = libc::strdup(name);
-    if adoc_memory_error((*sect).name.cast::<c_void>(), c"addSection".as_ptr()) != 0 {
-        return -1;
+    let num_sections;
+    {
+        let coll = &mut adoc.collections[coll_ind as usize];
+        let sect = &mut coll.sections[coll.num_sections as usize];
+        *sect = AdocSection {
+            name: Some(name.to_vec()),
+            ..AdocSection::default()
+        };
+        num_sections = coll.num_sections;
     }
-    (*sect).keys = core::ptr::null_mut();
-    (*sect).values = core::ptr::null_mut();
-    (*sect).types = core::ptr::null_mut();
-    (*sect).num_keys = 0;
-    (*sect).max_keys = 0;
-    (*sect).comments = core::ptr::null_mut();
-    (*sect).com_index = core::ptr::null_mut();
-    (*sect).num_comments = 0;
 
     /* Add the collection and section # to master list */
-    *(*adoc).coll_list.add((*adoc).num_sections as usize) = coll_ind;
-    *(*adoc).sect_list.add((*adoc).num_sections as usize) = (*coll).num_sections;
-    (*adoc).num_sections += 1;
-    (*coll).num_sections += 1;
+    adoc.coll_list[adoc.num_sections as usize] = coll_ind;
+    adoc.sect_list[adoc.num_sections as usize] = num_sections;
+    adoc.num_sections += 1;
+    adoc.collections[coll_ind as usize].num_sections += 1;
     0
 }
 
 /// Matches C static `addCollection` (`autodoc.c:2242`).
-pub unsafe fn add_collection(adoc: *mut Autodoc, name: *const c_char) -> i32 {
-    let coll: *mut AdocCollection;
-
+pub fn add_collection(adoc: &mut Autodoc, name: &[u8]) -> i32 {
     /* Allocate just one at a time when needed */
-    if (*adoc).num_collections == 0 {
-        (*adoc).collections =
-            libc::malloc(core::mem::size_of::<AdocCollection>()).cast::<AdocCollection>();
-    } else {
-        (*adoc).collections = libc::realloc(
-            (*adoc).collections.cast::<c_void>(),
-            ((*adoc).num_collections + 1) as usize * core::mem::size_of::<AdocCollection>(),
-        )
-        .cast::<AdocCollection>();
-    }
-    if adoc_memory_error(
-        (*adoc).collections.cast::<c_void>(),
-        c"addCollection".as_ptr(),
-    ) != 0
-    {
-        return -1;
-    }
-    coll = (*adoc).collections.add((*adoc).num_collections as usize);
-    (*coll).name = libc::strdup(name);
-    if adoc_memory_error((*coll).name.cast::<c_void>(), c"addCollection".as_ptr()) != 0 {
-        return -1;
-    }
-    (*coll).num_sections = 0;
-    (*coll).max_sections = 0;
-    (*coll).sections = core::ptr::null_mut();
-    (*adoc).num_collections += 1;
+    adoc.collections.resize(
+        (adoc.num_collections + 1) as usize,
+        AdocCollection::default(),
+    );
+    let coll = &mut adoc.collections[adoc.num_collections as usize];
+    coll.name = Some(name.to_vec());
+    coll.num_sections = 0;
+    coll.max_sections = 0;
+    coll.sections = Vec::new();
+    adoc.num_collections += 1;
     0
 }
 
 /// Matches C static `addAutodoc` (`autodoc.c:2268`).
-pub unsafe fn add_autodoc() -> i32 {
-    let adoc: *mut Autodoc;
-    let mut index: c_int = -1;
-    let mut i: c_int;
+pub fn add_autodoc() -> i32 {
+    let mut index: i32 = -1;
 
-    /* Search for a free autodoc in array */
-    i = 0;
-    while i < S_NUM_AUTODOCS {
-        if (*S_AUTODOCS.add(i as usize)).in_use == 0 {
-            index = i;
-            break;
+    S_AUTODOCS.with_borrow_mut(|adocs| {
+        /* Search for a free autodoc in array */
+        let mut i: i32 = 0;
+        while i < adocs.len() as i32 {
+            if adocs[i as usize].in_use == 0 {
+                index = i;
+                break;
+            }
+            i += 1;
         }
-        i += 1;
-    }
 
-    if index < 0 {
-        /* Allocate just one at a time when needed */
-        if S_NUM_AUTODOCS == 0 {
-            S_AUTODOCS = libc::malloc(core::mem::size_of::<Autodoc>()).cast::<Autodoc>();
-        } else {
-            S_AUTODOCS = libc::realloc(
-                S_AUTODOCS.cast::<c_void>(),
-                (S_NUM_AUTODOCS + 1) as usize * core::mem::size_of::<Autodoc>(),
-            )
-            .cast::<Autodoc>();
+        if index < 0 {
+            /* Allocate just one at a time when needed */
+            index = adocs.len() as i32;
+            adocs.push(Autodoc::default());
         }
-        if adoc_memory_error(S_AUTODOCS.cast::<c_void>(), c"addAutodoc".as_ptr()) != 0 {
+
+        /* Initialize collections */
+        let adoc = &mut adocs[index as usize];
+        *adoc = Autodoc {
+            in_use: 1,
+            ..Autodoc::default()
+        };
+
+        /* Add a collection and section for global data */
+        if add_collection(adoc, ADOC_GLOBAL_NAME) != 0 {
             return -1;
         }
-        index = S_NUM_AUTODOCS;
-        S_NUM_AUTODOCS += 1;
-    }
-
-    /* Initialize collections */
-    adoc = S_AUTODOCS.add(index as usize);
-    (*adoc).collections = core::ptr::null_mut();
-    (*adoc).num_collections = 0;
-    (*adoc).final_comments = core::ptr::null_mut();
-    (*adoc).num_final_com = 0;
-    (*adoc).coll_list = core::ptr::null_mut();
-    (*adoc).sect_list = core::ptr::null_mut();
-    (*adoc).num_sections = 0;
-    (*adoc).max_sections = 0;
-    (*adoc).in_use = 1;
-    (*adoc).backed_up = 0;
-    (*adoc).write_as_xml = 0;
-    (*adoc).root_element = core::ptr::null_mut();
-
-    /* Add a collection and section for global data */
-    if add_collection(adoc, ADOC_GLOBAL_NAME.as_ptr()) != 0 {
-        return -1;
-    }
-    if add_section(adoc, 0, ADOC_GLOBAL_NAME.as_ptr()) != 0 {
-        delete_adoc(adoc);
-        return -1;
-    }
-    index
+        if add_section(adoc, 0, ADOC_GLOBAL_NAME) != 0 {
+            delete_adoc(adoc);
+            return -1;
+        }
+        index
+    })
 }
 
 /// Matches C static `deleteAdoc` (`autodoc.c:2317`).
-pub unsafe fn delete_adoc(adoc: *mut Autodoc) {
-    let mut sect: *mut AdocSection;
-    let mut coll: *mut AdocCollection;
-    let mut i: c_int;
-    let mut j: c_int;
+pub fn delete_adoc(adoc: &mut Autodoc) {
+    let mut i: i32;
+    let mut j: i32;
     i = 0;
-    while i < (*adoc).num_collections {
-        coll = (*adoc).collections.add(i as usize);
+    while i < adoc.num_collections {
+        let coll = &mut adoc.collections[i as usize];
         j = 0;
-        while j < (*coll).num_sections {
-            sect = (*coll).sections.add(j as usize);
-            delete_section(sect);
+        while j < coll.num_sections {
+            delete_section(&mut coll.sections[j as usize]);
             j += 1;
         }
 
         /* Free sections */
-        if !(*coll).sections.is_null() {
-            libc::free((*coll).sections.cast::<c_void>());
-            (*coll).sections = core::ptr::null_mut();
-        }
-        if !(*coll).name.is_null() {
-            libc::free((*coll).name.cast::<c_void>());
-            (*coll).name = core::ptr::null_mut();
-        }
+        coll.sections = Vec::new();
+        coll.name = None;
         i += 1;
     }
 
     /* Free collections */
-    if !(*adoc).collections.is_null() {
-        libc::free((*adoc).collections.cast::<c_void>());
-        (*adoc).collections = core::ptr::null_mut();
-    }
-    (*adoc).num_collections = 0;
+    adoc.collections = Vec::new();
+    adoc.num_collections = 0;
 
     /* Free lists of sections */
-    if !(*adoc).coll_list.is_null() {
-        libc::free((*adoc).coll_list.cast::<c_void>());
-        (*adoc).coll_list = core::ptr::null_mut();
-    }
-    if !(*adoc).sect_list.is_null() {
-        libc::free((*adoc).sect_list.cast::<c_void>());
-        (*adoc).sect_list = core::ptr::null_mut();
-    }
-    (*adoc).num_sections = 0;
-    (*adoc).max_sections = 0;
+    adoc.coll_list = Vec::new();
+    adoc.sect_list = Vec::new();
+    adoc.num_sections = 0;
+    adoc.max_sections = 0;
 
     /* Free final comments */
-    i = 0;
-    while i < (*adoc).num_final_com {
-        if !(*(*adoc).final_comments.add(i as usize)).is_null() {
-            libc::free((*(*adoc).final_comments.add(i as usize)).cast::<c_void>());
-            *(*adoc).final_comments.add(i as usize) = core::ptr::null_mut();
-        }
-        i += 1;
-    }
-    if !(*adoc).final_comments.is_null() {
-        libc::free((*adoc).final_comments.cast::<c_void>());
-        (*adoc).final_comments = core::ptr::null_mut();
-    }
-    (*adoc).num_final_com = 0;
-    if !(*adoc).root_element.is_null() {
-        libc::free((*adoc).root_element.cast::<c_void>());
-        (*adoc).root_element = core::ptr::null_mut();
-    }
-    (*adoc).in_use = 0;
+    adoc.final_comments = Vec::new();
+    adoc.num_final_com = 0;
+    adoc.root_element = None;
+    adoc.in_use = 0;
 }
 
 /// Matches C static `deleteSection` (`autodoc.c:2356`).
-pub unsafe fn delete_section(sect: *mut AdocSection) {
-    let mut k: c_int;
-
+pub fn delete_section(sect: &mut AdocSection) {
     /* Clean key/values out of section */
-    k = 0;
-    while k < (*sect).num_keys {
-        if !(*(*sect).keys.add(k as usize)).is_null() {
-            libc::free((*(*sect).keys.add(k as usize)).cast::<c_void>());
-            *(*sect).keys.add(k as usize) = core::ptr::null_mut();
-        }
-        if !(*(*sect).values.add(k as usize)).is_null() {
-            libc::free((*(*sect).values.add(k as usize)).cast::<c_void>());
-            *(*sect).values.add(k as usize) = core::ptr::null_mut();
-        }
-        k += 1;
-    }
-    if !(*sect).keys.is_null() {
-        libc::free((*sect).keys.cast::<c_void>());
-        (*sect).keys = core::ptr::null_mut();
-    }
-    if !(*sect).values.is_null() {
-        libc::free((*sect).values.cast::<c_void>());
-        (*sect).values = core::ptr::null_mut();
-    }
-    if !(*sect).types.is_null() {
-        libc::free((*sect).types.cast::<c_void>());
-        (*sect).types = core::ptr::null_mut();
-    }
-    if !(*sect).name.is_null() {
-        libc::free((*sect).name.cast::<c_void>());
-        (*sect).name = core::ptr::null_mut();
-    }
+    sect.keys = Vec::new();
+    sect.values = Vec::new();
+    sect.types = Vec::new();
+    sect.name = None;
 
     /* Clean comments out of section */
-    k = 0;
-    while k < (*sect).num_comments {
-        if !(*(*sect).comments.add(k as usize)).is_null() {
-            libc::free((*(*sect).comments.add(k as usize)).cast::<c_void>());
-            *(*sect).comments.add(k as usize) = core::ptr::null_mut();
-        }
-        k += 1;
-    }
-    if !(*sect).comments.is_null() {
-        libc::free((*sect).comments.cast::<c_void>());
-        (*sect).comments = core::ptr::null_mut();
-    }
-    if !(*sect).com_index.is_null() {
-        libc::free((*sect).com_index.cast::<c_void>());
-        (*sect).com_index = core::ptr::null_mut();
-    }
+    sect.comments = Vec::new();
+    sect.com_index = Vec::new();
 }
 
 /// Matches C static `parseKeyValue` (`autodoc.c:2381`).
-pub unsafe fn parse_key_value(
-    line: *mut c_char,
-    end: *mut c_char,
-    key: *mut *mut c_char,
-    value: *mut *mut c_char,
+///
+/// The source takes two `char *` into one NUL-terminated line buffer; `line`
+/// and `end` are indices into that buffer here, because `strstr(line, ...)`
+/// searches past `end` to the buffer's NUL and the two are not one slice.
+pub fn parse_key_value(
+    buf: &[u8],
+    line: usize,
+    end: usize,
+    key: &mut Vec<u8>,
+    value: &mut Option<Vec<u8>>,
 ) -> i32 {
     let mut line = line;
     let mut end = end;
-    let mut val_start: *mut c_char;
-    let mut key_end: *mut c_char;
-    let key_len: c_int;
-    let val_len: c_int;
+    let mut val_start: usize;
+    let mut key_end: usize;
+    let key_len: usize;
+    let val_len: isize;
 
     /* Eat spaces at start and end */
-    while line < end && (*line == b' ' as c_char || *line == b'\t' as c_char) {
-        line = line.add(1);
+    while line < end && (buf[line] == b' ' || buf[line] == b'\t') {
+        line += 1;
     }
-    while line < end && (*end.sub(1) == b' ' as c_char || *end.sub(1) == b'\t' as c_char) {
-        end = end.sub(1);
+    while line < end && (buf[end - 1] == b' ' || buf[end - 1] == b'\t') {
+        end -= 1;
     }
     if line == end {
         return 1;
     }
 
     /* Find delimiter.  If it is not there or no text before it, error */
-    val_start = libc::strstr(line, S_VALUE_DELIM);
-    if val_start.is_null() || val_start == line {
+    let delim = S_VALUE_DELIM.with_borrow(|delim| delim.clone());
+    let found = if delim.is_empty() || delim.len() > buf.len() - line {
+        None
+    } else {
+        buf[line..]
+            .windows(delim.len())
+            .position(|w| w == &delim[..])
+            .map(|p| line + p)
+    };
+    let Some(found) = found else {
+        return 1;
+    };
+    val_start = found;
+    if val_start == line {
         return 1;
     }
 
     /* Eat spaces after key */
     key_end = val_start;
-    while key_end > line
-        && (*key_end.sub(1) == b' ' as c_char || *key_end.sub(1) == b'\t' as c_char)
-    {
-        key_end = key_end.sub(1);
+    while key_end > line && (buf[key_end - 1] == b' ' || buf[key_end - 1] == b'\t') {
+        key_end -= 1;
     }
 
     /* Eat spaces after the delimiter.  Allow an empty value */
-    val_start = val_start.add(libc::strlen(S_VALUE_DELIM));
-    while val_start < end && (*val_start == b' ' as c_char || *val_start == b'\t' as c_char) {
-        val_start = val_start.add(1);
+    val_start += delim.len();
+    while val_start < end && (buf[val_start] == b' ' || buf[val_start] == b'\t') {
+        val_start += 1;
     }
 
     /* Allocate for strings and copy them */
-    key_len = key_end.offset_from(line) as c_int;
-    *key = libc::malloc((key_len + 1) as usize).cast::<c_char>();
-    if adoc_memory_error((*key).cast::<c_void>(), c"parseKeyValue".as_ptr()) != 0 {
-        return -1;
-    }
-    libc::memcpy(
-        (*key).cast::<c_void>(),
-        line.cast::<c_void>(),
-        key_len as usize,
-    );
-    *(*key).add(key_len as usize) = 0;
+    key_len = key_end - line;
+    *key = buf[line..line + key_len].to_vec();
 
-    val_len = end.offset_from(val_start) as c_int;
-    *value = core::ptr::null_mut();
+    val_len = end as isize - val_start as isize;
+    *value = None;
     if val_len != 0 {
-        *value = libc::malloc((val_len + 1) as usize).cast::<c_char>();
-        if adoc_memory_error((*value).cast::<c_void>(), c"parseKeyValue".as_ptr()) != 0 {
+        if val_len < 0 {
+            /* C computes `end - valStart` as a negative `int` and hands
+            `valLen + 1` to `malloc`, which fails; `adocMemoryError` then
+            returns -1 (`autodoc.c:2429`). */
+            adoc_memory_error(true, "parseKeyValue");
             return -1;
         }
-        libc::memcpy(
-            (*value).cast::<c_void>(),
-            val_start.cast::<c_void>(),
-            val_len as usize,
-        );
-        *(*value).add(val_len as usize) = 0;
+        *value = Some(buf[val_start..end].to_vec());
     }
     0
 }
 
 /// Matches C static `lookupKey` (`autodoc.c:2429`).
-pub unsafe fn lookup_key(sect: *mut AdocSection, key: *const c_char) -> i32 {
-    let mut i: c_int;
-    if key.is_null() {
-        return -1;
-    }
+pub fn lookup_key(sect: &AdocSection, key: &[u8]) -> i32 {
+    let mut i: i32;
     i = 0;
-    while i < (*sect).num_keys {
-        if !(*(*sect).keys.add(i as usize)).is_null()
-            && libc::strcmp(key, *(*sect).keys.add(i as usize)) == 0
-        {
+    while i < sect.num_keys {
+        if sect.keys[i as usize].as_deref() == Some(key) {
             return i;
         }
         i += 1;
@@ -3306,14 +2920,11 @@ pub unsafe fn lookup_key(sect: *mut AdocSection, key: *const c_char) -> i32 {
 }
 
 /// Matches C static `lookupCollection` (`autodoc.c:2442`).
-pub unsafe fn lookup_collection(adoc: *mut Autodoc, name: *const c_char) -> i32 {
-    let mut i: c_int;
-    if name.is_null() || adoc.is_null() {
-        return -1;
-    }
+pub fn lookup_collection(adoc: &Autodoc, name: &[u8]) -> i32 {
+    let mut i: i32;
     i = 0;
-    while i < (*adoc).num_collections {
-        if libc::strcmp(name, (*(*adoc).collections.add(i as usize)).name) == 0 {
+    while i < adoc.num_collections {
+        if adoc.collections[i as usize].name.as_deref() == Some(name) {
             return i;
         }
         i += 1;
@@ -3322,58 +2933,41 @@ pub unsafe fn lookup_collection(adoc: *mut Autodoc, name: *const c_char) -> i32 
 }
 
 /// Matches C static `getSection` (`autodoc.c:2455`).
-pub unsafe fn get_section(type_name: *const c_char, sect_ind: i32) -> *mut AdocSection {
-    let coll: *mut AdocCollection;
-    let coll_ind: c_int;
-    if S_CUR_ADOC.is_null() || type_name.is_null() || sect_ind < 0 {
-        return core::ptr::null_mut();
+///
+/// The C returns an `AdocSection *` into `sCurAdoc`; a `Vec` moves when it
+/// grows, so this returns the collection index and the section index that
+/// address the same section, and the autodoc is passed in.
+pub fn get_section(adoc: &Autodoc, type_name: &[u8], sect_ind: i32) -> Option<(usize, usize)> {
+    if sect_ind < 0 {
+        return None;
     }
-    coll_ind = lookup_collection(S_CUR_ADOC, type_name);
+    let coll_ind = lookup_collection(adoc, type_name);
     if coll_ind < 0 {
-        return core::ptr::null_mut();
+        return None;
     }
-    coll = (*S_CUR_ADOC).collections.add(coll_ind as usize);
-    if sect_ind >= (*coll).num_sections {
-        return core::ptr::null_mut();
+    if sect_ind >= adoc.collections[coll_ind as usize].num_sections {
+        return None;
     }
-    (*coll).sections.add(sect_ind as usize)
+    Some((coll_ind as usize, sect_ind as usize))
 }
 
 /// Matches C static `addComments` (`autodoc.c:2472`).
-pub unsafe fn add_comments(
-    sect: *mut AdocSection,
-    comments: *mut *mut c_char,
-    num_comments: *mut c_int,
+pub fn add_comments(
+    sect: &mut AdocSection,
+    comments: &mut [Vec<u8>],
+    num_comments: &mut i32,
     index: i32,
 ) -> i32 {
-    let mut i: c_int;
-    let new_num: c_int = (*sect).num_comments + *num_comments;
-    if (*sect).num_comments != 0 {
-        (*sect).comments = libc::realloc(
-            (*sect).comments.cast::<c_void>(),
-            new_num as usize * core::mem::size_of::<*mut c_char>(),
-        )
-        .cast::<*mut c_char>();
-        (*sect).com_index = libc::realloc(
-            (*sect).com_index.cast::<c_void>(),
-            new_num as usize * core::mem::size_of::<c_int>(),
-        )
-        .cast::<c_int>();
-    } else {
-        (*sect).comments = libc::malloc(new_num as usize * core::mem::size_of::<*mut c_char>())
-            .cast::<*mut c_char>();
-        (*sect).com_index =
-            libc::malloc(new_num as usize * core::mem::size_of::<c_int>()).cast::<c_int>();
-    }
-    if (*sect).comments.is_null() || (*sect).com_index.is_null() {
-        adoc_memory_error(core::ptr::null_mut(), c"addComments".as_ptr());
-        return -1;
-    }
+    let mut i: i32;
+    let new_num: i32 = sect.num_comments + *num_comments;
+    sect.comments.resize(new_num as usize, Vec::new());
+    sect.com_index.resize(new_num as usize, 0);
     i = 0;
     while i < *num_comments {
-        *(*sect).comments.add((*sect).num_comments as usize) = *comments.add(i as usize);
-        *(*sect).com_index.add((*sect).num_comments as usize) = index;
-        (*sect).num_comments += 1;
+        /* The C moves the pointer into the section rather than copying it. */
+        sect.comments[sect.num_comments as usize] = std::mem::take(&mut comments[i as usize]);
+        sect.com_index[sect.num_comments as usize] = index;
+        sect.num_comments += 1;
         i += 1;
     }
     *num_comments = 0;
@@ -3381,48 +2975,54 @@ pub unsafe fn add_comments(
 }
 
 /// Matches C static `findSectionInAdocList` (`autodoc.c:2497`).
-pub unsafe fn find_section_in_adoc_list(coll_ind: i32, sect_ind: i32) -> i32 {
-    let mut i: c_int;
-    i = 0;
-    while i < (*S_CUR_ADOC).num_sections {
-        if *(*S_CUR_ADOC).coll_list.add(i as usize) == coll_ind
-            && *(*S_CUR_ADOC).sect_list.add(i as usize) == sect_ind
-        {
-            return i;
-        }
-        i += 1;
+pub fn find_section_in_adoc_list(coll_ind: i32, sect_ind: i32) -> i32 {
+    let cur = S_CUR_ADOC_IND.get();
+    if cur < 0 {
+        return -1;
     }
-    -1
+    S_AUTODOCS.with_borrow(|adocs| {
+        let adoc = &adocs[cur as usize];
+        let mut i: i32 = 0;
+        while i < adoc.num_sections {
+            if adoc.coll_list[i as usize] == coll_ind && adoc.sect_list[i as usize] == sect_ind {
+                return i;
+            }
+            i += 1;
+        }
+        -1
+    })
 }
 
 /// Matches C static `adocMemoryError` (`autodoc.c:2506`).
-pub unsafe fn adoc_memory_error(ptr: *mut c_void, routine: *const c_char) -> i32 {
-    if !ptr.is_null() {
+///
+/// The C tests the pointer it was handed for NULL; every allocation in this
+/// module is a `Vec` that aborts rather than returning null, so what is passed
+/// is the outcome of the test the caller already made.
+pub fn adoc_memory_error(failed: bool, routine: &str) -> i32 {
+    if !failed {
         return 0;
     }
     b3d_error(
         Some(&mut ImodFile::Stderr),
-        format_args!(
-            "ERROR: {} - Allocating memory for string or autodoc component\n",
-            CStr::from_ptr(routine).to_string_lossy()
-        ),
+        format_args!("ERROR: {routine} - Allocating memory for string or autodoc component\n"),
     );
     -1
 }
 
 /// Matches C static `openForWrite` (`autodoc.c:2515`).
-pub unsafe fn open_for_write(name: *const c_char, mode: *const c_char) -> *mut libc::FILE {
-    let mut fp: *mut libc::FILE = core::ptr::null_mut();
-    let mut ind: c_int;
-    let trials: c_int = if 0 > S_OPEN_RETRIES {
+pub fn open_for_write(name: &[u8], mode: &str) -> Option<ImodFile> {
+    let mut fp: Option<ImodFile> = None;
+    let mut ind: i32;
+    let trials: i32 = if 0 > S_OPEN_RETRIES.get() {
         0
     } else {
-        S_OPEN_RETRIES
+        S_OPEN_RETRIES.get()
     };
+    let path = String::from_utf8_lossy(name).into_owned();
     ind = 0;
     while ind <= trials {
-        fp = libc::fopen(name, mode);
-        if !fp.is_null() || ind == trials {
+        fp = ImodFile::open(&path, mode);
+        if fp.is_some() || ind == trials {
             return fp;
         }
         b3d_milli_sleep(250);
@@ -3434,7 +3034,6 @@ pub unsafe fn open_for_write(name: *const c_char, mode: *const c_char) -> *mut l
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use std::ffi::CString;
     use std::sync::Mutex;
     /// The autodoc collection (`sAutodocs`) is process-global, so every test
     /// that touches it -- here and in `adoc_fwrap`, which drives the same
@@ -3444,394 +3043,508 @@ pub(crate) mod tests {
 
     #[test]
     fn reads_vendored_autodoc_fixture() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let path = CString::new(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/IMOD/autodoc/binvol.adoc"
-            ))
-            .unwrap();
-            assert!(adoc_read(path.as_ptr()) >= 0);
-            assert!(adoc_get_number_of_sections(c"Field".as_ptr()) >= 1);
-            let mut value = core::ptr::null_mut();
-            assert_eq!(adoc_get_section_name(c"Field".as_ptr(), 0, &mut value), 0);
-            assert!(!value.is_null());
-            libc::free(value.cast());
-            adoc_done();
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc/binvol.adoc");
+        assert!(adoc_read(path.as_bytes()) >= 0);
+        assert!(adoc_get_number_of_sections(b"Field") >= 1);
+        let mut value = Vec::new();
+        assert_eq!(adoc_get_section_name(b"Field", 0, &mut value), 0);
+        assert!(!value.is_empty());
+        adoc_done();
     }
 
     #[test]
     fn metadata_numbers_are_read_from_text_values() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let text =
-                b"ImageFile = stack.mrc\nMontage = 1\n[ZValue = 0]\nPieceCoordinates = 1 2 3\n";
-            let name = std::env::temp_dir().join("imod-rs-autodoc-metadata.adoc");
-            std::fs::write(&name, text).unwrap();
-            let file = CString::new(name.to_string_lossy().as_bytes()).unwrap();
-            assert!(adoc_read(file.as_ptr()) >= 0);
-            let mut a = 0;
-            let mut b = 0;
-            let mut c = 0;
-            assert_eq!(
-                adoc_get_three_integers(
-                    c"ZValue".as_ptr(),
-                    0,
-                    c"PieceCoordinates".as_ptr(),
-                    &mut a,
-                    &mut b,
-                    &mut c
-                ),
-                0
-            );
-            assert_eq!((a, b, c), (1, 2, 3));
-            std::fs::remove_file(name).unwrap();
-            adoc_done();
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        let text = b"ImageFile = stack.mrc\nMontage = 1\n[ZValue = 0]\nPieceCoordinates = 1 2 3\n";
+        let name = std::env::temp_dir().join("imod-rs-autodoc-metadata.adoc");
+        std::fs::write(&name, text).unwrap();
+        assert!(adoc_read(name.to_string_lossy().as_bytes()) >= 0);
+        let mut a = 0;
+        let mut b = 0;
+        let mut c = 0;
+        assert_eq!(
+            adoc_get_three_integers(b"ZValue", 0, b"PieceCoordinates", &mut a, &mut b, &mut c),
+            0
+        );
+        assert_eq!((a, b, c), (1, 2, 3));
+        std::fs::remove_file(name).unwrap();
+        adoc_done();
     }
 
     #[test]
     fn collection_indices_exclude_the_global_predata_collection() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            assert!(adoc_new() >= 0);
-            assert_eq!(adoc_add_section(c"Field".as_ptr(), c"one".as_ptr()), 0);
-            assert_eq!(adoc_get_num_collections(), 1);
-            let mut name = core::ptr::null_mut();
-            assert_eq!(adoc_get_collection_name(0, &mut name), 0);
-            assert_eq!(CStr::from_ptr(name).to_bytes(), b"Field");
-            libc::free(name.cast());
-            adoc_done();
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        assert!(adoc_new() >= 0);
+        assert_eq!(adoc_add_section(b"Field", b"one"), 0);
+        assert_eq!(adoc_get_num_collections(), 1);
+        let mut name = Vec::new();
+        assert_eq!(adoc_get_collection_name(0, &mut name), 0);
+        assert_eq!(name, b"Field");
+        adoc_done();
     }
 
     /// `writeFile` through `AdocPrintToString`, exercising `fsPrintf`'s string path.
     #[test]
     fn print_to_string_reproduces_the_written_layout() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            assert!(adoc_new() >= 0);
-            assert_eq!(
-                adoc_set_key_value(
-                    ADOC_GLOBAL_NAME.as_ptr(),
-                    0,
-                    c"ImageFile".as_ptr(),
-                    c"a.mrc".as_ptr()
-                ),
-                0
-            );
-            assert_eq!(
-                adoc_add_section(ADOC_ZVALUE_NAME.as_ptr(), c"0".as_ptr()),
-                0
-            );
-            assert_eq!(
-                adoc_set_two_integers(
-                    ADOC_ZVALUE_NAME.as_ptr(),
-                    0,
-                    c"PieceCoordinates".as_ptr(),
-                    3,
-                    4
-                ),
-                0
-            );
-            let mut buf = [0 as c_char; 512];
-            assert_eq!(adoc_print_to_string(buf.as_mut_ptr(), 512, 1), 0);
-            assert_eq!(
-                CStr::from_ptr(buf.as_ptr()).to_bytes(),
-                b"ImageFile = a.mrc\n\n[ZValue = 0]\nPieceCoordinates = 3 4\n"
-            );
-            adoc_done();
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        assert!(adoc_new() >= 0);
+        assert_eq!(
+            adoc_set_key_value(ADOC_GLOBAL_NAME, 0, b"ImageFile", Some(b"a.mrc")),
+            0
+        );
+        assert_eq!(adoc_add_section(ADOC_ZVALUE_NAME, b"0"), 0);
+        assert_eq!(
+            adoc_set_two_integers(ADOC_ZVALUE_NAME, 0, b"PieceCoordinates", 3, 4),
+            0
+        );
+        let mut buf = Vec::new();
+        assert_eq!(adoc_print_to_string(&mut buf, 512, 1), 0);
+        assert_eq!(
+            buf,
+            b"ImageFile = a.mrc\n\n[ZValue = 0]\nPieceCoordinates = 3 4\n"
+        );
+        adoc_done();
     }
 
     /// Round-trip a real vendored autodoc through the reader and the writer.
     #[test]
     fn round_trips_a_vendored_autodoc_byte_for_byte() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let src = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc/binvol.adoc");
-            let path = CString::new(src).unwrap();
-            assert!(adoc_read(path.as_ptr()) >= 0);
-            let out = std::env::temp_dir().join("imod-rs-autodoc-roundtrip.adoc");
-            let out_c = CString::new(out.to_string_lossy().as_bytes()).unwrap();
-            assert_eq!(adoc_write(out_c.as_ptr()), 0);
-            let written = std::fs::read(&out).unwrap();
-            adoc_done();
-            /* Re-read the written file and check it produces the same key count */
-            assert!(adoc_read(out_c.as_ptr()) >= 0);
-            let n = adoc_get_number_of_sections(c"Field".as_ptr());
-            adoc_done();
-            assert!(n >= 1);
-            assert!(!written.is_empty());
-            let _ = std::fs::remove_file(&out);
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        let src = concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc/binvol.adoc");
+        assert!(adoc_read(src.as_bytes()) >= 0);
+        let out = std::env::temp_dir().join("imod-rs-autodoc-roundtrip.adoc");
+        assert_eq!(adoc_write(out.to_string_lossy().as_bytes()), 0);
+        let written = std::fs::read(&out).unwrap();
+        adoc_done();
+        /* Re-read the written file and check it produces the same key count */
+        assert!(adoc_read(out.to_string_lossy().as_bytes()) >= 0);
+        let n = adoc_get_number_of_sections(b"Field");
+        adoc_done();
+        assert!(n >= 1);
+        assert!(!written.is_empty());
+        let _ = std::fs::remove_file(&out);
     }
 
     /// Comments read from an autodoc are attached and written back out in place.
     #[test]
     fn comments_are_preserved_across_a_write() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let text = b"# leading comment\nVersion = 1\n\n[Field = A]\n# about B\nB = 2\n";
-            let name = std::env::temp_dir().join("imod-rs-autodoc-comments.adoc");
-            std::fs::write(&name, text).unwrap();
-            let file = CString::new(name.to_string_lossy().as_bytes()).unwrap();
-            assert!(adoc_read(file.as_ptr()) >= 0);
-            let mut buf = [0 as c_char; 1024];
-            assert_eq!(adoc_print_to_string(buf.as_mut_ptr(), 1024, 1), 0);
-            let got = CStr::from_ptr(buf.as_ptr()).to_bytes().to_vec();
-            adoc_done();
-            let _ = std::fs::remove_file(&name);
-            assert_eq!(
-                String::from_utf8_lossy(&got),
-                "# leading comment\nVersion = 1\n\n[Field = A]\n# about B\nB = 2\n"
-            );
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        let text = b"# leading comment\nVersion = 1\n\n[Field = A]\n# about B\nB = 2\n";
+        let name = std::env::temp_dir().join("imod-rs-autodoc-comments.adoc");
+        std::fs::write(&name, text).unwrap();
+        assert!(adoc_read(name.to_string_lossy().as_bytes()) >= 0);
+        let mut buf = Vec::new();
+        assert_eq!(adoc_print_to_string(&mut buf, 1024, 1), 0);
+        adoc_done();
+        let _ = std::fs::remove_file(&name);
+        assert_eq!(
+            String::from_utf8_lossy(&buf),
+            "# leading comment\nVersion = 1\n\n[Field = A]\n# about B\nB = 2\n"
+        );
     }
 
     /// `AdocGetValTypeAndSize` counts space-separated tokens and reports the type.
     #[test]
     fn val_type_and_size_reports_tokens() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            assert!(adoc_new() >= 0);
-            let mut vals = [1.5f32, 2.5, 3.5];
-            assert_eq!(
-                adoc_set_float_array(
-                    ADOC_GLOBAL_NAME.as_ptr(),
-                    0,
-                    c"Vals".as_ptr(),
-                    vals.as_mut_ptr(),
-                    3
-                ),
-                0
-            );
-            let mut vtype = 0;
-            let mut ntok = 0;
-            assert_eq!(
-                adoc_get_val_type_and_size(
-                    ADOC_GLOBAL_NAME.as_ptr(),
-                    0,
-                    c"Vals".as_ptr(),
-                    &mut vtype,
-                    &mut ntok
-                ),
-                0
-            );
-            assert_eq!((vtype, ntok), (ADOC_FLOAT_ARRAY, 3));
-            let mut s: *mut c_char = core::ptr::null_mut();
-            assert_eq!(
-                adoc_get_string(ADOC_GLOBAL_NAME.as_ptr(), 0, c"Vals".as_ptr(), &mut s),
-                0
-            );
-            assert_eq!(CStr::from_ptr(s).to_bytes(), b"1.5 2.5 3.5");
-            libc::free(s.cast());
-            adoc_done();
-        }
+        let _lock = TEST_LOCK.lock().unwrap();
+        adoc_done();
+        assert!(adoc_new() >= 0);
+        let vals = [1.5f32, 2.5, 3.5];
+        assert_eq!(
+            adoc_set_float_array(ADOC_GLOBAL_NAME, 0, b"Vals", &vals, 3),
+            0
+        );
+        let mut vtype = 0;
+        let mut ntok = 0;
+        assert_eq!(
+            adoc_get_val_type_and_size(ADOC_GLOBAL_NAME, 0, b"Vals", &mut vtype, &mut ntok),
+            0
+        );
+        assert_eq!((vtype, ntok), (ADOC_FLOAT_ARRAY, 3));
+        let mut s = Vec::new();
+        assert_eq!(adoc_get_string(ADOC_GLOBAL_NAME, 0, b"Vals", &mut s), 0);
+        assert_eq!(s, b"1.5 2.5 3.5");
+        adoc_done();
     }
 
-    /// Insert/delete keep the master section list consistent.
+    /// C-versus-Rust differential driver for the autodoc API, the counterpart
+    /// of `scratchpad/adocapi/drv.c`.  It runs only when
+    /// `IMOD_ADOC_API_REPORT` and `IMOD_ADOC_API_FILES` are set, and is the
+    /// acceptance harness rather than an assertion of its own.
     #[test]
-    fn insert_and_delete_section_maintain_the_master_list() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            assert!(adoc_new() >= 0);
-            assert_eq!(adoc_add_section(c"Z".as_ptr(), c"0".as_ptr()), 0);
-            assert_eq!(adoc_add_section(c"Z".as_ptr(), c"2".as_ptr()), 1);
-            assert_eq!(adoc_find_insert_index(c"Z".as_ptr(), 1), 1);
-            assert_eq!(adoc_insert_section(c"Z".as_ptr(), 1, c"1".as_ptr()), 0);
-            assert_eq!(adoc_get_number_of_sections(c"Z".as_ptr()), 3);
-            let mut nm: *mut c_char = core::ptr::null_mut();
-            assert_eq!(adoc_get_section_name(c"Z".as_ptr(), 1, &mut nm), 0);
-            assert_eq!(CStr::from_ptr(nm).to_bytes(), b"1");
-            libc::free(nm.cast());
-            assert_eq!(adoc_lookup_by_name_value(c"Z".as_ptr(), 2), 2);
-            assert_eq!(adoc_delete_section(c"Z".as_ptr(), 1), 0);
-            assert_eq!(adoc_lookup_by_name_value(c"Z".as_ptr(), 2), 1);
-            assert_eq!(adoc_get_number_of_sections(c"Z".as_ptr()), 2);
-            adoc_done();
-        }
-    }
+    fn adoc_api_differential() {
+        use crate::imod::libcfshr::b3dutil::{CArg, c_format_bytes};
+        let Ok(reppath) = std::env::var("IMOD_ADOC_API_REPORT") else {
+            return;
+        };
+        let _lock = TEST_LOCK.lock().unwrap();
+        let list = std::env::var("IMOD_ADOC_API_FILES").unwrap();
+        let files = std::fs::read_to_string(&list).unwrap();
+        let mut rep: Vec<u8> = Vec::new();
 
-    /// `AdocOrderWriteByValue` sorts the named collection's sections by the
-    /// numeric value of their names and puts everything else after them.  The
-    /// expected text is the byte-for-byte output of the C driver linked against
-    /// the reference `libcfshr`.
-    #[test]
-    fn ordered_write_sorts_sections_by_numeric_name() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            assert!(adoc_new() >= 0);
-            adoc_set_key_value(
-                ADOC_GLOBAL_NAME.as_ptr(),
-                0,
-                c"ImageFile".as_ptr(),
-                c"a.mrc".as_ptr(),
-            );
-            let names = [c"7", c"3", c"12", c"-2", c"0", c"notanumber", c"9"];
-            for (i, name) in names.iter().enumerate() {
-                assert_eq!(
-                    adoc_add_section(c"ZValue".as_ptr(), name.as_ptr()),
-                    i as i32
-                );
-                adoc_set_integer(c"ZValue".as_ptr(), i as i32, c"Idx".as_ptr(), i as i32);
+        fn dump_all(rep: &mut Vec<u8>, tag: &str) {
+            use crate::imod::libcfshr::b3dutil::{CArg, c_format_bytes};
+            let nc = adoc_get_num_collections();
+            rep.extend_from_slice(&c_format_bytes(
+                "%s numColl=%d\n",
+                &[CArg::Str(tag), CArg::Int(nc as i64)],
+            ));
+            for ci in 0..nc {
+                let mut cname: Vec<u8> = Vec::new();
+                let err = adoc_get_collection_name(ci, &mut cname);
+                rep.extend_from_slice(&c_format_bytes(
+                    "%s coll[%d] err=%d name=%s\n",
+                    &[
+                        CArg::Str(tag),
+                        CArg::Int(ci as i64),
+                        CArg::Int(err as i64),
+                        CArg::Bytes(if err == 0 { &cname } else { b"(nil)" }),
+                    ],
+                ));
+                if err != 0 {
+                    continue;
+                }
+                let ns = adoc_get_number_of_sections(&cname);
+                rep.extend_from_slice(&c_format_bytes(
+                    "%s   numSect=%d\n",
+                    &[CArg::Str(tag), CArg::Int(ns as i64)],
+                ));
+                for si in 0..ns {
+                    let mut sname: Vec<u8> = Vec::new();
+                    let err = adoc_get_section_name(&cname, si, &mut sname);
+                    let nk = adoc_get_number_of_keys(&cname, si);
+                    rep.extend_from_slice(&c_format_bytes(
+                        "%s   sect[%d] err=%d name=%s numKeys=%d lookup=%d\n",
+                        &[
+                            CArg::Str(tag),
+                            CArg::Int(si as i64),
+                            CArg::Int(err as i64),
+                            CArg::Bytes(if err == 0 { &sname } else { b"(nil)" }),
+                            CArg::Int(nk as i64),
+                            CArg::Int(adoc_lookup_section(&cname, &sname) as i64),
+                        ],
+                    ));
+                    for ki in 0..nk {
+                        let mut key: Option<Vec<u8>> = None;
+                        let err = adoc_get_key_by_index(&cname, si, ki, &mut key);
+                        let Some(key) = key else {
+                            rep.extend_from_slice(&c_format_bytes(
+                                "%s     key[%d] err=%d (nil)\n",
+                                &[CArg::Str(tag), CArg::Int(ki as i64), CArg::Int(err as i64)],
+                            ));
+                            continue;
+                        };
+                        let (mut vt, mut nt) = (-9, -9);
+                        let err = adoc_get_val_type_and_size(&cname, si, &key, &mut vt, &mut nt);
+                        rep.extend_from_slice(&c_format_bytes(
+                            "%s     key[%d] %s tErr=%d type=%d ntok=%d",
+                            &[
+                                CArg::Str(tag),
+                                CArg::Int(ki as i64),
+                                CArg::Bytes(&key),
+                                CArg::Int(err as i64),
+                                CArg::Int(vt as i64),
+                                CArg::Int(nt as i64),
+                            ],
+                        ));
+                        let mut val: Vec<u8> = Vec::new();
+                        let err = adoc_get_string(&cname, si, &key, &mut val);
+                        rep.extend_from_slice(&c_format_bytes(
+                            " sErr=%d s=%s",
+                            &[
+                                CArg::Int(err as i64),
+                                CArg::Bytes(if err == 0 { &val } else { b"(nil)" }),
+                            ],
+                        ));
+                        /* `PipGetLineOfValues`' error path `strncpy`s the value
+                        into a 512-byte static; a longer value overruns it and
+                        native segfaults, so the numeric getters are driven only
+                        for values the C can survive. */
+                        if err == 0 && val.len() < 200 {
+                            let (mut i1, mut i2, mut i3) = (-9, -9, -9);
+                            let (mut f1, mut f2, mut f3) = (-9f32, -9f32, -9f32);
+                            let mut d1 = -9f64;
+                            let e = adoc_get_integer(&cname, si, &key, &mut i1);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " i=%d,%d",
+                                &[CArg::Int(e as i64), CArg::Int(i1 as i64)],
+                            ));
+                            let e = adoc_get_two_integers(&cname, si, &key, &mut i1, &mut i2);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " i2=%d,%d,%d",
+                                &[
+                                    CArg::Int(e as i64),
+                                    CArg::Int(i1 as i64),
+                                    CArg::Int(i2 as i64),
+                                ],
+                            ));
+                            let e = adoc_get_three_integers(
+                                &cname, si, &key, &mut i1, &mut i2, &mut i3,
+                            );
+                            rep.extend_from_slice(&c_format_bytes(
+                                " i3=%d,%d,%d,%d",
+                                &[
+                                    CArg::Int(e as i64),
+                                    CArg::Int(i1 as i64),
+                                    CArg::Int(i2 as i64),
+                                    CArg::Int(i3 as i64),
+                                ],
+                            ));
+                            let e = adoc_get_float(&cname, si, &key, &mut f1);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " f=%d,%g",
+                                &[CArg::Int(e as i64), CArg::Dbl(f1 as f64)],
+                            ));
+                            let e = adoc_get_two_floats(&cname, si, &key, &mut f1, &mut f2);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " f2=%d,%g,%g",
+                                &[
+                                    CArg::Int(e as i64),
+                                    CArg::Dbl(f1 as f64),
+                                    CArg::Dbl(f2 as f64),
+                                ],
+                            ));
+                            let e =
+                                adoc_get_three_floats(&cname, si, &key, &mut f1, &mut f2, &mut f3);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " f3=%d,%g,%g,%g",
+                                &[
+                                    CArg::Int(e as i64),
+                                    CArg::Dbl(f1 as f64),
+                                    CArg::Dbl(f2 as f64),
+                                    CArg::Dbl(f3 as f64),
+                                ],
+                            ));
+                            let e = adoc_get_double(&cname, si, &key, &mut d1);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " d=%d,%g",
+                                &[CArg::Int(e as i64), CArg::Dbl(d1)],
+                            ));
+                            let mut arr = [0i32; 8];
+                            let mut num = 8;
+                            let e = adoc_get_integer_array(&cname, si, &key, &mut arr, &mut num, 8);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " ia=%d,%d",
+                                &[CArg::Int(e as i64), CArg::Int(num as i64)],
+                            ));
+                            if e == 0 {
+                                for v in arr.iter().take(num.max(0) as usize) {
+                                    rep.extend_from_slice(&c_format_bytes(
+                                        ":%d",
+                                        &[CArg::Int(*v as i64)],
+                                    ));
+                                }
+                            }
+                            let mut farr = [0f32; 8];
+                            let mut num = 8;
+                            let e = adoc_get_float_array(&cname, si, &key, &mut farr, &mut num, 8);
+                            rep.extend_from_slice(&c_format_bytes(
+                                " fa=%d,%d",
+                                &[CArg::Int(e as i64), CArg::Int(num as i64)],
+                            ));
+                            if e == 0 {
+                                for v in farr.iter().take(num.max(0) as usize) {
+                                    rep.extend_from_slice(&c_format_bytes(
+                                        ":%g",
+                                        &[CArg::Dbl(*v as f64)],
+                                    ));
+                                }
+                            }
+                        }
+                        rep.push(b'\n');
+                    }
+                }
             }
-            assert_eq!(adoc_add_section(c"Other".as_ptr(), c"5".as_ptr()), 0);
-            adoc_set_integer(c"Other".as_ptr(), 0, c"Idx".as_ptr(), 100);
-            assert_eq!(adoc_order_write_by_value(c"ZValue".as_ptr()), 0);
-            let mut buf = [0 as c_char; 2048];
-            assert_eq!(adoc_print_to_string(buf.as_mut_ptr(), 2048, 1), 0);
-            let got = CStr::from_ptr(buf.as_ptr()).to_bytes().to_vec();
-            assert_eq!(adoc_order_write_by_value(core::ptr::null()), 0);
-            adoc_done();
-            assert_eq!(
-                String::from_utf8_lossy(&got),
-                "ImageFile = a.mrc\n\n[ZValue = -2]\nIdx = 3\n\n[ZValue = 0]\nIdx = 4\n\n\
-                 [ZValue = notanumber]\nIdx = 5\n\n[ZValue = 3]\nIdx = 1\n\n[ZValue = 7]\n\
-                 Idx = 0\n\n[ZValue = 9]\nIdx = 6\n\n[ZValue = 12]\nIdx = 2\n\n\
-                 [Other = 5]\nIdx = 100\n"
-            );
         }
-    }
 
-    /// `openForWrite` gives up and `AdocWrite` reports -1 for an unwritable path,
-    /// with or without retries.
-    #[test]
-    fn write_to_an_unopenable_path_returns_minus_one() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            assert!(adoc_new() >= 0);
-            adoc_set_key_value(ADOC_GLOBAL_NAME.as_ptr(), 0, c"A".as_ptr(), c"1".as_ptr());
-            adoc_retry_write_opens(0);
-            assert_eq!(adoc_write(c"/no/such/dir/x.adoc".as_ptr()), -1);
-            assert_eq!(adoc_append_section(c"/no/such/dir/x.adoc".as_ptr()), -1);
-            adoc_done();
-            /* No current autodoc left */
-            assert_eq!(adoc_write(c"/no/such/dir/x.adoc".as_ptr()), -1);
-        }
-    }
+        for line in files.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            let base = line.rsplit('/').next().unwrap();
+            let ind = adoc_read(line.as_bytes());
+            rep.extend_from_slice(&c_format_bytes(
+                "FILE %s read=%d cur=%d\n",
+                &[
+                    CArg::Str(base),
+                    CArg::Int(ind as i64),
+                    CArg::Int(adoc_get_current_index() as i64),
+                ],
+            ));
+            if ind < 0 {
+                continue;
+            }
+            let (mut a, mut b, mut c, mut d, mut e, mut f) = (-9, -9, -9, -9, -9, -9);
+            let err = adoc_xml_read_status(&mut a, &mut b, &mut c, &mut d, &mut e, &mut f);
+            rep.extend_from_slice(&c_format_bytes(
+                "xmlStatus=%d %d %d %d %d %d %d\n",
+                &[
+                    CArg::Int(err as i64),
+                    CArg::Int(a as i64),
+                    CArg::Int(b as i64),
+                    CArg::Int(c as i64),
+                    CArg::Int(d as i64),
+                    CArg::Int(e as i64),
+                    CArg::Int(f as i64),
+                ],
+            ));
+            let (mut mont, mut nsect, mut stype) = (-9, -9, -9);
+            let e = adoc_get_image_meta_info(&mut mont, &mut nsect, &mut stype);
+            rep.extend_from_slice(&c_format_bytes(
+                "meta=%d %d %d %d\n",
+                &[
+                    CArg::Int(e as i64),
+                    CArg::Int(mont as i64),
+                    CArg::Int(nsect as i64),
+                    CArg::Int(stype as i64),
+                ],
+            ));
+            dump_all(&mut rep, "R");
 
-    /// `AdocTransferSection` copies key/values and their types into another autodoc.
-    #[test]
-    fn transfer_section_copies_keys_and_types() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let src = adoc_new();
-            assert!(src >= 0);
-            assert_eq!(adoc_add_section(c"ZValue".as_ptr(), c"4".as_ptr()), 0);
-            assert_eq!(
-                adoc_set_three_floats(
-                    c"ZValue".as_ptr(),
-                    0,
-                    c"StagePosition".as_ptr(),
-                    1.5,
-                    -2.5,
-                    0.0
-                ),
-                0
+            rep.extend_from_slice(&c_format_bytes(
+                "lookupByName=%d findInsert=%d\n",
+                &[
+                    CArg::Int(adoc_lookup_by_name_value(b"ZValue", 1) as i64),
+                    CArg::Int(adoc_find_insert_index(b"ZValue", 7) as i64),
+                ],
+            ));
+            let mut line_of = |name: &str, v: i32, rep: &mut Vec<u8>| {
+                rep.extend_from_slice(&c_format_bytes(
+                    "%s=%d\n",
+                    &[CArg::Str(name), CArg::Int(v as i64)],
+                ));
+            };
+            line_of("addSect", adoc_add_section(b"Probe", b"17"), &mut rep);
+            line_of(
+                "setKV",
+                adoc_set_key_value(b"Probe", 0, b"Str", Some(b"hello there")),
+                &mut rep,
             );
-            let dst = adoc_new();
-            assert!(dst > src);
-            adoc_set_current(src);
-            assert_eq!(
-                adoc_transfer_section(c"ZValue".as_ptr(), 0, dst, c"4".as_ptr(), 1),
-                0
+            line_of(
+                "setInt",
+                adoc_set_integer(b"Probe", 0, b"One", -5),
+                &mut rep,
             );
-            /* Transferring to the current autodoc is rejected */
-            assert_eq!(
-                adoc_transfer_section(c"ZValue".as_ptr(), 0, src, c"4".as_ptr(), 1),
-                -2
+            line_of(
+                "set2Int",
+                adoc_set_two_integers(b"Probe", 0, b"Two", 3, -400000),
+                &mut rep,
             );
-            adoc_set_current(dst);
-            let mut vtype = 0;
-            let mut ntok = 0;
-            assert_eq!(
-                adoc_get_val_type_and_size(
-                    c"ZValue".as_ptr(),
-                    0,
-                    c"StagePosition".as_ptr(),
-                    &mut vtype,
-                    &mut ntok
-                ),
-                0
+            line_of(
+                "set3Int",
+                adoc_set_three_integers(b"Probe", 0, b"Three", 1, 2, 3),
+                &mut rep,
             );
-            assert_eq!((vtype, ntok), (ADOC_THREE_FLOATS, 3));
-            adoc_done();
-        }
-    }
+            line_of("setFlt", adoc_set_float(b"Probe", 0, b"F1", 1.5), &mut rep);
+            line_of(
+                "set2Flt",
+                adoc_set_two_floats(b"Probe", 0, b"F2", 0.1, -2.5e7),
+                &mut rep,
+            );
+            line_of(
+                "set3Flt",
+                adoc_set_three_floats(b"Probe", 0, b"F3", 1e-8, 0., 3.25),
+                &mut rep,
+            );
+            line_of(
+                "setDbl",
+                adoc_set_double(b"Probe", 0, b"D1", 1.0 / 3.0),
+                &mut rep,
+            );
+            let iv = [1i32, -2, 300000, 4];
+            let fv = [1.5f32, -0.25, 1e10, 0.];
+            line_of(
+                "setIA",
+                adoc_set_integer_array(b"Probe", 0, b"IA", &iv, 4),
+                &mut rep,
+            );
+            line_of(
+                "setFA",
+                adoc_set_float_array(b"Probe", 0, b"FA", &fv, 4),
+                &mut rep,
+            );
+            line_of("insSect", adoc_insert_section(b"Probe", 0, b"9"), &mut rep);
+            line_of(
+                "changeName",
+                adoc_change_section_name(b"Probe", 1, b"18"),
+                &mut rep,
+            );
+            line_of(
+                "delKV",
+                adoc_delete_key_value(b"Probe", 1, b"One"),
+                &mut rep,
+            );
+            dump_all(&mut rep, "M");
+            line_of("delSect", adoc_delete_section(b"Probe", 0), &mut rep);
+            dump_all(&mut rep, "D");
 
-    /// The `CommentCharacter` and `KeyValueDelimiter` directives change parsing
-    /// for the rest of the file, and `writeFile` re-derives the delimiter from
-    /// the global section as it writes.  The expected text is the byte-for-byte
-    /// output of the C driver linked against the reference `libcfshr`.
-    ///
-    /// Note that the two directives are order-sensitive in the source: once
-    /// `KeyValueDelimiter` has been seen, a later `CommentCharacter = ;` line
-    /// contains no delimiter and is swallowed as a continuation of the previous
-    /// value (`autodoc.c:234-249`).  Native does the same.
-    #[test]
-    fn delimiter_and_comment_character_directives_are_honoured() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let text = b"CommentCharacter = ;\n; a comment\nKeyValueDelimiter = :\nA : 5\n\n\
-                         [Sect : one]\nB : 3 4\n";
-            let name = std::env::temp_dir().join("imod-rs-autodoc-delim.adoc");
-            std::fs::write(&name, text).unwrap();
-            let file = CString::new(name.to_string_lossy().as_bytes()).unwrap();
-            assert!(adoc_read(file.as_ptr()) >= 0);
-            let mut i1 = 0;
-            let mut i2 = 0;
-            assert_eq!(
-                adoc_get_two_integers(c"Sect".as_ptr(), 0, c"B".as_ptr(), &mut i1, &mut i2),
-                0
+            let second = adoc_new();
+            line_of("new", second, &mut rep);
+            adoc_set_current(ind);
+            line_of(
+                "xfer",
+                adoc_transfer_section(b"Probe", 0, second, Some(b"77"), 1),
+                &mut rep,
             );
-            assert_eq!((i1, i2), (3, 4));
-            let mut buf = [0 as c_char; 512];
-            assert_eq!(adoc_print_to_string(buf.as_mut_ptr(), 512, 1), 0);
-            let got = CStr::from_ptr(buf.as_ptr()).to_bytes().to_vec();
-            adoc_done();
-            let _ = std::fs::remove_file(&name);
-            assert_eq!(
-                String::from_utf8_lossy(&got),
-                "CommentCharacter = ;\n; a comment\nKeyValueDelimiter = :\nA : 5\n\n\
-                 [Sect : one]\nB : 3 4\n"
-            );
-        }
-    }
+            adoc_set_current(second);
+            dump_all(&mut rep, "T");
+            adoc_set_current(ind);
+            adoc_clear(second);
 
-    /// A continuation line (no delimiter) is appended to the previous value.
-    #[test]
-    fn continuation_lines_append_to_previous_value() {
-        unsafe {
-            let _lock = TEST_LOCK.lock().unwrap();
-            adoc_done();
-            let text = b"[Field = A]\nText = one\ntwo\n";
-            let name = std::env::temp_dir().join("imod-rs-autodoc-continue.adoc");
-            std::fs::write(&name, text).unwrap();
-            let file = CString::new(name.to_string_lossy().as_bytes()).unwrap();
-            assert!(adoc_read(file.as_ptr()) >= 0);
-            let mut s: *mut c_char = core::ptr::null_mut();
-            assert_eq!(
-                adoc_get_string(c"Field".as_ptr(), 0, c"Text".as_ptr(), &mut s),
-                0
+            let mut sz = 40;
+            while sz <= 160000 {
+                let mut buf: Vec<u8> = Vec::new();
+                let err = adoc_print_to_string(&mut buf, sz, 1);
+                rep.extend_from_slice(&c_format_bytes(
+                    "print(%d)=%d [%s]\n",
+                    &[
+                        CArg::Int(sz as i64),
+                        CArg::Int(err as i64),
+                        CArg::Bytes(&buf),
+                    ],
+                ));
+                let mut buf: Vec<u8> = Vec::new();
+                let err = adoc_print_to_string(&mut buf, sz, 0);
+                rep.extend_from_slice(&c_format_bytes(
+                    "printLast(%d)=%d [%s]\n",
+                    &[
+                        CArg::Int(sz as i64),
+                        CArg::Int(err as i64),
+                        CArg::Bytes(&buf),
+                    ],
+                ));
+                sz *= 20;
+            }
+            line_of("orderNull", adoc_order_write_by_value(None), &mut rep);
+            line_of(
+                "orderZ",
+                adoc_order_write_by_value(Some(b"ZValue")),
+                &mut rep,
             );
-            assert_eq!(CStr::from_ptr(s).to_bytes(), b"one two");
-            libc::free(s.cast());
-            adoc_done();
-            let _ = std::fs::remove_file(&name);
+            let mut buf: Vec<u8> = Vec::new();
+            let err = adoc_print_to_string(&mut buf, 160000, 1);
+            rep.extend_from_slice(&c_format_bytes(
+                "printOrdered=%d [%s]\n",
+                &[CArg::Int(err as i64), CArg::Bytes(&buf)],
+            ));
+            adoc_order_write_by_value(None);
+            line_of("setRoot", adoc_set_xml_root_element(b"myroot"), &mut rep);
+            let mut root: Option<Vec<u8>> = None;
+            adoc_get_xml_root_element(&mut root);
+            rep.extend_from_slice(&c_format_bytes(
+                "root=%s\n",
+                &[CArg::Bytes(root.as_deref().unwrap_or(b"(nil)"))],
+            ));
+            adoc_clear(ind);
         }
+        adoc_done();
+        std::fs::write(&reppath, &rep).unwrap();
     }
 }

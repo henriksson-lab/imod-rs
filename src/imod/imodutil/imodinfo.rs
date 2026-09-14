@@ -7,13 +7,13 @@
 #![allow(dead_code)]
 
 use std::env;
-use std::ffi::CString;
 use std::io::Write;
 use std::os::fd::FromRawFd;
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
 use crate::imod::libcfshr::b3dutil::{
-    ImodFile, imod_backup_file, imod_copyright, imod_prog_name, imod_version, number_in_list,
+    CArg, ImodFile, c_format_bytes, imod_backup_file, imod_copyright, imod_prog_name, imod_version,
+    number_in_list,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::parselist::parselist;
@@ -29,81 +29,78 @@ use crate::imod::libimod::ilabel::imod_label_print;
 use crate::imod::libimod::imodel::{
     ICONT_OPEN, IMOD_CLIPSIZE, IMOD_MESH_BGNPOLYNORM, IMOD_MESH_BGNPOLYNORM2, IMOD_MESH_END,
     IMOD_MESH_ENDPOLY, IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_OUT, IMOD_OBJFLAG_SCAT,
-    Icont, Imesh, Imod, Iobj, Iplane, Ipoint,
+    Icont, Imesh, Imod, Iobj, Iplane, Ipoint, imod_units,
 };
 use crate::imod::libimod::imodel_files::{imod_file_write, imod_read, imod_write_ascii};
 use crate::imod::libimod::iplane::{imod_plane_set_from_clips, imod_planes_clip};
 use crate::imod::libimod::ipoint::imod_point_delete;
 use crate::imod::libimod::objgroup::obj_group_lookup;
 
-unsafe extern "C" {
-    static mut stdout: *mut libc::FILE;
-}
-
 /// C `static FILE *fout` (`imodinfo.cpp:113`), the destination of every report.
-pub static mut FOUT: *mut libc::FILE = std::ptr::null_mut();
+///
+/// `main` sets it to `stdout` (`imodinfo.cpp:150`) and `-f` reopens it on a
+/// file (`:287`).  It stays one of the C streams rather than becoming
+/// `std::io::stdout()`: `imodVersion`, `imodCopyright` and `imodLabelPrint`
+/// all write through the C stream, and the report's `# MODEL` banner goes to
+/// `printf` while its body goes to `fout`, so a second independently buffered
+/// handle would reorder a redirected capture.
+pub static mut FOUT: ImodFile = ImodFile::Stdout;
 
 /// Original: `imodinfo_usage` (`imodinfo.cpp:84`).
-pub fn imodinfo_usage(name: *const std::ffi::c_char) {
-    unsafe {
-        libc::printf(c"usage: %s [options] <imod filename>\n".as_ptr(), name);
-        libc::printf(c"options:\n".as_ptr());
-        libc::printf(c"\t-a\tPrint ascii readable version of IMOD model file.\n".as_ptr());
-        libc::printf(c"\t-c\tPrint centroids of closed objects.\n".as_ptr());
-        libc::printf(c"\t-l\tPrint lengths of contours in column output.\n".as_ptr());
-        libc::printf(c"\t-L\tPrint lengths of contour portions by fine-grained color.\n".as_ptr());
-        libc::printf(c"\t-s\tPrint surface information.\n".as_ptr());
-        libc::printf(c"\t-S N\tPrint surface information for every Nth surface.\n".as_ptr());
-        libc::printf(c"\t-p\tPrint point size information.\n".as_ptr());
-        libc::printf(c"\t-r\tPrint ratio of length to area for closed contours.\n".as_ptr());
-        libc::printf(
-            c"\t-e\tPrint center and axes of equivalent ellipse for closed contours.\n".as_ptr(),
+pub fn imodinfo_usage(name: &str) {
+    {
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "usage: %s [options] <imod filename>\n",
+            &[CArg::Str(name)],
+        ));
+        let _ = ImodFile::Stdout.write_all(b"options:\n");
+        let _ =
+            ImodFile::Stdout.write_all(b"\t-a\tPrint ascii readable version of IMOD model file.\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-c\tPrint centroids of closed objects.\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-l\tPrint lengths of contours in column output.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-L\tPrint lengths of contour portions by fine-grained color.\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-s\tPrint surface information.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-S N\tPrint surface information for every Nth surface.\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-p\tPrint point size information.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-r\tPrint ratio of length to area for closed contours.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-e\tPrint center and axes of equivalent ellipse for closed contours.\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-F\tPrint full report on objects.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-o list\tList of objects to process (default is all).\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-g #\tNumber of object group to process.\n");
+        let _ =
+            ImodFile::Stdout.write_all(b"\t-i\tAnalyze for inside contours and adjust volume.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-x min,max   Compute volume, mesh area, and point count and sizes\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-y min,max         between min and max in X (-x), Y (-y), or Z (-z).\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-z min,max   \n");
+        let _ = ImodFile::Stdout.write_all(
+            b"\t-t 1/-1\tApply clipping plane in normal (1) or inverted (-1) orientation\n",
         );
-        libc::printf(c"\t-F\tPrint full report on objects.\n".as_ptr());
-        libc::printf(c"\t-o list\tList of objects to process (default is all).\n".as_ptr());
-        libc::printf(c"\t-g #\tNumber of object group to process.\n".as_ptr());
-        libc::printf(c"\t-i\tAnalyze for inside contours and adjust volume.\n".as_ptr());
-        libc::printf(
-            c"\t-x min,max   Compute volume, mesh area, and point count and sizes\n".as_ptr(),
-        );
-        libc::printf(
-            c"\t-y min,max         between min and max in X (-x), Y (-y), or Z (-z).\n".as_ptr(),
-        );
-        libc::printf(c"\t-z min,max   \n".as_ptr());
-        libc::printf(
-            c"\t-t 1/-1\tApply clipping plane in normal (1) or inverted (-1) orientation\n"
-                .as_ptr(),
-        );
-        libc::printf(c"\t-v\tBe verbose on model output.\n".as_ptr());
-        libc::printf(c"\t-vv\tBe more verbose on model output (prints points).\n".as_ptr());
-        libc::printf(
-            c"\t-h\tHush - no detailed data in standard, point, or by-color output.\n".as_ptr(),
-        );
-        libc::printf(c"\t-f filename  Write output to file.\n".as_ptr());
+        let _ = ImodFile::Stdout.write_all(b"\t-v\tBe verbose on model output.\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-vv\tBe more verbose on model output (prints points).\n");
+        let _ = ImodFile::Stdout
+            .write_all(b"\t-h\tHush - no detailed data in standard, point, or by-color output.\n");
+        let _ = ImodFile::Stdout.write_all(b"\t-f filename  Write output to file.\n");
     }
 }
 /// Original: `main` (`imodinfo.cpp:116`).
 pub fn imodinfo() {
     let argv: Vec<String> = env::args().collect();
-    let arg_strings: Vec<CString> = argv
-        .iter()
-        .map(|value| CString::new(value.as_str()).unwrap_or_default())
-        .collect();
-    let progname_str = imod_prog_name(&argv[0]);
-    // `imodinfo_usage` and the `printf`/`sprintf` sites below still take the C
-    // string the source passes; this keeps one copy alive for them.
-    let progname_c = CString::new(progname_str.as_str()).unwrap_or_default();
-    let progname = progname_c.as_ptr();
-    let mut prefix = [0_i8; 100];
-    unsafe {
-        libc::sprintf(prefix.as_mut_ptr(), c"ERROR: %s - ".as_ptr(), progname);
-        setExitPrefix(core::ffi::CStr::from_ptr(prefix.as_ptr()).to_bytes());
-    }
+    let progname = imod_prog_name(&argv[0]);
+    let prefix = c_format_bytes("ERROR: %s - ", &[CArg::Str(&progname)]);
+    setExitPrefix(&prefix);
     if argv.len() == 1 {
-        imod_version(Some(&progname_str));
+        imod_version(Some(&progname));
         imod_copyright();
-        imodinfo_usage(progname);
-        unsafe { libc::exit(0) };
+        imodinfo_usage(&progname);
+        std::process::exit(0);
     }
     let mut iarg = 1_usize;
     let mut verbose = 0_i32;
@@ -127,7 +124,8 @@ pub fn imodinfo() {
         y: 1.0e30,
         z: 1.0e30,
     };
-    unsafe { FOUT = stdout };
+    // `fout = stdout` (`imodinfo.cpp:150`).
+    unsafe { FOUT = ImodFile::Stdout };
     while iarg < argv.len() && argv[iarg].starts_with('-') {
         match argv[iarg].as_bytes().get(1).copied().unwrap_or_default() as char {
             'g' => {
@@ -135,17 +133,30 @@ pub fn imodinfo() {
                 let Some(value) = argv.get(iarg) else {
                     std::process::exit(1)
                 };
-                group_num = unsafe { libc::atoi(CString::new(value.as_str()).unwrap().as_ptr()) };
+                // `atoi(argv[++i])`: `strtol` over the longest prefix that
+                // converts, and zero where nothing does.
+                let text = value.as_bytes();
+                let mut end = 0_usize;
+                while end < text.len() && text[end].is_ascii_whitespace() {
+                    end += 1;
+                }
+                let start = end;
+                if end < text.len() && (text[end] == b'-' || text[end] == b'+') {
+                    end += 1;
+                }
+                while end < text.len() && text[end].is_ascii_digit() {
+                    end += 1;
+                }
+                group_num = std::str::from_utf8(&text[start..end])
+                    .unwrap_or("")
+                    .parse::<i32>()
+                    .unwrap_or(0);
                 if group_num <= 0 {
-                    let mut message = [0_i8; 512];
-                    unsafe {
-                        libc::sprintf(
-                            message.as_mut_ptr(),
-                            c"Group number %d must be positive".as_ptr(),
-                            group_num,
-                        );
-                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                    }
+                    let message = c_format_bytes(
+                        "Group number %d must be positive",
+                        &[CArg::Int(group_num as i64)],
+                    );
+                    exit_error(&message);
                 }
                 // The source `case 'g'` has no break and falls into `case 'c'`.
                 mode = 2;
@@ -188,11 +199,43 @@ pub fn imodinfo() {
             'x' | 'y' | 'z' => {
                 let axis = argv[iarg].as_bytes()[1] as char;
                 iarg += 1;
-                let value = CString::new(argv.get(iarg).map(String::as_str).unwrap_or("")).unwrap();
+                let value = argv.get(iarg).map(String::as_str).unwrap_or("");
                 let mut low = 0_f32;
                 let mut high = 0_f32;
-                unsafe {
-                    libc::sscanf(value.as_ptr(), c"%f%*c%f".as_ptr(), &mut low, &mut high);
+                // `sscanf(argv[++i], "%f%*c%f", &low, &high)`: a float, one
+                // suppressed character of any kind, then a second float.  Each
+                // field is stored as it converts and the scan stops at the
+                // first that does not, so a bare number leaves `high` at zero.
+                {
+                    let text = value.as_bytes();
+                    let mut scan = 0_usize;
+                    for field in [&mut low, &mut high] {
+                        while scan < text.len() && text[scan].is_ascii_whitespace() {
+                            scan += 1;
+                        }
+                        let start = scan;
+                        let mut end = text.len();
+                        let mut scanned = None;
+                        while end > start {
+                            if let Some(parsed) =
+                                value.get(start..end).and_then(|f| f.parse::<f32>().ok())
+                            {
+                                scanned = Some((parsed, end));
+                                break;
+                            }
+                            end -= 1;
+                        }
+                        let Some((parsed, consumed)) = scanned else {
+                            break;
+                        };
+                        *field = parsed;
+                        scan = consumed;
+                        // `%*c` reads and discards exactly one character.
+                        if scan >= text.len() {
+                            break;
+                        }
+                        scan += 1;
+                    }
                 }
                 match axis {
                     'x' => {
@@ -218,21 +261,17 @@ pub fn imodinfo() {
                 let Some(value) = argv.get(iarg) else {
                     std::process::exit(1)
                 };
-                let value = CString::new(value.as_str()).unwrap_or_else(|_| std::process::exit(1));
                 let mut count = 0_i32;
-                let values = unsafe { parselist(value.as_ptr(), &mut count) };
-                if values.is_null() {
-                    let mut message = [0_i8; 512];
-                    unsafe {
-                        libc::sprintf(
-                            message.as_mut_ptr(),
-                            c"Parsing list %s".as_ptr(),
-                            value.as_ptr(),
-                        );
-                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                    }
-                }
-                list = unsafe { std::slice::from_raw_parts(values, count as usize) }.to_vec();
+                let values = parselist(value.as_bytes(), &mut count);
+                let Some(values) = values else {
+                    exit_error(&crate::imod::libcfshr::b3dutil::c_format_bytes(
+                        "Parsing list %s",
+                        &[crate::imod::libcfshr::b3dutil::CArg::Bytes(
+                            value.as_bytes(),
+                        )],
+                    ));
+                };
+                list = values;
             }
             'v' => {
                 verbose += 1;
@@ -251,188 +290,185 @@ pub fn imodinfo() {
                 hush = true;
                 if argv[iarg].len() > 2 {
                     if argv[iarg] == "-help" {
-                        imodinfo_usage(progname);
-                        unsafe { libc::exit(0) };
+                        imodinfo_usage(&progname);
+                        std::process::exit(0);
                     }
-                    let mut message = [0_i8; 512];
-                    let option = CString::new(argv[iarg].as_str()).unwrap_or_default();
-                    unsafe {
-                        libc::sprintf(
-                            message.as_mut_ptr(),
-                            c"Unknown option %s; enter -help for help".as_ptr(),
-                            option.as_ptr(),
-                        );
-                        exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                    }
+                    let message = c_format_bytes(
+                        "Unknown option %s; enter -help for help",
+                        &[CArg::Bytes(argv[iarg].as_bytes())],
+                    );
+                    exit_error(&message);
                 }
             }
-            _ => unsafe {
-                libc::printf(
-                    c"%s: unknown option %s\n".as_ptr(),
-                    progname,
-                    arg_strings[iarg].as_ptr(),
-                );
-                imodinfo_usage(progname);
-                libc::exit(2);
-            },
+            _ => {
+                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                    "%s: unknown option %s\n",
+                    &[CArg::Str(&progname), CArg::Bytes(argv[iarg].as_bytes())],
+                ));
+                imodinfo_usage(&progname);
+                std::process::exit(2);
+            }
         }
         iarg += 1;
     }
     if iarg >= argv.len() {
-        imodinfo_usage(progname);
-        unsafe { libc::exit(2) };
+        imodinfo_usage(&progname);
+        std::process::exit(2);
     }
     if let Some(filename) = out_file.as_ref() {
-        let name = CString::new(filename.as_str()).unwrap_or_default();
         if imod_backup_file(filename) != 0 {
-            let mut message = [0_i8; 512];
-            unsafe {
-                libc::sprintf(
-                    message.as_mut_ptr(),
-                    c"Could not make ~ backup of existing output file %s".as_ptr(),
-                    name.as_ptr(),
-                );
-                exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-            }
+            let message = c_format_bytes(
+                "Could not make ~ backup of existing output file %s",
+                &[CArg::Bytes(filename.as_bytes())],
+            );
+            exit_error(&message);
         }
-        unsafe {
-            FOUT = libc::fopen(name.as_ptr(), c"w".as_ptr());
-            if FOUT.is_null() {
-                let mut message = [0_i8; 512];
-                libc::sprintf(
-                    message.as_mut_ptr(),
-                    c"Opening output file %s".as_ptr(),
-                    name.as_ptr(),
+        match ImodFile::open(filename, "w") {
+            Some(opened) => unsafe { FOUT = opened },
+            None => {
+                let message = c_format_bytes(
+                    "Opening output file %s",
+                    &[CArg::Bytes(filename.as_bytes())],
                 );
-                exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
+                exit_error(&message);
             }
         }
     }
+    // `fout` is fixed from here on: the `-f` branch above is the only
+    // assignment `main` makes after `fout = stdout` (`imodinfo.cpp:150, 287`).
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     if !list.is_empty() && group_num > 0 {
-        unsafe {
-            exit_error(b"You cannot enter both an object list and an object group");
-        }
+        exit_error(b"You cannot enter both an object list and an object group");
     }
     if hush && verbose == 0 {
         verbose = -1;
     }
     for (index, filename) in argv.iter().enumerate().skip(iarg) {
-        let name = CString::new(filename.as_str()).unwrap_or_default();
-        unsafe {
-            *libc::__errno_location() = 0;
-            let fin = libc::fopen(name.as_ptr(), c"rb".as_ptr());
-            if fin.is_null() {
-                let errno = *libc::__errno_location();
-                let mut message = [0_i8; 512];
-                libc::sprintf(
-                    message.as_mut_ptr(),
-                    c"Opening input file %s%s%s".as_ptr(),
-                    name.as_ptr(),
-                    if errno != 0 {
-                        c" - system message: ".as_ptr()
-                    } else {
-                        c"".as_ptr()
-                    },
-                    if errno != 0 {
-                        libc::strerror(errno) as *const std::ffi::c_char
-                    } else {
-                        c"".as_ptr()
-                    },
+        match std::fs::File::open(filename) {
+            Ok(fin) => drop(fin),
+            Err(error) => {
+                let errno = error.raw_os_error().unwrap_or(0);
+                // `strerror(errno)` is a named foreign boundary: its exact
+                // wording is part of the message the source prints, and Rust's
+                // `io::Error` display appends `(os error N)` instead.  The
+                // bytes are copied out by hand rather than through `CStr`.
+                let text = unsafe {
+                    let message = libc::strerror(errno);
+                    let mut length = 0_usize;
+                    while *message.add(length) != 0 {
+                        length += 1;
+                    }
+                    std::slice::from_raw_parts(message.cast::<u8>(), length)
+                };
+                let message = c_format_bytes(
+                    "Opening input file %s%s%s",
+                    &[
+                        CArg::Bytes(filename.as_bytes()),
+                        CArg::Str(if errno != 0 {
+                            " - system message: "
+                        } else {
+                            ""
+                        }),
+                        CArg::Bytes(if errno != 0 { text } else { b"" }),
+                    ],
                 );
-                exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
+                exit_error(&message);
             }
-            libc::fclose(fin);
         }
         let mut model = match imod_read(filename) {
             Ok(model) => model,
             Err(error) => {
-                unsafe {
-                    libc::printf(
-                        c"%s: Error (%d) reading imod model. (%s)\n".as_ptr(),
-                        progname,
-                        error,
-                        name.as_ptr(),
-                    );
-                }
+                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                    "%s: Error (%d) reading imod model. (%s)\n",
+                    &[
+                        CArg::Str(&progname),
+                        CArg::Int(error as i64),
+                        CArg::Bytes(filename.as_bytes()),
+                    ],
+                ));
                 continue;
             }
         };
         if group_num > 0 {
             if model.group_list.is_empty() {
-                let mut message = [0_i8; 512];
-                unsafe {
-                    libc::sprintf(
-                        message.as_mut_ptr(),
-                        c"There are no object groups in model %s".as_ptr(),
-                        name.as_ptr(),
-                    );
-                    exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                }
+                let message = c_format_bytes(
+                    "There are no object groups in model %s",
+                    &[CArg::Bytes(filename.as_bytes())],
+                );
+                exit_error(&message);
             }
             if group_num > model.group_list.len() as i32 {
-                let mut message = [0_i8; 512];
-                unsafe {
-                    libc::sprintf(
-                        message.as_mut_ptr(),
-                        c"Group # %d is more than the number of object groups (%d) in %s".as_ptr(),
-                        group_num,
-                        model.group_list.len() as std::ffi::c_int,
-                        name.as_ptr(),
-                    );
-                    exit_error(core::ffi::CStr::from_ptr(message.as_ptr()).to_bytes());
-                }
+                let message = c_format_bytes(
+                    "Group # %d is more than the number of object groups (%d) in %s",
+                    &[
+                        CArg::Int(group_num as i64),
+                        CArg::Int(model.group_list.len() as std::ffi::c_int as i64),
+                        CArg::Bytes(filename.as_bytes()),
+                    ],
+                );
+                exit_error(&message);
             }
         }
         let _ = index;
-        unsafe {
-            libc::fprintf(FOUT, c"# MODEL %s\n".as_ptr(), name.as_ptr());
-            libc::fprintf(FOUT, c"# NAME  %s\n".as_ptr(), model.name.as_ptr());
-            libc::fprintf(
-                FOUT,
-                c"# PIX SCALE:  x = %g\n".as_ptr(),
-                model.xscale as std::ffi::c_double,
-            );
-            libc::fprintf(
-                FOUT,
-                c"#             y = %g\n".as_ptr(),
-                model.yscale as std::ffi::c_double,
-            );
-            libc::fprintf(
-                FOUT,
-                c"#             z = %g\n".as_ptr(),
-                model.zscale as std::ffi::c_double,
-            );
-            libc::fprintf(
-                FOUT,
-                c"# PIX SIZE      = %g\n".as_ptr(),
-                model.pixsize as std::ffi::c_double,
-            );
-            libc::fprintf(FOUT, c"# UNITS: ".as_ptr());
-            print_units(model.units);
-            if let Some(reference) = model.ref_image {
-                libc::fprintf(FOUT, c"\n# Model to Image index coords:\n".as_ptr());
-                libc::fprintf(
-                    FOUT,
-                    c"#      SCALE  = ( %g, %g, %g)\n".as_ptr(),
-                    reference.cscale.x as std::ffi::c_double,
-                    reference.cscale.y as std::ffi::c_double,
-                    reference.cscale.z as std::ffi::c_double,
-                );
-                libc::fprintf(
-                    FOUT,
-                    c"#      OFFSET = ( %g, %g, %g)\n".as_ptr(),
-                    reference.ctrans.x as std::ffi::c_double,
-                    reference.ctrans.y as std::ffi::c_double,
-                    reference.ctrans.z as std::ffi::c_double,
-                );
-                libc::fprintf(
-                    FOUT,
-                    c"#      ANGLES = ( %g, %g, %g)\n".as_ptr(),
-                    reference.crot.x as std::ffi::c_double,
-                    reference.crot.y as std::ffi::c_double,
-                    reference.crot.z as std::ffi::c_double,
-                );
-            }
+        let _ = fout.write_all(&c_format_bytes(
+            "# MODEL %s\n",
+            &[CArg::Bytes(filename.as_bytes())],
+        ));
+        // `Imod.name` is the fixed 128-byte array `imodel_write` emits
+        // whole; `%s` stops at its first NUL.
+        let name_end = model
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(model.name.len());
+        let _ = fout.write_all(&c_format_bytes(
+            "# NAME  %s\n",
+            &[CArg::Bytes(&model.name[..name_end])],
+        ));
+        let _ = fout.write_all(&c_format_bytes(
+            "# PIX SCALE:  x = %g\n",
+            &[CArg::Dbl((model.xscale as std::ffi::c_double) as f64)],
+        ));
+        let _ = fout.write_all(&c_format_bytes(
+            "#             y = %g\n",
+            &[CArg::Dbl((model.yscale as std::ffi::c_double) as f64)],
+        ));
+        let _ = fout.write_all(&c_format_bytes(
+            "#             z = %g\n",
+            &[CArg::Dbl((model.zscale as std::ffi::c_double) as f64)],
+        ));
+        let _ = fout.write_all(&c_format_bytes(
+            "# PIX SIZE      = %g\n",
+            &[CArg::Dbl((model.pixsize as std::ffi::c_double) as f64)],
+        ));
+        let _ = fout.write_all(b"# UNITS: ");
+        print_units(model.units);
+        if let Some(reference) = model.ref_image {
+            let _ = fout.write_all(b"\n# Model to Image index coords:\n");
+            let _ = fout.write_all(&c_format_bytes(
+                "#      SCALE  = ( %g, %g, %g)\n",
+                &[
+                    CArg::Dbl((reference.cscale.x as std::ffi::c_double) as f64),
+                    CArg::Dbl((reference.cscale.y as std::ffi::c_double) as f64),
+                    CArg::Dbl((reference.cscale.z as std::ffi::c_double) as f64),
+                ],
+            ));
+            let _ = fout.write_all(&c_format_bytes(
+                "#      OFFSET = ( %g, %g, %g)\n",
+                &[
+                    CArg::Dbl((reference.ctrans.x as std::ffi::c_double) as f64),
+                    CArg::Dbl((reference.ctrans.y as std::ffi::c_double) as f64),
+                    CArg::Dbl((reference.ctrans.z as std::ffi::c_double) as f64),
+                ],
+            ));
+            let _ = fout.write_all(&c_format_bytes(
+                "#      ANGLES = ( %g, %g, %g)\n",
+                &[
+                    CArg::Dbl((reference.crot.x as std::ffi::c_double) as f64),
+                    CArg::Dbl((reference.crot.y as std::ffi::c_double) as f64),
+                    CArg::Dbl((reference.crot.z as std::ffi::c_double) as f64),
+                ],
+            ));
         }
         let mut obj_list = Vec::<usize>::new();
         for ob in 0..model.obj.len() {
@@ -444,33 +480,32 @@ pub fn imodinfo() {
                 obj_list.push(ob);
             }
         }
-        unsafe {
-            libc::fprintf(FOUT, c"\n\n".as_ptr());
-            if model.obj.is_empty() {
-                libc::fprintf(FOUT, c"Model has no objects!!!\n".as_ptr());
-            }
+        let _ = fout.write_all(b"\n\n");
+        if model.obj.is_empty() {
+            let _ = fout.write_all(b"Model has no objects!!!\n");
         }
         match mode {
             4 => {
-                // `imodinfo.cpp:452` passes this program's own `fout`.  The
-                // converted `imodWriteAscii` takes an `ImodFile` (NATIVE.md
-                // vocabulary item 1), while this program still writes
-                // everything else on the C stream -- 170 `fprintf(FOUT, ...)`
-                // sites, whose conversion is its own unit of work -- so a
-                // second, independently buffered handle would reorder a
-                // redirected capture.  The C stream is flushed first and the
-                // Rust handle is a `dup` of its descriptor: `dup` shares the
-                // open file *description*, so both share one file offset and
-                // the C stream resumes exactly where these writes ended,
-                // including after `imodWriteAscii`'s own `rewind`.
-                unsafe {
-                    libc::fflush(FOUT);
-                    let mut out = ImodFile::File(std::rc::Rc::new(std::fs::File::from_raw_fd(
-                        libc::dup(libc::fileno(FOUT)),
-                    )));
-                    imod_write_ascii(&model, &mut out);
-                    let _ = out.flush();
-                }
+                // `imodinfo.cpp:452` passes this program's own `fout`.
+                //
+                // `imodWriteAscii` starts with `rewind(fout)`
+                // (`imodel_files.c:1645`), and that really seeks when `fout`
+                // is `stdout` on a regular file: native's `-a` output under a
+                // shell redirect is the ascii text written *over* the
+                // `# MODEL` banner, while under a pipe `fseek` fails and the
+                // text is appended.  [`ImodFile`]'s `Seek` treats the
+                // standard-stream arms as unseekable, so the descriptor is
+                // duplicated into a `File` arm, which seeks exactly as the C
+                // stream does.  The C buffer is flushed first, and `dup`
+                // shares the open file *description*, so the two handles share
+                // one offset and the `\n\n` written after this lands where
+                // the ascii text ended.
+                let _ = fout.flush();
+                let mut out = ImodFile::File(std::rc::Rc::new(unsafe {
+                    std::fs::File::from_raw_fd(libc::dup(fout.fileno()))
+                }));
+                imod_write_ascii(&model, &mut out);
+                let _ = out.flush();
             }
             6 => {
                 for ob in &obj_list {
@@ -495,42 +530,19 @@ pub fn imodinfo() {
                 }
             }
             2 => {
-                unsafe {
-                    libc::fprintf(
-                        FOUT,
-                        c"#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center\n".as_ptr(),
-                    );
-                    libc::fprintf(
-                        FOUT,
-                        c"#--------------------------------------------------------------------------------------------\n".as_ptr(),
-                    );
-                }
+                let _ = fout.write_all(b"#Obj       Cyl. Vol      Cont Vol   Vol Inside Mesh   Mesh Surf              Center\n");
+                let _ = fout.write_all(b"#--------------------------------------------------------------------------------------------\n");
                 for ob in &obj_list {
                     imodinfo_object(&model, *ob, scaninside, subarea, minimum, maximum, useclip);
                 }
             }
             3 => imodinfo_objndist(&model, bins),
             5 => {
-                unsafe {
-                    // `imodUnits` (`imodel.c:1360`).
-                    libc::fprintf(
-                        FOUT,
-                        c"# Obj Cont Pnts Length (in %s)\n".as_ptr(),
-                        match model.units {
-                            0 => c"pixels".as_ptr(),
-                            3 => c"km".as_ptr(),
-                            1 => c"m".as_ptr(),
-                            -2 => c"cm".as_ptr(),
-                            -3 => c"mm".as_ptr(),
-                            -6 => c"um".as_ptr(),
-                            -9 => c"nm".as_ptr(),
-                            -10 => c"A".as_ptr(),
-                            -12 => c"pm".as_ptr(),
-                            _ => c"unknown units".as_ptr(),
-                        },
-                    );
-                    libc::fprintf(FOUT, c"#------------------------\n".as_ptr());
-                }
+                let _ = fout.write_all(&c_format_bytes(
+                    "# Obj Cont Pnts Length (in %s)\n",
+                    &[CArg::Str(imod_units(&model))],
+                ));
+                let _ = fout.write_all(b"#------------------------\n");
                 for ob in &obj_list {
                     imodinfo_length(&model, *ob);
                 }
@@ -565,11 +577,9 @@ pub fn imodinfo() {
                 }
             }
         }
-        unsafe {
-            libc::fprintf(FOUT, c"\n\n".as_ptr());
-        }
+        let _ = fout.write_all(b"\n\n");
     }
-    unsafe { libc::exit(0) };
+    std::process::exit(0);
 }
 /// Original: `imodinfo_print_model` (`imodinfo.cpp:464`).
 pub fn imodinfo_print_model(
@@ -582,6 +592,7 @@ pub fn imodinfo_print_model(
     max: Ipoint,
     _useclip: i32,
 ) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_print_model` (`imodinfo.cpp:464`).  The source keeps
     // `Iobj *obj = &(model->obj[ob])` for the whole body; the translation takes
     // the alias afresh in each region because `contour_stats` is non-const.
@@ -608,39 +619,48 @@ pub fn imodinfo_print_model(
     );
     let doclip = if n_planes != 0 { _useclip } else { 0 };
     let obj = &model.obj[ob];
-    unsafe {
-        libc::fprintf(FOUT, c"OBJECT %d\n".as_ptr(), ob as std::ffi::c_int + 1);
-        libc::fprintf(FOUT, c"NAME:  %s\n".as_ptr(), obj.name.as_ptr());
-        libc::fprintf(
-            FOUT,
-            c"       %d contours\n".as_ptr(),
-            obj.cont.len() as std::ffi::c_int,
-        );
-        if obj.flags & IMOD_OBJFLAG_OFF != 0 {
-            libc::fprintf(FOUT, c"       object drawing is turned off\n".as_ptr());
-        }
-        if obj.flags & IMOD_OBJFLAG_SCAT != 0 {
-            libc::fprintf(FOUT, c"       object uses scattered points.\n".as_ptr());
-        } else if obj.flags & IMOD_OBJFLAG_OPEN != 0 {
-            libc::fprintf(FOUT, c"       object uses open contours.\n".as_ptr());
-        } else {
-            libc::fprintf(FOUT, c"       object uses closed contours.\n".as_ptr());
-        }
-        if obj.flags & IMOD_OBJFLAG_OUT != 0 {
-            libc::fprintf(
-                FOUT,
-                c"       contours in object are inside out.\n".as_ptr(),
-            );
-        }
-        libc::fprintf(
-            FOUT,
-            c"       color (red, green, blue) = (%g, %g, %g)\n".as_ptr(),
-            obj.red as std::ffi::c_double,
-            obj.green as std::ffi::c_double,
-            obj.blue as std::ffi::c_double,
-        );
-        libc::fprintf(FOUT, c"\n".as_ptr());
+    let _ = fout.write_all(&c_format_bytes(
+        "OBJECT %d\n",
+        &[CArg::Int((ob as std::ffi::c_int + 1) as i64)],
+    ));
+    {
+        let end = obj
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(obj.name.len());
+        let _ = fout.write_all(&c_format_bytes(
+            "NAME:  %s
+",
+            &[CArg::Bytes(&obj.name[..end])],
+        ));
     }
+    let _ = fout.write_all(&c_format_bytes(
+        "       %d contours\n",
+        &[CArg::Int((obj.cont.len() as std::ffi::c_int) as i64)],
+    ));
+    if obj.flags & IMOD_OBJFLAG_OFF != 0 {
+        let _ = fout.write_all(b"       object drawing is turned off\n");
+    }
+    if obj.flags & IMOD_OBJFLAG_SCAT != 0 {
+        let _ = fout.write_all(b"       object uses scattered points.\n");
+    } else if obj.flags & IMOD_OBJFLAG_OPEN != 0 {
+        let _ = fout.write_all(b"       object uses open contours.\n");
+    } else {
+        let _ = fout.write_all(b"       object uses closed contours.\n");
+    }
+    if obj.flags & IMOD_OBJFLAG_OUT != 0 {
+        let _ = fout.write_all(b"       contours in object are inside out.\n");
+    }
+    let _ = fout.write_all(&c_format_bytes(
+        "       color (red, green, blue) = (%g, %g, %g)\n",
+        &[
+            CArg::Dbl((obj.red as std::ffi::c_double) as f64),
+            CArg::Dbl((obj.green as std::ffi::c_double) as f64),
+            CArg::Dbl((obj.blue as std::ffi::c_double) as f64),
+        ],
+    ));
+    let _ = fout.write_all(b"\n");
     if scaninside && model.obj[ob].flags & IMOD_OBJFLAG_OPEN == 0 {
         let mut mesh_vol = 0.0_f64;
         tvol = model.pixsize as f64
@@ -661,21 +681,18 @@ pub fn imodinfo_print_model(
             let cont = &obj.cont[co];
             let npt = cont.pts.len();
             if verbose >= 0 {
-                unsafe {
-                    libc::fprintf(
-                        FOUT,
-                        c"\tCONTOUR #%d,%d,%d  %d points".as_ptr(),
-                        co as std::ffi::c_int + 1,
-                        ob as std::ffi::c_int + 1,
-                        cont.surf,
-                        npt as std::ffi::c_int,
-                    );
-                }
+                let _ = fout.write_all(&c_format_bytes(
+                    "\tCONTOUR #%d,%d,%d  %d points",
+                    &[
+                        CArg::Int((co as std::ffi::c_int + 1) as i64),
+                        CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                        CArg::Int((cont.surf) as i64),
+                        CArg::Int((npt as std::ffi::c_int) as i64),
+                    ],
+                ));
             }
             if verbose > 1 {
-                unsafe {
-                    libc::fprintf(FOUT, c"\n\t".as_ptr());
-                }
+                let _ = fout.write_all(b"\n\t");
                 // `imodinfo.cpp:540` prints the label to `stdout`, not to
                 // `fout`.  `ImodFile::Stdout` is that same C stream, so the
                 // two stay in order.
@@ -683,7 +700,7 @@ pub fn imodinfo_print_model(
             }
             if cont.pts.is_empty() {
                 if verbose >= 0 {
-                    unsafe { libc::fprintf(FOUT, c"\n".as_ptr()) };
+                    let _ = fout.write_all(b"\n");
                 }
                 continue;
             }
@@ -691,7 +708,7 @@ pub fn imodinfo_print_model(
                 let coz = cont.pts[0].z.round() as i32;
                 if (coz as f32) < min.z || (coz as f32) > max.z {
                     if verbose >= 0 {
-                        unsafe { libc::fprintf(FOUT, c"\n".as_ptr()) };
+                        let _ = fout.write_all(b"\n");
                     }
                     let vol_fac = contour_volume_factor(obj, cont, min, max);
                     if vol_fac > 0. {
@@ -728,13 +745,10 @@ pub fn imodinfo_print_model(
                 );
                 if obj.flags & IMOD_OBJFLAG_OPEN == 0 {
                     if verbose >= 0 {
-                        unsafe {
-                            libc::fprintf(
-                                FOUT,
-                                c", length = %g, ".as_ptr(),
-                                dist as std::ffi::c_double,
-                            )
-                        };
+                        let _ = fout.write_all(&c_format_bytes(
+                            ", length = %g, ",
+                            &[CArg::Dbl((dist as std::ffi::c_double) as f64)],
+                        ));
                     }
                     // `imodContourArea` (`icont.c:324`): magnitude of the summed cross
                     // products of successive points, halved, accumulated in float.
@@ -754,50 +768,37 @@ pub fn imodinfo_print_model(
                     let mut sa = area as f64;
                     sa *= model.pixsize as f64 * model.pixsize as f64;
                     if verbose >= 0 {
-                        unsafe {
-                            libc::fprintf(FOUT, c" area = %g\n".as_ptr(), sa as std::ffi::c_double)
-                        };
+                        let _ = fout.write_all(&c_format_bytes(
+                            " area = %g\n",
+                            &[CArg::Dbl((sa as std::ffi::c_double) as f64)],
+                        ));
                     }
                     tsa += dist;
                     tvol += sa;
                     mvol += sa * contour_volume_factor(obj, cont, min, max) as f64;
                 } else if verbose >= 0 {
-                    unsafe {
-                        // `imodUnits` (`imodel.c:1360`).
-                        libc::fprintf(
-                            FOUT,
-                            c"\tlength = %g %s\n".as_ptr(),
-                            dist as std::ffi::c_double,
-                            match model.units {
-                                0 => c"pixels".as_ptr(),
-                                3 => c"km".as_ptr(),
-                                1 => c"m".as_ptr(),
-                                -2 => c"cm".as_ptr(),
-                                -3 => c"mm".as_ptr(),
-                                -6 => c"um".as_ptr(),
-                                -9 => c"nm".as_ptr(),
-                                -10 => c"A".as_ptr(),
-                                -12 => c"pm".as_ptr(),
-                                _ => c"unknown units".as_ptr(),
-                            },
-                        )
-                    };
+                    let _ = fout.write_all(&c_format_bytes(
+                        "\tlength = %g %s\n",
+                        &[
+                            CArg::Dbl(dist as std::ffi::c_double),
+                            CArg::Str(imod_units(model)),
+                        ],
+                    ));
                 }
             } else {
-                unsafe { libc::fprintf(FOUT, c".\n".as_ptr()) };
+                let _ = fout.write_all(b".\n");
             }
             if verbose > 1 {
-                unsafe { libc::fprintf(FOUT, c"\t\tx\ty\tz\n".as_ptr()) };
+                let _ = fout.write_all(b"\t\tx\ty\tz\n");
                 for point in &cont.pts {
-                    unsafe {
-                        libc::fprintf(
-                            FOUT,
-                            c"\t\t%g\t%g\t%g\n".as_ptr(),
-                            point.x as std::ffi::c_double,
-                            point.y as std::ffi::c_double,
-                            point.z as std::ffi::c_double,
-                        )
-                    };
+                    let _ = fout.write_all(&c_format_bytes(
+                        "\t\t%g\t%g\t%g\n",
+                        &[
+                            CArg::Dbl((point.x as std::ffi::c_double) as f64),
+                            CArg::Dbl((point.y as std::ffi::c_double) as f64),
+                            CArg::Dbl((point.z as std::ffi::c_double) as f64),
+                        ],
+                    ));
                 }
             }
             if verbose > 0 {
@@ -845,45 +846,38 @@ pub fn imodinfo_print_model(
         // multiplies.
         inmvol *= (model.pixsize as f64).powf(3.);
     }
-    unsafe {
-        if mvol > 0.0 {
-            mvol *= model.zscale as f64 * model.pixsize as f64;
-            libc::fprintf(
-                FOUT,
-                c"\tTotal contour volume = %g\n".as_ptr(),
-                mvol as f32 as std::ffi::c_double,
-            );
-        } else if tvol > 0.0 {
-            tvol *= model.zscale as f64 * model.pixsize as f64;
-            libc::fprintf(
-                FOUT,
-                c"\n\tTotal cylinder volume = %g\n".as_ptr(),
-                tvol as f32 as std::ffi::c_double,
-            );
-        }
-        if inmvol > 0. {
-            libc::fprintf(
-                FOUT,
-                c"\tTotal volume inside mesh = %g\n".as_ptr(),
-                inmvol as f32 as std::ffi::c_double,
-            );
-        }
-        if msa > 0. {
-            libc::fprintf(
-                FOUT,
-                c"\tTotal mesh surface area = %g\n".as_ptr(),
-                msa as f32 as std::ffi::c_double,
-            );
-        } else if tsa > 0.0 {
-            tsa *= model.zscale as f64 * model.pixsize as f64;
-            libc::fprintf(
-                FOUT,
-                c"\tTotal cylinder surface area = %g\n".as_ptr(),
-                tsa as f32 as std::ffi::c_double,
-            );
-        }
-        libc::fprintf(FOUT, c"\n".as_ptr());
+    if mvol > 0.0 {
+        mvol *= model.zscale as f64 * model.pixsize as f64;
+        let _ = fout.write_all(&c_format_bytes(
+            "\tTotal contour volume = %g\n",
+            &[CArg::Dbl((mvol as f32 as std::ffi::c_double) as f64)],
+        ));
+    } else if tvol > 0.0 {
+        tvol *= model.zscale as f64 * model.pixsize as f64;
+        let _ = fout.write_all(&c_format_bytes(
+            "\n\tTotal cylinder volume = %g\n",
+            &[CArg::Dbl((tvol as f32 as std::ffi::c_double) as f64)],
+        ));
     }
+    if inmvol > 0. {
+        let _ = fout.write_all(&c_format_bytes(
+            "\tTotal volume inside mesh = %g\n",
+            &[CArg::Dbl((inmvol as f32 as std::ffi::c_double) as f64)],
+        ));
+    }
+    if msa > 0. {
+        let _ = fout.write_all(&c_format_bytes(
+            "\tTotal mesh surface area = %g\n",
+            &[CArg::Dbl((msa as f32 as std::ffi::c_double) as f64)],
+        ));
+    } else if tsa > 0.0 {
+        tsa *= model.zscale as f64 * model.pixsize as f64;
+        let _ = fout.write_all(&c_format_bytes(
+            "\tTotal cylinder surface area = %g\n",
+            &[CArg::Dbl((tsa as f32 as std::ffi::c_double) as f64)],
+        ));
+    }
+    let _ = fout.write_all(b"\n");
 }
 /// Original: `imodinfo_surface` (`imodinfo.cpp:646`).
 pub fn imodinfo_surface(
@@ -896,6 +890,7 @@ pub fn imodinfo_surface(
     sample: usize,
     _verbose: i32,
 ) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_surface` (`imodinfo.cpp:646`).
     let Some(obj) = imod.obj.get(ob) else {
         return;
@@ -990,13 +985,19 @@ pub fn imodinfo_surface(
             );
         }
     }
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\n#Object %d data, %s\n".as_ptr(),
-            ob as std::ffi::c_int + 1,
-            obj.name.as_ptr(),
-        );
+    {
+        let end = obj
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(obj.name.len());
+        let _ = fout.write_all(&c_format_bytes(
+            "\n#Object %d data, %s\n",
+            &[
+                CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                CArg::Bytes(&obj.name[..end]),
+            ],
+        ));
     }
     if !obj.mesh.is_empty() {
         let zs = imod.zscale;
@@ -1121,106 +1122,93 @@ pub fn imodinfo_surface(
                 }
             }
         }
-        unsafe {
-            if max_mesh_surf > 0 && obj.cont.is_empty() {
-                libc::fprintf(
-                    FOUT,
-                    c"#Surface : Contours,  Mesh Volume,  Mesh Surface\n".as_ptr(),
-                );
-                let mut i = 0_usize;
-                while i <= surfsize {
-                    libc::fprintf(
-                        FOUT,
-                        c"%7d   %8d   %12.6g  %12.6g\n".as_ptr(),
-                        i as std::ffi::c_int,
-                        nofc[i],
-                        vol_in_mesh[i],
-                        msa[i],
-                    );
-                    i += sample;
-                }
-            } else if max_cont_surf > 0 && max_mesh_surf == 0 && mvol[max_cont_surf as usize] > 0. {
-                libc::fprintf(
-                    FOUT,
-                    c"#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Surface,  Max Extent\n"
-                        .as_ptr(),
-                );
-                let mut i = 0_usize;
-                while i <= surfsize {
-                    libc::fprintf(
-                        FOUT,
-                        c"%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g\n".as_ptr(),
-                        i as std::ffi::c_int,
-                        nofc[i],
-                        vol[i],
-                        mvol[i],
-                        msa[i],
-                        extent[i] as std::ffi::c_double,
-                    );
-                    i += sample;
-                }
-            } else if max_cont_surf > 0 && max_mesh_surf > 0 && max_cont_surf == max_mesh_surf {
-                libc::fprintf(
-                    FOUT,
-                    c"#Surface : Contours,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent\n"
-                        .as_ptr(),
-                );
-                let mut i = 0_usize;
-                while i <= surfsize {
-                    libc::fprintf(
-                        FOUT,
-                        c"%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g\n".as_ptr(),
-                        i as std::ffi::c_int,
-                        nofc[i],
-                        mvol[i],
-                        vol_in_mesh[i],
-                        msa[i],
-                        extent[i] as std::ffi::c_double,
-                    );
-                    i += sample;
-                }
-            } else {
-                libc::fprintf(
-                    FOUT,
-                    c"#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent\n"
-                        .as_ptr(),
-                );
-                let mut i = 0_usize;
-                while i <= surfsize {
-                    libc::fprintf(
-                        FOUT,
-                        c"%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g  %12.6g\n".as_ptr(),
-                        i as std::ffi::c_int,
-                        nofc[i],
-                        vol[i],
-                        mvol[i],
-                        vol_in_mesh[i],
-                        msa[i],
-                        extent[i] as std::ffi::c_double,
-                    );
-                    i += sample;
-                }
+        if max_mesh_surf > 0 && obj.cont.is_empty() {
+            let _ = fout.write_all(b"#Surface : Contours,  Mesh Volume,  Mesh Surface\n");
+            let mut i = 0_usize;
+            while i <= surfsize {
+                let _ = fout.write_all(&c_format_bytes(
+                    "%7d   %8d   %12.6g  %12.6g\n",
+                    &[
+                        CArg::Int((i as std::ffi::c_int) as i64),
+                        CArg::Int((nofc[i]) as i64),
+                        CArg::Dbl((vol_in_mesh[i]) as f64),
+                        CArg::Dbl((msa[i]) as f64),
+                    ],
+                ));
+                i += sample;
             }
-        }
-    } else {
-        unsafe {
-            libc::fprintf(
-                FOUT,
-                c"#Surface : Contours,  Cyl. Volume,  Cyl. Surface,  Max. Extent\n".as_ptr(),
+        } else if max_cont_surf > 0 && max_mesh_surf == 0 && mvol[max_cont_surf as usize] > 0. {
+            let _ = fout.write_all(
+                b"#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Surface,  Max Extent\n",
             );
             let mut i = 0_usize;
             while i <= surfsize {
-                libc::fprintf(
-                    FOUT,
-                    c"%7d   %8d   %12.6g  %12.6g  %12.6g\n".as_ptr(),
-                    i as std::ffi::c_int,
-                    nofc[i],
-                    vol[i],
-                    sa[i],
-                    extent[i] as std::ffi::c_double,
-                );
+                let _ = fout.write_all(&c_format_bytes(
+                    "%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g\n",
+                    &[
+                        CArg::Int((i as std::ffi::c_int) as i64),
+                        CArg::Int((nofc[i]) as i64),
+                        CArg::Dbl((vol[i]) as f64),
+                        CArg::Dbl((mvol[i]) as f64),
+                        CArg::Dbl((msa[i]) as f64),
+                        CArg::Dbl((extent[i] as std::ffi::c_double) as f64),
+                    ],
+                ));
                 i += sample;
             }
+        } else if max_cont_surf > 0 && max_mesh_surf > 0 && max_cont_surf == max_mesh_surf {
+            let _ = fout.write_all(
+                b"#Surface : Contours,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent\n",
+            );
+            let mut i = 0_usize;
+            while i <= surfsize {
+                let _ = fout.write_all(&c_format_bytes(
+                    "%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g\n",
+                    &[
+                        CArg::Int((i as std::ffi::c_int) as i64),
+                        CArg::Int((nofc[i]) as i64),
+                        CArg::Dbl((mvol[i]) as f64),
+                        CArg::Dbl((vol_in_mesh[i]) as f64),
+                        CArg::Dbl((msa[i]) as f64),
+                        CArg::Dbl((extent[i] as std::ffi::c_double) as f64),
+                    ],
+                ));
+                i += sample;
+            }
+        } else {
+            let _ = fout.write_all(b"#Surface : Contours,  Cyl. Volume,  Cont. Volume,  Mesh Volume,  Mesh Surface,  Max Extent\n");
+            let mut i = 0_usize;
+            while i <= surfsize {
+                let _ = fout.write_all(&c_format_bytes(
+                    "%7d   %8d   %12.6g  %12.6g  %12.6g  %12.6g  %12.6g\n",
+                    &[
+                        CArg::Int((i as std::ffi::c_int) as i64),
+                        CArg::Int((nofc[i]) as i64),
+                        CArg::Dbl((vol[i]) as f64),
+                        CArg::Dbl((mvol[i]) as f64),
+                        CArg::Dbl((vol_in_mesh[i]) as f64),
+                        CArg::Dbl((msa[i]) as f64),
+                        CArg::Dbl((extent[i] as std::ffi::c_double) as f64),
+                    ],
+                ));
+                i += sample;
+            }
+        }
+    } else {
+        let _ = fout.write_all(b"#Surface : Contours,  Cyl. Volume,  Cyl. Surface,  Max. Extent\n");
+        let mut i = 0_usize;
+        while i <= surfsize {
+            let _ = fout.write_all(&c_format_bytes(
+                "%7d   %8d   %12.6g  %12.6g  %12.6g\n",
+                &[
+                    CArg::Int((i as std::ffi::c_int) as i64),
+                    CArg::Int((nofc[i]) as i64),
+                    CArg::Dbl((vol[i]) as f64),
+                    CArg::Dbl((sa[i]) as f64),
+                    CArg::Dbl((extent[i] as std::ffi::c_double) as f64),
+                ],
+            ));
+            i += sample;
         }
     }
 }
@@ -1234,6 +1222,7 @@ pub fn imodinfo_points(
     _useclip: i32,
     verbose: i32,
 ) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_points` (`imodinfo.cpp:910`).
     let Some(obj) = imod.obj.get(ob) else {
         return;
@@ -1262,30 +1251,33 @@ pub fn imodinfo_points(
         {
             if !objheader {
                 objheader = true;
-                unsafe {
-                    libc::fprintf(
-                        FOUT,
-                        c"\n#Object %d data, %s\n".as_ptr(),
-                        ob as std::ffi::c_int + 1,
-                        obj.name.as_ptr(),
-                    );
-                }
+                let end = obj
+                    .name
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(obj.name.len());
+                let _ = fout.write_all(&c_format_bytes(
+                    "\n#Object %d data, %s\n",
+                    &[
+                        CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                        CArg::Bytes(&obj.name[..end]),
+                    ],
+                ));
             }
             if verbose >= 0 {
-                unsafe {
-                    libc::fprintf(
-                        FOUT,
-                        c"\tCONTOUR #%d,%d,%d  %d points".as_ptr(),
-                        co as std::ffi::c_int + 1,
-                        ob as std::ffi::c_int + 1,
-                        cont.surf,
-                        cont.pts.len() as std::ffi::c_int,
-                    );
-                    if subarea || (_useclip != 0 && n_planes != 0) {
-                        libc::fprintf(FOUT, c" total, before constraints".as_ptr());
-                    }
-                    libc::fprintf(FOUT, c"\n".as_ptr());
+                let _ = fout.write_all(&c_format_bytes(
+                    "\tCONTOUR #%d,%d,%d  %d points",
+                    &[
+                        CArg::Int((co as std::ffi::c_int + 1) as i64),
+                        CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                        CArg::Int((cont.surf) as i64),
+                        CArg::Int((cont.pts.len() as std::ffi::c_int) as i64),
+                    ],
+                ));
+                if subarea || (_useclip != 0 && n_planes != 0) {
+                    let _ = fout.write_all(b" total, before constraints");
                 }
+                let _ = fout.write_all(b"\n");
             }
             for (pt, p1) in cont.pts.iter().enumerate() {
                 let mut skip = subarea;
@@ -1308,9 +1300,10 @@ pub fn imodinfo_points(
                     };
                     let rad = size * imod.pixsize;
                     if verbose >= 0 {
-                        unsafe {
-                            libc::fprintf(FOUT, c"  %11.6g\n".as_ptr(), rad as std::ffi::c_double)
-                        };
+                        let _ = fout.write_all(&c_format_bytes(
+                            "  %11.6g\n",
+                            &[CArg::Dbl((rad as std::ffi::c_double) as f64)],
+                        ));
                     }
                     rsum += rad as f64;
                     rsqsum += (rad * rad) as f64;
@@ -1324,20 +1317,12 @@ pub fn imodinfo_points(
         let rad = (rsum / nsum as f64) as f32;
         let area = (4. * pi as f64 * rsqsum) as f32;
         let volume = (4. * pi as f64 * rcubsum / 3.) as f32;
-        unsafe {
-            libc::fprintf(
-                FOUT,
-                c"\n\tMean radius = %g for %d points.\n\tImplied total surface area = %g; total volume = %g\n".as_ptr(),
-                rad as std::ffi::c_double,
-                nsum,
-                area as std::ffi::c_double,
-                volume as std::ffi::c_double,
-            );
-        }
+        let _ = fout.write_all(&c_format_bytes("\n\tMean radius = %g for %d points.\n\tImplied total surface area = %g; total volume = %g\n", &[CArg::Dbl((rad as std::ffi::c_double) as f64), CArg::Int((nsum) as i64), CArg::Dbl((area as std::ffi::c_double) as f64), CArg::Dbl((volume as std::ffi::c_double) as f64)]));
     }
 }
 /// Original: `imodinfo_ratios` (`imodinfo.cpp:996`).
 pub fn imodinfo_ratios(model: &Imod, ob: usize) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_ratios` (`imodinfo.cpp:996`).
     let Some(obj) = model.obj.get(ob) else {
         return;
@@ -1345,9 +1330,21 @@ pub fn imodinfo_ratios(model: &Imod, ob: usize) {
     if obj.flags & IMOD_OBJFLAG_SCAT != 0 || obj.flags & IMOD_OBJFLAG_OPEN != 0 {
         return;
     }
-    unsafe {
-        libc::fprintf(FOUT, c"OBJECT %d\n".as_ptr(), ob as std::ffi::c_int + 1);
-        libc::fprintf(FOUT, c"NAME:  %s\n".as_ptr(), obj.name.as_ptr());
+    let _ = fout.write_all(&c_format_bytes(
+        "OBJECT %d\n",
+        &[CArg::Int((ob as std::ffi::c_int + 1) as i64)],
+    ));
+    {
+        let end = obj
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(obj.name.len());
+        let _ = fout.write_all(&c_format_bytes(
+            "NAME:  %s
+",
+            &[CArg::Bytes(&obj.name[..end])],
+        ));
     }
     for (co, cont) in obj.cont.iter().enumerate() {
         if cont.pts.len() <= 2 {
@@ -1373,18 +1370,18 @@ pub fn imodinfo_ratios(model: &Imod, ob: usize) {
         let area = (((n.x * n.x + n.y * n.y + n.z * n.z) as f64).sqrt() * 0.5) as f32;
         let mut sa = area as f64;
         sa *= model.pixsize as f64 * model.pixsize as f64;
-        unsafe {
-            libc::fprintf(
-                FOUT,
-                c"%d %g\n".as_ptr(),
-                co as std::ffi::c_int + 1,
-                (sa / dist) as std::ffi::c_double,
-            );
-        }
+        let _ = fout.write_all(&c_format_bytes(
+            "%d %g\n",
+            &[
+                CArg::Int((co as std::ffi::c_int + 1) as i64),
+                CArg::Dbl(((sa / dist) as std::ffi::c_double) as f64),
+            ],
+        ));
     }
 }
 /// Original: `imodinfo_ellipse` (`imodinfo.cpp:1028`).
 pub fn imodinfo_ellipse(model: &Imod, ob: usize, subarea: bool, min: Ipoint, max: Ipoint) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_ellipse` (`imodinfo.cpp:1028`).
     let Some(obj) = model.obj.get(ob) else {
         return;
@@ -1405,27 +1402,26 @@ pub fn imodinfo_ellipse(model: &Imod, ob: usize, subarea: bool, min: Ipoint, max
     let mut ecc_sum_sq = 0.0_f32;
     let mut min_angle = 1000.0_f32;
     let mut max_angle = -1000.0_f32;
-    unsafe {
-        libc::fprintf(FOUT, c"\nOBJECT %d\n".as_ptr(), ob as std::ffi::c_int + 1);
-        libc::fprintf(FOUT, c"NAME:  %s\n".as_ptr(), obj.name.as_ptr());
-        // `imodUnits` (`imodel.c:1360`).
-        libc::fprintf(
-            FOUT,
-            c"contour     center (pixels)                 axes (%s)        eccen-   long\n   #      x        y        z       semi-major   semi-minor  tricity  angle\n".as_ptr(),
-            match model.units {
-                0 => c"pixels".as_ptr(),
-                3 => c"km".as_ptr(),
-                1 => c"m".as_ptr(),
-                -2 => c"cm".as_ptr(),
-                -3 => c"mm".as_ptr(),
-                -6 => c"um".as_ptr(),
-                -9 => c"nm".as_ptr(),
-                -10 => c"A".as_ptr(),
-                -12 => c"pm".as_ptr(),
-                _ => c"unknown units".as_ptr(),
-            },
-        );
+    let _ = fout.write_all(&c_format_bytes(
+        "\nOBJECT %d\n",
+        &[CArg::Int((ob as std::ffi::c_int + 1) as i64)],
+    ));
+    {
+        let end = obj
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(obj.name.len());
+        let _ = fout.write_all(&c_format_bytes(
+            "NAME:  %s
+",
+            &[CArg::Bytes(&obj.name[..end])],
+        ));
     }
+    let _ = fout.write_all(&c_format_bytes(
+        "contour     center (pixels)                 axes (%s)        eccen-   long\n   #      x        y        z       semi-major   semi-minor  tricity  angle\n",
+        &[CArg::Str(imod_units(model))],
+    ));
     for (co, cont) in obj.cont.iter().enumerate() {
         if cont.pts.len() <= 2 {
             continue;
@@ -1461,20 +1457,19 @@ pub fn imodinfo_ellipse(model: &Imod, ob: usize, subarea: bool, min: Ipoint, max
                 angle -= 180.;
             }
         }
-        unsafe {
-            libc::fprintf(
-                FOUT,
-                c"%4d %8.1f %8.1f %8.1f   %12.5g %12.5g   %.4f  %6.2f\n".as_ptr(),
-                co as std::ffi::c_int + 1,
-                center.x as std::ffi::c_double,
-                center.y as std::ffi::c_double,
-                center.z as std::ffi::c_double,
-                aa as std::ffi::c_double,
-                bb as std::ffi::c_double,
-                ecc as std::ffi::c_double,
-                angle as std::ffi::c_double,
-            );
-        }
+        let _ = fout.write_all(&c_format_bytes(
+            "%4d %8.1f %8.1f %8.1f   %12.5g %12.5g   %.4f  %6.2f\n",
+            &[
+                CArg::Int((co as std::ffi::c_int + 1) as i64),
+                CArg::Dbl((center.x as std::ffi::c_double) as f64),
+                CArg::Dbl((center.y as std::ffi::c_double) as f64),
+                CArg::Dbl((center.z as std::ffi::c_double) as f64),
+                CArg::Dbl((aa as std::ffi::c_double) as f64),
+                CArg::Dbl((bb as std::ffi::c_double) as f64),
+                CArg::Dbl((ecc as std::ffi::c_double) as f64),
+                CArg::Dbl((angle as std::ffi::c_double) as f64),
+            ],
+        ));
         aa_sum += aa;
         aa_sum_sq += aa * aa;
         bb_sum += bb;
@@ -1496,36 +1491,24 @@ pub fn imodinfo_ellipse(model: &Imod, ob: usize, subarea: bool, min: Ipoint, max
         let mut ecc_sd = 0.0_f32;
         let mut ang_avg = 0.0_f32;
         let mut ang_sd = 0.0_f32;
-        unsafe {
-            sums_to_avg_sd(aa_sum, aa_sum_sq, nsum, &mut aa_avg, &mut aa_sd);
-            sums_to_avg_sd(bb_sum, bb_sum_sq, nsum, &mut bb_avg, &mut bb_sd);
-            sums_to_avg_sd(ecc_sum, ecc_sum_sq, nsum, &mut ecc_avg, &mut ecc_sd);
-            sums_to_avg_sd(ang_sum, ang_sum_sq, nsum, &mut ang_avg, &mut ang_sd);
-        }
+        sums_to_avg_sd(aa_sum, aa_sum_sq, nsum, &mut aa_avg, &mut aa_sd);
+        sums_to_avg_sd(bb_sum, bb_sum_sq, nsum, &mut bb_avg, &mut bb_sd);
+        sums_to_avg_sd(ecc_sum, ecc_sum_sq, nsum, &mut ecc_avg, &mut ecc_sd);
+        sums_to_avg_sd(ang_sum, ang_sum_sq, nsum, &mut ang_avg, &mut ang_sd);
         if ang_avg < 0. {
             ang_avg += 180.;
         }
         if ang_avg >= 180. {
             ang_avg -= 180.;
         }
-        unsafe {
-            libc::printf(
-                c"Mean                              %12.5g %12.5g   %.4f  %6.2f\n SD                               %12.5g %12.5g   %.4f  %6.2f\n".as_ptr(),
-                aa_avg as std::ffi::c_double,
-                bb_avg as std::ffi::c_double,
-                ecc_avg as std::ffi::c_double,
-                ang_avg as std::ffi::c_double,
-                aa_sd as std::ffi::c_double,
-                bb_sd as std::ffi::c_double,
-                ecc_sd as std::ffi::c_double,
-                ang_sd as std::ffi::c_double,
-            );
-            if max_angle - min_angle > 2. * sector_crit {
-                libc::printf(
-                    c"WARNING: The range of angles is %.0f degrees and the mean may be inaccurate\n".as_ptr(),
-                    (max_angle - min_angle) as std::ffi::c_double,
-                );
-            }
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes("Mean                              %12.5g %12.5g   %.4f  %6.2f\n SD                               %12.5g %12.5g   %.4f  %6.2f\n", &[CArg::Dbl((aa_avg as std::ffi::c_double) as f64), CArg::Dbl((bb_avg as std::ffi::c_double) as f64), CArg::Dbl((ecc_avg as std::ffi::c_double) as f64), CArg::Dbl((ang_avg as std::ffi::c_double) as f64), CArg::Dbl((aa_sd as std::ffi::c_double) as f64), CArg::Dbl((bb_sd as std::ffi::c_double) as f64), CArg::Dbl((ecc_sd as std::ffi::c_double) as f64), CArg::Dbl((ang_sd as std::ffi::c_double) as f64)]));
+        if max_angle - min_angle > 2. * sector_crit {
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "WARNING: The range of angles is %.0f degrees and the mean may be inaccurate\n",
+                &[CArg::Dbl(
+                    ((max_angle - min_angle) as std::ffi::c_double) as f64,
+                )],
+            ));
         }
     }
 }
@@ -1539,72 +1522,69 @@ pub fn imodinfo_full_object_report(
     ptmax: Ipoint,
     useclip: i32,
 ) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_full_object_report` (`imodinfo.cpp:1117`).
     if ob < 1 || ob > imod.obj.len() {
         return;
     }
     let obj = &imod.obj[ob - 1];
     // `imodUnits` (`imodel.c:1360`).
-    let units = match imod.units {
-        0 => c"pixels".as_ptr(),
-        3 => c"km".as_ptr(),
-        1 => c"m".as_ptr(),
-        -2 => c"cm".as_ptr(),
-        -3 => c"mm".as_ptr(),
-        -6 => c"um".as_ptr(),
-        -9 => c"nm".as_ptr(),
-        -10 => c"A".as_ptr(),
-        -12 => c"pm".as_ptr(),
-        _ => c"unknown units".as_ptr(),
-    };
-    unsafe {
-        libc::fprintf(FOUT, c"Object # %d:\n".as_ptr(), ob as std::ffi::c_int);
-        libc::fprintf(FOUT, c"%s\n".as_ptr(), obj.name.as_ptr());
-        libc::fprintf(
-            FOUT,
-            c"\tNumber of Contours = %d\n".as_ptr(),
-            obj.cont.len() as std::ffi::c_int,
-        );
-        libc::fprintf(
-            FOUT,
-            c"\tNumber of Contours with Data = %d\n".as_ptr(),
-            obj.cont.iter().filter(|cont| !cont.pts.is_empty()).count() as std::ffi::c_int,
-        );
-        libc::fprintf(
-            FOUT,
-            c"\tNumber of Meshes   = %d\n".as_ptr(),
-            obj.mesh.len() as std::ffi::c_int,
-        );
-        libc::fprintf(FOUT, c"\tNumber of Surfaces = %d\n".as_ptr(), obj.surfsize);
-        libc::fprintf(
-            FOUT,
-            c"\tColor  = (Red, Green, Blue, Alpha) = (%g, %g, %g, %g)\n".as_ptr(),
-            obj.red as std::ffi::c_double,
-            obj.green as std::ffi::c_double,
-            obj.blue as std::ffi::c_double,
-            (obj.trans as f32 * 0.01_f32) as std::ffi::c_double,
-        );
-        libc::fprintf(
-            FOUT,
-            c"\tAmbient Light  = %d\n".as_ptr(),
-            obj.ambient as std::ffi::c_int,
-        );
-        libc::fprintf(
-            FOUT,
-            c"\tDiffuse Light  = %d\n".as_ptr(),
-            obj.diffuse as std::ffi::c_int,
-        );
-        libc::fprintf(
-            FOUT,
-            c"\tSpecular Light = %d\n".as_ptr(),
-            obj.specular as std::ffi::c_int,
-        );
-        libc::fprintf(
-            FOUT,
-            c"\tShininess      = %d\n".as_ptr(),
-            obj.shininess as std::ffi::c_int,
-        );
+    let units = imod_units(imod);
+    let _ = fout.write_all(&c_format_bytes(
+        "Object # %d:\n",
+        &[CArg::Int((ob as std::ffi::c_int) as i64)],
+    ));
+    {
+        let end = obj
+            .name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(obj.name.len());
+        let _ = fout.write_all(&c_format_bytes("%s\n", &[CArg::Bytes(&obj.name[..end])]));
     }
+    let _ = fout.write_all(&c_format_bytes(
+        "\tNumber of Contours = %d\n",
+        &[CArg::Int((obj.cont.len() as std::ffi::c_int) as i64)],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tNumber of Contours with Data = %d\n",
+        &[CArg::Int(
+            (obj.cont.iter().filter(|cont| !cont.pts.is_empty()).count() as std::ffi::c_int) as i64,
+        )],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tNumber of Meshes   = %d\n",
+        &[CArg::Int((obj.mesh.len() as std::ffi::c_int) as i64)],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tNumber of Surfaces = %d\n",
+        &[CArg::Int((obj.surfsize) as i64)],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tColor  = (Red, Green, Blue, Alpha) = (%g, %g, %g, %g)\n",
+        &[
+            CArg::Dbl((obj.red as std::ffi::c_double) as f64),
+            CArg::Dbl((obj.green as std::ffi::c_double) as f64),
+            CArg::Dbl((obj.blue as std::ffi::c_double) as f64),
+            CArg::Dbl(((obj.trans as f32 * 0.01_f32) as std::ffi::c_double) as f64),
+        ],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tAmbient Light  = %d\n",
+        &[CArg::Int((obj.ambient as std::ffi::c_int) as i64)],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tDiffuse Light  = %d\n",
+        &[CArg::Int((obj.diffuse as std::ffi::c_int) as i64)],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tSpecular Light = %d\n",
+        &[CArg::Int((obj.specular as std::ffi::c_int) as i64)],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "\tShininess      = %d\n",
+        &[CArg::Int((obj.shininess as std::ffi::c_int) as i64)],
+    ));
     // `imodObjectGetBBox` (`iobj.c`).
     let mut lower = Ipoint {
         x: f32::MAX,
@@ -1639,18 +1619,17 @@ pub fn imodinfo_full_object_report(
             }
         }
     }
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\n\tBounding Box   = { (%g, %g, %g), (%g, %g, %g)}\n".as_ptr(),
-            lower.x as std::ffi::c_double,
-            lower.y as std::ffi::c_double,
-            lower.z as std::ffi::c_double,
-            upper.x as std::ffi::c_double,
-            upper.y as std::ffi::c_double,
-            upper.z as std::ffi::c_double,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "\n\tBounding Box   = { (%g, %g, %g), (%g, %g, %g)}\n",
+        &[
+            CArg::Dbl((lower.x as std::ffi::c_double) as f64),
+            CArg::Dbl((lower.y as std::ffi::c_double) as f64),
+            CArg::Dbl((lower.z as std::ffi::c_double) as f64),
+            CArg::Dbl((upper.x as std::ffi::c_double) as f64),
+            CArg::Dbl((upper.y as std::ffi::c_double) as f64),
+            CArg::Dbl((upper.z as std::ffi::c_double) as f64),
+        ],
+    ));
     let (surf, vol, msurf, mvol, inmvol, cent) = compute_object_area_vol(
         imod,
         obj,
@@ -1668,74 +1647,70 @@ pub fn imodinfo_full_object_report(
         },
         0,
     );
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\tCenter         = (%g, %g, %g)\n".as_ptr(),
-            cent.x as std::ffi::c_double,
-            cent.y as std::ffi::c_double,
-            cent.z as std::ffi::c_double,
-        );
-        if mvol > 0. {
-            libc::fprintf(
-                FOUT,
-                c"\tContour Volume          = %g %s^3\n".as_ptr(),
-                mvol,
-                units,
-            );
-        } else {
-            libc::fprintf(
-                FOUT,
-                c"\tCylinder Volume         = %g %s^3\n".as_ptr(),
-                vol,
-                units,
-            );
-        }
-        if inmvol > 0. {
-            libc::fprintf(
-                FOUT,
-                c"\tVolume Inside Mesh      = %g %s^3\n".as_ptr(),
-                inmvol,
-                units,
-            );
-        }
-        if msurf > 0. {
-            libc::fprintf(
-                FOUT,
-                c"\tMesh Surface Area       = %g %s^2\n".as_ptr(),
-                msurf,
-                units,
-            );
-        } else {
-            libc::fprintf(
-                FOUT,
-                c"\tCylinder Surface Area   = %g %s^2\n".as_ptr(),
-                surf,
-                units,
-            );
-        }
+    let _ = fout.write_all(&c_format_bytes(
+        "\tCenter         = (%g, %g, %g)\n",
+        &[
+            CArg::Dbl((cent.x as std::ffi::c_double) as f64),
+            CArg::Dbl((cent.y as std::ffi::c_double) as f64),
+            CArg::Dbl((cent.z as std::ffi::c_double) as f64),
+        ],
+    ));
+    if mvol > 0. {
+        let _ = fout.write_all(&c_format_bytes(
+            "	Contour Volume          = %g %s^3
+",
+            &[CArg::Dbl(mvol), CArg::Str(units)],
+        ));
+    } else {
+        let _ = fout.write_all(&c_format_bytes(
+            "	Cylinder Volume         = %g %s^3
+",
+            &[CArg::Dbl(vol), CArg::Str(units)],
+        ));
+    }
+    if inmvol > 0. {
+        let _ = fout.write_all(&c_format_bytes(
+            "	Volume Inside Mesh      = %g %s^3
+",
+            &[CArg::Dbl(inmvol), CArg::Str(units)],
+        ));
+    }
+    if msurf > 0. {
+        let _ = fout.write_all(&c_format_bytes(
+            "	Mesh Surface Area       = %g %s^2
+",
+            &[CArg::Dbl(msurf), CArg::Str(units)],
+        ));
+    } else {
+        let _ = fout.write_all(&c_format_bytes(
+            "	Cylinder Surface Area   = %g %s^2
+",
+            &[CArg::Dbl(surf), CArg::Str(units)],
+        ));
     }
     let mut num_clips = 0;
     for clip in 0..(obj.clips.count as usize).min(obj.clips.normal.len()) {
         if obj.clips.flags & (1 << clip) != 0 {
-            unsafe {
-                libc::fprintf(
-                    FOUT,
-                    c"\tClip %d Normal    = (%g, %g, %g)\n".as_ptr(),
-                    clip as std::ffi::c_int,
-                    obj.clips.normal[clip].x as std::ffi::c_double,
-                    obj.clips.normal[clip].y as std::ffi::c_double,
-                    (obj.clips.normal[clip].z / imod.zscale) as std::ffi::c_double,
-                );
-                libc::fprintf(
-                    FOUT,
-                    c"\tClip %d Point     = (%g, %g, %g)\n".as_ptr(),
-                    clip as std::ffi::c_int,
-                    obj.clips.point[clip].x as std::ffi::c_double,
-                    obj.clips.point[clip].y as std::ffi::c_double,
-                    obj.clips.point[clip].z as std::ffi::c_double,
-                );
-            }
+            let _ = fout.write_all(&c_format_bytes(
+                "\tClip %d Normal    = (%g, %g, %g)\n",
+                &[
+                    CArg::Int((clip as std::ffi::c_int) as i64),
+                    CArg::Dbl((obj.clips.normal[clip].x as std::ffi::c_double) as f64),
+                    CArg::Dbl((obj.clips.normal[clip].y as std::ffi::c_double) as f64),
+                    CArg::Dbl(
+                        ((obj.clips.normal[clip].z / imod.zscale) as std::ffi::c_double) as f64,
+                    ),
+                ],
+            ));
+            let _ = fout.write_all(&c_format_bytes(
+                "\tClip %d Point     = (%g, %g, %g)\n",
+                &[
+                    CArg::Int((clip as std::ffi::c_int) as i64),
+                    CArg::Dbl((obj.clips.point[clip].x as std::ffi::c_double) as f64),
+                    CArg::Dbl((obj.clips.point[clip].y as std::ffi::c_double) as f64),
+                    CArg::Dbl((obj.clips.point[clip].z as std::ffi::c_double) as f64),
+                ],
+            ));
             num_clips += 1;
         }
     }
@@ -1749,47 +1724,37 @@ pub fn imodinfo_full_object_report(
         }
     }
     if subarea || (useclip != 0 && num_clips != 0) {
-        unsafe {
-            libc::fprintf(FOUT, c"    Clipped and/or subsetted values:\n".as_ptr());
-        }
+        let _ = fout.write_all(b"    Clipped and/or subsetted values:\n");
         let (surf, vol, msurf, mvol, _inmvol, _cent) =
             compute_object_area_vol(imod, obj, scaninside, subarea, ptmin, ptmax, useclip);
-        unsafe {
-            if mvol > 0. {
-                libc::fprintf(
-                    FOUT,
-                    c"\tContour Volume          = %g %s^3\n".as_ptr(),
-                    mvol,
-                    units,
-                );
-            } else {
-                libc::fprintf(
-                    FOUT,
-                    c"\tCylinder Volume         = %g %s^3\n".as_ptr(),
-                    vol,
-                    units,
-                );
-            }
-            if msurf > 0. {
-                libc::fprintf(
-                    FOUT,
-                    c"\tMesh Surface Area       = %g %s^2\n".as_ptr(),
-                    msurf,
-                    units,
-                );
-            } else if surf > 0. {
-                libc::fprintf(
-                    FOUT,
-                    c"\tCylinder Surface Area   = %g %s^2\n".as_ptr(),
-                    surf,
-                    units,
-                );
-            }
+        if mvol > 0. {
+            let _ = fout.write_all(&c_format_bytes(
+                "	Contour Volume          = %g %s^3
+",
+                &[CArg::Dbl(mvol), CArg::Str(units)],
+            ));
+        } else {
+            let _ = fout.write_all(&c_format_bytes(
+                "	Cylinder Volume         = %g %s^3
+",
+                &[CArg::Dbl(vol), CArg::Str(units)],
+            ));
+        }
+        if msurf > 0. {
+            let _ = fout.write_all(&c_format_bytes(
+                "	Mesh Surface Area       = %g %s^2
+",
+                &[CArg::Dbl(msurf), CArg::Str(units)],
+            ));
+        } else if surf > 0. {
+            let _ = fout.write_all(&c_format_bytes(
+                "	Cylinder Surface Area   = %g %s^2
+",
+                &[CArg::Dbl(surf), CArg::Str(units)],
+            ));
         }
     }
-    unsafe {
-        libc::fprintf(FOUT, c"\n".as_ptr());
-    }
+    let _ = fout.write_all(b"\n");
 }
 /// Original: `imodinfo_object` (`imodinfo.cpp:1218`).
 pub fn imodinfo_object(
@@ -1801,6 +1766,7 @@ pub fn imodinfo_object(
     max: Ipoint,
     useclip: i32,
 ) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_object` (`imodinfo.cpp:1218`).
     let Some(obj) = imod.obj.get(ob) else {
         return;
@@ -1814,36 +1780,31 @@ pub fn imodinfo_object(
         mvol = 0.0;
     }
     let _ = surf;
-    unsafe {
-        if !obj.cont.is_empty() {
-            libc::fprintf(
-                FOUT,
-                c"%4d   %12.6g  %12.6g  %12.6g  %12.6g  %9.2f %9.2f %9.2f\n".as_ptr(),
-                ob as std::ffi::c_int + 1,
-                vol,
-                mvol,
-                inmvol,
-                msurf,
-                cent.x as std::ffi::c_double,
-                cent.y as std::ffi::c_double,
-                cent.z as std::ffi::c_double,
-            );
-        } else if !obj.mesh.is_empty() {
-            libc::fprintf(
-                FOUT,
-                c"%4d              x             x   %12.6g  %12.6g      x         x         x\n"
-                    .as_ptr(),
-                ob as std::ffi::c_int + 1,
-                inmvol,
-                msurf,
-            );
-        } else {
-            libc::fprintf(
-                FOUT,
-                c"%4d              0             0             0             0       x         x         x\n".as_ptr(),
-                ob as std::ffi::c_int + 1,
-            );
-        }
+    if !obj.cont.is_empty() {
+        let _ = fout.write_all(&c_format_bytes(
+            "%4d   %12.6g  %12.6g  %12.6g  %12.6g  %9.2f %9.2f %9.2f\n",
+            &[
+                CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                CArg::Dbl((vol) as f64),
+                CArg::Dbl((mvol) as f64),
+                CArg::Dbl((inmvol) as f64),
+                CArg::Dbl((msurf) as f64),
+                CArg::Dbl((cent.x as std::ffi::c_double) as f64),
+                CArg::Dbl((cent.y as std::ffi::c_double) as f64),
+                CArg::Dbl((cent.z as std::ffi::c_double) as f64),
+            ],
+        ));
+    } else if !obj.mesh.is_empty() {
+        let _ = fout.write_all(&c_format_bytes(
+            "%4d              x             x   %12.6g  %12.6g      x         x         x\n",
+            &[
+                CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                CArg::Dbl((inmvol) as f64),
+                CArg::Dbl((msurf) as f64),
+            ],
+        ));
+    } else {
+        let _ = fout.write_all(&c_format_bytes("%4d              0             0             0             0       x         x         x\n", &[CArg::Int((ob as std::ffi::c_int + 1) as i64)]));
     }
 }
 /// Original: `computeObjectAreaVol` (`imodinfo.cpp:1257`).
@@ -1972,26 +1933,23 @@ pub fn compute_object_area_vol(
 /// Original: `print_units` (`imodinfo.cpp:1342`).
 pub fn print_units(units: i32) {
     // Original: `print_units` (`imodinfo.cpp:1342`).
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            match units {
-                0 => c"pixels".as_ptr(),
-                3 => c"km".as_ptr(),
-                1 => c"m".as_ptr(),
-                -2 => c"cm".as_ptr(),
-                -3 => c"mm".as_ptr(),
-                -6 => c"um".as_ptr(),
-                -9 => c"nm".as_ptr(),
-                -10 => c"A".as_ptr(),
-                -12 => c"pm".as_ptr(),
-                _ => c"unknown units".as_ptr(),
-            },
-        );
-    }
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
+    let _ = fout.write_all(match units {
+        0 => b"pixels".as_slice(),
+        3 => b"km".as_slice(),
+        1 => b"m".as_slice(),
+        -2 => b"cm".as_slice(),
+        -3 => b"mm".as_slice(),
+        -6 => b"um".as_slice(),
+        -9 => b"nm".as_slice(),
+        -10 => b"A".as_slice(),
+        -12 => b"pm".as_slice(),
+        _ => b"unknown units".as_slice(),
+    });
 }
 /// Original: `imodinfo_objndist` (`imodinfo.cpp:1381`).
 pub fn imodinfo_objndist(imod: &Imod, bins: usize) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_objndist` (`imodinfo.cpp:1381`).
     let bins = if bins == 0 { 20 } else { bins };
     let mut pixsize = imod.pixsize as f64;
@@ -2002,9 +1960,7 @@ pub fn imodinfo_objndist(imod: &Imod, bins: usize) {
     if zscale == 0. {
         zscale = 1.;
     }
-    unsafe {
-        libc::fprintf(FOUT, c"#distance   number\n\n".as_ptr());
-    }
+    let _ = fout.write_all(b"#distance   number\n\n");
     if imod.obj.is_empty() {
         return;
     }
@@ -2064,9 +2020,10 @@ pub fn imodinfo_objndist(imod: &Imod, bins: usize) {
                 level += 1;
             }
         }
-        unsafe {
-            libc::fprintf(FOUT, c"%f\t%d\n".as_ptr(), binval, level);
-        }
+        let _ = fout.write_all(&c_format_bytes(
+            "%f\t%d\n",
+            &[CArg::Dbl((binval) as f64), CArg::Int((level) as i64)],
+        ));
         binval += binsize;
     }
 }
@@ -2076,6 +2033,7 @@ pub fn imodinfo_objndist(imod: &Imod, bins: usize) {
 /// (`icont.c:527-533`) saves, sets and restores the contour's `flags`, so the
 /// source's `Icont *cont` parameter is not const.
 pub fn contour_stats(cont: Option<&mut Icont>, flags: u32, pixsize: f64, zscale: f64) -> i32 {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `contour_stats` (`imodinfo.cpp:1475`).
     let Some(cont) = cont else {
         return -1;
@@ -2088,107 +2046,97 @@ pub fn contour_stats(cont: Option<&mut Icont>, flags: u32, pixsize: f64, zscale:
             cmass.z += point.z;
         }
         let num = cont.pts.len().max(1) as f32;
-        unsafe {
-            libc::fprintf(
-                FOUT,
-                c"\t\tCenter of Mass     = (%g, %g, %g) in pixel coords.\n".as_ptr(),
-                (cmass.x / num) as std::ffi::c_double,
-                (cmass.y / num) as std::ffi::c_double,
-                (cmass.z / num) as std::ffi::c_double,
-            );
-        }
+        let _ = fout.write_all(&c_format_bytes(
+            "\t\tCenter of Mass     = (%g, %g, %g) in pixel coords.\n",
+            &[
+                CArg::Dbl(((cmass.x / num) as std::ffi::c_double) as f64),
+                CArg::Dbl(((cmass.y / num) as std::ffi::c_double) as f64),
+                CArg::Dbl(((cmass.z / num) as std::ffi::c_double) as f64),
+            ],
+        ));
         return 0;
     }
     let odist = info_contour_length(Some(cont), flags | IMOD_OBJFLAG_OPEN, pixsize, zscale) as f32;
     let cdist = info_contour_length(Some(cont), flags & !IMOD_OBJFLAG_OPEN, pixsize, zscale) as f32;
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\t\tClosed/Open length = %g / %g\n".as_ptr(),
-            cdist as std::ffi::c_double,
-            odist as std::ffi::c_double,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tClosed/Open length = %g / %g\n",
+        &[
+            CArg::Dbl((cdist as std::ffi::c_double) as f64),
+            CArg::Dbl((odist as std::ffi::c_double) as f64),
+        ],
+    ));
 
     let mut area = imod_contour_area(Some(cont));
     area *= (pixsize * pixsize) as f32;
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\t\tEnclosed Area      = %g\n".as_ptr(),
-            area as std::ffi::c_double,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tEnclosed Area      = %g\n",
+        &[CArg::Dbl((area as std::ffi::c_double) as f64)],
+    ));
 
     imod_contour_center_of_mass(Some(cont), &mut cmass);
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\t\tCenter of Mass     = (%g, %g, %g) in pixel coords.\n".as_ptr(),
-            cmass.x as std::ffi::c_double,
-            cmass.y as std::ffi::c_double,
-            cmass.z as std::ffi::c_double,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tCenter of Mass     = (%g, %g, %g) in pixel coords.\n",
+        &[
+            CArg::Dbl((cmass.x as std::ffi::c_double) as f64),
+            CArg::Dbl((cmass.y as std::ffi::c_double) as f64),
+            CArg::Dbl((cmass.z as std::ffi::c_double) as f64),
+        ],
+    ));
 
     let mut ll = Ipoint::default();
     let mut ur = Ipoint::default();
     imod_contour_get_bbox(Some(cont), &mut ll, &mut ur);
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\t\tBounding Box        = {(%g, %g), (%g, %g)}\n".as_ptr(),
-            ll.x as std::ffi::c_double,
-            ll.y as std::ffi::c_double,
-            ur.x as std::ffi::c_double,
-            ur.y as std::ffi::c_double,
-        );
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tBounding Box        = {(%g, %g), (%g, %g)}\n",
+        &[
+            CArg::Dbl((ll.x as std::ffi::c_double) as f64),
+            CArg::Dbl((ll.y as std::ffi::c_double) as f64),
+            CArg::Dbl((ur.x as std::ffi::c_double) as f64),
+            CArg::Dbl((ur.y as std::ffi::c_double) as f64),
+        ],
+    ));
 
-        libc::fprintf(
-            FOUT,
-            c"\t\tCircularity        = %g\n".as_ptr(),
-            imod_contour_circularity(Some(cont)) as std::ffi::c_double,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tCircularity        = %g\n",
+        &[CArg::Dbl(
+            (imod_contour_circularity(Some(cont)) as std::ffi::c_double) as f64,
+        )],
+    ));
 
     let mut aspect = 0.;
     let mut length = 0.;
     let mut orientation = imod_contour_long_axis(Some(cont), 1.0, &mut aspect, &mut length);
     orientation /= 0.01745329252;
 
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\t\tOrientation        = %g degrees.\n".as_ptr(),
-            orientation as std::ffi::c_double,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tOrientation        = %g degrees.\n",
+        &[CArg::Dbl((orientation as std::ffi::c_double) as f64)],
+    ));
 
     let width = if length > 0. { length / aspect } else { 0. };
 
-    unsafe {
-        if length != 0. && width != 0. {
-            libc::fprintf(
-                FOUT,
-                c"\t\tEllipse            = %g\n".as_ptr(),
-                (area / (0.7853981635 * length as f64 * width as f64 * pixsize * pixsize) as f32)
-                    as std::ffi::c_double,
-            );
-        }
-
-        libc::fprintf(
-            FOUT,
-            c"\t\tLength X Width     = %g x %g\n".as_ptr(),
-            length as std::ffi::c_double,
-            width as std::ffi::c_double,
-        );
-
-        libc::fprintf(
-            FOUT,
-            c"\t\tAspect Ratio       = %g\n".as_ptr(),
-            aspect as std::ffi::c_double,
-        );
+    if length != 0. && width != 0. {
+        let _ = fout.write_all(&c_format_bytes(
+            "\t\tEllipse            = %g\n",
+            &[CArg::Dbl(
+                ((area / (0.7853981635 * length as f64 * width as f64 * pixsize * pixsize) as f32)
+                    as std::ffi::c_double) as f64,
+            )],
+        ));
     }
+
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tLength X Width     = %g x %g\n",
+        &[
+            CArg::Dbl((length as std::ffi::c_double) as f64),
+            CArg::Dbl((width as std::ffi::c_double) as f64),
+        ],
+    ));
+
+    let _ = fout.write_all(&c_format_bytes(
+        "\t\tAspect Ratio       = %g\n",
+        &[CArg::Dbl((aspect as std::ffi::c_double) as f64)],
+    ));
 
     0
 }
@@ -2213,6 +2161,7 @@ pub fn imodinfo_special(imod: &mut Imod, fname: &str) {
 }
 /// Original: `imodinfo_length` (`imodinfo.cpp:1569`).
 pub fn imodinfo_length(imod: &Imod, ob: usize) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `imodinfo_length` (`imodinfo.cpp:1569`).
     let Some(obj) = imod.obj.get(ob) else {
         return;
@@ -2224,16 +2173,15 @@ pub fn imodinfo_length(imod: &Imod, ob: usize) {
             imod.pixsize as f64,
             imod.zscale as f64,
         );
-        unsafe {
-            libc::fprintf(
-                FOUT,
-                c"%3d %3d  %3d  %g\n".as_ptr(),
-                ob as std::ffi::c_int + 1,
-                co as std::ffi::c_int + 1,
-                cont.pts.len() as std::ffi::c_int,
-                dist,
-            );
-        }
+        let _ = fout.write_all(&c_format_bytes(
+            "%3d %3d  %3d  %g\n",
+            &[
+                CArg::Int((ob as std::ffi::c_int + 1) as i64),
+                CArg::Int((co as std::ffi::c_int + 1) as i64),
+                CArg::Int((cont.pts.len() as std::ffi::c_int) as i64),
+                CArg::Dbl((dist) as f64),
+            ],
+        ));
     }
 }
 /// Original: `pointdist` (`imodinfo.cpp:1587`).
@@ -2288,6 +2236,7 @@ pub fn info_contour_length(cont: Option<&Icont>, objflags: u32, pixsize: f64, zs
 }
 /// Original: `contourLengthByColor` (`imodinfo.cpp:1642`).
 pub fn contour_length_by_color(imod: &Imod, obj_num: usize, verbose: i32) {
+    let mut fout = unsafe { (*(&raw const FOUT)).clone() };
     // Original: `contourLengthByColor` (`imodinfo.cpp:1642`).  Per-point store
     // properties are supplied by `istore.c`; absent such properties, source
     // default draw properties make every segment use the object color.
@@ -2295,38 +2244,35 @@ pub fn contour_length_by_color(imod: &Imod, obj_num: usize, verbose: i32) {
         return;
     };
     // `imodUnits` (`imodel.c:1360`).
-    let units = match imod.units {
-        0 => c"pixels".as_ptr(),
-        3 => c"km".as_ptr(),
-        1 => c"m".as_ptr(),
-        -2 => c"cm".as_ptr(),
-        -3 => c"mm".as_ptr(),
-        -6 => c"um".as_ptr(),
-        -9 => c"nm".as_ptr(),
-        -10 => c"A".as_ptr(),
-        -12 => c"pm".as_ptr(),
-        _ => c"unknown units".as_ptr(),
-    };
+    let units = imod_units(imod);
     let color = ((255.0_f32 * obj.red).round() as i32) << 16
         | ((255.0_f32 * obj.green).round() as i32) << 8
         | (255.0_f32 * obj.blue).round() as i32;
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"\nObject # %d:  %s\n".as_ptr(),
-            obj_num as std::ffi::c_int + 1,
-            obj.name.as_ptr(),
-        );
-        libc::fprintf(
-            FOUT,
-            c"For color %d,%d,%d:\n".as_ptr(),
-            color >> 16,
-            (color >> 8) & 255,
-            color & 255,
-        );
-        if verbose >= 0 {
-            libc::fprintf(FOUT, c"Cont #      Length  (in %s)\n".as_ptr(), units);
-        }
+    let end = obj
+        .name
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(obj.name.len());
+    let _ = fout.write_all(&c_format_bytes(
+        "\nObject # %d:  %s\n",
+        &[
+            CArg::Int((obj_num as std::ffi::c_int + 1) as i64),
+            CArg::Bytes(&obj.name[..end]),
+        ],
+    ));
+    let _ = fout.write_all(&c_format_bytes(
+        "For color %d,%d,%d:\n",
+        &[
+            CArg::Int((color >> 16) as i64),
+            CArg::Int(((color >> 8) & 255) as i64),
+            CArg::Int((color & 255) as i64),
+        ],
+    ));
+    if verbose >= 0 {
+        let _ = fout.write_all(&c_format_bytes(
+            "Cont #      Length  (in %s)\n",
+            &[CArg::Str(units)],
+        ));
     }
     let mut total = 0.0_f64;
     let mut num_total = 0_i32;
@@ -2334,34 +2280,28 @@ pub fn contour_length_by_color(imod: &Imod, obj_num: usize, verbose: i32) {
         let dist = info_contour_length(Some(cont), obj.flags, 1.0, imod.zscale as f64);
         if dist != 0.0 {
             if verbose >= 0 {
-                unsafe {
-                    libc::fprintf(
-                        FOUT,
-                        c"%6d %11.5g\n".as_ptr(),
-                        co as std::ffi::c_int + 1,
-                        dist * imod.pixsize as f64,
-                    );
-                }
+                let _ = fout.write_all(&c_format_bytes(
+                    "%6d %11.5g\n",
+                    &[
+                        CArg::Int((co as std::ffi::c_int + 1) as i64),
+                        CArg::Dbl((dist * imod.pixsize as f64) as f64),
+                    ],
+                ));
             }
             total += dist;
             num_total += 1;
         }
     }
-    unsafe {
-        libc::fprintf(
-            FOUT,
-            c"%s   %d contours, length total = %12.6g,  mean = %12.5g %s\n\n".as_ptr(),
-            if verbose >= 0 {
-                c"\n".as_ptr()
-            } else {
-                c"".as_ptr()
-            },
-            num_total,
-            imod.pixsize as f64 * total,
-            imod.pixsize as f64 * total / num_total as f64,
-            units,
-        );
-    }
+    let _ = fout.write_all(&c_format_bytes(
+        "%s   %d contours, length total = %12.6g,  mean = %12.5g %s\n\n",
+        &[
+            CArg::Str(if verbose >= 0 { "\n" } else { "" }),
+            CArg::Int(num_total as i64),
+            CArg::Dbl(imod.pixsize as f64 * total),
+            CArg::Dbl(imod.pixsize as f64 * total / num_total as f64),
+            CArg::Str(units),
+        ],
+    ));
 }
 /// Original: `info_contour_surface_area` (`imodinfo.cpp:1731`).
 pub fn info_contour_surface_area(
@@ -3065,13 +3005,13 @@ mod tests {
             "imod-rs-imodinfo-print-units-{}.txt",
             std::process::id()
         ));
-        let name = CString::new(path.to_str().unwrap()).unwrap();
+        let name = path.to_str().unwrap().to_string();
         for (units, expected) in [(-9, "nm"), (0, "pixels"), (2, "unknown units")] {
             unsafe {
-                FOUT = libc::fopen(name.as_ptr(), c"w".as_ptr());
+                FOUT = ImodFile::open(&name, "w").unwrap();
                 print_units(units);
-                libc::fclose(FOUT);
-                FOUT = std::ptr::null_mut();
+                let _ = (*(&raw mut FOUT)).flush();
+                FOUT = ImodFile::Stdout;
             }
             assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
         }

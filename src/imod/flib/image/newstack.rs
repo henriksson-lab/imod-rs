@@ -70,7 +70,6 @@ use crate::imod::libwarp::maggradfield::{add_mag_grad_field, make_mag_grad_field
 use crate::imod::libwarp::warpfiles::get_linear_transform;
 use crate::imod::libwarp::warpinterp::warp_interp;
 use crate::imod::libwarp::warputils::{find_max_grid_size, get_size_adjusted_grid};
-use std::ffi::CString;
 use std::io::BufReader;
 
 /// Source fallback PIP table (`newstack.f90:151`), retained as 74 `@`-separated
@@ -846,9 +845,6 @@ pub fn newstack() {
         let mut ny_tile_in = 0_i32;
         let mut nz_chunk_in = 0_i32;
         for (file_index, name) in input_names.iter().enumerate() {
-            let Ok(name) = CString::new(name.as_bytes()) else {
-                exit_error("Invalid input file name");
-            };
             // Source opens this preliminary pass through `openInputFile` and
             // `irdhdr`, before closing the iiunit and reopening it for the
             // streaming loop below (newstack.f90:444-465).
@@ -881,7 +877,7 @@ pub fn newstack() {
             // `iiFillMrcHeader` (`unit_fileio.c:256-265`) -- a TIFF file's
             // `ImodImageFile.header` is the libtiff `TIFF *`
             // (`iitif.c:204, 687`), so reading it as an `MrcHeader` is garbage.
-            let header = (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
+            let header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
             // `newstack.f90:449-464`: retain the first input file's volume
             // structure in the output if the output is already HDF, and adopt
             // its chunk sizes unless the user entered them.
@@ -914,22 +910,18 @@ pub fn newstack() {
                 let mut num_sections = 0;
                 let mut section_type = 0;
                 let adoc_index = adoc_open_image_metadata(
-                    name.as_ptr(),
+                    name.as_bytes(),
                     1,
-                    &raw mut montage,
-                    &raw mut num_sections,
-                    &raw mut section_type,
+                    &mut montage,
+                    &mut num_sections,
+                    &mut section_type,
                 );
                 if adoc_index >= 0 {
                     adoc_set_current(adoc_index);
                     for section in 0..header.nz {
                         let mut spacing = 0.0_f32;
-                        if adoc_get_float(
-                            ADOC_ZVALUE_NAME.as_ptr(),
-                            section,
-                            c"PixelSpacing".as_ptr(),
-                            &raw mut spacing,
-                        ) == 0
+                        if adoc_get_float(ADOC_ZVALUE_NAME, section, b"PixelSpacing", &mut spacing)
+                            == 0
                         {
                             spacing_for_section[section as usize] = Some(spacing);
                         }
@@ -1583,7 +1575,7 @@ pub fn newstack() {
             let mut fields = get_items_to_use(
                 num_fields,
                 &default_fields,
-                c"UseFields",
+                b"UseFields",
                 "FIELD",
                 false,
                 input_names.len() as i32,
@@ -1762,8 +1754,7 @@ pub fn newstack() {
                     }
                     // `unit_fileio.c:256-265`: the unit's own `MrcHeader`,
                     // which is the only one a non-MRC input has.
-                    let scan_header =
-                        (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
+                    let scan_header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
                     scan_nx = scan_header.nx;
                     scan_ny = scan_header.ny;
                     // Source `mode` after `call irdhdr(1, ...)`
@@ -2045,7 +2036,7 @@ pub fn newstack() {
             let mut lines = get_items_to_use(
                 transforms.len() as i32,
                 &default_lines,
-                c"UseTransformLines",
+                b"UseTransformLines",
                 "TRANSFORM LINE",
                 one_per_file,
                 input_names.len() as i32,
@@ -2265,10 +2256,7 @@ pub fn newstack() {
                     ialprt(true);
                 }
                 ii_allow_multi_volume(0);
-                let Ok(output_name) = CString::new(output_names[0].as_bytes()) else {
-                    exit_error("Invalid output file name");
-                };
-                imopen(2, output_name.to_str().unwrap_or_default(), "OLD");
+                imopen(2, &output_names[0], "OLD");
                 let mut mxyz2 = [0_i32; 3];
                 let mut mode_old = 0_i32;
                 irdhdr(
@@ -2782,23 +2770,27 @@ pub fn newstack() {
         let mut date = [b' '; 9];
         b3d_date(&mut date);
         title[56..65].copy_from_slice(&date);
-        let mut now = 0_i64;
-        let mut local = std::mem::zeroed::<libc::tm>();
-        libc::time(&raw mut now);
-        libc::localtime_r(&raw const now, &raw mut local);
-        let mut time = [0_i8; 9];
-        libc::strftime(
-            time.as_mut_ptr(),
-            time.len(),
-            c"%H:%M:%S".as_ptr(),
-            &raw const local,
-        );
         // Source `timeStr` (`call time(timeStr)`, `newstack.f90:1518`), read
         // again for the scratch file's extension at `newstack.f90:2287-2290`.
-        let time_str: [u8; 8] =
-            unsafe { std::slice::from_raw_parts(time.as_ptr().cast::<u8>(), 8) }
-                .try_into()
-                .unwrap();
+        // `b3dTime`'s `strftime(..., "%H:%M:%S", ...)`.  The conversion to
+        // local civil time is the same foreign boundary `b3ddate.rs`
+        // documents -- Rust's standard library has no timezone database --
+        // but the eight characters are formatted here.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as libc::time_t;
+        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+        let mut time_str = [b' '; 8];
+        if !libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
+            let local = local.assume_init();
+            let text = format!(
+                "{:02}:{:02}:{:02}",
+                local.tm_hour, local.tm_min, local.tm_sec
+            );
+            let count = text.len().min(8);
+            time_str[..count].copy_from_slice(&text.as_bytes()[..count]);
+        }
         title[67..75].copy_from_slice(&time_str);
         // Source `ifTempOpen` (`newstack.f90:1523`).
         let mut if_temp_open = 0_i32;
@@ -2841,9 +2833,6 @@ pub fn newstack() {
         let mut all_file_tilts = Vec::<f32>::new();
         let mut iz_not_piece = Vec::<i32>::new();
         for (output_index, name) in output_names.iter().enumerate() {
-            let Ok(name) = CString::new(name.as_bytes()) else {
-                exit_error("Invalid output file name");
-            };
             // `newstack.f90:1525-1527`: each input file is opened with
             // `openInputFile` and reported with `irdhdr` at the top of the
             // source's input-file loop, before the output file that its first
@@ -2889,7 +2878,7 @@ pub fn newstack() {
                     // decision and the section reads -- uses this file's
                     // header and not the first input file's.
                     // `unit_fileio.c:256-265`: the unit's own `MrcHeader`.
-                    header = (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
+                    header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
                     // `newstack.f90:1570-1571`: the binned size to read is
                     // this file's, so inputs of different sizes each read
                     // their own extent into the common output size.
@@ -3088,16 +3077,13 @@ pub fn newstack() {
                         // `ierr = 1`, or 2 for a single-image file, which is what
                         // lets `AdocOpenImageMetadata` keep a FrameSet autodoc.
                         let add_mdoc = if header.nz == 1 { 2 } else { 1 };
-                        let Ok(list_c) = CString::new(list_string.as_bytes()) else {
-                            exit_error("Invalid input file name");
-                        };
                         let (mut montage, mut num_sect, mut sect_type) = (0_i32, 0_i32, 0_i32);
                         let opened = adoc_open_image_metadata(
-                            list_c.as_ptr(),
+                            list_string.as_bytes(),
                             add_mdoc,
-                            &raw mut montage,
-                            &raw mut num_sect,
-                            &raw mut sect_type,
+                            &mut montage,
+                            &mut num_sect,
+                            &mut sect_type,
                         );
                         ind_adoc_in = if opened >= 0 { opened + 1 } else { opened };
                         if ind_adoc_in <= 0 {
@@ -3294,7 +3280,7 @@ pub fn newstack() {
                 }
                 out_file
             } else if chunked_affine {
-                if iiu_open_print(2, name.to_str().unwrap_or_default(), "NEW") != 0 {
+                if iiu_open_print(2, name, "NEW") != 0 {
                     exit_error("Opening output file");
                 }
                 //
@@ -3387,8 +3373,7 @@ pub fn newstack() {
                 }
                 // `unit_fileio.c:256-269`: the output unit's own `MrcHeader`,
                 // which for a non-MRC output is not `ImodImageFile.header`.
-                let chunk_header =
-                    iiu_mrc_header(2, c"iiuTransHeader".as_ptr(), iiu_get_exit_on_error(), 2);
+                let chunk_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
                 // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
                 // the destination `fp` around the whole-header copy, so the
                 // output header keeps its own stream and not the input's.
@@ -3588,7 +3573,7 @@ pub fn newstack() {
                 // new volume in it.
                 if if3d_volumes > 1 {
                     ii_allow_multi_volume(1);
-                    imopen(12, name.to_str().unwrap_or_default(), "OLD");
+                    imopen(12, name, "OLD");
                     if iiu_volume_open(2, 12, -1) != 0 {
                         exit_error("Opening new volume in existing file");
                     }
@@ -3609,12 +3594,8 @@ pub fn newstack() {
                         if ind_global_adoc >= 0 {
                             if adoc_set_current(ind_global_adoc - 1) != 0 {
                                 ind_global_adoc = -1;
-                            } else if adoc_set_integer(
-                                ADOC_GLOBAL_NAME.as_ptr(),
-                                0,
-                                c"image_pyramid".as_ptr(),
-                                1,
-                            ) != 0
+                            } else if adoc_set_integer(ADOC_GLOBAL_NAME, 0, b"image_pyramid", 1)
+                                != 0
                             {
                                 ind_global_adoc = -1;
                             } else if iiu_write_global_adoc(12) != 0 {
@@ -3635,7 +3616,7 @@ pub fn newstack() {
                     // `wrap_iiunit.f90:67-69`) are both printed by that tail,
                     // so calling `iiuOpen` directly loses them for every
                     // non-MRC output.
-                    if iiu_open_print(2, name.to_str().unwrap_or_default(), "NEW") != 0 {
+                    if iiu_open_print(2, name, "NEW") != 0 {
                         exit_error("Opening output file");
                     }
                     need_close2 = 0;
@@ -3706,8 +3687,7 @@ pub fn newstack() {
                 // header anywhere else leaves `u->header->ny` at zero for a
                 // TIFF output and `setupCurrentLines` (`unit_fileio.c:744-750`)
                 // then refuses every write with `ny 0`.
-                let out_header =
-                    iiu_mrc_header(2, c"iiuTransHeader".as_ptr(), iiu_get_exit_on_error(), 2);
+                let out_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
                 // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
                 // the destination `fp` around the whole-header copy.
                 let fp_save = (*out_header).fp.take();
@@ -3954,43 +3934,31 @@ pub fn newstack() {
                 {
                     set_current_adoc_or_exit(ind_adoc_in, "input");
                     if adoc_transfer_section(
-                        ADOC_GLOBAL_NAME.as_ptr(),
+                        ADOC_GLOBAL_NAME,
                         0,
                         ind_adoc_out - 1,
-                        ADOC_GLOBAL_NAME.as_ptr(),
+                        Some(ADOC_GLOBAL_NAME),
                         0,
                     ) != 0
                     {
                         exit_error("Transferring global data between autodocs");
                     }
-                    if let Err(message) = transfer_collections(
-                        ADOC_ZVALUE_NAME.to_str().unwrap_or_default(),
-                        ind_adoc_out,
-                    ) {
+                    if let Err(message) = transfer_collections(ADOC_ZVALUE_NAME, ind_adoc_out) {
                         exit_error(&message);
                     }
                 }
                 if ind_adoc_out > 0 && ind_adoc_in > 0 && frame_set {
                     set_current_adoc_or_exit(ind_adoc_out, "output");
-                    if adoc_set_key_value(
-                        ADOC_GLOBAL_NAME.as_ptr(),
-                        0,
-                        c"ImageFile".as_ptr(),
-                        name.as_ptr(),
-                    ) != 0
+                    if adoc_set_key_value(ADOC_GLOBAL_NAME, 0, b"ImageFile", Some(name.as_bytes()))
+                        != 0
                         || adoc_set_two_integers(
-                            ADOC_GLOBAL_NAME.as_ptr(),
+                            ADOC_GLOBAL_NAME,
                             0,
-                            c"ImageSize".as_ptr(),
+                            b"ImageSize",
                             output_nx,
                             output_ny,
                         ) != 0
-                        || adoc_set_integer(
-                            ADOC_GLOBAL_NAME.as_ptr(),
-                            0,
-                            c"DataMode".as_ptr(),
-                            output_mode,
-                        ) != 0
+                        || adoc_set_integer(ADOC_GLOBAL_NAME, 0, b"DataMode", output_mode) != 0
                     {
                         exit_error("Setting global section of output autodoc");
                     }
@@ -4060,7 +4028,7 @@ pub fn newstack() {
                     if !active_input_file.is_null() {
                         active_input_index = input_index;
                         // `unit_fileio.c:256-265`: the unit's own `MrcHeader`.
-                        header = (*iiu_mrc_header(1, c"iiuRetBasicHead".as_ptr(), 1, 0)).clone();
+                        header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
                         // `newstack.f90:1570-1571`: the binned size to read is
                         // this file's, so inputs of different sizes each read
                         // their own extent into the common output size.
@@ -4259,16 +4227,13 @@ pub fn newstack() {
                             // `ierr = 1`, or 2 for a single-image file, which is what
                             // lets `AdocOpenImageMetadata` keep a FrameSet autodoc.
                             let add_mdoc = if header.nz == 1 { 2 } else { 1 };
-                            let Ok(list_c) = CString::new(list_string.as_bytes()) else {
-                                exit_error("Invalid input file name");
-                            };
                             let (mut montage, mut num_sect, mut sect_type) = (0_i32, 0_i32, 0_i32);
                             let opened = adoc_open_image_metadata(
-                                list_c.as_ptr(),
+                                list_string.as_bytes(),
                                 add_mdoc,
-                                &raw mut montage,
-                                &raw mut num_sect,
-                                &raw mut sect_type,
+                                &mut montage,
+                                &mut num_sect,
+                                &mut sect_type,
                             );
                             ind_adoc_in = if opened >= 0 { opened + 1 } else { opened };
                             if ind_adoc_in <= 0 {
@@ -7432,9 +7397,6 @@ pub fn newstack() {
                 // which is `out_section` here.
                 //
                 let list_string = format!("{out_section}");
-                let Ok(list_c) = CString::new(list_string.as_bytes()) else {
-                    exit_error("Invalid autodoc section name");
-                };
                 if ind_adoc_in > 0 && ind_adoc_out > 0 {
                     set_current_adoc_or_exit(ind_adoc_in, "input");
                     if frame_set {
@@ -7443,34 +7405,25 @@ pub fn newstack() {
                         // ZValue.
                         if out_section == 0 {
                             let mut value = 0.0_f32;
-                            if adoc_get_float(
-                                c"FrameSet".as_ptr(),
-                                0,
-                                c"RotationAngle".as_ptr(),
-                                &raw mut value,
-                            ) == 0
-                            {
+                            if adoc_get_float(b"FrameSet", 0, b"RotationAngle", &mut value) == 0 {
                                 value -= 90.;
                                 if value < -180. {
                                     value += 360.;
                                 }
                                 let title_text = format!("Tilt axis angle = {value:8.1}");
-                                let Ok(title_c) = CString::new(title_text.as_bytes()) else {
-                                    exit_error("Invalid autodoc title");
-                                };
                                 set_current_adoc_or_exit(ind_adoc_out, "output");
-                                if adoc_add_section(c"T".as_ptr(), title_c.as_ptr()) <= 0 {
+                                if adoc_add_section(b"T", title_text.as_bytes()) <= 0 {
                                     exit_error("Adding title section to autodoc");
                                 }
                                 set_current_adoc_or_exit(ind_adoc_in, "input");
                             }
                         }
                         if adoc_transfer_to_new_type(
-                            c"FrameSet".as_ptr(),
+                            b"FrameSet",
                             0,
                             ind_adoc_out - 1,
-                            ADOC_ZVALUE_NAME.as_ptr(),
-                            list_c.as_ptr(),
+                            ADOC_ZVALUE_NAME,
+                            Some(list_string.as_bytes()),
                             1,
                         ) != 0
                         {
@@ -7478,14 +7431,13 @@ pub fn newstack() {
                         }
                     } else {
                         // Otherwise just transfer the section.
-                        let ind_sect_in =
-                            adoc_lookup_by_name_value(ADOC_ZVALUE_NAME.as_ptr(), in_section);
+                        let ind_sect_in = adoc_lookup_by_name_value(ADOC_ZVALUE_NAME, in_section);
                         if ind_sect_in >= 0
                             && adoc_transfer_section(
-                                ADOC_ZVALUE_NAME.as_ptr(),
+                                ADOC_ZVALUE_NAME,
                                 ind_sect_in,
                                 ind_adoc_out - 1,
-                                list_c.as_ptr(),
+                                Some(list_string.as_bytes()),
                                 1,
                             ) != 0
                         {
@@ -7502,15 +7454,14 @@ pub fn newstack() {
                 if ind_adoc_out > 0 && save_tilts {
                     set_current_adoc_or_exit(ind_adoc_out, "output");
                     let mut ind_sect_in =
-                        adoc_lookup_by_name_value(ADOC_ZVALUE_NAME.as_ptr(), out_section as i32);
+                        adoc_lookup_by_name_value(ADOC_ZVALUE_NAME, out_section as i32);
                     if ind_sect_in < 0 {
-                        ind_sect_in =
-                            adoc_find_insert_index(ADOC_ZVALUE_NAME.as_ptr(), out_section as i32);
+                        ind_sect_in = adoc_find_insert_index(ADOC_ZVALUE_NAME, out_section as i32);
                         if ind_sect_in >= 0
                             && adoc_insert_section(
-                                ADOC_ZVALUE_NAME.as_ptr(),
+                                ADOC_ZVALUE_NAME,
                                 ind_sect_in,
-                                list_c.as_ptr(),
+                                list_string.as_bytes(),
                             ) < 0
                         {
                             ind_sect_in = -2;
@@ -7520,9 +7471,9 @@ pub fn newstack() {
                         }
                     }
                     if adoc_set_float(
-                        ADOC_ZVALUE_NAME.as_ptr(),
+                        ADOC_ZVALUE_NAME,
                         ind_sect_in,
-                        c"TiltAngle".as_ptr(),
+                        b"TiltAngle",
                         extra_tilts[route_index - 1],
                     ) != 0
                     {
@@ -7538,10 +7489,7 @@ pub fn newstack() {
             if list_replace.is_empty() && out_doc_changed && (*out_file).file != 5 {
                 set_current_adoc_or_exit(ind_adoc_out, "output");
                 let mdoc_name = format!("{}.mdoc", output_names[output_index]);
-                let Ok(mdoc_c) = CString::new(mdoc_name.as_bytes()) else {
-                    exit_error("Invalid output file name");
-                };
-                if adoc_write(mdoc_c.as_ptr()) != 0 {
+                if adoc_write(mdoc_name.as_bytes()) != 0 {
                     exit_error("Writing mdoc file for output file");
                 }
                 adoc_clear(ind_adoc_out - 1);
@@ -7579,8 +7527,7 @@ pub fn newstack() {
                 }
                 iiu_close(2);
             } else {
-                let out_header =
-                    iiu_mrc_header(2, c"iiuWriteHeader".as_ptr(), iiu_get_exit_on_error(), 2);
+                let out_header = iiu_mrc_header(2, "iiuWriteHeader", iiu_get_exit_on_error(), 2);
                 // `newstack.f90:2753`: `iiuWriteHeader(2, title, 1, ...)`.
                 // `labFlag == 1` puts the title in the next label slot, capped
                 // at `MRC_NLABELS` (`unit_header.c:290-296`).
@@ -7785,7 +7732,7 @@ pub fn chunk_sums_to_avgsd(
 pub fn get_items_to_use(
     nxforms: i32,
     in_list: &[i32],
-    option: &std::ffi::CStr,
+    option: &[u8],
     error: &str,
     one_per_file: bool,
     num_in_files: i32,
@@ -7807,13 +7754,13 @@ pub fn get_items_to_use(
     // first, which then failed the caller's section-count check.
     //
     let mut num_xf_lines = 0_i32;
-    unsafe { pip_number_of_entries(option.to_bytes(), &mut num_xf_lines) };
+    unsafe { pip_number_of_entries(option, &mut num_xf_lines) };
     if num_xf_lines > 0 {
         let mut parsed = Vec::<i32>::new();
         for _ in 0..num_xf_lines {
             let mut string_value: Vec<u8> = Vec::new();
             let list = unsafe {
-                if pip_get_string(option.to_bytes(), &mut string_value) != 0 {
+                if pip_get_string(option, &mut string_value) != 0 {
                     continue;
                 }
                 let list = String::from_utf8_lossy(&string_value).into_owned();
@@ -8748,41 +8695,32 @@ pub fn get_offset_entries(
 /// the loop indices are the source's 1-based ones; the Fortran wrappers
 /// (`adoc_fwrap.c:481, 397, 493`) subtract one before the C entry points, so
 /// this does the same at each call.
-pub unsafe fn transfer_collections(zvalue_name: &str, ind_adoc_out: i32) -> Result<(), String> {
+pub unsafe fn transfer_collections(zvalue_name: &[u8], ind_adoc_out: i32) -> Result<(), String> {
     let count = adoc_get_num_collections();
     for collection in 1..=count {
-        let mut name_ptr = core::ptr::null_mut();
-        if adoc_get_collection_name(collection - 1, &raw mut name_ptr) != 0 || name_ptr.is_null() {
+        let mut name = Vec::<u8>::new();
+        if adoc_get_collection_name(collection - 1, &mut name) != 0 {
             return Err("Getting collection name for transferring other autodoc sections".into());
         }
-        let name = std::ffi::CStr::from_ptr(name_ptr)
-            .to_string_lossy()
-            .into_owned();
-        libc::free(name_ptr.cast());
-        if name != zvalue_name && name != "T" {
-            let name_c = CString::new(name.as_bytes()).map_err(|_| "Invalid collection name")?;
-            let count = adoc_get_number_of_sections(name_c.as_ptr());
+        if name != zvalue_name && name != b"T" {
+            let count = adoc_get_number_of_sections(&name);
             for section in 1..=count {
-                let mut section_ptr = core::ptr::null_mut();
-                if adoc_get_section_name(name_c.as_ptr(), section - 1, &raw mut section_ptr) != 0
-                    || section_ptr.is_null()
-                {
+                let mut section_name = Vec::<u8>::new();
+                if adoc_get_section_name(&name, section - 1, &mut section_name) != 0 {
                     return Err(
                         "Getting section name for transferring other autodoc sections".into(),
                     );
                 }
                 if adoc_transfer_section(
-                    name_c.as_ptr(),
+                    &name,
                     section - 1,
                     ind_adoc_out - 1,
-                    section_ptr,
+                    Some(&section_name),
                     0,
                 ) != 0
                 {
-                    libc::free(section_ptr.cast());
                     return Err("transferring other autodoc section".into());
                 }
-                libc::free(section_ptr.cast());
             }
         }
     }
@@ -8861,7 +8799,7 @@ mod tests {
             get_items_to_use(
                 5,
                 &[0, 2],
-                c"UseTransformLines",
+                b"UseTransformLines",
                 "TRANSFORM LINE",
                 false,
                 0,

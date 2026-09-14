@@ -21,7 +21,7 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_SHORT, MRC_MODE_USHORT, get_byte_map, get_short_map, mrc_get_complex_scale,
     mrc_getdcsize, mrc_mirror_source, mrc_swap_floats, mrc_swap_shorts,
 };
-use core::ffi::{CStr, c_char};
+use core::ffi::CStr;
 
 const MRSA_BYTE: i32 = 1;
 const MRSA_FLOAT: i32 = 2;
@@ -212,7 +212,7 @@ pub unsafe fn mrc_read_section_any(
             &mut d,
             &mut free_map,
             &mut y_end,
-            c"mrcReadSectionAny".as_ptr(),
+            "mrcReadSectionAny",
         )
     };
     if init != 0 {
@@ -516,7 +516,7 @@ pub unsafe fn ii_init_read_section_any(
     data: *mut LineProcData,
     free_map: *mut i32,
     y_end: *mut i32,
-    caller: *const c_char,
+    caller: &str,
 ) -> i32 {
     let h = unsafe { &*hdata };
     let l = unsafe { &*li };
@@ -566,7 +566,6 @@ pub unsafe fn ii_init_read_section_any(
             MRC_MODE_BYTE | MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT | MRC_MODE_RGB
         )
     {
-        let caller = unsafe { CStr::from_ptr(caller) }.to_string_lossy();
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -577,7 +576,6 @@ pub unsafe fn ii_init_read_section_any(
         return 1;
     }
     if (d.byte != 0 && l.outmax > 255) || (d.to_short != 0 && l.outmax < 256) {
-        let caller = unsafe { CStr::from_ptr(caller) }.to_string_lossy();
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -636,7 +634,6 @@ pub unsafe fn ii_init_read_section_any(
         || d.y_start < 0
         || unsafe { *y_end } >= if d.read_y != 0 { h.nz } else { h.ny }
     {
-        let caller = unsafe { CStr::from_ptr(caller) }.to_string_lossy();
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -708,10 +705,7 @@ pub unsafe fn ii_init_read_section_any(
             if d.convert != 0 {
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
-                    format_args!(
-                        "ERROR: {} - unsupported data type.\n",
-                        unsafe { CStr::from_ptr(caller) }.to_string_lossy()
-                    ),
+                    format_args!("ERROR: {} - unsupported data type.\n", caller),
                 );
                 return 1;
             }
@@ -1474,7 +1468,7 @@ mod tests {
                     &mut data,
                     &mut free_map,
                     &mut y_end,
-                    c"test".as_ptr(),
+                    "test",
                 ),
                 0
             );
@@ -1522,7 +1516,7 @@ mod tests {
                     &mut data,
                     &mut free_map,
                     &mut y_end,
-                    c"mrcReadSectionAny".as_ptr(),
+                    "mrcReadSectionAny",
                 ),
                 1
             );
@@ -1566,7 +1560,7 @@ mod tests {
                     &mut data,
                     &mut free_map,
                     &mut y_end,
-                    c"test".as_ptr(),
+                    "test",
                 ),
                 0
             );
@@ -1615,7 +1609,7 @@ mod tests {
                     &mut data,
                     &mut free_map,
                     &mut y_end,
-                    c"test".as_ptr(),
+                    "test",
                 ),
                 0
             );
@@ -1640,10 +1634,8 @@ mod tests {
                 "imod-rs-mrcsec-inverted-complex-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(
                 mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_COMPLEX_FLOAT),
@@ -1668,9 +1660,7 @@ mod tests {
             );
             drop(file);
 
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
-                    .unwrap();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut header), 0);
             header.fp = Some(file.clone());
@@ -1686,10 +1676,7 @@ mod tests {
             );
             drop(file);
             assert_eq!(output, [30, 34, 0, 23]);
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -1700,10 +1687,8 @@ mod tests {
                 "imod-rs-mrcsec-inverted-mirror-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(
                 mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_COMPLEX_FLOAT),
@@ -1728,9 +1713,7 @@ mod tests {
             );
             drop(file);
 
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
-                    .unwrap();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut header), 0);
             header.fp = Some(file.clone());
@@ -1751,10 +1734,7 @@ mod tests {
             );
             b3d_set_store_error(0);
             drop(file);
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -1765,10 +1745,8 @@ mod tests {
                 "imod-rs-mrcsec-inverted-write-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb+")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb+").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 4, 3, 1, MRC_MODE_FLOAT), 0);
             header.fp = Some(file.clone());
@@ -1823,10 +1801,7 @@ mod tests {
                     20.0, 21.0, 22.0, 23.0, 10.0, 11.0, 12.0, 13.0, 0.0, 1.0, 2.0, 3.0
                 ]
             );
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -1841,10 +1816,8 @@ mod tests {
                 "imod-rs-mrcsec-inverted-chunk-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb+")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb+").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
             header.fp = Some(file.clone());
@@ -1902,10 +1875,7 @@ mod tests {
                     (ny - 1 - line) as f32
                 );
             }
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -1921,10 +1891,8 @@ mod tests {
                 "imod-rs-mrcsec-padded-chunk-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb+")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb+").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
             header.fp = Some(file.clone());
@@ -1980,10 +1948,7 @@ mod tests {
                 );
                 assert_eq!(stored[(line * nx + nx - 1) as usize], line as f32);
             }
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -1999,10 +1964,8 @@ mod tests {
                 "imod-rs-mrcsec-inverted-raw-read-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
             header.fp = Some(file.clone());
@@ -2029,9 +1992,7 @@ mod tests {
             );
             drop(file);
 
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
-                    .unwrap();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut header), 0);
             header.fp = Some(file.clone());
@@ -2054,10 +2015,7 @@ mod tests {
                     20.0, 21.0, 22.0, 23.0, 10.0, 11.0, 12.0, 13.0, 0.0, 1.0, 2.0, 3.0
                 ]
             );
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -2074,10 +2032,8 @@ mod tests {
                 "imod-rs-mrcsec-float-to-byte-{}.mrc",
                 std::process::id()
             ));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, nx, ny, 1, MRC_MODE_FLOAT), 0);
             header.fp = Some(file.clone());
@@ -2099,9 +2055,7 @@ mod tests {
             );
             drop(file);
 
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
-                    .unwrap();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut header), 0);
             header.fp = Some(file.clone());
@@ -2122,10 +2076,7 @@ mod tests {
             for index in 0..(nx * ny) as usize {
                 assert_eq!(arena[guard + index], index as u8, "pixel {index}");
             }
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 
@@ -2139,10 +2090,8 @@ mod tests {
             let nz = 3_i32;
             let path = std::env::temp_dir()
                 .join(format!("imod-rs-mrcsec-read-y-{}.mrc", std::process::id()));
-            let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
-                    .unwrap();
+            let path = path.to_str().unwrap().to_string();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, nx, ny, nz, MRC_MODE_FLOAT), 0);
             header.fp = Some(file.clone());
@@ -2171,9 +2120,7 @@ mod tests {
             );
             drop(file);
 
-            let mut file =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb")
-                    .unwrap();
+            let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut header), 0);
             header.fp = Some(file.clone());
@@ -2191,10 +2138,7 @@ mod tests {
                 got,
                 [10.0, 11.0, 12.0, 110.0, 111.0, 112.0, 210.0, 211.0, 212.0]
             );
-            std::fs::remove_file(std::path::Path::new(
-                std::ffi::CStr::from_ptr(path.as_ptr()).to_str().unwrap(),
-            ))
-            .unwrap();
+            std::fs::remove_file(std::path::Path::new(path.as_str())).unwrap();
         }
     }
 }

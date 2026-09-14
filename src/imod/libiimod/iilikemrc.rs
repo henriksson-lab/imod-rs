@@ -1,294 +1,135 @@
-//! Translation of `IMOD/libiimod/iilikemrc.c`.
+//! Translation of `IMOD/libiimod/iilikemrc.c` — check for recognizable formats
+//! that can be read like MRC.
 //!
-//! Each C definition is retained as one systematic snake-case Rust function.
-#![allow(
-    non_snake_case,
-    non_camel_case_types,
-    non_upper_case_globals,
-    dead_code,
-    unused_variables
-)]
+//! Each C definition is retained as one systematic snake-case Rust function,
+//! with the original C identifier named in its doc comment.
+#![allow(dead_code)]
+
 use crate::imod::libcfshr::b3dutil::{
-    ImodFile, b3d_error, b3d_fread as b3dFread, b3d_fseek as b3dFseek, b3d_rewind as b3dRewind,
-    wall_time as wallTime,
-};
-use crate::imod::libcfshr::ilist::{
-    Ilist, ilist_delete as ilistDelete, ilist_insert as ilistInsert, ilist_item as ilistItem,
-    ilist_new as ilistNew, ilist_size as ilistSize,
+    CArg, ImodFile, SEEK_END, SEEK_SET, b3d_error, b3d_fread, b3d_fseek, b3d_i_min, b3d_rewind,
+    c_format_bytes, wall_time,
 };
 pub use crate::imod::libiimod::iimage::ImodImageFile;
-use crate::imod::libiimod::iimage::{IiRawCheckFunction, RawImageInfo, ii_sync_from_mrc_header};
+use crate::imod::libiimod::iimage::{
+    IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NO_SUPPORT, IIERR_NOT_FORMAT, IIFILE_RAW,
+    IiRawCheckFunction, RawImageInfo, ii_sync_from_mrc_header,
+};
 use crate::imod::libiimod::iimrc::{ii_mrc_mode_to_format_type, ii_mrc_set_io_funcs};
 use crate::imod::libiimod::mrcfiles::{
-    MrcHeader, mrc_head_new, mrc_set_scale, mrc_swap_longs, mrc_swap_shorts,
+    MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT, MRC_MODE_RGB, MRC_MODE_SHORT,
+    MRC_MODE_USHORT, MrcHeader, mrc_head_new, mrc_set_scale, mrc_swap_longs, mrc_swap_shorts,
 };
-use core::ffi::CStr;
-#[repr(C)]
-pub struct _IO_wide_data {
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct _IO_codecvt {
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct _IO_marker {
-    _private: [u8; 0],
-}
-unsafe extern "C" {
-    static mut stdout: *mut FILE;
-    fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn getenv(__name: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    fn strcmp(
-        __s1: *const ::core::ffi::c_char,
-        __s2: *const ::core::ffi::c_char,
-    ) -> ::core::ffi::c_int;
-    fn strncmp(
-        __s1: *const ::core::ffi::c_char,
-        __s2: *const ::core::ffi::c_char,
-        __n: size_t,
-    ) -> ::core::ffi::c_int;
-    fn strdup(__s: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn strstr(
-        __haystack: *const ::core::ffi::c_char,
-        __needle: *const ::core::ffi::c_char,
-    ) -> *mut ::core::ffi::c_char;
-    fn strlen(__s: *const ::core::ffi::c_char) -> size_t;
-    fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> ::core::ffi::c_int;
-}
-pub type size_t = usize;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __uint64_t = u64;
-pub type __dev_t = ::core::ffi::c_ulong;
-pub type __uid_t = ::core::ffi::c_uint;
-pub type __gid_t = ::core::ffi::c_uint;
-pub type __ino_t = ::core::ffi::c_ulong;
-pub type __mode_t = ::core::ffi::c_uint;
-pub type __nlink_t = ::core::ffi::c_ulong;
-pub type __off_t = ::core::ffi::c_long;
-pub type __off64_t = ::core::ffi::c_long;
-pub type __time_t = ::core::ffi::c_long;
-pub type __blksize_t = ::core::ffi::c_long;
-pub type __blkcnt_t = ::core::ffi::c_long;
-pub type __syscall_slong_t = ::core::ffi::c_long;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
-    pub _IO_read_ptr: *mut ::core::ffi::c_char,
-    pub _IO_read_end: *mut ::core::ffi::c_char,
-    pub _IO_read_base: *mut ::core::ffi::c_char,
-    pub _IO_write_base: *mut ::core::ffi::c_char,
-    pub _IO_write_ptr: *mut ::core::ffi::c_char,
-    pub _IO_write_end: *mut ::core::ffi::c_char,
-    pub _IO_buf_base: *mut ::core::ffi::c_char,
-    pub _IO_buf_end: *mut ::core::ffi::c_char,
-    pub _IO_save_base: *mut ::core::ffi::c_char,
-    pub _IO_backup_base: *mut ::core::ffi::c_char,
-    pub _IO_save_end: *mut ::core::ffi::c_char,
-    pub _markers: *mut _IO_marker,
-    pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    pub _flags2: ::core::ffi::c_int,
-    pub _old_offset: __off_t,
-    pub _cur_column: ::core::ffi::c_ushort,
-    pub _vtable_offset: ::core::ffi::c_schar,
-    pub _shortbuf: [::core::ffi::c_char; 1],
-    pub _lock: *mut ::core::ffi::c_void,
-    pub _offset: __off64_t,
-    pub _codecvt: *mut _IO_codecvt,
-    pub _wide_data: *mut _IO_wide_data,
-    pub _freeres_list: *mut _IO_FILE,
-    pub _freeres_buf: *mut ::core::ffi::c_void,
-    pub __pad5: size_t,
-    pub _mode: ::core::ffi::c_int,
-    pub _unused2: [::core::ffi::c_char; 20],
-}
-pub type _IO_lock_t = ();
-pub type FILE = libc::FILE;
-pub type off_t = __off_t;
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct timespec {
-    pub tv_sec: __time_t,
-    pub tv_nsec: __syscall_slong_t,
-}
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct stat {
-    pub st_dev: __dev_t,
-    pub st_ino: __ino_t,
-    pub st_nlink: __nlink_t,
-    pub st_mode: __mode_t,
-    pub st_uid: __uid_t,
-    pub st_gid: __gid_t,
-    pub __pad0: ::core::ffi::c_int,
-    pub st_rdev: __dev_t,
-    pub st_size: __off_t,
-    pub st_blksize: __blksize_t,
-    pub st_blocks: __blkcnt_t,
-    pub st_atim: timespec,
-    pub st_mtim: timespec,
-    pub st_ctim: timespec,
-    pub __glibc_reserved: [__syscall_slong_t; 3],
-}
-pub type b3dByte = ::core::ffi::c_char;
-pub type b3dUByte = ::core::ffi::c_uchar;
-pub type b3dInt16 = ::core::ffi::c_short;
-pub type b3dUInt16 = ::core::ffi::c_ushort;
-pub type b3dInt32 = ::core::ffi::c_int;
-pub type b3dFloat = ::core::ffi::c_float;
-#[repr(C)]
+use std::cell::{Cell, RefCell};
+use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
+
+/// C `MAX_EM_MACHINES` (`iilikemrc.c:23`).
+pub const MAX_EM_MACHINES: i32 = 20;
+/// C `MAX_EM_TYPES` (`iilikemrc.c:24`).
+pub const MAX_EM_TYPES: i32 = 20;
+/// C `MAX_EM_SIZE` (`iilikemrc.c:25`).
+pub const MAX_EM_SIZE: f64 = 1.6e10;
+
+/// C `IIERR_MEMORY_ERR` (`iimage.h`).
+pub const IIERR_MEMORY_ERR: i32 = 3;
+
+/// C `RAW_MODE_SBYTE` (`iimage.h`).
+pub const RAW_MODE_SBYTE: i32 = 0;
+/// C `RAW_MODE_BYTE` (`iimage.h`).
+pub const RAW_MODE_BYTE: i32 = 1;
+/// C `RAW_MODE_SHORT` (`iimage.h`).
+pub const RAW_MODE_SHORT: i32 = 2;
+/// C `RAW_MODE_USHORT` (`iimage.h`).
+pub const RAW_MODE_USHORT: i32 = 3;
+/// C `RAW_MODE_FLOAT` (`iimage.h`).
+pub const RAW_MODE_FLOAT: i32 = 4;
+
+/// C `CheckEntry` (`iilikemrc.c:39-42`): `IIRawCheckFunction func; char *name;`.
+///
+/// `name` is the source's `strdup(name)`, owned by the entry and released when
+/// the list is dropped, which is what `iiDeleteRawCheckList`'s `free` does.
+#[derive(Clone)]
 struct CheckEntry {
     func: IiRawCheckFunction,
-    name: *mut ::core::ffi::c_char,
+    name: Vec<u8>,
 }
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const SEEK_SET: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const SEEK_END: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const MRC_MODE_BYTE: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const MRC_MODE_SHORT: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const MRC_MODE_FLOAT: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const MRC_MODE_COMPLEX_FLOAT: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const MRC_MODE_USHORT: ::core::ffi::c_int = 6 as ::core::ffi::c_int;
-pub const MRC_MODE_RGB: ::core::ffi::c_int = 16 as ::core::ffi::c_int;
-pub const IIFILE_RAW: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const IIERR_BAD_CALL: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-pub const IIERR_NOT_FORMAT: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const IIERR_IO_ERROR: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const IIERR_MEMORY_ERR: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-pub const IIERR_NO_SUPPORT: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const RAW_MODE_SBYTE: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const RAW_MODE_BYTE: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const RAW_MODE_SHORT: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const RAW_MODE_USHORT: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-pub const RAW_MODE_FLOAT: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const MAX_EM_MACHINES: ::core::ffi::c_int = 20 as ::core::ffi::c_int;
-pub const MAX_EM_TYPES: ::core::ffi::c_int = 20 as ::core::ffi::c_int;
-pub const MAX_EM_SIZE: ::core::ffi::c_double = 1.6e10f64;
-static mut checkList: *mut Ilist = ::core::ptr::null::<Ilist>() as *mut Ilist;
-unsafe extern "C" fn init_check_list() -> ::core::ffi::c_int {
-    if !checkList.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    checkList = ilistNew(
-        ::core::mem::size_of::<CheckEntry>() as ::core::ffi::c_int,
-        6 as ::core::ffi::c_int,
-    )
-    .map_or(::core::ptr::null_mut(), Box::into_raw);
-    if checkList.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    ii_add_raw_check_function(
-        Some(
-            check_em
-                as unsafe fn(
-                    &mut ImodFile,
-                    *mut ::core::ffi::c_char,
-                    *mut RawImageInfo,
-                ) -> ::core::ffi::c_int,
-        ),
-        b"EM\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-    ii_add_raw_check_function(
-        Some(
-            check_dm3
-                as unsafe fn(
-                    &mut ImodFile,
-                    *mut ::core::ffi::c_char,
-                    *mut RawImageInfo,
-                ) -> ::core::ffi::c_int,
-        ),
-        b"DM3\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-    ii_add_raw_check_function(
-        Some(
-            check_fei_raw
-                as unsafe fn(
-                    &mut ImodFile,
-                    *mut ::core::ffi::c_char,
-                    *mut RawImageInfo,
-                ) -> ::core::ffi::c_int,
-        ),
-        b"FEIraw\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-    ii_add_raw_check_function(
-        Some(
-            check_winkler
-                as unsafe fn(
-                    &mut ImodFile,
-                    *mut ::core::ffi::c_char,
-                    *mut RawImageInfo,
-                ) -> ::core::ffi::c_int,
-        ),
-        b"Winkler\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-    ii_add_raw_check_function(
-        Some(
-            check_pif
-                as unsafe fn(
-                    &mut ImodFile,
-                    *mut ::core::ffi::c_char,
-                    *mut RawImageInfo,
-                ) -> ::core::ffi::c_int,
-        ),
-        b"PIF\0" as *const u8 as *const ::core::ffi::c_char,
-    );
-    return 0 as ::core::ffi::c_int;
+
+thread_local! {
+    /// C `static Ilist *checkList` (`iilikemrc.c:36`).
+    ///
+    /// A `Vec<CheckEntry>` rather than an [`crate::imod::libcfshr::ilist::Ilist`]:
+    /// `Ilist` addresses its elements as raw bytes, and a `CheckEntry` now owns
+    /// its `name`, so a bitwise copy into that storage would duplicate the
+    /// owner (NATIVE.md §4d.3).  The `Option` is the source's NULL-versus-
+    /// allocated distinction, which `initCheckList` and `iiDeleteRawCheckList`
+    /// both test; nothing outside this file can observe the list's growth
+    /// quantum, which is the only other thing `ilistNew(sizeof(CheckEntry), 6)`
+    /// decided.
+    static CHECK_LIST: RefCell<Option<Vec<CheckEntry>>> = const { RefCell::new(None) };
 }
-pub unsafe extern "C" fn ii_add_raw_check_function(
-    mut func: IiRawCheckFunction,
-    mut name: *const ::core::ffi::c_char,
-) {
-    let mut item: CheckEntry = CheckEntry {
+
+/// Original `initCheckList` (`iilikemrc.c:46`).
+///
+/// Initialize check list: if it does not exist, allocate it and place resident
+/// functions on it.
+fn init_check_list() -> i32 {
+    if CHECK_LIST.with_borrow(|list| list.is_some()) {
+        return 0;
+    }
+    // `ilistNew(sizeof(CheckEntry), 6)`; a `Vec` cannot fail to be created, so
+    // the source's `if (!checkList) return 1;` has no reachable arm here.
+    CHECK_LIST.with_borrow_mut(|list| *list = Some(Vec::new()));
+    ii_add_raw_check_function(Some(check_em), b"EM");
+    ii_add_raw_check_function(Some(check_dm3), b"DM3");
+    ii_add_raw_check_function(Some(check_fei_raw), b"FEIraw");
+    ii_add_raw_check_function(Some(check_winkler), b"Winkler");
+    ii_add_raw_check_function(Some(check_pif), b"PIF");
+    0
+}
+
+/// Original `iiAddRawCheckFunction` (`iilikemrc.c:66`).
+///
+/// Add the given raw-type checking function `func` to the front of the checking
+/// list; `name` is a name for the format.
+pub fn ii_add_raw_check_function(func: IiRawCheckFunction, name: &[u8]) {
+    let mut item = CheckEntry {
         func: None,
-        name: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        name: Vec::new(),
     };
     item.func = func;
-    item.name = strdup(name);
-    if init_check_list() != 0 || item.name.is_null() {
+    item.name = name.to_vec();
+    if init_check_list() != 0 {
         return;
     }
-    ilistInsert(
-        &mut *checkList,
-        ::core::slice::from_raw_parts(
-            (&raw const item).cast::<u8>(),
-            ::core::mem::size_of::<CheckEntry>(),
-        ),
-        0 as ::core::ffi::c_int,
-    );
-}
-pub unsafe extern "C" fn ii_delete_raw_check_list() {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut item: *mut CheckEntry = ::core::ptr::null_mut::<CheckEntry>();
-    if checkList.is_null() {
-        return;
-    }
-    i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(checkList.as_ref()) {
-        item = ilistItem(checkList.as_mut(), i).map_or(::core::ptr::null_mut(), |entry| {
-            entry.as_mut_ptr().cast::<CheckEntry>()
-        });
-        if !(*item).name.is_null() {
-            free((*item).name as *mut ::core::ffi::c_void);
+    CHECK_LIST.with_borrow_mut(|list| {
+        if let Some(list) = list.as_mut() {
+            list.insert(0, item);
         }
-        i += 1;
-    }
-    ilistDelete(Some(Box::from_raw(checkList)));
-    checkList = ::core::ptr::null_mut::<Ilist>();
+    });
 }
-pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::core::ffi::c_int {
-    let mut i: ::core::ffi::c_int = 0;
-    let mut info: RawImageInfo = RawImageInfo {
+
+/// Original `iiDeleteRawCheckList` (`iilikemrc.c:79`).
+///
+/// Frees the checking list and all its data to avoid memory leaks.
+pub fn ii_delete_raw_check_list() {
+    CHECK_LIST.with_borrow_mut(|list| {
+        if list.is_none() {
+            return;
+        }
+        // The source's loop over the items `free`ing each `name`, then
+        // `ilistDelete`: dropping the vector releases both.
+        *list = None;
+    });
+}
+
+/// Original `iiLikeMRCCheck` (`iilikemrc.c:100`).
+///
+/// Checks the image file in `inFile` for one known MRC-like (raw-type) format
+/// after another.  Returns IIERR codes for errors.  `b3dError` is called with a
+/// message for all errors that occur during checking, except for
+/// `IIERR_NOT_FORMAT`.
+pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
+    let mut info = RawImageInfo {
         type_: 0,
         nx: 0,
         ny: 0,
@@ -304,41 +145,49 @@ pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::
         pixel: 0.,
         z_pixel: 0.,
     };
-    let mut err: ::core::ffi::c_int = 0;
-    let mut item: *mut CheckEntry = ::core::ptr::null_mut::<CheckEntry>();
-    info.swap_bytes = 0 as ::core::ffi::c_int;
-    info.section_skip = 0 as ::core::ffi::c_int;
-    info.y_inverted = 0 as ::core::ffi::c_int;
-    info.pixel = 0.0f32;
-    info.z_pixel = 0.0f32;
-    if inFile.is_null() {
+
+    info.swap_bytes = 0;
+    info.section_skip = 0;
+    info.y_inverted = 0;
+    info.pixel = 0.;
+    info.z_pixel = 0.;
+
+    if in_file.is_null() {
         return IIERR_BAD_CALL;
     }
-    let Some(mut fp) = (*inFile).fp.clone() else {
+    // `fp = inFile->fp` copies the handle by value, as the C does.
+    let Some(mut fp) = (unsafe { &*in_file }).fp.clone() else {
         return IIERR_BAD_CALL;
     };
     if init_check_list() != 0 {
         return IIERR_BAD_CALL;
     }
-    i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(checkList.as_ref()) {
-        item = ilistItem(checkList.as_mut(), i).map_or(::core::ptr::null_mut(), |entry| {
-            entry.as_mut_ptr().cast::<CheckEntry>()
-        });
-        err = Some((*item).func.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            &mut fp, (*inFile).filename, &raw mut info
-        );
+
+    let mut i: i32 = 0;
+    while i < CHECK_LIST.with_borrow(|list| list.as_ref().map_or(0, |list| list.len() as i32)) {
+        // `ilistItem(checkList, i)`; the entry is cloned out so that the list is
+        // not borrowed across the check function's call.
+        let Some(item) = CHECK_LIST
+            .with_borrow(|list| list.as_ref().and_then(|list| list.get(i as usize).cloned()))
+        else {
+            break;
+        };
+
+        // `inFile->filename`, which is NULL only where the caller never set it;
+        // the C would then pass NULL to the checker and on to `stat`.
+        let filename: &[u8] = (unsafe { &*in_file }).filename.as_deref().unwrap_or(b"");
+        let err = unsafe { (item.func.unwrap())(&mut fp, filename, &raw mut info) };
         if err == 0 {
-            return ii_setup_raw_headers(inFile, &raw mut info);
+            return unsafe { ii_setup_raw_headers(in_file, &raw mut info) };
         }
+
         if err != IIERR_NOT_FORMAT {
             if err == IIERR_IO_ERROR {
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiCheckLikeMRC - reading from file {}\n",
-                        CStr::from_ptr((*inFile).filename).to_string_lossy()
+                        String::from_utf8_lossy(filename)
                     ),
                 );
             } else if err == IIERR_NO_SUPPORT {
@@ -346,7 +195,7 @@ pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::
                     Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiCheckLikeMRC - unsupported data mode of {}-type file.\n",
-                        CStr::from_ptr((*item).name).to_string_lossy()
+                        String::from_utf8_lossy(&item.name)
                     ),
                 );
             }
@@ -354,13 +203,18 @@ pub unsafe extern "C" fn ii_like_mrc_check(mut inFile: *mut ImodImageFile) -> ::
         }
         i += 1;
     }
-    return IIERR_NOT_FORMAT;
+
+    IIERR_NOT_FORMAT
 }
-pub unsafe extern "C" fn ii_setup_raw_headers(
-    mut inFile: *mut ImodImageFile,
-    mut info: *mut RawImageInfo,
-) -> ::core::ffi::c_int {
-    let mut modeTable: [::core::ffi::c_int; 7] = [
+
+/// Original `iiSetupRawHeaders` (`iilikemrc.c:148`).
+///
+/// Creates an MRC header and fills it and the items in `inFile` from the
+/// information in `info`; specifically the `nx`, `ny`, `nz`, `swapBytes`,
+/// `headerSize`, `sectionSkip`, `yInverted`, and `type` members.
+/// Returns `IIERR_MEMORY_ERR` for error allocating header.
+pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawImageInfo) -> i32 {
+    let mode_table: [i32; 7] = [
         MRC_MODE_BYTE,
         MRC_MODE_BYTE,
         MRC_MODE_SHORT,
@@ -369,10 +223,13 @@ pub unsafe extern "C" fn ii_setup_raw_headers(
         MRC_MODE_COMPLEX_FLOAT,
         MRC_MODE_RGB,
     ];
-    let mut hdr: *mut MrcHeader = ::core::ptr::null_mut::<MrcHeader>();
+
+    /* Get an MRC header; set sizes into that header and the iifile header */
     // `Box`, not `malloc`: `MrcHeader.fp` is a non-`Copy` `Option<ImodFile>`,
-    // so assigning it over `malloc` residue drops garbage.
-    hdr = Box::into_raw(Box::new(MrcHeader::default()));
+    // so assigning it over `malloc` residue would drop garbage (NATIVE.md §4d).
+    // The allocation cannot fail, so the source's error arm is unreachable, but
+    // it is kept because its message and return code are part of the contract.
+    let hdr: *mut MrcHeader = Box::into_raw(Box::new(MrcHeader::default()));
     if hdr.is_null() {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -380,659 +237,686 @@ pub unsafe extern "C" fn ii_setup_raw_headers(
         );
         return IIERR_MEMORY_ERR;
     }
-    mrc_head_new(
-        &mut *hdr.cast::<MrcHeader>(),
-        (*info).nx,
-        (*info).ny,
-        (*info).nz,
-        modeTable[(*info).type_ as usize],
-    );
-    (*inFile).file = IIFILE_RAW;
-    (*hdr).swapped = (*info).swap_bytes;
-    (*hdr).header_size = (*info).header_size;
-    (*hdr).section_skip = (*info).section_skip;
-    (*hdr).y_inverted = (*info).y_inverted;
-    (*hdr).bytes_signed = if (*info).type_ == RAW_MODE_SBYTE {
-        1 as ::core::ffi::c_int
-    } else {
-        0 as ::core::ffi::c_int
-    };
-    (*hdr).packed4bits = 0 as ::core::ffi::c_int;
-    (*hdr).half_floats = 0 as ::core::ffi::c_int;
-    (*hdr).fp = (*inFile).fp.clone();
-    (*hdr).amin = (*info).amin as b3dFloat;
-    (*hdr).amax = (*info).amax as b3dFloat;
-    (*hdr).amean = (((*info).amin + (*info).amax) as ::core::ffi::c_double / 2.0f64) as b3dFloat;
-    if (*info).pixel != 0. {
-        mrc_set_scale(
-            &mut *hdr.cast::<MrcHeader>(),
-            (*info).pixel as ::core::ffi::c_double,
-            (*info).pixel as ::core::ffi::c_double,
-            (if (*info).z_pixel != 0. {
-                (*info).z_pixel
-            } else {
-                (*info).pixel
-            }) as ::core::ffi::c_double,
-        );
-    }
-    (*inFile).header = hdr as *mut ::core::ffi::c_char;
-    ii_mrc_mode_to_format_type(
-        inFile.cast::<ImodImageFile>(),
-        (*hdr).mode as ::core::ffi::c_int,
-        (*hdr).bytes_signed,
-    );
-    ii_sync_from_mrc_header(inFile.cast::<ImodImageFile>(), hdr.cast::<MrcHeader>());
-    ii_mrc_set_io_funcs(inFile.cast::<ImodImageFile>(), 1);
-    (*inFile).clean_up = Some(ii_like_mrc_delete as unsafe extern "C" fn(*mut ImodImageFile) -> ())
-        as Option<unsafe extern "C" fn(*mut ImodImageFile) -> ()>;
-    return 0 as ::core::ffi::c_int;
-}
-pub unsafe extern "C" fn ii_like_mrc_delete(mut inFile: *mut ImodImageFile) {
-    if !(*inFile).header.is_null() {
-        drop(Box::from_raw((*inFile).header as *mut MrcHeader));
-    }
-}
-unsafe fn check_winkler(
-    fp: &mut ImodFile,
-    mut filename: *mut ::core::ffi::c_char,
-    mut info: *mut RawImageInfo,
-) -> ::core::ffi::c_int {
-    let mut svals: [b3dUInt16; 4] = [0; 4];
-    let mut ivals: [b3dInt32; 12] = [0; 12];
-    b3dRewind(fp);
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut svals as *mut b3dUInt16 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((2) as usize) * ((2) as usize),
-        ),
-        2 as size_t,
-        2 as size_t,
-        fp,
-    ) != 2 as size_t
+    // Each borrow is scoped so that none is live across the calls below, which
+    // take `inFile` and the header as pointers of their own (NATIVE.md §4d.4).
     {
+        let info = unsafe { &mut *info };
+        let hdr_ref = unsafe { &mut *hdr };
+        let in_file_ref = unsafe { &mut *in_file };
+        mrc_head_new(
+            hdr_ref,
+            info.nx,
+            info.ny,
+            info.nz,
+            mode_table[info.type_ as usize],
+        );
+        in_file_ref.file = IIFILE_RAW;
+        hdr_ref.swapped = info.swap_bytes;
+        hdr_ref.header_size = info.header_size;
+        hdr_ref.section_skip = info.section_skip;
+        hdr_ref.y_inverted = info.y_inverted;
+        hdr_ref.bytes_signed = if info.type_ == RAW_MODE_SBYTE { 1 } else { 0 };
+        hdr_ref.packed4bits = 0;
+        hdr_ref.half_floats = 0;
+        hdr_ref.fp = in_file_ref.fp.clone();
+
+        /* Pass on a min and max of 0 as a sign that there is no min/max */
+        hdr_ref.amin = info.amin;
+        hdr_ref.amax = info.amax;
+        hdr_ref.amean = ((info.amin + info.amax) as f64 / 2.) as f32;
+        if info.pixel != 0. {
+            mrc_set_scale(
+                hdr_ref,
+                info.pixel as f64,
+                info.pixel as f64,
+                (if info.z_pixel != 0. {
+                    info.z_pixel
+                } else {
+                    info.pixel
+                }) as f64,
+            );
+        }
+        in_file_ref.header = hdr.cast();
+    }
+    unsafe {
+        ii_mrc_mode_to_format_type(in_file, (*hdr).mode, (*hdr).bytes_signed);
+        ii_sync_from_mrc_header(in_file, hdr);
+
+        /* Set the access routines; just use the MRC routines */
+        ii_mrc_set_io_funcs(in_file, 1);
+        (*in_file).clean_up = Some(ii_like_mrc_delete);
+    }
+    0
+}
+
+/// Original `iiLikeMRCDelete` (`iilikemrc.c:188`).
+pub unsafe extern "C" fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
+    unsafe {
+        if !(*in_file).header.is_null() {
+            // The source's `free(inFile->header)`; the header was `Box`ed above.
+            drop(Box::from_raw((*in_file).header.cast::<MrcHeader>()));
+        }
+    }
+}
+
+/// Original `checkWinkler` (`iilikemrc.c:197`).
+///
+/// Check for the Winkler format.
+///
+/// The source declares `b3dUInt16 svals[4]` and hands it to `mrc_swap_shorts`
+/// through a `(b3dInt16 *)` cast; the array is held signed here so that the
+/// swap takes it directly, and every *use* converts back with `as u16` to keep
+/// the source's unsigned semantics.
+unsafe fn check_winkler(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
+    let info = unsafe { &mut *info };
+    let mut sbuf = [0u8; 8];
+    let mut ibuf = [0u8; 48];
+
+    b3d_rewind(fp);
+    if b3d_fread(&mut sbuf[..4], 2, 2, fp) != 2 {
         return IIERR_IO_ERROR;
     }
-    (*info).swap_bytes = 0 as ::core::ffi::c_int;
-    if svals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int != 18739 as ::core::ffi::c_int
-        || svals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-            != 20480 as ::core::ffi::c_int
-    {
-        mrc_swap_shorts(
-            core::slice::from_raw_parts_mut(svals.as_mut_ptr().cast::<i16>(), 2),
-            2,
-        );
-        if svals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-            != 18739 as ::core::ffi::c_int
-            || svals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-                != 20480 as ::core::ffi::c_int
-        {
+    let mut svals: [i16; 4] = [
+        i16::from_ne_bytes([sbuf[0], sbuf[1]]),
+        i16::from_ne_bytes([sbuf[2], sbuf[3]]),
+        i16::from_ne_bytes([sbuf[4], sbuf[5]]),
+        i16::from_ne_bytes([sbuf[6], sbuf[7]]),
+    ];
+
+    info.swap_bytes = 0;
+    if svals[0] as u16 as i32 != 18739 || svals[1] as u16 as i32 != 20480 {
+        mrc_swap_shorts(&mut svals, 2);
+        if svals[0] as u16 as i32 != 18739 || svals[1] as u16 as i32 != 20480 {
             return IIERR_NOT_FORMAT;
         }
-        (*info).swap_bytes = 1 as ::core::ffi::c_int;
+        info.swap_bytes = 1;
     }
-    if b3dFseek(fp, 16 as ::core::ffi::c_int, SEEK_SET) != 0 {
+
+    if b3d_fseek(fp, 16, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut svals as *mut b3dUInt16 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((2) as usize) * ((4) as usize),
-        ),
-        2 as size_t,
-        4 as size_t,
-        fp,
-    ) != 4 as size_t
-    {
+    if b3d_fread(&mut sbuf, 2, 4, fp) != 4 {
         return IIERR_IO_ERROR;
     }
-    if (*info).swap_bytes != 0 {
-        mrc_swap_shorts(
-            core::slice::from_raw_parts_mut(svals.as_mut_ptr().cast::<i16>(), 4),
-            4,
-        );
+    svals = [
+        i16::from_ne_bytes([sbuf[0], sbuf[1]]),
+        i16::from_ne_bytes([sbuf[2], sbuf[3]]),
+        i16::from_ne_bytes([sbuf[4], sbuf[5]]),
+        i16::from_ne_bytes([sbuf[6], sbuf[7]]),
+    ];
+    if info.swap_bytes != 0 {
+        mrc_swap_shorts(&mut svals, 4);
     }
-    if svals[0 as ::core::ffi::c_int as usize] != 0 {
+    if svals[0] as u16 != 0 {
         return IIERR_NO_SUPPORT;
     }
-    match svals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_int {
+    match svals[1] as u16 as i32 {
         2 => {
-            (*info).type_ = RAW_MODE_BYTE;
+            info.type_ = RAW_MODE_BYTE;
         }
         3 => {
-            (*info).type_ = RAW_MODE_SHORT;
+            info.type_ = RAW_MODE_SHORT;
         }
         15 => {
-            (*info).type_ = RAW_MODE_USHORT;
+            info.type_ = RAW_MODE_USHORT;
         }
         5 => {
-            (*info).type_ = RAW_MODE_FLOAT;
+            info.type_ = RAW_MODE_FLOAT;
         }
-        _ => return IIERR_NO_SUPPORT,
+        _ => {
+            return IIERR_NO_SUPPORT;
+        }
     }
-    if svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int / 2 as ::core::ffi::c_int
-        != 1 as ::core::ffi::c_int
-    {
+
+    /* Dimension must be 2 or 3 */
+    if (svals[3] as u16) / 2 != 1 {
         return IIERR_NO_SUPPORT;
     }
-    if b3dFseek(fp, 24 as ::core::ffi::c_int, SEEK_SET) != 0 {
+    if b3d_fseek(fp, 24, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize) * ((1) as usize),
-        ),
-        4 as size_t,
-        1 as size_t,
-        fp,
-    ) != 1 as size_t
-    {
+
+    if b3d_fread(&mut ibuf[..4], 4, 1, fp) != 1 {
         return IIERR_IO_ERROR;
     }
-    if (*info).swap_bytes != 0 {
-        mrc_swap_longs(core::slice::from_raw_parts_mut(ivals.as_mut_ptr(), 1), 1);
+    let mut ivals = [0i32; 12];
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
     }
-    (*info).header_size = ivals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    if b3dFseek(fp, 64 as ::core::ffi::c_int, SEEK_SET) != 0 {
+    if info.swap_bytes != 0 {
+        mrc_swap_longs(&mut ivals, 1);
+    }
+    info.header_size = ivals[0];
+    if b3d_fseek(fp, 64, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize)
-                * ((svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-                    * 4 as ::core::ffi::c_int) as usize),
-        ),
-        4 as size_t,
-        (svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int * 4 as ::core::ffi::c_int)
-            as size_t,
-        fp,
-    ) != (svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-        * 4 as ::core::ffi::c_int) as size_t
-    {
+    let count = (svals[3] as u16 as i32 * 4) as usize;
+    if b3d_fread(&mut ibuf[..4 * count], 4, count, fp) != count {
         return IIERR_IO_ERROR;
     }
-    if (*info).swap_bytes != 0 {
-        mrc_swap_longs(core::slice::from_raw_parts_mut(ivals.as_mut_ptr(), 12), 12);
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
     }
-    if svals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int == 3 as ::core::ffi::c_int {
-        (*info).nx = ivals[10 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-        (*info).ny = ivals[6 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-        (*info).nz = ivals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
+    if info.swap_bytes != 0 {
+        mrc_swap_longs(&mut ivals, 12);
+    }
+    if svals[3] as u16 as i32 == 3 {
+        info.nx = ivals[10];
+        info.ny = ivals[6];
+        info.nz = ivals[2];
     } else {
-        (*info).nx = ivals[6 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-        (*info).ny = ivals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-        (*info).nz = 1 as ::core::ffi::c_int;
+        info.nx = ivals[6];
+        info.ny = ivals[2];
+        info.nz = 1;
     }
-    (*info).amin = 0.0f32;
-    (*info).amax = 0.0f32;
-    return 0 as ::core::ffi::c_int;
+
+    /* Set these to signal that the range is unknown */
+    info.amin = 0.;
+    info.amax = 0.;
+    0
 }
-unsafe fn check_pif(
-    fp: &mut ImodFile,
-    mut filename: *mut ::core::ffi::c_char,
-    mut info: *mut RawImageInfo,
-) -> ::core::ffi::c_int {
-    let mut ivals: [b3dInt32; 12] = [0; 12];
-    let mut cvals: [b3dByte; 6] = [0; 6];
-    if b3dFseek(fp, 32 as ::core::ffi::c_int, SEEK_SET) != 0 as ::core::ffi::c_int {
+
+/// Original `checkPif` (`iilikemrc.c:276`).
+///
+/// Check for the pif format.
+unsafe fn check_pif(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
+    let info = unsafe { &mut *info };
+    let mut ibuf = [0u8; 48];
+    let mut cvals = [0u8; 6];
+
+    /* is it a pif file (only reading bsoft pif files) */
+    if b3d_fseek(fp, 32, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut cvals as *mut b3dByte as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((1) as usize) * ((5) as usize),
-        ),
-        1 as size_t,
-        5 as size_t,
-        fp,
-    ) != 5 as size_t
-    {
+
+    if b3d_fread(&mut cvals[..5], 1, 5, fp) != 5 {
         return IIERR_IO_ERROR;
     }
-    cvals[5 as ::core::ffi::c_int as usize] = 0 as b3dByte;
-    if strcmp(
-        &raw mut cvals as *mut b3dByte,
-        b"Bsoft\0" as *const u8 as *const ::core::ffi::c_char,
-    ) != 0 as ::core::ffi::c_int
-    {
+
+    /* recognize file type  */
+    cvals[5] = 0;
+    // `strcmp(cvals, "Bsoft")`: with the terminator written at `cvals[5]` and
+    // no NUL inside "Bsoft", that is exactly a comparison of the five bytes.
+    if cvals[..5] != *b"Bsoft" {
         return IIERR_NOT_FORMAT;
     }
-    (*info).header_size = 1024 as ::core::ffi::c_int;
-    (*info).section_skip = 512 as ::core::ffi::c_int;
-    if b3dFseek(fp, 28 as ::core::ffi::c_int, SEEK_SET) != 0 as ::core::ffi::c_int {
+
+    info.header_size = 1024;
+    info.section_skip = 512;
+
+    /* set swapBytes */
+    if b3d_fseek(fp, 28, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize) * ((1) as usize),
-        ),
-        4 as size_t,
-        1 as size_t,
-        fp,
-    ) != 1 as size_t
-    {
+
+    if b3d_fread(&mut ibuf[..4], 4, 1, fp) != 1 {
         return IIERR_IO_ERROR;
     }
-    (*info).swap_bytes = 0 as ::core::ffi::c_int;
+    let mut ivals = [0i32; 12];
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
+    }
+
+    info.swap_bytes = 0;
+
     #[cfg(target_endian = "little")]
-    if ivals[0 as ::core::ffi::c_int as usize] != 0 as ::core::ffi::c_int {
-        (*info).swap_bytes = 1 as ::core::ffi::c_int;
+    if ivals[0] != 0 {
+        info.swap_bytes = 1;
     }
     #[cfg(target_endian = "big")]
-    if ivals[0 as ::core::ffi::c_int as usize] == 0 as ::core::ffi::c_int {
-        (*info).swap_bytes = 1 as ::core::ffi::c_int;
+    if ivals[0] == 0 {
+        info.swap_bytes = 1;
     }
-    if b3dFseek(fp, 24 as ::core::ffi::c_int, SEEK_SET) != 0 as ::core::ffi::c_int {
+
+    if b3d_fseek(fp, 24, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize) * ((1) as usize),
-        ),
-        4 as size_t,
-        1 as size_t,
-        fp,
-    ) != 1 as size_t
-    {
+
+    if b3d_fread(&mut ibuf[..4], 4, 1, fp) != 1 {
         return IIERR_IO_ERROR;
     }
-    if (*info).swap_bytes != 0 {
-        mrc_swap_longs(core::slice::from_raw_parts_mut(ivals.as_mut_ptr(), 1), 1);
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
     }
-    (*info).nz = ivals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    if b3dFseek(fp, 64 as ::core::ffi::c_int, SEEK_SET) != 0 as ::core::ffi::c_int {
+
+    if info.swap_bytes != 0 {
+        mrc_swap_longs(&mut ivals, 1);
+    }
+
+    /* set nz from numimages because nz is 1 */
+    info.nz = ivals[0];
+
+    if b3d_fseek(fp, 64, SEEK_SET) != 0 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize) * ((5) as usize),
-        ),
-        4 as size_t,
-        5 as size_t,
-        fp,
-    ) != 5 as size_t
-    {
+
+    if b3d_fread(&mut ibuf[..20], 4, 5, fp) != 5 {
         return IIERR_IO_ERROR;
     }
-    if (*info).swap_bytes != 0 {
-        mrc_swap_longs(core::slice::from_raw_parts_mut(ivals.as_mut_ptr(), 5), 5);
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
     }
-    if ivals[0 as ::core::ffi::c_int as usize] < 1 as ::core::ffi::c_int
-        && (*info).nz > 1 as ::core::ffi::c_int
-    {
+
+    if info.swap_bytes != 0 {
+        mrc_swap_longs(&mut ivals, 5);
+    }
+
+    /* If there are images of different sizes and there is more then one image,
+    fail. */
+    if ivals[0] < 1 && info.nz > 1 {
         return IIERR_NOT_FORMAT;
     }
-    (*info).nx = ivals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    (*info).ny = ivals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    match ivals[4 as ::core::ffi::c_int as usize] {
+
+    info.nx = ivals[1];
+    info.ny = ivals[2];
+
+    match ivals[4] {
         0 | 6 => {
-            (*info).type_ = RAW_MODE_BYTE;
+            info.type_ = RAW_MODE_BYTE;
         }
         1 | 7 | 20 | 88 => {
-            (*info).type_ = RAW_MODE_SHORT;
+            info.type_ = RAW_MODE_SHORT;
         }
         9 => {
-            (*info).type_ = RAW_MODE_FLOAT;
+            info.type_ = RAW_MODE_FLOAT;
         }
-        _ => return IIERR_NO_SUPPORT,
+        _ => {
+            return IIERR_NO_SUPPORT;
+        }
     }
-    (*info).amin = 0.0f32;
-    (*info).amax = 0.0f32;
-    return 0 as ::core::ffi::c_int;
+
+    /* assume dimensions are 2 or 3 */
+
+    /* Set these to signal that the range is unknown */
+    info.amin = 0.;
+    info.amax = 0.;
+    0
 }
-static mut sAssumeDMmatch: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sLastDMinfo: RawImageInfo = RawImageInfo {
-    type_: 0,
-    nx: 0,
-    ny: 0,
-    nz: 0,
-    swap_bytes: 0,
-    header_size: 0,
-    amin: 0.,
-    amax: 0.,
-    scan_min_max: 0,
-    all_match: 0,
-    section_skip: 0,
-    y_inverted: 0,
-    pixel: 0.,
-    z_pixel: 0.,
-};
-static mut sDMinfoSaved: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub unsafe extern "C" fn ii_assume_dmfile_matches(mut inVal: ::core::ffi::c_int) {
-    sAssumeDMmatch = inVal;
+
+thread_local! {
+    /// C `static int sAssumeDMmatch` (`iilikemrc.c:369`).
+    static S_ASSUME_DM_MATCH: Cell<i32> = const { Cell::new(0) };
+    /// C `static RawImageInfo sLastDMinfo` (`iilikemrc.c:370`).
+    static S_LAST_DM_INFO: RefCell<RawImageInfo> = RefCell::new(RawImageInfo {
+        type_: 0,
+        nx: 0,
+        ny: 0,
+        nz: 0,
+        swap_bytes: 0,
+        header_size: 0,
+        amin: 0.,
+        amax: 0.,
+        scan_min_max: 0,
+        all_match: 0,
+        section_skip: 0,
+        y_inverted: 0,
+        pixel: 0.,
+        z_pixel: 0.,
+    });
+    /// C `static int sDMinfoSaved` (`iilikemrc.c:371`).
+    static S_DM_INFO_SAVED: Cell<i32> = const { Cell::new(0) };
 }
-pub const DOC_CHECK_BUF: ::core::ffi::c_int = 832 as ::core::ffi::c_int;
-unsafe fn check_dm3(
-    fp: &mut ImodFile,
-    mut filename: *mut ::core::ffi::c_char,
-    mut info: *mut RawImageInfo,
-) -> ::core::ffi::c_int {
-    let mut bvals: [::core::ffi::c_uchar; 832] = [0; 832];
-    let mut err: ::core::ffi::c_int = 0;
-    let mut dmtype: ::core::ffi::c_int = 0;
-    let mut dmf: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut bsave: ::core::ffi::c_uchar = 0;
-    let mut testString: *mut ::core::ffi::c_char = b"DocumentObjectList\0" as *const u8
-        as *const ::core::ffi::c_char
-        as *mut ::core::ffi::c_char;
-    let mut testLen: ::core::ffi::c_int = strlen(testString) as ::core::ffi::c_int;
-    b3dRewind(fp);
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((1) as usize) * ((4) as usize),
-        ),
-        1 as size_t,
-        4 as size_t,
-        fp,
-    ) != 4 as size_t
-    {
+
+/// Original `iiAssumeDMfileMatches` (`iilikemrc.c:373`).
+pub fn ii_assume_dmfile_matches(in_val: i32) {
+    S_ASSUME_DM_MATCH.set(in_val);
+}
+
+/// C `DOC_CHECK_BUF` (`iilikemrc.c:379`): DocumentObjectList so far seen to end
+/// before 208.
+pub const DOC_CHECK_BUF: i32 = 832;
+
+/// Original `checkDM3` (`iilikemrc.c:383`).
+///
+/// Check for the DigitalMicrograph format.
+unsafe fn check_dm3(fp: &mut ImodFile, filename: &[u8], info: *mut RawImageInfo) -> i32 {
+    let mut bvals = [0u8; DOC_CHECK_BUF as usize];
+    let mut dmtype: i32 = 0;
+    let test_string: &[u8] = b"DocumentObjectList";
+    let test_len: i32 = test_string.len() as i32;
+
+    /* Check for 3 or 4 in the fourth byte */
+    b3d_rewind(fp);
+    if b3d_fread(&mut bvals[..4], 1, 4, fp) != 4 {
         return IIERR_IO_ERROR;
     }
-    if bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int != 3 as ::core::ffi::c_int
-        && bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int != 4 as ::core::ffi::c_int
-    {
+    if bvals[3] as i32 != 3 && bvals[3] as i32 != 4 {
         return IIERR_NOT_FORMAT;
     }
-    dmf = bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((1) as usize) * ((DOC_CHECK_BUF) as usize),
-        ),
-        1 as size_t,
-        DOC_CHECK_BUF as size_t,
-        fp,
-    ) != DOC_CHECK_BUF as size_t
-    {
+    let dmf: i32 = bvals[3] as i32;
+    if b3d_fread(&mut bvals, 1, DOC_CHECK_BUF as usize, fp) != DOC_CHECK_BUF as usize {
         return IIERR_IO_ERROR;
     }
-    err = 1 as ::core::ffi::c_int;
-    i = 0 as ::core::ffi::c_int;
-    while i < DOC_CHECK_BUF - testLen - 4 as ::core::ffi::c_int {
-        if bvals[i as usize] as ::core::ffi::c_int
-            == *testString.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-        {
-            bsave = bvals[(i + testLen) as usize];
-            bvals[(i + testLen) as usize] = 0 as ::core::ffi::c_uchar;
-            if strcmp(
-                (&raw mut bvals as *mut ::core::ffi::c_uchar).offset(i as isize)
-                    as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char,
-                testString,
-            ) == 0
-            {
-                err = 0 as ::core::ffi::c_int;
+
+    /* Look for the test string */
+    let mut err: i32 = 1;
+    let mut i: i32 = 0;
+    while i < DOC_CHECK_BUF - test_len - 4 {
+        if bvals[i as usize] == test_string[0] {
+            let bsave = bvals[(i + test_len) as usize];
+            bvals[(i + test_len) as usize] = 0x00;
+            // `strcmp(&bvals[i], testString)` with the terminator just written
+            // and no NUL inside the tag: a comparison of `testLen` bytes.
+            if bvals[i as usize..(i + test_len) as usize] == *test_string {
+                err = 0;
                 break;
-            } else {
-                bvals[(i + testLen) as usize] = bsave;
             }
+            bvals[(i + test_len) as usize] = bsave;
         }
         i += 1;
     }
     if err != 0 {
         return IIERR_NOT_FORMAT;
     }
-    if sAssumeDMmatch != 0 && sDMinfoSaved != 0 {
-        memcpy(
-            info as *mut ::core::ffi::c_void,
-            &raw mut sLastDMinfo as *const ::core::ffi::c_void,
-            ::core::mem::size_of::<RawImageInfo>() as size_t,
-        );
-        return 0 as ::core::ffi::c_int;
+
+    /* If a file was already opened and the flag is set to assume they match, just copy
+    old info and return */
+    if S_ASSUME_DM_MATCH.get() != 0 && S_DM_INFO_SAVED.get() != 0 {
+        // `memcpy(info, &sLastDMinfo, sizeof(RawImageInfo))`.
+        let info = unsafe { &mut *info };
+        S_LAST_DM_INFO.with_borrow(|last| {
+            info.type_ = last.type_;
+            info.nx = last.nx;
+            info.ny = last.ny;
+            info.nz = last.nz;
+            info.swap_bytes = last.swap_bytes;
+            info.header_size = last.header_size;
+            info.amin = last.amin;
+            info.amax = last.amax;
+            info.scan_min_max = last.scan_min_max;
+            info.all_match = last.all_match;
+            info.section_skip = last.section_skip;
+            info.y_inverted = last.y_inverted;
+            info.pixel = last.pixel;
+            info.z_pixel = last.z_pixel;
+        });
+        return 0;
     }
-    err = analyze_dm3(fp, filename, dmf, info, &raw mut dmtype);
+
+    err = unsafe { analyze_dm3(fp, filename, dmf, info, &mut dmtype) };
     if err != 0 {
         return err;
     }
+
+    let info = unsafe { &mut *info };
     match dmtype {
         9 => {
-            (*info).type_ = RAW_MODE_SBYTE;
+            info.type_ = RAW_MODE_SBYTE;
         }
         6 => {
-            (*info).type_ = RAW_MODE_BYTE;
+            info.type_ = RAW_MODE_BYTE;
         }
         1 => {
-            (*info).type_ = RAW_MODE_SHORT;
+            info.type_ = RAW_MODE_SHORT;
         }
         10 => {
-            (*info).type_ = RAW_MODE_USHORT;
+            info.type_ = RAW_MODE_USHORT;
         }
         2 => {
-            (*info).type_ = RAW_MODE_FLOAT;
+            info.type_ = RAW_MODE_FLOAT;
         }
-        _ => return IIERR_NO_SUPPORT,
+        _ => {
+            return IIERR_NO_SUPPORT;
+        }
     }
-    (*info).amin = 0.0f32;
-    (*info).amax = 0.0f32;
-    memcpy(
-        &raw mut sLastDMinfo as *mut ::core::ffi::c_void,
-        info as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<RawImageInfo>() as size_t,
-    );
-    sDMinfoSaved = 1 as ::core::ffi::c_int;
-    return 0 as ::core::ffi::c_int;
+
+    info.amin = 0.;
+    info.amax = 0.;
+    // `memcpy(&sLastDMinfo, info, sizeof(RawImageInfo))`.
+    S_LAST_DM_INFO.with_borrow_mut(|last| {
+        last.type_ = info.type_;
+        last.nx = info.nx;
+        last.ny = info.ny;
+        last.nz = info.nz;
+        last.swap_bytes = info.swap_bytes;
+        last.header_size = info.header_size;
+        last.amin = info.amin;
+        last.amax = info.amax;
+        last.scan_min_max = info.scan_min_max;
+        last.all_match = info.all_match;
+        last.section_skip = info.section_skip;
+        last.y_inverted = info.y_inverted;
+        last.pixel = info.pixel;
+        last.z_pixel = info.z_pixel;
+    });
+    S_DM_INFO_SAVED.set(1);
+    0
 }
-pub const MAX_TYPES: ::core::ffi::c_int = 13 as ::core::ffi::c_int;
-pub unsafe extern "C" fn analyze_dm3(
+
+/// C `BUFSIZE` (`iilikemrc.c:457`).
+///
+/// 8/3/09: This was 160000, but a file with Data%%%% at 595098 turned up.
+pub const BUFSIZE: usize = 1000000;
+/// C `MAX_TYPES` (`iilikemrc.c:458`).
+pub const MAX_TYPES: i32 = 13;
+
+thread_local! {
+    /// C function-static `lastMaxRead` (`iilikemrc.c:485`).
+    static LAST_MAX_READ: Cell<i64> = const { Cell::new(0) };
+    /// C function-static `debug` (`iilikemrc.c:489`).
+    static DEBUG: Cell<i32> = const { Cell::new(-1) };
+    /// C function-statics `lastDataType`, `lastDimensions`, `lastData`,
+    /// `lastCalibrations` (`iilikemrc.c:490`).
+    static LAST_DATA_TYPE: Cell<i32> = const { Cell::new(0) };
+    static LAST_DIMENSIONS: Cell<i32> = const { Cell::new(0) };
+    static LAST_DATA: Cell<i32> = const { Cell::new(0) };
+    static LAST_CALIBRATIONS: Cell<i32> = const { Cell::new(0) };
+    /// C function-statics `lastTabDimens`, `lastDimensInfo`, `lastUnits`,
+    /// `lastOffset` (`iilikemrc.c:491`).
+    static LAST_TAB_DIMENS: Cell<i32> = const { Cell::new(0) };
+    static LAST_DIMENS_INFO: Cell<i32> = const { Cell::new(0) };
+    static LAST_UNITS: Cell<i32> = const { Cell::new(0) };
+    static LAST_OFFSET: Cell<i32> = const { Cell::new(0) };
+    /// C function-statics `lastZunits`, `lastMaxEndUsed`, `lastMaxStartUsed`
+    /// (`iilikemrc.c:492`).
+    static LAST_ZUNITS: Cell<i32> = const { Cell::new(0) };
+    static LAST_MAX_END_USED: Cell<i32> = const { Cell::new(0) };
+    static LAST_MAX_START_USED: Cell<i32> = const { Cell::new(0) };
+}
+
+/// Original `analyzeDM3` (`iilikemrc.c:467`).
+///
+/// Analyzes a file known to be a DigitalMicrograph version 3 or 4, as indicated
+/// in `dmformat`; the file pointer is in `fp` and the filename in `filename`.
+/// Returns size, type, and other information in `info`; specifically the `nx`,
+/// `ny`, `nz`, `swapBytes`, `headerSize`, and `type` members.  Returns the DM
+/// data type number in `dmtype`.  Returns `IIERR_IO_ERROR` for errors reading
+/// the file or `IIERR_NO_SUPPORT` for other errors in analyzing the file.
+pub unsafe fn analyze_dm3(
     fp: &mut ImodFile,
-    mut filename: *mut ::core::ffi::c_char,
-    mut dmformat: ::core::ffi::c_int,
-    mut info: *mut RawImageInfo,
-    mut dmtype: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut c: ::core::ffi::c_int = 0;
-    let mut toffset: ::core::ffi::c_int = 0;
-    let mut typeIndex: ::core::ffi::c_int = 0;
-    let mut dmind: ::core::ffi::c_int = 0;
-    let mut buf: [::core::ffi::c_char; 1000000] = [0; 1000000];
-    let mut found: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut lowbyte: ::core::ffi::c_int = 0;
-    let mut hibyte: ::core::ffi::c_int = 0;
-    let mut loop_0: ::core::ffi::c_int = 0;
-    let mut maxUseC: ::core::ffi::c_int = 0;
-    let mut matchLast: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    let mut offset: ::core::ffi::c_int = 0;
-    let mut type_: ::core::ffi::c_int = 0;
-    let mut xsize: ::core::ffi::c_int = 0;
-    let mut ysize: ::core::ffi::c_int = 0;
-    let mut zsize: ::core::ffi::c_int = 0;
-    let mut gotCal: ::core::ffi::c_int = 0;
-    let mut gotDim: ::core::ffi::c_int = 0;
-    let mut gotScale: ::core::ffi::c_int = 0;
-    let mut gotMeta: ::core::ffi::c_int = 0;
-    let mut gotDimInfo: ::core::ffi::c_int = 0;
-    let mut scale: ::core::ffi::c_float = 0.;
-    let mut tmpPixel: ::core::ffi::c_float = 0.;
-    let mut pixel: ::core::ffi::c_float = 0.0f32;
-    let mut z_pixel: ::core::ffi::c_float = 0.0f32;
-    let mut typeOffset: off_t = 0;
-    let mut maxread: off_t = 0;
-    let mut plausibleOff: off_t = 0;
-    static mut lastMaxRead: off_t = 0 as off_t;
-    let mut statbuf: stat = stat {
-        st_dev: 0,
-        st_ino: 0,
-        st_nlink: 0,
-        st_mode: 0,
-        st_uid: 0,
-        st_gid: 0,
-        __pad0: 0,
-        st_rdev: 0,
-        st_size: 0,
-        st_blksize: 0,
-        st_blocks: 0,
-        st_atim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_mtim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        st_ctim: timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        },
-        __glibc_reserved: [0; 3],
-    };
-    let mut wallStart: ::core::ffi::c_double = 0.;
-    static mut debug: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-    static mut lastDataType: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastDimensions: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastData: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastCalibrations: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastTabDimens: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastDimensInfo: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastUnits: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastOffset: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastZunits: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastMaxEndUsed: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    static mut lastMaxStartUsed: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut curDataType: ::core::ffi::c_int = 0;
-    let mut curDimensions: ::core::ffi::c_int = 0;
-    let mut curData: ::core::ffi::c_int = 0;
-    let mut curCalibrations: ::core::ffi::c_int = 0;
-    let mut curTabDimens: ::core::ffi::c_int = 0;
-    let mut curDimensInfo: ::core::ffi::c_int = 0;
-    let mut curUnits: ::core::ffi::c_int = 0;
-    let mut curZunits: ::core::ffi::c_int = 0;
-    let mut curOffset: ::core::ffi::c_int = 0;
-    let mut maxCurUsed: ::core::ffi::c_int = 0;
-    let mut dataSize: [::core::ffi::c_int; 13] = [
-        1 as ::core::ffi::c_int,
-        2 as ::core::ffi::c_int,
-        4 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-        4 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-        2 as ::core::ffi::c_int,
-        4 as ::core::ffi::c_int,
-        8 as ::core::ffi::c_int,
-    ];
-    let mut dimensOff: [::core::ffi::c_int; 2] =
-        [15 as ::core::ffi::c_int, 27 as ::core::ffi::c_int];
-    let mut xsizeOff: [::core::ffi::c_int; 2] =
-        [31 as ::core::ffi::c_int, 59 as ::core::ffi::c_int];
-    let mut ysizeOff: [::core::ffi::c_int; 2] =
-        [50 as ::core::ffi::c_int, 94 as ::core::ffi::c_int];
-    let mut zsizeOff: [::core::ffi::c_int; 2] =
-        [69 as ::core::ffi::c_int, 129 as ::core::ffi::c_int];
-    let mut dtypeOff: [::core::ffi::c_int; 2] =
-        [20 as ::core::ffi::c_int, 36 as ::core::ffi::c_int];
-    let mut dataOff: [::core::ffi::c_int; 2] = [24 as ::core::ffi::c_int, 48 as ::core::ffi::c_int];
-    let mut scaleOff: [::core::ffi::c_int; 2] =
-        [17 as ::core::ffi::c_int, 33 as ::core::ffi::c_int];
-    let mut unitsOff: [::core::ffi::c_int; 2] =
-        [25 as ::core::ffi::c_int, 49 as ::core::ffi::c_int];
-    let mut maxOffset: [::core::ffi::c_int; 2] =
-        [90 as ::core::ffi::c_int, 150 as ::core::ffi::c_int];
-    if debug < 0 as ::core::ffi::c_int {
-        debug = if !getenv(b"ANALYZEDM3_DEBUG\0" as *const u8 as *const ::core::ffi::c_char)
-            .is_null()
-        {
-            1 as ::core::ffi::c_int
+    filename: &[u8],
+    dmformat: i32,
+    info: *mut RawImageInfo,
+    dmtype: &mut i32,
+) -> i32 {
+    let mut c: i32 = 0;
+    let mut toffset: i32;
+    let mut type_index: i32;
+    // C `char buf[BUFSIZE]`, an uninitialised one-megabyte stack array.  A
+    // `Vec` is zeroed where the C's is stack residue (NATIVE.md §4); only the
+    // bytes actually read are used, and the source's own NUL writes below are
+    // what `strstr` depends on.
+    let mut buf = vec![0u8; BUFSIZE];
+    let mut lowbyte: i32;
+    let mut hibyte: i32;
+    let mut loop_: i32;
+    let mut max_use_c: i32;
+    let mut match_last: i32 = 1;
+    let mut offset: i32 = 0;
+    let mut type_: i32 = -1;
+    let mut xsize: i32 = 0;
+    let mut ysize: i32 = 0;
+    let mut zsize: i32 = 0;
+    let mut got_cal: i32;
+    let mut got_dim: i32;
+    let mut got_scale: i32;
+    let mut got_meta: i32;
+    let mut got_dim_info: i32;
+    // The source leaves `scale` and `tmpPixel` uninitialised; they are function
+    // locals that persist across both scan loops, and the one path that reads
+    // `tmpPixel` without having set it is a latent source bug.
+    let mut scale: f32 = 0.;
+    let mut tmp_pixel: f32 = 0.;
+    let mut pixel: f32 = 0.;
+    let mut z_pixel: f32 = 0.;
+
+    /* off_t is only 32 bits in Windows!  So have to explicitly define the type for the
+    offsets, and make sure the 64-bit stat is used to get 64-bit size */
+    let mut type_offset: i64 = 0;
+    let maxread: i64;
+    let plausible_off: i64;
+    let mut wall_start: f64 = 0.;
+    let mut cur_data_type: i32;
+    let mut cur_dimensions: i32;
+    let mut cur_data: i32;
+    let mut cur_calibrations: i32;
+    let mut cur_tab_dimens: i32;
+    let mut cur_dimens_info: i32;
+    let mut cur_units: i32;
+    let mut cur_zunits: i32;
+    let mut cur_offset: i32 = 0;
+    let mut max_cur_used: i32 = 0;
+
+    /* The type-dependent values that were found after
+    D a t a % % % % 0 0 0 3 0 0 0 24 0 0 0 */
+    /*int datacode[MAX_TYPES] = {0, 2, 6, 0, 0, 0, 10, 3, 0, 9, 4, 5, 12}; */
+
+    let data_size: [i32; MAX_TYPES as usize] = [1, 2, 4, 1, 1, 1, 1, 4, 1, 1, 2, 4, 8];
+    let dimens_off: [i32; 2] = [15, 27];
+    let xsize_off: [i32; 2] = [31, 59];
+    let ysize_off: [i32; 2] = [50, 94];
+    let zsize_off: [i32; 2] = [69, 129];
+    let dtype_off: [i32; 2] = [20, 36];
+    let data_off: [i32; 2] = [24, 48];
+    let scale_off: [i32; 2] = [17, 33];
+    let units_off: [i32; 2] = [25, 49];
+    let max_offset: [i32; 2] = [90, 150]; /* Keep this higher than any offsets */
+
+    if DEBUG.get() < 0 {
+        DEBUG.set(if std::env::var_os("ANALYZEDM3_DEBUG").is_some() {
+            1
         } else {
-            0 as ::core::ffi::c_int
-        };
+            0
+        });
     }
+    let debug = DEBUG.get();
     if debug != 0 {
-        wallStart = wallTime();
+        wall_start = wall_time();
     }
-    dmind = dmformat - 3 as ::core::ffi::c_int;
-    if dmind < 0 as ::core::ffi::c_int || dmind > 1 as ::core::ffi::c_int {
+
+    let dmind: i32 = dmformat - 3;
+    if dmind < 0 || dmind > 1 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: analyzeDM3 - DM format {} not supported\n", dmformat),
         );
         return IIERR_NO_SUPPORT;
     }
-    if stat(filename, &raw mut statbuf) != 0 {
-        b3d_error(
-            Some(&mut ImodFile::Stderr),
-            format_args!(
-                "ERROR: analyzeDM3 - Doing stat of {}\n",
-                CStr::from_ptr(filename).to_string_lossy()
-            ),
-        );
-        return IIERR_IO_ERROR;
-    }
-    maxread = (if (statbuf.st_size as ::core::ffi::c_long - 2 as ::core::ffi::c_long)
-        < (1000000 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as ::core::ffi::c_long
-    {
-        statbuf.st_size as ::core::ffi::c_long - 2 as ::core::ffi::c_long
-    } else {
-        (1000000 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as ::core::ffi::c_long
-    }) as off_t;
-    if maxread != lastMaxRead || lastMaxEndUsed == 0 {
-        matchLast = 0 as ::core::ffi::c_int;
-    }
-    curCalibrations = (2 as off_t * maxread) as ::core::ffi::c_int;
-    curData = curCalibrations;
-    curDimensions = curData;
-    curDataType = curDimensions;
-    curZunits = (2 as off_t * maxread) as ::core::ffi::c_int;
-    curUnits = curZunits;
-    curDimensInfo = curUnits;
-    curTabDimens = curDimensInfo;
-    if debug != 0 {
-        printf(
-            b"analyze_dm3: Reading up to %d bytes\n\0" as *const u8 as *const ::core::ffi::c_char,
-            maxread as ::core::ffi::c_int,
-        );
-    }
-    loop_0 = 1 as ::core::ffi::c_int - matchLast;
-    while loop_0 < 2 as ::core::ffi::c_int {
-        offset = 0 as ::core::ffi::c_int;
-        xsize = 0 as ::core::ffi::c_int;
-        ysize = 0 as ::core::ffi::c_int;
-        type_ = -(1 as ::core::ffi::c_int);
-        typeOffset = 0 as off_t;
-        typeIndex = -(1 as ::core::ffi::c_int);
-        if loop_0 != 0 {
-            c = 0 as ::core::ffi::c_int;
-            maxUseC = maxread as ::core::ffi::c_int;
-        } else {
-            c = if lastDimensions < lastDataType {
-                lastDimensions
-            } else {
-                lastDataType
-            };
-            maxUseC = lastMaxEndUsed;
-        }
-        if b3dFseek(
-            fp,
-            -(maxread as ::core::ffi::c_long - c as ::core::ffi::c_long + 1 as ::core::ffi::c_long)
-                as ::core::ffi::c_int,
-            SEEK_END,
-        ) != 0
-        {
+
+    let st_size: i64 = match std::fs::metadata(std::ffi::OsStr::from_bytes(filename)) {
+        Ok(metadata) => metadata.len() as i64,
+        Err(_) => {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!(
-                    "ERROR: analyzeDM3 - Seeking to end of {}\n",
-                    CStr::from_ptr(filename).to_string_lossy()
+                    "ERROR: analyzeDM3 - Doing stat of {}\n",
+                    String::from_utf8_lossy(filename)
                 ),
             );
             return IIERR_IO_ERROR;
         }
-        if b3dFread(
-            core::slice::from_raw_parts_mut(
-                ((&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                    as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void)
-                    .cast::<u8>(),
-                ((1) as usize) * ((maxUseC - c) as usize),
-            ),
-            1 as size_t,
-            (maxUseC - c) as size_t,
+    };
+
+    maxread = if st_size - 2 < (BUFSIZE as i64 - 1) {
+        st_size - 2
+    } else {
+        BUFSIZE as i64 - 1
+    };
+    if maxread != LAST_MAX_READ.get() || LAST_MAX_END_USED.get() == 0 {
+        match_last = 0;
+    }
+
+    /* Initialize to big values so that the min of all can be taken even if some aren't
+    found */
+    cur_calibrations = (2 * maxread) as i32;
+    cur_data = cur_calibrations;
+    cur_dimensions = cur_data;
+    cur_data_type = cur_dimensions;
+    cur_zunits = (2 * maxread) as i32;
+    cur_units = cur_zunits;
+    cur_dimens_info = cur_units;
+    cur_tab_dimens = cur_dimens_info;
+    if debug != 0 {
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "analyzeDM3: Reading up to %d bytes\n",
+            &[CArg::Int(maxread as i32 as i64)],
+        ));
+    }
+
+    /* Read the end of the file first because we need the data type
+    before we can be sure we have the right Data%%%% entry */
+    loop_ = 1 - match_last;
+    while loop_ < 2 {
+        offset = 0;
+        xsize = 0;
+        ysize = 0;
+        type_ = -1;
+        type_offset = 0;
+        type_index = -1;
+
+        /* The first time through loop, if matching last file is possible, just read and
+        scan what is needed to find the tags in the same place */
+        if loop_ != 0 {
+            c = 0;
+            max_use_c = maxread as i32;
+        } else {
+            c = if LAST_DIMENSIONS.get() < LAST_DATA_TYPE.get() {
+                LAST_DIMENSIONS.get()
+            } else {
+                LAST_DATA_TYPE.get()
+            };
+            max_use_c = LAST_MAX_END_USED.get();
+        }
+
+        if b3d_fseek(fp, -((maxread - c as i64) + 1) as i32, SEEK_END) != 0 {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "ERROR: analyzeDM3 - Seeking to end of {}\n",
+                    String::from_utf8_lossy(filename)
+                ),
+            );
+            return IIERR_IO_ERROR;
+        }
+        if b3d_fread(
+            &mut buf[c as usize..max_use_c as usize],
+            1,
+            (max_use_c - c) as usize,
             fp,
         ) == 0
         {
@@ -1040,204 +924,175 @@ pub unsafe extern "C" fn analyze_dm3(
                 Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: analyzeDM3 - Error Reading tail end of {}\n",
-                    CStr::from_ptr(filename).to_string_lossy()
+                    String::from_utf8_lossy(filename)
                 ),
             );
             return IIERR_IO_ERROR;
         }
-        buf[(maxUseC - c - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
+        buf[(max_use_c - c - 1) as usize] = 0x00;
+
         if debug != 0 {
-            printf(
-                b"analyze_dm3: file end loop %d, start at %d, read %d\n\0" as *const u8
-                    as *const ::core::ffi::c_char,
-                loop_0,
-                c,
-                maxUseC - c,
-            );
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "analyzeDM3: file end loop %d, start at %d, read %d\n",
+                &[
+                    CArg::Int(loop_ as i64),
+                    CArg::Int(c as i64),
+                    CArg::Int((max_use_c - c) as i64),
+                ],
+            ));
         }
-        while c < maxUseC
-            && (xsize == 0 as ::core::ffi::c_int
-                || type_ < 0 as ::core::ffi::c_int
-                || c < typeIndex
-                    + 64 as ::core::ffi::c_int
-                    + (if dmind != 0 {
-                        20 as ::core::ffi::c_int
-                    } else {
-                        0 as ::core::ffi::c_int
-                    }))
+
+        /* Look past a DataType enough to see another Dimensions - it is supposed
+        to be after it */
+        while c < max_use_c
+            && (xsize == 0 || type_ < 0 || c < type_index + 64 + (if dmind != 0 { 20 } else { 0 }))
         {
-            if buf[c as usize] as ::core::ffi::c_int == 68 as ::core::ffi::c_int {
-                found = strstr(
-                    (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                        as *mut ::core::ffi::c_char,
-                    b"Dimensions\0" as *const u8 as *const ::core::ffi::c_char,
-                );
-                if !found.is_null()
-                    && (c + ysizeOff[dmind as usize] + 1 as ::core::ffi::c_int) < maxUseC
-                {
-                    if loop_0 == 0 && c != lastDimensions {
-                        matchLast = 0 as ::core::ffi::c_int;
+            /* Look for D, then check if it is Dimensions or DataType */
+            if buf[c as usize] as i32 == 68 {
+                // `strstr(&buf[c], "Dimensions")`: the search stops at the first
+                // NUL, which the terminator written above guarantees exists.
+                let hay = &buf[c as usize..];
+                let hay = &hay[..hay.iter().position(|b| *b == 0).unwrap_or(hay.len())];
+                let found = hay.windows(10).position(|w| w == b"Dimensions");
+                if found.is_some() && c + ysize_off[dmind as usize] + 1 < max_use_c {
+                    if loop_ == 0 && c != LAST_DIMENSIONS.get() {
+                        match_last = 0;
                         break;
+                    }
+                    lowbyte = buf[(c + dimens_off[dmind as usize]) as usize] as i32;
+                    if lowbyte == 3 {
+                        /* break the scan if this is running off the end for either loop type */
+                        if c + zsize_off[dmind as usize] + 1 >= max_use_c {
+                            match_last = 0;
+                            break;
+                        }
+                        lowbyte = buf[(c + zsize_off[dmind as usize]) as usize] as i32;
+                        hibyte = buf[(c + zsize_off[dmind as usize] + 1) as usize] as i32;
+                        zsize = lowbyte + 256 * hibyte;
+                    } else if lowbyte == 2 {
+                        zsize = 1;
                     } else {
-                        lowbyte = buf[(c + dimensOff[dmind as usize]) as usize]
-                            as ::core::ffi::c_uchar
-                            as ::core::ffi::c_int;
-                        if lowbyte == 3 as ::core::ffi::c_int {
-                            if c + zsizeOff[dmind as usize] + 1 as ::core::ffi::c_int >= maxUseC {
-                                matchLast = 0 as ::core::ffi::c_int;
-                                break;
-                            } else {
-                                lowbyte = buf[(c + zsizeOff[dmind as usize]) as usize]
-                                    as ::core::ffi::c_uchar
-                                    as ::core::ffi::c_int;
-                                hibyte =
-                                    buf[(c + zsizeOff[dmind as usize] + 1 as ::core::ffi::c_int)
-                                        as usize]
-                                        as ::core::ffi::c_uchar
-                                        as ::core::ffi::c_int;
-                                zsize = lowbyte + 256 as ::core::ffi::c_int * hibyte;
-                            }
-                        } else if lowbyte == 2 as ::core::ffi::c_int {
-                            zsize = 1 as ::core::ffi::c_int;
-                        } else {
-                            b3d_error(
-                                Some(&mut ImodFile::Stderr),
-                                format_args!(
-                                    "ERROR: analyzeDM3 - The number of dimensions seemsto be {}, not 2 or 3, in {}\n",
-                                    lowbyte,
-                                    CStr::from_ptr(filename).to_string_lossy()
-                                ),
-                            );
-                            return IIERR_NO_SUPPORT;
-                        }
-                        lowbyte = buf[(c + xsizeOff[dmind as usize]) as usize]
-                            as ::core::ffi::c_uchar
-                            as ::core::ffi::c_int;
-                        hibyte = buf
-                            [(c + xsizeOff[dmind as usize] + 1 as ::core::ffi::c_int) as usize]
-                            as ::core::ffi::c_uchar
-                            as ::core::ffi::c_int;
-                        xsize = lowbyte + 256 as ::core::ffi::c_int * hibyte;
-                        lowbyte = buf[(c + ysizeOff[dmind as usize]) as usize]
-                            as ::core::ffi::c_uchar
-                            as ::core::ffi::c_int;
-                        hibyte = buf
-                            [(c + ysizeOff[dmind as usize] + 1 as ::core::ffi::c_int) as usize]
-                            as ::core::ffi::c_uchar
-                            as ::core::ffi::c_int;
-                        ysize = lowbyte + 256 as ::core::ffi::c_int * hibyte;
-                        curDimensions = c;
-                        if debug != 0 {
-                            printf(
-                                b"analyze_dm3: Found Dimensions at %d  x %d y %d z %d\n\0"
-                                    as *const u8
-                                    as *const ::core::ffi::c_char,
-                                c,
-                                xsize,
-                                ysize,
-                                zsize,
-                            );
-                        }
+                        b3d_error(
+                            Some(&mut ImodFile::Stderr),
+                            format_args!(
+                                "ERROR: analyzeDM3 - The number of dimensions seemsto be {}, not 2 or 3, in {}\n",
+                                lowbyte,
+                                String::from_utf8_lossy(filename)
+                            ),
+                        );
+                        return IIERR_NO_SUPPORT;
+                    }
+                    lowbyte = buf[(c + xsize_off[dmind as usize]) as usize] as i32;
+                    hibyte = buf[(c + xsize_off[dmind as usize] + 1) as usize] as i32;
+                    xsize = lowbyte + 256 * hibyte;
+                    lowbyte = buf[(c + ysize_off[dmind as usize]) as usize] as i32;
+                    hibyte = buf[(c + ysize_off[dmind as usize] + 1) as usize] as i32;
+                    ysize = lowbyte + 256 * hibyte;
+                    cur_dimensions = c;
+                    if debug != 0 {
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Found Dimensions at %d  x %d y %d z %d\n",
+                            &[
+                                CArg::Int(c as i64),
+                                CArg::Int(xsize as i64),
+                                CArg::Int(ysize as i64),
+                                CArg::Int(zsize as i64),
+                            ],
+                        ));
                     }
                 } else {
-                    found = strstr(
-                        (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                            as *mut ::core::ffi::c_char,
-                        b"DataType\0" as *const u8 as *const ::core::ffi::c_char,
-                    );
-                    if !found.is_null()
-                        && c + dtypeOff[dmind as usize] < maxUseC
-                        && (buf[(c + dtypeOff[dmind as usize]) as usize] as ::core::ffi::c_int)
-                            < MAX_TYPES
+                    // `strstr(&buf[c], "DataType")`.
+                    let found = hay.windows(8).position(|w| w == b"DataType");
+                    // `buf[c + dtypeOff[dmind]]` is a C `char`, which is signed
+                    // on this platform: the `< MAX_TYPES` test and the value
+                    // stored in `type` are both sign-extended.
+                    if found.is_some()
+                        && c + dtype_off[dmind as usize] < max_use_c
+                        && (buf[(c + dtype_off[dmind as usize]) as usize] as i8 as i32) < MAX_TYPES
                     {
-                        if loop_0 == 0 && c != lastDataType {
-                            matchLast = 0 as ::core::ffi::c_int;
+                        if loop_ == 0 && c != LAST_DATA_TYPE.get() {
+                            match_last = 0;
                             break;
-                        } else {
-                            type_ =
-                                buf[(c + dtypeOff[dmind as usize]) as usize] as ::core::ffi::c_int;
-                            if typeOffset == 0 {
-                                typeOffset = (c as ::core::ffi::c_long
-                                    + statbuf.st_size as ::core::ffi::c_long
-                                    - (maxread as ::core::ffi::c_long + 1 as ::core::ffi::c_long))
-                                    as off_t;
-                            }
-                            typeIndex = c;
-                            curDataType = typeIndex;
-                            if debug != 0 {
-                                printf(
-                                    b"analyze_dm3: Found DataType at %d  type %d\n\0" as *const u8
-                                        as *const ::core::ffi::c_char,
-                                    c,
-                                    type_,
-                                );
-                            }
+                        }
+                        type_ = buf[(c + dtype_off[dmind as usize]) as usize] as i8 as i32;
+                        if type_offset == 0 {
+                            type_offset = c as i64 + st_size - (maxread + 1);
+                        }
+                        type_index = c;
+                        cur_data_type = type_index;
+                        if debug != 0 {
+                            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                "analyzeDM3: Found DataType at %d  type %d\n",
+                                &[CArg::Int(c as i64), CArg::Int(type_ as i64)],
+                            ));
                         }
                     }
                 }
             }
             c += 1;
         }
-        if matchLast != 0 && xsize != 0 && ysize != 0 && type_ >= 0 as ::core::ffi::c_int {
+
+        /* Break the outer loop if it still matches and size and type found */
+        if match_last != 0 && xsize != 0 && ysize != 0 && type_ >= 0 {
             break;
         }
-        loop_0 += 1;
+        loop_ += 1;
     }
-    if xsize == 0 || ysize == 0 || type_ < 0 as ::core::ffi::c_int {
+    if xsize == 0 || ysize == 0 || type_ < 0 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: analyzeDM3 - Dimensions or type not found in {}\n",
-                CStr::from_ptr(filename).to_string_lossy()
+                String::from_utf8_lossy(filename)
             ),
         );
         return IIERR_NO_SUPPORT;
     }
-    lastMaxEndUsed = (if maxread < (c + maxOffset[dmind as usize]) as ::core::ffi::c_long {
-        maxread as ::core::ffi::c_long
+    LAST_MAX_END_USED.set(if maxread < (c + max_offset[dmind as usize]) as i64 {
+        maxread as i32
     } else {
-        (c + maxOffset[dmind as usize]) as ::core::ffi::c_long
-    }) as ::core::ffi::c_int;
-    plausibleOff = (typeOffset as ::core::ffi::c_long
-        - (xsize * ysize) as ::core::ffi::c_long
-            * zsize as ::core::ffi::c_long
-            * dataSize[type_ as usize] as ::core::ffi::c_long) as off_t;
-    loop_0 = 1 as ::core::ffi::c_int - matchLast;
-    while loop_0 < 2 as ::core::ffi::c_int {
-        gotDimInfo = 0 as ::core::ffi::c_int;
-        gotMeta = gotDimInfo;
-        gotScale = gotMeta;
-        gotDim = gotScale;
-        gotCal = gotDim;
-        z_pixel = 0.0f32;
+        c + max_offset[dmind as usize]
+    });
+
+    /* Now look for the Data string in the front of the file and pixel size */
+    // `(off_t)(xsize * ysize)`: the product is formed as `int` and only then
+    // widened, so it wraps exactly where the C's does.
+    plausible_off = type_offset
+        - (xsize.wrapping_mul(ysize)) as i64 * zsize as i64 * data_size[type_ as usize] as i64;
+    loop_ = 1 - match_last;
+    while loop_ < 2 {
+        got_dim_info = 0;
+        got_meta = got_dim_info;
+        got_scale = got_meta;
+        got_dim = got_scale;
+        got_cal = got_dim;
+        z_pixel = 0.;
         pixel = z_pixel;
-        maxCurUsed = maxread as ::core::ffi::c_int;
-        if loop_0 != 0 {
-            c = 0 as ::core::ffi::c_int;
-            maxUseC = maxread as ::core::ffi::c_int;
+        max_cur_used = maxread as i32;
+
+        /* Try to read and scan only what is needed if things still match */
+        if loop_ != 0 {
+            c = 0;
+            max_use_c = maxread as i32;
         } else {
-            c = crate::imod::libcfshr::b3dutil::b3d_i_min(&[
-                lastDataType,
-                lastDimensions,
-                lastData,
-                lastCalibrations,
-                lastTabDimens,
-                lastDimensInfo,
-                lastUnits,
-                lastZunits,
+            c = b3d_i_min(&[
+                LAST_DATA_TYPE.get(),
+                LAST_DIMENSIONS.get(),
+                LAST_DATA.get(),
+                LAST_CALIBRATIONS.get(),
+                LAST_TAB_DIMENS.get(),
+                LAST_DIMENS_INFO.get(),
+                LAST_UNITS.get(),
+                LAST_ZUNITS.get(),
             ]);
-            maxUseC = lastMaxStartUsed;
+            max_use_c = LAST_MAX_START_USED.get();
         }
-        b3dFseek(fp, c, SEEK_SET);
-        if b3dFread(
-            core::slice::from_raw_parts_mut(
-                ((&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                    as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void)
-                    .cast::<u8>(),
-                ((1) as usize) * ((maxUseC - c) as usize),
-            ),
-            1 as size_t,
-            (maxUseC - c) as size_t,
+
+        b3d_fseek(fp, c, SEEK_SET);
+        if b3d_fread(
+            &mut buf[c as usize..max_use_c as usize],
+            1,
+            (max_use_c - c) as usize,
             fp,
         ) == 0
         {
@@ -1245,529 +1100,502 @@ pub unsafe extern "C" fn analyze_dm3(
                 Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: analyzeDM3 - Reading beginning of {}\n",
-                    CStr::from_ptr(filename).to_string_lossy()
+                    String::from_utf8_lossy(filename)
                 ),
             );
             return IIERR_IO_ERROR;
         }
-        buf[(maxUseC - 1 as ::core::ffi::c_int) as usize] = 0 as ::core::ffi::c_char;
+        buf[(max_use_c - 1) as usize] = 0x00;
         if debug != 0 {
-            printf(
-                b"analyze_dm3: file start loop %d, start at %d, read %d\n\0" as *const u8
-                    as *const ::core::ffi::c_char,
-                loop_0,
-                c,
-                maxUseC - c,
-            );
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "analyzeDM3: file start loop %d, start at %d, read %d\n",
+                &[
+                    CArg::Int(loop_ as i64),
+                    CArg::Int(c as i64),
+                    CArg::Int((max_use_c - c) as i64),
+                ],
+            ));
         }
-        while c < maxUseC {
-            if buf[c as usize] as ::core::ffi::c_int == 68 as ::core::ffi::c_int {
-                found = found_dm_tag(
-                    (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                        as *mut ::core::ffi::c_char,
-                    b"Data\0" as *const u8 as *const ::core::ffi::c_char,
-                    b"Data%%%%\0" as *const u8 as *const ::core::ffi::c_char,
-                    dmind,
-                    12 as ::core::ffi::c_int,
-                );
-                if !found.is_null() {
-                    toffset = found
-                        .offset(dataOff[dmind as usize] as isize)
-                        .offset_from(&raw mut buf as *mut ::core::ffi::c_char)
-                        as ::core::ffi::c_long as ::core::ffi::c_int;
-                    if offset == 0 || toffset as ::core::ffi::c_long <= plausibleOff {
-                        if loop_0 == 0 && (c != lastData || toffset != lastOffset) {
-                            matchLast = 0 as ::core::ffi::c_int;
+
+        while c < max_use_c {
+            if buf[c as usize] as i32 == 68 {
+                let found = found_dm_tag(&buf[c as usize..], b"Data", b"Data%%%%", dmind, 12);
+                if let Some(found) = found {
+                    toffset = (c as isize + found as isize + data_off[dmind as usize] as isize)
+                        as i64 as i32;
+
+                    /* If this is the first data string, or any data
+                    string that could still be far enough in front of the datatype
+                    string, save the offset */
+                    if offset == 0 || toffset as i64 <= plausible_off {
+                        if loop_ == 0 && (c != LAST_DATA.get() || toffset != LAST_OFFSET.get()) {
+                            match_last = 0;
                             break;
-                        } else {
-                            offset = toffset;
-                            curData = c;
-                            curOffset = offset;
-                            maxCurUsed = c;
                         }
+                        offset = toffset;
+                        cur_data = c;
+                        cur_offset = offset;
+                        max_cur_used = c;
                     }
+
+                    /* It used to be done with code types but that turned out to be
+                    unreliable */
+                    /* And if the code type is appropriate, save the
+                    offset and break out */
+                    /*if (type <= 11 && buf[c + 19] == datacode[type]) {
+                    offset = toffset;
+                    break;
+                    } */
                     if debug != 0 {
-                        printf(
-                            b"analyze_dm3: Found Data at %d  offset %d\n\0" as *const u8
-                                as *const ::core::ffi::c_char,
-                            c,
-                            toffset,
-                        );
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Found Data at %d  offset %d\n",
+                            &[CArg::Int(c as i64), CArg::Int(toffset as i64)],
+                        ));
                     }
-                } else if gotMeta != 0
-                    && !strstr(
-                        (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                            as *mut ::core::ffi::c_char,
-                        b"Dimension info\0" as *const u8 as *const ::core::ffi::c_char,
-                    )
-                    .is_null()
-                {
-                    gotDimInfo = 1 as ::core::ffi::c_int;
-                    if loop_0 == 0 && c != lastDimensInfo {
-                        matchLast = 0 as ::core::ffi::c_int;
+                } else if got_meta != 0 && {
+                    // `strstr(&buf[c], "Dimension info")`.
+                    let hay = &buf[c as usize..];
+                    let hay = &hay[..hay.iter().position(|b| *b == 0).unwrap_or(hay.len())];
+                    hay.windows(14).any(|w| w == b"Dimension info")
+                } {
+                    got_dim_info = 1;
+                    if loop_ == 0 && c != LAST_DIMENS_INFO.get() {
+                        match_last = 0;
                         break;
-                    } else {
-                        curDimensInfo = c;
-                        maxCurUsed = c;
-                        if debug != 0 {
-                            printf(
-                                b"analyze_dm3: Setting gotDimInfo at %d\n\0" as *const u8
-                                    as *const ::core::ffi::c_char,
-                                c,
-                            );
-                        }
                     }
-                }
-            } else if buf[c as usize] as ::core::ffi::c_int == 67 as ::core::ffi::c_int {
-                if !strstr(
-                    (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                        as *mut ::core::ffi::c_char,
-                    b"Calibrations\0" as *const u8 as *const ::core::ffi::c_char,
-                )
-                .is_null()
-                {
-                    gotCal = 1 as ::core::ffi::c_int;
-                    gotDimInfo = 0 as ::core::ffi::c_int;
-                    gotMeta = gotDimInfo;
-                    gotScale = gotMeta;
-                    gotDim = gotScale;
-                    if loop_0 == 0 && c != lastCalibrations {
-                        matchLast = 0 as ::core::ffi::c_int;
-                        break;
-                    } else {
-                        curCalibrations = c;
-                        maxCurUsed = c;
-                        if debug != 0 {
-                            printf(
-                                b"analyze_dm3: Found Calibrations at %d\n\0" as *const u8
-                                    as *const ::core::ffi::c_char,
-                                c,
-                            );
-                        }
-                    }
-                }
-            } else if buf[c as usize] as ::core::ffi::c_int == '\t' as i32 {
-                if gotCal != 0
-                    && gotDim == 0
-                    && !strstr(
-                        (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                            as *mut ::core::ffi::c_char,
-                        b"\tDimension\0" as *const u8 as *const ::core::ffi::c_char,
-                    )
-                    .is_null()
-                {
-                    gotDim = 1 as ::core::ffi::c_int;
-                    if loop_0 == 0 && c != lastTabDimens {
-                        matchLast = 0 as ::core::ffi::c_int;
-                        break;
-                    } else {
-                        curTabDimens = c;
-                        maxCurUsed = c;
-                        if debug != 0 {
-                            printf(
-                                b"analyze_dm3: Found tabDimension at %d\n\0" as *const u8
-                                    as *const ::core::ffi::c_char,
-                                c,
-                            );
-                        }
-                    }
-                }
-                if !strstr(
-                    (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                        as *mut ::core::ffi::c_char,
-                    b"\tMeta Data\0" as *const u8 as *const ::core::ffi::c_char,
-                )
-                .is_null()
-                {
-                    gotMeta = 1 as ::core::ffi::c_int;
-                    gotDimInfo = 0 as ::core::ffi::c_int;
-                    gotScale = gotDimInfo;
-                    gotDim = gotScale;
-                    gotCal = gotDim;
+                    cur_dimens_info = c;
+                    max_cur_used = c;
                     if debug != 0 {
-                        printf(
-                            b"analyze_dm3: Found tabMeta Data at %d\n\0" as *const u8
-                                as *const ::core::ffi::c_char,
-                            c,
-                        );
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Setting gotDimInfo at %d\n",
+                            &[CArg::Int(c as i64)],
+                        ));
                     }
                 }
-            } else if (gotDim != 0 || gotDimInfo != 0)
-                && gotScale == 0
-                && buf[c as usize] as ::core::ffi::c_int == 'S' as i32
+
+            /* Always look for start of the Calibrations sequence */
+            } else if buf[c as usize] as i32 == 67 {
+                // `strstr(&buf[c], "Calibrations")`.
+                let hay = &buf[c as usize..];
+                let hay = &hay[..hay.iter().position(|b| *b == 0).unwrap_or(hay.len())];
+                if hay.windows(12).any(|w| w == b"Calibrations") {
+                    got_cal = 1;
+                    got_dim_info = 0;
+                    got_meta = got_dim_info;
+                    got_scale = got_meta;
+                    got_dim = got_scale;
+                    if loop_ == 0 && c != LAST_CALIBRATIONS.get() {
+                        match_last = 0;
+                        break;
+                    }
+                    cur_calibrations = c;
+                    max_cur_used = c;
+                    if debug != 0 {
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Found Calibrations at %d\n",
+                            &[CArg::Int(c as i64)],
+                        ));
+                    }
+                }
+
+            /* Look for \tDimension if have Calibrations, or always look for Meta Data */
+            } else if buf[c as usize] == b'\t' {
+                let hay = &buf[c as usize..];
+                let hay = &hay[..hay.iter().position(|b| *b == 0).unwrap_or(hay.len())];
+                // `strstr(&buf[c], "\tDimension")`.
+                if got_cal != 0 && got_dim == 0 && hay.windows(10).any(|w| w == b"\tDimension") {
+                    got_dim = 1;
+                    if loop_ == 0 && c != LAST_TAB_DIMENS.get() {
+                        match_last = 0;
+                        break;
+                    }
+                    cur_tab_dimens = c;
+                    max_cur_used = c;
+                    if debug != 0 {
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Found tabDimension at %d\n",
+                            &[CArg::Int(c as i64)],
+                        ));
+                    }
+                }
+                // `strstr(&buf[c], "\tMeta Data")`.
+                if hay.windows(10).any(|w| w == b"\tMeta Data") {
+                    got_meta = 1;
+                    got_dim_info = 0;
+                    got_scale = got_dim_info;
+                    got_dim = got_scale;
+                    got_cal = got_dim;
+                    if debug != 0 {
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Found tabMeta Data at %d\n",
+                            &[CArg::Int(c as i64)],
+                        ));
+                    }
+                }
+
+            /* Look for Scale if have Dimension or Dimension info */
+            } else if (got_dim != 0 || got_dim_info != 0)
+                && got_scale == 0
+                && buf[c as usize] == b'S'
             {
-                found = found_dm_tag(
-                    (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                        as *mut ::core::ffi::c_char,
-                    b"Scale\0" as *const u8 as *const ::core::ffi::c_char,
-                    b"Scale%%%%\0" as *const u8 as *const ::core::ffi::c_char,
-                    dmind,
-                    13 as ::core::ffi::c_int,
-                );
-                if !found.is_null()
-                    && (c + scaleOff[dmind as usize] + 3 as ::core::ffi::c_int) < maxUseC
-                {
-                    gotScale = 1 as ::core::ffi::c_int;
-                    memcpy(
-                        &raw mut scale as *mut ::core::ffi::c_void,
-                        (&raw mut buf as *mut ::core::ffi::c_char).offset(
-                            (c + *(&raw mut scaleOff as *mut ::core::ffi::c_int)
-                                .offset(dmind as isize)) as isize,
-                        ) as *mut ::core::ffi::c_char
-                            as *const ::core::ffi::c_void,
-                        4 as size_t,
-                    );
+                let found = found_dm_tag(&buf[c as usize..], b"Scale", b"Scale%%%%", dmind, 13);
+                if found.is_some() && c + scale_off[dmind as usize] + 3 < max_use_c {
+                    /* Always copy a scale over but do not keep track of where, because there may
+                    be two good scales */
+                    got_scale = 1;
+                    // `memcpy(&scale, &buf[c + scaleOff[dmind]], 4)`.
+                    let base = (c + scale_off[dmind as usize]) as usize;
+                    scale = f32::from_ne_bytes([
+                        buf[base],
+                        buf[base + 1],
+                        buf[base + 2],
+                        buf[base + 3],
+                    ]);
                     #[cfg(target_endian = "big")]
-                    mrc_swap_longs(
-                        core::slice::from_raw_parts_mut(
-                            (&raw mut scale).cast::<::core::ffi::c_int>(),
-                            1,
-                        ),
-                        1,
-                    );
+                    {
+                        let mut swapped = [scale.to_bits() as i32];
+                        mrc_swap_longs(&mut swapped, 1);
+                        scale = f32::from_bits(swapped[0] as u32);
+                    }
                     if debug != 0 {
-                        printf(
-                            b"analyze_dm3: Found Scale at %d  %f\n\0" as *const u8
-                                as *const ::core::ffi::c_char,
-                            c,
-                            scale as ::core::ffi::c_double,
-                        );
+                        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                            "analyzeDM3: Found Scale at %d  %f\n",
+                            &[CArg::Int(c as i64), CArg::Dbl(scale as f64)],
+                        ));
                     }
                 }
-            } else if gotScale != 0 && buf[c as usize] as ::core::ffi::c_int == 'U' as i32 {
-                found = found_dm_tag(
-                    (&raw mut buf as *mut ::core::ffi::c_char).offset(c as isize)
-                        as *mut ::core::ffi::c_char,
-                    b"Units\0" as *const u8 as *const ::core::ffi::c_char,
-                    b"Units%%%%\0" as *const u8 as *const ::core::ffi::c_char,
-                    dmind,
-                    13 as ::core::ffi::c_int,
-                );
-                if !found.is_null()
-                    && (c + unitsOff[dmind as usize] + 2 as ::core::ffi::c_int) < maxUseC
-                {
-                    toffset = found.offset_from(&raw mut buf as *mut ::core::ffi::c_char)
-                        as ::core::ffi::c_long as ::core::ffi::c_int;
-                    if gotDim != 0 && pixel == 0.
-                        || gotDimInfo != 0 && z_pixel == 0.
-                        || toffset as ::core::ffi::c_long <= plausibleOff
-                    {
-                        if buf[(c + unitsOff[dmind as usize] + 2 as ::core::ffi::c_int) as usize]
-                            as ::core::ffi::c_int
-                            == 'm' as i32
+
+            /* If we have a scale, make sure it is valid and at a plausible location and
+            if so set the pixel size, overriding an earlier one */
+            } else if got_scale != 0 && buf[c as usize] == b'U' {
+                let found = found_dm_tag(&buf[c as usize..], b"Units", b"Units%%%%", dmind, 13);
+                if let Some(found) = found {
+                    if c + units_off[dmind as usize] + 2 < max_use_c {
+                        toffset = (c as isize + found as isize) as i64 as i32;
+                        if (got_dim != 0 && pixel == 0.)
+                            || (got_dim_info != 0 && z_pixel == 0.)
+                            || toffset as i64 <= plausible_off
                         {
-                            if buf[(c + unitsOff[dmind as usize]) as usize] as ::core::ffi::c_int
-                                == 'n' as i32
-                            {
-                                tmpPixel = (scale as ::core::ffi::c_double * 10.0f64)
-                                    as ::core::ffi::c_float;
-                            } else if buf[(c + unitsOff[dmind as usize]) as usize]
-                                as ::core::ffi::c_uchar
-                                as ::core::ffi::c_int
-                                == 181 as ::core::ffi::c_int
-                            {
-                                tmpPixel = (scale as ::core::ffi::c_double * 10000.0f64)
-                                    as ::core::ffi::c_float;
-                            }
-                            if gotDimInfo != 0 {
-                                if loop_0 == 0 && c != lastZunits {
-                                    matchLast = 0 as ::core::ffi::c_int;
-                                    break;
-                                } else {
-                                    curZunits = c;
-                                    z_pixel = tmpPixel;
+                            if buf[(c + units_off[dmind as usize] + 2) as usize] == b'm' {
+                                if buf[(c + units_off[dmind as usize]) as usize] == b'n' {
+                                    tmp_pixel = (scale as f64 * 10.) as f32;
+                                } else if buf[(c + units_off[dmind as usize]) as usize] as i32
+                                    == 181
+                                {
+                                    tmp_pixel = (scale as f64 * 10000.) as f32;
                                 }
-                            } else if loop_0 == 0 && c != lastUnits {
-                                matchLast = 0 as ::core::ffi::c_int;
-                                break;
-                            } else {
-                                curUnits = c;
-                                pixel = tmpPixel;
+
+                                /* Assign to regular or Z pixel and keep track of location separately */
+                                if got_dim_info != 0 {
+                                    if loop_ == 0 && c != LAST_ZUNITS.get() {
+                                        match_last = 0;
+                                        break;
+                                    }
+                                    cur_zunits = c;
+                                    z_pixel = tmp_pixel;
+                                } else {
+                                    if loop_ == 0 && c != LAST_UNITS.get() {
+                                        match_last = 0;
+                                        break;
+                                    }
+                                    cur_units = c;
+                                    pixel = tmp_pixel;
+                                }
+                                max_cur_used = c;
+                                if debug != 0 {
+                                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                        "analyzeDM3: Assigned %f to %spixel\n",
+                                        &[
+                                            CArg::Dbl(tmp_pixel as f64),
+                                            CArg::Str(if got_dim_info != 0 { "z" } else { "" }),
+                                        ],
+                                    ));
+                                }
                             }
-                            maxCurUsed = c;
                             if debug != 0 {
-                                printf(
-                                    b"analyze_dm3: Assigned %f to %spixel\n\0" as *const u8
-                                        as *const ::core::ffi::c_char,
-                                    tmpPixel as ::core::ffi::c_double,
-                                    if gotDimInfo != 0 {
-                                        b"z\0" as *const u8 as *const ::core::ffi::c_char
-                                    } else {
-                                        b"\0" as *const u8 as *const ::core::ffi::c_char
-                                    },
-                                );
+                                // C `%p` of `found`, which is `buf + toffset`.
+                                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                                    "analyzeDM3: Found Units at %d (%p) %d  %d\n",
+                                    &[
+                                        CArg::Int(c as i64),
+                                        CArg::Ptr(buf.as_ptr() as usize + toffset as usize),
+                                        CArg::Int(
+                                            buf[(c + units_off[dmind as usize]) as usize] as i64,
+                                        ),
+                                        CArg::Int(
+                                            buf[(c + units_off[dmind as usize] + 2) as usize]
+                                                as i64,
+                                        ),
+                                    ],
+                                ));
                             }
                         }
-                        if debug != 0 {
-                            printf(
-                                b"analyze_dm3: Found Units at %d (%p) %d  %d\n\0" as *const u8
-                                    as *const ::core::ffi::c_char,
-                                c,
-                                found,
-                                buf[(c + unitsOff[dmind as usize]) as usize] as ::core::ffi::c_uchar
-                                    as ::core::ffi::c_int,
-                                buf[(c + unitsOff[dmind as usize] + 2 as ::core::ffi::c_int)
-                                    as usize]
-                                    as ::core::ffi::c_uchar
-                                    as ::core::ffi::c_int,
-                            );
-                        }
+                        got_dim_info = 0;
+                        got_meta = got_dim_info;
+                        got_scale = got_meta;
+                        got_dim = got_scale;
+                        got_cal = got_dim;
                     }
-                    gotDimInfo = 0 as ::core::ffi::c_int;
-                    gotMeta = gotDimInfo;
-                    gotScale = gotMeta;
-                    gotDim = gotScale;
-                    gotCal = gotDim;
                 }
             }
             c += 1;
         }
-        if matchLast != 0 && offset != 0 {
+        if match_last != 0 && offset != 0 {
             break;
         }
-        loop_0 += 1;
+        loop_ += 1;
     }
     if offset == 0 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: analyzeDM3 - Data string not found in {}\n",
-                CStr::from_ptr(filename).to_string_lossy()
+                String::from_utf8_lossy(filename)
             ),
         );
         return IIERR_NO_SUPPORT;
     }
     if debug != 0 {
-        printf(
-            b"analyze_dm3: time %.1f\n\0" as *const u8 as *const ::core::ffi::c_char,
-            1000.0f64 * (wallTime() - wallStart),
-        );
-        fflush(stdout);
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            "analyzeDM3: time %.1f\n",
+            &[CArg::Dbl(1000. * (wall_time() - wall_start))],
+        ));
+        let _ = ImodFile::Stdout.flush();
     }
-    lastDataType = curDataType;
-    lastData = curData;
-    lastCalibrations = curCalibrations;
-    lastZunits = curZunits;
-    lastUnits = curUnits;
-    lastTabDimens = curTabDimens;
-    lastDimensions = curDimensions;
-    lastDimensInfo = curDimensInfo;
-    lastOffset = curOffset;
-    lastMaxRead = maxread;
-    lastMaxStartUsed = (if maxread < (maxCurUsed + maxOffset[dmind as usize]) as ::core::ffi::c_long
-    {
-        maxread as ::core::ffi::c_long
-    } else {
-        (maxCurUsed + maxOffset[dmind as usize]) as ::core::ffi::c_long
-    }) as ::core::ffi::c_int;
-    (*info).nx = xsize;
-    (*info).ny = ysize;
-    (*info).nz = zsize;
-    (*info).header_size = offset;
-    (*info).y_inverted = 1 as ::core::ffi::c_int;
-    (*info).pixel = pixel;
-    (*info).z_pixel = z_pixel;
+
+    /* Save all the indexes that were found for the next time */
+    LAST_DATA_TYPE.set(cur_data_type);
+    LAST_DATA.set(cur_data);
+    LAST_CALIBRATIONS.set(cur_calibrations);
+    LAST_ZUNITS.set(cur_zunits);
+    LAST_UNITS.set(cur_units);
+    LAST_TAB_DIMENS.set(cur_tab_dimens);
+    LAST_DIMENSIONS.set(cur_dimensions);
+    LAST_DIMENS_INFO.set(cur_dimens_info);
+    LAST_OFFSET.set(cur_offset);
+    LAST_MAX_READ.set(maxread);
+    LAST_MAX_START_USED.set(
+        if maxread < (max_cur_used + max_offset[dmind as usize]) as i64 {
+            maxread as i32
+        } else {
+            max_cur_used + max_offset[dmind as usize]
+        },
+    );
+
+    /* Set return values in info */
+    let info = unsafe { &mut *info };
+    info.nx = xsize;
+    info.ny = ysize;
+    info.nz = zsize;
+    info.header_size = offset;
+    info.y_inverted = 1;
+    info.pixel = pixel;
+    info.z_pixel = z_pixel;
     *dmtype = type_;
     #[cfg(target_endian = "little")]
     {
-        (*info).swap_bytes = 0 as ::core::ffi::c_int;
+        info.swap_bytes = 0;
     }
     #[cfg(target_endian = "big")]
     {
-        (*info).swap_bytes = 1 as ::core::ffi::c_int;
+        info.swap_bytes = 1;
     }
-    return 0 as ::core::ffi::c_int;
+    0
 }
-unsafe extern "C" fn found_dm_tag(
-    mut buf: *mut ::core::ffi::c_char,
-    mut tag: *const ::core::ffi::c_char,
-    mut fullTag: *const ::core::ffi::c_char,
-    mut dmind: ::core::ffi::c_int,
-    mut dm4Offset: ::core::ffi::c_int,
-) -> *mut ::core::ffi::c_char {
-    let mut found: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+
+/// Original `foundDMtag` (`iilikemrc.c:849`).
+///
+/// The C returns a `char *` into `buf`; here the return is the index of the
+/// match within the slice it was given, which is the same pointer arithmetic
+/// the two callers do with it.  `buf + dm4Offset` can run past the end of the
+/// one-megabyte buffer in the C, which reads adjacent stack; a slice that does
+/// not reach that far is treated as no match.
+fn found_dm_tag(
+    buf: &[u8],
+    tag: &[u8],
+    full_tag: &[u8],
+    dmind: i32,
+    dm4_offset: i32,
+) -> Option<usize> {
+    let mut found: Option<usize>;
+    // `strstr` searches only as far as the first NUL.
+    let hay = &buf[..buf.iter().position(|b| *b == 0).unwrap_or(buf.len())];
     if dmind != 0 {
-        found = strstr(buf, tag);
-        if !found.is_null()
-            && strstr(
-                buf.offset(dm4Offset as isize),
-                b"%%%%\0" as *const u8 as *const ::core::ffi::c_char,
-            )
-            .is_null()
-        {
-            found = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        found = hay.windows(tag.len()).position(|w| w == tag);
+        if found.is_some() {
+            let tail = match buf.get(dm4_offset as usize..) {
+                Some(tail) => tail,
+                None => return None,
+            };
+            let tail = &tail[..tail.iter().position(|b| *b == 0).unwrap_or(tail.len())];
+            if !tail.windows(4).any(|w| w == b"%%%%") {
+                found = None;
+            }
         }
     } else {
-        found = strstr(buf, fullTag);
+        found = hay.windows(full_tag.len()).position(|w| w == full_tag);
     }
-    return found;
+    found
 }
-unsafe fn check_fei_raw(
-    fp: &mut ImodFile,
-    mut filename: *mut ::core::ffi::c_char,
-    mut info: *mut RawImageInfo,
-) -> ::core::ffi::c_int {
-    let mut label: [::core::ffi::c_char; 13] = [0; 13];
-    let mut ivals: [::core::ffi::c_int; 9] = [0; 9];
-    b3dRewind(fp);
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut label as *mut ::core::ffi::c_char as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((1) as usize) * ((13) as usize),
-        ),
-        1 as size_t,
-        13 as size_t,
-        fp,
-    ) != 13 as size_t
-    {
+
+/// Original `checkFEIraw` (`iilikemrc.c:865`).
+///
+/// Check for the FEI raw format.
+unsafe fn check_fei_raw(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
+    let info = unsafe { &mut *info };
+    let mut label = [0u8; 13];
+    let mut ibuf = [0u8; 36];
+    b3d_rewind(fp);
+    if b3d_fread(&mut label, 1, 13, fp) != 13 {
         return IIERR_IO_ERROR;
     }
-    if strncmp(
-        &raw mut label as *mut ::core::ffi::c_char,
-        b"FEI RawImage\0" as *const u8 as *const ::core::ffi::c_char,
-        12 as size_t,
-    ) != 0
-    {
+    // `strncmp(label, "FEI RawImage", 12)`: the tag has no NUL in those 12
+    // bytes, so the comparison is exactly of the first 12 bytes.
+    if label[..12] != *b"FEI RawImage" {
         return IIERR_NOT_FORMAT;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut ::core::ffi::c_int as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize) * ((9) as usize),
-        ),
-        4 as size_t,
-        9 as size_t,
-        fp,
-    ) != 9 as size_t
-    {
+    if b3d_fread(&mut ibuf, 4, 9, fp) != 9 {
         return IIERR_IO_ERROR;
     }
-    if ivals[4 as ::core::ffi::c_int as usize] == 16 as ::core::ffi::c_int
-        && ivals[5 as ::core::ffi::c_int as usize] == 1 as ::core::ffi::c_int
-    {
-        (*info).type_ = RAW_MODE_SHORT;
-    } else if ivals[4 as ::core::ffi::c_int as usize] == 16 as ::core::ffi::c_int
-        && ivals[5 as ::core::ffi::c_int as usize] == 0 as ::core::ffi::c_int
-    {
-        (*info).type_ = RAW_MODE_USHORT;
-    } else if ivals[4 as ::core::ffi::c_int as usize] == 32 as ::core::ffi::c_int
-        && ivals[5 as ::core::ffi::c_int as usize] == 2 as ::core::ffi::c_int
-    {
-        (*info).type_ = RAW_MODE_FLOAT;
+    let mut ivals = [0i32; 9];
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
+    }
+    if ivals[4] == 16 && ivals[5] == 1 {
+        info.type_ = RAW_MODE_SHORT;
+    } else if ivals[4] == 16 && ivals[5] == 0 {
+        info.type_ = RAW_MODE_USHORT;
+    } else if ivals[4] == 32 && ivals[5] == 2 {
+        info.type_ = RAW_MODE_FLOAT;
     } else {
         return IIERR_NO_SUPPORT;
     }
-    (*info).nx = ivals[1 as ::core::ffi::c_int as usize];
-    (*info).ny = ivals[2 as ::core::ffi::c_int as usize];
-    (*info).nz = 1 as ::core::ffi::c_int;
+    info.nx = ivals[1];
+    info.ny = ivals[2];
+    info.nz = 1;
     #[cfg(target_endian = "little")]
     {
-        (*info).swap_bytes = 0 as ::core::ffi::c_int;
+        info.swap_bytes = 0;
     }
     #[cfg(target_endian = "big")]
     {
-        (*info).swap_bytes = 1 as ::core::ffi::c_int;
+        info.swap_bytes = 1;
     }
-    (*info).header_size = 49 as ::core::ffi::c_int + ivals[6 as ::core::ffi::c_int as usize];
-    (*info).y_inverted = 1 as ::core::ffi::c_int;
-    (*info).amin = 0.0f32;
-    (*info).amax = 0.0f32;
-    return 0 as ::core::ffi::c_int;
+    info.header_size = 49 + ivals[6];
+    info.y_inverted = 1;
+    info.amin = 0.;
+    info.amax = 0.;
+    0
 }
-unsafe fn check_em(
-    fp: &mut ImodFile,
-    mut filename: *mut ::core::ffi::c_char,
-    mut info: *mut RawImageInfo,
-) -> ::core::ffi::c_int {
-    let mut bvals: [::core::ffi::c_uchar; 4] = [0; 4];
-    let mut ivals: [b3dInt32; 12] = [0; 12];
-    b3dRewind(fp);
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut bvals as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((1) as usize) * ((4) as usize),
-        ),
-        1 as size_t,
-        4 as size_t,
-        fp,
-    ) != 4 as size_t
-    {
+
+/// Original `checkEM` (`iilikemrc.c:902`).
+///
+/// Check for the EM format.
+unsafe fn check_em(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
+    let info = unsafe { &mut *info };
+    let mut bvals = [0u8; 4];
+    let mut ibuf = [0u8; 48];
+    b3d_rewind(fp);
+    if b3d_fread(&mut bvals, 1, 4, fp) != 4 {
         return IIERR_IO_ERROR;
     }
-    if b3dFread(
-        core::slice::from_raw_parts_mut(
-            (&raw mut ivals as *mut b3dInt32 as *mut ::core::ffi::c_void).cast::<u8>(),
-            ((4) as usize) * ((3) as usize),
-        ),
-        4 as size_t,
-        3 as size_t,
-        fp,
-    ) != 3 as size_t
-    {
+    if b3d_fread(&mut ibuf[..12], 4, 3, fp) != 3 {
         return IIERR_IO_ERROR;
     }
-    if ivals[0 as ::core::ffi::c_int as usize] <= 0 as ::core::ffi::c_int
-        || ivals[1 as ::core::ffi::c_int as usize] <= 0 as ::core::ffi::c_int
-        || ivals[2 as ::core::ffi::c_int as usize] <= 0 as ::core::ffi::c_int
-        || ivals[0 as ::core::ffi::c_int as usize] > 65536 as ::core::ffi::c_int
-            && ivals[1 as ::core::ffi::c_int as usize] > 65536 as ::core::ffi::c_int
-            && ivals[2 as ::core::ffi::c_int as usize] > 65536 as ::core::ffi::c_int
-        || bvals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int > MAX_EM_MACHINES
-        || bvals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_int == 1 as ::core::ffi::c_int
-        || bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int > MAX_EM_TYPES
-        || (ivals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-            * ivals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-            * ivals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_float)
-            as ::core::ffi::c_double
-            > MAX_EM_SIZE
+    let mut ivals = [0i32; 12];
+    for (index, value) in ivals.iter_mut().enumerate() {
+        *value = i32::from_ne_bytes([
+            ibuf[4 * index],
+            ibuf[4 * index + 1],
+            ibuf[4 * index + 2],
+            ibuf[4 * index + 3],
+        ]);
+    }
+
+    /*printf("bvals %d %d %d %d  ivals %d %d %d\n", bvals[0], bvals[1], bvals[2],
+    bvals[3], ivals[0], ivals[1], ivals[2]);*/
+
+    /* Not much magic here, put limits on type values and machine numbers and
+    product of putative sizes */
+    // `((float)ivals[0] * ivals[1]) * ivals[2]`: the whole product is formed in
+    // single precision and only the comparison with MAX_EM_SIZE is in double.
+    if ivals[0] <= 0
+        || ivals[1] <= 0
+        || ivals[2] <= 0
+        || (ivals[0] > 65536 && ivals[1] > 65536 && ivals[2] > 65536)
+        || bvals[0] as i32 > MAX_EM_MACHINES
+        || bvals[2] as i32 == 1
+        || bvals[3] as i32 > MAX_EM_TYPES
+        || (ivals[0] as f32 * ivals[1] as f32 * ivals[2] as f32) as f64 > MAX_EM_SIZE
     {
-        mrc_swap_longs(core::slice::from_raw_parts_mut(ivals.as_mut_ptr(), 3), 3);
-        if ivals[0 as ::core::ffi::c_int as usize] <= 0 as ::core::ffi::c_int
-            || ivals[1 as ::core::ffi::c_int as usize] <= 0 as ::core::ffi::c_int
-            || ivals[2 as ::core::ffi::c_int as usize] <= 0 as ::core::ffi::c_int
-            || ivals[0 as ::core::ffi::c_int as usize] > 65536 as ::core::ffi::c_int
-                && ivals[1 as ::core::ffi::c_int as usize] > 65536 as ::core::ffi::c_int
-                && ivals[2 as ::core::ffi::c_int as usize] > 65536 as ::core::ffi::c_int
-            || bvals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int > MAX_EM_MACHINES
-            || bvals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-                == 1 as ::core::ffi::c_int
-            || bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int > MAX_EM_TYPES
-            || (ivals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-                * ivals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_float
-                * ivals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_float)
-                as ::core::ffi::c_double
-                > MAX_EM_SIZE
+        mrc_swap_longs(&mut ivals, 3);
+
+        if ivals[0] <= 0
+            || ivals[1] <= 0
+            || ivals[2] <= 0
+            || (ivals[0] > 65536 && ivals[1] > 65536 && ivals[2] > 65536)
+            || bvals[0] as i32 > MAX_EM_MACHINES
+            || bvals[2] as i32 == 1
+            || bvals[3] as i32 > MAX_EM_TYPES
+            || (ivals[0] as f32 * ivals[1] as f32 * ivals[2] as f32) as f64 > MAX_EM_SIZE
         {
             return IIERR_NOT_FORMAT;
         }
-        (*info).swap_bytes = 1 as ::core::ffi::c_int;
+        info.swap_bytes = 1;
     }
-    match bvals[3 as ::core::ffi::c_int as usize] as ::core::ffi::c_int {
+
+    match bvals[3] as i32 {
         1 => {
-            (*info).type_ = RAW_MODE_BYTE;
+            info.type_ = RAW_MODE_BYTE;
         }
         2 => {
-            (*info).type_ = RAW_MODE_SHORT;
+            info.type_ = RAW_MODE_SHORT;
         }
         5 => {
-            (*info).type_ = RAW_MODE_FLOAT;
+            info.type_ = RAW_MODE_FLOAT;
         }
-        _ => return IIERR_NO_SUPPORT,
+        _ => {
+            return IIERR_NO_SUPPORT;
+        }
     }
-    (*info).nx = ivals[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    (*info).ny = ivals[1 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    (*info).nz = ivals[2 as ::core::ffi::c_int as usize] as ::core::ffi::c_int;
-    (*info).header_size = 512 as ::core::ffi::c_int;
-    (*info).amin = 0.0f32;
-    (*info).amax = 0.0f32;
-    return 0 as ::core::ffi::c_int;
+
+    info.nx = ivals[0];
+    info.ny = ivals[1];
+    info.nz = ivals[2];
+    info.header_size = 512;
+    info.amin = 0.;
+    info.amax = 0.;
+    0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libiimod::iimage::{IIFILE_RAW, IITYPE_SHORT, ii_new};
-    use crate::imod::libiimod::mrcfiles::MrcHeader;
+    use crate::imod::libiimod::iimage::{IITYPE_SHORT, ii_new};
+
+    fn empty_info() -> RawImageInfo {
+        RawImageInfo {
+            type_: 0,
+            nx: 0,
+            ny: 0,
+            nz: 0,
+            swap_bytes: 0,
+            header_size: 0,
+            amin: 0.,
+            amax: 0.,
+            scan_min_max: 0,
+            all_match: 0,
+            section_skip: 0,
+            y_inverted: 0,
+            pixel: 0.,
+            z_pixel: 0.,
+        }
+    }
 
     #[test]
     fn fei_raw_dispatch_constructs_native_mrc_access_state() {
@@ -1787,7 +1615,7 @@ mod tests {
             let image = ii_new();
             assert!(!image.is_null());
             (*image).fp = Some(fp.clone());
-            (*image).filename = c"synthetic-fei.raw".as_ptr().cast_mut();
+            (*image).filename = Some(b"synthetic-fei.raw".to_vec());
             assert_eq!(ii_like_mrc_check(image.cast()), 0);
             let header = (*image).header.cast::<MrcHeader>();
             assert_eq!(((*image).file, (*image).type_), (IIFILE_RAW, IITYPE_SHORT));
@@ -1813,8 +1641,8 @@ mod tests {
                 bytes.len()
             );
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
-            let mut info: RawImageInfo = core::mem::zeroed();
-            assert_eq!(check_em(&mut fp, core::ptr::null_mut(), &mut info), 0);
+            let mut info = empty_info();
+            assert_eq!(check_em(&mut fp, b"", &mut info), 0);
             assert_eq!(
                 (info.nx, info.ny, info.nz, info.type_, info.header_size),
                 (8, 7, 2, RAW_MODE_SHORT, 512)
@@ -1834,7 +1662,7 @@ mod tests {
             );
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut unsupported_fp);
             assert_eq!(
-                check_em(&mut unsupported_fp, core::ptr::null_mut(), &mut info),
+                check_em(&mut unsupported_fp, b"", &mut info),
                 IIERR_NO_SUPPORT
             );
             drop(unsupported_fp);
@@ -1858,8 +1686,8 @@ mod tests {
                 crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
                 bytes.len()
             );
-            let mut info: RawImageInfo = core::mem::zeroed();
-            assert_eq!(check_pif(&mut fp, core::ptr::null_mut(), &mut info), 0);
+            let mut info = empty_info();
+            assert_eq!(check_pif(&mut fp, b"", &mut info), 0);
             assert_eq!(
                 (
                     info.nx,

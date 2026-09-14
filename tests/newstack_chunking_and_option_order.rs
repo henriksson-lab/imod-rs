@@ -64,7 +64,7 @@ fn write_input(dir: &std::path::Path, extra: Option<&[u8]>) {
     let path = dir.join("in.mrc");
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(path_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(path_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 64, 48, 5, 2), 0);
         if let Some(extra) = extra {
@@ -116,7 +116,7 @@ fn extended_header(path: &std::path::Path) -> (i32, i16, i16, Vec<u8>) {
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
     let mut header = unsafe { MrcHeader::default() };
     unsafe {
-        let file = ii_open(path_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(path_c.to_bytes(), "rb");
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         ii_close(file);
     }

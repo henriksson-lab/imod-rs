@@ -14,6 +14,7 @@
 use std::cell::{Cell, RefCell};
 use std::ptr;
 
+use crate::imod::libcfshr::b3dutil::{CArg, c_format};
 use crate::imod::libcfshr::ilist::{Ilist, ilist_item, ilist_remove, ilist_size};
 use crate::imod::libimod::icont::{
     ICONT_CURSOR_LIKE, ICONT_DRAW_ALLZ, ICONT_MMODEL_ONLY, ICONT_STIPPLED, Nesting,
@@ -2147,8 +2148,10 @@ pub struct ZapFuncs {
     pub drew_extra_cursor: bool,
     /// `mXzoom`.
     pub xzoom: f32,
-    /// `mData`; the source declares it and never assigns anything but NULL.
-    pub data: *mut libc::c_char,
+    /// `mData`; the source declares it (`xzap.h:221`) and never assigns
+    /// anything but NULL (`xzap.cpp:513`), so the `char *` is an owned buffer
+    /// that never exists rather than a string.
+    pub data: Option<Vec<u8>>,
     /// `mImage`; see [`ZapFuncs::images`].
     pub image: bool,
     /// `mNumImages`.
@@ -2725,7 +2728,7 @@ impl ZapFuncs {
             drag_add_end: 0,
             drew_extra_cursor: false,
             xzoom: 0.,
-            data: ptr::null_mut(),
+            data: None,
             image: false,
             num_images: 0,
             section_step: 0,
@@ -2789,7 +2792,7 @@ impl ZapFuncs {
         zap.last_hq_draw_time = 0;
         zap.hide = 0;
         zap.popup = 0;
-        zap.data = ptr::null_mut();
+        zap.data = None;
         zap.image = false;
         zap.tess_cont = ptr::null_mut();
         zap.label_font = false;
@@ -2877,13 +2880,7 @@ impl ZapFuncs {
             for t in 0..=num_times {
                 let label =
                     unsafe { crate::imod::three_dmod::imodview::ivw_get_time_index_label(vi, t) };
-                labels.push(if label.is_null() {
-                    String::new()
-                } else {
-                    unsafe { std::ffi::CStr::from_ptr(label) }
-                        .to_string_lossy()
-                        .into_owned()
-                });
+                labels.push(String::from_utf8_lossy(label).into_owned());
             }
             let _ = n;
             util_get_longest_time_string(num_times, &labels)
@@ -2972,23 +2969,17 @@ impl ZapFuncs {
                 max_winy = b;
             }
             let (wx, wy) = with_boundary(|n| n.zap_window_pos());
-            let mut buf = [0 as libc::c_char; 128];
-            unsafe {
-                libc::snprintf(
-                    buf.as_mut_ptr(),
-                    buf.len(),
-                    c"maxWinxy %d %d dpr %f  win l %d t %d".as_ptr(),
-                    max_winx,
-                    max_winy,
-                    pos_dpr as f64,
-                    wx,
-                    wy,
-                )
-            };
-            imod_trace(
-                'z',
-                &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
+            let buf = c_format(
+                "maxWinxy %d %d dpr %f  win l %d t %d",
+                &[
+                    CArg::Int(max_winx as i64),
+                    CArg::Int(max_winy as i64),
+                    CArg::Dbl(pos_dpr as f64),
+                    CArg::Int(wx as i64),
+                    CArg::Int(wy as i64),
+                ],
             );
+            imod_trace('z', &buf);
             with_boundary(|n| n.zap_window_set_size_text(max_winx, max_winy));
             usable_right = max_winx;
         } else {
@@ -3039,22 +3030,16 @@ impl ZapFuncs {
         }
         zap.device_pixel_ratio = with_boundary(|n| n.util_initialize_screen_change());
         let pos = with_boundary(|n| n.ivw_restorable_geometry(this));
-        let mut buf = [0 as libc::c_char; 128];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr(),
-                buf.len(),
-                c"mdpr %.2f, posdpr %.2f pos %d %d\n".as_ptr(),
-                zap.device_pixel_ratio as f64,
-                pos_dpr as f64,
-                pos[0],
-                pos[1],
-            )
-        };
-        imod_trace(
-            'z',
-            &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
+        let buf = c_format(
+            "mdpr %.2f, posdpr %.2f pos %d %d\n",
+            &[
+                CArg::Dbl(zap.device_pixel_ratio as f64),
+                CArg::Dbl(pos_dpr as f64),
+                CArg::Int(pos[0] as i64),
+                CArg::Int(pos[1] as i64),
+            ],
         );
+        imod_trace('z', &buf);
 
         // Replace the DPR with the correct one for the screen before zoom
         let is_windows = APP
@@ -3826,16 +3811,8 @@ impl ZapFuncs {
     pub fn paint(&mut self) {
         let drawtime = QTime::now();
         if imod_debug('z') {
-            let mut buf = [0 as libc::c_char; 64];
-            unsafe {
-                libc::snprintf(
-                    buf.as_mut_ptr(),
-                    buf.len(),
-                    c"Paint  %f:".as_ptr(),
-                    self.device_pixel_ratio as f64,
-                )
-            };
-            imod_print_stderr(&unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy());
+            let buf = c_format("Paint  %f:", &[CArg::Dbl(self.device_pixel_ratio as f64)]);
+            imod_print_stderr(&buf);
         }
 
         // Use this to keep track of whether the first draw has happened
@@ -4101,21 +4078,15 @@ impl ZapFuncs {
     pub fn screen_changed(&mut self, new_dpr: f32) {
         if new_dpr != 0. {
             let (px, py) = with_boundary(|n| n.zap_window_pos());
-            let mut buf = [0 as libc::c_char; 128];
-            unsafe {
-                libc::snprintf(
-                    buf.as_mut_ptr(),
-                    buf.len(),
-                    c"screen change Zap pos %d %d  DPR %f".as_ptr(),
-                    px,
-                    py,
-                    new_dpr as f64,
-                )
-            };
-            imod_trace(
-                'z',
-                &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
+            let buf = c_format(
+                "screen change Zap pos %d %d  DPR %f",
+                &[
+                    CArg::Int(px as i64),
+                    CArg::Int(py as i64),
+                    CArg::Dbl(new_dpr as f64),
+                ],
             );
+            imod_trace('z', &buf);
             if self.popup != 0 {
                 let screen_elapsed = self.screen_resize_time[0].elapsed().as_millis() as i32;
                 let resize_elapsed = self.screen_resize_time[1].elapsed().as_millis() as i32;
@@ -4144,19 +4115,8 @@ impl ZapFuncs {
             // here use up setting it to the right zoom
             if self.new_screen_zoom > 0. && new_dpr > with_boundary(|n| n.app_min_dev_pix_ratio()) {
                 self.zoom = self.new_screen_zoom;
-                let mut buf = [0 as libc::c_char; 64];
-                unsafe {
-                    libc::snprintf(
-                        buf.as_mut_ptr(),
-                        buf.len(),
-                        c"Zoom set to %.2f\n".as_ptr(),
-                        self.zoom as f64,
-                    )
-                };
-                imod_trace(
-                    'z',
-                    &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
-                );
+                let buf = c_format("Zoom set to %.2f\n", &[CArg::Dbl(self.zoom as f64)]);
+                imod_trace('z', &buf);
                 self.new_screen_zoom = 0.;
             }
         }
@@ -4771,38 +4731,29 @@ impl ZapFuncs {
                 let dy = cy - refy;
                 let dist2d =
                     (unsafe { (*vi).xybin } as f64 * ((dx * dx + dy * dy) as f64).sqrt()) as f32;
-                let mut wbuf = [0 as libc::c_char; 256];
-                unsafe {
-                    libc::snprintf(
-                        wbuf.as_mut_ptr(),
-                        wbuf.len(),
-                        c"From (%.1f, %.1f) to (%.1f, %.1f) =\n".as_ptr(),
-                        refx as f64 + 1.,
-                        refy as f64 + 1.,
-                        cx as f64 + 1.,
-                        cy as f64 + 1.,
-                    )
-                };
-                wprint(&unsafe { std::ffi::CStr::from_ptr(wbuf.as_ptr()) }.to_string_lossy());
+                let wbuf = c_format(
+                    "From (%.1f, %.1f) to (%.1f, %.1f) =\n",
+                    &[
+                        CArg::Dbl(refx as f64 + 1.),
+                        CArg::Dbl(refy as f64 + 1.),
+                        CArg::Dbl(cx as f64 + 1.),
+                        CArg::Dbl(cy as f64 + 1.),
+                    ],
+                );
+                wprint(&wbuf);
                 // `SPRINTF` is `QString::asprintf` (`imodconfig.h:13`), which
                 // prints a negative zero as `0`; `sprintf_arg` folds that.
-                let mut buf = [0 as libc::c_char; 256];
-                unsafe {
-                    libc::snprintf(
-                        buf.as_mut_ptr(),
-                        buf.len(),
-                        c"  %.1f %spixels".as_ptr(),
-                        crate::imod::libcfshr::b3dutil::sprintf_arg(dist2d as f64),
-                        if (*vi).xybin > 1 {
-                            c"unbinned ".as_ptr()
+                let str = c_format(
+                    "  %.1f %spixels",
+                    &[
+                        CArg::Dbl(crate::imod::libcfshr::b3dutil::sprintf_arg(dist2d as f64)),
+                        CArg::Str(if unsafe { (*vi).xybin } > 1 {
+                            "unbinned "
                         } else {
-                            c"".as_ptr()
-                        },
-                    )
-                };
-                let str = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
-                    .to_string_lossy()
-                    .into_owned();
+                            ""
+                        }),
+                    ],
+                );
                 with_boundary(|n| n.util_wprint_measure(&str, imod, dist2d, false));
             }
 
@@ -5154,51 +5105,37 @@ impl ZapFuncs {
                     for ind in 0..2 {
                         let length = unsafe { (*self.vi).xybin } as f32
                             * imod_contour_length(unsafe { cont.as_ref() }, ind);
-                        let mut buf = [0 as libc::c_char; 256];
-                        unsafe {
-                            libc::snprintf(
-                                buf.as_mut_ptr(),
-                                buf.len(),
-                                c"%s length %.1f %spixels".as_ptr(),
-                                if ind != 0 {
-                                    c"Closed".as_ptr()
+                        let str = c_format(
+                            "%s length %.1f %spixels",
+                            &[
+                                CArg::Str(if ind != 0 { "Closed" } else { "Open" }),
+                                CArg::Dbl(crate::imod::libcfshr::b3dutil::sprintf_arg(
+                                    length as f64,
+                                )),
+                                CArg::Str(if unsafe { (*self.vi).xybin } > 1 {
+                                    "unbin "
                                 } else {
-                                    c"Open".as_ptr()
-                                },
-                                crate::imod::libcfshr::b3dutil::sprintf_arg(length as f64),
-                                if (*self.vi).xybin > 1 {
-                                    c"unbin ".as_ptr()
-                                } else {
-                                    c"".as_ptr()
-                                },
-                            )
-                        };
-                        let str = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
-                            .to_string_lossy()
-                            .into_owned();
+                                    ""
+                                }),
+                            ],
+                        );
                         let imod = unsafe { (*self.vi).imod };
                         with_boundary(|n| n.util_wprint_measure(&str, imod, length, false));
                     }
                     let area = unsafe { (*self.vi).xybin } as f32
                         * unsafe { (*self.vi).xybin } as f32
                         * imod_contour_area(unsafe { cont.as_ref() });
-                    let mut buf = [0 as libc::c_char; 256];
-                    unsafe {
-                        libc::snprintf(
-                            buf.as_mut_ptr(),
-                            buf.len(),
-                            c"Area %g %spixels^2".as_ptr(),
-                            crate::imod::libcfshr::b3dutil::sprintf_arg(area as f64),
-                            if (*self.vi).xybin > 1 {
-                                c"unbin ".as_ptr()
+                    let str = c_format(
+                        "Area %g %spixels^2",
+                        &[
+                            CArg::Dbl(crate::imod::libcfshr::b3dutil::sprintf_arg(area as f64)),
+                            CArg::Str(if unsafe { (*self.vi).xybin } > 1 {
+                                "unbin "
                             } else {
-                                c"".as_ptr()
-                            },
-                        )
-                    };
-                    let str = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
-                        .to_string_lossy()
-                        .into_owned();
+                                ""
+                            }),
+                        ],
+                    );
                     let imod = unsafe { (*self.vi).imod };
                     with_boundary(|n| n.util_wprint_measure(&str, imod, area, true));
 
@@ -6075,19 +6012,16 @@ impl ZapFuncs {
             return 0;
         }
         if imod_debug('z') {
-            let mut buf = [0 as libc::c_char; 128];
-            unsafe {
-                libc::snprintf(
-                    buf.as_mut_ptr(),
-                    buf.len(),
-                    c"mouse segment %f,%f to %f,%f\n".as_ptr(),
-                    pnt1.x as f64,
-                    pnt1.y as f64,
-                    pnt2.x as f64,
-                    pnt2.y as f64,
-                )
-            };
-            imod_print_stderr(&unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy());
+            let buf = c_format(
+                "mouse segment %f,%f to %f,%f\n",
+                &[
+                    CArg::Dbl(pnt1.x as f64),
+                    CArg::Dbl(pnt1.y as f64),
+                    CArg::Dbl(pnt2.x as f64),
+                    CArg::Dbl(pnt2.y as f64),
+                ],
+            );
+            imod_print_stderr(&buf);
         }
 
         // Loop on contours
@@ -6141,22 +6075,16 @@ impl ZapFuncs {
                         (unsafe { (&(*cont).pts)[pt as usize].z } as f64 + 0.5).floor() as i32;
                     if last_z == iz1 && this_z == iz1 {
                         if imod_debug('z') {
-                            let mut buf = [0 as libc::c_char; 128];
-                            unsafe {
-                                libc::snprintf(
-                                    buf.as_mut_ptr(),
-                                    buf.len(),
-                                    c"%f,%f to %f,%f\n".as_ptr(),
-                                    (&(*cont).pts)[last_pt as usize].x as f64,
-                                    (&(*cont).pts)[last_pt as usize].y as f64,
-                                    (&(*cont).pts)[pt as usize].x as f64,
-                                    (&(*cont).pts)[pt as usize].y as f64,
-                                )
-                            };
-                            imod_print_stderr(
-                                &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
-                                    .to_string_lossy(),
+                            let buf = c_format(
+                                "%f,%f to %f,%f\n",
+                                &[
+                                    CArg::Dbl(unsafe { (&(*cont).pts)[last_pt as usize].x } as f64),
+                                    CArg::Dbl(unsafe { (&(*cont).pts)[last_pt as usize].y } as f64),
+                                    CArg::Dbl(unsafe { (&(*cont).pts)[pt as usize].x } as f64),
+                                    CArg::Dbl(unsafe { (&(*cont).pts)[pt as usize].y } as f64),
+                                ],
                             );
+                            imod_print_stderr(&buf);
                         }
 
                         if imod_point_intersect(
@@ -7452,33 +7380,19 @@ impl ZapFuncs {
 
         // `SPRINTF` is `QString::asprintf` (`imodconfig.h:13`); every
         // conversion here is `%d` or `%s`, which the two formatters agree on.
-        let mut buf = [0 as libc::c_char; 256];
-        unsafe {
-            libc::snprintf(
-                buf.as_mut_ptr(),
-                buf.len(),
-                c"  trimvol -x %d,%d %s %d,%d %s %d,%d".as_ptr(),
-                ixl + 1,
-                ixr + 1,
-                if flipped {
-                    c"-z".as_ptr()
-                } else {
-                    c"-y".as_ptr()
-                },
-                iyb + 1,
-                iyt + 1,
-                if flipped {
-                    c"-rx -y".as_ptr()
-                } else {
-                    c"-z".as_ptr()
-                },
-                low_section,
-                high_section,
-            )
-        };
-        let trimvol = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
-            .to_string_lossy()
-            .into_owned();
+        let trimvol = c_format(
+            "  trimvol -x %d,%d %s %d,%d %s %d,%d",
+            &[
+                CArg::Int((ixl + 1) as i64),
+                CArg::Int((ixr + 1) as i64),
+                CArg::Str(if flipped { "-z" } else { "-y" }),
+                CArg::Int((iyb + 1) as i64),
+                CArg::Int((iyt + 1) as i64),
+                CArg::Str(if flipped { "-rx -y" } else { "-z" }),
+                CArg::Int(low_section as i64),
+                CArg::Int(high_section as i64),
+            ],
+        );
 
         if to_info_window {
             wprint(&format!(
@@ -8170,19 +8084,14 @@ impl ZapFuncs {
 
                 // Print scale bar length if it was drawn
                 if self.scale_bar_size > 0. {
-                    let mut buf = [0 as libc::c_char; 128];
-                    unsafe {
-                        libc::snprintf(
-                            buf.as_mut_ptr(),
-                            buf.len(),
-                            c"Scale bar for montage is %g %s\n".as_ptr(),
-                            self.scale_bar_size as f64,
-                            imod_units(&*(*self.vi).imod),
-                        )
-                    };
-                    imod_print_stderr(
-                        &unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy(),
+                    let buf = c_format(
+                        "Scale bar for montage is %g %s\n",
+                        &[
+                            CArg::Dbl(self.scale_bar_size as f64),
+                            CArg::Str(imod_units(unsafe { &*(*self.vi).imod })),
+                        ],
                     );
+                    imod_print_stderr(&buf);
                 }
 
                 with_boundary(|n| n.gl_flush());
@@ -10441,13 +10350,7 @@ impl ZapFuncs {
                 let label = unsafe {
                     crate::imod::three_dmod::imodview::ivw_get_time_index_label(self.vi, time)
                 };
-                let label = if label.is_null() {
-                    String::new()
-                } else {
-                    unsafe { std::ffi::CStr::from_ptr(label) }
-                        .to_string_lossy()
-                        .into_owned()
-                };
+                let label = String::from_utf8_lossy(label).into_owned();
                 with_boundary(|n| n.zap_window_set_time_label(time, &label));
             }
         }

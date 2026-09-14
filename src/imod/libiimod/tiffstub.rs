@@ -31,18 +31,10 @@ pub type TiffMapFileProc =
     Option<unsafe extern "C" fn(Thandle, *mut *mut c_void, *mut Toff) -> c_int>;
 pub type TiffUnmapFileProc = Option<unsafe extern "C" fn(Thandle, *mut c_void, Toff)>;
 
-/// C global `version` (`tiffstub.c:4`).
-pub static mut VERSION: [c_char; 9] = [
-    b'I' as c_char,
-    b'M' as c_char,
-    b'O' as c_char,
-    b'D' as c_char,
-    b'S' as c_char,
-    b'T' as c_char,
-    b'U' as c_char,
-    b'B' as c_char,
-    0,
-];
+/// C global `version` (`tiffstub.c:4`), the string `TIFFGetVersion` returns.
+/// The bytes are held as bytes; only the pointer handed back across the
+/// libtiff ABI is a C string, and its terminator is the last element.
+pub static VERSION: [u8; 9] = *b"IMODSTUB\0";
 
 /// C `TIFFSetDirectory` (`tiffstub.c:6`).
 pub unsafe fn tiff_set_directory(d: *mut Tiff, t: Tdir) -> c_int {
@@ -126,7 +118,7 @@ pub unsafe fn tiff_set_error_handler(handler: TiffErrorHandler) -> TiffErrorHand
 
 /// C `TIFFGetVersion` (`tiffstub.c:86`).
 pub unsafe fn tiff_get_version() -> *const c_char {
-    core::ptr::addr_of!(VERSION).cast()
+    VERSION.as_ptr().cast()
 }
 
 /// C `TIFFIsByteSwapped` (`tiffstub.c:91`).
@@ -205,7 +197,7 @@ mod tests {
             assert_eq!(tiff_read_directory(core::ptr::null_mut()), 0);
             assert!(tiff_open(core::ptr::null(), core::ptr::null()).is_null());
             assert_eq!(
-                core::ffi::CStr::from_ptr(tiff_get_version()).to_bytes(),
+                core::slice::from_raw_parts(tiff_get_version().cast::<u8>(), VERSION.len() - 1),
                 b"IMODSTUB"
             );
         }

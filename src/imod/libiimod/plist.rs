@@ -8,21 +8,17 @@ use crate::imod::libcfshr::autodoc::{
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::b3d_error;
 use crate::imod::libiimod::mrcfiles::{LoadInfo, MrcHeader};
-use core::ffi::c_char;
 use core::sync::atomic::{AtomicI32, Ordering};
 use std::io::Read;
 
 static S_PIECE_KEY_IND: AtomicI32 = AtomicI32::new(0);
 
 /// Matches C `mrc_plist_li(IloadInfo *, MrcHeader *, const char *)` (`plist.c:18`).
-pub unsafe fn mrc_plist_li(li: *mut LoadInfo, hdata: *mut MrcHeader, fname: *const c_char) -> i32 {
-    if fname.is_null() {
+pub unsafe fn mrc_plist_li(li: *mut LoadInfo, hdata: *mut MrcHeader, fname: &[u8]) -> i32 {
+    if fname.is_empty() {
         return 1;
     }
-    let Some(mut fin) = ImodFile::open(
-        &unsafe { core::ffi::CStr::from_ptr(fname) }.to_string_lossy(),
-        "r",
-    ) else {
+    let Some(mut fin) = ImodFile::open(&String::from_utf8_lossy(fname), "r") else {
         unsafe {
             (*li).plist = 0;
             b3d_error(
@@ -201,20 +197,11 @@ pub unsafe fn mrc_plist_create(
 }
 
 /// Matches C `iiPlistLoad(const char *, IloadInfo *, int, int, int)` (`plist.c:191`).
-pub unsafe fn ii_plist_load(
-    filename: *const c_char,
-    li: *mut LoadInfo,
-    nx: i32,
-    ny: i32,
-    nz: i32,
-) -> i32 {
-    if filename.is_null() || nz < 1 || ny < 1 || nx < 1 {
+pub unsafe fn ii_plist_load(filename: &[u8], li: *mut LoadInfo, nx: i32, ny: i32, nz: i32) -> i32 {
+    if filename.is_empty() || nz < 1 || ny < 1 || nx < 1 {
         return 1;
     }
-    let Some(mut fin) = ImodFile::open(
-        &unsafe { core::ffi::CStr::from_ptr(filename) }.to_string_lossy(),
-        "r",
-    ) else {
+    let Some(mut fin) = ImodFile::open(&String::from_utf8_lossy(filename), "r") else {
         return 1;
     };
     let retval = unsafe { ii_plist_load_f(&mut fin, li, nx, ny, nz) };
@@ -238,14 +225,14 @@ pub unsafe fn ii_plist_load_f(
 
 /// Matches C `iiPlistFromMetadata` (`plist.c:234`).
 pub unsafe fn ii_plist_from_metadata(
-    filename: *const c_char,
+    filename: &[u8],
     add_mdoc: i32,
     li: *mut LoadInfo,
     nx: i32,
     ny: i32,
     nz: i32,
 ) -> i32 {
-    if filename.is_null() || nx < 1 || ny < 1 || nz < 1 {
+    if filename.is_empty() || nx < 1 || ny < 1 || nz < 1 {
         return -4;
     }
     let (mut montage, mut num_sect, mut sect_type) = (0, 0, 0);
@@ -276,11 +263,11 @@ pub unsafe fn ii_plist_from_autodoc(
     num_sect: i32,
     sect_type: i32,
 ) -> i32 {
-    let sect_names = [c"ZValue".as_ptr(), c"Image".as_ptr(), c"ZValue".as_ptr()];
-    let keys = [
-        c"PieceCoordinates".as_ptr(),
-        c"AlignedPieceCoords".as_ptr(),
-        c"AlignedPieceCoordsVS".as_ptr(),
+    let sect_names: [&[u8]; 3] = [b"ZValue", b"Image", b"ZValue"];
+    let keys: [&[u8]; 3] = [
+        b"PieceCoordinates",
+        b"AlignedPieceCoords",
+        b"AlignedPieceCoordsVS",
     ];
     let mut key_order = [2, 1, 0];
     let piece_key_ind = S_PIECE_KEY_IND.load(Ordering::SeqCst);
@@ -311,34 +298,28 @@ pub unsafe fn ii_plist_from_autodoc(
         while i < nz {
             let mut index = i;
             if sect_type == 3 {
-                index = adoc_lookup_by_name_value(c"ZValue".as_ptr(), i);
+                index = adoc_lookup_by_name_value(b"ZValue", i);
                 if index < 0 {
                     break;
                 }
             }
             let mut err = 0;
             for key_ind in 0..num_keys {
+                // `plist.c:290` passes `&li->pcoords[i * 3 + 0..2]`; the three
+                // values land in consecutive slots of the same array, so they
+                // are read out of a local triple and stored together.
+                let (mut px, mut py, mut pz) = (0_i32, 0_i32, 0_i32);
                 err = adoc_get_three_integers(
                     sect_names[(sect_type - 1) as usize],
                     index,
                     keys[key_order[key_ind as usize] as usize],
-                    (&mut (*li).pcoords)
-                        .as_mut()
-                        .unwrap()
-                        .as_mut_ptr()
-                        .add((i * 3) as usize),
-                    (&mut (*li).pcoords)
-                        .as_mut()
-                        .unwrap()
-                        .as_mut_ptr()
-                        .add((i * 3 + 1) as usize),
-                    (&mut (*li).pcoords)
-                        .as_mut()
-                        .unwrap()
-                        .as_mut_ptr()
-                        .add((i * 3 + 2) as usize),
+                    &mut px,
+                    &mut py,
+                    &mut pz,
                 );
                 if err == 0 {
+                    let pcoords = (&mut (*li).pcoords).as_mut().unwrap();
+                    pcoords[(i * 3) as usize..(i * 3 + 3) as usize].copy_from_slice(&[px, py, pz]);
                     break;
                 }
             }
@@ -367,18 +348,12 @@ pub fn ii_plist_set_adoc_coord_type(value: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CString;
-
     #[test]
     fn loads_vendored_piece_coordinate_fixture_and_normalizes_origin() {
-        let path = CString::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/fixtures/piece-list.txt"
-        ))
-        .unwrap();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/piece-list.txt");
         let mut load_info = LoadInfo::default();
         assert_eq!(
-            unsafe { ii_plist_load(path.as_ptr(), &mut load_info, 100, 80, 9) },
+            unsafe { ii_plist_load(path.as_bytes(), &mut load_info, 100, 80, 9) },
             0
         );
         assert_eq!(load_info.plist, 9);

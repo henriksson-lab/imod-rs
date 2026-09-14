@@ -111,9 +111,9 @@ pub unsafe fn slice_clear(s: *mut Islice, val: [f32; 4]) {
         }
     }
 }
-pub unsafe fn slice_mode(mst: *const core::ffi::c_char) -> i32 {
-    unsafe {
-        let value = core::ffi::CStr::from_ptr(mst).to_bytes();
+pub fn slice_mode(mst: &[u8]) -> i32 {
+    {
+        let value = mst;
         if value == b"byte" || value == b"0" {
             0
         } else if value == b"sbyte" {
@@ -557,13 +557,11 @@ mod tests {
 
     #[test]
     fn string_mode_table_matches_source_case_and_aliases() {
-        unsafe {
-            assert_eq!(slice_mode(c"byte".as_ptr()), 0);
-            assert_eq!(slice_mode(c"sbyte".as_ptr()), -2);
-            assert_eq!(slice_mode(c"complex".as_ptr()), 4);
-            assert_eq!(slice_mode(c"16".as_ptr()), 16);
-            assert_eq!(slice_mode(c"BYTE".as_ptr()), -1);
-        }
+        assert_eq!(slice_mode(b"byte"), 0);
+        assert_eq!(slice_mode(b"sbyte"), -2);
+        assert_eq!(slice_mode(b"complex"), 4);
+        assert_eq!(slice_mode(b"16"), 16);
+        assert_eq!(slice_mode(b"BYTE"), -1);
     }
     #[test]
     fn size_accessors_retain_source_raw_layout() {

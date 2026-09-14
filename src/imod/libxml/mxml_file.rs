@@ -4301,16 +4301,12 @@ mod tests {
 
     /// autodoc round-trip driver mirroring `scratchpad/xmldiff/adocrt.c`.
     ///
-    /// `libcfshr::autodoc` still has a C-shaped API, so this is the one place
-    /// in the module that builds a NUL-terminated string; it goes when autodoc
-    /// is converted.
     #[test]
     fn xml_autodoc_roundtrip() {
         use crate::imod::libcfshr::autodoc::{
             adoc_clear, adoc_get_write_as_xml, adoc_get_xml_root_element, adoc_read,
             adoc_set_write_as_xml, adoc_write,
         };
-        use std::ffi::{CStr, CString};
         let Ok(reppath) = std::env::var("IMOD_XML_RT_REPORT") else {
             return;
         };
@@ -4324,8 +4320,7 @@ mod tests {
                 continue;
             }
             let base = line.rsplit('/').next().unwrap();
-            let cline = CString::new(line).unwrap();
-            let ind = unsafe { adoc_read(cline.as_ptr()) };
+            let ind = adoc_read(line.as_bytes());
             let _ = rep.write_all(
                 c_format("%s read=%d", &[CArg::Str(base), CArg::Int(ind as i64)]).as_bytes(),
             );
@@ -4333,38 +4328,30 @@ mod tests {
                 let _ = rep.write_all(b"\n");
                 continue;
             }
-            let mut root: *mut core::ffi::c_char = core::ptr::null_mut();
-            let err = unsafe { adoc_get_xml_root_element(&raw mut root) };
-            let rootbytes: Vec<u8> = if root.is_null() {
-                b"(nil)".to_vec()
-            } else {
-                unsafe { CStr::from_ptr(root).to_bytes().to_vec() }
+            let mut root: Option<Vec<u8>> = None;
+            let err = adoc_get_xml_root_element(&mut root);
+            let rootbytes: Vec<u8> = match &root {
+                None => b"(nil)".to_vec(),
+                Some(root) => root.clone(),
             };
             let _ = rep.write_all(&c_format_bytes(
                 " rootErr=%d root=%s",
                 &[CArg::Int(err as i64), CArg::Bytes(&rootbytes)],
             ));
-            if !root.is_null() {
-                unsafe { libc::free(root as *mut core::ffi::c_void) };
-            }
             let _ = rep.write_all(
-                c_format(
-                    " xmlRead=%d",
-                    &[CArg::Int(unsafe { adoc_get_write_as_xml() } as i64)],
-                )
-                .as_bytes(),
+                c_format(" xmlRead=%d", &[CArg::Int(adoc_get_write_as_xml() as i64)]).as_bytes(),
             );
-            unsafe { adoc_set_write_as_xml(asxml) };
-            let out = CString::new(format!("{}/{}.out", outdir, base)).unwrap();
+            adoc_set_write_as_xml(asxml);
+            let out = format!("{}/{}.out", outdir, base);
             let _ = rep.write_all(
                 c_format(
                     " write=%d\n",
-                    &[CArg::Int(unsafe { adoc_write(out.as_ptr()) } as i64)],
+                    &[CArg::Int(adoc_write(out.as_bytes()) as i64)],
                 )
                 .as_bytes(),
             );
-            unsafe { adoc_clear(ind) };
-            unsafe { adoc_set_write_as_xml(0) };
+            adoc_clear(ind);
+            adoc_set_write_as_xml(0);
         }
     }
 

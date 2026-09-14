@@ -21,7 +21,6 @@ use crate::imod::libiimod::mrcsec::{
     mrc_read_section, mrc_read_section_byte, mrc_read_section_float, mrc_read_section_ushort,
     mrc_write_z, mrc_write_z_float,
 };
-use core::ffi::c_char;
 
 const IIERR_BAD_CALL: i32 = -1;
 const IIERR_NOT_FORMAT: i32 = 1;
@@ -134,38 +133,33 @@ pub unsafe extern "C" fn ii_mrc_delete(in_file: *mut ImodImageFile) {
     }
 }
 /// Matches C `iiMRCopenNew(ImodImageFile *, const char *)` (`iimrc.c:125`).
-pub unsafe extern "C" fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: *const c_char) -> i32 {
+pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
     unsafe {
         *libc::__errno_location() = 0;
-        (*in_file).fp = ImodFile::open(
-            &core::ffi::CStr::from_ptr((*in_file).filename).to_string_lossy(),
-            &core::ffi::CStr::from_ptr(mode).to_string_lossy(),
-        );
+        let name = (*in_file).filename.clone().unwrap_or_default();
+        (*in_file).fp = ImodFile::open(&String::from_utf8_lossy(&name), mode);
         if (*in_file).fp.is_none() {
             let errno = *libc::__errno_location();
-            let filename = if (*in_file).filename.is_null() {
-                "(null)"
-            } else {
-                core::ffi::CStr::from_ptr((*in_file).filename)
-                    .to_str()
-                    .unwrap_or("(non-UTF8)")
-            };
+            // `strerror` is the C library's own errno string; that call is the
+            // one place a C string legitimately crosses here.
             let message = if errno != 0 {
-                libc::strerror(errno)
+                core::ffi::CStr::from_ptr(libc::strerror(errno))
+                    .to_string_lossy()
+                    .into_owned()
             } else {
-                c"".as_ptr()
+                String::new()
             };
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: iiMRCopenNew - Could not open {}{}{}\n",
-                    filename,
+                    String::from_utf8_lossy(&name),
                     if errno != 0 {
                         " - system message: "
                     } else {
                         ""
                     },
-                    core::ffi::CStr::from_ptr(message).to_string_lossy()
+                    message
                 ),
             );
             return 1;
@@ -238,7 +232,7 @@ pub unsafe extern "C" fn ii_mrc_set_load_info(in_file: *mut ImodImageFile, li: *
 /// Matches C static `iiMRCreadSection` (`iimrc.c:192`).
 unsafe extern "C" fn ii_mrc_read_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_unscaled(in_file, buf, in_section, 0) }
@@ -246,7 +240,7 @@ unsafe extern "C" fn ii_mrc_read_section(
 /// Matches C static `iiMRCreadSectionFloat` (`iimrc.c:197`).
 unsafe extern "C" fn ii_mrc_read_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_unscaled(in_file, buf, in_section, 1) }
@@ -254,7 +248,7 @@ unsafe extern "C" fn ii_mrc_read_section_float(
 /// Matches C static `readSectionUnscaled` (`iimrc.c:202`).
 unsafe fn read_section_unscaled(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     as_float: i32,
 ) -> i32 {
@@ -281,7 +275,7 @@ unsafe fn read_section_unscaled(
 /// Matches C static `iiMRCreadSectionByte` (`iimrc.c:223`).
 unsafe extern "C" fn ii_mrc_read_section_byte(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_scaled(in_file, buf, in_section, 255) }
@@ -289,7 +283,7 @@ unsafe extern "C" fn ii_mrc_read_section_byte(
 /// Matches C static `iiMRCreadSectionUShort` (`iimrc.c:227`).
 unsafe extern "C" fn ii_mrc_read_section_ushort(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { read_section_scaled(in_file, buf, in_section, 65535) }
@@ -297,7 +291,7 @@ unsafe extern "C" fn ii_mrc_read_section_ushort(
 /// Matches C static `readSectionScaled` (`iimrc.c:232`).
 unsafe fn read_section_scaled(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     outmax: i32,
 ) -> i32 {
@@ -322,7 +316,7 @@ unsafe fn read_section_scaled(
 /// Matches C static `iiMRCwriteSection` (`iimrc.c:255`).
 unsafe extern "C" fn ii_mrc_write_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { write_section(in_file, buf, in_section, 0) }
@@ -330,7 +324,7 @@ unsafe extern "C" fn ii_mrc_write_section(
 /// Matches C static `iiMRCwriteSectionFloat` (`iimrc.c:260`).
 unsafe extern "C" fn ii_mrc_write_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { write_section(in_file, buf, in_section, 1) }
@@ -338,7 +332,7 @@ unsafe extern "C" fn ii_mrc_write_section_float(
 /// Matches C static `writeSection` (`iimrc.c:265`).
 unsafe fn write_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     as_float: i32,
 ) -> i32 {
@@ -611,8 +605,8 @@ mod tests {
             assert_eq!(libc::close(fd), 0);
             let image = ii_new();
             assert!(!image.is_null());
-            (*image).filename = path.as_mut_ptr().cast();
-            assert_eq!(ii_mrc_open_new(image, c"wb+".as_ptr()), 0);
+            (*image).filename = Some(path[..path.len() - 1].to_vec());
+            assert_eq!(ii_mrc_open_new(image, "wb+"), 0);
             let header = (*image).header.cast::<MrcHeader>();
             assert_eq!(
                 ((*image).file, (*header).nx, (*header).ny, (*header).nz),

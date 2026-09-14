@@ -10,10 +10,13 @@ use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libiimod::mrcfiles::MrcHeader;
 pub type FILE = libc::FILE;
 pub type fortStrLen_t = i32;
-#[derive(Copy, Clone)]
+/// C `BoundInfo` (`parallelwrite.c:28`).  `regions` was a `malloc`ed array of
+/// `numFiles` entries; it owns its storage here, which is why neither this type
+/// nor [`BoundRegion`] is `Copy` any more.
+#[derive(Clone)]
 #[repr(C)]
 pub struct BoundInfo {
-    pub regions: *mut BoundRegion,
+    pub regions: Vec<BoundRegion>,
     pub nx: ::core::ffi::c_int,
     pub ny: ::core::ffi::c_int,
     pub num_bound_lines: ::core::ffi::c_int,
@@ -21,10 +24,12 @@ pub struct BoundInfo {
     pub every_sec: ::core::ffi::c_int,
     pub hdf_index: ::core::ffi::c_int,
 }
-#[derive(Copy, Clone)]
+/// C `BoundRegion` (`parallelwrite.c:21`).
+#[derive(Clone)]
 #[repr(C)]
 pub struct BoundRegion {
-    pub file: *mut ::core::ffi::c_char,
+    /// C `char *file`, `strdup`ed from a line of the boundary-info file.
+    pub file: Vec<u8>,
     pub section: [::core::ffi::c_int; 2],
     pub start_line: [::core::ffi::c_int; 2],
 }
@@ -32,7 +37,9 @@ pub type ImodImageFile = crate::imod::libiimod::iimage::ImodImageFile;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct BufSegment {
-    pub buf_start: *mut ::core::ffi::c_char,
+    /// C `char *bufStart`: a position inside the shared HDF buffer, not a
+    /// string.
+    pub buf_start: *mut u8,
     pub num_bytes: ::core::ffi::c_int,
     pub section: ::core::ffi::c_int,
     pub start_line: ::core::ffi::c_int,
@@ -48,22 +55,21 @@ pub const SEEK_SET: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 pub const MAX_INFOS: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
 pub const MAXLINE: ::core::ffi::c_int = 1024 as ::core::ffi::c_int;
 pub const DEFAULT_HDF_BUF_MB: ::core::ffi::c_int = 20 as ::core::ffi::c_int;
-pub const HDF_BUFFER_ENV_VAR: [::core::ffi::c_char; 22] = unsafe {
-    ::core::mem::transmute::<[u8; 22], [::core::ffi::c_char; 22]>(*b"PARALLEL_HDF_BUF_SIZE\0")
-};
-static mut s_infos: [BoundInfo; 5] = [BoundInfo {
-    regions: ::core::ptr::null::<BoundRegion>() as *mut BoundRegion,
-    nx: 0,
-    ny: 0,
-    num_bound_lines: 0,
-    num_files: 0,
-    every_sec: 0,
-    hdf_index: 0,
+pub const HDF_BUFFER_ENV_VAR: &str = "PARALLEL_HDF_BUF_SIZE";
+static mut s_infos: [BoundInfo; 5] = [const {
+    BoundInfo {
+        regions: Vec::new(),
+        nx: 0,
+        ny: 0,
+        num_bound_lines: 0,
+        num_files: 0,
+        every_sec: 0,
+        hdf_index: 0,
+    }
 }; 5];
 static mut s_num_infos: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 static mut s_cur_info: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-static mut s_hdf_bufs: [*mut ::core::ffi::c_char; 5] =
-    [::core::ptr::null::<::core::ffi::c_char>() as *mut ::core::ffi::c_char; 5];
+static mut s_hdf_bufs: [*mut u8; 5] = [::core::ptr::null_mut::<u8>(); 5];
 static mut s_segments: [*mut BufSegment; 5] =
     [::core::ptr::null::<BufSegment>() as *mut BufSegment; 5];
 static mut s_num_segments: [::core::ffi::c_int; 5] = [0; 5];
@@ -81,11 +87,7 @@ static mut s_iy_bound: [[::core::ffi::c_int; 2]; 5] = [[0; 2]; 5];
 static mut s_if_open: [::core::ffi::c_int; 5] = [0; 5];
 static mut s_iz_bound: [[::core::ffi::c_int; 2]; 5] = [[0; 2]; 5];
 static mut s_if_all_sec: [::core::ffi::c_int; 5] = [0; 5];
-pub unsafe extern "C" fn par_wrt_initialize(
-    filename: *const ::core::ffi::c_char,
-    nxin: i32,
-    nyin: i32,
-) -> i32 {
+pub unsafe fn par_wrt_initialize(filename: &[u8], nxin: i32, nyin: i32) -> i32 {
     if s_num_infos >= MAX_INFOS {
         return 5;
     }
@@ -93,26 +95,24 @@ pub unsafe extern "C" fn par_wrt_initialize(
         .cast::<BoundInfo>()
         .add(s_num_infos as usize);
     (*bi).hdf_index = -1;
-    if filename.is_null() || libc::strlen(filename) == 0 {
-        (*bi).regions = ::core::ptr::null_mut();
+    if filename.is_empty() {
+        (*bi).regions = Vec::new();
         s_cur_info = s_num_infos;
         s_num_infos += 1;
         return 0;
     }
     if nxin < 0 {
-        (*bi).hdf_index = crate::imod::libcfshr::b3dutil::b3d_open_lock_file(
-            core::ffi::CStr::from_ptr(filename)
-                .to_string_lossy()
-                .as_ref(),
-        );
+        (*bi).hdf_index =
+            crate::imod::libcfshr::b3dutil::b3d_open_lock_file(&String::from_utf8_lossy(filename));
         if (*bi).hdf_index < 0 {
             return 6;
         }
         (*bi).nx = -nxin;
         (*bi).ny = nyin;
-        let env_value = libc::getenv(HDF_BUFFER_ENV_VAR.as_ptr());
-        if !env_value.is_null() {
-            let buffer_mb = libc::atoi(env_value);
+        // `parallelwrite.c:129-133`.  `atoi` of a string with no leading
+        // number is 0, which the failing parse stands in for.
+        if let Ok(env_value) = std::env::var(HDF_BUFFER_ENV_VAR) {
+            let buffer_mb = env_value.trim_start().parse::<i32>().unwrap_or(0);
             if buffer_mb > 0 {
                 s_buf_size = buffer_mb * 1_048_576;
             }
@@ -126,12 +126,8 @@ pub unsafe extern "C" fn par_wrt_initialize(
         s_num_infos += 1;
         return 0;
     }
-    let fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
-        core::ffi::CStr::from_ptr(filename)
-            .to_string_lossy()
-            .as_ref(),
-        "r",
-    );
+    let fp =
+        crate::imod::libcfshr::b3dutil::ImodFile::open(&String::from_utf8_lossy(filename), "r");
     let Some(mut fp) = fp else {
         return 1;
     };
@@ -139,47 +135,66 @@ pub unsafe extern "C" fn par_wrt_initialize(
     if crate::imod::libcfshr::b3dutil::fgetline(&mut fp, &mut line, MAXLINE) <= 0 {
         return 2;
     }
+    // `parallelwrite.c:148` is `sscanf(line, "%d %d %d %d %d", …)`: each `%d`
+    // skips leading whitespace, takes an optional sign and digits, and stops at
+    // the first character that cannot extend the number; a field that does not
+    // convert leaves its variable alone and ends the scan.
     let mut version = 0;
-    libc::sscanf(
-        line.as_mut_ptr().cast(),
-        c"%d %d %d %d %d".as_ptr(),
-        &raw mut version,
-        &raw mut (*bi).every_sec,
-        &raw mut (*bi).nx,
-        &raw mut (*bi).num_bound_lines,
-        &raw mut (*bi).num_files,
-    );
+    {
+        let text = String::from_utf8_lossy(&line[..line.iter().position(|b| *b == 0).unwrap_or(0)])
+            .into_owned();
+        let mut fields = text.split_ascii_whitespace();
+        for target in [
+            &raw mut version,
+            &raw mut (*bi).every_sec,
+            &raw mut (*bi).nx,
+            &raw mut (*bi).num_bound_lines,
+            &raw mut (*bi).num_files,
+        ] {
+            match fields.next().and_then(|f| f.parse::<i32>().ok()) {
+                Some(value) => *target = value,
+                None => break,
+            }
+        }
+    }
     if (*bi).nx != nxin || (*bi).num_bound_lines <= 0 || (*bi).num_files <= 0 {
         return 3;
     }
-    (*bi).regions =
-        libc::malloc((*bi).num_files as usize * ::core::mem::size_of::<BoundRegion>()).cast();
-    if (*bi).regions.is_null() {
-        return 4;
-    }
-    for i in 0..(*bi).num_files {
+    (*bi).regions = Vec::new();
+    for _i in 0..(*bi).num_files {
         if crate::imod::libcfshr::b3dutil::fgetline(&mut fp, &mut line, MAXLINE) <= 0 {
             return 2;
         }
-        let region = (*bi).regions.add(i as usize);
-        (*region).file = libc::strdup(line.as_mut_ptr().cast());
-        if (*region).file.is_null() {
-            return 4;
-        }
+        let mut region = BoundRegion {
+            file: line[..line.iter().position(|b| *b == 0).unwrap_or(0)].to_vec(),
+            section: [0; 2],
+            start_line: [0; 2],
+        };
         if crate::imod::libcfshr::b3dutil::fgetline(&mut fp, &mut line, MAXLINE) <= 0 {
             return 2;
         }
-        libc::sscanf(
-            line.as_mut_ptr().cast(),
-            c"%d %d %d %d".as_ptr(),
-            (*region).section.as_mut_ptr(),
-            (*region).start_line.as_mut_ptr(),
-            (*region).section.as_mut_ptr().add(1),
-            (*region).start_line.as_mut_ptr().add(1),
-        );
-        if (*region).section[1] >= 0 && (*region).start_line[1] < 0 {
-            (*region).start_line[1] = nyin - (*bi).num_bound_lines;
+        // `parallelwrite.c:167`, the same `%d` scan as above.
+        {
+            let text =
+                String::from_utf8_lossy(&line[..line.iter().position(|b| *b == 0).unwrap_or(0)])
+                    .into_owned();
+            let mut fields = text.split_ascii_whitespace();
+            for target in [
+                &raw mut region.section[0],
+                &raw mut region.start_line[0],
+                &raw mut region.section[1],
+                &raw mut region.start_line[1],
+            ] {
+                match fields.next().and_then(|f| f.parse::<i32>().ok()) {
+                    Some(value) => *target = value,
+                    None => break,
+                }
+            }
         }
+        if region.section[1] >= 0 && region.start_line[1] < 0 {
+            region.start_line[1] = nyin - (*bi).num_bound_lines;
+        }
+        (*bi).regions.push(region);
     }
     // `fclose(fp)`: the handle closes when it leaves scope.
     drop(fp);
@@ -208,7 +223,7 @@ pub unsafe extern "C" fn par_wrt_properties(
         *all_sec = (*bi).hdf_index;
         return -1;
     }
-    if (*bi).regions.is_null() {
+    if (*bi).regions.is_empty() {
         return 0;
     }
     *lines_bound = (*bi).num_bound_lines;
@@ -265,7 +280,7 @@ pub unsafe extern "C" fn parallel_write_slice(
     static mut S_FP_BOUND: Option<ImodFile> = None;
     let mut allsec = 0;
     let mut nfiles = 0;
-    let mut filename = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let mut filename = Vec::<u8>::new();
     // `parallelwrite.c:251` `(ImodImageFile *)fout` — the reverse of the HDF
     // identity token: for an HDF file `iiFile->fp` *is* `(FILE *)iiFile`, so
     // casting back recovers the struct.
@@ -304,7 +319,7 @@ pub unsafe extern "C" fn parallel_write_slice(
         fout = (*ii_file).fp.clone().unwrap();
     }
     let mut err =
-        crate::imod::libiimod::mrcfiles::mrc_write_slice(buf, &mut fout, hdata, slice, b'Z' as i8);
+        crate::imod::libiimod::mrcfiles::mrc_write_slice(buf, &mut fout, hdata, slice, b'Z');
     if parallel_hdf && par_wrt_reclose_hdf(ii_file, hdata) != 0 {
         return 1;
     }
@@ -329,7 +344,7 @@ pub unsafe extern "C" fn parallel_write_slice(
             slice,
             0,
             (*hdata).ny,
-            &raw mut filename,
+            &mut filename,
             (&raw mut S_SECTIONS).cast(),
             (&raw mut S_START_LINES).cast(),
         );
@@ -355,18 +370,14 @@ pub unsafe extern "C" fn parallel_write_slice(
             );
             return 1;
         }
-        crate::imod::libcfshr::b3dutil::imod_backup_file(
-            core::ffi::CStr::from_ptr(filename)
-                .to_string_lossy()
-                .as_ref(),
-        );
-        S_FP_BOUND = ImodFile::open(&core::ffi::CStr::from_ptr(filename).to_string_lossy(), "wb");
+        crate::imod::libcfshr::b3dutil::imod_backup_file(&String::from_utf8_lossy(&filename));
+        S_FP_BOUND = ImodFile::open(&String::from_utf8_lossy(&filename), "wb");
         if (&*(&raw const S_FP_BOUND)).is_none() {
             crate::imod::libcfshr::b3dutil::b3d_error(
                 Some(&mut ImodFile::Stdout),
                 format_args!(
                     "ERROR: sliceWriteParallel - opening boundary file {}\n",
-                    core::ffi::CStr::from_ptr(filename).to_string_lossy()
+                    String::from_utf8_lossy(&filename)
                 ),
             );
             return 1;
@@ -390,14 +401,14 @@ pub unsafe extern "C" fn parallel_write_slice(
                 SEEK_SET,
             );
             let data = buf
-                .cast::<::core::ffi::c_char>()
+                .cast::<u8>()
                 .add((hbound.nx * S_START_LINES[ib] * CSIZE * DSIZE) as usize);
             err = crate::imod::libiimod::mrcfiles::mrc_write_slice(
                 data.cast(),
                 (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
                 hbound,
                 ib as i32,
-                b'Z' as i8,
+                b'Z',
             );
             if err != 0 {
                 return err;
@@ -455,7 +466,7 @@ pub unsafe extern "C" fn parwrtgetregion_(
     strlen_0: fortStrLen_t,
 ) -> i32 {
     let region_num = *region_num - 1;
-    if s_num_infos == 0 || s_cur_info < 0 || s_infos[s_cur_info as usize].regions.is_null() {
+    if s_num_infos == 0 || s_cur_info < 0 || s_infos[s_cur_info as usize].regions.is_empty() {
         return 2;
     }
     let bi = (&raw mut s_infos)
@@ -464,12 +475,15 @@ pub unsafe extern "C" fn parwrtgetregion_(
     if region_num < 0 || region_num >= (*bi).num_files {
         return 1;
     }
-    let region = &*(*bi).regions.add(region_num as usize);
+    let region = &(&(*bi).regions)[region_num as usize];
     *sections = region.section[0];
     *sections.add(1) = region.section[1];
     *start_lines = region.start_line[0];
     *start_lines.add(1) = region.start_line[1];
-    crate::imod::libcfshr::b3dutil::c2f_string(region.file, filename, strlen_0)
+    // The Fortran bridge again: `c2f_string` blank-pads into the caller's
+    // fixed-length character variable.
+    let cname = std::ffi::CString::new(region.file.clone()).unwrap_or_default();
+    crate::imod::libcfshr::b3dutil::c2f_string(cname.as_ptr(), filename, strlen_0)
 }
 pub unsafe extern "C" fn par_wrt_reclose_hdf(
     ii_file: *mut ImodImageFile,
@@ -518,8 +532,8 @@ pub unsafe extern "C" fn par_wrt_flush_buffers(
     }
     0
 }
-pub unsafe extern "C" fn iiu_par_wrt_initialize(
-    filename: *const ::core::ffi::c_char,
+pub unsafe fn iiu_par_wrt_initialize(
+    filename: &[u8],
     iunit_bound: i32,
     nx_in: i32,
     ny_in: i32,
@@ -538,7 +552,7 @@ pub unsafe extern "C" fn iiu_par_wrt_initialize(
     s_lines_bound[index] = 0;
     s_if_open[index] = 0;
     let retval = par_wrt_initialize(filename, nx_in, ny_in);
-    if retval == 0 && !filename.is_null() && libc::strlen(filename) > 0 {
+    if retval == 0 && !filename.is_empty() {
         let mut num_files = 0;
         par_wrt_properties(
             (&raw mut s_if_all_sec)
@@ -560,13 +574,15 @@ pub unsafe extern "C" fn parwrtinitialize_(
     mut nzIn: *mut ::core::ffi::c_int,
     mut namelen: fortStrLen_t,
 ) -> i32 {
+    // The Fortran bridge: `f2c_string` carries the hidden string-length
+    // argument, and stays `char *` until both sides move (NATIVE.md 7).
     let c_string = crate::imod::libcfshr::b3dutil::f2c_string(filename, namelen);
     if c_string.is_null() {
         return 7;
     }
-    let err = iiu_par_wrt_initialize(c_string, *iunitBound, *nxIn, *nyIn, *nzIn);
+    let name = core::ffi::CStr::from_ptr(c_string).to_bytes().to_vec();
     libc::free(c_string.cast());
-    err
+    iiu_par_wrt_initialize(&name, *iunitBound, *nxIn, *nyIn, *nzIn)
 }
 pub unsafe extern "C" fn par_wrt_posn(iunit: i32, iz: i32, iy: i32) {
     crate::imod::libiimod::unit_fileio::iiu_set_position(iunit, iz, iy);
@@ -584,7 +600,7 @@ pub unsafe extern "C" fn parwrtposn_(
     par_wrt_posn(*iunit, *iz, *iy)
 }
 pub unsafe extern "C" fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
-    let barray = array.cast::<::core::ffi::c_char>();
+    let barray = array.cast::<u8>();
     if s_cur_info >= 0 && s_infos[s_cur_info as usize].hdf_index >= 0 {
         let ii_file = crate::imod::libiimod::unit_fileio::iiu_get_ii_file(iunit);
         let num_bytes = crate::imod::libiimod::unit_fileio::iiu_buf_bytes_per_pixel(iunit)
@@ -635,12 +651,16 @@ pub unsafe extern "C" fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void
         &raw mut ierr,
     );
     if ierr != 0 {
-        libc::printf(
-            b"\nERROR: parWrtSec - Finding parallel write boundary region sec %d err %d\n\0"
-                as *const u8 as *const ::core::ffi::c_char,
-            s_iz_cur[s_cur_info as usize],
-            ierr,
-        );
+        {
+            use std::io::Write;
+            let _ = ImodFile::Stdout.write_all(&crate::imod::libcfshr::b3dutil::c_format_bytes(
+                "\nERROR: parWrtSec - Finding parallel write boundary region sec %d err %d\n",
+                &[
+                    crate::imod::libcfshr::b3dutil::CArg::Int(s_iz_cur[s_cur_info as usize] as i64),
+                    crate::imod::libcfshr::b3dutil::CArg::Int(ierr as i64),
+                ],
+            ));
+        }
         libc::exit(1);
     }
     if s_iz_cur[s_cur_info as usize] == s_iz_bound[s_cur_info as usize][0] {
@@ -735,13 +755,21 @@ pub unsafe extern "C" fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void
             &raw mut ierr,
         );
         if ierr != 0 {
-            libc::printf(
-                b"\nERROR: parWrtSec - Finding parallel write boundary region at %d, %d  err %d\n\0"
-                    as *const u8 as *const ::core::ffi::c_char,
-                s_iz_cur[s_cur_info as usize],
-                s_iy_cur[s_cur_info as usize],
-                ierr,
-            );
+            {
+                use std::io::Write;
+                let _ = ImodFile::Stdout.write_all(&crate::imod::libcfshr::b3dutil::c_format_bytes(
+                    "\nERROR: parWrtSec - Finding parallel write boundary region at %d, %d  err %d\n",
+                    &[
+                        crate::imod::libcfshr::b3dutil::CArg::Int(
+                            s_iz_cur[s_cur_info as usize] as i64,
+                        ),
+                        crate::imod::libcfshr::b3dutil::CArg::Int(
+                            s_iy_cur[s_cur_info as usize] as i64,
+                        ),
+                        crate::imod::libcfshr::b3dutil::CArg::Int(ierr as i64),
+                    ],
+                ));
+            }
             libc::exit(1);
         }
     }
@@ -837,7 +865,7 @@ pub unsafe extern "C" fn iiu_par_wrt_sec_part(
         num_trim =
             crate::imod::libiimod::unit_fileio::iiu_buf_bytes_per_pixel(iunit) * nxdim * iy_start;
         ierr = add_segment(
-            array.cast::<::core::ffi::c_char>().add(num_trim as usize),
+            array.cast::<u8>().add(num_trim as usize),
             num_bytes,
             s_iz_cur[s_cur_info as usize],
             s_iy_cur[s_cur_info as usize],
@@ -892,12 +920,8 @@ pub unsafe extern "C" fn iiu_par_wrt_reclose_hdf(
         return 0;
     }
     ii_file = crate::imod::libiimod::unit_fileio::iiu_get_ii_file(iunit);
-    hdata = crate::imod::libiimod::unit_fileio::iiu_mrc_header(
-        iunit,
-        b"iiu_par_wrt_reclose_hdf\0" as *const u8 as *const ::core::ffi::c_char,
-        1,
-        0,
-    );
+    hdata =
+        crate::imod::libiimod::unit_fileio::iiu_mrc_header(iunit, "iiu_par_wrt_reclose_hdf", 1, 0);
     if par_wrt_reclose_hdf(
         ii_file,
         if write_header != 0 {
@@ -915,7 +939,7 @@ pub unsafe extern "C" fn iiuparwrtreclosehdf_(iunit: *mut i32, write_header: *mu
     iiu_par_wrt_reclose_hdf(*iunit, *write_header)
 }
 pub unsafe extern "C" fn iiu_write_dummy_sec_to_hdf(iunit: i32) {
-    let mut buf = [0i8; 32];
+    let mut buf = [0u8; 32];
     crate::imod::libiimod::unit_fileio::iiu_sync_with_mrc_header(iunit);
     let ii_file = crate::imod::libiimod::unit_fileio::iiu_get_ii_file(iunit);
     if crate::imod::libiimod::iihdf::hdf_write_dummy_section(ii_file, buf.as_mut_ptr(), 0) != 0 {
@@ -937,23 +961,22 @@ pub unsafe extern "C" fn iiu_par_wrt_flush_buffers(iunit: i32) -> i32 {
 pub unsafe extern "C" fn iiuparwrtflushbuffers_(iunit: *mut i32) -> i32 {
     iiu_par_wrt_flush_buffers(*iunit)
 }
-unsafe extern "C" fn par_wrt_find_region(
+unsafe fn par_wrt_find_region(
     sec_num: i32,
     line_num: i32,
     nl_write: i32,
-    filename: *mut *mut ::core::ffi::c_char,
+    filename: &mut Vec<u8>,
     sections: *mut i32,
     start_lines: *mut i32,
 ) -> ::core::ffi::c_int {
-    if s_num_infos == 0 || s_cur_info < 0 || s_infos[s_cur_info as usize].regions.is_null() {
+    if s_num_infos == 0 || s_cur_info < 0 || s_infos[s_cur_info as usize].regions.is_empty() {
         return 1;
     }
     let bi = (&raw mut s_infos)
         .cast::<BoundInfo>()
         .add(s_cur_info as usize);
-    let regions = (*bi).regions;
     for i in 0..(*bi).num_files {
-        let region = &*regions.add(i as usize);
+        let region = &(&(*bi).regions)[i as usize];
         let mut past_start = true;
         let mut before_end = true;
         if (*bi).every_sec != 0 {
@@ -982,7 +1005,9 @@ unsafe extern "C" fn par_wrt_find_region(
             }
         }
         if past_start && before_end {
-            *filename = region.file;
+            // `parallelwrite.c:866` hands out the region's own pointer; the
+            // caller only reads it, so a copy of the bytes is the same thing.
+            *filename = region.file.clone();
             *sections = region.section[0];
             *start_lines = region.start_line[0];
             *sections.add(1) = region.section[1];
@@ -1030,7 +1055,7 @@ unsafe extern "C" fn par_wrt_prepare_hdf(ii_file: *mut ImodImageFile) -> i32 {
     0
 }
 unsafe extern "C" fn add_segment(
-    buf: *mut ::core::ffi::c_char,
+    buf: *mut u8,
     num_bytes: i32,
     section: i32,
     start_line: i32,
@@ -1113,7 +1138,7 @@ unsafe extern "C" fn write_segments(
     let mut num_lines = 0;
     let mut start_line = 0;
     let mut line_section = 0;
-    let mut lines_buf = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let mut lines_buf = ::core::ptr::null_mut::<u8>();
     for ind in 0..s_num_segments[s_cur_info as usize] {
         let seg = s_segments[s_cur_info as usize].add(ind as usize);
         if (*seg).start_line < 0 {
@@ -1224,10 +1249,11 @@ unsafe extern "C" fn pw_open_if_needed(
     ierr: *mut i32,
 ) {
     let mut nxyz = [0; 3];
-    let mut filename = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let title = b"parallel_write: boundary lines\0"
-        .as_ptr()
-        .cast::<::core::ffi::c_char>();
+    let mut filename = Vec::<u8>::new();
+    // `iiuWriteHeaderStr` and `iiuOpen` are the Fortran-bridge unit layer and
+    // still take `const char *` (NATIVE.md 7), so the two names below keep a
+    // terminator at exactly those two calls.
+    let title = c"parallel_write: boundary lines";
     let mut cell = [0.0, 0.0, 0.0, 90.0, 90.0, 90.0];
     *ierr = 0;
     if s_num_infos <= 0 || s_cur_info < 0 {
@@ -1240,7 +1266,7 @@ unsafe extern "C" fn pw_open_if_needed(
         iz_sec,
         iy_line,
         nlines_write,
-        &raw mut filename,
+        &mut filename,
         (&raw mut s_iz_bound)
             .cast::<[i32; 2]>()
             .add(s_cur_info as usize)
@@ -1259,10 +1285,11 @@ unsafe extern "C" fn pw_open_if_needed(
     if s_if_all_sec[s_cur_info as usize] != 0 {
         nxyz[2] = 2 * s_nz_full[s_cur_info as usize];
     }
+    let cname = std::ffi::CString::new(filename.clone()).unwrap_or_default();
     *ierr = crate::imod::libiimod::unit_fileio::iiu_open(
         s_iunit_bound[s_cur_info as usize],
-        filename,
-        b"NEW\0".as_ptr().cast(),
+        cname.as_ptr().cast_mut(),
+        c"NEW".as_ptr(),
     );
     if *ierr != 0 {
         return;
@@ -1284,7 +1311,7 @@ unsafe extern "C" fn pw_open_if_needed(
     );
     *ierr = crate::imod::libiimod::unit_header::iiu_write_header_str(
         s_iunit_bound[s_cur_info as usize],
-        title,
+        title.as_ptr(),
         0,
         -32000.0,
         32000.0f32,
@@ -1316,7 +1343,7 @@ unsafe extern "C" fn write_buffered_lines(
     iunit: i32,
     section: i32,
     start_line: i32,
-    lines_buf: *mut ::core::ffi::c_char,
+    lines_buf: *mut u8,
     num_lines: *mut i32,
 ) -> i32 {
     if *num_lines != 0 {

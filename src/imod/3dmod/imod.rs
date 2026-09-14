@@ -6,7 +6,6 @@
 //! that boundary rather than pretending to be a viewer.
 
 use std::cell::RefCell;
-use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
@@ -454,16 +453,9 @@ pub fn imod_main(arguments: &[String]) -> Result<i32, String> {
         // deliberately retains the source C-compatible entry signature.
         let strings = arguments
             .iter()
-            .map(|argument| {
-                CString::new(argument.as_str())
-                    .map_err(|_| "3dmod: NUL byte in argument".to_owned())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let pointers = strings
-            .iter()
-            .map(|argument| argument.as_ptr())
+            .map(|argument| argument.as_bytes().to_vec())
             .collect::<Vec<_>>();
-        let status = unsafe { super::imodv::imodv_main(pointers.len() as i32, pointers.as_ptr()) };
+        let status = unsafe { super::imodv::imodv_main(strings.len() as i32, &strings) };
         if status == 0 {
             return Ok(0);
         }

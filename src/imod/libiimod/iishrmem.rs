@@ -3,7 +3,7 @@
 //! This module retains the operating-system shared-memory ABI.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, b3d_error, c_format_bytes};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
 use crate::imod::libiimod::iimage::{
     ImodImageFile, LineProcData, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
@@ -15,7 +15,9 @@ use crate::imod::libiimod::mrcfiles::{
     mrc_getdcsize, mrc_head_new,
 };
 use crate::imod::libiimod::mrcsec::{ii_init_read_section_any, ii_process_read_line};
-use core::ffi::{CStr, c_char, c_void};
+#[cfg(windows)]
+use core::ffi::c_char;
+use core::ffi::{CStr, c_void};
 use core::mem::zeroed;
 
 #[cfg(windows)]
@@ -49,27 +51,29 @@ unsafe extern "system" {
 }
 
 pub const IIFILE_SHR_MEM: i32 = 8;
-pub const SHR_MEM_NAME_TAG: &[u8] = b"/IMODShrMem_\0";
+/// C `SHR_MEM_NAME_TAG` (`iimage.h`), without the terminator a C string
+/// literal carries.
+pub const SHR_MEM_NAME_TAG: &[u8] = b"/IMODShrMem_";
 pub const SHR_MEM_DATA_OFFSET: usize = 2048;
 
-pub unsafe fn ii_shr_mem_create(filename: *const c_char, ii_file: *mut ImodImageFile) -> i32 {
+pub unsafe fn ii_shr_mem_create(filename: &[u8], ii_file: *mut ImodImageFile) -> i32 {
     unsafe {
         let mut map_file = 0;
-        let address = open_and_get_address(filename, c"iiShrMemCreate".as_ptr(), &mut map_file);
+        let address = open_and_get_address(filename, "iiShrMemCreate", &mut map_file);
         if address.is_null() {
             return 1;
         }
         (*ii_file).shr_mem_file = map_file;
         (*ii_file).user_data = address.cast();
         (*ii_file).header = core::ptr::null_mut();
-        (*ii_file).filename = libc::strdup(filename);
+        (*ii_file).filename = Some(filename.to_vec());
         (*ii_file).close = Some(shm_close);
         (*ii_file).clean_up = Some(clean_up);
         0
     }
 }
 
-pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *mut ImodImageFile {
+pub unsafe fn ii_shr_mem_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
     unsafe {
         let ii_file = ii_new();
         if ii_file.is_null() {
@@ -78,27 +82,26 @@ pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *
         (*ii_file).close = Some(shm_close);
         (*ii_file).clean_up = Some(clean_up);
         (*ii_file).reopen = Some(reopen);
-        (*ii_file).filename = libc::strdup(filename);
+        (*ii_file).filename = Some(filename.to_vec());
         (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
         let header = Box::into_raw(Box::new(MrcHeader::default()));
         (*ii_file).header = header.cast();
-        if header.is_null() || (*ii_file).filename.is_null() {
+        if header.is_null() {
             ii_delete(ii_file);
             return core::ptr::null_mut();
         }
-        (*ii_file).user_data = open_and_get_address(
-            filename,
-            c"iiShrMemOpen".as_ptr(),
-            &mut (*ii_file).shr_mem_file,
-        )
-        .cast();
+        (*ii_file).user_data =
+            open_and_get_address(filename, "iiShrMemOpen", &mut (*ii_file).shr_mem_file).cast();
         if (*ii_file).user_data.is_null() {
             ii_delete(ii_file);
             return core::ptr::null_mut();
         }
-        libc::strncpy((*ii_file).fmode.as_mut_ptr(), mode, 3);
+        // `iishrmem.c:97` is `strncpy(iiFile->fmode, mode, 3)`.
+        for (dst, src) in (*ii_file).fmode.iter_mut().zip(mode.bytes().take(3)) {
+            *dst = src;
+        }
         (*ii_file).file = IIFILE_SHR_MEM;
-        if libc::strstr(mode, c"w".as_ptr()).is_null() {
+        if !mode.contains('w') {
             // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
             *header = (*(*ii_file).user_data.cast::<MrcHeader>()).clone();
             ii_sync_from_mrc_header(ii_file, header);
@@ -125,36 +128,63 @@ pub unsafe fn ii_shr_mem_open(filename: *const c_char, mode: *const c_char) -> *
     }
 }
 
-pub unsafe fn ii_shr_mem_check_size(filename: *const c_char) -> usize {
-    unsafe {
-        if filename.is_null()
-            || libc::strstr(filename, SHR_MEM_NAME_TAG.as_ptr().cast()) != filename.cast_mut()
-        {
-            return 0;
-        }
-        let mut end = core::ptr::null_mut();
-        let base = filename.add(SHR_MEM_NAME_TAG.len() - 1);
-        let val = libc::strtol(base, &mut end, 10);
-        if end.is_null() || *end != (b'_' as c_char) {
-            return 0;
-        }
-        (1024_i64.wrapping_mul(val as i64)) as usize
+pub unsafe fn ii_shr_mem_check_size(filename: &[u8]) -> usize {
+    if !filename.starts_with(SHR_MEM_NAME_TAG) {
+        return 0;
     }
+    // `iishrmem.c:135` is `strtol(filename + strlen(SHR_MEM_NAME_TAG), &endPtr, 10)`:
+    // optional leading whitespace and sign, then decimal digits, stopping at
+    // the first character that cannot extend the number, with `endPtr` left
+    // there.  A name with no digits at all leaves `endPtr` at the start, which
+    // is why the `'_'` test below rejects it.
+    let base = &filename[SHR_MEM_NAME_TAG.len()..];
+    let mut pos = 0;
+    while pos < base.len() && (base[pos] as char).is_ascii_whitespace() {
+        pos += 1;
+    }
+    let sign_pos = pos;
+    if pos < base.len() && (base[pos] == b'+' || base[pos] == b'-') {
+        pos += 1;
+    }
+    let digits_start = pos;
+    while pos < base.len() && base[pos].is_ascii_digit() {
+        pos += 1;
+    }
+    let (val, end) = if pos == digits_start {
+        (0_i64, sign_pos)
+    } else {
+        let text = core::str::from_utf8(&base[sign_pos..pos]).unwrap_or("0");
+        (text.parse::<i64>().unwrap_or(i64::MAX), pos)
+    };
+    if base.get(end).copied() != Some(b'_') {
+        return 0;
+    }
+    (1024_i64.wrapping_mul(val)) as usize
 }
 
-unsafe fn open_and_get_address(
-    filename: *const c_char,
-    caller: *const c_char,
-    map_file: *mut isize,
-) -> *mut c_void {
+unsafe fn open_and_get_address(filename: &[u8], caller: &str, map_file: *mut isize) -> *mut c_void {
     unsafe {
         let mem_size = ii_shr_mem_check_size(filename);
+        // `shm_open`/`shm_unlink` are POSIX entry points that take a `char *`
+        // and have no Rust standard-library equivalent, so the terminator is
+        // added here, at that boundary, and nowhere above it.
+        let cname = std::ffi::CString::new(filename).unwrap_or_default();
         if mem_size == 0 {
+            // `iishrmem.c:163-165`.
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "ERROR: {} - Filename {} does not have correct form for shared memory, {}/size/name\n",
+                    caller,
+                    String::from_utf8_lossy(filename),
+                    String::from_utf8_lossy(SHR_MEM_NAME_TAG)
+                ),
+            );
             return core::ptr::null_mut();
         }
         #[cfg(windows)]
         {
-            let create = !libc::strstr(caller, c"Create".as_ptr()).is_null();
+            let create = caller.contains("Create");
             let mapping = if create {
                 CreateFileMappingA(
                     INVALID_HANDLE_VALUE,
@@ -180,15 +210,19 @@ unsafe fn open_and_get_address(
         }
         #[cfg(not(windows))]
         {
-            let create = !libc::strstr(caller, c"Create".as_ptr()).is_null();
-            if create && libc::shm_unlink(filename) == 0 {
-                libc::printf(
-                    c"Shared memory file %s already exists, recreating it\n".as_ptr(),
-                    filename,
-                );
+            let create = caller.contains("Create");
+            if create && libc::shm_unlink(cname.as_ptr()) == 0 {
+                use std::io::Write;
+                // `iishrmem.c:190`.  Still on the C stream: this program's
+                // other output goes through libc stdio, and a Rust write here
+                // would reorder a redirected capture.
+                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                    "Shared memory file %s already exists, recreating it\n",
+                    &[CArg::Bytes(filename)],
+                ));
             }
             let fd = libc::shm_open(
-                filename,
+                cname.as_ptr(),
                 if create {
                     libc::O_CREAT | libc::O_RDWR | libc::O_EXCL
                 } else {
@@ -197,12 +231,33 @@ unsafe fn open_and_get_address(
                 libc::S_IRUSR | libc::S_IWUSR,
             );
             if fd < 0 {
+                // `iishrmem.c:196-198`.
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: {} - Opening memory file for {} - {}\n",
+                        caller,
+                        String::from_utf8_lossy(filename),
+                        CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_string_lossy()
+                    ),
+                );
                 return core::ptr::null_mut();
             }
             let truncate = cfg!(not(target_os = "macos"));
             if create || truncate {
                 if libc::ftruncate(fd, mem_size as libc::off_t) != 0 {
-                    libc::shm_unlink(filename);
+                    // `iishrmem.c:202-204`.
+                    b3d_error(
+                        Some(&mut ImodFile::Stderr),
+                        format_args!(
+                            "ERROR: {} - Cannot set shared memory for {} to requested size - {}\n",
+                            caller,
+                            String::from_utf8_lossy(filename),
+                            CStr::from_ptr(libc::strerror(*libc::__errno_location()))
+                                .to_string_lossy()
+                        ),
+                    );
+                    libc::shm_unlink(cname.as_ptr());
                     return core::ptr::null_mut();
                 }
             }
@@ -215,7 +270,17 @@ unsafe fn open_and_get_address(
                 0,
             );
             if address == libc::MAP_FAILED {
-                libc::shm_unlink(filename);
+                // `iishrmem.c:211-213`.
+                b3d_error(
+                    Some(&mut ImodFile::Stderr),
+                    format_args!(
+                        "ERROR: {} - Cannot get address of shared memory for {} - {}\n",
+                        caller,
+                        String::from_utf8_lossy(filename),
+                        CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_string_lossy()
+                    ),
+                );
+                libc::shm_unlink(cname.as_ptr());
                 return core::ptr::null_mut();
             }
             if create {
@@ -242,23 +307,24 @@ unsafe extern "C" fn shm_close(ii_file: *mut ImodImageFile) {
         }
         #[cfg(not(windows))]
         {
-            if (*ii_file).filename.is_null() {
+            let Some(name) = (*ii_file).filename.clone() else {
                 return;
-            }
-            let size = ii_shr_mem_check_size((*ii_file).filename);
+            };
+            let size = ii_shr_mem_check_size(&name);
             if size == 0 {
                 return;
             }
             if !(*ii_file).header.is_null() {
                 libc::munmap((*ii_file).user_data.cast(), size);
             } else {
-                libc::shm_unlink((*ii_file).filename);
+                let cname = std::ffi::CString::new(name).unwrap_or_default();
+                libc::shm_unlink(cname.as_ptr());
             }
         }
         (*ii_file).user_data = core::ptr::null_mut();
     }
 }
-pub unsafe fn ii_shr_mem_remove(filename: *const c_char) -> i32 {
+pub unsafe fn ii_shr_mem_remove(filename: &[u8]) -> i32 {
     unsafe {
         #[cfg(windows)]
         {
@@ -267,7 +333,9 @@ pub unsafe fn ii_shr_mem_remove(filename: *const c_char) -> i32 {
         }
         #[cfg(not(windows))]
         {
-            libc::shm_unlink(filename)
+            // The `shm_unlink` boundary; see `open_and_get_address`.
+            let cname = std::ffi::CString::new(filename).unwrap_or_default();
+            libc::shm_unlink(cname.as_ptr())
         }
     }
 }
@@ -287,12 +355,9 @@ unsafe extern "C" fn clean_up(ii_file: *mut ImodImageFile) {
 }
 unsafe extern "C" fn reopen(ii_file: *mut ImodImageFile) -> i32 {
     unsafe {
-        (*ii_file).user_data = open_and_get_address(
-            (*ii_file).filename,
-            c"iiShrMemOpen".as_ptr(),
-            &mut (*ii_file).shr_mem_file,
-        )
-        .cast();
+        let name = (*ii_file).filename.clone().unwrap_or_default();
+        (*ii_file).user_data =
+            open_and_get_address(&name, "iiShrMemOpen", &mut (*ii_file).shr_mem_file).cast();
         if (*ii_file).user_data.is_null() { 1 } else { 0 }
     }
 }
@@ -323,35 +388,35 @@ unsafe extern "C" fn write_header(ii_file: *mut ImodImageFile) -> i32 {
 }
 unsafe extern "C" fn read_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_NOPROC) }
 }
 unsafe extern "C" fn read_section_byte(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_BYTE) }
 }
 unsafe extern "C" fn read_section_ushort(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_USHORT) }
 }
 unsafe extern "C" fn read_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_FLOAT) }
 }
 unsafe fn shm_read_section_any(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     typ: i32,
 ) -> i32 {
@@ -384,7 +449,7 @@ unsafe fn shm_read_section_any(
             &mut d,
             &mut free_map,
             &mut y_end,
-            c"shmReadSectionAny".as_ptr(),
+            "shmReadSectionAny",
         );
         if err != 0 {
             return err;
@@ -449,21 +514,21 @@ unsafe fn shm_read_section_any(
 }
 unsafe extern "C" fn write_section(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_write_section_any(in_file, buf, in_section, 0) }
 }
 unsafe extern "C" fn write_section_float(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_write_section_any(in_file, buf, in_section, 1) }
 }
 unsafe fn shm_write_section_any(
     in_file: *mut ImodImageFile,
-    buf: *mut c_char,
+    buf: *mut u8,
     in_section: i32,
     from_float: i32,
 ) -> i32 {
@@ -537,13 +602,11 @@ mod tests {
     #[test]
     fn posix_shared_memory_round_trips_a_native_section() {
         unsafe {
-            let name =
-                std::ffi::CString::new(format!("/IMODShrMem_1024_iishrmem_{}", std::process::id()))
-                    .unwrap();
+            let name = format!("/IMODShrMem_1024_iishrmem_{}", std::process::id()).into_bytes();
             let manager = ii_new();
             assert!(!manager.is_null());
-            assert_eq!(ii_shr_mem_create(name.as_ptr(), manager), 0);
-            let writer = ii_shr_mem_open(name.as_ptr(), c"wb+".as_ptr());
+            assert_eq!(ii_shr_mem_create(&name, manager), 0);
+            let writer = ii_shr_mem_open(&name, "wb+");
             assert!(!writer.is_null());
             let header = (*writer).header.cast::<MrcHeader>();
             mrc_head_new(&mut *header, 2, 2, 1, 0);
@@ -554,32 +617,29 @@ mod tests {
                 ((*writer).write_section.unwrap())(writer, input.as_ptr().cast_mut().cast(), 0),
                 0
             );
-            let reader = ii_shr_mem_open(name.as_ptr(), c"rb".as_ptr());
+            let reader = ii_shr_mem_open(&name, "rb");
             assert!(!reader.is_null());
             let mut output = [0_i8; 4];
             assert_eq!(
-                ((*reader).read_section.unwrap())(reader, output.as_mut_ptr(), 0),
+                ((*reader).read_section.unwrap())(reader, output.as_mut_ptr().cast(), 0),
                 0
             );
             assert_eq!(output, input);
             ii_delete(reader);
             ii_delete(writer);
             ii_delete(manager);
-            assert_ne!(ii_shr_mem_remove(name.as_ptr()), 0);
+            assert_ne!(ii_shr_mem_remove(&name), 0);
         }
     }
 
     #[test]
     fn posix_shared_memory_reads_cropped_padded_floats() {
         unsafe {
-            let name = std::ffi::CString::new(format!(
-                "/IMODShrMem_1024_iishrmem_convert_{}",
-                std::process::id()
-            ))
-            .unwrap();
+            let name =
+                format!("/IMODShrMem_1024_iishrmem_convert_{}", std::process::id()).into_bytes();
             let manager = ii_new();
-            assert_eq!(ii_shr_mem_create(name.as_ptr(), manager), 0);
-            let writer = ii_shr_mem_open(name.as_ptr(), c"wb+".as_ptr());
+            assert_eq!(ii_shr_mem_create(&name, manager), 0);
+            let writer = ii_shr_mem_open(&name, "wb+");
             let header = (*writer).header.cast::<MrcHeader>();
             mrc_head_new(&mut *header, 3, 2, 1, 1);
             ii_sync_from_mrc_header(writer, header);
@@ -589,7 +649,7 @@ mod tests {
                 ((*writer).write_section.unwrap())(writer, input.as_ptr().cast_mut().cast(), 0),
                 0
             );
-            let reader = ii_shr_mem_open(name.as_ptr(), c"rb".as_ptr());
+            let reader = ii_shr_mem_open(&name, "rb");
             (*reader).llx = 1;
             (*reader).urx = 2;
             (*reader).pad_left = 1;
@@ -603,7 +663,7 @@ mod tests {
             ii_delete(reader);
             ii_delete(writer);
             ii_delete(manager);
-            assert_ne!(ii_shr_mem_remove(name.as_ptr()), 0);
+            assert_ne!(ii_shr_mem_remove(&name), 0);
         }
     }
 }

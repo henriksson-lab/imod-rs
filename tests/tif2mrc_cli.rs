@@ -3,7 +3,6 @@ mod common;
 use imod_rs::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_RGB, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write,
 };
-use std::ffi::CString;
 
 #[test]
 fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
@@ -12,11 +11,9 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let input_c = input.to_str().unwrap();
+        let output_c = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(input_c, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
         header.amin = 1.;
@@ -60,9 +57,7 @@ fn tif2mrc_roundtrips_the_native_legacy_tiff_path() {
             String::from_utf8_lossy(&result.stdout)
                 .contains(&format!("Opening {} for input\n", tiff.display()))
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_c, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!(
@@ -106,11 +101,9 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
         let stamp = format!("imod-rs-tif2mrc-rgb-{}", std::process::id());
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let tiff_c = CString::new(tiff.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&tiff_c.to_string_lossy(), "wb")
-                .unwrap();
+        let tiff_c = tiff.to_str().unwrap();
+        let output_c = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(tiff_c, "wb").unwrap();
         let mut ifd = 0;
         let mut data_offset = 0;
         let rgb = [30_u8, 60, 90, 9, 12, 15];
@@ -120,7 +113,7 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
                 2,
                 1,
                 MRC_MODE_RGB,
-                rgb.as_ptr().cast_mut(),
+                &rgb,
                 &mut ifd,
                 &mut data_offset,
                 0.,
@@ -135,7 +128,7 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
                 2,
                 1,
                 MRC_MODE_RGB,
-                rgb_second.as_ptr().cast_mut(),
+                &rgb_second,
                 &mut ifd,
                 &mut data_offset,
                 0.,
@@ -153,9 +146,7 @@ fn tif2mrc_converts_real_rgb_tiff_to_source_average_grayscale() {
                 .unwrap()
                 .success()
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_c, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!(
@@ -238,10 +229,8 @@ fn tif2mrc_converts_signed_32_bit_tiff_through_the_source_float_path() {
         String::from_utf8_lossy(&conversion.stderr)
     );
     unsafe {
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let output_c = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_c, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz, header.mode), (2, 2, 1, 2));
@@ -282,11 +271,9 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let input_c = input.to_str().unwrap();
+        let output_c = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(input_c, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_BYTE), 0);
         header.fp = Some(file.clone());
@@ -343,9 +330,7 @@ fn tif2mrc_reads_every_directory_in_a_native_legacy_tiff_stack() {
             stdout.contains("Min = 129, Max = 136, Mean = 132.5"),
             "{stdout}"
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_c, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!((written.nx, written.ny, written.nz), (2, 2, 2));
@@ -398,10 +383,8 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
             (&input, [10_u8, 11, 12, 13]),
             (&background, [1_u8, 2, 3, 4]),
         ] {
-            let name = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                    .unwrap();
+            let name = path.to_str().unwrap();
+            let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(name, "wb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
             header.fp = Some(file.clone());
@@ -450,10 +433,8 @@ fn tif2mrc_applies_source_background_inversion_and_subtraction() {
                 .unwrap()
                 .success()
         );
-        let output_name = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_name.to_string_lossy(), "rb")
-                .unwrap();
+        let output_name = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_name, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
@@ -520,10 +501,8 @@ fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
         );
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}.mrc"));
-        let name = CString::new(tiff.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let name = tiff.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(name, "wb").unwrap();
         let mut ifd = 0;
         let mut data_offset = 0;
         for pixels in [[1_u8, 2], [3, 4]] {
@@ -533,7 +512,7 @@ fn tif2mrc_rejects_background_for_real_multi_directory_tiff() {
                     2,
                     1,
                     MRC_MODE_BYTE,
-                    pixels.as_ptr().cast_mut(),
+                    &pixels,
                     &mut ifd,
                     &mut data_offset,
                     0.,
@@ -570,11 +549,9 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
         let stamp = format!("imod-rs-tif2mrc-negative-chunks-{}", std::process::id());
         let tiff = std::env::temp_dir().join(format!("{stamp}.tif"));
         let output = std::env::temp_dir().join(format!("{stamp}.mrc"));
-        let tiff_c = CString::new(tiff.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&tiff_c.to_string_lossy(), "wb")
-                .unwrap();
+        let tiff_c = tiff.to_str().unwrap();
+        let output_c = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(tiff_c, "wb").unwrap();
         let mut ifd = 0;
         let mut data_offset = 0;
         let pixels = [5_u8, 8];
@@ -584,7 +561,7 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
                 2,
                 1,
                 MRC_MODE_BYTE,
-                pixels.as_ptr().cast_mut(),
+                &pixels,
                 &mut ifd,
                 &mut data_offset,
                 0.,
@@ -604,9 +581,7 @@ fn tif2mrc_accepts_negative_chunk_criterion_for_real_legacy_tiff() {
             "{}",
             String::from_utf8_lossy(&result.stdout)
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(output_c, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
@@ -726,10 +701,8 @@ fn convert_one_fixture_with_environment(
     let stdout = String::from_utf8_lossy(&result.stdout).into_owned();
     let bytes = std::fs::read(&output).unwrap();
     let header = unsafe {
-        let name = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
-                .unwrap();
+        let name = output.to_str().unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(name, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         drop(file);

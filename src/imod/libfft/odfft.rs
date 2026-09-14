@@ -1,5 +1,7 @@
 //! Translation of `IMOD/libfft/odfft.c`.
 use super::{cmplft, hermft, realft};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
+use std::io::Write as _;
 
 /// C `odfft`.
 pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i32) {
@@ -34,10 +36,10 @@ pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i
         // check on a non-positive `nx` or `ny` -- so neither does this.
         let nxo2 = nx / 2;
         if !(2 * nxo2 == nx || idir < 0) {
-            libc::printf(
-                c"ERROR: odfft - nx= %d must be even with IMOD FFT routines\n".as_ptr(),
-                nx,
-            );
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "ERROR: odfft - nx= %d must be even with IMOD FFT routines\n",
+                &[CArg::Int(nx as i64)],
+            ));
             std::process::exit(1);
         }
         let scale = (1.0 / nx as f64).sqrt() as f32;
@@ -102,10 +104,10 @@ pub unsafe fn odfft(array: *mut f32, nxp: *mut i32, nyp: *mut i32, idirp: *mut i
             }
             // `odfft.c:185-187`: the `default:` arm of the source's switch.
             _ => {
-                libc::printf(
-                    c"ERROR: odfft - idir = %d is an illegal option\n".as_ptr(),
-                    idir,
-                );
+                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                    "ERROR: odfft - idir = %d is an illegal option\n",
+                    &[CArg::Int(idir as i64)],
+                ));
                 std::process::exit(1);
             }
         }

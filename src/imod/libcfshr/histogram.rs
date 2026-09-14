@@ -1,13 +1,9 @@
 //! Translation of `IMOD/libcfshr/histogram.c` and its `cfsemshare.h` APIs.
 
-use core::ffi::c_char;
+use std::io::Write;
 
 use super::b3dutil::num_omp_threads;
-
-unsafe extern "C" {
-    fn printf(format: *const c_char, ...) -> i32;
-    static mut stdout: *mut libc::FILE;
-}
+use super::b3dutil::{CArg, ImodFile, c_format};
 
 /// Original `kernelHistogram` (`histogram.c:31`).
 pub unsafe fn kernel_histogram(
@@ -41,9 +37,8 @@ pub unsafe fn kernel_histogram(
     for value_index in 0..num_vals as usize {
         let val = unsafe { *values.add(value_index) };
         if verbose == 1 {
-            unsafe {
-                printf(c"Value: %.4f\n".as_ptr(), val as f64);
-            }
+            let _ = ImodFile::Stdout
+                .write_all(c_format("Value: %.4f\n", &[CArg::Dbl(val as f64)]).as_bytes());
         }
         if h != 0. {
             let mut ist = ((val - h - first_val) as f64 / dxbin as f64).ceil() as i32;
@@ -90,13 +85,16 @@ pub unsafe fn kernel_histogram(
     }
     if verbose == 2 {
         for index in 0..num_bins as usize {
-            unsafe {
-                printf(
-                    c"bin: %.4f %f\n".as_ptr(),
-                    (first_val + index as f32 * dxbin) as f64,
-                    *bins.add(index) as f64,
-                );
-            }
+            let _ = ImodFile::Stdout.write_all(
+                c_format(
+                    "bin: %.4f %f\n",
+                    &[
+                        CArg::Dbl((first_val + index as f32 * dxbin) as f64),
+                        CArg::Dbl(unsafe { *bins.add(index) } as f64),
+                    ],
+                )
+                .as_bytes(),
+            );
         }
     }
 }
@@ -304,15 +302,18 @@ pub unsafe fn find_histogram_dip(
         return 1;
     }
     if verbose >= 0 {
-        unsafe {
-            printf(
-                c"Histogram smoothed with H = %.3f has dip at %g, peaks at %g and %g\n".as_ptr(),
-                coarse_h as f64,
-                *hist_dip as f64,
-                *peak_below as f64,
-                *peak_above as f64,
-            );
-        }
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "Histogram smoothed with H = %.3f has dip at %g, peaks at %g and %g\n",
+                &[
+                    CArg::Dbl(coarse_h as f64),
+                    CArg::Dbl(unsafe { *hist_dip } as f64),
+                    CArg::Dbl(unsafe { *peak_below } as f64),
+                    CArg::Dbl(unsafe { *peak_above } as f64),
+                ],
+            )
+            .as_bytes(),
+        );
     }
     unsafe {
         kernel_histogram(
@@ -332,14 +333,17 @@ pub unsafe fn find_histogram_dip(
         );
     }
     if verbose >= 0 {
-        unsafe {
-            printf(
-                c"Histogram smoothed with H = %g has lowest dip at %g\n".as_ptr(),
-                fine_h as f64,
-                *hist_dip as f64,
-            );
-            libc::fflush(stdout);
-        }
+        let _ = ImodFile::Stdout.write_all(
+            c_format(
+                "Histogram smoothed with H = %g has lowest dip at %g\n",
+                &[
+                    CArg::Dbl(fine_h as f64),
+                    CArg::Dbl(unsafe { *hist_dip } as f64),
+                ],
+            )
+            .as_bytes(),
+        );
+        let _ = ImodFile::Stdout.flush();
     }
     0
 }

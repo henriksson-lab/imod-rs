@@ -44,7 +44,7 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
@@ -91,7 +91,7 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
     let output = base.with_extension("output.mrc");
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
-        let file = ii_open_new(name.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 1, 1, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
@@ -151,7 +151,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 3, 4, 2), 0);
         ii_sync_from_mrc_header(file, header);
@@ -193,7 +193,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
     assert!(result.status.success(), "{:?}", result);
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
@@ -224,7 +224,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 3, 4, 2), 0);
         ii_sync_from_mrc_header(file, header);
@@ -266,7 +266,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
     assert!(result.status.success(), "{:?}", result);
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
@@ -294,7 +294,7 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
         ii_sync_from_mrc_header(file, header);
@@ -322,7 +322,7 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
     assert!(result.status.success(), "{:?}", result);
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.mode, 1);
@@ -347,7 +347,7 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 3, 3, 2, 2), 0);
         (*header).nlabl = 1;
@@ -387,7 +387,7 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
     assert!(String::from_utf8_lossy(&result.stdout).contains("newstack -siz 2,2 -off 1,0"));
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
@@ -424,7 +424,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 2, 2, 3, 2), 0);
         ii_sync_from_mrc_header(file, header);
@@ -457,7 +457,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
     );
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 3, 2));
@@ -494,7 +494,7 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(input_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 4, 4, 2, 1), 0);
         (*header).xlen = 8.0;
@@ -535,7 +535,7 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
     );
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (4, 2, 4));

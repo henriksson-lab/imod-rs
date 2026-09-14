@@ -1,6 +1,8 @@
 //! Translation of `IMOD/libfft/cmplft.c`.
 
 use super::{diprp, mdftkd, srfp};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
+use std::io::Write as _;
 
 /// C `cmplft`.
 pub unsafe fn cmplft(x: *mut f32, y: *mut f32, n: i32, dim: *mut i32) {
@@ -29,10 +31,10 @@ pub unsafe fn cmplft(x: *mut f32, y: *mut f32, n: i32, dim: *mut i32) {
             // program rather than leaving the caller with untransformed
             // data.  No command reaches it -- `clip_nicesize` rejects such a
             // size and `newstack` and `binvol` pad to a `niceFrame` one.
-            libc::printf(
-                c"invalid number of points for cmplft.  n = %d\n".as_ptr(),
-                n,
-            );
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "invalid number of points for cmplft.  n = %d\n",
+                &[CArg::Int(n as i64)],
+            ));
             std::process::exit(1);
         }
         // `mdftkd` walks `x` and `y` as biased pointers into one caller

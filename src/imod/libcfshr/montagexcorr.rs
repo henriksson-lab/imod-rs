@@ -5,8 +5,9 @@
 //! original identifier named in each doc comment.
 #![allow(non_snake_case, dead_code, unused_variables, unused_assignments)]
 
-use crate::imod::libcfshr::b3dutil::{CArg, c_format};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 use core::ffi::c_int;
+use std::io::Write;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 // ---------------------------------------------------------------------------------------
@@ -1417,21 +1418,15 @@ pub fn montxcorredge(
             };
             let lineEnd = curDebug + lineEnd;
             debugStr[lineEnd] = 0x00;
-            // Foreign boundary: keep the debug lines on libc's stdout, not Rust's.  Mixing
-            // the two reorders output under redirection (CLAUDE.md, "printf vs println!").
-            unsafe {
-                libc::printf(
-                    b"%s\n\0".as_ptr().cast(),
-                    debugStr[curDebug..].as_ptr().cast::<core::ffi::c_char>(),
-                );
-            }
+            // The C stream, not Rust's: mixing the two reorders output under
+            // redirection (CLAUDE.md, "printf vs println!").  The line is the
+            // NUL-delimited C string starting at `curDebug`.
+            let line = &debugStr[curDebug..];
+            let line = &line[..line.iter().position(|&b| b == 0).unwrap_or(line.len())];
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes("%s\n", &[CArg::Bytes(line)]));
             curDebug = lineEnd + 1;
         }
-        // `fflush(stdout)`: the libc crate does not export glibc's `stdout` object except
-        // as a raw FILE handle, and `fflush(NULL)` flushes every C output stream, a superset.
-        unsafe {
-            libc::fflush(core::ptr::null_mut());
-        }
+        let _ = ImodFile::Stdout.flush();
     }
 }
 
@@ -2260,10 +2255,8 @@ pub fn mont_xc_find_best_corr(
     ix1 = ixEnd.min(nx + curDelX - nxTrim);
     iy0 = iyStart.max(nyTrim + curDelY);
     iy1 = iyEnd.min(ny + curDelY - nyTrim);
-    // C `fflush(stdout)` at montagexcorr.c:1349 — see the note in `montxcorredge`.
-    unsafe {
-        libc::fflush(core::ptr::null_mut());
-    }
+    // C `fflush(stdout)` at montagexcorr.c:1349.
+    let _ = ImodFile::Stdout.flush();
     iy = 0;
     while iy < 3 {
         done[iy as usize][0] = 0;

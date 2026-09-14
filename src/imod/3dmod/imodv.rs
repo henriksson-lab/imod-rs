@@ -7,7 +7,7 @@
 #![allow(dead_code, unused_variables)]
 
 use std::cell::RefCell;
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::c_void;
 
 use crate::imod::libimod::imat::{Imat, imod_mat_new};
 use crate::imod::libimod::imodel::{Imod, Iobj, Ipoint, Iview};
@@ -424,7 +424,7 @@ pub unsafe fn initstruct(vw: &mut ImodView, a: &mut ImodvApp) {
 }
 
 /// Original static: `load_models` (`imodv.cpp:483`).
-pub unsafe fn load_models(n: i32, fname: *const *const c_char, a: &mut ImodvApp) -> i32 {
+pub unsafe fn load_models(n: i32, fname: &[Vec<u8>], a: &mut ImodvApp) -> i32 {
     if n < 1 {
         return 0;
     }
@@ -432,8 +432,7 @@ pub unsafe fn load_models(n: i32, fname: *const *const c_char, a: &mut ImodvApp)
     a.num_mods = n;
     a.cur_mod = 0;
     for i in 0..n {
-        let name = CStr::from_ptr(*fname.add(i as usize));
-        let path = String::from_utf8_lossy(name.to_bytes());
+        let path = String::from_utf8_lossy(&fname[i as usize]);
         let Ok(model) = imod_read(path.as_ref()) else {
             return -1;
         };
@@ -483,7 +482,7 @@ pub fn open_window(a: &mut ImodvApp) -> i32 {
 }
 
 /// Original: `imodvMain` (`imodv.cpp:536`).
-pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
+pub unsafe fn imodv_main(argc: i32, argv: &[Vec<u8>]) -> i32 {
     /// Not a status the source returns: it marks that everything before
     /// `qApp->exec()` succeeded and the event loop is still to be entered.
     const ENTER_EVENT_LOOP: i32 = -1;
@@ -504,7 +503,7 @@ pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
             let mut print_id = false;
             let mut window_keys = None;
             while i < argc {
-                let argument = CStr::from_ptr(*argv.add(i as usize)).to_bytes();
+                let argument = argv[i as usize].as_slice();
                 if !argument.starts_with(b"-") {
                     break;
                 }
@@ -514,9 +513,7 @@ pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
                         if i >= argc {
                             return 1;
                         }
-                        a.rbgname = CStr::from_ptr(*argv.add(i as usize))
-                            .to_string_lossy()
-                            .into_owned();
+                        a.rbgname = String::from_utf8_lossy(&argv[i as usize]).into_owned();
                     }
                     b"-D" => crate::imod::three_dmod::imod::IMOD_DEBUG
                         .store(true, std::sync::atomic::Ordering::Relaxed),
@@ -526,7 +523,7 @@ pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
                         if i >= argc {
                             return 1;
                         }
-                        let text = CStr::from_ptr(*argv.add(i as usize)).to_string_lossy();
+                        let text = String::from_utf8_lossy(&argv[i as usize]);
                         let mut values = text.split(|c| c == ',' || c == 'x');
                         a.want_winx = values.next().and_then(|v| v.parse().ok()).unwrap_or(0);
                         a.want_winy = values.next().and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -537,15 +534,11 @@ pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
                         if i >= argc {
                             return 1;
                         }
-                        window_keys = Some(
-                            CStr::from_ptr(*argv.add(i as usize))
-                                .to_string_lossy()
-                                .into_owned(),
-                        );
+                        window_keys = Some(String::from_utf8_lossy(&argv[i as usize]).into_owned());
                     }
                     b"-L" => use_stdin = true,
                     b"-h" => {
-                        boundary.show_usage(&usage(&CStr::from_ptr(*argv).to_string_lossy()));
+                        boundary.show_usage(&usage(&String::from_utf8_lossy(&argv[0])));
                         return 1;
                     }
                     b"-modv" | b"-view" => {}
@@ -564,7 +557,7 @@ pub unsafe fn imodv_main(argc: i32, argv: *const *const c_char) -> i32 {
             if boundary.get_visuals(a, once_opened) != 0 {
                 return 3;
             }
-            if argc - i < 1 || load_models(argc - i, argv.add(i as usize), a) != 0 {
+            if argc - i < 1 || load_models(argc - i, &argv[i as usize..], a) != 0 {
                 return 3;
             }
             unsafe { (*(a.vi as *mut ImodView)).imod = a.imod };
@@ -1203,12 +1196,8 @@ mod tests {
             "fixtures/model-empty-seed.mod",
         ]
         .into_iter()
-        .map(|argument| std::ffi::CString::new(argument).unwrap())
+        .map(|argument| argument.as_bytes().to_vec())
         .collect::<Vec<_>>();
-        let pointers = arguments
-            .iter()
-            .map(|argument| argument.as_ptr())
-            .collect::<Vec<_>>();
         IMODV_STATE.with(|state| {
             let mut state = state.borrow_mut();
             state.1 = 1;
@@ -1222,10 +1211,7 @@ mod tests {
                 window_status: 0,
             }));
         });
-        assert_eq!(
-            unsafe { imodv_main(pointers.len() as i32, pointers.as_ptr()) },
-            0
-        );
+        assert_eq!(unsafe { imodv_main(arguments.len() as i32, &arguments) }, 0);
         assert_eq!(
             calls.borrow().as_slice(),
             [
@@ -1335,11 +1321,7 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::Relaxed);
         let arguments = ["3dmodv", "-D"]
             .into_iter()
-            .map(|argument| std::ffi::CString::new(argument).unwrap())
-            .collect::<Vec<_>>();
-        let pointers = arguments
-            .iter()
-            .map(|argument| argument.as_ptr())
+            .map(|argument| argument.as_bytes().to_vec())
             .collect::<Vec<_>>();
         let calls = Rc::new(RefCell::new(Vec::new()));
         IMODV_NATIVE_BOUNDARY.with(|slot| {
@@ -1350,10 +1332,7 @@ mod tests {
                 window_status: 0,
             }));
         });
-        assert_eq!(
-            unsafe { imodv_main(pointers.len() as i32, pointers.as_ptr()) },
-            3
-        );
+        assert_eq!(unsafe { imodv_main(arguments.len() as i32, &arguments) }, 3);
         assert!(
             crate::imod::three_dmod::imod::IMOD_DEBUG.load(std::sync::atomic::Ordering::Relaxed)
         );

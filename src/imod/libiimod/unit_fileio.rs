@@ -128,8 +128,8 @@ pub type b3dFloat = ::core::ffi::c_float;
 pub type fortStrLen_t = ::core::ffi::c_int;
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
-    b3d_error, b3d_get_error as b3dGetError, b3d_milli_sleep as b3dMilliSleep,
-    b3d_set_store_error as b3dSetStoreError, f2c_string as f2cString,
+    CArg, b3d_error, b3d_get_error as b3dGetError, b3d_milli_sleep as b3dMilliSleep,
+    b3d_set_store_error as b3dSetStoreError, c_format_bytes, f2c_string as f2cString,
     imod_backup_file as imodBackupFile,
 };
 use crate::imod::libcfshr::ilist::{
@@ -152,6 +152,7 @@ use crate::imod::libiimod::iimrc::ii_mrc_check as iiMRCCheck;
 use crate::imod::libiimod::iishrmem::ii_shr_mem_check_size as iiShrMemCheckSize;
 use crate::imod::libiimod::iitif::tiff_set_string_tag_to_print as tiffSetStringTagToPrint;
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_getdcsize};
+use std::io::Write as _;
 
 #[repr(C)]
 pub struct Unit {
@@ -159,7 +160,11 @@ pub struct Unit {
     pub header: *mut MrcHeader,
     pub current_sec: ::core::ffi::c_int,
     pub current_line: ::core::ffi::c_int,
-    pub tail_name: *mut ::core::ffi::c_char,
+    /// C `char *tailName` (`unit_fileio.c:119`), "pointer to filename only in
+    /// fname".  Now the index of that byte within `iiFile->filename` rather
+    /// than a pointer into it, because the name owns its storage; nothing in
+    /// the C or in this translation ever reads the field.
+    pub tail_name: usize,
     pub attribute: ::core::ffi::c_int,
     pub being_used: ::core::ffi::c_uchar,
     pub read_only: ::core::ffi::c_uchar,
@@ -200,17 +205,14 @@ pub unsafe extern "C" fn iiu_open(
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
     let mut mode: ::core::ffi::c_int = 0;
     let mut errSave: ::core::ffi::c_int = 0;
-    let mut modes: [*const ::core::ffi::c_char; 4] = [
-        b"rb\0" as *const u8 as *const ::core::ffi::c_char,
-        b"rb+\0" as *const u8 as *const ::core::ffi::c_char,
-        b"wb\0" as *const u8 as *const ::core::ffi::c_char,
-        b"wb+\0" as *const u8 as *const ::core::ffi::c_char,
-    ];
+    // `unit_fileio.c:207`: the `fopen` mode strings.  `iiFOpen`/`iiOpenNew`
+    // now take the mode as a `&str`, so the table is plain Rust.
+    let modes: [&str; 4] = ["rb", "rb+", "wb", "wb+"];
     let mut tailback: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
     u = find_new_unit(iunit);
     iiu_memory_error(
         u as *mut ::core::ffi::c_void,
-        b"ERROR: iiuOpen - Allocating new unit\0" as *const u8 as *const ::core::ffi::c_char,
+        "ERROR: iiuOpen - Allocating new unit",
     );
     (*u).being_used = 1 as ::core::ffi::c_uchar;
     (*u).read_only = 0 as ::core::ffi::c_uchar;
@@ -235,7 +237,7 @@ pub unsafe extern "C" fn iiu_open(
     if *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'N' as i32
         || *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'n' as i32
     {
-        if getenv(b"IMOD_NO_IMAGE_BACKUP\0" as *const u8 as *const ::core::ffi::c_char).is_null() {
+        if std::env::var_os("IMOD_NO_IMAGE_BACKUP").is_none() {
             *__errno_location() = 0 as ::core::ffi::c_int;
             if imodBackupFile(::core::ffi::CStr::from_ptr(name).to_string_lossy().as_ref()) != 0 {
                 errSave = *__errno_location();
@@ -247,11 +249,20 @@ pub unsafe extern "C" fn iiu_open(
                     name,
                 );
                 if errSave != 0 {
-                    fprintf(
-                        stdout,
-                        b"WARNING: from system - %s\n\0" as *const u8 as *const ::core::ffi::c_char,
-                        strerror(errSave),
-                    );
+                    // `strerror` is the C library's own errno table and its
+                    // exact wording is part of the acceptance target, so the
+                    // call stays; the result is walked to its NUL as bytes
+                    // rather than through `CStr`.
+                    let msg = strerror(errSave);
+                    let mut len = 0usize;
+                    while *msg.add(len) != 0 {
+                        len += 1;
+                    }
+                    let msg = core::slice::from_raw_parts(msg.cast::<u8>(), len);
+                    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                        "WARNING: from system - %s\n",
+                        &[CArg::Bytes(msg)],
+                    ));
                 }
             }
         }
@@ -271,7 +282,11 @@ pub unsafe extern "C" fn iiu_open(
         (*u).attribute = UNIT_ATBUT_SCRATCH;
     }
     if mode == 3 as ::core::ffi::c_int {
-        (*u).ii_file = iiOpenNew(name, modes[mode as usize], IIFILE_DEFAULT);
+        (*u).ii_file = iiOpenNew(
+            core::ffi::CStr::from_ptr(name).to_bytes(),
+            modes[mode as usize],
+            IIFILE_DEFAULT,
+        );
         if (*u).ii_file.is_null() {
             b3d_error(
                 Some(&mut ImodFile::Stdout),
@@ -283,14 +298,24 @@ pub unsafe extern "C" fn iiu_open(
                 return 1 as ::core::ffi::c_int;
             }
         }
-        printf(
-            b"\n NEW image file on unit %3d : %s\n\0" as *const u8 as *const ::core::ffi::c_char,
-            iunit,
-            name,
-        );
+        {
+            use std::io::Write;
+            let _ = ImodFile::Stdout.write_all(&crate::imod::libcfshr::b3dutil::c_format_bytes(
+                "\n NEW image file on unit %3d : %s\n",
+                &[
+                    crate::imod::libcfshr::b3dutil::CArg::Int(iunit as i64),
+                    crate::imod::libcfshr::b3dutil::CArg::Bytes(
+                        core::ffi::CStr::from_ptr(name).to_bytes(),
+                    ),
+                ],
+            ));
+        }
         fflush(stdout);
     } else {
-        (*u).ii_file = iiOpen(name, modes[mode as usize]);
+        (*u).ii_file = iiOpen(
+            core::ffi::CStr::from_ptr(name).to_bytes(),
+            modes[mode as usize],
+        );
         if (*u).ii_file.is_null() {
             b3d_error(
                 Some(&mut ImodFile::Stdout),
@@ -350,7 +375,7 @@ pub unsafe extern "C" fn iiu_open(
         (*u).header = Box::into_raw(Box::new(MrcHeader::default()));
         iiu_memory_error(
             (*u).header as *mut ::core::ffi::c_void,
-            b"ERROR: iiuOpen - Allocating MRC header\0" as *const u8 as *const ::core::ffi::c_char,
+            "ERROR: iiuOpen - Allocating MRC header",
         );
         if iiFillMrcHeader((*u).ii_file, (*u).header) != 0 {
             b3d_error(
@@ -369,19 +394,15 @@ pub unsafe extern "C" fn iiu_open(
     } else {
         (*u).header = (*(*u).ii_file).header as *mut MrcHeader;
     }
-    (*u).tail_name = strrchr((*(*u).ii_file).filename, '/' as i32);
-    tailback = strrchr((*(*u).ii_file).filename, '\\' as i32);
-    if tailback > (*u).tail_name {
-        (*u).tail_name = tailback;
-    }
-    if (*u).tail_name.is_null() {
-        (*u).tail_name = (*(*u).ii_file)
-            .filename
-            .offset(0 as ::core::ffi::c_int as isize)
-            as *mut ::core::ffi::c_char;
-    } else {
-        (*u).tail_name = (*u).tail_name.offset(1);
-    }
+    // `unit_fileio.c:273-280`: the last '/' or the last '\\', whichever is
+    // later, plus one; index 0 when there is neither.
+    let name = (*(*u).ii_file).filename.as_deref().unwrap_or_default();
+    let slash = name.iter().rposition(|b| *b == b'/');
+    let tailback = name.iter().rposition(|b| *b == b'\\');
+    (*u).tail_name = match slash.max(tailback) {
+        Some(pos) => pos + 1,
+        None => 0,
+    };
     return 0 as ::core::ffi::c_int;
 }
 #[unsafe(no_mangle)]
@@ -396,10 +417,7 @@ pub unsafe extern "C" fn iiuopen_(
     let mut cattr: *mut ::core::ffi::c_char = f2cString(attribute, attr_l as ::core::ffi::c_int);
     let mut err: ::core::ffi::c_int = 0;
     if cname.is_null() || cattr.is_null() {
-        iiu_memory_error(
-            NULL,
-            b"ERROR: iiuopen - Allocating C strings\0" as *const u8 as *const ::core::ffi::c_char,
-        );
+        iiu_memory_error(NULL, "ERROR: iiuopen - Allocating C strings");
     }
     err = iiu_open(*iunit, cname, cattr);
     free(cname as *mut ::core::ffi::c_void);
@@ -428,7 +446,8 @@ pub unsafe extern "C" fn iiu_close(mut iunit: ::core::ffi::c_int) {
             if (*u).attribute == UNIT_ATBUT_SCRATCH {
                 trial = 0 as ::core::ffi::c_int;
                 while trial < numTry {
-                    if remove((*(*u).ii_file).filename) == 0 {
+                    let scratch = (*(*u).ii_file).filename.clone().unwrap_or_default();
+                    if std::fs::remove_file(String::from_utf8_lossy(&scratch).as_ref()).is_ok() {
                         break;
                     }
                     if trial < numTry - 1 as ::core::ffi::c_int {
@@ -457,7 +476,7 @@ pub unsafe extern "C" fn iiuclose_(mut iunit: *mut ::core::ffi::c_int) {
 pub unsafe extern "C" fn iiu_get_ii_file(mut iunit: ::core::ffi::c_int) -> *mut ImodImageFile {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_get_ii_file\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_get_ii_file",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -467,7 +486,7 @@ pub unsafe extern "C" fn iiu_get_ii_file(mut iunit: ::core::ffi::c_int) -> *mut 
 pub unsafe extern "C" fn iiu_ret_num_volumes(mut iunit: ::core::ffi::c_int) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_ret_num_volumes\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_ret_num_volumes",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -492,14 +511,14 @@ pub unsafe extern "C" fn iiu_volume_open(
     let fp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
     let mut u: *mut Unit = lookup_unit(
         mainUnit,
-        b"iiuOpenVolume\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiuOpenVolume",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
     let mut unew: *mut Unit = find_new_unit(newUnit);
     iiu_memory_error(
         unew as *mut ::core::ffi::c_void,
-        b"ERROR:  - Allocating new unit\0" as *const u8 as *const ::core::ffi::c_char,
+        "ERROR:  - Allocating new unit",
     );
     (*unew).being_used = 1 as ::core::ffi::c_uchar;
     (*unew).read_only = (*u).read_only;
@@ -543,7 +562,7 @@ pub unsafe extern "C" fn iiu_ret_adoc_index(
 ) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_ret_adoc_index\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_ret_adoc_index",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -569,13 +588,13 @@ pub unsafe extern "C" fn iiu_trans_adoc_sections(
 ) -> ::core::ffi::c_int {
     let mut uto: *mut Unit = lookup_unit(
         toUnit,
-        b"iiu_trans_adoc_sections\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_trans_adoc_sections",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
     let mut ufrom: *mut Unit = lookup_unit(
         fromUnit,
-        b"iiu_trans_adoc_sections\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_trans_adoc_sections",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -592,7 +611,7 @@ pub unsafe extern "C" fn iiu_write_global_adoc(
 ) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_write_global_adoc\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_write_global_adoc",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -620,7 +639,7 @@ pub unsafe extern "C" fn iiu_ret_chunk_sizes(
 ) {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiuRetChunkSize\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiuRetChunkSize",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -646,7 +665,7 @@ pub unsafe extern "C" fn iiu_alt_chunk_sizes(
 ) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiuAltChunkSize\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiuAltChunkSize",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -668,7 +687,7 @@ pub unsafe extern "C" fn iiu_set_hdf_compression(
 ) {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_set_hdf_compression\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_set_hdf_compression",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -689,7 +708,7 @@ pub unsafe extern "C" fn iiu_set_position(
 ) {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_set_position\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_set_position",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -719,7 +738,7 @@ pub unsafe extern "C" fn iiu_read_section(
 ) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_read_section\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_read_section",
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
     );
@@ -756,7 +775,7 @@ pub unsafe extern "C" fn iiu_read_sec_part(
     let mut err: ::core::ffi::c_int = 0;
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_read_sec_part\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_read_sec_part",
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
     );
@@ -770,17 +789,9 @@ pub unsafe extern "C" fn iiu_read_sec_part(
     (*(*u).ii_file).pad_left = 0 as ::core::ffi::c_int;
     (*(*u).ii_file).pad_right = nxdim - (indX1 + 1 as ::core::ffi::c_int - indX0);
     if (*u).no_convert != 0 {
-        err = iiReadSection(
-            (*u).ii_file,
-            array as *mut ::core::ffi::c_char,
-            (*u).current_sec,
-        );
+        err = iiReadSection((*u).ii_file, array as *mut u8, (*u).current_sec);
     } else {
-        err = iiReadSectionFloat(
-            (*u).ii_file,
-            array as *mut ::core::ffi::c_char,
-            (*u).current_sec,
-        );
+        err = iiReadSectionFloat((*u).ii_file, array as *mut u8, (*u).current_sec);
     }
     (*u).current_sec += 1;
     (*u).current_line = 0 as ::core::ffi::c_int;
@@ -820,7 +831,7 @@ pub unsafe extern "C" fn iiu_read_lines(
     let mut iz: ::core::ffi::c_int = 0;
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_read_lines\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_read_lines",
         0 as ::core::ffi::c_int,
         1 as ::core::ffi::c_int,
     );
@@ -832,9 +843,9 @@ pub unsafe extern "C" fn iiu_read_lines(
         return -(2 as ::core::ffi::c_int);
     }
     if (*u).no_convert != 0 {
-        err = iiReadSection((*u).ii_file, array as *mut ::core::ffi::c_char, iz);
+        err = iiReadSection((*u).ii_file, array as *mut u8, iz);
     } else {
-        err = iiReadSectionFloat((*u).ii_file, array as *mut ::core::ffi::c_char, iz);
+        err = iiReadSectionFloat((*u).ii_file, array as *mut u8, iz);
     }
     if err != 0 && sStoreError < 0 as ::core::ffi::c_int {
         {
@@ -868,7 +879,7 @@ pub unsafe extern "C" fn iiu_write_section(
 ) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_write_section\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_write_section",
         sExitOnError,
         2 as ::core::ffi::c_int,
     );
@@ -923,7 +934,7 @@ pub unsafe extern "C" fn iiu_write_subarray(
     let mut mess: [::core::ffi::c_char; 120] = [0; 120];
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_write_subarray\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_write_subarray",
         sExitOnError,
         2 as ::core::ffi::c_int,
     );
@@ -977,11 +988,11 @@ pub unsafe extern "C" fn iiu_write_sec_part(
     let mut useMess: *const ::core::ffi::c_char = sWritePartMess;
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_write_sec_part\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_write_sec_part",
         sExitOnError,
         2 as ::core::ffi::c_int,
     );
-    let mut arrStart: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let mut arrStart: *mut u8 = ::core::ptr::null_mut::<u8>();
     if u.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
@@ -1042,8 +1053,8 @@ pub unsafe extern "C" fn iiu_write_sec_part(
             return -(3 as ::core::ffi::c_int);
         }
     }
-    arrStart = (array as *mut ::core::ffi::c_char)
-        .offset((iyStart * nxdim * iiu_buf_bytes_per_pixel(iunit)) as isize);
+    arrStart =
+        (array as *mut u8).offset((iyStart * nxdim * iiu_buf_bytes_per_pixel(iunit)) as isize);
     if (*u).no_convert != 0 {
         err = iiWriteSection((*u).ii_file, arrStart, (*u).current_sec);
     } else {
@@ -1092,12 +1103,8 @@ pub unsafe extern "C" fn iiu_write_lines(
 ) -> ::core::ffi::c_int {
     let mut err: ::core::ffi::c_int = 0;
     let mut iz: ::core::ffi::c_int = 0;
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        b"iiuWriteLine\0" as *const u8 as *const ::core::ffi::c_char,
-        sExitOnError,
-        2 as ::core::ffi::c_int,
-    );
+    let mut u: *mut Unit =
+        lookup_unit(iunit, "iiuWriteLine", sExitOnError, 2 as ::core::ffi::c_int);
     if u.is_null() {
         return -(1 as ::core::ffi::c_int);
     }
@@ -1113,7 +1120,7 @@ pub unsafe extern "C" fn iiu_write_lines(
         }
     }
     if (*u).no_convert != 0 {
-        err = iiWriteSection((*u).ii_file, array as *mut ::core::ffi::c_char, iz);
+        err = iiWriteSection((*u).ii_file, array as *mut u8, iz);
     } else {
         err = iiWriteSectionFloat((*u).ii_file, array as *mut f32, iz);
     }
@@ -1221,7 +1228,7 @@ pub unsafe extern "C" fn iiu_file_info(
     };
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiuFileSize\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiuFileSize",
         0 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -1231,11 +1238,15 @@ pub unsafe extern "C" fn iiu_file_info(
     if u.is_null() {
         return;
     }
+    let name = (*(*u).ii_file).filename.clone().unwrap_or_default();
     if (*(*u).ii_file).file == IIFILE_SHR_MEM {
-        *fileSize = (iiShrMemCheckSize((*(*u).ii_file).filename) as ::core::ffi::c_double
-            / 1024.0f64) as ::core::ffi::c_int;
+        *fileSize =
+            (iiShrMemCheckSize(&name) as ::core::ffi::c_double / 1024.0f64) as ::core::ffi::c_int;
     } else {
-        stat((*(*u).ii_file).filename, &raw mut buf);
+        // `unit_fileio.c:1080` is `stat(…, &buf)`; `stat` takes a `char *`, so
+        // the terminator is added at that call.
+        let cname = std::ffi::CString::new(name).unwrap_or_default();
+        stat(cname.as_ptr(), &raw mut buf);
         *fileSize = (buf.st_size as ::core::ffi::c_double / 1024.0f64) as ::core::ffi::c_int;
     }
     *fileType = (*(*u).ii_file).file;
@@ -1292,7 +1303,7 @@ pub unsafe fn iiu_alt_brief(val: i32) {
 pub unsafe fn iiu_ret_brief() -> i32 {
     if sBriefHeader >= 0 {
         sBriefHeader
-    } else if !getenv(b"IMOD_BRIEF_HEADER\0" as *const u8 as *const ::core::ffi::c_char).is_null() {
+    } else if std::env::var_os("IMOD_BRIEF_HEADER").is_some() {
         1
     } else {
         0
@@ -1339,10 +1350,12 @@ pub unsafe extern "C" fn iiualtconvert_(
 pub unsafe extern "C" fn iiallowmultivolume_(mut allow: *mut ::core::ffi::c_int) {
     iiAllowMultiVolume(*allow);
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_mrc_header(
+/// `function` is the caller's routine name for the error messages only; see
+/// `lookup_unit`.  `#[no_mangle] extern "C"` was dropped with the `c_char`:
+/// nothing outside this crate links the symbol.
+pub unsafe fn iiu_mrc_header(
     mut iunit: ::core::ffi::c_int,
-    mut function: *const ::core::ffi::c_char,
+    function: &str,
     mut doExit: ::core::ffi::c_int,
     mut checkRW: ::core::ffi::c_int,
 ) -> *mut MrcHeader {
@@ -1356,7 +1369,7 @@ pub unsafe extern "C" fn iiu_mrc_header(
 pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: ::core::ffi::c_int) {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_sync_with_mrc_header\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_sync_with_mrc_header",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -1366,7 +1379,7 @@ pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: ::core::ffi::c_int)
 pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: ::core::ffi::c_int) {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_reassign_header_ptr\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_reassign_header_ptr",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -1384,7 +1397,7 @@ pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: ::core::ffi::c_int) 
 pub unsafe extern "C" fn iiu_file_type(mut iunit: ::core::ffi::c_int) -> ::core::ffi::c_int {
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_file_type\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_file_type",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -1417,7 +1430,7 @@ pub unsafe extern "C" fn iiu_buf_bytes_per_pixel(
     let mut csize: ::core::ffi::c_int = 0;
     let mut u: *mut Unit = lookup_unit(
         iunit,
-        b"iiu_file_type\0" as *const u8 as *const ::core::ffi::c_char,
+        "iiu_file_type",
         1 as ::core::ffi::c_int,
         0 as ::core::ffi::c_int,
     );
@@ -1443,19 +1456,14 @@ pub unsafe extern "C" fn zero_(mut a: *mut ::core::ffi::c_char, mut n: *mut ::co
         *n as size_t,
     );
 }
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_memory_error(
-    mut ptr: *mut ::core::ffi::c_void,
-    mut message: *const ::core::ffi::c_char,
-) {
+/// `unit_fileio.c:1465`.  `message` is a literal diagnostic, not a Fortran
+/// string, so it is a `&str`; the write stays on the **C** stdout stream,
+/// which is what `fprintf(stdout, …)` used.
+pub unsafe fn iiu_memory_error(mut ptr: *mut ::core::ffi::c_void, message: &str) {
     if !ptr.is_null() {
         return;
     }
-    fprintf(
-        stdout,
-        b"\n%s\n\0" as *const u8 as *const ::core::ffi::c_char,
-        message,
-    );
+    let _ = ImodFile::Stdout.write_all(&c_format_bytes("\n%s\n", &[CArg::Str(message)]));
     exit(1 as ::core::ffi::c_int);
 }
 unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
@@ -1464,7 +1472,7 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         header: ::core::ptr::null_mut::<MrcHeader>(),
         current_sec: 0,
         current_line: 0,
-        tail_name: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        tail_name: 0,
         attribute: 0,
         being_used: 0,
         read_only: 0,
@@ -1580,9 +1588,12 @@ unsafe extern "C" fn mybcopy(
         *fresh2 = *fresh1;
     }
 }
-unsafe extern "C" fn lookup_unit(
+/// `function` is the *caller's routine name*, used only in the error messages
+/// below (`unit_fileio.c:195` onward).  It carries no Fortran hidden string
+/// length, so it is a plain `&str` rather than a `c_char` pointer.
+unsafe fn lookup_unit(
     mut unit: ::core::ffi::c_int,
-    mut function: *const ::core::ffi::c_char,
+    function: &str,
     mut doExit: ::core::ffi::c_int,
     mut checkRW: ::core::ffi::c_int,
 ) -> *mut Unit {
@@ -1592,8 +1603,7 @@ unsafe extern "C" fn lookup_unit(
             Some(&mut ImodFile::Stdout),
             format_args!(
                 "\nERROR: {} - {} is not a legal unit number.\n",
-                core::ffi::CStr::from_ptr(function).to_string_lossy(),
-                unit
+                function, unit
             ),
         );
         return exit_or_null(doExit) as *mut Unit;
@@ -1618,8 +1628,7 @@ unsafe extern "C" fn lookup_unit(
                     Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: {} - Trying to write to unit {}, which was opened read-only.\n",
-                        core::ffi::CStr::from_ptr(function).to_string_lossy(),
-                        unit
+                        function, unit
                     ),
                 );
                 return exit_or_null(doExit) as *mut Unit;
@@ -1633,7 +1642,7 @@ unsafe extern "C" fn lookup_unit(
                     Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: {} - There is no function for reading {} from the type of file on unit {}.\n",
-                        core::ffi::CStr::from_ptr(function).to_string_lossy(),
+                        function,
                         if (*u).no_convert != 0 {
                             "raw data"
                         } else {
@@ -1653,7 +1662,7 @@ unsafe extern "C" fn lookup_unit(
                     Some(&mut ImodFile::Stdout),
                     format_args!(
                         "\nERROR: {} - There is no function for writing {} to the type of file on unit {}.\n",
-                        core::ffi::CStr::from_ptr(function).to_string_lossy(),
+                        function,
                         if (*u).no_convert != 0 {
                             "raw data"
                         } else {
@@ -1669,11 +1678,7 @@ unsafe extern "C" fn lookup_unit(
     }
     b3d_error(
         Some(&mut ImodFile::Stdout),
-        format_args!(
-            "\nERROR: {} - unit {} is not open.\n",
-            core::ffi::CStr::from_ptr(function).to_string_lossy(),
-            unit
-        ),
+        format_args!("\nERROR: {} - unit {} is not open.\n", function, unit),
     );
     return exit_or_null(doExit) as *mut Unit;
 }
@@ -1692,10 +1697,7 @@ unsafe extern "C" fn add_unit_to_list(mut list: *mut *mut Ilist, mut unit: ::cor
         )
         .map_or(::core::ptr::null_mut(), Box::into_raw);
     }
-    iiu_memory_error(
-        *list as *mut ::core::ffi::c_void,
-        b"Allocating a unit list\0" as *const u8 as *const ::core::ffi::c_char,
-    );
+    iiu_memory_error(*list as *mut ::core::ffi::c_void, "Allocating a unit list");
     if ilistAppend(
         &mut **list,
         ::core::slice::from_raw_parts(
@@ -1704,10 +1706,7 @@ unsafe extern "C" fn add_unit_to_list(mut list: *mut *mut Ilist, mut unit: ::cor
         ),
     ) != 0
     {
-        iiu_memory_error(
-            NULL,
-            b"Appending to a unit list\0" as *const u8 as *const ::core::ffi::c_char,
-        );
+        iiu_memory_error(NULL, "Appending to a unit list");
     }
 }
 unsafe extern "C" fn remove_unit_from_list(mut list: *mut Ilist, mut unit: ::core::ffi::c_int) {

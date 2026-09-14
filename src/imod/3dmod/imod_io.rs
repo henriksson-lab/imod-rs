@@ -7,7 +7,6 @@
 //! a headless viewer.
 #![allow(dead_code)]
 
-use std::ffi::CStr;
 use std::fs::{File, OpenOptions, remove_file, rename};
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
@@ -109,18 +108,36 @@ pub trait ImodIoBoundary {
     }
 }
 
-/// Private `datetime` (`imod_io.cpp:67`).  `ctime`'s eight-character local
-/// clock format is kept without relying on process-global C buffers.
+/// Private `datetime` (`imod_io.cpp:67`).
+///
+/// The source copies eight characters out of `ctime`'s
+/// `"Www Mmm dd hh:mm:ss yyyy\n"` at offset 11 into `dummystring`
+/// (`imod_io.cpp:66`), which is **nine** blanks plus its terminator, so the
+/// `strncpy` leaves the ninth blank in place and the returned string is
+/// `"hh:mm:ss "` — with a trailing space that both `wprint` call sites
+/// (`:215`, `:357`) print.
+///
+/// `localtime_r` is the one foreign call left here and is the same named
+/// boundary `b3ddate.rs` keeps: `ctime` is *local* civil time, and converting
+/// epoch seconds to it needs the C library's timezone database
+/// (`/etc/localtime`, `$TZ`), which Rust's standard library has no equivalent
+/// for.  The formatting itself is Rust's.
 pub fn datetime() -> String {
-    let mut now: libc::time_t = 0;
-    let mut local: libc::tm = unsafe { core::mem::zeroed() };
-    unsafe {
-        libc::time(&mut now);
-        libc::localtime_r(&now, &mut local);
-        let mut text = [0_i8; 9];
-        libc::strftime(text.as_mut_ptr(), text.len(), c"%H:%M:%S".as_ptr(), &local);
-        CStr::from_ptr(text.as_ptr()).to_string_lossy().into_owned()
-    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as libc::time_t;
+    let local = unsafe {
+        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+        if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
+            return "         ".to_owned();
+        }
+        local.assume_init()
+    };
+    format!(
+        "{:02}:{:02}:{:02} ",
+        local.tm_hour, local.tm_min, local.tm_sec
+    )
 }
 
 /// `imod_model_changed`.

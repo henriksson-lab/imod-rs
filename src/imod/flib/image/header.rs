@@ -34,7 +34,6 @@ use crate::imod::libiimod::unit_header::{
     iiu_ret_delta, iiu_ret_extended_data, iiu_ret_extended_type, iiu_ret_imod_flags,
     iiu_ret_labels, iiu_ret_mrc_version, iiu_ret_num_extended, iiu_ret_origin, iiu_ret_rms,
 };
-use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 
 /// `parameter (ntypes = 6)` (`header.f90:12`).
@@ -266,14 +265,6 @@ pub fn header() {
             length -= 1;
         }
         let in_file = String::from_utf8_lossy(&in_file_record[..length]).into_owned();
-        let filename = match CString::new(in_file.as_bytes()) {
-            Ok(value) => value,
-            Err(_) => {
-                println!();
-                println!("ERROR: HEADER - Input file contains a NUL byte");
-                std::process::exit(1);
-            }
-        };
         unsafe {
             ii_allow_multi_volume(1);
             imopen(1, &in_file, "RO");
@@ -597,7 +588,7 @@ pub fn header() {
                 let mut num_sect = 0;
                 let mut i_type_adoc = 0;
                 let ind_adoc = adoc_open_image_metadata(
-                    filename.as_ptr(),
+                    in_file.as_bytes(),
                     1,
                     &mut montage,
                     &mut num_sect,
@@ -608,13 +599,7 @@ pub fn header() {
                         // Etomo needed a comma before text, or no text.  Copytomocoms now
                         // wants "from mdoc" to know that pixel spacing was 1
                         let mut pixel = 0.0_f32;
-                        if adoc_get_float(
-                            ADOC_GLOBAL_NAME.as_ptr(),
-                            0,
-                            c"PixelSpacing".as_ptr(),
-                            &mut pixel,
-                        ) == 0
-                        {
+                        if adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut pixel) == 0 {
                             println!(
                                 "          Pixel size in nanometers ={}{}",
                                 g_edit(pixel / 10.0, 11, 4),
@@ -625,11 +610,11 @@ pub fn header() {
 
                     if !found_axis_rot {
                         // Look in titles
-                        let num_labels = adoc_get_number_of_sections(c"T".as_ptr());
+                        let num_labels = adoc_get_number_of_sections(b"T");
                         for j in 0..num_labels {
-                            let mut name = core::ptr::null_mut();
-                            if adoc_get_section_name(c"T".as_ptr(), j, &mut name) == 0 {
-                                let temp_label_str = CStr::from_ptr(name).to_string_lossy();
+                            let mut name = Vec::<u8>::new();
+                            if adoc_get_section_name(b"T", j, &mut name) == 0 {
+                                let temp_label_str = String::from_utf8_lossy(&name);
                                 let fei_label = temp_label_str.contains("TiltAxisAngle");
                                 if fei_label || temp_label_str.contains("Tilt axis angle") {
                                     if let Some((_, rest)) = temp_label_str.split_once('=') {
@@ -646,9 +631,9 @@ pub fn header() {
                                             if fei_label {
                                                 let mut rot_angle = 0.0_f32;
                                                 if adoc_get_float(
-                                                    ADOC_ZVALUE_NAME.as_ptr(),
+                                                    ADOC_ZVALUE_NAME,
                                                     0,
-                                                    c"RotationAngle".as_ptr(),
+                                                    b"RotationAngle",
                                                     &mut rot_angle,
                                                 ) == 0
                                                 {
@@ -693,10 +678,8 @@ pub fn header() {
                                             }
                                         }
                                     }
-                                    libc::free(name.cast());
                                     break;
                                 }
-                                libc::free(name.cast());
                             }
                         }
                     }

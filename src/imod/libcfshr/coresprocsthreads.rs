@@ -4,6 +4,7 @@
 use core::sync::atomic::{AtomicI32, Ordering};
 
 use super::b3dutil::{ImodFile, fgetline};
+use super::parse_params::strtol;
 
 const CPUINFO_LINE: i32 = 80;
 const MAX_CPU_SOCKETS: usize = 64;
@@ -38,36 +39,39 @@ pub unsafe fn num_cores_and_logical_procs(physical: *mut i32, logical: *mut i32)
             if length == -1 {
                 break;
             }
-            if S_CPU_IS_AMD.load(Ordering::SeqCst) < 0
-                && !libc::strstr(line.as_ptr().cast(), c"vendor_id".as_ptr()).is_null()
+            // `strstr`/`strchr` read the C string, which ends at the NUL
+            // `fgetline` wrote, not the whole buffer.
+            let text = &line[..line.iter().position(|&b| b == 0).unwrap_or(line.len())];
+            if S_CPU_IS_AMD.load(Ordering::SeqCst) < 0 && text.windows(9).any(|w| w == b"vendor_id")
             {
                 S_CPU_IS_AMD.store(
-                    (!libc::strstr(line.as_ptr().cast(), c"AuthenticAMD".as_ptr()).is_null())
-                        as i32,
+                    text.windows(12).any(|w| w == b"AuthenticAMD") as i32,
                     Ordering::SeqCst,
                 );
             }
-            if !libc::strstr(line.as_ptr().cast(), c"physical id".as_ptr()).is_null() {
+            if text.windows(11).any(|w| w == b"physical id") {
                 if current_id >= 0 {
                     break;
                 }
-                let colon = libc::strchr(line.as_ptr().cast(), b':' as i32);
-                if !colon.is_null() {
-                    current_id = libc::atoi(colon.add(1));
+                let colon = text.iter().position(|&b| b == b':');
+                if let Some(colon) = colon {
+                    let mut scanned = 0usize;
+                    current_id = strtol(&text[colon + 1..], &mut scanned, 10) as i32;
                 }
-                if colon.is_null() || current_id < 0 || current_id as usize >= MAX_CPU_SOCKETS {
+                if colon.is_none() || current_id < 0 || current_id as usize >= MAX_CPU_SOCKETS {
                     break;
                 }
             }
-            if !libc::strstr(line.as_ptr().cast(), c"cpu cores".as_ptr()).is_null() {
+            if text.windows(9).any(|w| w == b"cpu cores") {
                 if current_cores >= 0 {
                     break;
                 }
-                let colon = libc::strchr(line.as_ptr().cast(), b':' as i32);
-                if !colon.is_null() {
-                    current_cores = libc::atoi(colon.add(1));
+                let colon = text.iter().position(|&b| b == b':');
+                if let Some(colon) = colon {
+                    let mut scanned = 0usize;
+                    current_cores = strtol(&text[colon + 1..], &mut scanned, 10) as i32;
                 }
-                if colon.is_null() || current_cores <= 0 {
+                if colon.is_none() || current_cores <= 0 {
                     break;
                 }
             }
@@ -118,14 +122,12 @@ pub fn b3d_cpu_is_amd() -> i32 {
 
 /// C `wallTime` (`coresprocsthreads.c:294`).
 pub fn wall_time() -> f64 {
-    let mut value = libc::timeval {
-        tv_sec: 0,
-        tv_usec: 0,
-    };
-    unsafe {
-        libc::gettimeofday(&mut value, core::ptr::null_mut());
-    }
-    value.tv_sec as f64 + value.tv_usec as f64 / 1_000_000.
+    // `gettimeofday(&tv, NULL)`: the wall clock since the epoch, in seconds
+    // and microseconds, which is what `SystemTime::UNIX_EPOCH` yields.
+    let value = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or(std::time::Duration::ZERO);
+    value.as_secs() as f64 + value.subsec_micros() as f64 / 1_000_000.
 }
 
 #[cfg(test)]

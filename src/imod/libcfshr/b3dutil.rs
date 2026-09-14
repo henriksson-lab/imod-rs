@@ -281,8 +281,39 @@ impl Seek for ImodFile {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match self {
             ImodFile::File(f) => (&**f).seek(pos),
-            // `b3dutil.c:903`: `b3dFseek` returns 0 without seeking when the
-            // handle is stdin, and the other streams are not seekable either.
+            // The standard streams **are** seekable when the shell has
+            // redirected them to a regular file, and C's `fseek`/`rewind` do
+            // seek in that case.  This mattered: `imodWriteAscii`
+            // (`imodel_files.c:1645`) rewinds `fout` so its later write
+            // overwrites the banner, which is exactly why
+            // `imodinfo -a m.mod > out` puts the header first while
+            // `imodinfo -a m.mod | cat > out` puts it last.  Returning
+            // `Ok(0)` here without seeking made the redirected form *append*
+            // instead, and a native differential caught it.
+            //
+            // `lseek` reports `ESPIPE` for a pipe or terminal, which is what
+            // the C library also sees, so the pipe case still behaves as
+            // before.  Note this is *not* `b3dFseek`'s stdin rule: that
+            // function has its own `fp == stdin` early return
+            // (`b3dutil.c:903`) and keeps it.
+            ImodFile::Stdin | ImodFile::Stdout | ImodFile::Stderr => {
+                let fd = match self {
+                    ImodFile::Stdin => 0,
+                    ImodFile::Stdout => 1,
+                    _ => 2,
+                };
+                let (whence, offset) = match pos {
+                    SeekFrom::Start(n) => (libc::SEEK_SET, n as i64),
+                    SeekFrom::Current(n) => (libc::SEEK_CUR, n),
+                    SeekFrom::End(n) => (libc::SEEK_END, n),
+                };
+                let result = unsafe { libc::lseek(fd, offset as libc::off_t, whence) };
+                if result < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(result as u64)
+                }
+            }
             _ => Ok(0),
         }
     }
@@ -2196,54 +2227,35 @@ pub fn standardmemorylimitmb(half_point: &i32) -> f64 {
 ///
 /// Its only call sites are inside `expandArgList`'s `#ifdef _WIN32` branch, so
 /// nothing reaches it on this platform; it is translated because the
-/// definition itself is not conditionally compiled.
-///
-/// **Not yet converted.**  It, @expand_arg_list and @replace_file_arg_vec are
-/// the `argv` boundary: their live caller is `parse_params.rs`, which is still
-/// raw C2Rust output holding `char **argv` throughout, so the three move when
-/// PIP does.  Nothing is wrapped in the meantime.
-unsafe fn add_to_arg_vector(
-    arg: *const c_char,
-    arg_vec: *mut *mut *mut c_char,
-    vec_size: *mut i32,
-    num_in_vec: *mut i32,
-    pattern: *const c_char,
+/// definition itself is not conditionally compiled.  The C's growable
+/// `char ***argVec` is a `Vec<Vec<u8>>`, and `vecSize` is kept because the
+/// source's quantum growth decides when it reallocates.
+fn add_to_arg_vector(
+    arg: &[u8],
+    arg_vec: &mut Vec<Vec<u8>>,
+    vec_size: &mut i32,
+    num_in_vec: &mut i32,
+    pattern: Option<&[u8]>,
     num_prefix: i32,
 ) -> i32 {
-    unsafe {
-        let quantum = 8;
-        if *num_in_vec >= *vec_size {
-            if *vec_size != 0 {
-                let grown = libc::realloc(
-                    (*arg_vec).cast(),
-                    (*vec_size + quantum) as usize * core::mem::size_of::<*mut c_char>(),
-                );
-                *arg_vec = grown.cast();
-            } else {
-                *arg_vec =
-                    libc::malloc(quantum as usize * core::mem::size_of::<*mut c_char>()).cast();
-            }
-            if (*arg_vec).is_null() {
-                return 1;
-            }
-            *vec_size += quantum;
-        }
-        let slot = (*arg_vec).offset(*num_in_vec as isize);
-        if !pattern.is_null() && num_prefix != 0 {
-            *slot = libc::malloc(num_prefix as usize + libc::strlen(arg) + 1).cast();
-        } else {
-            *slot = libc::strdup(arg);
-        }
-        if (*slot).is_null() {
-            return 1;
-        }
-        if !pattern.is_null() && num_prefix != 0 {
-            libc::strncpy(*slot, pattern, num_prefix as usize);
-            libc::strcpy((*slot).offset(num_prefix as isize), arg);
-        }
-        *num_in_vec += 1;
-        0
+    let quantum = 8;
+    if *num_in_vec >= *vec_size {
+        *vec_size += quantum;
     }
+    arg_vec.resize(*vec_size as usize, Vec::new());
+    let slot = &mut arg_vec[*num_in_vec as usize];
+    if pattern.is_some() && num_prefix != 0 {
+        /* `strncpy(slot, pattern, numPrefix); strcpy(slot + numPrefix, arg);` */
+        let pattern = pattern.unwrap();
+        slot.clear();
+        slot.extend_from_slice(&pattern[..(num_prefix as usize).min(pattern.len())]);
+        slot.resize(num_prefix as usize, 0);
+        slot.extend_from_slice(arg);
+    } else {
+        *slot = arg.to_vec();
+    }
+    *num_in_vec += 1;
+    0
 }
 /// Matches C `expandArgList` (`b3dutil.c:1579`).
 ///
@@ -2252,18 +2264,21 @@ unsafe fn add_to_arg_vector(
 /// expansion at all.  The Windows branch walks the argument vector with
 /// `FindFirstFile`/`FindNextFile` to expand `*` and `?` wildcards, and is not
 /// translated: it is unselected here and unreachable on a Unix target.
-/// See [`add_to_arg_vector`] for why this stays on `char **`.
-pub unsafe fn expand_arg_list(
-    arguments: *const *const c_char,
+///
+/// `None` is the source's NULL return, which means the allocation failed; the
+/// `#else` arm hands back the vector it was given, and `*allocated` is 0 so the
+/// caller never looks at the copy.
+pub fn expand_arg_list(
+    arguments: &[Vec<u8>],
     count: i32,
-    new_count: *mut i32,
-    allocated: *mut i32,
-    no_match: *mut i32,
-) -> *mut *mut c_char {
+    new_count: &mut i32,
+    allocated: &mut i32,
+    no_match: &mut i32,
+) -> Option<Vec<Vec<u8>>> {
     *allocated = 0;
     *no_match = -1;
     *new_count = count;
-    arguments.cast_mut().cast()
+    Some(arguments.to_vec())
 }
 /// Matches C `replaceFileArgVec` (`b3dutil.c:1722`).
 ///
@@ -2271,60 +2286,50 @@ pub unsafe fn expand_arg_list(
 /// translated in full.  On this platform `expandArgList` returns the original
 /// vector with `ifAlloc == 0` and `noMatchInd == -1`, which makes the two error
 /// paths and the replacement path unreachable; they are kept because the source
-/// keeps them.  See [`add_to_arg_vector`] for why this stays on `char **`.
-pub unsafe fn replace_file_arg_vec(
-    arguments: *mut *const *const c_char,
-    count: *mut i32,
-    first: *mut i32,
-    allocated: *mut i32,
+/// keeps them.
+pub fn replace_file_arg_vec(
+    arguments: &mut Vec<Vec<u8>>,
+    count: &mut i32,
+    first: &mut i32,
+    allocated: &mut i32,
 ) -> i32 {
-    unsafe {
-        let mut new_num = 0_i32;
-        let mut no_match_ind = 0_i32;
-        *allocated = 0;
-        if *first >= *count {
-            return 0;
-        }
-        let prog_name = imod_prog_name(
-            core::ffi::CStr::from_ptr(*(*arguments))
-                .to_string_lossy()
-                .as_ref(),
-        );
-        let new_vec = expand_arg_list(
-            (*arguments).offset(*first as isize),
-            *count - *first,
-            &mut new_num,
-            allocated,
-            &mut no_match_ind,
-        );
-        if new_vec.is_null() {
-            b3d_error(
-                Some(&mut ImodFile::Stdout),
-                format_args!("ERROR: {prog_name} - Allocating memory for expanded argument list\n"),
-            );
-            return -1;
-        }
-        if no_match_ind >= 0 {
-            libc::free(new_vec.cast());
-            b3d_error(
-                Some(&mut ImodFile::Stdout),
-                format_args!(
-                    "ERROR: {prog_name} - No files match entry {}\n",
-                    core::ffi::CStr::from_ptr(
-                        *(*arguments).offset((no_match_ind + *first) as isize)
-                    )
-                    .to_string_lossy()
-                ),
-            );
-            return 1;
-        }
-        if *allocated != 0 {
-            *arguments = new_vec.cast_const().cast();
-            *count = new_num;
-            *first = 0;
-        }
-        0
+    let mut new_num = 0_i32;
+    let mut no_match_ind = 0_i32;
+    *allocated = 0;
+    if *first >= *count {
+        return 0;
     }
+    let prog_name = imod_prog_name(String::from_utf8_lossy(&arguments[0]).as_ref());
+    let new_vec = expand_arg_list(
+        &arguments[*first as usize..],
+        *count - *first,
+        &mut new_num,
+        allocated,
+        &mut no_match_ind,
+    );
+    let Some(new_vec) = new_vec else {
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!("ERROR: {prog_name} - Allocating memory for expanded argument list\n"),
+        );
+        return -1;
+    };
+    if no_match_ind >= 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stdout),
+            format_args!(
+                "ERROR: {prog_name} - No files match entry {}\n",
+                String::from_utf8_lossy(&arguments[(no_match_ind + *first) as usize])
+            ),
+        );
+        return 1;
+    }
+    if *allocated != 0 {
+        *arguments = new_vec;
+        *count = new_num;
+        *first = 0;
+    }
+    0
 }
 /// Matches C `anglewithinlimits` (`b3dutil.c:1805`).
 pub fn anglewithinlimits(angle: &f32, lower: &f32, upper: &f32) -> f64 {

@@ -27,7 +27,7 @@ fn write_input_mrc(tag: &str) -> std::path::PathBuf {
     ));
     let path_c = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
-        let file = ii_open_new(path_c.as_ptr(), c"wb".as_ptr(), IIFILE_DEFAULT);
+        let file = ii_open_new(path_c.to_bytes(), "wb", IIFILE_DEFAULT);
         let header = (*file).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 8, 6, 4, MRC_MODE_FLOAT), 0);
         ii_sync_from_mrc_header(file, header);
@@ -51,7 +51,7 @@ fn write_input_mrc(tag: &str) -> std::path::PathBuf {
 fn read_section(path: &std::path::Path, section: i32, count: usize) -> Vec<f32> {
     let path_c = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
-        let file = ii_open(path_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(path_c.to_bytes(), "rb");
         assert!(!file.is_null(), "opening {}", path.display());
         let mut pixels = vec![0.0_f32; count];
         assert_eq!(
@@ -91,7 +91,7 @@ fn newstack_3d_one_writes_a_single_hdf_volume() {
     // this an HDF file.
     let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         assert_eq!((*file).file, IIFILE_HDF);
         assert_eq!((*file).nz, 4);
         // A stack of 2-D datasets reports no Z chunking at all.
@@ -162,7 +162,7 @@ fn newstack_chunk_reports_the_actual_tile_size() {
     );
     let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         assert_eq!((*file).file, IIFILE_HDF);
         assert_eq!(
             (
@@ -277,7 +277,7 @@ fn write_two_volume_hdf(tag: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_file(&path);
     let path_c = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
-        let image = ii_open_new(path_c.as_ptr(), c"wb".as_ptr(), IIFILE_HDF);
+        let image = ii_open_new(path_c.to_bytes(), "wb", IIFILE_HDF);
         assert!(!image.is_null());
         let header = (*image).header.cast::<MrcHeader>();
         assert_eq!(mrc_head_new(&mut *header, 8, 6, 2, MRC_MODE_FLOAT), 0);
@@ -291,7 +291,7 @@ fn write_two_volume_hdf(tag: &str) -> std::path::PathBuf {
                 0
             );
         }
-        assert_eq!(ii_hdf_open_new(image, c"wb".as_ptr()), 0);
+        assert_eq!(ii_hdf_open_new(image, "wb"), 0);
         let second = *(*image).ii_volumes.add(1);
         let second_header = (*second).header.cast::<MrcHeader>();
         assert_eq!(
@@ -415,7 +415,7 @@ fn newstack_3d_two_adds_a_volume_to_an_existing_file() {
         // `iiOpen` refuses a multi-volume HDF file unless the caller has said
         // it can handle one (`iimage.c:299-302`).
         ii_allow_multi_volume(1);
-        let file = ii_open(output_c.as_ptr(), c"rb".as_ptr());
+        let file = ii_open(output_c.to_bytes(), "rb");
         ii_allow_multi_volume(0);
         assert_eq!((*file).num_volumes, 3);
         ii_close(file);

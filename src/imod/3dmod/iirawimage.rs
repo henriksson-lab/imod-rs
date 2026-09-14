@@ -5,7 +5,6 @@
 //! calling [`ii_raw_check`].  Command-line raw-image options set `all_match`,
 //! as in the source, and consequently do not cross that boundary.
 
-use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
@@ -162,13 +161,9 @@ pub unsafe extern "C" fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_BAD_CALL;
     }
 
-    let filename = if unsafe { (*in_file).filename.is_null() } {
-        String::new()
-    } else {
-        unsafe { CStr::from_ptr((*in_file).filename) }
-            .to_string_lossy()
-            .into_owned()
-    };
+    let filename =
+        String::from_utf8_lossy(unsafe { (*in_file).filename.as_deref() }.unwrap_or(b""))
+            .into_owned();
     let str = filename
         .rsplit(['/', '\\'])
         .next()
@@ -451,12 +446,13 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
         let expand = expand_min_max_frac * (amax - amin);
         if config.store_scan_in_mrc != 0
             && unsafe { (*in_file).file } == IIFILE_MRC
-            && !unsafe { (*in_file).filename.is_null() }
+            && unsafe { (*in_file).filename.is_some() }
         {
-            let path = unsafe { CStr::from_ptr((*in_file).filename) }.to_bytes();
-            if let Ok(path) = CString::new(path) {
-                let file =
-                    crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "rb+");
+            let path =
+                String::from_utf8_lossy(unsafe { (*in_file).filename.as_deref() }.unwrap_or(b""))
+                    .into_owned();
+            {
+                let file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb+");
                 if let Some(mut file) = file {
                     let mut temp = MrcHeader::default();
                     if unsafe { mrc_head_read(&mut file, &mut temp) } == 0 {
@@ -571,10 +567,9 @@ mod tests {
                 values.len()
             );
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut file);
-            let name = CString::new("scan.raw").unwrap();
             let mut image = ImodImageFile::default();
             image.fp = Some(file.clone());
-            image.filename = name.as_ptr().cast_mut();
+            image.filename = Some(b"scan.raw".to_vec());
             {
                 let mut info = RAW_IMAGE_INFO.lock().unwrap();
                 *info = RawImageState {

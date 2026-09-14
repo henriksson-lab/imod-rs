@@ -2279,50 +2279,26 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
     let column_pad = pad / 10;
     pad %= 10;
     clear_defect_list(defects);
-    // `mxmlwrap.rs` is not yet converted: it still takes and returns C strings
-    // that it allocated with `strdup`, so the NUL-terminated copies and the
-    // `free` calls below belong to that boundary and go away with it.
-    let mut nul_text = text.to_vec();
-    nul_text.push(0);
-    let mut root: *mut core::ffi::c_char = core::ptr::null_mut();
-    let xml_ind = unsafe {
-        crate::imod::libcfshr::mxmlwrap::ixml_load_string(nul_text.as_ptr().cast(), 0, &mut root)
-    };
+    let mut root: Option<Vec<u8>> = None;
+    let xml_ind = unsafe { crate::imod::libcfshr::mxmlwrap::ixml_load_string(text, 0, &mut root) };
     if xml_ind < 0 {
         return xml_ind;
     }
     /* strcmp(root, "defects") */
-    let root_is_defects = !root.is_null() && {
-        let want = b"defects\0";
-        let mut i = 0usize;
-        loop {
-            let got = unsafe { *root.add(i) } as u8;
-            if got != want[i] {
-                break false;
-            }
-            if got == 0 {
-                break true;
-            }
-            i += 1;
-        }
-    };
+    let root_is_defects = root.as_deref() == Some(&b"defects"[..]);
     if !root_is_defects {
         unsafe {
-            libc::free(root.cast());
             crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
         }
         return -4;
     }
-    unsafe {
-        libc::free(root.cast());
-    }
     let tags: [&[u8]; 6] = [
-        b"row\0",
-        b"col\0",
-        b"area\0",
-        b"nonmaskingpoint\0",
-        b"point\0",
-        b"nonmaskingpoint\0",
+        b"row",
+        b"col",
+        b"area",
+        b"nonmaskingpoint",
+        b"point",
+        b"nonmaskingpoint",
     ];
     for tag_ind in 0..6 {
         let mut start_ind = 0;
@@ -2331,7 +2307,7 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
             crate::imod::libcfshr::mxmlwrap::ixml_find_elements(
                 xml_ind,
                 0,
-                tags[tag_ind].as_ptr().cast(),
+                tags[tag_ind],
                 &mut start_ind,
                 &mut number,
             )
@@ -2343,7 +2319,7 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
             return -err;
         }
         for elem_ind in 0..number {
-            let mut value = core::ptr::null_mut();
+            let mut value: Vec<u8> = Vec::new();
             let mut err = unsafe {
                 crate::imod::libcfshr::mxmlwrap::ixml_get_string_value(
                     xml_ind,
@@ -2351,96 +2327,74 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
                     &mut value,
                 )
             };
-            if err != 0 || value.is_null() {
+            // C: `err || !value`, where `value` is `strdup`'s result, so the
+            // second arm is the allocation failure that a `Vec` cannot have.
+            if err != 0 {
                 if err == 0 {
                     err = -5;
                 }
                 unsafe {
-                    libc::free(value.cast());
                     crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 }
                 return -err;
             }
             /* strchr(value, '/') */
-            let has_slash = {
-                let mut i = 0usize;
-                loop {
-                    let got = unsafe { *value.add(i) } as u8;
-                    if got == 0 {
-                        break false;
-                    }
-                    if got == b'/' {
-                        break true;
-                    }
-                    i += 1;
-                }
-            };
+            let has_slash = value.contains(&b'/');
             if has_slash {
-                unsafe {
-                    libc::free(value.cast());
-                }
                 continue;
             }
             let mut num_list = 0;
-            let values =
-                unsafe { crate::imod::libcfshr::parselist::parselist(value, &mut num_list) };
-            unsafe {
-                libc::free(value.cast());
-            }
-            if values.is_null() {
+            let values = crate::imod::libcfshr::parselist::parselist(&value, &mut num_list);
+            let Some(values) = values else {
                 unsafe {
                     crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 }
                 return 6 - num_list;
-            }
+            };
             if ((tag_ind == 2 || tag_ind == 3) && num_list != 4)
                 || ((tag_ind == 4 || tag_ind == 5) && num_list != 2)
             {
                 unsafe {
-                    libc::free(values.cast());
                     crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 }
                 return 10;
             }
-            let adjusted = 0.max(unsafe { *values } - column_pad);
-            unsafe {
-                match tag_ind {
-                    0 => {
-                        defects.bad_row_start.push(adjusted as u16);
-                        defects
-                            .bad_row_height
-                            .push((num_list + column_pad + *values - adjusted) as i16);
-                    }
-                    1 => {
-                        defects.bad_column_start.push(adjusted as u16);
-                        defects
-                            .bad_column_width
-                            .push((num_list + column_pad + *values - adjusted) as i16);
-                    }
-                    2 | 3 => {
-                        if *values.add(2) - *values > *values.add(3) - *values.add(1) {
-                            defects.partial_bad_row.push(*values.add(1) as u16);
-                            defects
-                                .partial_bad_height
-                                .push((1 + *values.add(3) - *values.add(1)) as i16);
-                            defects.partial_bad_start_x.push(*values as u16);
-                            defects.partial_bad_end_x.push(*values.add(2) as u16);
-                        } else {
-                            defects.partial_bad_col.push(*values as u16);
-                            defects
-                                .partial_bad_width
-                                .push((1 + *values.add(2) - *values) as i16);
-                            defects.partial_bad_start_y.push(*values.add(1) as u16);
-                            defects.partial_bad_end_y.push(*values.add(3) as u16);
-                        }
-                    }
-                    4 | 5 => {
-                        defects.bad_pixel_x.push(*values as u16);
-                        defects.bad_pixel_y.push(*values.add(1) as u16);
-                    }
-                    _ => {}
+            let adjusted = 0.max(values[0] - column_pad);
+            match tag_ind {
+                0 => {
+                    defects.bad_row_start.push(adjusted as u16);
+                    defects
+                        .bad_row_height
+                        .push((num_list + column_pad + values[0] - adjusted) as i16);
                 }
-                libc::free(values.cast());
+                1 => {
+                    defects.bad_column_start.push(adjusted as u16);
+                    defects
+                        .bad_column_width
+                        .push((num_list + column_pad + values[0] - adjusted) as i16);
+                }
+                2 | 3 => {
+                    if values[2] - values[0] > values[3] - values[1] {
+                        defects.partial_bad_row.push(values[1] as u16);
+                        defects
+                            .partial_bad_height
+                            .push((1 + values[3] - values[1]) as i16);
+                        defects.partial_bad_start_x.push(values[0] as u16);
+                        defects.partial_bad_end_x.push(values[2] as u16);
+                    } else {
+                        defects.partial_bad_col.push(values[0] as u16);
+                        defects
+                            .partial_bad_width
+                            .push((1 + values[2] - values[0]) as i16);
+                        defects.partial_bad_start_y.push(values[1] as u16);
+                        defects.partial_bad_end_y.push(values[3] as u16);
+                    }
+                }
+                4 | 5 => {
+                    defects.bad_pixel_x.push(values[0] as u16);
+                    defects.bad_pixel_y.push(values[1] as u16);
+                }
+                _ => {}
             }
         }
     }

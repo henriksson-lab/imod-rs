@@ -165,12 +165,18 @@ pub fn java_util_date_to_string(millis: i64) -> String {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
+    // `tm_zone` is a NUL-terminated string the C library owns.  Walked as
+    // bytes rather than through `CStr`, per NATIVE.md: the foreign call stays,
+    // the C string type does not.
     let zone = if broken_down.tm_zone.is_null() {
         String::new()
     } else {
-        unsafe { std::ffi::CStr::from_ptr(broken_down.tm_zone) }
-            .to_string_lossy()
-            .to_string()
+        let mut len = 0usize;
+        while unsafe { *broken_down.tm_zone.add(len) } != 0 {
+            len += 1;
+        }
+        let bytes = unsafe { core::slice::from_raw_parts(broken_down.tm_zone.cast::<u8>(), len) };
+        String::from_utf8_lossy(bytes).into_owned()
     };
     format!(
         "{} {} {:02} {:02}:{:02}:{:02} {} {}",
