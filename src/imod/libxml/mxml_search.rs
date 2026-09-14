@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 use super::*;
-use core::ffi::c_int;
 
 /// Matches C `mxmlFindElement` (`mxml-search.c:32`).
 pub fn mxml_find_element(
@@ -12,7 +11,7 @@ pub fn mxml_find_element(
     name: Option<&[u8]>,
     attr: Option<&[u8]>,
     value: Option<&[u8]>,
-    descend: c_int,
+    descend: i32,
 ) -> Option<usize> {
     let mut node = node;
 
@@ -103,7 +102,7 @@ pub fn mxml_find_path(arena: &MxmlArena, top: Option<usize>, path: &[u8]) -> Opt
          * Handle wildcards...
          */
 
-        let descend: c_int;
+        let descend: i32;
         if path.starts_with(b"*/") {
             path = &path[2..];
             descend = MXML_DESCEND;
@@ -162,7 +161,7 @@ pub fn mxml_walk_next(
     arena: &MxmlArena,
     node: Option<usize>,
     top: Option<usize>,
-    descend: c_int,
+    descend: i32,
 ) -> Option<usize> {
     let mut node = node;
 
@@ -198,7 +197,7 @@ pub fn mxml_walk_prev(
     arena: &MxmlArena,
     node: Option<usize>,
     top: Option<usize>,
-    descend: c_int,
+    descend: i32,
 ) -> Option<usize> {
     let mut node = node;
 

@@ -8,7 +8,7 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libcfshr::b3dutil::{
-    f2c_string, set_or_clear_flags, write_16_bit_mode_for_floats,
+    CArg, ImodFile, c_format_bytes, set_or_clear_flags, write_16_bit_mode_for_floats,
 };
 use crate::imod::libcfshr::linearxforms::{angles_to_matrix, icalc_angles};
 use crate::imod::libiimod::iimage::{IIFILE_MRC, IIFILE_TIFF, ImodImageFile};
@@ -25,6 +25,7 @@ use crate::imod::libiimod::unit_fileio::{
     iiu_sync_with_mrc_header, iiu_trans_adoc_sections,
 };
 use core::ffi::c_char;
+use std::io::Write;
 
 const IIFILE_SHR_MEM: i32 = 8;
 
@@ -190,10 +191,12 @@ pub unsafe fn iiu_write_header_str(
     b: f32,
     c: f32,
 ) -> i32 {
-    let mut out = [0i32; 20];
+    let mut out = [0u8; MRC_LABEL_SIZE];
     unsafe {
-        libc::strncpy(out.as_mut_ptr().cast(), label, MRC_LABEL_SIZE);
-        iiu_write_header(i, out.as_mut_ptr(), f, a, b, c)
+        let bytes = core::ffi::CStr::from_ptr(label).to_bytes();
+        let count = bytes.len().min(MRC_LABEL_SIZE);
+        out[..count].copy_from_slice(&bytes[..count]);
+        iiu_write_header(i, out.as_mut_ptr().cast(), f, a, b, c)
     }
 }
 
@@ -207,13 +210,30 @@ pub unsafe fn iiuwriteheaderstr(
     dmean: *mut f32,
     label_len: i32,
 ) -> i32 {
-    let label = unsafe { f2c_string(label_str, label_len) };
-    if label.is_null() {
+    if label_len < 0 || label_str.is_null() {
         return -1;
     }
-    let err = unsafe { iiu_write_header_str(*iunit, label, *lab_flag, *dmin, *dmax, *dmean) };
-    unsafe { libc::free(label.cast()) };
-    err
+    let source = unsafe { core::slice::from_raw_parts(label_str.cast::<u8>(), label_len as usize) };
+    let trimmed = source
+        .iter()
+        .rposition(|&byte| byte != b' ')
+        .map_or(&[][..], |last| &source[..=last]);
+    let mut label = Vec::new();
+    if label.try_reserve_exact(trimmed.len() + 1).is_err() {
+        return -1;
+    }
+    label.extend_from_slice(trimmed);
+    label.push(0);
+    unsafe {
+        iiu_write_header_str(
+            *iunit,
+            label.as_ptr().cast(),
+            *lab_flag,
+            *dmin,
+            *dmax,
+            *dmean,
+        )
+    }
 }
 
 /// Matches C `iwrhdrc` (`unit_header.c`).
@@ -237,11 +257,15 @@ pub unsafe fn iiu_print_header(iunit: i32, file_prefix: *const c_char) {
     unsafe {
         if !file_prefix.is_null() {
             let ii_file = iiu_get_ii_file(iunit).cast::<ImodImageFile>();
-            // `ImodImageFile.filename` owns its bytes now, so the varargs `%s`
-            // takes a terminated copy made here.
-            let name = std::ffi::CString::new((*ii_file).filename.clone().unwrap_or_default())
-                .unwrap_or_default();
-            libc::printf(c"%s: %s\n".as_ptr(), file_prefix, name.as_ptr());
+            // The prefix is an ABI C string, while the filename is owned Rust
+            // text.  The centralized formatter preserves the source's `%s`
+            // behavior without a varargs call or a temporary C string.
+            let prefix = core::ffi::CStr::from_ptr(file_prefix).to_bytes();
+            let name = (*ii_file).filename.as_deref().unwrap_or_default();
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "%s: %s\n",
+                &[CArg::Bytes(prefix), CArg::Str(name)],
+            ));
         }
         let (xscale, yscale, zscale) = mrc_get_scale(&*hdr);
         let mode = if (*hdr).half_floats != 0 && (*hdr).mode == MRC_MODE_FLOAT {
@@ -249,20 +273,22 @@ pub unsafe fn iiu_print_header(iunit: i32, file_prefix: *const c_char) {
         } else {
             (*hdr).mode
         };
-        libc::printf(
-            c" Dimensions: %6d %6d %6d   Pixel size:%10.4g %10.4g %10.4g\nMode: %2d               Min, max, mean: %12.5g %12.5g %12.5g\n"
-                .as_ptr(),
-            (*hdr).nx,
-            (*hdr).ny,
-            (*hdr).nz,
-            xscale as f64,
-            yscale as f64,
-            zscale as f64,
-            mode,
-            (*hdr).amin as f64,
-            (*hdr).amax as f64,
-            (*hdr).amean as f64,
-        );
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+            " Dimensions: %6d %6d %6d   Pixel size:%10.4g %10.4g %10.4g\n\
+             Mode: %2d               Min, max, mean: %12.5g %12.5g %12.5g\n",
+            &[
+                CArg::Int((*hdr).nx.into()),
+                CArg::Int((*hdr).ny.into()),
+                CArg::Int((*hdr).nz.into()),
+                CArg::Dbl(xscale.into()),
+                CArg::Dbl(yscale.into()),
+                CArg::Dbl(zscale.into()),
+                CArg::Int(mode.into()),
+                CArg::Dbl((*hdr).amin.into()),
+                CArg::Dbl((*hdr).amax.into()),
+                CArg::Dbl((*hdr).amean.into()),
+            ],
+        ));
         for lab_ind in 0..if (*hdr).nlabl > 1 { 2 } else { 1 } {
             mrc_print_label_string(Some(&*hdr), if lab_ind != 0 { (*hdr).nlabl - 1 } else { 0 });
         }
@@ -710,7 +736,7 @@ pub unsafe fn iiu_alt_labels(i: i32, p: *mut i32, n: i32) {
             fix_title_padding(&mut (*h).labels[x]);
         }
         for x in (*h).nlabl as usize..MRC_NLABELS {
-            (*h).labels[x] = [0; MRC_LABEL_SIZE + 1];
+            (*h).labels[x] = [0; MRC_LABEL_SIZE];
         }
     }
 }
@@ -763,7 +789,7 @@ pub unsafe fn iiu_ret_header_ext_type(i: i32, t: *mut i32, v: *mut i32) {
 }
 pub unsafe fn iiu_ret_extended_data(i: i32, n: *mut i32, e: *mut i32) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiRetExtendedData", iiu_get_exit_on_error(), 1) };
-    if h.is_null() {
+    if h.is_null() || n.is_null() || e.is_null() {
         return -1;
     }
     unsafe {
@@ -771,18 +797,17 @@ pub unsafe fn iiu_ret_extended_data(i: i32, n: *mut i32, e: *mut i32) -> i32 {
         if (*h).next == 0 {
             return 0;
         }
-        if mrc_read_extra_header(h, &mut e.cast::<u8>()) != 0 {
+        let mut data = Vec::new();
+        if mrc_read_extra_header(&mut *h, &mut data) != 0 {
             1
         } else {
+            // The Fortran ABI supplies a caller-owned integer buffer.  Copy to
+            // that boundary only after doing all file ownership in a Vec.
+            core::ptr::copy_nonoverlapping(data.as_ptr(), e.cast::<u8>(), data.len());
             0
         }
     }
 }
-unsafe extern "C" {
-    #[link_name = "stdout"]
-    static mut imod_stdout: *mut libc::FILE;
-}
-
 pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
     let do_exit = unsafe { iiu_get_exit_on_error() };
     let h = unsafe { iiu_mrc_header(i, "iiAltExtendedData", do_exit, 2) };
@@ -794,27 +819,30 @@ pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
             return 0;
         }
         if (*h).swapped != 0 {
-            libc::fprintf(
-                imod_stdout,
-                c"\nERROR: iiuAltExtendedData - Cannot write extra header data to a byte-swapped file (unit %d).\n"
-                    .as_ptr(),
-                i,
-            );
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "\nERROR: iiuAltExtendedData - Cannot write extra header data to a \
+                 byte-swapped file (unit %d).\n",
+                &[CArg::Int(i.into())],
+            ));
             if do_exit != 0 {
-                libc::exit(1);
+                std::process::exit(1);
             }
             return -2;
         }
-        if mrc_write_extra_header(h, e.cast(), n) != 0 {
-            libc::fprintf(
-                imod_stdout,
-                c"\nERROR: iiAltExtendedData - Writing %d bytes of extended header data for unit %d.\n"
-                    .as_ptr(),
-                n,
-                i,
-            );
+        if n <= 0
+            || e.is_null()
+            || mrc_write_extra_header(
+                &mut *h,
+                core::slice::from_raw_parts(e.cast::<u8>(), n as usize),
+            ) != 0
+        {
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "\nERROR: iiAltExtendedData - Writing %d bytes of extended header \
+                 data for unit %d.\n",
+                &[CArg::Int(n.into()), CArg::Int(i.into())],
+            ));
             if do_exit != 0 {
-                libc::exit(1);
+                std::process::exit(1);
             }
             2
         } else {
@@ -839,21 +867,25 @@ pub unsafe fn iiu_trans_extended_data(into: i32, i: i32) -> i32 {
             iiu_alt_num_extended(into, 0);
             return 0;
         }
-        let p = libc::malloc(((*a).next as usize + 3) & !3).cast::<i32>();
-        if p.is_null() {
+        let words = ((*a).next as usize).checked_add(3).map(|size| size / 4);
+        let Some(words) = words else {
+            return -1;
+        };
+        let mut data = Vec::<i32>::new();
+        if data.try_reserve_exact(words).is_err() {
             return -1;
         }
+        data.resize(words, 0);
         (*b).nint = (*a).nint;
         (*b).nreal = (*a).nreal;
         mrc_copy_valid_extended_type(&*a, &mut *b);
         let mut n = 0;
-        let e = iiu_ret_extended_data(i, &mut n, p);
+        let e = iiu_ret_extended_data(i, &mut n, data.as_mut_ptr());
         let ans = if e != 0 {
             1
         } else {
-            iiu_alt_extended_data(into, n, p)
+            iiu_alt_extended_data(into, n, data.as_mut_ptr())
         };
-        libc::free(p.cast());
         ans
     }
 }

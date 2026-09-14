@@ -24,10 +24,19 @@ pub struct NameValuePair {
     name: Vec<*mut Attribute>,
     /// Java field `parent`.
     parent: *mut dyn WriteOnlyStatementList,
-    /// Java field `value`, initialised to null.
-    value: *mut Token,
+    /// The parsed token list is borrowed from the tokenizer.  Values constructed by
+    /// the writable API stay owned by this statement instead of being turned into a
+    /// leaked raw allocation.
+    value: Option<Value>,
     /// Java field `newDelimiter`, initialised to null.
     new_delimiter: *mut Token,
+}
+
+/// Storage for a name/value-pair value.  Parser token lists remain borrowed until
+/// the tokenizer graph is made owned; tokens made by this statement are owned here.
+enum Value {
+    Parsed(*mut Token),
+    Generated(Box<Token>),
 }
 
 /// Java `TYPE`: `Statement.Type.NAME_VALUE_PAIR`.
@@ -48,7 +57,7 @@ impl NameValuePair {
             statement: StatementBase::initial(),
             name: Vec::new(),
             parent,
-            value: std::ptr::null_mut(),
+            value: None,
             new_delimiter: std::ptr::null_mut(),
         }));
         unsafe { StatementBase::statement(this, previous_statement, line_num) };
@@ -83,7 +92,11 @@ impl NameValuePair {
     /// hold at least one live attribute - Java's `name.get(name.size() - 1)` throws
     /// `ArrayIndexOutOfBoundsException` on an empty name.
     pub unsafe fn add_value(&mut self, value: *mut Token) {
-        self.value = value;
+        self.value = if value.is_null() {
+            None
+        } else {
+            Some(Value::Parsed(value))
+        };
         let this: *mut NameValuePair = self;
         let last = self.name[self.name.len() - 1];
         unsafe { (*last).add_name_value_pair(this) };
@@ -92,9 +105,9 @@ impl NameValuePair {
     /// Java package-private `setValue(Token)`.
     ///
     /// # Safety
-    /// `value` must be null or point to a live `Token` link list.
-    pub unsafe fn set_value(&mut self, value: *mut Token) {
-        self.value = value;
+    /// `value` is retained by the pair.
+    pub fn set_value(&mut self, value: Box<Token>) {
+        self.value = Some(Value::Generated(value));
     }
 
     /// Java `getValue()`.
@@ -102,15 +115,20 @@ impl NameValuePair {
     /// # Safety
     /// `value` must be null or point to a live `Token` link list.
     pub unsafe fn get_value(&self) -> Option<String> {
-        if self.value.is_null() {
-            return None;
+        match &self.value {
+            None => None,
+            Some(Value::Parsed(value)) => Some(unsafe { (**value).get_values() }),
+            Some(Value::Generated(value)) => Some(unsafe { value.get_values() }),
         }
-        Some(unsafe { (*self.value).get_values() })
     }
 
     /// Java `getTokenValue()`.
     pub fn get_token_value(&self) -> *mut Token {
-        self.value
+        match &self.value {
+            None => std::ptr::null_mut(),
+            Some(Value::Parsed(value)) => *value,
+            Some(Value::Generated(value)) => value.as_ref() as *const Token as *mut Token,
+        }
     }
 
     /// Java `toString()`, which returns `getString()`.
@@ -145,10 +163,11 @@ impl Statement for NameValuePair {
         min_length: i32,
         wrap_length: i32,
     ) {
-        if self.value.is_null() {
-            return;
-        }
-        let value_string = unsafe { (*self.value).get_multi_line_values() };
+        let value_string = match &self.value {
+            None => return,
+            Some(Value::Parsed(value)) => unsafe { (**value).get_multi_line_values() },
+            Some(Value::Generated(value)) => unsafe { value.get_multi_line_values() },
+        };
         if value_string.starts_with(match no_wrap_prefix {
             None => panic!("java.lang.NullPointerException"),
             Some(no_wrap_prefix) => no_wrap_prefix,
@@ -170,20 +189,19 @@ impl Statement for NameValuePair {
             wrap_length,
             0,
         ) {
-            self.value = Box::into_raw(Box::new(Token::new()));
-            unsafe {
-                (*self.value).set_type_and_string(
-                    token::Type::Anything,
-                    &utilities::wrap(
-                        Some(&value_string),
-                        matched_divider,
-                        min_length,
-                        wrap_length,
-                        0,
-                    )
-                    .unwrap(),
+            let mut value = Box::new(Token::new());
+            value.set_type_and_string(
+                token::Type::Anything,
+                &utilities::wrap(
+                    Some(&value_string),
+                    matched_divider,
+                    min_length,
+                    wrap_length,
+                    0,
                 )
-            };
+                .unwrap(),
+            );
+            self.value = Some(Value::Generated(value));
         }
     }
 
@@ -205,8 +223,10 @@ impl Statement for NameValuePair {
             })),
             writer_id,
         )?;
-        if !self.value.is_null() {
-            unsafe { (*self.value).write(file, writer_id)? };
+        match &self.value {
+            None => {}
+            Some(Value::Parsed(value)) => unsafe { (**value).write(file, writer_id)? },
+            Some(Value::Generated(value)) => unsafe { value.write(file, writer_id)? },
         }
         file.new_line(writer_id)?;
         if !self.new_delimiter.is_null() {
@@ -230,10 +250,10 @@ impl Statement for NameValuePair {
             }
         }
         print!(" {} ", unsafe { (*self.parent).get_current_delimiter() });
-        if self.value.is_null() {
-            println!();
-        } else {
-            println!("{}", unsafe { (*self.value).get_values() });
+        match &self.value {
+            None => println!(),
+            Some(Value::Parsed(value)) => println!("{}", unsafe { (**value).get_values() }),
+            Some(Value::Generated(value)) => println!("{}", unsafe { value.get_values() }),
         }
         if !self.new_delimiter.is_null() {
             unsafe { (*self.parent).set_current_delimiter(self.new_delimiter) };
@@ -303,10 +323,11 @@ impl ReadOnlyStatement for NameValuePair {
 
     /// Java `getRightSide()`.
     fn get_right_side(&self) -> Option<String> {
-        if self.value.is_null() {
-            return None;
+        match &self.value {
+            None => None,
+            Some(Value::Parsed(value)) => Some(unsafe { (**value).get_values() }),
+            Some(Value::Generated(value)) => Some(unsafe { value.get_values() }),
         }
-        Some(unsafe { (*self.value).get_values() })
     }
 
     /// Java `getSubsection()`.
@@ -328,8 +349,10 @@ impl ReadOnlyStatement for NameValuePair {
             buffer.push_str(&unsafe { (*self.name[i]).get_name() });
         }
         buffer.push_str(&format!(" {} ", autodoc_tokenizer::DEFAULT_DELIMITER));
-        if !self.value.is_null() {
-            buffer.push_str(&unsafe { (*self.value).get_values() });
+        match &self.value {
+            None => {}
+            Some(Value::Parsed(value)) => buffer.push_str(&unsafe { (**value).get_values() }),
+            Some(Value::Generated(value)) => buffer.push_str(&unsafe { value.get_values() }),
         }
         buffer
     }

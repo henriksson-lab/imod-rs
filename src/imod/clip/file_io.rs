@@ -375,25 +375,22 @@ pub unsafe fn set_chunk_output(
 }
 /// C++ `clipWriteSlice` (`file_io.cpp:344`).
 pub unsafe fn clip_write_slice(
-    slice: *mut Islice,
+    slice: &mut Islice,
     output: &mut MrcHeader,
     options: &mut ClipOptions,
     ksec: i32,
     z_write: *mut i32,
-    free_slice: i32,
+    _free_slice: i32,
 ) -> i32 {
     unsafe {
         if ksec < (options.nofsecs - options.oz) / 2
             || ksec >= (options.nofsecs - options.oz) / 2 + options.oz
         {
-            if free_slice != 0 {
-                slice_free(slice);
-            }
             return 0;
         }
         let mut blank_before = 0;
         let mut blank_after = 0;
-        let mut blank: *mut Islice = core::ptr::null_mut();
+        let mut blank: Option<Box<Islice>> = None;
         if options.oz > options.nofsecs && options.out_before != -1 {
             if ksec == 0 {
                 blank_before = if options.out_before == IP_DEFAULT {
@@ -411,14 +408,14 @@ pub unsafe fn clip_write_slice(
             }
             if blank_before != 0 || blank_after != 0 {
                 blank = clip_blank_slice(output, options);
-                if blank.is_null() {
+                if blank.is_none() {
                     return -1;
                 }
             }
         }
         for _ in 0..blank_before {
             if mrc_write_slice(
-                (*blank).data.b.cast(),
+                blank.as_mut().unwrap().data.as_mut_ptr().cast(),
                 &mut output.fp.clone().unwrap(),
                 output,
                 *z_write,
@@ -429,45 +426,55 @@ pub unsafe fn clip_write_slice(
             }
             *z_write += 1;
         }
-        if (*slice).mode != options.mode && slice_new_mode(slice, options.mode) < 0 {
+        if slice.mode != options.mode && slice_new_mode(slice, options.mode) < 0 {
             return -1;
         }
-        let mut resized = slice;
-        if options.ox != (*slice).xsize || options.oy != (*slice).ysize {
-            (*slice).mean = options.pad;
-            resized = mrc_slice_resize(slice, options.ox, options.oy);
-            if resized.is_null() {
+        if options.ox != slice.xsize || options.oy != slice.ysize {
+            slice.mean = options.pad;
+            let Some(mut resized) = mrc_slice_resize(slice, options.ox, options.oy) else {
                 let _ = ImodFile::Stderr.write_all(b"clipWriteSlice: error resizing slice.\n");
                 return -1;
+            };
+            slice_mmm(resized.as_mut());
+            output.amin = output.amin.min(resized.min);
+            output.amax = output.amax.max(resized.max);
+            if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
+                output.amean += (resized.mean + (blank_before + blank_after) as f32 * options.pad)
+                    / output.nz as f32;
+            }
+            if mrc_write_slice(
+                resized.data.as_mut_ptr().cast(),
+                &mut output.fp.clone().unwrap(),
+                output,
+                *z_write,
+                b'z',
+            ) != 0
+            {
+                return -1;
+            }
+        } else {
+            slice_mmm(slice);
+            output.amin = output.amin.min(slice.min);
+            output.amax = output.amax.max(slice.max);
+            if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
+                output.amean += (slice.mean + (blank_before + blank_after) as f32 * options.pad)
+                    / output.nz as f32;
+            }
+            if mrc_write_slice(
+                slice.data.as_mut_ptr().cast(),
+                &mut output.fp.clone().unwrap(),
+                output,
+                *z_write,
+                b'z',
+            ) != 0
+            {
+                return -1;
             }
         }
-        slice_mmm(resized);
-        output.amin = output.amin.min((*resized).min);
-        output.amax = output.amax.max((*resized).max);
-        if options.add2file != IP_APPEND_OVERWRITE && options.add2file != IP_APPEND_TRUNCATE {
-            output.amean += ((*resized).mean + (blank_before + blank_after) as f32 * options.pad)
-                / output.nz as f32;
-        }
-        if mrc_write_slice(
-            (*resized).data.b.cast(),
-            &mut output.fp.clone().unwrap(),
-            output,
-            *z_write,
-            b'z',
-        ) != 0
-        {
-            return -1;
-        }
         *z_write += 1;
-        if resized != slice {
-            slice_free(resized);
-        }
-        if free_slice != 0 {
-            slice_free(slice);
-        }
         for _ in 0..blank_after {
             if mrc_write_slice(
-                (*blank).data.b.cast(),
+                blank.as_mut().unwrap().data.as_mut_ptr().cast(),
                 &mut output.fp.clone().unwrap(),
                 output,
                 *z_write,
@@ -477,15 +484,12 @@ pub unsafe fn clip_write_slice(
                 return -1;
             }
             *z_write += 1;
-        }
-        if !blank.is_null() {
-            slice_free(blank);
         }
         0
     }
 }
 /// C++ `grap_volume_read` (`file_io.cpp:421`).
-pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> *mut Istack {
+pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Option<Istack> {
     unsafe {
         if options.dim == 2 {
             if options.iz == IP_DEFAULT {
@@ -523,36 +527,31 @@ pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions)
         } else {
             options.pad
         };
-        let volume = libc::malloc(core::mem::size_of::<Istack>()).cast::<Istack>();
-        if volume.is_null() {
-            return volume;
-        }
-        (*volume).zsize = options.iz;
-        (*volume).vol =
-            libc::malloc(options.iz as usize * core::mem::size_of::<*mut Islice>()).cast();
-        if (*volume).vol.is_null() {
-            libc::free(volume.cast());
-            return core::ptr::null_mut();
+        let Ok(zsize) = usize::try_from(options.iz) else {
+            return None;
+        };
+        let mut slices = Vec::new();
+        if slices.try_reserve_exact(zsize).is_err() {
+            return None;
         }
         for z in 0..options.iz {
-            let out = slice_create(options.ix, options.iy, input.mode);
-            if out.is_null() {
-                return core::ptr::null_mut();
-            }
-            (*volume).vol.add(z as usize).write(out);
+            let Some(mut out) = slice_create(options.ix, options.iy, input.mode) else {
+                return None;
+            };
             for y in 0..options.iy {
                 for x in 0..options.ix {
-                    slice_put_val(out, x, y, [pad; 4]);
+                    slice_put_val(out.as_mut(), x, y, [pad; 4]);
                 }
             }
-            (*out).mean = input.amean;
-            (*out).max = input.amax;
-            (*out).min = input.amin;
+            out.mean = input.amean;
+            out.max = input.amax;
+            out.min = input.amin;
+            slices.push(out);
         }
-        let source = slice_create(input.nx, input.ny, input.mode);
-        if source.is_null() {
-            return core::ptr::null_mut();
-        }
+        let mut volume = Istack { slices };
+        let Some(mut source) = slice_create(input.nx, input.ny, input.mode) else {
+            return None;
+        };
         let start_z = (options.cz - options.iz as f32 * 0.5f32).floor() as i32;
         for z in 0..options.iz {
             let file_z = start_z + z;
@@ -560,14 +559,14 @@ pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions)
                 continue;
             }
             if mrc_read_slice(
-                (*source).data.b.cast(),
+                source.data.as_mut_ptr().cast(),
                 &mut input.fp.clone().unwrap(),
                 input,
                 file_z,
                 b'z',
             ) != 0
             {
-                return core::ptr::null_mut();
+                return None;
             }
             let start_y = (options.cy as f64 - options.iy as f64 / 2.).floor() as i32;
             for y in 0..options.iy {
@@ -583,14 +582,16 @@ pub unsafe fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions)
                     }
                     let mut value = [0.; 4];
                     crate::imod::libcfshr::islice::slice_get_val(
-                        source, from_x, from_y, &mut value,
+                        source.as_mut(),
+                        from_x,
+                        from_y,
+                        &mut value,
                     );
-                    slice_put_val(*(*volume).vol.add(z as usize), x, y, value);
+                    slice_put_val(volume.slices[z as usize].as_mut(), x, y, value);
                 }
             }
         }
-        slice_free(source);
-        volume
+        Some(volume)
     }
 }
 /// C++ `grap_volume_write` (`file_io.cpp:507`).
@@ -600,36 +601,39 @@ pub unsafe fn grap_volume_write(
     options: &mut ClipOptions,
 ) -> i32 {
     unsafe {
-        let first = *volume.vol;
+        let Some(first) = volume.slices.first() else {
+            return -1;
+        };
         if options.mode == IP_DEFAULT {
-            options.mode = (*first).mode;
+            options.mode = first.mode;
         }
         if options.ox == IP_DEFAULT {
-            options.ox = (*first).xsize;
+            options.ox = first.xsize;
         }
         if options.oy == IP_DEFAULT {
-            options.oy = (*first).ysize;
+            options.oy = first.ysize;
         }
         if options.oz == IP_DEFAULT {
-            options.oz = volume.zsize;
+            options.oz = volume.slices.len() as i32;
         }
-        if (*first).mode != options.mode {
-            for z in 0..volume.zsize {
-                slice_new_mode(*volume.vol.add(z as usize), options.mode);
+        if first.mode != options.mode {
+            for slice in &mut volume.slices {
+                slice_new_mode(slice.as_mut(), options.mode);
             }
         }
-        slice_mmm(first);
-        let mut min = (*first).min;
-        let mut max = (*first).max;
-        let mut mean = (*first).mean;
-        for z in 1..volume.zsize {
-            let slice = *volume.vol.add(z as usize);
-            slice_mmm(slice);
-            min = min.min((*slice).min);
-            max = max.max((*slice).max);
-            mean += (*slice).mean;
+        for slice in &mut volume.slices {
+            slice_mmm(slice.as_mut());
         }
-        mean /= volume.zsize as f32;
+        let mut min = volume.slices[0].min;
+        let mut max = volume.slices[0].max;
+        let mut mean = volume.slices[0].mean;
+        for slice in &volume.slices[1..] {
+            min = min.min(slice.min);
+            max = max.max(slice.max);
+            mean += slice.mean;
+        }
+        mean /= volume.slices.len() as f32;
+        let first_mode = volume.slices[0].mode;
         let ks: i32;
         match options.add2file {
             IP_APPEND_TRUNCATE | IP_APPEND_OVERWRITE => {
@@ -641,7 +645,7 @@ pub unsafe fn grap_volume_write(
                 }
                 options.ox = output.nx;
                 options.oy = output.ny;
-                if output.mode != (*first).mode {
+                if output.mode != first_mode {
                     let _ = ImodFile::Stderr
                         .write_all(b"overwriting requires data modes to be the same.\n");
                     return -1;
@@ -657,7 +661,7 @@ pub unsafe fn grap_volume_write(
                 output.nz += options.oz;
                 options.ox = output.nx;
                 options.oy = output.ny;
-                if output.mode != (*first).mode {
+                if output.mode != first_mode {
                     let _ = ImodFile::Stderr
                         .write_all(b"inserting requires data modes to be the same.\n");
                     return -1;
@@ -672,13 +676,7 @@ pub unsafe fn grap_volume_write(
             }
             _ => {
                 let labels = output.nlabl;
-                mrc_head_new(
-                    &mut *output,
-                    options.ox,
-                    options.oy,
-                    options.oz,
-                    (*first).mode,
-                );
+                mrc_head_new(&mut *output, options.ox, options.oy, options.oz, first_mode);
                 output.nlabl = labels;
                 output.amin = min;
                 output.amax = max;
@@ -692,18 +690,18 @@ pub unsafe fn grap_volume_write(
         if mrc_head_write(&mut output.fp.clone().unwrap(), output) != 0 {
             return -1;
         }
-        let zs = (volume.zsize - options.oz) / 2;
-        let mut blank: *mut Islice = core::ptr::null_mut();
+        let zs = (volume.slices.len() as i32 - options.oz) / 2;
+        let mut blank: Option<Box<Islice>> = None;
         for (out_z, source_z) in (ks..output.nz).zip(zs..) {
-            if source_z < 0 || source_z >= volume.zsize {
-                if blank.is_null() {
+            if source_z < 0 || source_z >= volume.slices.len() as i32 {
+                if blank.is_none() {
                     blank = clip_blank_slice(output, options);
-                    if blank.is_null() {
-                        return -1;
-                    }
                 }
+                let Some(blank) = blank.as_mut() else {
+                    return -1;
+                };
                 if mrc_write_slice(
-                    (*blank).data.b.cast(),
+                    blank.data.as_mut_ptr().cast(),
                     &mut output.fp.clone().unwrap(),
                     output,
                     out_z,
@@ -713,19 +711,16 @@ pub unsafe fn grap_volume_write(
                     return -1;
                 }
             } else {
-                let source = *volume.vol.add(source_z as usize);
-                let resized = if options.ox != (*source).xsize || options.oy != (*source).ysize {
-                    (*source).mean = options.pad;
+                let source = volume.slices[source_z as usize].as_mut();
+                let resized = if options.ox != source.xsize || options.oy != source.ysize {
+                    source.mean = options.pad;
                     mrc_slice_resize(source, options.ox, options.oy)
                 } else {
-                    source
+                    None
                 };
-                if resized.is_null() {
-                    let _ = ImodFile::Stderr.write_all(b"volume_write: error resizing slice.\n");
-                    return -1;
-                }
+                let write_slice = resized.as_deref().unwrap_or(source);
                 if mrc_write_slice(
-                    (*resized).data.b.cast(),
+                    write_slice.data.as_ptr().cast_mut().cast(),
                     &mut output.fp.clone().unwrap(),
                     output,
                     out_z,
@@ -734,46 +729,32 @@ pub unsafe fn grap_volume_write(
                 {
                     return -1;
                 }
-                if resized != source {
-                    slice_free(resized);
-                }
             }
-        }
-        if !blank.is_null() {
-            slice_free(blank);
         }
         0
     }
 }
 /// C++ static `clipBlankSlice` (`file_io.cpp:626`).
-pub unsafe fn clip_blank_slice(output: &mut MrcHeader, options: &mut ClipOptions) -> *mut Islice {
+pub unsafe fn clip_blank_slice(
+    output: &mut MrcHeader,
+    options: &mut ClipOptions,
+) -> Option<Box<Islice>> {
     unsafe {
-        let slice = slice_create(output.nx, output.ny, output.mode);
-        if slice.is_null() {
+        let Some(mut slice) = slice_create(output.nx, output.ny, output.mode) else {
             let _ = ImodFile::Stderr.write_all(b"clipBlankSlice:  error getting slice\n");
-            return slice;
-        }
+            return None;
+        };
         for y in 0..output.ny {
             for x in 0..output.nx {
-                slice_put_val(slice, x, y, [options.pad; 4]);
+                slice_put_val(slice.as_mut(), x, y, [options.pad; 4]);
             }
         }
-        slice
+        Some(slice)
     }
 }
 /// C++ `grap_volume_free` (`file_io.cpp:646`).
-pub unsafe fn grap_volume_free(volume: *mut Istack) -> i32 {
-    unsafe {
-        if volume.is_null() {
-            return -1;
-        }
-        for z in 0..(*volume).zsize {
-            slice_free(*(*volume).vol.add(z as usize));
-        }
-        libc::free((*volume).vol.cast());
-        libc::free(volume.cast());
-        0
-    }
+pub fn grap_volume_free(_volume: Istack) -> i32 {
+    0
 }
 /// C++ `mrc_head_print` (`file_io.cpp:663`).
 pub fn mrc_head_print(data: &MrcHeader) -> i32 {

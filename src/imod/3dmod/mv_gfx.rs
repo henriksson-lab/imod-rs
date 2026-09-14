@@ -7,6 +7,7 @@
 
 use std::fs::File;
 use std::io::{self, Write};
+use std::sync::Mutex;
 
 use crate::imod::libimod::imodel::Ipoint;
 use crate::imod::three_dmod::imodv::{IMODV_STEREO_OFF, ImodvApp};
@@ -19,11 +20,11 @@ pub const SNAP_SHOT_TIF: i32 = 0;
 pub const SNAP_SHOT_RGB: i32 = 1;
 
 /// Original global: `ImodvCurModLight`.
-pub static mut IMODV_CUR_MOD_LIGHT: Ipoint = Ipoint {
+static IMODV_CUR_MOD_LIGHT: Mutex<Ipoint> = Mutex::new(Ipoint {
     x: 0.,
     y: 0.,
     z: 0.,
-};
+});
 
 /// Direct compatibility-profile boundary for the calls in this source unit.
 pub trait ImodvGfxGl {
@@ -263,9 +264,8 @@ pub fn imodv_paint_gl(
     gl.clear_temp_arrays(a);
     gl.resize_viewport_xy(a.winx, a.winy);
     if a.draw_light != 0 {
-        unsafe {
-            gl.draw_light_vector(a, IMODV_CUR_MOD_LIGHT);
-        }
+        let light = *IMODV_CUR_MOD_LIGHT.lock().unwrap();
+        gl.draw_light_vector(a, light);
     }
     let color = if a.tex_map == 0 && rgb == [0, 0, 0] {
         -1

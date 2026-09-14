@@ -61,10 +61,14 @@ pub unsafe fn scaled_sobel(
         } else {
             nxo * nyo
         };
-        let temporary = libc::malloc(size as usize * core::mem::size_of::<f32>()).cast::<f32>();
-        if temporary.is_null() {
+        let Ok(size) = usize::try_from(size) else {
+            return 1;
+        };
+        let mut temporary = Vec::new();
+        if temporary.try_reserve_exact(size).is_err() {
             return 1;
         }
+        temporary.resize(size, 0.);
         let (source, destination) = if binning > 1 {
             let error = crate::imod::libcfshr::reduce_by_binning::reduce_by_binning(
                 core::slice::from_raw_parts(
@@ -75,18 +79,17 @@ pub unsafe fn scaled_sobel(
                 nxin,
                 nyin,
                 binning,
-                core::slice::from_raw_parts_mut(temporary.cast::<u8>(), size as usize * 4),
+                core::slice::from_raw_parts_mut(temporary.as_mut_ptr().cast::<u8>(), size * 4),
                 0,
                 &mut nxbin,
                 &mut nybin,
             );
             if error != 0 {
-                libc::free(temporary.cast());
                 return error;
             }
-            (temporary, out_image)
+            (temporary.as_mut_ptr(), out_image)
         } else {
-            (in_image, temporary)
+            (in_image, temporary.as_mut_ptr())
         };
         let edge = crate::imod::libcfshr::taperpad::slice_edge_mean(
             core::slice::from_raw_parts(source, (nxbin * nybin) as usize),
@@ -129,37 +132,35 @@ pub unsafe fn scaled_sobel(
                 edge,
             );
             if error != 0 {
-                libc::free(temporary.cast());
                 return error;
             }
         }
         if binning > 1 {
             for index in 0..nxo * nyo {
-                *temporary.add(index as usize) = *out_image.add(index as usize);
+                temporary[index as usize] = *out_image.add(index as usize);
             }
         }
         if center == 0. {
             for index in 0..nxo * nyo {
-                *out_image.add(index as usize) = *temporary.add(index as usize);
+                *out_image.add(index as usize) = temporary[index as usize];
             }
-            libc::free(temporary.cast());
             return 0;
         }
         for y in 1..nyo - 1 {
             for x in 1..nxo - 1 {
                 let index = x + y * nxo;
-                let row = (*temporary.add((index - nxo - 1) as usize)
-                    + center * *temporary.add((index - nxo) as usize)
-                    + *temporary.add((index - nxo + 1) as usize))
-                    - (*temporary.add((index + nxo - 1) as usize)
-                        + center * *temporary.add((index + nxo) as usize)
-                        + *temporary.add((index + nxo + 1) as usize));
-                let col = (*temporary.add((index + nxo + 1) as usize)
-                    + center * *temporary.add((index + 1) as usize)
-                    + *temporary.add((index - nxo + 1) as usize))
-                    - (*temporary.add((index + nxo - 1) as usize)
-                        + center * *temporary.add((index - 1) as usize)
-                        + *temporary.add((index - nxo - 1) as usize));
+                let row = (temporary[(index - nxo - 1) as usize]
+                    + center * temporary[(index - nxo) as usize]
+                    + temporary[(index - nxo + 1) as usize])
+                    - (temporary[(index + nxo - 1) as usize]
+                        + center * temporary[(index + nxo) as usize]
+                        + temporary[(index + nxo + 1) as usize]);
+                let col = (temporary[(index + nxo + 1) as usize]
+                    + center * temporary[(index + 1) as usize]
+                    + temporary[(index - nxo + 1) as usize])
+                    - (temporary[(index + nxo - 1) as usize]
+                        + center * temporary[(index - 1) as usize]
+                        + temporary[(index - nxo - 1) as usize]);
                 *out_image.add(index as usize) = (row * row + col * col).sqrt();
             }
             *out_image.add((y * nxo) as usize) = *out_image.add((y * nxo + 1) as usize);
@@ -171,7 +172,6 @@ pub unsafe fn scaled_sobel(
             *out_image.add((x + nxo * (nyo - 1)) as usize) =
                 *out_image.add((x + nxo * (nyo - 2)) as usize);
         }
-        libc::free(temporary.cast());
         0
     }
 }

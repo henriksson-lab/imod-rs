@@ -5,20 +5,20 @@
 //! source-visible image preparation and command behavior stay here.
 #![allow(dead_code, unused_variables)]
 
+use std::cell::Cell;
+
 use crate::imod::backends::{Mrc2TifEncoder, TiffBackend, mrc2tif_encoder, tiff_backend};
 use crate::imod::libcfshr::autodoc::{
     ADOC_ZVALUE_NAME, adoc_get_float, adoc_get_image_meta_info, adoc_lookup_by_name_value,
     adoc_open_image_metadata, adoc_set_current,
 };
-use crate::imod::libcfshr::b3dutil::{
-    CArg, ImodFile, c_format_bytes, imod_prog_name, make_line_pointers,
-};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes, imod_prog_name};
 // `mrc2tif.cpp` scans its paired option values with the C library's `sscanf`.
 // `clip/clip.rs` carries this tree's translation of that routine (NATIVE.md
 // hazard 2: `str::parse` is not `sscanf` -- it rejects the partial parse the
 // `%f%*c%f` pairs depend on), so it is used rather than written again here.
 use crate::imod::clip::clip::{ScanArg, sscanf};
-use crate::imod::libcfshr::islice::{Islice, slice_get_val, slice_init, slice_put_val};
+use crate::imod::libcfshr::islice::{slice_create, slice_get_val, slice_init, slice_put_val};
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::samplemeansd::{sample_mean_sd, type_for_sample_mean};
 use crate::imod::libiimod::iimage::{
@@ -35,7 +35,7 @@ use crate::imod::libiimod::mrcfiles::{
     MrcHeader, mrc_contrast_scaling, mrc_get_scale, mrc_head_read, mrc_init_li,
 };
 use crate::imod::libiimod::mrcsec::mrc_read_z;
-use crate::imod::libiimod::mrcslice::{slice_mmm, slice_new_mode};
+use crate::imod::libiimod::mrcslice::slice_mmm;
 use crate::imod::mrc::tiff::tiff_write_image;
 use std::io::Write;
 
@@ -453,7 +453,7 @@ pub fn mrc2tif() {
             if adoc_ind < 0 {
                 let name = (*in_file).filename.clone().unwrap_or_default();
                 adoc_ind = adoc_open_image_metadata(
-                    &name,
+                    name.as_bytes(),
                     if (*in_file).file == IIFILE_ADOC { 0 } else { 1 },
                     &mut if_montage,
                     &mut num_adoc_sect,
@@ -464,7 +464,11 @@ pub fn mrc2tif() {
                 exit_error(&c_format_bytes(
                     "Could not find an mdoc file or autodoc information for input file %s",
                     &[CArg::Bytes(
-                        (*in_file).filename.as_deref().unwrap_or_default(),
+                        (*in_file)
+                            .filename
+                            .as_deref()
+                            .unwrap_or_default()
+                            .as_bytes(),
                     )],
                 ));
             }
@@ -737,21 +741,24 @@ pub fn mrc2tif() {
                 } else {
                     hdata.ny
                 };
-                // The source owns this as `malloc` storage.  `sliceNewMode`
-                // frees and replaces it for converted real modes, so a Rust
-                // Vec would be freed once by the C-shaped slice routine and
-                // again by Vec's destructor.
-                let buffer = libc::malloc(hdata.nx as usize * nlines as usize * psize).cast::<u8>();
-                if buffer.is_null() {
+                let Some(buffer_len) = (hdata.nx as usize)
+                    .checked_mul(nlines as usize)
+                    .and_then(|pixels| pixels.checked_mul(psize))
+                else {
+                    exit_error(b"Failed to allocate memory for slice");
+                };
+                let mut buffer = Vec::new();
+                if buffer.try_reserve_exact(buffer_len).is_err() {
                     // `mrc2tif.cpp:497`.
                     exit_error(b"Failed to allocate memory for slice");
                 }
+                buffer.resize(buffer_len, 0);
                 if do_chunks {
                     li.ymin = hdata.ny - (lines_done + nlines);
                     li.ymax = li.ymin + nlines - 1;
                     lines_done += nlines;
                 }
-                if mrc_read_z(&mut hdata, &mut li, buffer, z) != 0 {
+                if mrc_read_z(&mut hdata, &mut li, buffer.as_mut_ptr(), z) != 0 {
                     // `mrc2tif.cpp:508-509`: `perror("mrc2tif ")` then
                     // `exitError`.  `exitError` exits, so the source frees
                     // nothing here.
@@ -771,29 +778,19 @@ pub fn mrc2tif() {
                         &[CArg::Int(z as i64)],
                     ));
                 }
-                let mut slice: Islice = core::mem::zeroed();
-                if slice_init(&mut slice, hdata.nx, nlines, hdata.mode, buffer.cast()) != 0 {
-                    libc::free(buffer.cast());
+                let Some(mut slice) = slice_create(hdata.nx, nlines, hdata.mode) else {
                     break;
-                }
+                };
+                slice.data.copy_from_slice(&buffer);
                 if auto_contrast {
-                    let line_ptrs =
-                        make_line_pointers(slice.data.b.cast(), hdata.nx, hdata.ny, psize as i32);
-                    if line_ptrs.is_null() {
-                        // `mrc2tif.cpp:516`.
-                        exit_error(b"Allocating line pointers for autocontrasting");
-                    }
                     let sample =
                         (hdata.nx * hdata.ny).min(100_000) as f32 / (hdata.nx * hdata.ny) as f32;
                     let mut image_mean = 0.0;
                     let mut image_sd = 0.0;
                     // `makeLinePointers` becomes the line byte views the
                     // translated `sampleMeanSD` takes.
-                    let bytes = core::slice::from_raw_parts(
-                        slice.data.b.cast::<u8>(),
-                        hdata.nx as usize * hdata.ny as usize * psize,
-                    );
-                    let lines: Vec<&[u8]> = (0..hdata.ny as usize)
+                    let bytes = buffer.as_slice();
+                    let lines: Vec<&[u8]> = (0..nlines as usize)
                         .map(|index| &bytes[(hdata.nx as usize * index * psize)..])
                         .collect();
                     let sample_error = sample_mean_sd(
@@ -809,7 +806,6 @@ pub fn mrc2tif() {
                         Some(&mut image_mean),
                         Some(&mut image_sd),
                     );
-                    libc::free(line_ptrs.cast());
                     if sample_error != 0 {
                         // `mrc2tif.cpp:521`.
                         exit_error(&c_format_bytes(
@@ -824,28 +820,43 @@ pub fn mrc2tif() {
                     for y in 0..nlines {
                         for x in 0..hdata.nx {
                             let mut value = [0.; 4];
-                            slice_get_val(&mut slice, x, y, &mut value);
+                            slice_get_val(slice.as_mut(), x, y, &mut value);
                             for channel in 0..if psize == 3 { 3 } else { 1 } {
                                 value[channel] = (value[channel] * scale + offset).clamp(0., 255.);
                             }
-                            slice_put_val(&mut slice, x, y, value);
+                            slice_put_val(slice.as_mut(), x, y, value);
                         }
                     }
-                    if real_mode > 0 && slice_new_mode(&mut slice, MRC_MODE_BYTE) != 0 {
-                        // `mrc2tif.cpp:543`.
-                        exit_error(&c_format_bytes(
-                            "Converting slice %d to bytes",
-                            &[CArg::Int(z as i64)],
-                        ));
-                    }
-                    if slice.data.b.is_null() {
-                        // `mrc2tif.cpp:546`.
-                        exit_error(b"Failed to allocate memory for slice");
+                    if real_mode > 0 {
+                        let mut converted = Vec::new();
+                        if converted.try_reserve_exact(buffer_len).is_err() {
+                            exit_error(&c_format_bytes(
+                                "Converting slice %d to bytes",
+                                &[CArg::Int(z as i64)],
+                            ));
+                        }
+                        converted.resize(buffer_len / psize, 0);
+                        for y in 0..nlines {
+                            for x in 0..hdata.nx {
+                                let mut value = [0.; 4];
+                                slice_get_val(slice.as_mut(), x, y, &mut value);
+                                converted[x as usize + y as usize * hdata.nx as usize] =
+                                    value[0] as i32 as u8;
+                            }
+                        }
+                        if slice_init(slice.as_mut(), hdata.nx, nlines, MRC_MODE_BYTE, converted)
+                            != 0
+                        {
+                            exit_error(&c_format_bytes(
+                                "Converting slice %d to bytes",
+                                &[CArg::Int(z as i64)],
+                            ));
+                        }
                     }
                 }
-                let write_buffer = slice.data.b;
+                let write_buffer = slice.data.as_mut_ptr();
                 if !make_qimage {
-                    slice_mmm(&mut slice);
+                    slice_mmm(slice.as_mut());
                     slice_min = slice_min.min(slice.min);
                     slice_max = slice_max.max(slice.max);
                     all_min = all_min.min(slice.min);
@@ -871,12 +882,10 @@ pub fn mrc2tif() {
                     }
                     match encoder {
                         Mrc2TifEncoder::Parity => {
-                            // The Qt shim's two `const char *` arguments, and
-                            // the only NUL-terminated strings this unit builds
-                            // for a foreign call.
-                            let filename =
-                                std::ffi::CString::new(name_text.as_bytes()).unwrap_or_default();
-                            let format = std::ffi::CString::new(type_name).unwrap_or_default();
+                            let mut filename = name_text.as_bytes().to_vec();
+                            filename.push(0);
+                            let mut format = type_name.as_bytes().to_vec();
+                            format.push(0);
                             mrc2tif_qimage_save(
                                 qbuf.as_mut_ptr(),
                                 hdata.nx,
@@ -884,8 +893,8 @@ pub fn mrc2tif() {
                                 line_bytes as i32,
                                 if psize == 3 { 1 } else { 0 },
                                 use_resol,
-                                filename.as_ptr(),
-                                format.as_ptr(),
+                                filename.as_ptr().cast(),
+                                format.as_ptr().cast(),
                                 quality,
                             )
                         }
@@ -969,11 +978,6 @@ pub fn mrc2tif() {
                         quality,
                     )
                 };
-                if real_mode > 0 && convert {
-                    libc::free(write_buffer.cast());
-                } else {
-                    libc::free(buffer.cast());
-                }
                 if write_error != 0 {
                     // `mrc2tif.cpp:610-613`: one `exitError` with the section
                     // number and the file name, plus the parallel-compression
@@ -1057,12 +1061,14 @@ unsafe fn open_either_way(
     progname: &[u8],
     oldcode: i32,
 ) -> Option<ImodFile> {
-    static mut WARNED: i32 = 0;
+    thread_local! {
+        static WARNED: Cell<bool> = const { Cell::new(false) };
+    }
     unsafe {
         if iifile.is_null() {
             return None;
         }
-        (*iifile).filename = Some(iname.to_vec());
+        (*iifile).filename = Some(String::from_utf8_lossy(iname).into_owned());
         if oldcode != 0 || tiff_open_new(iifile) != 0 {
             let fp = ImodFile::open(&String::from_utf8_lossy(iname), "wb");
             if fp.is_none() {
@@ -1080,8 +1086,8 @@ unsafe fn open_either_way(
                 // `mrc2tif.cpp:661-662`.
                 exit_error(&c_format_bytes("Opening %s", &[CArg::Bytes(iname)]));
             }
-            if oldcode == 0 && WARNED == 0 {
-                WARNED = 1;
+            if oldcode == 0 && !WARNED.with(Cell::get) {
+                WARNED.with(|warned| warned.set(true));
                 let _ = ImodFile::Stdout.write_all(&c_format_bytes(
                     "\nWARNING: %s - Not writing with libtiff, compression not available",
                     &[CArg::Bytes(progname)],

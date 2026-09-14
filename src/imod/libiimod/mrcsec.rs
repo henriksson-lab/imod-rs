@@ -190,8 +190,7 @@ pub unsafe fn mrc_read_section_any(
     mut type_: i32,
 ) -> i32 {
     let mut fin = unsafe { (*hdata).fp.clone().unwrap() };
-    let mut d: LineProcData = unsafe { core::mem::zeroed() };
-    let mut free_map = 0;
+    let mut d = LineProcData::default();
     let mut y_end = if read_y != 0 {
         unsafe { (*li).zmax }
     } else {
@@ -205,15 +204,7 @@ pub unsafe fn mrc_read_section_any(
     d.cz = cz;
     d.swapped = unsafe { (*hdata).swapped };
     let init = unsafe {
-        ii_init_read_section_any(
-            hdata,
-            li,
-            buf,
-            &mut d,
-            &mut free_map,
-            &mut y_end,
-            "mrcReadSectionAny",
-        )
+        ii_init_read_section_any(hdata, li, buf, &mut d, &mut y_end, "mrcReadSectionAny")
     };
     if init != 0 {
         return init;
@@ -240,9 +231,6 @@ pub unsafe fn mrc_read_section_any(
                     "ERROR: mrcReadSectionAny - cannot mirror FFT with inverted Y data.\n"
                 ),
             );
-            if free_map != 0 {
-                unsafe { libc::free(d.map.cast()) }
-            };
             return 1;
         }
         let ny = unsafe { (*hdata).ny };
@@ -254,8 +242,6 @@ pub unsafe fn mrc_read_section_any(
             d.bdata = d.bdata.offset(lines * d.pix_size as isize);
             d.pix_index = d.pix_index.wrapping_add(lines as u32);
             d.bufp = d.bufp.offset(lines * pix_size_buf[type_ as usize] as isize);
-            d.usbufp = d.usbufp.offset(lines);
-            d.fbufp = d.fbufp.offset(lines);
         }
         d.delta_y_sign = -1;
     }
@@ -263,8 +249,6 @@ pub unsafe fn mrc_read_section_any(
         d.bufp = d
             .bufp
             .add((pix_size_buf[type_ as usize] * pad_left) as usize);
-        d.usbufp = d.usbufp.add(pad_left as usize);
-        d.fbufp = d.fbufp.add(pad_left as usize);
     }
     d.pix_index = d.pix_index.wrapping_add(pad_left as u32);
     let nx = unsafe { (*hdata).nx };
@@ -286,6 +270,7 @@ pub unsafe fn mrc_read_section_any(
             chunk_lines = chunk_lines.min(target_lines).max(1);
         }
     }
+    let mut temporary_data = Vec::new();
     let mut temporary: *mut u8 = core::ptr::null_mut();
     if d.need_data != 0 {
         let bytes = d.pix_size as usize
@@ -296,13 +281,11 @@ pub unsafe fn mrc_read_section_any(
             } else {
                 d.xsize as usize
             };
-        temporary = unsafe { libc::malloc(bytes).cast() };
-        if temporary.is_null() {
-            if free_map != 0 {
-                unsafe { libc::free(d.map.cast()) }
-            };
+        if temporary_data.try_reserve_exact(bytes).is_err() {
             return 2;
         }
+        temporary_data.resize(bytes, 0);
+        temporary = temporary_data.as_mut_ptr();
     }
     let seek_line = if d.packed4bits != 0 {
         d.x_start / 2
@@ -353,12 +336,6 @@ pub unsafe fn mrc_read_section_any(
         }
     };
     if seek_error != 0 {
-        if !temporary.is_null() {
-            unsafe { libc::free(temporary.cast()) }
-        };
-        if free_map != 0 {
-            unsafe { libc::free(d.map.cast()) }
-        };
         return 3;
     }
     d.line = d.y_start;
@@ -388,12 +365,6 @@ pub unsafe fn mrc_read_section_any(
                     Some(&mut ImodFile::Stderr),
                     format_args!("ERROR: mrcReadSectionAny - reading data from file.\n"),
                 );
-                if !temporary.is_null() {
-                    unsafe { libc::free(temporary.cast()) }
-                }
-                if free_map != 0 {
-                    unsafe { libc::free(d.map.cast()) }
-                }
                 return 3;
             }
             d.bdata = unsafe { chunk_start.add(seek_line as usize) };
@@ -408,12 +379,6 @@ pub unsafe fn mrc_read_section_any(
                     )
                 } != 0
                 {
-                    if !temporary.is_null() {
-                        unsafe { libc::free(temporary.cast()) }
-                    }
-                    if free_map != 0 {
-                        unsafe { libc::free(d.map.cast()) }
-                    }
                     return IIERR_QUITTING;
                 }
                 d.bdata = unsafe { d.bdata.add((nx_seek * d.pix_size) as usize) };
@@ -448,12 +413,6 @@ pub unsafe fn mrc_read_section_any(
                 Some(&mut ImodFile::Stderr),
                 format_args!("ERROR: mrcReadSectionAny - reading data from file.\n"),
             );
-            if !temporary.is_null() {
-                unsafe { libc::free(temporary.cast()) }
-            };
-            if free_map != 0 {
-                unsafe { libc::free(d.map.cast()) }
-            };
             return 3;
         }
         d.bdata = bdata;
@@ -467,12 +426,6 @@ pub unsafe fn mrc_read_section_any(
             )
         } != 0
         {
-            if !temporary.is_null() {
-                unsafe { libc::free(temporary.cast()) }
-            };
-            if free_map != 0 {
-                unsafe { libc::free(d.map.cast()) }
-            };
             return IIERR_QUITTING;
         }
         // `mrcsec.c:384-386`: only seek when there is something to skip.
@@ -491,21 +444,9 @@ pub unsafe fn mrc_read_section_any(
                 )
             } != 0
         {
-            if !temporary.is_null() {
-                libc::free(temporary.cast());
-            }
-            if free_map != 0 {
-                libc::free(d.map.cast());
-            }
             return 3;
         }
         d.line += 1;
-    }
-    if !temporary.is_null() {
-        unsafe { libc::free(temporary.cast()) }
-    }
-    if free_map != 0 {
-        unsafe { libc::free(d.map.cast()) }
     }
     0
 }
@@ -514,7 +455,6 @@ pub unsafe fn ii_init_read_section_any(
     li: *mut LoadInfo,
     buf: *mut u8,
     data: *mut LineProcData,
-    free_map: *mut i32,
     y_end: *mut i32,
     caller: &str,
 ) -> i32 {
@@ -552,11 +492,7 @@ pub unsafe fn ii_init_read_section_any(
     d.bdata = buf;
     d.buf = buf;
     d.bufp = buf;
-    d.fbufp = buf.cast();
-    d.usbufp = buf.cast();
-    d.fft = buf;
-    d.usfft = buf.cast();
-    d.map = core::ptr::null_mut();
+    d.map.clear();
     if (d.type_ == 0 && d.map_sbytes != 0) || d.packed4bits != 0 {
         d.convert = 1;
     }
@@ -647,10 +583,14 @@ pub unsafe fn ii_init_read_section_any(
         MRC_MODE_BYTE => {
             d.pix_size = 1;
             if (d.byte != 0 && d.do_scale != 0) || d.to_short != 0 {
-                d.map =
-                    unsafe { get_byte_map(l.slope, l.offset, l.outmin, l.outmax, h.bytes_signed) };
+                let map = get_byte_map(l.slope, l.offset, l.outmin, l.outmax, h.bytes_signed);
+                d.map = unsafe {
+                    core::slice::from_raw_parts(map, if d.to_short != 0 { 512 } else { 256 })
+                        .to_vec()
+                };
             } else if d.map_sbytes != 0 {
-                d.map = unsafe { get_byte_map(1., 0., 0, 255, 1) };
+                let map = get_byte_map(1., 0., 0, 255, 1);
+                d.map = unsafe { core::slice::from_raw_parts(map, 256).to_vec() };
             };
             d.need_data =
                 (d.type_ == MRSA_FLOAT || d.type_ == MRSA_USHORT || d.packed4bits != 0) as i32;
@@ -658,21 +598,15 @@ pub unsafe fn ii_init_read_section_any(
         MRC_MODE_SHORT | MRC_MODE_USHORT => {
             d.pix_size = 2;
             if (d.to_short != 0 && (d.do_scale != 0 || h.mode == MRC_MODE_SHORT)) || d.byte != 0 {
-                d.map = unsafe {
-                    get_short_map(
-                        l.slope,
-                        l.offset,
-                        l.outmin,
-                        l.outmax,
-                        l.ramp,
-                        d.swapped,
-                        (h.mode == MRC_MODE_SHORT) as i32,
-                    )
-                };
-                unsafe { *free_map = 1 };
-                if d.map.is_null() {
-                    return 2;
-                }
+                d.map = get_short_map(
+                    l.slope,
+                    l.offset,
+                    l.outmin,
+                    l.outmax,
+                    l.ramp,
+                    d.swapped,
+                    (h.mode == MRC_MODE_SHORT) as i32,
+                );
             };
             d.need_data = (d.type_ == MRSA_FLOAT || d.type_ == MRSA_BYTE) as i32;
         }
@@ -680,8 +614,8 @@ pub unsafe fn ii_init_read_section_any(
             d.pix_size = 3;
             d.need_data = (d.convert != 0 || d.type_ == MRSA_FLOAT) as i32;
             if d.do_scale != 0 {
-                d.map =
-                    unsafe { get_byte_map(l.slope, l.offset, l.outmin, l.outmax, h.bytes_signed) };
+                let map = get_byte_map(l.slope, l.offset, l.outmin, l.outmax, h.bytes_signed);
+                d.map = unsafe { core::slice::from_raw_parts(map, 256).to_vec() };
             }
         }
         MRC_MODE_FLOAT => {
@@ -711,7 +645,6 @@ pub unsafe fn ii_init_read_section_any(
             }
         }
     }
-    d.usmap = d.map.cast();
     d.bytes_since_check = 0;
     0
 }
@@ -730,8 +663,8 @@ pub unsafe fn ii_process_read_line(
     let mut bufp = if passed { bufp_in } else { d.bufp };
     let mut usbufp = bufp.cast::<u16>();
     let mut fbufp = bufp.cast::<f32>();
-    let map = d.map;
-    let usmap = d.usmap;
+    let map = d.map.as_ptr();
+    let usmap = map.cast::<u16>();
     let n = d.xsize as usize;
     unsafe {
         if d.convert != 0
@@ -920,7 +853,7 @@ pub unsafe fn ii_process_read_line(
                     } else {
                         d.pix_index as usize
                     };
-                    let fft = if l.mirror_fft != 0 { bdata } else { d.fft };
+                    let fft = if l.mirror_fft != 0 { bdata } else { d.buf };
                     let usfft = fft.cast::<u16>();
                     for i in 0..n {
                         let a = *src.add(2 * i);
@@ -955,7 +888,9 @@ pub unsafe fn ii_process_read_line(
                             } else {
                                 core::ptr::copy_nonoverlapping(
                                     usfft.add((x2 - x0) as usize),
-                                    d.usbufp.add((x2 - l.xmin + ybase * d.im_xsize) as usize),
+                                    d.bufp
+                                        .cast::<u16>()
+                                        .add((x2 - l.xmin + ybase * d.im_xsize) as usize),
                                     (x3 + 1 - x2) as usize,
                                 );
                             }
@@ -964,7 +899,7 @@ pub unsafe fn ii_process_read_line(
                                     *d.buf.add((ybase * d.im_xsize) as usize) =
                                         *fft.add(d.xsize as usize - 1);
                                 } else {
-                                    *d.usbufp.add((ybase * d.im_xsize) as usize) =
+                                    *d.bufp.cast::<u16>().add((ybase * d.im_xsize) as usize) =
                                         *usfft.add(d.xsize as usize - 1);
                                 }
                             }
@@ -991,7 +926,7 @@ pub unsafe fn ii_process_read_line(
                                             + (ybase * d.im_xsize) as usize,
                                     ) = *fft.add((h.nx - 1 - d.x_start - x2 - i as i32) as usize);
                                 } else {
-                                    *d.usbufp.add(
+                                    *d.bufp.cast::<u16>().add(
                                         i + x2 as usize - l.xmin as usize
                                             + (ybase * d.im_xsize) as usize,
                                     ) = *usfft.add((h.nx - 1 - d.x_start - x2 - i as i32) as usize);
@@ -1008,7 +943,7 @@ pub unsafe fn ii_process_read_line(
                                 if d.byte != 0 {
                                     *d.buf.add(destination) = *fft.add(source);
                                 } else {
-                                    *d.usbufp.add(destination) = *usfft.add(source);
+                                    *d.bufp.cast::<u16>().add(destination) = *usfft.add(source);
                                 }
                             }
                         }
@@ -1088,8 +1023,6 @@ pub unsafe fn ii_process_read_line(
         }
         if !passed {
             d.bufp = bufp;
-            d.usbufp = usbufp;
-            d.fbufp = fbufp;
             d.bytes_since_check += (d.xsize * d.pix_size + 100000).min(h.nx * d.pix_size);
             if d.bytes_since_check > 4000000 {
                 d.bytes_since_check = 0;
@@ -1246,18 +1179,21 @@ pub unsafe fn mrc_write_section_any(
         chunk_lines =
             ((2_000_000_f32 / bytes_line as f32 + 0.5) as i32).clamp(1, l.ymax + 1 - l.ymin);
     }
-    let temp = if need {
-        unsafe { libc::malloc((bytes_line * chunk_lines) as usize).cast::<u8>() }
-    } else {
-        core::ptr::null_mut()
-    };
-    if need && temp.is_null() {
+    let mut temp = Vec::new();
+    if need
+        && (temp
+            .try_reserve_exact((bytes_line * chunk_lines) as usize)
+            .is_err())
+    {
         // `mrcsec.c:1210-1213`
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: mrcWriteSectionAny - getting memory for temporary array.\n"),
         );
         return 2;
+    }
+    if need {
+        temp.resize((bytes_line * chunk_lines) as usize, 0);
     }
     if unsafe {
         mrc_huge_seek(
@@ -1278,9 +1214,6 @@ pub unsafe fn mrc_write_section_any(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: mrcWriteSectionAny - seeking to write location.\n"),
         );
-        if !temp.is_null() {
-            unsafe { libc::free(temp.cast()) }
-        };
         return 3;
     }
     let xdim = h.nx + l.pad_left.max(0) + l.pad_right.max(0);
@@ -1295,10 +1228,13 @@ pub unsafe fn mrc_write_section_any(
                     + l.pad_left.max(0) as isize * pix_buf as isize,
             )
         };
-        let out = if temp.is_null() {
+        let out = if !need {
             src
         } else {
-            unsafe { temp.add((lines_in_chunk * bytes_line) as usize) }
+            unsafe {
+                temp.as_mut_ptr()
+                    .add((lines_in_chunk * bytes_line) as usize)
+            }
         };
         if lines_in_chunk == 0 {
             chunk_write_ptr = out;
@@ -1329,7 +1265,7 @@ pub unsafe fn mrc_write_section_any(
                 for i in 0..h.nx as usize {
                     *out.add(i) = (*src.add(i) as i8).wrapping_sub(-128) as u8;
                 }
-            } else if !temp.is_null() {
+            } else if need {
                 core::ptr::copy_nonoverlapping(src, out, (h.nx * pix_out) as usize);
             }
             if h.swapped != 0 && bytes_chan > 1 {
@@ -1379,18 +1315,12 @@ pub unsafe fn mrc_write_section_any(
                         }
                     ),
                 );
-                if !temp.is_null() {
-                    unsafe { libc::free(temp.cast()) }
-                }
                 return 3;
             }
             lines_in_chunk = 0;
         }
         line += step;
     }
-    if !temp.is_null() {
-        unsafe { libc::free(temp.cast()) }
-    };
     0
 }
 pub unsafe fn lookup_ii_file(
@@ -1455,7 +1385,7 @@ mod tests {
             load.outmax = 255;
             let mut input = [0_u8, 17, 255];
             let mut output = [0.0_f32; 3];
-            let mut data: LineProcData = core::mem::zeroed();
+            let mut data = LineProcData::default();
             let mut free_map = 0;
             let mut y_end = 0;
             data.type_ = MRSA_FLOAT;
@@ -1466,7 +1396,6 @@ mod tests {
                     &mut load,
                     output.as_mut_ptr().cast(),
                     &mut data,
-                    &mut free_map,
                     &mut y_end,
                     "test",
                 ),
@@ -1504,7 +1433,7 @@ mod tests {
             load.slope = 1.0;
             load.outmax = 255;
             let mut output = [0_u8; 3];
-            let mut data: LineProcData = core::mem::zeroed();
+            let mut data = LineProcData::default();
             let mut free_map = 0;
             let mut y_end = 0;
             b3d_set_store_error(1);
@@ -1514,7 +1443,6 @@ mod tests {
                     &mut load,
                     output.as_mut_ptr(),
                     &mut data,
-                    &mut free_map,
                     &mut y_end,
                     "mrcReadSectionAny",
                 ),
@@ -1548,7 +1476,7 @@ mod tests {
             load.outmax = 255;
             let mut input = [0x21_u8, 0x43];
             let mut output = [0.0_f32; 4];
-            let mut data: LineProcData = core::mem::zeroed();
+            let mut data = LineProcData::default();
             let mut free_map = 0;
             let mut y_end = 0;
             data.type_ = MRSA_FLOAT;
@@ -1558,7 +1486,6 @@ mod tests {
                     &mut load,
                     output.as_mut_ptr().cast(),
                     &mut data,
-                    &mut free_map,
                     &mut y_end,
                     "test",
                 ),
@@ -1597,7 +1524,7 @@ mod tests {
             load.outmax = 255;
             let mut input = [1_u8, 2, 3];
             let mut output = [0.0_f32; 1];
-            let mut data: LineProcData = core::mem::zeroed();
+            let mut data = LineProcData::default();
             let mut free_map = 0;
             let mut y_end = 0;
             data.type_ = MRSA_FLOAT;
@@ -1607,7 +1534,6 @@ mod tests {
                     &mut load,
                     output.as_mut_ptr().cast(),
                     &mut data,
-                    &mut free_map,
                     &mut y_end,
                     "test",
                 ),

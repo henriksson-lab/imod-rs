@@ -8,53 +8,49 @@
 )]
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libiimod::mrcfiles::MrcHeader;
-pub type FILE = libc::FILE;
+use std::cell::{Cell, RefCell};
 pub type fortStrLen_t = i32;
 /// C `BoundInfo` (`parallelwrite.c:28`).  `regions` was a `malloc`ed array of
 /// `numFiles` entries; it owns its storage here, which is why neither this type
 /// nor [`BoundRegion`] is `Copy` any more.
 #[derive(Clone)]
-#[repr(C)]
 pub struct BoundInfo {
     pub regions: Vec<BoundRegion>,
-    pub nx: ::core::ffi::c_int,
-    pub ny: ::core::ffi::c_int,
-    pub num_bound_lines: ::core::ffi::c_int,
-    pub num_files: ::core::ffi::c_int,
-    pub every_sec: ::core::ffi::c_int,
-    pub hdf_index: ::core::ffi::c_int,
+    pub nx: i32,
+    pub ny: i32,
+    pub num_bound_lines: i32,
+    pub num_files: i32,
+    pub every_sec: i32,
+    pub hdf_index: i32,
 }
 /// C `BoundRegion` (`parallelwrite.c:21`).
 #[derive(Clone)]
-#[repr(C)]
 pub struct BoundRegion {
-    /// C `char *file`, `strdup`ed from a line of the boundary-info file.
-    pub file: Vec<u8>,
-    pub section: [::core::ffi::c_int; 2],
-    pub start_line: [::core::ffi::c_int; 2],
+    /// Boundary-file name, read from a line of the boundary-info file.
+    pub file: String,
+    pub section: [i32; 2],
+    pub start_line: [i32; 2],
 }
 pub type ImodImageFile = crate::imod::libiimod::iimage::ImodImageFile;
 #[derive(Copy, Clone)]
-#[repr(C)]
 pub struct BufSegment {
-    /// C `char *bufStart`: a position inside the shared HDF buffer, not a
-    /// string.
-    pub buf_start: *mut u8,
-    pub num_bytes: ::core::ffi::c_int,
-    pub section: ::core::ffi::c_int,
-    pub start_line: ::core::ffi::c_int,
-    pub chunk_lines: ::core::ffi::c_int,
-    pub ind_x0: ::core::ffi::c_int,
-    pub ind_x1: ::core::ffi::c_int,
-    pub nxdim_pad_right: ::core::ffi::c_int,
-    pub ix_start: ::core::ffi::c_int,
-    pub iy_start: ::core::ffi::c_int,
-    pub iy_end: ::core::ffi::c_int,
+    /// Offset of this segment in the owned shared HDF buffer.
+    pub buf_offset: usize,
+    pub num_bytes: i32,
+    pub section: i32,
+    pub start_line: i32,
+    pub chunk_lines: i32,
+    pub ind_x0: i32,
+    pub ind_x1: i32,
+    pub nxdim_pad_right: i32,
+    pub ix_start: i32,
+    pub iy_start: i32,
+    pub iy_end: i32,
 }
-pub const SEEK_SET: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-pub const MAX_INFOS: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
-pub const MAXLINE: ::core::ffi::c_int = 1024 as ::core::ffi::c_int;
-pub const DEFAULT_HDF_BUF_MB: ::core::ffi::c_int = 20 as ::core::ffi::c_int;
+pub const SEEK_SET: i32 = 0 as i32;
+pub const MAX_INFOS: i32 = 5 as i32;
+pub const MAXLINE: i32 = 1024 as i32;
+pub const DEFAULT_HDF_BUF_MB: i32 = 20 as i32;
 pub const HDF_BUFFER_ENV_VAR: &str = "PARALLEL_HDF_BUF_SIZE";
 static mut s_infos: [BoundInfo; 5] = [const {
     BoundInfo {
@@ -67,27 +63,39 @@ static mut s_infos: [BoundInfo; 5] = [const {
         hdf_index: 0,
     }
 }; 5];
-static mut s_num_infos: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut s_cur_info: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-static mut s_hdf_bufs: [*mut u8; 5] = [::core::ptr::null_mut::<u8>(); 5];
-static mut s_segments: [*mut BufSegment; 5] =
-    [::core::ptr::null::<BufSegment>() as *mut BufSegment; 5];
-static mut s_num_segments: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_max_segments: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_buf_size: ::core::ffi::c_int = DEFAULT_HDF_BUF_MB * 1048576 as ::core::ffi::c_int;
-static mut s_buf_index: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_nx_full: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_ny_full: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_iz_cur: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_iy_cur: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_lines_bound: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_iunit_bound: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_nz_full: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_iy_bound: [[::core::ffi::c_int; 2]; 5] = [[0; 2]; 5];
-static mut s_if_open: [::core::ffi::c_int; 5] = [0; 5];
-static mut s_iz_bound: [[::core::ffi::c_int; 2]; 5] = [[0; 2]; 5];
-static mut s_if_all_sec: [::core::ffi::c_int; 5] = [0; 5];
-pub unsafe fn par_wrt_initialize(filename: &[u8], nxin: i32, nyin: i32) -> i32 {
+static mut s_num_infos: i32 = 0;
+static mut s_cur_info: i32 = -1;
+static mut s_hdf_bufs: [Vec<u8>; 5] = [const { Vec::new() }; 5];
+static mut s_segments: [Vec<BufSegment>; 5] = [const { Vec::new() }; 5];
+static mut s_buf_index: [i32; 5] = [0; 5];
+static mut s_nx_full: [i32; 5] = [0; 5];
+static mut s_ny_full: [i32; 5] = [0; 5];
+static mut s_iz_cur: [i32; 5] = [0; 5];
+static mut s_iy_cur: [i32; 5] = [0; 5];
+static mut s_lines_bound: [i32; 5] = [0; 5];
+static mut s_iunit_bound: [i32; 5] = [0; 5];
+static mut s_nz_full: [i32; 5] = [0; 5];
+static mut s_iy_bound: [[i32; 2]; 5] = [[0; 2]; 5];
+static mut s_if_open: [i32; 5] = [0; 5];
+static mut s_iz_bound: [[i32; 2]; 5] = [[0; 2]; 5];
+static mut s_if_all_sec: [i32; 5] = [0; 5];
+thread_local! {
+    static S_BUF_SIZE: Cell<i32> = const { Cell::new(DEFAULT_HDF_BUF_MB * 1_048_576) };
+    static S_BOUNDARY_WRITE: RefCell<BoundaryWriteState> = RefCell::new(BoundaryWriteState::default());
+    static S_RECLOSE_WALL_SUM: Cell<f64> = const { Cell::new(0.0) };
+    static S_PREPARE_WALL_SUM: Cell<f64> = const { Cell::new(0.0) };
+}
+#[derive(Default)]
+struct BoundaryWriteState {
+    hbound: Option<MrcHeader>,
+    dsize: i32,
+    csize: i32,
+    lines_bound: i32,
+    sections: [i32; 2],
+    start_lines: [i32; 2],
+    fp_bound: Option<ImodFile>,
+}
+pub unsafe fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
     if s_num_infos >= MAX_INFOS {
         return 5;
     }
@@ -102,8 +110,7 @@ pub unsafe fn par_wrt_initialize(filename: &[u8], nxin: i32, nyin: i32) -> i32 {
         return 0;
     }
     if nxin < 0 {
-        (*bi).hdf_index =
-            crate::imod::libcfshr::b3dutil::b3d_open_lock_file(&String::from_utf8_lossy(filename));
+        (*bi).hdf_index = crate::imod::libcfshr::b3dutil::b3d_open_lock_file(filename);
         if (*bi).hdf_index < 0 {
             return 6;
         }
@@ -114,20 +121,24 @@ pub unsafe fn par_wrt_initialize(filename: &[u8], nxin: i32, nyin: i32) -> i32 {
         if let Ok(env_value) = std::env::var(HDF_BUFFER_ENV_VAR) {
             let buffer_mb = env_value.trim_start().parse::<i32>().unwrap_or(0);
             if buffer_mb > 0 {
-                s_buf_size = buffer_mb * 1_048_576;
+                S_BUF_SIZE.with(|size| size.set(buffer_mb * 1_048_576));
             }
         }
-        s_hdf_bufs[s_num_infos as usize] = libc::malloc(s_buf_size as usize).cast();
-        if s_hdf_bufs[s_num_infos as usize].is_null() {
+        let Ok(buffer_size) = usize::try_from(S_BUF_SIZE.with(Cell::get)) else {
+            return 7;
+        };
+        let mut hdf_buffer = Vec::new();
+        if hdf_buffer.try_reserve_exact(buffer_size).is_err() {
             return 7;
         }
+        hdf_buffer.resize(buffer_size, 0);
+        s_hdf_bufs[s_num_infos as usize] = hdf_buffer;
         clear_segments(s_num_infos);
         s_cur_info = s_num_infos;
         s_num_infos += 1;
         return 0;
     }
-    let fp =
-        crate::imod::libcfshr::b3dutil::ImodFile::open(&String::from_utf8_lossy(filename), "r");
+    let fp = crate::imod::libcfshr::b3dutil::ImodFile::open(filename, "r");
     let Some(mut fp) = fp else {
         return 1;
     };
@@ -166,7 +177,8 @@ pub unsafe fn par_wrt_initialize(filename: &[u8], nxin: i32, nyin: i32) -> i32 {
             return 2;
         }
         let mut region = BoundRegion {
-            file: line[..line.iter().position(|b| *b == 0).unwrap_or(0)].to_vec(),
+            file: String::from_utf8_lossy(&line[..line.iter().position(|b| *b == 0).unwrap_or(0)])
+                .into_owned(),
             section: [0; 2],
             start_line: [0; 2],
         };
@@ -232,9 +244,9 @@ pub unsafe extern "C" fn par_wrt_properties(
     0
 }
 pub unsafe extern "C" fn parwrtproperties_(
-    mut allSec: *mut ::core::ffi::c_int,
-    mut linesBound: *mut ::core::ffi::c_int,
-    mut nfiles: *mut ::core::ffi::c_int,
+    mut allSec: *mut i32,
+    mut linesBound: *mut i32,
+    mut nfiles: *mut i32,
 ) -> i32 {
     par_wrt_properties(allSec, linesBound, nfiles)
 }
@@ -245,7 +257,7 @@ pub unsafe extern "C" fn par_wrt_set_current(index: i32) -> i32 {
     s_cur_info = index;
     0
 }
-pub unsafe extern "C" fn parwrtsetcurrent_(mut index: *mut ::core::ffi::c_int) -> i32 {
+pub unsafe extern "C" fn parwrtsetcurrent_(mut index: *mut i32) -> i32 {
     par_wrt_set_current(*index - 1)
 }
 pub unsafe extern "C" fn par_wrt_close() {
@@ -266,21 +278,26 @@ pub unsafe extern "C" fn parallel_write_slice(
     fout: &mut ImodFile,
     hdata: *mut MrcHeader,
     slice: i32,
-) -> ::core::ffi::c_int {
+) -> i32 {
+    S_BOUNDARY_WRITE.with(|boundary| unsafe {
+        parallel_write_slice_state(buf, fout, hdata, slice, &mut boundary.borrow_mut())
+    })
+}
+
+unsafe fn parallel_write_slice_state(
+    buf: *mut ::core::ffi::c_void,
+    fout: &mut ImodFile,
+    hdata: *mut MrcHeader,
+    slice: i32,
+    state: &mut BoundaryWriteState,
+) -> i32 {
     // `parallelwrite.c:245` `static MrcHeader hbound;`.  A file-scope C struct
     // is zero-initialised once and keeps its address; `Option` in a `static`
     // gives the same lifetime and address without `mem::zeroed`, which is
     // undefined for a type holding an `ImodFile` (NATIVE.md 4b).
-    static mut S_HBOUND: Option<MrcHeader> = None;
-    static mut DSIZE: i32 = 0;
-    static mut CSIZE: i32 = 0;
-    static mut S_LINES_BOUND: i32 = -1;
-    static mut S_SECTIONS: [i32; 2] = [0; 2];
-    static mut S_START_LINES: [i32; 2] = [0; 2];
-    static mut S_FP_BOUND: Option<ImodFile> = None;
     let mut allsec = 0;
     let mut nfiles = 0;
-    let mut filename = Vec::<u8>::new();
+    let mut filename = String::new();
     // `parallelwrite.c:251` `(ImodImageFile *)fout` — the reverse of the HDF
     // identity token: for an HDF file `iiFile->fp` *is* `(FILE *)iiFile`, so
     // casting back recovers the struct.
@@ -288,18 +305,18 @@ pub unsafe extern "C" fn parallel_write_slice(
         ImodFile::Token(address) => *address as *mut ImodImageFile,
         _ => ::core::ptr::null_mut(),
     };
-    let hbound = (&mut *(&raw mut S_HBOUND)).get_or_insert_with(MrcHeader::default);
+    let hbound = state.hbound.get_or_insert_with(MrcHeader::default);
     let mut fout = fout.clone();
     let parallel_hdf = s_cur_info >= 0 && s_infos[s_cur_info as usize].hdf_index >= 0;
     if parallel_hdf {
         crate::imod::libiimod::mrcfiles::mrc_getdcsize(
             (*hdata).mode,
-            &mut *(&raw mut DSIZE),
-            &mut *(&raw mut CSIZE),
+            &mut state.dsize,
+            &mut state.csize,
         );
         let err = add_segment(
             buf.cast(),
-            DSIZE * CSIZE * (*hdata).nx * (*hdata).ny,
+            state.dsize * state.csize * (*hdata).nx * (*hdata).ny,
             slice,
             -2,
             ii_file,
@@ -326,17 +343,17 @@ pub unsafe extern "C" fn parallel_write_slice(
     if err != 0 || parallel_hdf {
         return err;
     }
-    if S_LINES_BOUND < 0 {
-        if par_wrt_properties(&raw mut allsec, &raw mut S_LINES_BOUND, &raw mut nfiles) != 0 {
-            S_LINES_BOUND = 0;
+    if state.lines_bound < 0 {
+        if par_wrt_properties(&mut allsec, &mut state.lines_bound, &mut nfiles) != 0 {
+            state.lines_bound = 0;
         }
-        if S_LINES_BOUND == 0 {
+        if state.lines_bound == 0 {
             return 0;
         }
         crate::imod::libiimod::mrcfiles::mrc_head_new(
             hbound,
             (*hdata).nx,
-            S_LINES_BOUND,
+            state.lines_bound,
             2,
             (*hdata).mode,
         );
@@ -345,8 +362,8 @@ pub unsafe extern "C" fn parallel_write_slice(
             0,
             (*hdata).ny,
             &mut filename,
-            (&raw mut S_SECTIONS).cast(),
-            (&raw mut S_START_LINES).cast(),
+            state.sections.as_mut_ptr(),
+            state.start_lines.as_mut_ptr(),
         );
         if err != 0 {
             crate::imod::libcfshr::b3dutil::b3d_error(
@@ -360,8 +377,8 @@ pub unsafe extern "C" fn parallel_write_slice(
         }
         if crate::imod::libiimod::mrcfiles::mrc_getdcsize(
             (*hdata).mode,
-            &mut *(&raw mut DSIZE),
-            &mut *(&raw mut CSIZE),
+            &mut state.dsize,
+            &mut state.csize,
         ) != 0
         {
             crate::imod::libcfshr::b3dutil::b3d_error(
@@ -370,42 +387,41 @@ pub unsafe extern "C" fn parallel_write_slice(
             );
             return 1;
         }
-        crate::imod::libcfshr::b3dutil::imod_backup_file(&String::from_utf8_lossy(&filename));
-        S_FP_BOUND = ImodFile::open(&String::from_utf8_lossy(&filename), "wb");
-        if (&*(&raw const S_FP_BOUND)).is_none() {
+        crate::imod::libcfshr::b3dutil::imod_backup_file(&filename);
+        state.fp_bound = ImodFile::open(&filename, "wb");
+        if state.fp_bound.is_none() {
             crate::imod::libcfshr::b3dutil::b3d_error(
                 Some(&mut ImodFile::Stdout),
                 format_args!(
                     "ERROR: sliceWriteParallel - opening boundary file {}\n",
-                    String::from_utf8_lossy(&filename)
+                    filename
                 ),
             );
             return 1;
         }
-        if crate::imod::libiimod::mrcfiles::mrc_head_write(
-            (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
-            hbound,
-        ) != 0
+        if crate::imod::libiimod::mrcfiles::mrc_head_write(state.fp_bound.as_mut().unwrap(), hbound)
+            != 0
         {
             return 1;
         }
     }
-    if S_LINES_BOUND == 0 {
+    if state.lines_bound == 0 {
         return 0;
     }
     for ib in 0..2usize {
-        if S_SECTIONS[ib] >= 0 && slice == S_SECTIONS[ib] {
+        if state.sections[ib] >= 0 && slice == state.sections[ib] {
             crate::imod::libcfshr::b3dutil::b3d_fseek(
-                (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
-                hbound.header_size + ib as i32 * hbound.nx * S_LINES_BOUND * CSIZE * DSIZE,
+                state.fp_bound.as_mut().unwrap(),
+                hbound.header_size
+                    + ib as i32 * hbound.nx * state.lines_bound * state.csize * state.dsize,
                 SEEK_SET,
             );
             let data = buf
                 .cast::<u8>()
-                .add((hbound.nx * S_START_LINES[ib] * CSIZE * DSIZE) as usize);
+                .add((hbound.nx * state.start_lines[ib] * state.csize * state.dsize) as usize);
             err = crate::imod::libiimod::mrcfiles::mrc_write_slice(
                 data.cast(),
-                (&mut *(&raw mut S_FP_BOUND)).as_mut().unwrap(),
+                state.fp_bound.as_mut().unwrap(),
                 hbound,
                 ib as i32,
                 b'Z',
@@ -480,16 +496,21 @@ pub unsafe extern "C" fn parwrtgetregion_(
     *sections.add(1) = region.section[1];
     *start_lines = region.start_line[0];
     *start_lines.add(1) = region.start_line[1];
-    // The Fortran bridge again: `c2f_string` blank-pads into the caller's
-    // fixed-length character variable.
-    let cname = std::ffi::CString::new(region.file.clone()).unwrap_or_default();
-    crate::imod::libcfshr::b3dutil::c2f_string(cname.as_ptr(), filename, strlen_0)
+    // This is the Fortran boundary: blank-pad the caller's fixed-length
+    // character variable directly from native Rust storage.
+    let destination = core::slice::from_raw_parts_mut(filename.cast::<u8>(), strlen_0 as usize);
+    let source = region.file.as_bytes();
+    if source.len() > destination.len() {
+        return -1;
+    }
+    destination[..source.len()].copy_from_slice(source);
+    destination[source.len()..].fill(b' ');
+    0
 }
 pub unsafe extern "C" fn par_wrt_reclose_hdf(
     ii_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
-    static mut WALL_SUM: f64 = 0.0;
     let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
     if !hdata.is_null()
         && crate::imod::libiimod::mrcfiles::mrc_head_write(
@@ -516,7 +537,8 @@ pub unsafe extern "C" fn par_wrt_reclose_hdf(
         );
         return 1;
     }
-    WALL_SUM += crate::imod::libcfshr::b3dutil::wall_time() - wall_start;
+    S_RECLOSE_WALL_SUM
+        .with(|sum| sum.set(sum.get() + crate::imod::libcfshr::b3dutil::wall_time() - wall_start));
     0
 }
 pub unsafe extern "C" fn par_wrt_flush_buffers(
@@ -533,7 +555,7 @@ pub unsafe extern "C" fn par_wrt_flush_buffers(
     0
 }
 pub unsafe fn iiu_par_wrt_initialize(
-    filename: &[u8],
+    filename: &str,
     iunit_bound: i32,
     nx_in: i32,
     ny_in: i32,
@@ -568,21 +590,16 @@ pub unsafe fn iiu_par_wrt_initialize(
 }
 pub unsafe extern "C" fn parwrtinitialize_(
     mut filename: *mut ::core::ffi::c_char,
-    mut iunitBound: *mut ::core::ffi::c_int,
-    mut nxIn: *mut ::core::ffi::c_int,
-    mut nyIn: *mut ::core::ffi::c_int,
-    mut nzIn: *mut ::core::ffi::c_int,
+    mut iunitBound: *mut i32,
+    mut nxIn: *mut i32,
+    mut nyIn: *mut i32,
+    mut nzIn: *mut i32,
     mut namelen: fortStrLen_t,
 ) -> i32 {
-    // The Fortran bridge: `f2c_string` carries the hidden string-length
-    // argument, and stays `char *` until both sides move (NATIVE.md 7).
-    let c_string = crate::imod::libcfshr::b3dutil::f2c_string(filename, namelen);
-    if c_string.is_null() {
-        return 7;
-    }
-    let name = core::ffi::CStr::from_ptr(c_string).to_bytes().to_vec();
-    libc::free(c_string.cast());
-    iiu_par_wrt_initialize(&name, *iunitBound, *nxIn, *nyIn, *nzIn)
+    // The Fortran bridge carries the hidden string-length argument; its Rust
+    // conversion owns the resulting string.
+    let c_string = crate::imod::libcfshr::b3dutil::fortran_string(filename, namelen);
+    iiu_par_wrt_initialize(&c_string, *iunitBound, *nxIn, *nyIn, *nzIn)
 }
 pub unsafe extern "C" fn par_wrt_posn(iunit: i32, iz: i32, iy: i32) {
     crate::imod::libiimod::unit_fileio::iiu_set_position(iunit, iz, iy);
@@ -592,11 +609,7 @@ pub unsafe extern "C" fn par_wrt_posn(iunit: i32, iz: i32, iy: i32) {
     s_iz_cur[s_cur_info as usize] = iz;
     s_iy_cur[s_cur_info as usize] = iy;
 }
-pub unsafe extern "C" fn parwrtposn_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut iz: *mut ::core::ffi::c_int,
-    mut iy: *mut ::core::ffi::c_int,
-) {
+pub unsafe extern "C" fn parwrtposn_(mut iunit: *mut i32, mut iz: *mut i32, mut iy: *mut i32) {
     par_wrt_posn(*iunit, *iz, *iy)
 }
 pub unsafe extern "C" fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
@@ -661,7 +674,7 @@ pub unsafe extern "C" fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void
                 ],
             ));
         }
-        libc::exit(1);
+        std::process::exit(1);
     }
     if s_iz_cur[s_cur_info as usize] == s_iz_bound[s_cur_info as usize][0] {
         crate::imod::libiimod::unit_fileio::iiu_set_position(
@@ -699,9 +712,9 @@ pub unsafe extern "C" fn par_wrt_sec(iunit: i32, array: *mut ::core::ffi::c_void
     0
 }
 pub unsafe extern "C" fn parwrtsec_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
+) -> i32 {
     par_wrt_sec(*iunit, array)
 }
 pub unsafe extern "C" fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void) -> i32 {
@@ -770,7 +783,7 @@ pub unsafe extern "C" fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void
                     ],
                 ));
             }
-            libc::exit(1);
+            std::process::exit(1);
         }
     }
     if s_if_all_sec[s_cur_info as usize] != 0 {
@@ -838,9 +851,9 @@ pub unsafe extern "C" fn par_wrt_lin(iunit: i32, array: *mut ::core::ffi::c_void
     0
 }
 pub unsafe extern "C" fn parwrtlin_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
+) -> i32 {
     par_wrt_lin(*iunit, array)
 }
 pub unsafe extern "C" fn iiu_par_wrt_sec_part(
@@ -910,10 +923,7 @@ pub unsafe extern "C" fn iiuparwrtsecpart_(
         *iunit, array, *nxdim, *ix_start, *ind_x0, *ind_x1, *iy_start, *iy_end,
     )
 }
-pub unsafe extern "C" fn iiu_par_wrt_reclose_hdf(
-    iunit: i32,
-    write_header: i32,
-) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iiu_par_wrt_reclose_hdf(iunit: i32, write_header: i32) -> i32 {
     let ii_file: *mut ImodImageFile;
     let hdata: *mut MrcHeader;
     if s_num_infos <= 0 || s_cur_info < 0 || s_infos[s_cur_info as usize].hdf_index < 0 {
@@ -931,7 +941,7 @@ pub unsafe extern "C" fn iiu_par_wrt_reclose_hdf(
         },
     ) != 0
     {
-        libc::exit(1);
+        std::process::exit(1);
     }
     1
 }
@@ -943,7 +953,7 @@ pub unsafe extern "C" fn iiu_write_dummy_sec_to_hdf(iunit: i32) {
     crate::imod::libiimod::unit_fileio::iiu_sync_with_mrc_header(iunit);
     let ii_file = crate::imod::libiimod::unit_fileio::iiu_get_ii_file(iunit);
     if crate::imod::libiimod::iihdf::hdf_write_dummy_section(ii_file, buf.as_mut_ptr(), 0) != 0 {
-        libc::exit(1);
+        std::process::exit(1);
     }
 }
 pub unsafe extern "C" fn iiuwritedummysectohdf_(iunit: *mut i32) {
@@ -965,10 +975,10 @@ unsafe fn par_wrt_find_region(
     sec_num: i32,
     line_num: i32,
     nl_write: i32,
-    filename: &mut Vec<u8>,
+    filename: &mut String,
     sections: *mut i32,
     start_lines: *mut i32,
-) -> ::core::ffi::c_int {
+) -> i32 {
     if s_num_infos == 0 || s_cur_info < 0 || s_infos[s_cur_info as usize].regions.is_empty() {
         return 1;
     }
@@ -1005,8 +1015,7 @@ unsafe fn par_wrt_find_region(
             }
         }
         if past_start && before_end {
-            // `parallelwrite.c:866` hands out the region's own pointer; the
-            // caller only reads it, so a copy of the bytes is the same thing.
+            // The caller takes ownership of the selected boundary-file name.
             *filename = region.file.clone();
             *sections = region.section[0];
             *start_lines = region.start_line[0];
@@ -1026,7 +1035,6 @@ unsafe fn par_wrt_find_region(
     2
 }
 unsafe extern "C" fn par_wrt_prepare_hdf(ii_file: *mut ImodImageFile) -> i32 {
-    static mut WALL_SUM: f64 = 0.0;
     let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
     let err = crate::imod::libcfshr::b3dutil::b3d_lock_file(s_infos[s_cur_info as usize].hdf_index);
     if err != 0 {
@@ -1051,7 +1059,8 @@ unsafe extern "C" fn par_wrt_prepare_hdf(ii_file: *mut ImodImageFile) -> i32 {
         );
         return 1;
     }
-    WALL_SUM += crate::imod::libcfshr::b3dutil::wall_time() - wall_start;
+    S_PREPARE_WALL_SUM
+        .with(|sum| sum.set(sum.get() + crate::imod::libcfshr::b3dutil::wall_time() - wall_start));
     0
 }
 unsafe extern "C" fn add_segment(
@@ -1070,7 +1079,7 @@ unsafe extern "C" fn add_segment(
     iy_start: i32,
     iy_end: i32,
 ) -> i32 {
-    if s_buf_index[s_cur_info as usize] + num_bytes > s_buf_size {
+    if s_buf_index[s_cur_info as usize] + num_bytes > S_BUF_SIZE.with(Cell::get) {
         let err = if start_line < -1 {
             par_wrt_prepare_hdf(ii_file)
         } else {
@@ -1080,7 +1089,9 @@ unsafe extern "C" fn add_segment(
             return 1;
         }
         let err = write_segments(ii_file, hdata, iunit);
-        if err == 0 && (start_line < 0 || s_buf_index[s_cur_info as usize] + num_bytes > s_buf_size)
+        if err == 0
+            && (start_line < 0
+                || s_buf_index[s_cur_info as usize] + num_bytes > S_BUF_SIZE.with(Cell::get))
         {
             return -1;
         }
@@ -1093,37 +1104,42 @@ unsafe extern "C" fn add_segment(
             return 1;
         }
     }
-    if s_num_segments[s_cur_info as usize] >= s_max_segments[s_cur_info as usize] {
+    let info_index = s_cur_info as usize;
+    if s_segments[info_index].len() == s_segments[info_index].capacity() {
         let increment = if start_line >= 0 { 128 } else { 8 };
-        s_segments[s_cur_info as usize] = libc::realloc(
-            s_segments[s_cur_info as usize].cast(),
-            (s_max_segments[s_cur_info as usize] + increment) as usize
-                * ::core::mem::size_of::<BufSegment>(),
-        ) as *mut BufSegment;
-        if s_segments[s_cur_info as usize].is_null() {
+        if s_segments[info_index].try_reserve_exact(increment).is_err() {
             return 1;
         }
-        s_max_segments[s_cur_info as usize] += increment;
     }
-    let seg = s_segments[s_cur_info as usize].add(s_num_segments[s_cur_info as usize] as usize);
-    (*seg).buf_start =
-        s_hdf_bufs[s_cur_info as usize].offset(s_buf_index[s_cur_info as usize] as isize);
-    (*seg).num_bytes = num_bytes;
-    (*seg).section = section;
-    (*seg).start_line = start_line;
-    (*seg).chunk_lines = chunk;
-    (*seg).ind_x0 = x0;
-    (*seg).ind_x1 = x1;
-    (*seg).nxdim_pad_right = nxdim;
-    (*seg).ix_start = ix_start;
-    (*seg).iy_start = iy_start;
-    (*seg).iy_end = iy_end;
-    libc::memcpy(
-        (*seg).buf_start.cast(),
-        buf.cast_const().cast(),
-        num_bytes as usize,
-    );
-    s_num_segments[s_cur_info as usize] += 1;
+    let Ok(num_bytes_usize) = usize::try_from(num_bytes) else {
+        return 1;
+    };
+    let Ok(buf_offset) = usize::try_from(s_buf_index[info_index]) else {
+        return 1;
+    };
+    let Some(end_offset) = buf_offset.checked_add(num_bytes_usize) else {
+        return 1;
+    };
+    let Some(destination) = s_hdf_bufs[info_index].get_mut(buf_offset..end_offset) else {
+        return 1;
+    };
+    if num_bytes_usize != 0 {
+        let source = core::slice::from_raw_parts(buf.cast_const(), num_bytes_usize);
+        destination.copy_from_slice(source);
+    }
+    s_segments[info_index].push(BufSegment {
+        buf_offset,
+        num_bytes,
+        section,
+        start_line,
+        chunk_lines: chunk,
+        ind_x0: x0,
+        ind_x1: x1,
+        nxdim_pad_right: nxdim,
+        ix_start,
+        iy_start,
+        iy_end,
+    });
     s_buf_index[s_cur_info as usize] += num_bytes;
     0
 }
@@ -1132,16 +1148,18 @@ unsafe extern "C" fn write_segments(
     _hdata: *mut MrcHeader,
     iunit: i32,
 ) -> i32 {
-    if s_num_segments[s_cur_info as usize] == 0 {
+    let info_index = s_cur_info as usize;
+    if s_segments[info_index].is_empty() {
         return 0;
     }
     let mut num_lines = 0;
     let mut start_line = 0;
     let mut line_section = 0;
     let mut lines_buf = ::core::ptr::null_mut::<u8>();
-    for ind in 0..s_num_segments[s_cur_info as usize] {
-        let seg = s_segments[s_cur_info as usize].add(ind as usize);
-        if (*seg).start_line < 0 {
+    for ind in 0..s_segments[info_index].len() {
+        let seg = s_segments[info_index][ind];
+        let segment_buffer = s_hdf_bufs[info_index].as_mut_ptr().add(seg.buf_offset);
+        if seg.start_line < 0 {
             if write_buffered_lines(
                 iunit,
                 line_section,
@@ -1152,59 +1170,53 @@ unsafe extern "C" fn write_segments(
             {
                 return 1;
             }
-            let err = if (*seg).start_line == -1 {
-                crate::imod::libiimod::unit_fileio::iiu_set_position(iunit, (*seg).section, 0);
-                crate::imod::libiimod::unit_fileio::iiu_write_section(
-                    iunit,
-                    (*seg).buf_start.cast(),
-                )
+            let err = if seg.start_line == -1 {
+                crate::imod::libiimod::unit_fileio::iiu_set_position(iunit, seg.section, 0);
+                crate::imod::libiimod::unit_fileio::iiu_write_section(iunit, segment_buffer.cast())
             } else {
                 crate::imod::libiimod::iimage::ii_write_section(
                     ii_file,
-                    (*seg).buf_start,
-                    (*seg).section,
+                    segment_buffer,
+                    seg.section,
                 )
             };
             if err != 0 {
                 return 1;
             }
-        } else if (*seg).chunk_lines == 1 {
+        } else if seg.chunk_lines == 1 {
             crate::imod::libiimod::unit_fileio::iiu_set_position(
                 iunit,
-                (*seg).section,
-                (*seg).start_line,
+                seg.section,
+                seg.start_line,
             );
             if crate::imod::libiimod::unit_fileio::iiu_write_sec_part(
                 iunit,
-                (*seg).buf_start.cast(),
-                (*seg).nxdim_pad_right,
-                (*seg).ix_start,
-                (*seg).ind_x0,
-                (*seg).ind_x1,
-                (*seg).iy_start,
-                (*seg).iy_end,
+                segment_buffer.cast(),
+                seg.nxdim_pad_right,
+                seg.ix_start,
+                seg.ind_x0,
+                seg.ind_x1,
+                seg.iy_start,
+                seg.iy_end,
             ) != 0
             {
                 return 1;
             }
-        } else if (*seg).chunk_lines == 2 {
-            (*ii_file).llx = (*seg).ind_x0;
-            (*ii_file).urx = (*seg).ind_x1;
-            (*ii_file).lly = (*seg).iy_start;
-            (*ii_file).ury = (*seg).iy_end;
-            (*ii_file).pad_left = (*seg).ix_start;
-            (*ii_file).pad_right = (*seg).nxdim_pad_right;
-            if crate::imod::libiimod::iimage::ii_write_section(
-                ii_file,
-                (*seg).buf_start,
-                (*seg).section,
-            ) != 0
+        } else if seg.chunk_lines == 2 {
+            (*ii_file).llx = seg.ind_x0;
+            (*ii_file).urx = seg.ind_x1;
+            (*ii_file).lly = seg.iy_start;
+            (*ii_file).ury = seg.iy_end;
+            (*ii_file).pad_left = seg.ix_start;
+            (*ii_file).pad_right = seg.nxdim_pad_right;
+            if crate::imod::libiimod::iimage::ii_write_section(ii_file, segment_buffer, seg.section)
+                != 0
             {
                 return 1;
             }
         } else {
             if num_lines != 0
-                && (start_line + num_lines != (*seg).start_line || line_section != (*seg).section)
+                && (start_line + num_lines != seg.start_line || line_section != seg.section)
             {
                 if write_buffered_lines(
                     iunit,
@@ -1218,9 +1230,9 @@ unsafe extern "C" fn write_segments(
                 }
             }
             if num_lines == 0 {
-                lines_buf = (*seg).buf_start;
-                start_line = (*seg).start_line;
-                line_section = (*seg).section;
+                lines_buf = segment_buffer;
+                start_line = seg.start_line;
+                line_section = seg.section;
             }
             num_lines += 1;
         }
@@ -1240,7 +1252,7 @@ unsafe extern "C" fn write_segments(
 }
 unsafe extern "C" fn clear_segments(info_ind: i32) {
     s_buf_index[info_ind as usize] = 0;
-    s_num_segments[info_ind as usize] = 0;
+    s_segments[info_ind as usize].clear();
 }
 unsafe extern "C" fn pw_open_if_needed(
     iz_sec: i32,
@@ -1249,7 +1261,7 @@ unsafe extern "C" fn pw_open_if_needed(
     ierr: *mut i32,
 ) {
     let mut nxyz = [0; 3];
-    let mut filename = Vec::<u8>::new();
+    let mut filename = String::new();
     // `iiuWriteHeaderStr` and `iiuOpen` are the Fortran-bridge unit layer and
     // still take `const char *` (NATIVE.md 7), so the two names below keep a
     // terminator at exactly those two calls.
@@ -1285,7 +1297,13 @@ unsafe extern "C" fn pw_open_if_needed(
     if s_if_all_sec[s_cur_info as usize] != 0 {
         nxyz[2] = 2 * s_nz_full[s_cur_info as usize];
     }
-    let cname = std::ffi::CString::new(filename.clone()).unwrap_or_default();
+    let cname = match std::ffi::CString::new(filename) {
+        Ok(name) => name,
+        Err(_) => {
+            *ierr = 1;
+            return;
+        }
+    };
     *ierr = crate::imod::libiimod::unit_fileio::iiu_open(
         s_iunit_bound[s_cur_info as usize],
         cname.as_ptr().cast_mut(),
@@ -1357,7 +1375,7 @@ unsafe extern "C" fn write_buffered_lines(
     }
     0
 }
-pub const IISTATE_NOTINIT: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+pub const IISTATE_NOTINIT: i32 = 0 as i32;
 
 #[cfg(test)]
 mod tests {

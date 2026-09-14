@@ -110,8 +110,7 @@ pub fn imodjoin() {
                 let Some(text) = argv.get(iarg) else {
                     parserr(1)
                 };
-                let mut nlist1 = 0_i32;
-                let Some(parsed) = parselist(text.as_bytes(), &mut nlist1) else {
+                let Ok(parsed) = parselist(text) else {
                     parserr(1)
                 };
                 list1 = parsed.iter().map(|&value| value as usize).collect();
@@ -329,8 +328,7 @@ pub fn imodjoin() {
             }
             iarg += 1;
             let text = &argv[iarg];
-            let mut nlist2 = 0_i32;
-            let Some(parsed) = parselist(text.as_bytes(), &mut nlist2) else {
+            let Ok(parsed) = parselist(text) else {
                 parserr(njoin)
             };
             list2 = parsed.iter().map(|&value| value as usize).collect();

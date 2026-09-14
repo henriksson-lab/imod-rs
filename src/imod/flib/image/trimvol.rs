@@ -16,6 +16,7 @@ use crate::imod::libiimod::mrcfiles::{
     LoadInfo, MRC_MODE_FLOAT, MRC_NLABELS, MrcHeader, mrc_head_new, mrc_head_write,
 };
 use crate::imod::libiimod::mrcsec::mrc_write_section_any;
+use chrono::{Local, Timelike};
 
 /// Original Python program top level (`pysrc/trimvol:1`).
 pub fn trimvol() -> i32 {
@@ -327,25 +328,14 @@ pub fn trimvol() -> i32 {
             let mut date = [b' '; 9];
             b3d_date(&mut date);
             title[56..65].copy_from_slice(&date);
-            // `strftime(time, 9, "%H:%M:%S", localtime(&now))`.  The
-            // conversion to local civil time is the same foreign boundary
-            // `b3ddate.rs` documents -- Rust's standard library has no
-            // timezone database -- but the eight characters it produces are
-            // formatted here rather than by the C library.
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as libc::time_t;
-            let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
-            let time = if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
-                String::new()
-            } else {
-                let local = local.assume_init();
-                format!(
-                    "{:02}:{:02}:{:02}",
-                    local.tm_hour, local.tm_min, local.tm_sec
-                )
-            };
+            // `strftime(time, 9, "%H:%M:%S", localtime(&now))`.
+            let local = Local::now();
+            let time = format!(
+                "{:02}:{:02}:{:02}",
+                local.hour(),
+                local.minute(),
+                local.second()
+            );
             let count = time.len().min(8);
             title[67..67 + count].copy_from_slice(&time.as_bytes()[..count]);
             (&mut (*out_header).labels[((*out_header).nlabl - 1) as usize])[..80]

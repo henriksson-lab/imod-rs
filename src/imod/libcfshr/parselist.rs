@@ -3,17 +3,20 @@
 
 use super::parse_params::strtol;
 
+/// Parsing failures from [`parselist`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseListError {
+    LeadingSlash,
+    InvalidCharacter,
+}
+
 /// Original `parselist` (`parselist.c:35`).
 ///
-/// The C returns a `malloc`ed `int *` and reports the count, or an error code,
-/// in `*nlist`; here the allocation is the returned `Vec` and `None` is the
-/// C's NULL, so `*nlist` still carries 0 (empty), -1 (a leading `/`), -2 (the
-/// allocation failed, which cannot happen here) or -3 (a bad character).
-///
-/// `line` is the C string's bytes without its NUL: `nchars` is `strlen(line)`,
-/// and the one place the loop can read at that index sees the terminator, so
-/// an index at or past the end reads 0 exactly as the C does.
-pub fn parselist(line: &[u8], nlist: &mut i32) -> Option<Vec<i32>> {
+/// A leading slash is the source's special no-list marker; any other malformed
+/// entry is an invalid character error.  The C terminator read is represented
+/// by the byte lookup's zero fallback.
+pub fn parselist(line: &str) -> Result<Vec<i32>, ParseListError> {
+    let line = line.as_bytes();
     let mut intern = [0_u8; 10];
     let mut dashlast = false;
     let mut negnum = false;
@@ -23,13 +26,11 @@ pub fn parselist(line: &[u8], nlist: &mut i32) -> Option<Vec<i32>> {
     let nchars = line.len() as i32;
     let mut list: Vec<i32> = Vec::new();
 
-    *nlist = 0;
     if line.is_empty() {
-        return None;
+        return Ok(list);
     }
     if line[0] == b'/' {
-        *nlist = -1;
-        return None;
+        return Err(ParseListError::LeadingSlash);
     }
     let mut ind = 0_i32;
     let mut lastnum = 0_i32;
@@ -76,7 +77,6 @@ pub fn parselist(line: &[u8], nlist: &mut i32) -> Option<Vec<i32>> {
             let mut value = loopst;
             while idir * value <= idir * number {
                 list.push(value);
-                *nlist += 1;
                 value += idir;
             }
             lastnum = number;
@@ -97,8 +97,7 @@ pub fn parselist(line: &[u8], nlist: &mut i32) -> Option<Vec<i32>> {
             if got_space {
                 break;
             }
-            *nlist = -3;
-            return None;
+            return Err(ParseListError::InvalidCharacter);
         }
         if next == b',' {
             gotcomma = true;
@@ -119,72 +118,22 @@ pub fn parselist(line: &[u8], nlist: &mut i32) -> Option<Vec<i32>> {
     }
 
     if gotcomma || negnum || dashlast {
-        *nlist = -3;
-        return None;
+        return Err(ParseListError::InvalidCharacter);
     }
-    Some(list)
-}
-
-/// Original Fortran wrapper `parselistfw` (`parselist.c:144`).
-///
-/// Both sides of this bridge are Rust now — its one caller is `rdlist.rs`,
-/// itself a translated Fortran unit — so the hidden length argument is the
-/// slice's own length and `f2c_string`'s trailing-blank trim
-/// (`b3dutil.c:1189`) is done in place of the copy it made.
-pub fn parselistfw(line: &[u8], list: &mut [i32], nlist: &mut i32, limlist: &mut i32) -> i32 {
-    // `f2c_string`: drop trailing blanks, then NUL-terminate.
-    let mut index = line.len();
-    while index > 0 && line[index - 1] == b' ' {
-        index -= 1;
-    }
-    let tempstr = &line[..index];
-    let mut ncopy = 0_i32;
-    let retlist = parselist(tempstr, &mut ncopy);
-    let Some(retlist) = retlist else {
-        if ncopy == 0 {
-            *nlist = 0;
-            return 0;
-        }
-        return -ncopy - 1;
-    };
-    *nlist = ncopy;
-    if *limlist > 0 && ncopy > *limlist {
-        *nlist = *limlist;
-    }
-    if *nlist > 0 {
-        list[..*nlist as usize].copy_from_slice(&retlist[..*nlist as usize]);
-    }
-    if *limlist > 0 && ncopy > *limlist {
-        -1
-    } else {
-        0
-    }
+    Ok(list)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parselist, parselistfw};
+    use super::{ParseListError, parselist};
 
     #[test]
     fn source_ranges_errors_and_fortran_copy_limit() {
-        let mut count = 0;
-        let values = parselist(b"1-5,7,9,11,15-13", &mut count).unwrap();
-        assert_eq!(count, 11);
+        let values = parselist("1-5,7,9,11,15-13").unwrap();
         assert_eq!(values, &[1, 2, 3, 4, 5, 7, 9, 11, 15, 14, 13]);
 
-        assert!(parselist(b"/", &mut count).is_none());
-        assert_eq!(count, -1);
-        assert!(parselist(b"1x", &mut count).is_none());
-        assert_eq!(count, -3);
-
-        let mut output = [0; 2];
-        let mut out_count = 0;
-        let mut limit = 2;
-        assert_eq!(
-            parselistfw(b"1-4  ", &mut output, &mut out_count, &mut limit),
-            -1
-        );
-        assert_eq!(out_count, 2);
-        assert_eq!(output, [1, 2]);
+        assert_eq!(parselist("/"), Err(ParseListError::LeadingSlash));
+        assert_eq!(parselist("1x"), Err(ParseListError::InvalidCharacter));
+        assert_eq!(parselist("-3--1, 2-4"), Ok(vec![-3, -2, -1, 2, 3, 4]));
     }
 }

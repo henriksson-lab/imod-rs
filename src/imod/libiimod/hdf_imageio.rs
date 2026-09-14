@@ -9,7 +9,7 @@
 use crate::imod::libcfshr::autodoc::adoc_new;
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{CArg, b3d_error, b3d_shift_bytes, c_format};
-use crate::imod::libcfshr::ilist::{Ilist, ilist_append, ilist_item, ilist_new, ilist_size};
+use crate::imod::libcfshr::ilist::{ilist_append, ilist_item, ilist_new, ilist_size};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
 use crate::imod::libiimod::iimage::{
     IIFORMAT_COMPLEX, IIFORMAT_RGB, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_SHORT, IITYPE_UBYTE,
@@ -23,7 +23,6 @@ use crate::imod::libiimod::mrcfiles::{
 };
 use crate::imod::libiimod::mrcsec::{ii_init_read_section_any, ii_process_read_line};
 use core::ffi::{c_char, c_int, c_uint, c_void};
-use core::mem::zeroed;
 
 pub type HidT = i64;
 pub type HsizeT = usize;
@@ -124,12 +123,13 @@ pub unsafe fn hdf_read_section_any(
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(in_file, &mut li);
     let hdata = (*in_file).header.cast::<MrcHeader>();
-    let mut d: LineProcData = zeroed();
+    let mut d = LineProcData::default();
+    // This selects read diagnostics in shared cleanup; map ownership is in `d`.
+    let read_operation = 0;
     d.type_ = typ;
     d.read_y = if li.axis == 2 { 1 } else { 0 };
     d.cz = cz;
     let mut y_end = if d.read_y != 0 { li.zmax } else { li.ymax };
-    let mut free_map = 0;
     if typ == MRSA_FLOAT || typ == 0 {
         li.outmin = (*in_file).smin as i32;
         li.outmax = (*in_file).smax as i32;
@@ -139,15 +139,8 @@ pub unsafe fn hdf_read_section_any(
         li.outmax = if typ == MRSA_USHORT { 65535 } else { 255 };
         li.mirror_fft = (*in_file).mirror_fft;
     }
-    let err = ii_init_read_section_any(
-        hdata,
-        &mut li,
-        buf,
-        &mut d,
-        &mut free_map,
-        &mut y_end,
-        "hdfReadSectionAny",
-    );
+    let err =
+        ii_init_read_section_any(hdata, &mut li, buf, &mut d, &mut y_end, "hdfReadSectionAny");
     if err != 0 {
         return err;
     }
@@ -162,10 +155,8 @@ pub unsafe fn hdf_read_section_any(
             _ => 0,
         } * pad_left as usize,
     );
-    d.usbufp = d.usbufp.add(pad_left as usize);
-    d.fbufp = d.fbufp.add(pad_left as usize);
     d.pix_index += pad_left as u32;
-    let read_stack_y = d.read_y != 0 && !(*in_file).stack_set_list.is_null();
+    let read_stack_y = d.read_y != 0 && (*in_file).stack_set_list.is_some();
     let mut chunk_lines = 1i32;
     let max_lines = (2_000_000.0 / (d.xsize * d.pix_size) as f32).round() as i32;
     if !read_stack_y
@@ -177,22 +168,12 @@ pub unsafe fn hdf_read_section_any(
             chunk_lines = chunk_lines.min(max_lines).max(1);
         }
     }
-    let tmp = if d.need_data != 0 {
-        libc::malloc((d.pix_size * d.xsize * chunk_lines) as usize).cast::<u8>()
+    let mut tmp_data = if d.need_data != 0 {
+        vec![0; (d.pix_size * d.xsize * chunk_lines) as usize]
     } else {
-        core::ptr::null_mut()
+        Vec::new()
     };
-    if d.need_data != 0 && tmp.is_null() {
-        cleanup_tmp(
-            tmp,
-            free_map,
-            d.map,
-            0,
-            0,
-            Some("getting memory for temporary array"),
-        );
-        return 2;
-    }
+    let tmp = tmp_data.as_mut_ptr();
     let scale = get_file_xscale((*in_file).format);
     let mut mem_dim = [chunk_lines as HsizeT, (d.x_dimension * scale) as HsizeT, 0];
     let mut mem_count = [chunk_lines as HsizeT, (d.xsize * scale) as HsizeT, 0];
@@ -220,8 +201,8 @@ pub unsafe fn hdf_read_section_any(
     {
         cleanup_tmp(
             tmp,
-            free_map,
-            d.map,
+            read_operation,
+            d.map.as_mut_ptr(),
             0,
             mem_space,
             Some("selecting memory area to use"),
@@ -272,8 +253,8 @@ pub unsafe fn hdf_read_section_any(
             {
                 cleanup_tmp(
                     tmp,
-                    free_map,
-                    d.map,
+                    read_operation,
+                    d.map.as_mut_ptr(),
                     dspace,
                     mem_space,
                     Some("selecting memory area to use"),
@@ -281,7 +262,7 @@ pub unsafe fn hdf_read_section_any(
                 return 3;
             }
         }
-        if d.read_y == 0 && !(*in_file).stack_set_list.is_null() {
+        if d.read_y == 0 && (*in_file).stack_set_list.is_some() {
             fcount[0] = 1;
             fcount[(rank - 2) as usize] = num as usize;
             foffset[0] = 0;
@@ -321,8 +302,8 @@ pub unsafe fn hdf_read_section_any(
         {
             cleanup_tmp(
                 tmp,
-                free_map,
-                d.map,
+                read_operation,
+                d.map.as_mut_ptr(),
                 dspace,
                 mem_space,
                 Some("selecting area to read from file"),
@@ -347,8 +328,8 @@ pub unsafe fn hdf_read_section_any(
                 {
                     cleanup_tmp(
                         tmp,
-                        free_map,
-                        d.map,
+                        read_operation,
+                        d.map.as_mut_ptr(),
                         dspace,
                         mem_space,
                         Some("reading data from file"),
@@ -374,7 +355,7 @@ pub unsafe fn hdf_read_section_any(
             d.line += 1;
         }
     }
-    cleanup_tmp(tmp, free_map, d.map, 0, mem_space, None);
+    cleanup_tmp(tmp, read_operation, d.map.as_mut_ptr(), 0, mem_space, None);
     0
 }
 
@@ -427,15 +408,13 @@ pub unsafe fn hdf_write_section_any(
     if need_data && from_float >= 0 {
         chunk = ((65536.0 / (nxout * pixout) as f32).round() as i32).clamp(1, yend + 1 - ystart);
     }
-    let tmp = if need_data && from_float >= 0 {
-        libc::malloc((pixout * nxout * chunk) as usize).cast::<u8>()
+    let mut tmp_data = if need_data && from_float >= 0 {
+        vec![0; (pixout * nxout * chunk) as usize]
     } else {
-        core::ptr::null_mut()
+        Vec::new()
     };
-    if need_data && from_float >= 0 && tmp.is_null() {
-        return 2;
-    }
-    if (*in_file).stack_set_list.is_null()
+    let tmp = tmp_data.as_mut_ptr();
+    if (*in_file).stack_set_list.is_none()
         && (*in_file).dataset_name.is_none()
         && init_new_hdf_file(in_file) != 0
     {
@@ -450,35 +429,15 @@ pub unsafe fn hdf_write_section_any(
         return 2;
     }
     let mut none = 0;
-    let dset = if !(*in_file).stack_set_list.is_null() {
+    let dset = if (*in_file).stack_set_list.is_some() {
         /* This is the stack branch from hdfWriteSectionAny itself, kept inline
         as in C rather than factored into a new Rust helper. */
         if cz >= (*in_file).z_map_size {
             let new_size = cz + 8;
-            let new_map = libc::realloc(
-                (*in_file).z_to_data_set_map.cast(),
-                new_size as usize * core::mem::size_of::<i32>(),
-            )
-            .cast::<i32>();
-            if new_map.is_null() {
-                (*in_file).z_map_size = 0;
-                cleanup_tmp(
-                    tmp,
-                    -1,
-                    core::ptr::null_mut(),
-                    0,
-                    0,
-                    Some("Reallocating section map"),
-                );
-                return 1;
-            }
-            for ind in (*in_file).z_map_size..new_size {
-                *new_map.add(ind as usize) = -1;
-            }
-            (*in_file).z_to_data_set_map = new_map;
+            (*in_file).z_to_data_set_map.resize(new_size as usize, -1);
             (*in_file).z_map_size = new_size;
         }
-        if *(*in_file).z_to_data_set_map.add(cz as usize) < 0 {
+        if (&(*in_file).z_to_data_set_map)[cz as usize] < 0 {
             let mut name = [0u8; 36];
             let new_dset = create_group_and_dataset(in_file, cz, &mut name);
             if new_dset < 0 {
@@ -492,24 +451,20 @@ pub unsafe fn hdf_write_section_any(
                 );
                 return 1;
             }
+            let stack_name =
+                name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())].to_vec();
             let stack = StackSetData {
-                name: Some(
-                    name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())].to_vec(),
-                ),
+                name: None,
                 dset_id: new_dset,
                 is_open: 1,
             };
             let appended = ilist_append(
-                &mut *(*in_file).stack_set_list.cast::<Ilist>(),
+                (*in_file).stack_set_list.as_deref_mut().unwrap(),
                 core::slice::from_raw_parts(
                     (&raw const stack).cast::<u8>(),
                     core::mem::size_of::<StackSetData>(),
                 ),
             );
-            // `ilistAppend` copies the struct bytewise, which moves the name's
-            // ownership into the list; the local must not also drop it.  On a
-            // failed append the C leaks the `strdup`, and so does this.
-            core::mem::forget(stack);
             if appended != 0 {
                 cleanup_tmp(
                     tmp,
@@ -521,8 +476,13 @@ pub unsafe fn hdf_write_section_any(
                 );
                 return 1;
             }
-            *(*in_file).z_to_data_set_map.add(cz as usize) =
-                ilist_size((*in_file).stack_set_list.cast::<Ilist>().as_ref()) - 1;
+            let stack_index = ilist_size((*in_file).stack_set_list.as_deref()) - 1;
+            let stack = ilist_item((*in_file).stack_set_list.as_deref_mut(), stack_index)
+                .unwrap()
+                .as_mut_ptr()
+                .cast::<StackSetData>();
+            (*stack).name = Some(stack_name);
+            (&mut (*in_file).z_to_data_set_map)[cz as usize] = stack_index;
         }
         get_dataset_for_z(in_file, cz, &mut none)
     } else {
@@ -677,8 +637,12 @@ pub unsafe fn init_new_hdf_file(in_file: *mut ImodImageFile) -> i32 {
         if ds < 0 {
             return 1;
         }
-        (*in_file).dataset_name =
-            Some(name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())].to_vec());
+        (*in_file).dataset_name = Some(
+            String::from_utf8_lossy(
+                &name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())],
+            )
+            .into_owned(),
+        );
         (*in_file).dataset_id = ds;
         (*in_file).dataset_is_open = 1;
         if (*in_file).global_adoc_index < 0 {
@@ -687,23 +651,17 @@ pub unsafe fn init_new_hdf_file(in_file: *mut ImodImageFile) -> i32 {
                 return 1;
             }
             for ind in 0..(*in_file).num_volumes {
-                (*(*(*in_file).ii_volumes.add(ind as usize))).global_adoc_index =
+                (*((&mut (*in_file).ii_volumes)[ind as usize])).global_adoc_index =
                     (*in_file).global_adoc_index;
             }
         }
     } else {
-        (*in_file).stack_set_list = ilist_new(core::mem::size_of::<StackSetData>() as i32, size)
-            .map_or(core::ptr::null_mut(), Box::into_raw)
-            .cast();
-        (*in_file).z_to_data_set_map =
-            libc::malloc((size as usize) * core::mem::size_of::<i32>()).cast();
-        if (*in_file).stack_set_list.is_null() || (*in_file).z_to_data_set_map.is_null() {
+        (*in_file).stack_set_list = ilist_new(core::mem::size_of::<StackSetData>() as i32, size);
+        (*in_file).z_to_data_set_map = vec![-1; size as usize];
+        if (*in_file).stack_set_list.is_none() {
             return 1;
         }
         (*in_file).z_map_size = size;
-        for i in 0..size {
-            *(*in_file).z_to_data_set_map.add(i as usize) = -1;
-        }
     }
     0
 }
@@ -872,14 +830,14 @@ unsafe fn lookup_native_datatype(in_file: *mut ImodImageFile) -> HidT {
 /// C static `getDatasetForZ` (`hdf_imageio.c:646`).
 unsafe fn get_dataset_for_z(in_file: *mut ImodImageFile, cz: i32, no_data: *mut i32) -> HidT {
     *no_data = 0;
-    if !(*in_file).stack_set_list.is_null() {
-        if cz >= (*in_file).z_map_size || *(*in_file).z_to_data_set_map.add(cz as usize) < 0 {
+    if (*in_file).stack_set_list.is_some() {
+        if cz >= (*in_file).z_map_size || (&(*in_file).z_to_data_set_map)[cz as usize] < 0 {
             *no_data = 1;
             return 0;
         }
         let stack = ilist_item(
-            (*in_file).stack_set_list.cast::<Ilist>().as_mut(),
-            *(*in_file).z_to_data_set_map.add(cz as usize),
+            (*in_file).stack_set_list.as_deref_mut(),
+            (&(*in_file).z_to_data_set_map)[cz as usize],
         )
         .map_or(core::ptr::null_mut(), |item| {
             item.as_mut_ptr().cast::<StackSetData>()
@@ -907,8 +865,8 @@ unsafe fn get_dataset_for_z(in_file: *mut ImodImageFile, cz: i32, no_data: *mut 
 /// C static `cleanupTmp` (`hdf_imageio.c:683`).
 unsafe fn cleanup_tmp(
     tmp: *mut u8,
-    free_map: i32,
-    map: *mut u8,
+    read_operation: i32,
+    _map: *mut u8,
     dspace: HidT,
     mspace: HidT,
     mess: Option<&str>,
@@ -923,18 +881,12 @@ unsafe fn cleanup_tmp(
     if dspace != 0 {
         H5Sclose(dspace);
     }
-    if !tmp.is_null() {
-        libc::free(tmp.cast());
-    }
-    if free_map > 0 && !map.is_null() {
-        libc::free(map.cast());
-    }
     if let Some(message) = mess {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: hdf{}SectionAny - {}.\n",
-                if free_map >= 0 { "Read" } else { "Write" },
+                if read_operation >= 0 { "Read" } else { "Write" },
                 message
             ),
         );
@@ -980,10 +932,6 @@ mod tests {
             let mut header = MrcHeader::default();
             let mut image = ImodImageFile::default();
             let mut companion = ImodImageFile::default();
-            let mut volumes = [
-                &mut image as *mut ImodImageFile,
-                &mut companion as *mut ImodImageFile,
-            ];
             image.header = (&raw mut header).cast();
             image.nx = 2;
             image.ny = 2;
@@ -993,7 +941,8 @@ mod tests {
             header.nz = 1;
             header.mode = MRC_MODE_FLOAT;
             image.num_volumes = 2;
-            image.ii_volumes = volumes.as_mut_ptr();
+            let volumes = vec![&raw mut image, &raw mut companion];
+            image.ii_volumes = volumes;
             image.hdf_file_id = file;
             image.z_chunk_size = 1;
             image.hdf_compression = 0;
@@ -1002,10 +951,7 @@ mod tests {
             assert_eq!(init_new_hdf_file(&mut image), 0);
             assert!(image.dataset_id >= 0);
             assert_eq!(image.dataset_is_open, 1);
-            assert_eq!(
-                image.dataset_name.as_deref(),
-                Some(&b"/MDF/images/1/image"[..])
-            );
+            assert_eq!(image.dataset_name.as_deref(), Some("/MDF/images/1/image"));
             assert!(image.global_adoc_index >= 0);
             assert_eq!(companion.global_adoc_index, image.global_adoc_index);
             let plist = H5Dget_create_plist(image.dataset_id);
@@ -1125,18 +1071,18 @@ mod tests {
             image.type_ = IITYPE_FLOAT;
             image.global_adoc_index = -1;
             assert_eq!(init_new_hdf_file(&mut image), 0);
-            assert!(!image.stack_set_list.is_null());
+            assert!(image.stack_set_list.is_some());
             assert_eq!(image.z_map_size, 4);
-            assert_eq!(*image.z_to_data_set_map.add(3), -1);
+            assert_eq!(image.z_to_data_set_map[3], -1);
 
             let section = [5.0f32, 6.0, 7.0, 8.0];
             assert_eq!(
                 hdf_write_section_any(&mut image, section.as_ptr().cast_mut().cast(), 3, 0),
                 0
             );
-            assert_eq!(ilist_size(image.stack_set_list.cast::<Ilist>().as_ref()), 1);
-            assert_eq!(*image.z_to_data_set_map.add(3), 0);
-            let stack = ilist_item(image.stack_set_list.cast::<Ilist>().as_mut(), 0)
+            assert_eq!(ilist_size(image.stack_set_list.as_deref()), 1);
+            assert_eq!(image.z_to_data_set_map[3], 0);
+            let stack = ilist_item(image.stack_set_list.as_deref_mut(), 0)
                 .unwrap()
                 .as_mut_ptr()
                 .cast::<StackSetData>();
@@ -1156,10 +1102,7 @@ mod tests {
             assert_eq!(read, section);
             assert_eq!(H5Dclose((*stack).dset_id), 0);
             (*stack).name = None;
-            crate::imod::libcfshr::ilist::ilist_delete(Some(Box::from_raw(
-                image.stack_set_list.cast::<Ilist>(),
-            )));
-            libc::free(image.z_to_data_set_map.cast());
+            crate::imod::libcfshr::ilist::ilist_delete(image.stack_set_list.take());
             assert_eq!(H5Fclose(file), 0);
             std::fs::remove_file(path).unwrap();
         }

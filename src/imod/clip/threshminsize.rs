@@ -3,7 +3,7 @@
 
 use crate::imod::clip::clip::{ClipOptions, PlaneConnectedPoints, ZConnectedSets};
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
-use crate::imod::libcfshr::islice::{Islice, slice_create, slice_free, slice_put_val};
+use crate::imod::libcfshr::islice::{Islice, slice_create, slice_put_val};
 use crate::imod::libiimod::mrcfiles::MrcHeader;
 use std::io::Write as _;
 
@@ -53,13 +53,15 @@ pub unsafe fn threshold_with_min_size(
                 return -1;
             }
         }
-        let out = slice_create(nx, ny, opt.mode);
-        if out.is_null() {
-            // `threshminsize.cpp:126-129`.  Note the doubled space in the
-            // source's text.
-            let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - Allocating  memory\n");
-            return -1;
-        }
+        let mut out = match slice_create(nx, ny, opt.mode) {
+            Some(slice) => slice,
+            None => {
+                // `threshminsize.cpp:126-129`.  Note the doubled space in the
+                // source's text.
+                let _ = ImodFile::Stdout.write_all(b"ERROR: CLIP - Allocating  memory\n");
+                return -1;
+            }
+        };
         // The source's two `catch` blocks (`threshminsize.cpp:358-365`,
         // `std::bad_alloc` and `exception&`) have no counterpart: Rust has no
         // exceptions, and the STL containers they guard are `Vec`s here.  Their
@@ -70,9 +72,9 @@ pub unsafe fn threshold_with_min_size(
         let mut sets: Vec<ZConnectedSets> = Vec::new();
         let offset = if opt.dim == 3 { 1 } else { 0 };
         let mut kout = 0;
-        let mut next: *mut Islice = core::ptr::null_mut();
-        let mut last: *mut Islice = core::ptr::null_mut();
-        let mut input: *mut Islice = core::ptr::null_mut();
+        let mut next: Option<Box<Islice>> = None;
+        let mut last: Option<Box<Islice>> = None;
+        let mut input: Option<Box<Islice>> = None;
         for kin in -offset..opt.nofsecs {
             if kin + offset < opt.nofsecs {
                 let z = opt.secs[(kin + offset) as usize];
@@ -85,7 +87,10 @@ pub unsafe fn threshold_with_min_size(
                     opt.cx as i32,
                     opt.cy as i32,
                 );
-                if next.is_null() || crate::imod::libiimod::mrcslice::slice_float(next) < 0 {
+                if next
+                    .as_deref_mut()
+                    .is_none_or(|slice| crate::imod::libiimod::mrcslice::slice_float(slice) < 0)
+                {
                     // `threshminsize.cpp:143`: the first `%s` is chosen by
                     // `nextSlice` and the third by `inSlice`, which are not the
                     // same test -- a conversion failure on the very first slice
@@ -94,13 +99,13 @@ pub unsafe fn threshold_with_min_size(
                         c_format(
                             "ERROR: CLIP - %s slice %d %s\n",
                             &[
-                                CArg::Str(if !next.is_null() {
+                                CArg::Str(if next.is_some() {
                                     "Converting"
                                 } else {
                                     "Reading"
                                 }),
                                 CArg::Int(z as i64),
-                                CArg::Str(if !input.is_null() {
+                                CArg::Str(if input.is_some() {
                                     "to floating point"
                                 } else {
                                     "from file"
@@ -109,23 +114,21 @@ pub unsafe fn threshold_with_min_size(
                         )
                         .as_bytes(),
                     );
-                    if !next.is_null() {
-                        slice_free(next)
-                    };
-                    if !last.is_null() {
-                        slice_free(last)
-                    };
-                    slice_free(out);
                     return -1;
                 }
                 if offset == 0 || kin == -1 {
-                    input = next
+                    input = next.take()
                 }
                 if kin == -1 {
                     continue;
                 }
             }
-            let data = (*input).data.f;
+            let data = input
+                .as_ref()
+                .expect("input slice set above")
+                .data
+                .as_ptr()
+                .cast::<f32>();
             grouped.fill(0);
             for ly in 0..ny {
                 for lx in 0..nx {
@@ -171,9 +174,11 @@ pub unsafe fn threshold_with_min_size(
                         }
                         ci += 1;
                     }
-                    let lone = if ci == 1 && !last.is_null() && !next.is_null() {
-                        let last_value = *((*last).data.f).add(li as usize);
-                        let next_value = *((*next).data.f).add(li as usize);
+                    let lone = if ci == 1 && last.is_some() && next.is_some() {
+                        let last_value =
+                            *(last.as_ref().unwrap().data.as_ptr().cast::<f32>()).add(li as usize);
+                        let next_value =
+                            *(next.as_ref().unwrap().data.as_ptr().cast::<f32>()).add(li as usize);
                         direction * (last_value - thresh) < 0.
                             && direction * (next_value - thresh) < 0.
                     } else {
@@ -185,14 +190,10 @@ pub unsafe fn threshold_with_min_size(
                 }
             }
             if offset != 0 {
-                if !last.is_null() {
-                    slice_free(last)
-                };
                 last = input;
-                input = next;
-                next = core::ptr::null_mut()
+                input = next.take();
             } else {
-                slice_free(input)
+                input = None
             }
             for pi in 0..planes[kin as usize].len() {
                 let plane = &planes[kin as usize][pi];
@@ -266,7 +267,7 @@ pub unsafe fn threshold_with_min_size(
                 }
                 for y in 0..ny {
                     for x in 0..nx {
-                        slice_put_val(out, x, y, [fill; 4]);
+                        slice_put_val(out.as_mut(), x, y, [fill; 4]);
                     }
                 }
                 for z in &sets {
@@ -275,7 +276,7 @@ pub unsafe fn threshold_with_min_size(
                             if z.plane_z[n] == kout {
                                 for p in &planes[kout as usize][z.index[n] as usize].points {
                                     slice_put_val(
-                                        out,
+                                        out.as_mut(),
                                         (p >> shift) as i32,
                                         (p & mask) as i32,
                                         [set; 4],
@@ -286,7 +287,7 @@ pub unsafe fn threshold_with_min_size(
                     }
                 }
                 if crate::imod::clip::file_io::clip_write_slice(
-                    out,
+                    out.as_mut(),
                     hout,
                     opt,
                     kout,
@@ -294,10 +295,6 @@ pub unsafe fn threshold_with_min_size(
                     0,
                 ) != 0
                 {
-                    if !last.is_null() {
-                        slice_free(last)
-                    }
-                    slice_free(out);
                     return -1;
                 }
                 planes[kout as usize].clear();
@@ -305,10 +302,6 @@ pub unsafe fn threshold_with_min_size(
             }
             sets.retain(|z| !((z.num_points < min_size && z.zmax < active) || z.zmax < kout));
         }
-        if !last.is_null() {
-            slice_free(last)
-        }
-        slice_free(out);
         crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
     }
 }

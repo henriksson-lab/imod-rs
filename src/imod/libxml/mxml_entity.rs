@@ -2,15 +2,12 @@
 #![allow(dead_code)]
 
 use super::*;
-use core::ffi::c_int;
 
 /// Matches C `mxmlEntityAddCallback` (`mxml-entity.c:26`).
-pub fn mxml_entity_add_callback(cb: MxmlEntityCb) -> c_int {
+pub fn mxml_entity_add_callback(cb: MxmlEntityCb) -> i32 {
     let added = mxml_global().with_borrow_mut(|global| {
-        if (global.num_entity_cbs as usize) < global.entity_cbs.len() {
-            global.entity_cbs[global.num_entity_cbs as usize] = cb;
-            global.num_entity_cbs += 1;
-
+        if global.entity_cbs.len() < 100 {
+            global.entity_cbs.push(cb);
             true
         } else {
             false
@@ -32,7 +29,7 @@ pub fn mxml_entity_add_callback(cb: MxmlEntityCb) -> c_int {
 }
 
 /// Matches C `mxmlEntityGetName` (`mxml-entity.c:52`).
-pub fn mxml_entity_get_name(val: c_int) -> Option<&'static [u8]> {
+pub fn mxml_entity_get_name(val: i32) -> Option<&'static [u8]> {
     match val {
         38 => Some(b"amp"),
         60 => Some(b"lt"),
@@ -43,25 +40,19 @@ pub fn mxml_entity_get_name(val: c_int) -> Option<&'static [u8]> {
 }
 
 /// Matches C `mxmlEntityGetValue` (`mxml-entity.c:80`).
-pub fn mxml_entity_get_value(name: &[u8]) -> c_int {
-    let mut i: c_int;
-    let mut ch: c_int;
-
-    i = 0;
+pub fn mxml_entity_get_value(name: &[u8]) -> i32 {
     /*
      * The C reads `global->num_entity_cbs` and `global->entity_cbs[i]` on each
      * pass and then calls the callback; each read takes and drops the borrow so
      * that a callback may reach the global itself.
      */
-    while i < mxml_global().with_borrow(|global| global.num_entity_cbs) {
-        let cb: MxmlEntityCb = mxml_global().with_borrow(|global| global.entity_cbs[i as usize]);
+    for cb in mxml_global().with_borrow(|global| global.entity_cbs.clone()) {
         if let Some(cb) = cb {
-            ch = cb(name);
+            let ch = cb(name);
             if ch >= 0 {
                 return ch;
             }
         }
-        i += 1;
     }
 
     -1
@@ -70,32 +61,19 @@ pub fn mxml_entity_get_value(name: &[u8]) -> c_int {
 /// Matches C `mxmlEntityRemoveCallback` (`mxml-entity.c:102`).
 pub fn mxml_entity_remove_callback(cb: MxmlEntityCb) {
     mxml_global().with_borrow_mut(|global| {
-        let mut i: c_int = 0;
-
-        while i < global.num_entity_cbs {
-            if cb.map(|f| f as usize) == global.entity_cbs[i as usize].map(|f| f as usize) {
-                global.num_entity_cbs -= 1;
-
-                if i < global.num_entity_cbs {
-                    /*
-                     * memmove(cbs + i, cbs + i + 1, (num_entity_cbs - i) * ...)
-                     */
-                    global.entity_cbs.copy_within(
-                        (i as usize + 1)..(global.num_entity_cbs as usize + 1),
-                        i as usize,
-                    );
-                }
-
-                return;
-            }
-            i += 1;
+        if let Some(index) = global
+            .entity_cbs
+            .iter()
+            .position(|registered| cb.map(|f| f as usize) == registered.map(|f| f as usize))
+        {
+            global.entity_cbs.remove(index);
         }
     });
 }
 
 /// The static `entities[]` table inside C `_mxml_entity_cb`
 /// (`mxml-entity.c:134`), in source order.
-static ENTITIES: [(&[u8], c_int); 257] = [
+static ENTITIES: [(&[u8], i32); 257] = [
     (b"AElig", 198),
     (b"Aacute", 193),
     (b"Acirc", 194),
@@ -163,10 +141,10 @@ static ENTITIES: [(&[u8], c_int); 257] = [
     (b"agrave", 224),
     (b"alefsym", 8501),
     (b"alpha", 945),
-    (b"amp", b'&' as c_int),
+    (b"amp", b'&' as i32),
     (b"and", 8743),
     (b"ang", 8736),
-    (b"apos", b'\'' as c_int),
+    (b"apos", b'\'' as i32),
     (b"aring", 229),
     (b"asymp", 8776),
     (b"atilde", 227),
@@ -217,7 +195,7 @@ static ENTITIES: [(&[u8], c_int); 257] = [
     (b"frasl", 8260),
     (b"gamma", 947),
     (b"ge", 8805),
-    (b"gt", b'>' as c_int),
+    (b"gt", b'>' as i32),
     (b"hArr", 8660),
     (b"harr", 8596),
     (b"hearts", 9829),
@@ -249,7 +227,7 @@ static ENTITIES: [(&[u8], c_int); 257] = [
     (b"lrm", 8206),
     (b"lsaquo", 8249),
     (b"lsquo", 8216),
-    (b"lt", b'<' as c_int),
+    (b"lt", b'<' as i32),
     (b"macr", 175),
     (b"mdash", 8212),
     (b"micro", 181),
@@ -294,7 +272,7 @@ static ENTITIES: [(&[u8], c_int); 257] = [
     (b"prod", 8719),
     (b"prop", 8733),
     (b"psi", 968),
-    (b"quot", b'\"' as c_int),
+    (b"quot", b'\"' as i32),
     (b"rArr", 8658),
     (b"radic", 8730),
     (b"rang", 9002),
@@ -356,14 +334,14 @@ static ENTITIES: [(&[u8], c_int); 257] = [
 ];
 
 /// Matches C `_mxml_entity_cb` (`mxml-entity.c:128`).
-pub fn mxml_entity_cb(name: &[u8]) -> c_int {
-    let mut diff: c_int;
-    let mut current: c_int;
-    let mut first: c_int;
-    let mut last: c_int;
+pub fn mxml_entity_cb(name: &[u8]) -> i32 {
+    let mut diff: i32;
+    let mut current: i32;
+    let mut first: i32;
+    let mut last: i32;
 
     first = 0;
-    last = (ENTITIES.len() - 1) as c_int;
+    last = (ENTITIES.len() - 1) as i32;
 
     while (last - first) > 1 {
         current = (first + last) / 2;

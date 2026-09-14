@@ -34,7 +34,7 @@ pub unsafe fn slice_byte_binned_fft(
         let nxin = (*sin).xsize;
         let nyin = (*sin).ysize;
         let mut nx_dim = nxin;
-        let mut input = (*sin).data.b;
+        let mut input = (*sin).data.as_mut_ptr();
         let mut binned = Vec::new();
         if binning > 1 {
             ix0 /= binning;
@@ -44,7 +44,7 @@ pub unsafe fn slice_byte_binned_fft(
             nx_dim /= binning;
             binned.resize((nx_dim * (nyin / binning)) as usize, 0);
             crate::imod::three_dmod::imodview::ivw_bin_by_n(
-                (*sin).data.b,
+                (*sin).data.as_mut_ptr(),
                 nxin,
                 nyin,
                 binning,
@@ -115,7 +115,7 @@ pub unsafe fn slice_byte_binned_fft(
             let mut iyin = iyout - iycen;
             if iyin < -n_pad_size / 2 || iyin >= n_pad_size / 2 {
                 for i in 0..nxin {
-                    *(*sin).data.b.add((i + iyout * nxin) as usize) = fill_val;
+                    (&mut (*sin).data)[(i + iyout * nxin) as usize] = fill_val;
                 }
                 continue;
             }
@@ -125,7 +125,10 @@ pub unsafe fn slice_byte_binned_fft(
             let mut ixbase = iyin * (n_pad_size + 2);
             let ixnd = (ixcen + n_pad_size / 2).min(nxin - 1);
             let ncopy = 2 * (ixnd + 1 - ixcen);
-            let mut output = (*sin).data.b.add((iyout * nxin + ixcen) as usize);
+            let mut output = (*sin)
+                .data
+                .as_mut_ptr()
+                .add((iyout * nxin + ixcen) as usize);
             for i in (ixbase..ixbase + ncopy).step_by(2) {
                 *output = (scale * (log_scale * fft_array[i as usize] as f64 + 1.).ln()
                     + (*sin).min as f64) as u8;
@@ -142,7 +145,10 @@ pub unsafe fn slice_byte_binned_fft(
                 }
             }
             ixbase = iyin * (n_pad_size + 2) + 2;
-            output = (*sin).data.b.add((iyout * nxin + ixcen - 1) as usize);
+            output = (*sin)
+                .data
+                .as_mut_ptr()
+                .add((iyout * nxin + ixcen - 1) as usize);
             let ixnd = (ixcen - n_pad_size / 2).max(0);
             let ncopy = 2 * (ixcen - ixnd);
             for i in (ixbase..ixbase + ncopy).step_by(2) {
@@ -183,19 +189,19 @@ pub unsafe fn slice_fourier_filter(
         slice_taper_out_pad(
             match (*sin).mode {
                 0 => crate::imod::libcfshr::taperpad::PadIn::Byte(core::slice::from_raw_parts(
-                    (*sin).data.b,
+                    (*sin).data.as_ptr(),
                     (nx * ny) as usize,
                 )),
                 1 => crate::imod::libcfshr::taperpad::PadIn::Short(core::slice::from_raw_parts(
-                    (*sin).data.s,
+                    (*sin).data.as_ptr().cast(),
                     (nx * ny) as usize,
                 )),
                 6 => crate::imod::libcfshr::taperpad::PadIn::UShort(core::slice::from_raw_parts(
-                    (*sin).data.us,
+                    (*sin).data.as_ptr().cast(),
                     (nx * ny) as usize,
                 )),
                 _ => crate::imod::libcfshr::taperpad::PadIn::Float(core::slice::from_raw_parts(
-                    (*sin).data.f,
+                    (*sin).data.as_ptr().cast(),
                     (nx * ny) as usize,
                 )),
             },
@@ -235,7 +241,7 @@ pub unsafe fn slice_fourier_filter(
             nxpad + 2,
             (nxpad - nx) / 2,
             (nypad - ny) / 2,
-            (*sin).data.b.cast::<c_void>(),
+            (*sin).data.as_mut_ptr().cast::<c_void>(),
             (*sin).mode,
             nx,
             ny,
@@ -327,7 +333,6 @@ pub unsafe fn xcorr_extract_convert(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libcfshr::islice::MrcData;
 
     #[test]
     fn extract_convert_scales_byte_subarea() {
@@ -373,11 +378,9 @@ mod tests {
 
     #[test]
     fn fourier_filter_processes_a_byte_slice_in_place() {
-        let mut data: Vec<u8> = (0..64).map(|value| (value * 4) as u8).collect();
+        let data: Vec<u8> = (0..64).map(|value| (value * 4) as u8).collect();
         let mut slice = Islice {
-            data: MrcData {
-                b: data.as_mut_ptr(),
-            },
+            data,
             xsize: 8,
             ysize: 8,
             mode: SLICE_MODE_BYTE,
@@ -392,6 +395,6 @@ mod tests {
         unsafe {
             assert_eq!(slice_fourier_filter(&mut slice, 0.15, 0.1, 0.02, 0.4), 0);
         }
-        assert!(data.iter().any(|&value| value != 0));
+        assert!(slice.data.iter().any(|&value| value != 0));
     }
 }

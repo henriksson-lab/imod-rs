@@ -30,9 +30,6 @@ pub const MAX_EM_TYPES: i32 = 20;
 /// C `MAX_EM_SIZE` (`iilikemrc.c:25`).
 pub const MAX_EM_SIZE: f64 = 1.6e10;
 
-/// C `IIERR_MEMORY_ERR` (`iimage.h`).
-pub const IIERR_MEMORY_ERR: i32 = 3;
-
 /// C `RAW_MODE_SBYTE` (`iimage.h`).
 pub const RAW_MODE_SBYTE: i32 = 0;
 /// C `RAW_MODE_BYTE` (`iimage.h`).
@@ -175,7 +172,11 @@ pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
 
         // `inFile->filename`, which is NULL only where the caller never set it;
         // the C would then pass NULL to the checker and on to `stat`.
-        let filename: &[u8] = (unsafe { &*in_file }).filename.as_deref().unwrap_or(b"");
+        let filename = (unsafe { &*in_file })
+            .filename
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes();
         let err = unsafe { (item.func.unwrap())(&mut fp, filename, &raw mut info) };
         if err == 0 {
             return unsafe { ii_setup_raw_headers(in_file, &raw mut info) };
@@ -212,7 +213,6 @@ pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
 /// Creates an MRC header and fills it and the items in `inFile` from the
 /// information in `info`; specifically the `nx`, `ny`, `nz`, `swapBytes`,
 /// `headerSize`, `sectionSkip`, `yInverted`, and `type` members.
-/// Returns `IIERR_MEMORY_ERR` for error allocating header.
 pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawImageInfo) -> i32 {
     let mode_table: [i32; 7] = [
         MRC_MODE_BYTE,
@@ -225,18 +225,10 @@ pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawIm
     ];
 
     /* Get an MRC header; set sizes into that header and the iifile header */
-    // `Box`, not `malloc`: `MrcHeader.fp` is a non-`Copy` `Option<ImodFile>`,
-    // so assigning it over `malloc` residue would drop garbage (NATIVE.md §4d).
-    // The allocation cannot fail, so the source's error arm is unreachable, but
-    // it is kept because its message and return code are part of the contract.
-    let hdr: *mut MrcHeader = Box::into_raw(Box::new(MrcHeader::default()));
-    if hdr.is_null() {
-        b3d_error(
-            Some(&mut ImodFile::Stderr),
-            format_args!("ERROR: iiSetupRawHeaders - Getting memory for header"),
-        );
-        return IIERR_MEMORY_ERR;
-    }
+    // The crate owns the header slot; the erased `header` field remains only
+    // the callback ABI alias for this MRC-compatible backend.
+    unsafe { (*in_file).mrc_header = Some(Box::new(MrcHeader::default())) };
+    let hdr = unsafe { (*in_file).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader };
     // Each borrow is scoped so that none is live across the calls below, which
     // take `inFile` and the header as pointers of their own (NATIVE.md §4d.4).
     {
@@ -292,10 +284,8 @@ pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawIm
 /// Original `iiLikeMRCDelete` (`iilikemrc.c:188`).
 pub unsafe extern "C" fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
     unsafe {
-        if !(*in_file).header.is_null() {
-            // The source's `free(inFile->header)`; the header was `Box`ed above.
-            drop(Box::from_raw((*in_file).header.cast::<MrcHeader>()));
-        }
+        (*in_file).mrc_header = None;
+        (*in_file).header = core::ptr::null_mut();
     }
 }
 
@@ -1576,7 +1566,7 @@ unsafe fn check_em(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libiimod::iimage::{IITYPE_SHORT, ii_new};
+    use crate::imod::libiimod::iimage::{IITYPE_SHORT, ii_new_box};
 
     fn empty_info() -> RawImageInfo {
         RawImageInfo {
@@ -1612,18 +1602,23 @@ mod tests {
             );
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
 
-            let image = ii_new();
-            assert!(!image.is_null());
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
             (*image).fp = Some(fp.clone());
-            (*image).filename = Some(b"synthetic-fei.raw".to_vec());
+            (*image).filename = Some("synthetic-fei.raw".into());
             assert_eq!(ii_like_mrc_check(image.cast()), 0);
             let header = (*image).header.cast::<MrcHeader>();
+            assert_eq!(
+                header,
+                (*image).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader
+            );
             assert_eq!(((*image).file, (*image).type_), (IIFILE_RAW, IITYPE_SHORT));
             assert_eq!(((*header).nx, (*header).ny, (*header).nz), (4, 3, 1));
             assert_eq!(((*header).header_size, (*header).y_inverted), (149, 1));
             ii_like_mrc_delete(image.cast());
+            assert!((*image).mrc_header.is_none());
+            assert!((*image).header.is_null());
             drop(fp);
-            drop(Box::from_raw(image));
             ii_delete_raw_check_list();
         }
     }

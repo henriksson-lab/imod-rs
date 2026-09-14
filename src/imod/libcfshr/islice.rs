@@ -1,22 +1,14 @@
 //! Translation of `IMOD/libcfshr/islice.c` and its direct `mrcslice.h` layouts.
 #![allow(dead_code)]
 use crate::imod::libiimod::mrcfiles::{
-    MRC_MODE_4BIT, MRC_MODE_BYTE, MRC_MODE_FLOAT, MRC_MODE_HALF_FLOAT, MRC_MODE_SHORT,
-    MRC_MODE_USHORT,
+    MRC_MODE_4BIT, MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_FLOAT, MRC_MODE_HALF_FLOAT,
+    MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT,
 };
 const SMOOTH_KERNEL: [[i32; 3]; 3] = [[1, 2, 1], [2, 4, 2], [1, 2, 1]];
 const SHARPEN_KERNEL: [[i32; 3]; 3] = [[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]];
 const LAPLACIAN_KERNEL: [[i32; 3]; 3] = [[1, 1, 1], [1, -4, 1], [1, 1, 1]];
-#[repr(C)]
-pub union MrcData {
-    pub b: *mut u8,
-    pub s: *mut i16,
-    pub us: *mut u16,
-    pub f: *mut f32,
-}
-#[repr(C)]
 pub struct Islice {
-    pub data: MrcData,
+    pub data: Vec<u8>,
     pub xsize: i32,
     pub ysize: i32,
     pub mode: i32,
@@ -28,77 +20,61 @@ pub struct Islice {
     pub index: i32,
     pub cval: [f32; 4],
 }
-/// C layout of `Istack` / `MRCvolume` from `mrcslice.h`.
-#[repr(C)]
 pub struct Istack {
-    pub vol: *mut *mut Islice,
-    pub zsize: i32,
+    pub slices: Vec<Box<Islice>>,
 }
-pub unsafe fn slice_create(xsize: i32, ysize: i32, mode: i32) -> *mut Islice {
+pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Box<Islice>> {
     let xysize = (xsize as usize).wrapping_mul(ysize as usize);
     if xysize / xsize as usize != ysize as usize {
-        return core::ptr::null_mut();
+        return None;
     }
-    let s = unsafe { libc::malloc(core::mem::size_of::<Islice>()).cast::<Islice>() };
-    if s.is_null() {
-        return s;
+    let mut dsize = 0;
+    let mut csize = 0;
+    if crate::imod::libcfshr::b3dutil::data_size_for_mode(mode, &mut dsize, &mut csize) != 0 {
+        return None;
     }
-    unsafe {
-        if crate::imod::libcfshr::b3dutil::data_size_for_mode(
-            mode,
-            &mut (*s).dsize,
-            &mut (*s).csize,
-        ) != 0
-        {
-            libc::free(s.cast());
-            return core::ptr::null_mut();
-        }
-        (*s).xsize = xsize;
-        (*s).ysize = ysize;
-        (*s).mode = mode;
-        (*s).index = -1;
-        (*s).data.b = libc::malloc(xysize * (*s).dsize as usize * (*s).csize as usize).cast();
-        if (*s).data.b.is_null() {
-            libc::free(s.cast());
-            return core::ptr::null_mut();
-        }
-    }
-    s
-}
-pub unsafe fn slice_init(
-    s: *mut Islice,
-    xsize: i32,
-    ysize: i32,
-    mode: i32,
-    data: *mut core::ffi::c_void,
-) -> i32 {
-    unsafe {
-        (*s).xsize = xsize;
-        (*s).ysize = ysize;
-        (*s).mode = mode;
-        (*s).data.b = data.cast();
-    }
-    if crate::imod::libcfshr::b3dutil::data_size_for_mode(
+    Some(Box::new(Islice {
+        data: vec![0; xysize * dsize as usize * csize as usize],
+        xsize,
+        ysize,
         mode,
-        unsafe { &mut (*s).dsize },
-        unsafe { &mut (*s).csize },
-    ) != 0
-    {
+        csize,
+        dsize,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: -1,
+        cval: [0.; 4],
+    }))
+}
+pub unsafe fn slice_init(s: *mut Islice, xsize: i32, ysize: i32, mode: i32, data: Vec<u8>) -> i32 {
+    let mut dsize = 0;
+    let mut csize = 0;
+    if crate::imod::libcfshr::b3dutil::data_size_for_mode(mode, &mut dsize, &mut csize) != 0 {
         return -1;
+    }
+    let Some(bytes) = usize::try_from(xsize)
+        .ok()
+        .and_then(|x| usize::try_from(ysize).ok().and_then(|y| x.checked_mul(y)))
+        .and_then(|pixels| pixels.checked_mul(dsize as usize))
+        .and_then(|size| size.checked_mul(csize as usize))
+    else {
+        return -1;
+    };
+    if data.len() != bytes {
+        return -1;
+    }
+    unsafe {
+        (*s).xsize = xsize;
+        (*s).ysize = ysize;
+        (*s).mode = mode;
+        (*s).dsize = dsize;
+        (*s).csize = csize;
+        (*s).data = data;
     }
     0
 }
-pub unsafe fn slice_free(s: *mut Islice) {
-    unsafe {
-        if s.is_null() {
-            return;
-        }
-        if !(*s).data.b.is_null() {
-            libc::free((*s).data.b.cast());
-        }
-        libc::free(s.cast());
-    }
-}
+pub fn slice_free(_s: Box<Islice>) {}
 pub unsafe fn slice_clear(s: *mut Islice, val: [f32; 4]) {
     unsafe {
         (*s).min = slice_get_val_magnitude(val, (*s).mode);
@@ -165,31 +141,31 @@ pub unsafe fn slice_get_val(s: *mut Islice, x: i32, y: i32, val: *mut [f32; 4]) 
         let mut index = x as usize + y as usize * (*s).xsize as usize;
         (*val)[1] = 0.;
         match (*s).mode {
-            0 => (*val)[0] = *(*s).data.b.add(index) as f32,
-            1 => (*val)[0] = *(*s).data.s.add(index) as f32,
-            6 => (*val)[0] = *(*s).data.us.add(index) as f32,
-            2 => (*val)[0] = *(*s).data.f.add(index),
+            0 => (*val)[0] = *(*s).data.as_mut_ptr().add(index) as f32,
+            1 => (*val)[0] = *(*s).data.as_mut_ptr().cast::<i16>().add(index) as f32,
+            6 => (*val)[0] = *(*s).data.as_mut_ptr().cast::<u16>().add(index) as f32,
+            2 => (*val)[0] = *(*s).data.as_mut_ptr().cast::<f32>().add(index),
             3 => {
                 index *= 2;
-                (*val)[0] = *(*s).data.s.add(index) as f32;
-                (*val)[1] = *(*s).data.s.add(index + 1) as f32;
+                (*val)[0] = *(*s).data.as_mut_ptr().cast::<i16>().add(index) as f32;
+                (*val)[1] = *(*s).data.as_mut_ptr().cast::<i16>().add(index + 1) as f32;
             }
             4 => {
                 index *= 2;
-                (*val)[0] = *(*s).data.f.add(index);
-                (*val)[1] = *(*s).data.f.add(index + 1);
+                (*val)[0] = *(*s).data.as_mut_ptr().cast::<f32>().add(index);
+                (*val)[1] = *(*s).data.as_mut_ptr().cast::<f32>().add(index + 1);
             }
             16 => {
                 index *= 3;
-                (*val)[0] = *(*s).data.b.add(index) as f32;
-                (*val)[1] = *(*s).data.b.add(index + 1) as f32;
-                (*val)[2] = *(*s).data.b.add(index + 2) as f32;
+                (*val)[0] = *(*s).data.as_mut_ptr().add(index) as f32;
+                (*val)[1] = *(*s).data.as_mut_ptr().add(index + 1) as f32;
+                (*val)[2] = *(*s).data.as_mut_ptr().add(index + 2) as f32;
             }
             99 => {
                 index *= 3;
-                (*val)[0] = *(*s).data.f.add(index);
-                (*val)[1] = *(*s).data.f.add(index + 1);
-                (*val)[2] = *(*s).data.f.add(index + 2);
+                (*val)[0] = *(*s).data.as_mut_ptr().cast::<f32>().add(index);
+                (*val)[1] = *(*s).data.as_mut_ptr().cast::<f32>().add(index + 1);
+                (*val)[2] = *(*s).data.as_mut_ptr().cast::<f32>().add(index + 2);
             }
             _ => return -1,
         };
@@ -210,31 +186,31 @@ pub unsafe fn slice_put_val(s: *mut Islice, x: i32, y: i32, val: [f32; 4]) -> i3
         // 15360 pixels as 127.  Going through `as i32` first reproduces the C
         // for every value in i32 range; outside it the C is undefined anyway.
         match (*s).mode {
-            0 => *(*s).data.b.add(i) = val[0] as i32 as u8,
-            1 => *(*s).data.s.add(i) = val[0] as i32 as i16,
-            6 => *(*s).data.us.add(i) = val[0] as i32 as u16,
-            2 => *(*s).data.f.add(i) = val[0],
+            0 => *(*s).data.as_mut_ptr().add(i) = val[0] as i32 as u8,
+            1 => *(*s).data.as_mut_ptr().cast::<i16>().add(i) = val[0] as i32 as i16,
+            6 => *(*s).data.as_mut_ptr().cast::<u16>().add(i) = val[0] as i32 as u16,
+            2 => *(*s).data.as_mut_ptr().cast::<f32>().add(i) = val[0],
             3 => {
                 i *= 2;
-                *(*s).data.s.add(i) = val[0] as i32 as i16;
-                *(*s).data.s.add(i + 1) = val[1] as i32 as i16
+                *(*s).data.as_mut_ptr().cast::<i16>().add(i) = val[0] as i32 as i16;
+                *(*s).data.as_mut_ptr().cast::<i16>().add(i + 1) = val[1] as i32 as i16
             }
             4 => {
                 i *= 2;
-                *(*s).data.f.add(i) = val[0];
-                *(*s).data.f.add(i + 1) = val[1]
+                *(*s).data.as_mut_ptr().cast::<f32>().add(i) = val[0];
+                *(*s).data.as_mut_ptr().cast::<f32>().add(i + 1) = val[1]
             }
             16 => {
                 i *= 3;
-                *(*s).data.b.add(i) = val[0] as i32 as u8;
-                *(*s).data.b.add(i + 1) = val[1] as i32 as u8;
-                *(*s).data.b.add(i + 2) = val[2] as i32 as u8
+                *(*s).data.as_mut_ptr().add(i) = val[0] as i32 as u8;
+                *(*s).data.as_mut_ptr().add(i + 1) = val[1] as i32 as u8;
+                *(*s).data.as_mut_ptr().add(i + 2) = val[2] as i32 as u8
             }
             99 => {
                 i *= 3;
-                *(*s).data.f.add(i) = val[0];
-                *(*s).data.f.add(i + 1) = val[1];
-                *(*s).data.f.add(i + 2) = val[2]
+                *(*s).data.as_mut_ptr().cast::<f32>().add(i) = val[0];
+                *(*s).data.as_mut_ptr().cast::<f32>().add(i + 1) = val[1];
+                *(*s).data.as_mut_ptr().cast::<f32>().add(i + 2) = val[2]
             }
             _ => return -1,
         };
@@ -278,10 +254,10 @@ pub unsafe fn slice_min_max(s: *mut Islice) -> i32 {
         let mut fval: f32;
         match (*s).mode {
             0 => {
-                imin = *(*s).data.b as i32;
-                imax = *(*s).data.b as i32;
+                imin = *(*s).data.as_mut_ptr() as i32;
+                imax = *(*s).data.as_mut_ptr() as i32;
                 for i in 1..((*s).xsize * (*s).ysize) {
-                    ival = *(*s).data.b.add(i as usize) as i32;
+                    ival = *(*s).data.as_mut_ptr().add(i as usize) as i32;
                     if imin > ival {
                         imin = ival;
                     }
@@ -293,10 +269,10 @@ pub unsafe fn slice_min_max(s: *mut Islice) -> i32 {
                 (*s).max = imax as f32;
             }
             1 => {
-                imin = *(*s).data.s as i32;
-                imax = *(*s).data.s as i32;
+                imin = *(*s).data.as_mut_ptr().cast::<i16>() as i32;
+                imax = *(*s).data.as_mut_ptr().cast::<i16>() as i32;
                 for i in 1..((*s).xsize * (*s).ysize) {
-                    ival = *(*s).data.s.add(i as usize) as i32;
+                    ival = *(*s).data.as_mut_ptr().cast::<i16>().add(i as usize) as i32;
                     if imin > ival {
                         imin = ival;
                     }
@@ -308,10 +284,10 @@ pub unsafe fn slice_min_max(s: *mut Islice) -> i32 {
                 (*s).max = imax as f32;
             }
             6 => {
-                imin = *(*s).data.us as i32;
-                imax = *(*s).data.us as i32;
+                imin = *(*s).data.as_mut_ptr().cast::<u16>() as i32;
+                imax = *(*s).data.as_mut_ptr().cast::<u16>() as i32;
                 for i in 1..((*s).xsize * (*s).ysize) {
-                    ival = *(*s).data.us.add(i as usize) as i32;
+                    ival = *(*s).data.as_mut_ptr().cast::<u16>().add(i as usize) as i32;
                     if imin > ival {
                         imin = ival;
                     }
@@ -323,10 +299,10 @@ pub unsafe fn slice_min_max(s: *mut Islice) -> i32 {
                 (*s).max = imax as f32;
             }
             2 => {
-                fmin = *(*s).data.f;
-                fmax = *(*s).data.f;
+                fmin = *(*s).data.as_mut_ptr().cast::<f32>();
+                fmax = *(*s).data.as_mut_ptr().cast::<f32>();
                 for i in 1..((*s).xsize * (*s).ysize) {
-                    fval = *(*s).data.f.add(i as usize);
+                    fval = *(*s).data.as_mut_ptr().cast::<f32>().add(i as usize);
                     if fmin > fval {
                         fmin = fval;
                     }
@@ -357,31 +333,34 @@ pub unsafe fn slice_scale_and_free(sout: *mut Islice, sin: *mut Islice) {
         match (*sout).mode {
             2 => {
                 for i in 0..imax {
-                    *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.f.add(i as usize) * mval + aval) as i32 as u8;
+                    *(*sin).data.as_mut_ptr().add(i as usize) =
+                        (*(*sout).data.as_mut_ptr().cast::<f32>().add(i as usize) * mval + aval)
+                            as i32 as u8;
                 }
             }
             1 => {
                 for i in 0..imax {
-                    *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.s.add(i as usize) as f32 * mval + aval) as i32 as u8;
+                    *(*sin).data.as_mut_ptr().add(i as usize) =
+                        (*(*sout).data.as_mut_ptr().cast::<i16>().add(i as usize) as f32 * mval
+                            + aval) as i32 as u8;
                 }
             }
             6 => {
                 for i in 0..imax {
-                    *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.us.add(i as usize) as f32 * mval + aval) as i32 as u8;
+                    *(*sin).data.as_mut_ptr().add(i as usize) =
+                        (*(*sout).data.as_mut_ptr().cast::<u16>().add(i as usize) as f32 * mval
+                            + aval) as i32 as u8;
                 }
             }
             0 => {
                 for i in 0..imax {
-                    *(*sin).data.b.add(i as usize) =
-                        (*(*sout).data.b.add(i as usize) as f32 * mval + aval) as i32 as u8;
+                    *(*sin).data.as_mut_ptr().add(i as usize) =
+                        (*(*sout).data.as_mut_ptr().add(i as usize) as f32 * mval + aval) as i32
+                            as u8;
                 }
             }
             _ => {}
         }
-        slice_free(sout);
     }
 }
 pub unsafe fn slice_byte_edge_laplacian(sin: *mut Islice) -> i32 {
@@ -395,45 +374,106 @@ pub unsafe fn slice_byte_smooth(sin: *mut Islice) -> i32 {
 }
 pub unsafe fn slice_byte_convolve(sin: *mut Islice, mask: *const [[i32; 3]; 3]) -> i32 {
     unsafe {
-        let sout = slice_create((*sin).xsize, (*sin).ysize, 1);
+        let Some(mut sout) = slice_create((*sin).xsize, (*sin).ysize, 1) else {
+            return -1;
+        };
         let imax = (*sin).xsize - 1;
         let jmax = (*sin).ysize - 1;
         for i in 1..imax {
             for j in 1..jmax {
-                let val = *(*sin).data.b.add((i + 1 + (j + 1) * (*sin).xsize) as usize) as i32
+                let val = *(*sin)
+                    .data
+                    .as_mut_ptr()
+                    .add((i + 1 + (j + 1) * (*sin).xsize) as usize)
+                    as i32
                     * (*mask)[0][0]
-                    + *(*sin).data.b.add((i + (j + 1) * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i + (j + 1) * (*sin).xsize) as usize) as i32
                         * (*mask)[0][1]
-                    + *(*sin).data.b.add((i - 1 + (j + 1) * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i - 1 + (j + 1) * (*sin).xsize) as usize)
+                        as i32
                         * (*mask)[0][2]
-                    + *(*sin).data.b.add((i + 1 + j * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i + 1 + j * (*sin).xsize) as usize) as i32
                         * (*mask)[1][0]
-                    + *(*sin).data.b.add((i + j * (*sin).xsize) as usize) as i32 * (*mask)[1][1]
-                    + *(*sin).data.b.add((i - 1 + j * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i + j * (*sin).xsize) as usize) as i32
+                        * (*mask)[1][1]
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i - 1 + j * (*sin).xsize) as usize) as i32
                         * (*mask)[1][2]
-                    + *(*sin).data.b.add((i + 1 + (j - 1) * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i + 1 + (j - 1) * (*sin).xsize) as usize)
+                        as i32
                         * (*mask)[2][0]
-                    + *(*sin).data.b.add((i + (j - 1) * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i + (j - 1) * (*sin).xsize) as usize) as i32
                         * (*mask)[2][1]
-                    + *(*sin).data.b.add((i - 1 + (j - 1) * (*sin).xsize) as usize) as i32
+                    + *(*sin)
+                        .data
+                        .as_mut_ptr()
+                        .add((i - 1 + (j - 1) * (*sin).xsize) as usize)
+                        as i32
                         * (*mask)[2][2];
-                *(*sout).data.s.add((i + j * (*sout).xsize) as usize) = val as i16;
+                *(*sout)
+                    .data
+                    .as_mut_ptr()
+                    .cast::<i16>()
+                    .add((i + j * (*sout).xsize) as usize) = val as i16;
             }
         }
         for j in 1..jmax {
-            *(*sout).data.s.add((j * (*sout).xsize) as usize) =
-                *(*sout).data.s.add((1 + j * (*sout).xsize) as usize);
-            *(*sout).data.s.add((imax + j * (*sout).xsize) as usize) =
-                *(*sout).data.s.add((imax - 1 + j * (*sout).xsize) as usize);
+            *(*sout)
+                .data
+                .as_mut_ptr()
+                .cast::<i16>()
+                .add((j * (*sout).xsize) as usize) = *(*sout)
+                .data
+                .as_mut_ptr()
+                .cast::<i16>()
+                .add((1 + j * (*sout).xsize) as usize);
+            *(*sout)
+                .data
+                .as_mut_ptr()
+                .cast::<i16>()
+                .add((imax + j * (*sout).xsize) as usize) = *(*sout)
+                .data
+                .as_mut_ptr()
+                .cast::<i16>()
+                .add((imax - 1 + j * (*sout).xsize) as usize);
         }
         for i in 0..=imax {
-            *(*sout).data.s.add(i as usize) = *(*sout).data.s.add((i + (*sout).xsize) as usize);
-            *(*sout).data.s.add((i + jmax * (*sout).xsize) as usize) = *(*sout)
+            *(*sout).data.as_mut_ptr().cast::<i16>().add(i as usize) = *(*sout)
                 .data
-                .s
+                .as_mut_ptr()
+                .cast::<i16>()
+                .add((i + (*sout).xsize) as usize);
+            *(*sout)
+                .data
+                .as_mut_ptr()
+                .cast::<i16>()
+                .add((i + jmax * (*sout).xsize) as usize) = *(*sout)
+                .data
+                .as_mut_ptr()
+                .cast::<i16>()
                 .add((i + (jmax - 1) * (*sout).xsize) as usize);
         }
-        slice_scale_and_free(sout, sin);
+        slice_scale_and_free(sout.as_mut(), sin);
         0
     }
 }
@@ -441,19 +481,19 @@ pub unsafe fn slice_byte_convolve(sin: *mut Islice, mask: *const [[i32; 3]; 3]) 
 ///
 /// The float path deliberately delegates to the corresponding complete C-unit
 /// translation; non-float input retains the original get/multiply/put path.
-pub unsafe fn slice_mat_filter(sin: *mut Islice, mat: *mut f32, dim: i32) -> *mut Islice {
+pub unsafe fn slice_mat_filter(sin: *mut Islice, mat: *mut f32, dim: i32) -> Option<Box<Islice>> {
     const MAX_STATIC_KERNEL: i32 = 9;
-    let sout = unsafe { slice_create((*sin).xsize, (*sin).ysize, MRC_MODE_FLOAT) };
-    if sout.is_null() {
-        return core::ptr::null_mut();
-    }
+    let mut sout = unsafe { slice_create((*sin).xsize, (*sin).ysize, MRC_MODE_FLOAT) }?;
     unsafe {
         if (*sin).mode == MRC_MODE_FLOAT {
             crate::imod::libcfshr::filtxcorr::apply_kernel_filter(
-                core::slice::from_raw_parts((*sin).data.f, ((*sin).xsize * (*sin).ysize) as usize),
+                core::slice::from_raw_parts(
+                    (*sin).data.as_mut_ptr().cast::<f32>(),
+                    ((*sin).xsize * (*sin).ysize) as usize,
+                ),
                 core::slice::from_raw_parts_mut(
-                    (*sout).data.f,
-                    ((*sout).xsize * (*sout).ysize) as usize,
+                    sout.data.as_mut_ptr().cast::<f32>(),
+                    (sout.xsize * sout.ysize) as usize,
                 ),
                 (*sin).xsize,
                 (*sin).xsize,
@@ -475,28 +515,23 @@ pub unsafe fn slice_mat_filter(sin: *mut Islice, mat: *mut f32, dim: i32) -> *mu
                         mrc_slice_mat_getimat(sin, i, j, dim, smat.as_mut_ptr());
                         let mut val = [0.0f32; 4];
                         val[0] = mrc_slice_mat_mult(mat, smat.as_ptr(), dim);
-                        slice_put_val(sout, i, j, val);
+                        slice_put_val(sout.as_mut(), i, j, val);
                     }
                 }
             } else {
-                let imat =
-                    libc::malloc((dim * dim) as usize * core::mem::size_of::<f32>()).cast::<f32>();
-                if imat.is_null() {
-                    return core::ptr::null_mut();
-                }
+                let mut imat = vec![0.0f32; (dim * dim) as usize];
                 for j in 0..(*sin).ysize {
                     for i in 0..(*sin).xsize {
-                        mrc_slice_mat_getimat(sin, i, j, dim, imat);
+                        mrc_slice_mat_getimat(sin, i, j, dim, imat.as_mut_ptr());
                         let mut val = [0.0f32; 4];
-                        val[0] = mrc_slice_mat_mult(mat, imat, dim);
-                        slice_put_val(sout, i, j, val);
+                        val[0] = mrc_slice_mat_mult(mat, imat.as_ptr(), dim);
+                        slice_put_val(sout.as_mut(), i, j, val);
                     }
                 }
-                libc::free(imat.cast());
             }
         }
     }
-    sout
+    Some(sout)
 }
 pub unsafe fn mrc_slice_mat_getimat(sin: *mut Islice, x: i32, y: i32, dim: i32, mat: *mut f32) {
     unsafe {
@@ -564,11 +599,9 @@ mod tests {
         assert_eq!(slice_mode(b"BYTE"), -1);
     }
     #[test]
-    fn size_accessors_retain_source_raw_layout() {
+    fn size_accessors_read_owned_slice_dimensions() {
         let mut slice = Islice {
-            data: MrcData {
-                b: core::ptr::null_mut(),
-            },
+            data: Vec::new(),
             xsize: 7,
             ysize: 9,
             mode: 0,
@@ -587,39 +620,29 @@ mod tests {
     }
     #[test]
     fn init_retains_source_fields_and_invalid_mode_result() {
-        let mut s: Islice = unsafe { core::mem::zeroed() };
-        let mut bytes = [0u8; 2];
+        let mut s = slice_create(1, 1, 0).unwrap();
         unsafe {
-            assert_eq!(slice_init(&mut s, 4, 5, 1, bytes.as_mut_ptr().cast()), 0);
+            assert_eq!(slice_init(s.as_mut(), 4, 5, 1, vec![0; 40]), 0);
             assert_eq!(
                 (s.xsize, s.ysize, s.mode, s.dsize, s.csize),
                 (4, 5, 1, 2, 1)
             );
-            assert_eq!(slice_init(&mut s, 1, 1, 12, core::ptr::null_mut()), -1);
+            assert_eq!(slice_init(s.as_mut(), 1, 1, 12, Vec::new()), -1);
         }
     }
     #[test]
-    fn free_handles_null_and_source_owned_allocations() {
-        unsafe {
-            slice_free(core::ptr::null_mut());
-            let s = libc::calloc(1, core::mem::size_of::<Islice>()).cast::<Islice>();
-            assert!(!s.is_null());
-            (*s).data.b = libc::malloc(8).cast();
-            slice_free(s);
-        }
+    fn free_consumes_owned_slice() {
+        slice_free(slice_create(2, 2, MRC_MODE_BYTE).unwrap());
     }
     #[test]
-    fn create_uses_source_allocation_and_mode_checks() {
-        unsafe {
-            let s = slice_create(3, 2, 1);
-            assert!(!s.is_null());
-            assert_eq!(
-                ((*s).xsize, (*s).ysize, (*s).dsize, (*s).csize, (*s).index),
-                (3, 2, 2, 1, -1)
-            );
-            slice_free(s);
-            assert!(slice_create(1, 1, 12).is_null());
-        }
+    fn create_uses_owned_allocation_and_mode_checks() {
+        let s = slice_create(3, 2, MRC_MODE_SHORT).unwrap();
+        assert_eq!(
+            (s.xsize, s.ysize, s.dsize, s.csize, s.index),
+            (3, 2, 2, 1, -1)
+        );
+        assert_eq!(s.data.len(), 12);
+        assert!(slice_create(1, 1, 12).is_none());
     }
     #[test]
     fn value_magnitude_preserves_scalar_complex_and_rgb_rules() {
@@ -630,137 +653,120 @@ mod tests {
     #[test]
     fn get_value_preserves_mode_layouts_and_bounds() {
         unsafe {
-            let mut b = [4u8, 5, 6];
-            let mut s: Islice = core::mem::zeroed();
-            s.data.b = b.as_mut_ptr();
-            s.xsize = 3;
-            s.ysize = 1;
-            s.mode = 0;
+            let mut s = slice_create(3, 1, MRC_MODE_BYTE).unwrap();
+            s.data.copy_from_slice(&[4, 5, 6]);
             s.mean = 9.;
             let mut v = [0.; 4];
-            assert_eq!(slice_get_val(&mut s, 1, 0, &mut v), 0);
+            assert_eq!(slice_get_val(s.as_mut(), 1, 0, &mut v), 0);
             assert_eq!(v[0], 5.);
-            assert_eq!(slice_get_val(&mut s, 3, 0, &mut v), -1);
+            assert_eq!(slice_get_val(s.as_mut(), 3, 0, &mut v), -1);
             assert_eq!(v[0], 9.);
-            let mut c = [3f32, 4.];
-            s.data.f = c.as_mut_ptr();
+            let mut s = slice_create(1, 1, MRC_MODE_COMPLEX_FLOAT).unwrap();
+            *s.data.as_mut_ptr().cast::<f32>() = 3.;
+            *s.data.as_mut_ptr().cast::<f32>().add(1) = 4.;
             s.xsize = 1;
-            s.mode = 4;
-            assert_eq!(slice_get_val(&mut s, 0, 0, &mut v), 0);
+            assert_eq!(slice_get_val(s.as_mut(), 0, 0, &mut v), 0);
             assert_eq!((v[0], v[1]), (3., 4.));
         }
     }
     #[test]
     fn put_clear_and_pixel_magnitude_preserve_source_data_and_channel_rules() {
         unsafe {
-            let s = slice_create(2, 2, 0);
-            assert!(!s.is_null());
-            slice_clear(s, [7., 0., 0., 0.]);
-            assert_eq!((*s).min, 7.);
-            assert_eq!((*s).max, 7.);
-            assert_eq!((*s).mean, 7.);
-            assert_eq!(slice_put_val(s, 1, 1, [9., 0., 0., 0.]), 0);
-            assert_eq!(slice_get_pixel_magnitude(s, 1, 1), 9.);
-            assert_eq!(slice_put_val(s, 2, 1, [1., 0., 0., 0.]), -1);
-            slice_free(s);
+            let mut s = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
+            slice_clear(s.as_mut(), [7., 0., 0., 0.]);
+            assert_eq!(s.min, 7.);
+            assert_eq!(s.max, 7.);
+            assert_eq!(s.mean, 7.);
+            assert_eq!(slice_put_val(s.as_mut(), 1, 1, [9., 0., 0., 0.]), 0);
+            assert_eq!(slice_get_pixel_magnitude(s.as_mut(), 1, 1), 9.);
+            assert_eq!(slice_put_val(s.as_mut(), 2, 1, [1., 0., 0., 0.]), -1);
 
-            let complex = slice_create(1, 1, 4);
-            assert!(!complex.is_null());
-            assert_eq!(slice_put_val(complex, 0, 0, [3., 4., 0., 0.]), 0);
-            assert_eq!(slice_get_pixel_magnitude(complex, 0, 0), 5.);
-            slice_free(complex);
+            let mut complex = slice_create(1, 1, MRC_MODE_COMPLEX_FLOAT).unwrap();
+            assert_eq!(slice_put_val(complex.as_mut(), 0, 0, [3., 4., 0., 0.]), 0);
+            assert_eq!(slice_get_pixel_magnitude(complex.as_mut(), 0, 0), 5.);
 
-            let rgb = slice_create(1, 1, 16);
-            assert!(!rgb.is_null());
-            assert_eq!(slice_put_val(rgb, 0, 0, [100., 100., 100., 0.]), 0);
-            assert!((slice_get_pixel_magnitude(rgb, 0, 0) - 100.).abs() < 1e-5);
-            slice_free(rgb);
+            let mut rgb = slice_create(1, 1, MRC_MODE_RGB).unwrap();
+            assert_eq!(slice_put_val(rgb.as_mut(), 0, 0, [100., 100., 100., 0.]), 0);
+            assert!((slice_get_pixel_magnitude(rgb.as_mut(), 0, 0) - 100.).abs() < 1e-5);
         }
     }
     #[test]
     fn min_max_preserves_each_supported_source_mode_and_rejects_other_modes() {
         unsafe {
-            let mut bytes = [8u8, 2, 7];
-            let mut slice: Islice = core::mem::zeroed();
-            slice.data.b = bytes.as_mut_ptr();
-            slice.xsize = 3;
-            slice.ysize = 1;
-            slice.mode = 0;
-            assert_eq!(slice_min_max(&mut slice), 0);
+            let mut slice = slice_create(3, 1, MRC_MODE_BYTE).unwrap();
+            slice.data.copy_from_slice(&[8, 2, 7]);
+            assert_eq!(slice_min_max(slice.as_mut()), 0);
             assert_eq!((slice.min, slice.max), (2., 8.));
 
-            let mut shorts = [-7i16, 12, 3];
-            slice.data.s = shorts.as_mut_ptr();
-            slice.mode = 1;
-            assert_eq!(slice_min_max(&mut slice), 0);
+            let mut slice = slice_create(3, 1, MRC_MODE_SHORT).unwrap();
+            let data = slice.data.as_mut_ptr().cast::<i16>();
+            *data = -7;
+            *data.add(1) = 12;
+            *data.add(2) = 3;
+            assert_eq!(slice_min_max(slice.as_mut()), 0);
             assert_eq!((slice.min, slice.max), (-7., 12.));
 
-            let mut ushorts = [9u16, 14, 4];
-            slice.data.us = ushorts.as_mut_ptr();
-            slice.mode = 6;
-            assert_eq!(slice_min_max(&mut slice), 0);
+            let mut slice = slice_create(3, 1, MRC_MODE_USHORT).unwrap();
+            let data = slice.data.as_mut_ptr().cast::<u16>();
+            *data = 9;
+            *data.add(1) = 14;
+            *data.add(2) = 4;
+            assert_eq!(slice_min_max(slice.as_mut()), 0);
             assert_eq!((slice.min, slice.max), (4., 14.));
 
-            let mut floats = [-1.5f32, 4.25, 0.];
-            slice.data.f = floats.as_mut_ptr();
-            slice.mode = 2;
-            assert_eq!(slice_min_max(&mut slice), 0);
+            let mut slice = slice_create(3, 1, MRC_MODE_FLOAT).unwrap();
+            let data = slice.data.as_mut_ptr().cast::<f32>();
+            *data = -1.5;
+            *data.add(1) = 4.25;
+            *data.add(2) = 0.;
+            assert_eq!(slice_min_max(slice.as_mut()), 0);
             assert_eq!((slice.min, slice.max), (-1.5, 4.25));
 
             slice.mode = 4;
-            assert_eq!(slice_min_max(&mut slice), 1);
+            assert_eq!(slice_min_max(slice.as_mut()), 1);
         }
     }
     #[test]
     fn scale_and_free_preserves_source_scaling_gate_and_data_modes() {
         unsafe {
-            let mut bytes = [0u8; 2];
-            let mut sin: Islice = core::mem::zeroed();
-            sin.data.b = bytes.as_mut_ptr();
-            sin.xsize = 2;
-            sin.ysize = 1;
+            let mut sin = slice_create(2, 1, MRC_MODE_BYTE).unwrap();
             sin.min = 10.;
             sin.max = 110.;
-            let sout = slice_create(2, 1, 2);
-            assert!(!sout.is_null());
-            *(*sout).data.f = 0.;
-            *(*sout).data.f.add(1) = 10.;
-            slice_scale_and_free(sout, &mut sin);
-            assert_eq!(bytes, [10, 110]);
+            let mut sout = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
+            *sout.data.as_mut_ptr().cast::<f32>() = 0.;
+            *sout.data.as_mut_ptr().cast::<f32>().add(1) = 10.;
+            slice_scale_and_free(sout.as_mut(), sin.as_mut());
+            assert_eq!(sin.data, [10, 110]);
 
-            let sout = slice_create(2, 1, 1);
-            assert!(!sout.is_null());
-            *(*sout).data.s = 2;
-            *(*sout).data.s.add(1) = 3;
+            let mut sout = slice_create(2, 1, MRC_MODE_SHORT).unwrap();
+            *sout.data.as_mut_ptr().cast::<i16>() = 2;
+            *sout.data.as_mut_ptr().cast::<i16>().add(1) = 3;
             sin.min = 0.;
             sin.max = 0.;
-            slice_scale_and_free(sout, &mut sin);
-            assert_eq!(bytes, [2, 3]);
+            slice_scale_and_free(sout.as_mut(), sin.as_mut());
+            assert_eq!(sin.data, [2, 3]);
         }
     }
     #[test]
     fn byte_convolution_and_fixed_kernel_wrappers_preserve_source_handoff() {
         unsafe {
-            let mut bytes = [10u8; 9];
-            let mut sin: Islice = core::mem::zeroed();
-            sin.data.b = bytes.as_mut_ptr();
-            sin.xsize = 3;
-            sin.ysize = 3;
+            let mut sin = slice_create(3, 3, MRC_MODE_BYTE).unwrap();
+            sin.data.fill(10);
             assert_eq!(
-                slice_byte_convolve(&mut sin, &[[0, 0, 0], [0, 1, 0], [0, 0, 0]]),
+                slice_byte_convolve(sin.as_mut(), &[[0, 0, 0], [0, 1, 0], [0, 0, 0]]),
                 0
             );
-            assert_eq!(bytes, [10; 9]);
+            assert_eq!(sin.data, [10; 9]);
 
-            bytes = [10; 9];
-            assert_eq!(slice_byte_edge_laplacian(&mut sin), 0);
-            assert_eq!(bytes, [40; 9]);
-            bytes = [10; 9];
-            assert_eq!(slice_byte_sharpen(&mut sin), 0);
-            assert_eq!(bytes, [10; 9]);
-            bytes = [10; 9];
-            assert_eq!(slice_byte_smooth(&mut sin), 0);
-            assert_eq!(bytes, [160; 9]);
+            sin.data.fill(10);
+            assert_eq!(slice_byte_edge_laplacian(sin.as_mut()), 0);
+            assert_eq!(sin.data, [40; 9]);
+            sin.data.fill(10);
+            assert_eq!(slice_byte_sharpen(sin.as_mut()), 0);
+            assert_eq!(sin.data, [10; 9]);
+            sin.data.fill(10);
+            assert_eq!(slice_byte_smooth(sin.as_mut()), 0);
+            assert_eq!(sin.data, [160; 9]);
         }
     }
     #[test]
@@ -770,15 +776,10 @@ mod tests {
             let m2 = [4., 3., 2., 1.];
             assert_eq!(mrc_slice_mat_mult(m1.as_ptr(), m2.as_ptr(), 2), 20.);
 
-            let mut bytes = [1u8, 2, 3, 4, 5, 6, 7, 8, 9];
-            let mut sin: Islice = core::mem::zeroed();
-            sin.data.b = bytes.as_mut_ptr();
-            sin.xsize = 3;
-            sin.ysize = 3;
-            sin.mode = 0;
-            sin.csize = 1;
+            let mut sin = slice_create(3, 3, MRC_MODE_BYTE).unwrap();
+            sin.data.copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
             let mut mat = [0.; 9];
-            mrc_slice_mat_getimat(&mut sin, 0, 0, 3, mat.as_mut_ptr());
+            mrc_slice_mat_getimat(sin.as_mut(), 0, 0, 3, mat.as_mut_ptr());
             assert_eq!(mat, [1., 1., 2., 1., 1., 2., 4., 4., 5.]);
         }
     }

@@ -1126,7 +1126,7 @@ fn mrc2tif_old_writer_converts_real_mrc_pixels_to_classic_tiff() {
 }
 
 #[test]
-fn mrc2tif_new_libtiff_writer_uses_source_tm_mon_datetime_tag() {
+fn mrc2tif_new_libtiff_writer_uses_local_datetime_tag() {
     unsafe {
         let stamp = format!("imod-rs-mrc2tif-datetime-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
@@ -1148,15 +1148,12 @@ fn mrc2tif_new_libtiff_writer_uses_source_tm_mon_datetime_tag() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{:?}", result);
-        let now = libc::time(core::ptr::null_mut());
-        let local = libc::localtime(&now);
-        assert!(!local.is_null());
-        let expected = format!("{:04}:{:02}:", (*local).tm_year + 1900, (*local).tm_mon);
+        let expected = chrono::Local::now().format("%Y:%m:").to_string();
         let bytes = std::fs::read(&output).unwrap();
         let datetime = bytes
             .windows(19)
             .find(|value| value.starts_with(expected.as_bytes()))
-            .expect("TIFF DateTime tag must use source tm_mon");
+            .expect("TIFF DateTime tag must use the local calendar date");
         assert_eq!(datetime[4], b':');
         assert_eq!(datetime[7], b':');
         assert_eq!(datetime[10], b' ');

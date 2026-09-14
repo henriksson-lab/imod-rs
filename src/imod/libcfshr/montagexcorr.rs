@@ -6,7 +6,6 @@
 #![allow(non_snake_case, dead_code, unused_variables, unused_assignments)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
-use core::ffi::c_int;
 use std::io::Write;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
@@ -21,10 +20,10 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 // would reorder its own output under `>` while looking correct on a terminal.
 // ---------------------------------------------------------------------------------------
 
-pub const MONTXC_MAX_PEAKS: c_int = 100;
-pub const MONTXC_MAX_DEBUG_LINE: c_int = 90;
-pub const MAX_RUNNERS_UP: c_int = 2;
-pub const SLICE_MODE_FLOAT: c_int = 2;
+pub const MONTXC_MAX_PEAKS: i32 = 100;
+pub const MONTXC_MAX_DEBUG_LINE: i32 = 90;
+pub const MAX_RUNNERS_UP: i32 = 2;
+pub const SLICE_MODE_FLOAT: i32 = 2;
 
 /// C `static float sDistWeightHalfFall`, held as raw bits so the file-scope global keeps the
 /// process-wide sharing the C has without needing a lock.
@@ -43,25 +42,25 @@ static S_LAST_RUNNERS_UP: [AtomicU32; 4] = [
 ///
 /// Sets up most of the sizes for the overlap zone correlations.
 pub fn mont_xc_basic_sizes(
-    mut ixy: c_int,
-    nbin: c_int,
-    indentXC: c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
+    mut ixy: i32,
+    nbin: i32,
+    indentXC: i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
     aspectMax: f32,
     extraWidth: f32,
     padFrac: f32,
-    niceLimit: c_int,
-    indentUse: &mut c_int,
-    nxyBox: &mut [c_int],
-    numExtra: &mut [c_int],
-    nxPad: &mut c_int,
-    nyPad: &mut c_int,
-    maxLongShift: &mut c_int,
+    niceLimit: i32,
+    indentUse: &mut i32,
+    nxyBox: &mut [i32],
+    numExtra: &mut [i32],
+    nxPad: &mut i32,
+    nyPad: &mut i32,
+    maxLongShift: &mut i32,
 ) {
-    let iyx: c_int;
-    let mut nxyBorder: [c_int; 2] = [0; 2];
-    let mut shiftInOverlap: c_int = 0;
+    let iyx: i32;
+    let mut nxyBorder: [i32; 2] = [0; 2];
+    let mut shiftInOverlap: i32 = 0;
     if ixy > 1 {
         ixy = ixy % 2;
         shiftInOverlap = if nxyOverlap[(1 - ixy) as usize] >= 0 {
@@ -75,11 +74,11 @@ pub fn mont_xc_basic_sizes(
     nxyBox[ixy as usize] = (nxyOverlap[ixy as usize] - *indentUse * 2) / nbin;
     nxyBox[iyx as usize] =
         (nxyPiece[iyx as usize] - shiftInOverlap - (2 * nbin).max(nxyPiece[ixy as usize] / 20))
-            .min((aspectMax * nxyOverlap[ixy as usize] as f32) as c_int)
+            .min((aspectMax * nxyOverlap[ixy as usize] as f32) as i32)
             / nbin;
     numExtra[iyx as usize] = 0;
     numExtra[ixy as usize] =
-        (2 * (((extraWidth * nxyBox[ixy as usize] as f32) as f64 + 0.5).floor() as c_int / 2)).min(
+        (2 * (((extraWidth * nxyBox[ixy as usize] as f32) as f64 + 0.5).floor() as i32 / 2)).min(
             (nxyPiece[ixy as usize]
                 - crate::imod::libcfshr::b3dutil::b3d_i_max(&[
                     nbin,
@@ -97,15 +96,15 @@ pub fn mont_xc_basic_sizes(
     } else {
         1.5f64 * nxyBox[ixy as usize] as f64
     }) + 0.5f64)
-        .floor() as c_int;
+        .floor() as i32;
 
     /* get the padded size */
     /* Limit the long dimension padding to that needed for the maximum shift */
     nxyBorder[ixy as usize] =
-        5.max(((padFrac * nxyBox[ixy as usize] as f32) as f64 + 0.5).floor() as c_int);
+        5.max(((padFrac * nxyBox[ixy as usize] as f32) as f64 + 0.5).floor() as i32);
     nxyBorder[iyx as usize] = 5
-        .max(((padFrac * nxyBox[iyx as usize] as f32) as f64 + 0.5).floor() as c_int)
-        .min(5.max((0.45f64 * *maxLongShift as f64 + 0.5).floor() as c_int));
+        .max(((padFrac * nxyBox[iyx as usize] as f32) as f64 + 0.5).floor() as i32)
+        .min(5.max((0.45f64 * *maxLongShift as f64 + 0.5).floor() as i32));
     *nxPad =
         crate::imod::libcfshr::filtxcorr::nice_frame(nxyBox[0] + 2 * nxyBorder[0], 2, niceLimit);
     *nyPad =
@@ -114,21 +113,21 @@ pub fn mont_xc_basic_sizes(
 
 /// C `montxcbasicsizes` — Fortran wrapper for `montXCBasicSizes`.  `ixy` should be 1 or 2.
 pub fn montxcbasicsizes(
-    ixy: &c_int,
-    nbin: &c_int,
-    indentXC: &c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
+    ixy: &i32,
+    nbin: &i32,
+    indentXC: &i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
     aspectMax: &f32,
     extraWidth: &f32,
     padFrac: &f32,
-    niceLimit: &c_int,
-    indentUse: &mut c_int,
-    nxyBox: &mut [c_int],
-    numExtra: &mut [c_int],
-    nxPad: &mut c_int,
-    nyPad: &mut c_int,
-    maxLongShift: &mut c_int,
+    niceLimit: &i32,
+    indentUse: &mut i32,
+    nxyBox: &mut [i32],
+    numExtra: &mut [i32],
+    nxPad: &mut i32,
+    nyPad: &mut i32,
+    maxLongShift: &mut i32,
 ) {
     mont_xc_basic_sizes(
         *ixy - 1,
@@ -153,33 +152,33 @@ pub fn montxcbasicsizes(
 ///
 /// Sets up indices for extracting boxes, and the filter function.
 pub fn mont_xc_inds_and_ctf(
-    mut ixy: c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
-    nxyBox: &[c_int],
-    nbin: c_int,
-    indentUse: c_int,
-    numExtra: &[c_int],
-    nxPad: c_int,
-    nyPad: c_int,
-    numSmooth: c_int,
+    mut ixy: i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
+    nxyBox: &[i32],
+    nbin: i32,
+    indentUse: i32,
+    numExtra: &[i32],
+    nxPad: i32,
+    nyPad: i32,
+    numSmooth: i32,
     sigma1: f32,
     sigma2: f32,
     radius1: f32,
     radius2: f32,
-    evalCCC: c_int,
-    ind0Lower: &mut [c_int],
-    ind1Lower: &mut [c_int],
-    ind0Upper: &mut [c_int],
-    ind1Upper: &mut [c_int],
-    nxSmooth: &mut c_int,
-    nySmooth: &mut c_int,
+    evalCCC: i32,
+    ind0Lower: &mut [i32],
+    ind1Lower: &mut [i32],
+    ind0Upper: &mut [i32],
+    ind1Upper: &mut [i32],
+    nxSmooth: &mut i32,
+    nySmooth: &mut i32,
     ctf: &mut [f32],
     delta: &mut f32,
 ) {
-    let mut iyx: c_int;
-    let mut shiftInOverlap: c_int = 0;
-    let mut longShift: c_int = 0;
+    let mut iyx: i32;
+    let mut shiftInOverlap: i32 = 0;
+    let mut longShift: i32 = 0;
     if ixy > 1 {
         ixy = ixy % 2;
         longShift = 1;
@@ -232,27 +231,27 @@ pub fn mont_xc_inds_and_ctf(
 
 /// C `montxcindsandctf` — Fortran wrapper for `montXCIndsAndCTF`.  `ixy` should be 1 or 2.
 pub fn montxcindsandctf(
-    ixy: &c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
-    nxyBox: &[c_int],
-    nbin: &c_int,
-    indentUse: &c_int,
-    numExtra: &[c_int],
-    nxPad: &c_int,
-    nyPad: &c_int,
-    numSmooth: &c_int,
+    ixy: &i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
+    nxyBox: &[i32],
+    nbin: &i32,
+    indentUse: &i32,
+    numExtra: &[i32],
+    nxPad: &i32,
+    nyPad: &i32,
+    numSmooth: &i32,
     sigma1: &f32,
     sigma2: &f32,
     radius1: &f32,
     radius2: &f32,
-    evalCCC: &c_int,
-    ind0Lower: &mut [c_int],
-    ind1Lower: &mut [c_int],
-    ind0Upper: &mut [c_int],
-    ind1Upper: &mut [c_int],
-    nxSmooth: &mut c_int,
-    nySmooth: &mut c_int,
+    evalCCC: &i32,
+    ind0Lower: &mut [i32],
+    ind1Lower: &mut [i32],
+    ind0Upper: &mut [i32],
+    ind1Upper: &mut [i32],
+    nxSmooth: &mut i32,
+    nySmooth: &mut i32,
     ctf: &mut [f32],
     delta: &mut f32,
 ) {
@@ -287,26 +286,26 @@ pub fn montxcindsandctf(
 ///
 /// Finds binning needed to keep boxed out area smaller than a target size.
 pub fn mont_xc_find_binning(
-    maxBin: c_int,
-    targetSize: c_int,
-    indentXC: c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
+    maxBin: i32,
+    targetSize: i32,
+    indentXC: i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
     aspectMax: f32,
     extraWidth: f32,
     padFrac: f32,
-    niceLimit: c_int,
-    numPaddedPix: &mut c_int,
-    numBoxedPix: &mut c_int,
-) -> c_int {
-    let mut nxPad: c_int = 0;
-    let mut nyPad: c_int = 0;
-    let mut indentUse: c_int = 0;
-    let mut nxyBox: [c_int; 2] = [0; 2];
-    let mut numExtra: [c_int; 2] = [0; 2];
-    let mut maxLongShift: c_int = 0;
-    let mut ixy: c_int;
-    let mut nbin: c_int = 1;
+    niceLimit: i32,
+    numPaddedPix: &mut i32,
+    numBoxedPix: &mut i32,
+) -> i32 {
+    let mut nxPad: i32 = 0;
+    let mut nyPad: i32 = 0;
+    let mut indentUse: i32 = 0;
+    let mut nxyBox: [i32; 2] = [0; 2];
+    let mut numExtra: [i32; 2] = [0; 2];
+    let mut maxLongShift: i32 = 0;
+    let mut ixy: i32;
+    let mut nbin: i32 = 1;
     while nbin <= maxBin {
         *numPaddedPix = 0;
         *numBoxedPix = 0;
@@ -343,18 +342,18 @@ pub fn mont_xc_find_binning(
 
 /// C `montxcfindbinning` — Fortran wrapper for `montXCFindBinning`.
 pub fn montxcfindbinning(
-    maxBin: &c_int,
-    targetSize: &c_int,
-    indentXC: &c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
+    maxBin: &i32,
+    targetSize: &i32,
+    indentXC: &i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
     aspectMax: &f32,
     extraWidth: &f32,
     padFrac: &f32,
-    niceLimit: &c_int,
-    numPaddedPix: &mut c_int,
-    numBoxedPix: &mut c_int,
-) -> c_int {
+    niceLimit: &i32,
+    numPaddedPix: &mut i32,
+    numBoxedPix: &mut i32,
+) -> i32 {
     mont_xc_find_binning(
         *maxBin,
         *targetSize,
@@ -375,28 +374,28 @@ pub fn montxcfindbinning(
 /// Finds binning needed to keep boxed out area smaller than a target size along one edge,
 /// with expected shift at the edge taken into account.
 pub fn mont_xc_find_binning2(
-    maxBin: c_int,
-    targetSize: c_int,
-    indentXC: c_int,
-    ixy: c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
-    expectedShift: &[c_int],
+    maxBin: i32,
+    targetSize: i32,
+    indentXC: i32,
+    ixy: i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
+    expectedShift: &[i32],
     aspectMax: f32,
     extraWidth: f32,
     padFrac: f32,
-    niceLimit: c_int,
-    numPaddedPix: &mut c_int,
-    numBoxedPix: &mut c_int,
-) -> c_int {
-    let mut nxPad: c_int = 0;
-    let mut nyPad: c_int = 0;
-    let mut indentUse: c_int = 0;
-    let mut nxyBox: [c_int; 2] = [0; 2];
-    let mut numExtra: [c_int; 2] = [0; 2];
-    let mut maxLongShift: c_int = 0;
-    let mut nbin: c_int;
-    let mut overlapUse: [c_int; 2] = [0; 2];
+    niceLimit: i32,
+    numPaddedPix: &mut i32,
+    numBoxedPix: &mut i32,
+) -> i32 {
+    let mut nxPad: i32 = 0;
+    let mut nyPad: i32 = 0;
+    let mut indentUse: i32 = 0;
+    let mut nxyBox: [i32; 2] = [0; 2];
+    let mut numExtra: [i32; 2] = [0; 2];
+    let mut maxLongShift: i32 = 0;
+    let mut nbin: i32;
+    let mut overlapUse: [i32; 2] = [0; 2];
     overlapUse[ixy as usize] = nxyOverlap[ixy as usize] + 0.max(-expectedShift[ixy as usize]);
     overlapUse[(1 - ixy) as usize] = expectedShift[(1 - ixy) as usize];
     nbin = 1;
@@ -430,20 +429,20 @@ pub fn mont_xc_find_binning2(
 
 /// C `montxcfindbinning2` — Fortran wrapper for `montXCFindBinning2`.
 pub fn montxcfindbinning2(
-    maxBin: &c_int,
-    targetSize: &c_int,
-    indentXC: &c_int,
-    ixy: &c_int,
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
-    expectedShift: &[c_int],
+    maxBin: &i32,
+    targetSize: &i32,
+    indentXC: &i32,
+    ixy: &i32,
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
+    expectedShift: &[i32],
     aspectMax: &f32,
     extraWidth: &f32,
     padFrac: &f32,
-    niceLimit: &c_int,
-    numPaddedPix: &mut c_int,
-    numBoxedPix: &mut c_int,
-) -> c_int {
+    niceLimit: &i32,
+    numPaddedPix: &mut i32,
+    numBoxedPix: &mut i32,
+) -> i32 {
     mont_xc_find_binning2(
         *maxBin,
         *targetSize,
@@ -471,50 +470,50 @@ pub fn montxcfindbinning2(
 pub fn mont_xcorr_edge(
     lowerIn: &[f32],
     upperIn: &[f32],
-    nxyBox: &[c_int],
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
-    nxSmooth: c_int,
-    nySmooth: c_int,
-    mut nxPad: c_int,
-    mut nyPad: c_int,
+    nxyBox: &[i32],
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
+    nxSmooth: i32,
+    nySmooth: i32,
+    mut nxPad: i32,
+    mut nyPad: i32,
     lowerPad: &mut [f32],
     upperPad: &mut [f32],
     mut lowerCopy: Option<&mut [f32]>,
-    numXcorrPeaks: c_int,
-    legacy: c_int,
+    numXcorrPeaks: i32,
+    legacy: i32,
     ctf: &[f32],
     delta: f32,
-    inExtra: &[c_int],
-    nbin: c_int,
-    ixy: c_int,
-    maxLongShift: c_int,
-    weightCCC: c_int,
+    inExtra: &[i32],
+    nbin: i32,
+    ixy: i32,
+    maxLongShift: i32,
+    weightCCC: i32,
     xDisplace: &mut f32,
     yDisplace: &mut f32,
     CCC: &mut f32,
-    twoDfft: &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int),
+    twoDfft: &mut dyn FnMut(&mut [f32], &mut i32, &mut i32, &mut i32),
     mut dumpEdge: Option<
-        &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int, &mut c_int, &mut c_int),
+        &mut dyn FnMut(&mut [f32], &mut i32, &mut i32, &mut i32, &mut i32, &mut i32),
     >,
     debugStr: &mut [u8],
-    debugLen: c_int,
-    debugLevel: c_int,
+    debugLen: i32,
+    debugLevel: i32,
 ) {
-    let mut ind: c_int;
-    let mut i: c_int;
-    let mut nxTrim: c_int = 0;
-    let mut nyTrim: c_int = 0;
-    let mut numPixel: c_int = 0;
-    let mut indPeak: c_int;
-    let mut indSecond: c_int;
-    let mut indThird: c_int;
-    let mut curDebugLen: c_int = 0;
-    let mut nxPadDim: c_int = nxPad + 2;
+    let mut ind: i32;
+    let mut i: i32;
+    let mut nxTrim: i32 = 0;
+    let mut nyTrim: i32 = 0;
+    let mut numPixel: i32 = 0;
+    let mut indPeak: i32;
+    let mut indSecond: i32;
+    let mut indThird: i32;
+    let mut curDebugLen: i32 = 0;
+    let mut nxPadDim: i32 = nxPad + 2;
     let mut xpeak: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
     let mut ypeak: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
     let mut peak: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
-    let mut wgtOrderInds: [c_int; MONTXC_MAX_PEAKS as usize] = [0; MONTXC_MAX_PEAKS as usize];
+    let mut wgtOrderInds: [i32; MONTXC_MAX_PEAKS as usize] = [0; MONTXC_MAX_PEAKS as usize];
     let mut wgtPeaks: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
     let mut gaussPeakProbs: [f32; MONTXC_MAX_PEAKS as usize] = [0.; MONTXC_MAX_PEAKS as usize];
     let mut sumArray: [f64; 7] = [0.; 7];
@@ -524,21 +523,21 @@ pub fn mont_xcorr_edge(
     let mut xTemp: f32;
     let mut yTemp: f32;
     let mut newCCC: f32 = 0.;
-    let mut zero: c_int = 0;
-    let mut one: c_int = 1;
-    let jxy: c_int = 0;
-    let mut ixyP1: c_int;
-    let mut numInSum: c_int;
+    let mut zero: i32 = 0;
+    let mut one: i32 = 1;
+    let jxy: i32 = 0;
+    let mut ixyP1: i32;
+    let mut numInSum: i32;
     let mut aWeights: Option<Vec<f32>> = None;
     let mut bWeights: Option<Vec<f32>> = None;
-    let nxWgt: c_int;
-    let nyWgt: c_int;
-    let mut numSamp: c_int = 0;
-    let binWgt: c_int = 2;
-    let mut wgtXoffset: c_int = 0;
-    let mut wgtYoffset: c_int = 0;
-    let wgtBox: c_int = 10;
-    let evalCCC: c_int = if numXcorrPeaks > 1 && legacy == 0 {
+    let nxWgt: i32;
+    let nyWgt: i32;
+    let mut numSamp: i32 = 0;
+    let binWgt: i32 = 2;
+    let mut wgtXoffset: i32 = 0;
+    let mut wgtYoffset: i32 = 0;
+    let wgtBox: i32 = 10;
+    let evalCCC: i32 = if numXcorrPeaks > 1 && legacy == 0 {
         1
     } else {
         0
@@ -550,30 +549,30 @@ pub fn mont_xcorr_edge(
     let mut sigma: f64 = 0.;
     let mut gaussProb: f64;
     let mut expectDist: [f64; 2] = [0.; 2];
-    let mut delx: c_int;
-    let mut dely: c_int;
-    let mut xStart: c_int;
-    let mut xEnd: c_int;
-    let mut yStart: c_int;
-    let mut yEnd: c_int;
-    let mut fullPixel: c_int = 0;
-    let wgtTrim: c_int;
-    let mut nyLocal: c_int = 0;
-    let mut nxLocal: c_int = 0;
-    let mut numLocalX: c_int = 0;
-    let mut localXoverlap: c_int = 0;
-    let mut numLocalY: c_int = 0;
-    let mut localYoverlap: c_int = 0;
-    let mut lyStart: c_int;
-    let mut lyEnd: c_int;
-    let mut lxStart: c_int;
-    let mut lxEnd: c_int;
-    let mut localX: c_int;
-    let mut localY: c_int;
-    let mut loc: c_int;
-    let mut indOrd: c_int;
-    let mut localXseq: [c_int; 100] = [0; 100];
-    let mut localYseq: [c_int; 100] = [0; 100];
+    let mut delx: i32;
+    let mut dely: i32;
+    let mut xStart: i32;
+    let mut xEnd: i32;
+    let mut yStart: i32;
+    let mut yEnd: i32;
+    let mut fullPixel: i32 = 0;
+    let wgtTrim: i32;
+    let mut nyLocal: i32 = 0;
+    let mut nxLocal: i32 = 0;
+    let mut numLocalX: i32 = 0;
+    let mut localXoverlap: i32 = 0;
+    let mut numLocalY: i32 = 0;
+    let mut localYoverlap: i32 = 0;
+    let mut lyStart: i32;
+    let mut lyEnd: i32;
+    let mut lxStart: i32;
+    let mut lxEnd: i32;
+    let mut localX: i32;
+    let mut localY: i32;
+    let mut loc: i32;
+    let mut indOrd: i32;
+    let mut localXseq: [i32; 100] = [0; 100];
+    let mut localYseq: [i32; 100] = [0; 100];
     let mut localAspect: f32;
     let maxLocalAspect: f32 = 2.;
     let mut maxWsum: f32 = 0.;
@@ -587,10 +586,10 @@ pub fn mont_xcorr_edge(
     let fracDiffCrit: f32 = 0.95;
     let minWsumRatio: f32 = 0.33;
     let runnerUpThreshFac: f32 = 0.8;
-    let mut longShiftToAdd: [c_int; 2] = [0, 0];
-    let mut extraFromExpected: [c_int; 2] = [0, 0];
+    let mut longShiftToAdd: [i32; 2] = [0, 0];
+    let mut extraFromExpected: [i32; 2] = [0, 0];
     let mut expectedLeft: [f32; 2] = [0., 0.];
-    let mut numExtra: [c_int; 2] = [0; 2];
+    let mut numExtra: [i32; 2] = [0; 2];
     let edgeDisplace: f32 = if ixy != 0 { *yDisplace } else { *xDisplace };
     let longDisplace: f32 = if ixy != 0 { *xDisplace } else { *yDisplace };
     let overlapPow: f64 = 0.166667;
@@ -612,13 +611,13 @@ pub fn mont_xcorr_edge(
         } else {
             -edgeDisplace as f64
         }) + 0.5f64)
-            .floor() as c_int;
+            .floor() as i32;
         expectedLeft[ixy as usize] = (if 0.0f64 > edgeDisplace as f64 {
             0.0f64
         } else {
             edgeDisplace as f64
         }) as f32;
-        longShiftToAdd[(1 - ixy) as usize] = (longDisplace as f64 + 0.5f64).floor() as c_int;
+        longShiftToAdd[(1 - ixy) as usize] = (longDisplace as f64 + 0.5f64).floor() as i32;
 
         // Probability down to half at the overlap plus extra extent: has to be binned
         let sDistWeightHalfFall = f32::from_bits(S_DIST_WEIGHT_HALF_FALL.load(Ordering::Relaxed));
@@ -645,7 +644,7 @@ pub fn mont_xcorr_edge(
             let at = curDebugLen as usize;
             debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
             debugStr[at + text.len()] = 0;
-            curDebugLen += text.len() as c_int;
+            curDebugLen += text.len() as i32;
         }
     }
     ixyP1 = ixy + 1;
@@ -799,7 +798,7 @@ pub fn mont_xcorr_edge(
                         .store(lc[(numSamp - 1) as usize].to_bits(), Ordering::Relaxed);
                 } else {
                     let v = crate::imod::libcfshr::percentile::percentile_float(
-                        (0.95f64 * numSamp as f64) as c_int,
+                        (0.95f64 * numSamp as f64) as i32,
                         lc,
                         numSamp,
                     );
@@ -846,10 +845,10 @@ pub fn mont_xcorr_edge(
     twoDfft(lowerPad, &mut nxPad, &mut nyPad, &mut one);
     if weightCCC != 0 {
         crate::imod::libcfshr::filtxcorr::set_peak_find_limits(
-            (expectedXpeak - distLimit) as c_int,
-            (expectedXpeak + distLimit) as c_int,
-            (expectedYpeak - distLimit) as c_int,
-            (expectedYpeak + distLimit) as c_int,
+            (expectedXpeak - distLimit) as i32,
+            (expectedXpeak + distLimit) as i32,
+            (expectedYpeak - distLimit) as i32,
+            (expectedYpeak + distLimit) as i32,
             1,
         );
     }
@@ -888,7 +887,7 @@ pub fn mont_xcorr_edge(
                 let at = curDebugLen as usize;
                 debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
                 debugStr[at + text.len()] = 0;
-                curDebugLen += text.len() as c_int;
+                curDebugLen += text.len() as i32;
             }
         } else if indPeak == -1 && peak[i as usize] as f64 > -1.0e29f64 {
             indPeak = i;
@@ -905,7 +904,7 @@ pub fn mont_xcorr_edge(
     *CCC = -1.5f32;
     if evalCCC != 0 {
         /* If there was no filtering, simply pad images again */
-        if delta == 0 as c_int as f32 {
+        if delta == 0 as i32 as f32 {
             crate::imod::libcfshr::taperpad::slice_taper_out_pad(
                 crate::imod::libcfshr::taperpad::PadIn::Float(lowerIn),
                 SLICE_MODE_FLOAT,
@@ -976,10 +975,10 @@ pub fn mont_xcorr_edge(
         };
         if ixy > 0 {
             nyLocal = (nyPad - 2 * nyTrim) / 2;
-            nxLocal = (localAspect * nyLocal as f32) as c_int;
+            nxLocal = (localAspect * nyLocal as f32) as i32;
         } else {
             nxLocal = (nxPad - 2 * nxTrim) / 2;
-            nyLocal = (localAspect * nxLocal as f32) as c_int;
+            nyLocal = (localAspect * nxLocal as f32) as i32;
         }
         i = 0;
         while i < numXcorrPeaks {
@@ -1011,7 +1010,7 @@ pub fn mont_xcorr_edge(
                     let at = curDebugLen as usize;
                     debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
                     debugStr[at + text.len()] = 0;
-                    curDebugLen += text.len() as c_int;
+                    curDebugLen += text.len() as i32;
                 }
                 wgtPeaks[i as usize] = -gaussPeakProbs[i as usize] * peak[i as usize];
                 i += 1;
@@ -1063,10 +1062,10 @@ pub fn mont_xcorr_edge(
             }
 
             // Ends are non-inclusive to avoid all the + 1's below
-            delx = (xpeak[i as usize] as f64 + 0.5f64).floor() as c_int;
+            delx = (xpeak[i as usize] as f64 + 0.5f64).floor() as i32;
             xStart = nxTrim.max(nxTrim + delx);
             xEnd = (nxPad - nxTrim).min(nxPad - nxTrim + delx);
-            dely = (ypeak[i as usize] as f64 + 0.5f64).floor() as c_int;
+            dely = (ypeak[i as usize] as f64 + 0.5f64).floor() as i32;
             yStart = nyTrim.max(nyTrim + dely);
             yEnd = (nyPad - nyTrim).min(nyPad - nyTrim + dely);
             numPixel = (yEnd - yStart) * (xEnd - xStart);
@@ -1149,7 +1148,7 @@ pub fn mont_xcorr_edge(
                     Some(&mut sumArray[..]),
                 );
 
-                if newCCC != 0 as c_int as f32 {
+                if newCCC != 0 as i32 as f32 {
                     numInSum += 1;
                     ind = 0;
                     while ind < 6 {
@@ -1192,7 +1191,7 @@ pub fn mont_xcorr_edge(
             // Handle a new max or a new 2nd or 3rd place one
             if wsum > minWsumRatio * wsumAtMax {
                 if gaussProb * ccc > cccMax {
-                    if cccMax > -1 as c_int as f64 {
+                    if cccMax > -1 as i32 as f64 {
                         indThird = indSecond;
                         indSecond = indPeak;
                         cccThird = cccSecond;
@@ -1239,7 +1238,7 @@ pub fn mont_xcorr_edge(
                 let at = curDebugLen as usize;
                 debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
                 debugStr[at + text.len()] = 0;
-                curDebugLen += text.len() as c_int;
+                curDebugLen += text.len() as i32;
             }
             indOrd += 1;
         }
@@ -1258,7 +1257,7 @@ pub fn mont_xcorr_edge(
             let at = curDebugLen as usize;
             debugStr[at..at + text.len()].copy_from_slice(text.as_bytes());
             debugStr[at + text.len()] = 0;
-            curDebugLen += text.len() as c_int;
+            curDebugLen += text.len() as i32;
         }
         *CCC = cccMax as f32;
 
@@ -1339,35 +1338,33 @@ pub fn mont_xcorr_edge(
 pub fn montxcorredge(
     lowerIn: &[f32],
     upperIn: &[f32],
-    nxyBox: &[c_int],
-    nxyPiece: &[c_int],
-    nxyOverlap: &[c_int],
-    nxSmooth: &c_int,
-    nySmooth: &c_int,
-    nxPad: &c_int,
-    nyPad: &c_int,
+    nxyBox: &[i32],
+    nxyPiece: &[i32],
+    nxyOverlap: &[i32],
+    nxSmooth: &i32,
+    nySmooth: &i32,
+    nxPad: &i32,
+    nyPad: &i32,
     lowerPad: &mut [f32],
     upperPad: &mut [f32],
     lowerCopy: Option<&mut [f32]>,
-    numXcorrPeaks: &c_int,
-    legacy: &c_int,
+    numXcorrPeaks: &i32,
+    legacy: &i32,
     ctf: &[f32],
     delta: &f32,
-    numExtra: &[c_int],
-    nbin: &c_int,
-    ixy: &c_int,
-    maxLongShift: &c_int,
-    weightCCC: &c_int,
+    numExtra: &[i32],
+    nbin: &i32,
+    ixy: &i32,
+    maxLongShift: &i32,
+    weightCCC: &i32,
     xDisplace: &mut f32,
     yDisplace: &mut f32,
     CCC: &mut f32,
-    twoDfft: &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int),
-    dumpEdge: Option<
-        &mut dyn FnMut(&mut [f32], &mut c_int, &mut c_int, &mut c_int, &mut c_int, &mut c_int),
-    >,
-    debugLevel: &c_int,
+    twoDfft: &mut dyn FnMut(&mut [f32], &mut i32, &mut i32, &mut i32),
+    dumpEdge: Option<&mut dyn FnMut(&mut [f32], &mut i32, &mut i32, &mut i32, &mut i32, &mut i32)>,
+    debugLevel: &i32,
 ) {
-    let debugLen: c_int = MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE;
+    let debugLen: i32 = MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE;
     let mut debugStr: [u8; (MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE) as usize] =
         [0; (MONTXC_MAX_PEAKS * MONTXC_MAX_DEBUG_LINE) as usize];
     mont_xcorr_edge(
@@ -1433,19 +1430,14 @@ pub fn montxcorredge(
 /// C `localNumAndOverlap` (static).
 ///
 /// Get number of boxes and their overlap on one axis.
-fn local_num_and_overlap(
-    extent: c_int,
-    nxLocal: c_int,
-    numLocalXp: &mut c_int,
-    nxOverlap: &mut c_int,
-) {
+fn local_num_and_overlap(extent: i32, nxLocal: i32, numLocalXp: &mut i32, nxOverlap: &mut i32) {
     let targetOverlap: f32 = 0.35;
     let minOverlap: f32 = 0.2;
     let maxOverlap: f32 = 0.5;
-    let mut numLocalX: c_int;
+    let mut numLocalX: i32;
     numLocalX = ((extent - nxLocal) as f64 / (nxLocal as f64 * (1.0f64 - targetOverlap as f64))
         + 0.5f64)
-        .floor() as c_int
+        .floor() as i32
         + 1;
     numLocalX = if numLocalX > 1 { numLocalX } else { 1 };
     while numLocalX > 1
@@ -1471,16 +1463,16 @@ fn local_num_and_overlap(
 ///
 /// Set up sequence from middle out.
 fn setup_local_sequence(
-    numLocalX: c_int,
-    numLocalY: c_int,
-    localXseq: &mut [c_int],
-    localYseq: &mut [c_int],
+    numLocalX: i32,
+    numLocalY: i32,
+    localXseq: &mut [i32],
+    localYseq: &mut [i32],
 ) {
-    let mut numLocalSeq: c_int = 0;
-    let mut ind: c_int;
-    let mut localX: c_int;
-    let mut localY: c_int;
-    let mut dir: c_int = -1;
+    let mut numLocalSeq: i32 = 0;
+    let mut ind: i32;
+    let mut localX: i32;
+    let mut localY: i32;
+    let mut dir: i32 = -1;
     ind = 0;
     while ind < numLocalX + 2 {
         if ind != 0 {
@@ -1504,7 +1496,7 @@ fn setup_local_sequence(
 
 /// C `montxcorrgetmaxes` — Fortran-callable routine returning the maximum number of peaks
 /// allowed in `maxPeak` and the maximum number of debug lines in `maxLines`.
-pub fn montxcorrgetmaxes(maxPeak: &mut c_int, maxLines: &mut c_int) {
+pub fn montxcorrgetmaxes(maxPeak: &mut i32, maxLines: &mut i32) {
     *maxPeak = MONTXC_MAX_PEAKS;
     *maxLines = MONTXC_MAX_DEBUG_LINE;
 }
@@ -1527,8 +1519,8 @@ pub fn mont_xc_get_last_trimmed_max_sd() -> f64 {
 /// C `montXCGetLastRunnersUp`.
 ///
 /// Returns up to `maxPairs` X,Y alternative displacements into `disps`.
-pub fn mont_xc_get_last_runners_up(disps: &mut [f32], maxPairs: c_int) {
-    let mut i: c_int;
+pub fn mont_xc_get_last_runners_up(disps: &mut [f32], maxPairs: i32) {
+    let mut i: i32;
     i = 0;
     while i < 2 * MAX_RUNNERS_UP.min(maxPairs) {
         disps[i as usize] = f32::from_bits(S_LAST_RUNNERS_UP[i as usize].load(Ordering::Relaxed));
@@ -1542,7 +1534,7 @@ pub fn mont_xc_get_last_runners_up(disps: &mut [f32], maxPairs: c_int) {
 }
 
 /// C `montxcgetlastrunnersup` — Fortran wrapper for `montXCGetLastRunnersUp`.
-pub fn montxcgetlastrunnersup(disps: &mut [f32], maxPairs: &c_int) {
+pub fn montxcgetlastrunnersup(disps: &mut [f32], maxPairs: &i32) {
     mont_xc_get_last_runners_up(disps, *maxPairs);
 }
 
@@ -1553,19 +1545,19 @@ pub fn montxcgetlastrunnersup(disps: &mut [f32], maxPairs: &c_int) {
 pub fn row_of_three_corrs(
     array: &[f32],
     brray: &[f32],
-    nxDim: c_int,
-    ix0: c_int,
-    ix1: c_int,
-    iy0: c_int,
-    iy1: c_int,
-    delX: c_int,
-    delY: c_int,
+    nxDim: i32,
+    ix0: i32,
+    ix1: i32,
+    iy0: i32,
+    iy1: i32,
+    delX: i32,
+    delY: i32,
     aWeights: Option<&[f32]>,
     bWeights: Option<&[f32]>,
-    nxWgt: c_int,
-    mut binning: c_int,
-    wgtXoffset: c_int,
-    wgtYoffset: c_int,
+    nxWgt: i32,
+    mut binning: i32,
+    wgtXoffset: i32,
+    wgtYoffset: i32,
     corr1: &mut f32,
     corr2: &mut f32,
     corr3: &mut f32,
@@ -1573,14 +1565,14 @@ pub fn row_of_three_corrs(
     mut sumArr2: Option<&mut [f64]>,
     mut sumArr3: Option<&mut [f64]>,
 ) {
-    let mut ix: c_int;
-    let mut iy: c_int;
-    let mut aBase: c_int;
-    let nsum: c_int = 0;
-    let end: c_int = 0;
-    let mut bBase: c_int;
-    let mut aWgtBase: c_int;
-    let mut bWgtBase: c_int;
+    let mut ix: i32;
+    let mut iy: i32;
+    let mut aBase: i32;
+    let nsum: i32 = 0;
+    let end: i32 = 0;
+    let mut bBase: i32;
+    let mut aWgtBase: i32;
+    let mut bWgtBase: i32;
     let mut abSum1: f64;
     let mut abSum2: f64;
     let mut abSum3: f64;
@@ -1631,12 +1623,12 @@ pub fn row_of_three_corrs(
     let mut wgt1: f32;
     let mut wgt3: f32;
     let mut awgt: f32;
-    let mut numThreads: c_int;
-    let maxThreads: c_int = 8;
+    let mut numThreads: i32;
+    let maxThreads: i32 = 8;
 
     numThreads = ((((ix1 - ix0) as f64 * (iy1 - iy0) as f64).sqrt() / 80.0f64 + 0.5f64).floor()
-        as c_int as f64
-        * (if aWeights.is_some() { 2.0f64 } else { 1.0f64 })) as c_int;
+        as i32 as f64
+        * (if aWeights.is_some() { 2.0f64 } else { 1.0f64 })) as i32;
     numThreads = numThreads.clamp(1, maxThreads);
     numThreads = crate::imod::libcfshr::b3dutil::num_omp_threads(numThreads);
 
@@ -1850,19 +1842,19 @@ pub fn row_of_three_corrs(
 pub fn column_of_three_corrs(
     array: &[f32],
     brray: &[f32],
-    nxDim: c_int,
-    ix0: c_int,
-    ix1: c_int,
-    iy0: c_int,
-    iy1: c_int,
-    delX: c_int,
-    delY: c_int,
+    nxDim: i32,
+    ix0: i32,
+    ix1: i32,
+    iy0: i32,
+    iy1: i32,
+    delX: i32,
+    delY: i32,
     aWeights: Option<&[f32]>,
     bWeights: Option<&[f32]>,
-    nxWgt: c_int,
-    binning: c_int,
-    wgtXoffset: c_int,
-    wgtYoffset: c_int,
+    nxWgt: i32,
+    binning: i32,
+    wgtXoffset: i32,
+    wgtYoffset: i32,
     corr1: &mut f32,
     corr2: &mut f32,
     corr3: &mut f32,
@@ -1870,17 +1862,17 @@ pub fn column_of_three_corrs(
     mut sumArr2: Option<&mut [f64]>,
     mut sumArr3: Option<&mut [f64]>,
 ) {
-    let mut ix: c_int;
-    let mut iy: c_int;
-    let mut aBase: c_int;
-    let nsum: c_int = 0;
-    let end: c_int = 0;
-    let mut bBase: c_int;
-    let mut aWgtBase: c_int;
-    let mut bWgtBase: c_int;
-    let mut bWgtBase1: c_int;
-    let mut bWgtBase3: c_int;
-    let mut wInd: c_int;
+    let mut ix: i32;
+    let mut iy: i32;
+    let mut aBase: i32;
+    let nsum: i32 = 0;
+    let end: i32 = 0;
+    let mut bBase: i32;
+    let mut aWgtBase: i32;
+    let mut bWgtBase: i32;
+    let mut bWgtBase1: i32;
+    let mut bWgtBase3: i32;
+    let mut wInd: i32;
     let mut abSum1: f64;
     let mut abSum2: f64;
     let mut abSum3: f64;
@@ -1933,12 +1925,12 @@ pub fn column_of_three_corrs(
     let mut wgt1: f32;
     let mut wgt3: f32;
     let mut awgt: f32;
-    let mut numThreads: c_int;
-    let maxThreads: c_int = 8;
+    let mut numThreads: i32;
+    let maxThreads: i32 = 8;
 
     numThreads = ((((ix1 - ix0) as f64 * (iy1 - iy0) as f64).sqrt() / 80.0f64 + 0.5f64).floor()
-        as c_int as f64
-        * (if aWeights.is_some() { 2.0f64 } else { 1.0f64 })) as c_int;
+        as i32 as f64
+        * (if aWeights.is_some() { 2.0f64 } else { 1.0f64 })) as i32;
     numThreads = numThreads.clamp(1, maxThreads);
     numThreads = crate::imod::libcfshr::b3dutil::num_omp_threads(numThreads);
 
@@ -2208,25 +2200,25 @@ pub fn column_of_three_corrs(
 pub fn mont_xc_find_best_corr(
     array: &[f32],
     brray: &[f32],
-    nxDim: c_int,
-    nx: c_int,
-    ny: c_int,
-    nxTrim: c_int,
-    nyTrim: c_int,
-    ixStart: c_int,
-    ixEnd: c_int,
-    iyStart: c_int,
-    iyEnd: c_int,
+    nxDim: i32,
+    nx: i32,
+    ny: i32,
+    nxTrim: i32,
+    nyTrim: i32,
+    ixStart: i32,
+    ixEnd: i32,
+    iyStart: i32,
+    iyEnd: i32,
     delX: &mut f32,
     delY: &mut f32,
     corr: &mut f32,
     maxDist: f32,
     aWeights: Option<&[f32]>,
     bWeights: Option<&[f32]>,
-    nxWgt: c_int,
-    binning: c_int,
-    wgtXoffset: c_int,
-    wgtYoffset: c_int,
+    nxWgt: i32,
+    binning: i32,
+    wgtXoffset: i32,
+    wgtYoffset: i32,
     threshCCC: f32,
     mut bestSumArr: Option<&mut [f64]>,
 ) {
@@ -2235,21 +2227,21 @@ pub fn mont_xc_find_best_corr(
     let mut cccMax: f32;
     let mut sumArrs: [[[f64; 6]; 3]; 3] = [[[0.; 6]; 3]; 3];
     let mut sumTmp: [[[f64; 6]; 3]; 3] = [[[0.; 6]; 3]; 3];
-    let mut done: [[c_int; 3]; 3] = [[0; 3]; 3];
-    let first: c_int = 1;
-    let mut curDelX: c_int = (*delX as f64 + 0.5f64).floor() as c_int;
-    let mut curDelY: c_int = (*delY as f64 + 0.5f64).floor() as c_int;
-    let mut ix: c_int;
-    let mut iy: c_int;
-    let mut ixMax: c_int;
-    let mut iyMax: c_int;
-    let mut ix0: c_int;
-    let mut ix1: c_int;
-    let mut iy0: c_int;
-    let mut iy1: c_int;
-    let nc: c_int;
-    let mut ind: c_int;
-    let mut needCol: c_int = -1;
+    let mut done: [[i32; 3]; 3] = [[0; 3]; 3];
+    let first: i32 = 1;
+    let mut curDelX: i32 = (*delX as f64 + 0.5f64).floor() as i32;
+    let mut curDelY: i32 = (*delY as f64 + 0.5f64).floor() as i32;
+    let mut ix: i32;
+    let mut iy: i32;
+    let mut ixMax: i32;
+    let mut iyMax: i32;
+    let mut ix0: i32;
+    let mut ix1: i32;
+    let mut iy0: i32;
+    let mut iy1: i32;
+    let nc: i32;
+    let mut ind: i32;
+    let mut needCol: i32 = -1;
 
     ix0 = ixStart.max(nxTrim + curDelX);
     ix1 = ixEnd.min(nx + curDelX - nxTrim);
@@ -2439,7 +2431,7 @@ pub fn mont_xc_find_best_corr(
     }
 
     // Too far, return 0.
-    *corr = 0 as c_int as f32;
+    *corr = 0 as i32 as f32;
 }
 
 #[cfg(test)]

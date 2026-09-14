@@ -29,17 +29,16 @@ pub mod mxml_set;
 pub mod mxml_string;
 
 use core::any::Any;
-use core::ffi::c_int;
 
 /* --- IMOD/include/mxml.h: constants ----------------------------------- */
 
 /// Matches C `MXML_MAJOR_VERSION` (`mxml.h:38`).
-pub const MXML_MAJOR_VERSION: c_int = 2;
+pub const MXML_MAJOR_VERSION: i32 = 2;
 /// Matches C `MXML_MINOR_VERSION` (`mxml.h:39`).
-pub const MXML_MINOR_VERSION: c_int = 10;
+pub const MXML_MINOR_VERSION: i32 = 10;
 
 /// Matches C `MXML_TAB` (`mxml.h:41`).
-pub const MXML_TAB: c_int = 8;
+pub const MXML_TAB: i32 = 8;
 
 /// Matches C `MXML_NO_CALLBACK` (`mxml.h:43`).
 pub const MXML_NO_CALLBACK: MxmlLoadCb = None;
@@ -49,24 +48,24 @@ pub const MXML_TEXT_CALLBACK: MxmlLoadCb = None;
 /// Matches C `MXML_NO_PARENT` (`mxml.h:54`), the C `NULL` parent pointer.
 pub const MXML_NO_PARENT: Option<usize> = None;
 
-pub const MXML_DESCEND: c_int = 1;
-pub const MXML_NO_DESCEND: c_int = 0;
-pub const MXML_DESCEND_FIRST: c_int = -1;
+pub const MXML_DESCEND: i32 = 1;
+pub const MXML_NO_DESCEND: i32 = 0;
+pub const MXML_DESCEND_FIRST: i32 = -1;
 
-pub const MXML_WS_BEFORE_OPEN: c_int = 0;
-pub const MXML_WS_AFTER_OPEN: c_int = 1;
-pub const MXML_WS_BEFORE_CLOSE: c_int = 2;
-pub const MXML_WS_AFTER_CLOSE: c_int = 3;
+pub const MXML_WS_BEFORE_OPEN: i32 = 0;
+pub const MXML_WS_AFTER_OPEN: i32 = 1;
+pub const MXML_WS_BEFORE_CLOSE: i32 = 2;
+pub const MXML_WS_AFTER_CLOSE: i32 = 3;
 
-pub const MXML_ADD_BEFORE: c_int = 0;
-pub const MXML_ADD_AFTER: c_int = 1;
+pub const MXML_ADD_BEFORE: i32 = 0;
+pub const MXML_ADD_AFTER: i32 = 1;
 /// Matches C `MXML_ADD_TO_PARENT` (`mxml.h:67`), the C `NULL` child pointer.
 pub const MXML_ADD_TO_PARENT: Option<usize> = None;
 
 /* --- IMOD/include/mxml.h: data types ---------------------------------- */
 
 /// Matches C `mxml_sax_event_t` (`mxml.h:74`).
-pub type MxmlSaxEvent = c_int;
+pub type MxmlSaxEvent = i32;
 pub const MXML_SAX_CDATA: MxmlSaxEvent = 0;
 pub const MXML_SAX_COMMENT: MxmlSaxEvent = 1;
 pub const MXML_SAX_DATA: MxmlSaxEvent = 2;
@@ -75,7 +74,7 @@ pub const MXML_SAX_ELEMENT_CLOSE: MxmlSaxEvent = 4;
 pub const MXML_SAX_ELEMENT_OPEN: MxmlSaxEvent = 5;
 
 /// Matches C `mxml_type_t` (`mxml.h:83`).
-pub type MxmlType = c_int;
+pub type MxmlType = i32;
 pub const MXML_IGNORE: MxmlType = -1;
 pub const MXML_ELEMENT: MxmlType = 0;
 pub const MXML_INTEGER: MxmlType = 1;
@@ -93,14 +92,14 @@ pub type MxmlCustomDestroyCb = Option<fn(&mut dyn Any)>;
 /// Matches C `mxml_error_cb_t` (`mxml.h:96`).
 pub type MxmlErrorCb = Option<fn(&[u8])>;
 /// Matches C `mxml_custom_load_cb_t` (`mxml.h:157`).
-pub type MxmlCustomLoadCb = Option<fn(&mut MxmlArena, usize, &[u8]) -> c_int>;
+pub type MxmlCustomLoadCb = Option<fn(&mut MxmlArena, usize, &[u8]) -> i32>;
 /// Matches C `mxml_custom_save_cb_t` (`mxml.h:160`).
 ///
 /// The C callback returns a `malloc`ed string that the caller frees; the owned
 /// `Vec` carries the same ownership transfer.
 pub type MxmlCustomSaveCb = Option<fn(&MxmlArena, usize) -> Option<Vec<u8>>>;
 /// Matches C `mxml_entity_cb_t` (`mxml.h:163`).
-pub type MxmlEntityCb = Option<fn(&[u8]) -> c_int>;
+pub type MxmlEntityCb = Option<fn(&[u8]) -> i32>;
 /// Matches C `mxml_load_cb_t` (`mxml.h:166`).
 pub type MxmlLoadCb = Option<fn(&MxmlArena, Option<usize>) -> MxmlType>;
 /// Matches C `mxml_save_cb_t` (`mxml.h:169`).
@@ -108,7 +107,7 @@ pub type MxmlLoadCb = Option<fn(&MxmlArena, Option<usize>) -> MxmlType>;
 /// The C callback returns a `const char *` into storage it owns and the writer
 /// only reads it; returning owned bytes is the same contract without the
 /// static buffer every implementation would otherwise need.
-pub type MxmlSaveCb = Option<fn(&MxmlArena, usize, c_int) -> Option<Vec<u8>>>;
+pub type MxmlSaveCb = Option<fn(&MxmlArena, usize, i32) -> Option<Vec<u8>>>;
 /// Matches C `mxml_sax_cb_t` (`mxml.h:172`).
 pub type MxmlSaxCb = Option<fn(&mut MxmlArena, Option<usize>, MxmlSaxEvent, &mut dyn Any)>;
 
@@ -116,25 +115,22 @@ pub type MxmlSaxCb = Option<fn(&mut MxmlArena, Option<usize>, MxmlSaxEvent, &mut
 ///
 /// `name` is `strdup`ed at every assignment and is never `NULL` once the
 /// attribute exists; `value` is `NULL` for a valueless attribute.
+#[derive(Clone)]
 pub struct MxmlAttr {
     pub name: Vec<u8>,
     pub value: Option<Vec<u8>>,
 }
 
 /// Matches C `mxml_element_t` (`mxml.h:105`); C field order `name`,
-/// `num_attrs`, `attrs`.
-///
-/// `num_attrs` is kept beside the `Vec` because it is the count the C grows,
-/// tests and writes back; `attrs` replaces the `realloc`ed array.
+/// `attrs`.  The vector owns both the attributes and their count.
 pub struct MxmlElement {
     pub name: Option<Vec<u8>>,
-    pub num_attrs: c_int,
     pub attrs: Vec<MxmlAttr>,
 }
 
 /// Matches C `mxml_text_t` (`mxml.h:112`).
 pub struct MxmlText {
-    pub whitespace: c_int,
+    pub whitespace: i32,
     pub string: Option<Vec<u8>>,
 }
 
@@ -152,7 +148,7 @@ pub struct MxmlCustom {
 /// the all-zero union of a node created with a type outside the six.
 pub enum MxmlValue {
     Element(MxmlElement),
-    Integer(c_int),
+    Integer(i32),
     Opaque(Option<Vec<u8>>),
     Real(f64),
     Text(MxmlText),
@@ -173,7 +169,7 @@ pub struct MxmlNode {
     pub child: Option<usize>,
     pub last_child: Option<usize>,
     pub value: MxmlValue,
-    pub ref_count: c_int,
+    pub ref_count: i32,
     pub user_data: Option<Box<dyn Any>>,
 }
 
@@ -214,15 +210,12 @@ impl MxmlArena {
 }
 
 /// Matches C `struct mxml_index_s` (`mxml.h:148`); C field order `attr`,
-/// `num_nodes`, `alloc_nodes`, `cur_node`, `nodes`.
-///
-/// `alloc_nodes` stays because the C grows `nodes` in blocks of 64
-/// (`mxml-index.c:340`) and that block size is observable through the field.
+/// The index owns its matching node handles and tracks the next result to
+/// enumerate.  Rust's `Vec` owns both the allocation and its length, so there
+/// are no C-style count/allocation fields to keep in sync.
 pub struct MxmlIndex {
     pub attr: Option<Vec<u8>>,
-    pub num_nodes: c_int,
-    pub alloc_nodes: c_int,
-    pub cur_node: c_int,
+    pub cur_node: usize,
     pub nodes: Vec<usize>,
 }
 

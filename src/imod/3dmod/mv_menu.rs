@@ -141,7 +141,12 @@ pub fn imodv_load_model(a: &mut ImodvApp, path: Option<&Path>) -> i32 {
         return -1;
     };
     model.cview = if model.cview != 0 { model.cview } else { 1 };
-    let raw = Box::into_raw(Box::new(model));
+    a.owned_models.push(Box::new(model));
+    let raw = a
+        .owned_models
+        .last_mut()
+        .expect("model was just pushed")
+        .as_mut() as *mut _;
     a.mod_.push(raw);
     a.num_mods += 1;
     imodv_select_model(a, a.num_mods - 1);

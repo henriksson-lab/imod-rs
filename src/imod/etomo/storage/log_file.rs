@@ -1602,27 +1602,13 @@ impl LogFile {
         }
         // `properties.store(outputStream, null)` writes a `#` line carrying
         // `new Date().toString()` and then one `key=value` line per property.
-        // `strftime` writes into this buffer and NUL-terminates it.  A `u8`
-        // array, sliced at the NUL, rather than a `CStr`: the foreign call
-        // stays, the C string type does not.  `localtime_r` is a named
-        // boundary — local civil time needs the C library's timezone
-        // database, which Rust's std has no equivalent for.
-        let mut date = [0u8; 64];
-        let now = unsafe { libc::time(std::ptr::null_mut()) };
-        let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
-        let written = unsafe {
-            libc::localtime_r(&now, &mut broken_down);
-            libc::strftime(
-                date.as_mut_ptr().cast::<libc::c_char>(),
-                date.len(),
-                c"%a %b %d %H:%M:%S %Z %Y".as_ptr(),
-                &broken_down,
-            )
-        };
-        let date = &date[..written];
+        // Keep Java date formatting in the JDK translation rather than exposing this
+        // storage type to the C time API.
+        let date =
+            utilities::java_util_date_to_string(utilities::java_lang_system_current_time_millis());
         let mut output = String::new();
         output.push('#');
-        output.push_str(&String::from_utf8_lossy(date));
+        output.push_str(&date);
         output.push('\n');
         for (key, value) in properties {
             output.push_str(key);

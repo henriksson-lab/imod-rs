@@ -3,12 +3,31 @@
 
 use super::linearxforms::{xf_apply, xf_unit};
 use super::regression::{mult_regress, robust_regress, stat_matrices};
+use std::cell::Cell;
 
-static mut S_KFACTOR: f32 = 0.;
-static mut S_MAX_CHANGE: f32 = 0.;
-static mut S_MAX_OSCILL: f32 = 0.;
-static mut S_MAX_ITER: i32 = 0;
-static mut S_MAX_ZERO_WGT: i32 = 0;
+/// Parameters installed for the next fit by `find_xf_robust_params`.
+///
+/// The original routine used process-global mutable values.  A fit and its
+/// configuration are naturally one thread's operation, so thread-local owned
+/// storage prevents one caller from changing another caller's fit.
+#[derive(Clone, Copy, Default)]
+struct FitControl {
+    k_factor: f32,
+    max_change: f32,
+    max_oscill: f32,
+    max_iter: i32,
+    max_zero_wgt: i32,
+}
+
+thread_local! {
+    static FIT_CONTROL: Cell<FitControl> = const { Cell::new(FitControl {
+        k_factor: 0.,
+        max_change: 0.,
+        max_oscill: 0.,
+        max_iter: 0,
+        max_zero_wgt: 0,
+    }) };
+}
 
 /// Original `findTransform` (`findtransform.c:59`).
 pub unsafe fn find_transform(
@@ -28,10 +47,15 @@ pub unsafe fn find_transform(
     ipnt_max: *mut i32,
 ) -> i32 {
     unsafe {
+        let control = FIT_CONTROL.with(Cell::get);
         let icol_y = icol_x + 1;
         let mut array_tot = icol_y * 5
             + icol_y * icol_y
-            + (3 * icol_y * icol_y).max(if S_KFACTOR != 0. { 2 * num_points } else { 0 });
+            + (3 * icol_y * icol_y).max(if control.k_factor != 0. {
+                2 * num_points
+            } else {
+                0
+            });
         let mut num_extra = 0;
         if if_dev < 0 {
             if_dev = -if_dev;
@@ -71,7 +95,7 @@ pub unsafe fn find_transform(
             let mut b_mat = [0_f32; 4];
             let mut c_vec = [0_f32; 2];
             let mut isol = 1;
-            if S_KFACTOR != 0. {
+            if control.k_factor != 0. {
                 isol = robust_regress(
                     core::slice::from_raw_parts_mut(x_mat, x_mat_len),
                     m_size,
@@ -85,12 +109,12 @@ pub unsafe fn find_transform(
                     core::slice::from_raw_parts_mut(x_mean, len_from(off_x_mean)),
                     core::slice::from_raw_parts_mut(sd, len_from(off_sd)),
                     core::slice::from_raw_parts_mut(ss_mat, len_from(off_ss_mat)),
-                    S_KFACTOR,
+                    control.k_factor,
                     &mut *ipnt_max,
-                    S_MAX_ITER,
-                    S_MAX_ZERO_WGT,
-                    S_MAX_CHANGE,
-                    S_MAX_OSCILL,
+                    control.max_iter,
+                    control.max_zero_wgt,
+                    control.max_change,
+                    control.max_oscill,
                 );
             }
             if isol != 0 {
@@ -114,7 +138,12 @@ pub unsafe fn find_transform(
                 }
             }
             if isol != 0 {
-                S_KFACTOR = 0.;
+                FIT_CONTROL.with(|state| {
+                    state.set(FitControl {
+                        k_factor: 0.,
+                        ..state.get()
+                    });
+                });
                 return isol;
             }
             for i in 0..2 {
@@ -124,7 +153,7 @@ pub unsafe fn find_transform(
             }
             if icol_x > 3 {
                 for i in 0..num_points {
-                    if S_KFACTOR != 0. {
+                    if control.k_factor != 0. {
                         *x_mat.add((i * m_size + 5) as usize) =
                             *x_mat.add((i * m_size + 4) as usize);
                     }
@@ -186,7 +215,12 @@ pub unsafe fn find_transform(
                 - *x_mean * sin_theta
                 - *x_mean.add(1) * cos_theta;
         }
-        S_KFACTOR = 0.;
+        FIT_CONTROL.with(|state| {
+            state.set(FitControl {
+                k_factor: 0.,
+                ..state.get()
+            });
+        });
         if if_dev == 0 {
             return 0;
         }
@@ -294,13 +328,15 @@ pub unsafe fn find_xf_robust_params(
     max_change: f32,
     max_oscill: f32,
 ) {
-    unsafe {
-        S_KFACTOR = k_factor;
-        S_MAX_ITER = max_iter;
-        S_MAX_ZERO_WGT = max_zero_wgt;
-        S_MAX_CHANGE = max_change;
-        S_MAX_OSCILL = max_oscill;
-    }
+    FIT_CONTROL.with(|state| {
+        state.set(FitControl {
+            k_factor,
+            max_change,
+            max_oscill,
+            max_iter,
+            max_zero_wgt,
+        });
+    });
 }
 
 /// Original `findxfrobustparams` (`findtransform.c:253`).

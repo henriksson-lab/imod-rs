@@ -3,12 +3,13 @@
 
 use crate::imod::libcfshr::b3dutil::imod_backup_file;
 use std::fs::File;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Source `common /hushcom/hush` with `data hush /.false./` (`dopen.f:32`).
 /// A Fortran blank-common cell has no Rust analogue, so the flag is a module
 /// static holding exactly the same one value that `DOPEN` and `dopenHush`
 /// share.
-static mut S_HUSH: bool = false;
+static S_HUSH: AtomicBool = AtomicBool::new(false);
 
 /// Original `DOPEN` (`dopen.f:20`).
 ///
@@ -66,7 +67,7 @@ pub fn dopen(iunit: i32, fname: &str, itype: &str, iform: &str) -> File {
     //
     // NOW WRITE OUT FILE INFO
     //
-    if unsafe { S_HUSH } {
+    if S_HUSH.load(Ordering::Relaxed) {
         return file;
     }
     // `INQUIRE (FILE=FNAME,NAME=FULLNAM)` returns the name as it was given.
@@ -78,5 +79,5 @@ pub fn dopen(iunit: i32, fname: &str, itype: &str, iform: &str) -> File {
 
 /// Original `dopenHush` (`dopen.f:78`).
 pub fn dopen_hush(value: bool) {
-    unsafe { S_HUSH = value };
+    S_HUSH.store(value, Ordering::Relaxed);
 }

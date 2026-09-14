@@ -3,7 +3,6 @@
 
 use super::*;
 use core::any::Any;
-use core::ffi::c_int;
 
 /// Matches C `mxmlGetCDATA` (`mxml-get.c:33`).
 pub fn mxml_get_cdata(arena: &MxmlArena, node: Option<usize>) -> Option<&[u8]> {
@@ -108,7 +107,7 @@ pub fn mxml_get_first_child(arena: &MxmlArena, node: Option<usize>) -> Option<us
 }
 
 /// Matches C `mxmlGetInteger` (`mxml-get.c:136`).
-pub fn mxml_get_integer(arena: &MxmlArena, node: Option<usize>) -> c_int {
+pub fn mxml_get_integer(arena: &MxmlArena, node: Option<usize>) -> i32 {
     /*
      * Range check input...
      */
@@ -278,7 +277,7 @@ pub fn mxml_get_real(arena: &MxmlArena, node: Option<usize>) -> f64 {
 pub fn mxml_get_text<'a>(
     arena: &'a MxmlArena,
     node: Option<usize>,
-    whitespace: Option<&mut c_int>,
+    whitespace: Option<&mut i32>,
 ) -> Option<&'a [u8]> {
     /*
      * Range check input...

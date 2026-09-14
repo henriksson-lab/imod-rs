@@ -8,9 +8,10 @@
 //! when `xclip` or an X display is unavailable.
 
 use crate::imod::libcfshr::b3dutil::{CArg, c_format};
+use chrono::{Local, Timelike};
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 pub struct ImodSendEvent {
     pub win_id: i32,
@@ -306,27 +307,11 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
         return 3;
     }
 
-    // QTime::currentTime() only uses local minute, second, and millisecond in
-    // the C++ source.  Converting epoch seconds to local civil time needs the C
-    // library's timezone database (`/etc/localtime`, `$TZ`), which Rust's
-    // standard library does not provide and this crate takes no dependency for,
-    // so `localtime_r` is the one foreign call left in this module.
-    let since_epoch = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let milliseconds = since_epoch.subsec_millis() as i32;
-    let now = since_epoch.as_secs() as libc::time_t;
-    let local_time = unsafe {
-        let mut local_time = std::mem::MaybeUninit::<libc::tm>::uninit();
-        if libc::localtime_r(&raw const now, local_time.as_mut_ptr()).is_null() {
-            let _ = std::io::stderr().write_all(
-                c_format("ERROR: imodsendevent - cannot get the local time\n", &[]).as_bytes(),
-            );
-            return 3;
-        }
-        local_time.assume_init()
-    };
-    let time_stamp = 60_000 * local_time.tm_min + 1_000 * local_time.tm_sec + milliseconds;
+    // QTime::currentTime() uses local minute, second, and millisecond.
+    let local_time = Local::now();
+    let time_stamp = 60_000 * local_time.minute() as i32
+        + 1_000 * local_time.second() as i32
+        + local_time.timestamp_subsec_millis() as i32;
     event.time_str = format!("{window_argument} {time_stamp} ");
     event.cmd_str = arguments[arg_index + 1..].join(" ");
     let qstr = format!("{}{}", event.time_str, event.cmd_str);

@@ -117,27 +117,10 @@ pub trait ImodIoBoundary {
 /// `"hh:mm:ss "` — with a trailing space that both `wprint` call sites
 /// (`:215`, `:357`) print.
 ///
-/// `localtime_r` is the one foreign call left here and is the same named
-/// boundary `b3ddate.rs` keeps: `ctime` is *local* civil time, and converting
-/// epoch seconds to it needs the C library's timezone database
-/// (`/etc/localtime`, `$TZ`), which Rust's standard library has no equivalent
-/// for.  The formatting itself is Rust's.
+/// `ctime` formats local civil time.  Chrono supplies the corresponding local
+/// clock while retaining the source's trailing blank.
 pub fn datetime() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as libc::time_t;
-    let local = unsafe {
-        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
-        if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
-            return "         ".to_owned();
-        }
-        local.assume_init()
-    };
-    format!(
-        "{:02}:{:02}:{:02} ",
-        local.tm_hour, local.tm_min, local.tm_sec
-    )
+    chrono::Local::now().format("%H:%M:%S ").to_string()
 }
 
 /// `imod_model_changed`.
@@ -619,6 +602,20 @@ mod tests {
         assert_eq!(m.pixsize, 0.2);
         assert!((m.zscale - 1.173).abs() < 0.000_01);
         assert_eq!(m.units, IMOD_UNIT_NM);
+    }
+    #[test]
+    fn datetime_keeps_ctime_time_field_layout() {
+        let value = datetime();
+        assert_eq!(value.len(), 9);
+        assert_eq!(&value[2..3], ":");
+        assert_eq!(&value[5..6], ":");
+        assert_eq!(&value[8..], " ");
+        assert!(
+            value[..8]
+                .bytes()
+                .enumerate()
+                .all(|(index, byte)| index == 2 || index == 5 || byte.is_ascii_digit())
+        );
     }
     #[test]
     fn save_and_load_use_real_imod_stream() {

@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 use super::*;
-use core::ffi::c_int;
 
 /// Matches C `mxmlIndexDelete` (`mxml-index.c:41`).
 ///
@@ -39,8 +38,8 @@ pub fn mxml_index_enum(ind: Option<&mut MxmlIndex>) -> Option<usize> {
      * Return the next node...
      */
 
-    if ind.cur_node < ind.num_nodes {
-        let node = ind.nodes[ind.cur_node as usize];
+    if ind.cur_node < ind.nodes.len() {
+        let node = ind.nodes[ind.cur_node];
         ind.cur_node += 1;
         Some(node)
     } else {
@@ -55,10 +54,9 @@ pub fn mxml_index_find(
     element: Option<&[u8]>,
     value: Option<&[u8]>,
 ) -> Option<usize> {
-    let mut diff: c_int;
-    let mut current: c_int;
-    let mut first: c_int;
-    let mut last: c_int;
+    let mut current: usize;
+    let mut first: usize;
+    let mut last: usize;
 
     /*
      * Range check input...
@@ -84,7 +82,7 @@ pub fn mxml_index_find(
      * If there are no nodes in the index, return NULL...
      */
 
-    if ind.num_nodes == 0 {
+    if ind.nodes.is_empty() {
         return None;
     }
 
@@ -98,25 +96,18 @@ pub fn mxml_index_find(
          */
 
         first = 0;
-        last = ind.num_nodes - 1;
+        last = ind.nodes.len() - 1;
 
         while (last - first) > 1 {
             current = (first + last) / 2;
 
-            diff = index_find(arena, ind, element, value, ind.nodes[current as usize]);
-            if diff == 0 {
+            if index_find(arena, ind, element, value, ind.nodes[current]).is_eq() {
                 /*
                  * Found a match, move back to find the first...
                  */
 
                 while current > 0
-                    && index_find(
-                        arena,
-                        ind,
-                        element,
-                        value,
-                        ind.nodes[(current - 1) as usize],
-                    ) == 0
+                    && index_find(arena, ind, element, value, ind.nodes[current - 1]).is_eq()
                 {
                     current -= 1;
                 }
@@ -127,8 +118,8 @@ pub fn mxml_index_find(
 
                 ind.cur_node = current + 1;
 
-                return Some(ind.nodes[current as usize]);
-            } else if diff < 0 {
+                return Some(ind.nodes[current]);
+            } else if index_find(arena, ind, element, value, ind.nodes[current]).is_lt() {
                 last = current;
             } else {
                 first = current;
@@ -141,13 +132,13 @@ pub fn mxml_index_find(
 
         current = first;
         while current <= last {
-            if index_find(arena, ind, element, value, ind.nodes[current as usize]) == 0 {
+            if index_find(arena, ind, element, value, ind.nodes[current]).is_eq() {
                 /*
                  * Found exactly one (or possibly two) match...
                  */
 
                 ind.cur_node = current + 1;
-                return Some(ind.nodes[current as usize]);
+                return Some(ind.nodes[current]);
             }
             current += 1;
         }
@@ -156,17 +147,17 @@ pub fn mxml_index_find(
          * No matches...
          */
 
-        ind.cur_node = ind.num_nodes;
+        ind.cur_node = ind.nodes.len();
 
         None
-    } else if ind.cur_node < ind.num_nodes
-        && index_find(arena, ind, element, value, ind.nodes[ind.cur_node as usize]) == 0
+    } else if ind.cur_node < ind.nodes.len()
+        && index_find(arena, ind, element, value, ind.nodes[ind.cur_node]).is_eq()
     {
         /*
          * Return the next matching node...
          */
 
-        let node = ind.nodes[ind.cur_node as usize];
+        let node = ind.nodes[ind.cur_node];
         ind.cur_node += 1;
         Some(node)
     } else {
@@ -174,14 +165,14 @@ pub fn mxml_index_find(
          * No more matches...
          */
 
-        ind.cur_node = ind.num_nodes;
+        ind.cur_node = ind.nodes.len();
 
         None
     }
 }
 
 /// Matches C `mxmlIndexGetCount` (`mxml-index.c:229`).
-pub fn mxml_index_get_count(ind: Option<&MxmlIndex>) -> c_int {
+pub fn mxml_index_get_count(ind: Option<&MxmlIndex>) -> usize {
     /*
      * Range check input...
      */
@@ -194,7 +185,7 @@ pub fn mxml_index_get_count(ind: Option<&MxmlIndex>) -> c_int {
      * Return the number of nodes in the index...
      */
 
-    ind.num_nodes
+    ind.nodes.len()
 }
 
 /// Matches C `mxmlIndexNew` (`mxml-index.c:257`).
@@ -224,10 +215,8 @@ pub fn mxml_index_new(
 
     ind = MxmlIndex {
         attr: None,
-        num_nodes: 0,
-        alloc_nodes: 0,
         cur_node: 0,
-        nodes: Vec::new(),
+        nodes: Vec::with_capacity(64),
     };
 
     if let Some(attr) = attr {
@@ -241,14 +230,7 @@ pub fn mxml_index_new(
     }
 
     while let Some(cur) = current {
-        if ind.num_nodes >= ind.alloc_nodes {
-            /* The C mallocs 64 pointers and then reallocs 64 more at a time. */
-            ind.nodes.resize((ind.alloc_nodes + 64) as usize, 0);
-            ind.alloc_nodes += 64;
-        }
-
-        ind.nodes[ind.num_nodes as usize] = cur;
-        ind.num_nodes += 1;
+        ind.nodes.push(cur);
 
         current = mxml_find_element(arena, current, node, element, attr, None, MXML_DESCEND);
     }
@@ -257,9 +239,10 @@ pub fn mxml_index_new(
      * Sort nodes based upon the search criteria...
      */
 
-    if ind.num_nodes > 1 {
-        let right = ind.num_nodes - 1;
-        index_sort(arena, &mut ind, 0, right);
+    if ind.nodes.len() > 1 {
+        let attr = ind.attr.clone();
+        ind.nodes
+            .sort_by(|first, second| index_compare(arena, attr.as_deref(), *first, *second));
     }
 
     /*
@@ -289,7 +272,7 @@ pub fn mxml_index_reset(ind: Option<&mut MxmlIndex>) -> Option<usize> {
      * Return the first node...
      */
 
-    if ind.num_nodes != 0 {
+    if !ind.nodes.is_empty() {
         Some(ind.nodes[0])
     } else {
         None
@@ -297,9 +280,12 @@ pub fn mxml_index_reset(ind: Option<&mut MxmlIndex>) -> Option<usize> {
 }
 
 /// Matches C static `index_compare` (`mxml-index.c:434`).
-pub fn index_compare(arena: &MxmlArena, ind: &MxmlIndex, first: usize, second: usize) -> c_int {
-    let mut diff: c_int;
-
+pub fn index_compare(
+    arena: &MxmlArena,
+    attr_name: Option<&[u8]>,
+    first: usize,
+    second: usize,
+) -> core::cmp::Ordering {
     /*
      * Check the element name...  The C `strcmp`s two element names that hold
      * no NUL, so the byte-slice ordering carries the sign strcmp returns and
@@ -317,12 +303,8 @@ pub fn index_compare(arena: &MxmlArena, ind: &MxmlIndex, first: usize, second: u
     }
     .expect("mxml: index_compare dereferences the element name the C strcmps");
 
-    diff = match first_name.cmp(second_name) {
-        core::cmp::Ordering::Less => -1,
-        core::cmp::Ordering::Equal => 0,
-        core::cmp::Ordering::Greater => 1,
-    };
-    if diff != 0 {
+    let diff = first_name.cmp(second_name);
+    if !diff.is_eq() {
         return diff;
     }
 
@@ -330,18 +312,14 @@ pub fn index_compare(arena: &MxmlArena, ind: &MxmlIndex, first: usize, second: u
      * Check the attribute value...
      */
 
-    if ind.attr.is_some() {
-        let first_attr = mxml_element_get_attr(arena, Some(first), ind.attr.as_deref())
+    if attr_name.is_some() {
+        let first_attr = mxml_element_get_attr(arena, Some(first), attr_name)
             .expect("mxml: index_compare dereferences the attribute the C strcmps");
-        let second_attr = mxml_element_get_attr(arena, Some(second), ind.attr.as_deref())
+        let second_attr = mxml_element_get_attr(arena, Some(second), attr_name)
             .expect("mxml: index_compare dereferences the attribute the C strcmps");
 
-        diff = match first_attr.cmp(second_attr) {
-            core::cmp::Ordering::Less => -1,
-            core::cmp::Ordering::Equal => 0,
-            core::cmp::Ordering::Greater => 1,
-        };
-        if diff != 0 {
+        let diff = first_attr.cmp(second_attr);
+        if !diff.is_eq() {
             return diff;
         }
     }
@@ -350,7 +328,7 @@ pub fn index_compare(arena: &MxmlArena, ind: &MxmlIndex, first: usize, second: u
      * No difference, return 0...
      */
 
-    0
+    core::cmp::Ordering::Equal
 }
 
 /// Matches C static `index_find` (`mxml-index.c:471`).
@@ -360,9 +338,7 @@ pub fn index_find(
     element: Option<&[u8]>,
     value: Option<&[u8]>,
     node: usize,
-) -> c_int {
-    let mut diff: c_int;
-
+) -> core::cmp::Ordering {
     /*
      * Check the element name...
      */
@@ -374,12 +350,8 @@ pub fn index_find(
         }
         .expect("mxml: index_find dereferences the element name the C strcmps");
 
-        diff = match element.cmp(&name) {
-            core::cmp::Ordering::Less => -1,
-            core::cmp::Ordering::Equal => 0,
-            core::cmp::Ordering::Greater => 1,
-        };
-        if diff != 0 {
+        let diff = element.cmp(&name);
+        if !diff.is_eq() {
             return diff;
         }
     }
@@ -392,12 +364,8 @@ pub fn index_find(
         let attr = mxml_element_get_attr(arena, Some(node), ind.attr.as_deref())
             .expect("mxml: index_find dereferences the attribute the C strcmps");
 
-        diff = match value.cmp(&attr) {
-            core::cmp::Ordering::Less => -1,
-            core::cmp::Ordering::Equal => 0,
-            core::cmp::Ordering::Greater => 1,
-        };
-        if diff != 0 {
+        let diff = value.cmp(&attr);
+        if !diff.is_eq() {
             return diff;
         }
     }
@@ -406,92 +374,14 @@ pub fn index_find(
      * No difference, return 0...
      */
 
-    0
-}
-
-/// Matches C static `index_sort` (`mxml-index.c:518`).
-///
-/// Sort the nodes in an index...
-///
-/// This function implements the classic quicksort algorithm...
-pub fn index_sort(arena: &MxmlArena, ind: &mut MxmlIndex, mut left: c_int, right: c_int) {
-    let mut templ: c_int;
-    let mut tempr: c_int;
-
-    /*
-     * Loop until we have sorted all the way to the right...
-     */
-
-    loop {
-        /*
-         * Sort the pivot in the current partition...
-         */
-
-        let pivot: usize = ind.nodes[left as usize];
-
-        templ = left;
-        tempr = right;
-        while templ < tempr {
-            /*
-             * Move left while left node <= pivot node...
-             */
-
-            while (templ < right)
-                && index_compare(arena, ind, ind.nodes[templ as usize], pivot) <= 0
-            {
-                templ += 1;
-            }
-
-            /*
-             * Move right while right node > pivot node...
-             */
-
-            while (tempr > left) && index_compare(arena, ind, ind.nodes[tempr as usize], pivot) > 0
-            {
-                tempr -= 1;
-            }
-
-            /*
-             * Swap nodes if needed...
-             */
-
-            if templ < tempr {
-                let temp: usize = ind.nodes[templ as usize];
-                ind.nodes[templ as usize] = ind.nodes[tempr as usize];
-                ind.nodes[tempr as usize] = temp;
-            }
-        }
-
-        /*
-         * When we get here, tempr <= templ...
-         */
-
-        if index_compare(arena, ind, pivot, ind.nodes[tempr as usize]) > 0 {
-            ind.nodes[left as usize] = ind.nodes[tempr as usize];
-            ind.nodes[tempr as usize] = pivot;
-        }
-
-        /*
-         * Recursively sort the left partition as needed...
-         */
-
-        if left < (tempr - 1) {
-            index_sort(arena, ind, left, tempr - 1);
-        }
-
-        left = tempr + 1;
-        if right <= left {
-            break;
-        }
-    }
+    core::cmp::Ordering::Equal
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `mxmlIndexNew` allocates in blocks of 64 and quicksorts the nodes
-    /// (`mxml-index.c:340`), and `mxmlIndexReset` returns `nodes[0]` *without*
+    /// `mxmlIndexNew` sorts the nodes, and `mxmlIndexReset` returns `nodes[0]` *without*
     /// advancing `cur_node`, so an enumeration loop that starts with a reset
     /// visits the first node twice.  Every value below is the reference
     /// `libimxml.so` result for the same input.
@@ -500,7 +390,7 @@ mod tests {
     /// `<root><child x="3"/><child x="1"/><child x="2"/></root>` is built here
     /// with the node API: `mxml_file`'s parser is a later conversion wave.
     #[test]
-    fn index_is_sorted_allocated_in_64s_and_reset_does_not_consume() {
+    fn index_is_sorted_and_reset_does_not_consume() {
         let arena = &mut MxmlArena::new();
         let tree = mxml_new_element(arena, MXML_NO_PARENT, Some(b"root"));
         for x in [b"3".as_slice(), b"1".as_slice(), b"2".as_slice()] {
@@ -512,7 +402,6 @@ mod tests {
         let mut ind = mxml_index_new(arena, tree, Some(b"child"), Some(b"x"))
             .expect("mxmlIndexNew returned an index");
         assert_eq!(mxml_index_get_count(Some(&ind)), 3);
-        assert_eq!(ind.alloc_nodes, 64);
 
         let mut seen: Vec<Vec<u8>> = Vec::new();
         let mut n = mxml_index_reset(Some(&mut ind));

@@ -8,13 +8,12 @@
 
 use super::*;
 use core::any::Any;
-use core::ffi::c_int;
 
 /// Matches C `mxmlAdd` (`mxml-node.c:41`).
 pub fn mxml_add(
     arena: &mut MxmlArena,
     parent: Option<usize>,
-    where_: c_int,
+    where_: i32,
     child: Option<usize>,
     node: Option<usize>,
 ) {
@@ -191,7 +190,7 @@ pub fn mxml_delete(arena: &mut MxmlArena, node: Option<usize>) {
 }
 
 /// Matches C `mxmlGetRefCount` (`mxml-node.c:230`).
-pub fn mxml_get_ref_count(arena: &MxmlArena, node: Option<usize>) -> c_int {
+pub fn mxml_get_ref_count(arena: &MxmlArena, node: Option<usize>) -> i32 {
     /*
      * Range check input...
      */
@@ -295,7 +294,7 @@ pub fn mxml_new_element(
 pub fn mxml_new_integer(
     arena: &mut MxmlArena,
     parent: Option<usize>,
-    integer: c_int,
+    integer: i32,
 ) -> Option<usize> {
     let node: Option<usize>;
 
@@ -359,7 +358,7 @@ pub fn mxml_new_real(arena: &mut MxmlArena, parent: Option<usize>, real: f64) ->
 pub fn mxml_new_text(
     arena: &mut MxmlArena,
     parent: Option<usize>,
-    whitespace: c_int,
+    whitespace: i32,
     string: Option<&[u8]>,
 ) -> Option<usize> {
     let node: Option<usize>;
@@ -395,7 +394,7 @@ pub fn mxml_new_text(
 pub fn mxml_new_textf(
     arena: &mut MxmlArena,
     parent: Option<usize>,
-    whitespace: c_int,
+    whitespace: i32,
     format: Option<&[u8]>,
     arg: &[u8],
 ) -> Option<usize> {
@@ -476,7 +475,7 @@ pub fn mxml_new_xml(arena: &mut MxmlArena, version: Option<&[u8]>) -> Option<usi
 }
 
 /// Matches C `mxmlRelease` (`mxml-node.c:651`).
-pub fn mxml_release(arena: &mut MxmlArena, node: Option<usize>) -> c_int {
+pub fn mxml_release(arena: &mut MxmlArena, node: Option<usize>) -> i32 {
     if let Some(node) = node {
         arena.node_mut(node).ref_count -= 1;
         if arena.node(node).ref_count <= 0 {
@@ -491,7 +490,7 @@ pub fn mxml_release(arena: &mut MxmlArena, node: Option<usize>) -> c_int {
 }
 
 /// Matches C `mxmlRetain` (`mxml-node.c:675`).
-pub fn mxml_retain(arena: &mut MxmlArena, node: Option<usize>) -> c_int {
+pub fn mxml_retain(arena: &mut MxmlArena, node: Option<usize>) -> i32 {
     if let Some(node) = node {
         arena.node_mut(node).ref_count += 1;
         arena.node(node).ref_count
@@ -563,7 +562,6 @@ pub fn mxml_new(arena: &mut MxmlArena, parent: Option<usize>, type_: MxmlType) -
         value: match type_ {
             MXML_ELEMENT => MxmlValue::Element(MxmlElement {
                 name: None,
-                num_attrs: 0,
                 attrs: Vec::new(),
             }),
             MXML_INTEGER => MxmlValue::Integer(0),

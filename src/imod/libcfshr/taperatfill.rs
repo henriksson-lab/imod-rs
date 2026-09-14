@@ -1,12 +1,24 @@
 //! Translation of `IMOD/libcfshr/taperatfill.c`.
-#![allow(dead_code, static_mut_refs)]
+#![allow(dead_code)]
 
-use crate::imod::libcfshr::islice::{Islice, slice_get_val, slice_init, slice_put_val};
+use crate::imod::libcfshr::islice::{Islice, slice_get_val, slice_put_val};
+use std::sync::Mutex;
 
 const MAX_TAPER: i32 = 256;
 const MAX_AVG_OUT: usize = 16;
-static mut S_FOUND_FILL: i32 = 0;
-static mut S_LAST_FILL_VAL: f32 = 0.0;
+
+/// Most recently detected fill value, shared by the taper operation and its
+/// legacy query entry point.
+#[derive(Default)]
+struct TaperFillState {
+    found_fill: bool,
+    last_fill_value: f32,
+}
+
+static TAPER_FILL_STATE: Mutex<TaperFillState> = Mutex::new(TaperFillState {
+    found_fill: false,
+    last_fill_value: 0.0,
+});
 
 /// C `sliceTaperAtFill`.
 pub unsafe fn slice_taper_at_fill(sl: *mut Islice, mut ntaper: i32, inside: i32) -> i32 {
@@ -16,7 +28,10 @@ pub unsafe fn slice_taper_at_fill(sl: *mut Islice, mut ntaper: i32, inside: i32)
         let inside = if inside != 0 { 1 } else { 0 };
         let xsize = (*sl).xsize;
         let ysize = (*sl).ysize;
-        S_FOUND_FILL = 0;
+        TAPER_FILL_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .found_fill = false;
         let (mut fillval, mut longest, mut longix, mut longiy, mut dir) = (0., 0, 0, 0, 0);
         slice_find_fill_value(
             sl,
@@ -52,8 +67,12 @@ pub unsafe fn slice_taper_at_fill(sl: *mut Islice, mut ntaper: i32, inside: i32)
         if !found {
             return 0;
         }
-        S_FOUND_FILL = 1;
-        S_LAST_FILL_VAL = fillval;
+        let mut state = TAPER_FILL_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.found_fill = true;
+        state.last_fill_value = fillval;
+        drop(state);
         let mut pixmap = vec![0u8; (xsize * ysize) as usize];
         let dirstart = dir;
         let xstart = ix;
@@ -261,9 +280,17 @@ pub unsafe fn taper_at_fill(
     inside: i32,
 ) -> i32 {
     unsafe {
-        let mut slice = core::mem::zeroed::<Islice>();
-        slice_init(&mut slice, nx, ny, data_type, array);
-        slice_taper_at_fill(&mut slice, ntaper, inside)
+        let Some(mut slice) = crate::imod::libcfshr::islice::slice_create(nx, ny, data_type) else {
+            return -1;
+        };
+        core::ptr::copy_nonoverlapping(
+            array.cast::<u8>(),
+            slice.data.as_mut_ptr(),
+            slice.data.len(),
+        );
+        let result = slice_taper_at_fill(slice.as_mut(), ntaper, inside);
+        core::ptr::copy_nonoverlapping(slice.data.as_ptr(), array.cast::<u8>(), slice.data.len());
+        result
     }
 }
 /// C Fortran wrapper `taperatfill`.
@@ -279,8 +306,11 @@ pub unsafe fn taper_at_fill_fortran(
 /// C `getLastTaperFillValue`.
 pub unsafe fn get_last_taper_fill_value(value: *mut f32) -> i32 {
     unsafe {
-        *value = S_LAST_FILL_VAL;
-        S_FOUND_FILL
+        let state = TAPER_FILL_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *value = state.last_fill_value;
+        i32::from(state.found_fill)
     }
 }
 /// C Fortran wrapper `getlasttaperfillvalue`.
@@ -536,13 +566,17 @@ mod tests {
                     image[y * 12 + x] = 10.;
                 }
             }
-            let mut sl = core::mem::zeroed::<Islice>();
-            slice_init(&mut sl, 12, 12, 2, image.as_mut_ptr().cast());
+            let mut sl = crate::imod::libcfshr::islice::slice_create(12, 12, 2).unwrap();
+            core::ptr::copy_nonoverlapping(
+                image.as_ptr().cast::<u8>(),
+                sl.data.as_mut_ptr(),
+                sl.data.len(),
+            );
             let (mut f, mut len, mut x, mut y, mut d) = (0., 0, 0, 0, 0);
-            slice_find_fill_value(&mut sl, &mut f, &mut len, &mut x, &mut y, &mut d);
+            slice_find_fill_value(sl.as_mut(), &mut f, &mut len, &mut x, &mut y, &mut d);
             assert_eq!(f, 0.);
             assert!(len >= 10);
-            assert_eq!(slice_taper_at_fill(&mut sl, 2, 0), 0);
+            assert_eq!(slice_taper_at_fill(sl.as_mut(), 2, 0), 0);
             let mut last = 0.;
             assert_eq!(get_last_taper_fill_value(&mut last), 1);
             assert_eq!(last, 0.);
@@ -558,13 +592,23 @@ mod tests {
                     image[y * 12 + x] = 10.;
                 }
             }
-            let mut sl = core::mem::zeroed::<Islice>();
-            slice_init(&mut sl, 12, 12, 2, image.as_mut_ptr().cast());
+            let mut sl = crate::imod::libcfshr::islice::slice_create(12, 12, 2).unwrap();
+            core::ptr::copy_nonoverlapping(
+                image.as_ptr().cast::<u8>(),
+                sl.data.as_mut_ptr(),
+                sl.data.len(),
+            );
             let mut old = 0.;
             let mut new = 0.;
-            assert_eq!(slice_replace_fill(&mut sl, 0, 0, &mut old, &mut new), 0);
+            assert_eq!(slice_replace_fill(sl.as_mut(), 0, 0, &mut old, &mut new), 0);
             assert_eq!((old, new), (0., 10.));
-            assert!(image.iter().all(|value| *value == 10.));
+            for y in 0..12 {
+                for x in 0..12 {
+                    let mut value = [0.; 4];
+                    assert_eq!(slice_get_val(sl.as_mut(), x, y, &mut value), 0);
+                    assert_eq!(value[0], 10.);
+                }
+            }
         }
     }
 }

@@ -70,6 +70,7 @@ use crate::imod::libwarp::maggradfield::{add_mag_grad_field, make_mag_grad_field
 use crate::imod::libwarp::warpfiles::get_linear_transform;
 use crate::imod::libwarp::warpinterp::warp_interp;
 use crate::imod::libwarp::warputils::{find_max_grid_size, get_size_adjusted_grid};
+use chrono::{Local, Timelike};
 use std::io::BufReader;
 
 /// Source fallback PIP table (`newstack.f90:151`), retained as 74 `@`-separated
@@ -2772,25 +2773,15 @@ pub fn newstack() {
         title[56..65].copy_from_slice(&date);
         // Source `timeStr` (`call time(timeStr)`, `newstack.f90:1518`), read
         // again for the scratch file's extension at `newstack.f90:2287-2290`.
-        // `b3dTime`'s `strftime(..., "%H:%M:%S", ...)`.  The conversion to
-        // local civil time is the same foreign boundary `b3ddate.rs`
-        // documents -- Rust's standard library has no timezone database --
-        // but the eight characters are formatted here.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as libc::time_t;
-        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
+        let local = Local::now();
+        let text = format!(
+            "{:02}:{:02}:{:02}",
+            local.hour(),
+            local.minute(),
+            local.second()
+        );
         let mut time_str = [b' '; 8];
-        if !libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
-            let local = local.assume_init();
-            let text = format!(
-                "{:02}:{:02}:{:02}",
-                local.tm_hour, local.tm_min, local.tm_sec
-            );
-            let count = text.len().min(8);
-            time_str[..count].copy_from_slice(&text.as_bytes()[..count]);
-        }
+        time_str.copy_from_slice(text.as_bytes());
         title[67..75].copy_from_slice(&time_str);
         // Source `ifTempOpen` (`newstack.f90:1523`).
         let mut if_temp_open = 0_i32;

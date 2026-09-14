@@ -3,10 +3,9 @@
 
 use super::*;
 use core::any::Any;
-use core::ffi::c_int;
 
 /// Matches C `mxmlSetCDATA` (`mxml-set.c:32`).
-pub fn mxml_set_cdata(arena: &mut MxmlArena, node: Option<usize>, data: Option<&[u8]>) -> c_int {
+pub fn mxml_set_cdata(arena: &mut MxmlArena, node: Option<usize>, data: Option<&[u8]>) -> i32 {
     /*
      * Range check input...
      */
@@ -70,7 +69,7 @@ pub fn mxml_set_custom(
     node: Option<usize>,
     data: Option<Box<dyn Any>>,
     destroy: MxmlCustomDestroyCb,
-) -> c_int {
+) -> i32 {
     /*
      * Range check input...
      */
@@ -112,7 +111,7 @@ pub fn mxml_set_custom(
 }
 
 /// Matches C `mxmlSetElement` (`mxml-set.c:104`).
-pub fn mxml_set_element(arena: &mut MxmlArena, node: Option<usize>, name: Option<&[u8]>) -> c_int {
+pub fn mxml_set_element(arena: &mut MxmlArena, node: Option<usize>, name: Option<&[u8]>) -> i32 {
     /*
      * Range check input...
      */
@@ -140,7 +139,7 @@ pub fn mxml_set_element(arena: &mut MxmlArena, node: Option<usize>, name: Option
 }
 
 /// Matches C `mxmlSetInteger` (`mxml-set.c:130`).
-pub fn mxml_set_integer(arena: &mut MxmlArena, node: Option<usize>, integer: c_int) -> c_int {
+pub fn mxml_set_integer(arena: &mut MxmlArena, node: Option<usize>, integer: i32) -> i32 {
     /*
      * Range check input...
      */
@@ -172,7 +171,7 @@ pub fn mxml_set_integer(arena: &mut MxmlArena, node: Option<usize>, integer: c_i
 }
 
 /// Matches C `mxmlSetOpaque` (`mxml-set.c:158`).
-pub fn mxml_set_opaque(arena: &mut MxmlArena, node: Option<usize>, opaque: Option<&[u8]>) -> c_int {
+pub fn mxml_set_opaque(arena: &mut MxmlArena, node: Option<usize>, opaque: Option<&[u8]>) -> i32 {
     /*
      * Range check input...
      */
@@ -207,7 +206,7 @@ pub fn mxml_set_opaque(arena: &mut MxmlArena, node: Option<usize>, opaque: Optio
 }
 
 /// Matches C `mxmlSetReal` (`mxml-set.c:190`).
-pub fn mxml_set_real(arena: &mut MxmlArena, node: Option<usize>, real: f64) -> c_int {
+pub fn mxml_set_real(arena: &mut MxmlArena, node: Option<usize>, real: f64) -> i32 {
     /*
      * Range check input...
      */
@@ -242,9 +241,9 @@ pub fn mxml_set_real(arena: &mut MxmlArena, node: Option<usize>, real: f64) -> c
 pub fn mxml_set_text(
     arena: &mut MxmlArena,
     node: Option<usize>,
-    whitespace: c_int,
+    whitespace: i32,
     string: Option<&[u8]>,
-) -> c_int {
+) -> i32 {
     /*
      * Range check input...
      */
@@ -292,10 +291,10 @@ pub fn mxml_set_text(
 pub fn mxml_set_textf(
     arena: &mut MxmlArena,
     node: Option<usize>,
-    whitespace: c_int,
+    whitespace: i32,
     format: Option<&[u8]>,
     arg: &[u8],
-) -> c_int {
+) -> i32 {
     /*
      * Range check input...
      */
@@ -339,7 +338,7 @@ pub fn mxml_set_user_data(
     arena: &mut MxmlArena,
     node: Option<usize>,
     data: Option<Box<dyn Any>>,
-) -> c_int {
+) -> i32 {
     /*
      * Range check input...
      */
@@ -378,7 +377,7 @@ mod tests {
         mxml_new_text(arena, tree, 0, Some(b"hello"));
         assert_eq!(mxml_get_type(arena, tree), MXML_ELEMENT);
         assert_eq!(mxml_set_text(arena, tree, 0, Some(b"bye")), 0);
-        let mut ws: c_int = 0;
+        let mut ws: i32 = 0;
         assert_eq!(
             mxml_get_text(arena, tree, Some(&mut ws)),
             Some(b"bye".as_slice())

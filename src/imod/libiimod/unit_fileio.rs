@@ -12,37 +12,15 @@ pub struct _IO_marker {
 }
 
 unsafe extern "C" {
-    static mut stdout: *mut FILE;
-    fn remove(__filename: *const ::core::ffi::c_char) -> ::core::ffi::c_int;
-    fn fflush(__stream: *mut FILE) -> ::core::ffi::c_int;
-    fn fprintf(
-        __stream: *mut FILE,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    fn printf(__format: *const ::core::ffi::c_char, ...) -> ::core::ffi::c_int;
-    fn sprintf(
-        __s: *mut ::core::ffi::c_char,
-        __format: *const ::core::ffi::c_char,
-        ...
-    ) -> ::core::ffi::c_int;
-    fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> ::core::ffi::c_int;
-    fn memset(
-        __s: *mut ::core::ffi::c_void,
-        __c: ::core::ffi::c_int,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    fn strrchr(
-        __s: *const ::core::ffi::c_char,
-        __c: ::core::ffi::c_int,
-    ) -> *mut ::core::ffi::c_char;
-    fn strerror(__errnum: ::core::ffi::c_int) -> *mut ::core::ffi::c_char;
-    fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
-    fn free(__ptr: *mut ::core::ffi::c_void);
-    fn exit(__status: ::core::ffi::c_int) -> !;
+    fn remove(__filename: *const ::core::ffi::c_char) -> i32;
+    fn printf(__format: *const ::core::ffi::c_char, ...) -> i32;
+    fn stat(__file: *const ::core::ffi::c_char, __buf: *mut stat) -> i32;
+    fn memset(__s: *mut ::core::ffi::c_void, __c: i32, __n: size_t) -> *mut ::core::ffi::c_void;
+    fn strrchr(__s: *const ::core::ffi::c_char, __c: i32) -> *mut ::core::ffi::c_char;
+    fn strerror(__errnum: i32) -> *mut ::core::ffi::c_char;
+    fn exit(__status: i32) -> !;
     fn getenv(__name: *const ::core::ffi::c_char) -> *mut ::core::ffi::c_char;
-    fn __errno_location() -> *mut ::core::ffi::c_int;
+    fn __errno_location() -> *mut i32;
 }
 pub type size_t = usize;
 pub type __uint16_t = u16;
@@ -63,7 +41,7 @@ pub type __syscall_slong_t = ::core::ffi::c_long;
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct _IO_FILE {
-    pub _flags: ::core::ffi::c_int,
+    pub _flags: i32,
     pub _IO_read_ptr: *mut ::core::ffi::c_char,
     pub _IO_read_end: *mut ::core::ffi::c_char,
     pub _IO_read_base: *mut ::core::ffi::c_char,
@@ -77,8 +55,8 @@ pub struct _IO_FILE {
     pub _IO_save_end: *mut ::core::ffi::c_char,
     pub _markers: *mut _IO_marker,
     pub _chain: *mut _IO_FILE,
-    pub _fileno: ::core::ffi::c_int,
-    pub _flags2: ::core::ffi::c_int,
+    pub _fileno: i32,
+    pub _flags2: i32,
     pub _old_offset: __off_t,
     pub _cur_column: ::core::ffi::c_ushort,
     pub _vtable_offset: ::core::ffi::c_schar,
@@ -90,7 +68,7 @@ pub struct _IO_FILE {
     pub _freeres_list: *mut _IO_FILE,
     pub _freeres_buf: *mut ::core::ffi::c_void,
     pub __pad5: size_t,
-    pub _mode: ::core::ffi::c_int,
+    pub _mode: i32,
     pub _unused2: [::core::ffi::c_char; 20],
 }
 pub type _IO_lock_t = ();
@@ -110,7 +88,7 @@ pub struct stat {
     pub st_mode: __mode_t,
     pub st_uid: __uid_t,
     pub st_gid: __gid_t,
-    pub __pad0: ::core::ffi::c_int,
+    pub __pad0: i32,
     pub st_rdev: __dev_t,
     pub st_size: __off_t,
     pub st_blksize: __blksize_t,
@@ -123,18 +101,14 @@ pub struct stat {
 pub type b3dByte = ::core::ffi::c_char;
 pub type b3dUByte = ::core::ffi::c_uchar;
 pub type b3dInt16 = ::core::ffi::c_short;
-pub type b3dInt32 = ::core::ffi::c_int;
+pub type b3dInt32 = i32;
 pub type b3dFloat = ::core::ffi::c_float;
-pub type fortStrLen_t = ::core::ffi::c_int;
+pub type fortStrLen_t = i32;
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
     CArg, b3d_error, b3d_get_error as b3dGetError, b3d_milli_sleep as b3dMilliSleep,
-    b3d_set_store_error as b3dSetStoreError, c_format_bytes, f2c_string as f2cString,
+    b3d_set_store_error as b3dSetStoreError, c_format_bytes, fortran_string,
     imod_backup_file as imodBackupFile,
-};
-use crate::imod::libcfshr::ilist::{
-    Ilist, ilist_append as ilistAppend, ilist_item as ilistItem, ilist_new as ilistNew,
-    ilist_remove as ilistRemove, ilist_size as ilistSize,
 };
 use crate::imod::libiimod::iihdf::hdf_write_global_adoc as hdfWriteGlobalAdoc;
 use crate::imod::libiimod::iimage::{
@@ -152,59 +126,102 @@ use crate::imod::libiimod::iimrc::ii_mrc_check as iiMRCCheck;
 use crate::imod::libiimod::iishrmem::ii_shr_mem_check_size as iiShrMemCheckSize;
 use crate::imod::libiimod::iitif::tiff_set_string_tag_to_print as tiffSetStringTagToPrint;
 use crate::imod::libiimod::mrcfiles::{MrcHeader, mrc_getdcsize};
+use std::cell::{Cell, RefCell};
 use std::io::Write as _;
 
-#[repr(C)]
 pub struct Unit {
     pub ii_file: *mut ImodImageFile,
-    pub header: *mut MrcHeader,
-    pub current_sec: ::core::ffi::c_int,
-    pub current_line: ::core::ffi::c_int,
+    header: UnitHeader,
+    pub current_sec: i32,
+    pub current_line: i32,
     /// C `char *tailName` (`unit_fileio.c:119`), "pointer to filename only in
     /// fname".  Now the index of that byte within `iiFile->filename` rather
     /// than a pointer into it, because the name owns its storage; nothing in
     /// the C or in this translation ever reads the field.
     pub tail_name: usize,
-    pub attribute: ::core::ffi::c_int,
+    pub attribute: i32,
     pub being_used: ::core::ffi::c_uchar,
     pub read_only: ::core::ffi::c_uchar,
     pub no_convert: ::core::ffi::c_uchar,
 }
+
+/// A unit either owns the header synthesized for a non-MRC image format, or
+/// borrows the header owned by its `ImodImageFile`.  The raw pointer is kept
+/// only in the latter case because `ImodImageFile` is still an FFI-shaped
+/// graph; the unit table itself never owns an erased allocation.
+enum UnitHeader {
+    None,
+    Owned(Box<MrcHeader>),
+    Borrowed(*mut MrcHeader),
+}
+
+/// Per-thread Fortran unit state.  Boxes keep an individual unit's address
+/// stable after callers receive its transient raw ABI cursor.  The legacy unit
+/// API itself has no cross-thread ownership contract, and `MrcHeader` carries
+/// non-Send file handles, so thread-local storage faithfully avoids inventing
+/// one while making ownership explicit.
+struct UnitTable {
+    units: Vec<Box<Unit>>,
+    map: Vec<i32>,
+    no_convert_units: Vec<i16>,
+}
 pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-pub const IIUNIT_SWAPPED: ::core::ffi::c_long =
-    (1 as ::core::ffi::c_long) << 0 as ::core::ffi::c_int;
-pub const IIUNIT_BYTES_SIGNED: ::core::ffi::c_long =
-    (1 as ::core::ffi::c_long) << 1 as ::core::ffi::c_int;
-pub const IIFILE_DEFAULT: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-pub const IIFILE_TIFF: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const IIFILE_MRC: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const IIFILE_RAW: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-pub const IIFILE_HDF: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
-pub const IIFILE_SHR_MEM: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
-pub const IIFORMAT_COMPLEX: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-pub const MAX_UNIT: ::core::ffi::c_int = 1000 as ::core::ffi::c_int;
-pub const UNIT_ATBUT_RO: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-pub const UNIT_ATBUT_NEW: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-pub const UNIT_ATBUT_OLD: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-pub const UNIT_ATBUT_SCRATCH: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-static mut sUnitList: *mut Ilist = ::core::ptr::null::<Ilist>() as *mut Ilist;
-static mut sUnitMap: *mut ::core::ffi::c_int =
-    ::core::ptr::null::<::core::ffi::c_int>() as *mut ::core::ffi::c_int;
-static mut sMapSize: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-static mut sNoConvList: *mut Ilist = ::core::ptr::null::<Ilist>() as *mut Ilist;
-static mut sBriefHeader: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
-static mut sPrintHeader: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-static mut sExitOnError: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-static mut sStoreError: ::core::ffi::c_int = -(1 as ::core::ffi::c_int);
+pub const IIUNIT_SWAPPED: ::core::ffi::c_long = (1 as ::core::ffi::c_long) << 0 as i32;
+pub const IIUNIT_BYTES_SIGNED: ::core::ffi::c_long = (1 as ::core::ffi::c_long) << 1 as i32;
+pub const IIFILE_DEFAULT: i32 = -(1 as i32);
+pub const IIFILE_TIFF: i32 = 1 as i32;
+pub const IIFILE_MRC: i32 = 2 as i32;
+pub const IIFILE_RAW: i32 = 4 as i32;
+pub const IIFILE_HDF: i32 = 5 as i32;
+pub const IIFILE_SHR_MEM: i32 = 8 as i32;
+pub const IIFORMAT_COMPLEX: i32 = 3 as i32;
+pub const MAX_UNIT: i32 = 1000 as i32;
+pub const UNIT_ATBUT_RO: i32 = 1 as i32;
+pub const UNIT_ATBUT_NEW: i32 = 2 as i32;
+pub const UNIT_ATBUT_OLD: i32 = 3 as i32;
+pub const UNIT_ATBUT_SCRATCH: i32 = 4 as i32;
+thread_local! {
+    static UNIT_TABLE: RefCell<UnitTable> = const { RefCell::new(UnitTable {
+        units: Vec::new(),
+        map: Vec::new(),
+        no_convert_units: Vec::new(),
+    }) };
+    /// C's process-global output options are consumed only by this module's
+    /// per-thread unit API.  Cells retain the mutation semantics without raw
+    /// globals or synchronization that the original ABI never provided.
+    static UNIT_OPTIONS: UnitOptions = const { UnitOptions::new() };
+    /// `sWritePartMess` was only used as a non-NULL marker between the public
+    /// whole/subarray write calls and their immediate `iiu_write_sec_part`
+    /// call.  The text itself was never read.
+    static WRITE_PART_MESSAGE: Cell<bool> = const { Cell::new(false) };
+}
+
+struct UnitOptions {
+    brief_header: Cell<i32>,
+    print_header: Cell<i32>,
+    exit_on_error: Cell<i32>,
+    store_error: Cell<i32>,
+}
+
+impl UnitOptions {
+    const fn new() -> Self {
+        Self {
+            brief_header: Cell::new(-1),
+            print_header: Cell::new(1),
+            exit_on_error: Cell::new(1),
+            store_error: Cell::new(-1),
+        }
+    }
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_open(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut name: *const ::core::ffi::c_char,
     mut attribute: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
+) -> i32 {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
-    let mut mode: ::core::ffi::c_int = 0;
-    let mut errSave: ::core::ffi::c_int = 0;
+    let mut mode: i32 = 0;
+    let mut errSave: i32 = 0;
     // `unit_fileio.c:207`: the `fopen` mode strings.  `iiFOpen`/`iiOpenNew`
     // now take the mode as a `&str`, so the table is plain Rust.
     let modes: [&str; 4] = ["rb", "rb+", "wb", "wb+"];
@@ -216,38 +233,33 @@ pub unsafe extern "C" fn iiu_open(
     );
     (*u).being_used = 1 as ::core::ffi::c_uchar;
     (*u).read_only = 0 as ::core::ffi::c_uchar;
-    (*u).current_sec = 0 as ::core::ffi::c_int;
-    (*u).current_line = 0 as ::core::ffi::c_int;
-    if *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'R' as i32
-        || *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'r' as i32
+    (*u).current_sec = 0 as i32;
+    (*u).current_line = 0 as i32;
+    if *attribute.offset(0 as i32 as isize) as i32 == 'R' as i32
+        || *attribute.offset(0 as i32 as isize) as i32 == 'r' as i32
     {
-        mode = 0 as ::core::ffi::c_int;
+        mode = 0 as i32;
         (*u).attribute = UNIT_ATBUT_RO;
         (*u).read_only = 1 as ::core::ffi::c_uchar;
     }
-    if name.is_null()
-        || *name.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 0 as ::core::ffi::c_int
-    {
+    if name.is_null() || *name.offset(0 as i32 as isize) as i32 == 0 as i32 {
         iiInsertCheckFunction(
-            Some(iiMRCCheck as unsafe extern "C" fn(*mut ImodImageFile) -> ::core::ffi::c_int),
-            0 as ::core::ffi::c_int,
+            Some(iiMRCCheck as unsafe extern "C" fn(*mut ImodImageFile) -> i32),
+            0 as i32,
         );
     }
-    if *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'N' as i32
-        || *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'n' as i32
+    if *attribute.offset(0 as i32 as isize) as i32 == 'N' as i32
+        || *attribute.offset(0 as i32 as isize) as i32 == 'n' as i32
     {
         if std::env::var_os("IMOD_NO_IMAGE_BACKUP").is_none() {
-            *__errno_location() = 0 as ::core::ffi::c_int;
+            *__errno_location() = 0 as i32;
             if imodBackupFile(::core::ffi::CStr::from_ptr(name).to_string_lossy().as_ref()) != 0 {
                 errSave = *__errno_location();
-                fprintf(
-                    stdout,
-                    b"\nWARNING: iiuOpen - Could not rename '%s' to '%s~'\n\0" as *const u8
-                        as *const ::core::ffi::c_char,
-                    name,
-                    name,
-                );
+                let name_bytes = core::ffi::CStr::from_ptr(name).to_bytes();
+                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                    "\nWARNING: iiuOpen - Could not rename '%s' to '%s~'\n",
+                    &[CArg::Bytes(name_bytes), CArg::Bytes(name_bytes)],
+                ));
                 if errSave != 0 {
                     // `strerror` is the C library's own errno table and its
                     // exact wording is part of the acceptance target, so the
@@ -266,22 +278,22 @@ pub unsafe extern "C" fn iiu_open(
                 }
             }
         }
-        mode = 3 as ::core::ffi::c_int;
+        mode = 3 as i32;
         (*u).attribute = UNIT_ATBUT_NEW;
     }
-    if *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'O' as i32
-        || *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'o' as i32
+    if *attribute.offset(0 as i32 as isize) as i32 == 'O' as i32
+        || *attribute.offset(0 as i32 as isize) as i32 == 'o' as i32
     {
-        mode = 1 as ::core::ffi::c_int;
+        mode = 1 as i32;
         (*u).attribute = UNIT_ATBUT_OLD;
     }
-    if *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 'S' as i32
-        || *attribute.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == 's' as i32
+    if *attribute.offset(0 as i32 as isize) as i32 == 'S' as i32
+        || *attribute.offset(0 as i32 as isize) as i32 == 's' as i32
     {
-        mode = 3 as ::core::ffi::c_int;
+        mode = 3 as i32;
         (*u).attribute = UNIT_ATBUT_SCRATCH;
     }
-    if mode == 3 as ::core::ffi::c_int {
+    if mode == 3 as i32 {
         (*u).ii_file = iiOpenNew(
             core::ffi::CStr::from_ptr(name).to_bytes(),
             modes[mode as usize],
@@ -292,10 +304,10 @@ pub unsafe extern "C" fn iiu_open(
                 Some(&mut ImodFile::Stdout),
                 format_args!("\nERROR: iiuOpen - Opening new output file\n"),
             );
-            if sExitOnError != 0 {
-                exit(1 as ::core::ffi::c_int);
+            if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+                exit(1 as i32);
             } else {
-                return 1 as ::core::ffi::c_int;
+                return 1 as i32;
             }
         }
         {
@@ -310,7 +322,7 @@ pub unsafe extern "C" fn iiu_open(
                 ],
             ));
         }
-        fflush(stdout);
+        let _ = ImodFile::Stdout.flush();
     } else {
         (*u).ii_file = iiOpen(
             core::ffi::CStr::from_ptr(name).to_bytes(),
@@ -324,10 +336,10 @@ pub unsafe extern "C" fn iiu_open(
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
                 ),
             );
-            if sExitOnError != 0 {
-                exit(1 as ::core::ffi::c_int);
+            if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+                exit(1 as i32);
             } else {
-                return 1 as ::core::ffi::c_int;
+                return 1 as i32;
             }
         }
         if !((*(*u).ii_file).write_section.is_some()
@@ -341,14 +353,14 @@ pub unsafe extern "C" fn iiu_open(
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
                 ),
             );
-            if sExitOnError != 0 {
-                exit(1 as ::core::ffi::c_int);
+            if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+                exit(1 as i32);
             } else {
-                return 1 as ::core::ffi::c_int;
+                return 1 as i32;
             }
         }
         if (*(*u).ii_file).file == IIFILE_TIFF {
-            if (*(*u).ii_file).mode < 0 as ::core::ffi::c_int {
+            if (*(*u).ii_file).mode < 0 as i32 {
                 b3d_error(
                     Some(&mut ImodFile::Stdout),
                     format_args!(
@@ -356,10 +368,10 @@ pub unsafe extern "C" fn iiu_open(
                         core::ffi::CStr::from_ptr(name).to_string_lossy()
                     ),
                 );
-                if sExitOnError != 0 {
-                    exit(1 as ::core::ffi::c_int);
+                if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+                    exit(1 as i32);
                 } else {
-                    return 1 as ::core::ffi::c_int;
+                    return 1 as i32;
                 }
             }
         }
@@ -369,15 +381,8 @@ pub unsafe extern "C" fn iiu_open(
         && (*(*u).ii_file).file != IIFILE_HDF
         && (*(*u).ii_file).file != IIFILE_SHR_MEM
     {
-        // `Box`, not `malloc`: `iiFillMrcHeader` below takes a `&mut
-        // MrcHeader` and assigns its `Option<ImodFile>` `fp`, which on
-        // `malloc` residue is a drop of garbage rather than a store.
-        (*u).header = Box::into_raw(Box::new(MrcHeader::default()));
-        iiu_memory_error(
-            (*u).header as *mut ::core::ffi::c_void,
-            "ERROR: iiuOpen - Allocating MRC header",
-        );
-        if iiFillMrcHeader((*u).ii_file, (*u).header) != 0 {
+        let mut header = Box::new(MrcHeader::default());
+        if iiFillMrcHeader((*u).ii_file, &raw mut *header) != 0 {
             b3d_error(
                 Some(&mut ImodFile::Stdout),
                 format_args!(
@@ -385,417 +390,319 @@ pub unsafe extern "C" fn iiu_open(
                     core::ffi::CStr::from_ptr(name).to_string_lossy()
                 ),
             );
-            if sExitOnError != 0 {
-                exit(1 as ::core::ffi::c_int);
+            if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+                exit(1 as i32);
             } else {
-                return 1 as ::core::ffi::c_int;
+                return 1 as i32;
             }
         }
+        (*u).header = UnitHeader::Owned(header);
     } else {
-        (*u).header = (*(*u).ii_file).header as *mut MrcHeader;
+        (*u).header = UnitHeader::Borrowed((*(*u).ii_file).header.cast());
     }
     // `unit_fileio.c:273-280`: the last '/' or the last '\\', whichever is
     // later, plus one; index 0 when there is neither.
     let name = (*(*u).ii_file).filename.as_deref().unwrap_or_default();
-    let slash = name.iter().rposition(|b| *b == b'/');
-    let tailback = name.iter().rposition(|b| *b == b'\\');
+    let slash = name.bytes().rposition(|b| b == b'/');
+    let tailback = name.bytes().rposition(|b| b == b'\\');
     (*u).tail_name = match slash.max(tailback) {
         Some(pos) => pos + 1,
         None => 0,
     };
-    return 0 as ::core::ffi::c_int;
+    return 0 as i32;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuopen_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut name: *mut ::core::ffi::c_char,
     mut attribute: *mut ::core::ffi::c_char,
     mut name_l: fortStrLen_t,
     mut attr_l: fortStrLen_t,
-) -> ::core::ffi::c_int {
-    let mut cname: *mut ::core::ffi::c_char = f2cString(name, name_l as ::core::ffi::c_int);
-    let mut cattr: *mut ::core::ffi::c_char = f2cString(attribute, attr_l as ::core::ffi::c_int);
-    let mut err: ::core::ffi::c_int = 0;
-    if cname.is_null() || cattr.is_null() {
-        iiu_memory_error(NULL, "ERROR: iiuopen - Allocating C strings");
-    }
-    err = iiu_open(*iunit, cname, cattr);
-    free(cname as *mut ::core::ffi::c_void);
-    free(cattr as *mut ::core::ffi::c_void);
-    return err;
+) -> i32 {
+    let cname = fortran_string(name, name_l as i32);
+    let cattr = fortran_string(attribute, attr_l as i32);
+    let cname = std::ffi::CString::new(cname).unwrap_or_default();
+    let cattr = std::ffi::CString::new(cattr).unwrap_or_default();
+    iiu_open(*iunit, cname.as_ptr().cast_mut(), cattr.as_ptr().cast_mut())
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_close(mut iunit: ::core::ffi::c_int) {
+pub unsafe extern "C" fn iiu_close(mut iunit: i32) {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
-    let mut trial: ::core::ffi::c_int = 0;
-    let mut delay: ::core::ffi::c_int = 500 as ::core::ffi::c_int;
-    let mut numTry: ::core::ffi::c_int = 10 as ::core::ffi::c_int;
-    let mut unit: ::core::ffi::c_int = iunit - 1 as ::core::ffi::c_int;
-    remove_unit_from_list(sNoConvList, unit);
-    if unit >= 0 as ::core::ffi::c_int
-        && unit < sMapSize
-        && *sUnitMap.offset(unit as isize) >= 0 as ::core::ffi::c_int
-    {
-        u = ilistItem(sUnitList.as_mut(), *sUnitMap.offset(unit as isize))
-            .map_or(::core::ptr::null_mut(), |item| {
-                item.as_mut_ptr().cast::<Unit>()
-            });
-        if (*u).being_used != 0 {
-            (*u).being_used = 0 as ::core::ffi::c_uchar;
-            iiClose((*u).ii_file);
-            if (*u).attribute == UNIT_ATBUT_SCRATCH {
-                trial = 0 as ::core::ffi::c_int;
-                while trial < numTry {
-                    let scratch = (*(*u).ii_file).filename.clone().unwrap_or_default();
-                    if std::fs::remove_file(String::from_utf8_lossy(&scratch).as_ref()).is_ok() {
-                        break;
+    let mut trial: i32 = 0;
+    let mut delay: i32 = 500 as i32;
+    let mut numTry: i32 = 10 as i32;
+    let mut unit: i32 = iunit - 1 as i32;
+    UNIT_TABLE.with(|unit_table| {
+        let mut table = unit_table.borrow_mut();
+        table
+            .no_convert_units
+            .retain(|&listed_unit| listed_unit as i32 != iunit);
+        if unit >= 0 && (unit as usize) < table.map.len() && table.map[unit as usize] >= 0 {
+            let index = table.map[unit as usize] as usize;
+            u = table.units[index].as_mut();
+            if (*u).being_used != 0 {
+                (*u).being_used = 0 as ::core::ffi::c_uchar;
+                iiClose((*u).ii_file);
+                if (*u).attribute == UNIT_ATBUT_SCRATCH {
+                    trial = 0 as i32;
+                    while trial < numTry {
+                        let scratch = (*(*u).ii_file).filename.clone().unwrap_or_default();
+                        if std::fs::remove_file(&scratch).is_ok() {
+                            break;
+                        }
+                        if trial < numTry - 1 as i32 {
+                            b3dMilliSleep(delay);
+                        }
+                        trial += 1;
                     }
-                    if trial < numTry - 1 as ::core::ffi::c_int {
-                        b3dMilliSleep(delay);
-                    }
-                    trial += 1;
                 }
+                (*u).header = UnitHeader::None;
+                iiDelete((*u).ii_file);
             }
-            if (*(*u).ii_file).file == IIFILE_TIFF {
-                drop(Box::from_raw((*u).header));
-            }
-            iiDelete((*u).ii_file);
+            table.map[unit as usize] = -1;
         }
-        *sUnitMap.offset(unit as isize) = -(1 as ::core::ffi::c_int);
-    }
+    });
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imclose_(mut iunit: *mut ::core::ffi::c_int) {
+pub unsafe extern "C" fn imclose_(mut iunit: *mut i32) {
     iiu_close(*iunit);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiuclose_(mut iunit: *mut ::core::ffi::c_int) {
+pub unsafe extern "C" fn iiuclose_(mut iunit: *mut i32) {
     iiu_close(*iunit);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_get_ii_file(mut iunit: ::core::ffi::c_int) -> *mut ImodImageFile {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_get_ii_file",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_get_ii_file(mut iunit: i32) -> *mut ImodImageFile {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_get_ii_file", 1 as i32, 0 as i32);
     return (*u).ii_file;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_ret_num_volumes(mut iunit: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_ret_num_volumes",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_ret_num_volumes(mut iunit: i32) -> i32 {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_ret_num_volumes", 1 as i32, 0 as i32);
     return if (*(*u).ii_file).dataset_id != 0 {
         (*(*u).ii_file).num_volumes
     } else {
-        0 as ::core::ffi::c_int
+        0 as i32
     };
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiuretnumvolumes_(
-    mut iunit: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iiuretnumvolumes_(mut iunit: *mut i32) -> i32 {
     return iiu_ret_num_volumes(*iunit);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_volume_open(
-    mut newUnit: ::core::ffi::c_int,
-    mut mainUnit: ::core::ffi::c_int,
-    mut volIndex: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut newUnit: i32,
+    mut mainUnit: i32,
+    mut volIndex: i32,
+) -> i32 {
     let fp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
-    let mut u: *mut Unit = lookup_unit(
-        mainUnit,
-        "iiuOpenVolume",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
     let mut unew: *mut Unit = find_new_unit(newUnit);
     iiu_memory_error(
         unew as *mut ::core::ffi::c_void,
         "ERROR:  - Allocating new unit",
     );
+    // `find_new_unit` can grow the owned unit vector, so obtain the main
+    // unit only after its storage is stable for this operation.
+    let mut u: *mut Unit = lookup_unit(mainUnit, "iiuOpenVolume", 1 as i32, 0 as i32);
     (*unew).being_used = 1 as ::core::ffi::c_uchar;
     (*unew).read_only = (*u).read_only;
-    (*unew).current_sec = 0 as ::core::ffi::c_int;
-    (*unew).current_line = 0 as ::core::ffi::c_int;
+    (*unew).current_sec = 0 as i32;
+    (*unew).current_line = 0 as i32;
     (*unew).attribute = if (*u).attribute == UNIT_ATBUT_SCRATCH {
         UNIT_ATBUT_NEW
     } else {
         (*u).attribute
     };
-    if volIndex < 0 as ::core::ffi::c_int {
+    if volIndex < 0 as i32 {
         fp = iiFOpenNewVolume((*u).ii_file);
-        volIndex = (*(*u).ii_file).num_volumes - 1 as ::core::ffi::c_int;
+        volIndex = (*(*u).ii_file).num_volumes - 1 as i32;
     } else {
         fp = iiFOpenVolume((*u).ii_file, volIndex);
     }
     if fp.is_none() {
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return 1 as ::core::ffi::c_int;
+            return 1 as i32;
         }
     }
-    (*unew).ii_file = *(*(*u).ii_file).ii_volumes.offset(volIndex as isize);
-    (*unew).header = (*(*unew).ii_file).header as *mut MrcHeader;
-    return 0 as ::core::ffi::c_int;
+    (*unew).ii_file = (&(*(*u).ii_file).ii_volumes)[volIndex as isize as usize];
+    (*unew).header = UnitHeader::Borrowed((*(*unew).ii_file).header.cast());
+    return 0 as i32;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuvolumeopen_(
-    mut newUnit: *mut ::core::ffi::c_int,
-    mut mainUnit: *mut ::core::ffi::c_int,
-    mut volIndex: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut newUnit: *mut i32,
+    mut mainUnit: *mut i32,
+    mut volIndex: *mut i32,
+) -> i32 {
     return iiu_volume_open(*newUnit, *mainUnit, *volIndex);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_ret_adoc_index(
-    mut iunit: ::core::ffi::c_int,
-    mut global: ::core::ffi::c_int,
-    mut openMdocOrNew: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_ret_adoc_index",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+    mut iunit: i32,
+    mut global: i32,
+    mut openMdocOrNew: i32,
+) -> i32 {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_ret_adoc_index", 1 as i32, 0 as i32);
     return iiGetAdocIndex((*u).ii_file, global, openMdocOrNew);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuretadocindex_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut global: *mut ::core::ffi::c_int,
-    mut openMdocOrNew: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = iiu_ret_adoc_index(*iunit, *global, *openMdocOrNew);
-    return if err < 0 as ::core::ffi::c_int {
-        err
-    } else {
-        err + 1 as ::core::ffi::c_int
-    };
+    mut iunit: *mut i32,
+    mut global: *mut i32,
+    mut openMdocOrNew: *mut i32,
+) -> i32 {
+    let mut err: i32 = iiu_ret_adoc_index(*iunit, *global, *openMdocOrNew);
+    return if err < 0 as i32 { err } else { err + 1 as i32 };
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_trans_adoc_sections(
-    mut toUnit: ::core::ffi::c_int,
-    mut fromUnit: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut uto: *mut Unit = lookup_unit(
-        toUnit,
-        "iiu_trans_adoc_sections",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
-    let mut ufrom: *mut Unit = lookup_unit(
-        fromUnit,
-        "iiu_trans_adoc_sections",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
-    if (*(*uto).ii_file).adoc_index >= 0 as ::core::ffi::c_int
-        && (*(*ufrom).ii_file).adoc_index >= 0 as ::core::ffi::c_int
-    {
+pub unsafe extern "C" fn iiu_trans_adoc_sections(mut toUnit: i32, mut fromUnit: i32) -> i32 {
+    let mut uto: *mut Unit = lookup_unit(toUnit, "iiu_trans_adoc_sections", 1 as i32, 0 as i32);
+    let mut ufrom: *mut Unit = lookup_unit(fromUnit, "iiu_trans_adoc_sections", 1 as i32, 0 as i32);
+    if (*(*uto).ii_file).adoc_index >= 0 as i32 && (*(*ufrom).ii_file).adoc_index >= 0 as i32 {
         return iiTransferAdocSections((*ufrom).ii_file, (*uto).ii_file);
     }
-    return 0 as ::core::ffi::c_int;
+    return 0 as i32;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_write_global_adoc(
-    mut iunit: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_write_global_adoc",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_write_global_adoc(mut iunit: i32) -> i32 {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_write_global_adoc", 1 as i32, 0 as i32);
     if hdfWriteGlobalAdoc((*u).ii_file) != 0 {
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return 1 as ::core::ffi::c_int;
+            return 1 as i32;
         }
     }
-    return 0 as ::core::ffi::c_int;
+    return 0 as i32;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiuwriteglobaladoc_(
-    mut iunit: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iiuwriteglobaladoc_(mut iunit: *mut i32) -> i32 {
     return iiu_write_global_adoc(*iunit);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_ret_chunk_sizes(
-    mut iunit: ::core::ffi::c_int,
-    mut xSize: *mut ::core::ffi::c_int,
-    mut ySize: *mut ::core::ffi::c_int,
-    mut zSize: *mut ::core::ffi::c_int,
+    mut iunit: i32,
+    mut xSize: *mut i32,
+    mut ySize: *mut i32,
+    mut zSize: *mut i32,
 ) {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiuRetChunkSize",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+    let mut u: *mut Unit = lookup_unit(iunit, "iiuRetChunkSize", 1 as i32, 0 as i32);
     *xSize = (*(*u).ii_file).tile_size_x;
     *ySize = (*(*u).ii_file).tile_size_y;
     *zSize = (*(*u).ii_file).z_chunk_size;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuretchunksizes_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut xSize: *mut ::core::ffi::c_int,
-    mut ySize: *mut ::core::ffi::c_int,
-    mut zSize: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
+    mut xSize: *mut i32,
+    mut ySize: *mut i32,
+    mut zSize: *mut i32,
 ) {
     iiu_ret_chunk_sizes(*iunit, xSize, ySize, zSize);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_alt_chunk_sizes(
-    mut iunit: ::core::ffi::c_int,
-    mut xSize: ::core::ffi::c_int,
-    mut ySize: ::core::ffi::c_int,
-    mut zSize: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiuAltChunkSize",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+    mut iunit: i32,
+    mut xSize: i32,
+    mut ySize: i32,
+    mut zSize: i32,
+) -> i32 {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiuAltChunkSize", 1 as i32, 0 as i32);
     return iiSetChunkSizes((*u).ii_file, xSize, ySize, zSize);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiualtchunksizes_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut xSize: *mut ::core::ffi::c_int,
-    mut ySize: *mut ::core::ffi::c_int,
-    mut zSize: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut iunit: *mut i32,
+    mut xSize: *mut i32,
+    mut ySize: *mut i32,
+    mut zSize: *mut i32,
+) -> i32 {
     return iiu_alt_chunk_sizes(*iunit, *xSize, *ySize, *zSize);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_set_hdf_compression(
-    mut iunit: ::core::ffi::c_int,
-    mut compression: ::core::ffi::c_int,
-) {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_set_hdf_compression",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_set_hdf_compression(mut iunit: i32, mut compression: i32) {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_set_hdf_compression", 1 as i32, 0 as i32);
     (*(*u).ii_file).hdf_compression = compression;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiusethdfcompression_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut compression: *mut ::core::ffi::c_int,
-) {
+pub unsafe extern "C" fn iiusethdfcompression_(mut iunit: *mut i32, mut compression: *mut i32) {
     iiu_set_hdf_compression(*iunit, *compression);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_set_position(
-    mut iunit: ::core::ffi::c_int,
-    mut section: ::core::ffi::c_int,
-    mut line: ::core::ffi::c_int,
-) {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_set_position",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_set_position(mut iunit: i32, mut section: i32, mut line: i32) {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_set_position", 1 as i32, 0 as i32);
     (*u).current_sec = section;
     (*u).current_line = line;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imposn_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut section: *mut ::core::ffi::c_int,
-    mut line: *mut ::core::ffi::c_int,
-) {
+pub unsafe extern "C" fn imposn_(mut iunit: *mut i32, mut section: *mut i32, mut line: *mut i32) {
     iiu_set_position(*iunit, *section, *line);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiusetposition_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut section: *mut ::core::ffi::c_int,
-    mut line: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
+    mut section: *mut i32,
+    mut line: *mut i32,
 ) {
     iiu_set_position(*iunit, *section, *line);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_read_section(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_read_section",
-        0 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-    );
+) -> i32 {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_read_section", 0 as i32, 1 as i32);
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
     return iiu_read_sec_part(
         iunit,
         array,
         (*(*u).ii_file).nx,
-        0 as ::core::ffi::c_int,
-        (*(*u).ii_file).nx - 1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-        (*(*u).ii_file).ny - 1 as ::core::ffi::c_int,
+        0 as i32,
+        (*(*u).ii_file).nx - 1 as i32,
+        0 as i32,
+        (*(*u).ii_file).ny - 1 as i32,
     );
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiureadsection_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
+) -> i32 {
     return iiu_read_section(*iunit, array);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_read_sec_part(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-    mut nxdim: ::core::ffi::c_int,
-    mut indX0: ::core::ffi::c_int,
-    mut indX1: ::core::ffi::c_int,
-    mut indY0: ::core::ffi::c_int,
-    mut indY1: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_read_sec_part",
-        0 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-    );
+    mut nxdim: i32,
+    mut indX0: i32,
+    mut indX1: i32,
+    mut indY0: i32,
+    mut indY1: i32,
+) -> i32 {
+    let mut err: i32 = 0;
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_read_sec_part", 0 as i32, 1 as i32);
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
     (*(*u).ii_file).llx = indX0;
     (*(*u).ii_file).urx = indX1;
     (*(*u).ii_file).lly = indY0;
     (*(*u).ii_file).ury = indY1;
-    (*(*u).ii_file).pad_left = 0 as ::core::ffi::c_int;
-    (*(*u).ii_file).pad_right = nxdim - (indX1 + 1 as ::core::ffi::c_int - indX0);
+    (*(*u).ii_file).pad_left = 0 as i32;
+    (*(*u).ii_file).pad_right = nxdim - (indX1 + 1 as i32 - indX0);
     if (*u).no_convert != 0 {
         err = iiReadSection((*u).ii_file, array as *mut u8, (*u).current_sec);
     } else {
         err = iiReadSectionFloat((*u).ii_file, array as *mut u8, (*u).current_sec);
     }
     (*u).current_sec += 1;
-    (*u).current_line = 0 as ::core::ffi::c_int;
-    if err != 0 && sStoreError < 0 as ::core::ffi::c_int {
+    (*u).current_line = 0 as i32;
+    if err != 0 && UNIT_OPTIONS.with(|options| options.store_error.get()) < 0 {
         {
             use std::io::Write;
             let _ = ImodFile::Stdout.write_all(
@@ -811,43 +718,38 @@ pub unsafe extern "C" fn iiu_read_sec_part(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiureadsecpart_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-    mut nxdim: *mut ::core::ffi::c_int,
-    mut indX0: *mut ::core::ffi::c_int,
-    mut indX1: *mut ::core::ffi::c_int,
-    mut indY0: *mut ::core::ffi::c_int,
-    mut indY1: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut nxdim: *mut i32,
+    mut indX0: *mut i32,
+    mut indX1: *mut i32,
+    mut indY0: *mut i32,
+    mut indY1: *mut i32,
+) -> i32 {
     return iiu_read_sec_part(*iunit, array, *nxdim, *indX0, *indX1, *indY0, *indY1);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_read_lines(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-    mut numLines: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut iz: ::core::ffi::c_int = 0;
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_read_lines",
-        0 as ::core::ffi::c_int,
-        1 as ::core::ffi::c_int,
-    );
+    mut numLines: i32,
+) -> i32 {
+    let mut err: i32 = 0;
+    let mut iz: i32 = 0;
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_read_lines", 0 as i32, 1 as i32);
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
     iz = (*u).current_sec;
     if setup_current_lines(u, numLines) != 0 {
-        return -(2 as ::core::ffi::c_int);
+        return -(2 as i32);
     }
     if (*u).no_convert != 0 {
         err = iiReadSection((*u).ii_file, array as *mut u8, iz);
     } else {
         err = iiReadSectionFloat((*u).ii_file, array as *mut u8, iz);
     }
-    if err != 0 && sStoreError < 0 as ::core::ffi::c_int {
+    if err != 0 && UNIT_OPTIONS.with(|options| options.store_error.get()) < 0 {
         {
             use std::io::Write;
             let _ = ImodFile::Stdout.write_all(
@@ -863,142 +765,115 @@ pub unsafe extern "C" fn iiu_read_lines(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiureadlines_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-    mut numLines: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut numLines: *mut i32,
+) -> i32 {
     return iiu_read_lines(*iunit, array, *numLines);
 }
 #[unsafe(no_mangle)]
-pub static mut sWritePartMess: *const ::core::ffi::c_char =
-    ::core::ptr::null::<::core::ffi::c_char>();
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_write_section(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
+) -> i32 {
     let mut u: *mut Unit = lookup_unit(
         iunit,
         "iiu_write_section",
-        sExitOnError,
-        2 as ::core::ffi::c_int,
+        UNIT_OPTIONS.with(|options| options.exit_on_error.get()),
+        2,
     );
-    let mut err: ::core::ffi::c_int = 0;
-    let mut mess: [::core::ffi::c_char; 120] = [0; 120];
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
-    sprintf(
-        &raw mut mess as *mut ::core::ffi::c_char,
-        b"\nERROR: iiuWriteSection - writing section %d to unit %d\n\0" as *const u8
-            as *const ::core::ffi::c_char,
-        (*u).current_sec - 1 as ::core::ffi::c_int,
-        iunit,
-    );
-    sWritePartMess = &raw mut mess as *mut ::core::ffi::c_char;
+    WRITE_PART_MESSAGE.with(|message| message.set(true));
     return iiu_write_sec_part(
         iunit,
         array,
         (*(*u).ii_file).nx,
-        0 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-        (*(*u).ii_file).nx - 1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-        (*(*u).ii_file).ny - 1 as ::core::ffi::c_int,
+        0 as i32,
+        0 as i32,
+        (*(*u).ii_file).nx - 1 as i32,
+        0 as i32,
+        (*(*u).ii_file).ny - 1 as i32,
     );
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuwritesection_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
+) -> i32 {
     return iiu_write_section(*iunit, array);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iwrsec_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut array: *mut ::core::ffi::c_void,
-) {
+pub unsafe extern "C" fn iwrsec_(mut iunit: *mut i32, mut array: *mut ::core::ffi::c_void) {
     iiu_write_section(*iunit, array);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_write_subarray(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-    mut nxdim: ::core::ffi::c_int,
-    mut ixStart: ::core::ffi::c_int,
-    mut iyStart: ::core::ffi::c_int,
-    mut iyEnd: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut mess: [::core::ffi::c_char; 120] = [0; 120];
+    mut nxdim: i32,
+    mut ixStart: i32,
+    mut iyStart: i32,
+    mut iyEnd: i32,
+) -> i32 {
+    let mut err: i32 = 0;
     let mut u: *mut Unit = lookup_unit(
         iunit,
         "iiu_write_subarray",
-        sExitOnError,
-        2 as ::core::ffi::c_int,
+        UNIT_OPTIONS.with(|options| options.exit_on_error.get()),
+        2,
     );
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
-    sprintf(
-        &raw mut mess as *mut ::core::ffi::c_char,
-        b"\nERROR: iiuWriteSubarray - writing section %d, lines %d to %d to unit %d\n\0"
-            as *const u8 as *const ::core::ffi::c_char,
-        (*u).current_sec - 1 as ::core::ffi::c_int,
-        iyStart,
-        iyEnd,
-        iunit,
-    );
-    sWritePartMess = &raw mut mess as *mut ::core::ffi::c_char;
+    WRITE_PART_MESSAGE.with(|message| message.set(true));
     return iiu_write_sec_part(
         iunit,
         array,
         nxdim,
         ixStart,
-        0 as ::core::ffi::c_int,
-        (*(*u).ii_file).nx - 1 as ::core::ffi::c_int,
+        0 as i32,
+        (*(*u).ii_file).nx - 1 as i32,
         iyStart,
         iyEnd,
     );
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuwritesubarray_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-    mut nxdim: *mut ::core::ffi::c_int,
-    mut ixStart: *mut ::core::ffi::c_int,
-    mut iyStart: *mut ::core::ffi::c_int,
-    mut iyEnd: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut nxdim: *mut i32,
+    mut ixStart: *mut i32,
+    mut iyStart: *mut i32,
+    mut iyEnd: *mut i32,
+) -> i32 {
     return iiu_write_subarray(*iunit, array, *nxdim, *ixStart, *iyStart, *iyEnd);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_write_sec_part(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-    mut nxdim: ::core::ffi::c_int,
-    mut ixStart: ::core::ffi::c_int,
-    mut indX0: ::core::ffi::c_int,
-    mut indX1: ::core::ffi::c_int,
-    mut iyStart: ::core::ffi::c_int,
-    mut iyEnd: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut useMess: *const ::core::ffi::c_char = sWritePartMess;
+    mut nxdim: i32,
+    mut ixStart: i32,
+    mut indX0: i32,
+    mut indX1: i32,
+    mut iyStart: i32,
+    mut iyEnd: i32,
+) -> i32 {
+    let mut err: i32 = 0;
+    let use_message = WRITE_PART_MESSAGE.with(|message| message.replace(false));
     let mut u: *mut Unit = lookup_unit(
         iunit,
         "iiu_write_sec_part",
-        sExitOnError,
-        2 as ::core::ffi::c_int,
+        UNIT_OPTIONS.with(|options| options.exit_on_error.get()),
+        2,
     );
     let mut arrStart: *mut u8 = ::core::ptr::null_mut::<u8>();
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
-    sWritePartMess = ::core::ptr::null::<::core::ffi::c_char>();
-    if (*(*u).ii_file).file != IIFILE_HDF
-        && (indX0 != 0 || indX1 != (*(*u).ii_file).nx - 1 as ::core::ffi::c_int)
+    if (*(*u).ii_file).file != IIFILE_HDF && (indX0 != 0 || indX1 != (*(*u).ii_file).nx - 1 as i32)
     {
         b3d_error(
             Some(&mut ImodFile::Stdout),
@@ -1007,22 +882,27 @@ pub unsafe extern "C" fn iiu_write_sec_part(
                 iunit
             ),
         );
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return -(2 as ::core::ffi::c_int);
+            return -(2 as i32);
         }
     }
     if (*(*u).ii_file).file == IIFILE_TIFF {
-        iiSyncFromMrcHeader((*u).ii_file, (*u).header);
+        let header = match &mut (*u).header {
+            UnitHeader::Owned(header) => &raw mut **header,
+            UnitHeader::Borrowed(header) => *header,
+            UnitHeader::None => unreachable!("an open TIFF unit always has a header"),
+        };
+        iiSyncFromMrcHeader((*u).ii_file, header);
     }
     (*(*u).ii_file).llx = indX0;
     (*(*u).ii_file).urx = indX1;
     (*(*u).ii_file).lly = (*u).current_line;
     (*(*u).ii_file).ury = (*u).current_line + iyEnd - iyStart;
     (*(*u).ii_file).pad_left = ixStart;
-    (*(*u).ii_file).pad_right = nxdim - (indX1 + 1 as ::core::ffi::c_int - indX0) - ixStart;
-    if (*(*u).ii_file).pad_right < 0 as ::core::ffi::c_int {
+    (*(*u).ii_file).pad_right = nxdim - (indX1 + 1 as i32 - indX0) - ixStart;
+    if (*(*u).ii_file).pad_right < 0 as i32 {
         b3d_error(
             Some(&mut ImodFile::Stdout),
             format_args!(
@@ -1030,10 +910,10 @@ pub unsafe extern "C" fn iiu_write_sec_part(
                 nxdim, iunit, ixStart, indX0, indX1
             ),
         );
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return -(2 as ::core::ffi::c_int);
+            return -(2 as i32);
         }
     }
     if (*(*u).ii_file).ury >= (*(*u).ii_file).ny {
@@ -1047,10 +927,10 @@ pub unsafe extern "C" fn iiu_write_sec_part(
                 (*u).current_line
             ),
         );
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return -(3 as ::core::ffi::c_int);
+            return -(3 as i32);
         }
     }
     arrStart =
@@ -1061,7 +941,7 @@ pub unsafe extern "C" fn iiu_write_sec_part(
         err = iiWriteSectionFloat((*u).ii_file, arrStart.cast(), (*u).current_sec);
     }
     if err != 0 {
-        if !useMess.is_null() {
+        if use_message {
             b3d_error(
                 Some(&mut ImodFile::Stdout),
                 format_args!(
@@ -1070,53 +950,62 @@ pub unsafe extern "C" fn iiu_write_sec_part(
                 ),
             );
         }
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
             return err;
         }
     }
     (*u).current_sec += 1;
-    (*u).current_line = 0 as ::core::ffi::c_int;
+    (*u).current_line = 0 as i32;
     return err;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuwritesecpart_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-    mut nxdim: *mut ::core::ffi::c_int,
-    mut ixStart: *mut ::core::ffi::c_int,
-    mut indX0: *mut ::core::ffi::c_int,
-    mut indX1: *mut ::core::ffi::c_int,
-    mut iyStart: *mut ::core::ffi::c_int,
-    mut iyEnd: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut nxdim: *mut i32,
+    mut ixStart: *mut i32,
+    mut indX0: *mut i32,
+    mut indX1: *mut i32,
+    mut iyStart: *mut i32,
+    mut iyEnd: *mut i32,
+) -> i32 {
     return iiu_write_sec_part(
         *iunit, array, *nxdim, *ixStart, *indX0, *indX1, *iyStart, *iyEnd,
     );
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_write_lines(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
-    mut numLines: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut err: ::core::ffi::c_int = 0;
-    let mut iz: ::core::ffi::c_int = 0;
-    let mut u: *mut Unit =
-        lookup_unit(iunit, "iiuWriteLine", sExitOnError, 2 as ::core::ffi::c_int);
+    mut numLines: i32,
+) -> i32 {
+    let mut err: i32 = 0;
+    let mut iz: i32 = 0;
+    let mut u: *mut Unit = lookup_unit(
+        iunit,
+        "iiuWriteLine",
+        UNIT_OPTIONS.with(|options| options.exit_on_error.get()),
+        2,
+    );
     if u.is_null() {
-        return -(1 as ::core::ffi::c_int);
+        return -(1 as i32);
     }
     if (*(*u).ii_file).file == IIFILE_TIFF {
-        iiSyncFromMrcHeader((*u).ii_file, (*u).header);
+        let header = match &mut (*u).header {
+            UnitHeader::Owned(header) => &raw mut **header,
+            UnitHeader::Borrowed(header) => *header,
+            UnitHeader::None => unreachable!("an open TIFF unit always has a header"),
+        };
+        iiSyncFromMrcHeader((*u).ii_file, header);
     }
     iz = (*u).current_sec;
     if setup_current_lines(u, numLines) != 0 {
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return -(3 as ::core::ffi::c_int);
+            return -(3 as i32);
         }
     }
     if (*u).no_convert != 0 {
@@ -1132,45 +1021,39 @@ pub unsafe extern "C" fn iiu_write_lines(
                 iunit
             ),
         );
-        if sExitOnError != 0 {
-            exit(1 as ::core::ffi::c_int);
+        if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
+            exit(1 as i32);
         } else {
-            return 1 as ::core::ffi::c_int;
+            return 1 as i32;
         }
     }
     return err;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiuwritelines_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-    mut numLines: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+    mut numLines: *mut i32,
+) -> i32 {
     return iiu_write_lines(*iunit, array, *numLines);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iwrlin_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut array: *mut ::core::ffi::c_void,
-) {
-    iiu_write_lines(*iunit, array, 1 as ::core::ffi::c_int);
+pub unsafe extern "C" fn iwrlin_(mut iunit: *mut i32, mut array: *mut ::core::ffi::c_void) {
+    iiu_write_lines(*iunit, array, 1 as i32);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iwrsecl_(
-    mut iunit: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
     mut array: *mut ::core::ffi::c_void,
-    mut numLines: *mut ::core::ffi::c_int,
+    mut numLines: *mut i32,
 ) {
     iiu_write_lines(*iunit, array, *numLines);
 }
-unsafe extern "C" fn setup_current_lines(
-    mut u: *mut Unit,
-    mut numLines: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    (*(*u).ii_file).llx = 0 as ::core::ffi::c_int;
-    (*(*u).ii_file).urx = (*(*u).ii_file).nx - 1 as ::core::ffi::c_int;
+unsafe extern "C" fn setup_current_lines(mut u: *mut Unit, mut numLines: i32) -> i32 {
+    (*(*u).ii_file).llx = 0 as i32;
+    (*(*u).ii_file).urx = (*(*u).ii_file).nx - 1 as i32;
     (*(*u).ii_file).lly = (*u).current_line;
-    (*(*u).ii_file).ury = (*u).current_line + numLines - 1 as ::core::ffi::c_int;
+    (*(*u).ii_file).ury = (*u).current_line + numLines - 1 as i32;
     if (*(*u).ii_file).ury >= (*(*u).ii_file).ny {
         b3d_error(
             Some(&mut ImodFile::Stdout),
@@ -1182,23 +1065,23 @@ unsafe extern "C" fn setup_current_lines(
                 (*(*u).ii_file).ny
             ),
         );
-        return 1 as ::core::ffi::c_int;
+        return 1 as i32;
     }
-    (*(*u).ii_file).pad_right = 0 as ::core::ffi::c_int;
+    (*(*u).ii_file).pad_right = 0 as i32;
     (*(*u).ii_file).pad_left = (*(*u).ii_file).pad_right;
     (*u).current_line += numLines;
     if (*u).current_line == (*(*u).ii_file).ny {
         (*u).current_sec += 1;
-        (*u).current_line = 0 as ::core::ffi::c_int;
+        (*u).current_line = 0 as i32;
     }
-    return 0 as ::core::ffi::c_int;
+    return 0 as i32;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiu_file_info(
-    mut iunit: ::core::ffi::c_int,
-    mut fileSize: *mut ::core::ffi::c_int,
-    mut fileType: *mut ::core::ffi::c_int,
-    mut flags: *mut ::core::ffi::c_int,
+    mut iunit: i32,
+    mut fileSize: *mut i32,
+    mut fileType: *mut i32,
+    mut flags: *mut i32,
 ) {
     let mut buf: stat = stat {
         st_dev: 0,
@@ -1226,83 +1109,79 @@ pub unsafe extern "C" fn iiu_file_info(
         },
         __glibc_reserved: [0; 3],
     };
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiuFileSize",
-        0 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
-    *flags = 0 as ::core::ffi::c_int;
+    let mut u: *mut Unit = lookup_unit(iunit, "iiuFileSize", 0 as i32, 0 as i32);
+    *flags = 0 as i32;
     *fileType = IIFILE_MRC;
-    *fileSize = -(1 as ::core::ffi::c_int);
+    *fileSize = -(1 as i32);
     if u.is_null() {
         return;
     }
     let name = (*(*u).ii_file).filename.clone().unwrap_or_default();
     if (*(*u).ii_file).file == IIFILE_SHR_MEM {
-        *fileSize =
-            (iiShrMemCheckSize(&name) as ::core::ffi::c_double / 1024.0f64) as ::core::ffi::c_int;
+        *fileSize = (iiShrMemCheckSize(&name) as ::core::ffi::c_double / 1024.0f64) as i32;
     } else {
         // `unit_fileio.c:1080` is `stat(…, &buf)`; `stat` takes a `char *`, so
         // the terminator is added at that call.
         let cname = std::ffi::CString::new(name).unwrap_or_default();
         stat(cname.as_ptr(), &raw mut buf);
-        *fileSize = (buf.st_size as ::core::ffi::c_double / 1024.0f64) as ::core::ffi::c_int;
+        *fileSize = (buf.st_size as ::core::ffi::c_double / 1024.0f64) as i32;
     }
     *fileType = (*(*u).ii_file).file;
-    *flags = ((*(*u).header).iiu_flags as ::core::ffi::c_long
-        | (if (*(*u).header).swapped != 0 {
+    let header = match &mut (*u).header {
+        UnitHeader::Owned(header) => &mut **header,
+        UnitHeader::Borrowed(header) => &mut **header,
+        UnitHeader::None => unreachable!("an open unit always has a header"),
+    };
+    *flags = (header.iiu_flags as ::core::ffi::c_long
+        | (if header.swapped != 0 {
             IIUNIT_SWAPPED
         } else {
             0 as ::core::ffi::c_long
         })
-        | (if (*(*u).header).bytes_signed != 0 {
+        | (if header.bytes_signed != 0 {
             IIUNIT_BYTES_SIGNED
         } else {
             0 as ::core::ffi::c_long
-        })) as ::core::ffi::c_int;
+        })) as i32;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn iiufileinfo_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut fileSize: *mut ::core::ffi::c_int,
-    mut fileType: *mut ::core::ffi::c_int,
-    mut flags: *mut ::core::ffi::c_int,
+    mut iunit: *mut i32,
+    mut fileSize: *mut i32,
+    mut fileType: *mut i32,
+    mut flags: *mut i32,
 ) {
     iiu_file_info(*iunit, fileSize, fileType, flags);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_exit_on_error(
-    mut doExit: ::core::ffi::c_int,
-    mut storeError: ::core::ffi::c_int,
-) {
-    sExitOnError = doExit;
-    sStoreError = storeError;
+pub unsafe extern "C" fn iiu_exit_on_error(mut doExit: i32, mut storeError: i32) {
+    UNIT_OPTIONS.with(|options| {
+        options.exit_on_error.set(doExit);
+        options.store_error.set(storeError);
+    });
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiuexitonerror(
-    mut doExit: *mut ::core::ffi::c_int,
-    mut storeError: *mut ::core::ffi::c_int,
-) {
+pub unsafe extern "C" fn iiuexitonerror(mut doExit: *mut i32, mut storeError: *mut i32) {
     iiu_exit_on_error(*doExit, *storeError);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_get_exit_on_error() -> ::core::ffi::c_int {
-    return sExitOnError;
+pub unsafe extern "C" fn iiu_get_exit_on_error() -> i32 {
+    UNIT_OPTIONS.with(|options| options.exit_on_error.get())
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ialbrief_(mut val: *mut ::core::ffi::c_int) {
-    sBriefHeader = *val;
+pub unsafe extern "C" fn ialbrief_(mut val: *mut i32) {
+    UNIT_OPTIONS.with(|options| options.brief_header.set(*val));
 }
 /// Matches C `iiuAltBrief` (`unit_fileio.c`), used directly by translated
 /// Fortran program units rather than through their underscore ABI wrapper.
 pub unsafe fn iiu_alt_brief(val: i32) {
-    sBriefHeader = val;
+    UNIT_OPTIONS.with(|options| options.brief_header.set(val));
 }
 /// Matches C `iiuRetBrief` (`unit_fileio.c`).
 pub unsafe fn iiu_ret_brief() -> i32 {
-    if sBriefHeader >= 0 {
-        sBriefHeader
+    let brief_header = UNIT_OPTIONS.with(|options| options.brief_header.get());
+    if brief_header >= 0 {
+        brief_header
     } else if std::env::var_os("IMOD_BRIEF_HEADER").is_some() {
         1
     } else {
@@ -1310,101 +1189,94 @@ pub unsafe fn iiu_ret_brief() -> i32 {
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiuretbrief_() -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iiuretbrief_() -> i32 {
     iiu_ret_brief()
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiualtprint_(mut val: *mut ::core::ffi::c_int) {
+pub unsafe extern "C" fn iiualtprint_(mut val: *mut i32) {
     iiu_alt_print(*val);
 }
 /// Matches C `iiuAltPrint` (`unit_fileio.c`).
 pub unsafe fn iiu_alt_print(val: i32) {
-    sPrintHeader = val;
+    UNIT_OPTIONS.with(|options| options.print_header.set(val));
 }
 /// Matches C `iiuRetPrint` (`unit_fileio.c`).
 pub unsafe fn iiu_ret_print() -> i32 {
-    sPrintHeader
+    UNIT_OPTIONS.with(|options| options.print_header.get())
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiuretprint_() -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iiuretprint_() -> i32 {
     iiu_ret_print()
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_alt_convert(
-    mut iunit: ::core::ffi::c_int,
-    mut val: ::core::ffi::c_int,
-) {
-    remove_unit_from_list(sNoConvList, iunit);
-    if val == 0 as ::core::ffi::c_int {
-        add_unit_to_list(&raw mut sNoConvList, iunit);
-    }
+pub unsafe extern "C" fn iiu_alt_convert(mut iunit: i32, mut val: i32) {
+    UNIT_TABLE.with(|unit_table| {
+        let mut table = unit_table.borrow_mut();
+        table
+            .no_convert_units
+            .retain(|&listed_unit| listed_unit as i32 != iunit);
+        if val == 0 as i32 {
+            table.no_convert_units.push(iunit as i16);
+        }
+    });
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiualtconvert_(
-    mut iunit: *mut ::core::ffi::c_int,
-    mut val: *mut ::core::ffi::c_int,
-) {
+pub unsafe extern "C" fn iiualtconvert_(mut iunit: *mut i32, mut val: *mut i32) {
     iiu_alt_convert(*iunit, *val);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiallowmultivolume_(mut allow: *mut ::core::ffi::c_int) {
+pub unsafe extern "C" fn iiallowmultivolume_(mut allow: *mut i32) {
     iiAllowMultiVolume(*allow);
 }
 /// `function` is the caller's routine name for the error messages only; see
 /// `lookup_unit`.  `#[no_mangle] extern "C"` was dropped with the `c_char`:
 /// nothing outside this crate links the symbol.
 pub unsafe fn iiu_mrc_header(
-    mut iunit: ::core::ffi::c_int,
+    mut iunit: i32,
     function: &str,
-    mut doExit: ::core::ffi::c_int,
-    mut checkRW: ::core::ffi::c_int,
+    mut doExit: i32,
+    mut checkRW: i32,
 ) -> *mut MrcHeader {
     let mut u: *mut Unit = lookup_unit(iunit, function, doExit, checkRW);
     if u.is_null() {
         return ::core::ptr::null_mut::<MrcHeader>();
     }
-    return (*u).header;
+    return match &mut (*u).header {
+        UnitHeader::Owned(header) => &raw mut **header,
+        UnitHeader::Borrowed(header) => *header,
+        UnitHeader::None => ::core::ptr::null_mut(),
+    };
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: ::core::ffi::c_int) {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_sync_with_mrc_header",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
-    iiSyncFromMrcHeader((*u).ii_file, (*u).header);
+pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: i32) {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_sync_with_mrc_header", 1 as i32, 0 as i32);
+    let header = match &mut (*u).header {
+        UnitHeader::Owned(header) => &raw mut **header,
+        UnitHeader::Borrowed(header) => *header,
+        UnitHeader::None => unreachable!("an open unit always has a header"),
+    };
+    iiSyncFromMrcHeader((*u).ii_file, header);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: ::core::ffi::c_int) {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_reassign_header_ptr",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: i32) {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_reassign_header_ptr", 1 as i32, 0 as i32);
     if (*(*u).ii_file).file != IIFILE_HDF {
         printf(
             b"ERROR: iiuReassignHeaderPtr - File on unit %d is not HDF\n\0" as *const u8
                 as *const ::core::ffi::c_char,
             iunit,
         );
-        exit(1 as ::core::ffi::c_int);
+        exit(1 as i32);
     }
-    (*u).header = (*(*u).ii_file).header as *mut MrcHeader;
+    (*u).header = UnitHeader::Borrowed((*(*u).ii_file).header.cast());
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_file_type(mut iunit: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_file_type",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_file_type(mut iunit: i32) -> i32 {
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_file_type", 1 as i32, 0 as i32);
     return (*(*u).ii_file).file;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiufiletype_(mut iunit: *mut ::core::ffi::c_int) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iiufiletype_(mut iunit: *mut i32) -> i32 {
     return iiu_file_type(*iunit);
 }
 #[unsafe(no_mangle)]
@@ -1416,45 +1288,32 @@ pub unsafe extern "C" fn iiufiletype_(mut iunit: *mut ::core::ffi::c_int) -> ::c
 /// aborted `header -tag <n>` outright, which the reference does not do, so the
 /// deterministic representation of that indeterminate value is returned
 /// instead.
-pub unsafe extern "C" fn iisettifftagtoprint_(
-    mut tag: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn iisettifftagtoprint_(mut tag: *mut i32) -> i32 {
     unsafe { tiffSetStringTagToPrint(*tag) };
     0
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_buf_bytes_per_pixel(
-    mut iunit: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut dsize: ::core::ffi::c_int = 0;
-    let mut csize: ::core::ffi::c_int = 0;
-    let mut u: *mut Unit = lookup_unit(
-        iunit,
-        "iiu_file_type",
-        1 as ::core::ffi::c_int,
-        0 as ::core::ffi::c_int,
-    );
+pub unsafe extern "C" fn iiu_buf_bytes_per_pixel(mut iunit: i32) -> i32 {
+    let mut dsize: i32 = 0;
+    let mut csize: i32 = 0;
+    let mut u: *mut Unit = lookup_unit(iunit, "iiu_file_type", 1 as i32, 0 as i32);
     if (*u).no_convert != 0 {
         mrc_getdcsize((*(*u).ii_file).mode, &mut dsize, &mut csize);
         return dsize * csize;
     }
-    return 4 as ::core::ffi::c_int;
+    return 4 as i32;
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn move_(
     mut a: *mut ::core::ffi::c_char,
     mut b: *mut ::core::ffi::c_char,
-    mut n: *mut ::core::ffi::c_int,
+    mut n: *mut i32,
 ) {
     mybcopy(a, b, *n);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zero_(mut a: *mut ::core::ffi::c_char, mut n: *mut ::core::ffi::c_int) {
-    memset(
-        a as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        *n as size_t,
-    );
+pub unsafe extern "C" fn zero_(mut a: *mut ::core::ffi::c_char, mut n: *mut i32) {
+    memset(a as *mut ::core::ffi::c_void, 0 as i32, *n as size_t);
 }
 /// `unit_fileio.c:1465`.  `message` is a literal diagnostic, not a Fortran
 /// string, so it is a `&str`; the write stays on the **C** stdout stream,
@@ -1464,12 +1323,12 @@ pub unsafe fn iiu_memory_error(mut ptr: *mut ::core::ffi::c_void, message: &str)
         return;
     }
     let _ = ImodFile::Stdout.write_all(&c_format_bytes("\n%s\n", &[CArg::Str(message)]));
-    exit(1 as ::core::ffi::c_int);
+    exit(1 as i32);
 }
-unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
-    let mut newUnit: Unit = Unit {
-        ii_file: ::core::ptr::null_mut::<ImodImageFile>(),
-        header: ::core::ptr::null_mut::<MrcHeader>(),
+unsafe extern "C" fn find_new_unit(mut iunit: i32) -> *mut Unit {
+    let new_unit = Unit {
+        ii_file: ::core::ptr::null_mut(),
+        header: UnitHeader::None,
         current_sec: 0,
         current_line: 0,
         tail_name: 0,
@@ -1478,13 +1337,7 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         read_only: 0,
         no_convert: 0,
     };
-    let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
-    let mut i: ::core::ffi::c_int = 0;
-    let mut newSize: ::core::ffi::c_int = 0;
-    if sMapSize == 0 {
-        b3dSetStoreError(sStoreError);
-    }
-    if iunit <= 0 as ::core::ffi::c_int || iunit > MAX_UNIT {
+    if iunit <= 0 as i32 || iunit > MAX_UNIT {
         b3d_error(
             Some(&mut ImodFile::Stdout),
             format_args!(
@@ -1492,33 +1345,19 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
                 iunit
             ),
         );
-        exit(1 as ::core::ffi::c_int);
+        exit(1 as i32);
     }
-    if iunit > sMapSize {
-        newSize = iunit + 9 as ::core::ffi::c_int;
-        if sMapSize == 0 {
-            sUnitMap = malloc(
-                (newSize as size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-            ) as *mut ::core::ffi::c_int;
-        } else {
-            sUnitMap = realloc(
-                sUnitMap as *mut ::core::ffi::c_void,
-                (newSize as size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>() as size_t),
-            ) as *mut ::core::ffi::c_int;
+    let already_open = UNIT_TABLE.with(|unit_table| {
+        let mut table = unit_table.borrow_mut();
+        if table.map.is_empty() {
+            b3dSetStoreError(UNIT_OPTIONS.with(|options| options.store_error.get()));
         }
-        if sUnitMap.is_null() {
-            return ::core::ptr::null_mut::<Unit>();
+        if iunit as usize > table.map.len() {
+            table.map.resize(iunit as usize + 9, -1);
         }
-        i = sMapSize;
-        while i < newSize {
-            *sUnitMap.offset(i as isize) = -(1 as ::core::ffi::c_int);
-            i += 1;
-        }
-        sMapSize = newSize;
-    }
-    if *sUnitMap.offset((iunit - 1 as ::core::ffi::c_int) as isize) >= 0 as ::core::ffi::c_int {
+        table.map[iunit as usize - 1] >= 0
+    });
+    if already_open {
         b3d_error(
             Some(&mut ImodFile::Stdout),
             format_args!(
@@ -1528,52 +1367,22 @@ unsafe extern "C" fn find_new_unit(mut iunit: ::core::ffi::c_int) -> *mut Unit {
         );
         iiu_close(iunit);
     }
-    if sUnitList.is_null() {
-        sUnitList = ilistNew(
-            ::core::mem::size_of::<Unit>() as ::core::ffi::c_int,
-            4 as ::core::ffi::c_int,
-        )
-        .map_or(::core::ptr::null_mut(), Box::into_raw);
-    }
-    if sUnitList.is_null() {
-        return ::core::ptr::null_mut::<Unit>();
-    }
-    i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(sUnitList.as_ref()) {
-        u = ilistItem(sUnitList.as_mut(), i).map_or(::core::ptr::null_mut(), |item| {
-            item.as_mut_ptr().cast::<Unit>()
-        });
-        if (*u).being_used == 0 {
-            *sUnitMap.offset((iunit - 1 as ::core::ffi::c_int) as isize) = i;
-            return u;
+    UNIT_TABLE.with(|unit_table| {
+        let mut table = unit_table.borrow_mut();
+        if let Some(index) = table.units.iter().position(|unit| unit.being_used == 0) {
+            table.map[iunit as usize - 1] = index as i32;
+            return table.units[index].as_mut() as *mut Unit;
         }
-        i += 1;
-    }
-    newUnit.being_used = 0 as ::core::ffi::c_uchar;
-    if ilistAppend(
-        &mut *sUnitList,
-        ::core::slice::from_raw_parts(
-            (&raw const newUnit).cast::<u8>(),
-            ::core::mem::size_of::<Unit>(),
-        ),
-    ) != 0
-    {
-        return ::core::ptr::null_mut::<Unit>();
-    }
-    *sUnitMap.offset((iunit - 1 as ::core::ffi::c_int) as isize) =
-        ilistSize(sUnitList.as_ref()) - 1 as ::core::ffi::c_int;
-    return ilistItem(
-        sUnitList.as_mut(),
-        ilistSize(sUnitList.as_ref()) - 1 as ::core::ffi::c_int,
-    )
-    .map_or(::core::ptr::null_mut(), |item| {
-        item.as_mut_ptr().cast::<Unit>()
-    });
+        table.units.push(Box::new(new_unit));
+        let index = table.units.len() - 1;
+        table.map[iunit as usize - 1] = index as i32;
+        table.units[index].as_mut() as *mut Unit
+    })
 }
 unsafe extern "C" fn mybcopy(
     mut a: *mut ::core::ffi::c_char,
     mut b: *mut ::core::ffi::c_char,
-    mut n: ::core::ffi::c_int,
+    mut n: i32,
 ) {
     loop {
         let fresh0 = n;
@@ -1592,13 +1401,13 @@ unsafe extern "C" fn mybcopy(
 /// below (`unit_fileio.c:195` onward).  It carries no Fortran hidden string
 /// length, so it is a plain `&str` rather than a `c_char` pointer.
 unsafe fn lookup_unit(
-    mut unit: ::core::ffi::c_int,
+    mut unit: i32,
     function: &str,
-    mut doExit: ::core::ffi::c_int,
-    mut checkRW: ::core::ffi::c_int,
+    mut doExit: i32,
+    mut checkRW: i32,
 ) -> *mut Unit {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
-    if unit <= 0 as ::core::ffi::c_int || unit > MAX_UNIT {
+    if unit <= 0 as i32 || unit > MAX_UNIT {
         b3d_error(
             Some(&mut ImodFile::Stdout),
             format_args!(
@@ -1608,22 +1417,24 @@ unsafe fn lookup_unit(
         );
         return exit_or_null(doExit) as *mut Unit;
     }
-    if unit <= sMapSize
-        && *sUnitMap.offset((unit - 1 as ::core::ffi::c_int) as isize) >= 0 as ::core::ffi::c_int
-    {
-        u = ilistItem(
-            sUnitList.as_mut(),
-            *sUnitMap.offset((unit - 1 as ::core::ffi::c_int) as isize),
-        )
-        .map_or(::core::ptr::null_mut(), |item| {
-            item.as_mut_ptr().cast::<Unit>()
-        });
-        (*u).no_convert = is_unit_on_list(sNoConvList, unit) as ::core::ffi::c_uchar;
+    let found = UNIT_TABLE.with(|unit_table| {
+        let mut table = unit_table.borrow_mut();
+        if (unit as usize) <= table.map.len() && table.map[unit as usize - 1] >= 0 {
+            let index = table.map[unit as usize - 1] as usize;
+            let no_convert = table.no_convert_units.contains(&(unit as i16));
+            u = table.units[index].as_mut();
+            (*u).no_convert = no_convert as ::core::ffi::c_uchar;
+            true
+        } else {
+            false
+        }
+    });
+    if found {
         if (*(*u).ii_file).format == IIFORMAT_COMPLEX {
             (*u).no_convert = 1 as ::core::ffi::c_uchar;
         }
         if (*u).being_used != 0 {
-            if checkRW > 1 as ::core::ffi::c_int && (*u).read_only as ::core::ffi::c_int != 0 {
+            if checkRW > 1 as i32 && (*u).read_only as i32 != 0 {
                 b3d_error(
                     Some(&mut ImodFile::Stdout),
                     format_args!(
@@ -1633,9 +1444,8 @@ unsafe fn lookup_unit(
                 );
                 return exit_or_null(doExit) as *mut Unit;
             }
-            if checkRW == 1 as ::core::ffi::c_int
-                && ((*u).no_convert as ::core::ffi::c_int != 0
-                    && (*(*u).ii_file).read_section.is_none()
+            if checkRW == 1 as i32
+                && ((*u).no_convert as i32 != 0 && (*(*u).ii_file).read_section.is_none()
                     || (*u).no_convert == 0 && (*(*u).ii_file).read_section_float.is_none())
             {
                 b3d_error(
@@ -1653,9 +1463,8 @@ unsafe fn lookup_unit(
                 );
                 return exit_or_null(doExit) as *mut Unit;
             }
-            if checkRW > 1 as ::core::ffi::c_int
-                && ((*u).no_convert as ::core::ffi::c_int != 0
-                    && (*(*u).ii_file).write_section.is_none()
+            if checkRW > 1 as i32
+                && ((*u).no_convert as i32 != 0 && (*(*u).ii_file).write_section.is_none()
                     || (*u).no_convert == 0 && (*(*u).ii_file).write_section_float.is_none())
             {
                 b3d_error(
@@ -1682,67 +1491,12 @@ unsafe fn lookup_unit(
     );
     return exit_or_null(doExit) as *mut Unit;
 }
-unsafe extern "C" fn exit_or_null(mut doExit: ::core::ffi::c_int) -> *mut ::core::ffi::c_void {
+unsafe extern "C" fn exit_or_null(mut doExit: i32) -> *mut ::core::ffi::c_void {
     if doExit != 0 {
-        exit(3 as ::core::ffi::c_int);
+        exit(3 as i32);
     }
     return NULL;
 }
-unsafe extern "C" fn add_unit_to_list(mut list: *mut *mut Ilist, mut unit: ::core::ffi::c_int) {
-    let mut val: b3dInt16 = unit as b3dInt16;
-    if (*list).is_null() {
-        *list = ilistNew(
-            ::core::mem::size_of::<b3dInt16>() as ::core::ffi::c_int,
-            4 as ::core::ffi::c_int,
-        )
-        .map_or(::core::ptr::null_mut(), Box::into_raw);
-    }
-    iiu_memory_error(*list as *mut ::core::ffi::c_void, "Allocating a unit list");
-    if ilistAppend(
-        &mut **list,
-        ::core::slice::from_raw_parts(
-            (&raw const val).cast::<u8>(),
-            ::core::mem::size_of::<b3dInt16>(),
-        ),
-    ) != 0
-    {
-        iiu_memory_error(NULL, "Appending to a unit list");
-    }
-}
-unsafe extern "C" fn remove_unit_from_list(mut list: *mut Ilist, mut unit: ::core::ffi::c_int) {
-    let mut valp: *mut b3dInt16 = ::core::ptr::null_mut::<b3dInt16>();
-    let mut i: ::core::ffi::c_int = 0;
-    i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(list.as_ref()) {
-        valp = ilistItem(list.as_mut(), i).map_or(::core::ptr::null_mut(), |item| {
-            item.as_mut_ptr().cast::<b3dInt16>()
-        });
-        if *valp as ::core::ffi::c_int == unit {
-            ilistRemove(&mut *list, i);
-            return;
-        }
-        i += 1;
-    }
-}
-unsafe extern "C" fn is_unit_on_list(
-    mut list: *mut Ilist,
-    mut unit: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut valp: *mut b3dInt16 = ::core::ptr::null_mut::<b3dInt16>();
-    let mut i: ::core::ffi::c_int = 0;
-    i = 0 as ::core::ffi::c_int;
-    while i < ilistSize(list.as_ref()) {
-        valp = ilistItem(list.as_mut(), i).map_or(::core::ptr::null_mut(), |item| {
-            item.as_mut_ptr().cast::<b3dInt16>()
-        });
-        if *valp as ::core::ffi::c_int == unit {
-            return 1 as ::core::ffi::c_int;
-        }
-        i += 1;
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
 #[cfg(test)]
 mod tests {
     use super::{move_, zero_};

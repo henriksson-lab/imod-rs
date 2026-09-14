@@ -102,40 +102,35 @@ pub unsafe fn spectrum_scaled(
         {
             return -4;
         }
-        let fft =
-            libc::malloc((padx * pad_size) as usize * core::mem::size_of::<f32>()).cast::<f32>();
-        if fft.is_null() {
+        let Some(work_size) = usize::try_from(padx).ok().and_then(|width| {
+            usize::try_from(pad_size)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        }) else {
+            return -3;
+        };
+        let mut fft = Vec::new();
+        if fft.try_reserve_exact(work_size).is_err() {
             return -3;
         }
-        let mut temp: *mut i16 = core::ptr::null_mut();
-        let mut crop: *mut f32 = core::ptr::null_mut();
-        let mut lines: *mut *mut u8 = core::ptr::null_mut();
+        fft.resize(work_size, 0.);
+        let mut temp = None;
         if bkgd_gray > 0 || reducing {
-            temp = libc::malloc((padx * pad_size) as usize * 2).cast();
-            if temp.is_null() {
-                libc::free(fft.cast());
+            let mut storage = Vec::new();
+            if storage.try_reserve_exact(work_size).is_err() {
                 return -3;
             }
-            if reducing {
-                lines = crate::imod::libcfshr::b3dutil::make_line_pointers(
-                    temp.cast(),
-                    pad_size,
-                    pad_size,
-                    2,
-                );
-                if lines.is_null() {
-                    libc::free(temp.cast());
-                    libc::free(fft.cast());
-                    return -3;
-                }
-            }
+            storage.resize(work_size, 0_i16);
+            temp = Some(storage);
         }
+        let mut crop = None;
         if cropping {
-            crop = libc::malloc((padx * pad_size) as usize * 4).cast();
-            if crop.is_null() {
-                libc::free(fft.cast());
+            let mut storage = Vec::new();
+            if storage.try_reserve_exact(work_size).is_err() {
                 return -3;
             }
+            storage.resize(work_size, 0.);
+            crop = Some(storage);
         }
         crate::imod::libcfshr::taperpad::slice_taper_in_pad(
             match typ {
@@ -166,7 +161,7 @@ pub unsafe fn spectrum_scaled(
             nx - 1,
             0,
             ny - 1,
-            core::slice::from_raw_parts_mut(fft, (padx * pad_size) as usize),
+            &mut fft,
             padx,
             pad_size,
             pad_size,
@@ -174,27 +169,25 @@ pub unsafe fn spectrum_scaled(
             (ny as f32 * taper) as i32,
         );
         let (mut px, mut py, mut idir) = (pad_size, pad_size, 0);
-        two_d_fft(fft, &mut px, &mut py, &mut idir);
+        two_d_fft(fft.as_mut_ptr(), &mut px, &mut py, &mut idir);
         if filt_type < 0 {
-            make_amplitude_spectrum(
-                fft,
-                if cropping { crop } else { spectrum.cast() },
-                pad_size,
-                padx,
-            );
+            let output = crop
+                .as_mut()
+                .map_or(spectrum.cast::<f32>(), Vec::as_mut_ptr);
+            make_amplitude_spectrum(fft.as_mut_ptr(), output, pad_size, padx);
             let place = (padx * pad_size / 2 + pad_size / 2) as usize;
-            *(if cropping {
-                crop
-            } else {
-                spectrum.cast::<f32>()
-            })
-            .add(place) = 0.;
+            *output.add(place) = 0.;
             if cropping {
                 idir = 0;
-                two_d_fft(crop, &mut px, &mut py, &mut idir);
+                two_d_fft(
+                    crop.as_mut().unwrap().as_mut_ptr(),
+                    &mut px,
+                    &mut py,
+                    &mut idir,
+                );
                 let shift = 0.5 * (pad_size as f32 / final_size as f32 - 1.);
                 crate::imod::libcfshr::filtxcorr::fourier_reduce_image(
-                    core::slice::from_raw_parts(crop, (padx * pad_size) as usize),
+                    crop.as_ref().unwrap(),
                     pad_size,
                     pad_size,
                     core::slice::from_raw_parts_mut(
@@ -205,16 +198,11 @@ pub unsafe fn spectrum_scaled(
                     final_size,
                     shift,
                     shift,
-                    Some(core::slice::from_raw_parts_mut(
-                        fft,
-                        (padx * pad_size) as usize,
-                    )),
+                    Some(&mut fft),
                 );
                 let (mut fx, mut fy, mut inv) = (final_size, final_size, 1);
                 two_d_fft(spectrum.cast(), &mut fx, &mut fy, &mut inv);
             }
-            libc::free(crop.cast());
-            libc::free(fft.cast());
             return 0;
         }
         let mut cen = 0_f64;
@@ -224,28 +212,32 @@ pub unsafe fn spectrum_scaled(
                 if x == 0 && y == 0 {
                     continue;
                 }
-                cen = cen.max(fft_magnitude(fft, pad_size, pad_size, x, y));
-                cen = cen.max(fft_magnitude(fft, pad_size, pad_size, x, pad_size - 1 - y));
+                cen = cen.max(fft_magnitude(fft.as_mut_ptr(), pad_size, pad_size, x, y));
+                cen = cen.max(fft_magnitude(
+                    fft.as_mut_ptr(),
+                    pad_size,
+                    pad_size,
+                    x,
+                    pad_size - 1 - y,
+                ));
             }
         }
         let mut sum = 0.;
         for y in 0..pad_size {
-            sum += fft_magnitude(fft, pad_size, pad_size, pad_size / 2, y);
+            sum += fft_magnitude(fft.as_mut_ptr(), pad_size, pad_size, pad_size / 2, y);
         }
         let log_scale = 5. / (sum / pad_size as f64);
         let scale = 32000. / (log_scale * cen + 1.).ln();
-        let stemp = if temp.is_null() {
-            spectrum.cast::<i16>()
-        } else {
-            temp
-        };
+        let stemp = temp
+            .as_mut()
+            .map_or(spectrum.cast::<i16>(), Vec::as_mut_ptr);
         let mut yin = pad_size / 2;
         for yout in 0..pad_size {
             let base = yin * padx;
             let mut dst = stemp.add((yout * pad_size + pad_size / 2) as usize);
             for i in (base..base + pad_size).step_by(2) {
-                let val = ((*fft.add(i as usize) * *fft.add(i as usize)
-                    + *fft.add((i + 1) as usize) * *fft.add((i + 1) as usize))
+                let val = ((fft[i as usize] * fft[i as usize]
+                    + fft[(i + 1) as usize] * fft[(i + 1) as usize])
                     as f64)
                     .sqrt();
                 // C assigns the double expression through an `int` to a
@@ -265,9 +257,8 @@ pub unsafe fn spectrum_scaled(
                 dst = dst.add(1);
             }
             let i = base + pad_size;
-            let val = ((*fft.add(i as usize) * *fft.add(i as usize)
-                + *fft.add((i + 1) as usize) * *fft.add((i + 1) as usize))
-                as f64)
+            let val = ((fft[i as usize] * fft[i as usize]
+                + fft[(i + 1) as usize] * fft[(i + 1) as usize]) as f64)
                 .sqrt();
             let converted = scale * (log_scale * val + 1.).ln();
             *stemp.add((((pad_size - yout) % pad_size) * pad_size) as usize) = if converted
@@ -291,13 +282,15 @@ pub unsafe fn spectrum_scaled(
         *stemp.add((pad_size * pad_size / 2 + pad_size / 2) as usize) = 32000;
         let mut ret = 0;
         if reducing {
-            // `zoomWithFilter` takes typed line and output slices now; the
-            // `makeLinePointers` block above still runs for its error-5 path.
-            let line_vec: Vec<&[i16]> = (0..pad_size as usize)
-                .map(|i| {
-                    core::slice::from_raw_parts(temp.add(i * pad_size as usize), pad_size as usize)
-                })
-                .collect();
+            let mut line_vec = Vec::new();
+            if line_vec.try_reserve_exact(pad_size as usize).is_err() {
+                return -3;
+            }
+            let temp_data = temp.as_ref().unwrap();
+            for row in 0..pad_size as usize {
+                let start = row * pad_size as usize;
+                line_vec.push(&temp_data[start..start + pad_size as usize]);
+            }
             ret = crate::imod::libcfshr::zoomdown::zoom_with_filter(
                 crate::imod::libcfshr::zoomdown::ZoomLines::Short(&line_vec),
                 pad_size,
@@ -312,7 +305,7 @@ pub unsafe fn spectrum_scaled(
                 &mut crate::imod::libcfshr::zoomdown::ZoomOut::Short(
                     core::slice::from_raw_parts_mut(
                         if bkgd_gray > 0 {
-                            fft.cast::<i16>()
+                            fft.as_mut_ptr().cast::<i16>()
                         } else {
                             spectrum.cast::<i16>()
                         },
@@ -324,7 +317,11 @@ pub unsafe fn spectrum_scaled(
             );
         }
         if ret == 0 && bkgd_gray > 0 {
-            let scalein = if reducing { fft.cast::<i16>() } else { temp };
+            let scalein = if reducing {
+                fft.as_mut_ptr().cast::<i16>()
+            } else {
+                temp.as_mut().unwrap().as_mut_ptr()
+            };
             let (mut min, mut max) = (0_f32, 32000_f32);
             if final_size > 50 {
                 let mut b = 0.;
@@ -364,13 +361,6 @@ pub unsafe fn spectrum_scaled(
                     ((s * (*scalein.add(i as usize) as f32 - min)) as i32).clamp(0, 255) as u8;
             }
         }
-        if !temp.is_null() {
-            libc::free(temp.cast())
-        }
-        libc::free(fft.cast());
-        if !lines.is_null() {
-            libc::free(lines.cast())
-        };
         ret
     }
 }

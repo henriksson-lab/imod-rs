@@ -2,90 +2,85 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes};
-use crate::imod::libcfshr::ilist::*;
 use crate::imod::libcfshr::parse_params::{
     PIP_DOUBLE, PIP_FLOAT, PIP_INTEGER, pip_get_line_of_values,
 };
 use crate::imod::libxml::*;
 use core::cell::{Cell, RefCell};
-use core::ffi::c_void;
-
-const NODE_LIST_QUANTUM: i32 = 32;
-static mut S_NODE_LISTS: *mut *mut Ilist = core::ptr::null_mut();
-static mut S_NUM_LISTS: i32 = 0;
-
 thread_local! {
-    /// The `mxml_node_t *` values the C keeps in `sNodeLists` are arena slot
-    /// indices now, so the arena each document was parsed into has to live
-    /// beside its node list; this is that storage, indexed by the same
-    /// `xmlInd`.
+    /// The C stores node pointers in `sNodeLists`; the Rust XML arena uses
+    /// stable slot indices, so each document keeps its indexed node list here.
+    static S_NODE_LISTS: RefCell<Vec<Option<Vec<usize>>>> = const { RefCell::new(Vec::new()) };
+    /// Each indexed node list owns its matching XML arena at the same `xmlInd`.
     static S_ARENAS: RefCell<Vec<Option<MxmlArena>>> = const { RefCell::new(Vec::new()) };
     /// Matches C static `sLastLevel`.
     static S_LAST_LEVEL: Cell<i32> = const { Cell::new(-1) };
 }
 
 /// Matches C static `getOrAddFreeList`.
-pub unsafe fn get_or_add_free_list() -> i32 {
-    let mut xml_ind = 0;
-    while xml_ind < S_NUM_LISTS {
-        if (*S_NODE_LISTS.add(xml_ind as usize)).is_null() {
-            break;
+pub fn get_or_add_free_list() -> i32 {
+    let xml_ind = S_NODE_LISTS.with_borrow_mut(|lists| {
+        if let Some(index) = lists.iter().position(Option::is_none) {
+            lists[index] = Some(Vec::new());
+            return Some(index);
         }
-        xml_ind += 1;
-    }
-    if xml_ind >= S_NUM_LISTS {
-        let new_lists =
-            libc::malloc(((S_NUM_LISTS + 1) as usize) * core::mem::size_of::<*mut Ilist>())
-                .cast::<*mut Ilist>();
-        if new_lists.is_null() {
-            return -1;
+        if lists.try_reserve(1).is_err() {
+            return None;
         }
-        if S_NUM_LISTS != 0 {
-            core::ptr::copy_nonoverlapping(S_NODE_LISTS, new_lists, S_NUM_LISTS as usize);
+        lists.push(Some(Vec::new()));
+        Some(lists.len() - 1)
+    });
+    let Some(xml_ind) = xml_ind else {
+        return -1;
+    };
+    let arenas_ready = S_ARENAS.with_borrow_mut(|arenas| {
+        if arenas.len() <= xml_ind && arenas.try_reserve(xml_ind + 1 - arenas.len()).is_err() {
+            return false;
         }
-        libc::free(S_NODE_LISTS.cast::<c_void>());
-        S_NODE_LISTS = new_lists;
-        S_NUM_LISTS += 1;
+        while arenas.len() <= xml_ind {
+            arenas.push(None);
+        }
+        true
+    });
+    if !arenas_ready {
+        S_NODE_LISTS.with_borrow_mut(|lists| lists[xml_ind] = None);
+        return -1;
     }
-    *S_NODE_LISTS.add(xml_ind as usize) =
-        ilist_new(core::mem::size_of::<usize>() as i32, NODE_LIST_QUANTUM)
-            .map_or(core::ptr::null_mut(), Box::into_raw);
-    if (*S_NODE_LISTS.add(xml_ind as usize)).is_null() {
-        xml_ind = -1;
-    } else {
-        ilist_quantum(&mut **S_NODE_LISTS.add(xml_ind as usize), NODE_LIST_QUANTUM);
-        S_ARENAS.with_borrow_mut(|arenas| {
-            while arenas.len() <= xml_ind as usize {
-                arenas.push(None);
-            }
-        });
-    }
-    xml_ind
+    xml_ind as i32
 }
 
 /// Matches C static `getNodeAtIndex`.
 ///
 /// The C returns the `mxml_node_t *` stored in the list; the list now holds
 /// arena slot indices, so this returns one of those.
-pub unsafe fn get_node_at_index(xml_ind: i32, node_ind: i32, error: *mut i32) -> Option<usize> {
-    if xml_ind < 0 || xml_ind >= S_NUM_LISTS {
+pub fn get_node_at_index(xml_ind: i32, node_ind: i32, error: &mut i32) -> Option<usize> {
+    if xml_ind < 0 {
         *error = -2;
         return None;
     }
-    let node_list = *S_NODE_LISTS.add(xml_ind as usize);
-    if node_list.is_null() {
+    let node = S_NODE_LISTS.with_borrow(|lists| {
+        lists
+            .get(xml_ind as usize)
+            .and_then(|list| list.as_ref())
+            .and_then(|list| list.get(node_ind.max(0) as usize))
+            .copied()
+    });
+    if node.is_none()
+        && S_NODE_LISTS.with_borrow(|lists| {
+            lists
+                .get(xml_ind as usize)
+                .is_none_or(|list| list.is_none())
+        })
+    {
         *error = -2;
         return None;
     }
-    if node_ind < 0 || node_ind >= ilist_size(node_list.as_ref()) {
+    if node_ind < 0 || node.is_none() {
         *error = -3;
         return None;
     }
     *error = 0;
-    let item = ilist_item(node_list.as_mut(), node_ind)?;
-    Some(usize::from_ne_bytes(
-        item[..core::mem::size_of::<usize>()].try_into().unwrap(),
-    ))
+    node
 }
 
 /// Matches C static `getElementString`.
@@ -138,20 +133,24 @@ pub unsafe fn process_loaded_nodes(
         mxml_delete(&mut arena, xml);
         return xml_ind;
     }
-    ilist_append(
-        &mut **S_NODE_LISTS.add(xml_ind as usize),
-        &xml.unwrap_or(usize::MAX).to_ne_bytes(),
-    );
+    S_NODE_LISTS.with_borrow_mut(|lists| {
+        lists[xml_ind as usize]
+            .as_mut()
+            .unwrap()
+            .push(xml.unwrap_or(usize::MAX));
+    });
     let mut top = xml;
     if with_xml_decl != 0 {
         top = mxml_walk_next(&arena, xml, xml, MXML_DESCEND);
         if mxml_get_type(&arena, top) == MXML_OPAQUE {
             top = mxml_walk_next(&arena, top, xml, MXML_DESCEND);
         }
-        ilist_append(
-            &mut **S_NODE_LISTS.add(xml_ind as usize),
-            &top.unwrap_or(usize::MAX).to_ne_bytes(),
-        );
+        S_NODE_LISTS.with_borrow_mut(|lists| {
+            lists[xml_ind as usize]
+                .as_mut()
+                .unwrap()
+                .push(top.unwrap_or(usize::MAX));
+        });
     }
     *root_element = None;
     if let Some(root) = mxml_get_element(&arena, top) {
@@ -204,18 +203,16 @@ pub unsafe fn ixml_new_node_list(root_element: &[u8]) -> i32 {
         if xml.is_none() {
             xml_ind = -2;
         } else {
-            ilist_append(
-                &mut **S_NODE_LISTS.add(xml_ind as usize),
-                &xml.unwrap().to_ne_bytes(),
-            );
+            S_NODE_LISTS.with_borrow_mut(|lists| {
+                lists[xml_ind as usize].as_mut().unwrap().push(xml.unwrap());
+            });
             let top = mxml_new_element(&mut arena, xml, Some(root_element));
             if top.is_none() {
                 xml_ind = -2;
             } else {
-                ilist_append(
-                    &mut **S_NODE_LISTS.add(xml_ind as usize),
-                    &top.unwrap().to_ne_bytes(),
-                );
+                S_NODE_LISTS.with_borrow_mut(|lists| {
+                    lists[xml_ind as usize].as_mut().unwrap().push(top.unwrap());
+                });
             }
         }
         if xml_ind >= 0 {
@@ -278,13 +275,18 @@ pub unsafe fn ixml_find_elements(
     if !found {
         return -2;
     }
-    *found_ind = ilist_size((*S_NODE_LISTS.add(xml_ind as usize)).as_ref());
+    *found_ind =
+        S_NODE_LISTS.with_borrow(|lists| lists[xml_ind as usize].as_ref().unwrap().len() as i32);
     for node in nodes {
-        if ilist_append(
-            &mut **S_NODE_LISTS.add(xml_ind as usize),
-            &node.to_ne_bytes(),
-        ) != 0
-        {
+        if S_NODE_LISTS.with_borrow_mut(|lists| {
+            let list = lists[xml_ind as usize].as_mut().unwrap();
+            if list.try_reserve(1).is_err() {
+                true
+            } else {
+                list.push(node);
+                false
+            }
+        }) {
             return -1;
         }
         *num_found += 1;
@@ -384,8 +386,7 @@ pub unsafe fn ixml_get_string_attribute(
         let MxmlValue::Element(element) = &arena.node(node.unwrap()).value else {
             return;
         };
-        for ind in 0..element.num_attrs {
-            let attr = &element.attrs[ind as usize];
+        for attr in &element.attrs {
             if attr.name == name {
                 value = Some(attr.value.clone().unwrap_or_default());
                 return;
@@ -421,8 +422,7 @@ pub unsafe fn ixml_get_integer_attribute(
         let MxmlValue::Element(element) = &arena.node(node.unwrap()).value else {
             return;
         };
-        for ind in 0..element.num_attrs {
-            let attr = &element.attrs[ind as usize];
+        for attr in &element.attrs {
             if attr.name == name {
                 value = Some(attr.value.clone().unwrap_or_default());
                 return;
@@ -460,14 +460,18 @@ pub unsafe fn ixml_add_element(xml_ind: i32, node_ind: i32, tag: &[u8]) -> i32 {
     let Some(elem) = elem else {
         return -1;
     };
-    if ilist_append(
-        &mut **S_NODE_LISTS.add(xml_ind as usize),
-        &elem.to_ne_bytes(),
-    ) != 0
-    {
+    if S_NODE_LISTS.with_borrow_mut(|lists| {
+        let list = lists[xml_ind as usize].as_mut().unwrap();
+        if list.try_reserve(1).is_err() {
+            true
+        } else {
+            list.push(elem);
+            false
+        }
+    }) {
         return -1;
     }
-    ilist_size((*S_NODE_LISTS.add(xml_ind as usize)).as_ref()) - 1
+    S_NODE_LISTS.with_borrow(|lists| lists[xml_ind as usize].as_ref().unwrap().len() as i32 - 1)
 }
 
 /// Matches C `ixmlSetStringValue`.
@@ -551,19 +555,37 @@ pub unsafe fn ixml_add_integer_attribute(
 
 /// Matches C `ixmlPopListIndexes`.
 pub unsafe fn ixml_pop_list_indexes(xml_ind: i32, first_ind: i32) -> i32 {
-    if xml_ind < 0 || xml_ind >= S_NUM_LISTS || (*S_NODE_LISTS.add(xml_ind as usize)).is_null() {
+    if xml_ind < 0
+        || S_NODE_LISTS.with_borrow(|lists| {
+            lists
+                .get(xml_ind as usize)
+                .is_none_or(|list| list.is_none())
+        })
+    {
         return -2;
     }
-    if first_ind < 2 || first_ind >= ilist_size((*S_NODE_LISTS.add(xml_ind as usize)).as_ref()) {
+    if first_ind < 2
+        || S_NODE_LISTS.with_borrow(|lists| {
+            first_ind as usize >= lists[xml_ind as usize].as_ref().unwrap().len()
+        })
+    {
         return -3;
     }
-    ilist_truncate(&mut **S_NODE_LISTS.add(xml_ind as usize), first_ind);
+    S_NODE_LISTS.with_borrow_mut(|lists| {
+        lists[xml_ind as usize]
+            .as_mut()
+            .unwrap()
+            .truncate(first_ind as usize);
+    });
     0
 }
 
 /// Matches C `ixmlClear`.
 pub unsafe fn ixml_clear(index: i32) {
-    if index < 0 && index >= S_NUM_LISTS {
+    if index < 0
+        || S_NODE_LISTS
+            .with_borrow(|lists| lists.get(index as usize).is_none_or(|list| list.is_none()))
+    {
         return;
     }
     let mut err = 0;
@@ -576,8 +598,7 @@ pub unsafe fn ixml_clear(index: i32) {
             *slot = None;
         }
     });
-    ilist_delete(Some(Box::from_raw(*S_NODE_LISTS.add(index as usize))));
-    *S_NODE_LISTS.add(index as usize) = core::ptr::null_mut();
+    S_NODE_LISTS.with_borrow_mut(|lists| lists[index as usize] = None);
 }
 
 /// Matches C `ixmlResetLastLevel`.

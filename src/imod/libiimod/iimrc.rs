@@ -25,28 +25,17 @@ use crate::imod::libiimod::mrcsec::{
 const IIERR_BAD_CALL: i32 = -1;
 const IIERR_NOT_FORMAT: i32 = 1;
 const IIERR_IO_ERROR: i32 = 2;
-const IIERR_MEMORY_ERR: i32 = 3;
 
 /// Matches C `iiMRCCheck(ImodImageFile *)` (`iimrc.c:31`).
 pub unsafe extern "C" fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
     if iif.is_null() || unsafe { (*iif).fp.is_none() } {
         return IIERR_BAD_CALL;
     }
-    // `Box`, not `malloc`: `MrcHeader.fp` is a non-`Copy` `Option<ImodFile>`
-    // now, so assigning it over `malloc` residue would drop garbage.
-    let hdr = Box::into_raw(Box::new(MrcHeader::default()));
-    if hdr.is_null() {
-        unsafe {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("ERROR: iiMRCCheck - getting memory for header\n"),
-            )
-        };
-        return IIERR_MEMORY_ERR;
-    }
-    let err = unsafe { mrc_head_read(&mut (*iif).fp.clone().unwrap(), &mut *hdr) };
+    // Keep the allocation in the image record; `header` below is only the
+    // erased legacy ABI alias used by callbacks.
+    let mut hdr = Box::new(MrcHeader::default());
+    let err = unsafe { mrc_head_read(&mut (*iif).fp.clone().unwrap(), &mut hdr) };
     if err != 0 {
-        unsafe { drop(Box::from_raw(hdr)) };
         return if err < 0 {
             IIERR_IO_ERROR
         } else {
@@ -54,6 +43,8 @@ pub unsafe extern "C" fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
         };
     }
     unsafe {
+        (*iif).mrc_header = Some(hdr);
+        let hdr = (*iif).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader;
         (*iif).header = hdr.cast();
         (*iif).file = IIFILE_MRC;
         ii_mrc_mode_to_format_type(iif, (*hdr).mode, (*hdr).bytes_signed);
@@ -127,34 +118,27 @@ pub unsafe extern "C" fn ii_mrc_set_io_funcs(in_file: *mut ImodImageFile, raw_fi
 /// Matches C `iiMRCdelete(ImodImageFile *)` (`iimrc.c:118`).
 pub unsafe extern "C" fn ii_mrc_delete(in_file: *mut ImodImageFile) {
     unsafe {
-        if !(*in_file).header.is_null() {
-            drop(Box::from_raw((*in_file).header.cast::<MrcHeader>()));
-        }
+        (*in_file).mrc_header = None;
+        (*in_file).header = core::ptr::null_mut();
     }
 }
 /// Matches C `iiMRCopenNew(ImodImageFile *, const char *)` (`iimrc.c:125`).
 pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
     unsafe {
-        *libc::__errno_location() = 0;
         let name = (*in_file).filename.clone().unwrap_or_default();
-        (*in_file).fp = ImodFile::open(&String::from_utf8_lossy(&name), mode);
+        (*in_file).fp = ImodFile::open(&name, mode);
         if (*in_file).fp.is_none() {
-            let errno = *libc::__errno_location();
-            // `strerror` is the C library's own errno string; that call is the
-            // one place a C string legitimately crosses here.
-            let message = if errno != 0 {
-                core::ffi::CStr::from_ptr(libc::strerror(errno))
-                    .to_string_lossy()
-                    .into_owned()
-            } else {
-                String::new()
-            };
+            // `ImodFile::open` is implemented with Rust's file API, so retain
+            // the operating-system failure as a Rust error value.
+            let error = std::io::Error::last_os_error();
+            let message = error.to_string();
+            let has_os_error = error.raw_os_error().is_some();
             b3d_error(
                 Some(&mut ImodFile::Stderr),
                 format_args!(
                     "ERROR: iiMRCopenNew - Could not open {}{}{}\n",
-                    String::from_utf8_lossy(&name),
-                    if errno != 0 {
+                    name,
+                    if has_os_error {
                         " - system message: "
                     } else {
                         ""
@@ -164,17 +148,12 @@ pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
             );
             return 1;
         }
-        (*in_file).header = Box::into_raw(Box::new(MrcHeader::default())).cast();
-        if (*in_file).header.is_null() {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("ERROR: iiMRCopenNew - Allocating MRC header\n"),
-            );
-            return 1;
-        }
-        mrc_head_new(&mut *(*in_file).header.cast::<MrcHeader>(), 1, 1, 1, 0);
+        (*in_file).mrc_header = Some(Box::new(MrcHeader::default()));
+        let header = (*in_file).mrc_header.as_deref_mut().unwrap();
+        mrc_head_new(header, 1, 1, 1, 0);
         ii_mrc_set_io_funcs(in_file, 0);
-        (*(*in_file).header.cast::<MrcHeader>()).fp = (*in_file).fp.clone();
+        header.fp = (*in_file).fp.clone();
+        (*in_file).header = (header as *mut MrcHeader).cast();
         (*in_file).file = IIFILE_MRC;
     }
     0
@@ -453,13 +432,13 @@ pub unsafe extern "C" fn ii_mrc_load_pcoord(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libiimod::iimage::ii_new;
+    use crate::imod::libiimod::iimage::ii_new_box;
     use crate::imod::libiimod::mrcfiles::mrc_head_write;
 
     #[test]
     fn mode_to_format_type_retains_every_source_case_and_unknown_mode() {
-        let image = ii_new();
-        assert!(!image.is_null());
+        let mut image_owner = ii_new_box();
+        let image = image_owner.as_mut() as *mut ImodImageFile;
         unsafe {
             ii_mrc_mode_to_format_type(image, MRC_MODE_BYTE, 1);
             assert_eq!(
@@ -503,14 +482,14 @@ mod tests {
                 ((*image).format, (*image).type_, (*image).mode),
                 (87, 99, 123)
             );
-            drop(Box::from_raw(image));
         }
     }
 
     #[test]
     fn fill_header_and_piece_coordinate_check_retain_source_shallow_copy_and_rules() {
         unsafe {
-            let image = ii_new();
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
             let mut source = MrcHeader::default();
             source.nx = 12;
             source.labels[0][0] = b'X';
@@ -521,7 +500,6 @@ mod tests {
             assert_eq!(ii_mrc_fill_header(image, &mut source), 0);
             (*image).header = core::ptr::null_mut();
             assert_eq!(ii_mrc_fill_header(image, &mut copied), 1);
-            drop(Box::from_raw(image));
 
             let mut header = MrcHeader::default();
             assert_eq!(ii_mrc_check_pcoord(&mut header), 0);
@@ -537,8 +515,8 @@ mod tests {
     #[test]
     fn set_load_info_retains_source_bounds_defaults_and_overrides() {
         unsafe {
-            let image = ii_new();
-            assert!(!image.is_null());
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
             (*image).nx = 4;
             (*image).ny = 5;
             (*image).nz = 6;
@@ -563,31 +541,40 @@ mod tests {
                 (li.slope, li.offset, li.axis, li.pad_left, li.pad_right),
                 (2.5, -3.0, 1, 7, 9)
             );
-            drop(Box::from_raw(image));
         }
     }
 
     #[test]
-    fn delete_frees_only_a_nonnull_header_as_in_source() {
+    fn delete_releases_only_the_owned_mrc_header_and_clears_its_alias() {
         unsafe {
-            let image = ii_new();
-            assert!(!image.is_null());
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
             ii_mrc_delete(image);
-            (*image).header = Box::into_raw(Box::new(MrcHeader::default())).cast();
+            (*image).mrc_header = Some(Box::new(MrcHeader::default()));
+            (*image).header =
+                ((*image).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader).cast();
+            assert!((*image).mrc_header.is_some());
             assert!(!(*image).header.is_null());
             ii_mrc_delete(image);
-            // C intentionally leaves `header` unchanged after free; clear it
-            // here solely to keep this test from freeing it twice.
-            (*image).header = core::ptr::null_mut();
-            drop(Box::from_raw(image));
+            assert!((*image).mrc_header.is_none());
+            assert!((*image).header.is_null());
+
+            // An erased header may belong to another backend; this cleanup
+            // must never reconstruct ownership from that alias.
+            let mut borrowed = MrcHeader::default();
+            (*image).header = (&mut borrowed as *mut MrcHeader).cast();
+            ii_mrc_delete(image);
+            borrowed.nx = 7;
+            assert_eq!(borrowed.nx, 7);
+            assert!((*image).header.is_null());
         }
     }
 
     #[test]
     fn set_io_funcs_observes_raw_file_early_return_and_new_file_initialization() {
         unsafe {
-            let image = ii_new();
-            assert!(!image.is_null());
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
             ii_mrc_set_io_funcs(image, 1);
             assert!((*image).read_section.is_some());
             assert!((*image).read_section_byte.is_some());
@@ -597,17 +584,25 @@ mod tests {
             assert!((*image).clean_up.is_none());
             assert!((*image).write_section.is_none());
             assert!((*image).write_section_float.is_none());
-            drop(Box::from_raw(image));
 
-            let mut path = b"/tmp/imod-rs-iimrc-XXXXXX\0".to_vec();
-            let fd = libc::mkstemp(path.as_mut_ptr().cast());
-            assert!(fd >= 0);
-            assert_eq!(libc::close(fd), 0);
-            let image = ii_new();
-            assert!(!image.is_null());
-            (*image).filename = Some(path[..path.len() - 1].to_vec());
+            let path = std::env::temp_dir().join(format!(
+                "imod-rs-iimrc-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::File::create(&path).unwrap();
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
+            (*image).filename = Some(path.to_string_lossy().into_owned());
             assert_eq!(ii_mrc_open_new(image, "wb+"), 0);
             let header = (*image).header.cast::<MrcHeader>();
+            assert_eq!(
+                header,
+                (*image).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader
+            );
             assert_eq!(
                 ((*image).file, (*header).nx, (*header).ny, (*header).nz),
                 (IIFILE_MRC, 1, 1, 1)
@@ -617,8 +612,7 @@ mod tests {
             assert!((*image).write_section_float.is_some());
             (*image).fp = None;
             ii_mrc_delete(image);
-            drop(Box::from_raw(image));
-            assert_eq!(libc::unlink(path.as_ptr().cast()), 0);
+            std::fs::remove_file(path).unwrap();
         }
     }
 
@@ -637,10 +631,14 @@ mod tests {
             );
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
 
-            let image = ii_new();
-            assert!(!image.is_null());
+            let mut image_owner = ii_new_box();
+            let image = image_owner.as_mut() as *mut ImodImageFile;
             (*image).fp = Some(fp.clone());
             assert_eq!(ii_mrc_check(image), 0);
+            assert_eq!(
+                (*image).header.cast::<MrcHeader>(),
+                (*image).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader
+            );
             assert_eq!(
                 (
                     (*image).file,
@@ -659,7 +657,6 @@ mod tests {
             assert_eq!(read, [129, 130, 131, 132]);
             ii_mrc_delete(image);
             drop(fp);
-            drop(Box::from_raw(image));
         }
     }
 }

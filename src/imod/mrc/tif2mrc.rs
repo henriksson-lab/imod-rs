@@ -98,8 +98,10 @@ unsafe fn manage_mode(
         if *mode == MRC_MODE_SHORT
             && (keep_ushort != 0
                 || (force_signed == 0
-                    && !(*tiff).iifile.is_null()
-                    && (*(*tiff).iifile).type_ == IITYPE_USHORT))
+                    && tiff
+                        .iifile
+                        .as_deref()
+                        .is_some_and(|file| file.type_ == IITYPE_USHORT)))
         {
             *mode = MRC_MODE_USHORT;
         }
@@ -153,22 +155,30 @@ fn convertrgb(tifdata: &mut [u8], xsize: i32, ysize: i32, ntsc: i32) {
 }
 
 /// Original `expandIndexToRGB` (`tif2mrc.c:689`).
-unsafe fn expand_index_to_rgb(datap: &mut Vec<u8>, iifile: *mut ImodImageFile, section: i32) {
+unsafe fn expand_index_to_rgb(datap: &mut Vec<u8>, iifile: Option<&ImodImageFile>, section: i32) {
     unsafe {
-        if iifile.is_null() || (*iifile).colormap.is_null() {
+        let Some(iifile) = iifile else {
+            exit_error(b"Colormap data not read in properly.");
+        };
+        if iifile.colormap.is_none() {
             // `tif2mrc.c:696`: no trailing newline -- `exitError` supplies one.
             exit_error(b"Colormap data not read in properly.");
         }
-        let mut size = (*iifile).nx as usize * (*iifile).ny as usize;
-        if (*iifile).ury >= 0 {
-            size = (*iifile).nx as usize * ((*iifile).ury + 1 - (*iifile).lly) as usize;
+        let mut size = iifile.nx as usize * iifile.ny as usize;
+        if iifile.ury >= 0 {
+            size = iifile.nx as usize * (iifile.ury + 1 - iifile.lly) as usize;
         }
         // `tif2mrc.c:702`: the C `malloc`s the expansion, swaps it into
         // `*datap` and *leaks* the index image it replaced.  Owning both as
         // `Vec`s releases the old one instead; nothing observable changes.
         let mut out = vec![0_u8; 3 * size];
         let input = core::mem::take(datap);
-        let map = (*iifile).colormap.add(768 * section as usize);
+        let map = iifile
+            .colormap
+            .as_deref()
+            .unwrap()
+            .as_ptr()
+            .add(768 * section as usize);
         for i in 0..size {
             let ind = input[i] as usize;
             out[3 * i] = *map.add(ind);
@@ -180,17 +190,20 @@ unsafe fn expand_index_to_rgb(datap: &mut Vec<u8>, iifile: *mut ImodImageFile, s
 }
 
 /// Original `convertLongToFloat` (`tif2mrc.c:716`).
-unsafe fn convert_long_to_float(tifdata: &mut [u8], iifile: *const ImodImageFile) {
+unsafe fn convert_long_to_float(tifdata: &mut [u8], iifile: Option<&ImodImageFile>) {
     unsafe {
-        if iifile.is_null() || ((*iifile).type_ != IITYPE_UINT && (*iifile).type_ != IITYPE_INT) {
+        let Some(iifile) = iifile else {
+            return;
+        };
+        if iifile.type_ != IITYPE_UINT && iifile.type_ != IITYPE_INT {
             return;
         }
-        let mut size = (*iifile).nx as usize * (*iifile).ny as usize;
-        if (*iifile).ury >= 0 {
-            size = (*iifile).nx as usize * ((*iifile).ury + 1 - (*iifile).lly) as usize;
+        let mut size = iifile.nx as usize * iifile.ny as usize;
+        if iifile.ury >= 0 {
+            size = iifile.nx as usize * (iifile.ury + 1 - iifile.lly) as usize;
         }
         let data = tifdata.as_mut_ptr();
-        if (*iifile).type_ == IITYPE_UINT {
+        if iifile.type_ == IITYPE_UINT {
             for i in 0..size {
                 *data.cast::<f32>().add(i) = *data.cast::<u32>().add(i) as f32;
             }
@@ -255,31 +268,55 @@ unsafe fn minmaxmean(
     }
 }
 
+/// Metadata that is compared across the TIFF inputs handled by one run.
+///
+/// The C program kept this as function-local static state.  It belongs to the
+/// `tif2mrc` invocation instead: each input can refine the eventual shared
+/// label, while separate conversions start with no carry-over.
+struct TvipsMetadataState {
+    last_axis: f32,
+    last_spot: i32,
+    last_binning: i32,
+    same_spot: i32,
+    same_bin: i32,
+    same_axis: i32,
+}
+
+impl Default for TvipsMetadataState {
+    fn default() -> Self {
+        Self {
+            last_axis: 0.0,
+            last_spot: 0,
+            last_binning: 0,
+            same_spot: -1,
+            same_bin: -1,
+            same_axis: -1,
+        }
+    }
+}
+
 /// Original `manageTVIPSdata` (`tif2mrc.c:813`).
 unsafe fn manage_tvipsdata(
-    iifile: *const ImodImageFile,
+    state: &mut TvipsMetadataState,
+    iifile: Option<&ImodImageFile>,
     label: &mut [u8; MRC_LABEL_SIZE],
     tilt_angle: &mut f32,
 ) -> i32 {
-    static mut LAST_AXIS: f32 = 0.0;
-    static mut LAST_SPOT: i32 = 0;
-    static mut LAST_BINNING: i32 = 0;
-    static mut SAME_SPOT: i32 = -1;
-    static mut SAME_BIN: i32 = -1;
-    static mut SAME_AXIS: i32 = -1;
     unsafe {
-        if iifile.is_null()
-            || (*iifile).user_data.is_null()
-            || (*iifile).user_count < 4260
-            || (*iifile).user_flags & IIFLAG_TVIPS_DATA == 0
+        let Some(iifile) = iifile else {
+            return 1;
+        };
+        if iifile.user_data.is_null()
+            || iifile.user_count < 4260
+            || iifile.user_flags & IIFLAG_TVIPS_DATA == 0
         {
             return 1;
         }
-        let mut axis = core::ptr::read_unaligned((*iifile).user_data.add(3704).cast::<f32>());
-        *tilt_angle = core::ptr::read_unaligned((*iifile).user_data.add(3564).cast::<f32>());
-        let mut spot_float = core::ptr::read_unaligned((*iifile).user_data.add(3624).cast::<f32>());
-        let mut binning = core::ptr::read_unaligned((*iifile).user_data.add(3944).cast::<i32>());
-        if (*iifile).user_flags & IIFLAG_BYTES_SWAPPED != 0 {
+        let mut axis = core::ptr::read_unaligned(iifile.user_data.add(3704).cast::<f32>());
+        *tilt_angle = core::ptr::read_unaligned(iifile.user_data.add(3564).cast::<f32>());
+        let mut spot_float = core::ptr::read_unaligned(iifile.user_data.add(3624).cast::<f32>());
+        let mut binning = core::ptr::read_unaligned(iifile.user_data.add(3944).cast::<i32>());
+        if iifile.user_flags & IIFLAG_BYTES_SWAPPED != 0 {
             axis = f32::from_bits(axis.to_bits().swap_bytes());
             *tilt_angle = f32::from_bits((*tilt_angle).to_bits().swap_bytes());
             spot_float = f32::from_bits(spot_float.to_bits().swap_bytes());
@@ -287,29 +324,29 @@ unsafe fn manage_tvipsdata(
         }
         let spot = spot_float.round() as i32;
         if spot < 1 {
-            SAME_SPOT = 0;
+            state.same_spot = 0;
         }
         if binning < 1 {
-            SAME_BIN = 0;
+            state.same_bin = 0;
         }
-        if SAME_SPOT < 0 {
-            SAME_SPOT = 1;
-        } else if SAME_SPOT > 0 && spot != LAST_SPOT {
-            SAME_SPOT = 0;
+        if state.same_spot < 0 {
+            state.same_spot = 1;
+        } else if state.same_spot > 0 && spot != state.last_spot {
+            state.same_spot = 0;
         }
-        if SAME_BIN < 0 {
-            SAME_BIN = 1;
-        } else if SAME_BIN > 0 && binning != LAST_BINNING {
-            SAME_BIN = 0;
+        if state.same_bin < 0 {
+            state.same_bin = 1;
+        } else if state.same_bin > 0 && binning != state.last_binning {
+            state.same_bin = 0;
         }
-        if SAME_AXIS < 0 {
-            SAME_AXIS = 1;
-        } else if SAME_AXIS > 0 && (axis - LAST_AXIS).abs() > 1.0e-5 {
-            SAME_AXIS = 0;
+        if state.same_axis < 0 {
+            state.same_axis = 1;
+        } else if state.same_axis > 0 && (axis - state.last_axis).abs() > 1.0e-5 {
+            state.same_axis = 0;
         }
-        LAST_AXIS = axis;
-        LAST_SPOT = spot;
-        LAST_BINNING = binning;
+        state.last_axis = axis;
+        state.last_spot = spot;
+        state.last_binning = binning;
         axis -= 90.0;
         if axis < -180.0 {
             axis += 360.0;
@@ -320,7 +357,7 @@ unsafe fn manage_tvipsdata(
         // `tif2mrc.c:874-884`: three `snprintf`s into `label` with a size of
         // MRC_LABEL_SIZE, so at most MRC_LABEL_SIZE - 1 characters land and
         // the byte after them is the terminating NUL.
-        let text = if SAME_AXIS > 0 && SAME_SPOT > 0 && SAME_BIN > 0 {
+        let text = if state.same_axis > 0 && state.same_spot > 0 && state.same_bin > 0 {
             c_format_bytes(
                 "    Tilt axis angle = %.1f, binning = %d  spot = %d",
                 &[
@@ -329,12 +366,12 @@ unsafe fn manage_tvipsdata(
                     CArg::Int(spot as i64),
                 ],
             )
-        } else if SAME_AXIS > 0 && SAME_BIN > 0 {
+        } else if state.same_axis > 0 && state.same_bin > 0 {
             c_format_bytes(
                 "    Tilt axis angle = %.1f, binning = %d",
                 &[CArg::Dbl(axis as f64), CArg::Int(binning as i64)],
             )
-        } else if SAME_AXIS > 0 {
+        } else if state.same_axis > 0 {
             c_format_bytes("    Tilt axis angle = %.1f", &[CArg::Dbl(axis as f64)])
         } else {
             Vec::new()
@@ -413,6 +450,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         let mut short_fill: i16 = 0;
         let mut ushort_fill: u16 = 0;
         let mut label = [0_u8; MRC_LABEL_SIZE];
+        let mut tvips_metadata = TvipsMetadataState::default();
         let mut tilt_file: Option<String> = None;
         let mut tiltfp: Option<crate::imod::libcfshr::b3dutil::ImodFile> = None;
         let openmode = "rb";
@@ -601,8 +639,8 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             }
 
             tiffp = tiff.fp.clone().unwrap();
-            if !tiff.iifile.is_null() {
-                tiff_pages = (*tiff.iifile).nz;
+            if let Some(iifile) = tiff.iifile.as_deref() {
+                tiff_pages = iifile.nz;
             } else {
                 tiff_pages = tiff_ifd_number(&mut tiffp);
             }
@@ -619,7 +657,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     );
                 }
 
-                if tiff.iifile.is_null() {
+                if tiff.iifile.is_none() {
                     read_tiffheader(&mut tiffp, &mut tiff.header);
                     crate::imod::libcfshr::b3dutil::b3d_rewind(&mut tiffp);
                     crate::imod::libcfshr::b3dutil::b3d_fread(
@@ -701,7 +739,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     };
 
                     if tiff.photometric_interpretation == 3 {
-                        expand_index_to_rgb(&mut tifdata, tiff.iifile, in_section);
+                        expand_index_to_rgb(&mut tifdata, tiff.iifile.as_deref(), in_section);
                     }
 
                     /* convert RGB to gray scale */
@@ -710,7 +748,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     }
 
                     /* Convert long ints to floats */
-                    convert_long_to_float(&mut tifdata, tiff.iifile);
+                    convert_long_to_float(&mut tifdata, tiff.iifile.as_deref());
 
                     mean += minmaxmean(
                         &mut tifdata,
@@ -749,9 +787,9 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     );
                 }
                 /* write more info to mrc header. 1/17/04 eliminate unneeded rewind */
-                if !tiff.iifile.is_null() && pixel_entered == 0 {
-                    pixel_size = (*tiff.iifile).xscale;
-                    y_pixel_size = (*tiff.iifile).yscale;
+                if let Some(iifile) = tiff.iifile.as_deref().filter(|_| pixel_entered == 0) {
+                    pixel_size = iifile.xscale;
+                    y_pixel_size = iifile.yscale;
                 }
                 hdata.nx = xsize;
                 hdata.ny = ysize;
@@ -894,7 +932,12 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             ));
             let _ = out.flush();
             tiffp = tiff.fp.clone().unwrap();
-            k = manage_tvipsdata(tiff.iifile, &mut label, &mut tilt_angle);
+            k = manage_tvipsdata(
+                &mut tvips_metadata,
+                tiff.iifile.as_deref(),
+                &mut label,
+                &mut tilt_angle,
+            );
             if tilt_file.is_some() {
                 if k != 0 {
                     exit_error(b"There is no tilt angle value in this file");
@@ -910,9 +953,9 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             num_chunks = 1;
             lines_per_chunk = 0;
             lines_done = 0;
-            if !tiff.iifile.is_null() && bg == 0 {
-                xsize = (*tiff.iifile).nx;
-                ysize = (*tiff.iifile).ny;
+            if let Some(iifile) = tiff.iifile.as_deref().filter(|_| bg == 0) {
+                xsize = iifile.nx;
+                ysize = iifile.ny;
                 k = if tiff.photometric_interpretation == 2 {
                     3
                 } else {
@@ -945,8 +988,9 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     } else {
                         ysize - lines_done
                     };
-                    (*tiff.iifile).lly = lines_done;
-                    (*tiff.iifile).ury = lines_done + nlines - 1;
+                    let iifile = tiff.iifile.as_deref_mut().unwrap();
+                    iifile.lly = lines_done;
+                    iifile.ury = lines_done + nlines - 1;
                     lines_done += nlines;
                 }
 
@@ -980,9 +1024,9 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     );
 
                     /* Collect the pixel size the first time */
-                    if !tiff.iifile.is_null() && pixel_entered == 0 {
-                        pixel_size = (*tiff.iifile).xscale;
-                        y_pixel_size = (*tiff.iifile).yscale;
+                    if let Some(iifile) = tiff.iifile.as_deref().filter(|_| pixel_entered == 0) {
+                        pixel_size = iifile.xscale;
+                        y_pixel_size = iifile.yscale;
                     }
                 }
 
@@ -999,7 +1043,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 }
 
                 if tiff.photometric_interpretation == 3 {
-                    expand_index_to_rgb(&mut tifdata, tiff.iifile, 0);
+                    expand_index_to_rgb(&mut tifdata, tiff.iifile.as_deref(), 0);
                 }
 
                 /* convert RGB to gray scale */
@@ -1008,7 +1052,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 }
 
                 /* Convert long ints to floats */
-                convert_long_to_float(&mut tifdata, tiff.iifile);
+                convert_long_to_float(&mut tifdata, tiff.iifile.as_deref());
 
                 /* Correct for bg */
                 if bg != 0 {
@@ -1222,7 +1266,6 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 for index in 0..MRC_LABEL_SIZE {
                     hdata.labels[hdata.nlabl as usize][index] = label[index];
                 }
-                hdata.labels[hdata.nlabl as usize][MRC_LABEL_SIZE] = 0;
                 hdata.nlabl += 1;
             }
         }
@@ -1276,11 +1319,45 @@ mod tests {
             image.type_ = IITYPE_USHORT;
             let mut tiff = TfInfo::default();
             tiff.bits_per_sample = 16;
-            tiff.iifile = &raw mut image;
+            tiff.iifile = Some(Box::new(image));
             let mut pixel_size = 0;
             let mut mode = 0;
             manage_mode(&tiff, 0, 0, 0, &mut pixel_size, &mut mode);
             assert_eq!((pixel_size, mode), (2, MRC_MODE_USHORT));
+        }
+    }
+
+    #[test]
+    fn tvips_metadata_carry_over_is_owned_by_one_conversion() {
+        unsafe {
+            let mut bytes = vec![0_u8; 4260];
+            bytes[3564..3568].copy_from_slice(&12.5_f32.to_ne_bytes());
+            bytes[3624..3628].copy_from_slice(&4.0_f32.to_ne_bytes());
+            bytes[3704..3708].copy_from_slice(&90.0_f32.to_ne_bytes());
+            bytes[3944..3948].copy_from_slice(&2_i32.to_ne_bytes());
+            let image = ImodImageFile {
+                user_data: bytes.as_mut_ptr(),
+                user_count: bytes.len() as i32,
+                user_flags: IIFLAG_TVIPS_DATA,
+                ..ImodImageFile::default()
+            };
+            let mut state = TvipsMetadataState::default();
+            let mut label = [0_u8; MRC_LABEL_SIZE];
+            let mut tilt_angle = 0.0;
+
+            assert_eq!(
+                manage_tvipsdata(&mut state, Some(&image), &mut label, &mut tilt_angle),
+                0
+            );
+            assert_eq!(tilt_angle, 12.5);
+            assert!(label.starts_with(b"    Tilt axis angle = 0.0, binning = 2  spot = 4"));
+
+            bytes[3704..3708].copy_from_slice(&91.0_f32.to_ne_bytes());
+            assert_eq!(
+                manage_tvipsdata(&mut state, Some(&image), &mut label, &mut tilt_angle),
+                0
+            );
+            assert_eq!(label[0], 0);
         }
     }
 

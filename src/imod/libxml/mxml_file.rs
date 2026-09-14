@@ -11,18 +11,17 @@
 use super::*;
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 use core::any::Any;
-use core::ffi::c_int;
 use std::io::{Read, Write};
 
 /// Matches C `ENCODE_UTF8` (`mxml-file.c:31`).
-pub const ENCODE_UTF8: c_int = 0;
+pub const ENCODE_UTF8: i32 = 0;
 /// Matches C `ENCODE_UTF16BE` (`mxml-file.c:32`).
-pub const ENCODE_UTF16BE: c_int = 1;
+pub const ENCODE_UTF16BE: i32 = 1;
 /// Matches C `ENCODE_UTF16LE` (`mxml-file.c:33`).
-pub const ENCODE_UTF16LE: c_int = 2;
+pub const ENCODE_UTF16LE: i32 = 2;
 
 /// C `EOF` from `<stdio.h>`.
-const EOF: c_int = -1;
+const EOF: i32 = -1;
 
 /// Matches C `_mxml_fdbuf_t` (`mxml-file.c:47`).
 ///
@@ -68,9 +67,9 @@ pub enum MxmlSink<'a> {
 }
 
 /// Matches C `_mxml_getc_cb_t` (`mxml-file.c:44`).
-pub type MxmlGetcCb = Option<fn(&mut MxmlSource, &mut c_int) -> c_int>;
+pub type MxmlGetcCb = Option<fn(&mut MxmlSource, &mut i32) -> i32>;
 /// Matches C `_mxml_putc_cb_t` (`mxml-file.c:45`).
-pub type MxmlPutcCb = Option<fn(c_int, &mut MxmlSink) -> c_int>;
+pub type MxmlPutcCb = Option<fn(i32, &mut MxmlSink) -> i32>;
 
 /// Matches C `MXML_NO_CALLBACK` where a SAX callback is expected
 /// (`mxml-file.c:97`).
@@ -163,7 +162,7 @@ pub fn mxml_save_alloc_string(
     node: Option<usize>,
     cb: MxmlSaveCb,
 ) -> Option<Vec<u8>> {
-    let bytes: c_int;
+    let bytes: i32;
     let mut buffer: [u8; 8192] = [0; 8192];
     let mut s: Vec<u8>;
 
@@ -177,7 +176,7 @@ pub fn mxml_save_alloc_string(
         return None;
     }
 
-    if bytes < (8192 - 1) as c_int {
+    if bytes < (8192 - 1) as i32 {
         /*
          * Node fit inside the buffer, so just duplicate that string and
          * return...
@@ -210,8 +209,8 @@ pub fn mxml_save_fd(
     node: Option<usize>,
     fd: std::os::fd::BorrowedFd,
     cb: MxmlSaveCb,
-) -> c_int {
-    let col: c_int;
+) -> i32 {
+    let col: i32;
 
     /*
      * Initialize the file descriptor buffer...
@@ -238,7 +237,7 @@ pub fn mxml_save_fd(
         return -1;
     }
 
-    if col > 0 && mxml_fd_putc(b'\n' as c_int, &mut buf) < 0 {
+    if col > 0 && mxml_fd_putc(b'\n' as i32, &mut buf) < 0 {
         return -1;
     }
 
@@ -258,8 +257,8 @@ pub fn mxml_save_file(
     node: Option<usize>,
     fp: &mut dyn Write,
     cb: MxmlSaveCb,
-) -> c_int {
-    let col: c_int;
+) -> i32 {
+    let col: i32;
 
     /*
      * Write the node...
@@ -275,7 +274,7 @@ pub fn mxml_save_file(
     }
 
     /* The C calls putc('\n', fp) here, which is mxml_file_putc's body. */
-    if col > 0 && mxml_file_putc(b'\n' as c_int, &mut p) < 0 {
+    if col > 0 && mxml_file_putc(b'\n' as i32, &mut p) < 0 {
         return -1;
     }
 
@@ -291,10 +290,10 @@ pub fn mxml_save_string(
     arena: &MxmlArena,
     node: Option<usize>,
     buffer: &mut [u8],
-    bufsize: c_int,
+    bufsize: i32,
     cb: MxmlSaveCb,
-) -> c_int {
-    let col: c_int;
+) -> i32 {
+    let col: i32;
 
     /*
      * Write the node...  ptr[0] is the write cursor and ptr[1] the end of the
@@ -315,7 +314,7 @@ pub fn mxml_save_string(
     }
 
     if col > 0 {
-        mxml_string_putc(b'\n' as c_int, &mut ptr);
+        mxml_string_putc(b'\n' as i32, &mut ptr);
     }
 
     /*
@@ -341,7 +340,7 @@ pub fn mxml_save_string(
      * Return the number of characters...
      */
 
-    *ptr as c_int
+    *ptr as i32
 }
 
 /// Matches C `mxmlSAXLoadFd` (`mxml-file.c:349`).
@@ -447,7 +446,7 @@ pub fn mxml_set_error_callback(cb: MxmlErrorCb) {
 }
 
 /// Matches C `mxmlSetWrapMargin` (`mxml-file.c:484`).
-pub fn mxml_set_wrap_margin(column: c_int) {
+pub fn mxml_set_wrap_margin(column: i32) {
     mxml_global().with_borrow_mut(|global| {
         global.wrap = column;
     });
@@ -458,7 +457,7 @@ pub fn mxml_set_wrap_margin(column: c_int) {
 /// The C grows a `realloc`ed buffer and advances a cursor into it; the owned
 /// `Vec` is both, so the `bufptr`/`buffer`/`bufsize` triple collapses to one
 /// argument and the "unable to expand string buffer" arm cannot be reached.
-pub fn mxml_add_char(ch: c_int, bufptr: &mut Vec<u8>) -> c_int {
+pub fn mxml_add_char(ch: i32, bufptr: &mut Vec<u8>) -> i32 {
     /*
      * Nul-terminate the buffer as needed...
      */
@@ -499,9 +498,9 @@ pub fn mxml_add_char(ch: c_int, bufptr: &mut Vec<u8>) -> c_int {
 }
 
 /// Matches C static `mxml_fd_getc` (`mxml-file.c:568`).
-pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
-    let mut ch: c_int;
-    let mut temp: c_int;
+pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
+    let mut ch: i32;
+    let mut temp: i32;
 
     /*
      * Get the next character...
@@ -514,7 +513,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
         return EOF;
     }
 
-    ch = buf.buffer[buf.current] as c_int;
+    ch = buf.buffer[buf.current] as i32;
     buf.current += 1;
 
     match *encoding {
@@ -528,10 +527,10 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * ASCII
                  */
 
-                if ch < b' ' as c_int
-                    && ch != b'\n' as c_int
-                    && ch != b'\r' as c_int
-                    && ch != b'\t' as c_int
+                if ch < b' ' as i32
+                    && ch != b'\n' as i32
+                    && ch != b'\r' as i32
+                    && ch != b'\t' as i32
                 {
                     mxml_error(
                         c_format(
@@ -553,7 +552,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                ch = buf.buffer[buf.current] as c_int;
+                ch = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if ch != 0xff {
@@ -572,7 +571,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                ch = buf.buffer[buf.current] as c_int;
+                ch = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if ch != 0xfe {
@@ -591,7 +590,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if (temp & 0xc0) != 0x80 {
@@ -619,7 +618,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if (temp & 0xc0) != 0x80 {
@@ -632,7 +631,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if (temp & 0xc0) != 0x80 {
@@ -668,7 +667,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if (temp & 0xc0) != 0x80 {
@@ -681,7 +680,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if (temp & 0xc0) != 0x80 {
@@ -694,7 +693,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if (temp & 0xc0) != 0x80 {
@@ -727,16 +726,12 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                 return EOF;
             }
 
-            temp = buf.buffer[buf.current] as c_int;
+            temp = buf.buffer[buf.current] as i32;
             buf.current += 1;
 
             ch = (ch << 8) | temp;
 
-            if ch < b' ' as c_int
-                && ch != b'\n' as c_int
-                && ch != b'\r' as c_int
-                && ch != b'\t' as c_int
-            {
+            if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
                 mxml_error(
                     c_format(
                         "Bad control character 0x%02x not allowed by XML standard!",
@@ -750,20 +745,20 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * Multi-word UTF-16 char...
                  */
 
-                let mut lch: c_int;
+                let mut lch: i32;
 
                 if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
                     return EOF;
                 }
 
-                lch = buf.buffer[buf.current] as c_int;
+                lch = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 lch = (lch << 8) | temp;
@@ -785,16 +780,12 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                 return EOF;
             }
 
-            temp = buf.buffer[buf.current] as c_int;
+            temp = buf.buffer[buf.current] as i32;
             buf.current += 1;
 
             ch |= temp << 8;
 
-            if ch < b' ' as c_int
-                && ch != b'\n' as c_int
-                && ch != b'\r' as c_int
-                && ch != b'\t' as c_int
-            {
+            if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
                 mxml_error(
                     c_format(
                         "Bad control character 0x%02x not allowed by XML standard!",
@@ -808,20 +799,20 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * Multi-word UTF-16 char...
                  */
 
-                let mut lch: c_int;
+                let mut lch: i32;
 
                 if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
                     return EOF;
                 }
 
-                lch = buf.buffer[buf.current] as c_int;
+                lch = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 if buf.current >= buf.end && mxml_fd_read(buf) < 0 {
                     return EOF;
                 }
 
-                temp = buf.buffer[buf.current] as c_int;
+                temp = buf.buffer[buf.current] as i32;
                 buf.current += 1;
 
                 lch |= temp << 8;
@@ -841,7 +832,7 @@ pub fn mxml_fd_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
 }
 
 /// Matches C static `mxml_fd_putc` (`mxml-file.c:807`).
-pub fn mxml_fd_putc(ch: c_int, p: &mut MxmlSink) -> c_int {
+pub fn mxml_fd_putc(ch: i32, p: &mut MxmlSink) -> i32 {
     /*
      * Flush the write buffer as needed - note above that "end" still indicates
      * the end of the buffer...
@@ -869,7 +860,7 @@ pub fn mxml_fd_putc(ch: c_int, p: &mut MxmlSink) -> c_int {
 /// The C loops over `EAGAIN`/`EINTR`; `std::io::Read` reports the latter as
 /// `ErrorKind::Interrupted` and the former as `WouldBlock`, and the loop is
 /// the same.
-pub fn mxml_fd_read(buf: &mut MxmlFdbuf) -> c_int {
+pub fn mxml_fd_read(buf: &mut MxmlFdbuf) -> i32 {
     let bytes: usize;
 
     /*
@@ -907,7 +898,7 @@ pub fn mxml_fd_read(buf: &mut MxmlFdbuf) -> c_int {
 }
 
 /// Matches C static `mxml_fd_write` (`mxml-file.c:879`).
-pub fn mxml_fd_write(buf: &mut MxmlFdbuf) -> c_int {
+pub fn mxml_fd_write(buf: &mut MxmlFdbuf) -> i32 {
     let mut bytes: usize;
     let mut ptr: usize;
 
@@ -945,9 +936,9 @@ pub fn mxml_fd_write(buf: &mut MxmlFdbuf) -> c_int {
 ///
 /// The C reads through `getc` on a buffered `FILE *`; `ImodFile` is unbuffered,
 /// so each character is one `read`.  The bytes are the same.
-pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
-    let mut ch: c_int;
-    let mut temp: c_int;
+pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
+    let mut ch: i32;
+    let mut temp: i32;
 
     /*
      * Read a character from the file and see if it is EOF or ASCII...
@@ -958,7 +949,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
     };
     let mut one: [u8; 1] = [0];
     ch = match fp.read(&mut one) {
-        Ok(1) => one[0] as c_int,
+        Ok(1) => one[0] as i32,
         _ => EOF,
     };
 
@@ -977,10 +968,10 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * ASCII
                  */
 
-                if ch < b' ' as c_int
-                    && ch != b'\n' as c_int
-                    && ch != b'\r' as c_int
-                    && ch != b'\t' as c_int
+                if ch < b' ' as i32
+                    && ch != b'\n' as i32
+                    && ch != b'\r' as i32
+                    && ch != b'\t' as i32
                 {
                     mxml_error(
                         c_format(
@@ -999,7 +990,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  */
 
                 ch = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if ch != 0xff {
@@ -1015,7 +1006,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  */
 
                 ch = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if ch != 0xfe {
@@ -1031,7 +1022,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  */
 
                 temp = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if temp == EOF || (temp & 0xc0) != 0x80 {
@@ -1056,7 +1047,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  */
 
                 temp = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if temp == EOF || (temp & 0xc0) != 0x80 {
@@ -1066,7 +1057,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                 ch = ((ch & 0x0f) << 6) | (temp & 0x3f);
 
                 temp = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if temp == EOF || (temp & 0xc0) != 0x80 {
@@ -1099,7 +1090,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  */
 
                 temp = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if temp == EOF || (temp & 0xc0) != 0x80 {
@@ -1109,7 +1100,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                 ch = ((ch & 0x07) << 6) | (temp & 0x3f);
 
                 temp = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if temp == EOF || (temp & 0xc0) != 0x80 {
@@ -1119,7 +1110,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                 ch = (ch << 6) | (temp & 0x3f);
 
                 temp = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 if temp == EOF || (temp & 0xc0) != 0x80 {
@@ -1150,15 +1141,11 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
 
             ch = (ch << 8)
                 | match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
 
-            if ch < b' ' as c_int
-                && ch != b'\n' as c_int
-                && ch != b'\r' as c_int
-                && ch != b'\t' as c_int
-            {
+            if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
                 mxml_error(
                     c_format(
                         "Bad control character 0x%02x not allowed by XML standard!",
@@ -1172,13 +1159,13 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * Multi-word UTF-16 char...
                  */
 
-                let mut lch: c_int = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                let mut lch: i32 = match fp.read(&mut one) {
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 lch = (lch << 8)
                     | match fp.read(&mut one) {
-                        Ok(1) => one[0] as c_int,
+                        Ok(1) => one[0] as i32,
                         _ => EOF,
                     };
 
@@ -1196,15 +1183,11 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
              */
 
             ch |= match fp.read(&mut one) {
-                Ok(1) => one[0] as c_int,
+                Ok(1) => one[0] as i32,
                 _ => EOF,
             } << 8;
 
-            if ch < b' ' as c_int
-                && ch != b'\n' as c_int
-                && ch != b'\r' as c_int
-                && ch != b'\t' as c_int
-            {
+            if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
                 mxml_error(
                     c_format(
                         "Bad control character 0x%02x not allowed by XML standard!",
@@ -1218,12 +1201,12 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * Multi-word UTF-16 char...
                  */
 
-                let mut lch: c_int = match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                let mut lch: i32 = match fp.read(&mut one) {
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 };
                 lch |= match fp.read(&mut one) {
-                    Ok(1) => one[0] as c_int,
+                    Ok(1) => one[0] as i32,
                     _ => EOF,
                 } << 8;
 
@@ -1242,7 +1225,7 @@ pub fn mxml_file_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
 }
 
 /// Matches C static `mxml_file_putc` (`mxml-file.c:1102`).
-pub fn mxml_file_putc(ch: c_int, p: &mut MxmlSink) -> c_int {
+pub fn mxml_file_putc(ch: i32, p: &mut MxmlSink) -> i32 {
     let MxmlSink::File(fp) = p else {
         return -1;
     };
@@ -1258,10 +1241,10 @@ pub fn mxml_get_entity(
     arena: &MxmlArena,
     parent: Option<usize>,
     p: &mut MxmlSource,
-    encoding: &mut c_int,
+    encoding: &mut i32,
     getc_cb: MxmlGetcCb,
-) -> c_int {
-    let mut ch: c_int;
+) -> i32 {
+    let mut ch: i32;
     let mut entity: [u8; 64] = [0; 64];
     let mut entptr: usize;
 
@@ -1281,7 +1264,7 @@ pub fn mxml_get_entity(
         if ch == EOF {
             break;
         }
-        if ch > 126 || (!(ch as u8).is_ascii_alphanumeric() && ch != b'#' as c_int) {
+        if ch > 126 || (!(ch as u8).is_ascii_alphanumeric() && ch != b'#' as i32) {
             break;
         } else if entptr < 64 - 1 {
             entity[entptr] = ch as u8;
@@ -1298,7 +1281,7 @@ pub fn mxml_get_entity(
 
     let entity: &[u8] = &entity[..entptr];
 
-    if ch != b';' as c_int {
+    if ch != b';' as i32 {
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(b"Character entity \"");
         msg.extend_from_slice(entity);
@@ -1321,7 +1304,7 @@ pub fn mxml_get_entity(
                     .saturating_add((digits[k] as char).to_digit(16).unwrap() as i64);
                 k += 1;
             }
-            ch = value as c_int;
+            ch = value as i32;
         } else {
             /* strtol(entity + 1, NULL, 10) */
             let digits: &[u8] = &entity[1..];
@@ -1333,7 +1316,7 @@ pub fn mxml_get_entity(
                     .saturating_add((digits[k] - b'0') as i64);
                 k += 1;
             }
-            ch = value as c_int;
+            ch = value as i32;
         }
     } else {
         ch = mxml_entity_get_value(entity);
@@ -1348,7 +1331,7 @@ pub fn mxml_get_entity(
         }
     }
 
-    if ch < b' ' as c_int && ch != b'\n' as c_int && ch != b'\r' as c_int && ch != b'\t' as c_int {
+    if ch < b' ' as i32 && ch != b'\n' as i32 && ch != b'\r' as i32 && ch != b'\t' as i32 {
         let mut msg: Vec<u8> = Vec::new();
         msg.extend_from_slice(
             c_format(
@@ -1367,9 +1350,8 @@ pub fn mxml_get_entity(
 }
 
 /// Matches C static inline `mxml_isspace` (`mxml-file.c:60`).
-pub fn mxml_isspace(ch: c_int) -> c_int {
-    (ch == b' ' as c_int || ch == b'\t' as c_int || ch == b'\r' as c_int || ch == b'\n' as c_int)
-        as c_int
+pub fn mxml_isspace(ch: i32) -> i32 {
+    (ch == b' ' as i32 || ch == b'\t' as i32 || ch == b'\r' as i32 || ch == b'\n' as i32) as i32
 }
 
 /// Matches C static `mxml_load_data` (`mxml-file.c:1191`).
@@ -1385,11 +1367,11 @@ pub fn mxml_load_data(
     let mut node: Option<usize>;
     let mut first: Option<usize>;
     let mut parent: Option<usize>;
-    let mut ch: c_int;
-    let mut whitespace: c_int;
+    let mut ch: i32;
+    let mut whitespace: i32;
     let mut buffer: Vec<u8>;
     let mut type_: MxmlType;
-    let mut encoding: c_int;
+    let mut encoding: i32;
     static TYPES: [&[u8]; 6] = [
         b"MXML_ELEMENT",
         b"MXML_INTEGER",
@@ -1425,7 +1407,7 @@ pub fn mxml_load_data(
                 break;
             }
 
-            if (ch == b'<' as c_int
+            if (ch == b'<' as i32
                 || (mxml_isspace(ch) != 0 && type_ != MXML_OPAQUE && type_ != MXML_CUSTOM))
                 && !buffer.is_empty()
             {
@@ -1496,7 +1478,7 @@ pub fn mxml_load_data(
                                 value.saturating_neg()
                             } else {
                                 value
-                            } as c_int,
+                            } as i32,
                         );
                     }
 
@@ -1647,7 +1629,7 @@ pub fn mxml_load_data(
                 }
 
                 buffer.clear();
-                whitespace = (mxml_isspace(ch) != 0 && type_ == MXML_TEXT) as c_int;
+                whitespace = (mxml_isspace(ch) != 0 && type_ == MXML_TEXT) as i32;
 
                 if node.is_none() && type_ != MXML_IGNORE {
                     /*
@@ -1692,7 +1674,7 @@ pub fn mxml_load_data(
              * whitespace...
              */
 
-            if ch == b'<' as c_int && whitespace != 0 && type_ == MXML_TEXT {
+            if ch == b'<' as i32 && whitespace != 0 && type_ == MXML_TEXT {
                 if parent.is_some() {
                     node = mxml_new_text(arena, parent, whitespace, Some(b""));
 
@@ -1712,7 +1694,7 @@ pub fn mxml_load_data(
                 whitespace = 0;
             }
 
-            if ch == b'<' as c_int {
+            if ch == b'<' as i32 {
                 /*
                  * Start of open/close tag...
                  */
@@ -1726,14 +1708,14 @@ pub fn mxml_load_data(
                     }
 
                     if mxml_isspace(ch) != 0
-                        || ch == b'>' as c_int
-                        || (ch == b'/' as c_int && !buffer.is_empty())
+                        || ch == b'>' as i32
+                        || (ch == b'/' as i32 && !buffer.is_empty())
                     {
                         break;
-                    } else if ch == b'<' as c_int {
+                    } else if ch == b'<' as i32 {
                         mxml_error(b"Bare < in element!");
                         break 'error;
-                    } else if ch == b'&' as c_int {
+                    } else if ch == b'&' as i32 {
                         ch = mxml_get_entity(arena, parent, p, &mut encoding, getc_cb);
                         if ch == EOF {
                             break 'error;
@@ -1742,11 +1724,11 @@ pub fn mxml_load_data(
                         if mxml_add_char(ch, &mut buffer) != 0 {
                             break 'error;
                         }
-                    } else if ch < b'0' as c_int
-                        && ch != b'!' as c_int
-                        && ch != b'-' as c_int
-                        && ch != b'.' as c_int
-                        && ch != b'/' as c_int
+                    } else if ch < b'0' as i32
+                        && ch != b'!' as i32
+                        && ch != b'-' as i32
+                        && ch != b'.' as i32
+                        && ch != b'/' as i32
                     {
                         break 'error;
                     } else if mxml_add_char(ch, &mut buffer) != 0 {
@@ -1770,7 +1752,7 @@ pub fn mxml_load_data(
                             break;
                         }
 
-                        if ch == b'>' as c_int
+                        if ch == b'>' as i32
                             && buffer.len() > 4
                             && buffer[buffer.len() - 3] != b'-'
                             && buffer[buffer.len() - 2] == b'-'
@@ -1786,7 +1768,7 @@ pub fn mxml_load_data(
                      * Error out if we didn't get the whole comment...
                      */
 
-                    if ch != b'>' as c_int {
+                    if ch != b'>' as i32 {
                         /*
                          * Print error and return...
                          */
@@ -1859,7 +1841,7 @@ pub fn mxml_load_data(
                             break;
                         }
 
-                        if ch == b'>' as c_int
+                        if ch == b'>' as i32
                             && buffer.len() >= 2
                             && buffer[buffer.len() - 2..] == *b"]]"
                         {
@@ -1873,7 +1855,7 @@ pub fn mxml_load_data(
                      * Error out if we didn't get the whole comment...
                      */
 
-                    if ch != b'>' as c_int {
+                    if ch != b'>' as i32 {
                         /*
                          * Print error and return...
                          */
@@ -1946,7 +1928,7 @@ pub fn mxml_load_data(
                             break;
                         }
 
-                        if ch == b'>' as c_int
+                        if ch == b'>' as i32
                             && !buffer.is_empty()
                             && buffer[buffer.len() - 1] == b'?'
                         {
@@ -1960,7 +1942,7 @@ pub fn mxml_load_data(
                      * Error out if we didn't get the whole processing instruction...
                      */
 
-                    if ch != b'>' as c_int {
+                    if ch != b'>' as i32 {
                         /*
                          * Print error and return...
                          */
@@ -2046,10 +2028,10 @@ pub fn mxml_load_data(
                      */
 
                     loop {
-                        if ch == b'>' as c_int {
+                        if ch == b'>' as i32 {
                             break;
                         } else {
-                            if ch == b'&' as c_int {
+                            if ch == b'&' as i32 {
                                 ch = mxml_get_entity(arena, parent, p, &mut encoding, getc_cb);
                                 if ch == EOF {
                                     break 'error;
@@ -2071,7 +2053,7 @@ pub fn mxml_load_data(
                      * Error out if we didn't get the whole declaration...
                      */
 
-                    if ch != b'>' as c_int {
+                    if ch != b'>' as i32 {
                         /*
                          * Print error and return...
                          */
@@ -2191,7 +2173,7 @@ pub fn mxml_load_data(
                      * Keep reading until we see >...
                      */
 
-                    while ch != b'>' as c_int && ch != EOF {
+                    while ch != b'>' as i32 && ch != EOF {
                         ch = getc_cb.unwrap()(p, &mut encoding);
                     }
 
@@ -2261,9 +2243,9 @@ pub fn mxml_load_data(
                         if ch == EOF {
                             break 'error;
                         }
-                    } else if ch == b'/' as c_int {
+                    } else if ch == b'/' as i32 {
                         ch = getc_cb.unwrap()(p, &mut encoding);
-                        if ch != b'>' as c_int {
+                        if ch != b'>' as i32 {
                             let mut msg: Vec<u8> = Vec::new();
                             msg.extend_from_slice(
                                 c_format(
@@ -2279,7 +2261,7 @@ pub fn mxml_load_data(
                             break 'error;
                         }
 
-                        ch = b'/' as c_int;
+                        ch = b'/' as i32;
                     }
 
                     if let Some(sax) = sax_cb {
@@ -2294,7 +2276,7 @@ pub fn mxml_load_data(
                         break;
                     }
 
-                    if ch != b'/' as c_int {
+                    if ch != b'/' as i32 {
                         /*
                          * Descend into this node, setting the value type as needed...
                          */
@@ -2316,7 +2298,7 @@ pub fn mxml_load_data(
                 }
 
                 buffer.clear();
-            } else if ch == b'&' as c_int {
+            } else if ch == b'&' as i32 {
                 /*
                  * Add character entity to current buffer...
                  */
@@ -2402,11 +2384,11 @@ pub fn mxml_parse_element(
     arena: &mut MxmlArena,
     node: usize,
     p: &mut MxmlSource,
-    encoding: &mut c_int,
+    encoding: &mut i32,
     getc_cb: MxmlGetcCb,
-) -> c_int {
-    let mut ch: c_int;
-    let mut quote: c_int;
+) -> i32 {
+    let mut ch: i32;
+    let mut quote: i32;
     let mut name: Vec<u8>;
     let mut value: Vec<u8>;
 
@@ -2442,14 +2424,14 @@ pub fn mxml_parse_element(
              * Stop at /, ?, or >...
              */
 
-            if ch == b'/' as c_int || ch == b'?' as c_int {
+            if ch == b'/' as i32 || ch == b'?' as i32 {
                 /*
                  * Grab the > character and print an error if it isn't there...
                  */
 
                 quote = getc_cb.unwrap()(p, encoding);
 
-                if quote != b'>' as c_int {
+                if quote != b'>' as i32 {
                     let mut msg: Vec<u8> = Vec::new();
                     msg.extend_from_slice(
                         c_format(
@@ -2470,7 +2452,7 @@ pub fn mxml_parse_element(
                 }
 
                 break;
-            } else if ch == b'<' as c_int {
+            } else if ch == b'<' as i32 {
                 let mut msg: Vec<u8> = Vec::new();
                 msg.extend_from_slice(b"Bare < in element ");
                 msg.extend_from_slice(match &arena.node(node).value {
@@ -2480,7 +2462,7 @@ pub fn mxml_parse_element(
                 msg.push(b'!');
                 mxml_error(&msg);
                 break 'error;
-            } else if ch == b'>' as c_int {
+            } else if ch == b'>' as i32 {
                 break;
             }
 
@@ -2491,7 +2473,7 @@ pub fn mxml_parse_element(
             name.clear();
             name.push(ch as u8);
 
-            if ch == b'\"' as c_int || ch == b'\'' as c_int {
+            if ch == b'\"' as i32 || ch == b'\'' as i32 {
                 /*
                  * Name is in quotes, so get a quoted string...
                  */
@@ -2504,7 +2486,7 @@ pub fn mxml_parse_element(
                         break;
                     }
 
-                    if ch == b'&' as c_int {
+                    if ch == b'&' as i32 {
                         ch = mxml_get_entity(arena, Some(node), p, encoding, getc_cb);
                         if ch == EOF {
                             break 'error;
@@ -2531,14 +2513,14 @@ pub fn mxml_parse_element(
                     }
 
                     if mxml_isspace(ch) != 0
-                        || ch == b'=' as c_int
-                        || ch == b'/' as c_int
-                        || ch == b'>' as c_int
-                        || ch == b'?' as c_int
+                        || ch == b'=' as i32
+                        || ch == b'/' as i32
+                        || ch == b'>' as i32
+                        || ch == b'?' as i32
                     {
                         break;
                     } else {
-                        if ch == b'&' as c_int {
+                        if ch == b'&' as i32 {
                             ch = mxml_get_entity(arena, Some(node), p, encoding, getc_cb);
                             if ch == EOF {
                                 break 'error;
@@ -2560,7 +2542,7 @@ pub fn mxml_parse_element(
                 ch = getc_cb.unwrap()(p, encoding);
             }
 
-            if ch == b'=' as c_int {
+            if ch == b'=' as i32 {
                 /*
                  * Read the attribute value...
                  */
@@ -2586,7 +2568,7 @@ pub fn mxml_parse_element(
                     break 'error;
                 }
 
-                if ch == b'\'' as c_int || ch == b'\"' as c_int {
+                if ch == b'\'' as i32 || ch == b'\"' as i32 {
                     /*
                      * Read quoted value...
                      */
@@ -2603,7 +2585,7 @@ pub fn mxml_parse_element(
                         if ch == quote {
                             break;
                         } else {
-                            if ch == b'&' as c_int {
+                            if ch == b'&' as i32 {
                                 ch = mxml_get_entity(arena, Some(node), p, encoding, getc_cb);
                                 if ch == EOF {
                                     break 'error;
@@ -2630,13 +2612,13 @@ pub fn mxml_parse_element(
                         }
 
                         if mxml_isspace(ch) != 0
-                            || ch == b'=' as c_int
-                            || ch == b'/' as c_int
-                            || ch == b'>' as c_int
+                            || ch == b'=' as i32
+                            || ch == b'/' as i32
+                            || ch == b'>' as i32
                         {
                             break;
                         } else {
-                            if ch == b'&' as c_int {
+                            if ch == b'&' as i32 {
                                 ch = mxml_get_entity(arena, Some(node), p, encoding, getc_cb);
                                 if ch == EOF {
                                     break 'error;
@@ -2673,14 +2655,14 @@ pub fn mxml_parse_element(
              * Check the end character...
              */
 
-            if ch == b'/' as c_int || ch == b'?' as c_int {
+            if ch == b'/' as i32 || ch == b'?' as i32 {
                 /*
                  * Grab the > character and print an error if it isn't there...
                  */
 
                 quote = getc_cb.unwrap()(p, encoding);
 
-                if quote != b'>' as c_int {
+                if quote != b'>' as i32 {
                     let mut msg: Vec<u8> = Vec::new();
                     msg.extend_from_slice(
                         c_format(
@@ -2701,7 +2683,7 @@ pub fn mxml_parse_element(
                 }
 
                 break;
-            } else if ch == b'>' as c_int {
+            } else if ch == b'>' as i32 {
                 break;
             }
         }
@@ -2725,14 +2707,14 @@ pub fn mxml_parse_element(
 /// The C walks a NUL-terminated string; reading at or past the end of the byte
 /// slice is the C reading that terminating NUL, so every dereference below is
 /// `s.get(pos).unwrap_or(&0)`.
-pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
-    let mut ch: c_int;
+pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut i32) -> i32 {
+    let mut ch: i32;
 
     let MxmlSource::String { s, pos } = p else {
         return EOF;
     };
 
-    ch = (*s.get(*pos).unwrap_or(&0) as c_int) & 255;
+    ch = (*s.get(*pos).unwrap_or(&0) as i32) & 255;
     if ch != 0 || *encoding == ENCODE_UTF16LE {
         *pos += 1;
 
@@ -2747,10 +2729,10 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * ASCII
                      */
 
-                    if ch < b' ' as c_int
-                        && ch != b'\n' as c_int
-                        && ch != b'\r' as c_int
-                        && ch != b'\t' as c_int
+                    if ch < b' ' as i32
+                        && ch != b'\n' as i32
+                        && ch != b'\r' as i32
+                        && ch != b'\t' as i32
                     {
                         mxml_error(
                             c_format(
@@ -2768,7 +2750,7 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * UTF-16 big-endian BOM?
                      */
 
-                    if ((*s.get(*pos).unwrap_or(&0) as c_int) & 255) != 0xff {
+                    if ((*s.get(*pos).unwrap_or(&0) as i32) & 255) != 0xff {
                         return EOF;
                     }
 
@@ -2781,7 +2763,7 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * UTF-16 little-endian BOM?
                      */
 
-                    if ((*s.get(*pos).unwrap_or(&0) as c_int) & 255) != 0xfe {
+                    if ((*s.get(*pos).unwrap_or(&0) as i32) & 255) != 0xfe {
                         return EOF;
                     }
 
@@ -2794,11 +2776,11 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * Two-byte value...
                      */
 
-                    if ((*s.get(*pos).unwrap_or(&0) as c_int) & 0xc0) != 0x80 {
+                    if ((*s.get(*pos).unwrap_or(&0) as i32) & 0xc0) != 0x80 {
                         return EOF;
                     }
 
-                    ch = ((ch & 0x1f) << 6) | ((*s.get(*pos).unwrap_or(&0) as c_int) & 0x3f);
+                    ch = ((ch & 0x1f) << 6) | ((*s.get(*pos).unwrap_or(&0) as i32) & 0x3f);
 
                     *pos += 1;
 
@@ -2819,15 +2801,14 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * Three-byte value...
                      */
 
-                    if ((*s.get(*pos).unwrap_or(&0) as c_int) & 0xc0) != 0x80
-                        || ((*s.get(*pos + 1).unwrap_or(&0) as c_int) & 0xc0) != 0x80
+                    if ((*s.get(*pos).unwrap_or(&0) as i32) & 0xc0) != 0x80
+                        || ((*s.get(*pos + 1).unwrap_or(&0) as i32) & 0xc0) != 0x80
                     {
                         return EOF;
                     }
 
-                    ch = ((((ch & 0x0f) << 6) | ((*s.get(*pos).unwrap_or(&0) as c_int) & 0x3f))
-                        << 6)
-                        | ((*s.get(*pos + 1).unwrap_or(&0) as c_int) & 0x3f);
+                    ch = ((((ch & 0x0f) << 6) | ((*s.get(*pos).unwrap_or(&0) as i32) & 0x3f)) << 6)
+                        | ((*s.get(*pos + 1).unwrap_or(&0) as i32) & 0x3f);
 
                     *pos += 2;
 
@@ -2856,19 +2837,18 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * Four-byte value...
                      */
 
-                    if ((*s.get(*pos).unwrap_or(&0) as c_int) & 0xc0) != 0x80
-                        || ((*s.get(*pos + 1).unwrap_or(&0) as c_int) & 0xc0) != 0x80
-                        || ((*s.get(*pos + 2).unwrap_or(&0) as c_int) & 0xc0) != 0x80
+                    if ((*s.get(*pos).unwrap_or(&0) as i32) & 0xc0) != 0x80
+                        || ((*s.get(*pos + 1).unwrap_or(&0) as i32) & 0xc0) != 0x80
+                        || ((*s.get(*pos + 2).unwrap_or(&0) as i32) & 0xc0) != 0x80
                     {
                         return EOF;
                     }
 
-                    ch = ((((((ch & 0x07) << 6)
-                        | ((*s.get(*pos).unwrap_or(&0) as c_int) & 0x3f))
+                    ch = ((((((ch & 0x07) << 6) | ((*s.get(*pos).unwrap_or(&0) as i32) & 0x3f))
                         << 6)
-                        | ((*s.get(*pos + 1).unwrap_or(&0) as c_int) & 0x3f))
+                        | ((*s.get(*pos + 1).unwrap_or(&0) as i32) & 0x3f))
                         << 6)
-                        | ((*s.get(*pos + 2).unwrap_or(&0) as c_int) & 0x3f);
+                        | ((*s.get(*pos + 2).unwrap_or(&0) as i32) & 0x3f);
 
                     *pos += 3;
 
@@ -2894,13 +2874,13 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * Read UTF-16 big-endian char...
                  */
 
-                ch = (ch << 8) | ((*s.get(*pos).unwrap_or(&0) as c_int) & 255);
+                ch = (ch << 8) | ((*s.get(*pos).unwrap_or(&0) as i32) & 255);
                 *pos += 1;
 
-                if ch < b' ' as c_int
-                    && ch != b'\n' as c_int
-                    && ch != b'\r' as c_int
-                    && ch != b'\t' as c_int
+                if ch < b' ' as i32
+                    && ch != b'\n' as i32
+                    && ch != b'\r' as i32
+                    && ch != b'\t' as i32
                 {
                     mxml_error(
                         c_format(
@@ -2915,14 +2895,14 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * Multi-word UTF-16 char...
                      */
 
-                    let lch: c_int;
+                    let lch: i32;
 
                     if *s.get(*pos).unwrap_or(&0) == 0 {
                         return EOF;
                     }
 
-                    lch = (((*s.get(*pos).unwrap_or(&0) as c_int) & 255) << 8)
-                        | ((*s.get(*pos + 1).unwrap_or(&0) as c_int) & 255);
+                    lch = (((*s.get(*pos).unwrap_or(&0) as i32) & 255) << 8)
+                        | ((*s.get(*pos + 1).unwrap_or(&0) as i32) & 255);
                     *pos += 2;
 
                     if !(0xdc00..0xdfff).contains(&lch) {
@@ -2940,7 +2920,7 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                  * Read UTF-16 little-endian char...
                  */
 
-                ch |= ((*s.get(*pos).unwrap_or(&0) as c_int) & 255) << 8;
+                ch |= ((*s.get(*pos).unwrap_or(&0) as i32) & 255) << 8;
 
                 if ch == 0 {
                     *pos -= 1;
@@ -2949,10 +2929,10 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
 
                 *pos += 1;
 
-                if ch < b' ' as c_int
-                    && ch != b'\n' as c_int
-                    && ch != b'\r' as c_int
-                    && ch != b'\t' as c_int
+                if ch < b' ' as i32
+                    && ch != b'\n' as i32
+                    && ch != b'\r' as i32
+                    && ch != b'\t' as i32
                 {
                     mxml_error(
                         c_format(
@@ -2967,14 +2947,14 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
                      * Multi-word UTF-16 char...
                      */
 
-                    let lch: c_int;
+                    let lch: i32;
 
                     if *s.get(*pos + 1).unwrap_or(&0) == 0 {
                         return EOF;
                     }
 
-                    lch = (((*s.get(*pos + 1).unwrap_or(&0) as c_int) & 255) << 8)
-                        | ((*s.get(*pos).unwrap_or(&0) as c_int) & 255);
+                    lch = (((*s.get(*pos + 1).unwrap_or(&0) as i32) & 255) << 8)
+                        | ((*s.get(*pos).unwrap_or(&0) as i32) & 255);
                     *pos += 2;
 
                     if !(0xdc00..0xdfff).contains(&lch) {
@@ -2995,7 +2975,7 @@ pub fn mxml_string_getc(p: &mut MxmlSource, encoding: &mut c_int) -> c_int {
 }
 
 /// Matches C static `mxml_string_putc` (`mxml-file.c:2258`).
-pub fn mxml_string_putc(ch: c_int, p: &mut MxmlSink) -> c_int {
+pub fn mxml_string_putc(ch: i32, p: &mut MxmlSink) -> i32 {
     let MxmlSink::String { buffer, ptr, end } = p else {
         return -1;
     };
@@ -3014,7 +2994,7 @@ pub fn mxml_string_putc(ch: c_int, p: &mut MxmlSink) -> c_int {
 /// The C indexes a `char` array, so `mxmlEntityGetName` is given the *signed*
 /// character value and never matches a byte with the high bit set; the cast
 /// through `i8` below keeps that.
-pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int {
+pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
     let quote: u8;
     let mut i: usize = 0;
 
@@ -3023,7 +3003,7 @@ pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int
          * Write a quoted name string...
          */
 
-        if putc_cb.unwrap()(s[0] as i8 as c_int, p) < 0 {
+        if putc_cb.unwrap()(s[0] as i8 as i32, p) < 0 {
             return -1;
         }
 
@@ -3035,22 +3015,22 @@ pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int
              * Escape special characters...
              */
 
-            let name = mxml_entity_get_name(s[i] as i8 as c_int);
+            let name = mxml_entity_get_name(s[i] as i8 as i32);
             if let Some(name) = name {
-                if putc_cb.unwrap()(b'&' as c_int, p) < 0 {
+                if putc_cb.unwrap()(b'&' as i32, p) < 0 {
                     return -1;
                 }
 
                 for c in name {
-                    if putc_cb.unwrap()(*c as i8 as c_int, p) < 0 {
+                    if putc_cb.unwrap()(*c as i8 as i32, p) < 0 {
                         return -1;
                     }
                 }
 
-                if putc_cb.unwrap()(b';' as c_int, p) < 0 {
+                if putc_cb.unwrap()(b';' as i32, p) < 0 {
                     return -1;
                 }
-            } else if putc_cb.unwrap()(s[i] as i8 as c_int, p) < 0 {
+            } else if putc_cb.unwrap()(s[i] as i8 as i32, p) < 0 {
                 return -1;
             }
 
@@ -3061,7 +3041,7 @@ pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int
          * Write the end quote...
          */
 
-        if putc_cb.unwrap()(quote as i8 as c_int, p) < 0 {
+        if putc_cb.unwrap()(quote as i8 as i32, p) < 0 {
             return -1;
         }
     } else {
@@ -3070,7 +3050,7 @@ pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int
          */
 
         while i < s.len() {
-            if putc_cb.unwrap()(s[i] as i8 as c_int, p) < 0 {
+            if putc_cb.unwrap()(s[i] as i8 as i32, p) < 0 {
                 return -1;
             }
 
@@ -3082,7 +3062,7 @@ pub fn mxml_write_name(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int
 }
 
 /// Matches C static `mxml_write_string` (`mxml-file.c:2618`).
-pub fn mxml_write_string(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_int {
+pub fn mxml_write_string(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> i32 {
     let mut i: usize = 0;
 
     while i < s.len() {
@@ -3090,22 +3070,22 @@ pub fn mxml_write_string(s: &[u8], p: &mut MxmlSink, putc_cb: MxmlPutcCb) -> c_i
          * Escape special characters...
          */
 
-        let name = mxml_entity_get_name(s[i] as i8 as c_int);
+        let name = mxml_entity_get_name(s[i] as i8 as i32);
         if let Some(name) = name {
-            if putc_cb.unwrap()(b'&' as c_int, p) < 0 {
+            if putc_cb.unwrap()(b'&' as i32, p) < 0 {
                 return -1;
             }
 
             for c in name {
-                if putc_cb.unwrap()(*c as i8 as c_int, p) < 0 {
+                if putc_cb.unwrap()(*c as i8 as i32, p) < 0 {
                     return -1;
                 }
             }
 
-            if putc_cb.unwrap()(b';' as c_int, p) < 0 {
+            if putc_cb.unwrap()(b';' as i32, p) < 0 {
                 return -1;
             }
-        } else if putc_cb.unwrap()(s[i] as i8 as c_int, p) < 0 {
+        } else if putc_cb.unwrap()(s[i] as i8 as i32, p) < 0 {
             return -1;
         }
 
@@ -3121,15 +3101,15 @@ pub fn mxml_write_ws(
     node: usize,
     p: &mut MxmlSink,
     cb: MxmlSaveCb,
-    ws: c_int,
-    mut col: c_int,
+    ws: i32,
+    mut col: i32,
     putc_cb: MxmlPutcCb,
-) -> c_int {
+) -> i32 {
     if let Some(f) = cb {
         let s = f(arena, node, ws);
         if let Some(s) = s {
             for c in &s {
-                if putc_cb.unwrap()(*c as i8 as c_int, p) < 0 {
+                if putc_cb.unwrap()(*c as i8 as i32, p) < 0 {
                     return -1;
                 } else if *c == b'\n' {
                     col = 0;
@@ -3152,14 +3132,14 @@ pub fn mxml_write_node(
     node: Option<usize>,
     p: &mut MxmlSink,
     cb: MxmlSaveCb,
-    mut col: c_int,
+    mut col: i32,
     putc_cb: MxmlPutcCb,
     global: &MxmlGlobal,
-) -> c_int {
+) -> i32 {
     let mut current: Option<usize>;
     let mut next: Option<usize>;
-    let mut i: c_int;
-    let mut width: c_int;
+    let mut i: i32;
+    let mut width: i32;
     let mut attr: usize;
 
     current = node;
@@ -3172,7 +3152,7 @@ pub fn mxml_write_node(
             MXML_ELEMENT => {
                 col = mxml_write_ws(arena, cur, p, cb, MXML_WS_BEFORE_OPEN, col, putc_cb);
 
-                if putc_cb.unwrap()(b'<' as c_int, p) < 0 {
+                if putc_cb.unwrap()(b'<' as i32, p) < 0 {
                     return -1;
                 }
 
@@ -3192,7 +3172,7 @@ pub fn mxml_write_node(
                      */
 
                     for c in name {
-                        if putc_cb.unwrap()(*c as i8 as c_int, p) < 0 {
+                        if putc_cb.unwrap()(*c as i8 as i32, p) < 0 {
                             return -1;
                         }
                     }
@@ -3200,54 +3180,49 @@ pub fn mxml_write_node(
                     return -1;
                 }
 
-                col += name.len() as c_int + 1;
+                col += name.len() as i32 + 1;
 
-                i = element.num_attrs;
-                attr = 0;
-                while i > 0 {
-                    width = element.attrs[attr].name.len() as c_int;
+                for attribute in &element.attrs {
+                    width = attribute.name.len() as i32;
 
-                    if let Some(value) = element.attrs[attr].value.as_deref() {
-                        width += value.len() as c_int + 3;
+                    if let Some(value) = attribute.value.as_deref() {
+                        width += value.len() as i32 + 3;
                     }
 
                     if global.wrap > 0 && (col + width) > global.wrap {
-                        if putc_cb.unwrap()(b'\n' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b'\n' as i32, p) < 0 {
                             return -1;
                         }
 
                         col = 0;
                     } else {
-                        if putc_cb.unwrap()(b' ' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b' ' as i32, p) < 0 {
                             return -1;
                         }
 
                         col += 1;
                     }
 
-                    if mxml_write_name(&element.attrs[attr].name, p, putc_cb) < 0 {
+                    if mxml_write_name(&attribute.name, p, putc_cb) < 0 {
                         return -1;
                     }
 
-                    if let Some(value) = element.attrs[attr].value.as_deref() {
-                        if putc_cb.unwrap()(b'=' as c_int, p) < 0 {
+                    if let Some(value) = attribute.value.as_deref() {
+                        if putc_cb.unwrap()(b'=' as i32, p) < 0 {
                             return -1;
                         }
-                        if putc_cb.unwrap()(b'\"' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b'\"' as i32, p) < 0 {
                             return -1;
                         }
                         if mxml_write_string(value, p, putc_cb) < 0 {
                             return -1;
                         }
-                        if putc_cb.unwrap()(b'\"' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b'\"' as i32, p) < 0 {
                             return -1;
                         }
                     }
 
                     col += width;
-
-                    i -= 1;
-                    attr += 1;
                 }
 
                 if arena.node(cur).child.is_some() {
@@ -3255,7 +3230,7 @@ pub fn mxml_write_node(
                      * Write children...
                      */
 
-                    if putc_cb.unwrap()(b'>' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'>' as i32, p) < 0 {
                         return -1;
                     } else {
                         col += 1;
@@ -3268,7 +3243,7 @@ pub fn mxml_write_node(
                      * without a closing tag...
                      */
 
-                    if putc_cb.unwrap()(b'>' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'>' as i32, p) < 0 {
                         return -1;
                     } else {
                         col += 1;
@@ -3276,13 +3251,13 @@ pub fn mxml_write_node(
 
                     col = mxml_write_ws(arena, cur, p, cb, MXML_WS_AFTER_OPEN, col, putc_cb);
                 } else {
-                    if putc_cb.unwrap()(b' ' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b' ' as i32, p) < 0 {
                         return -1;
                     }
-                    if putc_cb.unwrap()(b'/' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'/' as i32, p) < 0 {
                         return -1;
                     }
-                    if putc_cb.unwrap()(b'>' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'>' as i32, p) < 0 {
                         return -1;
                     }
 
@@ -3295,12 +3270,12 @@ pub fn mxml_write_node(
             MXML_INTEGER => {
                 if arena.node(cur).prev.is_some() {
                     if global.wrap > 0 && col > global.wrap {
-                        if putc_cb.unwrap()(b'\n' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b'\n' as i32, p) < 0 {
                             return -1;
                         }
 
                         col = 0;
-                    } else if putc_cb.unwrap()(b' ' as c_int, p) < 0 {
+                    } else if putc_cb.unwrap()(b' ' as i32, p) < 0 {
                         return -1;
                     } else {
                         col += 1;
@@ -3315,7 +3290,7 @@ pub fn mxml_write_node(
                     return -1;
                 }
 
-                col += s.len() as c_int;
+                col += s.len() as i32;
             }
 
             MXML_OPAQUE => {
@@ -3327,18 +3302,18 @@ pub fn mxml_write_node(
                     return -1;
                 }
 
-                col += opaque.len() as c_int;
+                col += opaque.len() as i32;
             }
 
             MXML_REAL => {
                 if arena.node(cur).prev.is_some() {
                     if global.wrap > 0 && col > global.wrap {
-                        if putc_cb.unwrap()(b'\n' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b'\n' as i32, p) < 0 {
                             return -1;
                         }
 
                         col = 0;
-                    } else if putc_cb.unwrap()(b' ' as c_int, p) < 0 {
+                    } else if putc_cb.unwrap()(b' ' as i32, p) < 0 {
                         return -1;
                     } else {
                         col += 1;
@@ -3353,7 +3328,7 @@ pub fn mxml_write_node(
                     return -1;
                 }
 
-                col += s.len() as c_int;
+                col += s.len() as i32;
             }
 
             MXML_TEXT => {
@@ -3362,12 +3337,12 @@ pub fn mxml_write_node(
                 };
                 if text.whitespace != 0 && col > 0 {
                     if global.wrap > 0 && col > global.wrap {
-                        if putc_cb.unwrap()(b'\n' as c_int, p) < 0 {
+                        if putc_cb.unwrap()(b'\n' as i32, p) < 0 {
                             return -1;
                         }
 
                         col = 0;
-                    } else if putc_cb.unwrap()(b' ' as c_int, p) < 0 {
+                    } else if putc_cb.unwrap()(b' ' as i32, p) < 0 {
                         return -1;
                     } else {
                         col += 1;
@@ -3382,7 +3357,7 @@ pub fn mxml_write_node(
                     return -1;
                 }
 
-                col += string.len() as c_int;
+                col += string.len() as i32;
             }
 
             MXML_CUSTOM if global.custom_save_cb.is_some() => {
@@ -3396,8 +3371,8 @@ pub fn mxml_write_node(
                 }
 
                 match data.iter().rposition(|c| *c == b'\n') {
-                    None => col += data.len() as c_int,
-                    Some(newline) => col = (data.len() - newline) as c_int,
+                    None => col += data.len() as i32,
+                    Some(newline) => col = (data.len() - newline) as i32,
                 }
             }
 
@@ -3433,20 +3408,20 @@ pub fn mxml_write_node(
                 if name.is_empty() || (name[0] != b'!' && name[0] != b'?') {
                     col = mxml_write_ws(arena, cur, p, cb, MXML_WS_BEFORE_CLOSE, col, putc_cb);
 
-                    if putc_cb.unwrap()(b'<' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'<' as i32, p) < 0 {
                         return -1;
                     }
-                    if putc_cb.unwrap()(b'/' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'/' as i32, p) < 0 {
                         return -1;
                     }
                     if mxml_write_string(name, p, putc_cb) < 0 {
                         return -1;
                     }
-                    if putc_cb.unwrap()(b'>' as c_int, p) < 0 {
+                    if putc_cb.unwrap()(b'>' as i32, p) < 0 {
                         return -1;
                     }
 
-                    col += name.len() as c_int + 3;
+                    col += name.len() as i32 + 3;
 
                     col = mxml_write_ws(arena, cur, p, cb, MXML_WS_AFTER_CLOSE, col, putc_cb);
                 }
@@ -3474,12 +3449,12 @@ mod tests {
     use std::cell::Cell;
 
     thread_local! {
-        static S_LAST_LEVEL: Cell<c_int> = const { Cell::new(-1) };
+        static S_LAST_LEVEL: Cell<i32> = const { Cell::new(-1) };
     }
 
     /// Copy of `ixmlWhitespace_cb` from `IMOD/libcfshr/mxmlwrap.c`.
-    fn ws_cb(arena: &MxmlArena, node: usize, where_: c_int) -> Option<Vec<u8>> {
-        let mut level: c_int = -1;
+    fn ws_cb(arena: &MxmlArena, node: usize, where_: i32) -> Option<Vec<u8>> {
+        let mut level: i32 = -1;
         let mut parent = arena.node(node).parent;
         let spaces: [u8; 32] = [b' '; 32];
         if where_ != MXML_WS_BEFORE_OPEN && where_ != MXML_WS_BEFORE_CLOSE {
@@ -3508,13 +3483,13 @@ mod tests {
         Some(out)
     }
 
-    fn node_index(nodes: &[usize], n: Option<usize>) -> c_int {
+    fn node_index(nodes: &[usize], n: Option<usize>) -> i32 {
         let Some(n) = n else {
             return -1;
         };
         for (i, p) in nodes.iter().enumerate() {
             if *p == n {
-                return i as c_int;
+                return i as i32;
             }
         }
         -2
@@ -3526,14 +3501,14 @@ mod tests {
         tree: Option<usize>,
         tag: &str,
     ) -> Vec<usize> {
-        let mut ws: c_int = 0;
+        let mut ws: i32 = 0;
         let mut nodes: Vec<usize> = Vec::new();
         let mut n = tree;
         while let Some(cur) = n {
             nodes.push(cur);
             n = mxml_walk_next(arena, n, tree, MXML_DESCEND);
         }
-        let num = nodes.len() as c_int;
+        let num = nodes.len() as i32;
         let _ = out.write_all(
             c_format("%s nodes=%d\n", &[CArg::Str(tag), CArg::Int(num as i64)]).as_bytes(),
         );
@@ -3561,11 +3536,10 @@ mod tests {
                         " elem=<%s> nattr=%d",
                         &[
                             CArg::Bytes(element.name.as_deref().unwrap_or(b"(null)")),
-                            CArg::Int(element.num_attrs as i64),
+                            CArg::Int(element.attrs.len() as i64),
                         ],
                     ));
-                    for k in 0..element.num_attrs {
-                        let a = &element.attrs[k as usize];
+                    for (k, a) in element.attrs.iter().enumerate() {
                         let _ = out.write_all(&c_format_bytes(
                             " attr[%d]=%s=\"%s\"",
                             &[
@@ -3625,7 +3599,7 @@ mod tests {
         tree: Option<usize>,
         tag: &str,
         cb: MxmlSaveCb,
-        wrap: c_int,
+        wrap: i32,
     ) {
         let mut buf: Vec<u8> = vec![0; 400000];
         mxml_set_wrap_margin(wrap);
@@ -3723,7 +3697,7 @@ mod tests {
             .as_bytes(),
         );
 
-        let mut count: c_int = 0;
+        let mut count: i32 = 0;
         let mut n = mxml_find_element(arena, tree, tree, Some(b"Field"), None, None, MXML_DESCEND);
         while n.is_some() {
             if count < 5 {
@@ -3772,12 +3746,12 @@ mod tests {
                     "  indexCount=%d alloc=%d\n",
                     &[
                         CArg::Int(mxml_index_get_count(Some(&ind)) as i64),
-                        CArg::Int(ind.alloc_nodes as i64),
+                        CArg::Int(ind.nodes.capacity() as i64),
                     ],
                 )
                 .as_bytes(),
             );
-            let mut count: c_int = 0;
+            let mut count: i32 = 0;
             let mut n = mxml_index_reset(Some(&mut ind));
             while n.is_some() {
                 if count < 8 {
@@ -3920,7 +3894,7 @@ mod tests {
 
     fn probe_build(out: &mut dyn Write) {
         let mut buf: [u8; 8192] = [0; 8192];
-        let mut i: c_int = 0;
+        let mut i: i32 = 0;
         let arena = &mut MxmlArena::new();
 
         let _ = out.write_all(b"=== BUILD\n");
@@ -4311,7 +4285,7 @@ mod tests {
             return;
         };
         let outdir = std::env::var("IMOD_XML_RT_OUTDIR").unwrap();
-        let asxml: c_int = std::env::var("IMOD_XML_RT_ASXML").unwrap().parse().unwrap();
+        let asxml: i32 = std::env::var("IMOD_XML_RT_ASXML").unwrap().parse().unwrap();
         let list = std::env::var("IMOD_XML_RT_FILES").unwrap();
         let files = std::fs::read_to_string(&list).unwrap();
         let mut rep = ImodFile::open(&reppath, "w").unwrap();

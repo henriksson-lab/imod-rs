@@ -2,13 +2,9 @@
 #![allow(dead_code)]
 
 use super::*;
-use core::ffi::c_int;
 
 /// Matches C `mxmlElementDeleteAttr` (`mxml-attr.c:38`).
 pub fn mxml_element_delete_attr(arena: &mut MxmlArena, node: Option<usize>, name: Option<&[u8]>) {
-    let mut i: c_int;
-    let mut attr: usize;
-
     /*
      * Range check input...
      */
@@ -30,25 +26,16 @@ pub fn mxml_element_delete_attr(arena: &mut MxmlArena, node: Option<usize>, name
      * Look for the attribute...
      */
 
-    i = element.num_attrs;
-    attr = 0;
-    while i > 0 {
-        if element.attrs[attr].name == name {
-            /*
-             * Delete this attribute...  (the C frees the name and value and
-             * then memmoves the tail of the array down over the slot.)
-             */
+    if let Some(attr) = element.attrs.iter().position(|attr| attr.name == name) {
+        /*
+         * Delete this attribute...  (the C frees the name and value and
+         * then memmoves the tail of the array down over the slot.)
+         */
 
-            element.attrs.remove(attr);
+        element.attrs.remove(attr);
 
-            element.num_attrs -= 1;
-
-            /* The C frees the whole array when the last attribute goes. */
-            return;
-        }
-
-        i -= 1;
-        attr += 1;
+        /* The C frees the whole array when the last attribute goes. */
+        return;
     }
 }
 
@@ -58,9 +45,6 @@ pub fn mxml_element_get_attr<'a>(
     node: Option<usize>,
     name: Option<&[u8]>,
 ) -> Option<&'a [u8]> {
-    let mut i: c_int;
-    let mut attr: usize;
-
     /*
      * Range check input...
      */
@@ -82,16 +66,11 @@ pub fn mxml_element_get_attr<'a>(
      * Look for the attribute...
      */
 
-    i = element.num_attrs;
-    attr = 0;
-    while i > 0 {
-        if element.attrs[attr].name == name {
-            return element.attrs[attr].value.as_deref();
-        }
-
-        i -= 1;
-        attr += 1;
-    }
+    return element
+        .attrs
+        .iter()
+        .find(|attr| attr.name == name)
+        .and_then(|attr| attr.value.as_deref());
 
     /*
      * Didn't find attribute, so return NULL...
@@ -129,7 +108,7 @@ pub fn mxml_element_set_attr(
         valuec = None;
     }
 
-    if mxml_set_attr(arena, node, name, valuec) != 0 {
+    if mxml_set_attr(arena, node, name, valuec).is_err() {
         /* The C frees `valuec` here; the owned Vec was moved in and dropped. */
     }
 }
@@ -177,7 +156,7 @@ pub fn mxml_element_set_attrf(
      * The C reports "Unable to allocate memory for attribute '%s' in element
      * %s!" when the format allocation returns NULL; a Vec aborts instead.
      */
-    if mxml_set_attr(arena, node, name, Some(value)) != 0 {
+    if mxml_set_attr(arena, node, name, Some(value)).is_err() {
         /* The C frees `value` here; the owned Vec was moved in and dropped. */
     }
 }
@@ -192,33 +171,23 @@ pub fn mxml_set_attr(
     node: usize,
     name: &[u8],
     value: Option<Vec<u8>>,
-) -> c_int {
-    let mut i: c_int;
-    let mut attr: usize;
-
+) -> Result<(), ()> {
     let MxmlValue::Element(element) = &mut arena.node_mut(node).value else {
-        return -1;
+        return Err(());
     };
 
     /*
      * Look for the attribute...
      */
 
-    i = element.num_attrs;
-    attr = 0;
-    while i > 0 {
-        if element.attrs[attr].name == name {
-            /*
-             * Free the old value as needed...
-             */
+    if let Some(attr) = element.attrs.iter_mut().find(|attr| attr.name == name) {
+        /*
+         * Free the old value as needed...
+         */
 
-            element.attrs[attr].value = value;
+        attr.value = value;
 
-            return 0;
-        }
-
-        i -= 1;
-        attr += 1;
+        return Ok(());
     }
 
     /*
@@ -230,7 +199,5 @@ pub fn mxml_set_attr(
         value,
     });
 
-    element.num_attrs += 1;
-
-    0
+    Ok(())
 }

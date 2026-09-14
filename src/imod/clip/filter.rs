@@ -82,7 +82,7 @@ pub unsafe fn clip_bandpass_filter(
         mrc_head_label(&mut *output, b"clip: fourier filter");
         show_status("Doing bandpass filter...\n");
         for k in 0..options.nofsecs {
-            let slice = slice_read_subm(
+            let Some(mut slice) = slice_read_subm(
                 input,
                 options.secs[(k) as usize],
                 b'z',
@@ -90,19 +90,18 @@ pub unsafe fn clip_bandpass_filter(
                 options.iy,
                 options.cx as i32,
                 options.cy as i32,
-            );
-            if slice.is_null() {
+            ) else {
                 return -1;
-            }
+            };
             if !complex {
-                slice_fft(slice);
-                mrc_bandpass_filter(slice, options.high as f64, options.low as f64);
-                slice_fft(slice);
+                slice_fft(slice.as_mut());
+                mrc_bandpass_filter(slice.as_mut(), options.high as f64, options.low as f64);
+                slice_fft(slice.as_mut());
             } else {
-                slice_complex_float(slice);
-                mrc_bandpass_filter(slice, options.high as f64, options.low as f64);
+                slice_complex_float(slice.as_mut());
+                mrc_bandpass_filter(slice.as_mut(), options.high as f64, options.low as f64);
             }
-            if clip_write_slice(slice, output, options, k, &mut z, 1) != 0 {
+            if clip_write_slice(slice.as_mut(), output, options, k, &mut z, 1) != 0 {
                 return -1;
             }
         }

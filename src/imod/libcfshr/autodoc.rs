@@ -2315,19 +2315,12 @@ pub fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
         }
 
         /* Assign any other attributes as key-values in the section */
-        let num_attrs = match &arena.node(cur_sect_node).value {
-            MxmlValue::Element(element) => element.num_attrs,
-            _ => 0,
+        let attrs = match &arena.node(cur_sect_node).value {
+            MxmlValue::Element(element) => element.attrs.clone(),
+            _ => Vec::new(),
         };
-        ind = 0;
-        while ind < num_attrs {
-            let (aname, avalue) = match &arena.node(cur_sect_node).value {
-                MxmlValue::Element(element) => {
-                    let attr = &element.attrs[ind as usize];
-                    (attr.name.clone(), attr.value.clone())
-                }
-                _ => break,
-            };
+        for attr in attrs {
+            let (aname, avalue) = (attr.name, attr.value);
             if aname != b"name" {
                 err = sect_set_key_value_type(
                     &mut adoc.collections[cur_coll as usize].sections[cur_sect as usize],
@@ -2340,7 +2333,6 @@ pub fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
                     break;
                 }
             }
-            ind += 1;
         }
 
         /* Now walk through the children of section node */
@@ -2377,7 +2369,7 @@ pub fn read_xml_file(adoc: &mut Autodoc, fp: &mut ImodFile) -> i32 {
                 S_NUM_CHILD_NOT_ELEM.set(S_NUM_CHILD_NOT_ELEM.get() + 1);
             } else {
                 if match &arena.node(cur_node).value {
-                    MxmlValue::Element(element) => element.num_attrs != 0,
+                    MxmlValue::Element(element) => !element.attrs.is_empty(),
                     _ => false,
                 } {
                     S_NUM_CHILD_ATTRIBS.set(S_NUM_CHILD_ATTRIBS.get() + 1);

@@ -38,6 +38,7 @@ mod tests {
     use super::ReadOnlyAttribute;
     use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
     use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+    use crate::imod::etomo::storage::autodoc::writable_attribute::WritableAttribute;
     use crate::imod::etomo::storage::autodoc::writable_autodoc::WritableAutodoc;
 
     /// A duplicate attribute reports the *last* value, as `Autodoc`'s version 1.3 note
@@ -56,6 +57,11 @@ mod tests {
             );
             assert_eq!(ReadOnlyAttribute::get_line_num(&*version), 3);
             assert!(ReadOnlyAttribute::get_children(&*version).is_null());
+            WritableAttribute::set_value(&mut *version, Some("1.4"));
+            assert_eq!(
+                ReadOnlyAttribute::get_value(&*version).as_deref(),
+                Some("1.4")
+            );
             let a = (*autodoc).get_attribute(Some("a"));
             assert_eq!(ReadOnlyAttribute::get_value(&*a), None);
             let b = ReadOnlyAttribute::get_attribute_by_name(&*a, Some("b"));

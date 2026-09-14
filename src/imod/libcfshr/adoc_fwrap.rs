@@ -2,25 +2,19 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::imod::libcfshr::autodoc::*;
-use crate::imod::libcfshr::b3dutil::{c2f_string, f2c_string};
+use crate::imod::libcfshr::b3dutil::{c2f_string, fortran_string};
 use crate::imod::libcfshr::parse_params::pip_set_error;
-use core::ffi::{CStr, c_char, c_void};
+use core::ffi::c_char;
 
 pub type FortStrLenT = i32;
 
 /// Matches C static `adocf2cstr`.
 ///
-/// `f2c_string` is the Fortran half of the bridge and keeps its `c_char`
+/// `fortran_string` is the Fortran half of the bridge and keeps its `c_char`
 /// buffer (NATIVE.md §7); the trimmed copy it returns is handed on as owned
 /// bytes, because `autodoc.c`'s own entry points take bytes now.
 pub unsafe fn adocf2cstr(string: *const c_char, string_size: FortStrLenT) -> Option<Vec<u8>> {
-    let new_str = f2c_string(string, string_size);
-    if new_str.is_null() {
-        pip_set_error(b"Memory error converting string from Fortran to C");
-        return None;
-    }
-    let owned = CStr::from_ptr(new_str).to_bytes().to_vec();
-    Some(owned)
+    Some(fortran_string(string, string_size).into_bytes())
 }
 
 /// Matches C static `twof2cstr`.

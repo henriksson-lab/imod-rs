@@ -581,7 +581,7 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
                             CArg::Dbl(mod_.obj[ob].red as f64),
                             CArg::Dbl(mod_.obj[ob].green as f64),
                             CArg::Dbl(mod_.obj[ob].blue as f64),
-                            CArg::Dbl((mod_.obj[ob].trans as std::ffi::c_double / 255.0) as f64),
+                            CArg::Dbl(mod_.obj[ob].trans as f64 / 255.0),
                         ],
                     )
                     .as_bytes(),
@@ -601,9 +601,7 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
                                 CArg::Dbl(mod_.obj[ob].red as f64),
                                 CArg::Dbl(mod_.obj[ob].green as f64),
                                 CArg::Dbl(mod_.obj[ob].blue as f64),
-                                CArg::Dbl(
-                                    (mod_.obj[ob].trans as std::ffi::c_double / 255.0) as f64,
-                                ),
+                                CArg::Dbl(mod_.obj[ob].trans as f64 / 255.0),
                             ],
                         )
                         .as_bytes(),
@@ -671,7 +669,7 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
                         &[
                             CArg::Dbl(mesh.vert[v].x as f64),
                             CArg::Dbl(mesh.vert[v].y as f64),
-                            CArg::Dbl((mesh.vert[v].z as std::ffi::c_double * zscale) as f64),
+                            CArg::Dbl(mesh.vert[v].z as f64 * zscale),
                         ],
                     )
                     .as_bytes(),
@@ -1185,7 +1183,7 @@ pub fn p_rib_scat(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
                         &[
                             CArg::Dbl(cont.pts[pt].x as f64),
                             CArg::Dbl(cont.pts[pt].y as f64),
-                            CArg::Dbl((cont.pts[pt].z as std::ffi::c_double * z) as f64),
+                            CArg::Dbl(cont.pts[pt].z as f64 * z),
                         ],
                     )
                     .as_bytes(),
@@ -1266,16 +1264,16 @@ pub fn prib_tube(
                     &[
                         CArg::Dbl((p2.x + offset[0].x) as f64),
                         CArg::Dbl((p2.y + offset[0].y) as f64),
-                        CArg::Dbl((p2.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl(p2.z as f64 * z),
                         CArg::Dbl((p2.x + offset[1].x) as f64),
                         CArg::Dbl((p2.y + offset[1].y) as f64),
-                        CArg::Dbl((p2.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl(p2.z as f64 * z),
                         CArg::Dbl((p1.x + offset[1].x) as f64),
                         CArg::Dbl((p1.y + offset[1].y) as f64),
-                        CArg::Dbl((p1.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl(p1.z as f64 * z),
                         CArg::Dbl((p1.x + offset[0].x) as f64),
                         CArg::Dbl((p1.y + offset[0].y) as f64),
-                        CArg::Dbl((p1.z as std::ffi::c_double * z) as f64),
+                        CArg::Dbl(p1.z as f64 * z),
                     ],
                 )
                 .as_bytes(),

@@ -16,6 +16,7 @@ pub const LIST_QUANTUM: i32 = 1;
 /// `#[repr(C)]` is dropped rather than kept as documentation: a `Vec<u8>` is not
 /// a `void *`, so the layout no longer describes the C struct even though the
 /// field order still does.
+#[derive(Clone)]
 pub struct Ilist {
     pub data: Vec<u8>,
     pub dsize: i32,

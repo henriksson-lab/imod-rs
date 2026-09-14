@@ -2315,17 +2315,14 @@ pub fn imodv_select(
         if a.winy < a.w_pick || a.winx < a.w_pick {
             return;
         }
-        if a.max_mod_picks < a.num_mods {
-            unsafe { libc::free(a.mod_picks as *mut libc::c_void) };
-            a.max_mod_picks = 0;
-            a.mod_picks = unsafe {
-                libc::malloc(std::mem::size_of::<Ipoint>() * a.num_mods.max(0) as usize)
-                    as *mut Ipoint
-            };
-            if a.mod_picks.is_null() {
+        if a.mod_picks.len() < a.num_mods as usize {
+            if a.mod_picks
+                .try_reserve_exact(a.num_mods as usize - a.mod_picks.len())
+                .is_err()
+            {
                 return;
             }
-            a.max_mod_picks = a.num_mods;
+            a.mod_picks.resize(a.num_mods as usize, Ipoint::default());
         }
         a.read_pix_for_pick = 1;
         unsafe { imodv_draw() };

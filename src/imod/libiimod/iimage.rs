@@ -8,10 +8,7 @@ use crate::imod::libcfshr::autodoc::{
 };
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_output_file_type};
-use crate::imod::libcfshr::ilist::{
-    Ilist, ilist_append, ilist_delete, ilist_dup, ilist_insert, ilist_item, ilist_new,
-    ilist_remove, ilist_size,
-};
+use crate::imod::libcfshr::ilist::{Ilist, ilist_dup};
 use crate::imod::libiimod::halffloat::imnp_floatbuf_to_halfs;
 use crate::imod::libiimod::hdf_imageio::{
     hdf_read_section_any as native_hdf_read_section_any,
@@ -42,6 +39,8 @@ use crate::imod::libiimod::mrcfiles::{
 };
 use core::ffi::{c_char, c_void};
 use core::sync::atomic::{AtomicI32, Ordering};
+use std::cell::RefCell;
+use std::sync::{LazyLock, Mutex};
 
 /// C `IISectionFunc` (`iimage.h`): `int (*)(ImodImageFile *, char *buf, int)`.
 ///
@@ -94,12 +93,24 @@ pub const MRSA_FLOAT: i32 = 2;
 pub const MRSA_USHORT: i32 = 3;
 static S_RW_CALL_COUNT: AtomicI32 = AtomicI32::new(0);
 static S_ALLOW_MULTI_VOLUME: AtomicI32 = AtomicI32::new(0);
-static mut S_OPENED_FILES: *mut Ilist = core::ptr::null_mut();
-static mut S_CHECK_LIST: *mut Ilist = core::ptr::null_mut();
-static mut S_II_TIFFS: [*mut ImodImageFile; MAX_TIFF_THREADS] =
-    [core::ptr::null_mut(); MAX_TIFF_THREADS];
-static mut S_MAX_TIFF_THREADS: i32 = 0;
-static mut S_QUIT_CHECK_FUNC: Option<unsafe extern "C" fn(i32) -> i32> = None;
+/// Registered image format probes, in the same ordered process-wide sequence
+/// used by `iimage.c`.  Functions are copied out before invoking them so a
+/// callback cannot retain the registry lock.
+static S_CHECK_LIST: LazyLock<Mutex<Vec<IiFileCheckFunction>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+/// Borrowed `ImodImageFile` identities for currently opened files.  The list
+/// never owns the pointed-to image files; their addresses are only retained to
+/// support the legacy `FILE *` to image-file lookup API.
+static S_OPENED_FILES: LazyLock<Mutex<Vec<usize>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+thread_local! {
+    /// TIFF thread copies are owned by the existing image-file lifecycle; these
+    /// are borrowed cursors kept per calling thread for parallel section reads.
+    static S_TIFF_THREADS: RefCell<([*mut ImodImageFile; MAX_TIFF_THREADS], i32)> =
+        const { RefCell::new(([core::ptr::null_mut(); MAX_TIFF_THREADS], 0)) };
+}
+/// Process-wide C callback registration.  Calls snapshot this value before
+/// entering foreign code so a callback may safely register a replacement.
+static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe extern "C" fn(i32) -> i32>> = Mutex::new(None);
 
 /// C `ImodImageFile` (`iimage.h`), in declaration order.
 ///
@@ -111,13 +122,12 @@ static mut S_QUIT_CHECK_FUNC: Option<unsafe extern "C" fn(i32) -> i32> = None;
 #[derive(Clone)]
 #[repr(C)]
 pub struct ImodImageFile {
-    /// C `char *filename`, `strdup`ed from the caller and `free`d by
-    /// `iiDelete`.  `None` is the source's NULL; the bytes never include a
-    /// terminator, which is added only where a real C library is called.
-    pub filename: Option<Vec<u8>>,
-    /// C `char fmode[4]`: the `fopen` mode, `strncpy`ed with a length of 3, so
-    /// the fourth byte is the NUL `iiNew`'s `memset` left there.
-    pub fmode: [u8; 4],
+    /// C `char *filename`, represented as text within Rust.  `None` is the
+    /// source's NULL; a NUL-terminated temporary is made only at an external
+    /// C API boundary.
+    pub filename: Option<String>,
+    /// C `char fmode[4]`, represented as an ordinary Rust file-mode string.
+    pub fmode: String,
     /// C `FILE *fp`.  See [`ImodFile`]; `None` is NULL, and the four places
     /// the source stores a non-file identity here use [`ImodFile::Token`].
     pub fp: Option<ImodFile>,
@@ -180,7 +190,8 @@ pub struct ImodImageFile {
     pub user_data: *mut u8,
     pub user_flags: u32,
     pub user_count: i32,
-    pub colormap: *mut u8,
+    /// TIFF palette data, owned by this image file.
+    pub colormap: Option<Vec<u8>>,
     pub planes_per_image: i32,
     pub contig_samples: i32,
     pub multiple_sizes: i32,
@@ -198,19 +209,30 @@ pub struct ImodImageFile {
     pub packed4bits: i32,
     pub fill_order: i32,
     pub half_floats: i32,
-    pub directory_nums: *mut c_void,
-    pub stack_set_list: *mut c_void,
-    pub z_to_data_set_map: *mut i32,
+    /// TIFF directory numbers collected while inspecting a multi-directory
+    /// file.  This is internal Rust ownership.
+    pub directory_nums: Option<Box<Ilist>>,
+    /// HDF stack dataset entries owned by this image file.
+    pub stack_set_list: Option<Box<Ilist>>,
+    /// Maps Z sections to HDF datasets.  This was a manually managed C array;
+    /// it is crate-owned state, so keep it as an owned Rust collection.
+    pub z_to_data_set_map: Vec<i32>,
     pub z_map_size: i32,
-    /// C `char *datasetName`, `strdup`ed in `hdf_imageio.c:521` and passed to
-    /// `H5Dopen`.
-    pub dataset_name: Option<Vec<u8>>,
+    /// C `char *datasetName`, represented as text until it crosses the HDF5
+    /// boundary.
+    pub dataset_name: Option<String>,
     // `iimage.h` declared this `int`, but it is passed to HDF5 as a `hid_t`.
     // Keep the native HDF identifier width so IDs from current HDF5 are not truncated.
     pub dataset_id: i64,
     pub dataset_is_open: i32,
     pub num_volumes: i32,
-    pub ii_volumes: *mut *mut ImodImageFile,
+    /// The related HDF volume image records.  The records themselves remain
+    /// address-stable allocations because the image API hands out their
+    /// addresses, while this relationship is ordinary owned collection data.
+    pub ii_volumes: Vec<*mut ImodImageFile>,
+    /// Address-stable storage for secondary HDF volume records.  `ii_volumes`
+    /// holds only the legacy cursors exposed to image APIs.
+    pub owned_hdf_volumes: Vec<Box<ImodImageFile>>,
     pub adoc_index: i32,
     pub global_adoc_index: i32,
     pub hdf_source: i32,
@@ -231,6 +253,14 @@ pub struct ImodImageFile {
     pub sync_from_mrc_header:
         Option<unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
     pub write_header: Option<unsafe extern "C" fn(*mut ImodImageFile) -> i32>,
+    /// Rust-owned MRC header storage used by the native MRC and like-MRC
+    /// backends.  `header` is retained as their temporary erased callback ABI
+    /// alias; it never owns this allocation.
+    pub mrc_header: Option<Box<MrcHeader>>,
+    /// Rust-owned MRC header storage used by the shared-memory image backend.
+    /// `header` remains the immediate raw pointer used by the legacy image
+    /// callbacks; it aliases this allocation only while that backend is open.
+    pub shr_mem_mrc_header: Option<Box<MrcHeader>>,
 }
 
 impl Default for ImodImageFile {
@@ -241,7 +271,7 @@ impl Default for ImodImageFile {
     fn default() -> ImodImageFile {
         ImodImageFile {
             filename: None,
-            fmode: [0; 4],
+            fmode: String::new(),
             fp: None,
             description: None,
             state: 0,
@@ -290,7 +320,7 @@ impl Default for ImodImageFile {
             user_data: core::ptr::null_mut(),
             user_flags: 0,
             user_count: 0,
-            colormap: core::ptr::null_mut(),
+            colormap: None,
             planes_per_image: 0,
             contig_samples: 0,
             multiple_sizes: 0,
@@ -308,15 +338,16 @@ impl Default for ImodImageFile {
             packed4bits: 0,
             fill_order: 0,
             half_floats: 0,
-            directory_nums: core::ptr::null_mut(),
-            stack_set_list: core::ptr::null_mut(),
-            z_to_data_set_map: core::ptr::null_mut(),
+            directory_nums: None,
+            stack_set_list: None,
+            z_to_data_set_map: Vec::new(),
             z_map_size: 0,
             dataset_name: None,
             dataset_id: 0,
             dataset_is_open: 0,
             num_volumes: 0,
-            ii_volumes: core::ptr::null_mut(),
+            ii_volumes: Vec::new(),
+            owned_hdf_volumes: Vec::new(),
             adoc_index: 0,
             global_adoc_index: 0,
             hdf_source: 0,
@@ -335,6 +366,8 @@ impl Default for ImodImageFile {
             fill_mrc_header: None,
             sync_from_mrc_header: None,
             write_header: None,
+            mrc_header: None,
+            shr_mem_mrc_header: None,
         }
     }
 }
@@ -359,20 +392,21 @@ pub struct RawImageInfo {
 }
 
 /// C `LineProcData` (`iimage.h`), in declaration order.
-#[repr(C)]
+#[derive(Default)]
 pub struct LineProcData {
     pub x_start: i32,
     pub x_end: i32,
     pub convert: i32,
+    /// Borrowed cursors into the caller's output buffer or an external image
+    /// backend's mapped/read buffer.  They do not own allocation; raw pointers
+    /// remain because `ii_process_read_line` is shared with the MRC, HDF5, and
+    /// POSIX shared-memory backends, all of which supply their storage through
+    /// pointer-based APIs.
     pub bdata: *mut u8,
     pub buf: *mut u8,
     pub bufp: *mut u8,
-    pub usbufp: *mut u16,
-    pub fbufp: *mut f32,
-    pub fft: *mut u8,
-    pub usfft: *mut u16,
-    pub map: *mut u8,
-    pub usmap: *mut u16,
+    /// Pixel-conversion lookup data, owned for the duration of a section read.
+    pub map: Vec<u8>,
     pub byte: i32,
     pub to_short: i32,
     pub map_sbytes: i32,
@@ -402,15 +436,13 @@ pub struct LineProcData {
 }
 
 pub unsafe fn init_check_list() -> i32 {
-    if !S_CHECK_LIST.is_null() {
+    let mut checks = S_CHECK_LIST
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !checks.is_empty() {
         return 0;
     }
-    S_CHECK_LIST = ilist_new(core::mem::size_of::<IiFileCheckFunction>() as i32, 6)
-        .map_or(core::ptr::null_mut(), Box::into_raw);
-    if S_CHECK_LIST.is_null() {
-        return 1;
-    }
-    for func in [
+    checks.extend([
         Some(core::mem::transmute::<
             unsafe fn(*mut ImodImageFile) -> i32,
             unsafe extern "C" fn(*mut ImodImageFile) -> i32,
@@ -426,65 +458,49 @@ pub unsafe fn init_check_list() -> i32 {
         >(native_ii_hdf_check)),
         Some(ii_jpeg_check),
         Some(ii_adoc_check),
-    ] {
-        ilist_append(
-            &mut *S_CHECK_LIST,
-            core::slice::from_raw_parts(
-                (&raw const func).cast::<u8>(),
-                core::mem::size_of::<IiFileCheckFunction>(),
-            ),
-        );
-    }
+    ]);
+    drop(checks);
     tiff_filter_warnings();
     0
 }
 pub unsafe fn ii_add_check_function(func: IiFileCheckFunction) {
     if init_check_list() == 0 {
-        ilist_append(
-            &mut *S_CHECK_LIST,
-            core::slice::from_raw_parts(
-                (&raw const func).cast::<u8>(),
-                core::mem::size_of::<IiFileCheckFunction>(),
-            ),
-        );
+        S_CHECK_LIST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(func);
     }
 }
 pub unsafe fn ii_insert_check_function(func: IiFileCheckFunction, index: i32) {
     if init_check_list() != 0 {
         return;
     }
-    if index < ilist_size(S_CHECK_LIST.as_ref()) {
-        ilist_insert(
-            &mut *S_CHECK_LIST,
-            core::slice::from_raw_parts(
-                (&raw const func).cast::<u8>(),
-                core::mem::size_of::<IiFileCheckFunction>(),
-            ),
-            index,
-        );
+    let mut checks = S_CHECK_LIST
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if index < 0 {
+        return;
+    }
+    if (index as usize) < checks.len() {
+        checks.insert(index as usize, func);
     } else {
-        ilist_append(
-            &mut *S_CHECK_LIST,
-            core::slice::from_raw_parts(
-                (&raw const func).cast::<u8>(),
-                core::mem::size_of::<IiFileCheckFunction>(),
-            ),
-        );
+        checks.push(func);
     }
 }
 pub unsafe fn ii_delete_check_list() {
-    if !S_CHECK_LIST.is_null() {
-        ilist_delete(Some(Box::from_raw(S_CHECK_LIST)));
-        S_CHECK_LIST = core::ptr::null_mut();
-    }
+    S_CHECK_LIST
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
 }
 /// Matches C `iiRegisterQuitCheck(int (*)(int))` (`iimage.c:121`).
 pub unsafe fn ii_register_quit_check(func: Option<unsafe extern "C" fn(i32) -> i32>) {
-    unsafe { S_QUIT_CHECK_FUNC = func };
+    *S_QUIT_CHECK_FUNC.lock().unwrap() = func;
 }
 /// Matches C `iiCheckForQuit(int)` (`iimage.c:130`).
 pub unsafe fn ii_check_for_quit(param: i32) -> i32 {
-    if let Some(func) = unsafe { S_QUIT_CHECK_FUNC } {
+    let func = *S_QUIT_CHECK_FUNC.lock().unwrap();
+    if let Some(func) = func {
         if unsafe { func(param) } != 0 {
             return IIERR_QUITTING;
         }
@@ -501,8 +517,8 @@ pub unsafe fn ii_check_for_quit(param: i32) -> i32 {
 /// `Rc<File>::drop` on the first command.  The struct is leaked back out as a
 /// raw pointer because every caller still holds one; `iiDelete` reclaims it
 /// with `Box::from_raw`.
-pub fn ii_new() -> *mut ImodImageFile {
-    let ofile = Box::into_raw(Box::new(ImodImageFile::default()));
+pub fn ii_new_box() -> Box<ImodImageFile> {
+    let mut ofile = Box::new(ImodImageFile::default());
     unsafe {
         (*ofile).xscale = 1.0;
         (*ofile).yscale = 1.0;
@@ -529,7 +545,7 @@ pub fn ii_new() -> *mut ImodImageFile {
         (*ofile).reopen = None;
         (*ofile).close = None;
         (*ofile).write_section = None;
-        (*ofile).colormap = core::ptr::null_mut();
+        (*ofile).colormap = None;
         (*ofile).user_data = core::ptr::null_mut();
         (*ofile).shr_mem_file = 0;
         (*ofile).llx = 0;
@@ -550,17 +566,27 @@ pub fn ii_new() -> *mut ImodImageFile {
         (*ofile).read_eer_as_super_res = 0;
         (*ofile).num_frames_in_eerfile = 0;
         (*ofile).antialias_eerfilter = 0;
-        (*ofile).directory_nums = core::ptr::null_mut();
+        (*ofile).directory_nums = None;
         (*ofile).adoc_index = -1;
         (*ofile).global_adoc_index = -1;
-        (*ofile).stack_set_list = core::ptr::null_mut();
-        (*ofile).z_to_data_set_map = core::ptr::null_mut();
+        (*ofile).stack_set_list = None;
+        (*ofile).z_to_data_set_map.clear();
         (*ofile).dataset_name = None;
-        (*ofile).ii_volumes = core::ptr::null_mut();
+        (*ofile).ii_volumes.clear();
+        (*ofile).owned_hdf_volumes.clear();
         (*ofile).num_volumes = 0;
         (*ofile).hdf_compression = -1;
     }
     ofile
+}
+
+/// Allocate an image record for the legacy raw-pointer API.
+///
+/// This is the explicit ownership boundary: the returned pointer owns the box
+/// made by [`ii_new_box`] and must be returned exactly once to [`ii_delete`].
+/// Internal callers that can retain ownership use `ii_new_box` directly.
+pub fn ii_new() -> *mut ImodImageFile {
+    Box::into_raw(ii_new_box())
 }
 
 /// Matches C `iiInit(ImodImageFile *, int, int, int, int, int, int)` (`iimage.c:215`).
@@ -592,9 +618,10 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
     if mode.contains('w') {
         return ii_open_new(filename, mode, IIFILE_DEFAULT);
     }
-    if filename.starts_with(SHR_MEM_NAME_TAG) {
-        if ii_shr_mem_check_size(filename) != 0 {
-            let file = ii_shr_mem_open(filename, mode);
+    let shared_memory_name = String::from_utf8_lossy(filename);
+    if shared_memory_name.starts_with(SHR_MEM_NAME_TAG) {
+        if ii_shr_mem_check_size(&shared_memory_name) != 0 {
+            let file = ii_shr_mem_open(&shared_memory_name, mode);
             if file.is_null() {
                 return core::ptr::null_mut();
             }
@@ -654,20 +681,17 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
             return core::ptr::null_mut();
         }
         (*file).format = IIFILE_UNKNOWN;
-        (*file).filename = Some(filename.to_vec());
-        // `iimage.c:284` is `strncpy(ofile->fmode, mode, 3)`: at most three
-        // bytes, and the fourth stays the NUL `iiNew`'s `memset` left.
-        for (dst, src) in (*file).fmode.iter_mut().zip(mode.bytes().take(3)) {
-            *dst = src;
-        }
+        (*file).filename = Some(String::from_utf8_lossy(filename).into_owned());
+        // `iimage.c:284` copies at most three bytes of the file mode.
+        (*file).fmode = mode.chars().take(3).collect();
         // `iimage.c:239` declares `err = 0`, so an empty check list leaves it
         // zero and the "unknown format" report below is not made.
         let mut err = 0;
-        for index in 0..ilist_size(S_CHECK_LIST.as_ref()) {
-            let check = *ilist_item(S_CHECK_LIST.as_mut(), index)
-                .map_or(core::ptr::null_mut(), |item| {
-                    item.as_mut_ptr().cast::<IiFileCheckFunction>()
-                });
+        let checks = S_CHECK_LIST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        for check in checks {
             if (*file).fp.is_none() {
                 // `iimage.c:292-294`.
                 b3d_error(
@@ -723,18 +747,19 @@ pub unsafe fn ii_open_new(filename: &[u8], mode: &str, mut file_kind: i32) -> *m
         return core::ptr::null_mut();
     }
     let mut err = 0;
-    let file = if filename.starts_with(SHR_MEM_NAME_TAG) {
-        if ii_shr_mem_check_size(filename) == 0 {
+    let shared_memory_name = String::from_utf8_lossy(filename);
+    let file = if shared_memory_name.starts_with(SHR_MEM_NAME_TAG) {
+        if ii_shr_mem_check_size(&shared_memory_name) == 0 {
             return core::ptr::null_mut();
         }
         file_kind = IIFILE_SHR_MEM;
-        ii_shr_mem_open(filename, mode)
+        ii_shr_mem_open(&shared_memory_name, mode)
     } else {
         let new_file = ii_new();
         if new_file.is_null() {
             return core::ptr::null_mut();
         }
-        (*new_file).filename = Some(filename.to_vec());
+        (*new_file).filename = Some(String::from_utf8_lossy(filename).into_owned());
         new_file
     };
     if file.is_null() {
@@ -756,8 +781,7 @@ pub unsafe fn ii_open_new(filename: &[u8], mode: &str, mut file_kind: i32) -> *m
     if err == 0 {
         (*file).file = file_kind;
         (*file).new_file = 1;
-        // `iimage.c:387` is `strncpy(ofile->fmode, "rb+", 3)`.
-        (&mut (*file).fmode)[..3].copy_from_slice(b"rb+");
+        (*file).fmode = "rb+".into();
         (*file).state = IISTATE_READY;
         if add_to_opened_list(file) == 0 {
             return file;
@@ -774,9 +798,9 @@ pub unsafe fn ii_reopen(in_file: *mut ImodImageFile) -> i32 {
         return 1;
     }
     unsafe {
-        if (*in_file).fmode[0] == 0 {
+        if (&(*in_file).fmode).is_empty() {
             // `iimage.c:411-412`.
-            (&mut (*in_file).fmode)[..3].copy_from_slice(b"rb+");
+            (*in_file).fmode = "rb+".into();
         }
         if let Some(reopen) = (*in_file).reopen {
             if reopen(in_file) != 0 {
@@ -789,13 +813,7 @@ pub unsafe fn ii_reopen(in_file: *mut ImodImageFile) -> i32 {
         let Some(name) = (*in_file).filename.clone() else {
             return 2;
         };
-        (*in_file).fp = ImodFile::open(
-            &String::from_utf8_lossy(&name),
-            &String::from_utf8_lossy({
-                let fmode = &(*in_file).fmode;
-                &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
-            }),
-        );
+        (*in_file).fp = ImodFile::open(&name, &(*in_file).fmode);
         if (*in_file).fp.is_none() {
             return 2;
         }
@@ -805,11 +823,11 @@ pub unsafe fn ii_reopen(in_file: *mut ImodImageFile) -> i32 {
             return 0;
         }
         (*in_file).format = IIFILE_UNKNOWN;
-        for index in 0..ilist_size(S_CHECK_LIST.as_ref()) {
-            let check = *ilist_item(S_CHECK_LIST.as_mut(), index)
-                .map_or(core::ptr::null_mut(), |item| {
-                    item.as_mut_ptr().cast::<IiFileCheckFunction>()
-                });
+        let checks = S_CHECK_LIST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        for check in checks {
             if check.unwrap()(in_file) == 0 {
                 (*in_file).state = IISTATE_READY;
                 return 0;
@@ -861,6 +879,13 @@ pub unsafe fn ii_close(in_file: *mut ImodImageFile) {
         }
     }
 }
+/// Destroy an image record obtained from [`ii_new`] or a legacy open API.
+///
+/// # Safety
+///
+/// `in_file` must be null or the unique, still-owned raw cursor produced by
+/// [`ii_new`] (or explicitly handed off to this legacy boundary by an image
+/// backend).  It must not point into a locally owned `Box<ImodImageFile>`.
 pub unsafe fn ii_delete(in_file: *mut ImodImageFile) {
     if in_file.is_null() {
         return;
@@ -872,7 +897,7 @@ pub unsafe fn ii_delete(in_file: *mut ImodImageFile) {
             clean_up(in_file);
         }
         (*in_file).description = None;
-        libc::free((*in_file).colormap.cast());
+        (*in_file).colormap = None;
         // `iiNew` hands out a `Box`; reclaim it the same way, which is also
         // what runs the `Option<ImodFile>` destructor and closes the file.
         drop(Box::from_raw(in_file));
@@ -882,7 +907,7 @@ pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
     if in_file.is_null() {
         return core::ptr::null_mut();
     }
-    if !(*in_file).colormap.is_null() {
+    if (*in_file).colormap.is_some() {
         // `iimage.c:535`.
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -899,6 +924,9 @@ pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
     *copy = (*in_file).clone();
     (*copy).fp = None;
     (*copy).header = core::ptr::null_mut();
+    (*copy).mrc_header = None;
+    (*copy).shr_mem_mrc_header = None;
+    (*copy).owned_hdf_volumes.clear();
     (*copy).filename = None;
     (*copy).description = None;
     if (*in_file).state != IISTATE_NOTINIT {
@@ -913,11 +941,9 @@ pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
         );
         return core::ptr::null_mut();
     }
-    if !(*in_file).directory_nums.is_null() {
-        (*copy).directory_nums = ilist_dup((*in_file).directory_nums.cast::<Ilist>().as_ref())
-            .map_or(core::ptr::null_mut(), Box::into_raw)
-            .cast();
-        if (*copy).directory_nums.is_null() {
+    if let Some(directory_nums) = (*in_file).directory_nums.as_deref() {
+        (*copy).directory_nums = ilist_dup(Some(directory_nums));
+        if (*copy).directory_nums.is_none() {
             ii_delete(copy);
             b3d_error(
                 Some(&mut ImodFile::Stderr),
@@ -941,7 +967,7 @@ pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
     copy
 }
 pub unsafe fn ii_use_tiff_threads(in_file: *mut ImodImageFile, mut max_threads: i32) -> i32 {
-    if (*in_file).file != IIFILE_TIFF || S_MAX_TIFF_THREADS > 0 {
+    if (*in_file).file != IIFILE_TIFF || S_TIFF_THREADS.with(|state| state.borrow().1 > 0) {
         return 0;
     }
     if max_threads <= 0 {
@@ -954,14 +980,16 @@ pub unsafe fn ii_use_tiff_threads(in_file: *mut ImodImageFile, mut max_threads: 
         max_threads,
     );
     if max_threads > 1 {
-        S_II_TIFFS[0] = in_file;
-        max_threads =
-            ii_open_copies_for_threads(core::ptr::addr_of_mut!(S_II_TIFFS).cast(), max_threads);
+        max_threads = S_TIFF_THREADS.with(|state| {
+            let mut state = state.borrow_mut();
+            state.0[0] = in_file;
+            ii_open_copies_for_threads(state.0.as_mut_ptr(), max_threads)
+        });
     }
     if max_threads > 1 {
-        S_MAX_TIFF_THREADS = max_threads;
+        S_TIFF_THREADS.with(|state| state.borrow_mut().1 = max_threads);
     }
-    S_MAX_TIFF_THREADS
+    S_TIFF_THREADS.with(|state| state.borrow().1)
 }
 pub unsafe fn ii_use_tiff_threads_for_fp(fp: &ImodFile, max_threads: i32) -> i32 {
     match ii_lookup_file_from_fp(fp) {
@@ -970,13 +998,16 @@ pub unsafe fn ii_use_tiff_threads_for_fp(fp: &ImodFile, max_threads: i32) -> i32
     }
 }
 pub unsafe fn ii_close_tiff_copies(in_file: *mut ImodImageFile) {
-    if S_MAX_TIFF_THREADS <= 0 || in_file != S_II_TIFFS[0] {
-        return;
-    }
-    for index in 1..S_MAX_TIFF_THREADS {
-        ii_delete(S_II_TIFFS[index as usize]);
-    }
-    S_MAX_TIFF_THREADS = 0;
+    S_TIFF_THREADS.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.1 <= 0 || in_file != state.0[0] {
+            return;
+        }
+        for index in 1..state.1 {
+            ii_delete(state.0[index as usize]);
+        }
+        state.1 = 0;
+    });
 }
 pub unsafe fn ii_close_tiff_copies_for_fp(fp: &ImodFile) {
     if let Some(file) = ii_lookup_file_from_fp(fp) {
@@ -1113,36 +1144,22 @@ pub unsafe fn ii_add_to_opened_list(ii_file: *mut ImodImageFile) -> i32 {
 }
 
 /// Matches C static `addToOpenedList(ImodImageFile *)` (`iimage.c:791`).
-pub unsafe fn add_to_opened_list(mut ii_file: *mut ImodImageFile) -> i32 {
-    unsafe {
-        if S_OPENED_FILES.is_null() {
-            S_OPENED_FILES = ilist_new(core::mem::size_of::<*mut ImodImageFile>() as i32, 4)
-                .map_or(core::ptr::null_mut(), Box::into_raw);
-        }
-        if !S_OPENED_FILES.is_null()
-            && ilist_append(
-                &mut *S_OPENED_FILES,
-                core::slice::from_raw_parts(
-                    (&raw const ii_file).cast::<u8>(),
-                    core::mem::size_of::<*mut ImodImageFile>(),
-                ),
-            ) == 0
-        {
-            return 0;
-        }
-        b3d_error(
-            Some(&mut ImodFile::Stderr),
-            format_args!("ERROR: iiOpen - Memory error adding new file to master list\n"),
-        );
-    }
-    1
+pub unsafe fn add_to_opened_list(ii_file: *mut ImodImageFile) -> i32 {
+    S_OPENED_FILES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(ii_file as usize);
+    0
 }
 
 /// Matches C static `removeFromOpenedList(ImodImageFile *)` (`iimage.c:801`).
 pub unsafe fn remove_from_opened_list(ii_file: *mut ImodImageFile) {
     let index = unsafe { find_file_in_list(ii_file, None) };
     if index >= 0 {
-        unsafe { ilist_remove(&mut *S_OPENED_FILES, index) };
+        S_OPENED_FILES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(index as usize);
     }
 }
 
@@ -1151,21 +1168,18 @@ pub unsafe fn remove_from_opened_list(ii_file: *mut ImodImageFile) {
 /// The source's `(*listPtr)->fp == fp` is an identity test on the C library's
 /// own handle; [`ImodFile::ptr_eq`] is that test.
 pub unsafe fn find_file_in_list(ii_file: *mut ImodImageFile, fp: Option<&ImodFile>) -> i32 {
-    let mut index = 0;
-    while index < unsafe { ilist_size(S_OPENED_FILES.as_ref()) } {
-        let list_pointer = unsafe {
-            ilist_item(S_OPENED_FILES.as_mut(), index).map_or(core::ptr::null_mut(), |item| {
-                item.as_mut_ptr().cast::<*mut ImodImageFile>()
-            })
-        };
-        if (!ii_file.is_null() && unsafe { *list_pointer } == ii_file)
+    let opened_files = S_OPENED_FILES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for (index, address) in opened_files.iter().copied().enumerate() {
+        let list_pointer = address as *mut ImodImageFile;
+        if (!ii_file.is_null() && list_pointer == ii_file)
             || fp.is_some_and(|fp| {
-                unsafe { (**list_pointer).fp.as_ref() }.is_some_and(|other| other.ptr_eq(fp))
+                unsafe { (*list_pointer).fp.as_ref() }.is_some_and(|other| other.ptr_eq(fp))
             })
         {
-            return index;
+            return index as i32;
         }
-        index += 1;
     }
     -1
 }
@@ -1191,10 +1205,10 @@ pub unsafe fn ii_file_change_address(old_file: *mut ImodImageFile, new_file: *mu
             }
         }
     }
-    if !unsafe { (*new_file).ii_volumes }.is_null() && unsafe { (*new_file).num_volumes } != 0 {
+    if !unsafe { (&(*new_file).ii_volumes).is_empty() } && unsafe { (*new_file).num_volumes } != 0 {
         for index in 0..unsafe { (*new_file).num_volumes } {
-            if unsafe { *(*new_file).ii_volumes.add(index as usize) } == old_file {
-                unsafe { *(*new_file).ii_volumes.add(index as usize) = new_file };
+            if unsafe { (&(*new_file).ii_volumes)[index as usize] } == old_file {
+                unsafe { (&mut (*new_file).ii_volumes)[index as usize] = new_file };
             }
         }
     }
@@ -1216,11 +1230,10 @@ pub fn ii_lookup_file_from_fp(fp: &ImodFile) -> Option<*mut ImodImageFile> {
     if index < 0 {
         return None;
     }
-    let file = unsafe {
-        *ilist_item(S_OPENED_FILES.as_mut(), index).map_or(core::ptr::null_mut(), |item| {
-            item.as_mut_ptr().cast::<*mut ImodImageFile>()
-        })
-    };
+    let file = S_OPENED_FILES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())[index as usize]
+        as *mut ImodImageFile;
     if file.is_null() { None } else { Some(file) }
 }
 pub fn ii_fclose(fp: &mut ImodFile) {
@@ -1256,7 +1269,7 @@ pub unsafe fn ii_fopen_volume(in_file: *mut ImodImageFile, vol_index: i32) -> Op
         );
         return None;
     }
-    let volume = *(*in_file).ii_volumes.add(vol_index as usize);
+    let volume = (&(*in_file).ii_volumes)[vol_index as usize];
     if ii_reopen(volume) != 0 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -1273,8 +1286,7 @@ pub unsafe fn ii_fopen_new_volume(in_file: *mut ImodImageFile) -> Option<ImodFil
     if in_file.is_null() {
         return None;
     }
-    if (*in_file).file != IIFILE_HDF || (!(*in_file).stack_set_list.is_null() && (*in_file).nz > 1)
-    {
+    if (*in_file).file != IIFILE_HDF || ((*in_file).stack_set_list.is_some() && (*in_file).nz > 1) {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -1286,9 +1298,7 @@ pub unsafe fn ii_fopen_new_volume(in_file: *mut ImodImageFile) -> Option<ImodFil
     if ii_hdf_open_new(in_file, "wb+") != 0 {
         return None;
     }
-    let file = *(*in_file)
-        .ii_volumes
-        .add(((*in_file).num_volumes - 1) as usize);
+    let file = (&(*in_file).ii_volumes)[((*in_file).num_volumes - 1) as usize];
     if add_to_opened_list(file) != 0 {
         return None;
     }
@@ -1322,7 +1332,7 @@ pub unsafe fn ii_set_chunk_sizes(
 ) -> i32 {
     if in_file.is_null()
         || unsafe { (*in_file).file } != IIFILE_HDF
-        || !unsafe { (*in_file).stack_set_list }.is_null()
+        || unsafe { (*in_file).stack_set_list.as_ref() }.is_some()
     {
         unsafe {
             b3d_error(
@@ -1372,7 +1382,7 @@ pub unsafe fn ii_get_adoc_index(
         return -2;
     }
     if (*in_file).file == IIFILE_HDF {
-        return if !(*in_file).stack_set_list.is_null()
+        return if (*in_file).stack_set_list.is_some()
             || (*in_file).global_adoc_index < 0
             || global == 0
         {
@@ -1388,9 +1398,11 @@ pub unsafe fn ii_get_adoc_index(
         (*in_file).adoc_index = adoc_new();
     } else {
         // `iimage.c:1020-1026`: the image name with ".mdoc" appended.
-        let mut name = (*in_file).filename.clone().unwrap_or_default();
-        name.extend_from_slice(b".mdoc");
-        (*in_file).adoc_index = adoc_read(&name);
+        let name = format!(
+            "{}.mdoc",
+            (*in_file).filename.as_deref().unwrap_or_default()
+        );
+        (*in_file).adoc_index = adoc_read(name.as_bytes());
     }
     if (*in_file).adoc_index < 0 {
         -2
@@ -1589,7 +1601,11 @@ pub unsafe fn read_write_section(
         }
         let mut data_size = 0;
         let mut convert = 0;
-        if S_MAX_TIFF_THREADS > 1 && in_file == S_II_TIFFS[0] && (*in_file).axis == 3 {
+        if S_TIFF_THREADS.with(|state| {
+            let state = state.borrow();
+            state.1 > 1 && in_file == state.0[0]
+        }) && (*in_file).axis == 3
+        {
             let mut dsize = 0;
             let mut csize = 0;
             if mrc_getdcsize((*in_file).mode, &mut dsize, &mut csize) == 0 {
@@ -1610,18 +1626,21 @@ pub unsafe fn read_write_section(
         }
         ii_change_call_count(1);
         let err = if data_size != 0 {
-            tiff_parallel_read(
-                core::ptr::addr_of_mut!(S_II_TIFFS).cast(),
-                S_MAX_TIFF_THREADS,
-                (*in_file).llx,
-                (*in_file).urx,
-                (*in_file).lly,
-                (*in_file).ury,
-                data_size,
-                buf,
-                in_section,
-                convert,
-            )
+            S_TIFF_THREADS.with(|state| {
+                let mut state = state.borrow_mut();
+                tiff_parallel_read(
+                    state.0.as_mut_ptr(),
+                    state.1,
+                    (*in_file).llx,
+                    (*in_file).urx,
+                    (*in_file).lly,
+                    (*in_file).ury,
+                    data_size,
+                    buf,
+                    in_section,
+                    convert,
+                )
+            })
         } else {
             func(in_file, buf, in_section)
         };
@@ -1694,7 +1713,11 @@ pub unsafe fn ii_load_pcoord(
     }
     if (*li).plist == 0 && use_mdoc != 0 {
         crate::imod::libiimod::plist::ii_plist_from_metadata(
-            (*in_file).filename.as_deref().unwrap_or_default(),
+            (*in_file)
+                .filename
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
             1,
             li,
             nx,
@@ -1710,9 +1733,8 @@ pub unsafe fn ii_make_buffer_convert_if_float(
     if_float: i32,
     inverted: *mut i32,
     routine: &str,
-) -> *mut u8 {
+) -> Result<Option<Vec<u8>>, ()> {
     unsafe {
-        let mut use_buf = buf;
         let mut fbufp = buf.cast::<f32>();
         let nx = (*in_file).nx;
         let ny = (*in_file).ny;
@@ -1723,8 +1745,8 @@ pub unsafe fn ii_make_buffer_convert_if_float(
         };
         let data_size = nx as usize * ny as usize * pixsize as usize;
         if if_float != 0 && (*in_file).type_ != IITYPE_FLOAT {
-            use_buf = libc::malloc(data_size).cast();
-            if use_buf.is_null() {
+            let mut use_buf = Vec::new();
+            if use_buf.try_reserve_exact(data_size).is_err() {
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
                     format_args!(
@@ -1732,18 +1754,20 @@ pub unsafe fn ii_make_buffer_convert_if_float(
                         routine
                     ),
                 );
-                return core::ptr::null_mut();
+                return Err(());
             }
+            use_buf.resize(data_size, 0);
             *inverted = 1;
             for iy in 0..ny {
                 let bdata = use_buf
-                    .cast::<u8>()
+                    .as_mut_ptr()
                     .add((nx * pixsize * (ny - 1 - iy)) as usize);
                 ii_convert_line_of_floats(fbufp, bdata, nx, (*in_file).mode, 0, 0);
                 fbufp = fbufp.add(nx as usize);
             }
+            return Ok(Some(use_buf));
         }
-        use_buf
+        Ok(None)
     }
 }
 pub unsafe fn ii_convert_line_of_floats(
@@ -1907,13 +1931,8 @@ pub fn iilimitedtilesize(
 /// length, so this entry point keeps the C calling convention until both sides
 /// of that bridge move together.
 pub unsafe fn iitestifhdf(filename: *const c_char, name_len: i32) -> i32 {
-    let cstr = crate::imod::libcfshr::b3dutil::f2c_string(filename, name_len);
-    if cstr.is_null() {
-        return -1;
-    }
-    let name = core::ffi::CStr::from_ptr(cstr).to_bytes().to_vec();
-    libc::free(cstr.cast());
-    native_ii_test_if_hdf(&name)
+    let cstr = crate::imod::libcfshr::b3dutil::fortran_string(filename, name_len);
+    native_ii_test_if_hdf(cstr.as_bytes())
 }
 pub fn tiffseteerreadproperties(super_res: i32, auto_group: i32, flags: i32) {
     tiff_set_eer_read_properties(super_res, auto_group, flags);
@@ -2051,7 +2070,8 @@ mod tests {
     #[test]
     fn make_buffer_convert_if_float_preserves_source_y_inversion_and_identity_return() {
         unsafe {
-            let in_file = ii_new();
+            let mut in_file_owner = ii_new_box();
+            let in_file = in_file_owner.as_mut() as *mut ImodImageFile;
             (*in_file).nx = 2;
             (*in_file).ny = 2;
             (*in_file).mode = MRC_MODE_BYTE;
@@ -2064,29 +2084,26 @@ mod tests {
                 1,
                 &mut inverted,
                 "test",
-            );
-            assert!(!converted.is_null());
+            )
+            .unwrap()
+            .unwrap();
             assert_eq!(inverted, 1);
-            assert_eq!(
-                core::slice::from_raw_parts(converted.cast::<u8>(), 4),
-                [3, 4, 1, 2]
-            );
-            libc::free(converted.cast());
+            assert_eq!(converted, [3, 4, 1, 2]);
 
             (*in_file).type_ = IITYPE_FLOAT;
             inverted = 0;
-            assert_eq!(
+            assert!(
                 ii_make_buffer_convert_if_float(
                     in_file,
                     floats.as_mut_ptr().cast(),
                     1,
                     &mut inverted,
                     "test",
-                ),
-                floats.as_mut_ptr().cast()
+                )
+                .unwrap()
+                .is_none()
             );
             assert_eq!(inverted, 0);
-            drop(Box::from_raw(in_file));
         }
     }
 
@@ -2127,7 +2144,8 @@ mod tests {
     #[test]
     fn sync_from_mrc_header_preserves_source_metadata_and_z_scale_condition() {
         unsafe {
-            let image_file = ii_new();
+            let mut image_file_owner = ii_new_box();
+            let image_file = image_file_owner.as_mut() as *mut ImodImageFile;
             (*image_file).mode = crate::imod::libiimod::mrcfiles::MRC_MODE_SHORT;
             let mut header = MrcHeader::default();
             header.nx = 4;
@@ -2199,7 +2217,6 @@ mod tests {
             header.zlen = 30.0;
             ii_sync_from_mrc_header(image_file, &mut header);
             assert_eq!((*image_file).zscale, 1.0);
-            libc::free(image_file.cast());
         }
     }
 
@@ -2242,7 +2259,8 @@ mod tests {
     #[test]
     fn image_file_constructor_and_initializer_match_source_defaults() {
         unsafe {
-            let image_file = ii_new();
+            let mut image_file_owner = ii_new_box();
+            let image_file = image_file_owner.as_mut() as *mut ImodImageFile;
             assert_eq!((*image_file).xscale, 1.0);
             assert_eq!((*image_file).smax, 255.0);
             assert_eq!(
@@ -2271,15 +2289,16 @@ mod tests {
                 (IIFILE_HDF, 3, IITYPE_FLOAT)
             );
             assert_eq!(ii_init(core::ptr::null_mut(), 0, 0, 0, 0, 0, 0), -1);
-            libc::free(image_file.cast());
         }
     }
 
     #[test]
     fn opened_file_registry_uses_the_original_ilist_pointer_identity_rules() {
         unsafe {
-            let first = ii_new();
-            let second = ii_new();
+            let mut first_owner = ii_new_box();
+            let first = first_owner.as_mut() as *mut ImodImageFile;
+            let mut second_owner = ii_new_box();
+            let second = second_owner.as_mut() as *mut ImodImageFile;
             (*first).fp = Some(ImodFile::Token(1));
             (*second).fp = Some(ImodFile::Token(2));
             assert_eq!(add_to_opened_list(first), 0);
@@ -2300,16 +2319,16 @@ mod tests {
                 Some(second)
             );
             remove_from_opened_list(second);
-            drop(Box::from_raw(first));
-            drop(Box::from_raw(second));
         }
     }
 
     #[test]
     fn file_address_change_replaces_the_opened_file_registry_entry() {
         unsafe {
-            let old_file = ii_new();
-            let new_file = ii_new();
+            let mut old_file_owner = ii_new_box();
+            let old_file = old_file_owner.as_mut() as *mut ImodImageFile;
+            let mut new_file_owner = ii_new_box();
+            let new_file = new_file_owner.as_mut() as *mut ImodImageFile;
             (*old_file).fp = Some(ImodFile::Token(1));
             (*new_file).fp = Some(ImodFile::Token(old_file as usize));
             assert_eq!(add_to_opened_list(old_file), 0);
@@ -2326,16 +2345,16 @@ mod tests {
                 Some(new_file)
             );
             remove_from_opened_list(new_file);
-            drop(Box::from_raw(old_file));
-            drop(Box::from_raw(new_file));
         }
     }
 
     #[test]
     fn save_and_restore_load_params_copy_only_the_source_load_fields() {
         unsafe {
-            let ii_file = ii_new();
-            let ii_save = ii_new();
+            let mut ii_file_owner = ii_new_box();
+            let ii_file = ii_file_owner.as_mut() as *mut ImodImageFile;
+            let mut ii_save_owner = ii_new_box();
+            let ii_save = ii_save_owner.as_mut() as *mut ImodImageFile;
             (*ii_file).llx = 1;
             (*ii_file).urx = 2;
             (*ii_file).lly = 3;
@@ -2376,15 +2395,14 @@ mod tests {
                 ),
                 (1, 2, 3, 4, 5, 6, 2, 7, 8, 1.5, -2.5)
             );
-            drop(Box::from_raw(ii_file));
-            libc::free(ii_save.cast());
         }
     }
 
     #[test]
     fn lookup_ii_file_saves_and_sets_axis_specific_load_parameters() {
         unsafe {
-            let ii_file = ii_new();
+            let mut ii_file_owner = ii_new_box();
+            let ii_file = ii_file_owner.as_mut() as *mut ImodImageFile;
             (*ii_file).fp = Some(ImodFile::Token(1));
             (*ii_file).file = IIFILE_TIFF;
             (*ii_file).llx = 99;
@@ -2429,7 +2447,6 @@ mod tests {
             );
             ii_change_call_count(-1);
             remove_from_opened_list(ii_file);
-            drop(Box::from_raw(ii_file));
         }
     }
 

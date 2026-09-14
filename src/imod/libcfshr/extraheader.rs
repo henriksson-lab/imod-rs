@@ -12,7 +12,6 @@ use super::autodoc::{
 use super::b3dutil::{
     b3d_error, b3d_get_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
 };
-use crate::imod::libcfshr::b3dutil::ImodFile;
 
 const MRC_EXT_TYPE_FEI: i32 = 3;
 const RADIANS_PER_DEGREE: f64 = 0.017_453_292_52;
@@ -127,19 +126,8 @@ pub unsafe fn get_extra_header_tilts_fortran(
         iz_piece,
     ) != 0
     {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
 }
 
@@ -334,19 +322,8 @@ pub unsafe fn get_extra_header_items_fortran(
         iz_piece,
     ) != 0
     {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
 }
 
@@ -449,19 +426,8 @@ pub unsafe fn get_metadata_items_fortran(
         iz_piece,
     ) != 0
     {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
 }
 
@@ -632,19 +598,8 @@ pub unsafe fn get_metadata_by_key_fortran(
         iz_piece,
     ) != 0
     {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
     if *value_type == 0 {
         for ind in 0..*num_found {
@@ -727,19 +682,8 @@ pub unsafe fn get_extra_header_pieces_fortran(
         *max_piece,
     ) != 0
     {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
 }
 
@@ -816,19 +760,8 @@ pub unsafe fn get_metadata_pieces_fortran(
         num_found,
     ) != 0
     {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
 }
 
@@ -1038,19 +971,8 @@ pub unsafe fn get_metadata_weighting_doses_fortran(
         sec_dose,
     );
     if error > 0 {
-        // `printf("\nERROR: %s\n", b3dGetError()); exit(1);` -- the C wrapper
-        // writes through libc stdout and exits, it does not unwind.
-        {
-            use std::io::Write;
-            let _ = crate::imod::libcfshr::b3dutil::ImodFile::Stdout.write_all(
-                crate::imod::libcfshr::b3dutil::c_format(
-                    "\nERROR: %s\n",
-                    &[crate::imod::libcfshr::b3dutil::CArg::Str(&b3d_get_error())],
-                )
-                .as_bytes(),
-            );
-        }
-        libc::exit(1);
+        println!("\nERROR: {}", b3d_get_error());
+        std::process::exit(1);
     }
     error
 }

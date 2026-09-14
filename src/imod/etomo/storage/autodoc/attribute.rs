@@ -316,16 +316,14 @@ impl WritableAttribute for Attribute {
         }
         // current we can only modify the last name/value pair found
         let name_value_pair = self.get_name_value_pair();
-        let value = Box::into_raw(Box::new(Token::new()));
-        unsafe {
-            (*value).set_type_and_string(
-                token::Type::Anything,
-                match new_value {
-                    None => panic!("java.lang.NullPointerException"),
-                    Some(new_value) => new_value,
-                },
-            )
-        };
+        let mut value = Box::new(Token::new());
+        value.set_type_and_string(
+            token::Type::Anything,
+            match new_value {
+                None => panic!("java.lang.NullPointerException"),
+                Some(new_value) => new_value,
+            },
+        );
         unsafe { (*name_value_pair).set_value(value) };
     }
 }

@@ -2098,7 +2098,7 @@ pub struct ZapFuncs {
     /// `mLmy`.
     pub lmy: i32,
     /// `mTessCont`.
-    pub tess_cont: *mut Icont,
+    pub tess_cont: Option<Icont>,
     /// `mTessMaxPoints`.
     pub tess_max_points: i32,
     /// `mNestContMap`.
@@ -2220,7 +2220,7 @@ pub fn imod_zap_open(vi: *mut ImodView, wintype: i32) -> i32 {
         drop(zap);
         return -1;
     }
-    Box::into_raw(zap);
+    let _ = Box::into_raw(zap);
     0
 }
 
@@ -2699,7 +2699,7 @@ impl ZapFuncs {
             ydrawsize: 0,
             lmx: 0,
             lmy: 0,
-            tess_cont: ptr::null_mut(),
+            tess_cont: None,
             tess_max_points: 0,
             nest_cont_map: Vec::new(),
             conts_at_cur_z: None,
@@ -2794,7 +2794,7 @@ impl ZapFuncs {
         zap.popup = 0;
         zap.data = None;
         zap.image = false;
-        zap.tess_cont = ptr::null_mut();
+        zap.tess_cont = None;
         zap.label_font = false;
         zap.label_painter = false;
         zap.nest_ind = Vec::new();
@@ -5014,9 +5014,15 @@ impl ZapFuncs {
         }
         if self.shift_registered != 0 {
             self.shift_registered = 0;
-            undo_finish_unit(unsafe { &mut *(*self.vi).undo }, unsafe {
-                &*(*self.vi).imod
-            });
+            undo_finish_unit(
+                unsafe {
+                    (*self.vi)
+                        .undo
+                        .as_deref_mut()
+                        .expect("initialized view undo stack")
+                },
+                unsafe { &*(*self.vi).imod },
+            );
         }
         let need_draw =
             self.drew_extra_cursor && !with_boundary(|n| n.gfx_extra_cursor_in_window());
@@ -5648,7 +5654,15 @@ impl ZapFuncs {
                     wprint(
                         "\u{7}Contour time does not match current time.\nSet contour time to 0 to model across times.\n",
                     );
-                    undo_finish_unit(unsafe { &mut *(*vi).undo }, unsafe { &*(*vi).imod });
+                    undo_finish_unit(
+                        unsafe {
+                            (*vi)
+                                .undo
+                                .as_deref_mut()
+                                .expect("initialized view undo stack")
+                        },
+                        unsafe { &*(*vi).imod },
+                    );
                     return 0;
                 }
 
@@ -5711,7 +5725,12 @@ impl ZapFuncs {
                 let dsq = (lpt.x - ix) * (lpt.x - ix) + (lpt.y - iy) * (lpt.y - iy);
                 if dsq <= critsq {
                     undo_point_removal(
-                        unsafe { &mut *(*self.vi).undo },
+                        unsafe {
+                            (*self.vi)
+                                .undo
+                                .as_deref_mut()
+                                .expect("initialized view undo stack")
+                        },
                         unsafe { &mut *(*self.vi).imod },
                         i,
                     );
@@ -5729,9 +5748,15 @@ impl ZapFuncs {
         if deleted == 0 {
             return 0;
         }
-        undo_finish_unit(unsafe { &mut *(*self.vi).undo }, unsafe {
-            &*(*self.vi).imod
-        });
+        undo_finish_unit(
+            unsafe {
+                (*self.vi)
+                    .undo
+                    .as_deref_mut()
+                    .expect("initialized view undo stack")
+            },
+            unsafe { &*(*self.vi).imod },
+        );
         let vi = self.vi;
         with_boundary(|n| n.imod_draw(vi, IMOD_DRAW_XYZ | IMOD_DRAW_MOD));
         1
@@ -5784,10 +5809,26 @@ impl ZapFuncs {
                 return 0;
             }
 
-            undo_point_shift_cp(unsafe { &mut *(*vi).undo }, unsafe { &mut *(*vi).imod });
+            undo_point_shift_cp(
+                unsafe {
+                    (*vi)
+                        .undo
+                        .as_deref_mut()
+                        .expect("initialized view undo stack")
+                },
+                unsafe { &mut *(*vi).imod },
+            );
             unsafe { (&mut (*cont).pts)[pt as usize].x = ix };
             unsafe { (&mut (*cont).pts)[pt as usize].y = iy };
-            undo_finish_unit(unsafe { &mut *(*vi).undo }, unsafe { &*(*vi).imod });
+            undo_finish_unit(
+                unsafe {
+                    (*vi)
+                        .undo
+                        .as_deref_mut()
+                        .expect("initialized view undo stack")
+                },
+                unsafe { &*(*vi).imod },
+            );
 
             unsafe { (*vi).xmouse = ix };
             unsafe { (*vi).ymouse = iy };
@@ -6300,11 +6341,23 @@ impl ZapFuncs {
                 // going backwards, need to increment registered first point
                 if self.drag_add_count == 0 {
                     if unsafe { !(&(*cont).store).is_empty() } {
-                        undo_contour_data_chg_cc(unsafe { &mut *(*vi).undo }, unsafe {
-                            &mut *(*vi).imod
-                        });
+                        undo_contour_data_chg_cc(
+                            unsafe {
+                                (*vi)
+                                    .undo
+                                    .as_deref_mut()
+                                    .expect("initialized view undo stack")
+                            },
+                            unsafe { &mut *(*vi).imod },
+                        );
                     } else {
-                        unsafe { (*(*vi).undo).get_open_unit(&*(*vi).imod) };
+                        unsafe {
+                            (*vi)
+                                .undo
+                                .as_deref_mut()
+                                .expect("initialized view undo stack")
+                                .get_open_unit(&*(*vi).imod)
+                        };
                     }
                     self.drag_add_index = unsafe { (*(*vi).imod).cindex };
                     self.drag_add_index.point = pt;
@@ -6408,7 +6461,15 @@ impl ZapFuncs {
             ) as f64
         {
             unsafe { (*(*vi).imod).cindex.point += 1 };
-            undo_point_shift_cp(unsafe { &mut *(*vi).undo }, unsafe { &mut *(*vi).imod });
+            undo_point_shift_cp(
+                unsafe {
+                    (*vi)
+                        .undo
+                        .as_deref_mut()
+                        .expect("initialized view undo stack")
+                },
+                unsafe { &mut *(*vi).imod },
+            );
             lpt = unsafe {
                 (*cont)
                     .pts
@@ -6418,7 +6479,15 @@ impl ZapFuncs {
             unsafe { (*lpt).x = pt.x };
             unsafe { (*lpt).y = pt.y };
             unsafe { (*lpt).z = pt.z };
-            undo_finish_unit(unsafe { &mut *(*vi).undo }, unsafe { &*(*vi).imod });
+            undo_finish_unit(
+                unsafe {
+                    (*vi)
+                        .undo
+                        .as_deref_mut()
+                        .expect("initialized view undo stack")
+                },
+                unsafe { &*(*vi).imod },
+            );
             with_boundary(|n| n.imod_draw(vi, IMOD_DRAW_XYZ | IMOD_DRAW_MOD));
             return 1;
         }
@@ -6438,20 +6507,36 @@ impl ZapFuncs {
         if self.drag_add_index.object != unsafe { (*index).object }
             || self.drag_add_index.contour != unsafe { (*index).contour }
         {
-            undo_flush_unit(unsafe { &mut *(*self.vi).undo });
+            undo_flush_unit(unsafe {
+                (*self.vi)
+                    .undo
+                    .as_deref_mut()
+                    .expect("initialized view undo stack")
+            });
             return;
         }
 
         // Send out the additions
         undo_point_addition_cc2(
-            unsafe { &mut *(*self.vi).undo },
+            unsafe {
+                (*self.vi)
+                    .undo
+                    .as_deref_mut()
+                    .expect("initialized view undo stack")
+            },
             unsafe { &mut *(*self.vi).imod },
             self.drag_add_index.point.min(unsafe { (*index).point }),
             self.drag_add_index.point.max(unsafe { (*index).point }),
         );
-        undo_finish_unit(unsafe { &mut *(*self.vi).undo }, unsafe {
-            &*(*self.vi).imod
-        });
+        undo_finish_unit(
+            unsafe {
+                (*self.vi)
+                    .undo
+                    .as_deref_mut()
+                    .expect("initialized view undo stack")
+            },
+            unsafe { &*(*self.vi).imod },
+        );
     }
 
     /*
@@ -6776,7 +6861,12 @@ impl ZapFuncs {
                     // Register changes first time only
                     if self.shift_registered == 0 {
                         undo_contour_data_chg(
-                            unsafe { &mut *(*self.vi).undo },
+                            unsafe {
+                                (*self.vi)
+                                    .undo
+                                    .as_deref_mut()
+                                    .expect("initialized view undo stack")
+                            },
                             unsafe { &mut *(*self.vi).imod },
                             ob,
                             co,
@@ -8242,7 +8332,7 @@ impl ZapFuncs {
         let (mut bl, mut wh, mut ind, mut iz);
         let mut rgba = APP.lock().unwrap().as_ref().map_or(0, |a| a.rgba);
         let mut image_data: *mut *mut u8 = ptr::null_mut();
-        let mut over_image: *mut u8 = ptr::null_mut();
+        let mut over_image: Option<Vec<u8>> = None;
         let mut overlay = 0;
         let other_sec = self.section + unsafe { (*vi).overlay_sec };
         let mut zoom;
@@ -8420,31 +8510,39 @@ impl ZapFuncs {
                 && other_sec < unsafe { (*vi).zsize }
                 && unsafe { (*vi).pyr_cache }.is_null()
             {
-                over_image = unsafe {
-                    libc::malloc(3 * (*vi).xsize as usize * (*vi).ysize as usize) as *mut u8
+                let Some(bytes) = (3usize)
+                    .checked_mul(unsafe { (*vi).xsize as usize })
+                    .and_then(|size| size.checked_mul(unsafe { (*vi).ysize as usize }))
+                else {
+                    wprint("\u{7}Failed to get memory for overlay image.\n");
+                    return;
                 };
-                if over_image.is_null() {
+                let mut image = Vec::new();
+                if image.try_reserve_exact(bytes).is_err() {
                     wprint("\u{7}Failed to get memory for overlay image.\n");
                 } else {
+                    image.resize(bytes, 0);
                     overlay = unsafe { (*vi).overlay_sec };
                     rgba = 3;
                     let (nx, ny) = (unsafe { (*vi).xsize }, unsafe { (*vi).ysize });
                     if unsafe { (*vi).which_green } != 0 {
-                        self.fill_overlay_rgb(image_data, nx, ny, 0, over_image);
-                        self.fill_overlay_rgb(image_data, nx, ny, 2, over_image);
+                        self.fill_overlay_rgb(image_data, nx, ny, 0, image.as_mut_ptr());
+                        self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr());
                     } else {
-                        self.fill_overlay_rgb(image_data, nx, ny, 1, over_image);
+                        self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr());
                     }
 
                     image_data = unsafe { ivw_get_z_section_time(vi, other_sec, time) };
                     if unsafe { (*vi).which_green } != 0 {
-                        self.fill_overlay_rgb(image_data, nx, ny, 1, over_image);
+                        self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr());
                     } else {
-                        self.fill_overlay_rgb(image_data, nx, ny, 0, over_image);
-                        self.fill_overlay_rgb(image_data, nx, ny, 2, over_image);
+                        self.fill_overlay_rgb(image_data, nx, ny, 0, image.as_mut_ptr());
+                        self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr());
                     }
-                    image_data =
-                        unsafe { ivw_make_line_pointers(vi, over_image, nx, ny, MRC_MODE_RGB) };
+                    image_data = unsafe {
+                        ivw_make_line_pointers(vi, image.as_mut_ptr(), nx, ny, MRC_MODE_RGB)
+                    };
+                    over_image = Some(image);
                 }
             }
             if overlay != self.overlay {
@@ -8563,9 +8661,6 @@ impl ZapFuncs {
             self.set_area_limits();
             with_boundary(|n| n.locator_schedule_draw(vi));
             self.record_subarea = 0;
-        }
-        if overlay != 0 {
-            unsafe { libc::free(over_image as *mut libc::c_void) };
         }
     }
 
@@ -8790,7 +8885,7 @@ impl ZapFuncs {
                     if let Some(mut tc) = imod_contour_new() {
                         tc.pts = vec![Ipoint::default(); max_pts as usize];
                         self.tess_max_points = max_pts;
-                        self.tess_cont = Box::into_raw(Box::new(tc));
+                        self.tess_cont = Some(tc);
                     }
                 }
             }
@@ -8818,9 +8913,8 @@ impl ZapFuncs {
             }
 
             // Clean up the tesselator contour
-            if !self.tess_cont.is_null() {
-                unsafe { drop(Box::from_raw(self.tess_cont)) };
-                self.tess_cont = ptr::null_mut();
+            if self.tess_cont.is_some() {
+                self.tess_cont = None;
                 self.tess_max_points = 0;
             }
             if self.label_painter {
@@ -9241,7 +9335,7 @@ impl ZapFuncs {
             // Draw fill first if there is a 2d trans setting
             // First check for nesting if contour is on this Z level at all
             if unsafe { (*obj).extra[IOBJ_EX_2D_TRANS] } != 0
-                && !self.tess_cont.is_null()
+                && self.tess_cont.is_some()
                 && unsafe { (*cont).flags } & ICONT_WILD == 0
             {
                 use_cont = cont;
@@ -9330,7 +9424,7 @@ impl ZapFuncs {
                             && unsafe { (&(*use_cont).pts).len() as i32 } > self.tess_max_points
                         {
                             let need = unsafe { (&(*use_cont).pts).len() };
-                            unsafe { (*self.tess_cont).pts = vec![Ipoint::default(); need] };
+                            self.tess_cont.as_mut().unwrap().pts = vec![Ipoint::default(); need];
                             self.tess_max_points = need as i32;
                         }
                     }
@@ -9344,18 +9438,14 @@ impl ZapFuncs {
                     let alpha = 1. - unsafe { (*obj).extra[IOBJ_EX_2D_TRANS] } as f32 / 100.;
                     let (r, g, b) = (cont_props.red, cont_props.green, cont_props.blue);
                     with_boundary(|n| n.gl_color_4f(r, g, b, alpha));
-                    for pt in 0..unsafe { (&(*use_cont).pts).len() } {
-                        unsafe {
-                            (&mut (*self.tess_cont).pts)[pt].x =
-                                self.xpos((&(*use_cont).pts)[pt].x) as f32
-                        };
-                        unsafe {
-                            (&mut (*self.tess_cont).pts)[pt].y =
-                                self.ypos((&(*use_cont).pts)[pt].y) as f32
-                        };
+                    let point_count = unsafe { (&(*use_cont).pts).len() };
+                    for pt in 0..point_count {
+                        let point = unsafe { (&(*use_cont).pts)[pt] };
+                        self.tess_cont.as_mut().unwrap().pts[pt].x = self.xpos(point.x) as f32;
+                        self.tess_cont.as_mut().unwrap().pts[pt].y = self.ypos(point.y) as f32;
                     }
-                    unsafe { (&mut (*self.tess_cont).pts).truncate((&(*use_cont).pts).len()) };
-                    let pts = unsafe { (&(*self.tess_cont).pts).clone() };
+                    self.tess_cont.as_mut().unwrap().pts.truncate(point_count);
+                    let pts = self.tess_cont.as_ref().unwrap().pts.clone();
                     with_boundary(|n| n.draw_filled_polygon(&pts));
                     with_boundary(|n| n.gl_enable_blend(false));
                     with_boundary(|n| n.gl_color_3f(r, g, b));
@@ -10662,8 +10752,9 @@ mod tests {
     }
 
     /// A view large enough that the source's offset arithmetic has room, with
-    /// a one-object model.
-    fn view() -> Box<ImodView> {
+    /// a one-object model.  Both boxes remain owned by each test; `ImodView`
+    /// borrows the model through its ABI-compatible raw pointer.
+    fn view() -> (Box<ImodView>, Box<Imod>) {
         let mut imod = Box::new(Imod::default());
         imod.obj.push(Iobj::default());
         imod.cindex = Iindex {
@@ -10678,8 +10769,8 @@ mod tests {
         vi.xybin = 1;
         vi.zbin = 1;
         vi.drawcursor = 1;
-        vi.imod = Box::into_raw(imod);
-        vi
+        vi.imod = &mut *imod;
+        (vi, imod)
     }
 
     fn zap(vi: &mut ImodView) -> Box<ZapFuncs> {
@@ -10715,7 +10806,7 @@ mod tests {
     #[test]
     fn window_and_image_coordinates_round_trip() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.xborder = 7;
         z.yborder = 3;
@@ -10739,7 +10830,7 @@ mod tests {
     #[test]
     fn xpos_truncates_after_adding_the_border() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.xborder = 10;
         z.xpos_start = 0;
@@ -10757,7 +10848,7 @@ mod tests {
     #[test]
     fn band_image_and_mouse_coordinates_round_trip() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.rb_image_x0 = 40.;
         z.rb_image_x1 = 140.;
@@ -10776,7 +10867,7 @@ mod tests {
     #[test]
     fn drag_two_band_sides_swaps_when_the_sides_cross() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         let (mut i0, mut i1) = (100.0f32, 101.0f32);
         let (mut d0, mut d1) = (1, 0);
@@ -10794,7 +10885,7 @@ mod tests {
     #[test]
     fn multi_z_panels_split_the_window_with_gutters() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         let (mut size, mut border) = (0, 0);
         z.allocate_to_panels(5, 256, 8, &mut size, &mut border);
@@ -10810,7 +10901,7 @@ mod tests {
     #[test]
     fn panel_index_and_coord_rejects_the_gutter() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let z = zap(&mut vi);
         let (mut pos, mut ind) = (2 + 44 + 3, 0);
         z.panel_index_and_coord(44, 5, 8, 2, &mut pos, &mut ind);
@@ -10824,7 +10915,7 @@ mod tests {
     /// with no band and swaps the two when they are entered inverted.
     #[test]
     fn low_high_section_falls_back_and_orders() {
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         set_zap_native_boundary(Some(Box::new(TestBoundary {
             low_section: "12".to_owned(),
@@ -10845,7 +10936,7 @@ mod tests {
     #[test]
     fn toggle_rubberband_starts_a_band_and_syncs_the_toolbar() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.toggle_rubberband(false);
         assert_eq!((z.starting_band, z.rubberband), (1, 0));
@@ -10863,7 +10954,7 @@ mod tests {
     #[test]
     fn arrows_push_and_pop_in_step() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.toggle_arrow(false);
         assert_eq!((z.arrow_head.len(), z.arrow_tail.len()), (1, 1));
@@ -10881,7 +10972,7 @@ mod tests {
     #[test]
     fn mouse_tracking_follows_the_governing_flags() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.set_mouse_tracking();
         let read = |expected: bool| {
@@ -10909,7 +11000,7 @@ mod tests {
     #[test]
     fn translate_clamps_to_the_image_size() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.translate(1000, -1000);
         assert_eq!((z.xtrans, z.ytrans), (512, -384));
@@ -10922,7 +11013,7 @@ mod tests {
     #[test]
     fn auto_translate_follows_zmouse_unless_locked() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         vi.zmouse = 12.6;
         let mut z = zap(&mut vi);
         z.auto_translate();
@@ -10938,7 +11029,7 @@ mod tests {
     #[test]
     fn point_visable_uses_floor_of_z_plus_half() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.section = 0;
         assert_eq!(
@@ -10981,7 +11072,7 @@ mod tests {
     #[test]
     fn ghost_color_scales_by_thirds() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         // (0 + 1) * 255 / 3 = 85; (2 + 1) * 255 / 3 = 255.
         z.set_ghost_color(1., 0., 0., -1);
@@ -10994,7 +11085,7 @@ mod tests {
     #[test]
     fn band_minimum_shrinks_for_a_tiny_image() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         assert_eq!(z.band_minimum(), 4);
         unsafe { (*z.vi).xsize = 1 };
@@ -11008,7 +11099,7 @@ mod tests {
     #[test]
     fn montage_shifts_refuse_a_useless_factor() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         let (mut ts, mut td, mut cd, mut fs) = (0, 0, 0, 0);
         // inWin = 256 / (1 * 1) = 256 >= 512 - 1 is false, so this is allowed.
@@ -11030,7 +11121,7 @@ mod tests {
     #[test]
     fn keypad_insert_release_ends_capture_and_restores_full_draw() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.draw_current_only = 1;
         S_INSERT_DOWN.set(1);
@@ -11054,7 +11145,7 @@ mod tests {
     #[test]
     fn external_key_callback_skips_the_keypad_insert() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.zoom = 1.;
         let before = z.zoom;
@@ -11072,7 +11163,7 @@ mod tests {
     #[test]
     fn step_zoom_uses_the_zoom_list_and_records_the_subarea() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.record_subarea = 0;
         z.step_zoom(1);
@@ -11087,7 +11178,7 @@ mod tests {
     #[test]
     fn shift_rubberband_clips_at_the_image_edges() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.rb_image_x0 = 10.;
         z.rb_image_x1 = 60.;
@@ -11103,7 +11194,7 @@ mod tests {
     #[test]
     fn subset_limits_need_a_recorded_area() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         S_NUM_ZAP_WINDOWS.set(0);
         let (mut ix, mut iy, mut nx, mut ny) = (0, 0, 0, 0);
@@ -11169,7 +11260,7 @@ mod tests {
     /// the third finally latches both boxes.
     #[test]
     fn draw_tools_reports_the_band_size_when_a_band_is_on() {
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.tool_max_z = vi.zsize;
         z.rubberband = 1;
@@ -11223,7 +11314,7 @@ mod tests {
     #[test]
     fn set_area_limits_matches_native_at_each_zoom() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         vi.xsize = 64;
         vi.ysize = 48;
         let mut z = zap(&mut vi);
@@ -11295,7 +11386,7 @@ mod tests {
     #[test]
     fn locked_page_up_or_down_clamps_the_section() {
         install();
-        let mut vi = view();
+        let (mut vi, _imod) = view();
         let mut z = zap(&mut vi);
         z.section = 0;
         z.locked_page_up_or_down(0, -1);

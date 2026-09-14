@@ -15,16 +15,14 @@
 
 use super::*;
 use core::cell::RefCell;
-use core::ffi::c_int;
 use std::io::Write;
 use std::thread::LocalKey;
 
 /// Matches C `_mxml_global_t` (`mxml-private.h:30`).
 pub struct MxmlGlobal {
     pub error_cb: MxmlErrorCb,
-    pub num_entity_cbs: c_int,
-    pub entity_cbs: [MxmlEntityCb; 100],
-    pub wrap: c_int,
+    pub entity_cbs: Vec<MxmlEntityCb>,
+    pub wrap: i32,
     pub custom_load_cb: MxmlCustomLoadCb,
     pub custom_save_cb: MxmlCustomSaveCb,
 }
@@ -35,12 +33,7 @@ thread_local! {
     /// fields at `mxml-private.c:170-172`; those are the initialiser here.
     static MXML_GLOBAL: RefCell<MxmlGlobal> = RefCell::new(MxmlGlobal {
         error_cb: None,
-        num_entity_cbs: 1,
-        entity_cbs: {
-            let mut cbs: [MxmlEntityCb; 100] = [None; 100];
-            cbs[0] = Some(mxml_entity_cb);
-            cbs
-        },
+        entity_cbs: vec![Some(mxml_entity_cb)],
         wrap: 72,
         custom_load_cb: None,
         custom_save_cb: None,
@@ -122,9 +115,7 @@ pub fn _mxml_destructor(g: MxmlGlobal) {
 pub fn _mxml_fini() {
     mxml_global().with_borrow_mut(|global| {
         global.error_cb = None;
-        global.num_entity_cbs = 1;
-        global.entity_cbs = [None; 100];
-        global.entity_cbs[0] = Some(mxml_entity_cb);
+        global.entity_cbs = vec![Some(mxml_entity_cb)];
         global.wrap = 72;
         global.custom_load_cb = None;
         global.custom_save_cb = None;

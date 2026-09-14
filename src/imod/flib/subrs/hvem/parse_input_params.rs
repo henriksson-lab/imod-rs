@@ -17,12 +17,13 @@ use crate::imod::libcfshr::parse_params::{
     pip_read_prog_defaults, pip_read_stdin_if_set, pip_set_error,
 };
 use std::io::{self, Write};
+use std::sync::Mutex;
 
 /// `character*32 prefix` in `common / exitprefix / prefix`
 /// (`parse_input_params.f90:235,246`).  A Fortran common block starts as zero
 /// bytes, and `trim` strips only trailing blanks, so the uninitialised state is
 /// reproduced with NUL fill rather than blank fill.
-static mut EXIT_PREFIX: [u8; 32] = [0; 32];
+static EXIT_PREFIX: Mutex<[u8; 32]> = Mutex::new([0; 32]);
 
 /// `integer bufferSize / parameter (bufferSize = 1024)`
 /// (`parse_input_params.f90:70`).
@@ -284,8 +285,8 @@ pub fn pip_exit_on_error(if_use_stderr: i32, message: &str) {
 /// reading data from file.` lines and then `ERROR: NEWSTACK - Reading image
 /// file`, and a `println!` here put the last line first.
 pub fn exit_error(message: &str) -> ! {
-    let prefix = unsafe {
-        let stored = &*core::ptr::addr_of!(EXIT_PREFIX);
+    let prefix = {
+        let stored = EXIT_PREFIX.lock().unwrap();
         let mut length = stored.len();
         while length > 0 && stored[length - 1] == b' ' {
             length -= 1;
@@ -308,13 +309,11 @@ pub fn exit_error(message: &str) -> ! {
 
 /// Original Fortran `setExitPrefix` (`parse_input_params.f90:243`).
 pub fn set_exit_prefix(message: &str) {
-    unsafe {
-        let stored = &mut *core::ptr::addr_of_mut!(EXIT_PREFIX);
-        stored.fill(b' ');
-        let bytes = message.as_bytes();
-        let count = bytes.len().min(stored.len());
-        stored[..count].copy_from_slice(&bytes[..count]);
-    }
+    let mut stored = EXIT_PREFIX.lock().unwrap();
+    stored.fill(b' ');
+    let bytes = message.as_bytes();
+    let count = bytes.len().min(stored.len());
+    stored[..count].copy_from_slice(&bytes[..count]);
 }
 
 /// Original Fortran `memoryError` (`parse_input_params.f90:254`).

@@ -20,12 +20,8 @@
 //! string; the rest — which in this unit is most of them, since PIP's output is
 //! literals and `%s` — is written as the bytes C's `%s` would copy, because
 //! `c_format` returns a `String` and would put U+FFFD in place of a byte that
-//! an option value legitimately carries.  The stream is
-//! [`ImodFile::Stdout`]/[`ImodFile::Stderr`], which are the *C* streams: the
-//! programs that call PIP still write their own output with `libc::printf`, and
-//! C stdio is block-buffered under redirection while Rust's is not, so PIP's
-//! error and usage text would move ahead of theirs in a captured file if it
-//! went through `std::io::stdout()`.
+//! an option value legitimately carries.  PIP's output itself uses Rust's
+//! standard streams; `ImodFile` is retained only for input and parameter files.
 //!
 //! **`strtol` and `strtod`** are translated below as the C library functions
 //! they are, beside the code that calls them, for the same reason `c_format` is
@@ -36,7 +32,7 @@
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 use std::cell::{Cell, RefCell};
-use std::io::Write;
+use std::io::{self, Write};
 
 /* #define NON_OPTION_STRING "NonOptionArgument" */
 const NON_OPTION_STRING: &[u8] = b"NonOptionArgument";
@@ -360,7 +356,7 @@ pub fn pip_warn_unused_non_opt_args() -> i32 {
     });
     let unused = (count - 1) - S_HIGHEST_NON_OPT_GOTTEN.get();
     if unused > 0 {
-        let mut out = ImodFile::Stdout;
+        let mut out = io::stdout();
         let _ = out.write_all(b"\nWARNING: Extra non-option arguments not used by the program:");
         for ind in (S_HIGHEST_NON_OPT_GOTTEN.get() + 1)..count {
             /* printf("  %s", sOptTable[sNonOptInd].valuePtr[ind]); */
@@ -933,10 +929,10 @@ pub fn pip_print_help(
     let mut num_out = 0i32;
     let mut num_real = 0i32;
     let helplim: i32 = 74;
-    let mut out = if use_std_err != 0 {
-        ImodFile::Stderr
+    let mut out: Box<dyn Write> = if use_std_err != 0 {
+        Box::new(io::stderr())
     } else {
-        ImodFile::Stdout
+        Box::new(io::stdout())
     };
     let indent4: &[u8] = b"    ";
     let mut line_pos = 11i32;
@@ -1402,7 +1398,7 @@ pub fn pip_print_entries() {
         return;
     }
 
-    let mut out = ImodFile::Stdout;
+    let mut out = io::stdout();
     let program_name = S_PROGRAM_NAME.with_borrow(|p| p.clone());
     let _ = out.write_all(b"\n*** Entries to program ");
     let _ = out.write_all(program_name.as_deref().unwrap_or(b""));
@@ -1485,19 +1481,18 @@ pub fn pip_set_error(err_string: &[u8]) -> i32 {
             let n = p.iter().position(|&c| c == 0).unwrap_or(PREFIX_SIZE);
             p[..n].to_vec()
         });
-        let mut out = if S_ERROR_DEST.get() != 0 {
-            ImodFile::Stderr
+        let mut out: Box<dyn Write> = if S_ERROR_DEST.get() != 0 {
+            Box::new(io::stderr())
         } else {
-            ImodFile::Stdout
+            Box::new(io::stdout())
         };
         let _ = out.write_all(&prefix);
         let _ = out.write_all(b" ");
         let _ = out.write_all(err_string);
         let _ = out.write_all(b"\n");
         let _ = out.flush();
-        /* C `exit` flushes every stdio stream; standard output can be holding a
-        partial line written by the program before the error. */
-        let _ = ImodFile::Stdout.flush();
+        /* Flush PIP's Rust standard output before terminating. */
+        let _ = io::stdout().flush();
         std::process::exit(1);
     }
     0
@@ -1510,7 +1505,7 @@ pub fn pip_set_error(err_string: &[u8]) -> i32 {
 pub fn exit_error(format: &[u8]) -> ! {
     pip_set_error(format);
     /* PipSetError already exited when an exit prefix is set. */
-    let _ = ImodFile::Stdout.flush();
+    let _ = io::stdout().flush();
     std::process::exit(1);
 }
 
@@ -2234,7 +2229,7 @@ pub fn pip_read_or_parse_options(
             pip_set_error(&err_string);
         }
         /* printf("PIP WARNING: %s\nUsing fallback options in main program\n", errString); */
-        let mut out = ImodFile::Stdout;
+        let mut out = io::stdout();
         let _ = out.write_all(b"PIP WARNING: ");
         let _ = out.write_all(&err_string);
         let _ = out.write_all(b"\nUsing fallback options in main program\n");
@@ -2258,7 +2253,7 @@ pub fn pip_read_or_parse_options(
             header_func(prog_name);
         }
         pip_print_help(prog_name, 0, num_in_files, num_out_files);
-        let _ = ImodFile::Stdout.flush();
+        let _ = io::stdout().flush();
         std::process::exit(0);
     }
 }

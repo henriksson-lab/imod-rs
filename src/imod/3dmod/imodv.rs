@@ -36,11 +36,14 @@ pub type VertBufManager = c_void;
 
 /// Original: `__imodv_struct` / `ImodvApp` (`imodv.h`).
 ///
-/// Pointer fields retain the source ownership relationship.  The object
-/// vectors are owned by `libimod`; `imodv.cpp` only selects current elements.
-#[repr(C)]
+/// The object vectors are owned by `libimod`; `imodv.cpp` only selects current
+/// elements.  Model-pick coordinates are owned by the application.
 pub struct ImodvApp {
+    /// Borrowed cursors used by the viewer and rendering boundaries.  Models
+    /// loaded by standalone `3dmodv` are kept alive by `owned_models`; models
+    /// supplied by the regular image viewer remain borrowed from that viewer.
     pub mod_: Vec<*mut Imod>,
+    pub(crate) owned_models: Vec<Box<Imod>>,
     pub imod: *mut Imod,
     pub num_mods: i32,
     pub cur_mod: i32,
@@ -120,7 +123,10 @@ pub struct ImodvApp {
     pub vb_manager: *mut VertBufManager,
     pub tex_map: i32,
     pub tex_trans: i32,
-    pub vi: *mut c_void,
+    /// The active image view is owned by the normal 3dmod viewer, except for
+    /// standalone `3dmodv`, whose value is retained in `owned_vi` below.
+    pub vi: *mut ImodView,
+    pub(crate) owned_vi: Option<Box<ImodView>>,
     pub do_pick: i32,
     pub x_pick: i32,
     pub y_pick: i32,
@@ -128,8 +134,7 @@ pub struct ImodvApp {
     pub h_pick: i32,
     pub pick_hits: i32,
     pub read_pix_for_pick: i32,
-    pub mod_picks: *mut Ipoint,
-    pub max_mod_picks: i32,
+    pub mod_picks: Vec<Ipoint>,
     pub legacy_pick_mode: i32,
     pub lighting: i32,
     pub depthcue: i32,
@@ -142,6 +147,7 @@ impl Default for ImodvApp {
     fn default() -> Self {
         Self {
             mod_: Vec::new(),
+            owned_models: Vec::new(),
             imod: std::ptr::null_mut(),
             num_mods: 0,
             cur_mod: 0,
@@ -225,6 +231,7 @@ impl Default for ImodvApp {
             tex_map: 0,
             tex_trans: 0,
             vi: std::ptr::null_mut(),
+            owned_vi: None,
             do_pick: 0,
             x_pick: 0,
             y_pick: 0,
@@ -232,8 +239,7 @@ impl Default for ImodvApp {
             h_pick: 0,
             pick_hits: 0,
             read_pix_for_pick: 0,
-            mod_picks: std::ptr::null_mut(),
-            max_mod_picks: 0,
+            mod_picks: Vec::new(),
             legacy_pick_mode: 0,
             lighting: 0,
             depthcue: 0,
@@ -320,7 +326,10 @@ pub fn imodv_init(a: &mut ImodvApp) -> i32 {
     a.num_mods = 0;
     a.cur_mod = 0;
     a.mod_.clear();
+    a.owned_models.clear();
     a.imod = std::ptr::null_mut();
+    a.vi = std::ptr::null_mut();
+    a.owned_vi = None;
     a.mat = imod_mat_new(3);
     a.rmat = imod_mat_new(3);
     a.obj = std::ptr::null_mut();
@@ -352,8 +361,7 @@ pub fn imodv_init(a: &mut ImodvApp) -> i32 {
     a.zrot_movie = 0.;
     a.current_subset = 0;
     a.read_pix_for_pick = 0;
-    a.mod_picks = std::ptr::null_mut();
-    a.max_mod_picks = 0;
+    a.mod_picks.clear();
     a.crosset = 0;
     a.fullscreen = 0;
     a.drawall = 0;
@@ -405,7 +413,8 @@ pub unsafe fn initstruct(vw: &mut ImodView, a: &mut ImodvApp) {
     a.standalone = 0;
     a.tex_map = 0;
     a.tex_trans = 0;
-    a.vi = vw as *mut ImodView as *mut c_void;
+    a.owned_vi = None;
+    a.vi = vw;
     if a.imod.is_null() {
         return;
     }
@@ -436,7 +445,13 @@ pub unsafe fn load_models(n: i32, fname: &[Vec<u8>], a: &mut ImodvApp) -> i32 {
         let Ok(model) = imod_read(path.as_ref()) else {
             return -1;
         };
-        let model = Box::into_raw(Box::new(model));
+        a.owned_models.push(Box::new(model));
+        let model = a
+            .owned_models
+            .last_mut()
+            .expect("model was just pushed")
+            .as_mut();
+        let model = model as *mut Imod;
         a.mod_.push(model);
         let image_max = Ipoint::default();
         let view_count = (*model).view.len();
@@ -553,14 +568,18 @@ pub unsafe fn imodv_main(argc: i32, argv: &[Vec<u8>]) -> i32 {
                 i += 1;
             }
             a.dbl_buf = 1;
-            a.vi = Box::into_raw(Box::new(ImodView::default())) as *mut c_void;
+            a.owned_vi = Some(Box::new(ImodView::default()));
+            a.vi = a
+                .owned_vi
+                .as_deref_mut()
+                .expect("standalone view was just created");
             if boundary.get_visuals(a, once_opened) != 0 {
                 return 3;
             }
             if argc - i < 1 || load_models(argc - i, &argv[i as usize..], a) != 0 {
                 return 3;
             }
-            unsafe { (*(a.vi as *mut ImodView)).imod = a.imod };
+            unsafe { (*a.vi).imod = a.imod };
             a.icon_pixmap = boundary.model_view_icon();
             if boundary.open_model_view(a, once_opened, last_geometry) != 0 {
                 return 3;
@@ -688,7 +707,7 @@ pub unsafe fn imodv_new_model(mod_: *mut Imod) {
         if mod_.is_null() || state.0.vi.is_null() {
             return;
         }
-        let vi = &*(state.0.vi as *const ImodView);
+        let vi = &*state.0.vi;
         let image_max = Ipoint {
             x: vi.xsize as f32,
             y: vi.ysize as f32,
@@ -788,7 +807,7 @@ pub fn imodv_draw_imod_images(skip_draw: i32) {
             if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
                 if skip_draw == 0 {
                     boundary.imod_draw(
-                        a.vi as *mut ImodView,
+                        a.vi,
                         crate::imod::three_dmod::imod::IMOD_DRAW_MOD
                             | crate::imod::three_dmod::imod::IMOD_DRAW_SKIPMODV,
                     );
@@ -806,7 +825,7 @@ pub fn imodv_byte_images_exist() -> i32 {
         if state.0.standalone != 0 || state.0.vi.is_null() {
             return 0;
         }
-        let vi = unsafe { &*(state.0.vi as *const ImodView) };
+        let vi = unsafe { &*state.0.vi };
         (vi.rgb_store == 0 && vi.fake_image == 0) as i32
     })
 }
@@ -816,7 +835,7 @@ pub fn imodv_register_model_chg() {
         let state = state.borrow();
         IMODV_NATIVE_BOUNDARY.with(|slot| {
             if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
-                boundary.undo_model_change(state.0.vi as *mut ImodView);
+                boundary.undo_model_change(state.0.vi);
             }
         });
     });
@@ -830,7 +849,7 @@ pub fn imodv_register_object_chg(object: i32) {
         }
         IMODV_NATIVE_BOUNDARY.with(|slot| {
             if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
-                boundary.undo_object_prop_change(state.0.vi as *mut ImodView, object);
+                boundary.undo_object_prop_change(state.0.vi, object);
             }
         });
     });
@@ -841,7 +860,7 @@ pub fn imodv_finish_chg_unit() {
         let state = state.borrow();
         IMODV_NATIVE_BOUNDARY.with(|slot| {
             if let Some(boundary) = slot.borrow_mut().as_deref_mut() {
-                boundary.undo_finish_unit(state.0.vi as *mut ImodView);
+                boundary.undo_finish_unit(state.0.vi);
             }
         });
     });
@@ -866,10 +885,10 @@ pub fn imodv_quit() {
                 boundary.vb_cleanup_vbd(a.imod);
                 boundary.mv_image_cleanup();
                 if a.bound_box_extra_obj > 0 {
-                    boundary.free_extra_object(a.vi as *mut ImodView, a.bound_box_extra_obj);
+                    boundary.free_extra_object(a.vi, a.bound_box_extra_obj);
                 }
                 if a.cur_point_extra_obj > 0 {
-                    boundary.free_extra_object(a.vi as *mut ImodView, a.cur_point_extra_obj);
+                    boundary.free_extra_object(a.vi, a.cur_point_extra_obj);
                 }
                 if a.standalone != 0 {
                     boundary.start_clip_disconnect();
@@ -890,6 +909,7 @@ pub fn imodv_quit() {
         state.0.rmat = None;
         state.0.rbgcolor = std::ptr::null_mut();
         state.0.main_win = std::ptr::null_mut();
+        state.0.owned_vi = None;
     });
 }
 
@@ -1044,7 +1064,7 @@ mod tests {
         IMODV_STATE.with(|state| {
             let mut state = state.borrow_mut();
             state.0.standalone = 0;
-            state.0.vi = &mut view as *mut ImodView as *mut c_void;
+            state.0.vi = &mut view;
         });
         let calls = Rc::new(RefCell::new(Vec::new()));
         IMODV_NATIVE_BOUNDARY.with(|slot| {
@@ -1084,7 +1104,7 @@ mod tests {
             let mut state = state.borrow_mut();
             state.1 = 0;
             state.0.standalone = 0;
-            state.0.vi = &mut view as *mut ImodView as *mut c_void;
+            state.0.vi = &mut view;
             state.0.imod = &mut model;
         });
         IMODV_NATIVE_BOUNDARY.with(|slot| {
@@ -1128,7 +1148,7 @@ mod tests {
             let mut state = state.borrow_mut();
             state.1 = 0;
             state.0.imod = &mut model;
-            state.0.vi = &mut view as *mut ImodView as *mut c_void;
+            state.0.vi = &mut view;
             state.0.sync_objed_to_cur_obj = 0;
         });
         IMODV_NATIVE_BOUNDARY.with(|slot| {

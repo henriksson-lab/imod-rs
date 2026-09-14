@@ -8,8 +8,8 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
-use crate::imod::libcfshr::b3dutil::make_line_pointers;
-use crate::imod::libcfshr::islice::{Islice, slice_init};
+use crate::imod::libcfshr::b3dutil::{b3drand, b3dsrand};
+use crate::imod::libcfshr::islice::slice_create;
 use crate::imod::libcfshr::samplemeansd::sample_mean_sd;
 use crate::imod::libiimod::iilikemrc::{
     RAW_MODE_BYTE, RAW_MODE_FLOAT, RAW_MODE_SBYTE, RAW_MODE_SHORT, RAW_MODE_USHORT,
@@ -161,9 +161,7 @@ pub unsafe extern "C" fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_BAD_CALL;
     }
 
-    let filename =
-        String::from_utf8_lossy(unsafe { (*in_file).filename.as_deref() }.unwrap_or(b""))
-            .into_owned();
+    let filename = unsafe { (*in_file).filename.clone() }.unwrap_or_default();
     let str = filename
         .rsplit(['/', '\\'])
         .next()
@@ -212,7 +210,7 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
     let mut do_scan = info.scan_min_max != 0;
     let seed = RAW_SCAN_SEED.swap(0, Ordering::Relaxed);
     if seed != 0 {
-        unsafe { libc::srand(seed as u32) };
+        b3dsrand(&seed);
     }
 
     if (unsafe { (*hdr).mode } == MRC_MODE_BYTE || unsafe { (*hdr).mode } == MRC_MODE_RGB)
@@ -270,22 +268,6 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
             MRC_MODE_SHORT | MRC_MODE_USHORT | MRC_MODE_FLOAT
         );
         do_mean_sd = mode_is_real && config.scale_scan_type > 1;
-        let buf_ptrs = if do_mean_sd {
-            let ptrs = unsafe {
-                make_line_pointers(
-                    buffer.as_mut_ptr().cast(),
-                    unsafe { (*hdr).nx },
-                    lines_to_scan,
-                    dsize * csize,
-                )
-            };
-            if ptrs.is_null() {
-                return IIERR_IO_ERROR;
-            }
-            ptrs
-        } else {
-            core::ptr::null_mut()
-        };
         if config.scale_scan_type != 0 && config.load_int_if_estimate != 0 {
             config.switch_to_ushort = 1;
         }
@@ -299,7 +281,6 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
         while z < unsafe { (*hdr).nz } {
             li.ymax = li.ymin + lines_to_scan - 1;
             if unsafe { mrc_read_z(hdr, &mut li, buffer.as_mut_ptr(), z) } != 0 {
-                unsafe { libc::free(buf_ptrs.cast()) };
                 return IIERR_IO_ERROR;
             }
             if mode_is_real && !do_mean_sd {
@@ -387,27 +368,17 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
                 tot_sum_sq += sample_sd as f64 * sample_sd as f64 * (buf_pixels as f64 - 1.)
                     + sample_mean as f64 * sample_mean as f64 * buf_pixels as f64;
             } else {
-                let mut slice: Islice = unsafe { core::mem::zeroed() };
-                unsafe {
-                    slice_init(
-                        &mut slice,
-                        (*hdr).nx,
-                        lines_to_scan,
-                        (*hdr).mode,
-                        buffer.as_mut_ptr().cast(),
-                    );
-                    slice_mmm(&mut slice);
-                }
-                amin = amin.min(unsafe { slice.min });
-                amax = amax.max(unsafe { slice.max });
+                let Some(mut slice) = slice_create((*hdr).nx, lines_to_scan, (*hdr).mode) else {
+                    return IIERR_IO_ERROR;
+                };
+                slice.data.copy_from_slice(&buffer);
+                slice_mmm(slice.as_mut());
+                amin = amin.min(slice.min);
+                amax = amax.max(slice.max);
             }
             let mut full_skip = lines_to_scan;
             if config.scale_scan_type != 0 {
-                full_skip = (skip_lines as f32
-                    * (1.
-                        + rand_frac
-                            * ((2. * unsafe { libc::rand() } as f32) / i32::MAX as f32 - 1.)))
-                    as i32;
+                full_skip = (skip_lines as f32 * (1. + rand_frac * (2. * b3drand() - 1.))) as i32;
             }
             let sec_skip = full_skip / unsafe { (*hdr).ny };
             let rem_skip = full_skip % unsafe { (*hdr).ny };
@@ -440,7 +411,6 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
                 (*in_file).smax = pow10 * (((*hdr).amean / pow10).floor() - 2.);
                 (*in_file).amax = (*in_file).smax;
                 (*hdr).amax = (*in_file).smax;
-                libc::free(buf_ptrs.cast());
             }
         }
         let expand = expand_min_max_frac * (amax - amin);
@@ -448,9 +418,7 @@ pub unsafe fn ii_raw_scan(in_file: *mut ImodImageFile) -> i32 {
             && unsafe { (*in_file).file } == IIFILE_MRC
             && unsafe { (*in_file).filename.is_some() }
         {
-            let path =
-                String::from_utf8_lossy(unsafe { (*in_file).filename.as_deref() }.unwrap_or(b""))
-                    .into_owned();
+            let path = unsafe { (*in_file).filename.clone() }.unwrap_or_default();
             {
                 let file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb+");
                 if let Some(mut file) = file {
@@ -569,7 +537,7 @@ mod tests {
             crate::imod::libcfshr::b3dutil::b3d_rewind(&mut file);
             let mut image = ImodImageFile::default();
             image.fp = Some(file.clone());
-            image.filename = Some(b"scan.raw".to_vec());
+            image.filename = Some("scan.raw".into());
             {
                 let mut info = RAW_IMAGE_INFO.lock().unwrap();
                 *info = RawImageState {

@@ -2,10 +2,10 @@
 #![allow(dead_code)]
 
 use core::cell::{Cell, RefCell};
-use core::ffi::{c_char, c_void};
-use core::ptr;
+use core::ffi::c_char;
 use core::sync::atomic::{AtomicI32, Ordering};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::sync::Mutex;
 
 // The three C standard streams, and the **only** foreign boundary this module
 // keeps that is not an OS service.
@@ -18,10 +18,10 @@ use std::io::{Read, Seek, SeekFrom, Write};
 // named accessor, so nobody else needs the declaration.
 //
 // They stay C streams rather than becoming `std::io::stdout()` because the
-// tree still has ~900 `libc::printf` sites and C stdio is *block*-buffered
-// under redirection where Rust's is line-buffered: a message written through
-// Rust's stream and a line written through `printf` come out in the wrong
-// order in a redirected capture, which is NATIVE.md §1's mixed-buffering trap.
+// tree uses C stdio only at this stream boundary, where its block buffering is
+// part of the externally visible contract under redirection. Rust's
+// line-buffered stream would reorder a message and a C-stream line in a
+// redirected capture, which is NATIVE.md §1's mixed-buffering trap.
 // Reading has the same problem in reverse — `mrc_head_read` takes the MRC
 // header off stdin with [`b3d_fread`] while `fgetline` reads the interactive
 // prompts off it with `getc`, and two different buffers over one descriptor
@@ -61,8 +61,27 @@ static S_WRITE_4_BIT_MODE: AtomicI32 = AtomicI32::new(0);
 static S_WRITE_16_BIT_FLOATS: AtomicI32 = AtomicI32::new(-1);
 static S_INVERT_MRC_ORIGIN_OVERRIDE: AtomicI32 = AtomicI32::new(-1);
 static S_ALL_BIG_TIFF_OVERRIDE: AtomicI32 = AtomicI32::new(-1);
-static S_B3DRAN_FIRST_TIME: AtomicI32 = AtomicI32::new(1);
-static S_B3DRAN_LAST_SEED: AtomicI32 = AtomicI32::new(0);
+
+/// Process-wide state for the source's `rand`/`srand` calls.  GNU libc's
+/// `rand` is the TYPE_3 additive-feedback generator, so retaining this state
+/// rather than choosing a Rust RNG keeps seeded IMOD output reproducible.
+struct B3dRandState {
+    words: [i32; 31],
+    front: usize,
+    rear: usize,
+    initialized: bool,
+    b3dran_first_time: bool,
+    b3dran_last_seed: i32,
+}
+
+static B3D_RAND_STATE: Mutex<B3dRandState> = Mutex::new(B3dRandState {
+    words: [0; 31],
+    front: 3,
+    rear: 0,
+    initialized: false,
+    b3dran_first_time: true,
+    b3dran_last_seed: 0,
+});
 
 thread_local! {
     /// `b3dutil.c:1848` `static int sLockFiles[MAX_LOCK_FILES]`.
@@ -82,11 +101,11 @@ thread_local! {
     static STORE_ERROR: Cell<i32> = const { Cell::new(0) };
     /// `b3dutil.c:857` `static char errorMess[MAX_IMOD_ERROR_STRING] = ""`.
     ///
-    /// Kept as a fixed byte array rather than a `String` because
-    /// @b3d_get_error hands the whole buffer back and the source's `vsprintf`
-    /// truncation at 512 is observable.
-    static ERROR_MESS: RefCell<[u8; MAX_IMOD_ERROR_STRING]> =
-        const { RefCell::new([0; MAX_IMOD_ERROR_STRING]) };
+    /// This is Rust-owned message bytes, not a NUL-terminated C buffer.  The
+    /// source's 511-byte `vsprintf` limit remains part of `b3d_error`, while
+    /// `b3d_get_error` returns an owned Rust string rather than exposing a
+    /// pointer into mutable static storage.
+    static ERROR_MESS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The Rust stand-in for a C `FILE *`, and the type every translated unit takes
@@ -327,18 +346,19 @@ impl Seek for ImodFile {
 pub fn b3d_error(fout: Option<&mut ImodFile>, arguments: core::fmt::Arguments<'_>) {
     let message = arguments.to_string();
     // `vsprintf` into a MAX_IMOD_ERROR_STRING buffer: the string stops at the
-    // first NUL and cannot exceed the buffer.
+    // first NUL and cannot exceed the buffer.  Keep those source-visible rules
+    // without retaining its fixed C character array.
     let message_length = message
         .bytes()
         .position(|byte| byte == 0)
         .unwrap_or(message.len())
         .min(MAX_IMOD_ERROR_STRING - 1);
     ERROR_MESS.with_borrow_mut(|buffer| {
-        buffer.fill(0);
-        buffer[..message_length].copy_from_slice(&message.as_bytes()[..message_length]);
+        buffer.clear();
+        buffer.extend_from_slice(&message.as_bytes()[..message_length]);
     });
     let store_error = STORE_ERROR.get();
-    let stored: Vec<u8> = ERROR_MESS.with_borrow(|buffer| buffer[..message_length].to_vec());
+    let stored = ERROR_MESS.with_borrow(|buffer| buffer.clone());
     match fout {
         Some(file) if file.is_stderr() && store_error < 0 => {
             let _ = ImodFile::Stdout.write_all(&stored);
@@ -362,14 +382,10 @@ pub fn b3d_get_store_error() -> i32 {
 
 /// Matches C `b3dGetError(void)` (`b3dutil.c:892`).
 ///
-/// The C returns `&errorMess[0]`, a pointer into the static buffer; every
-/// caller in this tree immediately reads it as a string, so the Rust hands back
-/// the string itself, cut at the NUL the way a C caller would see it.
+/// The C returns `&errorMess[0]`, a pointer into static C storage.  Rust keeps
+/// the message as owned bytes and returns the equivalent owned text instead.
 pub fn b3d_get_error() -> String {
-    ERROR_MESS.with_borrow(|buffer| {
-        let end = buffer.iter().position(|b| *b == 0).unwrap_or(buffer.len());
-        String::from_utf8_lossy(&buffer[..end]).into_owned()
-    })
+    ERROR_MESS.with_borrow(|buffer| String::from_utf8_lossy(buffer).into_owned())
 }
 
 /// Matches C `overrideWriteBytes(int)` (`b3dutil.c:383`).
@@ -1066,16 +1082,8 @@ pub const SEEK_END: i32 = 2;
 pub fn imod_version(program_name: Option<&str>) -> i32 {
     if let Some(program_name) = program_name {
         let _ = ImodFile::Stdout.write_all(
-            c_format(
-                "%s Version %s %s %s\n",
-                &[
-                    CArg::Str(program_name),
-                    CArg::Str("5.2.17"),
-                    CArg::Str(IMOD_BUILD_DATE),
-                    CArg::Str(IMOD_BUILD_TIME),
-                ],
-            )
-            .as_bytes(),
+            format!("{program_name} Version 5.2.17 {IMOD_BUILD_DATE} {IMOD_BUILD_TIME}\n")
+                .as_bytes(),
         );
     }
     5217
@@ -1089,13 +1097,8 @@ pub const IMOD_BUILD_TIME: &str = env!("IMOD_BUILD_TIME");
 /// Matches C `imodCopyright` (`b3dutil.c:157`).
 pub fn imod_copyright() {
     let uofc = "Regents of the University of Colorado";
-    let _ = ImodFile::Stdout.write_all(
-        c_format(
-            "Copyright (C) %s by the %s\n",
-            &[CArg::Str("1994-2025"), CArg::Str(uofc)],
-        )
-        .as_bytes(),
-    );
+    let _ =
+        ImodFile::Stdout.write_all(format!("Copyright (C) 1994-2025 by the {uofc}\n").as_bytes());
 }
 /// Matches C `imodUsageHeader` (`b3dutil.c:165`).
 pub fn imod_usage_header(program_name: Option<&str>) {
@@ -1195,11 +1198,7 @@ pub fn b3d_open_file(name: &str, mode: &str) -> ImodFile {
     if mode.starts_with('w') {
         if imod_backup_file(name) != 0 {
             let _ = ImodFile::Stdout.write_all(
-                c_format(
-                    "WARNING: b3dOpenFile - Renaming existing file %s\n",
-                    &[CArg::Str(name)],
-                )
-                .as_bytes(),
+                format!("WARNING: b3dOpenFile - Renaming existing file {name}\n").as_bytes(),
             );
         }
         desc_ind = 1;
@@ -1227,20 +1226,14 @@ pub fn b3d_open_file(name: &str, mode: &str) -> ImodFile {
         );
         crate::imod::libcfshr::parse_params::exit_error(&message);
     };
-    let _ = ImodFile::Stdout.write_all(
-        c_format(
-            "\nOpened %s: %s\n",
-            &[CArg::Str(descrip[desc_ind]), CArg::Str(name)],
-        )
-        .as_bytes(),
-    );
+    let _ =
+        ImodFile::Stdout.write_all(format!("\nOpened {}: {name}\n", descrip[desc_ind]).as_bytes());
     fp
 }
 /// Matches C `pidToStderr` (`b3dutil.c:359`).
 pub fn pid_to_stderr() {
     let mut stream = ImodFile::Stderr;
-    let _ = stream
-        .write_all(c_format("Shell PID: %d\n", &[CArg::Int(imod_getpid() as i64)]).as_bytes());
+    let _ = stream.write_all(format!("Shell PID: {}\n", imod_getpid()).as_bytes());
     let _ = stream.flush();
 }
 /// Matches C `imodgetpid(void)` (`b3dutil.c:353`).
@@ -1351,29 +1344,20 @@ pub fn set_float_output_for_entered_mode(mode: i32) -> i32 {
     2
 }
 
-/// Matches C `f2cString` (`b3dutil.c:811`). Caller owns the returned allocation.
-///
-/// One of the two halves of the Fortran bridge, and it stays on `c_char` with a
-/// `malloc`ed result: it exists to consume Fortran's hidden string-length
-/// argument, so it can only change when the Fortran-derived callers do
-/// (NATIVE.md §7).
-pub unsafe fn f2c_string(string: *const c_char, string_size: i32) -> *mut c_char {
-    let mut index = string_size - 1;
-    while index >= 0 && *string.add(index as usize) == b' ' as c_char {
-        index -= 1;
+/// Matches C `f2cString` (`b3dutil.c:811`) with Rust ownership.
+pub unsafe fn fortran_string(string: *const c_char, string_size: i32) -> String {
+    if string.is_null() || string_size <= 0 {
+        return String::new();
     }
-    let output = libc::malloc((index + 2) as usize).cast::<c_char>();
-    if output.is_null() {
-        return ptr::null_mut();
-    }
-    if index >= 0 {
-        ptr::copy_nonoverlapping(string, output, index as usize + 1);
-    }
-    *output.add((index + 1) as usize) = 0;
-    output
+    let bytes = core::slice::from_raw_parts(string.cast::<u8>(), string_size as usize);
+    let end = bytes
+        .iter()
+        .rposition(|byte| *byte != b' ')
+        .map_or(0, |index| index + 1);
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 /// Matches C `c2fString` (`b3dutil.c:835`). The other half of the Fortran
-/// bridge; see [`f2c_string`].
+/// bridge; see [`fortran_string`].
 pub unsafe fn c2f_string(
     mut c_string: *const c_char,
     mut fortran_string: *mut c_char,
@@ -1627,31 +1611,6 @@ pub fn b3d_i_max(values: &[i32]) -> i32 {
     }
     extreme
 }
-/// Matches C `makeLinePointers` (`b3dutil.c:1269`). Caller owns returned allocation.
-///
-/// Kept on raw pointers for the same reason as [`b3d_shift_bytes`]: the whole
-/// point of the routine is to hand out an array of interior pointers into a
-/// caller's buffer, which is what libtiff-shaped line access wants and what a
-/// `Vec<&mut [u8]>` cannot be without borrowing the buffer for the array's
-/// lifetime.  Its seven callers are all in `libiimod`/`mrc` and move with that
-/// conversion.
-pub unsafe fn make_line_pointers(
-    array: *mut c_void,
-    xsize: i32,
-    ysize: i32,
-    dsize: i32,
-) -> *mut *mut u8 {
-    let lines = libc::malloc(ysize as usize * core::mem::size_of::<*mut u8>()).cast::<*mut u8>();
-    if lines.is_null() {
-        return ptr::null_mut();
-    }
-    for index in 0..ysize as usize {
-        *lines.add(index) = array
-            .cast::<u8>()
-            .add(xsize as usize * index * dsize as usize);
-    }
-    lines
-}
 /// Matches C `cputime` (`b3dutil.c:1327`).
 pub fn cputime() -> f64 {
     // `clock_gettime(CLOCK_PROCESS_CPUTIME_ID)` has no `std` expression:
@@ -1736,25 +1695,80 @@ pub fn standard_memory_limit_mb(half_point: i32) -> f64 {
 }
 /// Matches C `b3drand` (`b3dutil.c:1754`).
 ///
-/// `rand`/`srand` are the C library's generator and the sequence is part of the
-/// output — `statfuncs.rs` carries the inlined glibc TYPE_3 implementation that
-/// proves it — so these three stay on the C entry points.
+/// This is glibc's TYPE_3 additive-feedback generator, retained in owned Rust
+/// state because its sequence is part of IMOD's output.
 pub fn b3drand() -> f32 {
-    unsafe { libc::rand() as f32 / libc::RAND_MAX as f32 }
+    let mut state = B3D_RAND_STATE.lock().expect("b3d random state poisoned");
+    if !state.initialized {
+        let mut word = 1_i32;
+        state.words[0] = word;
+        for entry in &mut state.words[1..] {
+            let hi = word / 127_773;
+            let lo = word % 127_773;
+            word = 16_807 * lo - 2_836 * hi;
+            if word < 0 {
+                word += 2_147_483_647;
+            }
+            *entry = word;
+        }
+        state.front = 3;
+        state.rear = 0;
+        for _ in 0..310 {
+            let front = state.front;
+            let rear = state.rear;
+            let value = (state.words[front] as u32).wrapping_add(state.words[rear] as u32);
+            state.words[front] = value as i32;
+            state.front = (state.front + 1) % state.words.len();
+            state.rear = (state.rear + 1) % state.words.len();
+        }
+        state.initialized = true;
+    }
+    let front = state.front;
+    let rear = state.rear;
+    let value = (state.words[front] as u32).wrapping_add(state.words[rear] as u32);
+    state.words[front] = value as i32;
+    state.front = (state.front + 1) % state.words.len();
+    state.rear = (state.rear + 1) % state.words.len();
+    (value >> 1) as f32 / 2_147_483_647_f32
 }
 /// Matches C `b3dsrand` (`b3dutil.c:1763`). Fortran wrapper: the seed arrives
 /// by reference.
 pub fn b3dsrand(seed: &i32) {
-    unsafe { libc::srand(*seed as u32) };
+    let mut state = B3D_RAND_STATE.lock().expect("b3d random state poisoned");
+    let mut word = if *seed == 0 { 1 } else { *seed };
+    state.words[0] = word;
+    for entry in &mut state.words[1..] {
+        let hi = word / 127_773;
+        let lo = word % 127_773;
+        word = 16_807 * lo - 2_836 * hi;
+        if word < 0 {
+            word += 2_147_483_647;
+        }
+        *entry = word;
+    }
+    state.front = 3;
+    state.rear = 0;
+    for _ in 0..310 {
+        let front = state.front;
+        let rear = state.rear;
+        let value = (state.words[front] as u32).wrapping_add(state.words[rear] as u32);
+        state.words[front] = value as i32;
+        state.front = (state.front + 1) % state.words.len();
+        state.rear = (state.rear + 1) % state.words.len();
+    }
+    state.initialized = true;
 }
 /// Matches C `b3dran` (`b3dutil.c:1776`). Fortran wrapper.
 pub fn b3dran(seed: &i32) -> f32 {
-    if S_B3DRAN_FIRST_TIME.load(Ordering::SeqCst) != 0
-        || *seed != S_B3DRAN_LAST_SEED.load(Ordering::SeqCst)
-    {
-        unsafe { libc::srand(*seed as u32) };
-        S_B3DRAN_LAST_SEED.store(*seed, Ordering::SeqCst);
-        S_B3DRAN_FIRST_TIME.store(0, Ordering::SeqCst);
+    let reseed = {
+        let state = B3D_RAND_STATE.lock().expect("b3d random state poisoned");
+        state.b3dran_first_time || *seed != state.b3dran_last_seed
+    };
+    if reseed {
+        b3dsrand(seed);
+        let mut state = B3D_RAND_STATE.lock().expect("b3d random state poisoned");
+        state.b3dran_last_seed = *seed;
+        state.b3dran_first_time = false;
     }
     b3drand()
 }
@@ -1898,15 +1912,10 @@ pub fn b3d_close_lock_file(index: i32) -> i32 {
 }
 
 /// Matches C `imodbackupfile` (`b3dutil.c:282`). Fortran wrapper; see
-/// [`f2c_string`] for why this half of the bridge keeps `c_char`.
+/// [`fortran_string`] for why this half of the bridge keeps `c_char`.
 pub unsafe fn imodbackupfile(filename: *const c_char, length: i32) -> i32 {
-    let string = f2c_string(filename, length);
-    if string.is_null() {
-        return -2;
-    }
-    let result = imod_backup_file(core::ffi::CStr::from_ptr(string).to_string_lossy().as_ref());
-    libc::free(string.cast());
-    result
+    let string = fortran_string(filename, length);
+    imod_backup_file(&string)
 }
 /// Matches C `imodgetenv` (`b3dutil.c:333`). Fortran wrapper.
 pub unsafe fn imodgetenv(
@@ -1915,16 +1924,23 @@ pub unsafe fn imodgetenv(
     variable_size: i32,
     value_size: i32,
 ) -> i32 {
-    let string = f2c_string(variable, variable_size);
-    if string.is_null() {
-        return -1;
-    }
-    let environment = libc::getenv(string);
-    libc::free(string.cast());
-    if environment.is_null() {
-        1
-    } else {
-        c2f_string(environment, value, value_size)
+    let string = fortran_string(variable, variable_size);
+    match std::env::var(&string) {
+        Err(_) => 1,
+        Ok(environment) => {
+            // The Fortran output is the foreign boundary.  Do not manufacture
+            // a temporary CString merely to pass Rust-owned environment text
+            // through another local Rust function.
+            let bytes = environment.as_bytes();
+            let size = value_size.max(0) as usize;
+            let copied = bytes.len().min(size);
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), value.cast::<u8>(), copied);
+            if copied < bytes.len() {
+                return -1;
+            }
+            core::ptr::write_bytes(value.add(copied), b' ', size - copied);
+            0
+        }
     }
 }
 /// Matches C `pidtostderr` (`b3dutil.c:366`).
@@ -1968,14 +1984,8 @@ pub fn b3doutputfiletype() -> i32 {
 }
 /// Matches C `setoutputtypefromstring` (`b3dutil.c:628`). Fortran wrapper.
 pub unsafe fn setoutputtypefromstring(string: *const c_char, length: i32) -> i32 {
-    let converted = f2c_string(string, length);
-    if converted.is_null() {
-        return -2;
-    }
-    let result =
-        set_output_type_from_string(core::ffi::CStr::from_ptr(converted).to_str().unwrap_or(""));
-    libc::free(converted.cast());
-    result
+    let converted = fortran_string(string, length);
+    set_output_type_from_string(&converted)
 }
 /// Matches C `overrideallbigtiff` (`b3dutil.c:652`).
 pub fn overrideallbigtiff(value: &i32) {
@@ -2119,15 +2129,8 @@ pub fn num_omp_threads(optimal_threads: i32) -> i32 {
         if std::env::var_os("IMOD_REPORT_CORES").is_some() {
             let mut stream = ImodFile::Stdout;
             let _ = stream.write_all(
-                c_format(
-                    "core count = %d  logical processors = %d  OMP num = %d => physical \
-                     processors = %d\n",
-                    &[
-                        CArg::Int(processor_core_count as i64),
-                        CArg::Int(logical_processor_count as i64),
-                        CArg::Int(num_procs as i64),
-                        CArg::Int(physical_procs as i64),
-                    ],
+                format!(
+                    "core count = {processor_core_count}  logical processors = {logical_processor_count}  OMP num = {num_procs} => physical processors = {physical_procs}\n"
                 )
                 .as_bytes(),
             );
@@ -2185,15 +2188,8 @@ pub fn num_omp_threads(optimal_threads: i32) -> i32 {
     if std::env::var_os("IMOD_REPORT_CORES").is_some() {
         let mut stream = ImodFile::Stdout;
         let _ = stream.write_all(
-            c_format(
-                "numProcs %d  limThreads %d  numThreads %d\n",
-                &[
-                    CArg::Int(num_procs as i64),
-                    CArg::Int(lim_threads as i64),
-                    CArg::Int(num_threads as i64),
-                ],
-            )
-            .as_bytes(),
+            format!("numProcs {num_procs}  limThreads {lim_threads}  numThreads {num_threads}\n")
+                .as_bytes(),
         );
         let _ = stream.flush();
     }
@@ -2365,13 +2361,8 @@ pub fn b3dsetlocktimeout(timeout: &f32) {
 }
 /// Matches C `b3dopenlockfile` (`b3dutil.c:1905`). Fortran wrapper.
 pub unsafe fn b3dopenlockfile(filename: *const c_char, length: i32) -> i32 {
-    let string = f2c_string(filename, length);
-    if string.is_null() {
-        return -3;
-    }
-    let result = b3d_open_lock_file(core::ffi::CStr::from_ptr(string).to_string_lossy().as_ref());
-    libc::free(string.cast());
-    result
+    let string = fortran_string(filename, length);
+    b3d_open_lock_file(&string)
 }
 /// Matches C `b3dlockfile` (`b3dutil.c:1960`).
 pub fn b3dlockfile(index: &i32) -> i32 {
@@ -2735,14 +2726,40 @@ mod tests {
     }
 
     #[test]
+    fn random_sequence_matches_glibc_for_default_and_explicit_seed() {
+        {
+            let mut state = B3D_RAND_STATE.lock().expect("b3d random state poisoned");
+            *state = B3dRandState {
+                words: [0; 31],
+                front: 3,
+                rear: 0,
+                initialized: false,
+                b3dran_first_time: true,
+                b3dran_last_seed: 0,
+            };
+        }
+        let expected = [1_804_289_383_u32, 846_930_886, 1_681_692_777, 1_714_636_915];
+        for value in expected {
+            assert_eq!(b3drand(), value as f32 / 2_147_483_647_f32);
+        }
+
+        b3dsrand(&1);
+        for value in expected {
+            assert_eq!(b3drand(), value as f32 / 2_147_483_647_f32);
+        }
+
+        let first = b3dran(&17);
+        let second = b3dran(&17);
+        assert_ne!(first, second);
+        b3dran(&18);
+        assert_eq!(first, b3dran(&17));
+    }
+
+    #[test]
     fn fortran_string_conversion_matches_blank_handling() {
         let input = b"abc   ";
-        let converted = unsafe { f2c_string(input.as_ptr().cast(), input.len() as i32) };
-        assert_eq!(
-            unsafe { core::ffi::CStr::from_ptr(converted) }.to_bytes(),
-            b"abc"
-        );
-        unsafe { libc::free(converted.cast()) };
+        let converted = unsafe { fortran_string(input.as_ptr().cast(), input.len() as i32) };
+        assert_eq!(converted, "abc");
         let mut output = [0_i8; 5];
         assert_eq!(
             unsafe { c2f_string(c"abc".as_ptr(), output.as_mut_ptr(), 5) },

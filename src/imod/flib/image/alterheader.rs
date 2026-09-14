@@ -1118,7 +1118,11 @@ pub fn alterheader() {
                         continue;
                     }
                     let mut extra = vec![0_i32; (nbsym as usize + 3) / 4];
-                    iiu_ret_extended_data(2, &raw mut nbsym, extra.as_mut_ptr());
+                    if iiu_ret_extended_data(2, &raw mut nbsym, extra.as_mut_ptr()) != 0 {
+                        println!(" Error reading extended header data");
+                        goto_label = 30;
+                        continue;
+                    }
                     let (mut num_int, mut num_real) = (0_i32, 0_i32);
                     iiu_ret_extended_type(2, &raw mut num_int, &raw mut num_real);
                     if num_int < 0 || extra_is_nbytes_and_flags(num_int, num_real) != 0 {

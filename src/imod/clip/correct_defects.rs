@@ -9,7 +9,26 @@
 
 use crate::imod::clip::clip::{ScanArg, fscanf};
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use std::cell::Cell;
 use std::io::{Read as _, Write as _};
+
+/// The three independent pseudo-random streams used while correcting integer
+/// pixels.  They were function-local C++ statics, so retain that separation
+/// while keeping the mutable state owned by each calling thread.
+#[derive(Clone, Copy)]
+struct PseudoSeeds {
+    column: i32,
+    int_sum: i32,
+    float: i32,
+}
+
+thread_local! {
+    static PSEUDO_SEEDS: Cell<PseudoSeeds> = const { Cell::new(PseudoSeeds {
+        column: 456_789,
+        int_sum: 482_945,
+        float: 843_295,
+    }) };
+}
 
 /// C++ `CameraDefects` from `include/CorrectDefects.h`, in declaration order.
 #[derive(Clone)]
@@ -425,7 +444,7 @@ unsafe fn correct_column(
     super_fac: i32,
     num_avg_super: i32,
 ) {
-    static mut PSEUDO: i32 = 456_789;
+    let mut pseudo = PSEUDO_SEEDS.with(|seeds| seeds.get().column);
     if ind_start < 0 {
         num += ind_start;
         ind_start = 0;
@@ -477,10 +496,8 @@ unsafe fn correct_column(
                             // adds nothing.
                             if count == 2 {
                                 if sum % 2 != 0 {
-                                    let next = unsafe {
-                                        PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-                                        PSEUDO
-                                    };
+                                    pseudo = (197 * (pseudo + 1)) & 0x000f_ffff;
+                                    let next = pseudo;
                                     let which = (next >> 2) & 1;
                                     let ptr = data.offset((ind + which * x_stride) as isize);
                                     *ptr = (*ptr as i32 + 1) as $ty;
@@ -488,10 +505,8 @@ unsafe fn correct_column(
                             } else {
                                 let remainder = sum % 4;
                                 for _ in 0..remainder {
-                                    let next = unsafe {
-                                        PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-                                        PSEUDO
-                                    };
+                                    pseudo = (197 * (pseudo + 1)) & 0x000f_ffff;
+                                    let next = pseudo;
                                     let which = (next >> 2) & 3;
                                     let ptr = data.offset((ind + which * x_stride) as isize);
                                     *ptr = (*ptr as i32 + 1) as $ty;
@@ -575,10 +590,8 @@ unsafe fn correct_column(
                     }
                     let mut i = full_start;
                     while i <= full_end {
-                        let next = unsafe {
-                            PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-                            PSEUDO
-                        };
+                        pseudo = (197 * (pseudo + 1)) & 0x000f_ffff;
+                        let next = pseudo;
                         let iy1 = (next >> 2) % 15;
                         let ifx1 = (next >> 6) & 15;
                         let fill = if next & 2048 != 0 {
@@ -682,14 +695,20 @@ unsafe fn correct_column(
         2 => run_column!(f32, false),
         _ => {}
     }
+    PSEUDO_SEEDS.with(|seeds| {
+        let mut state = seeds.get();
+        state.column = pseudo;
+        seeds.set(state);
+    });
 }
 /// Matches C++ `RandomIntFillFromIntSum`.
 pub fn random_int_fill_from_int_sum(integer_sum: i32, number_summed: i32) -> i32 {
-    static mut PSEUDO: i32 = 482_945;
-    let pseudo = unsafe {
-        PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-        PSEUDO
-    };
+    let pseudo = PSEUDO_SEEDS.with(|seeds| {
+        let mut state = seeds.get();
+        state.int_sum = (197 * (state.int_sum + 1)) & 0x000f_ffff;
+        seeds.set(state);
+        state.int_sum
+    });
     let random_integer = (pseudo >> 2) % number_summed;
     let mut result = integer_sum / number_summed;
     if integer_sum % number_summed > random_integer {
@@ -699,11 +718,12 @@ pub fn random_int_fill_from_int_sum(integer_sum: i32, number_summed: i32) -> i32
 }
 /// Matches C++ `RandomIntFillFromFloat`.
 pub fn random_int_fill_from_float(value: f32) -> i32 {
-    static mut PSEUDO: i32 = 843_295;
-    let pseudo = unsafe {
-        PSEUDO = (197 * (PSEUDO + 1)) & 0x000f_ffff;
-        PSEUDO
-    };
+    let pseudo = PSEUDO_SEEDS.with(|seeds| {
+        let mut state = seeds.get();
+        state.float = (197 * (state.float + 1)) & 0x000f_ffff;
+        seeds.set(state);
+        state.float
+    });
     let mut result = value as i32;
     if (value - result as f32) * 0x3ffff as f32 > (pseudo & 0x3ffff) as f32 {
         result += 1;
@@ -2343,16 +2363,20 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
             if has_slash {
                 continue;
             }
-            let mut num_list = 0;
-            let values = crate::imod::libcfshr::parselist::parselist(&value, &mut num_list);
-            let Some(values) = values else {
+            let Ok(text) = std::str::from_utf8(&value) else {
                 unsafe {
                     crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 }
-                return 6 - num_list;
+                return 9;
             };
-            if ((tag_ind == 2 || tag_ind == 3) && num_list != 4)
-                || ((tag_ind == 4 || tag_ind == 5) && num_list != 2)
+            let Ok(values) = crate::imod::libcfshr::parselist::parselist(text) else {
+                unsafe {
+                    crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
+                }
+                return 9;
+            };
+            if ((tag_ind == 2 || tag_ind == 3) && values.len() != 4)
+                || ((tag_ind == 4 || tag_ind == 5) && values.len() != 2)
             {
                 unsafe {
                     crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
@@ -2365,13 +2389,13 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
                     defects.bad_row_start.push(adjusted as u16);
                     defects
                         .bad_row_height
-                        .push((num_list + column_pad + values[0] - adjusted) as i16);
+                        .push((values.len() as i32 + column_pad + values[0] - adjusted) as i16);
                 }
                 1 => {
                     defects.bad_column_start.push(adjusted as u16);
                     defects
                         .bad_column_width
-                        .push((num_list + column_pad + values[0] - adjusted) as i16);
+                        .push((values.len() as i32 + column_pad + values[0] - adjusted) as i16);
                 }
                 2 | 3 => {
                     if values[2] - values[0] > values[3] - values[1] {

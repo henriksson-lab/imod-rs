@@ -1,61 +1,64 @@
-//! c2rust parity baseline of `IMOD/libfft/diprp.c`.
+//! Translation of `IMOD/libfft/diprp.c`.
 #![allow(non_snake_case, unused_mut, unsafe_op_in_unsafe_fn)]
 
 pub unsafe extern "C" fn diprp(
-    mut pts: ::core::ffi::c_int,
-    mut sym: *mut ::core::ffi::c_int,
-    mut psym: ::core::ffi::c_int,
-    mut unsym: *mut ::core::ffi::c_int,
-    mut dim: *mut ::core::ffi::c_int,
-    mut x: *mut ::core::ffi::c_float,
-    mut y: *mut ::core::ffi::c_float,
+    pts: i32,
+    sym: *mut i32,
+    psym: i32,
+    unsym: *mut i32,
+    dim: *mut i32,
+    x: *mut f32,
+    y: *mut f32,
 ) {
-    let mut t: ::core::ffi::c_float = 0.;
-    let mut onemod: ::core::ffi::c_int = 0;
-    let mut modulo: [::core::ffi::c_int; 15] = [0; 15];
-    let mut dk: ::core::ffi::c_int = 0;
-    let mut jj: ::core::ffi::c_int = 0;
-    let mut kk: ::core::ffi::c_int = 0;
-    let mut lk: ::core::ffi::c_int = 0;
-    let mut mods: ::core::ffi::c_int = 0;
-    let mut mult: ::core::ffi::c_int = 0;
-    let mut nest: ::core::ffi::c_int = 0;
-    let mut punsym: ::core::ffi::c_int = 0;
-    let mut test: ::core::ffi::c_int = 0;
-    let mut nt: ::core::ffi::c_int = 0;
-    let mut sep: ::core::ffi::c_int = 0;
-    let mut delta: ::core::ffi::c_int = 0;
-    let mut p: ::core::ffi::c_int = 0;
-    let mut p0: ::core::ffi::c_int = 0;
-    let mut p1: ::core::ffi::c_int = 0;
-    let mut p2: ::core::ffi::c_int = 0;
-    let mut p3: ::core::ffi::c_int = 0;
-    let mut p4: ::core::ffi::c_int = 0;
-    let mut p5: ::core::ffi::c_int = 0;
-    let mut size: ::core::ffi::c_int = 0;
-    let mut s: [::core::ffi::c_int; 15] = [0; 15];
-    let mut u: [::core::ffi::c_int; 15] = [0; 15];
-    let mut a: ::core::ffi::c_int = 0;
-    let mut b: ::core::ffi::c_int = 0;
-    let mut c: ::core::ffi::c_int = 0;
-    let mut d: ::core::ffi::c_int = 0;
-    let mut e: ::core::ffi::c_int = 0;
-    let mut f: ::core::ffi::c_int = 0;
-    let mut g: ::core::ffi::c_int = 0;
-    let mut h: ::core::ffi::c_int = 0;
-    let mut i: ::core::ffi::c_int = 0;
-    let mut j: ::core::ffi::c_int = 0;
-    let mut k: ::core::ffi::c_int = 0;
-    let mut l: ::core::ffi::c_int = 0;
-    let mut m: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_int = 0;
+    let sym = core::slice::from_raw_parts(sym, 15);
+    let unsym = core::slice::from_raw_parts(unsym, 15);
+    let dim = core::slice::from_raw_parts(dim, 6);
+    let mut t = 0.;
+    let mut onemod = 0;
+    let mut modulo = [0; 15];
+    let mut dk = 0;
+    let mut jj = 0;
+    let mut kk = 0;
+    let mut lk = 0;
+    let mut mods = 0;
+    let mut mult = 0;
+    let mut nest = 0;
+    let mut punsym = 0;
+    let mut test = 0;
+    let mut nt = 0;
+    let mut sep = 0;
+    let mut delta = 0;
+    let mut p = 0;
+    let mut p0 = 0;
+    let mut p1 = 0;
+    let mut p2 = 0;
+    let mut p3 = 0;
+    let mut p4 = 0;
+    let mut p5 = 0;
+    let mut size = 0;
+    let mut s = [0; 15];
+    let mut u = [0; 15];
+    let mut a = 0;
+    let mut b = 0;
+    let mut c = 0;
+    let mut d = 0;
+    let mut e = 0;
+    let mut f = 0;
+    let mut g = 0;
+    let mut h = 0;
+    let mut i = 0;
+    let mut j = 0;
+    let mut k = 0;
+    let mut l = 0;
+    let mut m = 0;
+    let mut n = 0;
     nest = 14 as ::core::ffi::c_int;
-    nt = *dim.offset(1 as ::core::ffi::c_int as isize);
-    sep = *dim.offset(2 as ::core::ffi::c_int as isize);
-    p2 = *dim.offset(3 as ::core::ffi::c_int as isize);
-    size = *dim.offset(4 as ::core::ffi::c_int as isize) - 1 as ::core::ffi::c_int;
-    p4 = *dim.offset(5 as ::core::ffi::c_int as isize);
-    if *sym.offset(1 as ::core::ffi::c_int as isize) != 0 as ::core::ffi::c_int {
+    nt = dim[1];
+    sep = dim[2];
+    p2 = dim[3];
+    size = dim[4] - 1;
+    p4 = dim[5];
+    if sym[1] != 0 {
         j = 1 as ::core::ffi::c_int;
         while j <= nest {
             u[j as usize] = 1 as ::core::ffi::c_int;
@@ -65,13 +68,13 @@ pub unsafe extern "C" fn diprp(
         n = pts;
         j = 1 as ::core::ffi::c_int;
         while j <= nest {
-            if *sym.offset(j as isize) == 0 as ::core::ffi::c_int {
+            if sym[j as usize] == 0 {
                 break;
             }
             jj = nest + 1 as ::core::ffi::c_int - j;
             u[jj as usize] = n;
-            s[jj as usize] = n / *sym.offset(j as isize);
-            n = n / *sym.offset(j as isize);
+            s[jj as usize] = n / sym[j as usize];
+            n /= sym[j as usize];
             j += 1;
         }
         jj = 0 as ::core::ffi::c_int;
@@ -177,25 +180,21 @@ pub unsafe extern "C" fn diprp(
             a += 1;
         }
     }
-    if *unsym.offset(1 as ::core::ffi::c_int as isize) == 0 as ::core::ffi::c_int {
+    if unsym[1] == 0 {
         return;
     }
     punsym = pts / (psym * psym);
-    mult = punsym / *unsym.offset(1 as ::core::ffi::c_int as isize);
-    test = (*unsym.offset(1 as ::core::ffi::c_int as isize)
-        * *unsym.offset(2 as ::core::ffi::c_int as isize)
-        - 1 as ::core::ffi::c_int)
-        * mult
-        * psym;
+    mult = punsym / unsym[1];
+    test = (unsym[1] * unsym[2] - 1 as ::core::ffi::c_int) * mult * psym;
     lk = mult;
     dk = mult;
     k = 2 as ::core::ffi::c_int;
     while k <= nest {
-        if *unsym.offset(k as isize) == 0 as ::core::ffi::c_int {
+        if unsym[k as usize] == 0 {
             break;
         }
-        lk = lk * *unsym.offset((k - 1 as ::core::ffi::c_int) as isize);
-        dk = dk / *unsym.offset(k as isize);
+        lk *= unsym[(k - 1) as usize];
+        dk /= unsym[k as usize];
         u[k as usize] = (lk - dk) * psym;
         mods = k;
         k += 1;

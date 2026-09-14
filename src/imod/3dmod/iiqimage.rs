@@ -79,8 +79,14 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
     }
     // `iiqimage_qt.cpp` is the Qt C++ ABI and takes a C string; the
     // terminator is added here, at the boundary, and nowhere else.
-    let mut name = unsafe { (*in_file).filename.clone().unwrap_or_default() };
-    name.push(0);
+    let Ok(name) =
+        std::ffi::CString::new(unsafe { (*in_file).filename.as_deref().unwrap_or_default() })
+    else {
+        // A Rust filename can contain a NUL while a Qt C entry point cannot.
+        // This is an unsupported source name, not a reason to abort a host
+        // process through the image-file checker callback.
+        return IIERR_NOT_FORMAT;
+    };
     let image = unsafe { iiqimage_open(name.as_ptr().cast()) };
     if unsafe { iiqimage_is_null(image) } != 0 {
         unsafe { iiqimage_delete(image) };
@@ -93,7 +99,7 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
                 None,
                 format_args!(
                     "{} is a recognized file type but data type is not supported\n",
-                    String::from_utf8_lossy((*in_file).filename.as_deref().unwrap_or(b""))
+                    (*in_file).filename.as_deref().unwrap_or("")
                 ),
             );
         }
@@ -169,8 +175,11 @@ pub unsafe extern "C" fn qimage_read_section(
 
 /// Matches C `qimageReopen` (`iiqimage.cpp:109`).
 pub unsafe extern "C" fn qimage_reopen(in_file: *mut ImodImageFile) -> i32 {
-    let mut name = unsafe { (*in_file).filename.clone().unwrap_or_default() };
-    name.push(0);
+    let Ok(name) =
+        std::ffi::CString::new(unsafe { (*in_file).filename.as_deref().unwrap_or_default() })
+    else {
+        return 1;
+    };
     let image = unsafe { iiqimage_open(name.as_ptr().cast()) };
     if unsafe { iiqimage_is_null(image) } != 0 {
         unsafe { iiqimage_delete(image) };
@@ -235,8 +244,7 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> 
     let mut map2 = [0_u8; 256];
     if byte != 0 || direct_bytes {
         if byte != 0 {
-            let source_map =
-                unsafe { get_byte_map((*in_file).slope, (*in_file).offset, 0, 255, 0) };
+            let source_map = get_byte_map((*in_file).slope, (*in_file).offset, 0, 255, 0);
             unsafe {
                 core::ptr::copy_nonoverlapping(source_map, map2.as_mut_ptr(), 256);
             }
@@ -322,7 +330,9 @@ unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, byte: i32) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{ii_q_image_check, iiqimage_index_row, qimage_close, qimage_read_section};
+    use super::{
+        ii_q_image_check, iiqimage_index_row, qimage_close, qimage_read_section, qimage_reopen,
+    };
     use crate::imod::libiimod::iimage::{IIFORMAT_LUMINANCE, ImodImageFile};
 
     #[test]
@@ -334,12 +344,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn embedded_nul_name_is_rejected_at_the_qt_boundary() {
+        let mut file = ImodImageFile::default();
+        file.filename = Some("not-a-path\0.png".into());
+
+        assert_eq!(unsafe { ii_q_image_check(&mut file) }, 1);
+        assert_eq!(unsafe { qimage_reopen(&mut file) }, 1);
+    }
+
     #[cfg(feature = "qt")]
     #[test]
     fn source_qimage_png_path_sets_up_and_reads_bottom_to_top() {
         let filename = "fixtures/mrc2tif-float-scaled.png";
         let mut file = ImodImageFile::default();
-        file.filename = Some(filename.as_bytes().to_vec());
+        file.filename = Some(filename.into());
         file.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(filename, "rb");
         assert!(file.fp.is_some());
         assert_eq!(unsafe { ii_q_image_check(&mut file) }, 0);

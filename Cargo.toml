@@ -32,6 +32,7 @@ three-dmod-gl = ["dep:winit", "dep:glutin", "dep:glutin-winit", "dep:glow", "dep
 
 [dependencies]
 libc = "0.2"
+chrono = "0.4"
 regex = "1"
 tiff = { version = "0.11", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }

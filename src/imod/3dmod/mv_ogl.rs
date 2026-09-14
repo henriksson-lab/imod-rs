@@ -3436,12 +3436,13 @@ pub fn imodv_unproject_picked_point(app: &mut ImodvApp, mo: i32, gl: &mut dyn Mv
         &mut upy,
         &mut upz,
     );
-    if !app.mod_picks.is_null() && mo >= 0 && mo < app.max_mod_picks {
-        unsafe {
-            (*app.mod_picks.add(mo as usize)).x = upx as f32;
-            (*app.mod_picks.add(mo as usize)).y = upy as f32;
-            (*app.mod_picks.add(mo as usize)).z = upz as f32;
-        }
+    if let Some(pick) = (mo >= 0)
+        .then(|| app.mod_picks.get_mut(mo as usize))
+        .flatten()
+    {
+        pick.x = upx as f32;
+        pick.y = upy as f32;
+        pick.z = upz as f32;
     }
     imod_trace(
         'p',
@@ -3518,11 +3519,11 @@ pub unsafe fn find_clicked_drawn_element(
         }
         let scale = 0.5 * app.winx.min(app.winy) as f32 / view.rad;
         scan_tol = base_scan_tol + 0.66 / scale;
-        let pick = if app.mod_picks.is_null() || mo_ind >= app.max_mod_picks {
-            Ipoint::default()
-        } else {
-            unsafe { *app.mod_picks.add(mo_ind as usize) }
-        };
+        let pick = usize::try_from(mo_ind)
+            .ok()
+            .and_then(|index| app.mod_picks.get(index))
+            .copied()
+            .unwrap_or_default();
 
         /* If displaying a current subset or doing current obj, set up object limits */
         obstart = 0;
@@ -4535,16 +4536,14 @@ mod tests {
     /// half-and-quarter-pixel offsets.
     #[test]
     fn imodv_unproject_picked_point_finds_the_nearest_depth_and_offsets_it() {
-        let mut picks = [Ipoint::default(); 2];
         let mut app = ImodvApp {
             w_pick: 5,
             h_pick: 5,
             x_pick: 10,
             y_pick: 20,
-            max_mod_picks: 2,
+            mod_picks: vec![Ipoint::default(); 2],
             ..Default::default()
         };
-        app.mod_picks = picks.as_mut_ptr();
         let mut gl = RecordingOglBoundary {
             depth_buffer: vec![1.0; 25],
             unproject_to: (3., 4., 5.),
@@ -4556,23 +4555,27 @@ mod tests {
         // xStart = 10 - 2, yStart = 20 - 2; the minimum is at (1, 2) in the
         // square, so (9, 20) in the window, plus 0.5 and 0.75.
         assert_eq!(gl.unproject_from, [(9.5, 20.75, 0.25)]);
-        assert_eq!((picks[1].x, picks[1].y, picks[1].z), (3., 4., 5.));
-        assert_eq!((picks[0].x, picks[0].y, picks[0].z), (0., 0., 0.));
+        assert_eq!(
+            (app.mod_picks[1].x, app.mod_picks[1].y, app.mod_picks[1].z),
+            (3., 4., 5.)
+        );
+        assert_eq!(
+            (app.mod_picks[0].x, app.mod_picks[0].y, app.mod_picks[0].z),
+            (0., 0., 0.)
+        );
     }
 
     /// With every depth at the far plane the source never breaks out of the
     /// search, and unprojects the click centre at depth 1.
     #[test]
     fn imodv_unproject_picked_point_uses_the_centre_when_nothing_is_nearer() {
-        let mut picks = [Ipoint::default(); 1];
         let mut app = ImodvApp {
             w_pick: 5,
             x_pick: 4,
             y_pick: 4,
-            max_mod_picks: 1,
+            mod_picks: vec![Ipoint::default()],
             ..Default::default()
         };
-        app.mod_picks = picks.as_mut_ptr();
         let mut gl = RecordingOglBoundary {
             depth_buffer: vec![1.0; 25],
             ..RecordingOglBoundary::default()
@@ -4605,22 +4608,20 @@ mod tests {
         object.cont.push(contour);
         model.obj.push(object);
         model.cindex.object = -1;
-        let mut picks = [Ipoint {
-            x: 20.,
-            y: 0.,
-            z: 0.,
-        }];
         let mut app = ImodvApp {
             num_mods: 1,
             cur_mod: 0,
             winx: 512,
             winy: 512,
-            max_mod_picks: 1,
+            mod_picks: vec![Ipoint {
+                x: 20.,
+                y: 0.,
+                z: 0.,
+            }],
             ..Default::default()
         };
         app.mod_.push(&mut model);
         app.imod = app.mod_[0];
-        app.mod_picks = picks.as_mut_ptr();
         let mut state = MvOglState::default();
         let (mut mo, mut ob, mut co, mut pt) = (-1, -1, -1, -1);
         let found = unsafe {

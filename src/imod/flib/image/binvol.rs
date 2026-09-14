@@ -33,6 +33,7 @@ use crate::imod::libiimod::unit_header::{
     iiu_ret_origin, iiu_trans_header, iiu_write_header_str,
 };
 use crate::imod::libiimod::unit_reduced::iiu_read_reduced;
+use chrono::{Local, Timelike};
 
 /// `parameter (numOptions = 14)` (`binvol.f90:46`).
 const BINVOL_NUM_OPTIONS: i32 = 14;
@@ -905,23 +906,14 @@ pub fn binvol() {
 
         let mut dat = [b' '; 9];
         b3d_date(&mut dat);
-        // `call time(tim)`.  Converting epoch seconds to local civil time is
-        // the same foreign boundary `b3ddate.rs` documents -- Rust's standard
-        // library carries no timezone database -- and nothing else here is C.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as libc::time_t;
-        let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
-        let tim = if libc::localtime_r(&raw const now, local.as_mut_ptr()).is_null() {
-            String::new()
-        } else {
-            let local = local.assume_init();
-            format!(
-                "{:02}:{:02}:{:02}",
-                local.tm_hour, local.tm_min, local.tm_sec
-            )
-        };
+        // `call time(tim)`.
+        let local = Local::now();
+        let tim = format!(
+            "{:02}:{:02}:{:02}",
+            local.hour(),
+            local.minute(),
+            local.second()
+        );
         //
         let mut titlech = [b' '; MRC_LABEL_SIZE + 1];
         let head = if ft_crop {

@@ -8,6 +8,8 @@
 //! is selected only through `IMOD_RS_TIFF_BACKEND=rust`.
 #![allow(dead_code)]
 
+use std::cell::Cell;
+
 use crate::imod::libcfshr::b3dutil::{
     ImodFile, SEEK_CUR, SEEK_END, SEEK_SET, b3d_fread, b3d_fseek, b3d_fwrite, b3d_rewind,
 };
@@ -71,7 +73,10 @@ pub struct TfInfo {
     pub directory: [TfEntry; 7],
     pub next_ifd: i32,
     pub imageinfo: ImInfo,
-    pub iifile: *mut crate::imod::libiimod::iimage::ImodImageFile,
+    /// The optional libtiff-backed reader for this legacy decoder.  This is
+    /// crate-owned state, so retain its `Box` rather than leaking it through
+    /// `ii_new` and later reconstructing ownership from a raw pointer.
+    pub iifile: Option<Box<crate::imod::libiimod::iimage::ImodImageFile>>,
     pub fp: Option<ImodFile>,
     // C `Tf_info.data` (`b3dtiff.h:51`) is deliberately absent.  It holds the
     // block `tiff_read_section` has just `malloc`ed and returns, and the
@@ -111,7 +116,7 @@ impl Default for TfInfo {
             directory: [TfEntry::default(); 7],
             next_ifd: 0,
             imageinfo: ImInfo::default(),
-            iifile: core::ptr::null_mut(),
+            iifile: None,
             fp: None,
             nstrip: 0,
             stripoff: Vec::new(),
@@ -128,7 +133,12 @@ impl Default for TfInfo {
     }
 }
 
-static mut SWAP_DATA: i32 = 0;
+thread_local! {
+    /// Byte order belongs to the TIFF stream being traversed.  The C module
+    /// stored it in one process-global mutable integer; keeping it per thread
+    /// retains its call-based lifetime without making independent reads race.
+    static SWAP_DATA: Cell<bool> = const { Cell::new(false) };
+}
 
 /// C static `swap` (`tiff.c:35`).
 ///
@@ -179,20 +189,23 @@ pub unsafe fn tiff_first_ifd(fp: &mut ImodFile) -> u32 {
         if word != 0x4949 && word != 0x4d4d {
             return 0;
         }
-        SWAP_DATA = (word
-            != if cfg!(target_endian = "little") {
-                0x4949
-            } else {
-                0x4d4d
-            }) as i32;
+        SWAP_DATA.with(|swap_data| {
+            swap_data.set(
+                word != if cfg!(target_endian = "little") {
+                    0x4949
+                } else {
+                    0x4d4d
+                },
+            );
+        });
         if b3d_fread(&mut short_raw, 2, 1, fp) < 1 {
             return 0;
         }
-        if SWAP_DATA != 0 {
+        if SWAP_DATA.with(Cell::get) {
             swap(&mut short_raw);
         }
         b3d_fread(&mut long_raw, 4, 1, fp);
-        if SWAP_DATA != 0 {
+        if SWAP_DATA.with(Cell::get) {
             swap(&mut long_raw);
         }
         u32::from_ne_bytes(long_raw)
@@ -247,7 +260,7 @@ pub unsafe fn tiff_ifd(fp: &mut ImodFile, section: i32) -> u32 {
             let mut entries_raw = [0u8; 2];
             b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
             b3d_fread(&mut entries_raw, 2, 1, fp);
-            if SWAP_DATA != 0 {
+            if SWAP_DATA.with(Cell::get) {
                 swap(&mut entries_raw);
             }
             let entries = u16::from_ne_bytes(entries_raw);
@@ -258,7 +271,7 @@ pub unsafe fn tiff_ifd(fp: &mut ImodFile, section: i32) -> u32 {
             );
             let mut ifd_raw = [0u8; 4];
             b3d_fread(&mut ifd_raw, 4, 1, fp);
-            if SWAP_DATA != 0 {
+            if SWAP_DATA.with(Cell::get) {
                 swap(&mut ifd_raw);
             }
             ifd = u32::from_ne_bytes(ifd_raw);
@@ -276,7 +289,7 @@ pub unsafe fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
             let mut entries_raw = [0u8; 2];
             b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
             b3d_fread(&mut entries_raw, 2, 1, fp);
-            if SWAP_DATA != 0 {
+            if SWAP_DATA.with(Cell::get) {
                 swap(&mut entries_raw);
             }
             let entries = u16::from_ne_bytes(entries_raw);
@@ -288,7 +301,7 @@ pub unsafe fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
             );
             let mut ifd_raw = [0u8; 4];
             b3d_fread(&mut ifd_raw, 4, 1, fp);
-            if SWAP_DATA != 0 {
+            if SWAP_DATA.with(Cell::get) {
                 swap(&mut ifd_raw);
             }
             ifd = u32::from_ne_bytes(ifd_raw);
@@ -304,7 +317,7 @@ pub unsafe fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
         b3d_fseek(fp, ((*tif).header.first_ifd_offset as i64) as i32, SEEK_SET);
         let mut numentries_raw = [0u8; 2];
         b3d_fread(&mut numentries_raw, 2, 1, fp);
-        if SWAP_DATA != 0 {
+        if SWAP_DATA.with(Cell::get) {
             swap(&mut numentries_raw);
         }
         (*tif).numentries = i16::from_ne_bytes(numentries_raw);
@@ -320,7 +333,7 @@ pub unsafe fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
             {
                 return 0;
             }
-            if SWAP_DATA != 0 {
+            if SWAP_DATA.with(Cell::get) {
                 swap(&mut tag_raw);
                 swap(&mut typ_raw);
                 swap(&mut len_raw);
@@ -353,7 +366,7 @@ pub unsafe fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
                         b3d_fseek(fp, (value as i64) as i32, SEEK_SET);
                         let mut bits_raw = [0u8; 2];
                         b3d_fread(&mut bits_raw, 2, 1, fp);
-                        if SWAP_DATA != 0 {
+                        if SWAP_DATA.with(Cell::get) {
                             swap(&mut bits_raw);
                         }
                         (*tif).bits_per_sample = u16::from_ne_bytes(bits_raw) as i32;
@@ -410,7 +423,7 @@ pub unsafe fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
                 fp,
             );
             b3d_fseek(fp, (pos) as i32, SEEK_SET);
-            if SWAP_DATA != 0 {
+            if SWAP_DATA.with(Cell::get) {
                 for i in 0..nstrip {
                     (*tif).stripoff[i] = (*tif).stripoff[i].swap_bytes();
                     (*tif).stripsize[i] = (*tif).stripsize[i].swap_bytes();
@@ -431,7 +444,7 @@ pub unsafe fn tiff_read_section(
         if crate::imod::mrc::rust_tiff::contains(tif) {
             return crate::imod::mrc::rust_tiff::read_section(tif, section);
         }
-        if (*tif).iifile.is_null() {
+        if (*tif).iifile.is_none() {
             (*tif).header.first_ifd_offset = tiff_ifd(fp, section) as i32;
             if (*tif).header.first_ifd_offset == 0 || read_tiffentries(fp, tif) == 0 {
                 return None;
@@ -456,11 +469,11 @@ pub unsafe fn tiff_read_section(
         // The C distinguishes `malloc` from `calloc` only to keep the sub-byte
         // branch's over-read deterministic; a `Vec` is zeroed either way.
         let mut data = vec![0_u8; allocated];
-        if !(*tif).iifile.is_null() {
+        if let Some(iifile) = (*tif).iifile.as_mut() {
             // `tiff.c` delegates library-backed data to iiReadSection or
             // tiffReadSection; the native iimage dispatch owns that choice.
             if crate::imod::libiimod::iimage::ii_read_section(
-                (*tif).iifile,
+                iifile.as_mut(),
                 data.as_mut_ptr().cast(),
                 section,
             ) != 0
@@ -566,7 +579,7 @@ pub unsafe fn tiff_read_section(
 /// C `tiff_read_file` (`tiff.c:236`).
 pub unsafe fn tiff_read_file(fp: &mut ImodFile, tif: &mut TfInfo) -> Option<Vec<u8>> {
     unsafe {
-        if !(*tif).iifile.is_null() {
+        if (*tif).iifile.is_some() {
             return tiff_read_section(fp, tif, 0);
         }
         b3d_rewind(fp);
@@ -625,22 +638,41 @@ pub unsafe fn tiff_open_file(
         if (*tif).fp.is_none() {
             return 1;
         }
-        (*tif).iifile = crate::imod::libiimod::iimage::ii_new();
-        if !(*tif).iifile.is_null() {
-            (*(*tif).iifile).fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, mode);
-            (*(*tif).iifile).filename = Some(filename.to_vec());
-            // `tiff.c:274`: `strncpy(tiff->iifile->fmode, mode, 3)`, into a
-            // four-byte array that `iiNew` has already cleared.
-            for (index, byte) in mode.as_bytes().iter().take(3).enumerate() {
-                (*(*tif).iifile).fmode[index] = *byte;
-            }
-            (*(*tif).iifile).any_tiff_pix_size = any_tif_pixel;
-            if crate::imod::libiimod::iitif::ii_tiff_check((*tif).iifile) != 0 {
-                if (*(*tif).iifile).fp.is_none() {
+        (*tif).iifile = Some(Box::new(
+            crate::imod::libiimod::iimage::ImodImageFile::default(),
+        ));
+        if let Some(iifile) = (*tif).iifile.as_mut() {
+            iifile.xscale = 1.0;
+            iifile.yscale = 1.0;
+            iifile.zscale = 1.0;
+            iifile.slope = 1.0;
+            iifile.smax = 255.0;
+            iifile.axis = 3;
+            iifile.mirror_fft = 0;
+            iifile.llx = 0;
+            iifile.lly = 0;
+            iifile.llz = 0;
+            iifile.urx = -1;
+            iifile.ury = -1;
+            iifile.urz = -1;
+            iifile.rms = -1.0;
+            iifile.last_written_z = -1;
+            iifile.packed4bits = 0;
+            iifile.half_floats = 0;
+            iifile.any_tiff_pix_size = any_tif_pixel;
+            iifile.raw_palette_bytes = 0;
+            iifile.tiff_compression = 1;
+            iifile.adoc_index = -1;
+            iifile.global_adoc_index = -1;
+            iifile.hdf_compression = -1;
+            iifile.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, mode);
+            iifile.filename = Some(String::from_utf8_lossy(filename).into_owned());
+            iifile.fmode = mode.chars().take(3).collect();
+            if crate::imod::libiimod::iitif::ii_tiff_check(iifile.as_mut()) != 0 {
+                if iifile.fp.is_none() {
                     (*tif).fp = ImodFile::open(&path, mode);
                 }
-                drop(Box::from_raw((*tif).iifile));
-                (*tif).iifile = core::ptr::null_mut();
+                (*tif).iifile = None;
                 if (*tif).fp.is_none() {
                     return 1;
                 }
@@ -652,38 +684,35 @@ pub unsafe fn tiff_open_file(
                 // caller uses these properties to size its first chunk before
                 // its later `tiff_read_file` call parses the legacy IFD.
                 (*tif).bits_per_sample = 8;
-                if (*(*tif).iifile).mode == MRC_MODE_SHORT
-                    || (*(*tif).iifile).mode == MRC_MODE_USHORT
-                {
+                if iifile.mode == MRC_MODE_SHORT || iifile.mode == MRC_MODE_USHORT {
                     (*tif).bits_per_sample = 16;
                 }
-                if (*(*tif).iifile).mode == MRC_MODE_FLOAT
-                    || (*(*tif).iifile).type_ == crate::imod::libiimod::iimage::IITYPE_UINT
-                    || (*(*tif).iifile).type_ == crate::imod::libiimod::iimage::IITYPE_INT
+                if iifile.mode == MRC_MODE_FLOAT
+                    || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_UINT
+                    || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_INT
                 {
                     (*tif).bits_per_sample = 32;
                 }
-                (*tif).photometric_interpretation = if (*(*tif).iifile).mode == MRC_MODE_RGB {
-                    2
-                } else {
-                    1
-                };
-                (*tif).directory[1].value = (*(*tif).iifile).nx;
-                (*tif).directory[2].value = (*(*tif).iifile).ny;
-                (*tif).width = (*(*tif).iifile).nx;
-                (*tif).length = (*(*tif).iifile).ny;
-                (*(*tif).iifile).llx = 0;
-                (*(*tif).iifile).lly = 0;
-                (*(*tif).iifile).urx = -1;
-                (*(*tif).iifile).ury = -1;
+                (*tif).photometric_interpretation = if iifile.mode == MRC_MODE_RGB { 2 } else { 1 };
+                (*tif).directory[1].value = iifile.nx;
+                (*tif).directory[2].value = iifile.ny;
+                (*tif).width = iifile.nx;
+                (*tif).length = iifile.ny;
+                iifile.llx = 0;
+                iifile.lly = 0;
+                iifile.urx = -1;
+                iifile.ury = -1;
                 // ii_tiff_check in this translation closes the probe FILE and
                 // replaces iifile.fp with its libtiff handle.  This legacy source
                 // unit still traverses IFDs through tiff->fp, so retain its own
                 // ordinary FILE stream alongside the library reader.
                 (*tif).fp = ImodFile::open(&path, mode);
                 if (*tif).fp.is_none() {
-                    crate::imod::libiimod::iimage::ii_delete((*tif).iifile);
-                    (*tif).iifile = core::ptr::null_mut();
+                    let mut iifile = (*tif).iifile.take().unwrap();
+                    crate::imod::libiimod::iimage::ii_close(iifile.as_mut());
+                    if let Some(clean_up) = iifile.clean_up {
+                        clean_up(iifile.as_mut());
+                    }
                     return 1;
                 }
             }
@@ -696,10 +725,12 @@ pub unsafe fn tiff_open_file(
 pub unsafe fn tiff_close_file(tif: &mut TfInfo) {
     unsafe {
         let _ = crate::imod::mrc::rust_tiff::close_file(tif);
-        if !(*tif).iifile.is_null() {
-            crate::imod::libiimod::iimage::ii_delete((*tif).iifile);
+        if let Some(mut iifile) = (*tif).iifile.take() {
+            crate::imod::libiimod::iimage::ii_close(iifile.as_mut());
+            if let Some(clean_up) = iifile.clean_up {
+                clean_up(iifile.as_mut());
+            }
         }
-        (*tif).iifile = core::ptr::null_mut();
         (*tif).fp = None;
     }
 }
@@ -1127,7 +1158,7 @@ mod tests {
 
             let mut tif = TfInfo::default();
             assert_eq!(tiff_open_file(name.as_bytes(), "rb", &mut tif, 0), 0);
-            assert!(!tif.iifile.is_null());
+            assert!(tif.iifile.is_some());
             assert_eq!((tif.width, tif.length, tif.bits_per_sample), (2, 2, 8));
             let mut fp = tif.fp.clone().unwrap();
             let result = tiff_read_file(&mut fp, &mut tif).expect("libtiff reader returned data");
@@ -1182,8 +1213,8 @@ mod tests {
 
             let mut tif = TfInfo::default();
             assert_eq!(tiff_open_file(name.as_bytes(), "rb", &mut tif, 0), 0);
-            assert!(!tif.iifile.is_null());
-            assert_eq!((*tif.iifile).nz, 2);
+            assert!(tif.iifile.is_some());
+            assert_eq!(tif.iifile.as_deref().unwrap().nz, 2);
             tiff_close_file(&mut tif);
             std::fs::remove_file(path).unwrap();
         }

@@ -1,9 +1,7 @@
 //! Translation of `IMOD/libiimod/mrcslice.c` and `include/mrcslice.h`.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::islice::{
-    Islice, Istack, slice_create, slice_free, slice_get_val, slice_init, slice_put_val,
-};
+use crate::imod::libcfshr::islice::{Islice, Istack, slice_create, slice_get_val, slice_put_val};
 use crate::imod::libiimod::mrcfiles::{
     LoadInfo, MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT,
     MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_head_new, mrc_head_write,
@@ -14,25 +12,18 @@ use crate::imod::libiimod::mrcfiles::{
 ///
 /// Returns a slice holding one plane of `hin` at coordinate `sno` along
 /// `axis`, using the file pointer in `hin`.  Calls `mrc_mread_slice`, which
-/// swaps bytes if needed.  Returns null on error.
-pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: u8) -> *mut Islice {
+/// swaps bytes if needed.
+pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: u8) -> Option<Box<Islice>> {
     unsafe {
-        let slice = libc::malloc(core::mem::size_of::<Islice>()).cast::<Islice>();
-        if slice.is_null() {
-            return core::ptr::null_mut();
-        }
-        (*slice).mean = (*hin).amean;
         // A *clone* of the handle, not a borrow of `hin.fp`: `mrc_read_slice`
         // (`mrcfiles.c:1049`) saves and restores `hdata->fp` around its call,
         // so a `&mut` into that very field would be left aliasing a `None`
         // the moment the callee takes it.  The C copies the `FILE *` by value
         // and a clone shares the same open file, which is the same thing.
         let mut fin = (*hin).fp.clone().unwrap();
-        let buf = mrc_mread_slice(&mut fin, hin, sno, axis);
-        if buf.is_null() {
-            libc::free(slice.cast());
-            return core::ptr::null_mut();
-        }
+        let Some(buf) = mrc_mread_slice(&mut fin, hin, sno, axis) else {
+            return None;
+        };
         // `mrcslice.c:960-978`: the switch has no assignment in its `default`
         // arm, so an unrecognised axis leaves nx and ny indeterminate in C.
         // Rust cannot reproduce an indeterminate local; zero is used and the
@@ -43,11 +34,10 @@ pub unsafe fn slice_read_mrc(hin: *mut MrcHeader, sno: i32, axis: u8) -> *mut Is
             b'z' | b'Z' => ((*hin).nx, (*hin).ny),
             _ => (0, 0),
         };
-        if slice_init(slice, nx, ny, (*hin).mode, buf) != 0 {
-            libc::free(slice.cast());
-            return core::ptr::null_mut();
-        }
-        slice
+        let mut slice = slice_create(nx, ny, (*hin).mode)?;
+        slice.data.copy_from_slice(&buf);
+        slice.mean = (*hin).amean;
+        Some(slice)
     }
 }
 
@@ -63,13 +53,13 @@ pub unsafe fn slice_read_subm(
     ysize: i32,
     xcen: i32,
     ycen: i32,
-) -> *mut Islice {
+) -> Option<Box<Islice>> {
     unsafe {
         let (nx, ny) = match axis as u8 {
             b'x' | b'X' => ((*hin).ny, (*hin).nz),
             b'y' | b'Y' => ((*hin).nx, (*hin).nz),
             b'z' | b'Z' => ((*hin).nx, (*hin).ny),
-            _ => return core::ptr::null_mut(),
+            _ => return None,
         };
         let llx = xcen - xsize / 2;
         let lly = ycen - ysize / 2;
@@ -94,63 +84,55 @@ pub unsafe fn slice_read_subm(
                 li.ymin = lly;
                 li.ymax = ury - 1;
             }
-            let slice = slice_create(urx - llx, ury - lly, (*hin).mode);
-            if slice.is_null() {
-                return core::ptr::null_mut();
-            }
-            (*slice).mean = (*hin).amean;
+            let mut slice = slice_create(urx - llx, ury - lly, (*hin).mode)?;
+            slice.mean = (*hin).amean;
             if crate::imod::libiimod::mrcsec::mrc_read_section(
                 hin,
                 &mut li,
-                (*slice).data.b.cast(),
+                slice.data.as_mut_ptr().cast(),
                 sec_num,
             ) == 0
             {
-                return slice;
+                return Some(slice);
             }
-            slice_free(slice);
-            return core::ptr::null_mut();
+            return None;
         }
-        let slice = libc::malloc(core::mem::size_of::<Islice>()).cast::<Islice>();
-        if slice.is_null() {
-            return slice;
-        }
-        (*slice).mean = (*hin).amean;
-        let buffer = crate::imod::libiimod::mrcfiles::mrc_mread_slice(
+        let Some(buffer) = crate::imod::libiimod::mrcfiles::mrc_mread_slice(
             &mut (*hin).fp.clone().unwrap(),
             hin,
             sec_num,
             axis,
-        );
-        if buffer.is_null() {
-            libc::free(slice.cast());
-            return core::ptr::null_mut();
+        ) else {
+            return None;
+        };
+        let mut slice = slice_create(nx, ny, (*hin).mode)?;
+        slice.data.copy_from_slice(&buffer);
+        slice.mean = (*hin).amean;
+        if slice_box_in(slice.as_mut(), llx, lly, urx, ury) != 0 {
+            return None;
         }
-        if slice_init(slice, nx, ny, (*hin).mode, buffer) != 0 {
-            libc::free(buffer);
-            libc::free(slice.cast());
-            return core::ptr::null_mut();
-        }
-        slice_box_in(slice, llx, lly, urx, ury);
-        slice
+        Some(slice)
     }
 }
 
 /// `sliceReadFloat` from mrcslice.c:1089.
-pub unsafe fn slice_read_float(hin: *mut MrcHeader, secno: i32) -> *mut Islice {
+pub unsafe fn slice_read_float(hin: *mut MrcHeader, secno: i32) -> Option<Box<Islice>> {
     unsafe {
         if crate::imod::libcfshr::islice::slice_mode_if_real((*hin).mode) < 0 {
-            return core::ptr::null_mut();
+            return None;
         }
-        let slice = slice_create((*hin).nx, (*hin).ny, MRC_MODE_FLOAT);
-        if slice.is_null() {
-            return slice;
+        let Some(mut slice) = slice_create((*hin).nx, (*hin).ny, MRC_MODE_FLOAT) else {
+            return None;
+        };
+        if crate::imod::libiimod::mrcfiles::mrc_read_float_slice(
+            slice.data.as_mut_ptr().cast::<f32>(),
+            hin,
+            secno,
+        ) != 0
+        {
+            return None;
         }
-        if crate::imod::libiimod::mrcfiles::mrc_read_float_slice((*slice).data.f, hin, secno) != 0 {
-            slice_free(slice);
-            return core::ptr::null_mut();
-        }
-        slice
+        Some(slice)
     }
 }
 
@@ -175,10 +157,9 @@ pub unsafe fn slice_new_mode_ex(s: *mut Islice, mode: i32, free_data: i32) -> i3
                 mode
             };
         }
-        let ns = slice_create((*s).xsize, (*s).ysize, mode);
-        if ns.is_null() {
+        let Some(mut ns) = slice_create((*s).xsize, (*s).ysize, mode) else {
             return -1;
-        }
+        };
         let (limit, lo, hi) = match mode {
             MRC_MODE_BYTE | MRC_MODE_RGB => (true, 0., 255.),
             MRC_MODE_SHORT => (true, -32768., 32767.),
@@ -213,15 +194,15 @@ pub unsafe fn slice_new_mode_ex(s: *mut Islice, mode: i32, free_data: i32) -> i3
                         val[q] = val[q].clamp(lo, hi);
                     }
                 }
-                slice_put_val(ns, i, j, val);
+                slice_put_val(ns.as_mut(), i, j, val);
             }
         }
-        if free_data != 0 {
-            libc::free((*s).data.b.cast());
-        }
-        (*s).data.b = (*ns).data.b;
-        (*s).mode = mode;
-        libc::free(ns.cast());
+        // Storage is always owned by Islice now; replacing it drops the old
+        // Vec regardless of the historical C freeData flag.
+        (*s).data = ns.data;
+        (*s).mode = ns.mode;
+        (*s).csize = ns.csize;
+        (*s).dsize = ns.dsize;
         mode
     }
 }
@@ -240,10 +221,9 @@ pub unsafe fn slice_float_ex(slice: *mut Islice, free_data: i32) -> i32 {
         if (*slice).mode == MRC_MODE_FLOAT {
             return 0;
         }
-        let tsl = slice_create((*slice).xsize, (*slice).ysize, MRC_MODE_FLOAT);
-        if tsl.is_null() {
+        let Some(mut tsl) = slice_create((*slice).xsize, (*slice).ysize, MRC_MODE_FLOAT) else {
             return -1;
-        }
+        };
         for j in 0..(*slice).ysize {
             for i in 0..(*slice).xsize {
                 let mut val = [0.; 4];
@@ -255,15 +235,13 @@ pub unsafe fn slice_float_ex(slice: *mut Islice, free_data: i32) -> i32 {
                 } else if (*slice).mode == MRC_MODE_RGB {
                     val[0] = val[0] * 0.3 + val[1] * 0.59 + val[2] * 0.11;
                 }
-                slice_put_val(tsl, i, j, val);
+                slice_put_val(tsl.as_mut(), i, j, val);
             }
         }
-        if free_data != 0 {
-            libc::free((*slice).data.b.cast());
-        }
-        (*slice).data.f = (*tsl).data.f;
-        (*slice).mode = MRC_MODE_FLOAT;
-        libc::free(tsl.cast());
+        (*slice).data = tsl.data;
+        (*slice).mode = tsl.mode;
+        (*slice).csize = tsl.csize;
+        (*slice).dsize = tsl.dsize;
         0
     }
 }
@@ -274,22 +252,22 @@ pub unsafe fn slice_complex_float(slice: *mut Islice) -> i32 {
         if (*slice).mode > MRC_MODE_COMPLEX_SHORT && (*slice).mode != MRC_MODE_USHORT {
             return -1;
         }
-        let tsl = slice_create((*slice).xsize, (*slice).ysize, MRC_MODE_COMPLEX_FLOAT);
-        if tsl.is_null() {
+        let Some(mut tsl) = slice_create((*slice).xsize, (*slice).ysize, MRC_MODE_COMPLEX_FLOAT)
+        else {
             return -1;
-        }
+        };
         for j in 0..(*slice).ysize {
             for i in 0..(*slice).xsize {
                 let mut v = [0.; 4];
                 slice_get_val(slice, i, j, &mut v);
                 v[1] = 0.;
-                slice_put_val(tsl, i, j, v);
+                slice_put_val(tsl.as_mut(), i, j, v);
             }
         }
-        libc::free((*slice).data.b.cast());
-        (*slice).data.f = (*tsl).data.f;
-        (*slice).mode = MRC_MODE_COMPLEX_FLOAT;
-        libc::free(tsl.cast());
+        (*slice).data = tsl.data;
+        (*slice).mode = tsl.mode;
+        (*slice).csize = tsl.csize;
+        (*slice).dsize = tsl.dsize;
         0
     }
 }
@@ -326,90 +304,107 @@ pub unsafe fn slice_mmm(s: *mut Islice) -> i32 {
     }
 }
 
-pub unsafe fn full_array_min_max_mean(
-    array: *mut core::ffi::c_void,
+pub fn full_array_min_max_mean(
+    array: &[u8],
     typ: i32,
     nx: i32,
     ny: i32,
-    dmin: *mut f32,
-    dmax: *mut f32,
-    avg: *mut f32,
-) {
-    unsafe {
-        let mut sl: Islice = core::mem::zeroed();
-        slice_init(&mut sl, nx, ny, typ, array);
-        slice_mmm(&mut sl);
-        *dmin = sl.min;
-        *dmax = sl.max;
-        *avg = sl.mean;
+) -> Option<(f32, f32, f32)> {
+    let mut slice = slice_create(nx, ny, typ)?;
+    if slice.data.len() != array.len() {
+        return None;
+    }
+    slice.data.copy_from_slice(array);
+    unsafe { slice_mmm(slice.as_mut()) };
+    Some((slice.min, slice.max, slice.mean))
+}
+
+pub fn mrc_slice_getvol(v: &Istack, sno: i32, axis: u8) -> Option<Box<Islice>> {
+    let first = v.slices.first()?;
+    match axis as char {
+        'y' | 'Y' => {
+            let mut out = slice_create(first.xsize, v.slices.len() as i32, first.mode)?;
+            for (k, source) in v.slices.iter().enumerate() {
+                for i in 0..out.xsize {
+                    let mut value = [0.; 4];
+                    unsafe {
+                        slice_get_val(
+                            source.as_ref() as *const Islice as *mut Islice,
+                            i,
+                            sno,
+                            &mut value,
+                        )
+                    };
+                    unsafe { slice_put_val(out.as_mut(), i, k as i32, value) };
+                }
+            }
+            Some(out)
+        }
+        'x' | 'X' => {
+            let mut out = slice_create(first.ysize, v.slices.len() as i32, first.mode)?;
+            for (k, source) in v.slices.iter().enumerate() {
+                for j in 0..out.xsize {
+                    let mut value = [0.; 4];
+                    unsafe {
+                        slice_get_val(
+                            source.as_ref() as *const Islice as *mut Islice,
+                            sno,
+                            j,
+                            &mut value,
+                        )
+                    };
+                    unsafe { slice_put_val(out.as_mut(), j, k as i32, value) };
+                }
+            }
+            Some(out)
+        }
+        _ => None,
     }
 }
 
-pub unsafe fn mrc_slice_getvol(v: *mut Istack, sno: i32, axis: u8) -> *mut Islice {
-    unsafe {
-        match axis as u8 as char {
-            'y' | 'Y' => {
-                let sout = slice_create((**(*v).vol).xsize, (*v).zsize, (**(*v).vol).mode);
-                if sout.is_null() {
-                    return sout;
-                }
-                for k in 0..(*sout).ysize {
-                    for i in 0..(*sout).xsize {
-                        let mut val = [0.; 4];
-                        slice_get_val(*(*v).vol.add(k as usize), i, sno, &mut val);
-                        slice_put_val(sout, i, k, val);
-                    }
-                }
-                sout
-            }
-            'x' | 'X' => {
-                let sout = slice_create((**(*v).vol).ysize, (*v).zsize, (**(*v).vol).mode);
-                if sout.is_null() {
-                    return sout;
-                }
-                for k in 0..(*sout).ysize {
-                    for j in 0..(*sout).xsize {
-                        let mut val = [0.; 4];
-                        slice_get_val(*(*v).vol.add(k as usize), sno, j, &mut val);
-                        slice_put_val(sout, j, k, val);
-                    }
-                }
-                sout
-            }
-            _ => core::ptr::null_mut(),
+pub fn mrc_slice_putvol(v: &mut Istack, s: Box<Islice>, sno: i32, axis: u8) -> i32 {
+    match axis as char {
+        'z' | 'Z' => {
+            let Some(slot) = v.slices.get_mut(sno as usize) else {
+                return -1;
+            };
+            *slot = s;
         }
-    }
-}
-
-pub unsafe fn mrc_slice_putvol(v: *mut Istack, s: *mut Islice, sno: i32, axis: u8) -> i32 {
-    unsafe {
-        match axis as u8 as char {
-            'z' | 'Z' => {
-                slice_free(*(*v).vol.add(sno as usize));
-                *(*v).vol.add(sno as usize) = s;
-            }
-            'y' | 'Y' => {
-                for k in 0..(*s).ysize {
-                    for i in 0..(*s).xsize {
-                        let mut val = [0.; 4];
-                        slice_get_val(s, i, k, &mut val);
-                        slice_put_val(*(*v).vol.add(k as usize), i, sno, val);
+        'y' | 'Y' => {
+            for (k, target) in v.slices.iter_mut().enumerate() {
+                for i in 0..s.xsize {
+                    let mut value = [0.; 4];
+                    unsafe {
+                        slice_get_val(
+                            s.as_ref() as *const Islice as *mut Islice,
+                            i,
+                            k as i32,
+                            &mut value,
+                        );
+                        slice_put_val(target.as_mut(), i, sno, value);
                     }
                 }
             }
-            'x' | 'X' => {
-                for k in 0..(*s).ysize {
-                    for j in 0..(*s).xsize {
-                        let mut val = [0.; 4];
-                        slice_get_val(s, j, k, &mut val);
-                        slice_put_val(*(*v).vol.add(k as usize), sno, j, val);
-                    }
-                }
-            }
-            _ => return 0,
         }
-        0
+        'x' | 'X' => {
+            for (k, target) in v.slices.iter_mut().enumerate() {
+                for j in 0..s.ysize {
+                    let mut value = [0.; 4];
+                    unsafe {
+                        slice_get_val(
+                            s.as_ref() as *const Islice as *mut Islice,
+                            j,
+                            k as i32,
+                            &mut value,
+                        );
+                        slice_put_val(target.as_mut(), sno, j, value);
+                    }
+                }
+            }
+        }
+        _ => return -1,
     }
+    0
 }
 
 pub unsafe fn corr_conj(g: *mut f32, h: *mut f32, size: i32) -> i32 {
@@ -537,20 +532,23 @@ pub unsafe fn mrc_slice_lie(sin: *mut Islice, fixed: f64, alpha: f64) -> i32 {
     }
 }
 
-pub unsafe fn slice_box(sl: *mut Islice, llx: i32, lly: i32, urx: i32, ury: i32) -> *mut Islice {
+pub unsafe fn slice_box(
+    sl: *mut Islice,
+    llx: i32,
+    lly: i32,
+    urx: i32,
+    ury: i32,
+) -> Option<Box<Islice>> {
     unsafe {
-        let sout = slice_create(urx - llx, ury - lly, (*sl).mode);
-        if sout.is_null() {
-            return sout;
-        }
+        let mut sout = slice_create(urx - llx, ury - lly, (*sl).mode)?;
         for (y, j) in (lly..ury).enumerate() {
             for (x, i) in (llx..urx).enumerate() {
                 let mut v = [0.; 4];
                 slice_get_val(sl, i, j, &mut v);
-                slice_put_val(sout, x as i32, y as i32, v);
+                slice_put_val(sout.as_mut(), x as i32, y as i32, v);
             }
         }
-        sout
+        Some(sout)
     }
 }
 pub unsafe fn slice_box_in(sl: *mut Islice, llx: i32, lly: i32, urx: i32, ury: i32) -> i32 {
@@ -558,15 +556,21 @@ pub unsafe fn slice_box_in(sl: *mut Islice, llx: i32, lly: i32, urx: i32, ury: i
         if llx == 0 && lly == 0 && urx == (*sl).xsize && ury == (*sl).ysize {
             return 0;
         }
-        let sout = slice_box(sl, llx, lly, urx, ury);
-        if sout.is_null() {
+        let Some(sout) = slice_box(sl, llx, lly, urx, ury) else {
             return -1;
-        }
-        if !(*sl).data.b.is_null() {
-            libc::free((*sl).data.b.cast());
-        }
-        core::ptr::copy_nonoverlapping(sout, sl, 1);
-        libc::free(sout.cast());
+        };
+        let replacement = *sout;
+        (*sl).data = replacement.data;
+        (*sl).xsize = replacement.xsize;
+        (*sl).ysize = replacement.ysize;
+        (*sl).mode = replacement.mode;
+        (*sl).csize = replacement.csize;
+        (*sl).dsize = replacement.dsize;
+        (*sl).min = replacement.min;
+        (*sl).max = replacement.max;
+        (*sl).mean = replacement.mean;
+        (*sl).index = replacement.index;
+        (*sl).cval = replacement.cval;
         0
     }
 }
@@ -580,12 +584,9 @@ pub unsafe fn slice_resize_in(sl: *mut Islice, x: i32, y: i32) -> i32 {
         slice_box_in(sl, llx, lly, llx + x, lly + y)
     }
 }
-pub unsafe fn mrc_slice_resize(slin: *mut Islice, nx: i32, ny: i32) -> *mut Islice {
+pub unsafe fn mrc_slice_resize(slin: *mut Islice, nx: i32, ny: i32) -> Option<Box<Islice>> {
     unsafe {
-        let sout = slice_create(nx, ny, (*slin).mode);
-        if sout.is_null() {
-            return sout;
-        }
+        let mut sout = slice_create(nx, ny, (*slin).mode)?;
         let sx = ((*slin).xsize - nx) / 2;
         let sy = ((*slin).ysize - ny) / 2;
         let p = [(*slin).mean; 4];
@@ -597,10 +598,10 @@ pub unsafe fn mrc_slice_resize(slin: *mut Islice, nx: i32, ny: i32) -> *mut Isli
                 if x >= 0 && y >= 0 && x < (*slin).xsize && y < (*slin).ysize {
                     slice_get_val(slin, x, y, &mut v);
                 }
-                slice_put_val(sout, i, j, v);
+                slice_put_val(sout.as_mut(), i, j, v);
             }
         }
-        sout
+        Some(sout)
     }
 }
 pub unsafe fn slice_mirror(s: *mut Islice, axis: u8) -> i32 {
@@ -652,41 +653,64 @@ pub unsafe fn slice_wrap_fft_lines(s: *mut Islice, direction: i32) -> i32 {
         } else {
             return 1;
         };
-        let buffer = libc::malloc((pixsize * nx) as usize).cast::<u8>();
-        if buffer.is_null() {
-            return 2;
-        }
         if pixsize == 8 {
+            let mut buffer = Vec::<f32>::new();
+            if buffer.try_reserve_exact((2 * nx) as usize).is_err() {
+                return 2;
+            }
+            buffer.resize((2 * nx) as usize, 0.);
             crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
-                core::slice::from_raw_parts_mut((*s).data.f, (2 * nx * ny) as usize),
-                core::slice::from_raw_parts_mut(buffer.cast::<f32>(), (2 * nx) as usize),
+                core::slice::from_raw_parts_mut(
+                    (*s).data.as_mut_ptr().cast::<f32>(),
+                    (2 * nx * ny) as usize,
+                ),
+                &mut buffer,
                 nx,
                 ny,
                 direction,
             );
-            libc::free(buffer.cast());
             return 0;
         }
+        let mut buffer = Vec::<u8>::new();
+        if buffer.try_reserve_exact((pixsize * nx) as usize).is_err() {
+            return 2;
+        }
+        buffer.resize((pixsize * nx) as usize, 0);
         for i in 0..ny / 2 {
             let ind1 = i * nx * 2;
             let ind2 = (i + ny / 2) * nx * 2;
             core::ptr::copy_nonoverlapping(
-                (*s).data.f.add(ind1 as usize).cast::<u8>(),
-                buffer,
+                (*s).data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add(ind1 as usize)
+                    .cast::<u8>(),
+                buffer.as_mut_ptr(),
                 (pixsize * nx) as usize,
             );
             core::ptr::copy_nonoverlapping(
-                (*s).data.f.add(ind2 as usize).cast::<u8>(),
-                (*s).data.f.add(ind1 as usize).cast::<u8>(),
+                (*s).data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add(ind2 as usize)
+                    .cast::<u8>(),
+                (*s).data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add(ind1 as usize)
+                    .cast::<u8>(),
                 (pixsize * nx) as usize,
             );
             core::ptr::copy_nonoverlapping(
-                buffer,
-                (*s).data.f.add(ind2 as usize).cast::<u8>(),
+                buffer.as_ptr(),
+                (*s).data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add(ind2 as usize)
+                    .cast::<u8>(),
                 (pixsize * nx) as usize,
             );
         }
-        libc::free(buffer.cast());
         0
     }
 }
@@ -700,14 +724,37 @@ pub unsafe fn slice_reduce_mirrored_fft(s: *mut Islice) -> i32 {
         let nx = (*s).xsize;
         let nfloats = nx + 2;
         for j in 0..(*s).ysize {
-            let tmp1 = *(*s).data.f.add((j * 2 * nx) as usize);
-            let tmp2 = *(*s).data.f.add((j * 2 * nx + 1) as usize);
+            let tmp1 = *(*s)
+                .data
+                .as_mut_ptr()
+                .cast::<f32>()
+                .add((j * 2 * nx) as usize);
+            let tmp2 = *(*s)
+                .data
+                .as_mut_ptr()
+                .cast::<f32>()
+                .add((j * 2 * nx + 1) as usize);
             for i in 0..nx {
-                *(*s).data.f.add((i + j * nfloats) as usize) =
-                    *(*s).data.f.add((i + nx + j * 2 * nx) as usize);
+                *(*s)
+                    .data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add((i + j * nfloats) as usize) = *(*s)
+                    .data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add((i + nx + j * 2 * nx) as usize);
             }
-            *(*s).data.f.add((nx + j * nfloats) as usize) = tmp1;
-            *(*s).data.f.add((nx + 1 + j * nfloats) as usize) = tmp2;
+            *(*s)
+                .data
+                .as_mut_ptr()
+                .cast::<f32>()
+                .add((nx + j * nfloats) as usize) = tmp1;
+            *(*s)
+                .data
+                .as_mut_ptr()
+                .cast::<f32>()
+                .add((nx + 1 + j * nfloats) as usize) = tmp2;
         }
         (*s).xsize = nx / 2 + 1;
         0
@@ -715,7 +762,7 @@ pub unsafe fn slice_reduce_mirrored_fft(s: *mut Islice) -> i32 {
 }
 
 /// `sliceWriteMRCfile` from mrcslice.c:903.
-pub unsafe fn slice_write_mrcfile(filename: &[u8], slice: *mut Islice) -> i32 {
+pub fn slice_write_mrcfile(filename: &[u8], slice: &mut Islice) -> i32 {
     unsafe {
         let Some(mut file) = crate::imod::libcfshr::b3dutil::ImodFile::open(
             &String::from_utf8_lossy(filename),
@@ -724,49 +771,49 @@ pub unsafe fn slice_write_mrcfile(filename: &[u8], slice: *mut Islice) -> i32 {
             return -1;
         };
         let mut hout = MrcHeader::default();
-        mrc_head_new(&mut hout, (*slice).xsize, (*slice).ysize, 1, (*slice).mode);
+        mrc_head_new(&mut hout, slice.xsize, slice.ysize, 1, slice.mode);
         slice_mmm(slice);
-        hout.amin = (*slice).min;
-        hout.amax = (*slice).max;
-        hout.amean = (*slice).mean;
+        hout.amin = slice.min;
+        hout.amax = slice.max;
+        hout.amean = slice.mean;
         if mrc_head_write(&mut file, &mut hout) != 0 {
             drop(file);
             return -2;
         }
-        let error = mrc_write_slice((*slice).data.b.cast(), &mut file, &mut hout, 0, b'z');
+        let error = mrc_write_slice(
+            slice.data.as_mut_ptr().cast(),
+            &mut file,
+            &mut hout,
+            0,
+            b'z',
+        );
         drop(file);
         error
     }
 }
 
 /// `mrcWriteImageToFile` from mrcslice.c:931.
-pub unsafe fn mrc_write_image_to_file(
-    filename: &[u8],
-    array: *mut core::ffi::c_void,
-    mode: i32,
-    nx: i32,
-    ny: i32,
-) -> i32 {
-    unsafe {
-        let mut slice: Islice = core::mem::zeroed();
-        slice_init(&mut slice, nx, ny, mode, array);
-        slice_write_mrcfile(filename, &mut slice)
+pub fn mrc_write_image_to_file(filename: &[u8], array: &[u8], mode: i32, nx: i32, ny: i32) -> i32 {
+    let Some(mut slice) = slice_create(nx, ny, mode) else {
+        return -1;
+    };
+    if slice.data.len() != array.len() {
+        return -1;
     }
+    slice.data.copy_from_slice(array);
+    slice_write_mrcfile(filename, slice.as_mut())
 }
 
-pub unsafe fn slice_gradient(sin: *mut Islice) -> *mut Islice {
+pub unsafe fn slice_gradient(sin: *mut Islice) -> Option<Box<Islice>> {
     unsafe {
-        let s = slice_create((*sin).xsize, (*sin).ysize, (*sin).mode);
-        if s.is_null() {
-            return s;
-        }
+        let mut s = slice_create((*sin).xsize, (*sin).ysize, (*sin).mode)?;
         for j in 0..(*sin).ysize {
             for i in 0..(*sin).xsize - 1 {
                 let (mut v, mut n) = ([0.; 4], [0.; 4]);
                 slice_get_val(sin, i, j, &mut v);
                 slice_get_val(sin, i + 1, j, &mut n);
                 v[0] = (n[0] - v[0]).abs();
-                slice_put_val(s, i, j, v);
+                slice_put_val(s.as_mut(), i, j, v);
             }
         }
         for i in 0..(*sin).xsize {
@@ -774,21 +821,21 @@ pub unsafe fn slice_gradient(sin: *mut Islice) -> *mut Islice {
                 let (mut v, mut n, mut g) = ([0.; 4], [0.; 4], [0.; 4]);
                 slice_get_val(sin, i, j, &mut v);
                 slice_get_val(sin, i, j + 1, &mut n);
-                slice_get_val(s, i, j, &mut g);
+                slice_get_val(s.as_mut(), i, j, &mut g);
                 g[0] = ((n[0] - v[0]).abs() + g[0]) / 2.;
-                slice_put_val(s, i, j, g);
+                slice_put_val(s.as_mut(), i, j, g);
             }
             let mut v = [0.; 4];
-            slice_get_val(s, i, (*sin).ysize - 2, &mut v);
-            slice_put_val(s, i, (*sin).ysize - 1, v);
+            slice_get_val(s.as_mut(), i, (*sin).ysize - 2, &mut v);
+            slice_put_val(s.as_mut(), i, (*sin).ysize - 1, v);
         }
         for j in 0..(*sin).ysize {
             let mut v = [0.; 4];
-            slice_get_val(s, (*sin).xsize - 2, j, &mut v);
-            slice_put_val(s, (*sin).xsize - 1, j, v);
+            slice_get_val(s.as_mut(), (*sin).xsize - 2, j, &mut v);
+            slice_put_val(s.as_mut(), (*sin).xsize - 1, j, v);
         }
-        slice_mmm(s);
-        s
+        slice_mmm(s.as_mut());
+        Some(s)
     }
 }
 pub unsafe fn mrc_bandpass_filter(sin: *mut Islice, low: f64, high: f64) -> i32 {
@@ -882,13 +929,11 @@ pub unsafe fn mrc_slice_rotate(
     ysize: i32,
     cx: f64,
     cy: f64,
-) -> *mut Islice {
+) -> Option<Box<Islice>> {
     unsafe {
-        let sout = slice_create(xsize, ysize, (*slin).mode);
-        if !sout.is_null() {
-            mrc_slice_rotates(slin, sout, angle, cx, cy);
-        }
-        sout
+        let mut sout = slice_create(xsize, ysize, (*slin).mode)?;
+        mrc_slice_rotates(slin, sout.as_mut(), angle, cx, cy);
+        Some(sout)
     }
 }
 pub unsafe fn mrc_slice_translate(
@@ -897,20 +942,17 @@ pub unsafe fn mrc_slice_translate(
     dy: f64,
     xsize: i32,
     ysize: i32,
-) -> *mut Islice {
+) -> Option<Box<Islice>> {
     unsafe {
-        let sout = slice_create(xsize, ysize, (*sin).mode);
-        if sout.is_null() {
-            return sout;
-        }
+        let mut sout = slice_create(xsize, ysize, (*sin).mode)?;
         for j in 0..ysize {
             for i in 0..xsize {
                 let mut v = [0.; 4];
                 slice_quad_interpolate(sin, i as f64 + dx, j as f64 + dy, &mut v);
-                slice_put_val(sout, i, j, v);
+                slice_put_val(sout.as_mut(), i, j, v);
             }
         }
-        sout
+        Some(sout)
     }
 }
 pub unsafe fn mrc_slice_zooms(
@@ -945,16 +987,14 @@ pub unsafe fn mrc_slice_zoom(
     ysize: i32,
     cx: f64,
     cy: f64,
-) -> *mut Islice {
+) -> Option<Box<Islice>> {
     unsafe {
         if xz == 0. || yz == 0. {
-            return core::ptr::null_mut();
+            return None;
         }
-        let sout = slice_create(xsize, ysize, (*sin).mode);
-        if !sout.is_null() {
-            mrc_slice_zooms(sin, sout, xz, yz, cx, cy);
-        }
-        sout
+        let mut sout = slice_create(xsize, ysize, (*sin).mode)?;
+        mrc_slice_zooms(sin, sout.as_mut(), xz, yz, cx, cy);
+        Some(sout)
     }
 }
 pub unsafe fn mrc_slice_wrap(s: *mut Islice) -> i32 {
@@ -980,16 +1020,17 @@ pub unsafe fn mrc_slice_wrap(s: *mut Islice) -> i32 {
         0
     }
 }
-pub unsafe fn mrc_slice_real(sin: *mut Islice) -> *mut Islice {
+pub unsafe fn mrc_slice_real(sin: *mut Islice) -> Option<Box<Islice>> {
     unsafe {
         if (*sin).mode != MRC_MODE_COMPLEX_FLOAT {
-            return sin;
+            return None;
         }
-        let sout = slice_create((*sin).xsize, (*sin).ysize, MRC_MODE_FLOAT);
+        let mut sout = slice_create((*sin).xsize, (*sin).ysize, MRC_MODE_FLOAT)?;
         for i in 0..(*sin).xsize * (*sin).ysize {
-            *(*sout).data.f.add(i as usize) = *(*sin).data.f.add((2 * i) as usize);
+            *sout.data.as_mut_ptr().cast::<f32>().add(i as usize) =
+                *(*sin).data.as_mut_ptr().cast::<f32>().add((2 * i) as usize);
         }
-        sout
+        Some(sout)
     }
 }
 pub unsafe fn mrc_slice_lie_img(sin: *mut Islice, mask: *mut Islice, alpha: f64) -> i32 {
@@ -1019,19 +1060,15 @@ pub unsafe fn mrc_slice_lie_img(sin: *mut Islice, mask: *mut Islice, alpha: f64)
         0
     }
 }
-pub unsafe fn mrc_vol_wrap(v: *mut Istack) -> i32 {
-    unsafe {
-        let z2 = (*v).zsize / 2;
-        for k in 0..(*v).zsize {
-            mrc_slice_wrap(*(*v).vol.add(k as usize));
-        }
-        for k in 0..z2 {
-            let s = *(*v).vol.add(k as usize);
-            *(*v).vol.add(k as usize) = *(*v).vol.add((k + z2) as usize);
-            *(*v).vol.add((k + z2) as usize) = s;
-        }
-        0
+pub fn mrc_vol_wrap(v: &mut Istack) -> i32 {
+    for slice in &mut v.slices {
+        unsafe { mrc_slice_wrap(slice.as_mut()) };
     }
+    let midpoint = v.slices.len() / 2;
+    for k in 0..midpoint {
+        v.slices.swap(k, k + midpoint);
+    }
+    0
 }
 
 #[cfg(test)]
@@ -1046,12 +1083,16 @@ mod tests {
                 std::process::id(),
                 std::thread::current().name().unwrap_or("test")
             );
-            let slice = slice_create(3, 2, MRC_MODE_BYTE);
-            assert!(!slice.is_null());
+            let mut slice = slice_create(3, 2, MRC_MODE_BYTE).unwrap();
             for (index, value) in [2.0_f32, 7.0, 1.0, 8.0, 2.0, 8.0].into_iter().enumerate() {
-                slice_put_val(slice, (index % 3) as i32, (index / 3) as i32, [value; 4]);
+                slice_put_val(
+                    slice.as_mut(),
+                    (index % 3) as i32,
+                    (index / 3) as i32,
+                    [value; 4],
+                );
             }
-            assert_eq!(slice_write_mrcfile(path.as_bytes(), slice), 0);
+            assert_eq!(slice_write_mrcfile(path.as_bytes(), slice.as_mut()), 0);
             let mut file = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(
@@ -1071,7 +1112,6 @@ mod tests {
             );
             assert_eq!(values, [2, 7, 1, 8, 2, 8]);
             drop(file);
-            slice_free(slice);
             std::fs::remove_file(&path).unwrap();
         }
     }

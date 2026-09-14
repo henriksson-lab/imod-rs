@@ -37,8 +37,13 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
         let mut num_sect = 0;
         let mut sect_type = 0;
         let name = (*in_file).filename.clone().unwrap_or_default();
-        (*in_file).adoc_index =
-            adoc_open_image_metadata(&name, 0, &mut montage, &mut num_sect, &mut sect_type);
+        (*in_file).adoc_index = adoc_open_image_metadata(
+            name.as_bytes(),
+            0,
+            &mut montage,
+            &mut num_sect,
+            &mut sect_type,
+        );
         if (*in_file).adoc_index >= 0 && sect_type != 2 {
             adoc_clear((*in_file).adoc_index);
             (*in_file).adoc_index = -1;
@@ -61,13 +66,7 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
             (*in_file).nz = num_sect;
         }
 
-        (*in_file).fp = ImodFile::open(
-            &String::from_utf8_lossy(&name),
-            &String::from_utf8_lossy({
-                let fmode = &(*in_file).fmode;
-                &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
-            }),
-        );
+        (*in_file).fp = ImodFile::open(&name, &(*in_file).fmode);
         if (*in_file).fp.is_none() {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
@@ -151,14 +150,8 @@ unsafe extern "C" fn adoc_close(in_file: *mut ImodImageFile) {
 unsafe extern "C" fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
     unsafe {
         let name = (*in_file).filename.clone().unwrap_or_default();
-        (*in_file).adoc_index = adoc_read(&name);
-        (*in_file).fp = ImodFile::open(
-            &String::from_utf8_lossy(&name),
-            &String::from_utf8_lossy({
-                let fmode = &(*in_file).fmode;
-                &fmode[..fmode.iter().position(|b| *b == 0).unwrap_or(4)]
-            }),
-        );
+        (*in_file).adoc_index = adoc_read(name.as_bytes());
+        (*in_file).fp = ImodFile::open(&name, &(*in_file).fmode);
         if (*in_file).fp.is_none() {
             b3d_error(
                 Some(&mut ImodFile::Stderr),
@@ -228,23 +221,25 @@ unsafe fn read_section_file(
         // `iiadoc.c:161-167`: the last '/' and the last '\', whichever is later.
         let mut slash_ind = -1_isize;
         let mut bs_ind = -1_isize;
-        if let Some(pos) = own_name.iter().rposition(|b| *b == b'/') {
+        if let Some(pos) = own_name.bytes().rposition(|b| b == b'/') {
             slash_ind = pos as isize;
         }
-        if let Some(pos) = own_name.iter().rposition(|b| *b == b'\\') {
+        if let Some(pos) = own_name.bytes().rposition(|b| b == b'\\') {
             bs_ind = pos as isize;
         }
         slash_ind = slash_ind.max(bs_ind);
         let use_name = if slash_ind >= 0 {
             // `iiadoc.c:172-177`: the directory part of the idoc name, up to
             // and including the separator, then the section's file name.
-            let mut composed = own_name[..slash_ind as usize + 1].to_vec();
-            composed.extend_from_slice(&filename);
-            composed
+            format!(
+                "{}{}",
+                &own_name[..slash_ind as usize + 1],
+                String::from_utf8_lossy(&filename)
+            )
         } else {
-            filename
+            String::from_utf8_lossy(&filename).into_owned()
         };
-        let sect_file = ii_open(&use_name, "rb");
+        let sect_file = ii_open(use_name.as_bytes(), "rb");
         if sect_file.is_null() {
             b3d_error(
                 Some(&mut ImodFile::Stderr),

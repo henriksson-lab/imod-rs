@@ -11,7 +11,7 @@ mod implementation {
     use super::TfInfo;
     use crate::imod::libiimod::iimage::{
         IIFILE_TIFF, IITYPE_BYTE, IITYPE_FLOAT, IITYPE_INT, IITYPE_SHORT, IITYPE_UBYTE,
-        IITYPE_UINT, IITYPE_USHORT, ii_new,
+        IITYPE_UINT, IITYPE_USHORT, ImodImageFile,
     };
     use crate::imod::libiimod::iitif::{IICOMPRESSION_LZW, IICOMPRESSION_NONE, IICOMPRESSION_ZIP};
     use crate::imod::libiimod::mrcfiles::{
@@ -360,19 +360,33 @@ mod implementation {
         let Some((width, height, bits, type_, rgb)) = first else {
             return 1;
         };
-        let iifile = ii_new();
-        if iifile.is_null() {
-            return 1;
-        }
+        let mut iifile = Box::new(ImodImageFile::default());
+        iifile.xscale = 1.0;
+        iifile.yscale = 1.0;
+        iifile.zscale = 1.0;
+        iifile.slope = 1.0;
+        iifile.smax = 255.0;
+        iifile.axis = 3;
+        iifile.urx = -1;
+        iifile.ury = -1;
+        iifile.urz = -1;
+        iifile.rms = -1.0;
+        iifile.last_written_z = -1;
+        iifile.packed4bits = 0;
+        iifile.half_floats = 0;
+        iifile.adoc_index = -1;
+        iifile.global_adoc_index = -1;
+        iifile.hdf_compression = -1;
+        iifile.tiff_compression = 1;
+        iifile.file = IIFILE_TIFF;
+        iifile.nx = width as i32;
+        iifile.ny = height as i32;
+        iifile.nz = images.len() as i32;
+        iifile.type_ = type_;
+        iifile.mode = if rgb { MRC_MODE_RGB } else { mode_for(type_) };
+        iifile.any_tiff_pix_size = any_tif_pixel;
         unsafe {
-            (*iifile).file = IIFILE_TIFF;
-            (*iifile).nx = width as i32;
-            (*iifile).ny = height as i32;
-            (*iifile).nz = images.len() as i32;
-            (*iifile).type_ = type_;
-            (*iifile).mode = if rgb { MRC_MODE_RGB } else { mode_for(type_) };
-            (*iifile).any_tiff_pix_size = any_tif_pixel;
-            (*tif).iifile = iifile;
+            (*tif).iifile = Some(iifile);
             // `tiff.c:262` always leaves `tiff->fp` an open stream, and
             // `tif2mrc.c:242` copies it out unconditionally, so this backend
             // has to provide one even though it decodes from its own in-memory

@@ -7,7 +7,7 @@ use crate::imod::clip::file_io::{
     set_output_options,
 };
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
-use crate::imod::libcfshr::islice::{Istack, slice_create, slice_free, slice_init};
+use crate::imod::libcfshr::islice::{Islice, Istack, slice_create};
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MrcHeader, mrc_coord_cp,
     mrc_head_label, mrc_head_label_cp, mrc_head_new, mrc_head_write,
@@ -115,12 +115,12 @@ pub unsafe fn clip_fft(
                 options.cx as i32,
                 options.cy as i32,
             );
-            if slice.is_null() {
+            let Some(mut slice) = slice else {
                 crate::imod::clip::clip::show_error("fft: Error reading slice.");
                 return -1;
-            }
-            slice_fft(slice);
-            if clip_write_slice(slice, output, options, k, &mut z, 1) != 0 {
+            };
+            slice_fft(slice.as_mut());
+            if clip_write_slice(slice.as_mut(), output, options, k, &mut z, 1) != 0 {
                 return -1;
             }
         }
@@ -134,59 +134,60 @@ pub unsafe fn clip_fft(
 }
 /// C++ `slice_fft` (`fft.cpp:111`).  The numerical backend is supplied by
 /// IMOD's translated `cfft` layer; this preserves its input/output layout.
-pub unsafe fn slice_fft(slice: *mut crate::imod::libcfshr::islice::Islice) -> i32 {
+pub unsafe fn slice_fft(slice: &mut Islice) -> i32 {
     unsafe {
-        if slice.is_null() {
-            return -1;
-        }
-        let nx2 = (*slice).xsize + 2;
-        let ncs = (*slice).xsize as usize * core::mem::size_of::<f32>();
-        let idir =
-            if (*slice).mode == MRC_MODE_COMPLEX_FLOAT || (*slice).mode == MRC_MODE_COMPLEX_SHORT {
-                -1
-            } else {
-                1
-            };
+        let nx2 = slice.xsize + 2;
+        let ncs = slice.xsize as usize * core::mem::size_of::<f32>();
+        let idir = if slice.mode == MRC_MODE_COMPLEX_FLOAT || slice.mode == MRC_MODE_COMPLEX_SHORT {
+            -1
+        } else {
+            1
+        };
         if idir == 1 {
             slice_float(slice);
-            let buffer =
-                libc::malloc((nx2 * (*slice).ysize) as usize * core::mem::size_of::<f32>())
-                    .cast::<f32>();
-            if buffer.is_null() {
+            let buffer_len = (nx2 * slice.ysize) as usize;
+            let mut buffer = Vec::new();
+            if buffer.try_reserve_exact(buffer_len).is_err() {
                 return -1;
             }
-            for row in 0..(*slice).ysize {
+            buffer.resize(buffer_len * core::mem::size_of::<f32>(), 0);
+            for row in 0..slice.ysize {
                 core::ptr::copy_nonoverlapping(
-                    (*slice).data.f.add((row * (*slice).xsize) as usize),
-                    buffer.add((row * nx2) as usize),
-                    ncs / core::mem::size_of::<f32>(),
+                    slice.data.as_ptr().add((row * slice.xsize) as usize * ncs),
+                    buffer
+                        .as_mut_ptr()
+                        .add((row * nx2) as usize * core::mem::size_of::<f32>()),
+                    ncs,
                 );
             }
-            libc::free((*slice).data.f.cast());
-            mrc_to_dfft(buffer, (*slice).xsize, (*slice).ysize, 0);
-            slice_init(
-                slice,
-                (*slice).xsize / 2 + 1,
-                (*slice).ysize,
-                MRC_MODE_COMPLEX_FLOAT,
-                buffer.cast(),
-            );
+            mrc_to_dfft(buffer.as_mut_ptr().cast(), slice.xsize, slice.ysize, 0);
+            slice.data = buffer;
+            slice.xsize = slice.xsize / 2 + 1;
+            slice.mode = MRC_MODE_COMPLEX_FLOAT;
+            slice.csize = 2;
+            slice.dsize = core::mem::size_of::<f32>() as i32;
             slice_wrap_fft_lines(slice, 0);
         } else {
             slice_complex_float(slice);
             slice_wrap_fft_lines(slice, 1);
-            let new_xsize = 2 * ((*slice).xsize - 1);
-            mrc_to_dfft((*slice).data.f, new_xsize, (*slice).ysize, 1);
-            for row in 0..(*slice).ysize {
+            let new_xsize = 2 * (slice.xsize - 1);
+            mrc_to_dfft(slice.data.as_mut_ptr().cast(), new_xsize, slice.ysize, 1);
+            for row in 0..slice.ysize {
                 for column in 0..new_xsize {
-                    *(*slice).data.f.add((column + row * new_xsize) as usize) = *(*slice)
+                    *slice
                         .data
-                        .f
+                        .as_mut_ptr()
+                        .cast::<f32>()
+                        .add((column + row * new_xsize) as usize) = *slice
+                        .data
+                        .as_ptr()
+                        .cast::<f32>()
                         .add((column + row * (new_xsize + 2)) as usize);
                 }
             }
-            (*slice).xsize = new_xsize;
-            (*slice).mode = MRC_MODE_FLOAT;
+            slice.xsize = new_xsize;
+            slice.mode = MRC_MODE_FLOAT;
+            slice.csize = 1;
         }
         0
     }
@@ -217,28 +218,29 @@ pub unsafe fn clip_3dfft(
                 return -1;
             }
         }
-        let volume = grap_volume_read(input, options);
-        if volume.is_null() {
+        let Some(mut volume) = grap_volume_read(input, options) else {
             return -1;
-        }
+        };
         if input.mode != MRC_MODE_COMPLEX_FLOAT {
-            for z in 0..(*volume).zsize {
-                let slice = *(*volume).vol.add(z as usize);
+            for slice in &mut volume.slices {
                 if input.mode == MRC_MODE_COMPLEX_SHORT {
-                    slice_complex_float(slice);
+                    slice_complex_float(slice.as_mut());
                 } else {
-                    slice_float(slice);
+                    slice_float(slice.as_mut());
                 }
             }
         }
         crate::imod::clip::clip::show_status("Doing 3d fast fourier transform in core...\n");
-        clip_fftvol(&mut *volume);
+        clip_fftvol(&mut volume);
+        let Some(first) = volume.slices.first() else {
+            return -1;
+        };
         mrc_head_new(
             &mut *output,
-            (*(*(*volume).vol)).xsize,
-            (*(*(*volume).vol)).ysize,
-            (*volume).zsize,
-            (*(*(*volume).vol)).mode,
+            first.xsize,
+            first.ysize,
+            volume.slices.len() as i32,
+            first.mode,
         );
         mrc_head_label_cp(&*input, &mut *output);
         mrc_head_label(
@@ -249,7 +251,7 @@ pub unsafe fn clip_3dfft(
                 b"Clip: Inverse 3D FFT"
             },
         );
-        if grap_volume_write(&mut *volume, output, options) != 0 {
+        if grap_volume_write(&mut volume, output, options) != 0 {
             return -1;
         }
         mrc_coord_cp(&mut *output, &*input);
@@ -260,7 +262,6 @@ pub unsafe fn clip_3dfft(
         if mrc_head_write(&mut fp, output) != 0 {
             return -1;
         }
-        grap_volume_free(volume);
         0
     }
 }
@@ -268,49 +269,53 @@ pub unsafe fn clip_3dfft(
 pub unsafe fn clip_fftvol(volume: &mut Istack) -> i32 {
     unsafe {
         // `fft.cpp:258` guards on `!v`; a reference is never null.
-        if volume.zsize == 0 {
+        if volume.slices.is_empty() {
             return -1;
         }
-        let first = *volume.vol;
-        if (*first).mode == MRC_MODE_COMPLEX_FLOAT {
+        let first = volume.slices.first().unwrap();
+        if first.mode == MRC_MODE_COMPLEX_FLOAT {
             clip_wrapvol(volume, 1);
             clip_fftvol3(volume, -2);
-            for z in 0..volume.zsize {
-                let slice = *volume.vol.add(z as usize);
+            for slice in &mut volume.slices {
                 mrc_to_dfft(
-                    (*slice).data.f,
-                    ((*slice).xsize - 1) * 2,
-                    (*slice).ysize,
+                    slice.data.as_mut_ptr().cast(),
+                    (slice.xsize - 1) * 2,
+                    slice.ysize,
                     -1,
                 );
-                (*slice).mode = MRC_MODE_FLOAT;
-                (*slice).xsize *= 2;
-                slice_box_in(slice, 0, 0, (*slice).xsize - 2, (*slice).ysize);
+                slice.mode = MRC_MODE_FLOAT;
+                slice.csize = 1;
+                slice.xsize *= 2;
+                slice_box_in(slice.as_mut(), 0, 0, slice.xsize - 2, slice.ysize);
             }
         } else {
-            let nx2 = (*first).xsize + 2;
-            for z in 0..volume.zsize {
-                let slice = *volume.vol.add(z as usize);
-                slice_float(slice);
-                let buffer =
-                    libc::malloc((nx2 * (*slice).ysize) as usize * core::mem::size_of::<f32>())
-                        .cast::<f32>();
-                if buffer.is_null() {
+            let nx2 = first.xsize + 2;
+            for slice in &mut volume.slices {
+                slice_float(slice.as_mut());
+                let buffer_len = (nx2 * slice.ysize) as usize;
+                let mut buffer = Vec::new();
+                if buffer.try_reserve_exact(buffer_len).is_err() {
                     return -1;
                 }
-                for row in 0..(*slice).ysize {
+                buffer.resize(buffer_len * core::mem::size_of::<f32>(), 0);
+                for row in 0..slice.ysize {
                     core::ptr::copy_nonoverlapping(
-                        (*slice).data.f.add((row * (*slice).xsize) as usize),
-                        buffer.add((row * nx2) as usize),
-                        (*slice).xsize as usize,
+                        slice.data.as_ptr().add((row * slice.xsize * 4) as usize),
+                        buffer.as_mut_ptr().add((row * nx2 * 4) as usize),
+                        slice.xsize as usize * 4,
                     );
                 }
-                libc::free((*slice).data.f.cast());
-                (*slice).data.f = buffer;
-                (*slice).xsize += 2;
-                mrc_to_dfft((*slice).data.f, (*slice).xsize - 2, (*slice).ysize, 0);
-                (*slice).xsize /= 2;
-                (*slice).mode = MRC_MODE_COMPLEX_FLOAT;
+                slice.data = buffer;
+                slice.xsize += 2;
+                mrc_to_dfft(
+                    slice.data.as_mut_ptr().cast(),
+                    slice.xsize - 2,
+                    slice.ysize,
+                    0,
+                );
+                slice.xsize /= 2;
+                slice.mode = MRC_MODE_COMPLEX_FLOAT;
+                slice.csize = 2;
             }
             clip_fftvol3(volume, -1);
             clip_wrapvol(volume, 0);
@@ -322,38 +327,46 @@ pub unsafe fn clip_fftvol(volume: &mut Istack) -> i32 {
 pub unsafe fn clip_fftvol3(volume: &mut Istack, idir: i32) -> i32 {
     unsafe {
         // `fft.cpp:288` guards on `!v`; a reference is never null.
-        if volume.zsize < 1 {
+        if volume.slices.is_empty() {
             return -1;
         }
-        let first = *volume.vol;
-        let work = slice_create(volume.zsize, (*first).xsize, MRC_MODE_COMPLEX_FLOAT);
-        if work.is_null() {
-            return -1;
-        }
-        for y in 0..(*first).ysize {
-            for z in 0..volume.zsize {
-                let slice = *volume.vol.add(z as usize);
-                let input = (*slice).data.f.add((2 * y * (*first).xsize) as usize);
-                let out = (*work).data.f.add((2 * z) as usize);
-                for x in 0..(*work).ysize {
-                    *out.add((2 * x * (*work).xsize) as usize) = *input.add((2 * x) as usize);
-                    *out.add((2 * x * (*work).xsize + 1) as usize) =
-                        *input.add((2 * x + 1) as usize);
+        let first_xsize = volume.slices[0].xsize;
+        let first_ysize = volume.slices[0].ysize;
+        let depth = volume.slices.len() as i32;
+        let mut work = match slice_create(depth, first_xsize, MRC_MODE_COMPLEX_FLOAT) {
+            Some(work) => work,
+            None => return -1,
+        };
+        for y in 0..first_ysize {
+            for (z, slice) in volume.slices.iter().enumerate() {
+                let input = unsafe {
+                    slice
+                        .data
+                        .as_ptr()
+                        .cast::<f32>()
+                        .add((2 * y * first_xsize) as usize)
+                };
+                let out = unsafe { work.data.as_mut_ptr().cast::<f32>().add(2 * z) };
+                for x in 0..work.ysize {
+                    *out.add((2 * x * work.xsize) as usize) = *input.add((2 * x) as usize);
+                    *out.add((2 * x * work.xsize + 1) as usize) = *input.add((2 * x + 1) as usize);
                 }
             }
-            mrc_odfft((*work).data.f, (*work).xsize, (*work).ysize, idir);
-            for z in 0..volume.zsize {
-                let slice = *volume.vol.add(z as usize);
-                let out = (*slice).data.f.add((2 * y * (*first).xsize) as usize);
-                let input = (*work).data.f.add((2 * z) as usize);
-                for x in 0..(*work).ysize {
+            mrc_odfft(work.data.as_mut_ptr().cast(), work.xsize, work.ysize, idir);
+            for (z, slice) in volume.slices.iter_mut().enumerate() {
+                let out = slice
+                    .data
+                    .as_mut_ptr()
+                    .cast::<f32>()
+                    .add((2 * y * first_xsize) as usize);
+                let input = work.data.as_ptr().cast::<f32>().add(2 * z);
+                for x in 0..work.ysize {
                     *out.add((2 * x) as usize) = *input.add((2 * x * (*work).xsize) as usize);
                     *out.add((2 * x + 1) as usize) =
                         *input.add((2 * x * (*work).xsize + 1) as usize);
                 }
             }
         }
-        slice_free(work);
         0
     }
 }
@@ -361,25 +374,30 @@ pub unsafe fn clip_fftvol3(volume: &mut Istack, idir: i32) -> i32 {
 pub unsafe fn clip_wrapvol(volume: &mut Istack, direction: i32) -> i32 {
     unsafe {
         // `fft.cpp:326` guards on `!v`; a reference is never null.
-        let first = *volume.vol;
-        let temporary =
-            libc::malloc((2 * (*first).xsize) as usize * core::mem::size_of::<f32>()).cast::<f32>();
-        if temporary.is_null() {
+        let Some(first) = volume.slices.first() else {
+            return -1;
+        };
+        let first_xsize = first.xsize;
+        let first_ysize = first.ysize;
+        let depth = volume.slices.len() as i32;
+        let temporary_len = (2 * first_xsize) as usize;
+        let mut temporary = Vec::new();
+        if temporary.try_reserve_exact(temporary_len).is_err() {
             crate::imod::clip::clip::show_error(
                 "fft: Memory error getting array for temporary line of data\n",
             );
             return 1;
         }
-        for z in 0..volume.zsize {
-            let slice = *volume.vol.add(z as usize);
+        temporary.resize(temporary_len, 0.);
+        for slice in &mut volume.slices {
             crate::imod::libcfshr::filtxcorr::wrap_fft_slice(
                 core::slice::from_raw_parts_mut(
-                    (*slice).data.f,
-                    (2 * (*first).xsize * (*first).ysize) as usize,
+                    slice.data.as_mut_ptr().cast(),
+                    (2 * first_xsize * first_ysize) as usize,
                 ),
-                core::slice::from_raw_parts_mut(temporary, (2 * (*first).xsize) as usize),
-                (*first).xsize,
-                (*first).ysize,
+                temporary.as_mut_slice(),
+                first_xsize,
+                first_ysize,
                 direction,
             );
         }
@@ -387,32 +405,27 @@ pub unsafe fn clip_wrapvol(volume: &mut Istack, direction: i32) -> i32 {
         let mut low = 0;
         let mut high = 0;
         let increment = crate::imod::libcfshr::filtxcorr::indices_for_fft_wrap(
-            volume.zsize,
+            depth,
             direction,
             &mut output,
             &mut low,
             &mut high,
         );
-        if volume.zsize % 2 != 0 {
-            let temporary_slice = *volume.vol.add(output as usize);
-            for _ in 0..volume.zsize / 2 {
-                *volume.vol.add(output as usize) = *volume.vol.add(high as usize);
-                *volume.vol.add(high as usize) = *volume.vol.add(low as usize);
+        if depth % 2 != 0 {
+            for _ in 0..depth / 2 {
+                volume.slices.swap(output as usize, high as usize);
+                volume.slices.swap(high as usize, low as usize);
                 output += increment;
                 high += increment;
                 low += increment;
             }
-            *volume.vol.add((volume.zsize / 2) as usize) = temporary_slice;
         } else {
-            for _ in 0..volume.zsize / 2 {
-                let temporary_slice = *volume.vol.add(low as usize);
-                *volume.vol.add(low as usize) = *volume.vol.add(high as usize);
-                *volume.vol.add(high as usize) = temporary_slice;
+            for _ in 0..depth / 2 {
+                volume.slices.swap(low as usize, high as usize);
                 high += 1;
                 low += 1;
             }
         }
-        libc::free(temporary.cast());
         0
     }
 }

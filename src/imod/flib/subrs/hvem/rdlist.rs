@@ -1,7 +1,7 @@
 //! Translation of `IMOD/flib/subrs/hvem/rdlist.f90`.
 #![allow(dead_code)]
 
-use crate::imod::libcfshr::parselist::parselistfw;
+use crate::imod::libcfshr::parselist::{ParseListError, parselist as parse_list};
 use std::io::BufRead;
 
 /// Original `rdlist` (`rdlist.f90:16`).
@@ -60,9 +60,31 @@ pub fn parselist2(
     num_in_list: &mut i32,
     lim_list: &mut i32,
 ) -> Result<(), i32> {
-    let mut source_limit = lim_list.unsigned_abs() as i32;
-    let ierr = parselistfw(line.as_bytes(), list, num_in_list, &mut source_limit);
-    if ierr == 0 {
+    let source_limit = lim_list.unsigned_abs() as i32;
+    let values = match parse_list(line.trim_end_matches(' ')) {
+        Ok(values) => values,
+        Err(ParseListError::LeadingSlash) => {
+            if *lim_list < 0 {
+                *lim_list = 0;
+            }
+            return Ok(());
+        }
+        Err(ParseListError::InvalidCharacter) => {
+            println!("\nERROR: PARSELIST - BAD CHARACTER IN ENTRY");
+            if *lim_list > 0 {
+                std::process::exit(1);
+            }
+            return Err(2);
+        }
+    };
+    *num_in_list = values.len() as i32;
+    if source_limit > 0 && *num_in_list > source_limit {
+        *num_in_list = source_limit;
+    }
+    if *num_in_list > 0 {
+        list[..*num_in_list as usize].copy_from_slice(&values[..*num_in_list as usize]);
+    }
+    if source_limit <= 0 || values.len() as i32 <= source_limit {
         if *lim_list < 0 {
             *lim_list = 0;
         }
@@ -71,20 +93,14 @@ pub fn parselist2(
     // `rdlist.f90:71-79` prints the classified message before it decides
     // what to do with it, so the message appears whichever form the caller
     // used, and a positive LIMLIST then exits.
-    if ierr < 0 {
-        println!("\nERROR: PARSELIST - TOO MANY LIST VALUES FOR ARRAY");
-    } else if ierr == 1 {
-        println!("\nERROR: PARSELIST - FAILED TO ALLOCATE MEMORY FOR LIST");
-    } else {
-        println!("\nERROR: PARSELIST - BAD CHARACTER IN ENTRY");
-    }
+    println!("\nERROR: PARSELIST - TOO MANY LIST VALUES FOR ARRAY");
     if *lim_list > 0 {
         use std::io::Write;
         let _ = std::io::stdout().flush();
         std::process::exit(1);
     }
-    *lim_list = ierr + 2;
-    Err(ierr)
+    *lim_list = 1;
+    Err(-1)
 }
 
 #[cfg(test)]

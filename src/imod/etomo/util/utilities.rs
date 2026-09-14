@@ -22,6 +22,8 @@
 //! type with no module carry a `// TODO(unit):` comment naming the blocking source.
 #![allow(dead_code)]
 
+use chrono::{Local, TimeZone};
+
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer;
 use crate::imod::etomo::storage::log_file::{LogFile, LogFileError};
@@ -156,59 +158,22 @@ pub fn java_lang_system_current_time_millis() -> i64 {
 /// month abbreviations, a zero-padded day of month, and the platform's short time zone
 /// name.
 pub fn java_util_date_to_string(millis: i64) -> String {
-    let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
-    let seconds = millis.div_euclid(1000) as libc::time_t;
-    unsafe {
-        libc::localtime_r(&seconds, &mut broken_down);
-    }
-    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    // `tm_zone` is a NUL-terminated string the C library owns.  Walked as
-    // bytes rather than through `CStr`, per NATIVE.md: the foreign call stays,
-    // the C string type does not.
-    let zone = if broken_down.tm_zone.is_null() {
-        String::new()
-    } else {
-        let mut len = 0usize;
-        while unsafe { *broken_down.tm_zone.add(len) } != 0 {
-            len += 1;
-        }
-        let bytes = unsafe { core::slice::from_raw_parts(broken_down.tm_zone.cast::<u8>(), len) };
-        String::from_utf8_lossy(bytes).into_owned()
-    };
-    format!(
-        "{} {} {:02} {:02}:{:02}:{:02} {} {}",
-        DAYS[broken_down.tm_wday.clamp(0, 6) as usize],
-        MONTHS[broken_down.tm_mon.clamp(0, 11) as usize],
-        broken_down.tm_mday,
-        broken_down.tm_hour,
-        broken_down.tm_min,
-        broken_down.tm_sec,
-        zone,
-        broken_down.tm_year + 1900
-    )
+    Local
+        .timestamp_millis_opt(millis)
+        .single()
+        .expect("Java Date milliseconds outside chrono's supported range")
+        .format("%a %b %d %H:%M:%S %Z %Y")
+        .to_string()
 }
 
 /// `new java.text.SimpleDateFormat("MMMdd-HHmmss", new Locale("en","US")).format(Date)`.
 pub fn java_text_simple_date_format_mmmdd_hhmmss(millis: i64) -> String {
-    let mut broken_down: libc::tm = unsafe { std::mem::zeroed() };
-    let seconds = millis.div_euclid(1000) as libc::time_t;
-    unsafe {
-        libc::localtime_r(&seconds, &mut broken_down);
-    }
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    format!(
-        "{}{:02}-{:02}{:02}{:02}",
-        MONTHS[broken_down.tm_mon.clamp(0, 11) as usize],
-        broken_down.tm_mday,
-        broken_down.tm_hour,
-        broken_down.tm_min,
-        broken_down.tm_sec
-    )
+    Local
+        .timestamp_millis_opt(millis)
+        .single()
+        .expect("Java Date milliseconds outside chrono's supported range")
+        .format("%b%d-%H%M%S")
+        .to_string()
 }
 
 /// `java.lang.FloatingDecimal.BinaryToASCIIConverter.digitsRoundedUp()` and
@@ -3244,4 +3209,34 @@ fn get_rootname_for_selected_files(files: &[String]) -> String {
         prev_sub_string = curr_sub_string;
     }
     prev_sub_string
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn java_date_to_string_formats_the_epoch_in_the_local_timezone() {
+        let epoch = Local.timestamp_millis_opt(0).single().unwrap();
+
+        assert_eq!(
+            java_util_date_to_string(0),
+            epoch.format("%a %b %d %H:%M:%S %Z %Y").to_string()
+        );
+    }
+
+    #[test]
+    fn simple_date_format_uses_english_fields_and_discards_milliseconds() {
+        let millis = 1_704_067_245_987;
+        let instant = Local.timestamp_millis_opt(millis).single().unwrap();
+
+        assert_eq!(
+            java_text_simple_date_format_mmmdd_hhmmss(millis),
+            instant.format("%b%d-%H%M%S").to_string()
+        );
+        assert_eq!(
+            java_text_simple_date_format_mmmdd_hhmmss(millis),
+            java_text_simple_date_format_mmmdd_hhmmss(millis - 987)
+        );
+    }
 }
