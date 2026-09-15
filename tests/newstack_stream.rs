@@ -4224,9 +4224,7 @@ fn newstack_tiff_stack_repeats_description_and_min_max_on_every_directory() {
     let input = base.with_extension("input.mrc");
     let output = base.with_extension("output.tif");
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 3, 3, 2), 0);
         // A range deliberately wider than the data, so the directories that

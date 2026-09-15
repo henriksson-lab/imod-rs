@@ -68,11 +68,7 @@ unsafe fn jpeg_read_section_float(
 }
 
 /// C static `jpegReadSection` (`iijpeg.c:170`).
-unsafe fn jpeg_read_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn jpeg_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     jpeg_read_section_any(in_file, buf, in_section, 0)
 }
 
@@ -98,11 +94,7 @@ pub unsafe fn jpeg_open_new(in_file: *mut ImodImageFile) -> i32 {
 }
 
 /// C static `iiJpegWriteSection` (`iijpeg.c:342`).
-unsafe fn ii_jpeg_write_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn ii_jpeg_write_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     ii_jpeg_write_section_any(in_file, buf, in_section, 0)
 }
 

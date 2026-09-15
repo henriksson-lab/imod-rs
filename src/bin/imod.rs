@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "binvol",
     "clip",
     "convertmod",
+    "dm3props",
     "etomo",
     #[cfg(feature = "gui")]
     "etomo-gui",
@@ -37,6 +38,9 @@ const COMMANDS: &[&str] = &[
     "imodsendevent",
     "midas",
     "mrc2tif",
+    "mrcinfo",
+    "mrctaper",
+    "mrctilt",
     "newstack",
     "processchunks",
     "sourcedoc",
@@ -87,6 +91,9 @@ fn dispatch(name: &str) -> bool {
         "binvol" => imod_rs::imod::flib::image::binvol::binvol(),
         "clip" => imod_rs::imod::clip::clip::clip(),
         "convertmod" => imod_rs::imod::flib::model::convertmod::convertmod(),
+        "dm3props" => std::process::exit(imod_rs::imod::mrc::dm3props::dm3props(
+            &std::env::args().collect::<Vec<_>>(),
+        )),
         "etomo" => std::process::exit(imod_rs::imod::pysrc::etomo::etomo(
             &std::env::args_os().collect::<Vec<_>>(),
         )),
@@ -125,6 +132,18 @@ fn dispatch(name: &str) -> bool {
             }
         }
         "mrc2tif" => imod_rs::imod::qttools::mrc2tif::mrc2tif::mrc2tif(),
+        "mrcinfo" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::mrcinfo::mrcinfo(&arguments))
+        }
+        "mrctaper" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::mrctaper::mrctaper(&arguments))
+        }
+        "mrctilt" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::mrctilt::mrctilt(&arguments))
+        }
         "newstack" => imod_rs::imod::flib::image::newstack::newstack(),
         "processchunks" => {
             let arguments = std::env::args().collect::<Vec<_>>();

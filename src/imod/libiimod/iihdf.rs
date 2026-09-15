@@ -1796,10 +1796,7 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
     }
 }
 /// C `hdfSyncFromMrcHeader` (`iihdf.c:1484`).
-unsafe fn hdf_sync_from_mrc_header(
-    in_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+unsafe fn hdf_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     if !in_file.is_null() && !hdata.is_null() {
         if let Some(header) = (*in_file).mrc_header.as_deref_mut() {
             if !core::ptr::eq(header, hdata) {
@@ -1954,27 +1951,15 @@ unsafe fn hdf_read_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -
     hdf_read_section_any(in_file, buf, cz, 0)
 }
 /// C `hdfReadSectionByte` (`iihdf.c:1616`).
-unsafe fn hdf_read_section_byte(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    cz: i32,
-) -> i32 {
+unsafe fn hdf_read_section_byte(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     hdf_read_section_any(in_file, buf, cz, MRSA_BYTE)
 }
 /// C `hdfReadSectionUShort` (`iihdf.c:1621`).
-unsafe fn hdf_read_section_ushort(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    cz: i32,
-) -> i32 {
+unsafe fn hdf_read_section_ushort(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     hdf_read_section_any(in_file, buf, cz, MRSA_USHORT)
 }
 /// C `hdfReadSectionFloat` (`iihdf.c:1626`).
-unsafe fn hdf_read_section_float(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    cz: i32,
-) -> i32 {
+unsafe fn hdf_read_section_float(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     hdf_read_section_any(in_file, buf, cz, MRSA_FLOAT)
 }
 /// C `hdfWriteSection` (`iihdf.c:1631`).
@@ -1982,11 +1967,7 @@ unsafe fn hdf_write_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) 
     hdf_write_section_any(in_file, buf, cz, 0)
 }
 /// C `hdfWriteSectionFloat` (`iihdf.c:1636`).
-unsafe fn hdf_write_section_float(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    cz: i32,
-) -> i32 {
+unsafe fn hdf_write_section_float(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     hdf_write_section_any(in_file, buf, cz, 1)
 }
 /// C `hdfWriteDummySection` (`iihdf.c:1641`).

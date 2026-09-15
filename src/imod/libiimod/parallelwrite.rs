@@ -553,10 +553,7 @@ pub unsafe extern "C" fn parwrtgetregion_(
         0
     })
 }
-pub unsafe fn par_wrt_reclose_hdf(
-    ii_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+pub unsafe fn par_wrt_reclose_hdf(ii_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     let wall_start = crate::imod::libcfshr::b3dutil::wall_time();
     if !hdata.is_null()
         && crate::imod::libiimod::mrcfiles::mrc_head_write(
@@ -590,10 +587,7 @@ pub unsafe fn par_wrt_reclose_hdf(
         .with(|sum| sum.set(sum.get() + crate::imod::libcfshr::b3dutil::wall_time() - wall_start));
     0
 }
-pub unsafe fn par_wrt_flush_buffers(
-    ii_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+pub unsafe fn par_wrt_flush_buffers(ii_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     if par_wrt_prepare_hdf(ii_file) != 0 {
         return 1;
     }
@@ -1237,11 +1231,7 @@ unsafe fn add_segment(
         0
     })
 }
-unsafe fn write_segments(
-    ii_file: *mut ImodImageFile,
-    _hdata: *mut MrcHeader,
-    iunit: i32,
-) -> i32 {
+unsafe fn write_segments(ii_file: *mut ImodImageFile, _hdata: *mut MrcHeader, iunit: i32) -> i32 {
     S_PARALLEL_WRITE.with(|state| unsafe {
         let mut state = state.borrow_mut();
         let info_index = state.cur_info as usize;
@@ -1361,12 +1351,7 @@ unsafe fn clear_segments(info_ind: i32) {
         state.segments[info_ind as usize].clear();
     });
 }
-unsafe fn pw_open_if_needed(
-    iz_sec: i32,
-    iy_line: i32,
-    nlines_write: i32,
-    ierr: *mut i32,
-) {
+unsafe fn pw_open_if_needed(iz_sec: i32, iy_line: i32, nlines_write: i32, ierr: *mut i32) {
     let mut nxyz = [0; 3];
     let mut filename = String::new();
     let title = "parallel_write: boundary lines";

@@ -37,9 +37,7 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
                 .unwrap();
         let mut got = String::new();
         unsafe {
-            let mut fp =
-                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb")
-                    .unwrap();
+            let mut fp = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(
                 mrc_head_read(&mut fp, &mut header),

@@ -1844,12 +1844,8 @@ pub fn b3d_lock_file(index: i32) -> i32 {
         l_pid: 0,
     };
     use std::os::fd::AsRawFd;
-    let descriptor = S_LOCK_FILES.with_borrow(|files| {
-        files[index]
-            .as_ref()
-            .map(AsRawFd::as_raw_fd)
-            .unwrap_or(-1)
-    });
+    let descriptor = S_LOCK_FILES
+        .with_borrow(|files| files[index].as_ref().map(AsRawFd::as_raw_fd).unwrap_or(-1));
     let timeout = S_LOCK_TIMEOUTS.with_borrow(|timeouts| timeouts[index]);
     let started = std::time::Instant::now();
     loop {
@@ -1885,12 +1881,8 @@ pub fn b3d_unlock_file(index: i32) -> i32 {
             l_pid: 0,
         };
         use std::os::fd::AsRawFd;
-        let descriptor = S_LOCK_FILES.with_borrow(|files| {
-            files[index]
-                .as_ref()
-                .map(AsRawFd::as_raw_fd)
-                .unwrap_or(-1)
-        });
+        let descriptor = S_LOCK_FILES
+            .with_borrow(|files| files[index].as_ref().map(AsRawFd::as_raw_fd).unwrap_or(-1));
         if unsafe { libc::fcntl(descriptor, libc::F_SETLK, &lock) } < 0 {
             return 1;
         }
@@ -1907,7 +1899,10 @@ pub fn b3d_close_lock_file(index: i32) -> i32 {
     if S_LOCKS_USED.with_borrow(|used| used[index]) < 0 {
         return -2;
     }
-    if S_LOCK_FILES.with_borrow_mut(|files| files[index].take()).is_none() {
+    if S_LOCK_FILES
+        .with_borrow_mut(|files| files[index].take())
+        .is_none()
+    {
         return 1;
     }
     S_LOCKS_USED.with_borrow_mut(|used| used[index] = -1);

@@ -168,10 +168,7 @@ unsafe fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
 }
 
 /// Matches C static `adocFillMrcHeader` (`iiadoc.c:129`).
-unsafe fn adoc_fill_mrc_header(
-    in_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+unsafe fn adoc_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     unsafe {
         ii_simple_fill_mrc_header(&*in_file, &mut *hdata);
         mrc_set_scale(
@@ -377,11 +374,7 @@ unsafe fn adoc_read_section_float(
 }
 
 /// Matches C static `adocReadSection` (`iiadoc.c:236`).
-unsafe fn adoc_read_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn adoc_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe {
         let Some(in_file) = in_file.as_mut() else {
             return IIERR_BAD_CALL;

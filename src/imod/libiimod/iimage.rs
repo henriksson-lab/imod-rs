@@ -29,8 +29,8 @@ use crate::imod::libiimod::iishrmem::{
     IIFILE_SHR_MEM, SHR_MEM_NAME_TAG, ii_shr_mem_check_size, ii_shr_mem_open,
 };
 use crate::imod::libiimod::iitif::{
-    MAX_TIFF_THREADS, ii_tiff_check, tiff_filter_warnings, tiff_get_max_eer_super_res,
-    tiff_num_read_threads, tiff_open_new, tiff_parallel_read, tiff_set_eer_read_properties, Tiff,
+    MAX_TIFF_THREADS, Tiff, ii_tiff_check, tiff_filter_warnings, tiff_get_max_eer_super_res,
+    tiff_num_read_threads, tiff_open_new, tiff_parallel_read, tiff_set_eer_read_properties,
 };
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_HALF_FLOAT,
@@ -268,8 +268,7 @@ pub struct ImodImageFile {
     pub close: Option<unsafe fn(*mut ImodImageFile)>,
     pub reopen: Option<unsafe fn(*mut ImodImageFile) -> i32>,
     pub fill_mrc_header: Option<unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
-    pub sync_from_mrc_header:
-        Option<unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
+    pub sync_from_mrc_header: Option<unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
     pub write_header: Option<unsafe fn(*mut ImodImageFile) -> i32>,
     /// Rust-owned MRC header storage used by the native MRC and like-MRC
     /// backends.
@@ -974,10 +973,8 @@ pub fn ii_use_tiff_threads(in_file: &mut ImodImageFile, mut max_threads: i32) ->
             let mut state = state.borrow_mut();
             state.0[0] = Some(NonNull::from(in_file));
             for index in 1..max_threads {
-                let Some(file) = (unsafe {
-                    state.0[0].and_then(|file| file.as_ptr().as_mut())
-                })
-                .and_then(ii_copy_open)
+                let Some(file) = (unsafe { state.0[0].and_then(|file| file.as_ptr().as_mut()) })
+                    .and_then(ii_copy_open)
                 else {
                     return index;
                 };
@@ -1000,7 +997,9 @@ pub fn ii_use_tiff_threads_for_fp(fp: &ImodFile, max_threads: i32) -> i32 {
 pub fn ii_close_tiff_copies(in_file: &mut ImodImageFile) {
     S_TIFF_THREADS.with(|state| {
         let mut state = state.borrow_mut();
-        if state.1 <= 0 || state.0[0].is_none_or(|file| !core::ptr::eq(in_file, unsafe { file.as_ref() })) {
+        if state.1 <= 0
+            || state.0[0].is_none_or(|file| !core::ptr::eq(in_file, unsafe { file.as_ref() }))
+        {
             return;
         }
         for index in 1..state.1 {
@@ -1029,10 +1028,7 @@ pub fn ii_open_copies_for_threads(
 }
 
 /// Matches C `iiFillMrcHeader(ImodImageFile *, MrcHeader *)` (`iimage.c:661`).
-pub unsafe fn ii_fill_mrc_header(
-    in_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+pub unsafe fn ii_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     if in_file.is_null() {
         return 1;
     }
@@ -1918,7 +1914,9 @@ pub fn read_write_section(
         let err = if data_size != 0 {
             S_TIFF_THREADS.with(|state| {
                 let mut state = state.borrow_mut();
-                let mut file_copies = state.0.map(|file| file.map_or(core::ptr::null_mut(), NonNull::as_ptr));
+                let mut file_copies = state
+                    .0
+                    .map(|file| file.map_or(core::ptr::null_mut(), NonNull::as_ptr));
                 unsafe {
                     tiff_parallel_read(
                         file_copies.as_mut_ptr(),

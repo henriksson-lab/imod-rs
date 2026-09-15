@@ -363,10 +363,7 @@ unsafe fn reopen(ii_file: *mut ImodImageFile) -> i32 {
         if (*ii_file).user_data.is_null() { 1 } else { 0 }
     }
 }
-unsafe fn sync_from_mrc_header(
-    ii_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+unsafe fn sync_from_mrc_header(ii_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     unsafe {
         if let Some(header) = (*ii_file).mrc_header.as_deref_mut() {
             if !core::ptr::eq(header, hdata) {
@@ -403,32 +400,16 @@ pub fn ii_shr_mem_write_header(ii_file: &mut ImodImageFile) -> i32 {
         0
     }
 }
-unsafe fn read_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_NOPROC) }
 }
-unsafe fn read_section_byte(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn read_section_byte(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_BYTE) }
 }
-unsafe fn read_section_ushort(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn read_section_ushort(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_USHORT) }
 }
-unsafe fn read_section_float(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn read_section_float(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_FLOAT) }
 }
 unsafe fn shm_read_section_any(
@@ -532,18 +513,10 @@ unsafe fn shm_read_section_any(
         0
     }
 }
-unsafe fn write_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn write_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { shm_write_section_any(in_file, buf, in_section, 0) }
 }
-unsafe fn write_section_float(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn write_section_float(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { shm_write_section_any(in_file, buf, in_section, 1) }
 }
 unsafe fn shm_write_section_any(

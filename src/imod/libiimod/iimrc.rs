@@ -157,10 +157,7 @@ pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
     0
 }
 /// Matches C `iiMRCfillHeader(ImodImageFile *, MrcHeader *)` (`iimrc.c:145`).
-pub unsafe fn ii_mrc_fill_header(
-    in_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+pub unsafe fn ii_mrc_fill_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     let (Some(image), Some(destination)) = (unsafe { in_file.as_ref() }, unsafe { hdata.as_mut() })
     else {
         return 1;
@@ -204,11 +201,7 @@ pub fn ii_mrc_set_load_info(image: &ImodImageFile, li: &mut LoadInfo) {
     li.pad_right = image.pad_right;
 }
 /// Matches C static `iiMRCreadSection` (`iimrc.c:192`).
-unsafe fn ii_mrc_read_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn ii_mrc_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     let Some(image) = (unsafe { in_file.as_mut() }) else {
         return IIERR_BAD_CALL;
     };
@@ -510,11 +503,7 @@ fn read_section_scaled(
     err
 }
 /// Matches C static `iiMRCwriteSection` (`iimrc.c:255`).
-unsafe fn ii_mrc_write_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    in_section: i32,
-) -> i32 {
+unsafe fn ii_mrc_write_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
     unsafe { write_section(in_file, buf, in_section, 0) }
 }
 /// Matches C static `iiMRCwriteSectionFloat` (`iimrc.c:260`).

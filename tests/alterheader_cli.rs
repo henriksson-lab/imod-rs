@@ -38,9 +38,7 @@ fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
             "imod-rs-alterheader-cli-{}.mrc",
             std::process::id()
         ));
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 3, 2, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -77,9 +75,7 @@ fn alterheader_persists_iiunit_origin_map_sample_mode_space_group_and_labels() {
             stdout.contains("Number of columns, rows, sections"),
             "{stdout}"
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb").unwrap();
         let mut output = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut output), 0);
         drop(file);
@@ -104,9 +100,7 @@ fn alterheader_inserts_title_at_source_one_based_position() {
             "imod-rs-alterheader-title-position-{}.mrc",
             std::process::id()
         ));
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.nlabl = 2;
@@ -122,9 +116,7 @@ fn alterheader_inserts_title_at_source_one_based_position() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{:?}", result);
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb").unwrap();
         let mut output = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut output), 0);
         drop(file);
@@ -143,9 +135,7 @@ fn alterheader_modefix_reports_source_mode_conversion_and_range_warning() {
             "imod-rs-alterheader-modefix-{}.mrc",
             std::process::id()
         ));
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, 1), 0);
         header.amin = -4.0;
@@ -167,9 +157,7 @@ fn alterheader_modefix_reports_source_mode_conversion_and_range_warning() {
             ),
             "{stdout}"
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb").unwrap();
         let mut changed = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut changed), 0);
         drop(file);
@@ -188,9 +176,7 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
             "imod-rs-alterheader-interactive-{}.mrc",
             std::process::id()
         ));
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 3, 2, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -242,9 +228,7 @@ fn alterheader_runs_the_interactive_option_loop_from_piped_input() {
         // Label 15 reopens the file on unit 3 and reprints the header.
         assert!(stdout.contains(" RO image file on unit   3 : "), "{stdout}");
 
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "rb").unwrap();
         let mut output = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut output), 0);
         drop(file);
@@ -265,9 +249,7 @@ fn alterheader_interactive_rejects_an_unknown_keyword_and_reprompts() {
             "imod-rs-alterheader-bogus-{}.mrc",
             std::process::id()
         ));
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -309,9 +291,7 @@ fn alterheader_falls_back_to_the_program_option_table_without_an_autodoc() {
         std::process::id()
     ));
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());

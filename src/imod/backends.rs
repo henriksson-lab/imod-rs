@@ -102,7 +102,7 @@ pub fn fft_backend() -> Result<FftBackend, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        fft_backend, mrc2tif_encoder, tiff_backend, FftBackend, Mrc2TifEncoder, TiffBackend,
+        FftBackend, Mrc2TifEncoder, TiffBackend, fft_backend, mrc2tif_encoder, tiff_backend,
     };
 
     #[test]

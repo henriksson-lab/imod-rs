@@ -127,10 +127,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
         (*u).read_only = true;
     }
     if name.is_empty() {
-        iiInsertCheckFunction(
-            Some(iiMRCCheck),
-            0 as i32,
-        );
+        iiInsertCheckFunction(Some(iiMRCCheck), 0 as i32);
     }
     if matches!(attribute.as_bytes().first(), Some(b'N' | b'n')) {
         if std::env::var_os("IMOD_NO_IMAGE_BACKUP").is_none() {
@@ -369,11 +366,7 @@ pub unsafe extern "C" fn iiuretnumvolumes_(mut iunit: *mut i32) -> i32 {
     return iiu_ret_num_volumes(*iunit);
 }
 #[unsafe(no_mangle)]
-pub unsafe fn iiu_volume_open(
-    mut newUnit: i32,
-    mut mainUnit: i32,
-    mut volIndex: i32,
-) -> i32 {
+pub unsafe fn iiu_volume_open(mut newUnit: i32, mut mainUnit: i32, mut volIndex: i32) -> i32 {
     let fp: Option<crate::imod::libcfshr::b3dutil::ImodFile>;
     let mut unew: *mut Unit = find_new_unit(newUnit);
     iiu_memory_error(unew, "ERROR:  - Allocating new unit");
@@ -422,11 +415,7 @@ pub unsafe extern "C" fn iiuvolumeopen_(
     return iiu_volume_open(*newUnit, *mainUnit, *volIndex);
 }
 #[unsafe(no_mangle)]
-pub unsafe fn iiu_ret_adoc_index(
-    mut iunit: i32,
-    mut global: i32,
-    mut openMdocOrNew: i32,
-) -> i32 {
+pub unsafe fn iiu_ret_adoc_index(mut iunit: i32, mut global: i32, mut openMdocOrNew: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_ret_adoc_index", 1 as i32, 0 as i32);
     return iiGetAdocIndex(&mut *(*u).ii_file, global, openMdocOrNew);
 }
@@ -532,10 +521,7 @@ pub unsafe extern "C" fn iiusetposition_(
     iiu_set_position(*iunit, *section, *line);
 }
 #[unsafe(no_mangle)]
-pub unsafe fn iiu_read_section(
-    mut iunit: i32,
-    mut array: *mut ::core::ffi::c_void,
-) -> i32 {
+pub unsafe fn iiu_read_section(mut iunit: i32, mut array: *mut ::core::ffi::c_void) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_read_section", 0 as i32, 1 as i32);
     if u.is_null() {
         return -(1 as i32);
@@ -643,10 +629,7 @@ pub unsafe extern "C" fn iiureadlines_(
     return iiu_read_lines(*iunit, array, *numLines);
 }
 #[unsafe(no_mangle)]
-pub unsafe fn iiu_write_section(
-    mut iunit: i32,
-    mut array: *mut ::core::ffi::c_void,
-) -> i32 {
+pub unsafe fn iiu_write_section(mut iunit: i32, mut array: *mut ::core::ffi::c_void) -> i32 {
     let mut u: *mut Unit = lookup_unit(
         iunit,
         "iiu_write_section",

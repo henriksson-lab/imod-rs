@@ -1342,10 +1342,7 @@ pub fn tiff_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader) -> i
     }
     0
 }
-unsafe fn tiff_fill_mrc_header_callback(
-    in_file: *mut ImodImageFile,
-    hdata: *mut MrcHeader,
-) -> i32 {
+unsafe fn tiff_fill_mrc_header_callback(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     let Some(in_file) = (unsafe { in_file.as_ref() }) else {
         return IIERR_BAD_CALL;
     };

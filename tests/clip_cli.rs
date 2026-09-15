@@ -3156,9 +3156,7 @@ fn unwrap_copies_a_real_default_selection_extended_header() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_SHORT), 0);
         header.fp = Some(file.clone());
@@ -3213,9 +3211,7 @@ fn unwrap_copies_a_real_default_selection_extended_header() {
     );
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
@@ -4954,9 +4950,7 @@ fn color_3d_writes_source_scaled_rgb_bytes_to_real_mrc() {
     let output = base.with_extension("output.mrc");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 1, 1, 0), 0);
         header.amin = 0.;
@@ -5003,9 +4997,7 @@ fn color_3d_writes_source_scaled_rgb_bytes_to_real_mrc() {
     );
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
@@ -5088,9 +5080,7 @@ fn color_2d_writes_source_rounded_rgb_bytes_to_real_mrc() {
     );
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
@@ -6020,9 +6010,7 @@ fn joinrgb_combines_three_real_byte_mrc_files() {
     );
     let output_c = CString::new(output.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut header), 0);
         assert_eq!(
@@ -6074,9 +6062,7 @@ fn splitrgb_writes_three_real_byte_mrc_files() {
     let prefix = base.with_extension("channels");
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 1, 1, 16), 0);
         header.amin = 0.;
@@ -6121,9 +6107,7 @@ fn splitrgb_writes_three_real_byte_mrc_files() {
         let path = prefix.with_extension(format!("channels.{extension}"));
         let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         unsafe {
-            let mut file =
-                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb")
-                    .unwrap();
+            let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut header), 0);
             assert_eq!((header.nx, header.ny, header.nz, header.mode), (2, 1, 1, 0));
@@ -6871,9 +6855,7 @@ fn writing_16_bit_floats_does_not_take_the_half_float_path_for_integer_modes() {
         // The written file must keep the input's own mode, not a half-float one.
         unsafe {
             let name = CString::new(output.to_string_lossy().as_bytes()).unwrap();
-            let mut fp =
-                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb")
-                    .unwrap();
+            let mut fp = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
             let mut written = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut fp, &mut written), 0);
             assert_eq!(written.mode, mode, "output mode for input mode {mode}");
@@ -7727,11 +7709,8 @@ fn fft_rustfft_transforms_match_the_parity_volume() {
             for (path, into) in [(&forward, &mut transformed), (&inverse, &mut recovered)] {
                 unsafe {
                     let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
-                    let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(
-                        &path,
-                        "rb",
-                    )
-                    .unwrap();
+                    let mut file =
+                        imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb").unwrap();
                     let mut header = MrcHeader::default();
                     assert_eq!(mrc_head_read(&mut file, &mut header), 0);
                     let count = (header.nx * header.ny * header.nz) as usize
