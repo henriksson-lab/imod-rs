@@ -5668,7 +5668,7 @@ unsafe fn ivw_check_binning(vi: *mut ImodView, nx: i32, ny: i32, nz: i32) -> i32
 /// `ivwReadAngleFile` (`imodview.cpp:3455`).
 pub fn ivw_read_angle_file(vi: &mut ImodView, fname: &[u8]) -> i32 {
     let name = String::from_utf8_lossy(fname);
-    let Some(mut fin) = ImodFile::open(&name, "r") else {
+    let Some(mut fin) = ImodFile::open(&*name, "r") else {
         with_boundary(|n| {
             n.imod_error(
                 None,

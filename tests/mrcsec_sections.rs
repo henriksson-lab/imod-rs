@@ -13,7 +13,6 @@ use imod_rs::imod::libiimod::mrcsec::{
     mrc_read_y, mrc_read_y_byte, mrc_read_y_float, mrc_read_y_ushort, mrc_read_z, mrc_read_z_byte,
     mrc_read_z_float, mrc_read_z_ushort,
 };
-use std::ffi::CString;
 use std::fmt::Write as _;
 
 fn dump(out: &mut String, tag: &str, buf: &[u8], n: usize, esize: usize) {
@@ -38,9 +37,8 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
                 .unwrap();
         let mut got = String::new();
         unsafe {
-            let name = CString::new(path.to_string_lossy().as_bytes()).unwrap();
             let mut fp =
-                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
+                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&path, "rb")
                     .unwrap();
             let mut header = MrcHeader::default();
             assert_eq!(

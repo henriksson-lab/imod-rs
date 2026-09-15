@@ -86,6 +86,10 @@ pub struct TfInfo {
     /// `ii_new` and later reconstructing ownership from a raw pointer.
     pub iifile: Option<Box<crate::imod::libiimod::iimage::ImodImageFile>>,
     pub fp: Option<ImodFile>,
+    /// Eagerly decoded pages for the opt-in Rust TIFF reader.  Keeping them
+    /// with the reader state makes their lifetime explicit; the legacy reader
+    /// leaves this empty and continues to read strips from `fp`.
+    pub decoded_pages: Vec<Vec<u8>>,
     // C `Tf_info.data` (`b3dtiff.h:51`) is deliberately absent.  It holds the
     // block `tiff_read_section` has just `malloc`ed and returns, and the
     // *caller* frees it (`tif2mrc.c:747`, `:1047`) -- the field is never read
@@ -126,6 +130,7 @@ impl Default for TfInfo {
             imageinfo: ImInfo::default(),
             iifile: None,
             fp: None,
+            decoded_pages: Vec::new(),
             nstrip: 0,
             stripoff: Vec::new(),
             stripsize: Vec::new(),

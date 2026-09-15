@@ -198,7 +198,7 @@ pub fn imod_autosave(
     state.autosave_filename = path.to_string_lossy().into_owned();
     imod_cleanup_autosave(state);
     state.autosave_filename = path.to_string_lossy().into_owned();
-    let Some(mut file) = ImodFile::open(&path.to_string_lossy(), "w") else {
+    let Some(mut file) = ImodFile::open(&path, "w") else {
         state.autosave_filename.clear();
         return -1;
     };
@@ -252,7 +252,7 @@ pub fn save_model(
     let name = PathBuf::from(&state.imod_filename);
     imod_make_backup(state, &name);
     // `imod_io.cpp:269` is `fopen(..., "wb+")`.
-    let Some(file) = ImodFile::open(&name.to_string_lossy(), "wb+") else {
+    let Some(file) = ImodFile::open(&name, "wb+") else {
         imod_undo_backup(state);
         let filename = native.choose_save_name();
         return saveas_model(state, model, view, filename, native);
@@ -274,7 +274,7 @@ pub fn saveas_model(
         return state.last_error;
     };
     imod_make_backup(state, &name);
-    let Some(file) = ImodFile::open(&name.to_string_lossy(), "w") else {
+    let Some(file) = ImodFile::open(&name, "w") else {
         imod_undo_backup(state);
         state.last_error = map_errno(io::Error::last_os_error());
         return state.last_error;
@@ -360,7 +360,7 @@ pub fn load_model_file(
     let path = filename
         .map(PathBuf::from)
         .or_else(|| native.choose_load_name())?;
-    let Some(mut file) = ImodFile::open(&path.to_string_lossy(), "r") else {
+    let Some(mut file) = ImodFile::open(&path, "r") else {
         state.last_error = map_errno(io::Error::last_os_error());
         return None;
     };

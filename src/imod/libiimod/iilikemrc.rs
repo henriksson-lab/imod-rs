@@ -125,7 +125,7 @@ pub fn ii_delete_raw_check_list() {
 /// after another.  Returns IIERR codes for errors.  `b3dError` is called with a
 /// message for all errors that occur during checking, except for
 /// `IIERR_NOT_FORMAT`.
-pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
+pub unsafe fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
     let Some(in_file) = (unsafe { in_file.as_mut() }) else {
         return IIERR_BAD_CALL;
     };
@@ -255,7 +255,7 @@ pub fn ii_setup_raw_headers(in_file: &mut ImodImageFile, info: &RawImageInfo) ->
 }
 
 /// Original `iiLikeMRCDelete` (`iilikemrc.c:188`).
-pub unsafe extern "C" fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
+pub unsafe fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
     unsafe {
         (*in_file).mrc_header = None;
     }

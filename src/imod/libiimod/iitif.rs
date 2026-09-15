@@ -979,22 +979,10 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     }
 
     /* 11/22/08: define this for all types, not just for 3-sample data */
-    (*in_file).read_section = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-    >(tiff_read_section));
-    (*in_file).read_section_ushort = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-    >(tiff_read_section_ushort));
-    (*in_file).read_section_byte = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-    >(tiff_read_section_byte));
-    (*in_file).read_section_float = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-    >(tiff_read_section_float));
+    (*in_file).read_section = Some(tiff_read_section);
+    (*in_file).read_section_ushort = Some(tiff_read_section_ushort);
+    (*in_file).read_section_byte = Some(tiff_read_section_byte);
+    (*in_file).read_section_float = Some(tiff_read_section_float);
 
     /* Set up file mode and default properties; fill in mode for raw info at same time */
     if bits == 8 || eer_file != 0 {
@@ -1243,7 +1231,7 @@ pub fn tiff_reopen(in_file: &mut ImodImageFile) -> i32 {
     0
 }
 
-unsafe extern "C" fn tiff_reopen_callback(in_file: *mut ImodImageFile) -> i32 {
+unsafe fn tiff_reopen_callback(in_file: *mut ImodImageFile) -> i32 {
     let Some(in_file) = (unsafe { in_file.as_mut() }) else {
         return IIERR_BAD_CALL;
     };
@@ -1266,7 +1254,7 @@ pub fn tiff_close(in_file: &mut ImodImageFile) {
     in_file.fp = None;
 }
 
-unsafe extern "C" fn tiff_close_callback(in_file: *mut ImodImageFile) {
+unsafe fn tiff_close_callback(in_file: *mut ImodImageFile) {
     if let Some(in_file) = unsafe { in_file.as_mut() } {
         tiff_close(in_file);
     }
@@ -1277,7 +1265,7 @@ pub fn tiff_delete(in_file: &mut ImodImageFile) {
     tiff_close(in_file);
 }
 
-unsafe extern "C" fn tiff_delete_callback(in_file: *mut ImodImageFile) {
+unsafe fn tiff_delete_callback(in_file: *mut ImodImageFile) {
     if let Some(in_file) = unsafe { in_file.as_mut() } {
         tiff_delete(in_file);
     }
@@ -1354,7 +1342,7 @@ pub fn tiff_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader) -> i
     }
     0
 }
-unsafe extern "C" fn tiff_fill_mrc_header_callback(
+unsafe fn tiff_fill_mrc_header_callback(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -1415,7 +1403,7 @@ fn tiff_sync_from_mrc_header(in_file: &mut ImodImageFile, hdata: &MrcHeader) -> 
     0
 }
 
-unsafe extern "C" fn tiff_sync_from_mrc_header_callback(
+unsafe fn tiff_sync_from_mrc_header_callback(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -3602,14 +3590,8 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
     (*in_file).close = Some(tiff_close_callback);
     (*in_file).fill_mrc_header = Some(tiff_fill_mrc_header_callback);
     (*in_file).sync_from_mrc_header = Some(tiff_sync_from_mrc_header_callback);
-    (*in_file).write_section = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-    >(ii_tiff_write_section));
-    (*in_file).write_section_float = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
-    >(ii_tiff_write_section_float));
+    (*in_file).write_section = Some(ii_tiff_write_section);
+    (*in_file).write_section_float = Some(ii_tiff_write_section_float);
     0
 }
 /// C `tiffWriteSection` (`iitif.c:2456`).

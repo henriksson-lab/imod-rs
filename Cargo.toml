@@ -12,14 +12,11 @@ publish = false
 path = "src/lib.rs"
 
 [features]
-default = ["qt"]
-# Enables the direct C++/Qt QImage boundary used by mrc2tif JPEG/PNG output.
-# The workspace builds `mrc2tif_qimage_save` against the system Qt installation.
-qt = []
+default = ["rust-native-backends"]
 # Default-off Rust-native experimental backends.  They are selected at runtime
 # only when the matching IMOD_RS_*_BACKEND environment variable requests them.
 rust-tiff = ["dep:tiff"]
-rust-image-encoder = ["dep:image", "dep:png"]
+rust-image-encoder = ["dep:png"]
 rustfft-backend = ["dep:rustfft", "dep:num-complex"]
 rust-native-backends = ["rust-tiff", "rust-image-encoder", "rustfft-backend"]
 # Enables the Slint presentation mapping of eTomo's MainFrame.  The command
@@ -35,7 +32,7 @@ libc = "0.2"
 chrono = "0.4"
 regex = "1"
 tiff = { version = "0.11", optional = true }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "ico", "pnm", "tga"] }
 png = { version = "0.18", optional = true }
 rustfft = { version = "6.2", optional = true }
 num-complex = { version = "0.4", optional = true }

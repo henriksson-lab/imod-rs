@@ -1557,7 +1557,7 @@ unsafe fn remove_attributes(group_id: HidT) -> i32 {
     err
 }
 /// C `hdfWriteHeader` (`iihdf.c:1246`).
-unsafe extern "C" fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
+unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
     if (*in_file).stack_set_list.is_none()
         && (*in_file).dataset_name.is_none()
         && init_new_hdf_file(&mut *in_file) != 0
@@ -1796,7 +1796,7 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
     }
 }
 /// C `hdfSyncFromMrcHeader` (`iihdf.c:1484`).
-unsafe extern "C" fn hdf_sync_from_mrc_header(
+unsafe fn hdf_sync_from_mrc_header(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -1810,7 +1810,7 @@ unsafe extern "C" fn hdf_sync_from_mrc_header(
     0
 }
 /// C `hdfClose` (`iihdf.c:1495`).
-unsafe extern "C" fn hdf_close(in_file: *mut ImodImageFile) {
+unsafe fn hdf_close(in_file: *mut ImodImageFile) {
     if (*in_file).dataset_is_open != 0 {
         H5Dclose((*in_file).dataset_id);
     }
@@ -1834,7 +1834,7 @@ unsafe extern "C" fn hdf_close(in_file: *mut ImodImageFile) {
     (*in_file).fp = None;
 }
 /// C `hdfReopen` (`iihdf.c:1523`).
-unsafe extern "C" fn hdf_reopen(in_file: *mut ImodImageFile) -> i32 {
+unsafe fn hdf_reopen(in_file: *mut ImodImageFile) -> i32 {
     for volume in (*in_file).ii_volumes.iter().flatten() {
         let volume = volume.as_ptr();
         if (*volume).fp.is_some() {
@@ -1875,7 +1875,7 @@ unsafe extern "C" fn hdf_reopen(in_file: *mut ImodImageFile) -> i32 {
     0
 }
 /// C `hdfDelete` (`iihdf.c:1555`).
-unsafe extern "C" fn hdf_delete(in_file: *mut ImodImageFile) {
+unsafe fn hdf_delete(in_file: *mut ImodImageFile) {
     let primary = (*in_file)
         .ii_volumes
         .first()
@@ -1950,11 +1950,11 @@ unsafe extern "C" fn hdf_delete(in_file: *mut ImodImageFile) {
     }
 }
 /// C `hdfReadSection` (`iihdf.c:1611`).
-unsafe extern "C" fn hdf_read_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
+unsafe fn hdf_read_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     hdf_read_section_any(in_file, buf, cz, 0)
 }
 /// C `hdfReadSectionByte` (`iihdf.c:1616`).
-unsafe extern "C" fn hdf_read_section_byte(
+unsafe fn hdf_read_section_byte(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     cz: i32,
@@ -1962,7 +1962,7 @@ unsafe extern "C" fn hdf_read_section_byte(
     hdf_read_section_any(in_file, buf, cz, MRSA_BYTE)
 }
 /// C `hdfReadSectionUShort` (`iihdf.c:1621`).
-unsafe extern "C" fn hdf_read_section_ushort(
+unsafe fn hdf_read_section_ushort(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     cz: i32,
@@ -1970,7 +1970,7 @@ unsafe extern "C" fn hdf_read_section_ushort(
     hdf_read_section_any(in_file, buf, cz, MRSA_USHORT)
 }
 /// C `hdfReadSectionFloat` (`iihdf.c:1626`).
-unsafe extern "C" fn hdf_read_section_float(
+unsafe fn hdf_read_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     cz: i32,
@@ -1978,11 +1978,11 @@ unsafe extern "C" fn hdf_read_section_float(
     hdf_read_section_any(in_file, buf, cz, MRSA_FLOAT)
 }
 /// C `hdfWriteSection` (`iihdf.c:1631`).
-unsafe extern "C" fn hdf_write_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
+unsafe fn hdf_write_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     hdf_write_section_any(in_file, buf, cz, 0)
 }
 /// C `hdfWriteSectionFloat` (`iihdf.c:1636`).
-unsafe extern "C" fn hdf_write_section_float(
+unsafe fn hdf_write_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     cz: i32,

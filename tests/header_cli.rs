@@ -16,9 +16,8 @@ fn header_reports_source_ordered_machine_readable_mrc_fields() {
     unsafe {
         let input =
             std::env::temp_dir().join(format!("imod-rs-header-cli-{}.mrc", std::process::id()));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
         let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb")
                 .unwrap();
         let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 3, 4, 2, MRC_MODE_FLOAT), 0);
@@ -122,9 +121,8 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
     unsafe {
         let old_fei =
             std::env::temp_dir().join(format!("imod-rs-header-old-fei-{}.mrc", std::process::id()));
-        let old_fei_c = CString::new(old_fei.as_os_str().as_encoded_bytes()).unwrap();
         let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&old_fei_c.to_string_lossy(), "wb")
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&old_fei, "wb")
                 .unwrap();
         let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 2, 2, 1, MRC_MODE_FLOAT), 0);
@@ -173,9 +171,8 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
 
         let new_fei =
             std::env::temp_dir().join(format!("imod-rs-header-new-fei-{}.mrc", std::process::id()));
-        let new_fei_c = CString::new(new_fei.as_os_str().as_encoded_bytes()).unwrap();
         let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&new_fei_c.to_string_lossy(), "wb")
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&new_fei, "wb")
                 .unwrap();
         let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 2, 2, 1, MRC_MODE_FLOAT), 0);
@@ -213,9 +210,8 @@ fn header_reports_old_fei_and_mdoc_rotation_angle_source_branches() {
 
         let mdoc_input =
             std::env::temp_dir().join(format!("imod-rs-header-mdoc-{}.mrc", std::process::id()));
-        let mdoc_input_c = CString::new(mdoc_input.as_os_str().as_encoded_bytes()).unwrap();
         let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&mdoc_input_c.to_string_lossy(), "wb")
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&mdoc_input, "wb")
                 .unwrap();
         let mut mrc = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut mrc, 2, 2, 1, MRC_MODE_FLOAT), 0);

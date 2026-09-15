@@ -297,7 +297,7 @@ fn open_and_get_address(filename: &str, caller: &str, map_file: &mut isize) -> *
     }
 }
 
-unsafe extern "C" fn shm_close(ii_file: *mut ImodImageFile) {
+unsafe fn shm_close(ii_file: *mut ImodImageFile) {
     unsafe {
         if (*ii_file).user_data.is_null() {
             return;
@@ -347,7 +347,7 @@ pub fn ii_shr_mem_remove(filename: &str) -> i32 {
         }
     }
 }
-unsafe extern "C" fn clean_up(ii_file: *mut ImodImageFile) {
+unsafe fn clean_up(ii_file: *mut ImodImageFile) {
     unsafe {
         // The C implementation frees `iiFile->header` here.  Its Rust storage
         // belongs to the image record, so dropping the owned slot also handles
@@ -355,7 +355,7 @@ unsafe extern "C" fn clean_up(ii_file: *mut ImodImageFile) {
         (*ii_file).mrc_header = None;
     }
 }
-unsafe extern "C" fn reopen(ii_file: *mut ImodImageFile) -> i32 {
+unsafe fn reopen(ii_file: *mut ImodImageFile) -> i32 {
     unsafe {
         let name = (*ii_file).filename.clone().unwrap_or_default();
         (*ii_file).user_data =
@@ -363,7 +363,7 @@ unsafe extern "C" fn reopen(ii_file: *mut ImodImageFile) -> i32 {
         if (*ii_file).user_data.is_null() { 1 } else { 0 }
     }
 }
-unsafe extern "C" fn sync_from_mrc_header(
+unsafe fn sync_from_mrc_header(
     ii_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -377,7 +377,7 @@ unsafe extern "C" fn sync_from_mrc_header(
         0
     }
 }
-unsafe extern "C" fn write_header(ii_file: *mut ImodImageFile) -> i32 {
+unsafe fn write_header(ii_file: *mut ImodImageFile) -> i32 {
     unsafe {
         let Some(ii_file) = ii_file.as_mut() else {
             return 1;
@@ -403,28 +403,28 @@ pub fn ii_shr_mem_write_header(ii_file: &mut ImodImageFile) -> i32 {
         0
     }
 }
-unsafe extern "C" fn read_section(
+unsafe fn read_section(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_NOPROC) }
 }
-unsafe extern "C" fn read_section_byte(
+unsafe fn read_section_byte(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_BYTE) }
 }
-unsafe extern "C" fn read_section_ushort(
+unsafe fn read_section_ushort(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_read_section_any(in_file, buf, in_section, MRSA_USHORT) }
 }
-unsafe extern "C" fn read_section_float(
+unsafe fn read_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -532,14 +532,14 @@ unsafe fn shm_read_section_any(
         0
     }
 }
-unsafe extern "C" fn write_section(
+unsafe fn write_section(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
     unsafe { shm_write_section_any(in_file, buf, in_section, 0) }
 }
-unsafe extern "C" fn write_section_float(
+unsafe fn write_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,

@@ -119,9 +119,7 @@ pub fn load_angles(view: &mut MidasView) -> Result<(), String> {
 
 /// C `load_image` (`file_io.cpp:28`).
 pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> {
-    let Some(mut fp) =
-        crate::imod::libcfshr::b3dutil::ImodFile::open(&filename.to_string_lossy(), "rb")
-    else {
+    let Some(mut fp) = crate::imod::libcfshr::b3dutil::ImodFile::open(filename, "rb") else {
         return Err(format!("Couldn't open {}", filename.display()));
     };
     let mut header = MrcHeader::default();
@@ -151,9 +149,7 @@ pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> 
 }
 /// C `load_refimage` (`file_io.cpp:66`).
 pub fn load_refimage(view: &mut MidasView, filename: &Path) -> Result<i32, String> {
-    let Some(mut fp) =
-        crate::imod::libcfshr::b3dutil::ImodFile::open(&filename.to_string_lossy(), "rb")
-    else {
+    let Some(mut fp) = crate::imod::libcfshr::b3dutil::ImodFile::open(filename, "rb") else {
         return Err(format!(
             "Error opening reference image {}",
             filename.display()
@@ -279,8 +275,7 @@ mod tests {
     fn image_header_and_load_info_own_a_real_mrc_file() {
         let path =
             std::env::temp_dir().join(format!("imod-rs-midas-image-{}.mrc", std::process::id()));
-        let mut fp =
-            crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb").unwrap();
+        let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
         let mut header = MrcHeader::default();
         mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
         header.amin = 0.;

@@ -155,7 +155,7 @@ pub fn ii_raw_set_scale(smin: f32, smax: f32) {
 
 /// C `iiRawCheck`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
+pub unsafe fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
     if in_file.is_null() || unsafe { (*in_file).fp.is_none() } {
         return IIERR_BAD_CALL;
     }

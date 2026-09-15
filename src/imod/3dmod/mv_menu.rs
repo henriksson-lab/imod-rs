@@ -172,8 +172,7 @@ pub fn imodv_file_save(a: &mut ImodvApp, filename: &Path) -> i32 {
             return 1;
         }
     }
-    let error = ImodFile::open(&filename.to_string_lossy(), "w")
-        .map_or(1, |mut f| write_opened_model_file(a, &mut f));
+    let error = ImodFile::open(filename, "w").map_or(1, |mut f| write_opened_model_file(a, &mut f));
     if error != 0 {
         let _ = remove_file(filename);
         let _ = rename(&backup, filename);

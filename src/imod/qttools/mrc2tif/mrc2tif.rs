@@ -1,8 +1,8 @@
 //! Translation of `IMOD/qttools/mrc2tif/mrc2tif.cpp`.
 //!
-//! TIFF writing defaults to IMOD's libtiff/QImage boundary.  An explicitly
-//! selected, default-off Rust encoder owns only the JPEG/PNG save operation;
-//! source-visible image preparation and command behavior stay here.
+//! TIFF writing defaults to IMOD's libtiff boundary. JPEG/PNG output uses the
+//! Rust generic-raster encoder because Qt is no longer linked; source-visible
+//! image preparation and command behavior stay here.
 #![allow(dead_code, unused_variables)]
 
 use std::cell::Cell;
@@ -38,91 +38,6 @@ use crate::imod::libiimod::mrcsec::mrc_read_z;
 use crate::imod::libiimod::mrcslice::slice_mmm;
 use crate::imod::mrc::tiff::tiff_write_image;
 use std::io::Write;
-
-/// The one C boundary this unit keeps.  `build.rs` compiles
-/// `mrc2tif_qimage.cpp` against system Qt5 and links it statically, so
-/// `filename` and `format` are `const char *` on the C++ side and have to be
-/// NUL-terminated here.  Nothing above this declaration carries a C string.
-#[cfg(feature = "qt")]
-unsafe extern "C" {
-    /// C++/Qt shim for the source QImage constructor, resolution/color-table setup, and save.
-    /// It returns 0 when `QImage::save` succeeds and nonzero on failure.
-    #[link_name = "mrc2tif_qimage_save"]
-    fn mrc2tif_qimage_save_ffi(
-        data: *mut u8,
-        width: i32,
-        height: i32,
-        bytes_per_line: i32,
-        rgb: i32,
-        resolution: i32,
-        filename: *const core::ffi::c_char,
-        format: *const core::ffi::c_char,
-        quality: i32,
-    ) -> i32;
-}
-
-/// No QImage implementation is linked in non-Qt builds.  The source program itself
-/// has a Qt build dependency; returning the failed `QImage::save` result here keeps
-/// non-Qt binaries linkable without substituting a different JPEG/PNG encoder.
-#[cfg(feature = "qt")]
-fn mrc2tif_qimage_save(
-    data: &mut [u8],
-    width: i32,
-    height: i32,
-    bytes_per_line: i32,
-    rgb: i32,
-    resolution: i32,
-    filename: &str,
-    format: &str,
-    quality: i32,
-) -> i32 {
-    let mut filename = filename.as_bytes().to_vec();
-    filename.push(0);
-    let mut format = format.as_bytes().to_vec();
-    format.push(0);
-    unsafe {
-        mrc2tif_qimage_save_ffi(
-            data.as_mut_ptr(),
-            width,
-            height,
-            bytes_per_line,
-            rgb,
-            resolution,
-            filename.as_ptr().cast(),
-            format.as_ptr().cast(),
-            quality,
-        )
-    }
-}
-
-/// No QImage implementation is linked in non-Qt builds.  The source program itself
-/// has a Qt build dependency; returning the failed `QImage::save` result here keeps
-/// non-Qt binaries linkable without substituting a different JPEG/PNG encoder.
-#[cfg(not(feature = "qt"))]
-fn mrc2tif_qimage_save(
-    data: &mut [u8],
-    width: i32,
-    height: i32,
-    bytes_per_line: i32,
-    rgb: i32,
-    resolution: i32,
-    filename: &str,
-    format: &str,
-    quality: i32,
-) -> i32 {
-    let _ = (
-        data,
-        width,
-        height,
-        bytes_per_line,
-        rgb,
-        resolution,
-        filename,
-        format,
-        quality,
-    );
-    1
-}
 
 /// Original: `usage` (`mrc2tif.cpp:28`).
 fn usage(progname: &[u8]) {
@@ -430,10 +345,6 @@ pub fn mrc2tif() {
             exit_error(
                 b"Rust TIFF writer currently supports only non-tiled images with no/LZW/ZIP compression and without old-writer options",
             );
-        }
-        #[cfg(not(feature = "qt"))]
-        if make_qimage {
-            exit_error(b"JPEG/PNG output requires the source QImage Qt boundary");
         }
         if args.len().saturating_sub(iarg) != 2 {
             usage(progname);
@@ -929,34 +840,25 @@ pub fn mrc2tif() {
                             .copy_from_slice(&source[from..from + row_bytes]);
                     }
                     match encoder {
-                        Mrc2TifEncoder::Parity => mrc2tif_qimage_save(
-                            &mut qbuf,
-                            hdata.nx,
-                            hdata.ny,
-                            line_bytes as i32,
-                            if psize == 3 { 1 } else { 0 },
-                            use_resol,
-                            &name_text,
-                            type_name,
-                            quality,
-                        ),
-                        Mrc2TifEncoder::Rust => match super::rust_encoder::save(
-                            &qbuf,
-                            hdata.nx,
-                            hdata.ny,
-                            line_bytes as i32,
-                            psize == 3,
-                            use_resol,
-                            &name_text,
-                            type_name,
-                            quality,
-                        ) {
-                            Ok(()) => 0,
-                            Err(error) => {
-                                rust_encoder_error = Some(error);
-                                1
+                        Mrc2TifEncoder::Parity | Mrc2TifEncoder::Rust => {
+                            match super::rust_encoder::save(
+                                &qbuf,
+                                hdata.nx,
+                                hdata.ny,
+                                line_bytes as i32,
+                                psize == 3,
+                                use_resol,
+                                &name_text,
+                                type_name,
+                                quality,
+                            ) {
+                                Ok(()) => 0,
+                                Err(error) => {
+                                    rust_encoder_error = Some(error);
+                                    1
+                                }
                             }
-                        },
+                        }
                     }
                 } else if native_tiff_writer {
                     let rust_bytes = hdata.nx as usize * nlines as usize * rust_output_pixel_size;
@@ -1105,7 +1007,7 @@ fn open_either_way(
     }
     iifile.filename = Some(String::from_utf8_lossy(iname).into_owned());
     if oldcode != 0 || unsafe { tiff_open_new(iifile) } != 0 {
-        let fp = ImodFile::open(&String::from_utf8_lossy(iname), "wb");
+        let fp = ImodFile::open(&*String::from_utf8_lossy(iname), "wb");
         if fp.is_none() {
             // `perror("mrc2tif system message")`; see the note at the
             // other `perror` site about the ` (os error N)` suffix.

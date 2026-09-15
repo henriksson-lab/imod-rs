@@ -1,53 +1,6 @@
 use crate::imod::libcfshr::b3dutil::{c2f_string, fortran_string};
 use crate::imod::libcfshr::parse_params::*;
-unsafe extern "C" {
-    fn exit(__status: i32) -> !;
-}
 pub type fortStrLen_t = i32;
-pub type __uint16_t = u16;
-pub type __uint32_t = u32;
-pub type __uint64_t = u64;
-pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
-#[inline]
-unsafe extern "C" fn __bswap_16(mut __bsx: __uint16_t) -> __uint16_t {
-    return (__bsx as i32 >> 8 as i32 & 0xff as i32 | (__bsx as i32 & 0xff as i32) << 8 as i32)
-        as __uint16_t;
-}
-#[inline]
-unsafe extern "C" fn __bswap_32(mut __bsx: __uint32_t) -> __uint32_t {
-    return (__bsx & 0xff000000 as __uint32_t) >> 24 as i32
-        | (__bsx & 0xff0000 as __uint32_t) >> 8 as i32
-        | (__bsx & 0xff00 as __uint32_t) << 8 as i32
-        | (__bsx & 0xff as __uint32_t) << 24 as i32;
-}
-#[inline]
-unsafe extern "C" fn __bswap_64(mut __bsx: __uint64_t) -> __uint64_t {
-    return ((__bsx as ::core::ffi::c_ulonglong & 0xff00000000000000 as ::core::ffi::c_ulonglong)
-        >> 56 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff000000000000 as ::core::ffi::c_ulonglong)
-            >> 40 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff0000000000 as ::core::ffi::c_ulonglong)
-            >> 24 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff00000000 as ::core::ffi::c_ulonglong)
-            >> 8 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff000000 as ::core::ffi::c_ulonglong) << 8 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff0000 as ::core::ffi::c_ulonglong) << 24 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff00 as ::core::ffi::c_ulonglong) << 40 as i32
-        | (__bsx as ::core::ffi::c_ulonglong & 0xff as ::core::ffi::c_ulonglong) << 56 as i32)
-        as __uint64_t;
-}
-#[inline]
-unsafe extern "C" fn __uint16_identity(mut __x: __uint16_t) -> __uint16_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint32_identity(mut __x: __uint32_t) -> __uint32_t {
-    return __x;
-}
-#[inline]
-unsafe extern "C" fn __uint64_identity(mut __x: __uint64_t) -> __uint64_t {
-    return __x;
-}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pipinitialize_(mut numOptions: *mut i32) -> i32 {
     return pip_initialize(*numOptions);
@@ -63,7 +16,7 @@ pub unsafe extern "C" fn pipexitonerrorfw_(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pipexit_(mut val: *mut i32) {
-    exit(*val);
+    std::process::exit(*val);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pipallowcommadefaults_(mut val: *mut i32) {

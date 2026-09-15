@@ -18,7 +18,8 @@ pub enum TiffBackend {
 /// Runtime choice for mrc2tif JPEG/PNG encoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mrc2TifEncoder {
-    /// Existing Qt `QImage` boundary.
+    /// Retained spelling for callers that requested the former default.  It
+    /// now selects the Rust encoder because Qt is no longer linked.
     Parity,
     /// Experimental Rust image encoder.
     Rust,
@@ -61,13 +62,14 @@ pub fn tiff_backend() -> Result<TiffBackend, String> {
         .clone()
 }
 
-/// Parses `IMOD_RS_MRC2TIF_ENCODER`; unset selects the Qt parity boundary.
+/// Parses `IMOD_RS_MRC2TIF_ENCODER`; unset selects the Rust encoder.
 pub fn mrc2tif_encoder() -> Result<Mrc2TifEncoder, String> {
     static BACKEND: OnceLock<Result<Mrc2TifEncoder, String>> = OnceLock::new();
     BACKEND
         .get_or_init(|| match value("IMOD_RS_MRC2TIF_ENCODER") {
             Ok(value) => match value.as_deref() {
-                None | Some("parity") => Ok(Mrc2TifEncoder::Parity),
+                None => Ok(Mrc2TifEncoder::Rust),
+                Some("parity") => Ok(Mrc2TifEncoder::Rust),
                 Some("rust") => Ok(Mrc2TifEncoder::Rust),
                 Some(_) => Err(
                     "ERROR: Rust-native backend - IMOD_RS_MRC2TIF_ENCODER must be parity or rust"
@@ -100,11 +102,11 @@ pub fn fft_backend() -> Result<FftBackend, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        FftBackend, Mrc2TifEncoder, TiffBackend, fft_backend, mrc2tif_encoder, tiff_backend,
+        fft_backend, mrc2tif_encoder, tiff_backend, FftBackend, Mrc2TifEncoder, TiffBackend,
     };
 
     #[test]
-    fn unset_backend_variables_select_parity() {
+    fn unset_backend_variables_select_the_current_defaults() {
         // The test process does not alter environment state because libtest
         // runs in one process; normal test invocations explicitly clear these
         // variables in their child commands instead.
@@ -112,7 +114,7 @@ mod tests {
             assert_eq!(tiff_backend(), Ok(TiffBackend::Parity));
         }
         if std::env::var_os("IMOD_RS_MRC2TIF_ENCODER").is_none() {
-            assert_eq!(mrc2tif_encoder(), Ok(Mrc2TifEncoder::Parity));
+            assert_eq!(mrc2tif_encoder(), Ok(Mrc2TifEncoder::Rust));
         }
         if std::env::var_os("IMOD_RS_FFT_BACKEND").is_none() {
             assert_eq!(fft_backend(), Ok(FftBackend::Parity));

@@ -128,7 +128,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
     }
     if name.is_empty() {
         iiInsertCheckFunction(
-            Some(iiMRCCheck as unsafe extern "C" fn(*mut ImodImageFile) -> i32),
+            Some(iiMRCCheck),
             0 as i32,
         );
     }
@@ -306,7 +306,7 @@ pub unsafe extern "C" fn iiuopen_(
     iiu_open(*iunit, &name, &attribute)
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_close(mut iunit: i32) {
+pub unsafe fn iiu_close(mut iunit: i32) {
     let mut u: *mut Unit = ::core::ptr::null_mut::<Unit>();
     let mut trial: i32 = 0;
     let mut delay: i32 = 500 as i32;
@@ -351,12 +351,12 @@ pub unsafe extern "C" fn iiuclose_(mut iunit: *mut i32) {
     iiu_close(*iunit);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_get_ii_file(mut iunit: i32) -> *mut ImodImageFile {
+pub unsafe fn iiu_get_ii_file(mut iunit: i32) -> *mut ImodImageFile {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_get_ii_file", 1 as i32, 0 as i32);
     return (*u).ii_file;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_ret_num_volumes(mut iunit: i32) -> i32 {
+pub unsafe fn iiu_ret_num_volumes(mut iunit: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_ret_num_volumes", 1 as i32, 0 as i32);
     return if (*(*u).ii_file).dataset_id != 0 {
         (*(*u).ii_file).num_volumes
@@ -369,7 +369,7 @@ pub unsafe extern "C" fn iiuretnumvolumes_(mut iunit: *mut i32) -> i32 {
     return iiu_ret_num_volumes(*iunit);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_volume_open(
+pub unsafe fn iiu_volume_open(
     mut newUnit: i32,
     mut mainUnit: i32,
     mut volIndex: i32,
@@ -422,7 +422,7 @@ pub unsafe extern "C" fn iiuvolumeopen_(
     return iiu_volume_open(*newUnit, *mainUnit, *volIndex);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_ret_adoc_index(
+pub unsafe fn iiu_ret_adoc_index(
     mut iunit: i32,
     mut global: i32,
     mut openMdocOrNew: i32,
@@ -440,7 +440,7 @@ pub unsafe extern "C" fn iiuretadocindex_(
     return if err < 0 as i32 { err } else { err + 1 as i32 };
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_trans_adoc_sections(mut toUnit: i32, mut fromUnit: i32) -> i32 {
+pub unsafe fn iiu_trans_adoc_sections(mut toUnit: i32, mut fromUnit: i32) -> i32 {
     let mut uto: *mut Unit = lookup_unit(toUnit, "iiu_trans_adoc_sections", 1 as i32, 0 as i32);
     let mut ufrom: *mut Unit = lookup_unit(fromUnit, "iiu_trans_adoc_sections", 1 as i32, 0 as i32);
     if (*(*uto).ii_file).adoc_index >= 0 as i32 && (*(*ufrom).ii_file).adoc_index >= 0 as i32 {
@@ -449,7 +449,7 @@ pub unsafe extern "C" fn iiu_trans_adoc_sections(mut toUnit: i32, mut fromUnit: 
     return 0 as i32;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_write_global_adoc(mut iunit: i32) -> i32 {
+pub unsafe fn iiu_write_global_adoc(mut iunit: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_write_global_adoc", 1 as i32, 0 as i32);
     if hdfWriteGlobalAdoc(&mut *(*u).ii_file) != 0 {
         if UNIT_OPTIONS.with(|options| options.exit_on_error.get()) != 0 {
@@ -465,7 +465,7 @@ pub unsafe extern "C" fn iiuwriteglobaladoc_(mut iunit: *mut i32) -> i32 {
     return iiu_write_global_adoc(*iunit);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_ret_chunk_sizes(
+pub unsafe fn iiu_ret_chunk_sizes(
     mut iunit: i32,
     mut xSize: *mut i32,
     mut ySize: *mut i32,
@@ -486,7 +486,7 @@ pub unsafe extern "C" fn iiuretchunksizes_(
     iiu_ret_chunk_sizes(*iunit, xSize, ySize, zSize);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_alt_chunk_sizes(
+pub unsafe fn iiu_alt_chunk_sizes(
     mut iunit: i32,
     mut xSize: i32,
     mut ySize: i32,
@@ -505,7 +505,7 @@ pub unsafe extern "C" fn iiualtchunksizes_(
     return iiu_alt_chunk_sizes(*iunit, *xSize, *ySize, *zSize);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_set_hdf_compression(mut iunit: i32, mut compression: i32) {
+pub unsafe fn iiu_set_hdf_compression(mut iunit: i32, mut compression: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_set_hdf_compression", 1 as i32, 0 as i32);
     (*(*u).ii_file).hdf_compression = compression;
 }
@@ -514,7 +514,7 @@ pub unsafe extern "C" fn iiusethdfcompression_(mut iunit: *mut i32, mut compress
     iiu_set_hdf_compression(*iunit, *compression);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_set_position(mut iunit: i32, mut section: i32, mut line: i32) {
+pub unsafe fn iiu_set_position(mut iunit: i32, mut section: i32, mut line: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_set_position", 1 as i32, 0 as i32);
     (*u).current_sec = section;
     (*u).current_line = line;
@@ -532,7 +532,7 @@ pub unsafe extern "C" fn iiusetposition_(
     iiu_set_position(*iunit, *section, *line);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_read_section(
+pub unsafe fn iiu_read_section(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
 ) -> i32 {
@@ -558,7 +558,7 @@ pub unsafe extern "C" fn iiureadsection_(
     return iiu_read_section(*iunit, array);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_read_sec_part(
+pub unsafe fn iiu_read_sec_part(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
     mut nxdim: i32,
@@ -606,7 +606,7 @@ pub unsafe extern "C" fn iiureadsecpart_(
     return iiu_read_sec_part(*iunit, array, *nxdim, *indX0, *indX1, *indY0, *indY1);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_read_lines(
+pub unsafe fn iiu_read_lines(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
     mut numLines: i32,
@@ -643,7 +643,7 @@ pub unsafe extern "C" fn iiureadlines_(
     return iiu_read_lines(*iunit, array, *numLines);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_write_section(
+pub unsafe fn iiu_write_section(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
 ) -> i32 {
@@ -680,7 +680,7 @@ pub unsafe extern "C" fn iwrsec_(mut iunit: *mut i32, mut array: *mut ::core::ff
     iiu_write_section(*iunit, array);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_write_subarray(
+pub unsafe fn iiu_write_subarray(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
     mut nxdim: i32,
@@ -722,7 +722,7 @@ pub unsafe extern "C" fn iiuwritesubarray_(
     return iiu_write_subarray(*iunit, array, *nxdim, *ixStart, *iyStart, *iyEnd);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_write_sec_part(
+pub unsafe fn iiu_write_sec_part(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
     mut nxdim: i32,
@@ -869,7 +869,7 @@ pub unsafe extern "C" fn iiuwritesecpart_(
     );
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_write_lines(
+pub unsafe fn iiu_write_lines(
     mut iunit: i32,
     mut array: *mut ::core::ffi::c_void,
     mut numLines: i32,
@@ -963,7 +963,7 @@ pub unsafe extern "C" fn iwrsecl_(
 ) {
     iiu_write_lines(*iunit, array, *numLines);
 }
-unsafe extern "C" fn setup_current_lines(mut u: *mut Unit, mut numLines: i32) -> i32 {
+unsafe fn setup_current_lines(mut u: *mut Unit, mut numLines: i32) -> i32 {
     (*(*u).ii_file).llx = 0 as i32;
     (*(*u).ii_file).urx = (*(*u).ii_file).nx - 1 as i32;
     (*(*u).ii_file).lly = (*u).current_line;
@@ -991,7 +991,7 @@ unsafe extern "C" fn setup_current_lines(mut u: *mut Unit, mut numLines: i32) ->
     return 0 as i32;
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_file_info(
+pub unsafe fn iiu_file_info(
     mut iunit: i32,
     mut fileSize: *mut i32,
     mut fileType: *mut i32,
@@ -1039,7 +1039,7 @@ pub unsafe extern "C" fn iiufileinfo_(
     iiu_file_info(*iunit, fileSize, fileType, flags);
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn iiu_exit_on_error(doExit: i32, storeError: i32) {
+pub fn iiu_exit_on_error(doExit: i32, storeError: i32) {
     UNIT_OPTIONS.with(|options| {
         options.exit_on_error.set(doExit);
         options.store_error.set(storeError);
@@ -1050,7 +1050,7 @@ pub unsafe extern "C" fn iiuexitonerror(mut doExit: *mut i32, mut storeError: *m
     iiu_exit_on_error(*doExit, *storeError);
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn iiu_get_exit_on_error() -> i32 {
+pub fn iiu_get_exit_on_error() -> i32 {
     UNIT_OPTIONS.with(|options| options.exit_on_error.get())
 }
 #[unsafe(no_mangle)]
@@ -1094,7 +1094,7 @@ pub extern "C" fn iiuretprint_() -> i32 {
     iiu_ret_print()
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_alt_convert(mut iunit: i32, mut val: i32) {
+pub unsafe fn iiu_alt_convert(mut iunit: i32, mut val: i32) {
     UNIT_TABLE.with(|unit_table| {
         let mut table = unit_table.borrow_mut();
         table
@@ -1132,7 +1132,7 @@ pub unsafe fn iiu_mrc_header(
     };
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: i32) {
+pub unsafe fn iiu_sync_with_mrc_header(mut iunit: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_sync_with_mrc_header", 1 as i32, 0 as i32);
     let header = match &mut (*u).header {
         UnitHeader::Header(header) => &raw mut *header,
@@ -1145,7 +1145,7 @@ pub unsafe extern "C" fn iiu_sync_with_mrc_header(mut iunit: i32) {
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: i32) {
+pub unsafe fn iiu_reassign_header_ptr(mut iunit: i32) {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_reassign_header_ptr", 1 as i32, 0 as i32);
     if (*(*u).ii_file).file != IIFILE_HDF {
         b3d_error(
@@ -1165,7 +1165,7 @@ pub unsafe extern "C" fn iiu_reassign_header_ptr(mut iunit: i32) {
     (*u).header = UnitHeader::Header(header);
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_file_type(mut iunit: i32) -> i32 {
+pub unsafe fn iiu_file_type(mut iunit: i32) -> i32 {
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_file_type", 1 as i32, 0 as i32);
     return (*(*u).ii_file).file;
 }
@@ -1187,7 +1187,7 @@ pub unsafe extern "C" fn iisettifftagtoprint_(mut tag: *mut i32) -> i32 {
     0
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn iiu_buf_bytes_per_pixel(mut iunit: i32) -> i32 {
+pub unsafe fn iiu_buf_bytes_per_pixel(mut iunit: i32) -> i32 {
     let mut dsize: i32 = 0;
     let mut csize: i32 = 0;
     let mut u: *mut Unit = lookup_unit(iunit, "iiu_file_type", 1 as i32, 0 as i32);

@@ -16,6 +16,13 @@ use std::process::Command;
 pub fn imod_cmd(command: &str) -> Command {
     let mut assembled = Command::new(env!("CARGO_BIN_EXE_imod"));
     assembled.arg(command);
+    // Backend choice is deliberately a child-process concern in integration
+    // tests.  A developer's shell selection must not turn an ordinary parity
+    // fixture into a different test; tests for a Rust backend set it explicitly
+    // on the command they are exercising.
+    assembled.env_remove("IMOD_RS_TIFF_BACKEND");
+    assembled.env_remove("IMOD_RS_MRC2TIF_ENCODER");
+    assembled.env_remove("IMOD_RS_FFT_BACKEND");
     assembled
 }
 
@@ -49,7 +56,11 @@ pub fn imod_link(command: &str) -> PathBuf {
 
 /// A `Command` running `<command>` through its symlink.
 pub fn imod_link_cmd(command: &str) -> Command {
-    Command::new(imod_link(command))
+    let mut assembled = Command::new(imod_link(command));
+    assembled.env_remove("IMOD_RS_TIFF_BACKEND");
+    assembled.env_remove("IMOD_RS_MRC2TIF_ENCODER");
+    assembled.env_remove("IMOD_RS_FFT_BACKEND");
+    assembled
 }
 
 /// Removes the symlink directory this process created.

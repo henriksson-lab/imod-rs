@@ -271,9 +271,8 @@ pub fn cor_def_correct_defects(
         let end = (defects_ref.bad_column_start[i] as i32 + defects_ref.bad_column_width[i] as i32
             - 1)
             / binning;
-        unsafe {
-            correct_column(
-                array.as_mut_ptr().cast(),
+        correct_column(
+                array,
                 data_type,
                 size_x,
                 size_y,
@@ -285,8 +284,7 @@ pub fn cor_def_correct_defects(
                 size_y - 1,
                 super_fac,
                 defects_ref.num_avg_super_res,
-            )
-        };
+            );
     }
     for i in 0..defects_ref.partial_bad_col.len() {
         let start = defects_ref.partial_bad_col[i] as i32 / binning;
@@ -296,9 +294,8 @@ pub fn cor_def_correct_defects(
         let ys = defects_ref.partial_bad_start_y[i] as i32 / binning - top;
         let ye = defects_ref.partial_bad_end_y[i] as i32 / binning - top;
         if ys < size_y && ye >= 0 && ys <= ye {
-            unsafe {
-                correct_column(
-                    array.as_mut_ptr().cast(),
+            correct_column(
+                    array,
                     data_type,
                     size_x,
                     size_y,
@@ -310,17 +307,15 @@ pub fn cor_def_correct_defects(
                     ye.min(size_y - 1),
                     super_fac,
                     defects_ref.num_avg_super_res,
-                )
-            };
+                );
         }
     }
     for i in 0..defects_ref.bad_row_start.len() {
         let start = defects_ref.bad_row_start[i] as i32 / binning;
         let end = (defects_ref.bad_row_start[i] as i32 + defects_ref.bad_row_height[i] as i32 - 1)
             / binning;
-        unsafe {
-            correct_column(
-                array.as_mut_ptr().cast(),
+        correct_column(
+                array,
                 data_type,
                 size_y,
                 size_x,
@@ -332,8 +327,7 @@ pub fn cor_def_correct_defects(
                 size_x - 1,
                 super_fac,
                 defects_ref.num_avg_super_res,
-            )
-        };
+            );
     }
     for i in 0..defects_ref.partial_bad_row.len() {
         let start = defects_ref.partial_bad_row[i] as i32 / binning;
@@ -343,9 +337,8 @@ pub fn cor_def_correct_defects(
         let ys = defects_ref.partial_bad_start_x[i] as i32 / binning - left;
         let ye = defects_ref.partial_bad_end_x[i] as i32 / binning - left;
         if ys < size_x && ye >= 0 && ys <= ye {
-            unsafe {
-                correct_column(
-                    array.as_mut_ptr().cast(),
+            correct_column(
+                    array,
                     data_type,
                     size_y,
                     size_x,
@@ -357,8 +350,7 @@ pub fn cor_def_correct_defects(
                     ye.min(size_x - 1),
                     super_fac,
                     defects_ref.num_avg_super_res,
-                )
-            };
+                );
         }
     }
     let mut pixel_data = match data_type {
@@ -538,8 +530,8 @@ fn correct_edge(
     }
 }
 /// C++ `CorrectColumn` (`CorrectDefects.cpp:429`).
-unsafe fn correct_column(
-    array: *mut core::ffi::c_void,
+fn correct_column(
+    array: &mut [u8],
     data_type: i32,
     nx: i32,
     ny: i32,
@@ -565,7 +557,11 @@ unsafe fn correct_column(
     }
     macro_rules! run_column {
         ($ty:ty, $integer:expr) => {{
-            let data = array.cast::<$ty>();
+            let data = array.as_mut_ptr().cast::<$ty>();
+            // The byte slice is validated by the caller for the selected
+            // pixel mode.  Keep the typed reinterpretation confined to this
+            // source-mirrored pixel kernel.
+            unsafe {
             if super_fac > 0 {
                 let mut sides = Vec::with_capacity((2 * num_avg_super) as usize);
                 for i in 0..num_avg_super {
@@ -793,6 +789,7 @@ unsafe fn correct_column(
                         i += 1;
                     }
                 }
+            }
             }
         }};
     }
@@ -1988,7 +1985,7 @@ pub fn cor_def_merge_defect_lists(
 pub fn check_if_point_in_full_lines(point: i32, columns: &[u16], widths: &[i16]) -> i32 {
     for index in 0..columns.len() {
         if point >= columns[index] as i32
-            && point <= columns[index] as i32 + widths[index] as i32 - 1
+            && point < columns[index] as i32 + widths[index] as i32
         {
             return 1;
         }
@@ -2006,7 +2003,7 @@ pub fn check_if_point_in_partial_lines(
 ) -> i32 {
     for index in 0..columns.len() {
         if point >= columns[index] as i32
-            && point <= columns[index] as i32 + widths[index] as i32 - 1
+            && point < columns[index] as i32 + widths[index] as i32
             && other >= start_y[index] as i32
             && other <= end_y[index] as i32
         {

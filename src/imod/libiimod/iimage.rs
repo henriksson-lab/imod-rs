@@ -30,13 +30,13 @@ use crate::imod::libiimod::iishrmem::{
 };
 use crate::imod::libiimod::iitif::{
     MAX_TIFF_THREADS, ii_tiff_check, tiff_filter_warnings, tiff_get_max_eer_super_res,
-    tiff_num_read_threads, tiff_open_new, tiff_parallel_read, tiff_set_eer_read_properties,
+    tiff_num_read_threads, tiff_open_new, tiff_parallel_read, tiff_set_eer_read_properties, Tiff,
 };
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_HALF_FLOAT,
     MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_complex_smin_smax, mrc_getdcsize, mrc_head_new,
 };
-use core::ffi::{c_char, c_void};
+use core::ffi::c_char;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicI32, Ordering};
 use std::cell::RefCell;
@@ -49,8 +49,8 @@ use std::sync::{LazyLock, Mutex};
 /// length at all (`iiuReadSecPart` takes `array` and a line width), so there is
 /// no slice to build there.  It is `*mut u8` rather than `*mut c_char` because
 /// nothing about it is a C string.
-pub type IiSectionFunc = Option<unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32>;
-pub type IiFileCheckFunction = Option<unsafe extern "C" fn(*mut ImodImageFile) -> i32>;
+pub type IiSectionFunc = Option<unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32>;
+pub type IiFileCheckFunction = Option<unsafe fn(*mut ImodImageFile) -> i32>;
 /// C `IIRawCheckFunction` (`iimage.h`).  The registry is crate-private Rust
 /// state, so probes receive their file and result through ordinary borrows.
 /// No foreign caller can install or invoke one of these entries.
@@ -109,7 +109,7 @@ thread_local! {
 }
 /// Process-wide C callback registration.  Calls snapshot this value before
 /// entering foreign code so a callback may safely register a replacement.
-static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe extern "C" fn(i32) -> i32>> = Mutex::new(None);
+static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe fn(i32) -> i32>> = Mutex::new(None);
 
 /// One dataset in an HDF image stack.  It is entirely crate-owned state: HDF5
 /// receives the identifier and a temporary C-compatible path separately.
@@ -192,10 +192,13 @@ pub struct ImodImageFile {
     pub section_skip: i32,
     pub has_piece_coords: i32,
     /// Opaque handle owned by an external image backend.  It is used only for
-    /// libtiff's `TIFF *` and Qt's `QImage *`; crate-owned MRC header data is
-    /// held in [`Self::mrc_header`] instead.  No Rust backend may store domain
-    /// state behind this erased pointer.
-    pub backend_handle: *mut c_void,
+    /// libtiff's `TIFF *`; crate-owned backend data has a typed field instead.
+    pub backend_handle: *mut Tiff,
+    /// Decoded pixels owned by the native raster-image backend.  Pixels are
+    /// top-to-bottom, with either one luminance byte or three RGB bytes each.
+    pub native_image_pixels: Option<Vec<u8>>,
+    /// Whether [`Self::native_image_pixels`] contains RGB triples.
+    pub native_image_rgb: bool,
     // `HANDLE` on Windows and an `int` file descriptor on POSIX (`iimage.h`).
     // Keeping a pointer-sized slot is required for the Windows mapping handle.
     pub shr_mem_file: isize,
@@ -261,13 +264,13 @@ pub struct ImodImageFile {
     pub read_section_float: IiSectionFunc,
     pub write_section: IiSectionFunc,
     pub write_section_float: IiSectionFunc,
-    pub clean_up: Option<unsafe extern "C" fn(*mut ImodImageFile)>,
-    pub close: Option<unsafe extern "C" fn(*mut ImodImageFile)>,
-    pub reopen: Option<unsafe extern "C" fn(*mut ImodImageFile) -> i32>,
-    pub fill_mrc_header: Option<unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
+    pub clean_up: Option<unsafe fn(*mut ImodImageFile)>,
+    pub close: Option<unsafe fn(*mut ImodImageFile)>,
+    pub reopen: Option<unsafe fn(*mut ImodImageFile) -> i32>,
+    pub fill_mrc_header: Option<unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
     pub sync_from_mrc_header:
-        Option<unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
-    pub write_header: Option<unsafe extern "C" fn(*mut ImodImageFile) -> i32>,
+        Option<unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
+    pub write_header: Option<unsafe fn(*mut ImodImageFile) -> i32>,
     /// Rust-owned MRC header storage used by the native MRC and like-MRC
     /// backends.
     pub mrc_header: Option<Box<MrcHeader>>,
@@ -326,6 +329,8 @@ impl Default for ImodImageFile {
             section_skip: 0,
             has_piece_coords: 0,
             backend_handle: core::ptr::null_mut(),
+            native_image_pixels: None,
+            native_image_rgb: false,
             shr_mem_file: 0,
             user_data: core::ptr::null_mut(),
             user_flags: 0,
@@ -455,22 +460,15 @@ pub fn init_check_list() -> i32 {
     if !checks.is_empty() {
         return 0;
     }
-    checks.extend(unsafe {
-        [
-            Some(core::mem::transmute::<
-                unsafe fn(*mut ImodImageFile) -> i32,
-                unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-            >(ii_tiff_check)),
-            Some(ii_mrc_check),
-            Some(core::mem::transmute::<
-                unsafe extern "C" fn(*mut crate::imod::libiimod::iilikemrc::ImodImageFile) -> i32,
-                unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-            >(ii_like_mrc_check)),
-            Some(hdf_check_callback),
-            Some(ii_jpeg_check),
-            Some(ii_adoc_check),
-        ]
-    });
+    let initial_checks: [IiFileCheckFunction; 6] = [
+        Some(ii_tiff_check),
+        Some(ii_mrc_check),
+        Some(ii_like_mrc_check),
+        Some(hdf_check_callback),
+        Some(ii_jpeg_check),
+        Some(ii_adoc_check),
+    ];
+    checks.extend(initial_checks);
     drop(checks);
     tiff_filter_warnings();
     0
@@ -506,7 +504,7 @@ pub fn ii_delete_check_list() {
         .clear();
 }
 /// Matches C `iiRegisterQuitCheck(int (*)(int))` (`iimage.c:121`).
-pub fn ii_register_quit_check(func: Option<unsafe extern "C" fn(i32) -> i32>) {
+pub fn ii_register_quit_check(func: Option<unsafe fn(i32) -> i32>) {
     *S_QUIT_CHECK_FUNC.lock().unwrap() = func;
 }
 /// Matches C `iiCheckForQuit(int)` (`iimage.c:130`).
@@ -664,7 +662,7 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
         (*file).fp = if filename.is_empty() {
             Some(ImodFile::Stdin)
         } else {
-            ImodFile::open(&String::from_utf8_lossy(filename), mode)
+            ImodFile::open(&*String::from_utf8_lossy(filename), mode)
         };
         if (*file).fp.is_none() || init_check_list() != 0 {
             if (*file).fp.is_none() {
@@ -925,6 +923,8 @@ pub fn ii_copy_open(in_file: &mut ImodImageFile) -> Option<Box<ImodImageFile>> {
     let mut copy = Box::new(in_file.clone());
     copy.fp = None;
     copy.backend_handle = core::ptr::null_mut();
+    copy.native_image_pixels = None;
+    copy.native_image_rgb = false;
     copy.mrc_header = None;
     copy.owned_hdf_volumes.clear();
     copy.filename = None;
@@ -1029,7 +1029,7 @@ pub fn ii_open_copies_for_threads(
 }
 
 /// Matches C `iiFillMrcHeader(ImodImageFile *, MrcHeader *)` (`iimage.c:661`).
-pub unsafe extern "C" fn ii_fill_mrc_header(
+pub unsafe fn ii_fill_mrc_header(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -1058,7 +1058,7 @@ pub fn ii_simple_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader)
 
 /// Stored callback adapter for image backends that expose this default fill
 /// operation through the legacy C dispatch table.
-pub(crate) unsafe extern "C" fn ii_simple_fill_mrc_header_callback(
+pub(crate) unsafe fn ii_simple_fill_mrc_header_callback(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -1496,7 +1496,7 @@ pub fn ii_read_section(image: &mut ImodImageFile, buf: &mut [u8], in_section: i3
 }
 
 /// Raw callback retained solely for the legacy MRC callback table.
-pub unsafe extern "C" fn ii_read_section_callback(
+pub unsafe fn ii_read_section_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -1561,7 +1561,7 @@ pub fn ii_read_section_byte(image: &mut ImodImageFile, buf: &mut [u8], in_sectio
 }
 
 /// Raw callback retained solely for the legacy MRC callback table.
-pub unsafe extern "C" fn ii_read_section_byte_callback(
+pub unsafe fn ii_read_section_byte_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -1617,7 +1617,7 @@ pub fn ii_read_section_ushort(image: &mut ImodImageFile, buf: &mut [u16], in_sec
 }
 
 /// Raw callback retained solely for the legacy MRC callback table.
-pub unsafe extern "C" fn ii_read_section_ushort_callback(
+pub unsafe fn ii_read_section_ushort_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -1675,7 +1675,7 @@ pub fn ii_read_section_float(image: &mut ImodImageFile, buf: &mut [f32], in_sect
 }
 
 /// Raw callback retained solely for the legacy MRC callback table.
-pub unsafe extern "C" fn ii_read_section_float_callback(
+pub unsafe fn ii_read_section_float_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -2251,7 +2251,7 @@ pub fn get_dflt_eersumming_from_env(super_res: &mut i32, z_summing: &mut i32) {
 pub fn tiffgetmaxeersuperres() -> i32 {
     tiff_get_max_eer_super_res()
 }
-unsafe extern "C" fn hdf_check_callback(in_file: *mut ImodImageFile) -> i32 {
+unsafe fn hdf_check_callback(in_file: *mut ImodImageFile) -> i32 {
     in_file.as_mut().map_or(IIERR_IO_ERROR, native_ii_hdf_check)
 }
 
@@ -2568,7 +2568,7 @@ mod tests {
 
     #[test]
     fn section_dispatch_requires_a_bounded_native_buffer() {
-        unsafe extern "C" fn read_two_bytes(
+        unsafe fn read_two_bytes(
             _image: *mut ImodImageFile,
             buffer: *mut u8,
             _section: i32,
@@ -2813,7 +2813,7 @@ mod tests {
 
     #[test]
     fn quit_callback_returns_the_source_quitting_status() {
-        unsafe extern "C" fn quit_on_seven(value: i32) -> i32 {
+        unsafe fn quit_on_seven(value: i32) -> i32 {
             (value == 7) as i32
         }
         unsafe {
@@ -2831,15 +2831,9 @@ mod tests {
         unsafe {
             use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, mrc_head_new, mrc_head_write};
 
-            let mut path = b"/tmp/imod-rs-iimage-open-XXXXXX\0".to_vec();
-            let fd = libc::mkstemp(path.as_mut_ptr().cast());
-            assert!(fd >= 0);
-            assert_eq!(libc::close(fd), 0);
-            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::open(
-                std::str::from_utf8(&path[..path.len() - 1]).unwrap(),
-                "wb",
-            )
-            .unwrap();
+            let path = std::env::temp_dir()
+                .join(format!("imod-rs-iimage-open-{}.mrc", std::process::id()));
+            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, "wb").unwrap();
             let mut header = MrcHeader::default();
             mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
             header.fp = Some(fp.clone());
@@ -2851,7 +2845,7 @@ mod tests {
             drop(fp);
 
             ii_delete_check_list();
-            let image = ii_open(&path[..path.len() - 1], "rb");
+            let image = ii_open(path.as_os_str().as_encoded_bytes(), "rb");
             assert!(!image.is_null());
             assert_eq!(
                 ((*image).state, (*image).file, (*image).nx, (*image).ny),
@@ -2864,7 +2858,7 @@ mod tests {
             assert_eq!(ii_read_point(&mut *image, -1, 1, 0), (*image).amin);
             ii_delete(image);
             ii_delete_check_list();
-            assert_eq!(libc::unlink(path.as_ptr().cast()), 0);
+            std::fs::remove_file(path).unwrap();
         }
     }
 }

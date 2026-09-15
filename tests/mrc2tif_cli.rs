@@ -859,10 +859,7 @@ fn mrc2tif_malformed_option_and_qimage_request_reaches_source_input_opening() {
         .output()
         .unwrap();
     assert!(!qimage.status.success());
-    #[cfg(feature = "qt")]
     assert!(String::from_utf8_lossy(&qimage.stdout).contains("Couldn't open not-opened.mrc"));
-    #[cfg(not(feature = "qt"))]
-    assert!(String::from_utf8_lossy(&qimage.stdout).contains("QImage Qt boundary"));
 }
 
 #[test]

@@ -378,7 +378,7 @@ fn image_reference_header_scale_controls_different_volume_transform() {
     // `mrcHeadWrite` takes `&mut ImodFile` since the `libiimod` conversion;
     // this is the minimal call-site edit for that.
     let mut image_file =
-        ImodFile::open(&image_path.to_string_lossy(), "wb").expect("image file must open");
+        ImodFile::open(&image_path, "wb").expect("image file must open");
     let mut header = MrcHeader::default();
     assert_eq!(mrc_head_new(&mut header, 10, 1, 1, 2), 0);
     header.mx = 10;

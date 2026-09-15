@@ -24,7 +24,7 @@ use crate::imod::libiimod::mrcfiles::{
 const IIADOC_IMAGE: &[u8] = b"Image";
 
 /// Matches C `iiADOCCheck(ImodImageFile *)` (`iiadoc.c:30`).
-pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
+pub unsafe fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
     if in_file.is_null() || unsafe { (*in_file).fp.is_none() } {
         return IIERR_BAD_CALL;
     }
@@ -134,7 +134,7 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
 }
 
 /// Matches C static `adocClose` (`iiadoc.c:106`).
-unsafe extern "C" fn adoc_close(in_file: *mut ImodImageFile) {
+unsafe fn adoc_close(in_file: *mut ImodImageFile) {
     unsafe {
         if !in_file.is_null() && (*in_file).adoc_index >= 0 {
             adoc_clear((*in_file).adoc_index);
@@ -147,7 +147,7 @@ unsafe extern "C" fn adoc_close(in_file: *mut ImodImageFile) {
 }
 
 /// Matches C static `adocReopen` (`iiadoc.c:116`).
-unsafe extern "C" fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
+unsafe fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
     unsafe {
         let name = (*in_file).filename.clone().unwrap_or_default();
         (*in_file).adoc_index = adoc_read(name.as_bytes());
@@ -168,7 +168,7 @@ unsafe extern "C" fn adoc_reopen(in_file: *mut ImodImageFile) -> i32 {
 }
 
 /// Matches C static `adocFillMrcHeader` (`iiadoc.c:129`).
-unsafe extern "C" fn adoc_fill_mrc_header(
+unsafe fn adoc_fill_mrc_header(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -281,7 +281,7 @@ fn read_section_file(
 }
 
 /// Matches C static `adocReadSectionByte` (`iiadoc.c:221`).
-unsafe extern "C" fn adoc_read_section_byte(
+unsafe fn adoc_read_section_byte(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -311,7 +311,7 @@ unsafe extern "C" fn adoc_read_section_byte(
 }
 
 /// Matches C static `adocReadSectionUShort` (`iiadoc.c:226`).
-unsafe extern "C" fn adoc_read_section_ushort(
+unsafe fn adoc_read_section_ushort(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -344,7 +344,7 @@ unsafe extern "C" fn adoc_read_section_ushort(
 }
 
 /// Matches C static `adocReadSectionFloat` (`iiadoc.c:231`).
-unsafe extern "C" fn adoc_read_section_float(
+unsafe fn adoc_read_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -377,7 +377,7 @@ unsafe extern "C" fn adoc_read_section_float(
 }
 
 /// Matches C static `adocReadSection` (`iiadoc.c:236`).
-unsafe extern "C" fn adoc_read_section(
+unsafe fn adoc_read_section(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,

@@ -93,25 +93,23 @@ fn fft_matrix_worker() {
     let inverse = fields[3].parse::<i32>().unwrap();
     let mut values = case_input(routine, nx, ny);
     let mut dumped = Vec::<u8>::new();
-    unsafe {
-        match routine {
-            "odfft_real" => {
-                imod_rs::imod::libfft::odfft_c(values.as_mut_ptr(), nx as i32, ny as i32, 0);
-                dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
-                imod_rs::imod::libfft::odfft_c(values.as_mut_ptr(), nx as i32, ny as i32, inverse);
-            }
-            "odfft_complex" => {
-                imod_rs::imod::libfft::odfft_c(values.as_mut_ptr(), nx as i32, ny as i32, -1);
-                dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
-                imod_rs::imod::libfft::odfft_c(values.as_mut_ptr(), nx as i32, ny as i32, inverse);
-            }
-            "todfft" => {
-                imod_rs::imod::libfft::todfft_c(values.as_mut_ptr(), nx as i32, ny as i32, 0);
-                dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
-                imod_rs::imod::libfft::todfft_c(values.as_mut_ptr(), nx as i32, ny as i32, inverse);
-            }
-            other => panic!("unknown case routine {other}"),
+    match routine {
+        "odfft_real" => {
+            imod_rs::imod::libfft::odfft_c(&mut values, nx as i32, ny as i32, 0);
+            dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+            imod_rs::imod::libfft::odfft_c(&mut values, nx as i32, ny as i32, inverse);
         }
+        "odfft_complex" => {
+            imod_rs::imod::libfft::odfft_c(&mut values, nx as i32, ny as i32, -1);
+            dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+            imod_rs::imod::libfft::odfft_c(&mut values, nx as i32, ny as i32, inverse);
+        }
+        "todfft" => {
+            imod_rs::imod::libfft::todfft_c(&mut values, nx as i32, ny as i32, 0);
+            dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+            imod_rs::imod::libfft::todfft_c(&mut values, nx as i32, ny as i32, inverse);
+        }
+        other => panic!("unknown case routine {other}"),
     }
     dumped.extend(values.iter().flat_map(|value| value.to_le_bytes()));
     std::fs::write(std::env::var(OUTPUT).unwrap(), dumped).unwrap();

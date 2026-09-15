@@ -2185,7 +2185,7 @@ pub fn mrc_write_fft(
         MRC_MODE_COMPLEX_FLOAT,
     );
     imod_backup_file(&String::from_utf8_lossy(filename));
-    let fp = ImodFile::open(&String::from_utf8_lossy(filename), "wb");
+    let fp = ImodFile::open(&*String::from_utf8_lossy(filename), "wb");
     if let Some(mut fp) = fp {
         retval = 0;
         hdr.amax = -1.0e37_f32;

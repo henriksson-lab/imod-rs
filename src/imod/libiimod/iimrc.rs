@@ -27,7 +27,7 @@ const IIERR_NOT_FORMAT: i32 = 1;
 const IIERR_IO_ERROR: i32 = 2;
 
 /// Matches C `iiMRCCheck(ImodImageFile *)` (`iimrc.c:31`).
-pub unsafe extern "C" fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
+pub unsafe fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
     let Some(image) = (unsafe { iif.as_mut() }) else {
         return IIERR_BAD_CALL;
     };
@@ -96,7 +96,7 @@ pub fn ii_mrc_mode_to_format_type(image: &mut ImodImageFile, mode: i32, bytes_si
 }
 
 /// Matches C `iiMRCsetIOFuncs(ImodImageFile *, int)` (`iimrc.c:105`).
-pub unsafe extern "C" fn ii_mrc_set_io_funcs(in_file: *mut ImodImageFile, raw_file: i32) {
+pub unsafe fn ii_mrc_set_io_funcs(in_file: *mut ImodImageFile, raw_file: i32) {
     let Some(image) = (unsafe { in_file.as_mut() }) else {
         return;
     };
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn ii_mrc_set_io_funcs(in_file: *mut ImodImageFile, raw_fi
     }
 }
 /// Matches C `iiMRCdelete(ImodImageFile *)` (`iimrc.c:118`).
-pub unsafe extern "C" fn ii_mrc_delete(in_file: *mut ImodImageFile) {
+pub unsafe fn ii_mrc_delete(in_file: *mut ImodImageFile) {
     if let Some(image) = unsafe { in_file.as_mut() } {
         image.mrc_header = None;
     }
@@ -157,7 +157,7 @@ pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
     0
 }
 /// Matches C `iiMRCfillHeader(ImodImageFile *, MrcHeader *)` (`iimrc.c:145`).
-pub unsafe extern "C" fn ii_mrc_fill_header(
+pub unsafe fn ii_mrc_fill_header(
     in_file: *mut ImodImageFile,
     hdata: *mut MrcHeader,
 ) -> i32 {
@@ -204,7 +204,7 @@ pub fn ii_mrc_set_load_info(image: &ImodImageFile, li: &mut LoadInfo) {
     li.pad_right = image.pad_right;
 }
 /// Matches C static `iiMRCreadSection` (`iimrc.c:192`).
-unsafe extern "C" fn ii_mrc_read_section(
+unsafe fn ii_mrc_read_section(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -253,7 +253,7 @@ unsafe extern "C" fn ii_mrc_read_section(
     read_section_unscaled(image, output, in_section, 0)
 }
 /// Matches C static `iiMRCreadSectionFloat` (`iimrc.c:197`).
-unsafe extern "C" fn ii_mrc_read_section_float(
+unsafe fn ii_mrc_read_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -375,7 +375,7 @@ fn read_section_unscaled(
     err
 }
 /// Matches C static `iiMRCreadSectionByte` (`iimrc.c:223`).
-unsafe extern "C" fn ii_mrc_read_section_byte(
+unsafe fn ii_mrc_read_section_byte(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -408,7 +408,7 @@ unsafe extern "C" fn ii_mrc_read_section_byte(
     read_section_scaled(image, output, in_section, 255)
 }
 /// Matches C static `iiMRCreadSectionUShort` (`iimrc.c:227`).
-unsafe extern "C" fn ii_mrc_read_section_ushort(
+unsafe fn ii_mrc_read_section_ushort(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -510,7 +510,7 @@ fn read_section_scaled(
     err
 }
 /// Matches C static `iiMRCwriteSection` (`iimrc.c:255`).
-unsafe extern "C" fn ii_mrc_write_section(
+unsafe fn ii_mrc_write_section(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
@@ -518,7 +518,7 @@ unsafe extern "C" fn ii_mrc_write_section(
     unsafe { write_section(in_file, buf, in_section, 0) }
 }
 /// Matches C static `iiMRCwriteSectionFloat` (`iimrc.c:260`).
-unsafe extern "C" fn ii_mrc_write_section_float(
+unsafe fn ii_mrc_write_section_float(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,

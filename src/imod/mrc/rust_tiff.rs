@@ -17,24 +17,11 @@ mod implementation {
     use crate::imod::libiimod::mrcfiles::{
         MRC_MODE_BYTE, MRC_MODE_FLOAT, MRC_MODE_RGB, MRC_MODE_SHORT, MRC_MODE_USHORT,
     };
-    use std::collections::HashMap;
     use std::fs::File;
     use std::io::Cursor;
-    use std::sync::{LazyLock, Mutex};
     use tiff::ColorType;
     use tiff::decoder::{Decoder, DecodingResult};
     use tiff::tags::Tag;
-
-    struct Image {
-        data: Vec<u8>,
-    }
-
-    struct FileData {
-        images: Vec<Image>,
-    }
-
-    static FILES: LazyLock<Mutex<HashMap<usize, FileData>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
 
     fn bytes(result: DecodingResult) -> (Vec<u8>, i32, i32, i32) {
         match result {
@@ -348,7 +335,7 @@ mod implementation {
                 first = Some((width, height, bits, type_, rgb));
             }
             flip_rows(&mut data, width as usize, height as usize, bytes_per_pixel);
-            images.push(Image { data });
+            images.push(data);
             if !decoder.more_images() {
                 break;
             }
@@ -404,10 +391,7 @@ mod implementation {
             (*tif).width = width as i32;
             (*tif).length = height as i32;
         }
-        FILES
-            .lock()
-            .unwrap()
-            .insert(tif as *mut TfInfo as usize, FileData { images });
+        tif.decoded_pages = images;
         0
     }
 
@@ -622,30 +606,15 @@ mod implementation {
     }
 
     pub fn read_section(tif: &mut TfInfo, section: i32) -> Option<Vec<u8>> {
-        let files = FILES.lock().unwrap();
-        Some(
-            files
-                .get(&(tif as *mut TfInfo as usize))?
-                .images
-                .get(section.max(0) as usize)?
-                .data
-                .clone(),
-        )
+        tif.decoded_pages.get(section.max(0) as usize).cloned()
     }
 
     pub fn contains(tif: &mut TfInfo) -> bool {
-        FILES
-            .lock()
-            .unwrap()
-            .contains_key(&(tif as *mut TfInfo as usize))
+        !tif.decoded_pages.is_empty()
     }
 
     pub fn close_file(tif: &mut TfInfo) -> bool {
-        FILES
-            .lock()
-            .unwrap()
-            .remove(&(tif as *mut TfInfo as usize))
-            .is_some()
+        !std::mem::take(&mut tif.decoded_pages).is_empty()
     }
 
     #[cfg(test)]

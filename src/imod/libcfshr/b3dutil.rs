@@ -84,9 +84,10 @@ static B3D_RAND_STATE: Mutex<B3dRandState> = Mutex::new(B3dRandState {
 });
 
 thread_local! {
-    /// `b3dutil.c:1848` `static int sLockFiles[MAX_LOCK_FILES]`.
-    static S_LOCK_FILES: RefCell<[i32; MAX_LOCK_FILES]> =
-        const { RefCell::new([0; MAX_LOCK_FILES]) };
+    /// `b3dutil.c:1848` `static int sLockFiles[MAX_LOCK_FILES]`.  Rust owns
+    /// the files; `fcntl` receives their borrowed descriptors.
+    static S_LOCK_FILES: RefCell<[Option<std::fs::File>; MAX_LOCK_FILES]> =
+        RefCell::new(std::array::from_fn(|_| None));
     /// `b3dutil.c:1850` `static int sLocksUsed[MAX_LOCK_FILES]`.
     static S_LOCKS_USED: RefCell<[i32; MAX_LOCK_FILES]> =
         const { RefCell::new([0; MAX_LOCK_FILES]) };
@@ -152,9 +153,11 @@ impl ImodFile {
     ///
     /// The source carries mode strings in variables and builds them
     /// conditionally, so this takes the string rather than exposing one
-    /// constructor per mode. `b` is accepted and ignored, as on POSIX.
-    /// Returns `None` where `fopen` returns NULL.
-    pub fn open(path: &str, mode: &str) -> Option<ImodFile> {
+    /// constructor per mode.  The path is any ordinary Rust path, so callers
+    /// do not have to create a lossy C-string-shaped intermediate. `b` is
+    /// accepted and ignored, as on POSIX. Returns `None` where `fopen`
+    /// returns NULL.
+    pub fn open(path: impl AsRef<std::path::Path>, mode: &str) -> Option<ImodFile> {
         let m: String = mode.chars().filter(|c| *c != 'b').collect();
         let mut o = std::fs::OpenOptions::new();
         match m.as_str() {
@@ -1811,11 +1814,9 @@ pub fn b3d_open_lock_file(filename: &str) -> i32 {
         Ok(file) => file,
         Err(_) => return -2,
     };
-    // The descriptor has to outlive this call the way the C's does, and the
-    // lock table stores descriptors rather than `File`s because
-    // @b3d_close_lock_file is what closes them.
-    use std::os::fd::IntoRawFd;
-    S_LOCK_FILES.with_borrow_mut(|files| files[ind] = file.into_raw_fd());
+    // The file remains owned by the table until `b3d_close_lock_file`; `fcntl`
+    // below borrows its descriptor without transferring ownership.
+    S_LOCK_FILES.with_borrow_mut(|files| files[ind] = Some(file));
     S_LOCKS_USED.with_borrow_mut(|used| used[ind] = 0);
     let timeout = S_DFLT_LOCK_TIMEOUT.get();
     S_LOCK_TIMEOUTS.with_borrow_mut(|timeouts| timeouts[ind] = timeout);
@@ -1842,7 +1843,13 @@ pub fn b3d_lock_file(index: i32) -> i32 {
         l_len: NUM_LOCK_BYTES as _,
         l_pid: 0,
     };
-    let descriptor = S_LOCK_FILES.with_borrow(|files| files[index]);
+    use std::os::fd::AsRawFd;
+    let descriptor = S_LOCK_FILES.with_borrow(|files| {
+        files[index]
+            .as_ref()
+            .map(AsRawFd::as_raw_fd)
+            .unwrap_or(-1)
+    });
     let timeout = S_LOCK_TIMEOUTS.with_borrow(|timeouts| timeouts[index]);
     let started = std::time::Instant::now();
     loop {
@@ -1877,7 +1884,13 @@ pub fn b3d_unlock_file(index: i32) -> i32 {
             l_len: NUM_LOCK_BYTES as _,
             l_pid: 0,
         };
-        let descriptor = S_LOCK_FILES.with_borrow(|files| files[index]);
+        use std::os::fd::AsRawFd;
+        let descriptor = S_LOCK_FILES.with_borrow(|files| {
+            files[index]
+                .as_ref()
+                .map(AsRawFd::as_raw_fd)
+                .unwrap_or(-1)
+        });
         if unsafe { libc::fcntl(descriptor, libc::F_SETLK, &lock) } < 0 {
             return 1;
         }
@@ -1894,8 +1907,7 @@ pub fn b3d_close_lock_file(index: i32) -> i32 {
     if S_LOCKS_USED.with_borrow(|used| used[index]) < 0 {
         return -2;
     }
-    let descriptor = S_LOCK_FILES.with_borrow(|files| files[index]);
-    if unsafe { libc::close(descriptor) } < 0 {
+    if S_LOCK_FILES.with_borrow_mut(|files| files[index].take()).is_none() {
         return 1;
     }
     S_LOCKS_USED.with_borrow_mut(|used| used[index] = -1);
@@ -2569,6 +2581,41 @@ mod tests {
         );
     }
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn imod_file_open_accepts_a_non_utf8_rust_path() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let path = std::env::temp_dir().join(std::ffi::OsString::from_vec(
+            [
+                b'i', b'm', b'o', b'd', b'-', b'r', b's', b'-', b'p', b'a', b't', b'h', b'-', 0xff,
+                b'-', b't', b'e', b's', b't', b'-',
+            ]
+            .to_vec(),
+        ));
+        let file = ImodFile::open(&path, "wb");
+        assert!(file.is_some());
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_file_owns_and_releases_its_rust_file() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-lock-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, []).unwrap();
+        let index = b3d_open_lock_file(path.to_str().unwrap());
+        assert!(index >= 0);
+        assert_eq!(b3d_lock_file(index), 0);
+        assert_eq!(b3d_unlock_file(index), 0);
+        assert_eq!(b3d_close_lock_file(index), 0);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn output_overrides_have_the_source_precedence() {

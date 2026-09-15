@@ -3,7 +3,6 @@ mod common;
 use imod_rs::imod::libiimod::mrcfiles::{
     MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_read, mrc_head_write,
 };
-use std::ffi::CString;
 
 #[test]
 fn binvol_without_two_arguments_prints_source_help_and_exits_zero() {
@@ -62,11 +61,7 @@ fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
         let stamp = format!("imod-rs-binvol-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 4, 2, MRC_MODE_FLOAT), 0);
         header.xlen = 8.;
@@ -119,9 +114,7 @@ fn binvol_bins_an_mrc_stack_and_preserves_transferred_metadata() {
             String::from_utf8_lossy(&result.stderr)
         );
 
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!(
@@ -181,11 +174,7 @@ fn binvol_spread_keeps_the_source_sampled_extent_and_origin_shift() {
         let stamp = format!("imod-rs-binvol-spread-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         // The native `iiuReadReduced` source path requires enough rows for
         // its ten-line filter chunk; use a real, source-valid small stack.
@@ -235,9 +224,7 @@ fn binvol_spread_keeps_the_source_sampled_extent_and_origin_shift() {
             String::from_utf8_lossy(&result.stderr)
         );
 
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         drop(file);
@@ -258,11 +245,7 @@ fn binvol_applies_source_xy_antialias_through_unit_reduced() {
         let stamp = format!("imod-rs-binvol-xy-filter-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         // Two sections: with `nz == 1` the source forces `binZ = 1` but leaves
         // `ibinZ` at 2 (`binvol.f90:138` does not touch `iredFac`), so
@@ -320,9 +303,7 @@ fn binvol_applies_source_xy_antialias_through_unit_reduced() {
             String::from_utf8_lossy(&result.stdout)
                 .contains(" Antialiasing is being applied in X and Y as well as Z\n")
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!((written.nx, written.ny, written.nz), (16, 16, 1));
@@ -366,11 +347,7 @@ fn binvol_uses_source_strip_fallback_at_one_megabyte_limit() {
         let stamp = format!("imod-rs-binvol-strip-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 1024, 1024, 2, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -412,9 +389,7 @@ fn binvol_uses_source_strip_fallback_at_one_megabyte_limit() {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!((written.nx, written.ny, written.nz), (512, 512, 1));
@@ -449,10 +424,7 @@ fn binvol_runs_source_fourier_reduce_and_expand_on_real_mrc_volumes() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let reduced = std::env::temp_dir().join(format!("{stamp}-reduced.mrc"));
         let expanded = std::env::temp_dir().join(format!("{stamp}-expanded.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 16, 16, 16, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -496,10 +468,7 @@ fn binvol_runs_source_fourier_reduce_and_expand_on_real_mrc_volumes() {
                 "{}",
                 String::from_utf8_lossy(&result.stderr)
             );
-            let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-            let mut file =
-                imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                    .unwrap();
+            let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
             let mut written = MrcHeader::default();
             assert_eq!(mrc_head_read(&mut file, &mut written), 0);
             assert_eq!((written.nx, written.ny, written.nz), dimensions);
@@ -526,10 +495,7 @@ fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let parity_output = std::env::temp_dir().join(format!("{stamp}-parity.mrc"));
         let rustfft_output = std::env::temp_dir().join(format!("{stamp}-rustfft.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 16, 16, 16, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -580,14 +546,10 @@ fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
             );
         }
 
-        let parity_c = CString::new(parity_output.as_os_str().as_encoded_bytes()).unwrap();
-        let rustfft_c = CString::new(rustfft_output.as_os_str().as_encoded_bytes()).unwrap();
         let mut parity_file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&parity_c.to_string_lossy(), "rb")
-                .unwrap();
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&parity_output, "rb").unwrap();
         let mut rustfft_file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&rustfft_c.to_string_lossy(), "rb")
-                .unwrap();
+            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&rustfft_output, "rb").unwrap();
         let mut parity_header = MrcHeader::default();
         let mut rustfft_header = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut parity_file, &mut parity_header), 0);
@@ -609,15 +571,21 @@ fn binvol_rustfft_fourier_reduction_matches_the_parity_mrc_volume() {
         let count = (parity_header.nx * parity_header.ny * parity_header.nz) as usize;
         let mut parity_pixels = vec![0_f32; count];
         let mut rustfft_pixels = vec![0_f32; count];
-        libc::fseek(
-            parity_file,
-            parity_header.header_size as i64,
-            libc::SEEK_SET,
+        assert_eq!(
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut parity_file,
+                parity_header.header_size,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET,
+            ),
+            0
         );
-        libc::fseek(
-            rustfft_file,
-            rustfft_header.header_size as i64,
-            libc::SEEK_SET,
+        assert_eq!(
+            imod_rs::imod::libcfshr::b3dutil::b3d_fseek(
+                &mut rustfft_file,
+                rustfft_header.header_size,
+                imod_rs::imod::libcfshr::b3dutil::SEEK_SET,
+            ),
+            0
         );
         assert_eq!(
             imod_rs::imod::libcfshr::b3dutil::b3d_fread(
@@ -677,11 +645,7 @@ fn binvol_accepts_source_permitted_noninteger_fourier_binning() {
         let stamp = format!("imod-rs-binvol-fourier-ratio-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 16, 16, 16, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -720,9 +684,7 @@ fn binvol_accepts_source_permitted_noninteger_fourier_binning() {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output_c.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         drop(file);
@@ -738,10 +700,7 @@ fn binvol_rejects_simultaneous_fourier_directions_on_real_mrc() {
         let stamp = format!("imod-rs-binvol-fourier-conflict-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -783,10 +742,7 @@ fn binvol_rejects_spread_with_fourier_on_real_mrc() {
         let stamp = format!("imod-rs-binvol-spread-fourier-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -830,10 +786,7 @@ fn binvol_rejects_noninteger_real_mrc_reduction_without_filter() {
         let stamp = format!("imod-rs-binvol-noninteger-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 4, 4, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -880,10 +833,7 @@ fn binvol_rejects_unequal_noninteger_xy_real_mrc_reduction() {
         let stamp = format!("imod-rs-binvol-xy-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 6, 6, 2, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -929,10 +879,7 @@ fn binvol_rejects_invalid_output_mode_on_real_mrc() {
         let stamp = format!("imod-rs-binvol-mode-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -975,10 +922,7 @@ fn binvol_rejects_source_invalid_antialias_filter_on_real_mrc() {
         let stamp = format!("imod-rs-binvol-antialias-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
         let output = std::env::temp_dir().join(format!("{stamp}-out.mrc"));
-        let name = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -1018,10 +962,7 @@ fn binvol_rejects_source_invalid_antialias_filter_on_real_mrc() {
 /// Native runs on this same stack supplied every expectation asserted here.
 fn write_tiny_float_stack(path: &std::path::Path) {
     unsafe {
-        let name = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(path, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 4, 4, 2, MRC_MODE_FLOAT), 0);
         header.amin = 1.;
@@ -1075,10 +1016,7 @@ fn binvol_takes_the_first_value_of_a_comma_separated_binning_entry() {
             .unwrap();
         assert_eq!(result.status.code(), Some(0));
         assert_eq!(String::from_utf8_lossy(&result.stderr), "");
-        let name = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&name.to_string_lossy(), "rb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
         let mut written = MrcHeader::default();
         assert_eq!(mrc_head_read(&mut file, &mut written), 0);
         assert_eq!((written.nx, written.ny, written.nz), (2, 2, 1));
@@ -1293,10 +1231,7 @@ fn binvol_rustfft_fourier_expansion_matches_parity_at_mixed_radix_sizes() {
     unsafe {
         let stamp = format!("imod-rs-binvol-rustfft-mixed-{}", std::process::id());
         let input = std::env::temp_dir().join(format!("{stamp}.mrc"));
-        let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
-        let mut file =
-            imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input_c.to_string_lossy(), "wb")
-                .unwrap();
+        let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&input, "wb").unwrap();
         let mut header = MrcHeader::default();
         assert_eq!(mrc_head_new(&mut header, 30, 18, 12, MRC_MODE_FLOAT), 0);
         header.fp = Some(file.clone());
@@ -1343,12 +1278,8 @@ fn binvol_rustfft_fourier_expansion_matches_parity_at_mixed_radix_sizes() {
                     "{option} {backend}: {}",
                     String::from_utf8_lossy(&result.stderr)
                 );
-                let output_c = CString::new(output.as_os_str().as_encoded_bytes()).unwrap();
-                let mut file = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(
-                    &output_c.to_string_lossy(),
-                    "rb",
-                )
-                .unwrap();
+                let mut file =
+                    imod_rs::imod::libcfshr::b3dutil::ImodFile::open(&output, "rb").unwrap();
                 let mut written = MrcHeader::default();
                 assert_eq!(mrc_head_read(&mut file, &mut written), 0);
                 let count = (written.nx * written.ny * written.nz) as usize;
