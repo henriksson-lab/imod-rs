@@ -456,7 +456,7 @@ mod tests {
         model.obj.push(Iobj::default());
         let mut app = ImodvApp::default();
         app.imod = &mut *model;
-        app.mod_.push(&mut *model);
+        app.mod_.push(std::ptr::NonNull::from(&mut *model));
         app.num_mods = 1;
         let mut native = Native::default();
         let mut form = ImodvObjedForm::new(&app, &mut native);

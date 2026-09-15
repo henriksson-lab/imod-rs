@@ -533,28 +533,28 @@ pub fn input_set_model_time(vi: &mut ImodView, time: i32) {
 /// `inputNextTime`.
 pub fn input_next_time(vi: &mut ImodView, n: &mut dyn InputNativeBoundary) {
     let mut time = 0;
-    if unsafe { ivw_get_time(vi, Some(&mut time)) } != 0 {
+    if ivw_get_time(vi, Some(&mut time)) != 0 {
         ivw_set_time(vi, time + 1);
         n.draw(vi, 7);
     }
 }
 /// `inputMovieTime`.
 pub fn input_movie_time(vi: &mut ImodView, val: i32, n: &mut dyn InputNativeBoundary) {
-    if unsafe { ivw_get_time(vi, None) } != 0 {
+    if ivw_get_time(vi, None) != 0 {
         n.movie_xyzt(vi, val);
     }
 }
 /// `inputPrevTime`.
 pub fn input_prev_time(vi: &mut ImodView, n: &mut dyn InputNativeBoundary) {
     let mut time = 0;
-    if unsafe { ivw_get_time(vi, Some(&mut time)) } != 0 {
+    if ivw_get_time(vi, Some(&mut time)) != 0 {
         ivw_set_time(vi, time - 1);
         n.draw(vi, 7);
     }
 }
 /// `inputLimitingTime`.
 pub fn input_limiting_time(vi: &mut ImodView, dir: i32, n: &mut dyn InputNativeBoundary) {
-    if unsafe { ivw_get_time(vi, None) } == 0 {
+    if ivw_get_time(vi, None) == 0 {
         return;
     }
     let (start, end) = n.get_start_end(vi, 3);

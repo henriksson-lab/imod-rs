@@ -2,7 +2,7 @@ mod common;
 
 use imod_rs::imod::libiimod::iihdf::ii_hdf_open_new;
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_HDF, ii_delete, ii_open_new, ii_sync_from_mrc_header,
+    IIFILE_HDF, ii_delete, ii_open_new, ii_sync_from_mrc_header, ii_write_header,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
@@ -261,20 +261,28 @@ fn header_opens_source_hdf_multivolume_and_selects_requested_volume() {
         let input_c = CString::new(input.as_os_str().as_encoded_bytes()).unwrap();
         let image = ii_open_new(input_c.to_bytes(), "wb", IIFILE_HDF);
         assert!(!image.is_null());
-        let header = (*image).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, MRC_MODE_FLOAT), 0);
-        ii_sync_from_mrc_header(image, header);
-        (*image).z_chunk_size = 1;
-        assert_eq!((*image).write_header.unwrap()(image), 0);
+        let image = &mut *image;
+        let mut header = image.mrc_header.take().expect("new HDF image header");
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        image.mrc_header = Some(header);
+        image.z_chunk_size = 1;
+        assert_eq!(ii_write_header(image), 0);
         assert_eq!(ii_hdf_open_new(image, "wb"), 0);
-        let second_volume = *(*image).ii_volumes.add(1);
-        let second_header = (*second_volume).header.cast::<MrcHeader>();
-        assert_eq!(
-            mrc_head_new(&mut *second_header, 2, 2, 2, MRC_MODE_FLOAT),
-            0
-        );
-        ii_sync_from_mrc_header(second_volume, second_header);
-        assert_eq!((*second_volume).write_header.unwrap()(second_volume), 0);
+        let second_volume = image
+            .owned_hdf_volumes
+            .first_mut()
+            .expect("second HDF volume")
+            .as_mut();
+        let mut second_header = second_volume
+            .mrc_header
+            .take()
+            .expect("new HDF volume header");
+        assert_eq!(mrc_head_new(&mut second_header, 2, 2, 2, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(second_volume, &mut second_header);
+        second_volume.mrc_header = Some(second_header);
+        assert_eq!(ii_write_header(second_volume), 0);
+        let second_volume = second_volume as *mut _;
         ii_delete(second_volume);
         ii_delete(image);
         let result = common::imod_cmd("header")

@@ -253,9 +253,9 @@ pub fn clip_corr3d(
         c_format(
             "max = %g, min = %g, mean = %g\n",
             &[
-                CArg::Dbl((max as core::ffi::c_double) as f64),
-                CArg::Dbl((min as core::ffi::c_double) as f64),
-                CArg::Dbl((mean as core::ffi::c_double) as f64),
+                CArg::Dbl(max as f64),
+                CArg::Dbl(min as f64),
+                CArg::Dbl(mean as f64),
             ],
         )
         .as_bytes(),
@@ -297,9 +297,9 @@ pub fn clip_corr3d(
             c_format(
                 "max = %g, min = %g, mean = %g\n",
                 &[
-                    CArg::Dbl((max as core::ffi::c_double) as f64),
-                    CArg::Dbl((min as core::ffi::c_double) as f64),
-                    CArg::Dbl((mean as core::ffi::c_double) as f64),
+                    CArg::Dbl(max as f64),
+                    CArg::Dbl(min as f64),
+                    CArg::Dbl(mean as f64),
                 ],
             )
             .as_bytes(),
@@ -421,9 +421,9 @@ pub fn clip_corr3d(
         c_format(
             "max = %g  min = %g  mean = %g\n",
             &[
-                CArg::Dbl((max as core::ffi::c_double) as f64),
-                CArg::Dbl((min as core::ffi::c_double) as f64),
-                CArg::Dbl((mean as core::ffi::c_double) as f64),
+                CArg::Dbl(max as f64),
+                CArg::Dbl(min as f64),
+                CArg::Dbl(mean as f64),
             ],
         )
         .as_bytes(),
@@ -443,9 +443,9 @@ pub fn clip_corr3d(
         c_format(
             "( %.2f, %.2f, %.2f)\n",
             &[
-                CArg::Dbl((peak_x as core::ffi::c_double) as f64),
-                CArg::Dbl((peak_y as core::ffi::c_double) as f64),
-                CArg::Dbl((peak_z as core::ffi::c_double) as f64),
+                CArg::Dbl(peak_x as f64),
+                CArg::Dbl(peak_y as f64),
+                CArg::Dbl(peak_z as f64),
             ],
         )
         .as_bytes(),
@@ -883,10 +883,10 @@ pub fn grap_corr(
         c_format(
             "Maximum at ( %.2f, %.2f), transformation ( %.2f, %.2f)\n",
             &[
-                CArg::Dbl((x as core::ffi::c_double) as f64),
-                CArg::Dbl((y as core::ffi::c_double) as f64),
-                CArg::Dbl((-x as core::ffi::c_double) as f64),
-                CArg::Dbl((-y as core::ffi::c_double) as f64),
+                CArg::Dbl(x as f64),
+                CArg::Dbl(y as f64),
+                CArg::Dbl(-x as f64),
+                CArg::Dbl(-y as f64),
             ],
         )
         .as_bytes(),

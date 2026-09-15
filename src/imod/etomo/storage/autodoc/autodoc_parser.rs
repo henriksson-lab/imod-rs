@@ -217,8 +217,13 @@ impl LinkList {
 
 /// Java package-private final `AutodocParser`.
 pub struct AutodocParser {
-    /// Java field `line`, a `Vector` of tokens.
-    line: Vec<*mut Token>,
+    /// Indices into `tokens` for the current source line.  Keeping line positions as
+    /// owned handles avoids treating lexer-token ownership as an untracked raw-pointer
+    /// collection.
+    line: Vec<usize>,
+    /// Parser-owned lexer tokens.  Parsed autodoc statements borrow these stable boxed
+    /// tokens for as long as this parser, which is retained by the autodoc, lives.
+    tokens: Vec<Box<Token>>,
     /// Java field `peetVariant`.
     peet_variant: bool,
     /// Java field `tokenizer`, cleared to null by `parse()`.
@@ -320,6 +325,7 @@ impl AutodocParser {
         let log_file = unsafe { (*tokenizer).get_log_file() };
         AutodocParser {
             line: Vec::new(),
+            tokens: Vec::new(),
             peet_variant,
             tokenizer,
             log_file,
@@ -1403,7 +1409,6 @@ impl AutodocParser {
         let error_message = format!("Line# {}: {}", self.line_num, message);
         let error_index = self.token_index - 1;
         let size = self.line.len() as i32;
-        let mut token: *mut Token;
         let mut value: String;
         let mut error_position: i32 = 0;
         let mut index: i32;
@@ -1411,12 +1416,9 @@ impl AutodocParser {
         let mut carat = String::new();
         index = 0;
         while index <= error_index && index < size - 1 {
-            token = self.line[index as usize];
-            value = unsafe {
-                match (*token).get_value() {
-                    None => "null".to_string(),
-                    Some(value) => value.to_string(),
-                }
+            value = match self.tokens[self.line[index as usize]].get_value() {
+                None => "null".to_string(),
+                Some(value) => value.to_string(),
             };
             if index < error_index {
                 error_position += value.encode_utf16().count() as i32;
@@ -1426,12 +1428,9 @@ impl AutodocParser {
         }
         index = error_index + 1;
         while index < size - 1 {
-            token = self.line[index as usize];
-            print_line.push_str(&unsafe {
-                match (*token).get_value() {
-                    None => "null".to_string(),
-                    Some(value) => value.to_string(),
-                }
+            print_line.push_str(&match self.tokens[self.line[index as usize]].get_value() {
+                None => "null".to_string(),
+                Some(value) => value.to_string(),
             });
             index += 1;
         }
@@ -1487,7 +1486,7 @@ impl AutodocParser {
         }
         self.prev_prev_token = self.prev_token;
         self.prev_token = self.token;
-        self.token = self.line[self.token_index as usize];
+        self.token = self.tokens[self.line[self.token_index as usize]].as_mut();
         self.token_index += 1;
         if self.detailed_test && *DEBUG {
             eprintln!(
@@ -1512,18 +1511,18 @@ impl AutodocParser {
     /// # Safety
     /// See `parse`.
     unsafe fn preprocess(&mut self) {
-        let mut token: *mut Token;
         self.line_num += 1;
         self.line.clear();
         self.delimiter_in_line = false;
         loop {
-            token = unsafe { (*self.tokenizer).next() };
-            if unsafe { (*token).is(token::Type::Delimiter) } {
+            let token = unsafe { (*self.tokenizer).next() };
+            if token.is(token::Type::Delimiter) {
                 self.delimiter_in_line = true;
             }
-            self.line.push(token);
-            if unsafe { (*token).is(token::Type::Eol) } || unsafe { (*token).is(token::Type::Eof) }
-            {
+            let at_line_end = token.is(token::Type::Eol) || token.is(token::Type::Eof);
+            self.tokens.push(token);
+            self.line.push(self.tokens.len() - 1);
+            if at_line_end {
                 break;
             }
         }
@@ -1542,7 +1541,7 @@ impl AutodocParser {
         let name = unsafe { (*attribute).get_name_token() };
         if unsafe { (*attribute).is_global() } {
             if unsafe {
-                (*name).equals_type_and_string(
+                name.equals_type_and_string(
                     token::Type::Keyword,
                     Some(autodoc_tokenizer::VERSION_KEYWORD),
                 )
@@ -1551,7 +1550,7 @@ impl AutodocParser {
                 return;
             }
             if unsafe {
-                (*name).equals_type_and_string(
+                name.equals_type_and_string(
                     token::Type::Keyword,
                     Some(autodoc_tokenizer::PIP_KEYWORD),
                 )
@@ -1567,7 +1566,7 @@ impl AutodocParser {
     /// See `parse`.
     unsafe fn is_delimiter_change(&self, attribute: *mut Attribute) -> bool {
         unsafe {
-            (*(*attribute).get_name_token()).equals_type_and_string(
+            (*attribute).get_name_token().equals_type_and_string(
                 token::Type::Keyword,
                 Some(autodoc_tokenizer::DELIMITER_KEYWORD),
             )
@@ -1668,7 +1667,7 @@ impl AutodocParser {
         self.print_test_indent();
         eprint!("Line# {}: ", self.line_num);
         for index in 0..size {
-            token = self.line[index];
+            token = self.tokens[self.line[index]].as_mut();
             if self.test_with_tokens {
                 eprint!("{}", unsafe { (*token).to_string() });
             } else if !unsafe { (*token).is(token::Type::Eol) }
@@ -1696,3 +1695,47 @@ impl AutodocParser {
 /// Keeps `ReadOnlyAttribute` in scope, the interface the attributes this parser builds
 /// are read through.
 const _: Option<&dyn ReadOnlyAttribute> = None;
+
+#[cfg(test)]
+mod tests {
+    use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+    use crate::imod::etomo::storage::autodoc::read_only_attribute::ReadOnlyAttribute;
+    use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+    use crate::imod::etomo::r#type::axis_id::AxisID;
+
+    #[test]
+    fn parser_keeps_file_tokens_owned_after_advancing_lines() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-autodoc-parser-owned-tokens-{}.adoc",
+            std::process::id()
+        ));
+        std::fs::write(&path, "Global = retained\n[Field = item]\nValue = 7\n").unwrap();
+
+        unsafe {
+            let autodoc = Autodoc::new(Some("owned-tokens"), std::ptr::null_mut());
+            Autodoc::initialize_generic_instance(
+                autodoc,
+                None,
+                &path,
+                AxisID::Only,
+                false,
+                std::ptr::null_mut(),
+            )
+            .unwrap();
+
+            let global = (*autodoc).get_attribute(Some("Global"));
+            assert_eq!(
+                ReadOnlyAttribute::get_value(&*global).as_deref(),
+                Some("retained")
+            );
+            assert_eq!(
+                ReadOnlyAutodoc::get_attribute_values(&*autodoc, Some("Field"), Some("Value"))
+                    .unwrap()
+                    .get("item")
+                    .and_then(Option::as_deref),
+                Some("7")
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+}

@@ -377,38 +377,6 @@ pub fn cubinterp(
     }
 }
 
-/// `cubinterpfwrap` (`cubinterp.c:312`).
-pub unsafe fn cubinterpfwrap(
-    array: *mut f32,
-    bray: *mut f32,
-    nxa: *const i32,
-    nya: *const i32,
-    nxb: *const i32,
-    nyb: *const i32,
-    amat: *const f32,
-    xc: *const f32,
-    yc: *const f32,
-    xt: *const f32,
-    yt: *const f32,
-    scale: *const f32,
-    dmean: *const f32,
-    linear: *const i32,
-) {
-    unsafe {
-        let mut cmat = [[0.0f32; 2]; 2];
-        cmat[0][0] = *amat;
-        cmat[0][1] = *amat.add(1);
-        cmat[1][0] = *amat.add(2);
-        cmat[1][1] = *amat.add(3);
-        let (nxa, nya, nxb, nyb) = (*nxa, *nya, *nxb, *nyb);
-        let array = core::slice::from_raw_parts(array, nxa as usize * nya as usize);
-        let bray = core::slice::from_raw_parts_mut(bray, nxb as usize * nyb as usize);
-        cubinterp(
-            array, bray, nxa, nya, nxb, nyb, &cmat, *xc, *yc, *xt, *yt, *scale, *dmean, *linear,
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,35 +560,6 @@ mod tests {
             );
             assert_eq!(output[2 + 2 * 5], input[2 + 2 * 5]);
         }
-    }
-
-    /// `cubinterpfwrap` (`cubinterp.c:312`) fills `cmat` in row-major order
-    /// from the flat Fortran array, so an identity there stays an identity.
-    #[test]
-    fn wrapper_matrix_order_round_trips_an_identity() {
-        let input = (0..49).map(|value| value as f32).collect::<Vec<_>>();
-        let mut output = vec![0.; 49];
-        let values = [1., 0., 0., 1.];
-        let (nxa, nya, nxb, nyb) = (7, 7, 7, 7);
-        unsafe {
-            cubinterpfwrap(
-                input.as_ptr().cast_mut(),
-                output.as_mut_ptr(),
-                &nxa,
-                &nya,
-                &nxb,
-                &nyb,
-                values.as_ptr(),
-                &3.5,
-                &3.5,
-                &0.,
-                &0.,
-                &1.,
-                &-1.,
-                &0,
-            )
-        };
-        assert_eq!(output[3 + 3 * 7], input[3 + 3 * 7]);
     }
 
     #[test]

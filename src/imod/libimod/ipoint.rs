@@ -179,7 +179,7 @@ pub fn imod_point_line_distance(ln: &Ipoint, p: &Ipoint) -> f32 {
     if d != 0. {
         (((l * l) / d) as f64).sqrt() as f32
     } else {
-        let _ = ImodFile::Stdout.write_all(c_format("ipd00:\n", &[]).as_bytes());
+        let _ = ImodFile::Stdout.write_all(b"ipd00:\n");
         0.0
     }
 }

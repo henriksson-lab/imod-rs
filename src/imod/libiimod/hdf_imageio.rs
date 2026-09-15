@@ -22,6 +22,7 @@ use crate::imod::libiimod::mrcfiles::{
 };
 use crate::imod::libiimod::mrcsec::{ii_init_read_section_any, ii_process_read_line};
 use core::ffi::{c_char, c_int, c_uint, c_void};
+use core::ptr::NonNull;
 
 pub type HidT = i64;
 pub type HsizeT = usize;
@@ -102,12 +103,14 @@ pub unsafe fn hdf_read_section_any(
     cz: i32,
     typ: i32,
 ) -> i32 {
-    if in_file.is_null() || (*in_file).header.is_null() {
+    if in_file.is_null() {
         return 1;
     }
     let mut li = LoadInfo::default();
-    ii_mrc_set_load_info(in_file, &mut li);
-    let hdata = (*in_file).header.cast::<MrcHeader>();
+    ii_mrc_set_load_info(&*in_file, &mut li);
+    let Some(hdata) = (*in_file).mrc_header.as_deref_mut() else {
+        return 1;
+    };
     let mut d = LineProcData::default();
     // This selects read diagnostics in shared cleanup; map ownership is in `d`.
     let read_operation = 0;
@@ -124,21 +127,20 @@ pub unsafe fn hdf_read_section_any(
         li.outmax = if typ == MRSA_USHORT { 65535 } else { 255 };
         li.mirror_fft = (*in_file).mirror_fft;
     }
-    let err = ii_init_read_section_any(&*hdata, &li, buf, &mut d, &mut y_end, "hdfReadSectionAny");
+    let err = ii_init_read_section_any(hdata, &li, buf, &mut d, &mut y_end, "hdfReadSectionAny");
     if err != 0 {
         return err;
     }
     let pad_left = li.pad_left.max(0);
     let pad_right = li.pad_right.max(0);
     d.x_dimension = d.xsize + pad_left + pad_right;
-    d.bufp = d.bufp.add(
-        match typ {
-            MRSA_BYTE => 1,
-            MRSA_FLOAT => 4,
-            MRSA_USHORT => 2,
-            _ => 0,
-        } * pad_left as usize,
-    );
+    d.bufp_offset += match typ {
+        MRSA_BYTE => 1,
+        MRSA_FLOAT => 4,
+        MRSA_USHORT => 2,
+        _ => 0,
+    } as isize
+        * pad_left as isize;
     d.pix_index += pad_left as u32;
     let read_stack_y = d.read_y != 0 && (*in_file).stack_set_list.is_some();
     let mut chunk_lines = 1i32;
@@ -200,7 +202,7 @@ pub unsafe fn hdf_read_section_any(
     let mut fcount = [0usize; 3];
     let mut foffset = [0usize; 3];
     if !read_stack_y {
-        dset = get_dataset_for_z(in_file, cz, &mut no_data);
+        dset = get_dataset_for_z(&mut *in_file, cz, &mut no_data);
         if no_data != 0 {
             for _ in d.y_start..=y_end {
                 let pixel_size = match typ {
@@ -209,8 +211,12 @@ pub unsafe fn hdf_read_section_any(
                     MRSA_USHORT => 2,
                     _ => 0,
                 };
-                core::ptr::write_bytes(d.bufp, 0, pixel_size * d.xsize as usize);
-                d.bufp = d.bufp.add(pixel_size * (pad_left + pad_right) as usize);
+                core::ptr::write_bytes(
+                    d.buf.offset(d.bufp_offset),
+                    0,
+                    pixel_size * d.xsize as usize,
+                );
+                d.bufp_offset += pixel_size as isize * (pad_left + pad_right) as isize;
             }
             return 0;
         }
@@ -219,7 +225,7 @@ pub unsafe fn hdf_read_section_any(
         fcount[(rank - 1) as usize] = (d.xsize * scale) as usize;
         foffset[(rank - 1) as usize] = (d.x_start * scale) as usize;
     }
-    let native = lookup_native_datatype(in_file);
+    let native = lookup_native_datatype(&*in_file);
     d.line = d.y_start;
     while d.line <= y_end {
         let line_end = y_end.min(d.line + chunk_lines - 1);
@@ -252,7 +258,7 @@ pub unsafe fn hdf_read_section_any(
             foffset[0] = 0;
             foffset[(rank - 2) as usize] = d.line as usize;
         } else if read_stack_y {
-            dset = get_dataset_for_z(in_file, d.line, &mut no_data);
+            dset = get_dataset_for_z(&mut *in_file, d.line, &mut no_data);
             if no_data == 0 {
                 dspace = H5Dget_space(dset);
                 rank = H5Sget_simple_extent_ndims(dspace);
@@ -294,7 +300,11 @@ pub unsafe fn hdf_read_section_any(
             );
             return 3;
         }
-        d.bdata = if d.need_data != 0 { tmp } else { d.bufp };
+        d.bdata = if d.need_data != 0 {
+            tmp
+        } else {
+            d.buf.offset(d.bufp_offset)
+        };
         let read_ptr = d.bdata.sub((pad_left * d.pix_size) as usize);
         let mut needed = true;
         while d.line <= line_end {
@@ -326,7 +336,7 @@ pub unsafe fn hdf_read_section_any(
             }
             needed = false;
             if ii_process_read_line(
-                &*hdata,
+                hdata,
                 &li,
                 &mut d,
                 core::ptr::null_mut(),
@@ -350,30 +360,32 @@ pub unsafe fn hdf_write_section_any(
     cz: i32,
     from_float: i32,
 ) -> i32 {
-    if in_file.is_null() || (*in_file).header.is_null() {
+    if in_file.is_null() {
         return 1;
     }
-    let h = (*in_file).header.cast::<MrcHeader>();
+    let Some(h) = (*in_file).mrc_header.as_deref_mut() else {
+        return 1;
+    };
     let mut li = LoadInfo::default();
-    ii_mrc_set_load_info(in_file, &mut li);
-    let mut buf_mode = (*h).mode;
-    let convert = from_float > 0 && !matches!((*h).mode, MRC_MODE_COMPLEX_FLOAT | MRC_MODE_FLOAT);
+    ii_mrc_set_load_info(&*in_file, &mut li);
+    let mut buf_mode = h.mode;
+    let convert = from_float > 0 && !matches!(h.mode, MRC_MODE_COMPLEX_FLOAT | MRC_MODE_FLOAT);
     if convert {
         buf_mode = MRC_MODE_FLOAT;
     }
-    let bytes_signed = ((*h).mode == 0 && (*h).bytes_signed != 0) as i32;
+    let bytes_signed = (h.mode == 0 && h.bytes_signed != 0) as i32;
     let (xstart, xend, ystart, yend) = (li.xmin, li.xmax, li.ymin, li.ymax);
     let nxout = xend + 1 - xstart;
-    let tiled = (*in_file).tile_size_x > 0 && (*in_file).tile_size_x < (*h).nx;
+    let tiled = (*in_file).tile_size_x > 0 && (*in_file).tile_size_x < h.nx;
     if (!tiled && xstart != 0)
         || (tiled && xstart % (*in_file).tile_size_x != 0)
-        || (xend != (*h).nx - 1 && (!tiled || (xend + 1) % (*in_file).tile_size_x != 0))
+        || (xend != h.nx - 1 && (!tiled || (xend + 1) % (*in_file).tile_size_x != 0))
     {
         return 1;
     }
     let mut bpo = 0;
     let mut nco = 0;
-    if mrc_getdcsize((*h).mode, &mut bpo, &mut nco) != 0 || (*h).mode == MRC_MODE_COMPLEX_SHORT {
+    if mrc_getdcsize(h.mode, &mut bpo, &mut nco) != 0 || h.mode == MRC_MODE_COMPLEX_SHORT {
         return -1;
     }
     let mut bpb = 0;
@@ -381,7 +393,7 @@ pub unsafe fn hdf_write_section_any(
     mrc_getdcsize(buf_mode, &mut bpb, &mut ncb);
     let pixout = bpo * nco;
     let pixbuf = bpb * ncb;
-    if convert && slice_mode_if_real((*h).mode) < 0 {
+    if convert && slice_mode_if_real(h.mode) < 0 {
         return 1;
     }
     let pad_left = li.pad_left.max(0);
@@ -423,7 +435,7 @@ pub unsafe fn hdf_write_section_any(
         }
         if (&(*in_file).z_to_data_set_map)[cz as usize] < 0 {
             let mut name = [0u8; 36];
-            let new_dset = create_group_and_dataset(in_file, cz, &mut name);
+            let new_dset = create_group_and_dataset(&mut *in_file, cz, &mut name);
             if new_dset < 0 {
                 cleanup_tmp(
                     tmp,
@@ -435,8 +447,10 @@ pub unsafe fn hdf_write_section_any(
                 );
                 return 1;
             }
-            let stack_name =
-                name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())].to_vec();
+            let stack_name = String::from_utf8_lossy(
+                &name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())],
+            )
+            .into_owned();
             (*in_file)
                 .stack_set_list
                 .as_mut()
@@ -449,9 +463,9 @@ pub unsafe fn hdf_write_section_any(
             let stack_index = (*in_file).stack_set_list.as_deref().unwrap().len() as i32 - 1;
             (&mut (*in_file).z_to_data_set_map)[cz as usize] = stack_index;
         }
-        get_dataset_for_z(in_file, cz, &mut none)
+        get_dataset_for_z(&mut *in_file, cz, &mut none)
     } else {
-        get_dataset_for_z(in_file, cz, &mut none)
+        get_dataset_for_z(&mut *in_file, cz, &mut none)
     };
     if dset < 0 {
         cleanup_tmp(
@@ -511,7 +525,7 @@ pub unsafe fn hdf_write_section_any(
     fo[0] = cz as usize;
     fc[rank - 1] = (nxout * scale) as usize;
     fo[rank - 1] = (xstart * scale) as usize;
-    let native = lookup_native_datatype(in_file);
+    let native = lookup_native_datatype(&*in_file);
     let mut line = ystart;
     let mut bufp = buf.add((pixbuf * pad_left) as usize);
     let mut fbufp = buf.cast::<f32>().add(pad_left as usize);
@@ -565,12 +579,32 @@ pub unsafe fn hdf_write_section_any(
         let write = bdata;
         while line <= end {
             if convert {
-                ii_convert_line_of_floats(fbufp, bdata, nxout, (*h).mode, bytes_signed, 0);
+                ii_convert_line_of_floats(
+                    core::slice::from_raw_parts(fbufp, nxout as usize),
+                    core::slice::from_raw_parts_mut(bdata, (pixout * nxout) as usize),
+                    (*h).mode,
+                    bytes_signed != 0,
+                    false,
+                );
                 fbufp = fbufp.add(xdim as usize);
                 bufp = fbufp.cast();
             } else {
                 if bytes_signed != 0 {
-                    b3d_shift_bytes(bufp, bdata.cast(), nxout, 1, 1, 1);
+                    if core::ptr::eq(bufp, bdata) {
+                        b3d_shift_bytes(
+                            core::slice::from_raw_parts_mut(bdata, nxout as usize),
+                            nxout,
+                            1,
+                            1,
+                            1,
+                        );
+                    } else {
+                        let source = core::slice::from_raw_parts(bufp, nxout as usize);
+                        let destination = core::slice::from_raw_parts_mut(bdata, nxout as usize);
+                        for (destination, source) in destination.iter_mut().zip(source) {
+                            *destination = (*source as i32 - 128) as i8 as u8;
+                        }
+                    }
                 }
                 bufp = bufp.add((pixbuf * xdim) as usize);
             }
@@ -615,9 +649,9 @@ pub fn init_new_hdf_file(in_file: &mut ImodImageFile) -> i32 {
             if in_file.global_adoc_index < 0 {
                 return 1;
             }
-            for volume in &mut in_file.ii_volumes {
+            for volume in in_file.ii_volumes.iter().flatten() {
                 unsafe {
-                    (**volume).global_adoc_index = in_file.global_adoc_index;
+                    (*volume.as_ptr()).global_adoc_index = in_file.global_adoc_index;
                 }
             }
         }
@@ -631,37 +665,37 @@ pub fn init_new_hdf_file(in_file: &mut ImodImageFile) -> i32 {
 
 /// C static `createGroupAndDataset` (`hdf_imageio.c:491`).
 unsafe fn create_group_and_dataset(
-    in_file: *mut ImodImageFile,
+    in_file: &mut ImodImageFile,
     z: i32,
     buf: &mut [u8; 36],
 ) -> HidT {
-    let scale = get_file_xscale((*in_file).format);
-    let rank = if (*in_file).z_chunk_size > 0 { 3 } else { 2 };
+    let scale = get_file_xscale(in_file.format);
+    let rank = if in_file.z_chunk_size > 0 { 3 } else { 2 };
     let xi = rank - 1;
     let yi = rank - 2;
     let mut fd = [0usize; 3];
     let mut md = [0usize; 3];
-    fd[xi as usize] = ((*in_file).nx * scale) as usize;
+    fd[xi as usize] = (in_file.nx * scale) as usize;
     md[xi as usize] = fd[xi as usize];
-    fd[yi as usize] = (*in_file).ny as usize;
+    fd[yi as usize] = in_file.ny as usize;
     md[yi as usize] = fd[yi as usize];
     if rank == 3 {
-        fd[0] = (*in_file).nz as usize;
+        fd[0] = in_file.nz as usize;
         md[0] = H5S_UNLIMITED;
     }
     /* The property-list/chunk-cache logic is retained from the C source: HDF5
     itself, not a Rust image abstraction, selects the physical layout. */
-    if (*in_file).hdf_compression < 0 {
+    if in_file.hdf_compression < 0 {
         let comp_env = std::env::var_os("IMOD_HDF_COMPRESSION");
-        (*in_file).hdf_compression = 0;
+        in_file.hdf_compression = 0;
         if let Some(value) = comp_env {
             // C `atoi`, which is `strtol` base 10 truncated to `int`: "3x" is
             // 3 where `str::parse` would fail.
             let mut end = 0;
-            (*in_file).hdf_compression =
+            in_file.hdf_compression =
                 crate::imod::libcfshr::parse_params::strtol(value.as_encoded_bytes(), &mut end, 10)
                     as i32;
-            (*in_file).hdf_compression = (*in_file).hdf_compression.clamp(0, 9);
+            in_file.hdf_compression = in_file.hdf_compression.clamp(0, 9);
         }
     }
     // `hdf_imageio.c:575`: `sprintf(buf, "/MDF/images/%d", zValue)`.
@@ -670,42 +704,42 @@ unsafe fn create_group_and_dataset(
     buf[text.len()] = 0;
     let name = std::ffi::CString::new(text.as_str()).unwrap();
     let group = H5Gcreate2(
-        (*in_file).hdf_file_id,
+        in_file.hdf_file_id,
         name.as_ptr(),
         H5P_DEFAULT,
         H5P_DEFAULT,
         H5P_DEFAULT,
     );
-    let compressed = (*in_file).hdf_compression > 0;
+    let compressed = in_file.hdf_compression > 0;
     let chunked = rank == 3 || compressed;
     let mut cparms = H5P_DEFAULT;
     let mut aparms = H5P_DEFAULT;
     if chunked {
         cparms = H5Pcreate(H5P_CLS_DATASET_CREATE_ID_g);
-        if H5Pset_deflate(cparms, (*in_file).hdf_compression as c_uint) < 0 {
+        if H5Pset_deflate(cparms, in_file.hdf_compression as c_uint) < 0 {
             return -1;
         }
         let mut chunks = [0usize; 3];
         if rank == 3 {
-            chunks[0] = (*in_file).z_chunk_size.max(1) as usize;
+            chunks[0] = in_file.z_chunk_size.max(1) as usize;
         }
         let tile_x = if rank == 3 {
-            (*in_file).tile_size_x
+            in_file.tile_size_x
         } else {
-            (*in_file).nx
+            in_file.nx
         };
         let tile_y = if rank == 3 {
-            (*in_file).tile_size_y
+            in_file.tile_size_y
         } else {
-            (65_536 / (*in_file).nx.max(1)).max(4)
+            (65_536 / in_file.nx.max(1)).max(4)
         };
-        chunks[yi as usize] = if tile_y <= 0 || tile_y > (*in_file).ny {
-            (*in_file).ny as usize
+        chunks[yi as usize] = if tile_y <= 0 || tile_y > in_file.ny {
+            in_file.ny as usize
         } else {
             tile_y as usize
         };
-        chunks[xi as usize] = if tile_x <= 0 || tile_x > (*in_file).nx {
-            ((*in_file).nx * scale) as usize
+        chunks[xi as usize] = if tile_x <= 0 || tile_x > in_file.nx {
+            (in_file.nx * scale) as usize
         } else {
             (tile_x * scale) as usize
         };
@@ -718,8 +752,8 @@ unsafe fn create_group_and_dataset(
             return -1;
         }
         let (mut bpc, mut channels) = (0, 0);
-        mrc_getdcsize((*in_file).mode, &mut bpc, &mut channels);
-        let nchunks = ((*in_file).nx + chunks[xi as usize] as i32 - 1) / chunks[xi as usize] as i32;
+        mrc_getdcsize(in_file.mode, &mut bpc, &mut channels);
+        let nchunks = (in_file.nx + chunks[xi as usize] as i32 - 1) / chunks[xi as usize] as i32;
         let wanted = (bpc as usize
             * nchunks as usize
             * chunks[xi as usize]
@@ -733,7 +767,12 @@ unsafe fn create_group_and_dataset(
     }
     let native = lookup_native_datatype(in_file);
     let typ = H5Tcopy(native);
-    if H5Tget_precision(typ) > 8 && (*(*in_file).header.cast::<MrcHeader>()).swapped != 0 {
+    if H5Tget_precision(typ) > 8
+        && in_file
+            .mrc_header
+            .as_deref()
+            .is_some_and(|header| header.swapped != 0)
+    {
         if H5Tget_order(native) == H5T_ORDER_LE {
             H5Tset_order(typ, H5T_ORDER_BE);
         } else {
@@ -780,8 +819,8 @@ fn get_file_xscale(format: i32) -> i32 {
     }
 }
 /// C static `lookupNativeDatatype` (`hdf_imageio.c:624`).
-unsafe fn lookup_native_datatype(in_file: *mut ImodImageFile) -> HidT {
-    match (*in_file).type_ {
+unsafe fn lookup_native_datatype(in_file: &ImodImageFile) -> HidT {
+    match in_file.type_ {
         IITYPE_BYTE => H5T_NATIVE_SCHAR_g,
         IITYPE_UBYTE => H5T_NATIVE_UCHAR_g,
         IITYPE_SHORT => H5T_NATIVE_SHORT_g,
@@ -791,36 +830,38 @@ unsafe fn lookup_native_datatype(in_file: *mut ImodImageFile) -> HidT {
     }
 }
 /// C static `getDatasetForZ` (`hdf_imageio.c:646`).
-unsafe fn get_dataset_for_z(in_file: *mut ImodImageFile, cz: i32, no_data: *mut i32) -> HidT {
+unsafe fn get_dataset_for_z(in_file: &mut ImodImageFile, cz: i32, no_data: &mut i32) -> HidT {
     *no_data = 0;
-    if (*in_file).stack_set_list.is_some() {
-        if cz >= (*in_file).z_map_size || (&(*in_file).z_to_data_set_map)[cz as usize] < 0 {
+    if in_file.stack_set_list.is_some() {
+        if cz >= in_file.z_map_size || in_file.z_to_data_set_map[cz as usize] < 0 {
             *no_data = 1;
             return 0;
         }
-        let Some(stack) = (*in_file).stack_set_list.as_deref_mut().and_then(|stacks| {
-            stacks.get_mut((&(*in_file).z_to_data_set_map)[cz as usize] as usize)
-        }) else {
+        let Some(stack) = in_file
+            .stack_set_list
+            .as_deref_mut()
+            .and_then(|stacks| stacks.get_mut(in_file.z_to_data_set_map[cz as usize] as usize))
+        else {
             *no_data = 1;
             return 0;
         };
         if stack.is_open {
             stack.dset_id
         } else {
-            let name = std::ffi::CString::new(stack.name.clone().unwrap_or_default()).unwrap();
-            let id = H5Dopen2((*in_file).hdf_file_id, name.as_ptr(), H5P_DEFAULT);
+            let name = std::ffi::CString::new(stack.name.as_deref().unwrap_or_default()).unwrap();
+            let id = H5Dopen2(in_file.hdf_file_id, name.as_ptr(), H5P_DEFAULT);
             stack.dset_id = id;
             stack.is_open = true;
             id
         }
-    } else if (*in_file).dataset_is_open != 0 {
-        (*in_file).dataset_id
+    } else if in_file.dataset_is_open != 0 {
+        in_file.dataset_id
     } else {
         let name =
-            std::ffi::CString::new((*in_file).dataset_name.clone().unwrap_or_default()).unwrap();
-        let id = H5Dopen2((*in_file).hdf_file_id, name.as_ptr(), H5P_DEFAULT);
-        (*in_file).dataset_id = id;
-        (*in_file).dataset_is_open = 1;
+            std::ffi::CString::new(in_file.dataset_name.clone().unwrap_or_default()).unwrap();
+        let id = H5Dopen2(in_file.hdf_file_id, name.as_ptr(), H5P_DEFAULT);
+        in_file.dataset_id = id;
+        in_file.dataset_is_open = 1;
         id
     }
 }
@@ -894,7 +935,6 @@ mod tests {
             let mut header = MrcHeader::default();
             let mut image = ImodImageFile::default();
             let mut companion = ImodImageFile::default();
-            image.header = (&raw mut header).cast();
             image.nx = 2;
             image.ny = 2;
             image.nz = 1;
@@ -902,8 +942,12 @@ mod tests {
             header.ny = 2;
             header.nz = 1;
             header.mode = MRC_MODE_FLOAT;
+            image.mrc_header = Some(Box::new(header));
             image.num_volumes = 2;
-            let volumes = vec![&raw mut image, &raw mut companion];
+            let volumes = vec![
+                Some(NonNull::from(&mut image)),
+                Some(NonNull::from(&mut companion)),
+            ];
             image.ii_volumes = volumes;
             image.hdf_file_id = file;
             image.z_chunk_size = 1;
@@ -1022,7 +1066,7 @@ mod tests {
             header.nz = 4;
             header.mode = MRC_MODE_FLOAT;
             let mut image = ImodImageFile::default();
-            image.header = (&raw mut header).cast();
+            image.mrc_header = Some(Box::new(header));
             image.nx = 2;
             image.ny = 2;
             image.nz = 4;
@@ -1050,7 +1094,7 @@ mod tests {
                 .unwrap()
                 .first_mut()
                 .unwrap();
-            assert_eq!(stack.name.as_deref(), Some(&b"/MDF/images/3/image"[..]));
+            assert_eq!(stack.name.as_deref(), Some("/MDF/images/3/image"));
             let mut read = [0.0f32; 4];
             assert_eq!(
                 H5Dread(

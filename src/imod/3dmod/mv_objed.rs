@@ -108,17 +108,13 @@ pub fn objed_object(a: &mut ImodvApp) -> Option<&mut Iobj> {
 }
 /// Original static `numEditableObjects`.
 pub fn num_editable_objects(a: &ImodvApp, model: i32) -> i32 {
-    unsafe { a.mod_.get(model.max(0) as usize).and_then(|m| m.as_ref()) }
+    unsafe { a.mod_.get(model.max(0) as usize).map(|m| m.as_ref()) }
         .map_or(0, |m| m.obj.len() as i32)
 }
 /// Original static `editableObject`.
 pub fn editable_object(a: &mut ImodvApp, model: i32, object: i32) -> Option<&mut Iobj> {
-    unsafe {
-        a.mod_
-            .get_mut(model.max(0) as usize)
-            .and_then(|m| m.as_mut())
-    }
-    .and_then(|m| m.obj.get_mut(object.max(0) as usize))
+    unsafe { a.mod_.get_mut(model.max(0) as usize).map(|m| m.as_mut()) }
+        .and_then(|m| m.obj.get_mut(object.max(0) as usize))
 }
 /// Original static `setStartEndModel`.
 pub fn set_start_end_model(a: &ImodvApp, multiple_ok: bool, mst: &mut i32, mnd: &mut i32) {
@@ -385,7 +381,7 @@ pub fn imodv_objed_get_cur_frame(editor: &ImodvObjed) -> i32 {
 pub fn imodv_objed_make_on_offs(a: &ImodvApp) -> usize {
     a.mod_
         .iter()
-        .filter_map(|m| unsafe { m.as_ref() })
+        .map(|m| unsafe { m.as_ref() })
         .map(|m| m.obj.len())
         .max()
         .unwrap_or(0)
@@ -488,7 +484,7 @@ impl ImodvObjed {
             if let Some(view) = unsafe {
                 a.mod_
                     .get(model.max(0) as usize)
-                    .and_then(|m| m.as_mut())
+                    .and_then(|m| m.as_ptr().as_mut())
                     .and_then(|m| m.view.first_mut())
             } {
                 view.world = (view.world & !WORLD_QUALITY_BITS) | (quality << WORLD_QUALITY_SHIFT);
@@ -666,7 +662,7 @@ mod tests {
         m.obj.push(Iobj::default());
         let mut a = ImodvApp::default();
         a.imod = &mut *m;
-        a.mod_.push(&mut *m);
+        a.mod_.push(std::ptr::NonNull::from(&mut *m));
         a.num_mods = 1;
         imodv_objed_draw_data(&mut a, 2, true);
         assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_MESH, 0);
@@ -679,7 +675,7 @@ mod tests {
         m.obj.push(Iobj::default());
         let mut a = ImodvApp::default();
         a.imod = &mut *m;
-        a.mod_.push(&mut *m);
+        a.mod_.push(std::ptr::NonNull::from(&mut *m));
         a.num_mods = 1;
         objed_toggle_obj(&mut a, 0, false);
         assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_OFF, 0);
@@ -694,7 +690,7 @@ mod tests {
         m.obj[2].flags |= IMOD_OBJFLAG_SCAT;
         let mut a = ImodvApp::default();
         a.imod = &mut *m;
-        a.mod_.push(&mut *m);
+        a.mod_.push(std::ptr::NonNull::from(&mut *m));
         a.num_mods = 1;
         let mut editor = ImodvObjed {
             edit_all: 1,
@@ -729,8 +725,8 @@ mod tests {
         other.view[0].world = 1 << 3;
         let mut a = ImodvApp::default();
         a.imod = &mut *current;
-        a.mod_.push(&mut *current);
-        a.mod_.push(&mut *other);
+        a.mod_.push(std::ptr::NonNull::from(&mut *current));
+        a.mod_.push(std::ptr::NonNull::from(&mut *other));
         a.num_mods = 2;
         a.crosset = 1;
         let mut editor = ImodvObjed::default();

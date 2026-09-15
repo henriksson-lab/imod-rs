@@ -28,8 +28,7 @@ use crate::imod::libwarp::delaunay::{
     Circle, Delaunay, delaunay_build, delaunay_circles_find, delaunay_destroy, delaunay_xytoi,
 };
 use crate::imod::libwarp::hash::{
-    Hashtable, ht_create_d2, ht_create_i2, ht_delete, ht_destroy, ht_find, ht_getnentries,
-    ht_insert, ht_process,
+    Hashtable, ht_create_d2, ht_create_i2, ht_delete, ht_find, ht_getnentries, ht_insert,
 };
 use crate::imod::libwarp::istack::{istack_create, istack_destroy, istack_push};
 use crate::imod::libwarp::nn::{NN_RULE, NN_TEST_VERTICE, NN_VERBOSE, NnRule, Point};
@@ -66,7 +65,7 @@ pub struct Nnpi {
     ///
     /// The source's data is a `malloc(8 * sizeof(double))` block, so the table
     /// owns `[f64; 8]` here and the `free`s disappear into the drop.
-    pub bad: Option<Box<Hashtable<[i32; 2], [f64; 8]>>>,
+    pub bad: Option<Hashtable<[i32; 2], [f64; 8]>>,
 }
 
 /// C `NSTART` (`nnpi.c:101`).
@@ -151,9 +150,7 @@ pub fn nnpi_destroy(nn: Box<Nnpi>) -> Box<Delaunay> {
 pub fn nnpi_reset(nn: &mut Nnpi) {
     nn.nvertices = 0;
     nn.ncircles = 0;
-    if nn.bad.is_some() {
-        ht_destroy(nn.bad.take());
-    }
+    drop(nn.bad.take());
 }
 
 /// Original static `nnpi_add_weight` (`nnpi.c:152`).
@@ -303,7 +300,7 @@ fn nnpi_triangle_process(nn: &mut Nnpi, p: &Point, i: i32) {
             key[0] = t.vids[j as usize];
 
             if nn.bad.is_none() {
-                nn.bad = ht_create_i2(HT_SIZE);
+                nn.bad = ht_create_i2(HT_SIZE).map(|table| *table);
             }
 
             key[1] = if j1bad != 0 {
@@ -1025,14 +1022,14 @@ pub fn nnpi_get_weights(nn: &Nnpi) -> &[f64] {
 
 /// C `struct nnhpi` (`nnpi.c:784`).
 pub struct Nnhpi {
-    pub nnpi: Box<Nnpi>,
+    pub nnpi: Nnpi,
     /// Maps a point to the index of the matching entry of
     /// `nnpi.d.points`; the source stores `&d->points[i]` and
     /// `nnhpi_modify_data` writes `->z` through it.
-    pub ht_data: Option<Box<Hashtable<[f64; 2], usize>>>,
+    pub ht_data: Option<Hashtable<[f64; 2], usize>>,
     /// Maps a point to an index into [`Nnhpi::weights_store`]; the source
     /// stores a malloc'd `nn_weights*`.
-    pub ht_weights: Option<Box<Hashtable<[f64; 2], usize>>>,
+    pub ht_weights: Option<Hashtable<[f64; 2], usize>>,
     /// Owns the `nn_weights` blocks the source mallocs one per new point.
     pub weights_store: Vec<NnWeights>,
     /// number of points processed
@@ -1058,7 +1055,7 @@ pub struct NnWeights {
 pub fn nnhpi_create(d: Box<Delaunay>, size: i32) -> Box<Nnhpi> {
     let npoints = d.npoints;
     let mut nn = Box::new(Nnhpi {
-        nnpi: nnpi_create(d),
+        nnpi: *nnpi_create(d),
         ht_data: None,
         ht_weights: None,
         weights_store: Vec::new(),
@@ -1066,8 +1063,8 @@ pub fn nnhpi_create(d: Box<Delaunay>, size: i32) -> Box<Nnhpi> {
     });
     let mut i;
 
-    nn.ht_data = ht_create_d2(npoints);
-    nn.ht_weights = ht_create_d2(size);
+    nn.ht_data = ht_create_d2(npoints).map(|table| *table);
+    nn.ht_weights = ht_create_d2(size).map(|table| *table);
     nn.n = 0;
 
     i = 0;
@@ -1080,20 +1077,13 @@ pub fn nnhpi_create(d: Box<Delaunay>, size: i32) -> Box<Nnhpi> {
     nn
 }
 
-/// Original static `free_nn_weights` (`nnpi.c:820`).
-///
-/// The source frees the `nn_weights` block and its two arrays; here the block
-/// is owned by [`Nnhpi::weights_store`] and released with it, so the callback
-/// has nothing left to do.
-fn free_nn_weights(_data: usize) {}
-
 /// Original `nnhpi_destroy` (`nnpi.c:833`).
 pub fn nnhpi_destroy(nn: Box<Nnhpi>) -> Box<Delaunay> {
     let nn = *nn;
-    ht_destroy(nn.ht_data);
-    ht_process(nn.ht_weights.as_ref().unwrap(), free_nn_weights);
-    ht_destroy(nn.ht_weights);
-    nnpi_destroy(nn.nnpi)
+    // The two tables and their keys, plus `weights_store`, are direct owned
+    // fields. They drop with `nn`; only the triangulation is intentionally
+    // returned to the caller.
+    nn.nnpi.d
 }
 
 /// Original `nnhpi_interpolate` (`nnpi.c:846`).

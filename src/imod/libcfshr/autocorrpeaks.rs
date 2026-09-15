@@ -262,10 +262,7 @@ pub fn find_auto_corr_peaks(
     }
     if ind1 < 0 {
         /* snprintf(messBuf, bufSize, ...) truncates at bufSize - 1 bytes. */
-        *mess_buf = c_format(
-            "Did not find a peak away from the center of the autocorrelation",
-            &[],
-        );
+        *mess_buf = "Did not find a peak away from the center of the autocorrelation".into();
         mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
         return -1;
     }
@@ -360,10 +357,7 @@ pub fn find_auto_corr_peaks(
     }
     let mut ifac = fac_start as usize;
     if ind2_for_fac[ifac] < 0 && (!both_geom || ind2_for_fac[1] < 0 || ind2_for_fac[2] < 0) {
-        *mess_buf = c_format(
-            "Did not find another peak at proper angle away from best one",
-            &[],
-        );
+        *mess_buf = "Did not find another peak at proper angle away from best one".into();
         mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
         return 1;
     }

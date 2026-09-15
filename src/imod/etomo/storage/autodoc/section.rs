@@ -2,9 +2,9 @@
 //!
 //! `@notthreadsafe`
 //!
-//! **Ownership.**  A `Section` is aliased by its parent's section list and section map,
-//! by the `Subsection` statement that names it, and by its own attribute list's
-//! `parent`.  As in `statement.rs`, the allocation is a leaked `Box`.
+//! **Ownership.**  A parent section list owns each `Section` in a `Box`; maps and
+//! subsection statements borrow its stable address.  Each section owns its attribute
+//! list directly.
 #![allow(dead_code)]
 
 use crate::imod::etomo::storage::log_file;
@@ -32,7 +32,7 @@ use std::collections::HashMap;
 /// ReadOnlySection`.
 pub struct Section {
     /// Java field `statementList`.
-    statement_list: Vec<*mut dyn Statement>,
+    statement_list: Vec<Box<dyn Statement>>,
     /// Java field `key`.
     key: Option<String>,
     /// Java field `type`.
@@ -40,11 +40,11 @@ pub struct Section {
     /// Java field `name`.
     name: *mut Token,
     /// Java field `attributeList`.
-    attribute_list: *mut AttributeList,
+    attribute_list: Option<Box<AttributeList>>,
     /// Java field `sectionList`.
-    section_list: Vec<*mut Section>,
+    section_list: Vec<Box<Section>>,
     /// Java field `subSectionMap`.
-    sub_section_map: HashMap<String, *mut Section>,
+    sub_section_map: HashMap<String, std::ptr::NonNull<Section>>,
     /// Java field `subsection`, initialised to false.
     subsection: bool,
     /// Java field `parent`.
@@ -55,19 +55,15 @@ pub struct Section {
 
 /// Java `public static getKey(Token type, Token name)`.
 ///
-/// # Safety
-/// `type` and `name` must be null or point to live `Token` link lists.
-pub unsafe fn get_key_of_tokens(r#type: *mut Token, name: *mut Token) -> Option<String> {
-    if r#type.is_null() && name.is_null() {
-        return None;
+pub fn get_key_of_tokens(r#type: Option<&Token>, name: Option<&Token>) -> Option<String> {
+    match (r#type, name) {
+        (None, None) => None,
+        (None, Some(name)) => Some(unsafe { name.get_key() }),
+        (Some(r#type), None) => Some(unsafe { r#type.get_key() }),
+        (Some(r#type), Some(name)) => {
+            Some(unsafe { r#type.get_key() } + &unsafe { name.get_key() })
+        }
     }
-    if r#type.is_null() {
-        return Some(unsafe { (*name).get_key() });
-    }
-    if name.is_null() {
-        return Some(unsafe { (*r#type).get_key() });
-    }
-    Some(unsafe { (*r#type).get_key() } + &unsafe { (*name).get_key() })
 }
 
 /// Java `public static getKey(String type, String name)`.
@@ -99,17 +95,17 @@ impl Section {
     ) -> *mut Section {
         let this = Box::into_raw(Box::new(Section {
             statement_list: Vec::new(),
-            key: unsafe { get_key_of_tokens(r#type, name) },
+            key: get_key_of_tokens(unsafe { r#type.as_ref() }, unsafe { name.as_ref() }),
             r#type,
             name,
-            attribute_list: std::ptr::null_mut(),
+            attribute_list: None,
             section_list: Vec::new(),
             sub_section_map: HashMap::new(),
             subsection: false,
             parent,
             debug: false,
         }));
-        unsafe { (*this).attribute_list = Box::into_raw(Box::new(AttributeList::new(this))) };
+        unsafe { (*this).attribute_list = Some(Box::new(AttributeList::new(this))) };
         this
     }
 
@@ -134,7 +130,7 @@ impl Section {
             } else {
                 unsafe { (*self.name).to_string() }
             },
-            unsafe { (*self.attribute_list).to_string() }
+            unsafe { self.attribute_list.as_deref().unwrap().to_string() }
         )
     }
 
@@ -151,11 +147,11 @@ impl Section {
     }
 
     /// Java package-private `getTypeToken()`.
-    pub fn get_type_token(&self) -> *mut Token {
+    pub fn get_type_token(&self) -> &Token {
         if self.r#type.is_null() {
             panic!("java.lang.IllegalStateException: type is required");
         }
-        self.r#type
+        unsafe { &*self.r#type }
     }
 
     /// Java package-private `getKey()`.
@@ -164,11 +160,11 @@ impl Section {
     }
 
     /// Java package-private `getNameToken()`.
-    pub fn get_name_token(&self) -> *mut Token {
+    pub fn get_name_token(&self) -> &Token {
         if self.name.is_null() {
             panic!("java.lang.IllegalStateException: name is required");
         }
-        self.name
+        unsafe { &*self.name }
     }
 
     /// Java `hashCode()`, which is `key.hashCode()` - see `Attribute.hashCode`.
@@ -213,7 +209,7 @@ impl Section {
         }
         file.new_line(writer_id)?;
         for statement in self.statement_list.iter() {
-            unsafe { (**statement).write(file, writer_id)? };
+            unsafe { statement.write(file, writer_id)? };
         }
         // if subsection, write subsection footer
         if self.subsection {
@@ -257,12 +253,13 @@ impl Section {
         autodoc::print_indent(level);
         println!("Statements:");
         for i in 0..self.statement_list.len() {
-            let statement = self.statement_list[i];
+            let statement =
+                self.statement_list[i].as_ref() as *const dyn Statement as *mut dyn Statement;
             unsafe { (*statement).print(level) };
         }
         autodoc::print_indent(level);
         println!("Attributes:");
-        unsafe { (*self.attribute_list).print(level) };
+        unsafe { self.attribute_list.as_deref().unwrap().print(level) };
     }
 
     /// Java private `getMostRecentStatement()`.
@@ -270,14 +267,20 @@ impl Section {
         if self.statement_list.is_empty() {
             return std::ptr::null_mut::<EmptyStatement>();
         }
-        self.statement_list[self.statement_list.len() - 1]
+        self.statement_list[self.statement_list.len() - 1].as_ref() as *const dyn Statement
+            as *mut dyn Statement
     }
 }
 
 impl WriteOnlyAttributeList for Section {
     /// Java `addAttribute(Token, int)`.
     unsafe fn add_attribute(&mut self, name: *mut Token, line_num: i32) -> *mut Attribute {
-        unsafe { (*self.attribute_list).add_attribute(name, line_num) }
+        unsafe {
+            self.attribute_list
+                .as_deref_mut()
+                .unwrap()
+                .add_attribute(name, line_num)
+        }
     }
 
     /// Java `isGlobal()`.
@@ -296,7 +299,7 @@ impl WriteOnlyStatementList for Section {
     unsafe fn add_name_value_pair(&mut self, line_num: i32) -> *mut NameValuePair {
         let this: *mut Section = self;
         let pair = unsafe { NameValuePair::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(pair);
+        self.statement_list.push(unsafe { Box::from_raw(pair) });
         pair
     }
 
@@ -312,14 +315,15 @@ impl WriteOnlyStatementList for Section {
         unsafe { (*section).subsection = true };
         let subsection =
             unsafe { Subsection::new(section, this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(subsection);
-        self.section_list.push(section);
+        self.statement_list
+            .push(unsafe { Box::from_raw(subsection) });
+        self.section_list.push(unsafe { Box::from_raw(section) });
         self.sub_section_map.insert(
             match unsafe { (*section).get_key() } {
                 None => panic!("java.lang.NullPointerException"),
                 Some(key) => key,
             },
-            section,
+            std::ptr::NonNull::new(section).expect("new section is non-null"),
         );
         section
     }
@@ -329,14 +333,16 @@ impl WriteOnlyStatementList for Section {
         let this: *mut Section = self;
         let statement =
             unsafe { Comment::new(comment, this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(statement);
+        self.statement_list
+            .push(unsafe { Box::from_raw(statement) });
     }
 
     /// Java `addEmptyLine(int)`.
     unsafe fn add_empty_line(&mut self, line_num: i32) {
         let this: *mut Section = self;
         let statement = unsafe { EmptyLine::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(statement);
+        self.statement_list
+            .push(unsafe { Box::from_raw(statement) });
     }
 
     /// Java `setCurrentDelimiter(Token)`.
@@ -388,7 +394,8 @@ impl ReadOnlyStatementList for Section {
         if location.is_out_of_range(Some(&self.statement_list)) {
             return std::ptr::null_mut::<EmptyStatement>();
         }
-        let statement = self.statement_list[location.get_index()];
+        let statement = self.statement_list[location.get_index()].as_ref() as *const dyn Statement
+            as *mut dyn Statement;
         location.increment();
         statement
     }
@@ -411,10 +418,10 @@ impl ReadOnlySectionList for Section {
     ) -> *mut Section {
         match get_key_of_strings(sub_section_type, sub_section_name) {
             None => std::ptr::null_mut(),
-            Some(key) => *self
+            Some(key) => self
                 .sub_section_map
                 .get(&key)
-                .unwrap_or(&std::ptr::null_mut()),
+                .map_or(std::ptr::null_mut(), |section| section.as_ptr()),
         }
     }
 
@@ -425,7 +432,7 @@ impl ReadOnlySectionList for Section {
     unsafe fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation> {
         let mut section: *mut Section;
         for i in 0..self.section_list.len() {
-            section = self.section_list[i];
+            section = self.section_list[i].as_ref() as *const Section as *mut Section;
             if unsafe { (*section).equals_type(r#type) } {
                 return Some(SectionLocation::new(
                     r#type.map(|r#type| r#type.to_string()),
@@ -455,7 +462,7 @@ impl ReadOnlySectionList for Section {
         };
         let mut section: *mut Section;
         for i in location.get_index()..self.section_list.len() as i32 {
-            section = self.section_list[i as usize];
+            section = self.section_list[i as usize].as_ref() as *const Section as *mut Section;
             if unsafe { (*section).equals_type(location.get_type()) } {
                 location.set_index(i + 1);
                 return section;
@@ -483,7 +490,7 @@ impl ReadOnlySectionList for Section {
 impl ReadOnlySection for Section {
     /// Java `getAttribute(String)`.
     unsafe fn get_attribute(&self, name: Option<&str>) -> *mut Attribute {
-        unsafe { (*self.attribute_list).get_attribute(name) }
+        unsafe { self.attribute_list.as_deref().unwrap().get_attribute(name) }
     }
 
     /// Java `getType()`.
@@ -504,28 +511,23 @@ mod tests {
     /// half drops out of the key entirely.
     #[test]
     fn section_keys_match_the_source_overloads() {
-        unsafe {
-            let r#type = Box::into_raw(Box::new(Token::new()));
-            (*r#type).set_type_and_string(token::Type::Anything, "Field");
-            let name = Box::into_raw(Box::new(Token::new()));
-            (*name).set_type_and_string(token::Type::Anything, "Name");
-            assert_eq!(
-                get_key_of_tokens(r#type, name).as_deref(),
-                Some("fieldname")
-            );
-            assert_eq!(
-                get_key_of_tokens(r#type, std::ptr::null_mut()).as_deref(),
-                Some("field")
-            );
-            assert_eq!(
-                get_key_of_tokens(std::ptr::null_mut(), name).as_deref(),
-                Some("name")
-            );
-            assert_eq!(
-                get_key_of_tokens(std::ptr::null_mut(), std::ptr::null_mut()),
-                None
-            );
-        }
+        let mut r#type = Token::new();
+        r#type.set_type_and_string(token::Type::Anything, "Field");
+        let mut name = Token::new();
+        name.set_type_and_string(token::Type::Anything, "Name");
+        assert_eq!(
+            get_key_of_tokens(Some(&r#type), Some(&name)).as_deref(),
+            Some("fieldname")
+        );
+        assert_eq!(
+            get_key_of_tokens(Some(&r#type), None).as_deref(),
+            Some("field")
+        );
+        assert_eq!(
+            get_key_of_tokens(None, Some(&name)).as_deref(),
+            Some("name")
+        );
+        assert_eq!(get_key_of_tokens(None, None), None);
         assert_eq!(
             get_key_of_strings(Some("FiElD"), Some("NaMe")).as_deref(),
             Some("fieldname")

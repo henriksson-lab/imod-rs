@@ -22,5 +22,5 @@ pub use mdftkd::{mdftkd, r2cftk, r3cftk, r4cftk, r5cftk, r8cftk, rpcftk};
 pub use odfft::{cleanup_fft_plans, nice_fft_limit, odfft, odfft_c, using_fftw};
 pub use realft::realft;
 pub use srfp::srfp;
-pub use thrdfft::{thrdfft, thrdfft_c};
+pub use thrdfft::thrdfft;
 pub use todfft::{fft_add_time, fft_start_timer, parallel_todfft, todfft, todfft_c};

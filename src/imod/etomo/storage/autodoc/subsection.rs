@@ -109,7 +109,7 @@ impl ReadOnlyStatement for Subsection {
 
     /// Java `getLeftSide()`.
     fn get_left_side(&self) -> Option<String> {
-        Some(unsafe { (*(*self.subsection).get_type_token()).get_values() })
+        Some(unsafe { (*self.subsection).get_type_token().get_values() })
     }
 
     /// Java `getLeftSide(int)`.
@@ -117,7 +117,7 @@ impl ReadOnlyStatement for Subsection {
         if index > 0 {
             return None;
         }
-        Some(unsafe { (*(*self.subsection).get_type_token()).get_values() })
+        Some(unsafe { (*self.subsection).get_type_token().get_values() })
     }
 
     /// Java `getRightSide()`.

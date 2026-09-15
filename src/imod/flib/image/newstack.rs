@@ -23,13 +23,14 @@ use crate::imod::libcfshr::autodoc::{
     adoc_transfer_to_new_type, adoc_write,
 };
 use crate::imod::libcfshr::b3dutil::{
-    b3d_output_file_type, override_output_type, override_write_bytes, set_4_bit_output_mode,
-    set_float_output_for_entered_mode, set_output_type_from_string, write_16_bit_mode_for_floats,
+    b3d_get_error, b3d_output_file_type, override_output_type, override_write_bytes,
+    set_4_bit_output_mode, set_float_output_for_entered_mode, set_output_type_from_string,
+    write_16_bit_mode_for_floats,
 };
 use crate::imod::libcfshr::cubinterp::cubinterp;
 use crate::imod::libcfshr::extraheader::{
     copy_extra_header_section, get_extra_header_max_sec_size, get_extra_header_sec_offset,
-    get_extra_header_tilts_fortran,
+    get_extra_header_tilts,
 };
 use crate::imod::libcfshr::filtxcorr::{
     fourier_crop_sizes, fourier_expand_image, fourier_reduce_image, fourier_shift_image, nice_frame,
@@ -47,8 +48,8 @@ use crate::imod::libcfshr::taperpad::{
 use crate::imod::libfft::odfft::nice_fft_limit;
 use crate::imod::libfft::todfft::todfft_c;
 use crate::imod::libiimod::iimage::{
-    IIFILE_HDF, IIFILE_MRC, ii_allow_multi_volume, ii_best_tile_size, ii_read_section_float,
-    ii_sync_from_mrc_header, ii_write_header,
+    IIFILE_HDF, IIFILE_MRC, ii_allow_multi_volume, ii_best_tile_size, ii_sync_from_mrc_header,
+    ii_write_header,
 };
 use crate::imod::libiimod::mrcfiles::{
     IIUNIT_4BIT_MODE, IIUNIT_HALF_XSIZE, MRC_LABEL_SIZE, MRC_NLABELS, MrcHeader, fix_title_padding,
@@ -57,8 +58,8 @@ use crate::imod::libiimod::mrcfiles::{
 use crate::imod::libiimod::unit_fileio::{
     IIFILE_SHR_MEM, iiu_alt_chunk_sizes, iiu_close, iiu_file_info, iiu_file_type,
     iiu_get_exit_on_error, iiu_get_ii_file, iiu_mrc_header, iiu_open, iiu_ret_adoc_index,
-    iiu_ret_chunk_sizes, iiu_set_hdf_compression, iiu_set_position, iiu_trans_adoc_sections,
-    iiu_volume_open, iiu_write_global_adoc, iiu_write_lines,
+    iiu_ret_chunk_sizes, iiu_set_hdf_compression, iiu_set_position, iiu_sync_with_mrc_header,
+    iiu_trans_adoc_sections, iiu_volume_open, iiu_write_global_adoc, iiu_write_lines,
 };
 use crate::imod::libiimod::unit_header::{
     iiu_alt_extended_data, iiu_alt_extended_type, iiu_alt_num_extended, iiu_create_header,
@@ -871,12 +872,12 @@ pub fn newstack() {
             if ii_file.is_null() {
                 exit_error("Opening input file");
             }
-            // The unit's MRC header, not `ImodImageFile.header`.  For MRC,
+            // The unit's MRC header, not the image's external backend handle. For MRC,
             // RAW, HDF and shared-memory files `iiuOpen` copies the pointer
             // (`unit_fileio.c:269`) and the two are the same, but for every
             // other type it allocates its own `MrcHeader` and fills it through
             // `iiFillMrcHeader` (`unit_fileio.c:256-265`) -- a TIFF file's
-            // `ImodImageFile.header` is the libtiff `TIFF *`
+            // the image's external backend handle is the libtiff `TIFF *`
             // (`iitif.c:204, 687`), so reading it as an `MrcHeader` is garbage.
             let header = (*iiu_mrc_header(1, "iiuRetBasicHead", 1, 0)).clone();
             // `newstack.f90:449-464`: retain the first input file's volume
@@ -2915,11 +2916,10 @@ pub fn newstack() {
                             max_extra_in = n_byte_sym_in + 1024;
                             extra_in = vec![0_u8; max_extra_in as usize];
                         }
-                        iiu_ret_extended_data(
-                            1,
-                            &raw mut n_byte_sym_in,
-                            extra_in.as_mut_ptr().cast(),
-                        );
+                        let mut extended_data = Vec::new();
+                        let _ = iiu_ret_extended_data(1, &mut extended_data);
+                        n_byte_sym_in = extended_data.len() as i32;
+                        extra_in[..extended_data.len()].copy_from_slice(&extended_data);
                         let mut extended_type = [0; 2];
                         iiu_ret_extended_type(1, &mut extended_type);
                         [num_int_or_bytes_in, i_flag_extra_in] = extended_type;
@@ -2964,18 +2964,19 @@ pub fn newstack() {
                                 iz_not_piece[ind] = ind as i32;
                             }
                             let mut num_tilts = 0_i32;
-                            let mut nz_in = header.nz;
-                            get_extra_header_tilts_fortran(
-                                extra_in.as_mut_ptr().cast(),
-                                &raw mut n_byte_sym_in,
-                                &raw mut num_int_or_bytes_in,
-                                &raw mut i_flag_extra_in,
-                                &raw mut nz_in,
-                                all_file_tilts.as_mut_ptr(),
-                                &raw mut num_tilts,
-                                &raw mut max_in_file_angles,
-                                iz_not_piece.as_mut_ptr(),
-                            );
+                            if get_extra_header_tilts(
+                                &extra_in,
+                                n_byte_sym_in,
+                                num_int_or_bytes_in,
+                                i_flag_extra_in,
+                                header.nz,
+                                &mut all_file_tilts,
+                                &mut num_tilts,
+                                &iz_not_piece,
+                            ) != 0
+                            {
+                                exit_error(&format!("ERROR: {}", b3d_get_error()));
+                            }
                             if num_tilts < header.nz {
                                 exit_error(
                                     "There are either not enough or no tilt angles in extended header; tilt angles for -reorder must be entered with the -angles option",
@@ -3315,10 +3316,10 @@ pub fn newstack() {
                 let mut mxyz = nxyz;
                 iiu_create_header(
                     2,
-                    nxyz.as_mut_ptr(),
-                    mxyz.as_mut_ptr(),
+                    &nxyz,
+                    &mxyz,
                     output_mode,
-                    std::ptr::null_mut(),
+                    &[[0; MRC_LABEL_SIZE]; MRC_NLABELS],
                     0,
                 );
                 let chunk_file = iiu_get_ii_file(2);
@@ -3361,7 +3362,7 @@ pub fn newstack() {
                     }
                 }
                 // `unit_fileio.c:256-269`: the output unit's own `MrcHeader`,
-                // which for a non-MRC output is not `ImodImageFile.header`.
+                // which for a non-MRC output is not the external backend handle.
                 let chunk_header = iiu_mrc_header(2, "iiuTransHeader", iiu_get_exit_on_error(), 2);
                 // `iiuTransHeader` (`unit_header.c:381-385`) saves and restores
                 // the destination `fp` around the whole-header copy, so the
@@ -3553,7 +3554,7 @@ pub fn newstack() {
                 // appends this run's title.
                 (*chunk_header).labels = header.labels;
                 (*chunk_header).nlabl = header.nlabl;
-                ii_sync_from_mrc_header(chunk_file, chunk_header);
+                ii_sync_from_mrc_header(&mut *chunk_file, &mut *chunk_header);
                 std::ptr::null_mut()
             } else {
                 // `newstack.f90:1766-1788`: with `-3d 2` or `-3d 3` the output
@@ -3898,7 +3899,7 @@ pub fn newstack() {
                 // and leaves free space behind it.
                 (*out_header).labels = header.labels;
                 (*out_header).nlabl = header.nlabl;
-                ii_sync_from_mrc_header(out_file, out_header);
+                iiu_sync_with_mrc_header(2);
                 (*out_file).llx = 0;
                 (*out_file).lly = 0;
                 (*out_file).llz = 0;
@@ -4063,11 +4064,10 @@ pub fn newstack() {
                                 max_extra_in = n_byte_sym_in + 1024;
                                 extra_in = vec![0_u8; max_extra_in as usize];
                             }
-                            iiu_ret_extended_data(
-                                1,
-                                &raw mut n_byte_sym_in,
-                                extra_in.as_mut_ptr().cast(),
-                            );
+                            let mut extended_data = Vec::new();
+                            let _ = iiu_ret_extended_data(1, &mut extended_data);
+                            n_byte_sym_in = extended_data.len() as i32;
+                            extra_in[..extended_data.len()].copy_from_slice(&extended_data);
                             let mut extended_type = [0; 2];
                             iiu_ret_extended_type(1, &mut extended_type);
                             [num_int_or_bytes_in, i_flag_extra_in] = extended_type;
@@ -4112,18 +4112,19 @@ pub fn newstack() {
                                     iz_not_piece[ind] = ind as i32;
                                 }
                                 let mut num_tilts = 0_i32;
-                                let mut nz_in = header.nz;
-                                get_extra_header_tilts_fortran(
-                                    extra_in.as_mut_ptr().cast(),
-                                    &raw mut n_byte_sym_in,
-                                    &raw mut num_int_or_bytes_in,
-                                    &raw mut i_flag_extra_in,
-                                    &raw mut nz_in,
-                                    all_file_tilts.as_mut_ptr(),
-                                    &raw mut num_tilts,
-                                    &raw mut max_in_file_angles,
-                                    iz_not_piece.as_mut_ptr(),
-                                );
+                                if get_extra_header_tilts(
+                                    &extra_in,
+                                    n_byte_sym_in,
+                                    num_int_or_bytes_in,
+                                    i_flag_extra_in,
+                                    header.nz,
+                                    &mut all_file_tilts,
+                                    &mut num_tilts,
+                                    &iz_not_piece,
+                                ) != 0
+                                {
+                                    exit_error(&format!("ERROR: {}", b3d_get_error()));
+                                }
                                 if num_tilts < header.nz {
                                     exit_error(
                                         "There are either not enough or no tilt angles in extended header; tilt angles for -reorder must be entered with the -angles option",
@@ -4725,10 +4726,10 @@ pub fn newstack() {
                         let mut nxyz3 = [output_nx, output_ny, num_output_sections[output_index]];
                         iiu_create_header(
                             3,
-                            nxyz3.as_mut_ptr(),
-                            nxyz3.as_mut_ptr(),
+                            &nxyz3,
+                            &nxyz3,
                             2,
-                            title.as_mut_ptr().cast(),
+                            &[[0; MRC_LABEL_SIZE]; MRC_NLABELS],
                             0,
                         );
                         if_temp_open = 1;
@@ -6211,10 +6212,10 @@ pub fn newstack() {
                         let mut nxyz3 = [output_nx, output_ny, num_output_sections[output_index]];
                         iiu_create_header(
                             3,
-                            nxyz3.as_mut_ptr(),
-                            nxyz3.as_mut_ptr(),
+                            &nxyz3,
+                            &nxyz3,
                             2,
-                            title.as_mut_ptr().cast(),
+                            &[[0; MRC_LABEL_SIZE]; MRC_NLABELS],
                             0,
                         );
                         if_temp_open = 1;
@@ -7480,9 +7481,7 @@ pub fn newstack() {
                 // `newstack.f90:2764-2767`: one write with `labFlag = -1`, so
                 // the existing labels are untouched and only the min, max and
                 // (unchanged) mean are stored.
-                if iiu_write_header(2, title.as_mut_ptr().cast(), -1, dmin, dmax, replace_dmean)
-                    != 0
-                {
+                if iiu_write_header(2, &title, -1, dmin, dmax, replace_dmean) != 0 {
                     exit_error("Writing output header");
                 }
                 iiu_close(2);
@@ -7491,12 +7490,12 @@ pub fn newstack() {
                 // extraOut)` writes the assembled extended header, which is a
                 // no-op when the output is not MRC.
                 if n_byte_sym_out > 0 {
-                    iiu_alt_extended_data(2, n_byte_sym_out, extra_out.as_mut_ptr().cast());
+                    iiu_alt_extended_data(2, &extra_out[..n_byte_sym_out as usize]);
                 }
                 // `newstack.f90:2753`: `labFlag = 1` appends this run's title.
                 if iiu_write_header(
                     2,
-                    title.as_mut_ptr().cast(),
+                    &title,
                     1,
                     dmin,
                     dmax,
@@ -7525,12 +7524,12 @@ pub fn newstack() {
                 // extraOut)` writes the assembled extended header, which is a
                 // no-op when the output is not MRC.
                 if n_byte_sym_out > 0 {
-                    iiu_alt_extended_data(2, n_byte_sym_out, extra_out.as_mut_ptr().cast());
+                    iiu_alt_extended_data(2, &extra_out[..n_byte_sym_out as usize]);
                 }
-                ii_sync_from_mrc_header(out_file, out_header);
+                iiu_sync_with_mrc_header(2);
                 if ((*out_file).file == IIFILE_MRC
                     && mrc_head_write(&mut (*out_file).fp.clone().unwrap(), &mut *out_header) != 0)
-                    || ((*out_file).file != IIFILE_MRC && ii_write_header(out_file) != 0)
+                    || ((*out_file).file != IIFILE_MRC && ii_write_header(&mut *out_file) != 0)
                 {
                     exit_error("Writing output header");
                 }
@@ -8145,47 +8144,45 @@ pub fn read_binned_or_reduced(
     temp: &mut [f32],
 ) -> Result<(), i32> {
     let mut ierr = 0;
-    unsafe {
-        if do_shrink {
-            iiu_read_reduced(
-                im_unit,
-                iz,
-                array.as_mut_ptr(),
-                nx_dim,
-                x_ub_start,
-                y_ub_start,
-                red_fac,
-                nx_red,
-                ny_red,
-                ifilt_type,
-                temp.as_mut_ptr(),
-                temp.len() as i32,
-                &raw mut ierr,
-            );
-            // `newstack.f90:3539-3543`, whose `write(listString, '(a,i2,a)')`
-            // right-justifies the code in two columns.
-            if ierr > 0 {
-                exit_error(&format!(
-                    "Calling irdReduced to read image (error code{ierr:2})"
-                ));
-            }
-        } else {
-            iiu_read_binned(
-                im_unit,
-                iz,
-                array.as_mut_ptr(),
-                nx_dim,
-                ny_dim,
-                x_ub_start.round() as i32,
-                y_ub_start.round() as i32,
-                red_fac.round() as i32,
-                nx_red,
-                ny_red,
-                temp.as_mut_ptr(),
-                temp.len() as i32,
-                &raw mut ierr,
-            );
+    if do_shrink {
+        iiu_read_reduced(
+            im_unit,
+            iz,
+            array,
+            nx_dim,
+            x_ub_start,
+            y_ub_start,
+            red_fac,
+            nx_red,
+            ny_red,
+            ifilt_type,
+            temp,
+            temp.len() as i32,
+            &mut ierr,
+        );
+        // `newstack.f90:3539-3543`, whose `write(listString, '(a,i2,a)')`
+        // right-justifies the code in two columns.
+        if ierr > 0 {
+            exit_error(&format!(
+                "Calling irdReduced to read image (error code{ierr:2})"
+            ));
         }
+    } else {
+        iiu_read_binned(
+            im_unit,
+            iz,
+            array,
+            nx_dim,
+            ny_dim,
+            x_ub_start.round() as i32,
+            y_ub_start.round() as i32,
+            red_fac.round() as i32,
+            nx_red,
+            ny_red,
+            temp,
+            temp.len() as i32,
+            &mut ierr,
+        );
     }
     // `newstack.f90:3548`: the subroutine itself exits on a read failure, so
     // the message is this routine's, not the caller's.

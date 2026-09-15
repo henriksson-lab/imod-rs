@@ -271,9 +271,8 @@ pub fn surface_sort(xyz: &[f32], num_pts: i32, markers_in_group: i32, group: &mu
             sort_ind[ipt as usize] = ipt;
             if markers_in_group != 0 && group[ipt as usize] < 0 {
                 if s_debug_level > 1 {
-                    let _ = ImodFile::Stdout.write_all(
-                        c_format("Skipping search for %d\n", &[CArg::Int(ipt as i64)]).as_bytes(),
-                    );
+                    let _ = ImodFile::Stdout
+                        .write_all(format!("Skipping search for {ipt}\n").as_bytes());
                 }
                 continue;
             }

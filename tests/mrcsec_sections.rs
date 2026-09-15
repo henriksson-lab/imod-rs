@@ -76,74 +76,76 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
                 "sec",
                 np,
                 1,
-                mrc_read_section(&mut header, &mut li, buf.as_mut_ptr(), z)
+                mrc_read_section(&mut header, &mut li, &mut buf, z)
             );
             step!(
                 "secB",
                 np,
                 1,
-                mrc_read_section_byte(&mut header, &mut li, buf.as_mut_ptr(), z)
+                mrc_read_section_byte(&mut header, &mut li, &mut buf, z)
             );
-            step!(
-                "secU",
-                np,
-                2,
-                mrc_read_section_ushort(&mut header, &mut li, buf.as_mut_ptr(), z)
-            );
-            step!(
-                "secF",
-                np,
-                4,
-                mrc_read_section_float(&mut header, &mut li, buf.as_mut_ptr().cast(), z)
-            );
-            step!(
-                "z",
-                np,
-                1,
-                mrc_read_z(&mut header, &mut li, buf.as_mut_ptr(), z)
-            );
+            step!("secU", np, 2, {
+                let mut values = vec![0_u16; buf.len() / 2];
+                let rc = mrc_read_section_ushort(&mut header, &mut li, &mut values, z);
+                for (index, value) in values.iter().enumerate() {
+                    buf[2 * index..][..2].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
+            step!("secF", np, 4, {
+                let mut values = vec![0_f32; buf.len() / 4];
+                let rc = mrc_read_section_float(&mut header, &mut li, &mut values, z);
+                for (index, value) in values.iter().enumerate() {
+                    buf[4 * index..][..4].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
+            step!("z", np, 1, mrc_read_z(&mut header, &mut li, &mut buf, z));
             step!(
                 "zB",
                 np,
                 1,
-                mrc_read_z_byte(&mut header, &mut li, buf.as_mut_ptr(), z)
+                mrc_read_z_byte(&mut header, &mut li, &mut buf, z)
             );
-            step!(
-                "zU",
-                np,
-                2,
-                mrc_read_z_ushort(&mut header, &mut li, buf.as_mut_ptr(), z)
-            );
-            step!(
-                "zF",
-                np,
-                4,
-                mrc_read_z_float(&mut header, &mut li, buf.as_mut_ptr().cast(), z)
-            );
-            step!(
-                "y",
-                nyz,
-                1,
-                mrc_read_y(&mut header, &mut li, buf.as_mut_ptr(), 1)
-            );
+            step!("zU", np, 2, {
+                let mut values = vec![0_u16; buf.len() / 2];
+                let rc = mrc_read_z_ushort(&mut header, &mut li, &mut values, z);
+                for (index, value) in values.iter().enumerate() {
+                    buf[2 * index..][..2].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
+            step!("zF", np, 4, {
+                let mut values = vec![0_f32; buf.len() / 4];
+                let rc = mrc_read_z_float(&mut header, &mut li, &mut values, z);
+                for (index, value) in values.iter().enumerate() {
+                    buf[4 * index..][..4].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
+            step!("y", nyz, 1, mrc_read_y(&mut header, &mut li, &mut buf, 1));
             step!(
                 "yB",
                 nyz,
                 1,
-                mrc_read_y_byte(&mut header, &mut li, buf.as_mut_ptr(), 1)
+                mrc_read_y_byte(&mut header, &mut li, &mut buf, 1)
             );
-            step!(
-                "yU",
-                nyz,
-                2,
-                mrc_read_y_ushort(&mut header, &mut li, buf.as_mut_ptr(), 1)
-            );
-            step!(
-                "yF",
-                nyz,
-                4,
-                mrc_read_y_float(&mut header, &mut li, buf.as_mut_ptr().cast(), 1)
-            );
+            step!("yU", nyz, 2, {
+                let mut values = vec![0_u16; buf.len() / 2];
+                let rc = mrc_read_y_ushort(&mut header, &mut li, &mut values, 1);
+                for (index, value) in values.iter().enumerate() {
+                    buf[2 * index..][..2].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
+            step!("yF", nyz, 4, {
+                let mut values = vec![0_f32; buf.len() / 4];
+                let rc = mrc_read_y_float(&mut header, &mut li, &mut values, 1);
+                for (index, value) in values.iter().enumerate() {
+                    buf[4 * index..][..4].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
 
             // Sub-rectangle plus a slope/offset scaling, then a Y read of it.
             li.xmin = 3;
@@ -160,21 +162,25 @@ fn every_section_reader_matches_the_reference_for_every_mode() {
                 "subB",
                 rw * rh,
                 1,
-                mrc_read_section_byte(&mut header, &mut li, buf.as_mut_ptr(), z)
+                mrc_read_section_byte(&mut header, &mut li, &mut buf, z)
             );
-            step!(
-                "subF",
-                rw * rh,
-                4,
-                mrc_read_section_float(&mut header, &mut li, buf.as_mut_ptr().cast(), z)
-            );
+            step!("subF", rw * rh, 4, {
+                let mut values = vec![0_f32; buf.len() / 4];
+                let rc = mrc_read_section_float(&mut header, &mut li, &mut values, z);
+                for (index, value) in values.iter().enumerate() {
+                    buf[4 * index..][..4].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
             li.axis = 2;
-            step!(
-                "subYF",
-                rw * nz as usize,
-                4,
-                mrc_read_y_float(&mut header, &mut li, buf.as_mut_ptr().cast(), 2)
-            );
+            step!("subYF", rw * nz as usize, 4, {
+                let mut values = vec![0_f32; buf.len() / 4];
+                let rc = mrc_read_y_float(&mut header, &mut li, &mut values, 2);
+                for (index, value) in values.iter().enumerate() {
+                    buf[4 * index..][..4].copy_from_slice(&value.to_ne_bytes());
+                }
+                rc
+            });
             drop(fp);
         }
         assert_eq!(got, want, "mode {mode} must match the reference driver");

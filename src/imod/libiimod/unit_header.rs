@@ -66,12 +66,12 @@ pub unsafe fn iiuretbasichead(
 }
 
 /// Matches C `iiuCreateHeader` (`unit_header.c`).
-pub unsafe fn iiu_create_header(
+pub fn iiu_create_header(
     iunit: i32,
-    nxyz: *mut i32,
-    mxyz: *mut i32,
+    nxyz: &[i32; 3],
+    mxyz: &[i32; 3],
     mode: i32,
-    labels: *mut i32,
+    labels: &[[u8; MRC_LABEL_SIZE]; MRC_NLABELS],
     num_labels: i32,
 ) {
     let hdr = unsafe { iiu_mrc_header(iunit, "iiuCreateHeader", 1, 2) };
@@ -93,14 +93,14 @@ pub unsafe fn iiu_create_header(
     }
     let nxyzst = [0; 3];
     unsafe {
-        iiu_alt_size(iunit, nxyz, nxyzst.as_ptr() as *mut i32);
+        iiu_alt_size(iunit, nxyz, &nxyzst);
         iiu_alt_sample(iunit, mxyz);
-        (*hdr).xlen = *mxyz as f32;
-        (*hdr).ylen = *mxyz.add(1) as f32;
-        (*hdr).zlen = *mxyz.add(2) as f32;
-        iiu_alt_labels(iunit, labels, num_labels);
-        iiu_sync_with_mrc_header(iunit);
+        (*hdr).xlen = mxyz[0] as f32;
+        (*hdr).ylen = mxyz[1] as f32;
+        (*hdr).zlen = mxyz[2] as f32;
     }
+    iiu_alt_labels(iunit, labels, num_labels);
+    unsafe { iiu_sync_with_mrc_header(iunit) };
 }
 pub unsafe fn iiucreateheader(
     iunit: *mut i32,
@@ -110,7 +110,16 @@ pub unsafe fn iiucreateheader(
     labels: *mut i32,
     num_labels: *mut i32,
 ) {
-    unsafe { iiu_create_header(*iunit, nxyz, mxyz, *mode, labels, *num_labels) }
+    unsafe {
+        iiu_create_header(
+            *iunit,
+            &*nxyz.cast::<[i32; 3]>(),
+            &*mxyz.cast::<[i32; 3]>(),
+            *mode,
+            &*labels.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
+            *num_labels,
+        )
+    }
 }
 pub unsafe fn icrhdr(
     iunit: *mut i32,
@@ -120,12 +129,21 @@ pub unsafe fn icrhdr(
     labels: *mut i32,
     num_labels: *mut i32,
 ) {
-    unsafe { iiu_create_header(*iunit, nxyz, mxyz, *mode, labels, *num_labels) }
+    unsafe {
+        iiu_create_header(
+            *iunit,
+            &*nxyz.cast::<[i32; 3]>(),
+            &*mxyz.cast::<[i32; 3]>(),
+            *mode,
+            &*labels.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
+            *num_labels,
+        )
+    }
 }
 
-pub unsafe fn iiu_write_header(
+pub fn iiu_write_header(
     iunit: i32,
-    label: *mut i32,
+    label: &[u8; MRC_LABEL_SIZE],
     lab_flag: i32,
     dmin: f32,
     dmax: f32,
@@ -137,25 +155,17 @@ pub unsafe fn iiu_write_header(
     }
     unsafe {
         if lab_flag == 0 {
-            iiu_alt_labels(iunit, label, 1)
+            iiu_alt_labels(iunit, core::slice::from_ref(label), 1)
         } else if lab_flag == 1 {
             (*hdr).nlabl = ((*hdr).nlabl + 1).min(MRC_NLABELS as i32);
-            core::ptr::copy_nonoverlapping(
-                label.cast::<u8>(),
-                (*hdr).labels[((*hdr).nlabl - 1) as usize].as_mut_ptr(),
-                MRC_LABEL_SIZE,
-            );
+            (*hdr).labels[((*hdr).nlabl - 1) as usize] = *label;
             fix_title_padding(&mut (*hdr).labels[((*hdr).nlabl - 1) as usize]);
         } else if lab_flag == 2 {
             (*hdr).nlabl = ((*hdr).nlabl + 1).min(MRC_NLABELS as i32);
             for i in (1..(*hdr).nlabl as usize).rev() {
                 (*hdr).labels[i] = (*hdr).labels[i - 1];
             }
-            core::ptr::copy_nonoverlapping(
-                label.cast::<u8>(),
-                (*hdr).labels[0].as_mut_ptr(),
-                MRC_LABEL_SIZE,
-            );
+            (*hdr).labels[0] = *label;
             fix_title_padding(&mut (*hdr).labels[0]);
         }
         (*hdr).amin = dmin;
@@ -176,28 +186,19 @@ pub unsafe fn iiuwriteheader(
     b: *mut f32,
     c: *mut f32,
 ) -> i32 {
-    unsafe { iiu_write_header(*i, l, *f, *a, *b, *c) }
+    unsafe { iiu_write_header(*i, &*l.cast::<[u8; MRC_LABEL_SIZE]>(), *f, *a, *b, *c) }
 }
 pub unsafe fn iwrhdr(i: *mut i32, l: *mut i32, f: *mut i32, a: *mut f32, b: *mut f32, c: *mut f32) {
     unsafe {
-        iiu_write_header(*i, l, *f, *a, *b, *c);
+        iiu_write_header(*i, &*l.cast::<[u8; MRC_LABEL_SIZE]>(), *f, *a, *b, *c);
     }
 }
-pub unsafe fn iiu_write_header_str(
-    i: i32,
-    label: *const c_char,
-    f: i32,
-    a: f32,
-    b: f32,
-    c: f32,
-) -> i32 {
+pub fn iiu_write_header_str(i: i32, label: &str, f: i32, a: f32, b: f32, c: f32) -> i32 {
     let mut out = [0u8; MRC_LABEL_SIZE];
-    unsafe {
-        let bytes = core::ffi::CStr::from_ptr(label).to_bytes();
-        let count = bytes.len().min(MRC_LABEL_SIZE);
-        out[..count].copy_from_slice(&bytes[..count]);
-        iiu_write_header(i, out.as_mut_ptr().cast(), f, a, b, c)
-    }
+    let bytes = label.as_bytes();
+    let count = bytes.len().min(MRC_LABEL_SIZE);
+    out[..count].copy_from_slice(&bytes[..count]);
+    iiu_write_header(i, &out, f, a, b, c)
 }
 
 /// Matches C `iiuwriteheaderstr` (`unit_header.c`).
@@ -218,22 +219,8 @@ pub unsafe fn iiuwriteheaderstr(
         .iter()
         .rposition(|&byte| byte != b' ')
         .map_or(&[][..], |last| &source[..=last]);
-    let mut label = Vec::new();
-    if label.try_reserve_exact(trimmed.len() + 1).is_err() {
-        return -1;
-    }
-    label.extend_from_slice(trimmed);
-    label.push(0);
-    unsafe {
-        iiu_write_header_str(
-            *iunit,
-            label.as_ptr().cast(),
-            *lab_flag,
-            *dmin,
-            *dmax,
-            *dmean,
-        )
-    }
+    let label = String::from_utf8_lossy(trimmed);
+    unsafe { iiu_write_header_str(*iunit, &label, *lab_flag, *dmin, *dmax, *dmean) }
 }
 
 /// Matches C `iwrhdrc` (`unit_header.c`).
@@ -387,46 +374,32 @@ pub fn iiu_alt_data_type(i: i32, t: i32, l: i32, n1: i32, n2: i32, v1: f32, v2: 
     }
 }
 
-pub unsafe fn iiu_ret_size(i: i32, n: *mut i32, m: *mut i32, s: *mut i32) {
+pub fn iiu_ret_size(i: i32, n: &mut [i32; 3], m: &mut [i32; 3], s: &mut [i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetSize", 1, 0) };
     unsafe {
-        *n = (*h).nx;
-        *n.add(1) = (*h).ny;
-        *n.add(2) = (*h).nz;
-        *m = (*h).mx;
-        *m.add(1) = (*h).my;
-        *m.add(2) = (*h).mz;
-        *s = (*h).nxstart;
-        *s.add(1) = (*h).nystart;
-        *s.add(2) = (*h).nzstart;
+        *n = [(*h).nx, (*h).ny, (*h).nz];
+        *m = [(*h).mx, (*h).my, (*h).mz];
+        *s = [(*h).nxstart, (*h).nystart, (*h).nzstart];
     }
 }
-pub unsafe fn iiu_alt_size(i: i32, n: *mut i32, s: *mut i32) {
+pub fn iiu_alt_size(i: i32, n: &[i32; 3], s: &[i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltSize", 1, 0) };
     unsafe {
-        (*h).nx = *n;
-        (*h).ny = *n.add(1);
-        (*h).nz = *n.add(2);
-        (*h).nxstart = *s;
-        (*h).nystart = *s.add(1);
-        (*h).nzstart = *s.add(2);
+        ((*h).nx, (*h).ny, (*h).nz) = (n[0], n[1], n[2]);
+        ((*h).nxstart, (*h).nystart, (*h).nzstart) = (s[0], s[1], s[2]);
         iiu_sync_with_mrc_header(i);
     }
 }
-pub unsafe fn iiu_ret_sample(i: i32, m: *mut i32) {
+pub fn iiu_ret_sample(i: i32, m: &mut [i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetSample", 1, 0) };
     unsafe {
-        *m = (*h).mx;
-        *m.add(1) = (*h).my;
-        *m.add(2) = (*h).mz;
+        *m = [(*h).mx, (*h).my, (*h).mz];
     }
 }
-pub unsafe fn iiu_alt_sample(i: i32, m: *mut i32) {
+pub fn iiu_alt_sample(i: i32, m: &[i32; 3]) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltSample", 1, 0) };
     unsafe {
-        (*h).mx = *m;
-        (*h).my = *m.add(1);
-        (*h).mz = *m.add(2);
+        ((*h).mx, (*h).my, (*h).mz) = (m[0], m[1], m[2]);
     }
 }
 pub unsafe fn iiu_alt_size_samp_cell(i: i32, x: i32, y: i32, z: i32) {
@@ -600,99 +573,68 @@ pub fn iiu_alt_rms(i: i32, v: f32) {
         (*h).rms = v;
     }
 }
-pub unsafe fn iiu_ret_tilt(i: i32, p: *mut f32) {
-    let h = unsafe { iiu_mrc_header(i, "iiuRetTilt", 1, 0) };
-    unsafe {
-        *p = (*h).tiltangles[3];
-        *p.add(1) = (*h).tiltangles[4];
-        *p.add(2) = (*h).tiltangles[5];
-    }
+pub fn iiu_ret_tilt(i: i32, p: &mut [f32; 3]) {
+    let h = unsafe { &*iiu_mrc_header(i, "iiuRetTilt", 1, 0) };
+    *p = [h.tiltangles[3], h.tiltangles[4], h.tiltangles[5]];
 }
-pub unsafe fn iiu_alt_tilt(i: i32, p: *mut f32) {
-    let h = unsafe { iiu_mrc_header(i, "iiuAltTilt", 1, 0) };
-    unsafe {
-        (*h).tiltangles[3] = *p;
-        (*h).tiltangles[4] = *p.add(1);
-        (*h).tiltangles[5] = *p.add(2);
-    }
+pub fn iiu_alt_tilt(i: i32, p: &[f32; 3]) {
+    let h = unsafe { &mut *iiu_mrc_header(i, "iiuAltTilt", 1, 0) };
+    h.tiltangles[3] = p[0];
+    h.tiltangles[4] = p[1];
+    h.tiltangles[5] = p[2];
 }
-pub unsafe fn iiu_ret_tilt_orig(i: i32, p: *mut f32) {
-    let h = unsafe { iiu_mrc_header(i, "iiuRetTiltOrig", 1, 0) };
-    unsafe {
-        *p = (*h).tiltangles[0];
-        *p.add(1) = (*h).tiltangles[1];
-        *p.add(2) = (*h).tiltangles[2];
-    }
+pub fn iiu_ret_tilt_orig(i: i32, p: &mut [f32; 3]) {
+    let h = unsafe { &*iiu_mrc_header(i, "iiuRetTiltOrig", 1, 0) };
+    *p = [h.tiltangles[0], h.tiltangles[1], h.tiltangles[2]];
 }
-pub unsafe fn iiu_alt_tilt_orig(i: i32, p: *mut f32) {
-    let h = unsafe { iiu_mrc_header(i, "iiuAltTiltOrig", 1, 0) };
-    unsafe {
-        (*h).tiltangles[0] = *p;
-        (*h).tiltangles[1] = *p.add(1);
-        (*h).tiltangles[2] = *p.add(2);
-    }
+pub fn iiu_alt_tilt_orig(i: i32, p: &[f32; 3]) {
+    let h = unsafe { &mut *iiu_mrc_header(i, "iiuAltTiltOrig", 1, 0) };
+    h.tiltangles[0] = p[0];
+    h.tiltangles[1] = p[1];
+    h.tiltangles[2] = p[2];
 }
 /// Matches C `iiuAltTiltRot` (`unit_header.c`).
-pub unsafe fn iiu_alt_tilt_rot(iunit: i32, tilt: *mut f32) {
+pub fn iiu_alt_tilt_rot(iunit: i32, tilt: &[f32; 3]) {
     let mut amat1 = [0.0_f32; 9];
     let mut amat2 = [0.0_f32; 9];
     let mut amat3 = [0.0_f32; 9];
-    let hdr = unsafe { iiu_mrc_header(iunit, "iiuAltTiltRot", 1, 0) };
+    let hdr = unsafe { &mut *iiu_mrc_header(iunit, "iiuAltTiltRot", 1, 0) };
 
-    unsafe {
-        /* Convert new and old angles to matrices, then multiply */
-        angles_to_matrix(&*(tilt as *const [f32; 3]), &mut amat1, 3);
-        angles_to_matrix(
-            &*((*hdr).tiltangles.as_ptr().add(3) as *const [f32; 3]),
-            &mut amat2,
-            3,
-        );
-        for k in 0..3 {
-            for l in 0..3 {
-                amat3[l + 3 * k] = 0.;
-                for m in 0..3 {
-                    amat3[l + 3 * k] += amat1[l + 3 * m] * amat2[m + 3 * k];
-                }
+    /* Convert new and old angles to matrices, then multiply */
+    angles_to_matrix(tilt, &mut amat1, 3);
+    angles_to_matrix(
+        &[hdr.tiltangles[3], hdr.tiltangles[4], hdr.tiltangles[5]],
+        &mut amat2,
+        3,
+    );
+    for k in 0..3 {
+        for l in 0..3 {
+            amat3[l + 3 * k] = 0.;
+            for m in 0..3 {
+                amat3[l + 3 * k] += amat1[l + 3 * m] * amat2[m + 3 * k];
             }
         }
+    }
 
-        /* Convert back to angles */
-        icalc_angles(
-            &mut *((*hdr).tiltangles.as_mut_ptr().add(3) as *mut [f32; 3]),
-            &amat3,
-        );
-    }
+    /* Convert back to angles */
+    let mut result = [0.0; 3];
+    icalc_angles(&mut result, &amat3);
+    hdr.tiltangles[3..6].copy_from_slice(&result);
 }
-pub unsafe fn iiu_ret_delta(i: i32, p: *mut f32) {
-    let h = unsafe { iiu_mrc_header(i, "iiuRetDelta", 1, 0) };
-    unsafe {
-        *p = if (*h).mx > 0 {
-            (*h).xlen / (*h).mx as f32
-        } else {
-            1.
-        };
-        *p.add(1) = if (*h).my > 0 {
-            (*h).ylen / (*h).my as f32
-        } else {
-            1.
-        };
-        *p.add(2) = if (*h).mz > 0 {
-            (*h).zlen / (*h).mz as f32
-        } else {
-            1.
-        };
-    }
+pub fn iiu_ret_delta(i: i32, p: &mut [f32; 3]) {
+    let h = unsafe { &*iiu_mrc_header(i, "iiuRetDelta", 1, 0) };
+    p[0] = if h.mx > 0 { h.xlen / h.mx as f32 } else { 1. };
+    p[1] = if h.my > 0 { h.ylen / h.my as f32 } else { 1. };
+    p[2] = if h.mz > 0 { h.zlen / h.mz as f32 } else { 1. };
 }
-pub unsafe fn iiu_alt_delta(i: i32, p: *mut f32) {
-    let h = unsafe { iiu_mrc_header(i, "iiuAltDelta", 1, 0) };
-    unsafe {
-        (*h).mx = (*h).mx.max(1);
-        (*h).xlen = *p * (*h).mx as f32;
-        (*h).my = (*h).my.max(1);
-        (*h).ylen = *p.add(1) * (*h).my as f32;
-        (*h).mz = (*h).mz.max(1);
-        (*h).zlen = *p.add(2) * (*h).mz as f32;
-    }
+pub fn iiu_alt_delta(i: i32, p: &[f32; 3]) {
+    let h = unsafe { &mut *iiu_mrc_header(i, "iiuAltDelta", 1, 0) };
+    h.mx = h.mx.max(1);
+    h.xlen = p[0] * h.mx as f32;
+    h.my = h.my.max(1);
+    h.ylen = p[1] * h.my as f32;
+    h.mz = h.mz.max(1);
+    h.zlen = p[2] * h.mz as f32;
 }
 pub fn iiu_ret_space_group(i: i32, p: &mut i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetSpaceGroup", 1, 0) };
@@ -706,29 +648,21 @@ pub fn iiu_alt_space_group(i: i32, v: i32) {
         (*h).ispg = v;
     }
 }
-pub unsafe fn iiu_ret_labels(i: i32, p: *mut i32, n: *mut i32) {
+pub fn iiu_ret_labels(i: i32, labels: &mut [[u8; MRC_LABEL_SIZE]; MRC_NLABELS], n: &mut i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuRetLabels", 1, 0) };
     unsafe {
-        *n = (*h).nlabl;
-        for x in 0..(*h).nlabl as usize {
-            core::ptr::copy_nonoverlapping(
-                (*h).labels[x].as_ptr(),
-                p.add(20 * x).cast(),
-                MRC_LABEL_SIZE,
-            )
+        *n = (*h).nlabl.clamp(0, MRC_NLABELS as i32);
+        for x in 0..*n as usize {
+            labels[x] = (*h).labels[x];
         }
     }
 }
-pub unsafe fn iiu_alt_labels(i: i32, p: *mut i32, n: i32) {
+pub fn iiu_alt_labels(i: i32, labels: &[[u8; MRC_LABEL_SIZE]], n: i32) {
     let h = unsafe { iiu_mrc_header(i, "iiuAltLabels", 1, 0) };
     unsafe {
-        (*h).nlabl = n.min(MRC_NLABELS as i32);
+        (*h).nlabl = n.clamp(0, labels.len().min(MRC_NLABELS) as i32);
         for x in 0..(*h).nlabl as usize {
-            core::ptr::copy_nonoverlapping(
-                p.add(20 * x).cast(),
-                (*h).labels[x].as_mut_ptr(),
-                MRC_LABEL_SIZE,
-            );
+            (*h).labels[x] = labels[x];
             fix_title_padding(&mut (*h).labels[x]);
         }
         for x in (*h).nlabl as usize..MRC_NLABELS {
@@ -736,7 +670,7 @@ pub unsafe fn iiu_alt_labels(i: i32, p: *mut i32, n: i32) {
         }
     }
 }
-pub unsafe fn iiu_trans_labels(into: i32, i: i32) {
+pub fn iiu_trans_labels(into: i32, i: i32) {
     let a = unsafe { iiu_mrc_header(i, "iiuTransLabels", 1, 0) };
     let b = unsafe { iiu_mrc_header(into, "iiuTransLabels", 1, 0) };
     unsafe {
@@ -780,28 +714,24 @@ pub fn iiu_ret_header_ext_type(i: i32, values: &mut [i32; 2]) {
         values[0] = mrc_get_extended_type(&*h, &mut values[1]);
     }
 }
-pub unsafe fn iiu_ret_extended_data(i: i32, n: *mut i32, e: *mut i32) -> i32 {
+pub fn iiu_ret_extended_data(i: i32, data: &mut Vec<u8>) -> i32 {
     let h = unsafe { iiu_mrc_header(i, "iiRetExtendedData", iiu_get_exit_on_error(), 1) };
-    if h.is_null() || n.is_null() || e.is_null() {
+    if h.is_null() {
         return -1;
     }
     unsafe {
-        *n = (*h).next;
         if (*h).next == 0 {
+            data.clear();
             return 0;
         }
-        let mut data = Vec::new();
-        if mrc_read_extra_header(&mut *h, &mut data) != 0 {
+        if mrc_read_extra_header(&mut *h, data) != 0 {
             1
         } else {
-            // The Fortran ABI supplies a caller-owned integer buffer.  Copy to
-            // that boundary only after doing all file ownership in a Vec.
-            core::ptr::copy_nonoverlapping(data.as_ptr(), e.cast::<u8>(), data.len());
             0
         }
     }
 }
-pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
+pub fn iiu_alt_extended_data(i: i32, data: &[u8]) -> i32 {
     let do_exit = unsafe { iiu_get_exit_on_error() };
     let h = unsafe { iiu_mrc_header(i, "iiAltExtendedData", do_exit, 2) };
     if h.is_null() {
@@ -822,17 +752,11 @@ pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
             }
             return -2;
         }
-        if n <= 0
-            || e.is_null()
-            || mrc_write_extra_header(
-                &mut *h,
-                core::slice::from_raw_parts(e.cast::<u8>(), n as usize),
-            ) != 0
-        {
+        if data.is_empty() || mrc_write_extra_header(&mut *h, data) != 0 {
             let _ = ImodFile::Stdout.write_all(&c_format_bytes(
                 "\nERROR: iiAltExtendedData - Writing %d bytes of extended header \
                  data for unit %d.\n",
-                &[CArg::Int(n.into()), CArg::Int(i.into())],
+                &[CArg::Int(data.len() as i64), CArg::Int(i.into())],
             ));
             if do_exit != 0 {
                 std::process::exit(1);
@@ -843,7 +767,7 @@ pub unsafe fn iiu_alt_extended_data(i: i32, n: i32, e: *mut i32) -> i32 {
         }
     }
 }
-pub unsafe fn iiu_trans_extended_data(into: i32, i: i32) -> i32 {
+pub fn iiu_trans_extended_data(into: i32, i: i32) -> i32 {
     let a = unsafe { iiu_mrc_header(i, "iiuTransExtendedData", iiu_get_exit_on_error(), 1) };
     let b = unsafe { iiu_mrc_header(into, "iiuTransExtendedData", iiu_get_exit_on_error(), 2) };
     if a.is_null() || b.is_null() {
@@ -860,24 +784,15 @@ pub unsafe fn iiu_trans_extended_data(into: i32, i: i32) -> i32 {
             iiu_alt_num_extended(into, 0);
             return 0;
         }
-        let words = ((*a).next as usize).checked_add(3).map(|size| size / 4);
-        let Some(words) = words else {
-            return -1;
-        };
-        let mut data = Vec::<i32>::new();
-        if data.try_reserve_exact(words).is_err() {
-            return -1;
-        }
-        data.resize(words, 0);
+        let mut data = Vec::new();
         (*b).nint = (*a).nint;
         (*b).nreal = (*a).nreal;
         mrc_copy_valid_extended_type(&*a, &mut *b);
-        let mut n = 0;
-        let e = iiu_ret_extended_data(i, &mut n, data.as_mut_ptr());
+        let e = iiu_ret_extended_data(i, &mut data);
         let ans = if e != 0 {
             1
         } else {
-            iiu_alt_extended_data(into, n, data.as_mut_ptr())
+            iiu_alt_extended_data(into, &data)
         };
         ans
     }
@@ -951,28 +866,28 @@ pub unsafe fn ialdat(
     unsafe { iiu_alt_data_type(*i, *t, *l, *n1, *n2, *v1, *v2) }
 }
 pub unsafe fn iiuretsize(i: *mut i32, n: *mut i32, m: *mut i32, s: *mut i32) {
-    unsafe { iiu_ret_size(*i, n, m, s) }
+    unsafe { iiu_ret_size(*i, &mut *n.cast(), &mut *m.cast(), &mut *s.cast()) }
 }
 pub unsafe fn irtsiz(i: *mut i32, n: *mut i32, m: *mut i32, s: *mut i32) {
-    unsafe { iiu_ret_size(*i, n, m, s) }
+    unsafe { iiu_ret_size(*i, &mut *n.cast(), &mut *m.cast(), &mut *s.cast()) }
 }
 pub unsafe fn iiualtsize(i: *mut i32, n: *mut i32, s: *mut i32) {
-    unsafe { iiu_alt_size(*i, n, s) }
+    unsafe { iiu_alt_size(*i, &*n.cast(), &*s.cast()) }
 }
 pub unsafe fn ialsiz(i: *mut i32, n: *mut i32, s: *mut i32) {
-    unsafe { iiu_alt_size(*i, n, s) }
+    unsafe { iiu_alt_size(*i, &*n.cast(), &*s.cast()) }
 }
 pub unsafe fn iiuretsample(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_ret_sample(*i, m) }
+    unsafe { iiu_ret_sample(*i, &mut *m.cast()) }
 }
 pub unsafe fn irtsam(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_ret_sample(*i, m) }
+    unsafe { iiu_ret_sample(*i, &mut *m.cast()) }
 }
 pub unsafe fn iiualtsample(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_alt_sample(*i, m) }
+    unsafe { iiu_alt_sample(*i, &*m.cast()) }
 }
 pub unsafe fn ialsam(i: *mut i32, m: *mut i32) {
-    unsafe { iiu_alt_sample(*i, m) }
+    unsafe { iiu_alt_sample(*i, &*m.cast()) }
 }
 pub unsafe fn iiualtsizesampcell(i: *mut i32, x: *mut i32, y: *mut i32, z: *mut i32) {
     unsafe { iiu_alt_size_samp_cell(*i, *x, *y, *z) }
@@ -1055,46 +970,46 @@ pub unsafe fn ialrms(i: *mut i32, v: *mut f32) {
     unsafe { iiu_alt_rms(*i, *v) }
 }
 pub unsafe fn iiurettilt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt(*i, p) }
+    unsafe { iiu_ret_tilt(*i, &mut *p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn irttlt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt(*i, p) }
+    unsafe { iiu_ret_tilt(*i, &mut *p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiualttilt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt(*i, p) }
+    unsafe { iiu_alt_tilt(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn ialtlt(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt(*i, p) }
+    unsafe { iiu_alt_tilt(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiurettiltorig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt_orig(*i, p) }
+    unsafe { iiu_ret_tilt_orig(*i, &mut *p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn irttlt_orig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_tilt_orig(*i, p) }
+    unsafe { iiu_ret_tilt_orig(*i, &mut *p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiualttiltorig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_orig(*i, p) }
+    unsafe { iiu_alt_tilt_orig(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn ialtlt_orig(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_orig(*i, p) }
+    unsafe { iiu_alt_tilt_orig(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiualttiltrot(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_rot(*i, p) }
+    unsafe { iiu_alt_tilt_rot(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn ialtlt_rot(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_tilt_rot(*i, p) }
+    unsafe { iiu_alt_tilt_rot(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiuretdelta(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_delta(*i, p) }
+    unsafe { iiu_ret_delta(*i, &mut *p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn irtdel(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_ret_delta(*i, p) }
+    unsafe { iiu_ret_delta(*i, &mut *p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiualtdelta(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_delta(*i, p) }
+    unsafe { iiu_alt_delta(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn ialdel(i: *mut i32, p: *mut f32) {
-    unsafe { iiu_alt_delta(*i, p) }
+    unsafe { iiu_alt_delta(*i, &*p.cast::<[f32; 3]>()) }
 }
 pub unsafe fn iiuretspacegroup(i: *mut i32, p: *mut i32) {
     unsafe { iiu_ret_space_group(*i, &mut *p) }
@@ -1103,16 +1018,28 @@ pub unsafe fn iiualtspacegroup(i: *mut i32, p: *mut i32) {
     iiu_alt_space_group(*i, *p)
 }
 pub unsafe fn iiuretlabels(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe { iiu_ret_labels(*i, p, n) }
+    unsafe {
+        iiu_ret_labels(
+            *i,
+            &mut *p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
+            &mut *n,
+        )
+    }
 }
 pub unsafe fn irtlab(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe { iiu_ret_labels(*i, p, n) }
+    unsafe {
+        iiu_ret_labels(
+            *i,
+            &mut *p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(),
+            &mut *n,
+        )
+    }
 }
 pub unsafe fn iiualtlabels(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe { iiu_alt_labels(*i, p, *n) }
+    unsafe { iiu_alt_labels(*i, &*p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(), *n) }
 }
 pub unsafe fn iallab(i: *mut i32, p: *mut i32, n: *mut i32) {
-    unsafe { iiu_alt_labels(*i, p, *n) }
+    unsafe { iiu_alt_labels(*i, &*p.cast::<[[u8; MRC_LABEL_SIZE]; MRC_NLABELS]>(), *n) }
 }
 pub unsafe fn iiutranslabels(i: *mut i32, j: *mut i32) {
     unsafe { iiu_trans_labels(*i, *j) }
@@ -1149,12 +1076,24 @@ pub unsafe fn iiuretheaderexttype(i: *mut i32, a: *mut i32, b: *mut i32) {
 }
 pub unsafe fn irtsym(i: *mut i32, n: *mut i32, e: *mut i32) {
     unsafe {
-        let _ = iiu_ret_extended_data(*i, n, e);
+        let mut data = Vec::new();
+        let result = iiu_ret_extended_data(*i, &mut data);
+        if result == 0 {
+            *n = data.len() as i32;
+            if !data.is_empty() && !e.is_null() {
+                core::ptr::copy_nonoverlapping(data.as_ptr(), e.cast::<u8>(), data.len());
+            }
+        }
     }
 }
 pub unsafe fn ialsym(i: *mut i32, n: *mut i32, e: *mut i32) {
     unsafe {
-        let _ = iiu_alt_extended_data(*i, *n, e);
+        let data = if *n > 0 && !e.is_null() {
+            core::slice::from_raw_parts(e.cast::<u8>(), *n as usize)
+        } else {
+            &[]
+        };
+        let _ = iiu_alt_extended_data(*i, data);
     }
 }
 pub unsafe fn itrextra(i: *mut i32, j: *mut i32) {
@@ -1168,8 +1107,13 @@ pub unsafe fn iiutransvalidexttype(i: *mut i32, j: *mut i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{iiu_create_header, iiu_ret_basic_head};
-    use crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
+    use super::{
+        iiu_alt_delta, iiu_alt_extended_data, iiu_alt_labels, iiu_alt_sample, iiu_alt_size,
+        iiu_alt_tilt, iiu_alt_tilt_orig, iiu_create_header, iiu_ret_basic_head, iiu_ret_delta,
+        iiu_ret_extended_data, iiu_ret_labels, iiu_ret_sample, iiu_ret_size, iiu_ret_tilt,
+        iiu_ret_tilt_orig,
+    };
+    use crate::imod::libiimod::mrcfiles::{MRC_LABEL_SIZE, MRC_MODE_FLOAT, MRC_NLABELS};
     use crate::imod::libiimod::unit_fileio::{iiu_close, iiu_open};
 
     #[test]
@@ -1181,18 +1125,76 @@ mod tests {
         let name = path.to_string_lossy();
         unsafe {
             assert_eq!(iiu_open(991, &name, "NEW"), 0);
-            let mut nxyz = [7, 5, 3];
-            let mut mxyz = [7, 5, 3];
+            let nxyz = [7, 5, 3];
+            let mxyz = [7, 5, 3];
             iiu_create_header(
                 991,
-                nxyz.as_mut_ptr(),
-                mxyz.as_mut_ptr(),
+                &nxyz,
+                &mxyz,
                 MRC_MODE_FLOAT,
-                core::ptr::null_mut(),
+                &[[0; MRC_LABEL_SIZE]; MRC_NLABELS],
                 0,
             );
             let mut out_n = [0; 3];
             let mut out_m = [0; 3];
+            let mut out_start = [0; 3];
+            iiu_ret_size(991, &mut out_n, &mut out_m, &mut out_start);
+            assert_eq!(out_n, nxyz);
+            assert_eq!(out_m, mxyz);
+            assert_eq!(out_start, [0; 3]);
+
+            let new_size = [9, 6, 4];
+            let new_start = [3, 2, 1];
+            let new_sample = [18, 12, 8];
+            iiu_alt_size(991, &new_size, &new_start);
+            iiu_alt_sample(991, &new_sample);
+            iiu_ret_size(991, &mut out_n, &mut out_m, &mut out_start);
+            assert_eq!(out_n, new_size);
+            assert_eq!(out_m, new_sample);
+            assert_eq!(out_start, new_start);
+            iiu_ret_sample(991, &mut out_m);
+            assert_eq!(out_m, new_sample);
+
+            let mut labels = [[0; MRC_LABEL_SIZE]; MRC_NLABELS];
+            labels[0][..5].copy_from_slice(b"first");
+            labels[1][..6].copy_from_slice(b"second");
+            iiu_alt_labels(991, &labels, 2);
+            let mut returned_labels = [[0; MRC_LABEL_SIZE]; MRC_NLABELS];
+            let mut num_labels = 0;
+            iiu_ret_labels(991, &mut returned_labels, &mut num_labels);
+            assert_eq!(num_labels, 2);
+            assert_eq!(&returned_labels[0][..5], b"first");
+            assert_eq!(&returned_labels[1][..6], b"second");
+            assert!(returned_labels[0][5..].iter().all(|&byte| byte == b' '));
+            iiu_alt_labels(991, &labels[..1], 1);
+            returned_labels = [[0; MRC_LABEL_SIZE]; MRC_NLABELS];
+            iiu_ret_labels(991, &mut returned_labels, &mut num_labels);
+            assert_eq!(num_labels, 1);
+            assert_eq!(returned_labels[1], [0; MRC_LABEL_SIZE]);
+
+            let current_tilt = [1.25, -2.5, 3.75];
+            let original_tilt = [-4.5, 5.25, -6.0];
+            iiu_alt_tilt(991, &current_tilt);
+            iiu_alt_tilt_orig(991, &original_tilt);
+            let mut out_tilt = [0.0; 3];
+            let mut out_original_tilt = [0.0; 3];
+            iiu_ret_tilt(991, &mut out_tilt);
+            iiu_ret_tilt_orig(991, &mut out_original_tilt);
+            assert_eq!(out_tilt, current_tilt);
+            assert_eq!(out_original_tilt, original_tilt);
+
+            let delta = [1.5, 2.25, 3.75];
+            iiu_alt_delta(991, &delta);
+            let mut out_delta = [0.0; 3];
+            iiu_ret_delta(991, &mut out_delta);
+            assert_eq!(out_delta, delta);
+
+            let extended_data = vec![0x31, 0x42, 0x53, 0x64, 0x75];
+            assert_eq!(iiu_alt_extended_data(991, &extended_data), 0);
+            let mut returned_extended_data = Vec::new();
+            assert_eq!(iiu_ret_extended_data(991, &mut returned_extended_data), 0);
+            assert_eq!(returned_extended_data, extended_data);
+
             let mut mode = -1;
             let mut dmin = 0.;
             let mut dmax = 0.;
@@ -1206,8 +1208,8 @@ mod tests {
                 &mut dmax,
                 &mut dmean,
             );
-            assert_eq!(out_n, nxyz);
-            assert_eq!(out_m, mxyz);
+            assert_eq!(out_n, new_size);
+            assert_eq!(out_m, new_sample);
             assert_eq!(mode, MRC_MODE_FLOAT);
             iiu_close(991);
         }

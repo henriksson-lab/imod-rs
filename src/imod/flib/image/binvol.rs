@@ -240,7 +240,7 @@ pub fn binvol() {
         iiu_alt_mode(3, mode);
         //
         let mut delta = [0.0_f32; 3];
-        iiu_ret_delta(1, delta.as_mut_ptr());
+        iiu_ret_delta(1, &mut delta);
         let mut nxyz_bin = [0_i32; 3];
         let mut nfs_pad = [0_i32; 3];
         let mut ncrop_pad = [0_i32; 3];
@@ -340,9 +340,9 @@ pub fn binvol() {
 
         // Common header operations
         let mut nxyzst = [0_i32; 3];
-        iiu_alt_size(3, nxyz_bin.as_mut_ptr(), nxyzst.as_mut_ptr());
-        iiu_alt_sample(3, nxyz_bin.as_mut_ptr());
-        iiu_alt_delta(3, delta.as_mut_ptr());
+        iiu_alt_size(3, &nxyz_bin, &nxyzst);
+        iiu_alt_sample(3, &nxyz_bin);
+        iiu_alt_delta(3, &delta);
         let mut dmean_sum = 0.0_f64;
         dmax = -1.0e30;
         dmin = 1.0e30;
@@ -652,10 +652,11 @@ pub fn binvol() {
                         let num_bin_lines = (num_lines as f32 / bin_y) as i32;
                         if if_xy_anti_alias > 0 {
                             let mut error = 0;
+                            let (before_temp, temp) = array.split_at_mut(itemp_base as usize);
                             iiu_read_reduced(
                                 1,
                                 inz,
-                                array[in_base as usize..].as_mut_ptr(),
+                                &mut before_temp[in_base as usize..],
                                 nx_bin,
                                 0.0,
                                 iy as f32,
@@ -663,9 +664,9 @@ pub fn binvol() {
                                 nx_bin,
                                 num_bin_lines,
                                 ifilt_type - 1,
-                                array[itemp_base as usize..].as_mut_ptr(),
+                                temp,
                                 nx * max_lines,
-                                &raw mut error,
+                                &mut error,
                             );
                             if error != 0 {
                                 exit_error("Reading image");
@@ -813,10 +814,11 @@ pub fn binvol() {
                         for inz in input_starts[iz_out as usize]..=input_ends[iz_out as usize] {
                             if if_xy_anti_alias > 0 {
                                 let mut error = 0;
+                                let (before_temp, temp) = array.split_at_mut(itemp_base as usize);
                                 iiu_read_reduced(
                                     1,
                                     inz,
-                                    array[in_base as usize..].as_mut_ptr(),
+                                    &mut before_temp[in_base as usize..],
                                     nx_bin,
                                     0.0,
                                     iy as f32,
@@ -824,9 +826,9 @@ pub fn binvol() {
                                     nx_bin,
                                     num_bin_lines,
                                     ifilt_type - 1,
-                                    array[itemp_base as usize..].as_mut_ptr(),
+                                    temp,
                                     nx * max_lines,
-                                    &raw mut error,
+                                    &mut error,
                                 );
                                 if error != 0 {
                                     exit_error("Reading image");
@@ -919,14 +921,14 @@ pub fn binvol() {
         titlech[..head_len].copy_from_slice(&head[..head_len]);
         titlech[56..65].copy_from_slice(&dat);
         titlech[67..75].copy_from_slice(tim.as_bytes());
-        let mut title_c = [0_i8; MRC_LABEL_SIZE + 1];
-        core::ptr::copy_nonoverlapping(
-            titlech.as_ptr().cast(),
-            title_c.as_mut_ptr(),
-            MRC_LABEL_SIZE,
+        iiu_write_header_str(
+            3,
+            std::str::from_utf8(&titlech[..MRC_LABEL_SIZE]).unwrap_or_default(),
+            1,
+            dmin,
+            dmax,
+            dmean,
         );
-
-        iiu_write_header_str(3, title_c.as_ptr(), 1, dmin, dmax, dmean);
         iiu_close(3);
         iiu_close(1);
         //

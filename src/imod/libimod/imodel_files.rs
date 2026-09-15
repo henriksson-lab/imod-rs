@@ -109,7 +109,7 @@ pub fn imod_write_ascii(imod: &Imod, file: &mut ImodFile) -> i32 {
     {
         // `imodel_files.c:1645` `rewind(imod->file)`.
         let _ = file.rewind();
-        let _ = file.write_all(c_format("# imod ascii file version 2.0\n\n", &[]).as_bytes());
+        let _ = file.write_all(b"# imod ascii file version 2.0\n\n");
         let _ =
             file.write_all(c_format("imod %d\n", &[CArg::Int(imod.obj.len() as i64)]).as_bytes());
         let _ = file.write_all(
@@ -412,7 +412,7 @@ pub fn imod_write_ascii(imod: &Imod, file: &mut ImodFile) -> i32 {
                 (1 << 17, "valcolor\n"),
             ] {
                 if obj.flags & flag != 0 {
-                    let _ = file.write_all(c_format(line, &[]).as_bytes());
+                    let _ = file.write_all(line.as_bytes());
                 }
             }
             let _ = file.write_all(
@@ -513,7 +513,7 @@ pub fn imod_write_ascii(imod: &Imod, file: &mut ImodFile) -> i32 {
                         c_format(" %g", &[CArg::Dbl(cont_props.value1 as f64)]).as_bytes(),
                     );
                 }
-                let _ = file.write_all(c_format("\n", &[]).as_bytes());
+                let _ = file.write_all(b"\n");
                 let mut cursor = 0;
                 let mut state = 0;
                 let mut changes = 0;
@@ -557,7 +557,7 @@ pub fn imod_write_ascii(imod: &Imod, file: &mut ImodFile) -> i32 {
                             .as_bytes(),
                         );
                     }
-                    let _ = file.write_all(c_format("\n", &[]).as_bytes());
+                    let _ = file.write_all(b"\n");
                 }
                 if cont.flags != 0 {
                     let _ = file.write_all(
@@ -621,7 +621,7 @@ pub fn imod_write_ascii(imod: &Imod, file: &mut ImodFile) -> i32 {
                 }
             }
         }
-        let _ = file.write_all(c_format("# end of IMOD model\n", &[]).as_bytes());
+        let _ = file.write_all(b"# end of IMOD model\n");
     }
     0
 }

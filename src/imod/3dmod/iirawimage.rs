@@ -196,7 +196,7 @@ pub unsafe extern "C" fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
         pixel: info.pixel,
         z_pixel: info.z_pixel,
     };
-    let err = unsafe { ii_setup_raw_headers(in_file, &mut raw_info) };
+    let err = unsafe { ii_setup_raw_headers(&mut *in_file, &raw_info) };
     if err != 0 {
         return err;
     }
@@ -205,7 +205,7 @@ pub unsafe extern "C" fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
 
 /// C `iiRawScan`.
 pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
-    let hdr = unsafe { in_file.header.cast::<MrcHeader>().as_mut() };
+    let hdr = in_file.mrc_header.as_deref_mut();
     if in_file.fp.is_none() || hdr.is_none() {
         return 1;
     }
@@ -286,7 +286,7 @@ pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
         let mut tot_sum_sq = 0_f64;
         while z < hdr.nz {
             li.ymax = li.ymin + lines_to_scan - 1;
-            if unsafe { mrc_read_z(&mut *hdr, &mut li, buffer.as_mut_ptr(), z) } != 0 {
+            if mrc_read_z(&mut *hdr, &mut li, &mut buffer, z) != 0 {
                 return IIERR_IO_ERROR;
             }
             if mode_is_real && !do_mean_sd {

@@ -94,13 +94,13 @@ pub struct Autodoc {
     parser: *mut AutodocParser,
     // data
     /// Java field `sectionList`.
-    section_list: Vec<*mut Section>,
+    section_list: Vec<Box<Section>>,
     /// Java field `sectionMap`.
-    section_map: HashMap<String, *mut Section>,
+    section_map: HashMap<String, std::ptr::NonNull<Section>>,
     /// Java field `statementList`.
-    statement_list: Vec<*mut dyn Statement>,
+    statement_list: Vec<Box<dyn Statement>>,
     /// Java field `attributeList`.
-    attribute_list: *mut AttributeList,
+    attribute_list: Option<Box<AttributeList>>,
     /// Java field `currentDelimiter`, initialised to
     /// `AutodocTokenizer.DEFAULT_DELIMITER`.
     current_delimiter: String,
@@ -129,13 +129,13 @@ impl Autodoc {
             section_list: Vec::new(),
             section_map: HashMap::new(),
             statement_list: Vec::new(),
-            attribute_list: std::ptr::null_mut(),
+            attribute_list: None,
             current_delimiter: autodoc_tokenizer::DEFAULT_DELIMITER.to_string(),
             debug: false,
             writable: false,
             err_msg,
         }));
-        unsafe { (*this).attribute_list = Box::into_raw(Box::new(AttributeList::new(this))) };
+        unsafe { (*this).attribute_list = Some(Box::new(AttributeList::new(this))) };
         this
     }
 
@@ -153,10 +153,10 @@ impl Autodoc {
         let autodoc_file = unsafe { (*self.parser).get_log_file() }.unwrap();
         let writer_id = autodoc_file.open_writer()?;
         for statement in self.statement_list.iter() {
-            unsafe { (**statement).write(&autodoc_file, &writer_id)? };
+            unsafe { statement.write(&autodoc_file, &writer_id)? };
         }
         for section in self.section_list.iter() {
-            unsafe { (**section).write(&autodoc_file, &writer_id)? };
+            unsafe { section.write(&autodoc_file, &writer_id)? };
         }
         autodoc_file.close_id(Some(&writer_id));
         Ok(())
@@ -521,7 +521,8 @@ impl Autodoc {
         if self.statement_list.is_empty() {
             return std::ptr::null_mut::<EmptyStatement>();
         }
-        self.statement_list[self.statement_list.len() - 1]
+        self.statement_list[self.statement_list.len() - 1].as_ref() as *const dyn Statement
+            as *mut dyn Statement
     }
 
     /// Java private `getAttributeValues(String, String, boolean)`.
@@ -581,7 +582,12 @@ impl Autodoc {
 impl WriteOnlyAttributeList for Autodoc {
     /// Java `addAttribute(Token, int)`.
     unsafe fn add_attribute(&mut self, name: *mut Token, line_num: i32) -> *mut Attribute {
-        unsafe { (*self.attribute_list).add_attribute(name, line_num) }
+        unsafe {
+            self.attribute_list
+                .as_deref_mut()
+                .unwrap()
+                .add_attribute(name, line_num)
+        }
     }
 
     /// Java `isGlobal()`.
@@ -606,20 +612,24 @@ impl WriteOnlyStatementList for Autodoc {
         let _ = line_num;
         let this: *mut Autodoc = self;
         let existing_section: *mut Section;
-        let key = unsafe { section::get_key_of_tokens(r#type, name) };
+        let key = section::get_key_of_tokens(unsafe { r#type.as_ref() }, unsafe { name.as_ref() });
         existing_section = match &key {
             None => std::ptr::null_mut(),
-            Some(key) => *self.section_map.get(key).unwrap_or(&std::ptr::null_mut()),
+            Some(key) => self
+                .section_map
+                .get(key)
+                .map_or(std::ptr::null_mut(), |section| section.as_ptr()),
         };
         if existing_section.is_null() {
             let new_section = unsafe { Section::new(r#type, name, this) };
-            self.section_list.push(new_section);
+            self.section_list
+                .push(unsafe { Box::from_raw(new_section) });
             self.section_map.insert(
                 match unsafe { (*new_section).get_key() } {
                     None => panic!("java.lang.NullPointerException"),
                     Some(key) => key,
                 },
-                new_section,
+                std::ptr::NonNull::new(new_section).expect("new section is non-null"),
             );
             return new_section;
         }
@@ -630,7 +640,7 @@ impl WriteOnlyStatementList for Autodoc {
     unsafe fn add_name_value_pair(&mut self, line_num: i32) -> *mut NameValuePair {
         let this: *mut Autodoc = self;
         let pair = unsafe { NameValuePair::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(pair);
+        self.statement_list.push(unsafe { Box::from_raw(pair) });
         pair
     }
 
@@ -639,14 +649,16 @@ impl WriteOnlyStatementList for Autodoc {
         let this: *mut Autodoc = self;
         let statement =
             unsafe { Comment::new(comment, this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(statement);
+        self.statement_list
+            .push(unsafe { Box::from_raw(statement) });
     }
 
     /// Java `addEmptyLine(int)`.
     unsafe fn add_empty_line(&mut self, line_num: i32) {
         let this: *mut Autodoc = self;
         let statement = unsafe { EmptyLine::new(this, self.get_most_recent_statement(), line_num) };
-        self.statement_list.push(statement);
+        self.statement_list
+            .push(unsafe { Box::from_raw(statement) });
     }
 
     /// Java `setCurrentDelimiter(Token)`.
@@ -687,7 +699,8 @@ impl ReadOnlyStatementList for Autodoc {
         if location.is_out_of_range(Some(&self.statement_list)) {
             return std::ptr::null_mut::<EmptyStatement>();
         }
-        let statement = self.statement_list[location.get_index()];
+        let statement = self.statement_list[location.get_index()].as_ref() as *const dyn Statement
+            as *mut dyn Statement;
         location.increment();
         statement
     }
@@ -724,7 +737,10 @@ impl ReadOnlySectionList for Autodoc {
         }
         let section: *mut Section = match &key {
             None => std::ptr::null_mut(),
-            Some(key) => *self.section_map.get(key).unwrap_or(&std::ptr::null_mut()),
+            Some(key) => self
+                .section_map
+                .get(key)
+                .map_or(std::ptr::null_mut(), |section| section.as_ptr()),
         };
         if self.debug {
             println!(
@@ -746,7 +762,7 @@ impl ReadOnlySectionList for Autodoc {
     unsafe fn get_section_location_by_type(&self, r#type: Option<&str>) -> Option<SectionLocation> {
         let mut section: *mut Section;
         for i in 0..self.section_list.len() {
-            section = self.section_list[i];
+            section = self.section_list[i].as_ref() as *const Section as *mut Section;
             if unsafe { (*section).equals_type(r#type) } {
                 return Some(SectionLocation::new(
                     r#type.map(|r#type| r#type.to_string()),
@@ -776,7 +792,7 @@ impl ReadOnlySectionList for Autodoc {
         };
         let mut section: *mut Section;
         for i in location.get_index()..self.section_list.len() as i32 {
-            section = self.section_list[i as usize];
+            section = self.section_list[i as usize].as_ref() as *const Section as *mut Section;
             if unsafe { (*section).equals_type(location.get_type()) } {
                 location.set_index(i + 1);
                 return section;
@@ -836,15 +852,16 @@ impl ReadOnlyAutodoc for Autodoc {
         // The source's `statementList != null` guard cannot fail; the field is final.
         let mut statement: *mut dyn Statement;
         for i in 0..self.statement_list.len() {
-            statement = self.statement_list[i];
+            statement =
+                self.statement_list[i].as_ref() as *const dyn Statement as *mut dyn Statement;
             unsafe { (*statement).print(0) };
         }
         // attribute map
         println!("Attributes:");
-        unsafe { (*self.attribute_list).print(0) };
+        unsafe { self.attribute_list.as_deref().unwrap().print(0) };
         // section list
         for i in 0..self.section_list.len() {
-            let section = self.section_list[i];
+            let section = self.section_list[i].as_ref() as *const Section as *mut Section;
             unsafe { (*section).print(0) };
         }
     }
@@ -856,7 +873,7 @@ impl ReadOnlyAutodoc for Autodoc {
 
     /// Java `getAttribute(String)`.
     unsafe fn get_attribute(&self, name: Option<&str>) -> *mut Attribute {
-        unsafe { (*self.attribute_list).get_attribute(name) }
+        unsafe { self.attribute_list.as_deref().unwrap().get_attribute(name) }
     }
 
     /// Java `runInternalTest(InternalTestType, boolean, boolean)`.
@@ -908,6 +925,10 @@ impl ReadOnlyAutodoc for Autodoc {
     /// Java `getChildren()`.
     fn get_children(&self) -> *mut AttributeList {
         self.attribute_list
+            .as_deref()
+            .map_or(std::ptr::null_mut(), |list| {
+                list as *const AttributeList as *mut AttributeList
+            })
     }
 }
 
@@ -948,9 +969,19 @@ impl WritableAutodoc for Autodoc {
             // add attribute
             let name_token = Box::into_raw(Box::new(Token::new()));
             unsafe { (*name_token).set_type_and_string(token::Type::Anything, &name) };
-            unsafe { (*self.attribute_list).add_attribute(name_token, line_num) };
+            unsafe {
+                self.attribute_list
+                    .as_deref_mut()
+                    .unwrap()
+                    .add_attribute(name_token, line_num)
+            };
             // add value to attribute
-            let attribute = unsafe { (*self.attribute_list).get_attribute(Some(&name)) };
+            let attribute = unsafe {
+                self.attribute_list
+                    .as_deref()
+                    .unwrap()
+                    .get_attribute(Some(&name))
+            };
             let value_token = Box::into_raw(Box::new(Token::new()));
             unsafe {
                 (*value_token).set_type_and_string(
@@ -979,14 +1010,17 @@ impl WritableAutodoc for Autodoc {
             }
             let pair = unsafe { self.add_name_value_pair(line_num) };
             unsafe {
-                (*self.attribute_list).add_attribute_multi(0, Some(&parts), line_num, value, pair)
+                self.attribute_list
+                    .as_deref_mut()
+                    .unwrap()
+                    .add_attribute_multi(0, Some(&parts), line_num, value, pair)
             };
         }
     }
 
     /// Java `getWritableAttribute(String)`.
     unsafe fn get_writable_attribute(&self, name: Option<&str>) -> *mut Attribute {
-        unsafe { (*self.attribute_list).get_attribute(name) }
+        unsafe { self.attribute_list.as_deref().unwrap().get_attribute(name) }
     }
 
     /// Java `addComment(Token, int)`, the single body that also satisfies
@@ -1022,18 +1056,21 @@ impl WritableAutodoc for Autodoc {
     /// of the attribute in the name/value pair.  Returns the previous statement in
     /// statementList.
     unsafe fn remove_name_value_pair(&mut self, name: Option<&str>) -> *mut dyn Statement {
-        let attribute = unsafe { (*self.attribute_list).get_attribute(name) };
+        let attribute = unsafe { self.attribute_list.as_deref().unwrap().get_attribute(name) };
         if attribute.is_null() {
             // unable to find an attribute with this name
             return std::ptr::null_mut::<EmptyStatement>();
         }
         let pair = unsafe { (*attribute).get_name_value_pair() };
-        if let Some(index) = self
-            .statement_list
-            .iter()
-            .position(|statement| std::ptr::addr_eq(*statement, pair))
-        {
+        if let Some(index) = self.statement_list.iter().position(|statement| {
+            std::ptr::addr_eq(
+                statement.as_ref() as *const dyn Statement as *mut dyn Statement,
+                pair as *mut dyn Statement,
+            )
+        }) {
+            let previous = unsafe { (*pair).remove() };
             self.statement_list.remove(index);
+            return previous;
         }
         unsafe { (*pair).remove() }
     }
@@ -1041,12 +1078,15 @@ impl WritableAutodoc for Autodoc {
     /// Java `removeStatement(WritableStatement)`.  Returns the previous statement in
     /// statementList.
     unsafe fn remove_statement(&mut self, statement: *mut dyn Statement) -> *mut dyn Statement {
-        if let Some(index) = self
-            .statement_list
-            .iter()
-            .position(|entry| std::ptr::addr_eq(*entry, statement))
-        {
+        if let Some(index) = self.statement_list.iter().position(|entry| {
+            std::ptr::addr_eq(
+                entry.as_ref() as *const dyn Statement as *mut dyn Statement,
+                statement,
+            )
+        }) {
+            let previous = unsafe { (*statement).remove() };
             self.statement_list.remove(index);
+            return previous;
         }
         unsafe { (*statement).remove() }
     }
@@ -1061,7 +1101,7 @@ impl WritableAutodoc for Autodoc {
             if i > 0 {
                 buffer.push_str(", ");
             }
-            buffer.push_str(&unsafe { (*self.statement_list[i]).get_string() });
+            buffer.push_str(&self.statement_list[i].get_string());
         }
         buffer.push(']');
         println!("{}", buffer);
@@ -1085,7 +1125,7 @@ impl WritableAutodoc for Autodoc {
         let size = self.statement_list.len();
         for i in 0..size {
             unsafe {
-                (*self.statement_list[i]).wrap_value(
+                self.statement_list[i].wrap_value(
                     no_wrap_prefix,
                     wrap_prefix,
                     divider,

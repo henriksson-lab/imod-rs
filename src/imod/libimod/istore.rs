@@ -434,16 +434,13 @@ pub fn istore_dump(list: &[Istore]) {
         "ISOTHRESH",
     ];
     let mut out = ImodFile::Stdout;
-    let _ =
-        out.write_all(c_format(" %d items in list:\n", &[CArg::Int(list.len() as i64)]).as_bytes());
+    let _ = out.write_all(format!(" {} items in list:\n", list.len()).as_bytes());
     for store in list {
-        let _ = out.write_all(c_format("%6d-", &[CArg::Int(store.type_ as i64)]).as_bytes());
+        let _ = out.write_all(format!("{:>6}-", store.type_).as_bytes());
         if store.type_ > 0 && store.type_ as usize <= types.len() {
-            let _ = out.write_all(
-                c_format("%s", &[CArg::Str(types[store.type_ as usize - 1])]).as_bytes(),
-            );
+            let _ = out.write_all(types[store.type_ as usize - 1].as_bytes());
         }
-        let _ = out.write_all(c_format("  %6o-", &[CArg::Uint(store.flags as u64)]).as_bytes());
+        let _ = out.write_all(format!("  {:>6o}-", store.flags).as_bytes());
         let mut dtype = 0;
         let j = if store.type_ == 23 || store.type_ == 22 {
             1
@@ -451,82 +448,57 @@ pub fn istore_dump(list: &[Istore]) {
             0
         };
         if store.flags & (1 << 4) != 0 {
-            let _ = out.write_all(c_format("NOIND", &[]).as_bytes());
+            let _ = out.write_all(b"NOIND");
             dtype = 1;
         }
         if j == 0 && store.flags & (1 << 5) != 0 {
-            let _ = out.write_all(
-                c_format("%sREVERT", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
-            );
+            let _ = out.write_all(if dtype != 0 { b"|REVERT" } else { b"REVERT" });
             dtype = 1;
         }
         if j == 0 && store.flags & (1 << 6) != 0 {
-            let _ = out.write_all(
-                c_format("%sSURF", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
-            );
+            let _ = out.write_all(if dtype != 0 { b"|SURF" } else { b"SURF" });
             dtype = 1;
         }
         if j == 0 && store.flags & (1 << 7) != 0 {
-            let _ = out.write_all(
-                c_format("%sONEPT", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
-            );
+            let _ = out.write_all(if dtype != 0 { b"|ONEPT" } else { b"ONEPT" });
             dtype = 1;
         }
         if j != 0 && store.flags & (1 << 5) != 0 {
-            let _ = out.write_all(
-                c_format("%sCAP", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
-            );
+            let _ = out.write_all(if dtype != 0 { b"|CAP" } else { b"CAP" });
             dtype = 1;
         }
         if j != 0 && store.flags & (1 << 6) != 0 {
-            let _ = out.write_all(
-                c_format("%sDEL", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
-            );
+            let _ = out.write_all(if dtype != 0 { b"|DEL" } else { b"DEL" });
             dtype = 1;
         }
         if j != 0 && store.flags & (1 << 7) != 0 {
-            let _ = out.write_all(
-                c_format("%sOUTER", &[CArg::Str(if dtype != 0 { "|" } else { "" })]).as_bytes(),
-            );
+            let _ = out.write_all(if dtype != 0 { b"|OUTER" } else { b"OUTER" });
         }
         let mut dtype = store.flags & 3;
         for item in [store.index, store.value] {
             match dtype {
                 0 => {
-                    let _ =
-                        out.write_all(c_format(" %11d", &[CArg::Int(item.i() as i64)]).as_bytes());
+                    let _ = out.write_all(format!(" {:>11}", item.i()).as_bytes());
                 }
                 1 => {
                     let _ = out
                         .write_all(c_format(" %12.6g", &[CArg::Dbl(item.f() as f64)]).as_bytes());
                 }
                 2 => {
-                    let _ = out.write_all(
-                        c_format(
-                            " %6d %6d",
-                            &[CArg::Int(item.s()[0] as i64), CArg::Int(item.s()[1] as i64)],
-                        )
-                        .as_bytes(),
-                    );
+                    let [first, second] = item.s();
+                    let _ = out.write_all(format!(" {:>6} {:>6}", first, second).as_bytes());
                 }
                 _ => {
+                    let [first, second, third, fourth] = item.b();
                     let _ = out.write_all(
-                        c_format(
-                            " %3d %3d %3d %3d",
-                            &[
-                                CArg::Int(item.b()[0] as i64),
-                                CArg::Int(item.b()[1] as i64),
-                                CArg::Int(item.b()[2] as i64),
-                                CArg::Int(item.b()[3] as i64),
-                            ],
-                        )
-                        .as_bytes(),
+                        format!(" {:>3} {:>3} {:>3} {:>3}", first, second, third, fourth)
+                            .as_bytes(),
                     );
                 }
             }
             dtype = (store.flags >> 2) & 3;
         }
-        let _ = out.write_all(c_format("\n", &[]).as_bytes());
+        let _ = out.write_all(b"\n");
     }
 }
 /// Original: `istoreChecksum` (`istore.c:357`).

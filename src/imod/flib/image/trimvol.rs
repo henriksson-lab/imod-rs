@@ -292,8 +292,8 @@ pub fn trimvol() -> i32 {
         }
         // `iiOpenNew` resolves `IIFILE_DEFAULT` through `b3dOutputFileType`
         // (`iimage.c`), so `IMOD_OUTPUT_FORMAT` or an earlier `-T` can make
-        // this a TIFF or JPEG file -- in which case `ImodImageFile.header` is
-        // the libtiff `TIFF *` (`iitif.c:204, 687`) or the JPEG state, not an
+        // this a TIFF or JPEG file -- in which case its external backend
+        // handle is a libtiff `TIFF *` (`iitif.c:204, 687`) or JPEG state, not
         // `MrcHeader`, and everything below (`mrc_head_new`, `mrc_head_write`
         // on `(*output).fp`, `mrc_write_section_any`) would write MRC bytes
         // over it.  The source never reaches this: `trimvol:350-360` delegates
@@ -308,7 +308,11 @@ pub fn trimvol() -> i32 {
             ii_close(input);
             return 1;
         }
-        let out_header = (*output).header.cast::<MrcHeader>();
+        let Some(out_header) = (*output).mrc_header.as_deref_mut() else {
+            ii_close(output);
+            ii_close(input);
+            return 1;
+        };
         let (final_ny, final_nz) = if rotate_x || flip_yz {
             (out_nz, out_ny)
         } else {
@@ -400,7 +404,7 @@ pub fn trimvol() -> i32 {
             (*out_header).zorg =
                 (final_nz as f32 / 2.0 + ycen) * (*out_header).zlen / final_nz as f32;
         }
-        ii_sync_from_mrc_header(output, out_header);
+        ii_sync_from_mrc_header(&mut *output, &mut *out_header);
         if mrc_head_write(&mut (*output).fp.clone().unwrap(), &mut *out_header) != 0 {
             println!("ERROR: trimvol - Writing output header");
             ii_close(output);
@@ -411,10 +415,7 @@ pub fn trimvol() -> i32 {
         let mut volume = vec![0.0_f32; (out_nx * out_ny * out_nz) as usize];
         for oz in 0..out_nz {
             let iz = z0 + oz;
-            if iz >= 0
-                && iz < nz
-                && ii_read_section_float(input, source.as_mut_ptr().cast(), iz) != 0
-            {
+            if iz >= 0 && iz < nz && ii_read_section_float(&mut *input, &mut source, iz) != 0 {
                 println!("ERROR: trimvol - Reading image section");
                 ii_close(output);
                 ii_close(input);
@@ -478,7 +479,10 @@ pub fn trimvol() -> i32 {
             if mrc_write_section_any(
                 &mut *out_header,
                 &mut write_info,
-                written.as_mut_ptr().cast(),
+                core::slice::from_raw_parts(
+                    written.as_ptr().cast(),
+                    written.len() * core::mem::size_of::<f32>(),
+                ),
                 final_z,
                 MRC_MODE_FLOAT,
             ) != 0

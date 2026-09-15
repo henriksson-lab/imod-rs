@@ -126,7 +126,7 @@ pub fn load_image(view: &mut MidasView, filename: &Path) -> Result<i32, String> 
     };
     let mut header = MrcHeader::default();
     header.fp = Some(fp.clone());
-    if unsafe { mrc_head_read(&mut fp, &mut header) } != 0 {
+    if mrc_head_read(&mut fp, &mut header) != 0 {
         return Err(format!("Error reading header from {}", filename.display()));
     }
     let (mut smin, mut smax) = (header.amin, header.amax);
@@ -161,7 +161,7 @@ pub fn load_refimage(view: &mut MidasView, filename: &Path) -> Result<i32, Strin
     };
     let mut header = MrcHeader::default();
     header.fp = Some(fp.clone());
-    if unsafe { mrc_head_read(&mut fp, &mut header) } != 0 {
+    if mrc_head_read(&mut fp, &mut header) != 0 {
         return Err(format!(
             "Error reading header of reference image {}",
             filename.display()
@@ -211,13 +211,13 @@ pub fn midas_read_z_byte(
     sec: i32,
 ) -> Result<i32, String> {
     if view.binning == 1 {
-        if unsafe { mrc_read_z_byte(header, li, data.as_mut_ptr(), sec) } != 0 {
+        if mrc_read_z_byte(header, li, data, sec) != 0 {
             return Err("Error reading MRC byte section".into());
         }
     } else {
         view.unbinned_buf
             .resize((header.nx * header.ny).max(0) as usize, 0);
-        if unsafe { mrc_read_z_byte(header, li, view.unbinned_buf.as_mut_ptr(), sec) } != 0 {
+        if mrc_read_z_byte(header, li, &mut view.unbinned_buf, sec) != 0 {
             return Err("Error reading MRC byte section".into());
         }
         let (mut nx, mut ny) = (0, 0);
@@ -279,22 +279,19 @@ mod tests {
     fn image_header_and_load_info_own_a_real_mrc_file() {
         let path =
             std::env::temp_dir().join(format!("imod-rs-midas-image-{}.mrc", std::process::id()));
-        unsafe {
-            let mut fp =
-                crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb")
-                    .unwrap();
-            let mut header = MrcHeader::default();
-            mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
-            header.amin = 0.;
-            header.amax = 3.;
-            header.amean = 1.5;
-            assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
-            assert_eq!(
-                mrc_write_slice(&[0_u8, 1, 2, 3], &mut fp, &mut header, 0, b'z'),
-                0
-            );
-            drop(fp);
-        }
+        let mut fp =
+            crate::imod::libcfshr::b3dutil::ImodFile::open(&path.to_string_lossy(), "wb").unwrap();
+        let mut header = MrcHeader::default();
+        mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE);
+        header.amin = 0.;
+        header.amax = 3.;
+        header.amean = 1.5;
+        assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
+        assert_eq!(
+            mrc_write_slice(&[0_u8, 1, 2, 3], &mut fp, &mut header, 0, b'z'),
+            0
+        );
+        drop(fp);
         let mut view = new_view();
         view.binning = 1;
         assert_eq!(load_image(&mut view, &path), Ok(0));

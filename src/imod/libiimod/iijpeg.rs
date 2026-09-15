@@ -2,7 +2,8 @@
 //!
 //! This unit deliberately retains the libjpeg C ABI as its boundary.  It must
 //! not be replaced by a Rust image abstraction: IMOD stores a libjpeg
-//! compression/decompression object in `ImodImageFile.header`, uses libjpeg's
+//! compression/decompression object in the explicit external image-backend
+//! handle, uses libjpeg's
 //! stdio source/destination managers, and relies on its error-manager ABI.
 //! A generated, version-locked binding for `jpeglib.h` and a C-compatible
 //! `setjmp`/`longjmp` error trampoline are still required to enable this

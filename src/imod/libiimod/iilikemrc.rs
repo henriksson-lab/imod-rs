@@ -126,34 +126,12 @@ pub fn ii_delete_raw_check_list() {
 /// message for all errors that occur during checking, except for
 /// `IIERR_NOT_FORMAT`.
 pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
-    let mut info = RawImageInfo {
-        type_: 0,
-        nx: 0,
-        ny: 0,
-        nz: 0,
-        swap_bytes: 0,
-        header_size: 0,
-        amin: 0.,
-        amax: 0.,
-        scan_min_max: 0,
-        all_match: 0,
-        section_skip: 0,
-        y_inverted: 0,
-        pixel: 0.,
-        z_pixel: 0.,
-    };
-
-    info.swap_bytes = 0;
-    info.section_skip = 0;
-    info.y_inverted = 0;
-    info.pixel = 0.;
-    info.z_pixel = 0.;
-
-    if in_file.is_null() {
+    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
         return IIERR_BAD_CALL;
-    }
+    };
+    let mut info = RawImageInfo::default();
     // `fp = inFile->fp` copies the handle by value, as the C does.
-    let Some(mut fp) = (unsafe { &*in_file }).fp.clone() else {
+    let Some(mut fp) = in_file.fp.clone() else {
         return IIERR_BAD_CALL;
     };
     if init_check_list() != 0 {
@@ -172,14 +150,10 @@ pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
 
         // `inFile->filename`, which is NULL only where the caller never set it;
         // the C would then pass NULL to the checker and on to `stat`.
-        let filename = (unsafe { &*in_file })
-            .filename
-            .as_deref()
-            .unwrap_or("")
-            .as_bytes();
-        let err = unsafe { (item.func.unwrap())(&mut fp, filename, &raw mut info) };
+        let filename = in_file.filename.as_deref().unwrap_or("").as_bytes();
+        let err = (item.func.unwrap())(&mut fp, filename, &mut info);
         if err == 0 {
-            return unsafe { ii_setup_raw_headers(in_file, &raw mut info) };
+            return ii_setup_raw_headers(in_file, &info);
         }
 
         if err != IIERR_NOT_FORMAT {
@@ -213,7 +187,7 @@ pub unsafe extern "C" fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
 /// Creates an MRC header and fills it and the items in `inFile` from the
 /// information in `info`; specifically the `nx`, `ny`, `nz`, `swapBytes`,
 /// `headerSize`, `sectionSkip`, `yInverted`, and `type` members.
-pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawImageInfo) -> i32 {
+pub fn ii_setup_raw_headers(in_file: &mut ImodImageFile, info: &RawImageInfo) -> i32 {
     let mode_table: [i32; 7] = [
         MRC_MODE_BYTE,
         MRC_MODE_BYTE,
@@ -227,38 +201,36 @@ pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawIm
     /* Get an MRC header; set sizes into that header and the iifile header */
     // The crate owns the header slot; the erased `header` field remains only
     // the callback ABI alias for this MRC-compatible backend.
-    unsafe { (*in_file).mrc_header = Some(Box::new(MrcHeader::default())) };
-    let hdr = unsafe { (*in_file).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader };
-    // Each borrow is scoped so that none is live across the calls below, which
-    // take `inFile` and the header as pointers of their own (NATIVE.md §4d.4).
-    {
-        let info = unsafe { &mut *info };
-        let hdr_ref = unsafe { &mut *hdr };
-        let in_file_ref = unsafe { &mut *in_file };
+    in_file.mrc_header = Some(Box::new(MrcHeader::default()));
+    let file_handle = in_file.fp.clone();
+    let (mode, bytes_signed) = {
+        let hdr = in_file
+            .mrc_header
+            .as_deref_mut()
+            .expect("header just installed");
         mrc_head_new(
-            hdr_ref,
+            hdr,
             info.nx,
             info.ny,
             info.nz,
             mode_table[info.type_ as usize],
         );
-        in_file_ref.file = IIFILE_RAW;
-        hdr_ref.swapped = info.swap_bytes;
-        hdr_ref.header_size = info.header_size;
-        hdr_ref.section_skip = info.section_skip;
-        hdr_ref.y_inverted = info.y_inverted;
-        hdr_ref.bytes_signed = if info.type_ == RAW_MODE_SBYTE { 1 } else { 0 };
-        hdr_ref.packed4bits = 0;
-        hdr_ref.half_floats = 0;
-        hdr_ref.fp = in_file_ref.fp.clone();
+        hdr.swapped = info.swap_bytes;
+        hdr.header_size = info.header_size;
+        hdr.section_skip = info.section_skip;
+        hdr.y_inverted = info.y_inverted;
+        hdr.bytes_signed = if info.type_ == RAW_MODE_SBYTE { 1 } else { 0 };
+        hdr.packed4bits = 0;
+        hdr.half_floats = 0;
+        hdr.fp = file_handle;
 
         /* Pass on a min and max of 0 as a sign that there is no min/max */
-        hdr_ref.amin = info.amin;
-        hdr_ref.amax = info.amax;
-        hdr_ref.amean = ((info.amin + info.amax) as f64 / 2.) as f32;
+        hdr.amin = info.amin;
+        hdr.amax = info.amax;
+        hdr.amean = ((info.amin + info.amax) as f64 / 2.) as f32;
         if info.pixel != 0. {
             mrc_set_scale(
-                hdr_ref,
+                hdr,
                 info.pixel as f64,
                 info.pixel as f64,
                 (if info.z_pixel != 0. {
@@ -268,16 +240,17 @@ pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawIm
                 }) as f64,
             );
         }
-        in_file_ref.header = hdr.cast();
-    }
-    unsafe {
-        ii_mrc_mode_to_format_type(in_file, (*hdr).mode, (*hdr).bytes_signed);
-        ii_sync_from_mrc_header(in_file, hdr);
+        (hdr.mode, hdr.bytes_signed)
+    };
+    in_file.file = IIFILE_RAW;
+    ii_mrc_mode_to_format_type(in_file, mode, bytes_signed);
+    let mut hdr = in_file.mrc_header.take().expect("header remains installed");
+    ii_sync_from_mrc_header(in_file, &mut hdr);
+    in_file.mrc_header = Some(hdr);
 
-        /* Set the access routines; just use the MRC routines */
-        ii_mrc_set_io_funcs(in_file, 1);
-        (*in_file).clean_up = Some(ii_like_mrc_delete);
-    }
+    /* Set the access routines; just use the MRC routines */
+    unsafe { ii_mrc_set_io_funcs(in_file, 1) };
+    in_file.clean_up = Some(ii_like_mrc_delete);
     0
 }
 
@@ -285,7 +258,6 @@ pub unsafe fn ii_setup_raw_headers(in_file: *mut ImodImageFile, info: *mut RawIm
 pub unsafe extern "C" fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
     unsafe {
         (*in_file).mrc_header = None;
-        (*in_file).header = core::ptr::null_mut();
     }
 }
 
@@ -297,8 +269,7 @@ pub unsafe extern "C" fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
 /// through a `(b3dInt16 *)` cast; the array is held signed here so that the
 /// swap takes it directly, and every *use* converts back with `as u16` to keep
 /// the source's unsigned semantics.
-unsafe fn check_winkler(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
-    let info = unsafe { &mut *info };
+fn check_winkler(fp: &mut ImodFile, _filename: &[u8], info: &mut RawImageInfo) -> i32 {
     let mut sbuf = [0u8; 8];
     let mut ibuf = [0u8; 48];
 
@@ -419,8 +390,7 @@ unsafe fn check_winkler(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImage
 /// Original `checkPif` (`iilikemrc.c:276`).
 ///
 /// Check for the pif format.
-unsafe fn check_pif(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
-    let info = unsafe { &mut *info };
+fn check_pif(fp: &mut ImodFile, _filename: &[u8], info: &mut RawImageInfo) -> i32 {
     let mut ibuf = [0u8; 48];
     let mut cvals = [0u8; 6];
 
@@ -584,7 +554,7 @@ pub const DOC_CHECK_BUF: i32 = 832;
 /// Original `checkDM3` (`iilikemrc.c:383`).
 ///
 /// Check for the DigitalMicrograph format.
-unsafe fn check_dm3(fp: &mut ImodFile, filename: &[u8], info: *mut RawImageInfo) -> i32 {
+fn check_dm3(fp: &mut ImodFile, filename: &[u8], info: &mut RawImageInfo) -> i32 {
     let mut bvals = [0u8; DOC_CHECK_BUF as usize];
     let mut dmtype: i32 = 0;
     let test_string: &[u8] = b"DocumentObjectList";
@@ -628,32 +598,17 @@ unsafe fn check_dm3(fp: &mut ImodFile, filename: &[u8], info: *mut RawImageInfo)
     old info and return */
     if S_ASSUME_DM_MATCH.get() != 0 && S_DM_INFO_SAVED.get() != 0 {
         // `memcpy(info, &sLastDMinfo, sizeof(RawImageInfo))`.
-        let info = unsafe { &mut *info };
         S_LAST_DM_INFO.with_borrow(|last| {
-            info.type_ = last.type_;
-            info.nx = last.nx;
-            info.ny = last.ny;
-            info.nz = last.nz;
-            info.swap_bytes = last.swap_bytes;
-            info.header_size = last.header_size;
-            info.amin = last.amin;
-            info.amax = last.amax;
-            info.scan_min_max = last.scan_min_max;
-            info.all_match = last.all_match;
-            info.section_skip = last.section_skip;
-            info.y_inverted = last.y_inverted;
-            info.pixel = last.pixel;
-            info.z_pixel = last.z_pixel;
+            *info = *last;
         });
         return 0;
     }
 
-    err = unsafe { analyze_dm3(fp, filename, dmf, info, &mut dmtype) };
+    err = analyze_dm3(fp, filename, dmf, info, &mut dmtype);
     if err != 0 {
         return err;
     }
 
-    let info = unsafe { &mut *info };
     match dmtype {
         9 => {
             info.type_ = RAW_MODE_SBYTE;
@@ -678,22 +633,7 @@ unsafe fn check_dm3(fp: &mut ImodFile, filename: &[u8], info: *mut RawImageInfo)
     info.amin = 0.;
     info.amax = 0.;
     // `memcpy(&sLastDMinfo, info, sizeof(RawImageInfo))`.
-    S_LAST_DM_INFO.with_borrow_mut(|last| {
-        last.type_ = info.type_;
-        last.nx = info.nx;
-        last.ny = info.ny;
-        last.nz = info.nz;
-        last.swap_bytes = info.swap_bytes;
-        last.header_size = info.header_size;
-        last.amin = info.amin;
-        last.amax = info.amax;
-        last.scan_min_max = info.scan_min_max;
-        last.all_match = info.all_match;
-        last.section_skip = info.section_skip;
-        last.y_inverted = info.y_inverted;
-        last.pixel = info.pixel;
-        last.z_pixel = info.z_pixel;
-    });
+    S_LAST_DM_INFO.with_borrow_mut(|last| *last = *info);
     S_DM_INFO_SAVED.set(1);
     0
 }
@@ -737,11 +677,11 @@ thread_local! {
 /// `ny`, `nz`, `swapBytes`, `headerSize`, and `type` members.  Returns the DM
 /// data type number in `dmtype`.  Returns `IIERR_IO_ERROR` for errors reading
 /// the file or `IIERR_NO_SUPPORT` for other errors in analyzing the file.
-pub unsafe fn analyze_dm3(
+pub fn analyze_dm3(
     fp: &mut ImodFile,
     filename: &[u8],
     dmformat: i32,
-    info: *mut RawImageInfo,
+    info: &mut RawImageInfo,
     dmtype: &mut i32,
 ) -> i32 {
     let mut c: i32 = 0;
@@ -1373,7 +1313,6 @@ pub unsafe fn analyze_dm3(
     );
 
     /* Set return values in info */
-    let info = unsafe { &mut *info };
     info.nx = xsize;
     info.ny = ysize;
     info.nz = zsize;
@@ -1431,8 +1370,7 @@ fn found_dm_tag(
 /// Original `checkFEIraw` (`iilikemrc.c:865`).
 ///
 /// Check for the FEI raw format.
-unsafe fn check_fei_raw(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
-    let info = unsafe { &mut *info };
+fn check_fei_raw(fp: &mut ImodFile, _filename: &[u8], info: &mut RawImageInfo) -> i32 {
     let mut label = [0u8; 13];
     let mut ibuf = [0u8; 36];
     b3d_rewind(fp);
@@ -1486,8 +1424,7 @@ unsafe fn check_fei_raw(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImage
 /// Original `checkEM` (`iilikemrc.c:902`).
 ///
 /// Check for the EM format.
-unsafe fn check_em(fp: &mut ImodFile, _filename: &[u8], info: *mut RawImageInfo) -> i32 {
-    let info = unsafe { &mut *info };
+fn check_em(fp: &mut ImodFile, _filename: &[u8], info: &mut RawImageInfo) -> i32 {
     let mut bvals = [0u8; 4];
     let mut ibuf = [0u8; 48];
     b3d_rewind(fp);
@@ -1588,6 +1525,41 @@ mod tests {
     }
 
     #[test]
+    fn raw_header_setup_owns_its_mrc_header_through_safe_references() {
+        let mut image = ii_new_box();
+        let info = RawImageInfo {
+            nx: 8,
+            ny: 6,
+            nz: 2,
+            type_: RAW_MODE_USHORT,
+            swap_bytes: 1,
+            header_size: 512,
+            section_skip: 32,
+            y_inverted: 1,
+            pixel: 1.5,
+            z_pixel: 3.0,
+            ..empty_info()
+        };
+
+        assert_eq!(ii_setup_raw_headers(&mut image, &info), 0);
+        let header = image.mrc_header.as_deref().expect("installed header");
+        assert_eq!(
+            (image.file, image.nx, image.ny, image.nz),
+            (IIFILE_RAW, 8, 6, 2)
+        );
+        assert_eq!(
+            (
+                header.mode,
+                header.swapped,
+                header.header_size,
+                header.section_skip
+            ),
+            (MRC_MODE_USHORT, 1, 512, 32)
+        );
+        assert_eq!((image.xscale, image.yscale, image.zscale), (1.5, 1.5, 3.0));
+    }
+
+    #[test]
     fn fei_raw_dispatch_constructs_native_mrc_access_state() {
         unsafe {
             ii_delete_raw_check_list();
@@ -1607,17 +1579,15 @@ mod tests {
             (*image).fp = Some(fp.clone());
             (*image).filename = Some("synthetic-fei.raw".into());
             assert_eq!(ii_like_mrc_check(image.cast()), 0);
-            let header = (*image).header.cast::<MrcHeader>();
-            assert_eq!(
-                header,
-                (*image).mrc_header.as_deref_mut().unwrap() as *mut MrcHeader
-            );
+            let header = (*image)
+                .mrc_header
+                .as_deref_mut()
+                .expect("raw image has an owned header");
             assert_eq!(((*image).file, (*image).type_), (IIFILE_RAW, IITYPE_SHORT));
-            assert_eq!(((*header).nx, (*header).ny, (*header).nz), (4, 3, 1));
-            assert_eq!(((*header).header_size, (*header).y_inverted), (149, 1));
+            assert_eq!((header.nx, header.ny, header.nz), (4, 3, 1));
+            assert_eq!((header.header_size, header.y_inverted), (149, 1));
             ii_like_mrc_delete(image.cast());
             assert!((*image).mrc_header.is_none());
-            assert!((*image).header.is_null());
             drop(fp);
             ii_delete_raw_check_list();
         }
@@ -1625,77 +1595,70 @@ mod tests {
 
     #[test]
     fn em_checker_accepts_little_endian_dimensions_and_rejects_unknown_type() {
-        unsafe {
-            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
-            let mut bytes = vec![6_u8, 0, 0, 2];
-            for value in [8_i32, 7, 2] {
-                bytes.extend_from_slice(&value.to_ne_bytes());
-            }
-            assert_eq!(
-                crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
-                bytes.len()
-            );
-            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
-            let mut info = empty_info();
-            assert_eq!(check_em(&mut fp, b"", &mut info), 0);
-            assert_eq!(
-                (info.nx, info.ny, info.nz, info.type_, info.header_size),
-                (8, 7, 2, RAW_MODE_SHORT, 512)
-            );
-
-            let mut unsupported = bytes;
-            unsupported[3] = 3;
-            let mut unsupported_fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
-            assert_eq!(
-                crate::imod::libcfshr::b3dutil::b3d_fwrite(
-                    &unsupported,
-                    1,
-                    unsupported.len(),
-                    &mut unsupported_fp
-                ),
-                unsupported.len()
-            );
-            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut unsupported_fp);
-            assert_eq!(
-                check_em(&mut unsupported_fp, b"", &mut info),
-                IIERR_NO_SUPPORT
-            );
-            drop(unsupported_fp);
-            drop(fp);
+        let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
+        let mut bytes = vec![6_u8, 0, 0, 2];
+        for value in [8_i32, 7, 2] {
+            bytes.extend_from_slice(&value.to_ne_bytes());
         }
+        assert_eq!(
+            crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
+            bytes.len()
+        );
+        crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
+        let mut info = empty_info();
+        assert_eq!(check_em(&mut fp, b"", &mut info), 0);
+        assert_eq!(
+            (info.nx, info.ny, info.nz, info.type_, info.header_size),
+            (8, 7, 2, RAW_MODE_SHORT, 512)
+        );
+
+        let mut unsupported = bytes;
+        unsupported[3] = 3;
+        let mut unsupported_fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
+        assert_eq!(
+            crate::imod::libcfshr::b3dutil::b3d_fwrite(
+                &unsupported,
+                1,
+                unsupported.len(),
+                &mut unsupported_fp
+            ),
+            unsupported.len()
+        );
+        crate::imod::libcfshr::b3dutil::b3d_rewind(&mut unsupported_fp);
+        assert_eq!(
+            check_em(&mut unsupported_fp, b"", &mut info),
+            IIERR_NO_SUPPORT
+        );
     }
 
     #[test]
     fn pif_checker_reads_bsoft_header_fields() {
-        unsafe {
-            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
-            let mut bytes = vec![0_u8; 84];
-            bytes[24..28].copy_from_slice(&3_i32.to_ne_bytes());
-            bytes[28..32].copy_from_slice(&0_i32.to_ne_bytes());
-            bytes[32..37].copy_from_slice(b"Bsoft");
-            for (index, value) in [1_i32, 4, 3, 0, 9].into_iter().enumerate() {
-                let start = 64 + 4 * index;
-                bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
-            }
-            assert_eq!(
-                crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
-                bytes.len()
-            );
-            let mut info = empty_info();
-            assert_eq!(check_pif(&mut fp, b"", &mut info), 0);
-            assert_eq!(
-                (
-                    info.nx,
-                    info.ny,
-                    info.nz,
-                    info.type_,
-                    info.header_size,
-                    info.section_skip,
-                    info.swap_bytes,
-                ),
-                (4, 3, 3, RAW_MODE_FLOAT, 1024, 512, 0)
-            );
-            drop(fp);
+        let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
+        let mut bytes = vec![0_u8; 84];
+        bytes[24..28].copy_from_slice(&3_i32.to_ne_bytes());
+        bytes[28..32].copy_from_slice(&0_i32.to_ne_bytes());
+        bytes[32..37].copy_from_slice(b"Bsoft");
+        for (index, value) in [1_i32, 4, 3, 0, 9].into_iter().enumerate() {
+            let start = 64 + 4 * index;
+            bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
         }
+        assert_eq!(
+            crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
+            bytes.len()
+        );
+        let mut info = empty_info();
+        assert_eq!(check_pif(&mut fp, b"", &mut info), 0);
+        assert_eq!(
+            (
+                info.nx,
+                info.ny,
+                info.nz,
+                info.type_,
+                info.header_size,
+                info.section_skip,
+                info.swap_bytes,
+            ),
+            (4, 3, 3, RAW_MODE_FLOAT, 1024, 512, 0)
+        );
     }
 }

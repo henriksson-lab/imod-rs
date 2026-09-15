@@ -1208,15 +1208,15 @@ pub fn b3d_open_file(name: &str, mode: &str) -> ImodFile {
 
     let fp = ImodFile::open(name, mode);
     let Some(fp) = fp else {
-        // `strerror(errno)` is the C library's own message text and the source
-        // prints exactly that. `std::io::Error` appends " (os error N)", so it
-        // cannot provide byte-identical output. This is an immediate view of a
-        // foreign OS-error string, never crate-owned C-string storage.
         let mut message = format!("Opening {}, {}: ", descrip[desc_ind], name).into_bytes();
-        let error_text = unsafe {
-            core::ffi::CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_bytes()
-        };
-        message.extend_from_slice(error_text);
+        let error = std::io::Error::last_os_error().to_string();
+        message.extend_from_slice(
+            error
+                .split(" (os error ")
+                .next()
+                .unwrap_or(&error)
+                .as_bytes(),
+        );
         crate::imod::libcfshr::parse_params::exit_error(&message);
     };
     let _ =
@@ -1238,32 +1238,30 @@ pub fn imodgetstamp() -> i32 {
     IMOD_MRC_STAMP
 }
 
-/// Matches C `b3dShiftBytes` (`b3dutil.c:474`).
+/// Matches the in-place uses of C `b3dShiftBytes` (`b3dutil.c:474`).
 ///
-/// Kept on raw pointers, deliberately.  Every caller in this tree except
-/// `mrc_read_slice` passes the *same* buffer for both arguments — `iitif.rs`
-/// writes `b3d_shift_bytes(buf.cast(), buf.cast(), …)` at four sites — because
-/// the routine's job is to reinterpret one block of memory between signed and
-/// unsigned bytes in place.  Two `&mut` slices cannot alias, so a safe
-/// signature would have to be a different routine with different callers; that
-/// belongs with the `libiimod` conversion, not here.
-pub unsafe fn b3d_shift_bytes(
-    usbuf: *mut u8,
-    sbuf: *mut i8,
-    nx: i32,
-    ny: i32,
-    direction: i32,
-    bytes_signed: i32,
-) {
+/// Signed-byte conversion is a flip of the high bit in the same owned image
+/// buffer.  The C routine spells that as aliased unsigned and signed pointers;
+/// the Rust representation makes the in-place ownership explicit.
+pub fn b3d_shift_bytes(buf: &mut [u8], nx: i32, ny: i32, direction: i32, bytes_signed: i32) {
     if bytes_signed == 0 {
         return;
     }
-    let nxy = nx as usize * ny as usize;
-    for i in 0..nxy {
+    let Some(nxy) = usize::try_from(nx).ok().and_then(|width| {
+        usize::try_from(ny)
+            .ok()
+            .and_then(|height| width.checked_mul(height))
+    }) else {
+        return;
+    };
+    if nxy > buf.len() {
+        return;
+    }
+    for value in &mut buf[..nxy] {
         if direction >= 0 {
-            *sbuf.add(i) = (*usbuf.add(i) as i32 - 128) as i8;
+            *value = (*value as i32 - 128) as i8 as u8;
         } else {
-            *usbuf.add(i) = (*sbuf.add(i) as i32 + 128) as u8;
+            *value = (*value as i8 as i32 + 128) as u8;
         }
     }
 }
@@ -1904,38 +1902,6 @@ pub fn b3d_close_lock_file(index: i32) -> i32 {
     0
 }
 
-/// Matches C `imodbackupfile` (`b3dutil.c:282`). Fortran wrapper; see
-/// [`fortran_string`] for why this half of the bridge keeps `c_char`.
-pub unsafe fn imodbackupfile(filename: *const c_char, length: i32) -> i32 {
-    let string = fortran_string(filename, length);
-    imod_backup_file(&string)
-}
-/// Matches C `imodgetenv` (`b3dutil.c:333`). Fortran wrapper.
-pub unsafe fn imodgetenv(
-    variable: *const c_char,
-    value: *mut c_char,
-    variable_size: i32,
-    value_size: i32,
-) -> i32 {
-    let string = fortran_string(variable, variable_size);
-    match std::env::var(&string) {
-        Err(_) => 1,
-        Ok(environment) => {
-            // The Fortran output is the foreign boundary.  Do not manufacture
-            // a temporary CString merely to pass Rust-owned environment text
-            // through another local Rust function.
-            let bytes = environment.as_bytes();
-            let size = value_size.max(0) as usize;
-            let copied = bytes.len().min(size);
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), value.cast::<u8>(), copied);
-            if copied < bytes.len() {
-                return -1;
-            }
-            core::ptr::write_bytes(value.add(copied), b' ', size - copied);
-            0
-        }
-    }
-}
 /// Matches C `pidtostderr` (`b3dutil.c:366`).
 pub fn pidtostderr() {
     pid_to_stderr();
@@ -1952,17 +1918,6 @@ pub fn writebytessigned() -> i32 {
 pub fn readbytessigned(stamp: &i32, flags: &i32, mode: &i32, minimum: &f32, maximum: &f32) -> i32 {
     read_bytes_signed(*stamp, *flags, *mode, *minimum, *maximum)
 }
-/// Matches C `b3dshiftbytes` (`b3dutil.c:490`).
-pub unsafe fn b3dshiftbytes(
-    unsigned: *mut u8,
-    signed: *mut i8,
-    nx: &i32,
-    ny: &i32,
-    direction: &i32,
-    bytes_signed: &i32,
-) {
-    b3d_shift_bytes(unsigned, signed, *nx, *ny, *direction, *bytes_signed);
-}
 /// Matches C `overrideinvertmrcorigin` (`b3dutil.c:508`).
 pub fn overrideinvertmrcorigin(value: &i32) {
     override_invert_mrc_origin(*value);
@@ -1974,11 +1929,6 @@ pub fn overrideoutputtype(value: &i32) {
 /// Matches C `b3doutputfiletype` (`b3dutil.c:590`).
 pub fn b3doutputfiletype() -> i32 {
     b3d_output_file_type()
-}
-/// Matches C `setoutputtypefromstring` (`b3dutil.c:628`). Fortran wrapper.
-pub unsafe fn setoutputtypefromstring(string: *const c_char, length: i32) -> i32 {
-    let converted = fortran_string(string, length);
-    set_output_type_from_string(&converted)
 }
 /// Matches C `overrideallbigtiff` (`b3dutil.c:652`).
 pub fn overrideallbigtiff(value: &i32) {
@@ -2352,11 +2302,6 @@ pub fn get_standard_gpu_options(
 pub fn b3dsetlocktimeout(timeout: &f32) {
     b3d_set_lock_timeout(*timeout);
 }
-/// Matches C `b3dopenlockfile` (`b3dutil.c:1905`). Fortran wrapper.
-pub unsafe fn b3dopenlockfile(filename: *const c_char, length: i32) -> i32 {
-    let string = fortran_string(filename, length);
-    b3d_open_lock_file(&string)
-}
 /// Matches C `b3dlockfile` (`b3dutil.c:1960`).
 pub fn b3dlockfile(index: &i32) -> i32 {
     b3d_lock_file(*index)
@@ -2701,11 +2646,10 @@ mod tests {
 
     #[test]
     fn core_b3dutil_value_operations_follow_source() {
-        let mut signed = [0_i8; 3];
         let mut bytes = [0_u8, 128, 255];
-        unsafe { b3d_shift_bytes(bytes.as_mut_ptr(), signed.as_mut_ptr(), 3, 1, 1, 1) };
-        assert_eq!(signed, [-128, 0, 127]);
-        unsafe { b3d_shift_bytes(bytes.as_mut_ptr(), signed.as_mut_ptr(), 3, 1, -1, 1) };
+        b3d_shift_bytes(&mut bytes, 3, 1, 1, 1);
+        assert_eq!(bytes.map(|value| value as i8), [-128, 0, 127]);
+        b3d_shift_bytes(&mut bytes, 3, 1, -1, 1);
         assert_eq!(bytes, [0, 128, 255]);
         let values = [4, 7, 9];
         assert_eq!(number_in_list(7, Some(&values), 3, -1), 1);

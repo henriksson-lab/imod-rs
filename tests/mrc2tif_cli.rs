@@ -1405,8 +1405,8 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         drop(file);
         let reader = ii_new();
         assert!(!reader.is_null());
-        (*reader).filename = Some(stack_c.as_bytes().to_vec());
-        (*reader).fmode = [b'r', b'b', 0, 0];
+        (*reader).filename = Some(stack_c.to_owned());
+        (*reader).fmode = "rb".to_owned();
         (*reader).fp = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(stack_c, "rb");
         assert_eq!(ii_tiff_check(reader), 0);
         assert_eq!((*reader).tiff_compression, IICOMPRESSION_ZIP);
@@ -1584,8 +1584,8 @@ fn mrc2tif_zip_stack_quality_and_slice_scaling_use_source_libtiff_paths() {
         let numeric_c = numeric.to_str().unwrap();
         let reader = ii_new();
         assert!(!reader.is_null());
-        (*reader).filename = Some(numeric_c.as_bytes().to_vec());
-        (*reader).fmode = [b'r', b'b', 0, 0];
+        (*reader).filename = Some(numeric_c.to_owned());
+        (*reader).fmode = "rb".to_owned();
         (*reader).fp = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(numeric_c, "rb");
         assert_eq!(ii_tiff_check(reader), 0);
         assert_eq!((*reader).tiff_compression, 32946);
@@ -1688,8 +1688,8 @@ fn mrc2tif_jpeg_compression_uses_the_installed_libtiff_codec() {
         let jpeg_c = jpeg.to_str().unwrap();
         let reader = ii_new();
         assert!(!reader.is_null());
-        (*reader).filename = Some(jpeg_c.as_bytes().to_vec());
-        (*reader).fmode = [b'r', b'b', 0, 0];
+        (*reader).filename = Some(jpeg_c.to_owned());
+        (*reader).fmode = "rb".to_owned();
         (*reader).fp = imod_rs::imod::libcfshr::b3dutil::ImodFile::open(jpeg_c, "rb");
         assert_eq!(ii_tiff_check(reader), 0);
         assert_eq!((*reader).tiff_compression, 7);

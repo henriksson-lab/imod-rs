@@ -185,569 +185,528 @@ pub fn isit_tiff(fp: &mut ImodFile) -> i32 {
 }
 
 /// C `tiffFirstIFD` (`tiff.c:347`).
-pub unsafe fn tiff_first_ifd(fp: &mut ImodFile) -> u32 {
-    unsafe {
-        let mut short_raw = [0u8; 2];
-        let mut long_raw = [0u8; 4];
-        b3d_rewind(fp);
-        if b3d_fread(&mut short_raw, 2, 1, fp) < 1 {
-            return 0;
-        }
-        let word = u16::from_ne_bytes(short_raw);
-        if word != 0x4949 && word != 0x4d4d {
-            return 0;
-        }
-        SWAP_DATA.with(|swap_data| {
-            swap_data.set(
-                word != if cfg!(target_endian = "little") {
-                    0x4949
-                } else {
-                    0x4d4d
-                },
-            );
-        });
-        if b3d_fread(&mut short_raw, 2, 1, fp) < 1 {
-            return 0;
-        }
-        if SWAP_DATA.with(Cell::get) {
-            swap(&mut short_raw);
-        }
-        b3d_fread(&mut long_raw, 4, 1, fp);
-        if SWAP_DATA.with(Cell::get) {
-            swap(&mut long_raw);
-        }
-        u32::from_ne_bytes(long_raw)
+pub fn tiff_first_ifd(fp: &mut ImodFile) -> u32 {
+    let mut short_raw = [0u8; 2];
+    let mut long_raw = [0u8; 4];
+    b3d_rewind(fp);
+    if b3d_fread(&mut short_raw, 2, 1, fp) < 1 {
+        return 0;
     }
+    let word = u16::from_ne_bytes(short_raw);
+    if word != 0x4949 && word != 0x4d4d {
+        return 0;
+    }
+    SWAP_DATA.with(|swap_data| {
+        swap_data.set(
+            word != if cfg!(target_endian = "little") {
+                0x4949
+            } else {
+                0x4d4d
+            },
+        );
+    });
+    if b3d_fread(&mut short_raw, 2, 1, fp) < 1 {
+        return 0;
+    }
+    if SWAP_DATA.with(Cell::get) {
+        swap(&mut short_raw);
+    }
+    b3d_fread(&mut long_raw, 4, 1, fp);
+    if SWAP_DATA.with(Cell::get) {
+        swap(&mut long_raw);
+    }
+    u32::from_ne_bytes(long_raw)
 }
 
 /// C `read_tiffheader` (`tiff.c:325`).
-pub unsafe fn read_tiffheader(fp: &mut ImodFile, header: &mut TfHeader) -> i32 {
-    unsafe {
-        // `tiff.c:325`: `fread(header, sizeof(Tf_header), 1, fp)` -- the eight
-        // bytes of the on-disk header, unpacked field by field rather than
-        // read over the struct, so the transfer does not depend on the Rust
-        // layout.
-        let mut raw = [0u8; 8];
-        if b3d_fread(&mut raw, 8, 1, fp) < 1 {
-            return 0;
-        }
-        let mut order_raw = [raw[0], raw[1]];
-        let mut version_raw = [raw[2], raw[3]];
-        let mut offset_raw = [raw[4], raw[5], raw[6], raw[7]];
-        let order = u16::from_ne_bytes(order_raw);
-        if order != 0x4d4d && order != 0x4949 {
-            header.byteorder = i16::from_ne_bytes(order_raw);
-            header.version = i16::from_ne_bytes(version_raw);
-            header.first_ifd_offset = i32::from_ne_bytes(offset_raw);
-            return 0;
-        }
-        let machine = if cfg!(target_endian = "little") {
-            0x4949
-        } else {
-            0x4d4d
-        };
-        if order != machine {
-            swap(&mut version_raw);
-            swap(&mut offset_raw);
-        }
+pub fn read_tiffheader(fp: &mut ImodFile, header: &mut TfHeader) -> i32 {
+    // `tiff.c:325`: `fread(header, sizeof(Tf_header), 1, fp)` -- the eight
+    // bytes of the on-disk header, unpacked field by field rather than
+    // read over the struct, so the transfer does not depend on the Rust
+    // layout.
+    let mut raw = [0u8; 8];
+    if b3d_fread(&mut raw, 8, 1, fp) < 1 {
+        return 0;
+    }
+    let mut order_raw = [raw[0], raw[1]];
+    let mut version_raw = [raw[2], raw[3]];
+    let mut offset_raw = [raw[4], raw[5], raw[6], raw[7]];
+    let order = u16::from_ne_bytes(order_raw);
+    if order != 0x4d4d && order != 0x4949 {
         header.byteorder = i16::from_ne_bytes(order_raw);
         header.version = i16::from_ne_bytes(version_raw);
-        header.first_ifd_offset = tiff_first_ifd(fp) as i32;
-        if header.version != 42 { 0 } else { 1 }
+        header.first_ifd_offset = i32::from_ne_bytes(offset_raw);
+        return 0;
     }
+    let machine = if cfg!(target_endian = "little") {
+        0x4949
+    } else {
+        0x4d4d
+    };
+    if order != machine {
+        swap(&mut version_raw);
+        swap(&mut offset_raw);
+    }
+    header.byteorder = i16::from_ne_bytes(order_raw);
+    header.version = i16::from_ne_bytes(version_raw);
+    header.first_ifd_offset = tiff_first_ifd(fp) as i32;
+    if header.version != 42 { 0 } else { 1 }
 }
 
 /// C `tiffIFD` (`tiff.c:379`).
-pub unsafe fn tiff_ifd(fp: &mut ImodFile, section: i32) -> u32 {
-    unsafe {
-        let mut ifd = tiff_first_ifd(fp);
-        for _ in 0..section {
-            if ifd == 0 {
-                return 0;
-            }
-            let mut entries_raw = [0u8; 2];
-            b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
-            b3d_fread(&mut entries_raw, 2, 1, fp);
-            if SWAP_DATA.with(Cell::get) {
-                swap(&mut entries_raw);
-            }
-            let entries = u16::from_ne_bytes(entries_raw);
-            b3d_fseek(
-                fp,
-                ((ifd + 2 + entries as u32 * 12) as i64) as i32,
-                SEEK_SET,
-            );
-            let mut ifd_raw = [0u8; 4];
-            b3d_fread(&mut ifd_raw, 4, 1, fp);
-            if SWAP_DATA.with(Cell::get) {
-                swap(&mut ifd_raw);
-            }
-            ifd = u32::from_ne_bytes(ifd_raw);
+pub fn tiff_ifd(fp: &mut ImodFile, section: i32) -> u32 {
+    let mut ifd = tiff_first_ifd(fp);
+    for _ in 0..section {
+        if ifd == 0 {
+            return 0;
         }
-        ifd
+        let mut entries_raw = [0u8; 2];
+        b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
+        b3d_fread(&mut entries_raw, 2, 1, fp);
+        if SWAP_DATA.with(Cell::get) {
+            swap(&mut entries_raw);
+        }
+        let entries = u16::from_ne_bytes(entries_raw);
+        b3d_fseek(
+            fp,
+            ((ifd + 2 + entries as u32 * 12) as i64) as i32,
+            SEEK_SET,
+        );
+        let mut ifd_raw = [0u8; 4];
+        b3d_fread(&mut ifd_raw, 4, 1, fp);
+        if SWAP_DATA.with(Cell::get) {
+            swap(&mut ifd_raw);
+        }
+        ifd = u32::from_ne_bytes(ifd_raw);
     }
+    ifd
 }
 
 /// C `tiffIFDNumber` (`tiff.c:411`).
-pub unsafe fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
-    unsafe {
-        let mut ifd = tiff_first_ifd(fp);
-        let mut count = 0;
-        while ifd != 0 {
-            let mut entries_raw = [0u8; 2];
-            b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
-            b3d_fread(&mut entries_raw, 2, 1, fp);
-            if SWAP_DATA.with(Cell::get) {
-                swap(&mut entries_raw);
-            }
-            let entries = u16::from_ne_bytes(entries_raw);
-            count += 1;
-            b3d_fseek(
-                fp,
-                ((ifd + 2 + entries as u32 * 12) as i64) as i32,
-                SEEK_SET,
-            );
-            let mut ifd_raw = [0u8; 4];
-            b3d_fread(&mut ifd_raw, 4, 1, fp);
-            if SWAP_DATA.with(Cell::get) {
-                swap(&mut ifd_raw);
-            }
-            ifd = u32::from_ne_bytes(ifd_raw);
+pub fn tiff_ifd_number(fp: &mut ImodFile) -> i32 {
+    let mut ifd = tiff_first_ifd(fp);
+    let mut count = 0;
+    while ifd != 0 {
+        let mut entries_raw = [0u8; 2];
+        b3d_fseek(fp, (ifd as i64) as i32, SEEK_SET);
+        b3d_fread(&mut entries_raw, 2, 1, fp);
+        if SWAP_DATA.with(Cell::get) {
+            swap(&mut entries_raw);
         }
-        count
+        let entries = u16::from_ne_bytes(entries_raw);
+        count += 1;
+        b3d_fseek(
+            fp,
+            ((ifd + 2 + entries as u32 * 12) as i64) as i32,
+            SEEK_SET,
+        );
+        let mut ifd_raw = [0u8; 4];
+        b3d_fread(&mut ifd_raw, 4, 1, fp);
+        if SWAP_DATA.with(Cell::get) {
+            swap(&mut ifd_raw);
+        }
+        ifd = u32::from_ne_bytes(ifd_raw);
     }
+    count
 }
 
 /// C `read_tiffentries` (`tiff.c:432`).
-pub unsafe fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
-    unsafe {
-        (*tif).nstrip = 1;
-        b3d_fseek(fp, ((*tif).header.first_ifd_offset as i64) as i32, SEEK_SET);
-        let mut numentries_raw = [0u8; 2];
-        b3d_fread(&mut numentries_raw, 2, 1, fp);
-        if SWAP_DATA.with(Cell::get) {
-            swap(&mut numentries_raw);
-        }
-        (*tif).numentries = i16::from_ne_bytes(numentries_raw);
-        for _ in 0..(*tif).numentries {
-            let mut tag_raw = [0u8; 2];
-            let mut typ_raw = [0u8; 2];
-            let mut len_raw = [0u8; 4];
-            let mut value_raw = [0u8; 4];
-            if b3d_fread(&mut tag_raw, 2, 1, fp) < 1
-                || b3d_fread(&mut typ_raw, 2, 1, fp) < 1
-                || b3d_fread(&mut len_raw, 4, 1, fp) < 1
-                || b3d_fread(&mut value_raw, 4, 1, fp) < 1
-            {
-                return 0;
-            }
-            if SWAP_DATA.with(Cell::get) {
-                swap(&mut tag_raw);
-                swap(&mut typ_raw);
-                swap(&mut len_raw);
-                swap(&mut value_raw);
-            }
-            let tag = u16::from_ne_bytes(tag_raw);
-            let typ = u16::from_ne_bytes(typ_raw);
-            let len = u32::from_ne_bytes(len_raw);
-            let mut value = u32::from_ne_bytes(value_raw);
-            if cfg!(target_endian = "little") == false && typ == 3 && len < 3 {
-                value >>= 16;
-            }
-            match tag {
-                256 => {
-                    (*tif).directory[1].value = value as i32;
-                    (*tif).width = value as i32;
-                }
-                257 => {
-                    (*tif).directory[2].value = value as i32;
-                    (*tif).length = value as i32;
-                }
-                258 => {
-                    if len == 1 {
-                        (*tif).bits_per_sample = value as i32;
-                        if value == 16 {
-                            (*tif).mode = 2;
-                        }
-                    } else if len == 3 {
-                        let pos = fp.tell();
-                        b3d_fseek(fp, (value as i64) as i32, SEEK_SET);
-                        let mut bits_raw = [0u8; 2];
-                        b3d_fread(&mut bits_raw, 2, 1, fp);
-                        if SWAP_DATA.with(Cell::get) {
-                            swap(&mut bits_raw);
-                        }
-                        (*tif).bits_per_sample = u16::from_ne_bytes(bits_raw) as i32;
-                        (*tif).mode = 16;
-                        b3d_fseek(fp, (pos) as i32, SEEK_SET);
-                    }
-                }
-                259 if value != 1 => return 0,
-                262 => {
-                    if value == 3 {
-                        return 0;
-                    }
-                    (*tif).photometric_interpretation = value as i32;
-                }
-                273 => {
-                    (*tif).strip_pos = value as i32;
-                    (*tif).nstrip = len as i32;
-                }
-                278 => (*tif).rows_per_strip = value as i32,
-                279 => (*tif).strip_byte_counts = value as i32,
-                324 | 325 => return 0,
-                _ => {}
-            }
-        }
-        // `tiff.c:534-536`: `malloc(sizeof(int) * tiff->nstrip)` for each.
-        // A negative `nstrip` cannot reach here -- it comes from an unsigned
-        // IFD length field -- so the cast is the C's own implicit one.
-        (*tif).stripoff = vec![0_i32; (*tif).nstrip.max(0) as usize];
-        (*tif).stripsize = vec![0_i32; (*tif).nstrip.max(0) as usize];
-        if (*tif).nstrip == 1 {
-            (*tif).stripoff[0] = (*tif).strip_pos;
-            (*tif).stripsize[0] = (*tif).strip_byte_counts;
-        } else {
-            let pos = fp.tell();
-            b3d_fseek(fp, ((*tif).strip_pos as i64) as i32, SEEK_SET);
-            let nstrip = (*tif).nstrip.max(0) as usize;
-            b3d_fread(
-                core::slice::from_raw_parts_mut(
-                    (*tif).stripoff.as_mut_ptr().cast::<u8>(),
-                    (4) * nstrip,
-                ),
-                4,
-                nstrip,
-                fp,
-            );
-            b3d_fseek(fp, ((*tif).strip_byte_counts as i64) as i32, SEEK_SET);
-            b3d_fread(
-                core::slice::from_raw_parts_mut(
-                    (*tif).stripsize.as_mut_ptr().cast::<u8>(),
-                    (4) * nstrip,
-                ),
-                4,
-                nstrip,
-                fp,
-            );
-            b3d_fseek(fp, (pos) as i32, SEEK_SET);
-            if SWAP_DATA.with(Cell::get) {
-                for i in 0..nstrip {
-                    (*tif).stripoff[i] = (*tif).stripoff[i].swap_bytes();
-                    (*tif).stripsize[i] = (*tif).stripsize[i].swap_bytes();
-                }
-            }
-        }
-        1
+pub fn read_tiffentries(fp: &mut ImodFile, tif: &mut TfInfo) -> i32 {
+    tif.nstrip = 1;
+    b3d_fseek(fp, (tif.header.first_ifd_offset as i64) as i32, SEEK_SET);
+    let mut numentries_raw = [0u8; 2];
+    b3d_fread(&mut numentries_raw, 2, 1, fp);
+    if SWAP_DATA.with(Cell::get) {
+        swap(&mut numentries_raw);
     }
+    tif.numentries = i16::from_ne_bytes(numentries_raw);
+    for _ in 0..tif.numentries {
+        let mut tag_raw = [0u8; 2];
+        let mut typ_raw = [0u8; 2];
+        let mut len_raw = [0u8; 4];
+        let mut value_raw = [0u8; 4];
+        if b3d_fread(&mut tag_raw, 2, 1, fp) < 1
+            || b3d_fread(&mut typ_raw, 2, 1, fp) < 1
+            || b3d_fread(&mut len_raw, 4, 1, fp) < 1
+            || b3d_fread(&mut value_raw, 4, 1, fp) < 1
+        {
+            return 0;
+        }
+        if SWAP_DATA.with(Cell::get) {
+            swap(&mut tag_raw);
+            swap(&mut typ_raw);
+            swap(&mut len_raw);
+            swap(&mut value_raw);
+        }
+        let tag = u16::from_ne_bytes(tag_raw);
+        let typ = u16::from_ne_bytes(typ_raw);
+        let len = u32::from_ne_bytes(len_raw);
+        let mut value = u32::from_ne_bytes(value_raw);
+        if cfg!(target_endian = "little") == false && typ == 3 && len < 3 {
+            value >>= 16;
+        }
+        match tag {
+            256 => {
+                tif.directory[1].value = value as i32;
+                tif.width = value as i32;
+            }
+            257 => {
+                tif.directory[2].value = value as i32;
+                tif.length = value as i32;
+            }
+            258 => {
+                if len == 1 {
+                    tif.bits_per_sample = value as i32;
+                    if value == 16 {
+                        tif.mode = 2;
+                    }
+                } else if len == 3 {
+                    let pos = fp.tell();
+                    b3d_fseek(fp, (value as i64) as i32, SEEK_SET);
+                    let mut bits_raw = [0u8; 2];
+                    b3d_fread(&mut bits_raw, 2, 1, fp);
+                    if SWAP_DATA.with(Cell::get) {
+                        swap(&mut bits_raw);
+                    }
+                    tif.bits_per_sample = u16::from_ne_bytes(bits_raw) as i32;
+                    tif.mode = 16;
+                    b3d_fseek(fp, (pos) as i32, SEEK_SET);
+                }
+            }
+            259 if value != 1 => return 0,
+            262 => {
+                if value == 3 {
+                    return 0;
+                }
+                tif.photometric_interpretation = value as i32;
+            }
+            273 => {
+                tif.strip_pos = value as i32;
+                tif.nstrip = len as i32;
+            }
+            278 => tif.rows_per_strip = value as i32,
+            279 => tif.strip_byte_counts = value as i32,
+            324 | 325 => return 0,
+            _ => {}
+        }
+    }
+    // `tiff.c:534-536`: `malloc(sizeof(int) * tiff->nstrip)` for each.
+    // A negative `nstrip` cannot reach here -- it comes from an unsigned
+    // IFD length field -- so the cast is the C's own implicit one.
+    tif.stripoff = vec![0_i32; tif.nstrip.max(0) as usize];
+    tif.stripsize = vec![0_i32; tif.nstrip.max(0) as usize];
+    if tif.nstrip == 1 {
+        tif.stripoff[0] = tif.strip_pos;
+        tif.stripsize[0] = tif.strip_byte_counts;
+    } else {
+        let pos = fp.tell();
+        b3d_fseek(fp, (tif.strip_pos as i64) as i32, SEEK_SET);
+        let nstrip = tif.nstrip.max(0) as usize;
+        for offset in &mut tif.stripoff {
+            let mut raw = [0_u8; 4];
+            b3d_fread(&mut raw, 4, 1, fp);
+            *offset = i32::from_ne_bytes(raw);
+        }
+        b3d_fseek(fp, (tif.strip_byte_counts as i64) as i32, SEEK_SET);
+        for size in &mut tif.stripsize {
+            let mut raw = [0_u8; 4];
+            b3d_fread(&mut raw, 4, 1, fp);
+            *size = i32::from_ne_bytes(raw);
+        }
+        b3d_fseek(fp, (pos) as i32, SEEK_SET);
+        if SWAP_DATA.with(Cell::get) {
+            for i in 0..nstrip {
+                tif.stripoff[i] = tif.stripoff[i].swap_bytes();
+                tif.stripsize[i] = tif.stripsize[i].swap_bytes();
+            }
+        }
+    }
+    1
 }
 
 /// C `tiff_read_section` (`tiff.c:112`).
-pub unsafe fn tiff_read_section(
-    fp: &mut ImodFile,
-    tif: &mut TfInfo,
-    section: i32,
-) -> Option<Vec<u8>> {
-    unsafe {
-        if crate::imod::mrc::rust_tiff::contains(tif) {
-            return crate::imod::mrc::rust_tiff::read_section(tif, section);
-        }
-        if (*tif).iifile.is_none() {
-            (*tif).header.first_ifd_offset = tiff_ifd(fp, section) as i32;
-            if (*tif).header.first_ifd_offset == 0 || read_tiffentries(fp, tif) == 0 {
-                return None;
-            }
-        }
-        let x = (*tif).directory[1].value;
-        let y = (*tif).directory[2].value;
-        let data_size = x as usize * y as usize;
-        // `tiff.c:141-145`: the pixel size comes from BitsPerSample and is then
-        // overridden for RGB.  Sub-byte data therefore leaves `pixSize` at 0.
-        let mut pixel = (*tif).bits_per_sample / 8;
-        if (*tif).photometric_interpretation == 2 {
-            pixel = 3;
-        }
-        // `tiff.c:148-152` allocates `(data_size + xsize + ysize) * pixSize`.
-        // With `pixSize` 0 that is a zero-byte block which the C then reads and
-        // writes far beyond (see the 1-bit branch below), so native `tif2mrc`
-        // has no defined output for sub-byte data.  Allocate the block the
-        // caller will actually consume, cleared, rather than reproducing the
-        // out-of-bounds access.
-        let allocated = (data_size + x as usize + y as usize) * pixel.max(1) as usize;
-        // The C distinguishes `malloc` from `calloc` only to keep the sub-byte
-        // branch's over-read deterministic; a `Vec` is zeroed either way.
-        let mut data = vec![0_u8; allocated];
-        if let Some(iifile) = (*tif).iifile.as_mut() {
-            // `tiff.c` delegates library-backed data to iiReadSection or
-            // tiffReadSection; the native iimage dispatch owns that choice.
-            if crate::imod::libiimod::iimage::ii_read_section(
-                iifile.as_mut(),
-                data.as_mut_ptr().cast(),
-                section,
-            ) != 0
-            {
-                return None;
-            }
-            return Some(data);
-        }
-        /* binary image. */
-        if (*tif).bits_per_sample == 1 {
-            // `tiff.c:167-189`.  `pixSize` is 0 on this path, so the C's
-            // `fread(&bitdata[dpos], pixSize, tiff->stripsize[i], fp)`
-            // transfers nothing and the expansion below runs over the
-            // uninitialized `malloc(data_size)` block, writing `data_size`
-            // bytes into a zero-byte `tiff->data`.  Native `tif2mrc` therefore
-            // aborts in `free()` for any 1-bit TIFF that declares
-            // BitsPerSample = 1 (verified: SIGABRT, "free(): invalid pointer").
-            // The zero-length reads are kept; `bitdata` is cleared so this
-            // produces a deterministic all-zero image instead of a crash.
-            let mut bitdata = vec![0_u8; data_size];
-            let mut dpos = 0_i32;
-            for i in 0..(*tif).nstrip as usize {
-                b3d_fseek(fp, ((*tif).stripoff[i]) as i32, SEEK_SET);
-                let count = (*tif).stripsize[i].max(0) as usize;
-                b3d_fread(
-                    core::slice::from_raw_parts_mut(
-                        bitdata.as_mut_ptr().wrapping_add(dpos as usize),
-                        (pixel as usize) * count,
-                    ),
-                    pixel as usize,
-                    count,
-                    fp,
-                );
-                dpos += (*tif).stripsize[i];
-            }
-            for i in 0..data_size {
-                // C reads through `char *bitdata` into an `int cbyte`, so the
-                // byte is sign extended before the mask is applied.
-                let cbyte = bitdata[i / 8] as i8 as i32;
-                let cbit = (i % 8) as i32;
-                data[i] = if cbyte & ((1 << 7) >> cbit) != 0 {
-                    0xff
-                } else {
-                    0x00
-                };
-            }
-            (*tif).bits_per_sample = 8;
-        } else {
-            // `tiff.c:190-211`.
-            let mut nleft = x * y * pixel;
-            let mut dpos = 0_i32;
-            for i in 0..(*tif).nstrip as usize {
-                b3d_fseek(fp, ((*tif).stripoff[i]) as i32, SEEK_SET);
-                /* DNM 11/17/01: Gatan image did not limit size of last strip */
-                // The `max(0)` has no counterpart in the C, which would pass a
-                // negative count straight to `fread`.
-                let mut realsize = (*tif).stripsize[i].max(0);
-                if realsize > nleft {
-                    realsize = nleft;
-                }
-                /* DNM 12/10/00: was pixSize, needed to be 1 because stripsize
-                is in bytes regardless of pixel size */
-                b3d_fread(
-                    core::slice::from_raw_parts_mut(
-                        data.as_mut_ptr().add(dpos as usize),
-                        (1) * (realsize as usize),
-                    ),
-                    1,
-                    realsize as usize,
-                    fp,
-                );
-                /* DNM: swap the bytes if necessary */
-                if (*tif).header.byteorder as u16
-                    != if cfg!(target_endian = "little") {
-                        0x4949
-                    } else {
-                        0x4d4d
-                    }
-                    && (pixel == 2 || pixel == 4)
-                {
-                    let mut at = 0;
-                    while at + pixel <= realsize {
-                        let start = (dpos + at) as usize;
-                        swap(&mut data[start..start + pixel as usize]);
-                        at += pixel;
-                    }
-                }
-                dpos += realsize;
-                nleft -= realsize;
-            }
-        }
-        for row in 0..y as usize / 2 {
-            let a = row * x as usize * pixel as usize;
-            let b = (y as usize - 1 - row) * x as usize * pixel as usize;
-            for j in 0..x as usize * pixel as usize {
-                data.swap(a + j, b + j);
-            }
-        }
-        Some(data)
+pub fn tiff_read_section(fp: &mut ImodFile, tif: &mut TfInfo, section: i32) -> Option<Vec<u8>> {
+    if crate::imod::mrc::rust_tiff::contains(tif) {
+        return crate::imod::mrc::rust_tiff::read_section(tif, section);
     }
+    if tif.iifile.is_none() {
+        tif.header.first_ifd_offset = tiff_ifd(fp, section) as i32;
+        if tif.header.first_ifd_offset == 0 || read_tiffentries(fp, tif) == 0 {
+            return None;
+        }
+    }
+    let x = tif.directory[1].value;
+    let y = tif.directory[2].value;
+    let data_size = x as usize * y as usize;
+    // `tiff.c:141-145`: the pixel size comes from BitsPerSample and is then
+    // overridden for RGB.  Sub-byte data therefore leaves `pixSize` at 0.
+    let mut pixel = tif.bits_per_sample / 8;
+    if tif.photometric_interpretation == 2 {
+        pixel = 3;
+    }
+    // `tiff.c:148-152` allocates `(data_size + xsize + ysize) * pixSize`.
+    // With `pixSize` 0 that is a zero-byte block which the C then reads and
+    // writes far beyond (see the 1-bit branch below), so native `tif2mrc`
+    // has no defined output for sub-byte data.  Allocate the block the
+    // caller will actually consume, cleared, rather than reproducing the
+    // out-of-bounds access.
+    let allocated = (data_size + x as usize + y as usize) * pixel.max(1) as usize;
+    // The C distinguishes `malloc` from `calloc` only to keep the sub-byte
+    // branch's over-read deterministic; a `Vec` is zeroed either way.
+    let mut data = vec![0_u8; allocated];
+    if let Some(iifile) = tif.iifile.as_mut() {
+        // `tiff.c` delegates library-backed data to iiReadSection or
+        // tiffReadSection; the native iimage dispatch owns that choice.
+        if crate::imod::libiimod::iimage::ii_read_section(iifile.as_mut(), &mut data, section) != 0
+        {
+            return None;
+        }
+        return Some(data);
+    }
+    /* binary image. */
+    if tif.bits_per_sample == 1 {
+        // `tiff.c:167-189`.  `pixSize` is 0 on this path, so the C's
+        // `fread(&bitdata[dpos], pixSize, tiff->stripsize[i], fp)`
+        // transfers nothing and the expansion below runs over the
+        // uninitialized `malloc(data_size)` block, writing `data_size`
+        // bytes into a zero-byte `tiff->data`.  Native `tif2mrc` therefore
+        // aborts in `free()` for any 1-bit TIFF that declares
+        // BitsPerSample = 1 (verified: SIGABRT, "free(): invalid pointer").
+        // The zero-length reads are kept; `bitdata` is cleared so this
+        // produces a deterministic all-zero image instead of a crash.
+        let mut bitdata = vec![0_u8; data_size];
+        let mut dpos = 0_i32;
+        for i in 0..tif.nstrip as usize {
+            b3d_fseek(fp, tif.stripoff[i], SEEK_SET);
+            let count = tif.stripsize[i].max(0) as usize;
+            b3d_fread(
+                &mut bitdata[dpos as usize..dpos as usize + pixel as usize * count],
+                pixel as usize,
+                count,
+                fp,
+            );
+            dpos += tif.stripsize[i];
+        }
+        for i in 0..data_size {
+            // C reads through `char *bitdata` into an `int cbyte`, so the
+            // byte is sign extended before the mask is applied.
+            let cbyte = bitdata[i / 8] as i8 as i32;
+            let cbit = (i % 8) as i32;
+            data[i] = if cbyte & ((1 << 7) >> cbit) != 0 {
+                0xff
+            } else {
+                0x00
+            };
+        }
+        tif.bits_per_sample = 8;
+    } else {
+        // `tiff.c:190-211`.
+        let mut nleft = x * y * pixel;
+        let mut dpos = 0_i32;
+        for i in 0..tif.nstrip as usize {
+            b3d_fseek(fp, tif.stripoff[i], SEEK_SET);
+            /* DNM 11/17/01: Gatan image did not limit size of last strip */
+            // The `max(0)` has no counterpart in the C, which would pass a
+            // negative count straight to `fread`.
+            let mut realsize = tif.stripsize[i].max(0);
+            if realsize > nleft {
+                realsize = nleft;
+            }
+            /* DNM 12/10/00: was pixSize, needed to be 1 because stripsize
+            is in bytes regardless of pixel size */
+            b3d_fread(
+                &mut data[dpos as usize..dpos as usize + realsize as usize],
+                1,
+                realsize as usize,
+                fp,
+            );
+            /* DNM: swap the bytes if necessary */
+            if tif.header.byteorder as u16
+                != if cfg!(target_endian = "little") {
+                    0x4949
+                } else {
+                    0x4d4d
+                }
+                && (pixel == 2 || pixel == 4)
+            {
+                let mut at = 0;
+                while at + pixel <= realsize {
+                    let start = (dpos + at) as usize;
+                    swap(&mut data[start..start + pixel as usize]);
+                    at += pixel;
+                }
+            }
+            dpos += realsize;
+            nleft -= realsize;
+        }
+    }
+    for row in 0..y as usize / 2 {
+        let a = row * x as usize * pixel as usize;
+        let b = (y as usize - 1 - row) * x as usize * pixel as usize;
+        for j in 0..x as usize * pixel as usize {
+            data.swap(a + j, b + j);
+        }
+    }
+    Some(data)
 }
 
 /// C `tiff_read_file` (`tiff.c:236`).
-pub unsafe fn tiff_read_file(fp: &mut ImodFile, tif: &mut TfInfo) -> Option<Vec<u8>> {
-    unsafe {
-        if (*tif).iifile.is_some() {
-            return tiff_read_section(fp, tif, 0);
-        }
-        b3d_rewind(fp);
-        if read_tiffheader(fp, &mut (*tif).header) == 0 {
-            None
-        } else {
-            tiff_read_section(fp, tif, 0)
-        }
+pub fn tiff_read_file(fp: &mut ImodFile, tif: &mut TfInfo) -> Option<Vec<u8>> {
+    if tif.iifile.is_some() {
+        return tiff_read_section(fp, tif, 0);
+    }
+    b3d_rewind(fp);
+    if read_tiffheader(fp, &mut tif.header) == 0 {
+        None
+    } else {
+        tiff_read_section(fp, tif, 0)
     }
 }
 
 /// C `tiff_read_mrc` (`tiff.c:96`).
-pub unsafe fn tiff_read_mrc(fp: &mut ImodFile, hdata: &mut MrcHeader) -> Option<Vec<u8>> {
-    unsafe {
-        let mut tif = TfInfo::default();
-        let data = tiff_read_file(fp, &mut tif)?;
-        mrc_head_new(
-            hdata,
-            tif.directory[1].value,
-            tif.directory[2].value,
-            1,
-            MRC_MODE_BYTE,
-        );
-        // `tiff.c:106-107` frees `tiff.stripoff` and `tiff.stripsize` here;
-        // the two `Vec`s are released when `tif` goes out of scope.
-        Some(data)
-    }
+pub fn tiff_read_mrc(fp: &mut ImodFile, hdata: &mut MrcHeader) -> Option<Vec<u8>> {
+    let mut tif = TfInfo::default();
+    let data = tiff_read_file(fp, &mut tif)?;
+    mrc_head_new(
+        hdata,
+        tif.directory[1].value,
+        tif.directory[2].value,
+        1,
+        MRC_MODE_BYTE,
+    );
+    // `tiff.c:106-107` frees `tiff.stripoff` and `tiff.stripsize` here;
+    // the two `Vec`s are released when `tif` goes out of scope.
+    Some(data)
 }
 
 /// C `tiff_open_file` (`tiff.c:258`).
-pub unsafe fn tiff_open_file(
-    filename: &[u8],
-    mode: &str,
-    tif: &mut TfInfo,
-    any_tif_pixel: i32,
-) -> i32 {
-    unsafe {
-        match crate::imod::backends::tiff_backend() {
-            Ok(crate::imod::backends::TiffBackend::Rust) => {
-                let result = crate::imod::mrc::rust_tiff::open_file(filename, tif, any_tif_pixel);
-                if result != 0 {
-                    eprintln!(
-                        "ERROR: Rust-native backend - Rust TIFF reader could not open or decode requested TIFF"
-                    );
-                }
-                return result;
+pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pixel: i32) -> i32 {
+    match crate::imod::backends::tiff_backend() {
+        Ok(crate::imod::backends::TiffBackend::Rust) => {
+            let result = crate::imod::mrc::rust_tiff::open_file(filename, tif, any_tif_pixel);
+            if result != 0 {
+                eprintln!(
+                    "ERROR: Rust-native backend - Rust TIFF reader could not open or decode requested TIFF"
+                );
             }
-            Ok(crate::imod::backends::TiffBackend::Parity) => {}
-            Err(error) => {
-                eprintln!("{error}");
+            return result;
+        }
+        Ok(crate::imod::backends::TiffBackend::Parity) => {}
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    }
+    let path = String::from_utf8_lossy(filename).into_owned();
+    tif.fp = ImodFile::open(&path, mode);
+    if tif.fp.is_none() {
+        return 1;
+    }
+    tif.iifile = Some(Box::new(
+        crate::imod::libiimod::iimage::ImodImageFile::default(),
+    ));
+    if let Some(iifile) = tif.iifile.as_mut() {
+        iifile.xscale = 1.0;
+        iifile.yscale = 1.0;
+        iifile.zscale = 1.0;
+        iifile.slope = 1.0;
+        iifile.smax = 255.0;
+        iifile.axis = 3;
+        iifile.mirror_fft = 0;
+        iifile.llx = 0;
+        iifile.lly = 0;
+        iifile.llz = 0;
+        iifile.urx = -1;
+        iifile.ury = -1;
+        iifile.urz = -1;
+        iifile.rms = -1.0;
+        iifile.last_written_z = -1;
+        iifile.packed4bits = 0;
+        iifile.half_floats = 0;
+        iifile.any_tiff_pix_size = any_tif_pixel;
+        iifile.raw_palette_bytes = 0;
+        iifile.tiff_compression = 1;
+        iifile.adoc_index = -1;
+        iifile.global_adoc_index = -1;
+        iifile.hdf_compression = -1;
+        iifile.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, mode);
+        iifile.filename = Some(String::from_utf8_lossy(filename).into_owned());
+        iifile.fmode = mode.chars().take(3).collect();
+        if unsafe { crate::imod::libiimod::iitif::ii_tiff_check(iifile.as_mut()) } != 0 {
+            if iifile.fp.is_none() {
+                tif.fp = ImodFile::open(&path, mode);
+            }
+            tif.iifile = None;
+            if tif.fp.is_none() {
+                return 1;
+            }
+            tiff_first_ifd(&mut tif.fp.clone().unwrap());
+        } else {
+            // Follow the successful `iiTIFFCheck` branch in the source
+            // before releasing this presently incomplete libtiff reader
+            // and continuing with the matching legacy reader below.  The
+            // caller uses these properties to size its first chunk before
+            // its later `tiff_read_file` call parses the legacy IFD.
+            tif.bits_per_sample = 8;
+            if iifile.mode == MRC_MODE_SHORT || iifile.mode == MRC_MODE_USHORT {
+                tif.bits_per_sample = 16;
+            }
+            if iifile.mode == MRC_MODE_FLOAT
+                || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_UINT
+                || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_INT
+            {
+                tif.bits_per_sample = 32;
+            }
+            tif.photometric_interpretation = if iifile.mode == MRC_MODE_RGB { 2 } else { 1 };
+            tif.directory[1].value = iifile.nx;
+            tif.directory[2].value = iifile.ny;
+            tif.width = iifile.nx;
+            tif.length = iifile.ny;
+            iifile.llx = 0;
+            iifile.lly = 0;
+            iifile.urx = -1;
+            iifile.ury = -1;
+            // ii_tiff_check in this translation closes the probe FILE and
+            // replaces iifile.fp with its libtiff handle.  This legacy source
+            // unit still traverses IFDs through tiff->fp, so retain its own
+            // ordinary FILE stream alongside the library reader.
+            tif.fp = ImodFile::open(&path, mode);
+            if tif.fp.is_none() {
+                let mut iifile = tif.iifile.take().unwrap();
+                unsafe { crate::imod::libiimod::iimage::ii_close(iifile.as_mut()) };
+                if let Some(clean_up) = iifile.clean_up {
+                    unsafe { clean_up(iifile.as_mut()) };
+                }
                 return 1;
             }
         }
-        let path = String::from_utf8_lossy(filename).into_owned();
-        (*tif).fp = ImodFile::open(&path, mode);
-        if (*tif).fp.is_none() {
-            return 1;
-        }
-        (*tif).iifile = Some(Box::new(
-            crate::imod::libiimod::iimage::ImodImageFile::default(),
-        ));
-        if let Some(iifile) = (*tif).iifile.as_mut() {
-            iifile.xscale = 1.0;
-            iifile.yscale = 1.0;
-            iifile.zscale = 1.0;
-            iifile.slope = 1.0;
-            iifile.smax = 255.0;
-            iifile.axis = 3;
-            iifile.mirror_fft = 0;
-            iifile.llx = 0;
-            iifile.lly = 0;
-            iifile.llz = 0;
-            iifile.urx = -1;
-            iifile.ury = -1;
-            iifile.urz = -1;
-            iifile.rms = -1.0;
-            iifile.last_written_z = -1;
-            iifile.packed4bits = 0;
-            iifile.half_floats = 0;
-            iifile.any_tiff_pix_size = any_tif_pixel;
-            iifile.raw_palette_bytes = 0;
-            iifile.tiff_compression = 1;
-            iifile.adoc_index = -1;
-            iifile.global_adoc_index = -1;
-            iifile.hdf_compression = -1;
-            iifile.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, mode);
-            iifile.filename = Some(String::from_utf8_lossy(filename).into_owned());
-            iifile.fmode = mode.chars().take(3).collect();
-            if crate::imod::libiimod::iitif::ii_tiff_check(iifile.as_mut()) != 0 {
-                if iifile.fp.is_none() {
-                    (*tif).fp = ImodFile::open(&path, mode);
-                }
-                (*tif).iifile = None;
-                if (*tif).fp.is_none() {
-                    return 1;
-                }
-                tiff_first_ifd(&mut (*tif).fp.clone().unwrap());
-            } else {
-                // Follow the successful `iiTIFFCheck` branch in the source
-                // before releasing this presently incomplete libtiff reader
-                // and continuing with the matching legacy reader below.  The
-                // caller uses these properties to size its first chunk before
-                // its later `tiff_read_file` call parses the legacy IFD.
-                (*tif).bits_per_sample = 8;
-                if iifile.mode == MRC_MODE_SHORT || iifile.mode == MRC_MODE_USHORT {
-                    (*tif).bits_per_sample = 16;
-                }
-                if iifile.mode == MRC_MODE_FLOAT
-                    || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_UINT
-                    || iifile.type_ == crate::imod::libiimod::iimage::IITYPE_INT
-                {
-                    (*tif).bits_per_sample = 32;
-                }
-                (*tif).photometric_interpretation = if iifile.mode == MRC_MODE_RGB { 2 } else { 1 };
-                (*tif).directory[1].value = iifile.nx;
-                (*tif).directory[2].value = iifile.ny;
-                (*tif).width = iifile.nx;
-                (*tif).length = iifile.ny;
-                iifile.llx = 0;
-                iifile.lly = 0;
-                iifile.urx = -1;
-                iifile.ury = -1;
-                // ii_tiff_check in this translation closes the probe FILE and
-                // replaces iifile.fp with its libtiff handle.  This legacy source
-                // unit still traverses IFDs through tiff->fp, so retain its own
-                // ordinary FILE stream alongside the library reader.
-                (*tif).fp = ImodFile::open(&path, mode);
-                if (*tif).fp.is_none() {
-                    let mut iifile = (*tif).iifile.take().unwrap();
-                    crate::imod::libiimod::iimage::ii_close(iifile.as_mut());
-                    if let Some(clean_up) = iifile.clean_up {
-                        clean_up(iifile.as_mut());
-                    }
-                    return 1;
-                }
-            }
-        }
-        0
     }
+    0
 }
 
 /// C `tiff_close_file` (`tiff.c:316`).
-pub unsafe fn tiff_close_file(tif: &mut TfInfo) {
-    unsafe {
-        let _ = crate::imod::mrc::rust_tiff::close_file(tif);
-        if let Some(mut iifile) = (*tif).iifile.take() {
-            crate::imod::libiimod::iimage::ii_close(iifile.as_mut());
-            if let Some(clean_up) = iifile.clean_up {
-                clean_up(iifile.as_mut());
-            }
+pub fn tiff_close_file(tif: &mut TfInfo) {
+    let _ = crate::imod::mrc::rust_tiff::close_file(tif);
+    if let Some(mut iifile) = tif.iifile.take() {
+        unsafe { crate::imod::libiimod::iimage::ii_close(iifile.as_mut()) };
+        if let Some(clean_up) = iifile.clean_up {
+            unsafe { clean_up(iifile.as_mut()) };
         }
-        (*tif).fp = None;
     }
+    tif.fp = None;
 }
 
 /// C `tiff_write_entry` (`tiff.c:76`).
-pub fn tiff_write_entry(tag: i16, type_: i16, length: i32, mut offset: u32, fout: &mut ImodFile) {
-    b3d_fwrite(&tag.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout);
-    b3d_fwrite(&type_.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout);
-    b3d_fwrite(&length.to_ne_bytes(), core::mem::size_of::<i32>(), 1, fout);
+pub fn tiff_write_entry(
+    tag: i16,
+    type_: i16,
+    length: i32,
+    mut offset: u32,
+    fout: &mut ImodFile,
+) -> bool {
+    let mut written = b3d_fwrite(&tag.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout) == 1;
+    written &= b3d_fwrite(&type_.to_ne_bytes(), core::mem::size_of::<i16>(), 1, fout) == 1;
+    written &= b3d_fwrite(&length.to_ne_bytes(), core::mem::size_of::<i32>(), 1, fout) == 1;
     // The C source moves short inline values only on a big-endian host.
     if cfg!(target_endian = "big") && length == 1 {
         if type_ == 1 {
@@ -756,11 +715,12 @@ pub fn tiff_write_entry(tag: i16, type_: i16, length: i32, mut offset: u32, fout
             offset <<= 16;
         }
     }
-    b3d_fwrite(&offset.to_ne_bytes(), core::mem::size_of::<u32>(), 1, fout);
+    written &= b3d_fwrite(&offset.to_ne_bytes(), core::mem::size_of::<u32>(), 1, fout) == 1;
+    written
 }
 
 /// C `tiff_write_image` (`tiff.c:733`).
-pub unsafe fn tiff_write_image(
+pub fn tiff_write_image(
     fout: &mut ImodFile,
     xsize: i32,
     ysize: i32,
@@ -771,109 +731,108 @@ pub unsafe fn tiff_write_image(
     dmin: f32,
     dmax: f32,
 ) -> i32 {
-    unsafe {
-        if *ifd_offset == 0 {
-            let pixel: u32 = if cfg!(target_endian = "big") {
-                0x4D4D002A
-            } else {
-                0x002A4949
-            };
-            b3d_fwrite(&pixel.to_ne_bytes(), 4, 1, fout);
-            *ifd_offset = 4;
-            *data_offset = 8;
-        }
-        if 0 != 0 {
+    if *ifd_offset == 0 {
+        let pixel: u32 = if cfg!(target_endian = "big") {
+            0x4D4D002A
+        } else {
+            0x002A4949
+        };
+        if b3d_fwrite(&pixel.to_ne_bytes(), 4, 1, fout) != 1 {
             return -1;
         }
-        let (pixel_size, sample_format) = match mode {
-            MRC_MODE_BYTE => (1u32, 0u32),
-            MRC_MODE_SHORT => (2, 2),
-            MRC_MODE_USHORT => (2, 1),
-            MRC_MODE_RGB => (3, 0),
-            MRC_MODE_FLOAT => (4, 3),
-            _ => return -50,
-        };
-        let data_size = (xsize as u32).wrapping_mul(ysize as u32);
-        let mut ifd = data_size.wrapping_mul(pixel_size);
-        let pad = 4i32 - (ifd % 4) as i32;
-        ifd = ifd
-            .wrapping_add(pad as u32)
-            .wrapping_add(4)
-            .wrapping_add(*data_offset);
-        b3d_fseek(fout, (*ifd_offset as i64) as i32, SEEK_SET);
-        if b3d_fwrite(&ifd.to_ne_bytes(), 4, 1, fout) == 0 {
-            return -2;
-        }
-        b3d_fseek(fout, (*data_offset as i64) as i32, SEEK_SET);
-        for y in (0..ysize).rev() {
-            b3d_fwrite(
-                core::slice::from_raw_parts(
-                    pixels
-                        .as_ptr()
-                        .add((xsize * y) as usize * pixel_size as usize),
-                    (pixel_size as usize) * (xsize as usize),
-                ),
-                pixel_size as usize,
-                xsize as usize,
-                fout,
-            );
-            if 0 != 0 {
-                return -3;
-            }
-        }
-        let zero = 0u32;
-        b3d_fwrite(&zero.to_ne_bytes(), 4, 1, fout);
-        if 0 != 0 {
-            return -4;
-        }
-        b3d_fseek(fout, (ifd as i64) as i32, SEEK_SET);
-        if mode != MRC_MODE_RGB {
-            let entries: i16 = if mode == MRC_MODE_BYTE { 11 } else { 14 };
-            b3d_fwrite(&entries.to_ne_bytes(), 2, 1, fout);
-            tiff_write_entry(254, 4, 1, 0, fout);
-            tiff_write_entry(256, 3, 1, xsize as u32, fout);
-            tiff_write_entry(257, 3, 1, ysize as u32, fout);
-            tiff_write_entry(258, 3, 1, 8 * pixel_size, fout);
-            tiff_write_entry(259, 3, 1, 1, fout);
-            tiff_write_entry(262, 3, 1, 1, fout);
-            tiff_write_entry(273, 4, 1, *data_offset, fout);
-            tiff_write_entry(277, 3, 1, 1, fout);
-            tiff_write_entry(278, 4, 1, ysize as u32, fout);
-            tiff_write_entry(279, 4, 1, data_size.wrapping_mul(pixel_size), fout);
-            tiff_write_entry(296, 3, 1, 1, fout);
-            if mode != MRC_MODE_BYTE {
-                tiff_write_entry(339, 3, 1, sample_format, fout);
-                tiff_write_entry(340, 11, 1, dmin.to_bits(), fout);
-                tiff_write_entry(341, 11, 1, dmax.to_bits(), fout);
-            }
-            b3d_fwrite(&zero.to_ne_bytes(), 4, 1, fout);
-            *ifd_offset = ifd + 2 + entries as u32 * 12;
-            *data_offset = ifd + 6 + entries as u32 * 12;
-        } else {
-            let entries: i16 = 12;
-            let bps: i16 = 8;
-            b3d_fwrite(&entries.to_ne_bytes(), 2, 1, fout);
-            tiff_write_entry(254, 4, 1, 0, fout);
-            tiff_write_entry(256, 3, 1, xsize as u32, fout);
-            tiff_write_entry(257, 3, 1, ysize as u32, fout);
-            tiff_write_entry(258, 3, 3, ifd + 6 + entries as u32 * 12, fout);
-            tiff_write_entry(259, 3, 1, 1, fout);
-            tiff_write_entry(262, 3, 1, 2, fout);
-            tiff_write_entry(273, 4, 1, *data_offset, fout);
-            tiff_write_entry(277, 3, 1, 3, fout);
-            tiff_write_entry(278, 4, 1, ysize as u32, fout);
-            tiff_write_entry(279, 4, 1, data_size * 3, fout);
-            tiff_write_entry(284, 3, 1, 1, fout);
-            tiff_write_entry(296, 3, 1, 1, fout);
-            b3d_fwrite(&zero.to_ne_bytes(), 4, 1, fout);
-            b3d_fwrite(&bps.to_ne_bytes(), 2, 1, fout);
-            b3d_fwrite(&bps.to_ne_bytes(), 2, 1, fout);
-            b3d_fwrite(&bps.to_ne_bytes(), 2, 1, fout);
-            *ifd_offset = ifd + 2 + entries as u32 * 12;
-            *data_offset = ifd + 12 + entries as u32 * 12;
-        }
-        if 0 != 0 { -10 } else { 0 }
+        *ifd_offset = 4;
+        *data_offset = 8;
     }
+    let (pixel_size, sample_format) = match mode {
+        MRC_MODE_BYTE => (1u32, 0u32),
+        MRC_MODE_SHORT => (2, 2),
+        MRC_MODE_USHORT => (2, 1),
+        MRC_MODE_RGB => (3, 0),
+        MRC_MODE_FLOAT => (4, 3),
+        _ => return -50,
+    };
+    let data_size = (xsize as u32).wrapping_mul(ysize as u32);
+    let mut ifd = data_size.wrapping_mul(pixel_size);
+    let pad = 4i32 - (ifd % 4) as i32;
+    ifd = ifd
+        .wrapping_add(pad as u32)
+        .wrapping_add(4)
+        .wrapping_add(*data_offset);
+    b3d_fseek(fout, (*ifd_offset as i64) as i32, SEEK_SET);
+    if b3d_fwrite(&ifd.to_ne_bytes(), 4, 1, fout) == 0 {
+        return -2;
+    }
+    b3d_fseek(fout, (*data_offset as i64) as i32, SEEK_SET);
+    for y in (0..ysize).rev() {
+        let start = (xsize * y) as usize * pixel_size as usize;
+        let end = start + pixel_size as usize * xsize as usize;
+        if b3d_fwrite(
+            &pixels[start..end],
+            pixel_size as usize,
+            xsize as usize,
+            fout,
+        ) != xsize as usize
+        {
+            return -3;
+        }
+    }
+    let zero = 0u32;
+    if b3d_fwrite(&zero.to_ne_bytes(), 4, 1, fout) != 1 {
+        return -4;
+    }
+    b3d_fseek(fout, (ifd as i64) as i32, SEEK_SET);
+    if mode != MRC_MODE_RGB {
+        let entries: i16 = if mode == MRC_MODE_BYTE { 11 } else { 14 };
+        let mut written = b3d_fwrite(&entries.to_ne_bytes(), 2, 1, fout) == 1;
+        written &= tiff_write_entry(254, 4, 1, 0, fout);
+        written &= tiff_write_entry(256, 3, 1, xsize as u32, fout);
+        written &= tiff_write_entry(257, 3, 1, ysize as u32, fout);
+        written &= tiff_write_entry(258, 3, 1, 8 * pixel_size, fout);
+        written &= tiff_write_entry(259, 3, 1, 1, fout);
+        written &= tiff_write_entry(262, 3, 1, 1, fout);
+        written &= tiff_write_entry(273, 4, 1, *data_offset, fout);
+        written &= tiff_write_entry(277, 3, 1, 1, fout);
+        written &= tiff_write_entry(278, 4, 1, ysize as u32, fout);
+        written &= tiff_write_entry(279, 4, 1, data_size.wrapping_mul(pixel_size), fout);
+        written &= tiff_write_entry(296, 3, 1, 1, fout);
+        if mode != MRC_MODE_BYTE {
+            written &= tiff_write_entry(339, 3, 1, sample_format, fout);
+            written &= tiff_write_entry(340, 11, 1, dmin.to_bits(), fout);
+            written &= tiff_write_entry(341, 11, 1, dmax.to_bits(), fout);
+        }
+        written &= b3d_fwrite(&zero.to_ne_bytes(), 4, 1, fout) == 1;
+        if !written {
+            return -10;
+        }
+        *ifd_offset = ifd + 2 + entries as u32 * 12;
+        *data_offset = ifd + 6 + entries as u32 * 12;
+    } else {
+        let entries: i16 = 12;
+        let bps: i16 = 8;
+        let mut written = b3d_fwrite(&entries.to_ne_bytes(), 2, 1, fout) == 1;
+        written &= tiff_write_entry(254, 4, 1, 0, fout);
+        written &= tiff_write_entry(256, 3, 1, xsize as u32, fout);
+        written &= tiff_write_entry(257, 3, 1, ysize as u32, fout);
+        written &= tiff_write_entry(258, 3, 3, ifd + 6 + entries as u32 * 12, fout);
+        written &= tiff_write_entry(259, 3, 1, 1, fout);
+        written &= tiff_write_entry(262, 3, 1, 2, fout);
+        written &= tiff_write_entry(273, 4, 1, *data_offset, fout);
+        written &= tiff_write_entry(277, 3, 1, 3, fout);
+        written &= tiff_write_entry(278, 4, 1, ysize as u32, fout);
+        written &= tiff_write_entry(279, 4, 1, data_size * 3, fout);
+        written &= tiff_write_entry(284, 3, 1, 1, fout);
+        written &= tiff_write_entry(296, 3, 1, 1, fout);
+        written &= b3d_fwrite(&zero.to_ne_bytes(), 4, 1, fout) == 1;
+        written &= b3d_fwrite(&bps.to_ne_bytes(), 2, 1, fout) == 1;
+        written &= b3d_fwrite(&bps.to_ne_bytes(), 2, 1, fout) == 1;
+        written &= b3d_fwrite(&bps.to_ne_bytes(), 2, 1, fout) == 1;
+        if !written {
+            return -10;
+        }
+        *ifd_offset = ifd + 2 + entries as u32 * 12;
+        *data_offset = ifd + 12 + entries as u32 * 12;
+    }
+    0
 }
 
 #[cfg(test)]
@@ -929,6 +888,27 @@ mod tests {
             assert_ne!(data, 0);
             drop(file);
         }
+    }
+
+    #[test]
+    fn legacy_writer_reports_an_initial_write_failure() {
+        let mut file = crate::imod::libcfshr::b3dutil::ImodFile::Token(0);
+        let mut ifd = 0;
+        let mut data = 0;
+        assert_eq!(
+            tiff_write_image(
+                &mut file,
+                1,
+                1,
+                MRC_MODE_BYTE,
+                &[0],
+                &mut ifd,
+                &mut data,
+                0.,
+                0.,
+            ),
+            -1
+        );
     }
 
     #[test]

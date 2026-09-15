@@ -139,7 +139,7 @@ mod tests {
         let mut m = Box::new(Imod::default());
         let mut app = ImodvApp::default();
         app.imod = &mut *m;
-        app.mod_.push(&mut *m);
+        app.mod_.push(std::ptr::NonNull::from(&mut *m));
         app.num_mods = 1;
         let mut d = ImodvModeled::default();
         let mut f = imodv_modeled_form_new(&app);

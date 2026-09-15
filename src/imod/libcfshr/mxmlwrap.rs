@@ -481,7 +481,7 @@ pub fn ixml_set_string_value(xml_ind: i32, node_ind: i32, string: &[u8]) -> i32 
 /// Matches C `ixmlSetIntegerValue`.
 pub fn ixml_set_integer_value(xml_ind: i32, node_ind: i32, val: i32) -> i32 {
     // `char buf[64]; snprintf(buf, 64, "%d", val);`
-    let buffer = c_format_bytes("%d", &[CArg::Int(val as i64)]);
+    let buffer = val.to_string().into_bytes();
     ixml_set_string_value(xml_ind, node_ind, &buffer)
 }
 
@@ -525,7 +525,7 @@ pub fn ixml_add_integer_attribute(xml_ind: i32, node_ind: i32, name: &[u8], valu
         return err;
     }
     // `char buf[64]; snprintf(buf, 64, "%d", value);`
-    let text = c_format_bytes("%d", &[CArg::Int(value as i64)]);
+    let text = value.to_string().into_bytes();
     S_ARENAS.with_borrow_mut(|arenas| {
         if let Some(arena) = arenas.get_mut(xml_ind as usize).and_then(|a| a.as_mut()) {
             mxml_element_set_attr(arena, node, Some(name), Some(&text));

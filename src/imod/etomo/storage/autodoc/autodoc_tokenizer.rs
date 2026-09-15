@@ -76,8 +76,6 @@ pub struct AutodocTokenizer {
     primative_tokenizer: PrimativeTokenizer,
     /// Java field `primativeToken`, initialised to null.
     primative_token: *mut Token,
-    /// Java field `autodocToken`, initialised to null.
-    autodoc_token: *mut Token,
     /// Java field `token`, initialised to `new Token()`.
     token: Token,
     /// Java field `nextToken`, initialised to `new Token()`.
@@ -146,7 +144,6 @@ impl AutodocTokenizer {
             delimiter_string: DEFAULT_DELIMITER.to_string(),
             primative_tokenizer,
             primative_token: std::ptr::null_mut(),
-            autodoc_token: std::ptr::null_mut(),
             token: Token::new(),
             next_token: Token::new(),
             use_next_token: false,
@@ -169,11 +166,6 @@ impl AutodocTokenizer {
     /// Java package-private `getLogFile()`.
     pub fn get_log_file(&self) -> Option<std::sync::Arc<log_file::Handle>> {
         self.primative_tokenizer.get_log_file_handle()
-    }
-
-    /// Java package-private `getToken()`.
-    pub fn get_token(&self) -> *mut Token {
-        self.autodoc_token
     }
 
     /// Java package-private `getDelimiterString()`.
@@ -210,19 +202,17 @@ impl AutodocTokenizer {
     /// Java package-private `next()`.
     ///
     /// # Safety
-    /// The tokenizer's tokens must be live.
-    pub unsafe fn next(&mut self) -> *mut Token {
+    /// The primitive tokenizer's token graph must be live.
+    pub unsafe fn next(&mut self) -> Box<Token> {
         if self.use_next_token {
             self.use_next_token = false;
-            self.autodoc_token = Box::into_raw(Box::new(Token::new_from_token(&self.next_token)));
-            return self.autodoc_token;
+            return Box::new(Token::new_from_token(&self.next_token));
         }
         if !self.look_ahead {
             self.primative_token = unsafe { self.primative_tokenizer.next(self.primative_token) };
         }
         let found = unsafe { self.find_token() };
-        self.autodoc_token = Box::into_raw(Box::new(Token::new_from_token(unsafe { &*found })));
-        self.autodoc_token
+        Box::new(Token::new_from_token(unsafe { &*found }))
     }
 
     /// Java package-private `test(boolean)`.
@@ -231,22 +221,22 @@ impl AutodocTokenizer {
     /// See `next`.
     pub unsafe fn test(&mut self, tokens: bool) {
         self.initialize();
-        let mut token: *mut Token;
         loop {
-            token = unsafe { self.next() };
+            let token = unsafe { self.next() };
             if tokens {
-                println!("{}", unsafe { (*token).to_string() });
-            } else if unsafe { (*token).is(token::Type::Eol) } {
+                println!("{}", token.to_string());
+            } else if token.is(token::Type::Eol) {
                 println!();
-            } else if !unsafe { (*token).is(token::Type::Eof) } {
-                print!("{}", unsafe {
-                    match (*token).get_value() {
+            } else if !token.is(token::Type::Eof) {
+                print!(
+                    "{}",
+                    match token.get_value() {
                         None => "null".to_string(),
                         Some(value) => value.to_string(),
                     }
-                });
+                );
             }
-            if unsafe { (*token).is(token::Type::Eof) } {
+            if token.is(token::Type::Eof) {
                 break;
             }
         }

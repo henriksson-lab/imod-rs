@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{
-    CArg, c_format_bytes, imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
+    imod_backup_file, imod_copyright, imod_version, replace_file_arg_vec,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libcfshr::parselist::parselist;
@@ -43,18 +43,17 @@ pub fn usage() -> ! {
 
 /// Original: `parserr` (`imodjoin.c:42`).
 pub fn parserr(mod_number: i32) -> ! {
-    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-        "ERROR: imodjoin - Error parsing object list before model %d\n",
-        &[CArg::Int(mod_number as i64)],
-    ));
+    let _ = ImodFile::Stdout.write_all(
+        format!("ERROR: imodjoin - Error parsing object list before model {mod_number}\n")
+            .as_bytes(),
+    );
     usage()
 }
 /// Original: `optionerr` (`imodjoin.c:48`).
 pub fn optionerr(mod_number: i32) -> ! {
-    let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-        "ERROR: imodjoin - Invalid option before model %d\n",
-        &[CArg::Int(mod_number as i64)],
-    ));
+    let _ = ImodFile::Stdout.write_all(
+        format!("ERROR: imodjoin - Invalid option before model {mod_number}\n").as_bytes(),
+    );
     usage()
 }
 /// Original: `doublerr` (`imodjoin.c:53`).
@@ -65,29 +64,19 @@ pub fn doublerr() -> ! {
 }
 /// Original: `readerr` (`imodjoin.c:59`).
 pub fn readerr(mod_number: i32) -> ! {
-    let message = c_format_bytes(
-        "Error reading file for model %d",
-        &[CArg::Int(mod_number as i64)],
-    );
-    exit_error(&message);
+    let message = format!("Error reading file for model {mod_number}");
+    exit_error(message.as_bytes());
 }
 /// Original: `objerr` (`imodjoin.c:63`).
 pub fn objerr(object_number: i32, mod_number: i32) -> ! {
-    let message = c_format_bytes(
-        "Invalid object number %d for model %d",
-        &[
-            CArg::Int(object_number as i64),
-            CArg::Int(mod_number as i64),
-        ],
-    );
-    exit_error(&message);
+    let message = format!("Invalid object number {object_number} for model {mod_number}");
+    exit_error(message.as_bytes());
 }
 
 /// Original: `main` (`imodjoin.c:68`).
 pub fn imodjoin() {
     let argv: Vec<String> = env::args().collect();
-    let prefix = c_format_bytes("ERROR: %s - ", &[CArg::Str("imodjoin")]);
-    setExitPrefix(&prefix);
+    setExitPrefix(b"ERROR: imodjoin - ");
     if argv.len() < 3 {
         usage();
     }
@@ -135,16 +124,16 @@ pub fn imodjoin() {
                 // that, not a conversion of `imodjoin`.
                 let fin = ImodFile::open(image, "rb");
                 if fin.is_none() {
-                    let message =
-                        c_format_bytes("Couldn't open %s", &[CArg::Bytes(image.as_bytes())]);
+                    let mut message = b"Couldn't open ".to_vec();
+                    message.extend_from_slice(image.as_bytes());
                     exit_error(&message);
                 }
                 let mut fin = fin.unwrap();
                 let mut hdata = MrcHeader::default();
-                if unsafe { mrc_head_read(&mut fin, &mut hdata) } != 0 {
+                if mrc_head_read(&mut fin, &mut hdata) != 0 {
                     drop(fin);
-                    let message =
-                        c_format_bytes("Reading header from %s", &[CArg::Bytes(image.as_bytes())]);
+                    let mut message = b"Reading header from ".to_vec();
+                    message.extend_from_slice(image.as_bytes());
                     exit_error(&message);
                 }
                 drop(fin);
@@ -372,10 +361,10 @@ pub fn imodjoin() {
                     },
                 );
             } else {
-                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-                    "WARNING: Model %d has no image reference data and will not be transformed\n",
-                    &[CArg::Int(njoin as i64)],
-                ));
+                let _ = ImodFile::Stdout.write_all(
+                    format!("WARNING: Model {njoin} has no image reference data and will not be transformed\n")
+                        .as_bytes(),
+                );
             }
         }
         // Original: `if (flipState != (joinModel->flags & IMODF_FLIPYZ))

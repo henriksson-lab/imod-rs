@@ -7,8 +7,8 @@
 
 use crate::imod::clip::clip::{ScanArg, atof, sscanf};
 use crate::imod::libcfshr::b3dutil::{
-    CArg, ImodFile, SEEK_SET, b3d_fwrite, b3d_shift_bytes, c_format_bytes, imod_backup_file,
-    imod_prog_name, mrc_big_seek, override_write_bytes, replace_file_arg_vec,
+    CArg, ImodFile, SEEK_SET, b3d_fwrite, c_format_bytes, imod_backup_file, imod_prog_name,
+    mrc_big_seek, override_write_bytes, replace_file_arg_vec,
 };
 use crate::imod::libcfshr::parse_params::{exit_error, setExitPrefix};
 use crate::imod::libiimod::iimage::ImodImageFile;
@@ -622,14 +622,12 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         /* Open the TIFF file. */
         let tiff_pages: i32;
 
-        if unsafe {
-            tiff_open_file(
-                argv[iarg as usize].as_bytes(),
-                openmode,
-                &mut tiff,
-                any_tif_pixel,
-            )
-        } != 0
+        if tiff_open_file(
+            argv[iarg as usize].as_bytes(),
+            openmode,
+            &mut tiff,
+            any_tif_pixel,
+        ) != 0
         {
             exit_error(&c_format_bytes(
                 "Couldn't open %s.",
@@ -641,7 +639,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         if let Some(iifile) = tiff.iifile.as_deref() {
             tiff_pages = iifile.nz;
         } else {
-            tiff_pages = unsafe { tiff_ifd_number(&mut tiffp) };
+            tiff_pages = tiff_ifd_number(&mut tiffp);
         }
         if tiff_pages > 1 {
             let _ = out.write_all(b"Reading multi-paged TIFF file.\n");
@@ -656,15 +654,15 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             }
 
             if tiff.iifile.is_none() {
-                unsafe { read_tiffheader(&mut tiffp, &mut tiff.header) };
+                read_tiffheader(&mut tiffp, &mut tiff.header);
                 crate::imod::libcfshr::b3dutil::b3d_rewind(&mut tiffp);
                 let mut byteorder = [0_u8; 2];
                 crate::imod::libcfshr::b3dutil::b3d_fread(&mut byteorder, 2, 1, &mut tiffp);
                 tiff.header.byteorder = i16::from_ne_bytes(byteorder);
 
-                tiff.header.first_ifd_offset = unsafe { tiff_first_ifd(&mut tiffp) } as i32;
+                tiff.header.first_ifd_offset = tiff_first_ifd(&mut tiffp) as i32;
                 crate::imod::libcfshr::b3dutil::b3d_rewind(&mut tiffp);
-                unsafe { read_tiffentries(&mut tiffp, &mut tiff) };
+                read_tiffentries(&mut tiffp, &mut tiff);
             }
 
             if std::env::var_os("IMOD_NO_IMAGE_BACKUP").is_none()
@@ -720,7 +718,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                     section
                 };
 
-                tifdata = match unsafe { tiff_read_section(&mut tiffp, &mut tiff, in_section) } {
+                tifdata = match tiff_read_section(&mut tiffp, &mut tiff, in_section) {
                     Some(data) => data,
                     None => exit_error(&c_format_bytes(
                         "Failed to get image data for section %d",
@@ -760,15 +758,8 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 );
 
                 if mode == 0 && hdata.bytes_signed != 0 {
-                    unsafe {
-                        b3d_shift_bytes(
-                            tifdata.as_mut_ptr(),
-                            tifdata.as_mut_ptr().cast(),
-                            xsize,
-                            ysize,
-                            1,
-                            1,
-                        );
+                    for byte in &mut tifdata[..(xsize * ysize) as usize] {
+                        *byte = byte.wrapping_sub(128);
                     }
                 }
                 b3d_fwrite(
@@ -817,20 +808,20 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             let _ = out.flush();
             std::process::exit(0);
         }
-        unsafe { tiff_close_file(&mut tiff) };
+        tiff_close_file(&mut tiff);
     }
 
     /* read in bg file */
     if bg != 0 {
         let name = bgfile.clone().unwrap_or_default();
-        if unsafe { tiff_open_file(name.as_bytes(), openmode, &mut tiff, any_tif_pixel) } != 0 {
+        if tiff_open_file(name.as_bytes(), openmode, &mut tiff, any_tif_pixel) != 0 {
             exit_error(&c_format_bytes(
                 "Couldn't open %s.",
                 &[CArg::Bytes(name.as_bytes())],
             ));
         }
         bgfp = tiff.fp.clone().unwrap();
-        bgdata = match unsafe { tiff_read_file(&mut bgfp, &mut tiff) } {
+        bgdata = match tiff_read_file(&mut bgfp, &mut tiff) {
             Some(data) => data,
             None => exit_error(&c_format_bytes(
                 "Reading %s.",
@@ -869,7 +860,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             }
         }
 
-        unsafe { tiff_close_file(&mut tiff) };
+        tiff_close_file(&mut tiff);
     }
 
     /* Write out mrcheader */
@@ -905,14 +896,12 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         };
 
         /* Open the TIFF file. */
-        if unsafe {
-            tiff_open_file(
-                argv[iread as usize].as_bytes(),
-                openmode,
-                &mut tiff,
-                any_tif_pixel,
-            )
-        } != 0
+        if tiff_open_file(
+            argv[iread as usize].as_bytes(),
+            openmode,
+            &mut tiff,
+            any_tif_pixel,
+        ) != 0
         {
             exit_error(&c_format_bytes(
                 "Couldn't open %s.",
@@ -987,7 +976,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             }
 
             /* Read in tiff file */
-            tifdata = match unsafe { tiff_read_file(&mut tiffp, &mut tiff) } {
+            tifdata = match tiff_read_file(&mut tiffp, &mut tiff) {
                 Some(data) => data,
                 None => exit_error(&c_format_bytes(
                     "Reading %s.",
@@ -1099,15 +1088,8 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             mean += (tmean * nlines as f32) / ysize as f32;
 
             if mode == 0 && hdata.bytes_signed != 0 {
-                unsafe {
-                    b3d_shift_bytes(
-                        tifdata.as_mut_ptr(),
-                        tifdata.as_mut_ptr().cast(),
-                        xsize,
-                        nlines,
-                        1,
-                        1,
-                    );
+                for byte in &mut tifdata[..(xsize * nlines) as usize] {
+                    *byte = byte.wrapping_sub(128);
                 }
             }
 
@@ -1220,7 +1202,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             tifdata = Vec::new();
         }
 
-        unsafe { tiff_close_file(&mut tiff) };
+        tiff_close_file(&mut tiff);
         iarg += 1;
     }
 

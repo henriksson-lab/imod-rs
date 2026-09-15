@@ -92,7 +92,9 @@ pub fn imodv_control_kick_clips(
     };
     imodv_register_model_chg();
     for model in &a.mod_[first..last] {
-        if let Some(view) = unsafe { model.as_mut() }.and_then(|m| m.view.first_mut()) {
+        if let Some(view) =
+            unsafe { model.as_ptr().as_mut() }.and_then(|model| model.view.first_mut())
+        {
             if state {
                 view.world |= WORLD_KICKOUT_CLIPS;
             } else {
@@ -149,7 +151,9 @@ pub fn imodv_control_clip(
     view.fovy = a.fovy as f32;
     if a.crosset != 0 {
         for model in &a.mod_ {
-            if let Some(other) = unsafe { model.as_mut() }.and_then(|m| m.view.first_mut()) {
+            if let Some(other) =
+                unsafe { model.as_ptr().as_mut() }.and_then(|model| model.view.first_mut())
+            {
                 other.fovy = view.fovy;
                 if plane == IMODV_CONTROL_FAR {
                     other.cfar = view.cfar;
@@ -185,7 +189,7 @@ pub fn imodv_control_zscale(
     if let Some(model) = a
         .mod_
         .get(a.cur_mod.max(0) as usize)
-        .and_then(|m| unsafe { m.as_mut() })
+        .and_then(|m| unsafe { m.as_ptr().as_mut() })
     {
         model.zscale = value as f32 / 100.;
     }
@@ -200,7 +204,7 @@ pub fn imodv_control_scale(a: &mut ImodvApp, scale: f32) {
         return;
     }
     let rad = 0.5 * a.winx.min(a.winy) as f32 / scale;
-    let models: &[*mut Imod] = if a.crosset != 0 {
+    let models: &[std::ptr::NonNull<Imod>] = if a.crosset != 0 {
         &a.mod_
     } else {
         a.mod_
@@ -209,7 +213,9 @@ pub fn imodv_control_scale(a: &mut ImodvApp, scale: f32) {
             .unwrap_or(&[])
     };
     for model in models {
-        if let Some(view) = unsafe { model.as_mut() }.and_then(|m| m.view.first_mut()) {
+        if let Some(view) =
+            unsafe { model.as_ptr().as_mut() }.and_then(|model| model.view.first_mut())
+        {
             view.rad = rad;
         }
     }
@@ -263,7 +269,9 @@ pub fn imodv_control_axis_text(
         a.mod_.len()
     };
     for model in &a.mod_[first..last] {
-        if let Some(view) = unsafe { model.as_mut() }.and_then(|m| m.view.first_mut()) {
+        if let Some(view) =
+            unsafe { model.as_ptr().as_mut() }.and_then(|model| model.view.first_mut())
+        {
             match axis {
                 IMODV_CONTROL_XAXIS => view.rot.x = rot,
                 IMODV_CONTROL_YAXIS => view.rot.y = rot,
@@ -518,7 +526,7 @@ mod tests {
         let p = &mut m as *mut _;
         let mut a = ImodvApp {
             imod: p,
-            mod_: vec![p],
+            mod_: vec![std::ptr::NonNull::from(&mut m)],
             num_mods: 1,
             cfar: 10,
             ..Default::default()
@@ -547,7 +555,7 @@ mod tests {
         let p = &mut m as *mut _;
         let mut a = ImodvApp {
             imod: p,
-            mod_: vec![p],
+            mod_: vec![std::ptr::NonNull::from(&mut m)],
             num_mods: 1,
             winx: 400,
             winy: 200,

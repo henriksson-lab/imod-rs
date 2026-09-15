@@ -557,7 +557,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_IO_ERROR;
     }
 
-    (*in_file).header = tif.cast();
+    (*in_file).backend_handle = tif.cast();
     (*in_file).nx = 0;
     (*in_file).ny = 0;
     (*in_file).multiple_sizes = 0;
@@ -1213,7 +1213,7 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
                 );
                 return IIERR_IO_ERROR;
             }
-            return ii_setup_raw_headers(in_file, &raw mut info);
+            return ii_setup_raw_headers(&mut *in_file, &info);
         }
     }
 
@@ -1223,142 +1223,128 @@ pub unsafe fn ii_tiff_check(in_file: *mut ImodImageFile) -> i32 {
     // `iitif.c:670`: `(FILE *)tif` — the libtiff handle used as this file's
     // identity in `sOpenedFiles`, never for I/O.
     (*in_file).fp = Some(ImodFile::Token(tif as usize));
-    (*in_file).clean_up = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile),
-        unsafe extern "C" fn(*mut ImodImageFile),
-    >(tiff_delete));
-    (*in_file).reopen = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-    >(tiff_reopen));
-    (*in_file).close = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile),
-        unsafe extern "C" fn(*mut ImodImageFile),
-    >(tiff_close));
-    (*in_file).fill_mrc_header = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
-    >(tiff_fill_mrc_header));
+    (*in_file).clean_up = Some(tiff_delete_callback);
+    (*in_file).reopen = Some(tiff_reopen_callback);
+    (*in_file).close = Some(tiff_close_callback);
+    (*in_file).fill_mrc_header = Some(tiff_fill_mrc_header_callback);
     (*in_file).last_written_z = (*in_file).nz - 1;
     0
 }
 /// C `tiffReopen` (`iitif.c:679`).
-pub unsafe fn tiff_reopen(in_file: *mut ImodImageFile) -> i32 {
-    if in_file.is_null() {
-        return IIERR_BAD_CALL;
-    }
-    let tif = open_without_b_mode(in_file);
+pub fn tiff_reopen(in_file: &mut ImodImageFile) -> i32 {
+    let tif = unsafe { open_without_b_mode(in_file) };
     if tif.is_null() {
         return 1;
     }
-    (*in_file).header_size = 8;
-    (*in_file).section_skip = 0;
-    (*in_file).header = tif.cast();
-    (*in_file).fp = Some(ImodFile::Token(tif as usize));
+    in_file.header_size = 8;
+    in_file.section_skip = 0;
+    in_file.backend_handle = tif.cast();
+    in_file.fp = Some(ImodFile::Token(tif as usize));
     0
 }
+
+unsafe extern "C" fn tiff_reopen_callback(in_file: *mut ImodImageFile) -> i32 {
+    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    tiff_reopen(in_file)
+}
 /// C `tiffClose` (`iitif.c:692`).
-pub unsafe fn tiff_close(in_file: *mut ImodImageFile) {
-    if in_file.is_null() {
-        return;
-    }
-    let tif = (*in_file).header.cast::<Tiff>();
-    if (*in_file).new_file != 0
-        && (*in_file).format != IIFORMAT_RGB
+pub fn tiff_close(in_file: &mut ImodImageFile) {
+    let tif = in_file.backend_handle.cast::<Tiff>();
+    if in_file.new_file != 0
+        && in_file.format != IIFORMAT_RGB
         && !tif.is_null()
-        && (*in_file).amax > (*in_file).amin
+        && in_file.amax > in_file.amin
     {
-        constrain_and_store_min_max(in_file);
+        unsafe { constrain_and_store_min_max(in_file) };
     }
     if !tif.is_null() {
-        TIFFClose(tif);
+        unsafe { TIFFClose(tif) };
     }
-    (*in_file).header = core::ptr::null_mut();
-    (*in_file).fp = None;
+    in_file.backend_handle = core::ptr::null_mut();
+    in_file.fp = None;
 }
-/// C `tiffDelete` (`iitif.c:708`).
-pub unsafe fn tiff_delete(in_file: *mut ImodImageFile) {
-    if !in_file.is_null() {
-        (*in_file).directory_nums = None;
+
+unsafe extern "C" fn tiff_close_callback(in_file: *mut ImodImageFile) {
+    if let Some(in_file) = unsafe { in_file.as_mut() } {
         tiff_close(in_file);
     }
 }
+/// C `tiffDelete` (`iitif.c:708`).
+pub fn tiff_delete(in_file: &mut ImodImageFile) {
+    in_file.directory_nums = None;
+    tiff_close(in_file);
+}
+
+unsafe extern "C" fn tiff_delete_callback(in_file: *mut ImodImageFile) {
+    if let Some(in_file) = unsafe { in_file.as_mut() } {
+        tiff_delete(in_file);
+    }
+}
 /// C `tiffFillMrcHeader` (`iitif.c:715`).
-pub unsafe fn tiff_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
-    if in_file.is_null() || hdata.is_null() {
-        return IIERR_BAD_CALL;
-    }
-    mrc_head_new(
-        &mut *hdata,
-        (*in_file).nx,
-        (*in_file).ny,
-        (*in_file).nz,
-        (*in_file).mode,
-    );
-    (*hdata).bytes_signed = if (*in_file).type_ == IITYPE_BYTE {
-        1
-    } else {
-        0
-    };
-    (*hdata).amin = (*in_file).amin;
-    (*hdata).amean = (*in_file).amean;
-    (*hdata).amax = (*in_file).amax;
+pub fn tiff_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader) -> i32 {
+    mrc_head_new(hdata, in_file.nx, in_file.ny, in_file.nz, in_file.mode);
+    hdata.bytes_signed = if in_file.type_ == IITYPE_BYTE { 1 } else { 0 };
+    hdata.amin = in_file.amin;
+    hdata.amean = in_file.amean;
+    hdata.amax = in_file.amax;
     mrc_set_scale(
-        &mut *hdata,
-        (*in_file).xscale as f64,
-        (*in_file).yscale as f64,
-        (*in_file).zscale as f64,
+        hdata,
+        in_file.xscale as f64,
+        in_file.yscale as f64,
+        in_file.zscale as f64,
     );
-    (*hdata).fp = (*in_file).fp.clone();
-    (*hdata).packed4bits = (*in_file).packed4bits;
-    (*hdata).half_floats = 0;
-    if (*hdata).packed4bits == PACKED_4BIT_MODE {
-        (*hdata).iiu_flags |= IIUNIT_4BIT_MODE;
+    hdata.fp = in_file.fp.clone();
+    hdata.packed4bits = in_file.packed4bits;
+    hdata.half_floats = 0;
+    if hdata.packed4bits == PACKED_4BIT_MODE {
+        hdata.iiu_flags |= IIUNIT_4BIT_MODE;
     }
-    if (*hdata).packed4bits == PACKED_HALF_XSIZE {
-        (*hdata).iiu_flags |= IIUNIT_HALF_XSIZE;
+    if hdata.packed4bits == PACKED_HALF_XSIZE {
+        hdata.iiu_flags |= IIUNIT_HALF_XSIZE;
     }
-    let tif = (*in_file).header.cast::<Tiff>();
+    let tif = in_file.backend_handle.cast::<Tiff>();
     let mut description: *mut u8 = core::ptr::null_mut();
     if !tif.is_null()
-        && TIFFSetDirectory(tif, 0) != 0
-        && TIFFGetField(tif, TIFFTAG_IMAGE_DESCRIPTION, &mut description) != 0
+        && unsafe { TIFFSetDirectory(tif, 0) } != 0
+        && unsafe { TIFFGetField(tif, TIFFTAG_IMAGE_DESCRIPTION, &mut description) } != 0
         && !description.is_null()
     {
-        (*hdata).nlabl = 0;
+        hdata.nlabl = 0;
         // `iitif.c:741` takes `strlen(description)` of libtiff's buffer and
         // then indexes it; the bytes are read as bytes from here on.
         let mut desc_len = 0usize;
-        while *description.add(desc_len) != 0 {
+        while unsafe { *description.add(desc_len) } != 0 {
             desc_len += 1;
         }
-        let description = core::slice::from_raw_parts(description, desc_len);
+        let description = unsafe { core::slice::from_raw_parts(description, desc_len) };
         let mut start_ind = 0;
-        while (*hdata).nlabl < MRC_NLABELS as i32 && start_ind < description.len() {
+        while hdata.nlabl < MRC_NLABELS as i32 && start_ind < description.len() {
             let mut end_ind = start_ind;
             while end_ind < description.len() && description[end_ind] != b'\n' {
                 end_ind += 1;
             }
             if end_ind == description.len() {
-                let dest = &mut (*hdata).labels[(*hdata).nlabl as usize];
+                let dest = &mut hdata.labels[hdata.nlabl as usize];
                 let count = (end_ind - start_ind).min(MRC_LABEL_SIZE);
                 dest[..count].copy_from_slice(&description[start_ind..start_ind + count]);
                 fix_title_padding(dest);
-                (*hdata).nlabl += 1;
+                hdata.nlabl += 1;
                 break;
             }
             if end_ind != 0 && description[end_ind - 1] == b'\r' {
                 end_ind -= 1;
             }
             if end_ind - start_ind > 0 {
-                let dest = &mut (*hdata).labels[(*hdata).nlabl as usize];
+                let dest = &mut hdata.labels[hdata.nlabl as usize];
                 let count = (end_ind - start_ind).min(MRC_LABEL_SIZE);
                 dest[..count].copy_from_slice(&description[start_ind..start_ind + count]);
                 if end_ind - start_ind < MRC_LABEL_SIZE {
                     dest[end_ind - start_ind] = 0;
                 }
                 fix_title_padding(dest);
-                (*hdata).nlabl += 1;
+                hdata.nlabl += 1;
             }
             if description[end_ind] == b'\r' {
                 end_ind += 1;
@@ -1368,37 +1354,45 @@ pub unsafe fn tiff_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcH
     }
     0
 }
-/// C `tiffSyncFromMrcHeader` (`iitif.c:771`).
-unsafe fn tiff_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
-    if in_file.is_null() || hdata.is_null() {
+unsafe extern "C" fn tiff_fill_mrc_header_callback(
+    in_file: *mut ImodImageFile,
+    hdata: *mut MrcHeader,
+) -> i32 {
+    let Some(in_file) = (unsafe { in_file.as_ref() }) else {
         return IIERR_BAD_CALL;
-    }
-    (*in_file).description = None;
-    if (*hdata).nlabl == 0 {
+    };
+    let Some(hdata) = (unsafe { hdata.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    tiff_fill_mrc_header(in_file, hdata)
+}
+/// C `tiffSyncFromMrcHeader` (`iitif.c:771`).
+fn tiff_sync_from_mrc_header(in_file: &mut ImodImageFile, hdata: &MrcHeader) -> i32 {
+    in_file.description = None;
+    if hdata.nlabl == 0 {
         return 0;
     }
-    // `iitif.c:780`'s `malloc(nlabl * (MRC_LABEL_SIZE + 1))`.  The source leaves
-    // the tail uninitialised and a `Vec` zeroes it, which is the recorded
-    // `malloc`-residue deviation; nothing past `outInd` is ever read.
-    (*in_file).description = Some(vec![0u8; (*hdata).nlabl as usize * (MRC_LABEL_SIZE + 1)]);
-    let description = (*in_file).description.as_mut().unwrap();
+    // Store Rust metadata bytes only. `tiff_add_description` creates its own
+    // terminated copy at the libtiff boundary.
+    in_file.description = Some(Vec::with_capacity(
+        hdata.nlabl as usize * (MRC_LABEL_SIZE + 1),
+    ));
+    let description = in_file.description.as_mut().unwrap();
     let mut out_ind = 0;
-    for lab in 0..(*hdata).nlabl as usize {
+    for lab in 0..hdata.nlabl as usize {
         let mut true_len = 0;
         for ind in 0..MRC_LABEL_SIZE {
-            if (*hdata).labels[lab][ind] == b'\n' {
+            if hdata.labels[lab][ind] == b'\n' {
                 break;
             }
-            if (*hdata).labels[lab][ind] != b' ' {
+            if hdata.labels[lab][ind] != b' ' {
                 true_len = ind + 1;
             }
         }
         if true_len != 0 {
             let start_ind = out_ind;
-            for ind in 0..true_len {
-                description[out_ind] = (*hdata).labels[lab][ind];
-                out_ind += 1;
-            }
+            description.extend_from_slice(&hdata.labels[lab][..true_len]);
+            out_ind += true_len;
             let line = &mut description[start_ind..start_ind + true_len];
             if let Some(bit_ind) = line
                 .windows(b"4 bits packed".len())
@@ -1411,55 +1405,69 @@ unsafe fn tiff_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut Mrc
                     line[bit_ind + 1] = b'-';
                 }
             }
-            description[out_ind] = if lab == (*hdata).nlabl as usize - 1 {
-                0
-            } else {
-                b'\n'
-            };
-            out_ind += 1;
-        } else if lab == (*hdata).nlabl as usize - 1 {
-            description[out_ind] = 0;
-            out_ind += 1;
+            if lab != hdata.nlabl as usize - 1 {
+                description.push(b'\n');
+                out_ind += 1;
+            }
         }
     }
-    tiff_add_description((*in_file).description.as_deref());
+    tiff_add_description(in_file.description.as_deref());
     0
+}
+
+unsafe extern "C" fn tiff_sync_from_mrc_header_callback(
+    in_file: *mut ImodImageFile,
+    hdata: *mut MrcHeader,
+) -> i32 {
+    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(hdata) = (unsafe { hdata.as_ref() }) else {
+        return IIERR_BAD_CALL;
+    };
+    tiff_sync_from_mrc_header(in_file, hdata)
 }
 /// C `tiffGetField` (`iitif.c:814`).
 pub unsafe fn tiff_get_field(in_file: *mut ImodImageFile, tag: i32, value: *mut c_void) -> i32 {
     if in_file.is_null() {
         return -1;
     }
-    if (*in_file).header.is_null() {
-        let _ = tiff_reopen(in_file);
+    if (*in_file).backend_handle.is_null() {
+        let _ = tiff_reopen(&mut *in_file);
     }
-    let tif = (*in_file).header.cast::<Tiff>();
+    let tif = (*in_file).backend_handle.cast::<Tiff>();
     if tif.is_null() {
         return -1;
     }
     TIFFGetField(tif, tag as u32, value)
 }
 /// C `tiffGetArray` (`iitif.c:829`).
-pub unsafe fn tiff_get_array(
-    in_file: *mut ImodImageFile,
-    tag: i32,
-    count: *mut u32,
-    value: *mut c_void,
-) -> i32 {
-    if !count.is_null() {
-        *count = 0;
+///
+/// libtiff owns the returned tag memory. Copy it at this boundary so the Rust
+/// image-processing path never stores or exposes that borrowed C pointer.
+pub fn tiff_get_array(in_file: &mut ImodImageFile, tag: i32) -> Result<Vec<u8>, i32> {
+    if in_file.backend_handle.is_null() {
+        let _ = unsafe { tiff_reopen(in_file) };
     }
-    if in_file.is_null() {
-        return -1;
-    }
-    if (*in_file).header.is_null() {
-        let _ = tiff_reopen(in_file);
-    }
-    let tif = (*in_file).header.cast::<Tiff>();
+    let tif = in_file.backend_handle.cast::<Tiff>();
     if tif.is_null() {
-        return -1;
+        return Err(-1);
     }
-    TIFFGetField(tif, tag as u32, count, value)
+    let mut count = 0_u32;
+    let mut value: *mut u8 = core::ptr::null_mut();
+    if unsafe {
+        TIFFGetField(
+            tif,
+            tag as u32,
+            &mut count,
+            (&mut value as *mut *mut u8).cast::<c_void>(),
+        )
+    } <= 0
+        || value.is_null()
+    {
+        return Err(-1);
+    }
+    Ok(unsafe { core::slice::from_raw_parts(value, count as usize) }.to_vec())
 }
 /// C `tiffSuppressErrors` (`iitif.c:843`).
 pub fn tiff_suppress_errors() {
@@ -1636,7 +1644,7 @@ unsafe fn open_without_b_mode(in_file: *mut ImodImageFile) -> *mut Tiff {
 }
 /// C `setMatchingDirectory` (`iitif.c:984`).
 unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i32 {
-    if in_file.is_null() || (*in_file).header.is_null() || dirnum < 0 {
+    if in_file.is_null() || (*in_file).backend_handle.is_null() || dirnum < 0 {
         return 1;
     }
     let Some(directory_list) = (*in_file).directory_nums.as_ref() else {
@@ -1645,11 +1653,11 @@ unsafe fn set_matching_directory(in_file: *mut ImodImageFile, dirnum: i32) -> i3
     let Some(&directory) = directory_list.get(dirnum as usize) else {
         return 1;
     };
-    (TIFFSetDirectory((*in_file).header.cast(), directory as u16) == 0) as i32
+    (TIFFSetDirectory((*in_file).backend_handle.cast(), directory as u16) == 0) as i32
 }
 /// C `closeWithError` (`iitif.c:994`).
 unsafe fn close_with_error(in_file: *mut ImodImageFile, message: &str) {
-    TIFFClose((*in_file).header.cast());
+    TIFFClose((*in_file).backend_handle.cast());
     (*in_file).fp = ImodFile::open(
         (*in_file).filename.as_deref().unwrap_or(""),
         &(*in_file).fmode,
@@ -1792,7 +1800,7 @@ unsafe fn read_section(
     let mut yti: i32;
     let x_dimension: i32;
 
-    let mut tif = (*in_file).header.cast::<Tiff>();
+    let mut tif = (*in_file).backend_handle.cast::<Tiff>();
     if (*in_file).axis == 2 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -1802,9 +1810,9 @@ unsafe fn read_section(
     }
 
     if tif.is_null() {
-        ii_reopen(in_file);
+        ii_reopen(&mut *in_file);
     }
-    tif = (*in_file).header.cast::<Tiff>();
+    tif = (*in_file).backend_handle.cast::<Tiff>();
     if tif.is_null() {
         return -1;
     }
@@ -1918,13 +1926,14 @@ unsafe fn read_section(
         {
             pixsize = 4;
         } else if ((to_short != 0 || doscale != 0) && colormap.is_null()) || signed_bytes != 0 {
-            map = get_byte_map(
+            map_data = get_byte_map(
                 slope,
                 offset,
                 outmin,
                 outmax,
                 if signed_bytes != 0 { 1 } else { 0 },
             );
+            map = map_data.as_mut_ptr();
             if (*in_file).format == IIFORMAT_RGB {
                 pixsize = (*in_file).rgb_samples;
             }
@@ -3545,7 +3554,7 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
         return IIERR_BAD_CALL;
     };
     augment_libtiff_with_custom_tags();
-    let mut minor = 0;
+    let (version, _) = tiff_version();
     let mut pixel_size = 1;
     if matches!((*in_file).type_, IITYPE_SHORT | IITYPE_USHORT) {
         pixel_size = 2;
@@ -3556,7 +3565,7 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
     if (*in_file).format == IIFORMAT_RGB {
         pixel_size *= 3;
     }
-    let use_w8 = tiff_version(&mut minor) > 3
+    let use_w8 = version > 3
         && ((((*in_file).nx as f64 * (*in_file).ny as f64)
             * (*in_file).nz as f64
             * pixel_size as f64)
@@ -3586,25 +3595,13 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
     if tif.is_null() {
         return IIERR_IO_ERROR;
     }
-    (*in_file).header = tif.cast();
+    (*in_file).backend_handle = tif.cast();
     (*in_file).fp = Some(ImodFile::Token(tif as usize));
     (*in_file).state = IISTATE_READY;
-    (*in_file).clean_up = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile),
-        unsafe extern "C" fn(*mut ImodImageFile),
-    >(tiff_delete));
-    (*in_file).close = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile),
-        unsafe extern "C" fn(*mut ImodImageFile),
-    >(tiff_close));
-    (*in_file).fill_mrc_header = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
-    >(tiff_fill_mrc_header));
-    (*in_file).sync_from_mrc_header = Some(core::mem::transmute::<
-        unsafe fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
-        unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32,
-    >(tiff_sync_from_mrc_header));
+    (*in_file).clean_up = Some(tiff_delete_callback);
+    (*in_file).close = Some(tiff_close_callback);
+    (*in_file).fill_mrc_header = Some(tiff_fill_mrc_header_callback);
+    (*in_file).sync_from_mrc_header = Some(tiff_sync_from_mrc_header_callback);
     (*in_file).write_section = Some(core::mem::transmute::<
         unsafe fn(*mut ImodImageFile, *mut u8, i32) -> i32,
         unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32,
@@ -3616,50 +3613,76 @@ pub unsafe fn tiff_open_new(in_file: *mut ImodImageFile) -> i32 {
     0
 }
 /// C `tiffWriteSection` (`iitif.c:2456`).
-pub unsafe fn tiff_write_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut c_void,
+pub fn tiff_write_section(
+    in_file: &mut ImodImageFile,
+    buf: &mut [u8],
     compression: i32,
     inverted: i32,
     resolution: i32,
     quality: i32,
 ) -> i32 {
-    if in_file.is_null() || (*in_file).header.is_null() {
+    if in_file.backend_handle.is_null() {
+        return IIERR_BAD_CALL;
+    }
+    let pixel_bytes = match in_file.format {
+        IIFORMAT_RGB => 3usize,
+        _ => match in_file.type_ {
+            IITYPE_UBYTE | IITYPE_BYTE => 1,
+            IITYPE_USHORT | IITYPE_SHORT => 2,
+            IITYPE_UINT | IITYPE_INT | IITYPE_FLOAT => 4,
+            _ => return IIERR_NO_SUPPORT,
+        },
+    };
+    let Some(required) = usize::try_from(in_file.nx)
+        .ok()
+        .and_then(|nx| {
+            usize::try_from(in_file.ny)
+                .ok()
+                .and_then(|ny| nx.checked_mul(ny))
+        })
+        .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+    else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < required {
         return IIERR_BAD_CALL;
     }
     let mut rows = 0;
     let mut number = 0;
     let mut tile_x = 0;
-    let error = tiff_write_setup(
-        in_file,
-        compression,
-        inverted,
-        resolution,
-        quality,
-        &mut rows,
-        &mut number,
-        &mut tile_x,
-    );
+    let error = unsafe {
+        tiff_write_setup(
+            in_file,
+            compression,
+            inverted,
+            resolution,
+            quality,
+            &mut rows,
+            &mut number,
+            &mut tile_x,
+        )
+    };
     if error != 0 {
         return error;
     }
     let mut state = *S_STRIP_TILE_STATE.lock().unwrap();
     for strip in 0..state.num_strips {
-        let lines = state.rows_per_strip.min((*in_file).ny - state.lines_done);
-        let source = if inverted != 0 {
-            (buf as *mut u8).add(strip as usize * state.strip_bytes as usize)
+        let lines = state.rows_per_strip.min(in_file.ny - state.lines_done);
+        let source_offset = if inverted != 0 {
+            strip as usize * state.strip_bytes as usize
         } else {
-            (buf as *mut u8).add(
-                ((*in_file).ny - (state.lines_done + lines)) as usize * state.line_bytes as usize,
-            )
+            (in_file.ny - (state.lines_done + lines)) as usize * state.line_bytes as usize
         };
-        let error = tiff_write_strip(in_file, strip, source.cast());
+        let Some(source) = buf.get_mut(source_offset..) else {
+            return IIERR_BAD_CALL;
+        };
+        let error = unsafe { tiff_write_strip(in_file, strip, source.as_mut_ptr().cast()) };
         if error != 0 {
             return error;
         }
         state.lines_done += lines;
     }
-    tiff_write_finish(in_file);
+    unsafe { tiff_write_finish(in_file) };
     0
 }
 /// C `tiffWriteSetup` (`iitif.c:2490`).
@@ -3674,7 +3697,7 @@ pub unsafe fn tiff_write_setup(
     tile_size_x: *mut i32,
 ) -> i32 {
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
-    if in_file.is_null() || (*in_file).header.is_null() {
+    if in_file.is_null() || (*in_file).backend_handle.is_null() {
         return IIERR_BAD_CALL;
     }
     if (*in_file).format != IIFORMAT_RGB
@@ -3686,7 +3709,7 @@ pub unsafe fn tiff_write_setup(
     {
         return IIERR_NO_SUPPORT;
     }
-    let tif = (*in_file).header.cast::<Tiff>();
+    let tif = (*in_file).backend_handle.cast::<Tiff>();
     if (*in_file).state == IISTATE_BUSY {
         TIFFWriteDirectory(tif);
     }
@@ -3776,8 +3799,8 @@ pub unsafe fn tiff_write_setup(
         let mut description = S_DESCRIPTION.lock().unwrap();
         if let Some(text) = description.as_deref() {
             if S_SETTING_UP_PARALLEL.load(Ordering::SeqCst) <= 0 {
-                // Below the libtiff line: the stored bytes already carry the
-                // terminator `strdup` copied.
+                // Below the libtiff line: this staging buffer owns the sole
+                // C terminator required by the foreign API.
                 TIFFSetField(
                     tif,
                     TIFFTAG_IMAGE_DESCRIPTION,
@@ -3859,14 +3882,13 @@ pub unsafe fn tiff_write_setup(
 /// C `tiffWriteStrip` (`iitif.c:2660`).
 pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mut c_void) -> i32 {
     let mut tmp_buf = S_TMP_BUF.lock().unwrap();
-    if in_file.is_null() || (*in_file).header.is_null() || buf.is_null() {
+    if in_file.is_null() || (*in_file).backend_handle.is_null() || buf.is_null() {
         return IIERR_BAD_CALL;
     }
     let state = *S_STRIP_TILE_STATE.lock().unwrap();
     let lines = state.rows_per_strip.min((*in_file).ny - state.lines_done);
     b3d_shift_bytes(
-        buf.cast(),
-        buf.cast(),
+        core::slice::from_raw_parts_mut(buf.cast::<u8>(), (state.line_bytes * lines) as usize),
         state.line_bytes,
         lines,
         1,
@@ -3899,7 +3921,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
                     .copy_from_slice(source);
             }
             if TIFFWriteEncodedTile(
-                (*in_file).header.cast(),
+                (*in_file).backend_handle.cast(),
                 (x_tile + strip * state.num_x_tiles) as u32,
                 tmp_buf.as_mut_ptr().cast(),
                 state.strip_bytes as isize,
@@ -3910,8 +3932,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
             }
         }
         b3d_shift_bytes(
-            buf.cast(),
-            buf.cast(),
+            core::slice::from_raw_parts_mut(buf.cast::<u8>(), (state.line_bytes * lines) as usize),
             state.line_bytes,
             lines,
             -1,
@@ -3940,7 +3961,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
         tmp_buf.as_mut_ptr()
     };
     if TIFFWriteEncodedStrip(
-        (*in_file).header.cast(),
+        (*in_file).backend_handle.cast(),
         strip as u32,
         output.cast(),
         (state.line_bytes * lines) as isize,
@@ -3952,8 +3973,7 @@ pub unsafe fn tiff_write_strip(in_file: *mut ImodImageFile, strip: i32, buf: *mu
         return IIERR_IO_ERROR;
     }
     b3d_shift_bytes(
-        buf.cast(),
-        buf.cast(),
+        core::slice::from_raw_parts_mut(buf.cast::<u8>(), (state.line_bytes * lines) as usize),
         state.line_bytes,
         lines,
         -1,
@@ -3984,7 +4004,38 @@ pub unsafe fn ii_tiff_write_section(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    tiff_write_section_any(in_file, buf, in_section, 0)
+    if in_file.is_null() || buf.is_null() {
+        return IIERR_BAD_CALL;
+    }
+    let file = &mut *in_file;
+    let pixel_bytes = if file.format == IIFORMAT_RGB {
+        3
+    } else if matches!(file.type_, IITYPE_UBYTE | IITYPE_BYTE) {
+        1
+    } else if matches!(file.type_, IITYPE_USHORT | IITYPE_SHORT) {
+        2
+    } else {
+        4
+    };
+    let Some(byte_count) = usize::try_from(file.nx)
+        .ok()
+        .and_then(|nx| {
+            usize::try_from(file.ny)
+                .ok()
+                .and_then(|ny| nx.checked_mul(ny))
+        })
+        .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+    else {
+        return IIERR_BAD_CALL;
+    };
+    // The stored image callback is the ABI boundary; all native section writing
+    // below receives a bounded Rust slice.
+    tiff_write_section_any(
+        file,
+        core::slice::from_raw_parts_mut(buf, byte_count),
+        in_section,
+        0,
+    )
 }
 /// C `iiTiffWriteSectionFloat` (`iitif.c:2726`).
 pub unsafe fn ii_tiff_write_section_float(
@@ -3992,7 +4043,36 @@ pub unsafe fn ii_tiff_write_section_float(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    tiff_write_section_any(in_file, buf, in_section, 1)
+    if in_file.is_null() || buf.is_null() {
+        return IIERR_BAD_CALL;
+    }
+    let file = &mut *in_file;
+    let pixel_bytes = if file.format == IIFORMAT_RGB {
+        3
+    } else if matches!(file.type_, IITYPE_UBYTE | IITYPE_BYTE) {
+        1
+    } else if matches!(file.type_, IITYPE_USHORT | IITYPE_SHORT) {
+        2
+    } else {
+        4
+    };
+    let Some(byte_count) = usize::try_from(file.nx)
+        .ok()
+        .and_then(|nx| {
+            usize::try_from(file.ny)
+                .ok()
+                .and_then(|ny| nx.checked_mul(ny))
+        })
+        .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+    else {
+        return IIERR_BAD_CALL;
+    };
+    tiff_write_section_any(
+        file,
+        core::slice::from_raw_parts_mut(buf, byte_count),
+        in_section,
+        1,
+    )
 }
 /// C `tiffAddDescription` (`iitif.c:2732`).
 pub fn tiff_add_description(text: Option<&[u8]>) {
@@ -4011,37 +4091,33 @@ pub fn tiff_add_description(text: Option<&[u8]>) {
     }
 }
 /// C `tiffWriteSectionAny` (`iitif.c:2738`).
-unsafe fn tiff_write_section_any(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
+fn tiff_write_section_any(
+    in_file: &mut ImodImageFile,
+    buf: &mut [u8],
     in_section: i32,
     if_float: i32,
 ) -> i32 {
-    if in_file.is_null() || buf.is_null() {
-        return IIERR_BAD_CALL;
-    }
-    if (*in_file).pad_left != 0 || (*in_file).pad_right != 0 {
+    if in_file.pad_left != 0 || in_file.pad_right != 0 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: tiffWriteSectionAny - Cannot write from a subset of an array\n"),
         );
         return -1;
     }
-    if in_section != (*in_file).last_written_z + 1 {
+    if in_section != in_file.last_written_z + 1 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
                 "ERROR: tiffWriteSectionAny - Can only write sequential sections to a TIFF file (last Z = {}, requested Z = {})\n",
-                (*in_file).last_written_z,
-                in_section
+                in_file.last_written_z, in_section
             ),
         );
         return -1;
     }
-    if (*in_file).llx != 0
-        || (*in_file).lly != 0
-        || (*in_file).urx != (*in_file).nx - 1
-        || (*in_file).ury != (*in_file).ny - 1
+    if in_file.llx != 0
+        || in_file.lly != 0
+        || in_file.urx != in_file.nx - 1
+        || in_file.ury != in_file.ny - 1
     {
         b3d_error(
             Some(&mut ImodFile::Stderr),
@@ -4049,28 +4125,41 @@ unsafe fn tiff_write_section_any(
         );
         return -1;
     }
-    if (*in_file).format == IIFORMAT_COMPLEX {
+    if in_file.format == IIFORMAT_COMPLEX {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: tiffWriteSectionAny - Cannot write complex data\n"),
         );
         return -1;
     }
-    let mut inverted = 0;
+    let mut inverted = false;
+    let float_buffer = if if_float != 0 {
+        if buf.len() % core::mem::size_of::<f32>() != 0
+            || buf.as_ptr().align_offset(core::mem::align_of::<f32>()) != 0
+        {
+            return IIERR_BAD_CALL;
+        }
+        // The safe caller supplied the owned section buffer; interpret it as
+        // floats only for the existing scalar conversion routine.
+        Some(unsafe {
+            core::slice::from_raw_parts(
+                buf.as_ptr().cast::<f32>(),
+                buf.len() / core::mem::size_of::<f32>(),
+            )
+        })
+    } else {
+        None
+    };
     let converted = match ii_make_buffer_convert_if_float(
         in_file,
-        buf,
-        if_float,
+        float_buffer,
         &mut inverted,
         "tiffWriteSectionAny",
     ) {
         Ok(converted) => converted,
         Err(()) => return IIERR_MEMORY_ERR,
     };
-    let use_buf = converted
-        .as_deref()
-        .map_or(buf, |converted| converted.as_ptr().cast_mut());
-    let resolution = if (*in_file).xscale == 1.0 {
+    let resolution = if in_file.xscale == 1.0 {
         0
     } else {
         // `iitif.c:2775-2776`: `1.e8` and `-2.54e8` are double literals and
@@ -4083,7 +4172,7 @@ unsafe fn tiff_write_section_any(
             1.0e8_f64
         } else {
             -2.54e8_f64
-        } / (*in_file).xscale as f64) as i32
+        } / in_file.xscale as f64) as i32
     };
     let compression = match std::env::var_os("IMOD_TIFF_COMPRESSION") {
         None => 1,
@@ -4099,40 +4188,48 @@ unsafe fn tiff_write_section_any(
             (strtol(value.as_encoded_bytes(), &mut end, 10) as i32).max(1)
         }
     };
-    let result = tiff_write_section(
-        in_file,
-        use_buf.cast(),
-        compression,
-        inverted,
-        resolution,
-        quality,
-    );
+    let result = if let Some(mut converted) = converted {
+        tiff_write_section(
+            in_file,
+            converted.as_mut_slice(),
+            compression,
+            i32::from(inverted),
+            resolution,
+            quality,
+        )
+    } else {
+        tiff_write_section(
+            in_file,
+            buf,
+            compression,
+            i32::from(inverted),
+            resolution,
+            quality,
+        )
+    };
     if result == 0 {
-        (*in_file).last_written_z += 1;
+        in_file.last_written_z += 1;
     }
     result
 }
 /// C `tiffVersion` (`iitif.c:2793`).
-pub unsafe fn tiff_version(minor: *mut i32) -> i32 {
-    if !minor.is_null() {
-        *minor = 0;
-    }
-    let version = TIFFGetVersion();
+pub fn tiff_version() -> (i32, i32) {
+    let version = unsafe { TIFFGetVersion() };
     if version.is_null() {
-        return 0;
+        return (0, 0);
     }
     // `TIFFGetVersion` hands back libtiff's own C string; length it here and
     // read it as bytes.
     let mut version_len = 0usize;
-    while *version.add(version_len) != 0 {
+    while unsafe { *version.add(version_len) } != 0 {
         version_len += 1;
     }
-    let bytes = core::slice::from_raw_parts(version.cast::<u8>(), version_len);
+    let bytes = unsafe { core::slice::from_raw_parts(version.cast::<u8>(), version_len) };
     if bytes.windows(4).any(|word| word == b"IMOD") {
-        return 0;
+        return (0, 0);
     }
     let Some(start) = bytes.windows(6).position(|word| word == b"ersion") else {
-        return 0;
+        return (0, 0);
     };
     // `sscanf(substr + 7, "%d.%d.%d", ...)` in the C source skips the
     // whitespace following "Version" before accepting the first integer.
@@ -4154,10 +4251,7 @@ pub unsafe fn tiff_version(minor: *mut i32) -> i32 {
         }
         index += 1;
     }
-    if !minor.is_null() {
-        *minor = values[1];
-    }
-    values[0]
+    (values[0], values[1])
 }
 /// C `tiffNumReadThreads` (`iitif.c:2813`).
 pub fn tiff_num_read_threads(nx: i32, ny: i32, compression: i32, max_threads: i32) -> i32 {
@@ -4294,14 +4388,41 @@ pub unsafe fn tiff_parallel_write(
         }
     }
     num_threads = num_omp_threads(num_threads).min(MAX_TIFF_THREADS as i32);
-    let mut minor = 0;
+    let (version, _) = tiff_version();
     if num_threads < 2
         || (*in_file).format == IIFORMAT_RGB
-        || tiff_version(&mut minor) < 4
+        || version < 4
         || compression == IICOMPRESSION_JPEG
         || compression == IICOMPRESSION_NONE
     {
-        return tiff_write_section(in_file, buf, compression, inverted, resolution, quality);
+        let pixel_bytes = if (*in_file).format == IIFORMAT_RGB {
+            3
+        } else if matches!((*in_file).type_, IITYPE_UBYTE | IITYPE_BYTE) {
+            1
+        } else if matches!((*in_file).type_, IITYPE_USHORT | IITYPE_SHORT) {
+            2
+        } else {
+            4
+        };
+        let Some(byte_count) = usize::try_from((*in_file).nx)
+            .ok()
+            .and_then(|nx| {
+                usize::try_from((*in_file).ny)
+                    .ok()
+                    .and_then(|ny| nx.checked_mul(ny))
+            })
+            .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        return tiff_write_section(
+            &mut *in_file,
+            core::slice::from_raw_parts_mut(buf.cast(), byte_count),
+            compression,
+            inverted,
+            resolution,
+            quality,
+        );
     }
 
     *did_parallel = 1;
@@ -4450,8 +4571,7 @@ pub unsafe fn tiff_parallel_write(
                     )
                 };
                 b3d_shift_bytes(
-                    source,
-                    source.cast(),
+                    core::slice::from_raw_parts_mut(source, (line_bytes * number_lines) as usize),
                     line_bytes,
                     number_lines,
                     1,
@@ -4476,14 +4596,13 @@ pub unsafe fn tiff_parallel_write(
                     }
                 }
                 let written = TIFFWriteEncodedStrip(
-                    (*temp_files[file]).header.cast(),
+                    (*temp_files[file]).backend_handle.cast(),
                     strip_index as u32,
                     use_buf,
                     (line_bytes * number_lines) as isize,
                 );
                 b3d_shift_bytes(
-                    source,
-                    source.cast(),
+                    core::slice::from_raw_parts_mut(source, (line_bytes * number_lines) as usize),
                     line_bytes,
                     number_lines,
                     -1,
@@ -4522,7 +4641,7 @@ pub unsafe fn tiff_parallel_write(
                     for strip_index in 0..thread_num_strips[file] {
                         let lines = rows_per_strip.min((*in_file).ny - lines_done);
                         let bytes = TIFFReadRawStrip(
-                            (*temp_files[file]).header.cast(),
+                            (*temp_files[file]).backend_handle.cast(),
                             strip_index as u32,
                             tmp_buf.as_mut_ptr().cast(),
                             (2 * strip_bytes) as isize,
@@ -4539,7 +4658,7 @@ pub unsafe fn tiff_parallel_write(
                             break;
                         }
                         if TIFFWriteRawStrip(
-                            (*in_file).header.cast(),
+                            (*in_file).backend_handle.cast(),
                             (strip_index + copied_strips) as u32,
                             tmp_buf.as_mut_ptr().cast(),
                             bytes,
@@ -4617,8 +4736,16 @@ unsafe fn constrain_and_store_min_max(in_file: *mut ImodImageFile) {
             _ => {}
         }
     }
-    TIFFSetField((*in_file).header.cast(), TIFFTAG_SMINSAMPLEVALUE, minimum);
-    TIFFSetField((*in_file).header.cast(), TIFFTAG_SMAXSAMPLEVALUE, maximum);
+    TIFFSetField(
+        (*in_file).backend_handle.cast(),
+        TIFFTAG_SMINSAMPLEVALUE,
+        minimum,
+    );
+    TIFFSetField(
+        (*in_file).backend_handle.cast(),
+        TIFFTAG_SMAXSAMPLEVALUE,
+        maximum,
+    );
 }
 /// C `registerCustomTIFFTags` (`iitif.c:3191`).
 unsafe extern "C" fn register_custom_tiff_tags(tif: *mut Tiff) {
@@ -4633,8 +4760,7 @@ unsafe fn augment_libtiff_with_custom_tags() {
     if S_AUGMENTED_TAGS.load(Ordering::SeqCst) != 0 {
         return;
     }
-    let mut minor = 0;
-    let version = tiff_version(&mut minor);
+    let (version, minor) = tiff_version();
     if version < 4 || (version == 4 && minor < 5) {
         return;
     }
@@ -5160,11 +5286,15 @@ mod tests {
             (*writer).amax = 1000.;
             assert_eq!(tiff_open_new(writer), 0);
             let pixels: [u16; 8] = [0, 100, 200, 400, 600, 800, 900, 1000];
+            let mut pixel_bytes: Vec<u8> = pixels
+                .iter()
+                .flat_map(|pixel| pixel.to_ne_bytes())
+                .collect();
             assert_eq!(
-                tiff_write_section(writer, pixels.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                tiff_write_section(&mut *writer, &mut pixel_bytes, 1, 0, 0, -1),
                 0
             );
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
 
             let reader = ii_new();
@@ -5254,15 +5384,15 @@ mod tests {
             let sentinel = warning_handler as *mut c_void;
             let _ = TIFFSetErrorHandler(sentinel);
             S_OLD_ERR_HANDLER.store(sentinel, Ordering::SeqCst);
-            let pixels = [1_u8, 2, 3, 0];
+            let mut pixels = [1_u8, 2, 3, 0];
             assert_eq!(
-                tiff_write_section(writer, pixels.as_ptr().cast_mut().cast(), 1, 0, 100, -1),
+                tiff_write_section(&mut *writer, &mut pixels, 1, 0, 100, -1),
                 0
             );
             assert_eq!(TIFFSetErrorHandler(core::ptr::null_mut()), sentinel);
             let _ = TIFFSetErrorHandler(original);
             S_OLD_ERR_HANDLER.store(core::ptr::null_mut(), Ordering::SeqCst);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             std::fs::remove_file(path).unwrap();
         }
@@ -5622,12 +5752,12 @@ mod tests {
             (*writer).amin = 2.;
             (*writer).amax = 5.;
             assert_eq!(tiff_open_new(writer), 0);
-            let pixels = [3_u8, 1, 4, 1];
+            let mut pixels = [3_u8, 1, 4, 1];
             assert_eq!(
-                tiff_write_section(writer, pixels.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                tiff_write_section(&mut *writer, &mut pixels, 1, 0, 0, -1),
                 0
             );
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
 
             let reader = ii_new();
@@ -5658,7 +5788,7 @@ mod tests {
             let mut raw_bytes = 0;
             let mut max_electrons = 0;
             count_eer_bytes_and_electrons(
-                (*reader).header.cast(),
+                (*reader).backend_handle.cast(),
                 0,
                 &mut raw_bytes,
                 &mut max_electrons,
@@ -5782,19 +5912,19 @@ mod tests {
             (*writer).format = IIFORMAT_LUMINANCE;
             (*writer).type_ = IITYPE_UBYTE;
             assert_eq!(tiff_open_new(writer), 0);
-            let thumbnail = [17_u8];
+            let mut thumbnail = [17_u8];
             assert_eq!(
-                tiff_write_section(writer, thumbnail.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                tiff_write_section(&mut *writer, &mut thumbnail, 1, 0, 0, -1),
                 0
             );
             (*writer).nx = 2;
             (*writer).ny = 2;
-            let science = [3_u8, 1, 4, 1];
+            let mut science = [3_u8, 1, 4, 1];
             assert_eq!(
-                tiff_write_section(writer, science.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                tiff_write_section(&mut *writer, &mut science, 1, 0, 0, -1),
                 0
             );
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
 
             let reader = ii_new();
@@ -5843,7 +5973,7 @@ mod tests {
                 -1
             );
             assert_eq!((*writer).last_written_z, -1);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             std::fs::remove_file(path).unwrap();
         }
@@ -5879,7 +6009,7 @@ mod tests {
                 -1
             );
             assert_eq!((*writer).last_written_z, -1);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             std::fs::remove_file(path).unwrap();
         }
@@ -5910,14 +6040,14 @@ mod tests {
             (*writer).format = IIFORMAT_LUMINANCE;
             (*writer).type_ = IITYPE_UBYTE;
             assert_eq!(tiff_open_new(writer), 0);
-            let pixels = [1_u8, 2, 3, 4];
+            let mut pixels = [1_u8, 2, 3, 4];
             assert_eq!(
-                tiff_write_section(writer, pixels.as_ptr().cast_mut().cast(), 1, 0, 0, -1),
+                tiff_write_section(&mut *writer, &mut pixels, 1, 0, 0, -1),
                 0
             );
             (*writer).amin = 1.;
             (*writer).amax = 4.;
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
 
             let reader = ii_new();
@@ -5984,7 +6114,7 @@ mod tests {
                 0
             );
             tiff_write_finish(writer);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             let reader = ii_new();
             (*reader).filename = Some(name.clone());
@@ -6042,14 +6172,14 @@ mod tests {
             let mut quality = 0_i32;
             assert_ne!(
                 TIFFGetField(
-                    (*writer).header.cast::<Tiff>(),
+                    (*writer).backend_handle.cast::<Tiff>(),
                     TIFFTAG_ZIPQUALITY,
                     &mut quality
                 ),
                 0
             );
             assert_eq!(quality, 9);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             std::fs::remove_file(path).unwrap();
         }
@@ -6096,7 +6226,7 @@ mod tests {
             // The source's numOMPthreads mapping is a no-OpenMP build here, so
             // the source eligibility path correctly selects its serial writer.
             assert_eq!(did_parallel, 0);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             let reader = ii_new();
             (*reader).filename = Some(name.clone());
@@ -6115,8 +6245,7 @@ mod tests {
     fn custom_digital_micrograph_scale_tag_registers_and_roundtrips() {
         let _lock = TIFF_IO_TEST_LOCK.lock().unwrap();
         unsafe {
-            let mut minor = 0;
-            let version = tiff_version(&mut minor);
+            let (version, minor) = tiff_version();
             let path = std::env::temp_dir().join(format!(
                 "imod-rs-iitif-custom-tag-{}.tif",
                 std::process::id()
@@ -6131,7 +6260,7 @@ mod tests {
             (*writer).format = IIFORMAT_LUMINANCE;
             (*writer).type_ = IITYPE_UBYTE;
             assert_eq!(tiff_open_new(writer), 0);
-            let tif = (*writer).header.cast::<Tiff>();
+            let tif = (*writer).backend_handle.cast::<Tiff>();
             // The source deliberately declines to globally extend libtiff before
             // 4.5.  Current Debian libtiff is 4.3, so call the source callback
             // directly in that compatibility branch to exercise the ABI table.
@@ -6142,16 +6271,9 @@ mod tests {
             let mut value = 0.0_f64;
             assert_ne!(TIFFGetField(tif, TIFFTAG_DM_SCALE_0, &mut value), 0);
             assert_eq!(value, 1.25);
-            let pixel = [0_u8];
+            let mut pixel = [0_u8];
             assert_eq!(
-                tiff_write_section(
-                    writer,
-                    pixel.as_ptr().cast_mut().cast(),
-                    1,
-                    0,
-                    2_000_000,
-                    -1,
-                ),
+                tiff_write_section(&mut *writer, &mut pixel, 1, 0, 2_000_000, -1,),
                 0
             );
             assert_ne!(TIFFGetField(tif, TIFFTAG_DM_SCALE_0, &mut value), 0);
@@ -6169,7 +6291,7 @@ mod tests {
                 datetime_len += 1;
             }
             assert_eq!(datetime_len, 19);
-            tiff_close(writer);
+            tiff_close(&mut *writer);
             ii_delete(writer);
             std::fs::remove_file(path).unwrap();
         }

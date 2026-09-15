@@ -1,10 +1,7 @@
 //! Translation of `IMOD/libcfshr/metro.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(dead_code)]
 
 use super::b3dutil::num_omp_threads;
-
-/// C `MetroFunct` callback type (`cfsemshare.h`).
-pub type MetroFunct = unsafe extern "C" fn(*mut i32, *mut f32, *mut f32, *mut f32);
 
 /// C static `copyArray` (`metro.c:10`).
 pub fn copy_array(to: &mut [f32], from: &[f32]) {
@@ -33,10 +30,10 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 }
 
 /// C `metroSearch` (`metro.c:58`).
-pub fn metro_search(
+pub fn metro_search<F>(
     n: usize,
     argument: &mut [f32],
-    funct: MetroFunct,
+    mut funct: F,
     function: &mut f32,
     gradient: &mut [f32],
     step_initial: f32,
@@ -46,7 +43,9 @@ pub fn metro_search(
     hessian: &mut [f32],
     num_iter: &mut i32,
     rms_scale: f32,
-) {
+) where
+    F: FnMut(&mut [f32], &mut f32, &mut [f32]),
+{
     const BREAK_SUMS: usize = 8;
     assert!(argument.len() >= n && gradient.len() >= n);
     assert!(hessian.len() >= n * n + 3 * n);
@@ -63,15 +62,7 @@ pub fn metro_search(
     *num_iter = 0;
     let iter_limit = limit_in.abs();
     let mut step = step_initial;
-    let n_i32 = n as i32;
-    unsafe {
-        funct(
-            &n_i32 as *const i32 as *mut i32,
-            argument.as_mut_ptr(),
-            function,
-            gradient.as_mut_ptr(),
-        )
-    };
+    funct(argument, function, gradient);
     let mut reinitialize = true;
     while *num_iter <= iter_limit {
         if reinitialize {
@@ -105,14 +96,7 @@ pub fn metro_search(
         for j in 0..n {
             argument[j] += step * hessian[direction_base + j];
         }
-        unsafe {
-            funct(
-                &n_i32 as *const i32 as *mut i32,
-                argument.as_mut_ptr(),
-                function,
-                gradient.as_mut_ptr(),
-            )
-        };
+        funct(argument, function, gradient);
         f_new = *function as f64;
         dir_dot_g_new = dot_product(&hessian[direction_base..direction_base + n], gradient);
         let mut del_x_dot_g = 0.;
@@ -144,14 +128,7 @@ pub fn metro_search(
                 for j in 0..n {
                     argument[j] -= backoff_step as f32 * hessian[direction_base + j];
                 }
-                unsafe {
-                    funct(
-                        &n_i32 as *const i32 as *mut i32,
-                        argument.as_mut_ptr(),
-                        function,
-                        gradient.as_mut_ptr(),
-                    )
-                };
+                funct(argument, function, gradient);
                 cut_by_ten = *function as f64 > f_old || *function as f64 > f_new;
             }
             if cut_by_ten {
@@ -243,47 +220,15 @@ pub fn metro_search(
     *ier = 3;
 }
 
-/// C Fortran wrapper `metro` (`metro.c:365`).
-pub unsafe fn metro(
-    n: *mut i32,
-    argument: *mut f32,
-    funct: MetroFunct,
-    function: *mut f32,
-    gradient: *mut f32,
-    step_initial: *mut f32,
-    epsilon: *mut f32,
-    limit_in: *mut i32,
-    ier: *mut i32,
-    hessian: *mut f32,
-    num_iter: *mut i32,
-    rms_scale: *mut f32,
-) {
-    let n_value = *n as usize;
-    metro_search(
-        n_value,
-        core::slice::from_raw_parts_mut(argument, n_value),
-        funct,
-        &mut *function,
-        core::slice::from_raw_parts_mut(gradient, n_value),
-        *step_initial,
-        *epsilon,
-        *limit_in,
-        &mut *ier,
-        core::slice::from_raw_parts_mut(hessian, n_value * n_value + 3 * n_value),
-        &mut *num_iter,
-        *rms_scale,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    unsafe extern "C" fn quadratic(n: *mut i32, x: *mut f32, f: *mut f32, g: *mut f32) {
+    fn quadratic(x: &mut [f32], f: &mut f32, g: &mut [f32]) {
         *f = 0.;
-        for i in 0..*n {
-            let d = *x.add(i as usize) - (i + 1) as f32;
+        for (index, value) in x.iter().enumerate() {
+            let d = *value - (index + 1) as f32;
             *f += d * d;
-            *g.add(i as usize) = 2. * d;
+            g[index] = 2. * d;
         }
     }
     #[test]

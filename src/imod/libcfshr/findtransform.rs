@@ -264,52 +264,6 @@ pub fn find_transform(
     0
 }
 
-/// Original `findxf` (`findtransform.c:225`).
-pub unsafe fn findxf(
-    x_mat: *mut f32,
-    m_size: *mut i32,
-    icol_x: *mut i32,
-    num_points: *mut i32,
-    xcen: *mut f32,
-    y_cen: *mut f32,
-    if_trans: *mut i32,
-    if_rotrans: *mut i32,
-    if_dev: *mut i32,
-    xf: *mut f32,
-    dev_avg: *mut f32,
-    dev_sd: *mut f32,
-    dev_max: *mut f32,
-    ipnt_max: *mut i32,
-) {
-    unsafe {
-        // Fortran ABI adapter: its rank-one arrays have no length metadata.
-        // The fitting core itself only accepts bounded Rust slices.
-        let rows = *num_points + if *if_dev < 0 { (*ipnt_max).max(0) } else { 0 };
-        let values = core::slice::from_raw_parts_mut(x_mat, (rows * *m_size) as usize);
-        let transform = &mut *(xf as *mut [f32; 6]);
-        if find_transform(
-            values,
-            *m_size,
-            *icol_x,
-            *num_points,
-            *xcen,
-            *y_cen,
-            *if_trans,
-            *if_rotrans,
-            *if_dev,
-            transform,
-            &mut *dev_avg,
-            &mut *dev_sd,
-            &mut *dev_max,
-            &mut *ipnt_max,
-        ) != 0
-        {
-            print!("ERROR: Findxf function - Allocating array for matrices\n");
-            std::process::exit(1);
-        }
-    }
-}
-
 /// Original `findXfRobustParams` (`findtransform.c:242`).
 pub fn find_xf_robust_params(
     k_factor: f32,
@@ -327,19 +281,6 @@ pub fn find_xf_robust_params(
             max_zero_wgt,
         });
     });
-}
-
-/// Original `findxfrobustparams` (`findtransform.c:253`).
-pub unsafe fn findxfrobustparams(
-    kfactor: *mut f32,
-    max_iter: *mut i32,
-    max_zero_wgt: *mut i32,
-    max_change: *mut f32,
-    max_oscill: *mut f32,
-) {
-    unsafe {
-        find_xf_robust_params(*kfactor, *max_iter, *max_zero_wgt, *max_change, *max_oscill);
-    }
 }
 
 #[cfg(test)]

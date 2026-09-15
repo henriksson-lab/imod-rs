@@ -2878,7 +2878,7 @@ impl ZapFuncs {
             let mut labels = Vec::new();
             for t in 0..=num_times {
                 let label =
-                    unsafe { crate::imod::three_dmod::imodview::ivw_get_time_index_label(vi, t) };
+                    unsafe { crate::imod::three_dmod::imodview::ivw_get_time_index_label(&*vi, t) };
                 labels.push(String::from_utf8_lossy(label).into_owned());
             }
             let _ = n;
@@ -4017,9 +4017,10 @@ impl ZapFuncs {
             ZAP_TOGGLE_LASSO => self.toggle_lasso(true),
             ZAP_TOGGLE_ARROW => self.toggle_arrow(true),
             ZAP_TOGGLE_TIMELOCK => {
-                unsafe {
-                    crate::imod::three_dmod::imodview::ivw_get_time(self.vi, Some(&mut time))
-                };
+                crate::imod::three_dmod::imodview::ivw_get_time(
+                    unsafe { &*self.vi },
+                    Some(&mut time),
+                );
                 self.time_lock = if state != 0 { time } else { 0 };
                 if self.time_lock == 0 {
                     self.draw();
@@ -4365,11 +4366,16 @@ impl ZapFuncs {
                                 .map_or(ptr::null_mut(), |o| o as *const Iobj as *mut Iobj);
                             cont = ptr::null_mut();
                             if !obj.is_null() {
-                                cont = unsafe { ivw_get_or_make_contour(vi, obj, self.time_lock) };
+                                cont = unsafe {
+                                    let view = &mut *vi;
+                                    let model = &mut *view.imod;
+                                    ivw_get_or_make_contour(view, model, self.time_lock)
+                                        .map_or(ptr::null_mut(), |contour| contour)
+                                };
                             }
                             if obj.is_null()
                                 || cont.is_null()
-                                || unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) }
+                                || unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) }
                             {
                                 broke = true;
                             } else {
@@ -4388,7 +4394,19 @@ impl ZapFuncs {
                                 {
                                     unsafe { (*cont).flags |= ICONT_WILD };
                                 }
-                                unsafe { ivw_register_insert_point(vi, cont, &mut add_pt, end) };
+                                unsafe {
+                                    let contour_first =
+                                        (*cont).pts.first().map(|point| (point.z, (*cont).flags));
+                                    let view = &mut *vi;
+                                    let model = &mut *view.imod;
+                                    ivw_register_insert_point(
+                                        view,
+                                        model,
+                                        contour_first,
+                                        add_pt,
+                                        end,
+                                    )
+                                };
                                 unsafe { (*vi).xmouse = add_pt.x };
                                 unsafe { (*vi).ymouse = add_pt.y };
                                 with_boundary(|n| n.imod_draw(vi, IMOD_DRAW_MOD | IMOD_DRAW_XYZ));
@@ -5569,7 +5587,12 @@ impl ZapFuncs {
                 // Get current contour; if there is none, start a new one
                 // DNM 7/10/04: switch to calling routine; it now fixes time of
                 // empty cont
-                cont = unsafe { ivw_get_or_make_contour(vi, obj, self.time_lock) };
+                cont = unsafe {
+                    let view = &mut *vi;
+                    let model = &mut *view.imod;
+                    ivw_get_or_make_contour(view, model, self.time_lock)
+                        .map_or(ptr::null_mut(), |contour| contour)
+                };
                 if cont.is_null() {
                     return 0;
                 }
@@ -5620,7 +5643,8 @@ impl ZapFuncs {
                 being modeled, and start new contour for any kind of contour */
                 // DNM 7/10/04: just use first point instead of current point
                 if unsafe { !(&(*cont).pts).is_empty() } {
-                    let time_mismatch = unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) };
+                    let time_mismatch =
+                        unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) };
                     let not_in_plane = iobj_planar(unsafe { (*obj).flags }) != 0
                         && unsafe { (*cont).flags } & ICONT_WILD == 0
                         && (unsafe { (&(*cont).pts)[0].z } as f64 + 0.5).floor() as i32
@@ -5646,7 +5670,7 @@ impl ZapFuncs {
                 }
 
                 /* Now if times still don't match refuse the point */
-                if unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) } {
+                if unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) } {
                     wprint(
                         "\u{7}Contour time does not match current time.\nSet contour time to 0 to model across times.\n",
                     );
@@ -5677,7 +5701,12 @@ impl ZapFuncs {
                     pt -= 1;
                 }
 
-                unsafe { ivw_register_insert_point(vi, cont, &mut point, pt) };
+                unsafe {
+                    let contour_first = (*cont).pts.first().map(|first| (first.z, (*cont).flags));
+                    let view = &mut *vi;
+                    let model = &mut *view.imod;
+                    ivw_register_insert_point(view, model, contour_first, point, pt)
+                };
 
                 /* DNM: auto section advance is based on the direction of
                 section change between last and just-inserted points */
@@ -5792,7 +5821,7 @@ impl ZapFuncs {
 
             let obj = imod_object_get(unsafe { (*vi).imod.as_ref() })
                 .map_or(ptr::null_mut(), |o| o as *const Iobj as *mut Iobj);
-            if unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) } {
+            if unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) } {
                 return 0;
             }
 
@@ -6284,7 +6313,7 @@ impl ZapFuncs {
             if (iobj_planar(unsafe { (*obj).flags }) != 0
                 && unsafe { (*cont).flags } & ICONT_WILD == 0
                 && (unsafe { (*lpt).z } as f64 + 0.5).floor() as i32 != cpt.z as i32)
-                || unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) }
+                || unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) }
                 || (unsafe { (*obj).extra[IOBJ_EX_PNT_LIMIT] } != 0
                     && unsafe { (&(*cont).pts).len() as u32 }
                         >= unsafe { (*obj).extra[IOBJ_EX_PNT_LIMIT] })
@@ -6293,7 +6322,7 @@ impl ZapFuncs {
                 return self.b2_click(x, y, 0);
             }
 
-            if unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) } {
+            if unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) } {
                 return 0;
             }
         }
@@ -6423,7 +6452,7 @@ impl ZapFuncs {
             return 0;
         }
 
-        if unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) } {
+        if unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) } {
             return 0;
         }
 
@@ -7413,7 +7442,9 @@ impl ZapFuncs {
         let time = ivw_window_time(unsafe { &*self.vi }, self.time_lock);
         if unsafe {
             ivw_get_image_padding(
-                self.vi,
+                &*self.vi,
+                (*self.vi).image.as_ref(),
+                (*self.vi).li.as_ref(),
                 (iyb + iyt) / 2,
                 (low_section + high_section) / 2,
                 time,
@@ -7750,7 +7781,9 @@ impl ZapFuncs {
         // Get extent of padded region in image and use it to limit the subarea
         if unsafe {
             ivw_get_image_padding(
-                self.vi,
+                &*self.vi,
+                (*self.vi).image.as_ref(),
+                (*self.vi).li.as_ref(),
                 -1,
                 self.section,
                 time,
@@ -8465,7 +8498,7 @@ impl ZapFuncs {
 
         if self.num_xpanels == 0 {
             if unsafe { (*vi).pyr_cache }.is_null() {
-                image_data = unsafe { ivw_get_z_section_time(vi, self.section, time) };
+                image_data = unsafe { ivw_get_z_section_time(&mut *vi, self.section, time) };
             }
 
             // If flag set, record the subarea size, clear flag, and do call
@@ -8528,7 +8561,7 @@ impl ZapFuncs {
                         self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr());
                     }
 
-                    image_data = unsafe { ivw_get_z_section_time(vi, other_sec, time) };
+                    image_data = unsafe { ivw_get_z_section_time(&mut *vi, other_sec, time) };
                     if unsafe { (*vi).which_green } != 0 {
                         self.fill_overlay_rgb(image_data, nx, ny, 1, image.as_mut_ptr());
                     } else {
@@ -8536,7 +8569,15 @@ impl ZapFuncs {
                         self.fill_overlay_rgb(image_data, nx, ny, 2, image.as_mut_ptr());
                     }
                     image_data = unsafe {
-                        ivw_make_line_pointers(vi, image.as_mut_ptr(), nx, ny, MRC_MODE_RGB)
+                        ivw_make_line_pointers(
+                            &mut (*vi).line_ptrs,
+                            &mut (*vi).line_ptr_max,
+                            &mut image,
+                            nx,
+                            ny,
+                            MRC_MODE_RGB,
+                        )
+                        .map_or(ptr::null_mut(), |lines| lines.as_mut_ptr().cast())
                     };
                     over_image = Some(image);
                 }
@@ -8612,7 +8653,7 @@ impl ZapFuncs {
                             )
                         });
                     } else {
-                        image_data = unsafe { ivw_get_z_section_time(vi, iz, time) };
+                        image_data = unsafe { ivw_get_z_section_time(&mut *vi, iz, time) };
                     }
                     bl = self.xborder
                         + self.panel_xborder
@@ -9294,7 +9335,7 @@ impl ZapFuncs {
         /* check for contours that contain time data. */
         /* Don't draw them if the time isn't right. */
         /* DNM 6/7/01: but draw contours with time 0 regardless of time */
-        if unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) } {
+        if unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) } {
             return;
         }
 
@@ -9946,7 +9987,7 @@ impl ZapFuncs {
             x = self.xpos(unsafe { (*pnt).x });
             y = self.ypos(unsafe { (*pnt).y });
             if self.point_visable(unsafe { &*pnt }) != 0
-                && !unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) }
+                && !unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) }
             {
                 let curpoint = APP.lock().unwrap().as_ref().map_or(0, |a| a.curpoint);
                 with_boundary(|n| n.b3d_color_index(curpoint));
@@ -9960,7 +10001,7 @@ impl ZapFuncs {
 
         /* draw begin/end points for current contour */
         if !cont.is_null() {
-            if unsafe { ivw_time_mismatch(vi, self.time_lock, obj, cont) } {
+            if unsafe { ivw_time_mismatch(&*vi, self.time_lock, &*obj, &*cont) } {
                 return;
             }
 
@@ -10432,7 +10473,7 @@ impl ZapFuncs {
             if self.tool_time != time {
                 self.tool_time = time;
                 let label = unsafe {
-                    crate::imod::three_dmod::imodview::ivw_get_time_index_label(self.vi, time)
+                    crate::imod::three_dmod::imodview::ivw_get_time_index_label(&*self.vi, time)
                 };
                 let label = String::from_utf8_lossy(label).into_owned();
                 with_boundary(|n| n.zap_window_set_time_label(time, &label));

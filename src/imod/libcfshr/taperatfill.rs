@@ -293,25 +293,6 @@ pub fn taper_at_fill(array: &mut [f32], nx: i32, ny: i32, ntaper: i32, inside: b
     }
     result
 }
-/// C Fortran wrapper `taperatfill`.
-pub unsafe fn taper_at_fill_fortran(
-    array: *mut f32,
-    nx: *const i32,
-    ny: *const i32,
-    ntaper: *const i32,
-    inside: *const i32,
-) -> i32 {
-    let (nx, ny, ntaper, inside) = unsafe { (*nx, *ny, *ntaper, *inside) };
-    let Some(pixel_count) = usize::try_from(nx).ok().and_then(|width| {
-        usize::try_from(ny)
-            .ok()
-            .and_then(|height| width.checked_mul(height))
-    }) else {
-        return -1;
-    };
-    let array = unsafe { std::slice::from_raw_parts_mut(array, pixel_count) };
-    taper_at_fill(array, nx, ny, ntaper, inside != 0)
-}
 /// Return the fill value found by the most recent taper operation.
 pub fn get_last_taper_fill_value(value: &mut f32) -> bool {
     let state = TAPER_FILL_STATE
@@ -320,11 +301,6 @@ pub fn get_last_taper_fill_value(value: &mut f32) -> bool {
     *value = state.last_fill_value;
     state.found_fill
 }
-/// C Fortran wrapper `getlasttaperfillvalue`.
-pub unsafe fn get_last_taper_fill_value_fortran(value: *mut f32) -> i32 {
-    unsafe { i32::from(get_last_taper_fill_value(&mut *value)) }
-}
-
 /// Find the longest run on a slice edge and return its value and location.
 pub fn slice_find_fill_value(sl: &Islice) -> (f32, i32, i32, i32, i32) {
     let (xsize, ysize) = (sl.xsize, sl.ysize);

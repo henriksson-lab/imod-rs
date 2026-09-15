@@ -9,9 +9,9 @@ mod common;
 use imod_rs::imod::libiimod::iihdf::ii_hdf_open_new;
 use imod_rs::imod::libiimod::iimage::{
     IIFILE_DEFAULT, IIFILE_HDF, ii_allow_multi_volume, ii_close, ii_delete, ii_open, ii_open_new,
-    ii_read_section_float, ii_sync_from_mrc_header, ii_write_section_float,
+    ii_read_section_float, ii_sync_from_mrc_header, ii_write_header, ii_write_section_float,
 };
-use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write};
+use imod_rs::imod::libiimod::mrcfiles::{MRC_MODE_FLOAT, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
 
 /// Every PIP-driven invocation needs an autodoc directory, exactly as a real
@@ -28,19 +28,15 @@ fn write_input_mrc(tag: &str) -> std::path::PathBuf {
     let path_c = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(path_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 8, 6, 4, MRC_MODE_FLOAT), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 8, 6, 4, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         for z in 0..4 {
             let mut section: Vec<f32> = (0..48).map(|i| (z * 100 + i) as f32).collect();
-            assert_eq!(
-                ii_write_section_float(file, section.as_mut_ptr().cast(), z),
-                0
-            );
+            assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
         ii_close(file);
     }
@@ -54,10 +50,7 @@ fn read_section(path: &std::path::Path, section: i32, count: usize) -> Vec<f32> 
         let file = ii_open(path_c.to_bytes(), "rb");
         assert!(!file.is_null(), "opening {}", path.display());
         let mut pixels = vec![0.0_f32; count];
-        assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), section),
-            0
-        );
+        assert_eq!(ii_read_section_float(&mut *file, &mut pixels, section), 0);
         ii_close(file);
         pixels
     }
@@ -279,35 +272,36 @@ fn write_two_volume_hdf(tag: &str) -> std::path::PathBuf {
     unsafe {
         let image = ii_open_new(path_c.to_bytes(), "wb", IIFILE_HDF);
         assert!(!image.is_null());
-        let header = (*image).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 8, 6, 2, MRC_MODE_FLOAT), 0);
-        ii_sync_from_mrc_header(image, header);
-        (*image).z_chunk_size = 1;
-        assert_eq!((*image).write_header.unwrap()(image), 0);
+        let image = &mut *image;
+        let mut header = image.mrc_header.take().expect("new HDF image header");
+        assert_eq!(mrc_head_new(&mut header, 8, 6, 2, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        image.mrc_header = Some(header);
+        image.z_chunk_size = 1;
+        assert_eq!(ii_write_header(image), 0);
         for z in 0..2 {
             let mut section = vec![(10 + z) as f32; 48];
-            assert_eq!(
-                ii_write_section_float(image, section.as_mut_ptr().cast(), z),
-                0
-            );
+            assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
         assert_eq!(ii_hdf_open_new(image, "wb"), 0);
-        let second = *(*image).ii_volumes.add(1);
-        let second_header = (*second).header.cast::<MrcHeader>();
-        assert_eq!(
-            mrc_head_new(&mut *second_header, 8, 6, 2, MRC_MODE_FLOAT),
-            0
-        );
-        ii_sync_from_mrc_header(second, second_header);
-        (*second).z_chunk_size = 1;
-        assert_eq!((*second).write_header.unwrap()(second), 0);
+        let second = image
+            .owned_hdf_volumes
+            .first_mut()
+            .expect("second HDF volume")
+            .as_mut();
+        let mut second_header = second.mrc_header.take().expect("new HDF volume header");
+        assert_eq!(mrc_head_new(&mut second_header, 8, 6, 2, MRC_MODE_FLOAT), 0);
+        ii_sync_from_mrc_header(second, &mut second_header);
+        second.mrc_header = Some(second_header);
+        second.z_chunk_size = 1;
+        assert_eq!(ii_write_header(second), 0);
         for z in 0..2 {
             let mut section = vec![(20 + z) as f32; 48];
-            assert_eq!(
-                ii_write_section_float(second, section.as_mut_ptr().cast(), z),
-                0
-            );
+            assert_eq!(ii_write_section_float(second, &mut section, z), 0);
         }
+        // HDF's legacy multi-volume cursor teardown removes the child from
+        // its parent's owned collection before reclaiming it.
+        let second = second as *mut _;
         ii_delete(second);
         ii_delete(image);
     }

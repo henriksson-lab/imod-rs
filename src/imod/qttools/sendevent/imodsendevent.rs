@@ -97,10 +97,8 @@ impl ImodSendEvent {
             };
             if let Some(mut stdin) = child.stdin.take() {
                 if stdin.write_all(qstr.as_bytes()).is_err() {
-                    let _ = std::io::stderr().write_all(
-                        c_format("ERROR: imodsendevent - cannot write X clipboard\n", &[])
-                            .as_bytes(),
-                    );
+                    let _ = std::io::stderr()
+                        .write_all(b"ERROR: imodsendevent - cannot write X clipboard\n");
                     self.exit_code = Some(2);
                     let _ = child.kill();
                     let _ = child.wait();
@@ -181,9 +179,8 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
             Some(b't') => {
                 arg_index += 1;
                 let Some(value) = arguments.get(arg_index) else {
-                    let _ = std::io::stderr().write_all(
-                        c_format("ERROR: imodsendevent - invalid timeout entry \n", &[]).as_bytes(),
-                    );
+                    let _ = std::io::stderr()
+                        .write_all(b"ERROR: imodsendevent - invalid timeout entry \n");
                     return 3;
                 };
                 // `strtod`: skip leading whitespace, convert the longest prefix
@@ -343,9 +340,8 @@ pub fn imodsendevent(arguments: &[String]) -> i32 {
     };
     if let Some(mut stdin) = child.stdin.take() {
         if stdin.write_all(qstr.as_bytes()).is_err() {
-            let _ = std::io::stderr().write_all(
-                c_format("ERROR: imodsendevent - cannot write X clipboard\n", &[]).as_bytes(),
-            );
+            let _ =
+                std::io::stderr().write_all(b"ERROR: imodsendevent - cannot write X clipboard\n");
             let _ = child.kill();
             let _ = child.wait();
             return 2;

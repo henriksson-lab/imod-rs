@@ -42,20 +42,6 @@ pub fn thrdfft(array: &mut [f32], brray: &mut [f32], nx: i32, ny: i32, nz: i32, 
     }
 }
 
-/// C `thrdfftc` ABI boundary.
-///
-/// # Safety
-///
-/// `array` must point to `(nx + 2) * ny * nz` floats and `brray` to
-/// `2 * nz * ((nx + 2) / 2)` floats.  Neither region may overlap.
-pub unsafe fn thrdfft_c(array: *mut f32, brray: *mut f32, nx: i32, ny: i32, nz: i32, idir: i32) {
-    let array_len = ((nx + 2) * ny * nz) as usize;
-    let work_len = (2 * nz * ((nx + 2) / 2)) as usize;
-    let array = unsafe { core::slice::from_raw_parts_mut(array, array_len) };
-    let brray = unsafe { core::slice::from_raw_parts_mut(brray, work_len) };
-    thrdfft(array, brray, nx, ny, nz, idir);
-}
-
 #[cfg(test)]
 mod tests {
     use super::thrdfft;

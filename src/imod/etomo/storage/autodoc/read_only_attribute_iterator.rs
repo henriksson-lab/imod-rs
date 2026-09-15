@@ -1,41 +1,32 @@
 //! `IMOD/Etomo/src/etomo/storage/autodoc/ReadOnlyAttributeIterator.java`.
 
-/// Java's typed `Iterator<Attribute>` represented with a Rust generic, so the
-/// read-only Autodoc interfaces can use their eventual `Attribute` type
-/// without a second compatibility iterator.
-pub struct ReadOnlyAttributeIterator<'a, T> {
-    iterator: std::slice::Iter<'a, T>,
+use super::attribute::Attribute;
+
+/// Java's typed `Iterator<Attribute>`.  The source's list contains references;
+/// the Rust list owns `Box<Attribute>` values and this iterator exposes a borrowed
+/// stable address for compatibility with the remaining read-only interface.
+pub struct ReadOnlyAttributeIterator<'a> {
+    iterator: std::slice::Iter<'a, Box<Attribute>>,
+    current: *mut Attribute,
 }
 
-impl<'a, T> ReadOnlyAttributeIterator<'a, T> {
+impl<'a> ReadOnlyAttributeIterator<'a> {
     /// Java package-private `ReadOnlyAttributeIterator(List<Attribute>)`.
-    pub fn new(list: &'a [T]) -> Self {
+    pub fn new(list: &'a [Box<Attribute>]) -> Self {
         Self {
             iterator: list.iter(),
+            current: std::ptr::null_mut(),
         }
     }
     /// Java `next()`; `None` is Rust's non-panicking representation of Java's
     /// exhausted-iterator exception boundary.
-    pub fn next(&mut self) -> Option<&'a T> {
-        self.iterator.next()
+    pub fn next(&mut self) -> Option<&*mut Attribute> {
+        let attribute = self.iterator.next()?;
+        self.current = attribute.as_ref() as *const Attribute as *mut Attribute;
+        Some(&self.current)
     }
     /// Java `hasNext()`.
     pub fn has_next(&self) -> bool {
         !self.iterator.as_slice().is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ReadOnlyAttributeIterator;
-    #[test]
-    fn source_iterator_order_and_exhaustion_are_preserved() {
-        let values = ["first", "second"];
-        let mut iterator = ReadOnlyAttributeIterator::new(&values);
-        assert!(iterator.has_next());
-        assert_eq!(iterator.next(), Some(&"first"));
-        assert_eq!(iterator.next(), Some(&"second"));
-        assert!(!iterator.has_next());
-        assert_eq!(iterator.next(), None);
     }
 }

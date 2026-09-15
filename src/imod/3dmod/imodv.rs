@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::ffi::c_void;
+use std::ptr::NonNull;
 
 use crate::imod::libimod::imat::{Imat, imod_mat_new};
 use crate::imod::libimod::imodel::{Imod, Iobj, Ipoint, Iview};
@@ -29,10 +30,6 @@ pub const IMODV_STEREO_OFF: i32 = 0;
 pub use crate::imod::three_dmod::mv_window::ImodvWindow;
 /// Rust representation of the C++ `QPixmap` ownership boundary.
 pub type QPixmap = c_void;
-/// Rust representation of the C++ `QColor` ownership boundary.
-pub type QColor = c_void;
-/// Rust representation of the C++ `VertBufManager` ownership boundary.
-pub type VertBufManager = c_void;
 
 /// Original: `__imodv_struct` / `ImodvApp` (`imodv.h`).
 ///
@@ -42,7 +39,7 @@ pub struct ImodvApp {
     /// Borrowed cursors used by the viewer and rendering boundaries.  Models
     /// loaded by standalone `3dmodv` are kept alive by `owned_models`; models
     /// supplied by the regular image viewer remain borrowed from that viewer.
-    pub mod_: Vec<*mut Imod>,
+    pub mod_: Vec<NonNull<Imod>>,
     pub(crate) owned_models: Vec<Box<Imod>>,
     pub imod: *mut Imod,
     pub num_mods: i32,
@@ -55,7 +52,9 @@ pub struct ImodvApp {
     pub main_win: *mut ImodvWindow,
     pub icon_pixmap: *mut QPixmap,
     pub rbgname: String,
-    pub rbgcolor: *mut QColor,
+    /// Whether the model-view window has applied `rbgname`.  The old port used
+    /// a non-null fake `QColor` pointer only as this sentinel.
+    pub background_color_is_set: bool,
     pub enable_depth_sb: i32,
     pub enable_depth_db: i32,
     pub enable_depth_sbst: i32,
@@ -120,7 +119,10 @@ pub struct ImodvApp {
     pub vert_buf_ok: i32,
     pub prim_restart_ok: i32,
     pub gl_ext_flags: i32,
-    pub vb_manager: *mut VertBufManager,
+    /// Renderer-owned translated vertex-buffer manager.  It is kept as a
+    /// cursor while the native event loop owns its lifetime, but no longer
+    /// erased behind a C `void *`.
+    pub vb_manager: *mut crate::imod::three_dmod::vertexbuffer::VertBufManager,
     pub tex_map: i32,
     pub tex_trans: i32,
     /// The active image view is owned by the normal 3dmod viewer, except for
@@ -159,7 +161,7 @@ impl Default for ImodvApp {
             main_win: std::ptr::null_mut(),
             icon_pixmap: std::ptr::null_mut(),
             rbgname: String::new(),
-            rbgcolor: std::ptr::null_mut(),
+            background_color_is_set: false,
             enable_depth_sb: 0,
             enable_depth_db: 0,
             enable_depth_sbst: 0,
@@ -399,34 +401,36 @@ pub fn imodv_init(a: &mut ImodvApp) -> i32 {
 /// existing 3dmod image view, as opposed to standalone `3dmodv`.
 pub fn initstruct(vw: &mut ImodView, a: &mut ImodvApp) {
     imodv_init(a);
+    // `ImodView::imod` is supplied by the normal viewer.  Convert that one
+    // UI-owned cursor at the entry boundary; all model initialization below
+    // uses ordinary Rust borrows.
+    let Some(imod) = (unsafe { vw.imod.as_mut() }) else {
+        return;
+    };
     a.num_mods = 1;
-    a.mod_.push(vw.imod);
-    a.imod = vw.imod;
-    if let Some(imod) = unsafe { a.imod.as_mut() }
-        && imod.cindex.object >= 0
-        && (imod.cindex.object as usize) < imod.obj.len()
-    {
-        a.obj_num = imod.cindex.object;
-        a.obj = &mut imod.obj[a.obj_num as usize];
-    }
+    a.mod_.push(NonNull::from(&mut *imod));
+    a.imod = imod;
     a.fullscreen = 0;
     a.standalone = 0;
     a.tex_map = 0;
     a.tex_trans = 0;
     a.owned_vi = None;
     a.vi = vw;
-    let Some(imod) = (unsafe { a.imod.as_mut() }) else {
-        return;
-    };
     let image_max = Ipoint {
         x: vw.xsize as f32,
         y: vw.ysize as f32,
         z: vw.zsize as f32,
     };
     let bin_scale = vw.zbin as f32 / vw.xybin as f32;
-    let imod_ref = imod as *const Imod;
+    // Scaling reads the model while changing each view.  Keep that source
+    // snapshot owned instead of manufacturing an aliased raw borrow.
+    let scale_model = imod.clone();
     for view in &mut imod.view {
-        unsafe { imod_view_default_scale(&*imod_ref, view, &image_max, bin_scale) };
+        imod_view_default_scale(&scale_model, view, &image_max, bin_scale);
+    }
+    if imod.cindex.object >= 0 && (imod.cindex.object as usize) < imod.obj.len() {
+        a.obj_num = imod.cindex.object;
+        a.obj = &mut imod.obj[a.obj_num as usize];
     }
 }
 
@@ -449,12 +453,11 @@ pub fn load_models(n: i32, fname: &[Vec<u8>], a: &mut ImodvApp) -> i32 {
             .last_mut()
             .expect("model was just pushed")
             .as_mut();
-        a.mod_.push(model);
+        a.mod_.push(NonNull::from(&mut *model));
         let image_max = Ipoint::default();
-        let view_count = model.view.len();
-        let imod = model as *const Imod;
+        let scale_model = model.clone();
         for view in &mut model.view {
-            unsafe { imod_view_default_scale(&*imod, view, &image_max, 1.) };
+            imod_view_default_scale(&scale_model, view, &image_max, 1.);
         }
     }
     let model = a
@@ -630,8 +633,12 @@ pub fn imodv_open() {
         let Some(boundary) = slot.as_deref_mut() else {
             return;
         };
-        let vw = boundary.current_model_view();
-        if vw.is_null() || unsafe { (*vw).imod.is_null() } {
+        // The UI host exposes the current view as a raw Qt-side cursor.  It
+        // crosses the boundary once here, then `initstruct` works by borrow.
+        let Some(vw) = (unsafe { boundary.current_model_view().as_mut() }) else {
+            return;
+        };
+        if vw.imod.is_null() {
             return;
         }
         IMODV_STATE.with(|state| {
@@ -642,7 +649,7 @@ pub fn imodv_open() {
             }
             let once_opened = state.2;
             let old_trans_bkgd = state.0.trans_bkgd;
-            unsafe { initstruct(&mut *vw, &mut state.0) };
+            initstruct(vw, &mut state.0);
             if once_opened {
                 state.0.trans_bkgd = old_trans_bkgd;
             }
@@ -680,6 +687,8 @@ pub fn imodv_draw() {
         if state.1 != 0 || state.0.imod.is_null() {
             return;
         }
+        // The model cursor is retained for renderer ABI calls.  All native
+        // object selection is done through this scoped Rust borrow.
         let Some(imod) = (unsafe { state.0.imod.as_mut() }) else {
             return;
         };
@@ -700,7 +709,7 @@ pub fn imodv_draw() {
     });
 }
 /// Original: `imodv_new_model` (`imodv.cpp:715`).
-pub unsafe fn imodv_new_model(mod_: *mut Imod) {
+pub fn imodv_new_model(mod_: &mut Imod) {
     IMODV_STATE.with(|state| {
         let mut state = state.borrow_mut();
         if state.1 != 0 {
@@ -708,23 +717,26 @@ pub unsafe fn imodv_new_model(mod_: *mut Imod) {
         }
         state.0.imod = mod_;
         if !state.0.mod_.is_empty() {
-            state.0.mod_[0] = mod_;
+            state.0.mod_[0] = NonNull::from(&mut *mod_);
         }
-        if mod_.is_null() || state.0.vi.is_null() {
+        if state.0.vi.is_null() {
             return;
         }
-        let vi = &*state.0.vi;
+        // `vi` is the legacy view pointer retained by the native UI state.
+        // The ordinary viewer owns this image view; make a scoped reference
+        // at that UI boundary and retain only copied dimensions below.
+        let Some(vi) = (unsafe { state.0.vi.as_ref() }) else {
+            return;
+        };
         let image_max = Ipoint {
             x: vi.xsize as f32,
             y: vi.ysize as f32,
             z: vi.zsize as f32,
         };
         let bin_scale = vi.zbin as f32 / vi.xybin as f32;
-        let view_count = (*mod_).view.len();
-        for i in 0..view_count {
-            let imod = mod_ as *const Imod;
-            let view = &mut (&mut (*mod_).view)[i];
-            imod_view_default_scale(&*imod, view, &image_max, bin_scale);
+        let model = mod_.clone();
+        for view in &mut mod_.view {
+            imod_view_default_scale(&model, view, &image_max, bin_scale);
         }
     });
 }
@@ -831,7 +843,9 @@ pub fn imodv_byte_images_exist() -> i32 {
         if state.0.standalone != 0 || state.0.vi.is_null() {
             return 0;
         }
-        let vi = unsafe { &*state.0.vi };
+        let Some(vi) = (unsafe { state.0.vi.as_ref() }) else {
+            return 0;
+        };
         (vi.rgb_store == 0 && vi.fake_image == 0) as i32
     })
 }
@@ -850,7 +864,9 @@ pub fn imodv_register_model_chg() {
 pub fn imodv_register_object_chg(object: i32) {
     IMODV_STATE.with(|state| {
         let state = state.borrow();
-        if state.0.imod.is_null() || object >= unsafe { (*state.0.imod).obj.len() as i32 } {
+        let object_exists = unsafe { state.0.imod.as_ref() }
+            .is_some_and(|imod| object >= 0 && (object as usize) < imod.obj.len());
+        if !object_exists {
             return;
         }
         IMODV_NATIVE_BOUNDARY.with(|slot| {
@@ -913,7 +929,7 @@ pub fn imodv_quit() {
         });
         state.0.mat = None;
         state.0.rmat = None;
-        state.0.rbgcolor = std::ptr::null_mut();
+        state.0.background_color_is_set = false;
         state.0.main_win = std::ptr::null_mut();
         state.0.owned_vi = None;
     });
@@ -1167,13 +1183,13 @@ mod tests {
         });
 
         imodv_close();
-        unsafe { imodv_draw() };
+        imodv_draw();
         assert_eq!(calls.borrow().as_slice(), ["close", "draw_model_view"]);
 
         IMODV_STATE.with(|state| state.borrow_mut().1 = 1);
         calls.borrow_mut().clear();
         imodv_close();
-        unsafe { imodv_draw() };
+        imodv_draw();
         assert!(calls.borrow().is_empty());
         IMODV_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
     }
@@ -1237,7 +1253,7 @@ mod tests {
                 window_status: 0,
             }));
         });
-        assert_eq!(unsafe { imodv_main(arguments.len() as i32, &arguments) }, 0);
+        assert_eq!(imodv_main(arguments.len() as i32, &arguments), 0);
         assert_eq!(
             calls.borrow().as_slice(),
             [
@@ -1261,7 +1277,7 @@ mod tests {
             state.0.standalone = 0;
             state.0.bound_box_extra_obj = 1;
             state.0.cur_point_extra_obj = 2;
-            state.0.rbgcolor = 1 as *mut QColor;
+            state.0.background_color_is_set = true;
         });
         IMODV_NATIVE_BOUNDARY.with(|slot| {
             *slot.borrow_mut() = Some(Box::new(ImodvHost {
@@ -1323,7 +1339,7 @@ mod tests {
         view.xybin = 1;
         view.zbin = 1;
         let mut app = ImodvApp::default();
-        unsafe { initstruct(&mut view, &mut app) };
+        initstruct(&mut view, &mut app);
         assert_eq!(app.num_mods, 1);
         assert_eq!(app.obj_num, 0);
         assert!(std::ptr::eq(app.imod, &*model));
@@ -1358,7 +1374,7 @@ mod tests {
                 window_status: 0,
             }));
         });
-        assert_eq!(unsafe { imodv_main(arguments.len() as i32, &arguments) }, 3);
+        assert_eq!(imodv_main(arguments.len() as i32, &arguments), 3);
         assert!(
             crate::imod::three_dmod::imod::IMOD_DEBUG.load(std::sync::atomic::Ordering::Relaxed)
         );

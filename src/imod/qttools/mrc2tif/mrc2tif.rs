@@ -47,7 +47,8 @@ use std::io::Write;
 unsafe extern "C" {
     /// C++/Qt shim for the source QImage constructor, resolution/color-table setup, and save.
     /// It returns 0 when `QImage::save` succeeds and nonzero on failure.
-    fn mrc2tif_qimage_save(
+    #[link_name = "mrc2tif_qimage_save"]
+    fn mrc2tif_qimage_save_ffi(
         data: *mut u8,
         width: i32,
         height: i32,
@@ -63,16 +64,50 @@ unsafe extern "C" {
 /// No QImage implementation is linked in non-Qt builds.  The source program itself
 /// has a Qt build dependency; returning the failed `QImage::save` result here keeps
 /// non-Qt binaries linkable without substituting a different JPEG/PNG encoder.
-#[cfg(not(feature = "qt"))]
-unsafe fn mrc2tif_qimage_save(
-    data: *mut u8,
+#[cfg(feature = "qt")]
+fn mrc2tif_qimage_save(
+    data: &mut [u8],
     width: i32,
     height: i32,
     bytes_per_line: i32,
     rgb: i32,
     resolution: i32,
-    filename: *const core::ffi::c_char,
-    format: *const core::ffi::c_char,
+    filename: &str,
+    format: &str,
+    quality: i32,
+) -> i32 {
+    let mut filename = filename.as_bytes().to_vec();
+    filename.push(0);
+    let mut format = format.as_bytes().to_vec();
+    format.push(0);
+    unsafe {
+        mrc2tif_qimage_save_ffi(
+            data.as_mut_ptr(),
+            width,
+            height,
+            bytes_per_line,
+            rgb,
+            resolution,
+            filename.as_ptr().cast(),
+            format.as_ptr().cast(),
+            quality,
+        )
+    }
+}
+
+/// No QImage implementation is linked in non-Qt builds.  The source program itself
+/// has a Qt build dependency; returning the failed `QImage::save` result here keeps
+/// non-Qt binaries linkable without substituting a different JPEG/PNG encoder.
+#[cfg(not(feature = "qt"))]
+fn mrc2tif_qimage_save(
+    data: &mut [u8],
+    width: i32,
+    height: i32,
+    bytes_per_line: i32,
+    rgb: i32,
+    resolution: i32,
+    filename: &str,
+    format: &str,
     quality: i32,
 ) -> i32 {
     let _ = (
@@ -548,8 +583,7 @@ pub fn mrc2tif() {
         let output_count = zmax - zmin + 1;
         let xysize = hdata.nx as f64 * hdata.ny as f64;
         if !make_qimage {
-            let mut minor = 0;
-            let version = tiff_version(&mut minor);
+            let (version, minor) = tiff_version();
             if version < 4 {
                 let save_criterion = if version == 0 || oldcode {
                     2.146e9
@@ -625,8 +659,16 @@ pub fn mrc2tif() {
             (*iifile).nz = output_count;
         }
         if stack && !native_tiff_writer {
-            old_fp = open_either_way(iifile, output_root.as_bytes(), progname, oldcode as i32);
-            if old_fp.is_none() && (*iifile).header.is_null() {
+            old_fp = open_either_way(
+                &mut *iifile,
+                output_root.as_bytes(),
+                progname,
+                oldcode as i32,
+            );
+            if old_fp.is_none()
+                && (*iifile).mrc_header.is_none()
+                && (*iifile).backend_handle.is_null()
+            {
                 let _ = ImodFile::Stdout.flush();
                 std::process::exit(1);
             }
@@ -671,9 +713,16 @@ pub fn mrc2tif() {
                     if z > zmin {
                         (*iifile).filename = None;
                     }
-                    old_fp =
-                        open_either_way(iifile, name_text.as_bytes(), progname, oldcode as i32);
-                    if old_fp.is_none() && (*iifile).header.is_null() {
+                    old_fp = open_either_way(
+                        &mut *iifile,
+                        name_text.as_bytes(),
+                        progname,
+                        oldcode as i32,
+                    );
+                    if old_fp.is_none()
+                        && (*iifile).mrc_header.is_none()
+                        && (*iifile).backend_handle.is_null()
+                    {
                         // `mrc2tif.cpp:662`.
                         exit_error(&c_format_bytes(
                             "Opening %s",
@@ -758,7 +807,7 @@ pub fn mrc2tif() {
                     li.ymax = li.ymin + nlines - 1;
                     lines_done += nlines;
                 }
-                if mrc_read_z(&mut hdata, &mut li, buffer.as_mut_ptr(), z) != 0 {
+                if mrc_read_z(&mut hdata, &mut li, &mut buffer, z) != 0 {
                     // `mrc2tif.cpp:508-509`: `perror("mrc2tif ")` then
                     // `exitError`.  `exitError` exits, so the source frees
                     // nothing here.
@@ -854,7 +903,6 @@ pub fn mrc2tif() {
                         }
                     }
                 }
-                let write_buffer = slice.data.as_mut_ptr();
                 if !make_qimage {
                     slice_mmm(slice.as_mut());
                     slice_min = slice_min.min(slice.min);
@@ -867,12 +915,12 @@ pub fn mrc2tif() {
                     }
                 }
                 let mut rust_encoder_error = None;
+                let write_buffer = slice.data.as_mut_slice();
                 let write_error = if make_qimage {
                     let out_pixel_size = if psize == 3 { 3 } else { 1 };
                     let mut qbuf = vec![0u8; line_bytes * hdata.ny as usize];
                     let row_bytes = hdata.nx as usize * out_pixel_size;
-                    let source =
-                        core::slice::from_raw_parts(write_buffer, row_bytes * hdata.ny as usize);
+                    let source = &write_buffer[..row_bytes * hdata.ny as usize];
                     // `mrc2tif.cpp:570-583`: spread the rows to the aligned
                     // stride and invert the image, in one pass.
                     for row in 0..hdata.ny as usize {
@@ -881,23 +929,17 @@ pub fn mrc2tif() {
                             .copy_from_slice(&source[from..from + row_bytes]);
                     }
                     match encoder {
-                        Mrc2TifEncoder::Parity => {
-                            let mut filename = name_text.as_bytes().to_vec();
-                            filename.push(0);
-                            let mut format = type_name.as_bytes().to_vec();
-                            format.push(0);
-                            mrc2tif_qimage_save(
-                                qbuf.as_mut_ptr(),
-                                hdata.nx,
-                                hdata.ny,
-                                line_bytes as i32,
-                                if psize == 3 { 1 } else { 0 },
-                                use_resol,
-                                filename.as_ptr().cast(),
-                                format.as_ptr().cast(),
-                                quality,
-                            )
-                        }
+                        Mrc2TifEncoder::Parity => mrc2tif_qimage_save(
+                            &mut qbuf,
+                            hdata.nx,
+                            hdata.ny,
+                            line_bytes as i32,
+                            if psize == 3 { 1 } else { 0 },
+                            use_resol,
+                            &name_text,
+                            type_name,
+                            quality,
+                        ),
                         Mrc2TifEncoder::Rust => match super::rust_encoder::save(
                             &qbuf,
                             hdata.nx,
@@ -918,7 +960,7 @@ pub fn mrc2tif() {
                     }
                 } else if native_tiff_writer {
                     let rust_bytes = hdata.nx as usize * nlines as usize * rust_output_pixel_size;
-                    let image = core::slice::from_raw_parts(write_buffer, rust_bytes);
+                    let image = &write_buffer[..rust_bytes];
                     if stack {
                         rust_tiff_stack.push(image.to_vec());
                         rust_tiff_resolutions.push(use_resol);
@@ -947,21 +989,18 @@ pub fn mrc2tif() {
                         hdata.nx,
                         hdata.ny,
                         hdata.mode,
-                        core::slice::from_raw_parts(
-                            write_buffer,
-                            hdata.nx as usize * hdata.ny as usize * out_psize,
-                        ),
+                        write_buffer,
                         &mut ifd_offset,
                         &mut data_offset,
                         dmin,
                         dmax,
                     )
                 } else if do_chunks {
-                    tiff_write_strip(iifile, chunk, write_buffer.cast())
+                    tiff_write_strip(iifile, chunk, write_buffer.as_mut_ptr().cast())
                 } else if do_parallel != 0 {
                     tiff_parallel_write(
                         iifile,
-                        write_buffer.cast(),
+                        write_buffer.as_mut_ptr().cast(),
                         compression,
                         0,
                         use_resol,
@@ -970,8 +1009,8 @@ pub fn mrc2tif() {
                     )
                 } else {
                     tiff_write_section(
-                        iifile,
-                        write_buffer.cast(),
+                        &mut *iifile,
+                        write_buffer,
                         compression,
                         0,
                         use_resol,
@@ -1055,8 +1094,8 @@ pub fn mrc2tif() {
 }
 
 /// Original: `openEitherWay` (`mrc2tif.cpp:651`).
-unsafe fn open_either_way(
-    iifile: *mut ImodImageFile,
+fn open_either_way(
+    iifile: &mut ImodImageFile,
     iname: &[u8],
     progname: &[u8],
     oldcode: i32,
@@ -1064,38 +1103,33 @@ unsafe fn open_either_way(
     thread_local! {
         static WARNED: Cell<bool> = const { Cell::new(false) };
     }
-    unsafe {
-        if iifile.is_null() {
-            return None;
+    iifile.filename = Some(String::from_utf8_lossy(iname).into_owned());
+    if oldcode != 0 || unsafe { tiff_open_new(iifile) } != 0 {
+        let fp = ImodFile::open(&String::from_utf8_lossy(iname), "wb");
+        if fp.is_none() {
+            // `perror("mrc2tif system message")`; see the note at the
+            // other `perror` site about the ` (os error N)` suffix.
+            let message = std::io::Error::last_os_error().to_string();
+            let message = message
+                .split(" (os error ")
+                .next()
+                .unwrap_or(message.as_str());
+            let _ = ImodFile::Stderr.write_all(&c_format_bytes(
+                "mrc2tif system message: %s\n",
+                &[CArg::Str(message)],
+            ));
+            // `mrc2tif.cpp:661-662`.
+            exit_error(&c_format_bytes("Opening %s", &[CArg::Bytes(iname)]));
         }
-        (*iifile).filename = Some(String::from_utf8_lossy(iname).into_owned());
-        if oldcode != 0 || tiff_open_new(iifile) != 0 {
-            let fp = ImodFile::open(&String::from_utf8_lossy(iname), "wb");
-            if fp.is_none() {
-                // `perror("mrc2tif system message")`; see the note at the
-                // other `perror` site about the ` (os error N)` suffix.
-                let message = std::io::Error::last_os_error().to_string();
-                let message = message
-                    .split(" (os error ")
-                    .next()
-                    .unwrap_or(message.as_str());
-                let _ = ImodFile::Stderr.write_all(&c_format_bytes(
-                    "mrc2tif system message: %s\n",
-                    &[CArg::Str(message)],
-                ));
-                // `mrc2tif.cpp:661-662`.
-                exit_error(&c_format_bytes("Opening %s", &[CArg::Bytes(iname)]));
-            }
-            if oldcode == 0 && !WARNED.with(Cell::get) {
-                WARNED.with(|warned| warned.set(true));
-                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-                    "\nWARNING: %s - Not writing with libtiff, compression not available",
-                    &[CArg::Bytes(progname)],
-                ));
-            }
-            fp
-        } else {
-            None
+        if oldcode == 0 && !WARNED.with(Cell::get) {
+            WARNED.with(|warned| warned.set(true));
+            let _ = ImodFile::Stdout.write_all(&c_format_bytes(
+                "\nWARNING: %s - Not writing with libtiff, compression not available",
+                &[CArg::Bytes(progname)],
+            ));
         }
+        fp
+    } else {
+        None
     }
 }

@@ -1,13 +1,9 @@
 //! Translation of `IMOD/libcfshr/lsqr.c` and its local `lsqr.h` interface.
 
-use core::ffi::c_void;
 use std::io::Write;
 
 use super::b3dutil::ImodFile;
 use super::lsqrblas::{cblas_dcopy, cblas_dnrm2, cblas_dscal};
-
-/// Matrix product callback from `lsqr.h`.
-pub type Aprod = unsafe extern "C" fn(i32, i32, i32, *mut f64, *mut f64, *mut c_void);
 
 /// Original `d2norm` (`lsqr.c:40`).
 fn d2norm(a: f64, b: f64) -> f64 {

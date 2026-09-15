@@ -614,10 +614,8 @@ pub fn imodv_draw_models(state: &mut MvOglState, app: &mut ImodvApp, gl: &mut dy
     for m in first..last {
         state.mod_being_drawn = m as i32;
         gl.load_name(m as u32);
-        let model = app.mod_[m];
-        if !model.is_null() {
-            unsafe { imodv_draw_model(state, app, model, gl) };
-        }
+        let model = app.mod_[m].as_ptr();
+        unsafe { imodv_draw_model(state, app, model, gl) };
     }
     if app.read_pix_for_pick == 0 {
         gl.draw_image(app, true);
@@ -1178,13 +1176,13 @@ pub unsafe fn imodv_draw_spheres(
         let world = app
             .mod_
             .get(state.mod_being_drawn.max(0) as usize)
-            .and_then(|m| m.as_ref())
+            .map(|m| m.as_ref())
             .and_then(|m| m.view.first())
             .map_or(0u32, |v| v.world);
         let rad = app
             .mod_
             .get(state.mod_being_drawn.max(0) as usize)
-            .and_then(|m| m.as_ref())
+            .map(|m| m.as_ref())
             .and_then(|m| m.view.first())
             .map_or(1.0f32, |v| v.rad);
         let mut quality = (((world & WORLD_QUALITY_BITS) >> WORLD_QUALITY_SHIFT) + 1) as i32;
@@ -3504,7 +3502,7 @@ pub fn find_clicked_drawn_element(
         if mo_ind < 0 || mo_ind as usize >= app.mod_.len() {
             continue;
         }
-        let imod = app.mod_[mo_ind as usize];
+        let imod = app.mod_[mo_ind as usize].as_ptr();
         let Some(imod) = (unsafe { imod.as_mut() }) else {
             continue;
         };
@@ -4620,8 +4618,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        app.mod_.push(&mut model);
-        app.imod = app.mod_[0];
+        app.mod_.push(std::ptr::NonNull::from(&mut model));
+        app.imod = app.mod_[0].as_ptr();
         let mut state = MvOglState::default();
         let (mut mo, mut ob, mut co, mut pt) = (-1, -1, -1, -1);
         let found = find_clicked_drawn_element(

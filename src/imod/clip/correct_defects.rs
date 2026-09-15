@@ -1,15 +1,15 @@
 //! Translation of `IMOD/clip/CorrectDefects.cpp` and its paired
 //! `IMOD/include/CorrectDefects.h`.
 //!
-//! Two boundaries are still C-shaped and are marked where they occur:
-//! `libcfshr/mxmlwrap.rs`, which returns `strdup`'d C strings, and
-//! `libiimod/iitif.rs`'s `tiffGetArray`, which returns the TIFF tag payload as
-//! a malloc'd pointer.  Both go away when those modules convert.
+//! TIFF tag payloads are copied into owned byte vectors immediately at the
+//! libtiff boundary. The section-correction pixel kernel remains localized in
+//! this unit while shared readers still use callback cursors.
 #![allow(dead_code)]
 
 use crate::imod::clip::clip::{ScanArg, fscanf};
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
+use crate::imod::libcfshr::b3dutil::ImodFile;
 use std::cell::Cell;
+use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 
 /// The three independent pseudo-random streams used while correcting integer
@@ -56,7 +56,9 @@ pub struct CameraDefects {
     pub partial_bad_end_x: Vec<u16>,
     pub bad_pixel_x: Vec<u16>,
     pub bad_pixel_y: Vec<u16>,
-    pub pix_use_mean: Vec<i8>,
+    /// Whether each bad pixel is corrected from the sampled mean rather than
+    /// neighbouring pixels.
+    pub pix_use_mean: Vec<bool>,
 }
 
 pub enum PixelData<'a> {
@@ -1331,7 +1333,7 @@ pub fn correct_pixels_3_ways(
         return;
     }
     for i in 0..defects.bad_pixel_x.len() {
-        if (i < defects.pix_use_mean.len() && defects.pix_use_mean[i] == use_mean as i8)
+        if (i < defects.pix_use_mean.len() && defects.pix_use_mean[i] == (use_mean != 0))
             || (i >= defects.pix_use_mean.len() && use_mean == 0)
         {
             let x = defects.bad_pixel_x[i] as i32 / binning - left;
@@ -1778,9 +1780,11 @@ pub fn cor_def_find_touching_pixels(
                 && point_map.contains(&key.wrapping_add(x_difference as u32)))
         {
             if defects.pix_use_mean.is_empty() {
-                defects.pix_use_mean.resize(defects.bad_pixel_x.len(), 0);
+                defects
+                    .pix_use_mean
+                    .resize(defects.bad_pixel_x.len(), false);
             }
-            defects.pix_use_mean[index] = 1;
+            defects.pix_use_mean[index] = true;
         }
     }
 }
@@ -2177,64 +2181,37 @@ pub fn cor_def_defects_to_string(
     camera_size_x: i32,
     camera_size_y: i32,
 ) {
-    output.push_str(&c_format(
-        "CameraSizeX %d\n",
-        &[CArg::Int(camera_size_x as i64)],
-    ));
-    output.push_str(&c_format(
-        "CameraSizeY %d\n",
-        &[CArg::Int(camera_size_y as i64)],
-    ));
-    output.push_str(&c_format(
-        "RotationAndFlip %d\n",
-        &[CArg::Int(defects.rotation_flip as i64)],
-    ));
-    output.push_str(&c_format(
-        "WasScaled %d\n",
-        &[CArg::Int(defects.was_scaled as i64)],
-    ));
-    output.push_str(&c_format(
-        "K2Type %d\n",
-        &[CArg::Int(defects.k2_type as i64)],
-    ));
-    output.push_str(&c_format(
-        "FalconType %d\n",
-        &[CArg::Int(defects.falcon_type as i64)],
-    ));
-    output.push_str(&c_format(
-        "NumToAvgSuperRes %d\n",
-        &[CArg::Int(defects.num_avg_super_res as i64)],
-    ));
-    output.push_str(&c_format(
-        "UsableArea %d %d %d %d\n",
-        &[
-            CArg::Int(defects.usable_top as i64),
-            CArg::Int(defects.usable_left as i64),
-            CArg::Int(defects.usable_bottom as i64),
-            CArg::Int(defects.usable_right as i64),
-        ],
-    ));
+    let _ = writeln!(output, "CameraSizeX {camera_size_x}");
+    let _ = writeln!(output, "CameraSizeY {camera_size_y}");
+    let _ = writeln!(output, "RotationAndFlip {}", defects.rotation_flip);
+    let _ = writeln!(output, "WasScaled {}", defects.was_scaled);
+    let _ = writeln!(output, "K2Type {}", defects.k2_type);
+    let _ = writeln!(output, "FalconType {}", defects.falcon_type);
+    let _ = writeln!(output, "NumToAvgSuperRes {}", defects.num_avg_super_res);
+    let _ = writeln!(
+        output,
+        "UsableArea {} {} {} {}",
+        defects.usable_top, defects.usable_left, defects.usable_bottom, defects.usable_right,
+    );
     for index in 0..defects.partial_bad_col.len() {
-        output.push_str(&c_format(
-            "PartialBadColumn %d %d %d %d\n",
-            &[
-                CArg::Int(defects.partial_bad_col[index] as i64),
-                CArg::Int(defects.partial_bad_width[index] as i64),
-                CArg::Int(defects.partial_bad_start_y[index] as i64),
-                CArg::Int(defects.partial_bad_end_y[index] as i64),
-            ],
-        ));
+        let _ = writeln!(
+            output,
+            "PartialBadColumn {} {} {} {}",
+            defects.partial_bad_col[index],
+            defects.partial_bad_width[index],
+            defects.partial_bad_start_y[index],
+            defects.partial_bad_end_y[index],
+        );
     }
     for index in 0..defects.partial_bad_row.len() {
-        output.push_str(&c_format(
-            "PartialBadRow %d %d %d %d\n",
-            &[
-                CArg::Int(defects.partial_bad_row[index] as i64),
-                CArg::Int(defects.partial_bad_height[index] as i64),
-                CArg::Int(defects.partial_bad_start_x[index] as i64),
-                CArg::Int(defects.partial_bad_end_x[index] as i64),
-            ],
-        ));
+        let _ = writeln!(
+            output,
+            "PartialBadRow {} {} {} {}",
+            defects.partial_bad_row[index],
+            defects.partial_bad_height[index],
+            defects.partial_bad_start_x[index],
+            defects.partial_bad_end_x[index],
+        );
     }
     let mut count = 0;
     let mut buffer = String::new();
@@ -2242,13 +2219,11 @@ pub fn cor_def_defects_to_string(
         if count == 0 {
             buffer = "BadPixels".to_owned();
         }
-        buffer.push_str(&c_format(
-            " %d %d",
-            &[
-                CArg::Int(defects.bad_pixel_x[index] as i64),
-                CArg::Int(defects.bad_pixel_y[index] as i64),
-            ],
-        ));
+        let _ = write!(
+            buffer,
+            " {} {}",
+            defects.bad_pixel_x[index], defects.bad_pixel_y[index],
+        );
         count += 1;
         if count == 10 || index == defects.bad_pixel_x.len() - 1 {
             buffer.push('\n');
@@ -2278,10 +2253,7 @@ pub fn bad_rows_or_cols_to_string(starts: &[u16], widths: &[i16], output: &mut S
             if count == 0 {
                 buffer = name.to_owned();
             }
-            buffer.push_str(&c_format(
-                " %d",
-                &[CArg::Int((starts[index] as i32 + column as i32) as i64)],
-            ));
+            let _ = write!(buffer, " {}", starts[index] as i32 + column as i32);
             count += 1;
             if count == 20 {
                 buffer.push('\n');
@@ -2564,16 +2536,14 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
     pad %= 10;
     clear_defect_list(defects);
     let mut root: Option<Vec<u8>> = None;
-    let xml_ind = unsafe { crate::imod::libcfshr::mxmlwrap::ixml_load_string(text, 0, &mut root) };
+    let xml_ind = crate::imod::libcfshr::mxmlwrap::ixml_load_string(text, 0, &mut root);
     if xml_ind < 0 {
         return xml_ind;
     }
     /* strcmp(root, "defects") */
     let root_is_defects = root.as_deref() == Some(&b"defects"[..]);
     if !root_is_defects {
-        unsafe {
-            crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-        }
+        crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
         return -4;
     }
     let tags: [&[u8]; 6] = [
@@ -2595,29 +2565,20 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
             &mut number,
         );
         if err != 0 {
-            unsafe {
-                crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-            }
+            crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
             return -err;
         }
         for elem_ind in 0..number {
             let mut value: Vec<u8> = Vec::new();
-            let mut err = unsafe {
-                crate::imod::libcfshr::mxmlwrap::ixml_get_string_value(
-                    xml_ind,
-                    start_ind + elem_ind,
-                    &mut value,
-                )
-            };
+            let err = crate::imod::libcfshr::mxmlwrap::ixml_get_string_value(
+                xml_ind,
+                start_ind + elem_ind,
+                &mut value,
+            );
             // C: `err || !value`, where `value` is `strdup`'s result, so the
             // second arm is the allocation failure that a `Vec` cannot have.
             if err != 0 {
-                if err == 0 {
-                    err = -5;
-                }
-                unsafe {
-                    crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-                }
+                crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 return -err;
             }
             /* strchr(value, '/') */
@@ -2626,23 +2587,17 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
                 continue;
             }
             let Ok(text) = std::str::from_utf8(&value) else {
-                unsafe {
-                    crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-                }
+                crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 return 9;
             };
             let Ok(values) = crate::imod::libcfshr::parselist::parselist(text) else {
-                unsafe {
-                    crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-                }
+                crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 return 9;
             };
             if ((tag_ind == 2 || tag_ind == 3) && values.len() != 4)
                 || ((tag_ind == 4 || tag_ind == 5) && values.len() != 2)
             {
-                unsafe {
-                    crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-                }
+                crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
                 return 10;
             }
             let adjusted = 0.max(values[0] - column_pad);
@@ -2684,9 +2639,7 @@ pub fn cor_def_parse_fei_xml(text: &[u8], defects: &mut CameraDefects, mut pad: 
             }
         }
     }
-    unsafe {
-        crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
-    }
+    crate::imod::libcfshr::mxmlwrap::ixml_clear(xml_ind);
     defects.falcon_type = 1;
     defects.num_avg_super_res = pad.clamp(0, 4);
     0
@@ -2704,30 +2657,16 @@ pub fn cor_def_process_fei_defects(
     mess_buf: &mut String,
     buf_len: i32,
 ) -> i32 {
-    let mut count = 0_u32;
-    // `iitif.rs` still returns the tag payload as a malloc'd C pointer.
-    let mut text: *mut core::ffi::c_char = core::ptr::null_mut();
-    if unsafe {
-        crate::imod::libiimod::iitif::tiff_get_array(
-            ii_file,
-            65_100,
-            &mut count,
-            (&mut text as *mut *mut core::ffi::c_char).cast(),
-        )
-    } <= 0
-        || count == 0
-        || text.is_null()
-    {
+    let Ok(bytes) = crate::imod::libiimod::iitif::tiff_get_array(ii_file, 65_100) else {
+        return -1;
+    };
+    if bytes.is_empty() {
         return -1;
     }
-    let bytes = unsafe { core::slice::from_raw_parts(text.cast::<u8>(), count as usize) };
-    let parsed = cor_def_parse_fei_xml(bytes, defects, fei_def_pad);
+    let parsed = cor_def_parse_fei_xml(&bytes, defects, fei_def_pad);
     if parsed != 0 {
         /* snprintf(messBuf, bufLen, ...) truncates at bufLen - 1 bytes. */
-        *mess_buf = c_format(
-            "Parsing defect string from TIFF file (error %d)",
-            &[CArg::Int(parsed as i64)],
-        );
+        *mess_buf = format!("Parsing defect string from TIFF file (error {parsed})");
         /* snprintf writes at most bufLen - 1 bytes plus the NUL. */
         let limit = (buf_len.max(1) as usize) - 1;
         let mut cut = limit.min(mess_buf.len());
@@ -2743,10 +2682,7 @@ pub fn cor_def_process_fei_defects(
         crate::imod::libcfshr::b3dutil::imod_backup_file(dump_defect_name);
         let file = ImodFile::open(dump_defect_name, "w");
         let Some(mut file) = file else {
-            *mess_buf = c_format(
-                "Opening file to write defects to, %s",
-                &[CArg::Str(dump_defect_name)],
-            );
+            *mess_buf = format!("Opening file to write defects to, {dump_defect_name}");
             let limit = (buf_len.max(1) as usize) - 1;
             let mut cut = limit.min(mess_buf.len());
             while cut > 0 && !mess_buf.is_char_boundary(cut) {
@@ -3199,6 +3135,17 @@ pub fn cor_def_find_drift_corr_edges(
     if values.len() != pixel_count {
         return 1;
     }
+    // The C implementation accepts every positive `maxWidth`, then reads the
+    // adjacent row/column for each width without checking that it exists. The
+    // command's own default is 30, so ordinary images shorter than 31 pixels
+    // reach that out-of-bounds access. Keep the accepted command surface, but
+    // analyze only widths that have a neighboring row and column.
+    let max_width = max_width
+        .min(nx.saturating_sub(1))
+        .min(ny.saturating_sub(1));
+    if max_width <= 0 {
+        return 1;
+    }
     let x_start = (nx / 2 - analyze_len / 2).max(0);
     let y_start = (ny / 2 - analyze_len / 2).max(0);
     let x_end = (x_start + analyze_len).min(nx);
@@ -3447,14 +3394,14 @@ pub fn cor_def_setup_to_correct(
         }
         if *use_binning > 1 && bin_option.is_some() {
             let bin_text = if scaled_for_k2 {
-                c_format("%.1f", &[CArg::Dbl(*use_binning as f64 / 2.)])
+                format!("{:.1}", *use_binning as f64 / 2.)
             } else {
-                c_format("%d", &[CArg::Int(*use_binning as i64)])
+                use_binning.to_string()
             };
             let _ = ImodFile::Stdout.write_all(
-                c_format(
-                    "Assuming binning of %s for defect correction instead of a small subarea;\n    use the %s option to set a binning if this is incorrect.\n",
-                    &[CArg::Str(&bin_text), CArg::Str(bin_option.unwrap())],
+                format!(
+                    "Assuming binning of {bin_text} for defect correction instead of a small subarea;\n    use the {} option to set a binning if this is incorrect.\n",
+                    bin_option.unwrap(),
                 )
                 .as_bytes(),
             );
@@ -3630,6 +3577,28 @@ mod tests {
         correct_jumbo_pixel, correct_pixel, correct_super_pixel,
     };
     use crate::imod::clip::clip::CameraDefects;
+
+    #[test]
+    fn defect_list_text_keeps_c_integer_layout() {
+        let mut defects = CameraDefects::default();
+        defects.rotation_flip = 3;
+        defects.partial_bad_col = vec![2];
+        defects.partial_bad_width = vec![4];
+        defects.partial_bad_start_y = vec![6];
+        defects.partial_bad_end_y = vec![8];
+        defects.bad_pixel_x = vec![10];
+        defects.bad_pixel_y = vec![11];
+        defects.bad_column_start = vec![12];
+        defects.bad_column_width = vec![2];
+        let mut text = String::new();
+
+        cor_def_defects_to_string(&defects, &mut text, 1024, 2048);
+
+        assert_eq!(
+            text,
+            "CameraSizeX 1024\nCameraSizeY 2048\nRotationAndFlip 3\nWasScaled 0\nK2Type 0\nFalconType 0\nNumToAvgSuperRes 0\nUsableArea 0 0 0 0\nPartialBadColumn 2 4 6 8\nBadPixels 10 11\nBadColumns 12 13\n"
+        );
+    }
 
     #[test]
     fn correct_edge_copies_good_float_row_without_taper() {

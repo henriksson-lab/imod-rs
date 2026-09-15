@@ -1,8 +1,8 @@
 //! `IMOD/Etomo/src/etomo/storage/autodoc/Attribute.java`.
 //!
-//! **Ownership.**  An `Attribute` is aliased by its `AttributeList`'s map and list, by
-//! every `NameValuePair` whose name contains it, and by its children's `parent`.  As in
-//! `statement.rs`, the allocation is a leaked `Box` and the aliases are raw pointers.
+//! **Ownership.**  An `AttributeList` owns attributes in `Box` values.  Its map and
+//! name/value pairs borrow their stable addresses, while a nested attribute list is
+//! owned directly by its parent `Attribute`.
 #![allow(dead_code)]
 
 use crate::imod::etomo::storage::log_file;
@@ -36,23 +36,19 @@ pub struct Attribute {
     /// nameValuePairList will be instantiated if the attribute is the last attribute
     /// in the name of at least one name/value pair.  The value of the attribute is
     /// retrieved through the name/value pair.
-    name_value_pair_list: Option<Vec<*mut NameValuePair>>,
+    /// Borrowed links to statements owned by the surrounding statement list.
+    name_value_pair_list: Option<Vec<std::ptr::NonNull<NameValuePair>>>,
     /// Java field `children`, initialised to null.
     ///
     /// children will be instantiated if the attribute is the not the last attribute
     /// in the name of at least one name/value pair.
-    children: *mut AttributeList,
+    children: Option<Box<AttributeList>>,
 }
 
 /// Java static `getKey(Token name)`.
 ///
-/// # Safety
-/// `name` must be null or point to a live `Token` link list.
-pub unsafe fn get_key_of_token(name: *mut Token) -> Option<String> {
-    if name.is_null() {
-        return None;
-    }
-    Some(unsafe { (*name).get_key() })
+pub fn get_key_of_token(name: Option<&Token>) -> Option<String> {
+    name.map(|name| unsafe { name.get_key() })
 }
 
 /// Java static `getKey(String name)`.
@@ -62,8 +58,9 @@ pub fn get_key_of_string(name: Option<&str>) -> Option<String> {
 }
 
 impl Attribute {
-    /// Java package-private `Attribute(WriteOnlyAttributeList, Token, int)`.  The
-    /// allocation is leaked; see the module header.
+    /// Java package-private `Attribute(WriteOnlyAttributeList, Token, int)`.
+    /// Construction still returns a pointer for the translated parser interface; the
+    /// receiving `AttributeList` immediately transfers it into its owned `Box` list.
     ///
     /// # Safety
     /// `parent` must point to a live attribute-list owner and `name` to a live `Token`
@@ -81,7 +78,7 @@ impl Attribute {
             line_num,
             occurrences: 1,
             name_value_pair_list: None,
-            children: std::ptr::null_mut(),
+            children: None,
         }))
     }
 
@@ -129,12 +126,18 @@ impl Attribute {
         value: Option<&str>,
         name_value_pair: *mut NameValuePair,
     ) {
-        if self.children.is_null() {
+        if self.children.is_none() {
             let this: *mut Attribute = self;
-            self.children = Box::into_raw(Box::new(AttributeList::new(this)));
+            self.children = Some(Box::new(AttributeList::new(this)));
         }
         unsafe {
-            (*self.children).add_attribute_multi(index, name, line_num, value, name_value_pair)
+            self.children.as_deref_mut().unwrap().add_attribute_multi(
+                index,
+                name,
+                line_num,
+                value,
+                name_value_pair,
+            )
         };
     }
 
@@ -151,7 +154,7 @@ impl Attribute {
         self.name_value_pair_list
             .as_mut()
             .unwrap()
-            .push(name_value_pair);
+            .push(std::ptr::NonNull::new(name_value_pair).expect("name/value pair is required"));
     }
 
     /// Java package-private `getFirstAttribute()`.
@@ -162,10 +165,11 @@ impl Attribute {
     /// # Safety
     /// The children must be live.
     pub unsafe fn get_first_attribute(&self) -> *mut Attribute {
-        if self.children.is_null() {
-            return std::ptr::null_mut();
-        }
-        unsafe { (*self.children).get_first_attribute() }
+        self.children
+            .as_deref()
+            .map_or(std::ptr::null_mut(), |children| unsafe {
+                children.get_first_attribute()
+            })
     }
 
     /// Java package-private `write(LogFile.Handle, LogFile.WriterId)`.
@@ -201,15 +205,13 @@ impl Attribute {
                             if i > 0 {
                                 autodoc::print_indent(level);
                             }
-                            let name_value_pair = name_value_pair_list[i];
-                            if !name_value_pair.is_null() {
-                                print!(" = ");
-                                let value = unsafe { (*name_value_pair).get_token_value() };
-                                if value.is_null() {
-                                    println!("null");
-                                } else {
-                                    println!("{}", unsafe { (*value).get_values() });
-                                }
+                            let name_value_pair = name_value_pair_list[i].as_ptr();
+                            print!(" = ");
+                            let value = unsafe { (*name_value_pair).get_token_value() };
+                            if value.is_null() {
+                                println!("null");
+                            } else {
+                                println!("{}", unsafe { (*value).get_values() });
                             }
                         }
                     } else {
@@ -218,8 +220,8 @@ impl Attribute {
                 }
             }
         }
-        if !self.children.is_null() {
-            unsafe { (*self.children).print(level) };
+        if let Some(children) = self.children.as_deref() {
+            unsafe { children.print(level) };
         }
     }
 
@@ -229,8 +231,8 @@ impl Attribute {
     }
 
     /// Java package-private `getNameToken()`.
-    pub fn get_name_token(&self) -> *mut Token {
-        self.name
+    pub fn get_name_token(&self) -> &Token {
+        unsafe { &*self.name }
     }
 
     /// Java package-private `removeNameValuePair(NameValuePair)`.
@@ -243,7 +245,10 @@ impl Attribute {
             None => panic!("java.lang.NullPointerException"),
             Some(list) => list,
         };
-        if let Some(index) = list.iter().position(|entry| std::ptr::eq(*entry, pair)) {
+        if let Some(index) = list
+            .iter()
+            .position(|entry| std::ptr::eq(entry.as_ptr(), pair))
+        {
             list.remove(index);
         }
     }
@@ -254,7 +259,7 @@ impl Attribute {
     pub fn get_name_value_pair(&self) -> *mut NameValuePair {
         if let Some(list) = &self.name_value_pair_list {
             if !list.is_empty() {
-                return list[list.len() - 1];
+                return list[list.len() - 1].as_ptr();
             }
         }
         std::ptr::null_mut()
@@ -286,11 +291,16 @@ impl Attribute {
 impl WriteOnlyAttributeList for Attribute {
     /// Java `addAttribute(Token, int)`.
     unsafe fn add_attribute(&mut self, name: *mut Token, line_num: i32) -> *mut Attribute {
-        if self.children.is_null() {
+        if self.children.is_none() {
             let this: *mut Attribute = self;
-            self.children = Box::into_raw(Box::new(AttributeList::new(this)));
+            self.children = Some(Box::new(AttributeList::new(this)));
         }
-        unsafe { (*self.children).add_attribute(name, line_num) }
+        unsafe {
+            self.children
+                .as_deref_mut()
+                .unwrap()
+                .add_attribute(name, line_num)
+        }
     }
 
     /// Java `isGlobal()`.  Global attributes are not in sections.
@@ -331,18 +341,20 @@ impl WritableAttribute for Attribute {
 impl ReadOnlyAttribute for Attribute {
     /// Java `getAttribute(int)`.
     unsafe fn get_attribute_by_index(&self, name: i32) -> *mut Attribute {
-        if self.children.is_null() {
-            return std::ptr::null_mut();
-        }
-        unsafe { (*self.children).get_attribute(Some(&name.to_string())) }
+        self.children
+            .as_deref()
+            .map_or(std::ptr::null_mut(), |children| unsafe {
+                children.get_attribute(Some(&name.to_string()))
+            })
     }
 
     /// Java `getAttribute(String)`.
     unsafe fn get_attribute_by_name(&self, name: Option<&str>) -> *mut Attribute {
-        if self.children.is_null() {
-            return std::ptr::null_mut();
-        }
-        unsafe { (*self.children).get_attribute(name) }
+        self.children
+            .as_deref()
+            .map_or(std::ptr::null_mut(), |children| unsafe {
+                children.get_attribute(name)
+            })
     }
 
     /// Java `getName()`.
@@ -353,6 +365,10 @@ impl ReadOnlyAttribute for Attribute {
     /// Java `getChildren()`.
     fn get_children(&self) -> *mut AttributeList {
         self.children
+            .as_deref()
+            .map_or(std::ptr::null_mut(), |children| {
+                children as *const AttributeList as *mut AttributeList
+            })
     }
 
     /// Java `getMultiLineValue()`.
@@ -392,10 +408,10 @@ impl ReadOnlyAttribute for Attribute {
         format!(
             "etomo.storage.autodoc.Attribute[,name={},\nchildren={}]",
             unsafe { (*self.name).to_string() },
-            if self.children.is_null() {
+            if self.children.is_none() {
                 "null".to_string()
             } else {
-                unsafe { (*self.children).to_string() }
+                unsafe { self.children.as_deref().unwrap().to_string() }
             }
         )
     }

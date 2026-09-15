@@ -420,37 +420,11 @@ pub fn slice_aniso_diff(
     }
     for _ in 0..iterations {
         if state.iter_done % 2 == 0 {
-            let mut output_rows: Vec<*mut f32> =
-                state.image2.iter_mut().map(Vec::as_mut_ptr).collect();
-            let mut input_rows: Vec<*mut f32> =
-                state.image.iter_mut().map(Vec::as_mut_ptr).collect();
-            unsafe {
-                update_matrix(
-                    output_rows.as_mut_ptr(),
-                    input_rows.as_mut_ptr(),
-                    m,
-                    n,
-                    cc,
-                    k,
-                    lambda,
-                );
-            }
+            let AnisoState { image, image2, .. } = &mut *state;
+            update_matrix(image2, image, m, n, cc, k, lambda);
         } else {
-            let mut output_rows: Vec<*mut f32> =
-                state.image.iter_mut().map(Vec::as_mut_ptr).collect();
-            let mut input_rows: Vec<*mut f32> =
-                state.image2.iter_mut().map(Vec::as_mut_ptr).collect();
-            unsafe {
-                update_matrix(
-                    output_rows.as_mut_ptr(),
-                    input_rows.as_mut_ptr(),
-                    m,
-                    n,
-                    cc,
-                    k,
-                    lambda,
-                );
-            }
+            let AnisoState { image, image2, .. } = &mut *state;
+            update_matrix(image, image2, m, n, cc, k, lambda);
         }
         state.iter_done += 1;
     }
@@ -499,34 +473,10 @@ pub fn slice_byte_aniso_diff(
     let mut use_image2 = false;
     for _ in 0..iterations {
         if *iter_done % 2 == 0 {
-            let mut output_rows: Vec<*mut f32> = image2.iter_mut().map(Vec::as_mut_ptr).collect();
-            let mut input_rows: Vec<*mut f32> = image.iter_mut().map(Vec::as_mut_ptr).collect();
-            unsafe {
-                update_matrix(
-                    output_rows.as_mut_ptr(),
-                    input_rows.as_mut_ptr(),
-                    m,
-                    n,
-                    cc,
-                    k,
-                    lambda,
-                );
-            }
+            update_matrix(image2, image, m, n, cc, k, lambda);
             use_image2 = true;
         } else {
-            let mut output_rows: Vec<*mut f32> = image.iter_mut().map(Vec::as_mut_ptr).collect();
-            let mut input_rows: Vec<*mut f32> = image2.iter_mut().map(Vec::as_mut_ptr).collect();
-            unsafe {
-                update_matrix(
-                    output_rows.as_mut_ptr(),
-                    input_rows.as_mut_ptr(),
-                    m,
-                    n,
-                    cc,
-                    k,
-                    lambda,
-                );
-            }
+            update_matrix(image, image2, m, n, cc, k, lambda);
             use_image2 = false;
         }
         *iter_done += 1;

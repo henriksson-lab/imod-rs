@@ -15,9 +15,9 @@ use crate::imod::libcfshr::autodoc::{
     ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_get_float, adoc_get_number_of_sections,
     adoc_get_section_name, adoc_open_image_metadata,
 };
-use crate::imod::libcfshr::b3dutil::extra_is_nbytes_and_flags;
+use crate::imod::libcfshr::b3dutil::{b3d_get_error, extra_is_nbytes_and_flags};
 use crate::imod::libcfshr::extraheader::{
-    get_extra_header_items_fortran, get_extra_header_value, get_fei_ext_head_angle_scale,
+    get_extra_header_items, get_extra_header_value, get_fei_ext_head_angle_scale,
 };
 use crate::imod::libcfshr::parse_params::pip_enable_entry_output;
 use crate::imod::libcfshr::pip_fwrap::{
@@ -28,7 +28,7 @@ use crate::imod::libiimod::iitif::{
     tiff_get_max_eer_super_res, tiff_set_eer_read_properties, tiff_set_string_tag_to_print,
 };
 use crate::imod::libiimod::unit_fileio::{
-    ialbrief_, iiu_close, iiu_file_info, iiu_ret_num_volumes, iiu_volume_open, iiualtprint_,
+    iiu_alt_brief, iiu_alt_print, iiu_close, iiu_file_info, iiu_ret_num_volumes, iiu_volume_open,
 };
 use crate::imod::libiimod::unit_header::{
     iiu_ret_delta, iiu_ret_extended_data, iiu_ret_extended_type, iiu_ret_imod_flags,
@@ -171,14 +171,10 @@ pub fn header() {
 
     let silent =
         do_size || do_mode || do_min || do_max || do_mean || do_rms || do_pixel || do_origin;
-    unsafe {
-        if silent {
-            let mut value = 0;
-            iiualtprint_(&mut value);
-        }
-        let mut value = if_brief * 2;
-        ialbrief_(&mut value);
+    if silent {
+        iiu_alt_print(0);
     }
+    iiu_alt_brief(if_brief * 2);
 
     // Fortran `Gw.d` edit descriptor, as used by every `g11.4`, `g13.5` and
     // `g15.5` field written by `header.f90` (FORMAT 102/104 and the
@@ -320,7 +316,7 @@ pub fn header() {
                 }
                 if do_pixel {
                     let mut delta = [0.0_f32; 3];
-                    iiu_ret_delta(im_unit, delta.as_mut_ptr());
+                    iiu_ret_delta(im_unit, &mut delta);
                     println!(
                         "{}{}{}",
                         g_edit(delta[0], 15, 5),
@@ -369,11 +365,17 @@ pub fn header() {
                     // `allocate(array(nbsym / 4 + 10), stat=ierr)` followed by
                     // `call memoryError(ierr, 'array for extended header')`
                     // (`header.f90:174`).
-                    let mut array = Vec::<f32>::new();
-                    let ierr = i32::from(array.try_reserve_exact(nbsym as usize / 4 + 10).is_err());
+                    let mut extended_data = Vec::new();
+                    let ierr = i32::from(extended_data.try_reserve_exact(nbsym as usize).is_err());
                     memory_error(ierr, "array for extended header");
-                    array.resize(nbsym as usize / 4 + 10, 0.0);
-                    iiu_ret_extended_data(im_unit, &mut nbsym, array.as_mut_ptr().cast());
+                    if iiu_ret_extended_data(im_unit, &mut extended_data) != 0 {
+                        exit_error("Reading extended header");
+                    }
+                    nbsym = extended_data.len() as i32;
+                    let mut array: Vec<f32> = extended_data
+                        .chunks_exact(4)
+                        .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
+                        .collect();
                     let mut extended_type = [0; 2];
                     iiu_ret_extended_type(im_unit, &mut extended_type);
                     let [mut num_int, mut num_real] = extended_type;
@@ -390,7 +392,7 @@ pub fn header() {
                             }
                             let mut labels = [[0_u8; 80]; 10];
                             let mut nlabel = 0;
-                            iiu_ret_labels(im_unit, labels.as_mut_ptr().cast(), &mut nlabel);
+                            iiu_ret_labels(im_unit, &mut labels, &mut nlabel);
                             if labels[0][..4] == *b"Fei " {
                                 println!(
                                     "          Tilt axis rotation angle = {:7.1}{}",
@@ -416,7 +418,7 @@ pub fn header() {
                         let mut delta = [0.0_f32; 3];
                         let mut iflags = 0;
                         let mut if_imod = 0;
-                        iiu_ret_delta(im_unit, delta.as_mut_ptr());
+                        iiu_ret_delta(im_unit, &mut delta);
                         iiu_ret_imod_flags(im_unit, &mut iflags, &mut if_imod);
                         if pixel > 0.005 && pixel < 10000.0 && iflags & 2 == 0 {
                             let mut i_binning = 0_i32;
@@ -461,12 +463,7 @@ pub fn header() {
                         let mut j = 0_i32;
                         let mut tiltaxis = 0.0_f32;
                         let mut axis8 = 0.0_f64;
-                        let array_bytes = unsafe {
-                            core::slice::from_raw_parts(
-                                array.as_ptr().cast::<u8>(),
-                                core::mem::size_of_val(array.as_slice()),
-                            )
-                        };
+                        let array_bytes = &extended_data;
                         if get_extra_header_value(
                             array_bytes,
                             8,
@@ -541,21 +538,21 @@ pub fn header() {
                         }
                         let mut ierr = 0;
                         let mut one = 1;
-                        let mut max_vals = nxyz[2] + 9;
-                        let mut nz = nxyz[2];
-                        get_extra_header_items_fortran(
-                            array.as_mut_ptr().cast(),
-                            &mut nbsym,
-                            &mut num_int,
-                            &mut num_real,
-                            &mut nz,
-                            &mut one,
-                            tilts.as_mut_ptr(),
-                            tilts.as_mut_ptr(),
+                        if get_extra_header_items(
+                            &extended_data,
+                            nbsym,
+                            num_int,
+                            num_real,
+                            nxyz[2],
+                            one,
+                            &mut tilts,
+                            None,
                             &mut ierr,
-                            &mut max_vals,
-                            iz_piece.as_mut_ptr(),
-                        );
+                            &iz_piece,
+                        ) != 0
+                        {
+                            exit_error(&format!("ERROR: {}", b3d_get_error()));
+                        }
                         if ierr > 0 {
                             println!(
                                 "Extended header has tilt angles - extract with \"extracttilts\""
@@ -569,7 +566,7 @@ pub fn header() {
             if !found_axis_rot {
                 let mut all_labels = [[0_u8; 80]; 10];
                 let mut num_labels = 0;
-                iiu_ret_labels(1, all_labels.as_mut_ptr().cast(), &mut num_labels);
+                iiu_ret_labels(1, &mut all_labels, &mut num_labels);
                 for j in 0..num_labels.clamp(0, 10) as usize {
                     let temp_label_str = String::from_utf8_lossy(&all_labels[j][..80]);
                     if temp_label_str.contains("Tilt axis angle") {
@@ -582,7 +579,7 @@ pub fn header() {
             // if no pixel in extended header,
             if !found_pixel {
                 let mut delta = [0.0_f32; 3];
-                iiu_ret_delta(1, delta.as_mut_ptr());
+                iiu_ret_delta(1, &mut delta);
                 found_pixel = delta[0] != 1.0 || delta[1] != 1.0 || delta[2] != 1.0;
             }
 

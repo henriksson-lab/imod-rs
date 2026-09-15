@@ -515,7 +515,7 @@ pub fn ps_out(st: &mut HullStorage, v: &mut [Site], mut vdim: i32, f: &mut dyn W
         let _ = f.write_all(b"stroke\n");
     } else if amble == -1 {
         let mut len = [0f32; 2];
-        let _ = f.write_all(c_format("%%!PS\n", &[]).as_bytes());
+        let _ = f.write_all(b"%%!PS\n");
         let mins = MINS.get();
         let maxs = MAXS.get();
         len[0] = (maxs[0] - mins[0]) as f32;
@@ -535,14 +535,14 @@ pub fn ps_out(st: &mut HullStorage, v: &mut [Site], mut vdim: i32, f: &mut dyn W
             )
             .as_bytes(),
         );
-        let _ = f.write_all(c_format("%%%%Creator: hull program\n", &[]).as_bytes());
-        let _ = f.write_all(c_format("%%%%Pages: 1\n", &[]).as_bytes());
-        let _ = f.write_all(c_format("%%%%EndProlog\n", &[]).as_bytes());
-        let _ = f.write_all(c_format("%%%%Page: 1 1\n", &[]).as_bytes());
+        let _ = f.write_all(b"%%Creator: hull program\n");
+        let _ = f.write_all(b"%%Pages: 1\n");
+        let _ = f.write_all(b"%%EndProlog\n");
+        let _ = f.write_all(b"%%Page: 1 1\n");
         let _ = f.write_all(b" 0.5 setlinewidth [] 0 setdash\n");
         let _ = f.write_all(b" 1 setlinecap 1 setlinejoin 10 setmiterlimit\n");
     } else if amble == 1 {
-        let _ = f.write_all(c_format("showpage\n %%%%EOF\n", &[]).as_bytes());
+        let _ = f.write_all(b"showpage\n %%EOF\n");
     }
 }
 

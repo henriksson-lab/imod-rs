@@ -15,7 +15,7 @@
 #![allow(dead_code, unused_variables)]
 
 use core::ffi::c_void;
-use core::ptr;
+use core::ptr::{self, NonNull};
 use std::cell::{Cell, RefCell};
 use std::io::{Read, Write};
 
@@ -221,9 +221,6 @@ pub struct ImodView {
     pub slice: ImodShowsliceStruct,
     pub lslice: ImodShowsliceStruct,
     pub cramp: *mut Cramp,
-    /// Viewer-owned ramp pointers.  The pointed-to ramps remain legacy viewer
-    /// cursors; the view owns only this pointer table.
-    pub time_ramps: Vec<*mut Cramp>,
     pub imod: *mut Imod,
     /// `ViewInfo::extraObj`; see the type note above.
     pub extra_obj: Vec<Iobj>,
@@ -235,9 +232,10 @@ pub struct ImodView {
     pub num_tilt_angles: i32,
     /// `ViewInfo::tiltAngles`; see the type note above.
     pub tilt_angles: Vec<f32>,
-    /// Scratch row pointers assembled for legacy image consumers.  The
-    /// pointers borrow image/cache storage; this vector owns only the table.
-    pub line_ptrs: Vec<*mut u8>,
+    /// Scratch row handles assembled from image/cache storage.  This vector
+    /// owns the table, never the pixels; it is converted to the legacy raw
+    /// pointer table only at a rendering boundary.
+    pub line_ptrs: Vec<Option<NonNull<u8>>>,
     pub line_ptr_max: i32,
     pub blank_line: Vec<u8>,
     /// `ViewInfo::ax`, the `Autox` of `autox.cpp`.
@@ -365,7 +363,6 @@ impl Default for ImodView {
             slice: ImodShowsliceStruct::default(),
             lslice: ImodShowsliceStruct::default(),
             cramp: ptr::null_mut(),
-            time_ramps: Vec::new(),
             imod: ptr::null_mut(),
             extra_obj: Vec::new(),
             num_extra_obj: 0,
@@ -931,14 +928,16 @@ thread_local! {
     /// `skipDumping` (`imodview.cpp:901`).
     static S_SKIP_DUMPING: Cell<bool> = const { Cell::new(false) };
     /// `best_ivwGetValue` (`imodview.cpp:940`).
-    static S_BEST_IVW_GET_VALUE: Cell<fn(*mut ImodView, i32, i32, i32) -> i32> =
+    static S_BEST_IVW_GET_VALUE: Cell<fn(&ImodView, i32, i32, i32) -> i32> =
         const { Cell::new(fake_ivw_get_value) };
     /// `imdataxsize` (`imodview.cpp:1046`).
     static S_IMDATAXSIZE: Cell<i32> = const { Cell::new(0) };
     /// Rust-owned backing storage for the fast-access lookup table.
     static S_VMDATAXSIZE_STORAGE: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
-    /// Rust-owned backing storage for the fast-access image pointers.
-    static S_IMDATA_STORAGE: RefCell<Vec<*mut u8>> = const { RefCell::new(Vec::new()) };
+    /// Rust-owned fast-access handles into image/cache-owned pixels.  A
+    /// missing cache plane is represented explicitly instead of a null raw
+    /// pointer.
+    static S_IMDATA_STORAGE: RefCell<Vec<Option<NonNull<u8>>>> = const { RefCell::new(Vec::new()) };
     /// `imdataMax` (`imodview.cpp:1050`).
     static S_IMDATA_MAX: Cell<i32> = const { Cell::new(0) };
     /// `vmnullvalue` (`imodview.cpp:1051`).
@@ -1049,7 +1048,6 @@ pub fn ivw_init(vi: &mut ImodView, modview: bool) {
     vi.num_tilt_angles = 0;
     vi.tilt_angles.clear();
     vi.bapc_xsize = 0;
-    vi.time_ramps = Vec::with_capacity(4);
 
     vi.movie_interval = 17;
     vi.movie_running = 0;
@@ -1092,41 +1090,39 @@ pub fn ivw_init(vi: &mut ImodView, modview: bool) {
  */
 
 /// `ivwGetCurrentSection` (`imodview.cpp:171`).
-pub unsafe fn ivw_get_current_section(vi: *mut ImodView) -> *mut *mut u8 {
-    let cz = unsafe { ((*vi).zmouse + 0.5f32) as i32 };
-    unsafe { ivw_get_z_section(vi, cz) }
+pub fn ivw_get_current_section(vi: &mut ImodView) -> *mut *mut u8 {
+    let cz = (vi.zmouse + 0.5f32) as i32;
+    ivw_get_z_section(vi, cz)
 }
 
 /// `ivwGetCurrentZSection` (`imodview.cpp:179`).
-pub unsafe fn ivw_get_current_z_section(vi: *mut ImodView) -> *mut *mut u8 {
-    let cz = unsafe { ((*vi).zmouse + 0.5f32) as i32 };
-    if unsafe { !(*vi).pyr_cache.is_null() } {
+pub fn ivw_get_current_z_section(vi: &mut ImodView) -> *mut *mut u8 {
+    let cz = (vi.zmouse + 0.5f32) as i32;
+    if !vi.pyr_cache.is_null() {
         return with_boundary(|n| n.pyr_cache_get_full_section(vi, cz));
     }
-    unsafe { ivw_get_z_section(vi, cz) }
+    ivw_get_z_section(vi, cz)
 }
 
 /// `ivwReopen` (`imodview.cpp:189`).
-pub unsafe fn ivw_reopen(in_file: *mut ImodImageFile) -> i32 {
+pub fn ivw_reopen(in_file: &mut ImodImageFile) -> i32 {
     let ifd_path = IMOD_IFD_PATH.lock().unwrap().clone();
     if !ifd_path.is_empty() {
         with_boundary(|n| n.qdir_set_current(&ifd_path));
     }
-    let retval = unsafe { ii_reopen(in_file) };
+    let retval = ii_reopen(in_file);
 
     // If multiple threads are allowed and not in use, open the file copies
     let cvi = with_boundary(|n| n.app_cvi());
     if !cvi.is_null()
         && unsafe { (*cvi).max_read_threads > 1 }
         && unsafe { (*cvi).num_read_threads < 2 }
-        && unsafe { (*in_file).file } == IIFILE_TIFF
+        && in_file.file == IIFILE_TIFF
     {
         unsafe {
             (*cvi).file_copies[0] = in_file;
-            (*cvi).num_read_threads = ii_open_copies_for_threads(
-                (*cvi).file_copies.as_mut_ptr(),
-                (*cvi).max_read_threads,
-            );
+            (*cvi).num_read_threads =
+                ii_open_copies_for_threads(&mut (*cvi).file_copies, (*cvi).max_read_threads);
         }
     }
     if !ifd_path.is_empty() {
@@ -1150,204 +1146,302 @@ pub unsafe fn ivw_close(vi: *mut ImodView, in_file: *mut ImodImageFile) {
 }
 
 /// `ivwGetZSectionTime` (`imodview.cpp:220`).
-pub unsafe fn ivw_get_z_section_time(vi: *mut ImodView, section: i32, time: i32) -> *mut *mut u8 {
+pub fn ivw_get_z_section_time(vi: &mut ImodView, section: i32, time: i32) -> *mut *mut u8 {
     let mut old_time = 0;
 
-    if vi.is_null() {
-        return ptr::null_mut();
-    }
-    if unsafe { (*vi).num_times } == 0 {
-        return unsafe { ivw_get_z_section(vi, section) };
+    if vi.num_times == 0 {
+        return ivw_get_z_section(vi, section);
     }
 
     /* DNM: make test > instead of >= */
-    if time < 1 || time > unsafe { (*vi).num_times } {
+    if time < 1 || time > vi.num_times {
         return ptr::null_mut();
     }
 
-    unsafe { ivw_get_time(vi, Some(&mut old_time)) };
+    ivw_get_time(vi, Some(&mut old_time));
     if time == old_time {
-        return unsafe { ivw_get_z_section(vi, section) };
+        return ivw_get_z_section(vi, section);
     }
 
-    unsafe {
-        (*vi).cur_time = time;
-        (*vi).image = (*vi).image_list.add((time - 1) as usize);
-        (*vi).hdr = (*vi).image;
-        ivw_reopen((*vi).image);
-        let image_data = ivw_get_z_section(vi, section);
-        ivw_close(vi, (*vi).image);
-        (*vi).cur_time = old_time;
-        (*vi).image = (*vi).image_list.add((old_time - 1) as usize);
-        (*vi).hdr = (*vi).image;
-        image_data
+    let Some(time_index) = usize::try_from(time - 1).ok() else {
+        return ptr::null_mut();
+    };
+    let Some(old_index) = usize::try_from(old_time - 1).ok() else {
+        return ptr::null_mut();
+    };
+    if time_index >= vi.image_list_storage.len() || old_index >= vi.image_list_storage.len() {
+        return ptr::null_mut();
     }
+
+    vi.cur_time = time;
+    // `image` is a temporary legacy cursor into the owned image-list vector.
+    let image = unsafe { vi.image_list_storage.as_mut_ptr().add(time_index) };
+    vi.image = image;
+    vi.hdr = image;
+    unsafe { ivw_reopen(&mut *image) };
+    let image_data = ivw_get_z_section(vi, section);
+    unsafe { ivw_close(vi, image) };
+    vi.cur_time = old_time;
+    let image = unsafe { vi.image_list_storage.as_mut_ptr().add(old_index) };
+    vi.image = image;
+    vi.hdr = image;
+    image_data
 }
 
 /// `ivwScaleDepth8` (`imodview.cpp:250`).
-pub unsafe fn ivw_scale_depth8(vi: *mut ImodView, temp_slice: &mut IvwSlice) {
-    unsafe {
-        let rbase = (*vi).rampbase;
-        let scale = (*vi).rampsize as f32 / 256.0f32;
-        let mi = temp_slice.sec.xsize * temp_slice.sec.ysize;
-        let id = temp_slice.sec.data.as_mut_ptr();
-        if imod_depth() == 8 && (*vi).raw_image_store == 0 {
-            for i in 0..mi {
-                let pix = (*id.add(i as usize) as f32 * scale + rbase as f32) as i32;
-                *id.add(i as usize) = pix as u8;
-            }
-        }
+pub fn ivw_scale_depth8(vi: &ImodView, temp_slice: &mut IvwSlice) {
+    if imod_depth() != 8 || vi.raw_image_store != 0 {
+        return;
+    }
+    let rbase = vi.rampbase;
+    let scale = vi.rampsize as f32 / 256.0f32;
+    let Some(pixel_count) = usize::try_from(temp_slice.sec.xsize)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(temp_slice.sec.ysize)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+    else {
+        return;
+    };
+    for pixel in temp_slice.sec.data.iter_mut().take(pixel_count) {
+        *pixel = (*pixel as f32 * scale + rbase as f32) as u8;
     }
 }
 
 /// `ivwGetZSection` (`imodview.cpp:269`); returns line pointers for a Z section.
-pub unsafe fn ivw_get_z_section(vi: *mut ImodView, mut section: i32) -> *mut *mut u8 {
-    unsafe {
-        let mut slmin: usize = 0;
+pub fn ivw_get_z_section(vi: &mut ImodView, mut section: i32) -> *mut *mut u8 {
+    let mut slmin: usize = 0;
 
-        if section < 0 || section >= (*vi).zsize {
-            return ptr::null_mut();
-        }
-        if (*vi).fp.is_none()
-            || (*vi).fake_image != 0
-            || (*vi).loading_image != 0
-            || !(*vi).pyr_cache.is_null()
-        {
-            return ptr::null_mut();
-        }
-        if (*vi).full_cache_flipped == 0 && ivw_plist_blank(vi, section) != 0 {
-            return ptr::null_mut();
-        }
+    if section < 0 || section >= vi.zsize {
+        return ptr::null_mut();
+    }
+    if vi.fp.is_none() || vi.fake_image != 0 || vi.loading_image != 0 || !vi.pyr_cache.is_null() {
+        return ptr::null_mut();
+    }
+    let load_info = unsafe { vi.li.as_ref() };
+    if vi.full_cache_flipped == 0 && ivw_plist_blank(load_info, section) != 0 {
+        return ptr::null_mut();
+    }
 
-        // Flip -> rotation: invert Z if flipped
-        if (*(*vi).li).axis == 2 {
-            section = (*vi).zsize - 1 - section;
-        }
+    // Flip -> rotation: invert Z if flipped
+    if load_info.is_some_and(|load_info| load_info.axis == 2) {
+        section = vi.zsize - 1 - section;
+    }
 
-        /* Plain, uncached data: make line pointers if not flipped */
-        if (*vi).vm_size == 0 {
-            if (*(*vi).li).axis == 3 {
-                return ivw_make_line_pointers(
-                    vi,
-                    *(*vi).idata.add(section as usize),
-                    (*vi).xsize,
-                    (*vi).ysize,
-                    (*vi).raw_image_store as i32,
-                );
-            } else {
-                /* If flipped, check the pointer allocation, get the */
-                if ivw_check_line_ptr_allocation(vi, (*vi).ysize) != 0 {
-                    return ptr::null_mut();
-                }
-                let pix_size = ivw_get_pixel_bytes((*vi).raw_image_store as i32);
-                for sl in 0..(*vi).ysize {
-                    (&mut (*vi).line_ptrs)[sl as usize] = (*(*vi).idata.add(sl as usize))
-                        .add(((*vi).xsize * pix_size * section) as usize);
-                }
-                return (*vi).line_ptrs.as_mut_ptr();
-            }
-        }
-
-        /* Cached data with a full cache upon flipping - make line pointers */
-        if (*vi).vm_size != 0 && (*vi).full_cache_flipped != 0 {
-            if ivw_check_line_ptr_allocation(vi, (*vi).ysize) != 0 {
+    /* Plain, uncached data: make line pointers if not flipped */
+    if vi.vm_size == 0 {
+        if load_info.is_some_and(|load_info| load_info.axis == 3) {
+            let bytes = usize::try_from(vi.xsize)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(vi.ysize)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| {
+                    pixels.checked_mul(ivw_get_pixel_bytes(vi.raw_image_store as i32) as usize)
+                });
+            let Some(bytes) = bytes else {
+                return ptr::null_mut();
+            };
+            let Some(data) = (unsafe { vi.idata.add(section as usize).as_ref() }) else {
+                return ptr::null_mut();
+            };
+            let data = unsafe { core::slice::from_raw_parts_mut(*data, bytes) };
+            return ivw_make_line_pointers(
+                &mut vi.line_ptrs,
+                &mut vi.line_ptr_max,
+                data,
+                vi.xsize,
+                vi.ysize,
+                vi.raw_image_store as i32,
+            )
+            .map_or(ptr::null_mut(), |lines| lines.as_mut_ptr().cast());
+        } else {
+            /* If flipped, check the pointer allocation, get the */
+            if ivw_check_line_ptr_allocation(vi, vi.ysize) != 0 {
                 return ptr::null_mut();
             }
-            let pix_size = ivw_get_pixel_bytes((*vi).raw_image_store as i32);
-            for sl in 0..(*vi).ysize {
-                let slice = (&(*vi).cache_index)
-                    [(sl * (*vi).vm_tdim + (*vi).cur_time - (*vi).vm_tbase) as usize];
-                if slice < 0 {
-                    (&mut (*vi).line_ptrs)[sl as usize] = (*vi).blank_line.as_mut_ptr();
-                } else {
-                    (&mut (*vi).line_ptrs)[sl as usize] = (&mut (*vi).vm_cache)[slice as usize]
-                        .sec
-                        .data
-                        .as_mut_ptr()
-                        .add(((*vi).xsize * pix_size * section) as usize);
+            let pix_size = ivw_get_pixel_bytes(vi.raw_image_store as i32);
+            if vi.idata.is_null() {
+                return ptr::null_mut();
+            }
+            for (sl, line) in vi.line_ptrs.iter_mut().enumerate().take(vi.ysize as usize) {
+                let data = unsafe { *vi.idata.add(sl) };
+                if data.is_null() {
+                    return ptr::null_mut();
                 }
+                let Some(offset) = vi
+                    .xsize
+                    .checked_mul(pix_size)
+                    .and_then(|stride| stride.checked_mul(section))
+                    .and_then(|offset| usize::try_from(offset).ok())
+                else {
+                    return ptr::null_mut();
+                };
+                *line = NonNull::new(unsafe { data.add(offset) });
             }
-            return (*vi).line_ptrs.as_mut_ptr();
+            return vi.line_ptrs.as_mut_ptr().cast();
         }
-
-        /* Cached data otherwise */
-        let cache_key = (section * (*vi).vm_tdim + (*vi).cur_time - (*vi).vm_tbase) as usize;
-        let mut sl = (&(*vi).cache_index)[cache_key];
-        if sl < 0 {
-        } else {
-            /* Didn't find slice in cache, need to load it in. */
-
-            /* DNM 12/12/01: add call to cache filler */
-            if with_boundary(|n| n.icf_get_autofill()) != 0 {
-                let filled = with_boundary(|n| n.icf_do_autofill(vi, section));
-                return ivw_make_line_pointers(
-                    vi,
-                    filled,
-                    (*vi).xsize,
-                    (*vi).ysize,
-                    (*vi).raw_image_store as i32,
-                );
-            }
-
-            /* Find oldest slice to replace */
-            let mut minused = (*vi).vm_count + 1;
-            for (index, cached) in (*vi).vm_cache.iter().enumerate() {
-                if cached.used < minused {
-                    minused = cached.used;
-                    slmin = index;
-                }
-            }
-
-            sl = slmin as i32;
-            let old_cz = (&(*vi).vm_cache)[slmin].cz;
-            let old_ct = (&(*vi).vm_cache)[slmin].ct;
-            if old_cz >= 0 && old_ct >= (*vi).vm_tbase {
-                (&mut (*vi).cache_index)
-                    [(old_cz * (*vi).vm_tdim + old_ct - (*vi).vm_tbase) as usize] = -1;
-            }
-
-            /* Load in image */
-            ivw_read_z(
-                vi,
-                (&mut (*vi).vm_cache)[slmin].sec.data.as_mut_ptr(),
-                section,
-            );
-            ivw_scale_depth8(vi, &mut (&mut (*vi).vm_cache)[slmin]);
-            (&mut (*vi).vm_cache)[slmin].cz = section;
-            (&mut (*vi).vm_cache)[slmin].ct = (*vi).cur_time;
-            (&mut (*vi).cache_index)[cache_key] = sl;
-        }
-
-        /* Adjust use count, assign to slice */
-        (*vi).vm_count += 1;
-        let temp_slice = &mut (&mut (*vi).vm_cache)[sl as usize];
-        temp_slice.used = (*vi).vm_count;
-
-        ivw_make_line_pointers(
-            vi,
-            temp_slice.sec.data.as_mut_ptr(),
-            temp_slice.sec.xsize,
-            temp_slice.sec.ysize,
-            (*vi).raw_image_store as i32,
-        )
     }
+
+    /* Cached data with a full cache upon flipping - make line pointers */
+    if vi.vm_size != 0 && vi.full_cache_flipped != 0 {
+        if ivw_check_line_ptr_allocation(vi, vi.ysize) != 0 {
+            return ptr::null_mut();
+        }
+        let pix_size = ivw_get_pixel_bytes(vi.raw_image_store as i32);
+        let Some(section_offset) = vi
+            .xsize
+            .checked_mul(pix_size)
+            .and_then(|stride| stride.checked_mul(section))
+            .and_then(|offset| usize::try_from(offset).ok())
+        else {
+            return ptr::null_mut();
+        };
+        for (sl, line) in vi.line_ptrs.iter_mut().enumerate().take(vi.ysize as usize) {
+            let Some(cache_key) = i32::try_from(sl)
+                .ok()
+                .and_then(|sl| sl.checked_mul(vi.vm_tdim))
+                .and_then(|key| key.checked_add(vi.cur_time - vi.vm_tbase))
+                .and_then(|key| usize::try_from(key).ok())
+            else {
+                return ptr::null_mut();
+            };
+            let Some(&slice) = vi.cache_index.get(cache_key) else {
+                return ptr::null_mut();
+            };
+            if slice < 0 {
+                *line = NonNull::new(vi.blank_line.as_mut_ptr());
+            } else {
+                let Some(cached) = vi.vm_cache.get_mut(slice as usize) else {
+                    return ptr::null_mut();
+                };
+                let Some(data) = cached.sec.data.get_mut(section_offset..) else {
+                    return ptr::null_mut();
+                };
+                *line = NonNull::new(data.as_mut_ptr());
+            }
+        }
+        return vi.line_ptrs.as_mut_ptr().cast();
+    }
+
+    /* Cached data otherwise */
+    let Some(cache_key) = section
+        .checked_mul(vi.vm_tdim)
+        .and_then(|key| key.checked_add(vi.cur_time - vi.vm_tbase))
+        .and_then(|key| usize::try_from(key).ok())
+    else {
+        return ptr::null_mut();
+    };
+    let Some(&mut_sl) = vi.cache_index.get(cache_key) else {
+        return ptr::null_mut();
+    };
+    let mut sl = mut_sl;
+    if sl < 0 {
+        /* Didn't find slice in cache, need to load it in. */
+
+        /* DNM 12/12/01: add call to cache filler */
+        if with_boundary(|n| n.icf_get_autofill()) != 0 {
+            let filled = with_boundary(|n| n.icf_do_autofill(vi, section));
+            let bytes = usize::try_from(vi.xsize)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(vi.ysize)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| {
+                    pixels.checked_mul(ivw_get_pixel_bytes(vi.raw_image_store as i32) as usize)
+                });
+            let Some(bytes) = bytes else {
+                return ptr::null_mut();
+            };
+            let data = unsafe { core::slice::from_raw_parts_mut(filled, bytes) };
+            return ivw_make_line_pointers(
+                &mut vi.line_ptrs,
+                &mut vi.line_ptr_max,
+                data,
+                vi.xsize,
+                vi.ysize,
+                vi.raw_image_store as i32,
+            )
+            .map_or(ptr::null_mut(), |lines| lines.as_mut_ptr().cast());
+        }
+
+        /* Find oldest slice to replace */
+        let mut minused = vi.vm_count + 1;
+        for (index, cached) in vi.vm_cache.iter().enumerate() {
+            if cached.used < minused {
+                minused = cached.used;
+                slmin = index;
+            }
+        }
+
+        sl = slmin as i32;
+        let old_cz = vi.vm_cache[slmin].cz;
+        let old_ct = vi.vm_cache[slmin].ct;
+        if let Some(old_key) = old_cz
+            .checked_mul(vi.vm_tdim)
+            .and_then(|key| key.checked_add(old_ct - vi.vm_tbase))
+            .and_then(|key| usize::try_from(key).ok())
+            && let Some(old_index) = vi.cache_index.get_mut(old_key)
+        {
+            *old_index = -1;
+        }
+
+        /* Load in image */
+        let data = vi.vm_cache[slmin].sec.data.as_mut_ptr();
+        unsafe { ivw_read_z(vi, data, section) };
+        let mut temp_slice = vi.vm_cache.remove(slmin);
+        ivw_scale_depth8(vi, &mut temp_slice);
+        temp_slice.cz = section;
+        temp_slice.ct = vi.cur_time;
+        vi.vm_cache.insert(slmin, temp_slice);
+        vi.cache_index[cache_key] = sl;
+    }
+
+    /* Adjust use count, assign to slice */
+    vi.vm_count += 1;
+    let Some(temp_slice) = vi.vm_cache.get_mut(sl as usize) else {
+        return ptr::null_mut();
+    };
+    temp_slice.used = vi.vm_count;
+
+    ivw_make_line_pointers(
+        &mut vi.line_ptrs,
+        &mut vi.line_ptr_max,
+        &mut temp_slice.sec.data,
+        temp_slice.sec.xsize,
+        temp_slice.sec.ysize,
+        vi.raw_image_store as i32,
+    )
+    .map_or(ptr::null_mut(), |lines| lines.as_mut_ptr().cast())
 }
 
 /// `ivwPlistBlank` (`imodview.cpp:368`).
-pub unsafe fn ivw_plist_blank(vi: *mut ImodView, mut cz: i32) -> i32 {
-    unsafe {
-        let mi = (*(*vi).li).plist;
-        if mi == 0 {
-            return mi;
-        }
-        cz += (*(*vi).li).zmin;
-        for i in 0..mi {
-            if (&(*(*vi).li).pcoords).as_ref().unwrap()[(i * 3 + 2) as usize] == cz {
-                return 0;
-            }
-        }
-        1
+pub fn ivw_plist_blank(load_info: Option<&LoadInfo>, mut cz: i32) -> i32 {
+    let Some(load_info) = load_info else {
+        return 0;
+    };
+    if load_info.plist == 0 {
+        return 0;
     }
+    let Some(coords) = load_info.pcoords.as_deref() else {
+        return 0;
+    };
+    cz += load_info.zmin;
+    for i in 0..load_info.plist as usize {
+        let Some(&piece_z) = coords.get(i * 3 + 2) else {
+            return 0;
+        };
+        if piece_z == cz {
+            return 0;
+        }
+    }
+    1
 }
 
 /// `ivwReadZ` (`imodview.cpp:381`); read a section of data into the cache.
@@ -1453,8 +1547,8 @@ pub unsafe fn ivw_read_z(vi: *mut ImodView, buf: *mut u8, mut cz: i32) {
                     /* Draw our piece into the image buffer. */
                     S_PLIST_STORAGE.with(|storage| {
                         memreccpy(
-                            buf,
-                            storage.borrow_mut().as_mut_ptr(),
+                            core::slice::from_raw_parts_mut(buf, image_bytes),
+                            storage.borrow().as_slice(),
                             xsize,
                             ysize,
                             pix_size,
@@ -1493,12 +1587,12 @@ pub unsafe fn ivw_read_z(vi: *mut ImodView, buf: *mut u8, mut cz: i32) {
             ivw_close(vi, (*vi).image);
             (*vi).image = (*vi).image_list.add(zread as usize);
             (*vi).hdr = (*vi).image;
-            ivw_reopen((*vi).image);
+            ivw_reopen(&mut *(*vi).image);
             zread = 0;
         }
 
         /* DNM 1/2/04: simplify to call one place for raw, regular, or binned read */
-        ivw_read_binned_section(vi, buf, ivw_adjusted_z_if_vol_stack(vi, zread));
+        ivw_read_binned_section(vi, buf, ivw_adjusted_z_if_vol_stack(&*vi, zread));
     }
 }
 
@@ -1515,53 +1609,54 @@ pub fn ivw_get_pixel_bytes(mode: i32) -> i32 {
 }
 
 /// `ivwCheckLinePtrAllocation` (`imodview.cpp:541`).
-pub unsafe fn ivw_check_line_ptr_allocation(vi: *mut ImodView, ysize: i32) -> i32 {
-    unsafe {
-        if ysize > (*vi).line_ptr_max {
-            (*vi).line_ptrs.resize(ysize as usize, ptr::null_mut());
-            (*vi).line_ptr_max = ysize;
-        }
-        0
+pub fn ivw_check_line_ptr_allocation(vi: &mut ImodView, ysize: i32) -> i32 {
+    if ysize < 0 {
+        return 1;
     }
+    if ysize > vi.line_ptr_max {
+        vi.line_ptrs.resize(ysize as usize, None);
+        vi.line_ptr_max = ysize;
+    }
+    0
 }
 
 /// `ivwAdjustedZIfVolStack` (`imodview.cpp:557`).
-pub unsafe fn ivw_adjusted_z_if_vol_stack(vi: *mut ImodView, z_in: i32) -> i32 {
-    unsafe {
-        if (*vi).volume_stack == 0 {
-            return z_in;
-        }
-        z_in + ((*vi).cur_time - 1) * (*vi).zsize
+pub fn ivw_adjusted_z_if_vol_stack(vi: &ImodView, z_in: i32) -> i32 {
+    if vi.volume_stack == 0 {
+        return z_in;
     }
+    z_in + (vi.cur_time - 1) * vi.zsize
 }
 
 /// `ivwMakeLinePointers` (`imodview.cpp:566`).
-pub unsafe fn ivw_make_line_pointers(
-    vi: *mut ImodView,
-    data: *mut u8,
+pub fn ivw_make_line_pointers<'a>(
+    line_ptrs: &'a mut Vec<Option<NonNull<u8>>>,
+    line_ptr_max: &mut i32,
+    data: &mut [u8],
     xsize: i32,
     ysize: i32,
     mode: i32,
-) -> *mut *mut u8 {
-    unsafe {
-        if data.is_null() {
-            return ptr::null_mut();
-        }
-
-        if ivw_check_line_ptr_allocation(vi, ysize) != 0 {
-            return ptr::null_mut();
-        }
-
-        let pix_size = ivw_get_pixel_bytes(mode);
-
-        /* Make up the pointers */
-        (&mut (*vi).line_ptrs)[0] = data;
-        for i in 1..ysize {
-            (&mut (*vi).line_ptrs)[i as usize] =
-                (&(*vi).line_ptrs)[(i - 1) as usize].add((pix_size * xsize) as usize);
-        }
-        (*vi).line_ptrs.as_mut_ptr()
+) -> Option<&'a mut [Option<NonNull<u8>>]> {
+    let row_bytes = usize::try_from(xsize)
+        .ok()?
+        .checked_mul(usize::try_from(ivw_get_pixel_bytes(mode)).ok()?)?;
+    let rows = usize::try_from(ysize).ok()?;
+    if row_bytes == 0 || data.len() < row_bytes.checked_mul(rows)? || ysize < 0 {
+        return None;
     }
+    if ysize > *line_ptr_max || line_ptrs.len() < rows {
+        line_ptrs.resize(rows, None);
+        *line_ptr_max = (*line_ptr_max).max(ysize);
+    }
+
+    for (line, row) in line_ptrs
+        .iter_mut()
+        .take(rows)
+        .zip(data.chunks_exact_mut(row_bytes))
+    {
+        *line = NonNull::new(row.as_mut_ptr());
+    }
+    Some(&mut line_ptrs[..rows])
 }
 
 /// `ivwReadBinnedSection(ImodView *, char *, int)` (`imodview.cpp:589`).
@@ -1658,7 +1753,7 @@ pub unsafe fn ivw_read_binned_section_image(
         }
 
         // Now load the image normally with these adjusted coordinates
-        ivw_get_file_start_pos(image);
+        ivw_get_file_start_pos(&*image);
         let xbinned = (im.urx + 1 - im.llx) as usize;
         let ybinned = if im.axis == 3 {
             (im.ury + 1 - im.lly) as usize
@@ -1693,7 +1788,12 @@ pub unsafe fn ivw_read_binned_section_image(
                     convert,
                 );
             } else {
-                ii_read_section_any(&mut im, buf, section, convert);
+                ii_read_section_any(
+                    &mut im,
+                    core::slice::from_raw_parts_mut(buf, num_bytes),
+                    section,
+                    convert,
+                );
             }
         } else {
             im.llx = (*vi).xybin * im.llx;
@@ -1743,12 +1843,7 @@ pub unsafe fn ivw_read_binned_section_image(
                         convert,
                     );
                 } else {
-                    ii_read_section_any(
-                        &mut im,
-                        unbinbuf.as_mut_ptr(),
-                        (*vi).zbin * section + iz,
-                        convert,
-                    );
+                    ii_read_section_any(&mut im, &mut unbinbuf, (*vi).zbin * section + iz, convert);
                 }
                 reduce_by_binning(
                     core::slice::from_raw_parts(
@@ -1792,7 +1887,7 @@ pub unsafe fn ivw_read_binned_section_image(
                 }
             }
         }
-        ivw_dump_file_sys_cache(image);
+        ivw_dump_file_sys_cache(&*image);
 
         // If the image is at all undersized, now it needs to be copied up in array and
         // padding applied
@@ -1915,8 +2010,10 @@ pub fn ivw_fix_under_size_coords(
 
 /// `ivwGetImagePadding` (`imodview.cpp:837`).
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn ivw_get_image_padding(
-    vi: *mut ImodView,
+pub fn ivw_get_image_padding(
+    vi: &ImodView,
+    image: Option<&ImodImageFile>,
+    load_info: Option<&LoadInfo>,
     cy: i32,
     section: i32,
     time: i32,
@@ -1930,131 +2027,140 @@ pub unsafe fn ivw_get_image_padding(
     left_zpad: &mut i32,
     right_zpad: &mut i32,
 ) -> i32 {
-    unsafe {
-        let mut fz: i32;
-        let mut blank_z = false;
+    let mut fz: i32;
+    let mut blank_z = false;
 
-        if (*vi).fake_image != 0 || (*vi).volume_stack != 0 {
-            *ll_x = 0;
-            *left_xpad = 0;
-            *right_xpad = 0;
-            *ll_y = 0;
-            *left_ypad = 0;
-            *right_ypad = 0;
-            *ll_z = 0;
-            *left_zpad = 0;
-            *right_zpad = 0;
-            return if (*vi).fake_image != 0 { 1 } else { 0 };
-        }
-
-        // Copy the right image file structure for the situation
+    if vi.fake_image != 0 || vi.volume_stack != 0 {
+        *ll_x = 0;
+        *left_xpad = 0;
+        *right_xpad = 0;
+        *ll_y = 0;
+        *left_ypad = 0;
+        *right_ypad = 0;
+        *ll_z = 0;
         *left_zpad = 0;
         *right_zpad = 0;
-        *ll_z = 0;
-        let mut im;
-        if (*vi).multi_file_z > 0 {
-            fz = if (*(*vi).li).axis == 3 { section } else { cy };
-            if fz < 0 || fz >= (*vi).multi_file_z {
-                return -1;
-            }
-            im = (*(*vi).image_list.add(fz as usize)).clone();
-        } else if time > 0 {
-            im = (*(*vi).image_list.add((time - 1) as usize)).clone();
-        } else {
-            im = (*(*vi).image).clone();
-        }
+        return if vi.fake_image != 0 { 1 } else { 0 };
+    }
+    let Some(load_info) = load_info else {
+        return -1;
+    };
 
-        if (*(*vi).li).plist != 0 {
-            *left_xpad = 0;
-            *right_xpad = 0;
-            *left_ypad = 0;
-            *right_ypad = 0;
-            *left_zpad = 0;
-            *right_zpad = 0;
-            *ll_x = im.llx;
-            *ll_y = im.lly;
-            *ll_z = im.llz;
-            return 0;
+    // Copy the right image file structure for the situation.
+    *left_zpad = 0;
+    *right_zpad = 0;
+    *ll_z = 0;
+    let mut im = if vi.multi_file_z > 0 {
+        fz = if load_info.axis == 3 { section } else { cy };
+        if fz < 0 || fz >= vi.multi_file_z {
+            return -1;
         }
+        let Some(image) = vi.image_list_storage.get(fz as usize) else {
+            return -1;
+        };
+        image.clone()
+    } else if time > 0 {
+        let Some(image) = vi.image_list_storage.get((time - 1) as usize) else {
+            return -1;
+        };
+        image.clone()
+    } else {
+        let Some(image) = image else {
+            return -1;
+        };
+        image.clone()
+    };
 
-        // Get the padding on each axis
-        fz = 0;
-        let blank_x = ivw_fix_under_size_coords(
-            (*vi).full_xsize,
-            im.nx / (*vi).xybin,
-            &mut im.llx,
-            &mut im.urx,
-            &mut fz,
-            left_xpad,
-            right_xpad,
-        );
-        let blank_y = ivw_fix_under_size_coords(
-            (*vi).full_ysize,
-            im.ny / (*vi).xybin,
-            &mut im.lly,
-            &mut im.ury,
-            &mut fz,
-            left_ypad,
-            right_ypad,
-        );
+    if load_info.plist != 0 {
+        *left_xpad = 0;
+        *right_xpad = 0;
+        *left_ypad = 0;
+        *right_ypad = 0;
+        *left_zpad = 0;
+        *right_zpad = 0;
         *ll_x = im.llx;
         *ll_y = im.lly;
-        if (*vi).multi_file_z <= 0 {
-            blank_z = ivw_fix_under_size_coords(
-                (*vi).full_zsize,
-                im.nz / (*vi).zbin,
-                &mut im.llz,
-                &mut im.urz,
-                &mut fz,
-                left_zpad,
-                right_zpad,
-            );
-            *ll_z = im.llz;
-        }
-
-        // Swap Y and Z padding if flipped
-        if (*(*vi).li).axis == 2 {
-            fz = *left_ypad;
-            *left_ypad = *left_zpad;
-            *left_zpad = fz;
-            fz = *right_ypad;
-            *right_ypad = *right_zpad;
-            *right_zpad = fz;
-        }
-        if blank_x || blank_y || blank_z { 1 } else { 0 }
+        *ll_z = im.llz;
+        return 0;
     }
+
+    // Get the padding on each axis.
+    fz = 0;
+    let blank_x = ivw_fix_under_size_coords(
+        vi.full_xsize,
+        im.nx / vi.xybin,
+        &mut im.llx,
+        &mut im.urx,
+        &mut fz,
+        left_xpad,
+        right_xpad,
+    );
+    let blank_y = ivw_fix_under_size_coords(
+        vi.full_ysize,
+        im.ny / vi.xybin,
+        &mut im.lly,
+        &mut im.ury,
+        &mut fz,
+        left_ypad,
+        right_ypad,
+    );
+    *ll_x = im.llx;
+    *ll_y = im.lly;
+    if vi.multi_file_z <= 0 {
+        blank_z = ivw_fix_under_size_coords(
+            vi.full_zsize,
+            im.nz / vi.zbin,
+            &mut im.llz,
+            &mut im.urz,
+            &mut fz,
+            left_zpad,
+            right_zpad,
+        );
+        *ll_z = im.llz;
+    }
+
+    // Swap Y and Z padding if flipped.
+    if load_info.axis == 2 {
+        fz = *left_ypad;
+        *left_ypad = *left_zpad;
+        *left_zpad = fz;
+        fz = *right_ypad;
+        *right_ypad = *right_zpad;
+        *right_zpad = fz;
+    }
+    if blank_x || blank_y || blank_z { 1 } else { 0 }
 }
 
 /// `ivwGetFileStartPos` (`imodview.cpp:903`).
-pub unsafe fn ivw_get_file_start_pos(image: *mut ImodImageFile) {
-    unsafe {
-        S_SKIP_DUMPING.with(|s| s.set(std::env::var_os("IMOD_DUMP_FSCACHE").is_none()));
-        if S_SKIP_DUMPING.with(|s| s.get())
-            || (*image).fp.is_none()
-            || ((*image).file != IIFILE_MRC && (*image).file != IIFILE_RAW)
-        {
-            return;
-        }
-        S_START_POS.with(|s| s.set((*image).fp.clone().unwrap().tell() as i64));
+pub fn ivw_get_file_start_pos(image: &ImodImageFile) {
+    S_SKIP_DUMPING.with(|s| s.set(std::env::var_os("IMOD_DUMP_FSCACHE").is_none()));
+    if S_SKIP_DUMPING.with(|s| s.get())
+        || image.fp.is_none()
+        || (image.file != IIFILE_MRC && image.file != IIFILE_RAW)
+    {
+        return;
     }
+    S_START_POS.with(|s| s.set(image.fp.clone().unwrap().tell()));
 }
 
 /// `ivwDumpFileSysCache` (`imodview.cpp:914`).
-pub unsafe fn ivw_dump_file_sys_cache(image: *mut ImodImageFile) {
+pub fn ivw_dump_file_sys_cache(image: &ImodImageFile) {
+    if S_SKIP_DUMPING.with(|s| s.get())
+        || image.fp.is_none()
+        || (image.file != IIFILE_MRC && image.file != IIFILE_RAW)
+    {
+        return;
+    }
+    let filedes = image.fp.as_ref().unwrap().fileno();
+    let end = image.fp.clone().unwrap().tell();
+    let start = S_START_POS.with(|s| s.get());
+    if end <= start {
+        return;
+    }
+    let diff = end - start;
+    // POSIX owns the file-descriptor cache policy; all Rust image state above
+    // is borrowed and validated before crossing this OS boundary.
     unsafe {
-        if S_SKIP_DUMPING.with(|s| s.get())
-            || (*image).fp.is_none()
-            || ((*image).file != IIFILE_MRC && (*image).file != IIFILE_RAW)
-        {
-            return;
-        }
-        let filedes = (&(*image).fp).as_ref().unwrap().fileno();
-        let end = (*image).fp.clone().unwrap().tell() as i64;
-        let start = S_START_POS.with(|s| s.get());
-        if end <= start {
-            return;
-        }
-        let diff = end - start;
         libc::posix_fadvise(
             filedes,
             start as libc::off_t,
@@ -2069,19 +2175,29 @@ pub unsafe fn ivw_dump_file_sys_cache(image: *mut ImodImageFile) {
  */
 
 /// `ivwGetValue` (`imodview.cpp:942`).
-pub unsafe fn ivw_get_value(vi: *mut ImodView, x: i32, y: i32, z: i32) -> i32 {
+pub fn ivw_get_value(vi: &ImodView, x: i32, y: i32, z: i32) -> i32 {
     S_BEST_IVW_GET_VALUE.with(|f| f.get())(vi, x, y, z)
 }
 
 /// `idata_ivwGetValue` (`imodview.cpp:947`).
-fn idata_ivw_get_value(vi: *mut ImodView, x: i32, y: i32, z: i32) -> i32 {
+fn idata_ivw_get_value(vi: &ImodView, x: i32, y: i32, z: i32) -> i32 {
+    if vi.li.is_null() || vi.idata.is_null() {
+        return 0;
+    }
     unsafe {
         /* DNM: calling routine is responsible for limit checks */
-        if (*(*vi).li).axis == 3 {
-            *(*(*vi).idata.add(z as usize)).add((x + y * (*vi).xsize) as usize) as i32
+        if (*vi.li).axis == 3 {
+            let image = *vi.idata.add(z as usize);
+            if image.is_null() {
+                return 0;
+            }
+            *image.add((x + y * vi.xsize) as usize) as i32
         } else {
-            *(*(*vi).idata.add(y as usize)).add((x + ((*vi).zsize - 1 - z) * (*vi).xsize) as usize)
-                as i32
+            let image = *vi.idata.add(y as usize);
+            if image.is_null() {
+                return 0;
+            }
+            *image.add((x + (vi.zsize - 1 - z) * vi.xsize) as usize) as i32
         }
     }
 }
@@ -2090,64 +2206,80 @@ fn idata_ivw_get_value(vi: *mut ImodView, x: i32, y: i32, z: i32) -> i32 {
 and the only user of li->slope and offset */
 
 /// `cache_ivwGetValue` (`imodview.cpp:959`).
-fn cache_ivw_get_value(vi: *mut ImodView, x: i32, mut y: i32, mut z: i32) -> i32 {
-    unsafe {
-        /* find pixel in cache */
-        // Flip -> rotation: invert Z
-        if (*(*vi).li).axis == 2 {
-            z = (*vi).zsize - 1 - z;
-        }
-
-        /* If full cache and flipped, swap y and z */
-        if (*vi).full_cache_flipped != 0 {
-            let sl = z;
-            z = y;
-            y = sl;
-        }
-
-        /* get slice if it is loaded */
-        let sl =
-            (&(*vi).cache_index)[(z * (*vi).vm_tdim + (*vi).cur_time - (*vi).vm_tbase) as usize];
-        if sl < 0 {
-            return 0;
-        }
-
-        let temp_slice = &(&(*vi).vm_cache)[sl as usize];
-        let index = y as usize * temp_slice.sec.xsize as usize + x as usize;
-
-        /* DNM: calling routine is responsible for limit checks */
-        if (*vi).ushort_store != 0 {
-            let usimage = temp_slice.sec.data.as_ptr().cast::<u16>();
-            if temp_slice.sec.data.is_empty() {
-                return 0;
-            }
-            return *usimage.add(index) as i32;
-        }
-        let image = temp_slice.sec.data.as_ptr();
-        if temp_slice.sec.data.is_empty() {
-            return 0;
-        }
-        *image.add(index) as i32
+fn cache_ivw_get_value(vi: &ImodView, x: i32, mut y: i32, mut z: i32) -> i32 {
+    /* find pixel in cache */
+    // Flip -> rotation: invert Z
+    if vi.li.is_null() {
+        return 0;
     }
+    if unsafe { (*vi.li).axis } == 2 {
+        z = vi.zsize - 1 - z;
+    }
+
+    /* If full cache and flipped, swap y and z */
+    if vi.full_cache_flipped != 0 {
+        (y, z) = (z, y);
+    }
+
+    let Some(cache_key) = usize::try_from(z * vi.vm_tdim + vi.cur_time - vi.vm_tbase).ok() else {
+        return 0;
+    };
+    let Some(&sl) = vi.cache_index.get(cache_key) else {
+        return 0;
+    };
+    let Some(temp_slice) = usize::try_from(sl)
+        .ok()
+        .and_then(|index| vi.vm_cache.get(index))
+    else {
+        return 0;
+    };
+    let Some(index) = usize::try_from(y)
+        .ok()
+        .and_then(|row| row.checked_mul(temp_slice.sec.xsize as usize))
+        .and_then(|row| {
+            usize::try_from(x)
+                .ok()
+                .and_then(|column| row.checked_add(column))
+        })
+    else {
+        return 0;
+    };
+
+    /* DNM: calling routine is responsible for limit checks */
+    if vi.ushort_store != 0 {
+        let Some(offset) = index.checked_mul(std::mem::size_of::<u16>()) else {
+            return 0;
+        };
+        let Some(bytes) = temp_slice
+            .sec
+            .data
+            .get(offset..offset + std::mem::size_of::<u16>())
+        else {
+            return 0;
+        };
+        return u16::from_ne_bytes([bytes[0], bytes[1]]) as i32;
+    }
+    temp_slice.sec.data.get(index).copied().unwrap_or(0) as i32
 }
 
 /// `fake_ivwGetValue` (`imodview.cpp:1000`).
-fn fake_ivw_get_value(vi: *mut ImodView, x: i32, y: i32, z: i32) -> i32 {
+fn fake_ivw_get_value(vi: &ImodView, x: i32, y: i32, z: i32) -> i32 {
     0
 }
 
 /// `tiles_ivwGetValue` (`imodview.cpp:1005`).
-fn tiles_ivw_get_value(vi: *mut ImodView, x: i32, y: i32, z: i32) -> i32 {
-    unsafe { (*(*vi).pyr_cache).get_value_from_base_cache(x, y, z) }
+fn tiles_ivw_get_value(vi: &ImodView, x: i32, y: i32, z: i32) -> i32 {
+    if vi.pyr_cache.is_null() {
+        return 0;
+    }
+    unsafe { (*vi.pyr_cache).get_value_from_base_cache(x, y, z) }
 }
 
 /// `ivwUShortInRangeToByteMap` (`imodview.cpp:1012`).
-pub unsafe fn ivw_ushort_in_range_to_byte_map(vi: *mut ImodView) -> Vec<u8> {
-    unsafe {
-        let slope = (255. / ((*vi).range_high - (*vi).range_low) as f64) as f32;
-        let offset = -slope * (*vi).range_low as f32;
-        get_short_map(slope, offset, 0, 255, MRC_RAMP_LIN, 0, 0)
-    }
+pub fn ivw_ushort_in_range_to_byte_map(vi: &ImodView) -> Vec<u8> {
+    let slope = (255. / (vi.range_high - vi.range_low) as f64) as f32;
+    let offset = -slope * vi.range_low as f32;
+    get_short_map(slope, offset, 0, 255, MRC_RAMP_LIN, 0, 0)
 }
 
 /*
@@ -2157,7 +2289,10 @@ pub unsafe fn ivw_ushort_in_range_to_byte_map(vi: *mut ImodView) -> Vec<u8> {
 /// `idata_GetValue` (`imodview.cpp:1043`).
 fn idata_get_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[z as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add((x + y * S_IMDATAXSIZE.with(|s| s.get())) as usize) as i32
     }
 }
@@ -2165,7 +2300,10 @@ fn idata_get_value(x: i32, y: i32, z: i32) -> i32 {
 /// `idata_BigGetValue` (`imodview.cpp:1048`).
 fn idata_big_get_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[z as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(x as usize + y as usize * S_IMDATAXSIZE.with(|s| s.get()) as usize) as i32
     }
 }
@@ -2173,7 +2311,10 @@ fn idata_big_get_value(x: i32, y: i32, z: i32) -> i32 {
 /// `flipped_GetValue` (`imodview.cpp:1053`).
 fn flipped_get_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[y as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(
             (x + S_XZSIZE_FAC.with(|s| s.get()) - (z * S_IMDATAXSIZE.with(|s| s.get()))) as usize,
         ) as i32
@@ -2183,7 +2324,10 @@ fn flipped_get_value(x: i32, y: i32, z: i32) -> i32 {
 /// `flipped_BigGetValue` (`imodview.cpp:1058`).
 fn flipped_big_get_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[y as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(
             x as usize + S_XZSIZE_BIG_FAC.with(|s| s.get())
                 - (z as usize * S_IMDATAXSIZE.with(|s| s.get()) as usize),
@@ -2194,10 +2338,10 @@ fn flipped_big_get_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_GetValue` (`imodview.cpp:1063`).
 fn cache_get_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[z as usize]);
         *imdata.add((x + y * vmdataxsize) as usize) as i32
     }
@@ -2206,10 +2350,10 @@ fn cache_get_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_BigGetValue` (`imodview.cpp:1070`).
 fn cache_big_get_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[z as usize]);
         *imdata.add(x as usize + y as usize * vmdataxsize as usize) as i32
     }
@@ -2218,10 +2362,10 @@ fn cache_big_get_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_GetFlipped` (`imodview.cpp:1077`).
 fn cache_get_flipped(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[y as usize]);
         *imdata.add((x + (S_ZSIZE_FAC.with(|s| s.get()) - z) * vmdataxsize) as usize) as i32
     }
@@ -2230,10 +2374,10 @@ fn cache_get_flipped(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_BigGetFlipped` (`imodview.cpp:1084`).
 fn cache_big_get_flipped(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[y as usize]);
         *imdata
             .add(x as usize + (S_ZSIZE_FAC.with(|s| s.get()) - z) as usize * vmdataxsize as usize)
@@ -2244,7 +2388,10 @@ fn cache_big_get_flipped(x: i32, y: i32, z: i32) -> i32 {
 /// `idata_ChanValue` (`imodview.cpp:1091`).
 fn idata_chan_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[z as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(
             (3 * (x + y * S_IMDATAXSIZE.with(|s| s.get())) + S_RGB_CHAN.with(|s| s.get())) as usize,
         ) as i32
@@ -2254,7 +2401,10 @@ fn idata_chan_value(x: i32, y: i32, z: i32) -> i32 {
 /// `idata_BigChanValue` (`imodview.cpp:1096`).
 fn idata_big_chan_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[z as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(
             3 * (x as usize + y as usize * S_IMDATAXSIZE.with(|s| s.get()) as usize)
                 + S_RGB_CHAN.with(|s| s.get()) as usize,
@@ -2265,7 +2415,10 @@ fn idata_big_chan_value(x: i32, y: i32, z: i32) -> i32 {
 /// `flipped_ChanValue` (`imodview.cpp:1101`).
 fn flipped_chan_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[y as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(
             (3 * (x + S_XZSIZE_FAC.with(|s| s.get()) - (z * S_IMDATAXSIZE.with(|s| s.get())))
                 + S_RGB_CHAN.with(|s| s.get())) as usize,
@@ -2276,7 +2429,10 @@ fn flipped_chan_value(x: i32, y: i32, z: i32) -> i32 {
 /// `flipped_BigChanValue` (`imodview.cpp:1106`).
 fn flipped_big_chan_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
+        let imdata = S_IMDATA_STORAGE
+            .with(|storage| storage.borrow()[y as usize])
+            .expect("fast access has a loaded plane")
+            .as_ptr();
         *imdata.add(
             3 * (x as usize + S_XZSIZE_BIG_FAC.with(|s| s.get())
                 - (z as usize * S_IMDATAXSIZE.with(|s| s.get()) as usize))
@@ -2288,10 +2444,10 @@ fn flipped_big_chan_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_ChanValue` (`imodview.cpp:1111`).
 fn cache_chan_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[z as usize]);
         *imdata.add((3 * (x + y * vmdataxsize) + S_RGB_CHAN.with(|s| s.get())) as usize) as i32
     }
@@ -2300,10 +2456,10 @@ fn cache_chan_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_BigChanValue` (`imodview.cpp:1118`).
 fn cache_big_chan_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[z as usize]);
         *imdata.add(
             3 * (x as usize + y as usize * vmdataxsize as usize)
@@ -2315,10 +2471,10 @@ fn cache_big_chan_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_ChanFlipped` (`imodview.cpp:1125`).
 fn cache_chan_flipped(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[y as usize]);
         *imdata.add(
             (3 * (x + (S_ZSIZE_FAC.with(|s| s.get()) - z) * vmdataxsize)
@@ -2330,10 +2486,10 @@ fn cache_chan_flipped(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_BigChanFlipped` (`imodview.cpp:1132`).
 fn cache_big_chan_flipped(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]);
-        if imdata.is_null() {
+        let Some(imdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let imdata = imdata.as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[y as usize]);
         *imdata.add(
             3 * x as usize
@@ -2348,7 +2504,9 @@ fn idata_get_us_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
         let usimdata = S_IMDATA_STORAGE
             .with(|storage| storage.borrow()[z as usize])
-            .cast::<u16>();
+            .expect("fast access has a loaded plane")
+            .cast::<u16>()
+            .as_ptr();
         *usimdata.add((x + y * S_IMDATAXSIZE.with(|s| s.get())) as usize) as i32
     }
 }
@@ -2358,7 +2516,9 @@ fn idata_big_get_us_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
         let usimdata = S_IMDATA_STORAGE
             .with(|storage| storage.borrow()[z as usize])
-            .cast::<u16>();
+            .expect("fast access has a loaded plane")
+            .cast::<u16>()
+            .as_ptr();
         *usimdata.add(x as usize + y as usize * S_IMDATAXSIZE.with(|s| s.get()) as usize) as i32
     }
 }
@@ -2368,7 +2528,9 @@ fn flipped_get_us_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
         let usimdata = S_IMDATA_STORAGE
             .with(|storage| storage.borrow()[y as usize])
-            .cast::<u16>();
+            .expect("fast access has a loaded plane")
+            .cast::<u16>()
+            .as_ptr();
         *usimdata.add(
             (x + S_XZSIZE_FAC.with(|s| s.get()) - (z * S_IMDATAXSIZE.with(|s| s.get()))) as usize,
         ) as i32
@@ -2380,7 +2542,9 @@ fn flipped_big_get_us_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
         let usimdata = S_IMDATA_STORAGE
             .with(|storage| storage.borrow()[y as usize])
-            .cast::<u16>();
+            .expect("fast access has a loaded plane")
+            .cast::<u16>()
+            .as_ptr();
         *usimdata.add(
             x as usize + S_XZSIZE_BIG_FAC.with(|s| s.get())
                 - (z as usize * S_IMDATAXSIZE.with(|s| s.get()) as usize),
@@ -2391,12 +2555,10 @@ fn flipped_big_get_us_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_GetUSValue` (`imodview.cpp:1159`).
 fn cache_get_us_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let usimdata = S_IMDATA_STORAGE
-            .with(|storage| storage.borrow()[z as usize])
-            .cast::<u16>();
-        if usimdata.is_null() {
+        let Some(usimdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let usimdata = usimdata.cast::<u16>().as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[z as usize]);
         *usimdata.add((x + y * vmdataxsize) as usize) as i32
     }
@@ -2405,12 +2567,10 @@ fn cache_get_us_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_BigGetUSValue` (`imodview.cpp:1166`).
 fn cache_big_get_us_value(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let usimdata = S_IMDATA_STORAGE
-            .with(|storage| storage.borrow()[z as usize])
-            .cast::<u16>();
-        if usimdata.is_null() {
+        let Some(usimdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[z as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let usimdata = usimdata.cast::<u16>().as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[z as usize]);
         *usimdata.add(x as usize + y as usize * vmdataxsize as usize) as i32
     }
@@ -2419,12 +2579,10 @@ fn cache_big_get_us_value(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_GetUSFlipped` (`imodview.cpp:1173`).
 fn cache_get_us_flipped(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let usimdata = S_IMDATA_STORAGE
-            .with(|storage| storage.borrow()[y as usize])
-            .cast::<u16>();
-        if usimdata.is_null() {
+        let Some(usimdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let usimdata = usimdata.cast::<u16>().as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[y as usize]);
         *usimdata.add((x + (S_ZSIZE_FAC.with(|s| s.get()) - z) * vmdataxsize) as usize) as i32
     }
@@ -2433,12 +2591,10 @@ fn cache_get_us_flipped(x: i32, y: i32, z: i32) -> i32 {
 /// `cache_BigGetUSFlipped` (`imodview.cpp:1180`).
 fn cache_big_get_us_flipped(x: i32, y: i32, z: i32) -> i32 {
     unsafe {
-        let usimdata = S_IMDATA_STORAGE
-            .with(|storage| storage.borrow()[y as usize])
-            .cast::<u16>();
-        if usimdata.is_null() {
+        let Some(usimdata) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[y as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let usimdata = usimdata.cast::<u16>().as_ptr();
         let vmdataxsize = S_VMDATAXSIZE_STORAGE.with(|storage| storage.borrow()[y as usize]);
         *usimdata
             .add(x as usize + (S_ZSIZE_FAC.with(|s| s.get()) - z) as usize * vmdataxsize as usize)
@@ -2464,10 +2620,10 @@ fn tilecache_get_value(x: i32, y: i32, z: i32) -> i32 {
         let mut ytile = (y + y_off) / S_FAST_TILE_YDELTA.with(|s| s.get());
         ytile = ytile.clamp(0, num_y - 1);
         let index = xtile + (ytile + z * num_y) * num_x;
-        let data = S_IMDATA_STORAGE.with(|storage| storage.borrow()[index as usize]);
-        if data.is_null() {
+        let Some(data) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[index as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let data = data.as_ptr();
         let x_in_tile = if xtile != 0 {
             (x + x_off) - xtile * S_FAST_TILE_XDELTA.with(|s| s.get())
         } else {
@@ -2495,12 +2651,10 @@ fn tilecache_get_us_value(x: i32, y: i32, z: i32) -> i32 {
         let mut ytile = (y + y_off) / S_FAST_TILE_YDELTA.with(|s| s.get());
         ytile = ytile.clamp(0, num_y - 1);
         let index = xtile + (ytile + z * num_y) * num_x;
-        let data = S_IMDATA_STORAGE
-            .with(|storage| storage.borrow()[index as usize])
-            .cast::<u16>();
-        if data.is_null() {
+        let Some(data) = S_IMDATA_STORAGE.with(|storage| storage.borrow()[index as usize]) else {
             return S_VMNULLVALUE.with(|s| s.get());
-        }
+        };
+        let data = data.cast::<u16>().as_ptr();
         let x_in_tile = if xtile != 0 {
             (x + x_off) - xtile * S_FAST_TILE_XDELTA.with(|s| s.get())
         } else {
@@ -2522,7 +2676,7 @@ fn setup_fast_arrays(size: i32, do_xsize: i32) -> i32 {
     if S_IMDATA_MAX.with(|s| s.get()) < size {
         S_IMDATA_STORAGE.with(|storage| {
             let mut storage = storage.borrow_mut();
-            storage.resize(size as usize, ptr::null_mut());
+            storage.resize(size as usize, None);
         });
         if do_xsize != 0 {
             S_VMDATAXSIZE_STORAGE.with(|storage| {
@@ -2591,10 +2745,11 @@ pub unsafe fn ivw_setup_fast_access(
                                 [(iz * (*vi).vm_tdim + time - (*vi).vm_tbase) as usize]
                         };
                         if i < 0 {
-                            imdata[iz as usize] = ptr::null_mut();
+                            imdata[iz as usize] = None;
                         } else {
-                            imdata[iz as usize] =
-                                (&mut (*vi).vm_cache)[i as usize].sec.data.as_mut_ptr();
+                            imdata[iz as usize] = NonNull::new(
+                                (&mut (*vi).vm_cache)[i as usize].sec.data.as_mut_ptr(),
+                            );
                             vmdataxsize[iz as usize] = (&(*vi).vm_cache)[i as usize].sec.xsize;
                             *cache_sum += iz;
                         }
@@ -2663,7 +2818,7 @@ pub unsafe fn ivw_setup_fast_access(
             S_IMDATA_STORAGE.with(|storage| {
                 let mut imdata = storage.borrow_mut();
                 for i in 0..size {
-                    imdata[i as usize] = *(*vi).idata.add(i as usize);
+                    imdata[i as usize] = NonNull::new(*(*vi).idata.add(i as usize));
                 }
             });
             S_IMDATAXSIZE.with(|s| s.set((*vi).xsize));
@@ -2728,7 +2883,7 @@ pub unsafe fn ivw_setup_fast_access(
             }
         }
         if !out_imdata.is_null() {
-            *out_imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow_mut().as_mut_ptr());
+            *out_imdata = S_IMDATA_STORAGE.with(|storage| storage.borrow_mut().as_mut_ptr().cast());
         }
         0
     }
@@ -2765,7 +2920,7 @@ pub unsafe fn ivw_setup_fast_tile_access(
                     n.pyr_cache_setup_fast_access(
                         vi,
                         cache_ind,
-                        image_storage.borrow_mut().as_mut_ptr(),
+                        image_storage.borrow_mut().as_mut_ptr().cast(),
                         xsize_storage.borrow_mut().as_mut_ptr(),
                         cache_sum,
                         &mut x_delta,
@@ -2796,96 +2951,91 @@ pub unsafe fn ivw_setup_fast_tile_access(
 /* CACHE INITIALIZATION ROUTINES */
 
 /// `ivwFreeCache` (`imodview.cpp:1375`).
-pub unsafe fn ivw_free_cache(vi: *mut ImodView) {
-    unsafe {
-        (*vi).vm_cache.clear();
-        (*vi).cache_index.clear();
-        (*vi).blank_line.clear();
-    }
+pub fn ivw_free_cache(vi: &mut ImodView) {
+    vi.vm_cache.clear();
+    vi.cache_index.clear();
+    vi.blank_line.clear();
 }
 
 /// `ivwFlushCache` (`imodview.cpp:1391`).
-pub unsafe fn ivw_flush_cache(vi: *mut ImodView, time: i32) {
-    unsafe {
-        let mut zsize = (*(*vi).li).zmax - (*(*vi).li).zmin + 1;
-        if (*(*vi).li).axis == 2 {
-            zsize = (*(*vi).li).ymax - (*(*vi).li).ymin + 1;
-        }
+pub fn ivw_flush_cache(vi: &mut ImodView, load_info: Option<&LoadInfo>, time: i32) {
+    let Some(load_info) = load_info else {
+        return;
+    };
+    let mut zsize = load_info.zmax - load_info.zmin + 1;
+    if load_info.axis == 2 {
+        zsize = load_info.ymax - load_info.ymin + 1;
+    }
 
-        for slice in &mut (*vi).vm_cache {
-            if time < 0 || slice.ct == time {
-                slice.cz = -1;
-                slice.ct = 0;
-                slice.used = -1;
-            }
+    for slice in &mut vi.vm_cache {
+        if time < 0 || slice.ct == time {
+            slice.cz = -1;
+            slice.ct = 0;
+            slice.used = -1;
         }
-        let tst;
-        let tnd;
-        if time < 0 {
-            (*vi).vm_count = 0;
-            tst = if (*vi).num_times != 0 { 1 } else { 0 };
-            tnd = if (*vi).num_times != 0 {
-                (*vi).num_times
-            } else {
-                0
-            };
-        } else {
-            tst = time;
-            tnd = time;
-        }
+    }
+    let tst;
+    let tnd;
+    if time < 0 {
+        vi.vm_count = 0;
+        tst = if vi.num_times != 0 { 1 } else { 0 };
+        tnd = if vi.num_times != 0 { vi.num_times } else { 0 };
+    } else {
+        tst = time;
+        tnd = time;
+    }
 
-        for t in tst..=tnd {
-            for i in 0..zsize {
-                (&mut (*vi).cache_index)[(i * (*vi).vm_tdim + t - (*vi).vm_tbase) as usize] = -1;
+    for t in tst..=tnd {
+        for i in 0..zsize {
+            let index = i * vi.vm_tdim + t - vi.vm_tbase;
+            if let Some(value) = usize::try_from(index)
+                .ok()
+                .and_then(|index| vi.cache_index.get_mut(index))
+            {
+                *value = -1;
             }
         }
     }
 }
 
 /// `ivwInitCache` (`imodview.cpp:1420`).
-pub unsafe fn ivw_init_cache(vi: *mut ImodView) -> i32 {
-    unsafe {
-        let xsize = (*(*vi).li).xmax - (*(*vi).li).xmin + 1;
-        let mut ysize = (*(*vi).li).ymax - (*(*vi).li).ymin + 1;
-        let mut zsize = (*(*vi).li).zmax - (*(*vi).li).zmin + 1;
+pub fn ivw_init_cache(vi: &mut ImodView, load_info: &LoadInfo) -> i32 {
+    let xsize = load_info.xmax - load_info.xmin + 1;
+    let mut ysize = load_info.ymax - load_info.ymin + 1;
+    let mut zsize = load_info.zmax - load_info.zmin + 1;
 
-        (*vi).vm_tdim = if (*vi).num_times != 0 {
-            (*vi).num_times
-        } else {
-            1
-        };
-        (*vi).vm_tbase = if (*vi).num_times != 0 { 1 } else { 0 };
+    vi.vm_tdim = if vi.num_times != 0 { vi.num_times } else { 1 };
+    vi.vm_tbase = if vi.num_times != 0 { 1 } else { 0 };
 
-        if (*(*vi).li).axis == 2 {
-            ysize = (*(*vi).li).zmax - (*(*vi).li).zmin + 1;
-            zsize = (*(*vi).li).ymax - (*(*vi).li).ymin + 1;
-        }
-
-        let pixels = xsize * ivw_get_pixel_bytes((*vi).raw_image_store as i32);
-        let Some(index_len) = ((*vi).vm_tdim as usize).checked_mul(zsize as usize) else {
-            return 9;
-        };
-        let mut cache = Vec::new();
-        if cache.try_reserve_exact((*vi).vm_size as usize).is_err() {
-            return 9;
-        }
-        for _ in 0..(*vi).vm_size {
-            let Some(sec) = slice_create(xsize, ysize, (*vi).raw_image_store as i32) else {
-                return 10;
-            };
-            cache.push(IvwSlice {
-                cz: -1,
-                ct: 0,
-                used: -1,
-                sec,
-            });
-        }
-        (*vi).vm_cache = cache;
-        (*vi).cache_index = vec![-1; index_len];
-        (*vi).blank_line = vec![0; pixels as usize];
-        ivw_flush_cache(vi, -1);
-        0
+    if load_info.axis == 2 {
+        ysize = load_info.zmax - load_info.zmin + 1;
+        zsize = load_info.ymax - load_info.ymin + 1;
     }
+
+    let pixels = xsize * ivw_get_pixel_bytes(vi.raw_image_store as i32);
+    let Some(index_len) = (vi.vm_tdim as usize).checked_mul(zsize as usize) else {
+        return 9;
+    };
+    let mut cache = Vec::new();
+    if cache.try_reserve_exact(vi.vm_size as usize).is_err() {
+        return 9;
+    }
+    for _ in 0..vi.vm_size {
+        let Some(sec) = slice_create(xsize, ysize, vi.raw_image_store as i32) else {
+            return 10;
+        };
+        cache.push(IvwSlice {
+            cz: -1,
+            ct: 0,
+            used: -1,
+            sec,
+        });
+    }
+    vi.vm_cache = cache;
+    vi.cache_index = vec![-1; index_len];
+    vi.blank_line = vec![0; pixels as usize];
+    ivw_flush_cache(vi, Some(load_info), -1);
+    0
 }
 
 /// `ivwSetCacheSize` (`imodview.cpp:1475`).
@@ -3022,7 +3172,9 @@ pub unsafe fn ivw_flip(vi: *mut ImodView) -> i32 {
         let mut cache_full = 1;
         if (*vi).vm_size != 0 && (*vi).full_cache_flipped == 0 {
             for i in 0..(*vi).vm_tdim * (*vi).zsize {
-                if (&(*vi).cache_index)[i as usize] < 0 && ivw_plist_blank(vi, i) == 0 {
+                if (&(*vi).cache_index)[i as usize] < 0
+                    && ivw_plist_blank((*vi).li.as_ref(), i) == 0
+                {
                     cache_full = 0;
                     break;
                 }
@@ -3066,7 +3218,7 @@ pub unsafe fn ivw_flip(vi: *mut ImodView) -> i32 {
                 (*(*vi).image).axis = (*(*vi).li).axis;
             }
 
-            ivw_free_cache(vi);
+            ivw_free_cache(&mut *vi);
             /* DNM: if the cache size equalled old # of Z planes, set it to new
             number of planes, including ones for each file
             Otherwise, set it to occupy same amount of memory, rounding up
@@ -3084,7 +3236,7 @@ pub unsafe fn ivw_flip(vi: *mut ImodView) -> i32 {
                     (*vi).vm_size = 1;
                 }
             }
-            ivw_init_cache(vi);
+            ivw_init_cache(&mut *vi, &*(*vi).li);
         }
 
         //vi->xsize = nx;
@@ -3101,7 +3253,9 @@ pub unsafe fn ivw_flip(vi: *mut ImodView) -> i32 {
 
         // Rotate here instead of flipping
         if (*vi).doing_initial_load == 0 {
-            ivw_flip_model(vi, true);
+            if let (Some(model), Some(load_info)) = ((*vi).imod.as_mut(), (*vi).li.as_ref()) {
+                ivw_flip_model(model, Some(load_info), true);
+            }
         }
         with_boundary(|n| n.iproc_rethink(vi));
         with_boundary(|n| n.autox_newsize(vi));
@@ -3192,13 +3346,11 @@ pub fn ivw_get_location_point(in_imod_view: &ImodView, out_point: &mut Ipoint) {
 }
 
 /// `ivwGetTime` (`imodview.cpp:1742`).
-pub unsafe fn ivw_get_time(vi: *mut ImodView, time: Option<&mut i32>) -> i32 {
-    unsafe {
-        if let Some(time) = time {
-            *time = (*vi).cur_time;
-        }
-        (*vi).num_times
+pub fn ivw_get_time(vi: &ImodView, time: Option<&mut i32>) -> i32 {
+    if let Some(time) = time {
+        *time = vi.cur_time;
     }
+    vi.num_times
 }
 
 /// `ivwSetTime` (`imodview.cpp:1753`); set the current time index.
@@ -3218,7 +3370,13 @@ pub fn ivw_set_time(vi: &mut ImodView, time: i32) {
 
         // keep file open for volume stack
         if vi.cur_time > 0 && vi.fake_image == 0 && vi.volume_stack == 0 {
-            ivw_close(vi, vi.image_list.add((vi.cur_time - 1) as usize));
+            let current_image = vi
+                .image_list_storage
+                .get_mut((vi.cur_time - 1) as usize)
+                .map(|image| image as *mut ImodImageFile);
+            if let Some(current_image) = current_image {
+                ivw_close(vi, current_image);
+            }
         }
 
         vi.cur_time = time;
@@ -3230,19 +3388,29 @@ pub fn ivw_set_time(vi: &mut ImodView, time: i32) {
         }
 
         if vi.fake_image == 0 {
-            vi.image = vi.image_list.add((vi.cur_time - 1) as usize);
-            vi.hdr = vi.image;
-            if vi.ushort_store != 0 {
-                let (low, high) = (vi.range_low, vi.range_high);
-                let (smin, smax) = ((*vi.image).smin, (*vi.image).smax);
-                let is_float = (*vi.image).type_ == IITYPE_FLOAT;
-                with_boundary(|n| n.info_widget_set_lh_sliders(low, high, smin, smax, is_float));
-            }
+            let image_index = (vi.cur_time - 1) as usize;
+            if let Some(image) = vi.image_list_storage.get_mut(image_index) {
+                let image_ptr = image as *mut ImodImageFile;
+                let slider_values = (vi.ushort_store != 0).then_some((
+                    vi.range_low,
+                    vi.range_high,
+                    image.smin,
+                    image.smax,
+                    image.type_ == IITYPE_FLOAT,
+                ));
 
-            // ivwSetScale(vi);
+                // ivwSetScale(vi);
+                if vi.volume_stack == 0 {
+                    ivw_reopen(image);
+                }
+                vi.image = image_ptr;
+                vi.hdr = image_ptr;
 
-            if vi.volume_stack == 0 {
-                ivw_reopen(vi.image);
+                if let Some((low, high, smin, smax, is_float)) = slider_values {
+                    with_boundary(|n| {
+                        n.info_widget_set_lh_sliders(low, high, smin, smax, is_float)
+                    });
+                }
             }
         }
         /* DNM: update scale window */
@@ -3256,37 +3424,25 @@ pub fn ivw_set_time(vi: &mut ImodView, time: i32) {
 }
 
 /// `ivwGetTimeIndexLabel` (`imodview.cpp:1794`).
-pub unsafe fn ivw_get_time_index_label<'a>(in_imod_view: *mut ImodView, in_index: i32) -> &'a [u8] {
-    unsafe {
-        if in_imod_view.is_null() {
-            return b"";
-        }
-        if in_index < 1 {
-            return b"";
-        }
-        if in_index > (*in_imod_view).num_times {
-            return b"";
-        }
-        if (*in_imod_view).fake_image != 0 {
-            return b"";
-        }
-        // The source returns the `char *` itself; a NULL `description` is the
-        // empty borrow the four guards above already return.
-        (*(*in_imod_view).image_list.add((in_index - 1) as usize))
-            .description
-            .as_deref()
-            .unwrap_or(b"")
+pub fn ivw_get_time_index_label(in_imod_view: &ImodView, in_index: i32) -> &[u8] {
+    if in_index < 1 || in_index > in_imod_view.num_times || in_imod_view.fake_image != 0 {
+        return b"";
     }
+    // The image-list backing is owned by the view; an absent source
+    // `description` remains an empty borrowed label.
+    in_imod_view
+        .image_list_storage
+        .get((in_index - 1) as usize)
+        .and_then(|image| image.description.as_deref())
+        .unwrap_or(b"")
 }
 
 /// `ivwGetTimeLabel` (`imodview.cpp:1803`).
-pub unsafe fn ivw_get_time_label<'a>(in_imod_view: *mut ImodView) -> &'a [u8] {
-    unsafe {
-        (*(*in_imod_view).image)
-            .description
-            .as_deref()
-            .unwrap_or(b"")
-    }
+///
+/// Time labels are owned by `image_list_storage`; the legacy `image` cursor
+/// merely mirrors the selected element for image-I/O and UI callbacks.
+pub fn ivw_get_time_label(in_imod_view: &ImodView) -> &[u8] {
+    ivw_get_time_index_label(in_imod_view, in_imod_view.cur_time)
 }
 
 /// `ivwGetMaxTime` (`imodview.cpp:1808`).
@@ -3334,15 +3490,18 @@ pub fn imod_setxyzmouse() -> i32 {
 /// `imod_redraw` (`imodview.cpp:1854`).
 pub unsafe fn imod_redraw(vw: *mut ImodView) -> i32 {
     unsafe {
-        let imod = ivw_get_model(vw);
+        let Some(imod) = ivw_get_model(vw.as_ref()) else {
+            with_boundary(|n| n.imod_draw(vw, IMOD_DRAW_MOD));
+            return 1;
+        };
 
-        let index = (*imod).cindex.point;
+        let index = imod.cindex.point;
         if index < 0 {
             with_boundary(|n| n.imod_draw(vw, IMOD_DRAW_MOD));
             return 1;
         }
 
-        let Some(cont) = imod_contour_get(Some(&*imod)) else {
+        let Some(cont) = imod_contour_get(Some(imod)) else {
             with_boundary(|n| n.imod_draw(vw, IMOD_DRAW_MOD));
             return 1;
         };
@@ -3353,7 +3512,7 @@ pub unsafe fn imod_redraw(vw: *mut ImodView) -> i32 {
 
         let time = cont.time;
         let point = cont.pts[index as usize];
-        let obj = imod_object_get(Some(&*imod));
+        let obj = imod_object_get(Some(imod));
         if obj.is_some_and(|obj| iobj_flag_time(obj) != 0) {
             ivw_set_time(&mut *vw, time);
         }
@@ -3390,7 +3549,7 @@ unsafe fn ivw_read_binned_point(
         let mut sum = 0.;
         let mut nsum = 0;
         if (*vi).xybin * (*vi).zbin == 1 && (*(*vi).image).mirror_fft == 0 {
-            return ii_read_point(image, cx, cy, cz);
+            return ii_read_point(&mut *image, cx, cy, cz);
         }
         for iz in 0..(*vi).zbin {
             let ubz = cz * (*vi).zbin + iz;
@@ -3407,10 +3566,10 @@ unsafe fn ivw_read_binned_point(
                                     ubx,
                                     uby,
                                 );
-                                sum += ii_read_point(image, mirx, miry, ubz) as f64;
+                                sum += ii_read_point(&mut *image, mirx, miry, ubz) as f64;
                                 nsum += 1;
                             } else if ubx < (*image).nx {
-                                sum += ii_read_point(image, ubx, uby, ubz) as f64;
+                                sum += ii_read_point(&mut *image, ubx, uby, ubz) as f64;
                                 nsum += 1;
                             }
                         }
@@ -3443,14 +3602,14 @@ pub unsafe fn ivw_get_file_value(vi: *mut ImodView, cx: i32, cy: i32, mut cz: i3
             || (*(*vi).image).tiff_compression == IICOMPRESSION_EER_8BIT
         {
             if (*vi).raw_image_store == 0 {
-                return ivw_get_value(vi, cx, cy, cz) as f32;
+                return ivw_get_value(&*vi, cx, cy, cz) as f32;
             }
             return 0.0f32;
         }
         if (*(*vi).li).axis == 2 {
             cz = (*vi).zsize - 1 - cz;
         }
-        cz = ivw_adjusted_z_if_vol_stack(vi, cz);
+        cz = ivw_adjusted_z_if_vol_stack(&*vi, cz);
 
         // For a tile cache, translate the coordinates and read it
         if !(*vi).pyr_cache.is_null() {
@@ -3463,7 +3622,9 @@ pub unsafe fn ivw_get_file_value(vi: *mut ImodView, cx: i32, cy: i32, mut cz: i3
         if !(*vi).li.is_null() {
             /* get to index values in file from screen index values */
             if ivw_get_image_padding(
-                vi,
+                &*vi,
+                (*vi).image.as_ref(),
+                (*vi).li.as_ref(),
                 cy,
                 cz,
                 (*vi).cur_time,
@@ -3505,7 +3666,7 @@ pub unsafe fn ivw_get_file_value(vi: *mut ImodView, cx: i32, cy: i32, mut cz: i3
                     ivw_close(vi, (*vi).image);
                     (*vi).image = (*vi).image_list.add(fz as usize);
                     (*vi).hdr = (*vi).image;
-                    ivw_reopen((*vi).image);
+                    ivw_reopen(&mut *(*vi).image);
                 }
                 fz = 0;
             }
@@ -3543,47 +3704,102 @@ pub unsafe fn ivw_get_file_value(vi: *mut ImodView, cx: i32, cy: i32, mut cz: i3
 
 /// `memreccpy` (`imodview.cpp:2029`); copy a portion of one buffer into another.
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn memreccpy(
-    mut tb: *mut u8,
-    mut fb: *mut u8,
-    mut xcpy: i32,
+pub fn memreccpy(
+    tb: &mut [u8],
+    fb: &[u8],
+    xcpy: i32,
     ycpy: i32,
     psize: i32,
-    mut tskip: i32,
+    tskip: i32,
     tox: i32,
     toy: i32,
-    mut fskip: i32,
+    fskip: i32,
     fox: i32,
     foy: i32,
 ) {
-    unsafe {
-        /* initialize both to and from buffers. */
-        tb = tb.offset((tox * psize) as isize);
-        fb = fb.offset((fox * psize) as isize);
-        tb = tb.offset((((xcpy + tskip) as usize * toy as usize) * psize as usize) as isize);
-        fb = fb.offset((((xcpy + fskip) as usize * foy as usize) * psize as usize) as isize);
+    if xcpy < 0
+        || ycpy < 0
+        || psize < 0
+        || tskip < 0
+        || fskip < 0
+        || tox < 0
+        || toy < 0
+        || fox < 0
+        || foy < 0
+    {
+        return;
+    }
+    let Some(width) = (xcpy as usize).checked_mul(psize as usize) else {
+        return;
+    };
+    let Some(target_stride) = (xcpy as usize)
+        .checked_add(tskip as usize)
+        .and_then(|pixels| pixels.checked_mul(psize as usize))
+    else {
+        return;
+    };
+    let Some(source_stride) = (xcpy as usize)
+        .checked_add(fskip as usize)
+        .and_then(|pixels| pixels.checked_mul(psize as usize))
+    else {
+        return;
+    };
+    let Some(target_start) = (tox as usize)
+        .checked_mul(psize as usize)
+        .and_then(|offset| {
+            (toy as usize)
+                .checked_mul(target_stride)
+                .and_then(|row| offset.checked_add(row))
+        })
+    else {
+        return;
+    };
+    let Some(source_start) = (fox as usize)
+        .checked_mul(psize as usize)
+        .and_then(|offset| {
+            (foy as usize)
+                .checked_mul(source_stride)
+                .and_then(|row| offset.checked_add(row))
+        })
+    else {
+        return;
+    };
 
-        let my = ycpy as u32; /* set max y value */
-        xcpy *= psize;
-        tskip *= psize;
-        fskip *= psize;
-        tskip += xcpy;
-        fskip += xcpy;
-        for _ in 0..my {
-            core::slice::from_raw_parts_mut(tb, xcpy as usize)
-                .copy_from_slice(core::slice::from_raw_parts(fb, xcpy as usize));
-            tb = tb.offset(tskip as isize);
-            fb = fb.offset(fskip as isize);
-        }
+    for row in 0..ycpy as usize {
+        let Some(target_offset) = row
+            .checked_mul(target_stride)
+            .and_then(|offset| target_start.checked_add(offset))
+        else {
+            return;
+        };
+        let Some(source_offset) = row
+            .checked_mul(source_stride)
+            .and_then(|offset| source_start.checked_add(offset))
+        else {
+            return;
+        };
+        let Some(target_end) = target_offset.checked_add(width) else {
+            return;
+        };
+        let Some(source_end) = source_offset.checked_add(width) else {
+            return;
+        };
+        let (Some(target), Some(source)) = (
+            tb.get_mut(target_offset..target_end),
+            fb.get(source_offset..source_end),
+        ) else {
+            return;
+        };
+        target.copy_from_slice(source);
     }
 }
 
 /// `memLineCpy` (`imodview.cpp:2064`).
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn mem_line_cpy(
-    tlines: *mut *mut u8,
-    mut fb: *mut u8,
-    mut xcpy: i32,
+pub fn mem_line_cpy(
+    tlines: &mut [&mut [u8]],
+    fb: &[u8],
+    xcpy: i32,
     ycpy: i32,
     psize: i32,
     tox: i32,
@@ -3592,46 +3808,92 @@ pub unsafe fn mem_line_cpy(
     fox: i32,
     foy: i32,
 ) {
-    unsafe {
-        /* initialize from buffer pointer */
-        fb = fb.offset(((fox + fxsize * foy) * psize) as isize);
-        xcpy *= psize;
-        for y in 0..ycpy {
-            let tb = (*tlines.add((y + toy) as usize)).offset((tox * psize) as isize);
-            core::slice::from_raw_parts_mut(tb, xcpy as usize)
-                .copy_from_slice(core::slice::from_raw_parts(fb, xcpy as usize));
-            fb = fb.offset((fxsize * psize) as isize);
-        }
+    if xcpy < 0 || ycpy < 0 || psize < 0 || tox < 0 || toy < 0 || fxsize < 0 || fox < 0 || foy < 0 {
+        return;
+    }
+    let Some(width) = (xcpy as usize).checked_mul(psize as usize) else {
+        return;
+    };
+    let Some(source_stride) = (fxsize as usize).checked_mul(psize as usize) else {
+        return;
+    };
+    let Some(source_start) = (fox as usize)
+        .checked_mul(psize as usize)
+        .and_then(|offset| {
+            (foy as usize)
+                .checked_mul(source_stride)
+                .and_then(|row| offset.checked_add(row))
+        })
+    else {
+        return;
+    };
+    let Some(target_start) = (tox as usize).checked_mul(psize as usize) else {
+        return;
+    };
+
+    for row in 0..ycpy as usize {
+        let Some(source_offset) = row
+            .checked_mul(source_stride)
+            .and_then(|offset| source_start.checked_add(offset))
+        else {
+            return;
+        };
+        let Some(source_end) = source_offset.checked_add(width) else {
+            return;
+        };
+        let Some(target_line) = (toy as usize)
+            .checked_add(row)
+            .and_then(|line| tlines.get_mut(line))
+        else {
+            return;
+        };
+        let Some(target_end) = target_start.checked_add(width) else {
+            return;
+        };
+        let (Some(target), Some(source)) = (
+            target_line.get_mut(target_start..target_end),
+            fb.get(source_offset..source_end),
+        ) else {
+            return;
+        };
+        target.copy_from_slice(source);
     }
 }
 
 /// `ivwCopyImageToByteBuffer` (`imodview.cpp:2078`).
-pub unsafe fn ivw_copy_image_to_byte_buffer(
-    vi: *mut ImodView,
-    image: *mut *mut u8,
-    mut buf: *mut u8,
-) -> i32 {
-    unsafe {
-        let mut bmap = None;
-        let usimage = image.cast::<*mut u16>();
-        if (*vi).ushort_store != 0 {
-            bmap = Some(ivw_ushort_in_range_to_byte_map(vi));
-        }
-        for j in 0..(*vi).ysize {
-            if let Some(bmap) = bmap.as_ref() {
-                for i in 0..(*vi).xsize {
-                    *buf = bmap[*(*usimage.add(j as usize)).add(i as usize) as usize];
-                    buf = buf.add(1);
-                }
-            } else {
-                for i in 0..(*vi).xsize {
-                    *buf = *(*image.add(j as usize)).add(i as usize);
-                    buf = buf.add(1);
-                }
+pub fn ivw_copy_image_to_byte_buffer(vi: &ImodView, image: &[&[u8]], buf: &mut [u8]) -> i32 {
+    let (Ok(width), Ok(height)) = (usize::try_from(vi.xsize), usize::try_from(vi.ysize)) else {
+        return 1;
+    };
+    let Some(byte_count) = width.checked_mul(height) else {
+        return 1;
+    };
+    if image.len() < height || buf.len() < byte_count {
+        return 1;
+    }
+    if vi.ushort_store != 0 {
+        let byte_width = match width.checked_mul(std::mem::size_of::<u16>()) {
+            Some(value) => value,
+            None => return 1,
+        };
+        let map = ivw_ushort_in_range_to_byte_map(vi);
+        for (source, destination) in image.iter().take(height).zip(buf.chunks_exact_mut(width)) {
+            let Some(source) = source.get(..byte_width) else {
+                return 1;
+            };
+            for (pixel, destination) in source.chunks_exact(2).zip(destination) {
+                *destination = map[u16::from_ne_bytes([pixel[0], pixel[1]]) as usize];
             }
         }
-        0
+    } else {
+        for (source, destination) in image.iter().take(height).zip(buf.chunks_exact_mut(width)) {
+            let Some(source) = source.get(..width) else {
+                return 1;
+            };
+            destination.copy_from_slice(source);
+        }
     }
+    0
 }
 
 /// `ivwGrayScaleImageLoaded` (`imodview.cpp:2101`).
@@ -3664,195 +3926,202 @@ pub fn ivw_check_wild_flag(imod: &mut Imod) {
 /// The source `malloc`s the returned `IrefImage` and the callers `free` it;
 /// the translated `Iref_image` is an owned value, so ownership rides in the
 /// `Option` instead.
-pub unsafe fn ivw_get_image_ref(vi: *mut ImodView) -> Option<Iref_image> {
-    unsafe {
-        let mut ref_: Iref_image = Iref_image {
-            oscale: Ipoint::default(),
-            otrans: Ipoint::default(),
-            orot: Ipoint::default(),
-            cscale: Ipoint::default(),
-            ctrans: Ipoint::default(),
-            crot: Ipoint::default(),
-        };
+pub fn ivw_get_image_ref(
+    image: Option<&ImodImageFile>,
+    load_info: Option<&LoadInfo>,
+    xybin: i32,
+    zbin: i32,
+) -> Option<Iref_image> {
+    let (Some(image), Some(load_info)) = (image, load_info) else {
+        return None;
+    };
+    let mut ref_ = Iref_image {
+        oscale: Ipoint::default(),
+        otrans: Ipoint::default(),
+        orot: Ipoint::default(),
+        cscale: Ipoint::default(),
+        ctrans: Ipoint::default(),
+        crot: Ipoint::default(),
+    };
 
-        if (*vi).image.is_null() {
-            return None;
-        }
+    let xscale = image.xscale;
+    let yscale = image.yscale;
+    let zscale = image.zscale;
 
-        let xscale = (*(*vi).image).xscale;
-        let yscale = (*(*vi).image).yscale;
-        let zscale = (*(*vi).image).zscale;
-        let xtrans = (*(*vi).image).xtrans;
-        let ytrans = (*(*vi).image).ytrans;
-        let ztrans = (*(*vi).image).ztrans;
-        let xrot = (*(*vi).image).xrot;
-        let yrot = (*(*vi).image).yrot;
-        let zrot = (*(*vi).image).zrot;
+    ref_.cscale.x = xscale;
+    ref_.cscale.y = yscale;
+    ref_.cscale.z = zscale;
 
-        ref_.cscale.x = xscale;
-        ref_.cscale.y = yscale;
-        ref_.cscale.z = zscale;
-
-        /* DNM 11/5/98: need to scale the load-in offsets before adding them */
-        ref_.ctrans.x = xtrans - xscale * (*(*vi).li).xmin as f32 * (*vi).xybin as f32;
-        ref_.ctrans.y = ytrans - yscale * (*(*vi).li).ymin as f32 * (*vi).xybin as f32;
-        ref_.ctrans.z = ztrans - zscale * (*(*vi).li).zmin as f32 * (*vi).zbin as f32;
-        if (*(*vi).image).mirror_fft != 0 {
-            ref_.ctrans.x =
-                (ref_.ctrans.x as f64 + (xscale * (*(*vi).image).nx as f32) as f64 / 2.) as f32;
-        }
-
-        /* DNM 12/19/98: if using piece lists, need to subtract the minimum
-        values as well */
-        if (*(*vi).li).plist != 0 {
-            ref_.ctrans.x -= xscale * (*(*vi).li).opx * (*vi).xybin as f32;
-            ref_.ctrans.y -= yscale * (*(*vi).li).opy * (*vi).xybin as f32;
-            ref_.ctrans.z -= zscale * (*(*vi).li).opz;
-        }
-
-        /* DNM 11/5/98: tilt angles were not being passed back.  Start passing
-        them through so that they will start being saved in model IrefImage */
-        ref_.crot.x = xrot;
-        ref_.crot.y = yrot;
-        ref_.crot.z = zrot;
-        Some(ref_)
+    /* DNM 11/5/98: need to scale the load-in offsets before adding them */
+    ref_.ctrans.x = image.xtrans - xscale * load_info.xmin as f32 * xybin as f32;
+    ref_.ctrans.y = image.ytrans - yscale * load_info.ymin as f32 * xybin as f32;
+    ref_.ctrans.z = image.ztrans - zscale * load_info.zmin as f32 * zbin as f32;
+    if image.mirror_fft != 0 {
+        ref_.ctrans.x = (ref_.ctrans.x as f64 + (xscale * image.nx as f32) as f64 / 2.) as f32;
     }
+
+    /* DNM 12/19/98: if using piece lists, need to subtract the minimum
+    values as well */
+    if load_info.plist != 0 {
+        ref_.ctrans.x -= xscale * load_info.opx * xybin as f32;
+        ref_.ctrans.y -= yscale * load_info.opy * xybin as f32;
+        ref_.ctrans.z -= zscale * load_info.opz;
+    }
+
+    /* DNM 11/5/98: tilt angles were not being passed back.  Start passing
+    them through so that they will start being saved in model IrefImage */
+    ref_.crot.x = image.xrot;
+    ref_.crot.y = image.yrot;
+    ref_.crot.z = image.zrot;
+    Some(ref_)
 }
 
 /// `ivwSetModelTrans` (`imodview.cpp:2198`).
-pub unsafe fn ivw_set_model_trans(vi: *mut ImodView) {
-    unsafe {
-        let imod = (*vi).imod;
+pub fn ivw_set_model_trans(vi: &mut ImodView) {
+    let Some(imod) = (unsafe { vi.imod.as_mut() }) else {
+        return;
+    };
 
-        // Unconditionally set the maxes in the model; this works for fakeimage because
-        // size was set from model right away
-        (*imod).xmax = (*vi).xsize;
-        (*imod).ymax = (*vi).ysize;
-        (*imod).zmax = (*vi).zsize;
+    // Unconditionally set the maxes in the model; this works for fakeimage because
+    // size was set from model right away
+    imod.xmax = vi.xsize;
+    imod.ymax = vi.ysize;
+    imod.zmax = vi.zsize;
 
-        if (*vi).fake_image != 0 {
-            return;
-        }
-
-        // If there is not an existing refImage, get a new one
-        if (*imod).ref_image.is_none() {
-            (*imod).ref_image = Some(Iref_image {
-                oscale: Ipoint::default(),
-                otrans: Ipoint::default(),
-                orot: Ipoint::default(),
-                cscale: Ipoint::default(),
-                ctrans: Ipoint::default(),
-                crot: Ipoint::default(),
-            });
-        }
-
-        // Get the current image transformation data and copy to model structure
-        let Some(iref) = ivw_get_image_ref(vi) else {
-            return;
-        };
-        let ref_ = (*imod).ref_image.as_mut().unwrap();
-
-        ref_.cscale = iref.cscale;
-        ref_.ctrans = iref.ctrans;
-        ref_.crot = iref.crot;
-
-        /* DNM 11/5/98: set this flag that tilt angles were properly saved */
-        (*imod).flags |= IMODF_TILTOK;
-
-        /* DNM 7/20/02: the old values in the model seem never to be used, so
-        use otrans to store image origin information so programs can get
-        back to full volume index coordinates from info in model header.
-        Also set a new flag to indicate this info exists */
-        let (xt, yt, zt) = (
-            (*(*vi).image).xtrans,
-            (*(*vi).image).ytrans,
-            (*(*vi).image).ztrans,
-        );
-        let ref_ = (*imod).ref_image.as_mut().unwrap();
-        ref_.otrans.x = xt;
-        ref_.otrans.y = yt;
-        ref_.otrans.z = zt;
-        (*imod).flags |= IMODF_OTRANS_ORIGIN;
+    if vi.fake_image != 0 {
+        return;
     }
+
+    let Some(image) = (unsafe { vi.image.as_ref() }) else {
+        return;
+    };
+    // Get the current image transformation data and copy to model structure.
+    let Some(iref) = ivw_get_image_ref(Some(image), unsafe { vi.li.as_ref() }, vi.xybin, vi.zbin)
+    else {
+        return;
+    };
+    let (xt, yt, zt) = (image.xtrans, image.ytrans, image.ztrans);
+
+    // If there is not an existing refImage, get a new one
+    let ref_ = imod.ref_image.get_or_insert_with(|| Iref_image {
+        oscale: Ipoint::default(),
+        otrans: Ipoint::default(),
+        orot: Ipoint::default(),
+        cscale: Ipoint::default(),
+        ctrans: Ipoint::default(),
+        crot: Ipoint::default(),
+    });
+    ref_.cscale = iref.cscale;
+    ref_.ctrans = iref.ctrans;
+    ref_.crot = iref.crot;
+
+    /* DNM 7/20/02: the old values in the model seem never to be used, so
+    use otrans to store image origin information so programs can get
+    back to full volume index coordinates from info in model header.
+    Also set a new flag to indicate this info exists */
+    ref_.otrans.x = xt;
+    ref_.otrans.y = yt;
+    ref_.otrans.z = zt;
+    /* DNM 11/5/98: set this flag that tilt angles were properly saved */
+    imod.flags |= IMODF_TILTOK;
+    imod.flags |= IMODF_OTRANS_ORIGIN;
 }
 
 /// `ivwFlipModel` (`imodview.cpp:2246`); `rotate` defaults to false.
-pub unsafe fn ivw_flip_model(vi: *mut ImodView, rotate: bool) {
-    unsafe {
-        /* flip model y and z and manage the flag state */
-        let imod = (*vi).imod;
-        let flag = if rotate { IMODF_ROT90X } else { IMODF_FLIPYZ };
-        let cur_state = i32::from((*imod).flags & flag != 0);
-        if (*(*vi).li).axis == 2 && cur_state != 0 {
-            return;
-        }
+///
+/// The view itself is Rust-owned.  Its model and load-info fields are legacy
+/// viewer cursors, so their conversion is limited to this boundary.
+pub fn ivw_flip_model(imod: &mut Imod, load_info: Option<&LoadInfo>, rotate: bool) {
+    let Some(load_info) = load_info else {
+        return;
+    };
+    /* flip model y and z and manage the flag state */
+    let flag = if rotate { IMODF_ROT90X } else { IMODF_FLIPYZ };
+    let cur_state = i32::from(imod.flags & flag != 0);
+    if load_info.axis == 2 && cur_state != 0 {
+        return;
+    }
 
-        if ((*(*vi).li).axis == 3 || (*(*vi).li).axis == 0) && cur_state == 0 {
-            return;
-        }
+    if (load_info.axis == 3 || load_info.axis == 0) && cur_state == 0 {
+        return;
+    }
 
-        if cur_state != 0 {
-            (*imod).flags &= !flag;
-        } else {
-            (*imod).flags |= flag;
-        }
+    if cur_state != 0 {
+        imod.flags &= !flag;
+    } else {
+        imod.flags |= flag;
+    }
 
-        if rotate {
-            imod_rot90x(&mut *imod, cur_state);
-        } else {
-            imod_flip_yz(&mut *imod);
-        }
+    if rotate {
+        imod_rot90x(imod, cur_state);
+    } else {
+        imod_flip_yz(imod);
     }
 }
 
 /// `ivwTransModel` (`imodview.cpp:2275`).
-pub unsafe fn ivw_trans_model(vi: *mut ImodView) {
-    unsafe {
-        let imod = (*vi).imod;
-        let imod_trans = IMOD_TRANS.load(core::sync::atomic::Ordering::Relaxed);
+pub fn ivw_trans_model(vi: &mut ImodView) {
+    let imod_trans = IMOD_TRANS.load(core::sync::atomic::Ordering::Relaxed);
 
-        /* If model doesn't have a reference coordinate system from an image, then use
-         * this image's coordinate system and return, unless there is binning; */
-        if !imod_trans || (*(*vi).imod).ref_image.is_none() {
-            // When loading with no trans, if the model is flipped, need to invert it to
-            // restore handedness and mark it as rotated if image is, to avoid further
-            // operations
-            if !imod_trans {
-                with_boundary(|n| n.util_exchange_flip_rotation((*vi).imod, FLIP_TO_ROTATION));
-                let state = i32::from((*(*vi).li).axis == 2);
-                set_or_clear_flags(&mut (*(*vi).imod).flags, IMODF_ROT90X, state);
-            } else {
-                // Otherwise is needs to be in the right flip state before setting the
-                // trans data
-                ivw_flip_model(vi, false);
-            }
-            ivw_set_model_trans(vi);
-            if !imod_trans || (*(*vi).imod).ref_image.is_none() || (*vi).xybin * (*vi).zbin == 1 {
+    /* If model doesn't have a reference coordinate system from an image, then use
+     * this image's coordinate system and return, unless there is binning; */
+    let has_ref_image = unsafe { vi.imod.as_ref() }.is_some_and(|imod| imod.ref_image.is_some());
+    if !imod_trans || !has_ref_image {
+        // When loading with no trans, if the model is flipped, need to invert it to
+        // restore handedness and mark it as rotated if image is, to avoid further
+        // operations
+        if !imod_trans {
+            let Some(imod) = (unsafe { vi.imod.as_mut() }) else {
                 return;
+            };
+            with_boundary(|n| n.util_exchange_flip_rotation(imod, FLIP_TO_ROTATION));
+            let state = i32::from(unsafe { vi.li.as_ref() }.is_some_and(|li| li.axis == 2));
+            set_or_clear_flags(&mut imod.flags, IMODF_ROT90X, state);
+        } else {
+            // Otherwise is needs to be in the right flip state before setting the
+            // trans data
+            let load_info = unsafe { vi.li.as_ref() };
+            if let Some(imod) = unsafe { vi.imod.as_mut() } {
+                ivw_flip_model(imod, load_info, false);
             }
         }
+        ivw_set_model_trans(vi);
+        let has_ref_image =
+            unsafe { vi.imod.as_ref() }.is_some_and(|imod| imod.ref_image.is_some());
+        if !imod_trans || !has_ref_image || vi.xybin * vi.zbin == 1 {
+            return;
+        }
+    }
 
-        /* Try and get the coordinate system that we will transform the model to match.
-         * Set the old members if iref to the model's current members */
-        let iref = ivw_get_image_ref(vi);
-        if let Some(mut iref) = iref {
-            let current = (*(*vi).imod).ref_image.as_ref().unwrap();
+    /* Try and get the coordinate system that we will transform the model to match.
+     * Set the old members if iref to the model's current members */
+    let iref = ivw_get_image_ref(
+        unsafe { vi.image.as_ref() },
+        unsafe { vi.li.as_ref() },
+        vi.xybin,
+        vi.zbin,
+    );
+    if let (Some(mut iref), Some(imod)) = (iref, unsafe { vi.imod.as_mut() }) {
+        if let Some(current) = imod.ref_image.as_ref() {
             iref.orot = current.crot;
             iref.otrans = current.ctrans;
             iref.oscale = current.cscale;
             let bin_scale = Ipoint {
-                x: (*vi).xybin as f32,
-                y: (*vi).xybin as f32,
-                z: (*vi).zbin as f32,
+                x: vi.xybin as f32,
+                y: vi.xybin as f32,
+                z: vi.zbin as f32,
             };
 
             /* transform model to new coords (it will be unflipped if necessary) */
-            imod_trans_from_ref_image(&mut *imod, &iref, bin_scale);
+            imod_trans_from_ref_image(imod, &iref, bin_scale);
         }
-
-        ivw_flip_model(vi, false);
-        ivw_set_model_trans(vi);
     }
+
+    let load_info = unsafe { vi.li.as_ref() };
+    if let Some(imod) = unsafe { vi.imod.as_mut() } {
+        ivw_flip_model(imod, load_info, false);
+    }
+    ivw_set_model_trans(vi);
 }
 
 /*****************************************************************************/
@@ -4292,7 +4561,7 @@ pub unsafe fn ivw_multiple_files(
                     (*vi).image_list_storage.clear();
                     (*vi).image_list_storage = grown_images;
                 }
-                let adoc_ind = ii_get_adoc_index(image, 1, 0);
+                let adoc_ind = ii_get_adoc_index(&mut *image, 1, 0);
                 let mut vol_flag = 0;
                 if adoc_ind >= 0
                     && adoc_set_current(adoc_ind) == 0
@@ -4305,14 +4574,19 @@ pub unsafe fn ivw_multiple_files(
             ind_vol = 0;
             while ind_vol < num_vols {
                 if ind_vol != 0 {
-                    if ii_reopen((&(*base_image).ii_volumes)[ind_vol as usize]) != 0 {
+                    let volume = (&(*base_image).ii_volumes)[ind_vol as usize]
+                        .expect("listed HDF volume has a cursor")
+                        .as_ptr();
+                    if ii_reopen(&mut *volume) != 0 {
                         crate::imod::three_dmod::imod::imod_print_stderr(&format!(
                             "Failed to reopen volume #{} in image file.\n",
                             ind_vol + 1
                         ));
                         image = ptr::null_mut();
                     } else {
-                        image = (&(*base_image).ii_volumes)[ind_vol as usize];
+                        image = (&(*base_image).ii_volumes)[ind_vol as usize]
+                            .expect("reopened HDF volume has a cursor")
+                            .as_ptr();
                         convarg = (*image)
                             .filename
                             .as_deref()
@@ -4518,7 +4792,7 @@ pub unsafe fn ivw_load_image(vi: *mut ImodView) -> i32 {
                 been computed based on unflipped Z dimensions */
                 let axis_save = (*(*vi).li).axis;
                 (*(*vi).li).axis = 3;
-                let eret = ivw_init_cache(vi);
+                let eret = ivw_init_cache(&mut *vi, &*(*vi).li);
                 if eret != 0 {
                     return eret;
                 }
@@ -4634,22 +4908,22 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 if (*image).file == IIFILE_MRC {
                     // Analyze real MRC file for whether the hot pixel in the middle of
                     // of the file is much higher than at the bottom, if so don't mirror
-                    ivw_reopen(image);
+                    ivw_reopen(&mut *image);
                     let midy = (*image).ny / 2;
                     let midz = (*image).nz / 2;
-                    let mut naysum = ii_read_point(image, 1, midy, 0)
-                        + ii_read_point(image, 0, midy - 1, 0)
-                        + ii_read_point(image, 1, midy + 1, 0);
+                    let mut naysum = ii_read_point(&mut *image, 1, midy, 0)
+                        + ii_read_point(&mut *image, 0, midy - 1, 0)
+                        + ii_read_point(&mut *image, 1, midy + 1, 0);
                     let mut zratio = 0.;
                     if naysum > 0. {
-                        zratio = ii_read_point(image, 0, midy, 0) / naysum;
+                        zratio = ii_read_point(&mut *image, 0, midy, 0) / naysum;
                     }
-                    naysum = ii_read_point(image, 1, midy, midz)
-                        + ii_read_point(image, 0, midy - 1, midz)
-                        + ii_read_point(image, 1, midy + 1, midz);
+                    naysum = ii_read_point(&mut *image, 1, midy, midz)
+                        + ii_read_point(&mut *image, 0, midy - 1, midz)
+                        + ii_read_point(&mut *image, 1, midy + 1, midz);
                     let mut mratio = 0.;
                     if naysum > 0. {
-                        mratio = ii_read_point(image, 0, midy, midz) / naysum;
+                        mratio = ii_read_point(&mut *image, 0, midy, midz) / naysum;
                     }
                     if zratio != 0. && mratio != 0. && mratio > 10. * zratio {
                         (*image).mirror_fft = 0;
@@ -4894,7 +5168,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             if (*(*vi).li).smin == (*(*vi).li).smax {
                 get_valid_scale(image, Some(&mut smin), Some(&mut smax));
                 ii_set_mm(
-                    image,
+                    &mut *image,
                     smin,
                     smax,
                     if (*vi).ushort_store != 0 {
@@ -4905,7 +5179,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 );
             } else {
                 ii_set_mm(
-                    image,
+                    &mut *image,
                     (*(*vi).li).smin,
                     (*(*vi).li).smax,
                     if (*vi).ushort_store != 0 {
@@ -4939,15 +5213,18 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             {
                 // If only one file and -T option is not given, check for a volume stack
                 // with at least 2 volumes
-                let header = (*image).header.cast::<MrcHeader>();
-                if (*header).ispg == 401 && (*header).nz / (*header).mz > 1 {
-                    zsize = (*header).mz;
-                    (*vi).num_times = (*header).nz / (*header).mz;
+                let header = (*image)
+                    .mrc_header
+                    .as_deref()
+                    .expect("MRC image has an owned header");
+                if header.ispg == 401 && header.nz / header.mz > 1 {
+                    zsize = header.mz;
+                    (*vi).num_times = header.nz / header.mz;
                     (*vi).cur_time = 1;
                     (*vi).volume_stack = 1;
 
                     // Have to reopen to get the fp
-                    if ii_reopen(image) != 0 {
+                    if ii_reopen(&mut *image) != 0 {
                         with_boundary(|n| {
                             n.imod_error(None, "3DMOD Error: Reopening volume stack file")
                         });
@@ -4964,7 +5241,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                     for i in 1..(*vi).num_times {
                         image_list.push(stable_image.clone());
                         let new_image = image_list.last_mut().unwrap();
-                        if ii_add_to_opened_list(new_image) != 0 {
+                        if ii_add_to_opened_list(&mut *new_image) != 0 {
                             with_boundary(|n| {
                                 n.imod_error(
                                     None,
@@ -5048,7 +5325,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             *(*vi).image = (*staged_image).clone();
             ii_file_change_address(staged_image, (*vi).image);
             image_list.clear();
-            ivw_reopen((*vi).image);
+            ivw_reopen(&mut *(*vi).image);
             (*vi).cur_time = 0;
             (*vi).num_times = 0;
             (*vi).image_list = ptr::null_mut();
@@ -5078,12 +5355,12 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
             if (*vi).image_pyramid != 0 {
                 (*vi).cur_time = 0;
                 (*vi).num_times = 0;
-                ivw_reopen((*vi).image);
+                ivw_reopen(&mut *(*vi).image);
             } else if (*vi).multi_file_z == 0 {
                 ivw_set_time(&mut *vi, 1);
                 (*vi).dim |= 8;
             } else {
-                ivw_reopen((*vi).image);
+                ivw_reopen(&mut *(*vi).image);
             }
         }
         if (*vi).ushort_store != 0 {
@@ -5124,10 +5401,11 @@ unsafe fn get_valid_scale(
 
         // The RMS is valid if it is positive or if 0 is supposed to be valid due to flags
         if (*image).file == IIFILE_MRC && (*image).rms == 0. {
-            let hdata = (*image).header.cast::<MrcHeader>();
-            rms_valid = mrc_get_standard_version(Some(&*hdata)) > 0
-                || ((*hdata).imod_stamp == IMOD_MRC_STAMP
-                    && ((*hdata).imod_flags | MRC_FLAGS_BAD_RMS_NEG) != 0);
+            if let Some(hdata) = (*image).mrc_header.as_deref() {
+                rms_valid = mrc_get_standard_version(Some(hdata)) > 0
+                    || (hdata.imod_stamp == IMOD_MRC_STAMP
+                        && (hdata.imod_flags | MRC_FLAGS_BAD_RMS_NEG) != 0);
+            }
         }
 
         // The mean is valid if it is bigger than the min of min and max, and not bigger
@@ -5388,56 +5666,48 @@ unsafe fn ivw_check_binning(vi: *mut ImodView, nx: i32, ny: i32, nz: i32) -> i32
 /* Tilt angle functions */
 
 /// `ivwReadAngleFile` (`imodview.cpp:3455`).
-pub unsafe fn ivw_read_angle_file(vi: *mut ImodView, fname: &[u8]) -> i32 {
-    unsafe {
-        let name = String::from_utf8_lossy(fname);
-        let Some(mut fin) = ImodFile::open(&name, "r") else {
-            with_boundary(|n| {
-                n.imod_error(
-                    None,
-                    &format!("3dmod warning: could not open angle file {name}"),
-                )
-            });
-            return 1;
-        };
-        let mut list: Vec<f32> = Vec::new();
-        // `fscanf(fin, "%f", &angle)`: the stream is the file's bytes plus a
-        // cursor, which is what the translated `fscanf` takes.
-        let mut contents = Vec::new();
-        let _ = fin.read_to_end(&mut contents);
-        let mut pos = 0usize;
-        loop {
-            let mut angle: f32 = 0.;
-            let scanret = crate::imod::clip::clip::fscanf(
-                &contents,
-                &mut pos,
-                "%f",
-                &mut [crate::imod::clip::clip::ScanArg::Flt(&mut angle)],
-            );
-            if scanret != 1 {
-                break;
-            }
-            list.push(angle);
+pub fn ivw_read_angle_file(vi: &mut ImodView, fname: &[u8]) -> i32 {
+    let name = String::from_utf8_lossy(fname);
+    let Some(mut fin) = ImodFile::open(&name, "r") else {
+        with_boundary(|n| {
+            n.imod_error(
+                None,
+                &format!("3dmod warning: could not open angle file {name}"),
+            )
+        });
+        return 1;
+    };
+    let mut list: Vec<f32> = Vec::new();
+    // `fscanf(fin, "%f", &angle)`: the stream is the file's bytes plus a
+    // cursor, which is what the translated `fscanf` takes.
+    let mut contents = Vec::new();
+    let _ = fin.read_to_end(&mut contents);
+    let mut pos = 0usize;
+    loop {
+        let mut angle: f32 = 0.;
+        let scanret = crate::imod::clip::clip::fscanf(
+            &contents,
+            &mut pos,
+            "%f",
+            &mut [crate::imod::clip::clip::ScanArg::Flt(&mut angle)],
+        );
+        if scanret != 1 {
+            break;
         }
-        (*vi).tilt_angles = list;
-        (*vi).num_tilt_angles = (*vi).tilt_angles.len() as i32;
-        drop(fin);
-        0
+        list.push(angle);
     }
+    vi.num_tilt_angles = list.len() as i32;
+    vi.tilt_angles = list;
+    0
 }
 
 /// `ivwGetTiltAngles` (`imodview.cpp:3488`); return number and pointer to
 /// tilt angles, starting at zmin.
-pub unsafe fn ivw_get_tilt_angles(vi: *mut ImodView, num_angles: &mut i32) -> *mut f32 {
-    unsafe {
-        let zmin = 0.max((*(*vi).li).zmin);
-        *num_angles = 0.max((*vi).num_tilt_angles - zmin);
-        if *num_angles != 0 {
-            (*vi).tilt_angles.as_mut_ptr().add(zmin as usize)
-        } else {
-            ptr::null_mut()
-        }
-    }
+pub fn ivw_get_tilt_angles<'a>(vi: &'a mut ImodView, num_angles: &mut i32) -> &'a mut [f32] {
+    let zmin = unsafe { vi.li.as_ref() }.map_or(0, |li| 0.max(li.zmin)) as usize;
+    let angles = vi.tilt_angles.get_mut(zmin..).unwrap_or_default();
+    *num_angles = angles.len() as i32;
+    angles
 }
 
 /// `ivwReadAlignedPcCoords` (`imodview.cpp:3496`); read a file of aligned
@@ -5615,13 +5885,8 @@ pub fn ivw_get_movie_model_mode(vw: Option<&ImodView>) -> i32 {
 }
 
 /// `ivwGetModel` (`imodview.cpp:3615`).
-pub unsafe fn ivw_get_model(in_imod_view: *mut ImodView) -> *mut Imod {
-    unsafe {
-        if in_imod_view.is_null() {
-            return ptr::null_mut();
-        }
-        (*in_imod_view).imod
-    }
+pub fn ivw_get_model(in_imod_view: Option<&ImodView>) -> Option<&Imod> {
+    in_imod_view.and_then(|view| unsafe { view.imod.as_ref() })
 }
 
 /// `startExtraObjectIfNone` (`imodview.cpp:3622`).
@@ -5722,38 +5987,47 @@ pub fn ivw_clear_an_extra_object(in_imod_view: &mut ImodView, obj_num: i32) {
 
 /// `ivwGetCurPixelSize` (`imodview.cpp:3722`); get pixel size that applies to
 /// the current image.
-pub unsafe fn ivw_get_cur_pixel_size(vi: *mut ImodView) -> f32 {
-    unsafe {
-        let time_ind = if (*vi).num_times != 0 {
-            (*vi).cur_time - 1
-        } else {
-            0
-        };
+pub fn ivw_get_cur_pixel_size(
+    vi: &ImodView,
+    model: Option<&Imod>,
+    current_image: Option<&ImodImageFile>,
+) -> Option<f32> {
+    let model = model?;
+    let time_ind = if vi.num_times != 0 {
+        usize::try_from(vi.cur_time - 1).ok()?
+    } else {
+        0
+    };
 
-        // use model pixel size if no variations or there are no units
-        let units = (*(*vi).imod).units;
-        if (*vi).pixel_size_varies == 0 || units == IMOD_UNIT_PIXEL {
-            return (*(*vi).imod).pixsize;
-        }
-
-        // Otherwise get from the current image, then look for one from adoc lists
-        let mut pix_size = (*(*vi).image).xscale;
-        let im_z = ((*vi).zmouse as f64 + 0.5).floor() as i32;
-        if (*vi).multi_file_z != 0 {
-            pix_size = (*(*vi).image_list.add(im_z as usize)).xscale;
-        } else if (*vi).num_times != 0 {
-            pix_size = (*(*vi).image_list.add(time_ind as usize)).xscale;
-        }
-        let vec_ind = (&(*vi).pix_size_index)[time_ind as usize];
-        let adoc_pix_sizes = &(*vi).adoc_pix_sizes;
-        if vec_ind >= 0 && im_z >= 0 && (im_z as usize) < adoc_pix_sizes[vec_ind as usize].len() {
-            pix_size = adoc_pix_sizes[vec_ind as usize][im_z as usize];
-        }
-
-        // These are Angstroms; express in same units as model units
-        pix_size = (pix_size as f64 * 10f64.powf(-(10. + units as f64))) as f32;
-        pix_size
+    // Use model pixel size if no variations or there are no units.
+    let units = model.units;
+    if vi.pixel_size_varies == 0 || units == IMOD_UNIT_PIXEL {
+        return Some(model.pixsize);
     }
+
+    // Otherwise get from the current image, then look for one from adoc lists.
+    let mut pix_size = current_image?.xscale;
+    let im_z = (vi.zmouse as f64 + 0.5).floor() as i32;
+    if vi.multi_file_z != 0 {
+        pix_size = vi
+            .image_list_storage
+            .get(usize::try_from(im_z).ok()?)?
+            .xscale;
+    } else if vi.num_times != 0 {
+        pix_size = vi.image_list_storage.get(time_ind)?.xscale;
+    }
+    if let Some(&vec_ind) = vi.pix_size_index.get(time_ind)
+        && vec_ind >= 0
+        && let Some(pix_sizes) = vi.adoc_pix_sizes.get(vec_ind as usize)
+        && let Some(&adoc_pix_size) = usize::try_from(im_z)
+            .ok()
+            .and_then(|index| pix_sizes.get(index))
+    {
+        pix_size = adoc_pix_size;
+    }
+
+    // These are Angstroms; express in same units as model units.
+    Some((pix_size as f64 * 10f64.powf(-(10. + units as f64))) as f32)
 }
 
 /// `ivwEnableStipple` (`imodview.cpp:3751`).
@@ -6069,32 +6343,30 @@ pub fn clear_all_arrows(window_type: i32, all_windows: bool) -> i32 {
 
 /// `ivwCurrentImageFile` (`imodview.cpp:3980`); return the name of the
 /// current image file, without any path adjustments.
-pub unsafe fn ivw_current_image_file(in_imod_view: *mut ImodView, as_entered: bool) -> String {
-    unsafe {
-        if (*in_imod_view).fake_image != 0 {
-            return String::new();
-        }
-        let cur_dir = IMOD_IFD_PATH.lock().unwrap().clone();
-        let file;
-        if (*in_imod_view).multi_file_z <= 0 {
-            file = (*(*in_imod_view).image)
-                .filename
-                .clone()
-                .unwrap_or_default();
-        } else {
-            let mut cz = ((*in_imod_view).zmouse as f64 + 0.5).floor() as i32;
-            cz = cz.clamp(0, (*in_imod_view).multi_file_z - 1);
-            file = (*(*in_imod_view).image_list.add(cz as usize))
-                .filename
-                .clone()
-                .unwrap_or_default();
-        }
-        if as_entered {
-            return file;
-        }
-        let absolute = with_boundary(|n| n.qdir_absolute_file_path(&cur_dir, &file));
-        with_boundary(|n| n.qdir_clean_path(&absolute))
+pub fn ivw_current_image_file(in_imod_view: &ImodView, as_entered: bool) -> String {
+    if in_imod_view.fake_image != 0 {
+        return String::new();
     }
+    let cur_dir = IMOD_IFD_PATH.lock().unwrap().clone();
+    let file = if in_imod_view.multi_file_z <= 0 {
+        // `image` is the legacy image-I/O cursor for the single-file case.
+        unsafe { in_imod_view.image.as_ref() }
+            .and_then(|image| image.filename.clone())
+            .unwrap_or_default()
+    } else {
+        let cz = ((in_imod_view.zmouse as f64 + 0.5).floor() as i32)
+            .clamp(0, in_imod_view.multi_file_z - 1);
+        in_imod_view
+            .image_list_storage
+            .get(cz as usize)
+            .and_then(|image| image.filename.clone())
+            .unwrap_or_default()
+    };
+    if as_entered {
+        return file;
+    }
+    let absolute = with_boundary(|n| n.qdir_absolute_file_path(&cur_dir, &file));
+    with_boundary(|n| n.qdir_clean_path(&absolute))
 }
 
 /// `ivwOpen3dmodDialogs` (`imodview.cpp:3999`); open 3dmod dialogs based on
@@ -6121,8 +6393,8 @@ pub fn imod_update_object_dialogs() {
 }
 
 /// `ivwGetContrastReversed` (`imodview.cpp:4021`).
-pub unsafe fn ivw_get_contrast_reversed(in_imod_view: *mut ImodView) -> i32 {
-    unsafe { (*(*in_imod_view).cramp).reverse }
+pub fn ivw_get_contrast_reversed(in_imod_view: &ImodView) -> i32 {
+    unsafe { in_imod_view.cramp.as_ref() }.map_or(0, |cramp| cramp.reverse)
 }
 
 /// `ivwOverlayOK` (`imodview.cpp:4026`).
@@ -6132,147 +6404,144 @@ pub fn ivw_overlay_ok(in_imod_view: &ImodView) -> i32 {
 }
 
 /// `ivwSetOverlayMode` (`imodview.cpp:4031`).
-pub unsafe fn ivw_set_overlay_mode(vw: *mut ImodView, sec: i32, reverse: i32, which_green: i32) {
-    unsafe {
-        use crate::imod::three_dmod::xcramp::{
-            xcramp_getlevels, xcramp_ramp, xcramp_reverse, xcramp_select_index, xcramp_setlevels,
-        };
+pub fn ivw_set_overlay_mode(vw: &mut ImodView, sec: i32, reverse: i32, which_green: i32) {
+    use crate::imod::three_dmod::xcramp::{
+        xcramp_getlevels, xcramp_ramp, xcramp_reverse, xcramp_select_index, xcramp_setlevels,
+    };
 
-        // If changing state, change color ramps
-        if ((*vw).overlay_sec != 0 && sec == 0) || ((*vw).overlay_sec == 0 && sec != 0) {
-            if (*vw).overlay_ramp < 0 {
-                // The first time, save the ramp index, and initialize the next ramp
-                // to the same black-white levels
-                (*vw).overlay_ramp = (*(*vw).cramp).clevel;
-                xcramp_select_index(
-                    &mut *(*vw).cramp,
-                    ((*vw).overlay_ramp + 1) % (*(*vw).cramp).noflevels,
-                );
-                xcramp_setlevels(&mut *(*vw).cramp, (*vw).black, (*vw).white);
+    let Some(cramp) = (unsafe { vw.cramp.as_mut() }) else {
+        return;
+    };
+
+    // If changing state, change color ramps
+    if (vw.overlay_sec != 0 && sec == 0) || (vw.overlay_sec == 0 && sec != 0) {
+        if vw.overlay_ramp < 0 {
+            // The first time, save the ramp index, and initialize the next ramp
+            // to the same black-white levels
+            vw.overlay_ramp = cramp.clevel;
+            xcramp_select_index(cramp, (vw.overlay_ramp + 1) % cramp.noflevels);
+            xcramp_setlevels(cramp, vw.black, vw.white);
+        } else {
+            // Otherwise, restore the other color ramp
+            let index = if sec != 0 {
+                (vw.overlay_ramp + 1) % cramp.noflevels
             } else {
-                // Otherwise, restore the other color ramp
-                let index = if sec != 0 {
-                    ((*vw).overlay_ramp + 1) % (*(*vw).cramp).noflevels
-                } else {
-                    (*vw).overlay_ramp
-                };
-                xcramp_select_index(&mut *(*vw).cramp, index);
-                xcramp_ramp(&mut *(*vw).cramp);
-                let (black, white) = xcramp_getlevels(&*(*vw).cramp);
-                (*vw).black = black;
-                (*vw).white = white;
-                with_boundary(|n| n.imod_info_setbw(black, white));
-            }
-
-            // Reverse if flag set
-            if reverse != 0 {
-                let flag = i32::from((*(*vw).cramp).reverse == 0);
-                xcramp_reverse(&mut *(*vw).cramp, flag);
-            }
-
-            // If state is staying on but reverse is changing, then reverse
-        } else if sec != 0 && reverse != (*vw).reverse_overlay {
-            let flag = i32::from((*(*vw).cramp).reverse == 0);
-            xcramp_reverse(&mut *(*vw).cramp, flag);
+                vw.overlay_ramp
+            };
+            xcramp_select_index(cramp, index);
+            xcramp_ramp(cramp);
+            let (black, white) = xcramp_getlevels(cramp);
+            vw.black = black;
+            vw.white = white;
+            with_boundary(|n| n.imod_info_setbw(black, white));
         }
 
-        (*vw).reverse_overlay = reverse;
-        (*vw).overlay_sec = sec;
-        (*vw).which_green = which_green;
-        with_boundary(|n| n.imod_draw(vw, IMOD_DRAW_IMAGE | IMOD_DRAW_NOSYNC));
+        // Reverse if flag set
+        if reverse != 0 {
+            let flag = i32::from(cramp.reverse == 0);
+            xcramp_reverse(cramp, flag);
+        }
+
+        // If state is staying on but reverse is changing, then reverse
+    } else if sec != 0 && reverse != vw.reverse_overlay {
+        let flag = i32::from(cramp.reverse == 0);
+        xcramp_reverse(cramp, flag);
     }
+
+    vw.reverse_overlay = reverse;
+    vw.overlay_sec = sec;
+    vw.which_green = which_green;
+    with_boundary(|n| n.imod_draw(vw, IMOD_DRAW_IMAGE | IMOD_DRAW_NOSYNC));
 }
 
 /// `ivwGetOrMakeContour` (`imodview.cpp:4071`); get the current contour, the
 /// last contour if it is empty, or a new contour.
-pub unsafe fn ivw_get_or_make_contour(
-    vw: *mut ImodView,
-    obj: *mut Iobj,
+///
+/// Model selection is represented by `model.cindex`, so this native operation
+/// takes the view and model as ordinary Rust borrows.  Callers that originate
+/// in a Qt event callback convert their cursors before entering here.
+pub fn ivw_get_or_make_contour<'a>(
+    view: &mut ImodView,
+    model: &'a mut Imod,
     time_lock: i32,
-) -> *mut Icont {
-    unsafe {
-        let mut cont = imod_contour_get(Some(&*(*vw).imod))
-            .map_or(ptr::null_mut(), |c| c as *const Icont as *mut Icont);
-        let cur_time = if time_lock != 0 {
-            time_lock
-        } else {
-            (*vw).cur_time
-        };
-        if cont.is_null()
-            || ((*obj).extra[IOBJ_EX_PNT_LIMIT] != 0
-                && (*cont).pts.len() as u32 >= (*obj).extra[IOBJ_EX_PNT_LIMIT])
-        {
-            // Set index to last contour, both to use that contour if it is empty and
-            // so that its properties (surface and open/closed) are inherited if a new
-            // contour is made
-            (*(*vw).imod).cindex.contour = (*obj).cont.len() as i32 - 1;
-            cont = imod_contour_get(Some(&*(*vw).imod))
-                .map_or(ptr::null_mut(), |c| c as *const Icont as *mut Icont);
-            if cont.is_null() || !(*cont).pts.is_empty() {
-                // Actually get a new contour now if last one is not empty
-                crate::imod::three_dmod::undoredo::undo_contour_addition_co(
-                    (*vw)
-                        .undo
-                        .as_deref_mut()
-                        .expect("initialized view undo stack"),
-                    &mut *(*vw).imod,
-                    (*obj).cont.len() as i32,
-                );
-                imod_new_contour(&mut *(*vw).imod);
-                cont = imod_contour_get(Some(&*(*vw).imod))
-                    .map_or(ptr::null_mut(), |c| c as *const Icont as *mut Icont);
-                if cont.is_null() {
-                    (*vw)
-                        .undo
-                        .as_deref_mut()
-                        .expect("initialized view undo stack")
-                        .clear_units();
-                    return ptr::null_mut();
-                }
-                ivw_set_new_contour_time(&*vw, Some(&*obj), Some(&mut *cont));
-            }
-        }
+) -> Option<&'a mut Icont> {
+    let object_index = usize::try_from(model.cindex.object).ok()?;
+    let point_limit_reached = model
+        .obj
+        .get(object_index)
+        .and_then(|object| {
+            imod_contour_get(Some(model)).map(|contour| {
+                object.extra[IOBJ_EX_PNT_LIMIT] != 0
+                    && contour.pts.len() as u32 >= object.extra[IOBJ_EX_PNT_LIMIT]
+            })
+        })
+        .unwrap_or(true);
 
-        // If contour is empty and time doesn't match,
-        // reassign it to the current or requested time
-        if ivw_time_mismatch(vw, time_lock, obj, cont) && (*cont).pts.is_empty() {
-            crate::imod::three_dmod::undoredo::undo_contour_prop_chg_cc(
-                (*vw)
-                    .undo
+    if point_limit_reached {
+        let contour_count = model.obj.get(object_index)?.cont.len();
+        // Use the last contour if it is empty so a newly-created contour
+        // inherits its surface and open/closed state.
+        model.cindex.contour = contour_count as i32 - 1;
+        let last_is_empty =
+            imod_contour_get(Some(model)).is_some_and(|contour| contour.pts.is_empty());
+        if !last_is_empty {
+            crate::imod::three_dmod::undoredo::undo_contour_addition_co(
+                view.undo
                     .as_deref_mut()
                     .expect("initialized view undo stack"),
-                &mut *(*vw).imod,
+                model,
+                contour_count as i32,
             );
-            (*cont).time = cur_time;
+            if imod_new_contour(model) != 0 {
+                view.undo
+                    .as_deref_mut()
+                    .expect("initialized view undo stack")
+                    .clear_units();
+                return None;
+            }
+            let contour_index = usize::try_from(model.cindex.contour).ok()?;
+            let time_enabled = model
+                .obj
+                .get(object_index)
+                .is_some_and(|object| iobj_flag_time(object) != 0);
+            if view.num_times != 0 && time_enabled {
+                model
+                    .obj
+                    .get_mut(object_index)?
+                    .cont
+                    .get_mut(contour_index)?
+                    .time = view.cur_time;
+            }
         }
-
-        // If current point index is not set, set it to end of contour
-        if (*(*vw).imod).cindex.point < 0 {
-            (*(*vw).imod).cindex.point = (*cont).pts.len() as i32 - 1;
-        }
-
-        cont
     }
+
+    let contour_index = usize::try_from(model.cindex.contour).ok()?;
+    let mismatch = {
+        let object = model.obj.get(object_index)?;
+        let contour = object.cont.get(contour_index)?;
+        ivw_time_mismatch(view, time_lock, object, contour)
+    };
+    let current_time = ivw_window_time(view, time_lock);
+    if mismatch && model.obj[object_index].cont[contour_index].pts.is_empty() {
+        crate::imod::three_dmod::undoredo::undo_contour_prop_chg_cc(
+            view.undo
+                .as_deref_mut()
+                .expect("initialized view undo stack"),
+            model,
+        );
+        model.obj[object_index].cont[contour_index].time = current_time;
+    }
+
+    if model.cindex.point < 0 {
+        model.cindex.point = model.obj[object_index].cont[contour_index].pts.len() as i32 - 1;
+    }
+    model.obj.get_mut(object_index)?.cont.get_mut(contour_index)
 }
 
 /// `ivwTimeMismatch` (`imodview.cpp:4114`).
-pub unsafe fn ivw_time_mismatch(
-    vi: *mut ImodView,
-    timelock: i32,
-    obj: *mut Iobj,
-    cont: *mut Icont,
-) -> bool {
-    unsafe {
-        let time = if timelock != 0 {
-            timelock
-        } else {
-            (*vi).cur_time
-        };
-        (*vi).num_times > 0
-            && iobj_flag_time(&*obj) != 0
-            && (*cont).time != 0
-            && time != (*cont).time
-    }
+pub fn ivw_time_mismatch(vi: &ImodView, timelock: i32, obj: &Iobj, cont: &Icont) -> bool {
+    let time = if timelock != 0 { timelock } else { vi.cur_time };
+    vi.num_times > 0 && iobj_flag_time(obj) != 0 && cont.time != 0 && time != cont.time
 }
 
 /// `ivwWindowTime` (`imodview.cpp:4121`).
@@ -6281,50 +6550,40 @@ pub fn ivw_window_time(vi: &ImodView, timelock: i32) -> i32 {
 }
 
 /// `ivwRegisterInsertPoint` (`imodview.cpp:4129`).
-pub unsafe fn ivw_register_insert_point(
-    vi: *mut ImodView,
-    cont: *mut Icont,
-    pt: *mut Ipoint,
+pub fn ivw_register_insert_point(
+    vi: &mut ImodView,
+    model: &mut Imod,
+    contour_first: Option<(f32, u32)>,
+    pt: Ipoint,
     index: i32,
 ) -> i32 {
-    unsafe {
-        let cont_pts = &(*cont).pts;
-        if !cont_pts.is_empty()
-            && (cont_pts[0].z as f64 + 0.5).floor() as i32 != ((*pt).z as f64 + 0.5).floor() as i32
-            && (*cont).flags & ICONT_WILD == 0
-        {
-            crate::imod::three_dmod::undoredo::undo_contour_prop_chg_cc(
-                (*vi)
-                    .undo
-                    .as_deref_mut()
-                    .expect("initialized view undo stack"),
-                &mut *(*vi).imod,
-            );
-        }
-        crate::imod::three_dmod::undoredo::undo_point_addition_cc(
-            (*vi)
-                .undo
-                .as_deref_mut()
-                .expect("initialized view undo stack"),
-            &mut *(*vi).imod,
-            index,
+    if let Some((first_z, contour_flags)) = contour_first
+        && (first_z as f64 + 0.5).floor() as i32 != (pt.z as f64 + 0.5).floor() as i32
+        && contour_flags & ICONT_WILD == 0
+    {
+        crate::imod::three_dmod::undoredo::undo_contour_prop_chg_cc(
+            vi.undo.as_deref_mut().expect("initialized view undo stack"),
+            model,
         );
-        let ret = imod_insert_point(Some(&mut *(*vi).imod), Some(*pt), index);
-        if ret <= 0 {
-            (*vi)
-                .undo
-                .as_deref_mut()
-                .expect("initialized view undo stack")
-                .flush_unit();
-        } else {
-            (*vi)
-                .undo
-                .as_deref_mut()
-                .expect("initialized view undo stack")
-                .finish_unit(&mut *(*vi).imod);
-        }
-        ret
     }
+    crate::imod::three_dmod::undoredo::undo_point_addition_cc(
+        vi.undo.as_deref_mut().expect("initialized view undo stack"),
+        model,
+        index,
+    );
+    let result = imod_insert_point(Some(model), Some(pt), index);
+    if result <= 0 {
+        vi.undo
+            .as_deref_mut()
+            .expect("initialized view undo stack")
+            .flush_unit();
+    } else {
+        vi.undo
+            .as_deref_mut()
+            .expect("initialized view undo stack")
+            .finish_unit(model);
+    }
+    result
 }
 
 /// `ivwDraw` (`imodview.cpp:4157`).
@@ -6345,157 +6604,74 @@ pub fn ivw_get_ramp(in_imod_view: &ImodView, out_ramp_base: &mut i32, out_ramp_s
 }
 
 /// `ivwGetObjectColor` (`imodview.cpp:4174`).
-pub unsafe fn ivw_get_object_color(in_imod_view: *mut ImodView, in_object: i32) -> i32 {
-    unsafe {
-        let obj_index = 0;
+pub fn ivw_get_object_color(in_imod_view: &mut ImodView, in_object: i32) -> i32 {
+    let obj_index = 0;
 
-        /* check that inObject is within range. */
-        if in_object < 0 {
-            return obj_index;
-        }
-        if in_object >= (*(*in_imod_view).imod).obj.len() as i32 {
-            return obj_index;
-        }
-
-        let objbase = with_boundary(|n| n.app_objbase());
-        let objects = &mut (*(*in_imod_view).imod).obj;
-        let obj = &mut objects[in_object as usize];
-
-        if imod_depth() <= 8 {
-            obj.fgcolor = objbase - in_object;
-        } else {
-            obj.fgcolor = objbase + in_object;
-        }
-        obj.fgcolor
+    /* check that inObject is within range. */
+    if in_object < 0 {
+        return obj_index;
     }
+    let Some(model) = (unsafe { in_imod_view.imod.as_mut() }) else {
+        return obj_index;
+    };
+    if in_object >= model.obj.len() as i32 {
+        return obj_index;
+    }
+
+    let objbase = with_boundary(|n| n.app_objbase());
+    let obj = &mut model.obj[in_object as usize];
+
+    if imod_depth() <= 8 {
+        obj.fgcolor = objbase - in_object;
+    } else {
+        obj.fgcolor = objbase + in_object;
+    }
+    obj.fgcolor
 }
 
 /// `ivwSetBlackWhiteFromModel` (`imodview.cpp:4192`); set the black and white
 /// levels from the values stored in a model, adjusting as needed.
-pub unsafe fn ivw_set_black_white_from_model(vi: *mut ImodView) {
-    unsafe {
-        (*vi).black = (*(*vi).imod).blacklevel;
-        (*vi).white = (*(*vi).imod).whitelevel;
-        if (*vi).ushort_store != 0 {
-            if (*vi).black < 256 && (*vi).white < 256 {
-                (*vi).black *= 256;
-                (*vi).white *= 256;
-            }
-        } else if (*vi).black > 255 || (*vi).white > 255 {
-            (*vi).black /= 256;
-            (*vi).white /= 256;
+pub fn ivw_set_black_white_from_model(vi: &mut ImodView, model: Option<&Imod>) {
+    let Some(model) = model else {
+        return;
+    };
+    vi.black = model.blacklevel;
+    vi.white = model.whitelevel;
+    if vi.ushort_store != 0 {
+        if vi.black < 256 && vi.white < 256 {
+            vi.black *= 256;
+            vi.white *= 256;
         }
+    } else if vi.black > 255 || vi.white > 255 {
+        vi.black /= 256;
+        vi.white /= 256;
     }
 }
 
 /// `ivwBinByN` (`imodview.cpp:4206`); bin an array by the binning factor.
-pub unsafe fn ivw_bin_by_n(array: *mut u8, nxin: i32, nyin: i32, nbin: i32, brray: *mut u8) {
-    unsafe {
-        let nbinsq = nbin * nbin;
-        let nxout = nxin / nbin;
-        let nyout = nyin / nbin;
-        let ixofs = (nxin % nbin) / 2;
-        let iyofs = (nyin % nbin) / 2;
-        let nxins = nxin as usize;
-        let mut bdata = brray;
-        let mut cline1: *mut u8;
-        let mut cline2: *mut u8;
-        let mut cline3: *mut u8;
-        let mut cline4: *mut u8;
-
-        match nbin {
-            2 => {
-                for iy in 0..nyout {
-                    cline1 = array.add(2 * iy as usize * nxins);
-                    cline2 = cline1.add(nxins);
-                    for _ in 0..nxout {
-                        let sum = *cline1 as i32
-                            + *cline1.add(1) as i32
-                            + *cline2 as i32
-                            + *cline2.add(1) as i32;
-                        *bdata = (sum / 4) as u8;
-                        bdata = bdata.add(1);
-                        cline1 = cline1.add(2);
-                        cline2 = cline2.add(2);
-                    }
+pub fn ivw_bin_by_n(array: &[u8], nxin: i32, nyin: i32, nbin: i32, brray: &mut [u8]) {
+    if nxin <= 0 || nyin <= 0 || nbin <= 0 || array.len() != (nxin * nyin) as usize {
+        return;
+    }
+    let nxout = nxin / nbin;
+    let nyout = nyin / nbin;
+    if brray.len() < (nxout * nyout) as usize {
+        return;
+    }
+    // `imodview.cpp:4222` deliberately omits centered remainders for factor 2.
+    let ixofs = if nbin == 2 { 0 } else { (nxin % nbin) / 2 };
+    let iyofs = if nbin == 2 { 0 } else { (nyin % nbin) / 2 };
+    for iy in 0..nyout {
+        for ix in 0..nxout {
+            let mut sum = 0i32;
+            for by in 0..nbin {
+                for bx in 0..nbin {
+                    sum += array
+                        [(ix * nbin + ixofs + bx + (iy * nbin + iyofs + by) * nxin) as usize]
+                        as i32;
                 }
             }
-
-            3 => {
-                for iy in 0..nyout {
-                    cline1 = array.add((3 * iy + iyofs) as usize * nxins + ixofs as usize);
-                    cline2 = cline1.add(nxins);
-                    cline3 = cline2.add(nxins);
-                    for _ in 0..nxout {
-                        let sum = *cline1 as i32
-                            + *cline1.add(1) as i32
-                            + *cline1.add(2) as i32
-                            + *cline2 as i32
-                            + *cline2.add(1) as i32
-                            + *cline2.add(2) as i32
-                            + *cline3 as i32
-                            + *cline3.add(1) as i32
-                            + *cline3.add(2) as i32;
-                        *bdata = (sum / 9) as u8;
-                        bdata = bdata.add(1);
-                        cline1 = cline1.add(3);
-                        cline2 = cline2.add(3);
-                        cline3 = cline3.add(3);
-                    }
-                }
-            }
-
-            4 => {
-                for iy in 0..nyout {
-                    cline1 = array.add((4 * iy + iyofs) as usize * nxins + ixofs as usize);
-                    cline2 = cline1.add(nxins);
-                    cline3 = cline2.add(nxins);
-                    cline4 = cline3.add(nxins);
-                    for _ in 0..nxout {
-                        let sum = *cline1 as i32
-                            + *cline1.add(1) as i32
-                            + *cline1.add(2) as i32
-                            + *cline1.add(3) as i32
-                            + *cline2 as i32
-                            + *cline2.add(1) as i32
-                            + *cline2.add(2) as i32
-                            + *cline2.add(3) as i32
-                            + *cline3 as i32
-                            + *cline3.add(1) as i32
-                            + *cline3.add(2) as i32
-                            + *cline3.add(3) as i32
-                            + *cline4 as i32
-                            + *cline4.add(1) as i32
-                            + *cline4.add(2) as i32
-                            + *cline4.add(3) as i32;
-                        *bdata = (sum / 16) as u8;
-                        bdata = bdata.add(1);
-                        cline1 = cline1.add(4);
-                        cline2 = cline2.add(4);
-                        cline3 = cline3.add(4);
-                        cline4 = cline4.add(4);
-                    }
-                }
-            }
-
-            _ => {
-                for iy in 0..nyout {
-                    cline1 = array.add((nbin * iy + iyofs) as usize * nxins + ixofs as usize);
-                    for _ in 0..nxout {
-                        let mut sum = 0;
-                        cline2 = cline1;
-                        for _ in 0..nbin {
-                            for i in 0..nbin {
-                                sum += *cline2.add(i as usize) as i32;
-                            }
-                            cline2 = cline2.add(nxins);
-                        }
-                        *bdata = (sum / nbinsq) as u8;
-                        bdata = bdata.add(1);
-                        cline1 = cline1.add(nbin as usize);
-                    }
-                }
-            }
+            brray[(ix + iy * nxout) as usize] = (sum / (nbin * nbin)) as u8;
         }
     }
 }
@@ -6565,9 +6741,9 @@ mod tests {
 
     #[test]
     fn bin_by_three_preserves_upstream_centered_window() {
-        let mut input: Vec<u8> = (0..36).collect();
+        let input: Vec<u8> = (0..36).collect();
         let mut output = [0u8; 4];
-        unsafe { ivw_bin_by_n(input.as_mut_ptr(), 6, 6, 3, output.as_mut_ptr()) };
+        ivw_bin_by_n(&input, 6, 6, 3, &mut output);
         assert_eq!(output, [7, 10, 25, 28]);
     }
 
@@ -6575,11 +6751,175 @@ mod tests {
     fn bin_by_two_omits_the_offsets_the_source_omits() {
         // `imodview.cpp:4222` is the only `ivwBinByN` case that does not add
         // `ixofs`/`iyofs` to the line start, so an odd input starts at 0, 0.
-        let mut input: Vec<u8> = (0..25).collect();
+        let input: Vec<u8> = (0..25).collect();
         let mut output = [0u8; 4];
-        unsafe { ivw_bin_by_n(input.as_mut_ptr(), 5, 5, 2, output.as_mut_ptr()) };
+        ivw_bin_by_n(&input, 5, 5, 2, &mut output);
         // Rows 0-1, columns 0-1 => (0+1+5+6)/4 = 3, not the centred (6+7+11+12)/4.
         assert_eq!(output[0], 3);
+    }
+
+    #[test]
+    fn time_metadata_reads_owned_view_data() {
+        let mut view = ImodView {
+            num_times: 2,
+            cur_time: 2,
+            image_list_storage: vec![
+                ImodImageFile {
+                    description: Some(b"first".to_vec()),
+                    ..Default::default()
+                },
+                ImodImageFile {
+                    description: Some(b"second".to_vec()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let mut time = 0;
+
+        assert_eq!(ivw_get_time(&view, Some(&mut time)), 2);
+        assert_eq!(time, 2);
+        assert_eq!(ivw_get_time_index_label(&view, 1), b"first");
+        assert_eq!(ivw_get_time_index_label(&view, 2), b"second");
+        assert_eq!(ivw_get_time_label(&view), b"second");
+        assert_eq!(ivw_get_time_index_label(&view, 0), b"");
+        view.fake_image = 1;
+        assert_eq!(ivw_get_time_index_label(&view, 1), b"");
+    }
+
+    #[test]
+    fn viewer_state_uses_owned_image_ramp_and_model_data() {
+        let calls = install(RecordingBoundary::default());
+        let mut view = ImodView {
+            multi_file_z: 2,
+            zmouse: 1.,
+            image_list_storage: vec![
+                ImodImageFile {
+                    filename: Some("first.mrc".into()),
+                    ..Default::default()
+                },
+                ImodImageFile {
+                    filename: Some("second.mrc".into()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(ivw_current_image_file(&view, true), "second.mrc");
+        assert_eq!(ivw_get_contrast_reversed(&view), 0);
+
+        let mut cramp = crate::imod::three_dmod::xcramp::xcramp_allinit(24, None, 0, 255, 0)
+            .expect("test ramp initializes");
+        view.cramp = &mut cramp;
+        ivw_set_overlay_mode(&mut view, 1, 1, 2);
+        assert_eq!(
+            (view.overlay_sec, view.reverse_overlay, view.which_green),
+            (1, 1, 2)
+        );
+        assert_eq!(ivw_get_contrast_reversed(&view), 1);
+        assert!(
+            calls
+                .borrow()
+                .iter()
+                .any(|call| call == &format!("imodDraw({})", IMOD_DRAW_IMAGE | IMOD_DRAW_NOSYNC))
+        );
+
+        let mut model = Imod {
+            obj: vec![Iobj::default()],
+            ..Imod::default()
+        };
+        view.imod = &mut model;
+        assert_eq!(ivw_get_object_color(&mut view, -1), 0);
+        let color = ivw_get_object_color(&mut view, 0);
+        assert_eq!(model.obj[0].fgcolor, color);
+
+        view.fake_image = 1;
+        view.xsize = 11;
+        view.ysize = 12;
+        view.zsize = 13;
+        ivw_set_model_trans(&mut view);
+        assert_eq!((model.xmax, model.ymax, model.zmax), (11, 12, 13));
+        uninstall();
+    }
+
+    #[test]
+    fn filesystem_cache_accounting_accepts_an_image_reference() {
+        let image = ImodImageFile::default();
+        ivw_get_file_start_pos(&image);
+        ivw_dump_file_sys_cache(&image);
+    }
+
+    #[test]
+    fn image_reference_uses_typed_image_and_load_info() {
+        let image = ImodImageFile {
+            xscale: 2.,
+            yscale: 3.,
+            zscale: 4.,
+            xtrans: 50.,
+            ytrans: 60.,
+            ztrans: 70.,
+            xrot: 1.,
+            yrot: 2.,
+            zrot: 3.,
+            nx: 20,
+            mirror_fft: 1,
+            ..Default::default()
+        };
+        let load_info = LoadInfo {
+            xmin: 2,
+            ymin: 3,
+            zmin: 4,
+            plist: 1,
+            opx: 1.5,
+            opy: 2.5,
+            opz: 3.5,
+            ..Default::default()
+        };
+        let reference = ivw_get_image_ref(Some(&image), Some(&load_info), 2, 3).unwrap();
+
+        assert_eq!(
+            reference.cscale,
+            Ipoint {
+                x: 2.,
+                y: 3.,
+                z: 4.
+            }
+        );
+        assert_eq!(
+            reference.ctrans,
+            Ipoint {
+                x: 56.,
+                y: 27.,
+                z: 8.
+            }
+        );
+        assert_eq!(
+            reference.crot,
+            Ipoint {
+                x: 1.,
+                y: 2.,
+                z: 3.
+            }
+        );
+        assert!(ivw_get_image_ref(None, Some(&load_info), 2, 3).is_none());
+    }
+
+    #[test]
+    fn tilt_angles_are_an_owned_view_slice_from_load_zmin() {
+        let mut load_info = zeroed_load_info();
+        load_info.zmin = 1;
+        let mut view = ImodView {
+            li: &mut load_info,
+            num_tilt_angles: 3,
+            tilt_angles: vec![-60., 0., 60.],
+            ..Default::default()
+        };
+        let mut number = -1;
+        let angles = ivw_get_tilt_angles(&mut view, &mut number);
+        assert_eq!(number, 2);
+        assert_eq!(angles, [0., 60.]);
+        angles[0] = 1.5;
+        assert_eq!(view.tilt_angles, [-60., 1.5, 60.]);
     }
 
     #[test]
@@ -6610,6 +6950,246 @@ mod tests {
             &mut right
         ));
         assert_eq!((llx, urx, offset, left, right), (0, 6, 1, 1, 0));
+    }
+
+    #[test]
+    fn image_padding_uses_typed_view_image_and_load_info() {
+        let view = ImodView {
+            full_xsize: 10,
+            full_ysize: 10,
+            full_zsize: 10,
+            xybin: 1,
+            zbin: 1,
+            ..Default::default()
+        };
+        let image = ImodImageFile {
+            nx: 8,
+            ny: 8,
+            nz: 8,
+            urx: 7,
+            ury: 7,
+            urz: 7,
+            ..Default::default()
+        };
+        let load_info = LoadInfo::default();
+        let (mut llx, mut left_x, mut right_x) = (0, 0, 0);
+        let (mut lly, mut left_y, mut right_y) = (0, 0, 0);
+        let (mut llz, mut left_z, mut right_z) = (0, 0, 0);
+
+        assert_eq!(
+            ivw_get_image_padding(
+                &view,
+                Some(&image),
+                Some(&load_info),
+                0,
+                0,
+                0,
+                &mut llx,
+                &mut left_x,
+                &mut right_x,
+                &mut lly,
+                &mut left_y,
+                &mut right_y,
+                &mut llz,
+                &mut left_z,
+                &mut right_z,
+            ),
+            0
+        );
+        assert_eq!((llx, left_x, right_x), (0, 1, 0));
+        assert_eq!((lly, left_y, right_y), (0, 1, 0));
+        assert_eq!((llz, left_z, right_z), (0, 1, 0));
+    }
+
+    #[test]
+    fn cache_lifecycle_uses_owned_view_storage() {
+        let mut view = ImodView {
+            vm_tdim: 2,
+            vm_count: 9,
+            cache_index: vec![4, 5, 6, 7],
+            blank_line: vec![0; 4],
+            ..Default::default()
+        };
+        let load_info = LoadInfo {
+            zmin: 0,
+            zmax: 1,
+            ..Default::default()
+        };
+
+        ivw_flush_cache(&mut view, Some(&load_info), -1);
+        assert_eq!(view.vm_count, 0);
+        assert_eq!(view.cache_index, vec![-1, 5, -1, 7]);
+        ivw_free_cache(&mut view);
+        assert!(view.cache_index.is_empty());
+        assert!(view.blank_line.is_empty());
+    }
+
+    #[test]
+    fn cached_value_reads_owned_slice_bytes() {
+        let mut load_info = LoadInfo {
+            axis: 3,
+            ..Default::default()
+        };
+        let mut byte_slice = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
+        byte_slice.data = vec![1, 2, 3, 4];
+        let view = ImodView {
+            li: &mut load_info,
+            vm_tdim: 1,
+            cache_index: vec![0],
+            vm_cache: vec![IvwSlice {
+                cz: 0,
+                ct: 0,
+                used: 0,
+                sec: byte_slice,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(cache_ivw_get_value(&view, 1, 1, 0), 4);
+        S_BEST_IVW_GET_VALUE.with(|getter| getter.set(cache_ivw_get_value));
+        assert_eq!(ivw_get_value(&view, 1, 1, 0), 4);
+        S_BEST_IVW_GET_VALUE.with(|getter| getter.set(fake_ivw_get_value));
+
+        let mut ushort_load_info = LoadInfo {
+            axis: 3,
+            ..Default::default()
+        };
+        let mut ushort_slice = slice_create(1, 1, MRC_MODE_USHORT).unwrap();
+        ushort_slice.data = 500u16.to_ne_bytes().to_vec();
+        let ushort_view = ImodView {
+            li: &mut ushort_load_info,
+            vm_tdim: 1,
+            ushort_store: 1,
+            cache_index: vec![0],
+            vm_cache: vec![IvwSlice {
+                cz: 0,
+                ct: 0,
+                used: 0,
+                sec: ushort_slice,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(cache_ivw_get_value(&ushort_view, 0, 0, 0), 500);
+    }
+
+    #[test]
+    fn z_section_uses_owned_cache_storage_through_a_view_borrow() {
+        let mut load_info = LoadInfo {
+            axis: 3,
+            ..Default::default()
+        };
+        let mut section = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
+        section.data = vec![10, 11, 12, 13];
+        let mut view = ImodView {
+            fp: Some(ImodFile::Token(1)),
+            li: &mut load_info,
+            xsize: 2,
+            ysize: 2,
+            zsize: 1,
+            vm_size: 1,
+            vm_tdim: 1,
+            cache_index: vec![0],
+            vm_cache: vec![IvwSlice {
+                cz: 0,
+                ct: 0,
+                used: 0,
+                sec: section,
+            }],
+            ..Default::default()
+        };
+
+        let lines = ivw_get_z_section(&mut view, 0);
+        assert!(!lines.is_null());
+        assert_eq!(view.vm_cache[0].used, 1);
+        unsafe {
+            assert_eq!(*lines.add(0), view.vm_cache[0].sec.data.as_mut_ptr());
+            assert_eq!(*lines.add(1), view.vm_cache[0].sec.data.as_mut_ptr().add(2));
+        }
+    }
+
+    #[test]
+    fn image_copy_uses_bounded_rows_and_owned_range_map() {
+        let view = ImodView {
+            xsize: 2,
+            ysize: 2,
+            ..Default::default()
+        };
+        let top = vec![1, 2];
+        let bottom = vec![3, 4];
+        let mut copied = vec![0; 4];
+        assert_eq!(
+            ivw_copy_image_to_byte_buffer(&view, &[&top, &bottom], &mut copied),
+            0
+        );
+        assert_eq!(copied, vec![1, 2, 3, 4]);
+
+        let ushort_view = ImodView {
+            xsize: 1,
+            ysize: 1,
+            ushort_store: 1,
+            range_low: 0,
+            range_high: 65535,
+            ..Default::default()
+        };
+        let pixel = 500u16.to_ne_bytes().to_vec();
+        let map = ivw_ushort_in_range_to_byte_map(&ushort_view);
+        let mut mapped = vec![0; 1];
+        assert_eq!(
+            ivw_copy_image_to_byte_buffer(&ushort_view, &[&pixel], &mut mapped),
+            0
+        );
+        assert_eq!(mapped, vec![map[500]]);
+        assert_eq!(
+            ivw_copy_image_to_byte_buffer(&view, &[&top], &mut copied),
+            1
+        );
+    }
+
+    #[test]
+    fn model_getter_returns_a_typed_model_reference() {
+        let mut model = Box::new(Imod::default());
+        model.pixsize = 2.5;
+        let view = ImodView {
+            imod: model.as_mut(),
+            ..Default::default()
+        };
+
+        assert_eq!(ivw_get_model(Some(&view)).unwrap().pixsize, 2.5);
+        assert!(ivw_get_model(None).is_none());
+    }
+
+    #[test]
+    fn current_pixel_size_uses_owned_image_metadata() {
+        let model = Imod {
+            units: 1,
+            pixsize: 2.5,
+            ..Default::default()
+        };
+        let current_image = ImodImageFile {
+            xscale: 20.,
+            ..Default::default()
+        };
+        let view = ImodView {
+            num_times: 1,
+            cur_time: 1,
+            zmouse: 1.,
+            pixel_size_varies: 1,
+            image_list_storage: vec![ImodImageFile {
+                xscale: 40.,
+                ..Default::default()
+            }],
+            pix_size_index: vec![0],
+            adoc_pix_sizes: vec![vec![10., 30.]],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            ivw_get_cur_pixel_size(&view, Some(&model), Some(&current_image)),
+            Some(3.0e-10)
+        );
+        assert_eq!(
+            ivw_get_cur_pixel_size(&view, None, Some(&current_image)),
+            None
+        );
     }
 
     #[test]
@@ -6686,44 +7266,17 @@ mod tests {
     #[test]
     fn memreccpy_places_a_tile_at_the_requested_offsets() {
         let mut to = vec![0u8; 16];
-        let mut from: Vec<u8> = (1..=4).collect();
-        unsafe {
-            memreccpy(
-                to.as_mut_ptr(),
-                from.as_mut_ptr(),
-                2,
-                2,
-                1,
-                2,
-                1,
-                1,
-                0,
-                0,
-                0,
-            );
-        }
+        let from: Vec<u8> = (1..=4).collect();
+        memreccpy(&mut to, &from, 2, 2, 1, 2, 1, 1, 0, 0, 0);
         assert_eq!(to, vec![0, 0, 0, 0, 0, 1, 2, 0, 0, 3, 4, 0, 0, 0, 0, 0]);
     }
 
     #[test]
     fn mem_line_cpy_writes_through_line_pointers() {
         let mut rows = [[0u8; 4]; 3];
-        let mut lines: Vec<*mut u8> = rows.iter_mut().map(|r| r.as_mut_ptr()).collect();
-        let mut from: Vec<u8> = (1..=9).collect();
-        unsafe {
-            mem_line_cpy(
-                lines.as_mut_ptr(),
-                from.as_mut_ptr(),
-                2,
-                2,
-                1,
-                1,
-                1,
-                3,
-                1,
-                1,
-            );
-        }
+        let mut lines: Vec<&mut [u8]> = rows.iter_mut().map(|row| row.as_mut_slice()).collect();
+        let from: Vec<u8> = (1..=9).collect();
+        mem_line_cpy(&mut lines, &from, 2, 2, 1, 1, 1, 3, 1, 1);
         assert_eq!(rows[0], [0, 0, 0, 0]);
         assert_eq!(rows[1], [0, 5, 6, 0]);
         assert_eq!(rows[2], [0, 8, 9, 0]);
@@ -6811,6 +7364,45 @@ mod tests {
     }
 
     #[test]
+    fn set_time_selects_the_owned_image_record() {
+        let calls = install(RecordingBoundary::default());
+        let mut view = ImodView {
+            num_times: 2,
+            cur_time: 1,
+            fake_image: 0,
+            volume_stack: 1,
+            image_list_storage: vec![
+                ImodImageFile {
+                    description: Some(b"first".to_vec()),
+                    ..Default::default()
+                },
+                ImodImageFile {
+                    description: Some(b"second".to_vec()),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        ivw_set_time(&mut view, 2);
+        assert_eq!(view.cur_time, 2);
+        assert_eq!(ivw_get_time_label(&view), b"second");
+        assert_eq!(
+            view.image,
+            view.image_list_storage.as_mut_ptr().wrapping_add(1)
+        );
+        assert_eq!(view.hdr, view.image);
+        assert_eq!(
+            *calls.borrow(),
+            vec![
+                "imodImageScaleUpdate".to_owned(),
+                "setWindowTitle(3dmod:)".to_owned(),
+            ]
+        );
+        uninstall();
+    }
+
+    #[test]
     fn black_and_white_from_model_scale_between_byte_and_short() {
         let mut model = Imod {
             blacklevel: 10,
@@ -6818,11 +7410,10 @@ mod tests {
             ..Imod::default()
         };
         let mut view = ImodView {
-            imod: &mut model,
             ushort_store: 1,
             ..Default::default()
         };
-        unsafe { ivw_set_black_white_from_model(&mut view) };
+        ivw_set_black_white_from_model(&mut view, Some(&model));
         assert_eq!((view.black, view.white), (2560, 51200));
 
         let mut model = Imod {
@@ -6830,11 +7421,8 @@ mod tests {
             whitelevel: 51200,
             ..Imod::default()
         };
-        let mut view = ImodView {
-            imod: &mut model,
-            ..Default::default()
-        };
-        unsafe { ivw_set_black_white_from_model(&mut view) };
+        let mut view = ImodView::default();
+        ivw_set_black_white_from_model(&mut view, Some(&model));
         assert_eq!((view.black, view.white), (10, 200));
     }
 
@@ -6853,12 +7441,74 @@ mod tests {
             cur_time: 1,
             ..Default::default()
         };
-        assert!(unsafe { ivw_time_mismatch(&mut view, 0, &mut obj, &mut cont) });
-        assert!(!unsafe { ivw_time_mismatch(&mut view, 2, &mut obj, &mut cont) });
+        assert!(ivw_time_mismatch(&view, 0, &obj, &cont));
+        assert!(!ivw_time_mismatch(&view, 2, &obj, &cont));
         obj.flags = 0;
-        assert!(!unsafe { ivw_time_mismatch(&mut view, 0, &mut obj, &mut cont) });
+        assert!(!ivw_time_mismatch(&view, 0, &obj, &cont));
         assert_eq!(ivw_window_time(&view, 0), 1);
         assert_eq!(ivw_window_time(&view, 7), 7);
+    }
+
+    #[test]
+    fn contour_creation_and_insertion_use_typed_view_and_model_borrows() {
+        let mut model = Imod {
+            cindex: Iindex {
+                object: 0,
+                contour: -1,
+                point: -1,
+            },
+            obj: vec![Iobj {
+                flags: 1 << 18,
+                ..Iobj::default()
+            }],
+            ..Imod::default()
+        };
+        let mut view = ImodView {
+            num_times: 3,
+            cur_time: 2,
+            undo: Some(Box::new(crate::imod::three_dmod::undoredo::UndoRedo::new())),
+            ..ImodView::default()
+        };
+
+        let contour = ivw_get_or_make_contour(&mut view, &mut model, 0)
+            .expect("a selected object gets a contour");
+        assert_eq!(contour.time, 2);
+        let contour_first = contour.pts.first().map(|point| (point.z, contour.flags));
+        assert_eq!(
+            ivw_register_insert_point(
+                &mut view,
+                &mut model,
+                contour_first,
+                Ipoint {
+                    x: 4.,
+                    y: 5.,
+                    z: 6.,
+                },
+                0,
+            ),
+            1
+        );
+        assert_eq!(
+            model.obj[0].cont[0].pts,
+            vec![Ipoint {
+                x: 4.,
+                y: 5.,
+                z: 6.
+            }]
+        );
+    }
+
+    #[test]
+    fn model_flip_uses_explicit_model_and_load_info_borrows() {
+        let mut load_info = zeroed_load_info();
+        load_info.axis = 2;
+        let mut model = Imod::default();
+        ivw_flip_model(&mut model, Some(&load_info), true);
+        assert_ne!(model.flags & IMODF_ROT90X, 0);
+
+        load_info.axis = 3;
+        ivw_flip_model(&mut model, Some(&load_info), true);
+        assert_eq!(model.flags & IMODF_ROT90X, 0);
     }
 
     #[test]
@@ -6894,43 +7544,115 @@ mod tests {
             cur_time: 3,
             ..Default::default()
         };
-        assert_eq!(unsafe { ivw_adjusted_z_if_vol_stack(&mut view, 4) }, 4);
+        assert_eq!(ivw_adjusted_z_if_vol_stack(&view, 4), 4);
         view.volume_stack = 1;
-        assert_eq!(unsafe { ivw_adjusted_z_if_vol_stack(&mut view, 4) }, 24);
+        assert_eq!(ivw_adjusted_z_if_vol_stack(&view, 4), 24);
     }
 
     #[test]
     fn plist_blank_reports_a_section_with_no_piece() {
-        let mut coords = [0, 0, 5, 0, 0, 7];
         let mut li = zeroed_load_info();
         li.plist = 2;
         li.zmin = 1;
-        li.pcoords = Some(coords.to_vec());
+        li.pcoords = Some(vec![0, 0, 5, 0, 0, 7]);
+        assert_eq!(ivw_plist_blank(Some(&li), 4), 0);
+        assert_eq!(ivw_plist_blank(Some(&li), 6), 0);
+        assert_eq!(ivw_plist_blank(Some(&li), 3), 1);
+        li.plist = 0;
+        assert_eq!(ivw_plist_blank(Some(&li), 3), 0);
+    }
+
+    #[test]
+    fn line_pointer_allocation_uses_owned_storage() {
+        let mut view = ImodView::default();
+        assert_eq!(ivw_check_line_ptr_allocation(&mut view, 3), 0);
+        assert_eq!(view.line_ptrs.len(), 3);
+        assert_eq!(view.line_ptr_max, 3);
+        assert_eq!(ivw_check_line_ptr_allocation(&mut view, 2), 0);
+        assert_eq!(view.line_ptrs.len(), 3);
+        assert_eq!(ivw_check_line_ptr_allocation(&mut view, -1), 1);
+    }
+
+    #[test]
+    fn cache_initialization_uses_typed_load_info_and_owned_storage() {
+        let mut load_info = zeroed_load_info();
+        load_info.xmin = 2;
+        load_info.xmax = 5;
+        load_info.ymin = 3;
+        load_info.ymax = 5;
+        load_info.zmin = 4;
+        load_info.zmax = 5;
+        load_info.axis = 3;
         let mut view = ImodView {
-            li: &mut li,
+            vm_size: 2,
+            num_times: 2,
+            raw_image_store: MRC_MODE_BYTE as i16,
             ..Default::default()
         };
-        assert_eq!(unsafe { ivw_plist_blank(&mut view, 4) }, 0);
-        assert_eq!(unsafe { ivw_plist_blank(&mut view, 6) }, 0);
-        assert_eq!(unsafe { ivw_plist_blank(&mut view, 3) }, 1);
-        li.plist = 0;
-        assert_eq!(unsafe { ivw_plist_blank(&mut view, 3) }, 0);
+
+        assert_eq!(ivw_init_cache(&mut view, &load_info), 0);
+        assert_eq!(view.vm_tdim, 2);
+        assert_eq!(view.vm_tbase, 1);
+        assert_eq!(view.vm_cache.len(), 2);
+        assert_eq!(view.cache_index, vec![-1; 4]);
+        assert_eq!(view.blank_line.len(), 4);
+        assert!(view.vm_cache.iter().all(|slice| slice.sec.data.len() == 12));
     }
 
     #[test]
     fn line_pointers_step_by_the_pixel_size_of_the_mode() {
         let mut data = vec![0u8; 24];
         let mut view = ImodView::default();
-        let lines = unsafe { ivw_make_line_pointers(&mut view, data.as_mut_ptr(), 4, 3, 1) };
-        assert!(!lines.is_null());
+        let lines = ivw_make_line_pointers(
+            &mut view.line_ptrs,
+            &mut view.line_ptr_max,
+            &mut data,
+            4,
+            3,
+            1,
+        )
+        .unwrap();
+        assert_eq!(lines[0], NonNull::new(data.as_mut_ptr()));
         unsafe {
-            assert_eq!(*lines, data.as_mut_ptr());
-            assert_eq!((*lines.add(1)).offset_from(data.as_mut_ptr()), 8);
-            assert_eq!((*lines.add(2)).offset_from(data.as_mut_ptr()), 16);
+            assert_eq!(
+                lines[1]
+                    .expect("line pointer was constructed")
+                    .as_ptr()
+                    .offset_from(data.as_mut_ptr()),
+                8
+            );
+            assert_eq!(
+                lines[2]
+                    .expect("line pointer was constructed")
+                    .as_ptr()
+                    .offset_from(data.as_mut_ptr()),
+                16
+            );
         }
         assert_eq!(view.line_ptr_max, 3);
         // A null data pointer is the source's own "nothing to point at".
-        assert!(unsafe { ivw_make_line_pointers(&mut view, ptr::null_mut(), 4, 3, 1) }.is_null());
+        assert!(
+            ivw_make_line_pointers(
+                &mut view.line_ptrs,
+                &mut view.line_ptr_max,
+                &mut [],
+                4,
+                3,
+                1,
+            )
+            .is_none()
+        );
+        assert!(
+            ivw_make_line_pointers(
+                &mut view.line_ptrs,
+                &mut view.line_ptr_max,
+                &mut data,
+                0,
+                3,
+                1,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -7017,7 +7739,6 @@ mod tests {
         // `3dmod -Dr` on that file prints
         //   mmvalid 1  meanvalid 0  rmsvalid 0
         //   return min/max 0.017216  199.971176
-        let mut header = MrcHeader::default();
         let mut image = ImodImageFile::default();
         image.file = IIFILE_MRC;
         image.type_ = IITYPE_FLOAT;
@@ -7025,7 +7746,7 @@ mod tests {
         image.amax = 199.971176;
         image.amean = 100.451;
         image.rms = 0.;
-        image.header = (&raw mut header).cast();
+        image.mrc_header = Some(Box::new(MrcHeader::default()));
         let mut min = 0.0f32;
         let mut max = 0.0f32;
         let ret = unsafe { get_valid_scale(&mut image, Some(&mut min), Some(&mut max)) };
@@ -7053,7 +7774,7 @@ mod tests {
         image.amax = 10.;
         image.amean = 5.;
         image.rms = 0.;
-        image.header = (&raw mut header).cast();
+        image.mrc_header = Some(Box::new(header));
         // With a valid min/max the preference decides; the default preference
         // is min/max, so the return is still 1, but mean/SD is now available.
         assert_eq!(unsafe { get_valid_scale(&mut image, None, None) }, 1);

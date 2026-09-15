@@ -1186,7 +1186,7 @@ pub fn adoc_lookup_section(type_name: &[u8], name: &[u8]) -> i32 {
 /// Matches C `AdocLookupByNameValue` (`autodoc.c:993`).
 pub fn adoc_lookup_by_name_value(type_name: &[u8], name_value: i32) -> i32 {
     /* `char buf[15]; sprintf(buf, "%d", nameValue);` */
-    let buf = c_format_bytes("%d", &[CArg::Int(name_value as i64)]);
+    let buf = name_value.to_string().into_bytes();
     adoc_lookup_section(type_name, &buf)
 }
 
@@ -1412,7 +1412,7 @@ pub fn sect_set_key_value_type(
 
 /// Matches C `AdocSetInteger` (`autodoc.c:1163`).
 pub fn adoc_set_integer(type_name: &[u8], sect_ind: i32, key: &[u8], ival: i32) -> i32 {
-    let str = c_format_bytes("%d", &[CArg::Int(ival as i64)]);
+    let str = ival.to_string().into_bytes();
     set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_ONE_INT)
 }
 
@@ -1424,7 +1424,7 @@ pub fn adoc_set_two_integers(
     ival1: i32,
     ival2: i32,
 ) -> i32 {
-    let str = c_format_bytes("%d %d", &[CArg::Int(ival1 as i64), CArg::Int(ival2 as i64)]);
+    let str = format!("{ival1} {ival2}").into_bytes();
     set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_TWO_INTS)
 }
 
@@ -1437,14 +1437,7 @@ pub fn adoc_set_three_integers(
     ival2: i32,
     ival3: i32,
 ) -> i32 {
-    let str = c_format_bytes(
-        "%d %d %d",
-        &[
-            CArg::Int(ival1 as i64),
-            CArg::Int(ival2 as i64),
-            CArg::Int(ival3 as i64),
-        ],
-    );
+    let str = format!("{ival1} {ival2} {ival3}").into_bytes();
     set_key_value_type(type_name, sect_ind, key, Some(&str), ADOC_THREE_INTS)
 }
 
@@ -1556,9 +1549,7 @@ pub fn set_array_of_values(
         /* C branches on `valType == ADOC_INT_ARRAY` and casts the same
         `void *` either way; the variant carries that choice instead. */
         tmp = match &vals {
-            ArrayOfValues::Ints(ivals) => {
-                c_format_bytes("%d ", &[CArg::Int(ivals[ind as usize] as i64)])
-            }
+            ArrayOfValues::Ints(ivals) => format!("{} ", ivals[ind as usize]).into_bytes(),
             ArrayOfValues::Floats(fvals) => {
                 c_format_bytes("%g ", &[CArg::Dbl(fvals[ind as usize] as f64)])
             }
@@ -1572,13 +1563,9 @@ pub fn set_array_of_values(
     ind = 0;
     while ind < num_vals {
         tmp = match &vals {
-            ArrayOfValues::Ints(ivals) => c_format_bytes(
-                "%s%d",
-                &[
-                    CArg::Bytes(if ind != 0 { b" " } else { b"" }),
-                    CArg::Int(ivals[ind as usize] as i64),
-                ],
-            ),
+            ArrayOfValues::Ints(ivals) => {
+                format!("{}{}", if ind != 0 { " " } else { "" }, ivals[ind as usize]).into_bytes()
+            }
             ArrayOfValues::Floats(fvals) => c_format_bytes(
                 "%s%g",
                 &[
@@ -1973,13 +1960,9 @@ pub fn adoc_get_double_array(
 
 /// Matches C `AdocWriteInteger` (`autodoc.c:1638`).
 pub fn adoc_write_integer(fp: &mut ImodFile, key: &[u8], ival: i32) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %d\n",
-            &[CArg::Bytes(key), CArg::Int(ival as i64)],
-        ))
-        .is_err()
-    {
+    let mut line = key.to_vec();
+    line.extend_from_slice(format!(" = {ival}\n").as_bytes());
+    if fp.write_all(&line).is_err() {
         return 1;
     }
     0
@@ -1987,17 +1970,9 @@ pub fn adoc_write_integer(fp: &mut ImodFile, key: &[u8], ival: i32) -> i32 {
 
 /// Matches C `AdocWriteTwoIntegers` (`autodoc.c:1649`).
 pub fn adoc_write_two_integers(fp: &mut ImodFile, key: &[u8], ival1: i32, ival2: i32) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %d %d\n",
-            &[
-                CArg::Bytes(key),
-                CArg::Int(ival1 as i64),
-                CArg::Int(ival2 as i64),
-            ],
-        ))
-        .is_err()
-    {
+    let mut line = key.to_vec();
+    line.extend_from_slice(format!(" = {ival1} {ival2}\n").as_bytes());
+    if fp.write_all(&line).is_err() {
         return 1;
     }
     0
@@ -2011,18 +1986,9 @@ pub fn adoc_write_three_integers(
     ival2: i32,
     ival3: i32,
 ) -> i32 {
-    if fp
-        .write_all(&c_format_bytes(
-            "%s = %d %d %d\n",
-            &[
-                CArg::Bytes(key),
-                CArg::Int(ival1 as i64),
-                CArg::Int(ival2 as i64),
-                CArg::Int(ival3 as i64),
-            ],
-        ))
-        .is_err()
-    {
+    let mut line = key.to_vec();
+    line.extend_from_slice(format!(" = {ival1} {ival2} {ival3}\n").as_bytes());
+    if fp.write_all(&line).is_err() {
         return 1;
     }
     0
@@ -2037,7 +2003,8 @@ pub fn adoc_write_integer_array(
 ) -> i32 {
     let mut ind: i32;
     if fp
-        .write_all(&c_format_bytes("%s =", &[CArg::Bytes(key)]))
+        .write_all(key)
+        .and_then(|()| fp.write_all(b" ="))
         .is_err()
     {
         return 1;
@@ -2045,10 +2012,7 @@ pub fn adoc_write_integer_array(
     ind = 0;
     while ind < num_vals {
         if fp
-            .write_all(&c_format_bytes(
-                " %d",
-                &[CArg::Int(ivals[ind as usize] as i64)],
-            ))
+            .write_all(format!(" {}", ivals[ind as usize]).as_bytes())
             .is_err()
         {
             return 1;
@@ -2122,7 +2086,8 @@ pub fn adoc_write_three_floats(
 pub fn adoc_write_float_array(fp: &mut ImodFile, key: &[u8], vals: &[f32], num_vals: i32) -> i32 {
     let mut ind: i32;
     if fp
-        .write_all(&c_format_bytes("%s =", &[CArg::Bytes(key)]))
+        .write_all(key)
+        .and_then(|()| fp.write_all(b" ="))
         .is_err()
     {
         return 1;

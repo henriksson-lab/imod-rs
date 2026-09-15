@@ -1,7 +1,6 @@
 //! Translation of `IMOD/libcfshr/writelist.c`.
 #![allow(dead_code)]
 
-use crate::imod::libcfshr::b3dutil::{CArg, c_format, c_format_bytes};
 use std::io::Write;
 
 /// Original `writeList` (`writelist.c:23`).
@@ -26,8 +25,8 @@ pub fn write_list(list: &[i32], number_of_values: i32, line_length: i32) -> i32 
         start += index as usize + 1;
     }
     let mut out = std::io::stdout();
-    let _ = out.write_all(&c_format_bytes("%s", &[CArg::Bytes(&saved_string)]));
-    let _ = out.write_all(c_format("\n", &[]).as_bytes());
+    let _ = out.write_all(&saved_string);
+    let _ = out.write_all(b"\n");
     let _ = out.flush();
     0
 }
@@ -71,10 +70,10 @@ pub fn add_range_to_line(
     number_end: i32,
     line: Option<String>,
 ) -> Option<String> {
-    let mut range_string = c_format("%d", &[CArg::Int(number_start as i64)]);
+    let mut range_string = number_start.to_string();
     if number_end > number_start {
         range_string.push_str("-");
-        let end_string = c_format("%d", &[CArg::Int(number_end as i64)]);
+        let end_string = number_end.to_string();
         range_string.push_str(&end_string);
     }
 

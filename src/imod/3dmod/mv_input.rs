@@ -1097,7 +1097,7 @@ pub fn imodv_key_press(a: &mut ImodvApp, event: InputEvent, n: &mut dyn MvInputN
                 if a.vert_buf_ok == 0 {
                     for m in 0..a.num_mods {
                         let model = a.mod_[m as usize];
-                        n.vb_cleanup_vbd(model);
+                        n.vb_cleanup_vbd(model.as_ptr());
                     }
                 }
                 unsafe { imodv_draw() };
@@ -1745,10 +1745,9 @@ pub fn imodv_zoomd(a: &mut ImodvApp, zoom: f64) {
 
     if a.crosset != 0 {
         for m in 0..a.num_mods {
-            if let Some(model) = unsafe { a.mod_[m as usize].as_mut() } {
-                let rad = model.view[0].rad;
-                model.view[0].rad = (rad as f64 / zoom) as f32;
-            }
+            let model = unsafe { a.mod_[m as usize].as_mut() };
+            let rad = model.view[0].rad;
+            model.view[0].rad = (rad as f64 / zoom) as f32;
         }
     } else {
         let model = unsafe { &mut *a.imod };
@@ -1815,9 +1814,8 @@ pub fn imodv_translate_by_delta(
         let Some(imod) = (unsafe {
             a.mod_
                 .get(m as usize)
-                .copied()
-                .unwrap_or(std::ptr::null_mut())
-                .as_mut()
+                .map(|model| model.as_ptr())
+                .and_then(|model| model.as_mut())
         }) else {
             continue;
         };
@@ -1973,7 +1971,7 @@ pub fn imodv_compute_rotation(
                 .mod_
                 .get(m as usize)
                 .copied()
-                .unwrap_or(std::ptr::null_mut());
+                .map_or(std::ptr::null_mut(), std::ptr::NonNull::as_ptr);
             let Some(model) = (unsafe { imod.as_mut() }) else {
                 continue;
             };
@@ -2511,7 +2509,7 @@ pub fn process_selection(
         || pt_num == -1
         || mo_num < 0
         || mo_num >= a.num_mods
-        || ob_num >= unsafe { (*a.mod_[mo_num as usize]).obj.len() as i32 }
+        || ob_num >= unsafe { a.mod_[mo_num as usize].as_ref().obj.len() as i32 }
     {
         // `App->newQtOpenGL` is set on this build.
         unsafe { imodv_draw() };
@@ -2934,7 +2932,7 @@ mod tests {
             rmat: imod_mat_new(3),
             ..Default::default()
         };
-        a.mod_.push(ptr);
+        a.mod_.push(unsafe { std::ptr::NonNull::from(&mut *ptr) });
         (a, model)
     }
 

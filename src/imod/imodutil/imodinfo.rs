@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::env;
 use std::io::Write;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::BorrowedFd;
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
 use crate::imod::libcfshr::b3dutil::{
@@ -443,14 +443,14 @@ pub fn imodinfo() {
                 // one offset and the `\n\n` written after this lands where
                 // the ascii text ended.
                 let _ = fout.flush();
-                // `dup` is the immediate POSIX boundary needed to preserve
-                // the shared descriptor offset.  Convert it to owned Rust
-                // state at the boundary so no raw descriptor escapes.
-                let duplicated = unsafe { libc::dup(fout.fileno()) };
-                if duplicated < 0 {
+                // `try_clone_to_owned` is the standard-library `dup` wrapper:
+                // it preserves the shared kernel file description and turns
+                // the duplicate into owned Rust state before this routine
+                // resumes normal I/O.
+                let borrowed = unsafe { BorrowedFd::borrow_raw(fout.fileno()) };
+                let Ok(owned) = borrowed.try_clone_to_owned() else {
                     exit_error(b"Could not duplicate output file descriptor");
-                }
-                let owned = unsafe { OwnedFd::from_raw_fd(duplicated) };
+                };
                 let mut out = ImodFile::File(std::rc::Rc::new(std::fs::File::from(owned)));
                 imod_write_ascii(&model, &mut out);
                 let _ = out.flush();

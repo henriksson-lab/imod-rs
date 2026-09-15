@@ -213,8 +213,7 @@ pub fn icalc_angles(angles: &mut [f32; 3], matrix: &[f32]) {
         .as_bytes(),
     );
     let _ = out.write_all(c_format("determinant - %f\n", &[CArg::Dbl(S_DET.get())]).as_bytes());
-    let _ = out
-        .write_all(c_format("ERROR: icalc_angles - Not a pure rotation matrix\n", &[]).as_bytes());
+    let _ = out.write_all(b"ERROR: icalc_angles - Not a pure rotation matrix\n");
     let _ = out.flush();
 }
 

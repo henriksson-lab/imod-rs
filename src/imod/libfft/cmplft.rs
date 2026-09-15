@@ -40,19 +40,9 @@ pub fn cmplft(data: &mut [f32], n: i32, dim: &mut [i32; 6]) {
     // IMOD stores complex values as interleaved real/imaginary floats.
     // `mdftkd` receives the owned storage and the fixed odd-value bias.
     mdftkd(n, &factor, dim, data, 0, 1);
-    // `diprp` remains the immediate translated kernel boundary.  Its
-    // real and imaginary streams are adjacent views of `data`.
-    unsafe {
-        diprp(
-            n,
-            sym.as_mut_ptr(),
-            psym,
-            unsym.as_mut_ptr(),
-            dim.as_mut_ptr(),
-            data.as_mut_ptr(),
-            data[1..].as_mut_ptr(),
-        );
-    }
+    // `diprp` operates on the interleaved real/imaginary values directly;
+    // its former adjacent raw streams were just two cursors into this slice.
+    diprp(n, &sym, psym, &unsym, dim, data);
 }
 
 #[cfg(test)]

@@ -37,6 +37,7 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_complex_smin_smax, mrc_getdcsize, mrc_head_new,
 };
 use core::ffi::{c_char, c_void};
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicI32, Ordering};
 use std::cell::RefCell;
 use std::sync::{LazyLock, Mutex};
@@ -50,11 +51,10 @@ use std::sync::{LazyLock, Mutex};
 /// nothing about it is a C string.
 pub type IiSectionFunc = Option<unsafe extern "C" fn(*mut ImodImageFile, *mut u8, i32) -> i32>;
 pub type IiFileCheckFunction = Option<unsafe extern "C" fn(*mut ImodImageFile) -> i32>;
-/// C `IIRawCheckFunction` (`iimage.h`).  A plain Rust `fn` pointer rather than
-/// `extern "C"`: the table it lives in is private to `iilikemrc.c` and no C
-/// caller ever installs an entry, so nothing needs the C calling convention —
-/// and [`ImodFile`] is not an FFI type.
-pub type IiRawCheckFunction = Option<unsafe fn(&mut ImodFile, &[u8], *mut RawImageInfo) -> i32>;
+/// C `IIRawCheckFunction` (`iimage.h`).  The registry is crate-private Rust
+/// state, so probes receive their file and result through ordinary borrows.
+/// No foreign caller can install or invoke one of these entries.
+pub type IiRawCheckFunction = Option<fn(&mut ImodFile, &[u8], &mut RawImageInfo) -> i32>;
 
 pub const IITYPE_UBYTE: i32 = 0;
 pub const IITYPE_BYTE: i32 = 1;
@@ -104,8 +104,8 @@ static S_OPENED_FILES: LazyLock<Mutex<Vec<usize>>> = LazyLock::new(|| Mutex::new
 thread_local! {
     /// TIFF thread copies are owned by the existing image-file lifecycle; these
     /// are borrowed cursors kept per calling thread for parallel section reads.
-    static S_TIFF_THREADS: RefCell<([*mut ImodImageFile; MAX_TIFF_THREADS], i32)> =
-        const { RefCell::new(([core::ptr::null_mut(); MAX_TIFF_THREADS], 0)) };
+    static S_TIFF_THREADS: RefCell<([Option<NonNull<ImodImageFile>>; MAX_TIFF_THREADS], i32)> =
+        const { RefCell::new(([None; MAX_TIFF_THREADS], 0)) };
 }
 /// Process-wide C callback registration.  Calls snapshot this value before
 /// entering foreign code so a callback may safely register a replacement.
@@ -115,7 +115,9 @@ static S_QUIT_CHECK_FUNC: Mutex<Option<unsafe extern "C" fn(i32) -> i32>> = Mute
 /// receives the identifier and a temporary C-compatible path separately.
 #[derive(Clone)]
 pub struct StackSetData {
-    pub name: Option<Vec<u8>>,
+    /// Dataset path owned as ordinary Rust text.  A temporary `CString` is
+    /// constructed only for an HDF5 call.
+    pub name: Option<String>,
     pub dset_id: i64,
     pub is_open: bool,
 }
@@ -144,10 +146,9 @@ pub struct ImodImageFile {
     /// the source stores a non-file identity here use [`ImodFile::Token`].
     pub fp: Option<ImodFile>,
     /// C `char *description`: the TIFF `ImageDescription`, built out of the MRC
-    /// labels by `tiffSyncFromMrcHeader` (`iitif.c:775-809`) and `free`d by
-    /// `iiDelete`.  It holds the whole `nlabl * (MRC_LABEL_SIZE + 1)` buffer
-    /// the source allocates, NUL bytes included, because that is what goes to
-    /// libtiff.
+    /// labels by `tiffSyncFromMrcHeader` (`iitif.c:775-809`). This is owned
+    /// metadata text without a C terminator; the TIFF boundary adds one only
+    /// while calling libtiff.
     pub description: Option<Vec<u8>>,
     pub state: i32,
     pub nx: i32,
@@ -190,10 +191,11 @@ pub struct ImodImageFile {
     pub header_size: i32,
     pub section_skip: i32,
     pub has_piece_coords: i32,
-    /// C `char *header`, which every user casts to something else: an
-    /// `MrcHeader *` for MRC and shared memory, a `TfInfo *` for TIFF.  It is
-    /// not a string and never was.
-    pub header: *mut c_void,
+    /// Opaque handle owned by an external image backend.  It is used only for
+    /// libtiff's `TIFF *` and Qt's `QImage *`; crate-owned MRC header data is
+    /// held in [`Self::mrc_header`] instead.  No Rust backend may store domain
+    /// state behind this erased pointer.
+    pub backend_handle: *mut c_void,
     // `HANDLE` on Windows and an `int` file descriptor on POSIX (`iimage.h`).
     // Keeping a pointer-sized slot is required for the Windows mapping handle.
     pub shr_mem_file: isize,
@@ -240,10 +242,11 @@ pub struct ImodImageFile {
     pub num_volumes: i32,
     /// The related HDF volume image records.  The records themselves remain
     /// address-stable allocations because the image API hands out their
-    /// addresses, while this relationship is ordinary owned collection data.
-    pub ii_volumes: Vec<*mut ImodImageFile>,
+    /// addresses.  A vacant slot records a volume that has been deleted while
+    /// other legacy image cursors remain open.
+    pub ii_volumes: Vec<Option<NonNull<ImodImageFile>>>,
     /// Address-stable storage for secondary HDF volume records.  `ii_volumes`
-    /// holds only the legacy cursors exposed to image APIs.
+    /// holds typed, non-null legacy cursors exposed to image APIs.
     pub owned_hdf_volumes: Vec<Box<ImodImageFile>>,
     pub adoc_index: i32,
     pub global_adoc_index: i32,
@@ -266,13 +269,8 @@ pub struct ImodImageFile {
         Option<unsafe extern "C" fn(*mut ImodImageFile, *mut MrcHeader) -> i32>,
     pub write_header: Option<unsafe extern "C" fn(*mut ImodImageFile) -> i32>,
     /// Rust-owned MRC header storage used by the native MRC and like-MRC
-    /// backends.  `header` is retained as their temporary erased callback ABI
-    /// alias; it never owns this allocation.
+    /// backends.
     pub mrc_header: Option<Box<MrcHeader>>,
-    /// Rust-owned MRC header storage used by the shared-memory image backend.
-    /// `header` remains the immediate raw pointer used by the legacy image
-    /// callbacks; it aliases this allocation only while that backend is open.
-    pub shr_mem_mrc_header: Option<Box<MrcHeader>>,
 }
 
 impl Default for ImodImageFile {
@@ -327,7 +325,7 @@ impl Default for ImodImageFile {
             header_size: 0,
             section_skip: 0,
             has_piece_coords: 0,
-            header: core::ptr::null_mut(),
+            backend_handle: core::ptr::null_mut(),
             shr_mem_file: 0,
             user_data: core::ptr::null_mut(),
             user_flags: 0,
@@ -379,7 +377,6 @@ impl Default for ImodImageFile {
             sync_from_mrc_header: None,
             write_header: None,
             mrc_header: None,
-            shr_mem_mrc_header: None,
         }
     }
 }
@@ -388,6 +385,7 @@ impl Default for ImodImageFile {
 ///
 /// It is passed only between Rust format probes and setup code, so it has no
 /// foreign-layout contract.
+#[derive(Clone, Copy, Default)]
 pub struct RawImageInfo {
     pub type_: i32,
     pub nx: i32,
@@ -411,14 +409,15 @@ pub struct LineProcData {
     pub x_start: i32,
     pub x_end: i32,
     pub convert: i32,
-    /// Borrowed cursors into the caller's output buffer or an external image
-    /// backend's mapped/read buffer.  They do not own allocation; raw pointers
-    /// remain because `ii_process_read_line` is shared with the MRC, HDF5, and
-    /// POSIX shared-memory backends, all of which supply their storage through
-    /// pointer-based APIs.
+    /// Borrowed input cursor into an external image backend's mapped/read
+    /// buffer.  It does not own allocation because MRC, HDF5, and POSIX
+    /// shared-memory backends retarget it to their current input chunk.
     pub bdata: *mut u8,
+    /// Borrowed base of the caller's output buffer.  The mutable output cursor
+    /// is stored as `bufp_offset`, so section processing never keeps two raw
+    /// pointers for the same owned output allocation.
     pub buf: *mut u8,
-    pub bufp: *mut u8,
+    pub bufp_offset: isize,
     /// Pixel-conversion lookup data, owned for the duration of a section read.
     pub map: Vec<u8>,
     pub byte: i32,
@@ -467,10 +466,7 @@ pub fn init_check_list() -> i32 {
                 unsafe extern "C" fn(*mut crate::imod::libiimod::iilikemrc::ImodImageFile) -> i32,
                 unsafe extern "C" fn(*mut ImodImageFile) -> i32,
             >(ii_like_mrc_check)),
-            Some(core::mem::transmute::<
-                unsafe fn(*mut ImodImageFile) -> i32,
-                unsafe extern "C" fn(*mut ImodImageFile) -> i32,
-            >(native_ii_hdf_check)),
+            Some(hdf_check_callback),
             Some(ii_jpeg_check),
             Some(ii_adoc_check),
         ]
@@ -535,64 +531,62 @@ pub fn ii_check_for_quit(param: i32) -> i32 {
 /// with `Box::from_raw`.
 pub fn ii_new_box() -> Box<ImodImageFile> {
     let mut ofile = Box::new(ImodImageFile::default());
-    unsafe {
-        (*ofile).xscale = 1.0;
-        (*ofile).yscale = 1.0;
-        (*ofile).zscale = 1.0;
-        (*ofile).slope = 1.0;
-        (*ofile).smax = 255.0;
-        (*ofile).axis = 3;
-        (*ofile).mirror_fft = 0;
-        (*ofile).any_tiff_pix_size = 0;
-        (*ofile).raw_palette_bytes = 0;
-        (*ofile).tiff_compression = 1;
-        (*ofile).format = IIFILE_UNKNOWN;
-        (*ofile).fp = None;
-        (*ofile).read_section = None;
-        (*ofile).read_section_byte = None;
-        (*ofile).read_section_ushort = None;
-        (*ofile).read_section_float = None;
-        (*ofile).write_section = None;
-        (*ofile).write_section_float = None;
-        (*ofile).fill_mrc_header = None;
-        (*ofile).sync_from_mrc_header = None;
-        (*ofile).write_header = None;
-        (*ofile).clean_up = None;
-        (*ofile).reopen = None;
-        (*ofile).close = None;
-        (*ofile).write_section = None;
-        (*ofile).colormap = None;
-        (*ofile).user_data = core::ptr::null_mut();
-        (*ofile).shr_mem_file = 0;
-        (*ofile).llx = 0;
-        (*ofile).lly = 0;
-        (*ofile).llz = 0;
-        (*ofile).urx = -1;
-        (*ofile).ury = -1;
-        (*ofile).urz = -1;
-        (*ofile).pad_left = 0;
-        (*ofile).pad_right = 0;
-        (*ofile).nx = 0;
-        (*ofile).ny = 0;
-        (*ofile).nz = 0;
-        (*ofile).rms = -1.0;
-        (*ofile).last_written_z = -1;
-        (*ofile).packed4bits = 0;
-        (*ofile).half_floats = 0;
-        (*ofile).read_eer_as_super_res = 0;
-        (*ofile).num_frames_in_eerfile = 0;
-        (*ofile).antialias_eerfilter = 0;
-        (*ofile).directory_nums = None;
-        (*ofile).adoc_index = -1;
-        (*ofile).global_adoc_index = -1;
-        (*ofile).stack_set_list = None;
-        (*ofile).z_to_data_set_map.clear();
-        (*ofile).dataset_name = None;
-        (*ofile).ii_volumes.clear();
-        (*ofile).owned_hdf_volumes.clear();
-        (*ofile).num_volumes = 0;
-        (*ofile).hdf_compression = -1;
-    }
+    ofile.xscale = 1.0;
+    ofile.yscale = 1.0;
+    ofile.zscale = 1.0;
+    ofile.slope = 1.0;
+    ofile.smax = 255.0;
+    ofile.axis = 3;
+    ofile.mirror_fft = 0;
+    ofile.any_tiff_pix_size = 0;
+    ofile.raw_palette_bytes = 0;
+    ofile.tiff_compression = 1;
+    ofile.format = IIFILE_UNKNOWN;
+    ofile.fp = None;
+    ofile.read_section = None;
+    ofile.read_section_byte = None;
+    ofile.read_section_ushort = None;
+    ofile.read_section_float = None;
+    ofile.write_section = None;
+    ofile.write_section_float = None;
+    ofile.fill_mrc_header = None;
+    ofile.sync_from_mrc_header = None;
+    ofile.write_header = None;
+    ofile.clean_up = None;
+    ofile.reopen = None;
+    ofile.close = None;
+    ofile.write_section = None;
+    ofile.colormap = None;
+    ofile.user_data = core::ptr::null_mut();
+    ofile.shr_mem_file = 0;
+    ofile.llx = 0;
+    ofile.lly = 0;
+    ofile.llz = 0;
+    ofile.urx = -1;
+    ofile.ury = -1;
+    ofile.urz = -1;
+    ofile.pad_left = 0;
+    ofile.pad_right = 0;
+    ofile.nx = 0;
+    ofile.ny = 0;
+    ofile.nz = 0;
+    ofile.rms = -1.0;
+    ofile.last_written_z = -1;
+    ofile.packed4bits = 0;
+    ofile.half_floats = 0;
+    ofile.read_eer_as_super_res = 0;
+    ofile.num_frames_in_eerfile = 0;
+    ofile.antialias_eerfilter = 0;
+    ofile.directory_nums = None;
+    ofile.adoc_index = -1;
+    ofile.global_adoc_index = -1;
+    ofile.stack_set_list = None;
+    ofile.z_to_data_set_map.clear();
+    ofile.dataset_name = None;
+    ofile.ii_volumes.clear();
+    ofile.owned_hdf_volumes.clear();
+    ofile.num_volumes = 0;
+    ofile.hdf_compression = -1;
     ofile
 }
 
@@ -642,7 +636,7 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
                 return core::ptr::null_mut();
             }
             (*file).state = IISTATE_READY;
-            if add_to_opened_list(file) == 0 {
+            if add_to_opened_list(&mut *file) == 0 {
                 return file;
             }
             ii_delete(file);
@@ -674,12 +668,17 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
         };
         if (*file).fp.is_none() || init_check_list() != 0 {
             if (*file).fp.is_none() {
+                let system_error = std::io::Error::last_os_error().to_string();
+                let system_error = system_error
+                    .split(" (os error ")
+                    .next()
+                    .unwrap_or(&system_error);
                 b3d_error(
                     Some(&mut ImodFile::Stderr),
                     format_args!(
                         "ERROR: iiOpen - Opening file {} ({})\n",
                         String::from_utf8_lossy(filename),
-                        std::io::Error::last_os_error()
+                        system_error
                     ),
                 );
             } else {
@@ -721,7 +720,7 @@ pub unsafe fn ii_open(filename: &[u8], mode: &str) -> *mut ImodImageFile {
             if err == 0 {
                 if (*file).num_volumes <= 1 || S_ALLOW_MULTI_VOLUME.load(Ordering::SeqCst) != 0 {
                     (*file).state = IISTATE_READY;
-                    if add_to_opened_list(file) == 0 {
+                    if add_to_opened_list(&mut *file) == 0 {
                         return file;
                     }
                 } else {
@@ -785,7 +784,7 @@ pub unsafe fn ii_open_new(filename: &[u8], mode: &str, mut file_kind: i32) -> *m
     if err == 0 {
         err = match file_kind {
             IIFILE_MRC => ii_mrc_open_new(file, mode),
-            IIFILE_HDF => ii_hdf_open_new(file, mode),
+            IIFILE_HDF => ii_hdf_open_new(&mut *file, mode),
             IIFILE_TIFF => tiff_open_new(file),
             IIFILE_JPEG => jpeg_open_new(file),
             IIFILE_SHR_MEM => 0,
@@ -797,43 +796,40 @@ pub unsafe fn ii_open_new(filename: &[u8], mode: &str, mut file_kind: i32) -> *m
         (*file).new_file = 1;
         (*file).fmode = "rb+".into();
         (*file).state = IISTATE_READY;
-        if add_to_opened_list(file) == 0 {
+        if add_to_opened_list(&mut *file) == 0 {
             return file;
         }
     }
     ii_delete(file);
     core::ptr::null_mut()
 }
-pub unsafe fn ii_reopen(in_file: *mut ImodImageFile) -> i32 {
-    if in_file.is_null() {
-        return -1;
-    }
-    if unsafe { (*in_file).fp.is_some() } {
+pub fn ii_reopen(in_file: &mut ImodImageFile) -> i32 {
+    if in_file.fp.is_some() {
         return 1;
     }
-    unsafe {
-        if (&(*in_file).fmode).is_empty() {
+    {
+        if in_file.fmode.is_empty() {
             // `iimage.c:411-412`.
-            (*in_file).fmode = "rb+".into();
+            in_file.fmode = "rb+".into();
         }
-        if let Some(reopen) = (*in_file).reopen {
-            if reopen(in_file) != 0 {
+        if let Some(reopen) = in_file.reopen {
+            if unsafe { reopen(in_file) } != 0 {
                 return 2;
             }
-            (*in_file).state = IISTATE_READY;
+            in_file.state = IISTATE_READY;
             add_to_opened_list(in_file);
             return 0;
         }
-        let Some(name) = (*in_file).filename.clone() else {
+        let Some(name) = in_file.filename.clone() else {
             return 2;
         };
-        (*in_file).fp = ImodFile::open(&name, &(*in_file).fmode);
-        if (*in_file).fp.is_none() {
+        in_file.fp = ImodFile::open(&name, &in_file.fmode);
+        if in_file.fp.is_none() {
             return 2;
         }
         add_to_opened_list(in_file);
-        if (*in_file).state != IISTATE_NOTINIT {
-            (*in_file).state = IISTATE_READY;
+        if in_file.state != IISTATE_NOTINIT {
+            in_file.state = IISTATE_READY;
             return 0;
         }
         (*in_file).format = IIFILE_UNKNOWN;
@@ -842,8 +838,8 @@ pub unsafe fn ii_reopen(in_file: *mut ImodImageFile) -> i32 {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         for check in checks {
-            if check.unwrap()(in_file) == 0 {
-                (*in_file).state = IISTATE_READY;
+            if unsafe { check.unwrap()(in_file) } == 0 {
+                in_file.state = IISTATE_READY;
                 return 0;
             }
         }
@@ -851,29 +847,27 @@ pub unsafe fn ii_reopen(in_file: *mut ImodImageFile) -> i32 {
     -1
 }
 /// Matches C `iiSetMM` (`iimage.c:454`).
-pub unsafe fn ii_set_mm(
-    in_file: *mut ImodImageFile,
+pub fn ii_set_mm(
+    in_file: &mut ImodImageFile,
     mut in_min: f32,
     mut in_max: f32,
     scale_max: f32,
 ) -> i32 {
-    unsafe {
-        if in_min != in_max {
-            (*in_file).smin = in_min;
-            (*in_file).smax = in_max;
-        }
-        if (*in_file).smin == (*in_file).smax {
-            (*in_file).smin = 0.;
-            (*in_file).smax = 255.;
-        }
-        in_min = (*in_file).smin;
-        in_max = (*in_file).smax;
-        if (*in_file).format == IIFORMAT_COMPLEX {
-            (in_min, in_max) = mrc_complex_smin_smax(in_min, in_max);
-        }
-        (*in_file).slope = scale_max / (in_max - in_min);
-        (*in_file).offset = -in_min * (*in_file).slope;
+    if in_min != in_max {
+        in_file.smin = in_min;
+        in_file.smax = in_max;
     }
+    if in_file.smin == in_file.smax {
+        in_file.smin = 0.;
+        in_file.smax = 255.;
+    }
+    in_min = in_file.smin;
+    in_max = in_file.smax;
+    if in_file.format == IIFORMAT_COMPLEX {
+        (in_min, in_max) = mrc_complex_smin_smax(in_min, in_max);
+    }
+    in_file.slope = scale_max / (in_max - in_min);
+    in_file.offset = -in_min * in_file.slope;
     0
 }
 pub unsafe fn ii_close(in_file: *mut ImodImageFile) {
@@ -887,7 +881,7 @@ pub unsafe fn ii_close(in_file: *mut ImodImageFile) {
             drop(fp);
         }
         (*in_file).fp = None;
-        remove_from_opened_list(in_file);
+        remove_from_opened_list(&mut *in_file);
         if (*in_file).state != IISTATE_NOTINIT {
             (*in_file).state = IISTATE_PARK;
         }
@@ -917,50 +911,40 @@ pub unsafe fn ii_delete(in_file: *mut ImodImageFile) {
         drop(Box::from_raw(in_file));
     }
 }
-pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
-    if in_file.is_null() {
-        return core::ptr::null_mut();
-    }
-    if (*in_file).colormap.is_some() {
+pub fn ii_copy_open(in_file: &mut ImodImageFile) -> Option<Box<ImodImageFile>> {
+    if in_file.colormap.is_some() {
         // `iimage.c:535`.
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: iiCopyOpen - Not allowed for a file with a colormap\n"),
         );
-        return core::ptr::null_mut();
-    }
-    let copy = ii_new();
-    if copy.is_null() {
-        return copy;
+        return None;
     }
     // `iimage.c:541` is `memcpy(copy, inFile, sizeof(ImodImageFile))`; see the
     // type's `Clone` note for why this is a clone rather than a byte copy.
-    *copy = (*in_file).clone();
-    (*copy).fp = None;
-    (*copy).header = core::ptr::null_mut();
-    (*copy).mrc_header = None;
-    (*copy).shr_mem_mrc_header = None;
-    (*copy).owned_hdf_volumes.clear();
-    (*copy).filename = None;
-    (*copy).description = None;
-    if (*in_file).state != IISTATE_NOTINIT {
-        (*in_file).state = IISTATE_PARK;
+    let mut copy = Box::new(in_file.clone());
+    copy.fp = None;
+    copy.backend_handle = core::ptr::null_mut();
+    copy.mrc_header = None;
+    copy.owned_hdf_volumes.clear();
+    copy.filename = None;
+    copy.description = None;
+    if in_file.state != IISTATE_NOTINIT {
+        in_file.state = IISTATE_PARK;
     }
-    (*copy).filename = (*in_file).filename.clone();
-    if (*copy).filename.is_none() {
-        ii_delete(copy);
+    copy.filename = in_file.filename.clone();
+    if copy.filename.is_none() {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: iiCopyOpen - Memory error copying filename\n"),
         );
-        return core::ptr::null_mut();
+        return None;
     }
-    if let Some(directory_nums) = (*in_file).directory_nums.as_ref() {
-        (*copy).directory_nums = Some(directory_nums.clone());
+    if let Some(directory_nums) = in_file.directory_nums.as_ref() {
+        copy.directory_nums = Some(directory_nums.clone());
     }
-    let err = ii_reopen(copy);
+    let err = ii_reopen(&mut copy);
     if err != 0 {
-        ii_delete(copy);
         // `iimage.c:569` writes `%d` with no argument at all, so the reference
         // prints whatever is in the next varargs slot.  Pass the error code the
         // source plainly meant; the garbage it actually reads is not matchable.
@@ -968,28 +952,38 @@ pub unsafe fn ii_copy_open(in_file: *mut ImodImageFile) -> *mut ImodImageFile {
             Some(&mut ImodFile::Stderr),
             format_args!("ERROR: iiCopyOpen - Error {err} calling iiReopen on copy of file\n"),
         );
-        return core::ptr::null_mut();
+        return None;
     }
-    copy
+    Some(copy)
 }
-pub unsafe fn ii_use_tiff_threads(in_file: *mut ImodImageFile, mut max_threads: i32) -> i32 {
-    if (*in_file).file != IIFILE_TIFF || S_TIFF_THREADS.with(|state| state.borrow().1 > 0) {
+pub fn ii_use_tiff_threads(in_file: &mut ImodImageFile, mut max_threads: i32) -> i32 {
+    if in_file.file != IIFILE_TIFF || S_TIFF_THREADS.with(|state| state.borrow().1 > 0) {
         return 0;
     }
     if max_threads <= 0 {
         max_threads = MAX_TIFF_THREADS as i32;
     }
     max_threads = tiff_num_read_threads(
-        (*in_file).nx,
-        (*in_file).ny,
-        (*in_file).tiff_compression,
+        in_file.nx,
+        in_file.ny,
+        in_file.tiff_compression,
         max_threads,
     );
     if max_threads > 1 {
         max_threads = S_TIFF_THREADS.with(|state| {
             let mut state = state.borrow_mut();
-            state.0[0] = in_file;
-            ii_open_copies_for_threads(state.0.as_mut_ptr(), max_threads)
+            state.0[0] = Some(NonNull::from(in_file));
+            for index in 1..max_threads {
+                let Some(file) = (unsafe {
+                    state.0[0].and_then(|file| file.as_ptr().as_mut())
+                })
+                .and_then(ii_copy_open)
+                else {
+                    return index;
+                };
+                state.0[index as usize] = NonNull::new(Box::into_raw(file));
+            }
+            max_threads
         });
     }
     if max_threads > 1 {
@@ -1000,38 +994,40 @@ pub unsafe fn ii_use_tiff_threads(in_file: *mut ImodImageFile, mut max_threads: 
 pub fn ii_use_tiff_threads_for_fp(fp: &ImodFile, max_threads: i32) -> i32 {
     match ii_lookup_file_from_fp(fp) {
         None => 0,
-        Some(file) => unsafe { ii_use_tiff_threads(file, max_threads) },
+        Some(file) => unsafe { ii_use_tiff_threads(&mut *file, max_threads) },
     }
 }
-pub unsafe fn ii_close_tiff_copies(in_file: *mut ImodImageFile) {
+pub fn ii_close_tiff_copies(in_file: &mut ImodImageFile) {
     S_TIFF_THREADS.with(|state| {
         let mut state = state.borrow_mut();
-        if state.1 <= 0 || in_file != state.0[0] {
+        if state.1 <= 0 || state.0[0].is_none_or(|file| !core::ptr::eq(in_file, unsafe { file.as_ref() })) {
             return;
         }
         for index in 1..state.1 {
-            ii_delete(state.0[index as usize]);
+            unsafe { ii_delete(state.0[index as usize].expect("open TIFF copy").as_ptr()) };
         }
+        state.0.fill(None);
         state.1 = 0;
     });
 }
 pub fn ii_close_tiff_copies_for_fp(fp: &ImodFile) {
     if let Some(file) = ii_lookup_file_from_fp(fp) {
-        unsafe { ii_close_tiff_copies(file) };
+        unsafe { ii_close_tiff_copies(&mut *file) };
     }
 }
-pub unsafe fn ii_open_copies_for_threads(
-    file_copies: *mut *mut ImodImageFile,
+pub fn ii_open_copies_for_threads(
+    file_copies: &mut [*mut ImodImageFile; MAX_TIFF_THREADS],
     max_threads: i32,
 ) -> i32 {
     for index in 1..max_threads {
-        *file_copies.add(index as usize) = ii_copy_open(*file_copies);
-        if (*file_copies.add(index as usize)).is_null() {
+        let Some(file) = (unsafe { file_copies[0].as_mut() }).and_then(ii_copy_open) else {
             return index;
-        }
+        };
+        file_copies[index as usize] = Box::into_raw(file);
     }
     max_threads
 }
+
 /// Matches C `iiFillMrcHeader(ImodImageFile *, MrcHeader *)` (`iimage.c:661`).
 pub unsafe extern "C" fn ii_fill_mrc_header(
     in_file: *mut ImodImageFile,
@@ -1047,69 +1043,71 @@ pub unsafe extern "C" fn ii_fill_mrc_header(
 }
 
 /// Matches C `iiSimpleFillMrcHeader(ImodImageFile *, MrcHeader *)` (`iimage.c:674`).
-pub unsafe fn ii_simple_fill_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
-    unsafe {
-        mrc_head_new(
-            &mut *hdata,
-            (*in_file).nx,
-            (*in_file).ny,
-            (*in_file).nz,
-            (*in_file).mode,
-        );
-        (*hdata).bytes_signed = 0;
-        (*hdata).fp = (*in_file).fp.clone();
-        (*hdata).amin = (*in_file).amin;
-        (*hdata).amax = (*in_file).amax;
-        (*hdata).amean = (*in_file).amean;
-        (*hdata).xlen = (*in_file).nx as f32 * (*in_file).xscale;
-        (*hdata).ylen = (*in_file).ny as f32 * (*in_file).yscale;
-        (*hdata).zlen = (*in_file).nz as f32 * (*in_file).zscale;
-    }
+pub fn ii_simple_fill_mrc_header(in_file: &ImodImageFile, hdata: &mut MrcHeader) -> i32 {
+    mrc_head_new(hdata, in_file.nx, in_file.ny, in_file.nz, in_file.mode);
+    hdata.bytes_signed = 0;
+    hdata.fp = in_file.fp.clone();
+    hdata.amin = in_file.amin;
+    hdata.amax = in_file.amax;
+    hdata.amean = in_file.amean;
+    hdata.xlen = in_file.nx as f32 * in_file.xscale;
+    hdata.ylen = in_file.ny as f32 * in_file.yscale;
+    hdata.zlen = in_file.nz as f32 * in_file.zscale;
     0
 }
+
+/// Stored callback adapter for image backends that expose this default fill
+/// operation through the legacy C dispatch table.
+pub(crate) unsafe extern "C" fn ii_simple_fill_mrc_header_callback(
+    in_file: *mut ImodImageFile,
+    hdata: *mut MrcHeader,
+) -> i32 {
+    let (Some(in_file), Some(hdata)) = (unsafe { in_file.as_ref() }, unsafe { hdata.as_mut() })
+    else {
+        return 1;
+    };
+    ii_simple_fill_mrc_header(in_file, hdata)
+}
 /// Matches C `iiSyncFromMrcHeader(ImodImageFile *, MrcHeader *)` (`iimage.c:693`).
-pub unsafe fn ii_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) {
-    unsafe {
-        let bytes_signed = if (*hdata).bytes_signed != 0
-            && !((*in_file).file == IIFILE_TIFF && (*in_file).new_file != 0)
-        {
+pub fn ii_sync_from_mrc_header(in_file: &mut ImodImageFile, hdata: &mut MrcHeader) {
+    let bytes_signed =
+        if hdata.bytes_signed != 0 && !(in_file.file == IIFILE_TIFF && in_file.new_file != 0) {
             1
         } else {
             0
         };
-        if (*hdata).mode != (*in_file).mode || (*hdata).mode == 0 {
-            ii_mrc_mode_to_format_type(in_file, (*hdata).mode, bytes_signed);
-        }
-        (*in_file).nx = (*hdata).nx;
-        (*in_file).ny = (*hdata).ny;
-        (*in_file).nz = (*hdata).nz;
-        (*in_file).amin = (*hdata).amin;
-        (*in_file).amax = (*hdata).amax;
-        (*in_file).amean = (*hdata).amean;
-        (*in_file).rms = (*hdata).rms;
-        (*in_file).xscale = 1.0;
-        (*in_file).yscale = 1.0;
-        (*in_file).zscale = 1.0;
-        if (*hdata).xlen != 0.0 && (*hdata).mx != 0 {
-            (*in_file).xscale = (*hdata).xlen / (*hdata).mx as f32;
-        }
-        if (*hdata).ylen != 0.0 && (*hdata).my != 0 {
-            (*in_file).yscale = (*hdata).ylen / (*hdata).my as f32;
-        }
-        if (*hdata).xlen != 0.0 && (*hdata).mz != 0 {
-            (*in_file).zscale = (*hdata).zlen / (*hdata).mz as f32;
-        }
-        (*in_file).xtrans = (*hdata).xorg;
-        (*in_file).ytrans = (*hdata).yorg;
-        (*in_file).ztrans = (*hdata).zorg;
-        (*in_file).xrot = (*hdata).tiltangles[3];
-        (*in_file).yrot = (*hdata).tiltangles[4];
-        (*in_file).zrot = (*hdata).tiltangles[5];
-        (*in_file).header_size = (*hdata).header_size;
-        (*in_file).section_skip = (*hdata).section_skip;
-        if let Some(sync_from_mrc_header) = (*in_file).sync_from_mrc_header {
-            sync_from_mrc_header(in_file, hdata);
-        }
+    if hdata.mode != in_file.mode || hdata.mode == 0 {
+        ii_mrc_mode_to_format_type(in_file, hdata.mode, bytes_signed);
+    }
+    in_file.nx = hdata.nx;
+    in_file.ny = hdata.ny;
+    in_file.nz = hdata.nz;
+    in_file.amin = hdata.amin;
+    in_file.amax = hdata.amax;
+    in_file.amean = hdata.amean;
+    in_file.rms = hdata.rms;
+    in_file.xscale = 1.0;
+    in_file.yscale = 1.0;
+    in_file.zscale = 1.0;
+    if hdata.xlen != 0.0 && hdata.mx != 0 {
+        in_file.xscale = hdata.xlen / hdata.mx as f32;
+    }
+    if hdata.ylen != 0.0 && hdata.my != 0 {
+        in_file.yscale = hdata.ylen / hdata.my as f32;
+    }
+    if hdata.xlen != 0.0 && hdata.mz != 0 {
+        in_file.zscale = hdata.zlen / hdata.mz as f32;
+    }
+    in_file.xtrans = hdata.xorg;
+    in_file.ytrans = hdata.yorg;
+    in_file.ztrans = hdata.zorg;
+    in_file.xrot = hdata.tiltangles[3];
+    in_file.yrot = hdata.tiltangles[4];
+    in_file.zrot = hdata.tiltangles[5];
+    in_file.header_size = hdata.header_size;
+    in_file.section_skip = hdata.section_skip;
+    if let Some(sync_from_mrc_header) = in_file.sync_from_mrc_header {
+        unsafe { sync_from_mrc_header(in_file, hdata) };
     }
 }
 /// Matches C `iiDefaultMinMaxMean(int, float *, float *, float *)` (`iimage.c:741`).
@@ -1138,28 +1136,28 @@ pub fn ii_default_min_max_mean(type_: i32, amin: &mut f32, amax: &mut f32, amean
 }
 
 /// Matches C `iiWriteHeader(ImodImageFile *)` (`iimage.c:772`).
-pub unsafe fn ii_write_header(in_file: *mut ImodImageFile) -> i32 {
-    if let Some(write_header) = unsafe { (*in_file).write_header } {
+pub fn ii_write_header(in_file: &mut ImodImageFile) -> i32 {
+    if let Some(write_header) = in_file.write_header {
         return unsafe { write_header(in_file) };
     }
     0
 }
 /// Matches C `iiAddToOpenedList(ImodImageFile *)` (`iimage.c:783`).
-pub unsafe fn ii_add_to_opened_list(ii_file: *mut ImodImageFile) -> i32 {
-    unsafe { add_to_opened_list(ii_file) }
+pub fn ii_add_to_opened_list(ii_file: &mut ImodImageFile) -> i32 {
+    add_to_opened_list(ii_file)
 }
 
 /// Matches C static `addToOpenedList(ImodImageFile *)` (`iimage.c:791`).
-pub unsafe fn add_to_opened_list(ii_file: *mut ImodImageFile) -> i32 {
+pub fn add_to_opened_list(ii_file: &mut ImodImageFile) -> i32 {
     S_OPENED_FILES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(ii_file as usize);
+        .push(ii_file as *mut ImodImageFile as usize);
     0
 }
 
 /// Matches C static `removeFromOpenedList(ImodImageFile *)` (`iimage.c:801`).
-pub unsafe fn remove_from_opened_list(ii_file: *mut ImodImageFile) {
+pub fn remove_from_opened_list(ii_file: &mut ImodImageFile) {
     let index = unsafe { find_file_in_list(ii_file, None) };
     if index >= 0 {
         S_OPENED_FILES
@@ -1197,7 +1195,7 @@ pub unsafe fn ii_file_change_address(old_file: *mut ImodImageFile, new_file: *mu
         0
     };
     if change_list != 0 {
-        unsafe { remove_from_opened_list(old_file) };
+        unsafe { remove_from_opened_list(&mut *old_file) };
     }
     // `iimage.c:834`: an HDF file carries its own address in `fp` as an
     // identity token, so relocating the struct means restamping the token.
@@ -1207,19 +1205,26 @@ pub unsafe fn ii_file_change_address(old_file: *mut ImodImageFile, new_file: *mu
         unsafe {
             (*new_file).fp = Some(ImodFile::Token(new_file as usize));
             if (*new_file).file == IIFILE_HDF {
-                (*(*new_file).header.cast::<MrcHeader>()).fp = (*new_file).fp.clone();
+                if let Some(header) = (*new_file).mrc_header.as_deref_mut() {
+                    header.fp = (*new_file).fp.clone();
+                }
             }
         }
     }
     if !unsafe { (&(*new_file).ii_volumes).is_empty() } && unsafe { (*new_file).num_volumes } != 0 {
         for index in 0..unsafe { (*new_file).num_volumes } {
-            if unsafe { (&(*new_file).ii_volumes)[index as usize] } == old_file {
-                unsafe { (&mut (*new_file).ii_volumes)[index as usize] = new_file };
+            if unsafe { (&(*new_file).ii_volumes)[index as usize] }
+                .is_some_and(|volume| volume.as_ptr() == old_file)
+            {
+                unsafe {
+                    (&mut (*new_file).ii_volumes)[index as usize] =
+                        Some(NonNull::new_unchecked(new_file))
+                };
             }
         }
     }
     if change_list != 0 {
-        unsafe { add_to_opened_list(new_file) };
+        unsafe { add_to_opened_list(&mut *new_file) };
     }
 }
 pub fn ii_fopen(filename: &[u8], mode: &str) -> Option<ImodFile> {
@@ -1253,11 +1258,8 @@ pub fn ii_fclose(fp: &mut ImodFile) {
     }
 }
 /// Matches C `iiFOpenVolume` (`iimage.c:896`).
-pub unsafe fn ii_fopen_volume(in_file: *mut ImodImageFile, vol_index: i32) -> Option<ImodFile> {
-    if in_file.is_null() {
-        return None;
-    }
-    if (*in_file).file != IIFILE_HDF || (*in_file).num_volumes < 2 {
+pub fn ii_fopen_volume(in_file: &mut ImodImageFile, vol_index: i32) -> Option<ImodFile> {
+    if in_file.file != IIFILE_HDF || in_file.num_volumes < 2 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -1266,7 +1268,7 @@ pub unsafe fn ii_fopen_volume(in_file: *mut ImodImageFile, vol_index: i32) -> Op
         );
         return None;
     }
-    if vol_index < 1 || vol_index >= (*in_file).num_volumes {
+    if vol_index < 1 || vol_index >= in_file.num_volumes {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -1275,8 +1277,10 @@ pub unsafe fn ii_fopen_volume(in_file: *mut ImodImageFile, vol_index: i32) -> Op
         );
         return None;
     }
-    let volume = (&(*in_file).ii_volumes)[vol_index as usize];
-    if ii_reopen(volume) != 0 {
+    let volume = in_file.ii_volumes[vol_index as usize]
+        .expect("an open HDF volume has a cursor")
+        .as_ptr();
+    if unsafe { ii_reopen(&mut *volume) } != 0 {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -1285,14 +1289,11 @@ pub unsafe fn ii_fopen_volume(in_file: *mut ImodImageFile, vol_index: i32) -> Op
         );
         return None;
     }
-    (*volume).fp.clone()
+    unsafe { (*volume).fp.clone() }
 }
 /// Matches C `iiFOpenNewVolume` (`iimage.c:925`).
-pub unsafe fn ii_fopen_new_volume(in_file: *mut ImodImageFile) -> Option<ImodFile> {
-    if in_file.is_null() {
-        return None;
-    }
-    if (*in_file).file != IIFILE_HDF || ((*in_file).stack_set_list.is_some() && (*in_file).nz > 1) {
+pub fn ii_fopen_new_volume(in_file: &mut ImodImageFile) -> Option<ImodFile> {
+    if in_file.file != IIFILE_HDF || (in_file.stack_set_list.is_some() && in_file.nz > 1) {
         b3d_error(
             Some(&mut ImodFile::Stderr),
             format_args!(
@@ -1304,11 +1305,13 @@ pub unsafe fn ii_fopen_new_volume(in_file: *mut ImodImageFile) -> Option<ImodFil
     if ii_hdf_open_new(in_file, "wb+") != 0 {
         return None;
     }
-    let file = (&(*in_file).ii_volumes)[((*in_file).num_volumes - 1) as usize];
-    if add_to_opened_list(file) != 0 {
+    let file = in_file.ii_volumes[(in_file.num_volumes - 1) as usize]
+        .expect("the newly created HDF volume has a cursor")
+        .as_ptr();
+    if unsafe { add_to_opened_list(&mut *file) } != 0 {
         return None;
     }
-    (*file).fp.clone()
+    unsafe { (*file).fp.clone() }
 }
 /// Matches C `iiChangeCallCount(int)` (`iimage.c:944`).
 pub fn ii_change_call_count(delta: i32) {
@@ -1368,70 +1371,54 @@ pub fn ii_set_chunk_sizes(
     in_file.z_chunk_size = z_size;
     0
 }
-pub unsafe fn ii_get_adoc_index(
-    in_file: *mut ImodImageFile,
-    global: i32,
-    open_mdoc_or_new: i32,
-) -> i32 {
-    if in_file.is_null() {
-        return -2;
-    }
-    if (*in_file).file == IIFILE_HDF {
-        return if (*in_file).stack_set_list.is_some()
-            || (*in_file).global_adoc_index < 0
-            || global == 0
-        {
-            (*in_file).adoc_index
+pub fn ii_get_adoc_index(in_file: &mut ImodImageFile, global: i32, open_mdoc_or_new: i32) -> i32 {
+    if in_file.file == IIFILE_HDF {
+        return if in_file.stack_set_list.is_some() || in_file.global_adoc_index < 0 || global == 0 {
+            in_file.adoc_index
         } else {
-            (*in_file).global_adoc_index
+            in_file.global_adoc_index
         };
     }
-    if (*in_file).adoc_index >= 0 || open_mdoc_or_new == 0 {
-        return (*in_file).adoc_index;
+    if in_file.adoc_index >= 0 || open_mdoc_or_new == 0 {
+        return in_file.adoc_index;
     }
     if open_mdoc_or_new < 0 {
-        (*in_file).adoc_index = adoc_new();
+        in_file.adoc_index = adoc_new();
     } else {
         // `iimage.c:1020-1026`: the image name with ".mdoc" appended.
-        let name = format!(
-            "{}.mdoc",
-            (*in_file).filename.as_deref().unwrap_or_default()
-        );
-        (*in_file).adoc_index = adoc_read(name.as_bytes());
+        let name = format!("{}.mdoc", in_file.filename.as_deref().unwrap_or_default());
+        in_file.adoc_index = adoc_read(name.as_bytes());
     }
-    if (*in_file).adoc_index < 0 {
+    if in_file.adoc_index < 0 {
         -2
     } else {
-        (*in_file).adoc_index
+        in_file.adoc_index
     }
 }
-pub unsafe fn ii_transfer_adoc_sections(
-    from_file: *mut ImodImageFile,
-    to_file: *mut ImodImageFile,
-) -> i32 {
-    if (*from_file).adoc_index < 0 || (*to_file).adoc_index < 0 {
+pub fn ii_transfer_adoc_sections(from_file: &ImodImageFile, to_file: &ImodImageFile) -> i32 {
+    if from_file.adoc_index < 0 || to_file.adoc_index < 0 {
         return 1;
     }
-    if adoc_set_current((*from_file).adoc_index) != 0
+    if adoc_set_current(from_file.adoc_index) != 0
         || adoc_transfer_section(
             ADOC_GLOBAL_NAME,
             0,
-            (*to_file).adoc_index,
+            to_file.adoc_index,
             Some(ADOC_GLOBAL_NAME),
             0,
         ) != 0
     {
         return 1;
     }
-    let from_doc = if (*from_file).global_adoc_index >= 0 {
-        (*from_file).global_adoc_index
+    let from_doc = if from_file.global_adoc_index >= 0 {
+        from_file.global_adoc_index
     } else {
-        (*from_file).adoc_index
+        from_file.adoc_index
     };
-    let to_doc = if (*to_file).global_adoc_index >= 0 {
-        (*to_file).global_adoc_index
+    let to_doc = if to_file.global_adoc_index >= 0 {
+        to_file.global_adoc_index
     } else {
-        (*to_file).adoc_index
+        to_file.adoc_index
     };
     if adoc_set_current(from_doc) != 0 {
         return 1;
@@ -1462,120 +1449,372 @@ pub unsafe fn ii_transfer_adoc_sections(
     }
     0
 }
-pub unsafe extern "C" fn ii_read_section(
+pub fn ii_read_section(image: &mut ImodImageFile, buf: &mut [u8], in_section: i32) -> i32 {
+    let mut bytes = 0;
+    let mut channels = 0;
+    if mrc_getdcsize(image.mode, &mut bytes, &mut channels) != 0 {
+        // TIFF has no MRC integer mode for 32-bit signed or unsigned pixels.
+        // `iiTIFFCheck` deliberately records those as mode -1, while its
+        // section callback still transfers their native four-byte samples.
+        // Keep that representation usable through the bounded Rust API.
+        if matches!(image.type_, IITYPE_INT | IITYPE_UINT) {
+            bytes = 4;
+            channels = 1;
+        } else {
+            return IIERR_BAD_CALL;
+        }
+    }
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let pixel_bytes = if image.mode == MRC_MODE_HALF_FLOAT || image.half_floats != 0 {
+        2
+    } else {
+        (bytes * channels) as usize
+    };
+    let Some(length) = width
+        .checked_mul(rows)
+        .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+    else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < length {
+        return IIERR_BAD_CALL;
+    }
+    read_write_section(
+        image,
+        &mut buf[..length],
+        in_section,
+        image.read_section,
+        "reading from",
+    )
+}
+
+/// Raw callback retained solely for the legacy MRC callback table.
+pub unsafe extern "C" fn ii_read_section_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
+    let (Some(image), false) = (unsafe { in_file.as_mut() }, buf.is_null()) else {
+        return IIERR_BAD_CALL;
+    };
+    let mut bytes = 0;
+    let mut channels = 0;
+    if mrc_getdcsize(image.mode, &mut bytes, &mut channels) != 0 {
+        return IIERR_BAD_CALL;
+    }
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let pixel_bytes = if image.mode == MRC_MODE_HALF_FLOAT || image.half_floats != 0 {
+        2
+    } else {
+        (bytes * channels) as usize
+    };
+    let Some(length) = width
+        .checked_mul(rows)
+        .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+    else {
+        return IIERR_BAD_CALL;
+    };
     unsafe {
-        read_write_section(
-            in_file,
-            buf,
+        ii_read_section(
+            image,
+            core::slice::from_raw_parts_mut(buf, length),
             in_section,
-            (*in_file).read_section,
-            "reading from",
         )
     }
 }
-pub unsafe extern "C" fn ii_read_section_byte(
+pub fn ii_read_section_byte(image: &mut ImodImageFile, buf: &mut [u8], in_section: i32) -> i32 {
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let Some(length) = width.checked_mul(rows) else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < length {
+        return IIERR_BAD_CALL;
+    }
+    read_write_section(
+        image,
+        &mut buf[..length],
+        in_section,
+        image.read_section_byte,
+        "reading and converting to bytes for",
+    )
+}
+
+/// Raw callback retained solely for the legacy MRC callback table.
+pub unsafe extern "C" fn ii_read_section_byte_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
+    let (Some(image), false) = (unsafe { in_file.as_mut() }, buf.is_null()) else {
+        return IIERR_BAD_CALL;
+    };
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let Some(length) = width.checked_mul(rows) else {
+        return IIERR_BAD_CALL;
+    };
     unsafe {
-        read_write_section(
-            in_file,
-            buf,
+        ii_read_section_byte(
+            image,
+            core::slice::from_raw_parts_mut(buf, length),
             in_section,
-            (*in_file).read_section_byte,
-            "reading and converting to bytes for",
         )
     }
 }
-pub unsafe extern "C" fn ii_read_section_ushort(
+
+pub fn ii_read_section_ushort(image: &mut ImodImageFile, buf: &mut [u16], in_section: i32) -> i32 {
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let Some(length) = width.checked_mul(rows) else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < length {
+        return IIERR_BAD_CALL;
+    }
+    let bytes = unsafe {
+        core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<u8>(), length * size_of::<u16>())
+    };
+    read_write_section(
+        image,
+        bytes,
+        in_section,
+        image.read_section_ushort,
+        "reading and converting to shorts for",
+    )
+}
+
+/// Raw callback retained solely for the legacy MRC callback table.
+pub unsafe extern "C" fn ii_read_section_ushort_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
+    let (Some(image), false) = (unsafe { in_file.as_mut() }, buf.is_null()) else {
+        return IIERR_BAD_CALL;
+    };
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let Some(length) = width
+        .checked_mul(rows)
+        .and_then(|pixels| pixels.checked_mul(2))
+    else {
+        return IIERR_BAD_CALL;
+    };
     unsafe {
         read_write_section(
-            in_file,
-            buf,
+            image,
+            core::slice::from_raw_parts_mut(buf, length),
             in_section,
-            (*in_file).read_section_ushort,
+            image.read_section_ushort,
             "reading and converting to shorts for",
         )
     }
 }
-pub unsafe extern "C" fn ii_read_section_float(
+pub fn ii_read_section_float(image: &mut ImodImageFile, buf: &mut [f32], in_section: i32) -> i32 {
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let Some(pixels) = width.checked_mul(rows) else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < pixels {
+        return IIERR_BAD_CALL;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), pixels * 4) };
+    read_write_section(
+        image,
+        bytes,
+        in_section,
+        image.read_section_float,
+        "reading and converting to floats for",
+    )
+}
+
+/// Raw callback retained solely for the legacy MRC callback table.
+pub unsafe extern "C" fn ii_read_section_float_callback(
     in_file: *mut ImodImageFile,
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
+    let (Some(image), false) = (unsafe { in_file.as_mut() }, buf.is_null()) else {
+        return IIERR_BAD_CALL;
+    };
+    let width = (image.urx - image.llx + 1 + image.pad_left.max(0) + image.pad_right.max(0)).max(0)
+        as usize;
+    let rows = (if image.axis == 2 {
+        image.urz - image.llz + 1
+    } else {
+        image.ury - image.lly + 1
+    })
+    .max(0) as usize;
+    let Some(pixels) = width.checked_mul(rows) else {
+        return IIERR_BAD_CALL;
+    };
     unsafe {
-        read_write_section(
-            in_file,
-            buf,
+        ii_read_section_float(
+            image,
+            core::slice::from_raw_parts_mut(buf.cast(), pixels),
             in_section,
-            (*in_file).read_section_float,
-            "reading and converting to floats for",
         )
     }
 }
-pub unsafe fn ii_read_section_any(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
+pub fn ii_read_section_any(
+    in_file: &mut ImodImageFile,
+    buf: &mut [u8],
     in_section: i32,
     convert_to: i32,
 ) -> i32 {
-    unsafe {
-        match convert_to {
-            MRSA_NOPROC => ii_read_section(in_file, buf, in_section),
-            MRSA_BYTE => ii_read_section_byte(in_file, buf, in_section),
-            MRSA_USHORT => ii_read_section_ushort(in_file, buf, in_section),
-            MRSA_FLOAT => ii_read_section_float(in_file, buf, in_section),
-            _ => {
-                b3d_error(
-                    Some(&mut ImodFile::Stderr),
-                    format_args!(
-                        "ERROR: iiReadSectionAny - Invalid value {} for convertTo parameter\n",
-                        convert_to
-                    ),
-                );
-                -1
-            }
-        }
-    }
-}
-pub unsafe fn ii_write_section(in_file: *mut ImodImageFile, buf: *mut u8, in_section: i32) -> i32 {
-    unsafe {
-        read_write_section(
+    match convert_to {
+        MRSA_NOPROC => read_write_section(
             in_file,
             buf,
             in_section,
-            (*in_file).write_section,
-            "writing to",
-        )
+            in_file.read_section,
+            "reading from",
+        ),
+        MRSA_BYTE => read_write_section(
+            in_file,
+            buf,
+            in_section,
+            in_file.read_section_byte,
+            "reading and converting to bytes for",
+        ),
+        MRSA_USHORT => read_write_section(
+            in_file,
+            buf,
+            in_section,
+            in_file.read_section_ushort,
+            "reading and converting to shorts for",
+        ),
+        MRSA_FLOAT => read_write_section(
+            in_file,
+            buf,
+            in_section,
+            in_file.read_section_float,
+            "reading and converting to floats for",
+        ),
+        _ => {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "ERROR: iiReadSectionAny - Invalid value {} for convertTo parameter\n",
+                    convert_to
+                ),
+            );
+            -1
+        }
     }
 }
-pub unsafe fn ii_write_section_float(
-    in_file: *mut ImodImageFile,
-    buf: *mut f32,
+pub fn ii_write_section(in_file: &mut ImodImageFile, buf: &mut [u8], in_section: i32) -> i32 {
+    let mut bytes = 0;
+    let mut channels = 0;
+    if mrc_getdcsize(in_file.mode, &mut bytes, &mut channels) != 0 {
+        return IIERR_BAD_CALL;
+    }
+    let width = (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+        .max(0) as usize;
+    let rows = (if in_file.axis == 2 {
+        in_file.urz - in_file.llz + 1
+    } else {
+        in_file.ury - in_file.lly + 1
+    })
+    .max(0) as usize;
+    let pixel_bytes = if in_file.mode == MRC_MODE_HALF_FLOAT || in_file.half_floats != 0 {
+        2
+    } else {
+        (bytes * channels) as usize
+    };
+    let Some(length) = width
+        .checked_mul(rows)
+        .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+    else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < length {
+        return IIERR_BAD_CALL;
+    }
+    let func = in_file.write_section;
+    read_write_section(in_file, &mut buf[..length], in_section, func, "writing to")
+}
+pub fn ii_write_section_float(
+    in_file: &mut ImodImageFile,
+    buf: &mut [f32],
     in_section: i32,
 ) -> i32 {
-    unsafe {
-        read_write_section(
-            in_file,
-            buf.cast(),
-            in_section,
-            (*in_file).write_section_float,
-            "converting floats to write to",
-        )
+    let width = (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+        .max(0) as usize;
+    let rows = (if in_file.axis == 2 {
+        in_file.urz - in_file.llz + 1
+    } else {
+        in_file.ury - in_file.lly + 1
+    })
+    .max(0) as usize;
+    let Some(pixels) = width.checked_mul(rows) else {
+        return IIERR_BAD_CALL;
+    };
+    if buf.len() < pixels {
+        return IIERR_BAD_CALL;
     }
+    let func = in_file.write_section_float;
+    // `f32` is four contiguous bytes, so this is a bounded view of the
+    // caller-owned native float storage until the legacy section callback is
+    // itself converted to a typed API.
+    let bytes = unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), pixels * 4) };
+    read_write_section(
+        in_file,
+        bytes,
+        in_section,
+        func,
+        "converting floats to write to",
+    )
 }
-pub unsafe fn read_write_section(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
+pub fn read_write_section(
+    in_file: &mut ImodImageFile,
+    buf: &mut [u8],
     in_section: i32,
     func: IiSectionFunc,
     mess: &str,
@@ -1590,30 +1829,86 @@ pub unsafe fn read_write_section(
         );
         return -1;
     };
-    unsafe {
-        if (*in_file).fp.is_none() && ii_reopen(in_file) != 0 {
+    {
+        if in_file.fp.is_none() && ii_reopen(in_file) != 0 {
             return -1;
+        }
+        let width =
+            (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+                .max(0) as usize;
+        let rows = (if in_file.axis == 2 {
+            in_file.urz - in_file.llz + 1
+        } else {
+            in_file.ury - in_file.lly + 1
+        })
+        .max(0) as usize;
+        let element_bytes =
+            if Some(func) == in_file.read_section || Some(func) == in_file.write_section {
+                let mut bytes = 0;
+                let mut channels = 0;
+                if mrc_getdcsize(in_file.mode, &mut bytes, &mut channels) != 0 {
+                    // See `ii_read_section`: the TIFF reader represents
+                    // 32-bit integer pixels with mode -1 because MRC has no
+                    // corresponding storage mode.
+                    if matches!(in_file.type_, IITYPE_INT | IITYPE_UINT) {
+                        bytes = 4;
+                        channels = 1;
+                    } else {
+                        return IIERR_BAD_CALL;
+                    }
+                }
+                if in_file.mode == MRC_MODE_HALF_FLOAT || in_file.half_floats != 0 {
+                    2
+                } else {
+                    (bytes * channels) as usize
+                }
+            } else if Some(func) == in_file.read_section_byte {
+                1
+            } else if Some(func) == in_file.read_section_ushort {
+                2
+            } else if Some(func) == in_file.read_section_float
+                || Some(func) == in_file.write_section_float
+            {
+                4
+            } else {
+                return IIERR_BAD_CALL;
+            };
+        let Some(required) = width
+            .checked_mul(rows)
+            .and_then(|pixels| pixels.checked_mul(element_bytes))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        if buf.len() < required {
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "ERROR: iiRead/WriteSection - Buffer is too small for {} this type of file\n",
+                    mess
+                ),
+            );
+            return IIERR_BAD_CALL;
         }
         let mut data_size = 0;
         let mut convert = 0;
         if S_TIFF_THREADS.with(|state| {
             let state = state.borrow();
-            state.1 > 1 && in_file == state.0[0]
-        }) && (*in_file).axis == 3
+            state.1 > 1 && state.0[0].is_some_and(|file| core::ptr::eq(in_file, file.as_ptr()))
+        }) && in_file.axis == 3
         {
             let mut dsize = 0;
             let mut csize = 0;
-            if mrc_getdcsize((*in_file).mode, &mut dsize, &mut csize) == 0 {
-                if Some(func) == (*in_file).read_section {
+            if mrc_getdcsize(in_file.mode, &mut dsize, &mut csize) == 0 {
+                if Some(func) == in_file.read_section {
                     data_size = dsize * csize;
                     convert = MRSA_NOPROC;
-                } else if Some(func) == (*in_file).read_section_byte {
+                } else if Some(func) == in_file.read_section_byte {
                     data_size = 1;
                     convert = MRSA_BYTE;
-                } else if Some(func) == (*in_file).read_section_ushort {
+                } else if Some(func) == in_file.read_section_ushort {
                     data_size = 2;
                     convert = MRSA_USHORT;
-                } else if Some(func) == (*in_file).read_section_float {
+                } else if Some(func) == in_file.read_section_float {
                     data_size = 4;
                     convert = MRSA_FLOAT;
                 }
@@ -1623,69 +1918,71 @@ pub unsafe fn read_write_section(
         let err = if data_size != 0 {
             S_TIFF_THREADS.with(|state| {
                 let mut state = state.borrow_mut();
-                tiff_parallel_read(
-                    state.0.as_mut_ptr(),
-                    state.1,
-                    (*in_file).llx,
-                    (*in_file).urx,
-                    (*in_file).lly,
-                    (*in_file).ury,
-                    data_size,
-                    buf,
-                    in_section,
-                    convert,
-                )
+                let mut file_copies = state.0.map(|file| file.map_or(core::ptr::null_mut(), NonNull::as_ptr));
+                unsafe {
+                    tiff_parallel_read(
+                        file_copies.as_mut_ptr(),
+                        state.1,
+                        in_file.llx,
+                        in_file.urx,
+                        in_file.lly,
+                        in_file.ury,
+                        data_size,
+                        buf.as_mut_ptr(),
+                        in_section,
+                        convert,
+                    )
+                }
             })
         } else {
-            func(in_file, buf, in_section)
+            unsafe { func(in_file, buf.as_mut_ptr(), in_section) }
         };
         ii_change_call_count(-1);
         err
     }
 }
 /// Matches C `iiReadPoint` (`iimage.c:1214`).
-pub unsafe fn ii_read_point(in_file: *mut ImodImageFile, x: i32, y: i32, z: i32) -> f32 {
-    unsafe {
-        let mut value = (*in_file).amin;
-        if x < 0 || y < 0 || z < 0 || x >= (*in_file).nx || y >= (*in_file).ny || z >= (*in_file).nz
-        {
-            return value;
-        }
-        let mut save = ImodImageFile::default();
-        ii_save_load_params(in_file, &mut save);
-        (*in_file).llx = x;
-        (*in_file).urx = x;
-        (*in_file).lly = y;
-        (*in_file).ury = y;
-        (*in_file).axis = 3;
-        if (*in_file).mode == MRC_MODE_COMPLEX_SHORT {
-            let mut data = [0i16; 2];
-            if ii_read_section(in_file, data.as_mut_ptr().cast(), z) == 0 {
-                value = ((data[0] as f64 * data[0] as f64 + data[1] as f64 * data[1] as f64).sqrt())
-                    as f32;
-            }
-        } else if (*in_file).mode == MRC_MODE_COMPLEX_FLOAT {
-            let mut data = [0f32; 2];
-            if ii_read_section(in_file, data.as_mut_ptr().cast(), z) == 0 {
-                value = ((data[0] as f64 * data[0] as f64 + data[1] as f64 * data[1] as f64).sqrt())
-                    as f32;
-            }
-        } else {
-            ii_read_section_float(in_file, (&mut value as *mut f32).cast(), z);
-        }
-        ii_restore_load_params(0, in_file, &mut save);
-        value
+pub fn ii_read_point(in_file: &mut ImodImageFile, x: i32, y: i32, z: i32) -> f32 {
+    let mut value = in_file.amin;
+    if x < 0 || y < 0 || z < 0 || x >= in_file.nx || y >= in_file.ny || z >= in_file.nz {
+        return value;
     }
+    let mut save = ImodImageFile::default();
+    ii_save_load_params(in_file, &mut save);
+    in_file.llx = x;
+    in_file.urx = x;
+    in_file.lly = y;
+    in_file.ury = y;
+    in_file.axis = 3;
+    if in_file.mode == MRC_MODE_COMPLEX_SHORT {
+        let mut data = [0i16; 2];
+        let bytes = unsafe { core::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), 4) };
+        if ii_read_section(in_file, bytes, z) == 0 {
+            value =
+                ((data[0] as f64 * data[0] as f64 + data[1] as f64 * data[1] as f64).sqrt()) as f32;
+        }
+    } else if in_file.mode == MRC_MODE_COMPLEX_FLOAT {
+        let mut data = [0f32; 2];
+        let bytes = unsafe { core::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), 8) };
+        if ii_read_section(in_file, bytes, z) == 0 {
+            value =
+                ((data[0] as f64 * data[0] as f64 + data[1] as f64 * data[1] as f64).sqrt()) as f32;
+        }
+    } else {
+        ii_read_section_float(in_file, core::slice::from_mut(&mut value), z);
+    }
+    ii_restore_load_params(0, in_file, &save);
+    value
 }
-pub unsafe fn ii_load_pcoord(
-    in_file: *mut ImodImageFile,
+pub fn ii_load_pcoord(
+    in_file: &mut ImodImageFile,
     use_mdoc: i32,
-    li: *mut crate::imod::libiimod::mrcfiles::LoadInfo,
+    li: &mut crate::imod::libiimod::mrcfiles::LoadInfo,
     nx: i32,
     ny: i32,
     nz: i32,
 ) -> i32 {
-    if (*in_file).file == IIFILE_HDF || (*in_file).file == IIFILE_ADOC {
+    if in_file.file == IIFILE_HDF || in_file.file == IIFILE_ADOC {
         let adoc_index = ii_get_adoc_index(in_file, 0, 0);
         let mut montage = 0;
         let mut num_sect = 0;
@@ -1695,22 +1992,22 @@ pub unsafe fn ii_load_pcoord(
             && adoc_get_image_meta_info(&mut montage, &mut num_sect, &mut sect_type) == 0
         {
             crate::imod::libiimod::plist::ii_plist_from_autodoc(
-                adoc_index, 0, &mut *li, nx, ny, nz, montage, num_sect, sect_type,
+                adoc_index, 0, li, nx, ny, nz, montage, num_sect, sect_type,
             );
         }
         return 0;
     }
-    if ii_mrc_check(in_file) != 0 {
+    if unsafe { ii_mrc_check(in_file) } != 0 {
         return 0;
     }
     if use_mdoc < 2 {
         ii_mrc_load_pcoord(in_file, li, nx, ny, nz);
     }
-    if (*li).plist == 0 && use_mdoc != 0 {
+    if li.plist == 0 && use_mdoc != 0 {
         crate::imod::libiimod::plist::ii_plist_from_metadata(
-            (*in_file).filename.as_deref().unwrap_or_default(),
+            in_file.filename.as_deref().unwrap_or_default(),
             1,
-            &mut *li,
+            li,
             nx,
             ny,
             nz,
@@ -1718,154 +2015,164 @@ pub unsafe fn ii_load_pcoord(
     }
     0
 }
-pub unsafe fn ii_make_buffer_convert_if_float(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
-    if_float: i32,
-    inverted: *mut i32,
+pub fn ii_make_buffer_convert_if_float(
+    in_file: &ImodImageFile,
+    float_buffer: Option<&[f32]>,
+    inverted: &mut bool,
     routine: &str,
 ) -> Result<Option<Vec<u8>>, ()> {
-    unsafe {
-        let mut fbufp = buf.cast::<f32>();
-        let nx = (*in_file).nx;
-        let ny = (*in_file).ny;
-        let pixsize = if (*in_file).mode == MRC_MODE_BYTE {
-            1
-        } else {
-            2
-        };
-        let data_size = nx as usize * ny as usize * pixsize as usize;
-        if if_float != 0 && (*in_file).type_ != IITYPE_FLOAT {
-            let mut use_buf = Vec::new();
-            if use_buf.try_reserve_exact(data_size).is_err() {
-                b3d_error(
-                    Some(&mut ImodFile::Stderr),
-                    format_args!(
-                        "ERROR: {} - Allocating array for converting floats\n",
-                        routine
-                    ),
-                );
-                return Err(());
-            }
-            use_buf.resize(data_size, 0);
-            *inverted = 1;
-            for iy in 0..ny {
-                let bdata = use_buf
-                    .as_mut_ptr()
-                    .add((nx * pixsize * (ny - 1 - iy)) as usize);
-                ii_convert_line_of_floats(fbufp, bdata, nx, (*in_file).mode, 0, 0);
-                fbufp = fbufp.add(nx as usize);
-            }
-            return Ok(Some(use_buf));
-        }
-        Ok(None)
+    if float_buffer.is_none() || in_file.type_ == IITYPE_FLOAT {
+        return Ok(None);
     }
-}
-pub unsafe fn ii_convert_line_of_floats(
-    fbufp: *const f32,
-    bdata: *mut u8,
-    nx: i32,
-    mrc_mode: i32,
-    bytes_signed: i32,
-    pack_4bits: i32,
-) {
-    unsafe {
-        let sdata = bdata.cast::<i16>();
-        let usdata = bdata.cast::<u16>();
-        let sbdata = bdata.cast::<i8>();
-        match mrc_mode {
-            MRC_MODE_BYTE => {
-                if pack_4bits != 0 {
-                    let mut i = 0;
-                    while i < nx / 2 {
-                        let mut ival = (*fbufp.add((2 * i) as usize) + 0.5) as i32;
-                        ival = ival.clamp(0, 15);
-                        let mut hval = (*fbufp.add((2 * i + 1) as usize) + 0.5) as i32;
-                        hval = hval.clamp(0, 15);
-                        *bdata.add(i as usize) = (ival + (hval << 4)) as u8;
-                        i += 1;
-                    }
-                    if nx % 2 != 0 {
-                        let mut ival = (*fbufp.add((nx - 1) as usize) + 0.5) as i32;
-                        ival = ival.clamp(0, 15);
-                        *bdata.add(i as usize) = ival as u8;
-                    }
-                } else if bytes_signed != 0 {
-                    for i in 0..nx {
-                        // `iimage.c:1339`: `127.5` is a double literal and `floor`
-                        // is the double version, so the float promotes and the
-                        // whole expression evaluates in double.  Doing it in f32
-                        // lands one off on values near a .5 boundary.
-                        let mut ival = (*fbufp.add(i as usize) as f64 - 127.5).floor() as i32;
-                        ival = ival.clamp(-128, 127);
-                        *sbdata.add(i as usize) = ival as i8;
-                    }
-                } else {
-                    for i in 0..nx {
-                        let mut ival = (*fbufp.add(i as usize) + 0.5) as i32;
-                        ival = ival.clamp(0, 255);
-                        *bdata.add(i as usize) = ival as u8;
-                    }
-                }
-            }
-            MRC_MODE_SHORT => {
-                for i in 0..nx {
-                    // `iimage.c:1357`: `0.5` is a double literal and `floor` is the
-                    // double version -- unlike the unsigned arms, which use `0.5f`.
-                    let mut ival = (*fbufp.add(i as usize) as f64 + 0.5).floor() as i32;
-                    ival = ival.clamp(-32768, 32767);
-                    *sdata.add(i as usize) = ival as i16;
-                }
-            }
-            MRC_MODE_USHORT => {
-                for i in 0..nx {
-                    let mut ival = (*fbufp.add(i as usize) + 0.5) as i32;
-                    ival = ival.clamp(0, 65535);
-                    *usdata.add(i as usize) = ival as u16;
-                }
-            }
-            MRC_MODE_HALF_FLOAT => imnp_floatbuf_to_halfs(
-                core::slice::from_raw_parts(fbufp, nx as usize),
-                core::slice::from_raw_parts_mut(usdata, nx as usize),
-                nx,
+
+    let nx = match usize::try_from(in_file.nx) {
+        Ok(value) if value > 0 => value,
+        _ => return Ok(None),
+    };
+    let ny = match usize::try_from(in_file.ny) {
+        Ok(value) if value > 0 => value,
+        _ => return Ok(None),
+    };
+    let pixsize = if in_file.mode == MRC_MODE_BYTE { 1 } else { 2 };
+    let Some(data_size) = nx
+        .checked_mul(ny)
+        .and_then(|pixels| pixels.checked_mul(pixsize))
+    else {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: {} - Array size for converting floats overflows\n",
+                routine
             ),
-            _ => {}
+        );
+        return Err(());
+    };
+    let float_buffer = float_buffer.expect("checked above");
+    let Some(float_count) = nx.checked_mul(ny) else {
+        return Err(());
+    };
+    if float_buffer.len() < float_count {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: {} - Float buffer is too short for conversion\n",
+                routine
+            ),
+        );
+        return Err(());
+    }
+    let mut use_buf = Vec::new();
+    if use_buf.try_reserve_exact(data_size).is_err() {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: {} - Allocating array for converting floats\n",
+                routine
+            ),
+        );
+        return Err(());
+    }
+    use_buf.resize(data_size, 0);
+    *inverted = true;
+    for (source, destination) in float_buffer[..float_count]
+        .chunks_exact(nx)
+        .zip(use_buf.chunks_exact_mut(nx * pixsize).rev())
+    {
+        ii_convert_line_of_floats(source, destination, in_file.mode, false, false);
+    }
+    Ok(Some(use_buf))
+}
+pub fn ii_convert_line_of_floats(
+    floats: &[f32],
+    output: &mut [u8],
+    mrc_mode: i32,
+    bytes_signed: bool,
+    pack_4bits: bool,
+) {
+    match mrc_mode {
+        MRC_MODE_BYTE => {
+            if pack_4bits {
+                for (packed, values) in output.iter_mut().zip(floats.chunks(2)) {
+                    let mut ival = (values[0] + 0.5) as i32;
+                    ival = ival.clamp(0, 15);
+                    let hval = values
+                        .get(1)
+                        .map_or(0, |value| ((value + 0.5) as i32).clamp(0, 15));
+                    *packed = (ival + (hval << 4)) as u8;
+                }
+            } else if bytes_signed {
+                for (value, byte) in floats.iter().zip(output.iter_mut()) {
+                    // `iimage.c:1339`: `127.5` is a double literal and `floor`
+                    // is the double version, so the float promotes and the
+                    // whole expression evaluates in double.  Doing it in f32
+                    // lands one off on values near a .5 boundary.
+                    let mut ival = (*value as f64 - 127.5).floor() as i32;
+                    ival = ival.clamp(-128, 127);
+                    *byte = ival as i8 as u8;
+                }
+            } else {
+                for (value, byte) in floats.iter().zip(output.iter_mut()) {
+                    let mut ival = (*value + 0.5) as i32;
+                    ival = ival.clamp(0, 255);
+                    *byte = ival as u8;
+                }
+            }
         }
+        MRC_MODE_SHORT => {
+            for (value, bytes) in floats.iter().zip(output.chunks_exact_mut(2)) {
+                // `iimage.c:1357`: `0.5` is a double literal and `floor` is the
+                // double version -- unlike the unsigned arms, which use `0.5f`.
+                let mut ival = (*value as f64 + 0.5).floor() as i32;
+                ival = ival.clamp(-32768, 32767);
+                bytes.copy_from_slice(&(ival as i16).to_ne_bytes());
+            }
+        }
+        MRC_MODE_USHORT => {
+            for (value, bytes) in floats.iter().zip(output.chunks_exact_mut(2)) {
+                let mut ival = (*value + 0.5) as i32;
+                ival = ival.clamp(0, 65535);
+                bytes.copy_from_slice(&(ival as u16).to_ne_bytes());
+            }
+        }
+        MRC_MODE_HALF_FLOAT => {
+            let mut halves = vec![0_u16; floats.len()];
+            imnp_floatbuf_to_halfs(floats, &mut halves, floats.len() as i32);
+            for (half, bytes) in halves.iter().zip(output.chunks_exact_mut(2)) {
+                bytes.copy_from_slice(&half.to_ne_bytes());
+            }
+        }
+        _ => {}
     }
 }
-pub unsafe fn ii_save_load_params(ii_file: *mut ImodImageFile, ii_save: *mut ImodImageFile) {
-    unsafe {
-        (*ii_save).llx = (*ii_file).llx;
-        (*ii_save).urx = (*ii_file).urx;
-        (*ii_save).lly = (*ii_file).lly;
-        (*ii_save).ury = (*ii_file).ury;
-        (*ii_save).llz = (*ii_file).llz;
-        (*ii_save).urz = (*ii_file).urz;
-        (*ii_save).axis = (*ii_file).axis;
-        (*ii_save).pad_left = (*ii_file).pad_left;
-        (*ii_save).pad_right = (*ii_file).pad_right;
-        (*ii_save).slope = (*ii_file).slope;
-        (*ii_save).offset = (*ii_file).offset;
-    }
+pub fn ii_save_load_params(ii_file: &ImodImageFile, ii_save: &mut ImodImageFile) {
+    ii_save.llx = ii_file.llx;
+    ii_save.urx = ii_file.urx;
+    ii_save.lly = ii_file.lly;
+    ii_save.ury = ii_file.ury;
+    ii_save.llz = ii_file.llz;
+    ii_save.urz = ii_file.urz;
+    ii_save.axis = ii_file.axis;
+    ii_save.pad_left = ii_file.pad_left;
+    ii_save.pad_right = ii_file.pad_right;
+    ii_save.slope = ii_file.slope;
+    ii_save.offset = ii_file.offset;
 }
-pub unsafe fn ii_restore_load_params(
+pub fn ii_restore_load_params(
     ret_val: i32,
-    ii_file: *mut ImodImageFile,
-    ii_save: *mut ImodImageFile,
+    ii_file: &mut ImodImageFile,
+    ii_save: &ImodImageFile,
 ) -> i32 {
-    unsafe {
-        (*ii_file).llx = (*ii_save).llx;
-        (*ii_file).urx = (*ii_save).urx;
-        (*ii_file).lly = (*ii_save).lly;
-        (*ii_file).ury = (*ii_save).ury;
-        (*ii_file).llz = (*ii_save).llz;
-        (*ii_file).urz = (*ii_save).urz;
-        (*ii_file).axis = (*ii_save).axis;
-        (*ii_file).pad_left = (*ii_save).pad_left;
-        (*ii_file).pad_right = (*ii_save).pad_right;
-        (*ii_file).slope = (*ii_save).slope;
-        (*ii_file).offset = (*ii_save).offset;
-    }
+    ii_file.llx = ii_save.llx;
+    ii_file.urx = ii_save.urx;
+    ii_file.lly = ii_save.lly;
+    ii_file.ury = ii_save.ury;
+    ii_file.llz = ii_save.llz;
+    ii_file.urz = ii_save.urz;
+    ii_file.axis = ii_save.axis;
+    ii_file.pad_left = ii_save.pad_left;
+    ii_file.pad_right = ii_save.pad_right;
+    ii_file.slope = ii_save.slope;
+    ii_file.offset = ii_save.offset;
     ret_val
 }
 /// Matches C `iiBestTileSize(int, int *, int *, int)` (`iimage.c:1425`).
@@ -1944,14 +2251,22 @@ pub fn get_dflt_eersumming_from_env(super_res: &mut i32, z_summing: &mut i32) {
 pub fn tiffgetmaxeersuperres() -> i32 {
     tiff_get_max_eer_super_res()
 }
+unsafe extern "C" fn hdf_check_callback(in_file: *mut ImodImageFile) -> i32 {
+    in_file.as_mut().map_or(IIERR_IO_ERROR, native_ii_hdf_check)
+}
+
+/// Legacy C callback entry point.  Native Rust callers use the borrowed-image
+/// APIs from `iihdf` directly.
 pub unsafe fn ii_hdf_check(in_file: *mut ImodImageFile) -> i32 {
-    native_ii_hdf_check(in_file)
+    in_file.as_mut().map_or(IIERR_IO_ERROR, native_ii_hdf_check)
 }
 pub unsafe fn ii_hdfopen_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
-    ii_hdf_open_new(in_file, mode)
+    in_file
+        .as_mut()
+        .map_or(1, |file| ii_hdf_open_new(file, mode))
 }
 pub unsafe fn hdf_write_global_adoc(in_file: *mut ImodImageFile) -> i32 {
-    native_hdf_write_global_adoc(in_file)
+    in_file.as_mut().map_or(1, native_hdf_write_global_adoc)
 }
 pub unsafe fn hdf_write_dummy_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
     native_hdf_write_dummy_section(in_file, buf, cz)
@@ -1960,7 +2275,16 @@ pub unsafe fn ii_test_if_hdf(filename: &[u8]) -> i32 {
     native_ii_test_if_hdf(filename)
 }
 pub unsafe fn ii_reorder_hdfstack(in_file: *mut ImodImageFile, sect_order: *mut i32) -> i32 {
-    ii_reorder_hdf_stack(in_file, sect_order)
+    let Some(file) = in_file.as_mut() else {
+        return 1;
+    };
+    if sect_order.is_null() || file.nz < 0 {
+        return 1;
+    }
+    ii_reorder_hdf_stack(
+        file,
+        core::slice::from_raw_parts(sect_order, file.nz as usize),
+    )
 }
 pub unsafe fn hdf_read_section_any(
     in_file: *mut ImodImageFile,
@@ -2007,95 +2331,92 @@ mod tests {
     }
 
     #[test]
+    fn set_mm_uses_owned_image_state_and_complex_scaling() {
+        let mut image = ii_new_box();
+        image.format = IIFORMAT_COMPLEX;
+        assert_eq!(ii_set_mm(&mut image, 3., 3., 255.), 0);
+        let (complex_min, complex_max) = mrc_complex_smin_smax(0., 255.);
+        assert_eq!(image.slope, 255. / (complex_max - complex_min));
+        assert_eq!(image.offset, -complex_min * image.slope);
+    }
+
+    #[test]
     fn convert_line_of_floats_preserves_source_rounding_clamping_and_packing() {
-        unsafe {
-            let floats = [-2., 0.49, 255.6];
-            let mut bytes = [0u8; 3];
-            ii_convert_line_of_floats(floats.as_ptr(), bytes.as_mut_ptr(), 3, MRC_MODE_BYTE, 0, 0);
-            assert_eq!(bytes, [0, 0, 255]);
+        let floats = [-2., 0.49, 255.6];
+        let mut bytes = [0u8; 3];
+        ii_convert_line_of_floats(&floats, &mut bytes, MRC_MODE_BYTE, false, false);
+        assert_eq!(bytes, [0, 0, 255]);
 
-            let signed = [0., 127.5, 255.];
-            ii_convert_line_of_floats(signed.as_ptr(), bytes.as_mut_ptr(), 3, MRC_MODE_BYTE, 1, 0);
-            assert_eq!(bytes.map(|value| value as i8), [-128, 0, 127]);
+        let signed = [0., 127.5, 255.];
+        ii_convert_line_of_floats(&signed, &mut bytes, MRC_MODE_BYTE, true, false);
+        assert_eq!(bytes.map(|value| value as i8), [-128, 0, 127]);
 
-            let packed = [1., 2., 15.];
-            ii_convert_line_of_floats(packed.as_ptr(), bytes.as_mut_ptr(), 3, MRC_MODE_BYTE, 0, 1);
-            assert_eq!(&bytes[..2], &[0x21, 15]);
+        let packed = [1., 2., 15.];
+        ii_convert_line_of_floats(&packed, &mut bytes, MRC_MODE_BYTE, false, true);
+        assert_eq!(&bytes[..2], &[0x21, 15]);
 
-            let values = [-1.1, 32767.9];
-            let mut shorts = [0i16; 2];
-            ii_convert_line_of_floats(
-                values.as_ptr(),
-                shorts.as_mut_ptr().cast(),
-                2,
-                MRC_MODE_SHORT,
-                0,
-                0,
-            );
-            assert_eq!(shorts, [-1, 32767]);
+        let values = [-1.1, 32767.9];
+        let mut short_bytes = [0u8; 4];
+        ii_convert_line_of_floats(&values, &mut short_bytes, MRC_MODE_SHORT, false, false);
+        assert_eq!(
+            short_bytes
+                .chunks_exact(2)
+                .map(|value| i16::from_ne_bytes([value[0], value[1]]))
+                .collect::<Vec<_>>(),
+            [-1, 32767]
+        );
 
-            let mut ushorts = [0u16; 2];
-            ii_convert_line_of_floats(
-                values.as_ptr(),
-                ushorts.as_mut_ptr().cast(),
-                2,
-                MRC_MODE_USHORT,
-                0,
-                0,
-            );
-            assert_eq!(ushorts, [0, 32768]);
+        let mut ushort_bytes = [0u8; 4];
+        ii_convert_line_of_floats(&values, &mut ushort_bytes, MRC_MODE_USHORT, false, false);
+        assert_eq!(
+            ushort_bytes
+                .chunks_exact(2)
+                .map(|value| u16::from_ne_bytes([value[0], value[1]]))
+                .collect::<Vec<_>>(),
+            [0, 32768]
+        );
 
-            let half_values = [0., 1.];
-            ii_convert_line_of_floats(
-                half_values.as_ptr(),
-                ushorts.as_mut_ptr().cast(),
-                2,
-                MRC_MODE_HALF_FLOAT,
-                0,
-                0,
-            );
-            assert_eq!(ushorts, [0, 0x3c00]);
-        }
+        let half_values = [0., 1.];
+        ii_convert_line_of_floats(
+            &half_values,
+            &mut ushort_bytes,
+            MRC_MODE_HALF_FLOAT,
+            false,
+            false,
+        );
+        assert_eq!(
+            ushort_bytes
+                .chunks_exact(2)
+                .map(|value| u16::from_ne_bytes([value[0], value[1]]))
+                .collect::<Vec<_>>(),
+            [0, 0x3c00]
+        );
     }
 
     #[test]
     fn make_buffer_convert_if_float_preserves_source_y_inversion_and_identity_return() {
-        unsafe {
-            let mut in_file_owner = ii_new_box();
-            let in_file = in_file_owner.as_mut() as *mut ImodImageFile;
-            (*in_file).nx = 2;
-            (*in_file).ny = 2;
-            (*in_file).mode = MRC_MODE_BYTE;
-            (*in_file).type_ = IITYPE_UBYTE;
-            let mut floats = [1f32, 2., 3., 4.];
-            let mut inverted = 0;
-            let converted = ii_make_buffer_convert_if_float(
-                in_file,
-                floats.as_mut_ptr().cast(),
-                1,
-                &mut inverted,
-                "test",
-            )
-            .unwrap()
-            .unwrap();
-            assert_eq!(inverted, 1);
-            assert_eq!(converted, [3, 4, 1, 2]);
+        let mut in_file = ii_new_box();
+        in_file.nx = 2;
+        in_file.ny = 2;
+        in_file.mode = MRC_MODE_BYTE;
+        in_file.type_ = IITYPE_UBYTE;
+        let floats = [1f32, 2., 3., 4.];
+        let mut inverted = false;
+        let converted =
+            ii_make_buffer_convert_if_float(&in_file, Some(&floats), &mut inverted, "test")
+                .unwrap()
+                .unwrap();
+        assert!(inverted);
+        assert_eq!(converted, [3, 4, 1, 2]);
 
-            (*in_file).type_ = IITYPE_FLOAT;
-            inverted = 0;
-            assert!(
-                ii_make_buffer_convert_if_float(
-                    in_file,
-                    floats.as_mut_ptr().cast(),
-                    1,
-                    &mut inverted,
-                    "test",
-                )
+        in_file.type_ = IITYPE_FLOAT;
+        inverted = false;
+        assert!(
+            ii_make_buffer_convert_if_float(&in_file, Some(&floats), &mut inverted, "test",)
                 .unwrap()
                 .is_none()
-            );
-            assert_eq!(inverted, 0);
-        }
+        );
+        assert!(!inverted);
     }
 
     #[test]
@@ -2162,7 +2483,7 @@ mod tests {
             header.tiltangles[5] = 6.0;
             header.header_size = 1024;
             header.section_skip = 88;
-            ii_sync_from_mrc_header(image_file, &mut header);
+            ii_sync_from_mrc_header(&mut *image_file, &mut header);
             assert_eq!(
                 ((*image_file).nx, (*image_file).ny, (*image_file).nz),
                 (4, 5, 6)
@@ -2206,7 +2527,7 @@ mod tests {
             );
             header.xlen = 0.0;
             header.zlen = 30.0;
-            ii_sync_from_mrc_header(image_file, &mut header);
+            ii_sync_from_mrc_header(&mut *image_file, &mut header);
             assert_eq!((*image_file).zscale, 1.0);
         }
     }
@@ -2242,6 +2563,61 @@ mod tests {
                 image_file.z_chunk_size
             ),
             (64, 32, 2)
+        );
+    }
+
+    #[test]
+    fn section_dispatch_requires_a_bounded_native_buffer() {
+        unsafe extern "C" fn read_two_bytes(
+            _image: *mut ImodImageFile,
+            buffer: *mut u8,
+            _section: i32,
+        ) -> i32 {
+            unsafe {
+                let buffer = core::slice::from_raw_parts_mut(buffer, 2);
+                buffer.copy_from_slice(&[17, 29]);
+            }
+            0
+        }
+
+        let mut image = ImodImageFile {
+            fp: Some(ImodFile::Token(1)),
+            nx: 2,
+            ny: 1,
+            nz: 1,
+            llx: 0,
+            urx: 1,
+            lly: 0,
+            ury: 0,
+            llz: 0,
+            urz: 0,
+            axis: 3,
+            mode: MRC_MODE_BYTE,
+            read_section: Some(read_two_bytes),
+            ..ImodImageFile::default()
+        };
+        let func = image.read_section;
+        let mut short = [0_u8; 1];
+        assert_eq!(
+            read_write_section(&mut image, &mut short, 0, func, "reading from"),
+            IIERR_BAD_CALL
+        );
+        let mut pixels = [0_u8; 2];
+        assert_eq!(
+            read_write_section(&mut image, &mut pixels, 0, func, "reading from"),
+            0
+        );
+        assert_eq!(pixels, [17, 29]);
+
+        let mut dispatched = [0_u8; 2];
+        assert_eq!(
+            ii_read_section_any(&mut image, &mut dispatched, 0, MRSA_NOPROC),
+            0
+        );
+        assert_eq!(dispatched, [17, 29]);
+        assert_eq!(
+            ii_read_section_any(&mut image, &mut dispatched[..1], 0, MRSA_NOPROC),
+            IIERR_BAD_CALL
         );
     }
 
@@ -2290,8 +2666,8 @@ mod tests {
             let second = second_owner.as_mut() as *mut ImodImageFile;
             (*first).fp = Some(ImodFile::Token(1));
             (*second).fp = Some(ImodFile::Token(2));
-            assert_eq!(add_to_opened_list(first), 0);
-            assert_eq!(ii_add_to_opened_list(second), 0);
+            assert_eq!(add_to_opened_list(&mut *first), 0);
+            assert_eq!(ii_add_to_opened_list(&mut *second), 0);
             assert_eq!(find_file_in_list(first, None), 0);
             assert_eq!(
                 find_file_in_list(core::ptr::null_mut(), (*second).fp.as_ref()),
@@ -2301,13 +2677,13 @@ mod tests {
                 ii_lookup_file_from_fp((*first).fp.as_ref().unwrap()),
                 Some(first)
             );
-            remove_from_opened_list(first);
+            remove_from_opened_list(&mut *first);
             assert!(ii_lookup_file_from_fp((*first).fp.as_ref().unwrap()).is_none());
             assert_eq!(
                 ii_lookup_file_from_fp((*second).fp.as_ref().unwrap()),
                 Some(second)
             );
-            remove_from_opened_list(second);
+            remove_from_opened_list(&mut *second);
         }
     }
 
@@ -2320,7 +2696,7 @@ mod tests {
             let new_file = new_file_owner.as_mut() as *mut ImodImageFile;
             (*old_file).fp = Some(ImodFile::Token(1));
             (*new_file).fp = Some(ImodFile::Token(old_file as usize));
-            assert_eq!(add_to_opened_list(old_file), 0);
+            assert_eq!(add_to_opened_list(&mut *old_file), 0);
             ii_file_change_address(old_file, new_file);
             assert!(
                 (*new_file)
@@ -2333,58 +2709,54 @@ mod tests {
                 ii_lookup_file_from_fp((*new_file).fp.as_ref().unwrap()),
                 Some(new_file)
             );
-            remove_from_opened_list(new_file);
+            remove_from_opened_list(&mut *new_file);
         }
     }
 
     #[test]
     fn save_and_restore_load_params_copy_only_the_source_load_fields() {
-        unsafe {
-            let mut ii_file_owner = ii_new_box();
-            let ii_file = ii_file_owner.as_mut() as *mut ImodImageFile;
-            let mut ii_save_owner = ii_new_box();
-            let ii_save = ii_save_owner.as_mut() as *mut ImodImageFile;
-            (*ii_file).llx = 1;
-            (*ii_file).urx = 2;
-            (*ii_file).lly = 3;
-            (*ii_file).ury = 4;
-            (*ii_file).llz = 5;
-            (*ii_file).urz = 6;
-            (*ii_file).axis = 2;
-            (*ii_file).pad_left = 7;
-            (*ii_file).pad_right = 8;
-            (*ii_file).slope = 1.5;
-            (*ii_file).offset = -2.5;
-            ii_save_load_params(ii_file, ii_save);
-            (*ii_file).llx = 0;
-            (*ii_file).urx = 0;
-            (*ii_file).lly = 0;
-            (*ii_file).ury = 0;
-            (*ii_file).llz = 0;
-            (*ii_file).urz = 0;
-            (*ii_file).axis = 0;
-            (*ii_file).pad_left = 0;
-            (*ii_file).pad_right = 0;
-            (*ii_file).slope = 0.;
-            (*ii_file).offset = 0.;
-            assert_eq!(ii_restore_load_params(-7, ii_file, ii_save), -7);
-            assert_eq!(
-                (
-                    (*ii_file).llx,
-                    (*ii_file).urx,
-                    (*ii_file).lly,
-                    (*ii_file).ury,
-                    (*ii_file).llz,
-                    (*ii_file).urz,
-                    (*ii_file).axis,
-                    (*ii_file).pad_left,
-                    (*ii_file).pad_right,
-                    (*ii_file).slope,
-                    (*ii_file).offset,
-                ),
-                (1, 2, 3, 4, 5, 6, 2, 7, 8, 1.5, -2.5)
-            );
-        }
+        let mut ii_file = ii_new_box();
+        let mut ii_save = ii_new_box();
+        ii_file.llx = 1;
+        ii_file.urx = 2;
+        ii_file.lly = 3;
+        ii_file.ury = 4;
+        ii_file.llz = 5;
+        ii_file.urz = 6;
+        ii_file.axis = 2;
+        ii_file.pad_left = 7;
+        ii_file.pad_right = 8;
+        ii_file.slope = 1.5;
+        ii_file.offset = -2.5;
+        ii_save_load_params(&ii_file, &mut ii_save);
+        ii_file.llx = 0;
+        ii_file.urx = 0;
+        ii_file.lly = 0;
+        ii_file.ury = 0;
+        ii_file.llz = 0;
+        ii_file.urz = 0;
+        ii_file.axis = 0;
+        ii_file.pad_left = 0;
+        ii_file.pad_right = 0;
+        ii_file.slope = 0.;
+        ii_file.offset = 0.;
+        assert_eq!(ii_restore_load_params(-7, &mut ii_file, &ii_save), -7);
+        assert_eq!(
+            (
+                ii_file.llx,
+                ii_file.urx,
+                ii_file.lly,
+                ii_file.ury,
+                ii_file.llz,
+                ii_file.urz,
+                ii_file.axis,
+                ii_file.pad_left,
+                ii_file.pad_right,
+                ii_file.slope,
+                ii_file.offset,
+            ),
+            (1, 2, 3, 4, 5, 6, 2, 7, 8, 1.5, -2.5)
+        );
     }
 
     #[test]
@@ -2397,7 +2769,7 @@ mod tests {
             (*ii_file).llx = 99;
             (*ii_file).lly = 98;
             (*ii_file).axis = 1;
-            assert_eq!(add_to_opened_list(ii_file), 0);
+            assert_eq!(add_to_opened_list(&mut *ii_file), 0);
             let mut header = MrcHeader::default();
             header.fp = (*ii_file).fp.clone();
             let mut load = crate::imod::libiimod::mrcfiles::LoadInfo::default();
@@ -2435,7 +2807,7 @@ mod tests {
                     .is_null()
             );
             ii_change_call_count(-1);
-            remove_from_opened_list(ii_file);
+            remove_from_opened_list(&mut *ii_file);
         }
     }
 
@@ -2486,10 +2858,10 @@ mod tests {
                 (IISTATE_READY, IIFILE_MRC, 2, 2)
             );
             let mut pixels = [0_u8; 4];
-            assert_eq!(ii_read_section(image, pixels.as_mut_ptr().cast(), 0), 0);
+            assert_eq!(ii_read_section(&mut *image, &mut pixels, 0), 0);
             assert_eq!(pixels, [129, 130, 131, 132]);
-            assert_eq!(ii_read_point(image, 1, 1, 0), 132.);
-            assert_eq!(ii_read_point(image, -1, 1, 0), (*image).amin);
+            assert_eq!(ii_read_point(&mut *image, 1, 1, 0), 132.);
+            assert_eq!(ii_read_point(&mut *image, -1, 1, 0), (*image).amin);
             ii_delete(image);
             ii_delete_check_list();
             assert_eq!(libc::unlink(path.as_ptr().cast()), 0);

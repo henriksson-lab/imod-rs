@@ -21,7 +21,8 @@ pub struct NameValuePair {
     /// The fields Java inherits from `Statement`.
     statement: StatementBase,
     /// Java field `name`, a `Vector` of `Attribute`s: the name is made of attributes.
-    name: Vec<*mut Attribute>,
+    /// Borrowed attributes owned by their `AttributeList`s.
+    name: Vec<std::ptr::NonNull<Attribute>>,
     /// Java field `parent`.
     parent: *mut dyn WriteOnlyStatementList,
     /// The parsed token list is borrowed from the tokenizer.  Values constructed by
@@ -79,7 +80,8 @@ impl NameValuePair {
     /// # Safety
     /// `attribute` must point to a live `Attribute`.
     pub unsafe fn add_attribute(&mut self, attribute: *mut Attribute) {
-        self.name.push(attribute);
+        self.name
+            .push(std::ptr::NonNull::new(attribute).expect("attribute is required"));
     }
 
     /// Java package-private `addValue(Token)`.
@@ -98,7 +100,7 @@ impl NameValuePair {
             Some(Value::Parsed(value))
         };
         let this: *mut NameValuePair = self;
-        let last = self.name[self.name.len() - 1];
+        let last = self.name[self.name.len() - 1].as_ptr();
         unsafe { (*last).add_name_value_pair(this) };
     }
 
@@ -212,7 +214,7 @@ impl Statement for NameValuePair {
         writer_id: &log_file::WriterId,
     ) -> Result<(), log_file::LogFileError> {
         for i in 0..self.name.len() {
-            unsafe { (*self.name[i]).write(file, writer_id)? };
+            unsafe { (*self.name[i].as_ptr()).write(file, writer_id)? };
             if i < self.name.len() - 1 {
                 file.write(Some(autodoc_tokenizer::SEPARATOR_CHAR), writer_id)?;
             }
@@ -240,7 +242,7 @@ impl Statement for NameValuePair {
         autodoc::print_indent(level);
         for i in 0..self.name.len() {
             print!("{}", unsafe {
-                match (*self.name[i]).get_value() {
+                match (*self.name[i].as_ptr()).get_value() {
                     None => "null".to_string(),
                     Some(value) => value,
                 }
@@ -271,7 +273,7 @@ impl WritableStatement for NameValuePair {
         let this: *mut NameValuePair = self;
         let mut attribute: *mut Attribute;
         for i in 0..self.name.len() {
-            attribute = self.name[i];
+            attribute = self.name[i].as_ptr();
             unsafe { (*attribute).remove() };
             if i == self.name.len() - 1 {
                 unsafe { (*attribute).remove_name_value_pair(this) };
@@ -318,7 +320,7 @@ impl ReadOnlyStatement for NameValuePair {
         if index < 0 || index >= self.name.len() as i32 {
             return None;
         }
-        Some(unsafe { (*self.name[index as usize]).get_name() })
+        Some(unsafe { (*self.name[index as usize].as_ptr()).get_name() })
     }
 
     /// Java `getRightSide()`.
@@ -342,11 +344,11 @@ impl ReadOnlyStatement for NameValuePair {
     fn get_string(&self) -> String {
         let mut buffer = String::new();
         if !self.name.is_empty() {
-            buffer.push_str(&unsafe { (*self.name[0]).get_name() });
+            buffer.push_str(&unsafe { (*self.name[0].as_ptr()).get_name() });
         }
         for i in 1..self.name.len() {
             buffer.push_str(autodoc_tokenizer::SEPARATOR_CHAR);
-            buffer.push_str(&unsafe { (*self.name[i]).get_name() });
+            buffer.push_str(&unsafe { (*self.name[i].as_ptr()).get_name() });
         }
         buffer.push_str(&format!(" {} ", autodoc_tokenizer::DEFAULT_DELIMITER));
         match &self.value {

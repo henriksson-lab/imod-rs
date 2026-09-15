@@ -23,12 +23,7 @@ pub unsafe fn iiu_open_print(iunit: i32, name: &str, attribute: &str) -> i32 {
     let (mut nxyz, mut mxyz, mut nxyzst) = ([0; 3], [0; 3], [0; 3]);
     let (mut nx_tile, mut ny_tile, mut nz_chunk) = (0, 0, 0);
     iiu_file_info(iunit, &mut num_kbytes, &mut itype, &mut iflags);
-    iiu_ret_size(
-        iunit,
-        nxyz.as_mut_ptr(),
-        mxyz.as_mut_ptr(),
-        nxyzst.as_mut_ptr(),
-    );
+    iiu_ret_size(iunit, &mut nxyz, &mut mxyz, &mut nxyzst);
     iiu_ret_chunk_sizes(iunit, &mut nx_tile, &mut ny_tile, &mut nz_chunk);
     if nx_tile > 0 || ny_tile > 0 {
         if itype == 5 && nx_tile == 0 {
@@ -156,23 +151,17 @@ mod tests {
         unsafe {
             let file = ii_open_new(name.as_bytes(), "wb", IIFILE_DEFAULT);
             assert!(!file.is_null());
-            let header = (*file).header.cast::<MrcHeader>();
-            assert_eq!(mrc_head_new(&mut *header, 2, 2, 2, 2), 0);
-            ii_sync_from_mrc_header(file, header);
-            assert_eq!(
-                mrc_head_write(&mut (*file).fp.clone().unwrap(), &mut *header),
-                0
-            );
+            let header = (*file)
+                .mrc_header
+                .as_deref_mut()
+                .expect("new MRC image has an owned header");
+            assert_eq!(mrc_head_new(header, 2, 2, 2, 2), 0);
+            ii_sync_from_mrc_header(&mut *file, header);
+            assert_eq!(mrc_head_write(&mut (*file).fp.clone().unwrap(), header), 0);
             let mut first = [1.0_f32, 2.0, 3.0, 4.0];
             let mut second = [5.0_f32, 6.0, 7.0, 8.0];
-            assert_eq!(
-                ii_write_section_float(file, first.as_mut_ptr().cast(), 0),
-                0
-            );
-            assert_eq!(
-                ii_write_section_float(file, second.as_mut_ptr().cast(), 1),
-                0
-            );
+            assert_eq!(ii_write_section_float(&mut *file, &mut first, 0), 0);
+            assert_eq!(ii_write_section_float(&mut *file, &mut second, 1), 0);
             ii_close(file);
 
             assert_eq!(iiu_open(97, &name, "RO"), 0);

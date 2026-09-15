@@ -145,7 +145,7 @@ pub fn imod_to_nff(mod_: &Imod, fout: &mut ImodFile) -> i32 {
                             i += 1;
                             while mesh.list[i] != IMOD_MESH_ENDPOLY {
                                 {
-                                    let _ = fout.write_all(c_format("pp 3\n", &[]).as_bytes());
+                                    let _ = fout.write_all(b"pp 3\n");
                                 }
                                 for _ in 0..3 {
                                     let vert = mesh.vert[mesh.list[i + vert_base] as usize];
@@ -510,7 +510,7 @@ pub fn imod_to_synu(mod_: &mut Imod) -> i32 {
                             )
                             .as_bytes(),
                         );
-                        let _ = fout.write_all(c_format("0\n1\n1\n", &[]).as_bytes());
+                        let _ = fout.write_all(b"0\n1\n1\n");
                     }
                 }
             } else {
@@ -782,7 +782,7 @@ pub fn imod_mesh_to_synu(obj: &Iobj, no: i32, zscale: f64) -> i32 {
                     v2 = mesh.list[l];
                 } else {
                     {
-                        let _ = fout.write_all(c_format("0\n1\n2\n", &[]).as_bytes());
+                        let _ = fout.write_all(b"0\n1\n2\n");
                     }
                 }
             }
@@ -852,23 +852,14 @@ pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
     cdist = (cdist as f64 / 0.75) as f32;
 
     {
-        let _ = fout.write_all(c_format("#RenderMan RIB-Structure 1.0\n", &[]).as_bytes());
-        let _ = fout.write_all(c_format("#Created\n", &[]).as_bytes());
-        let _ = fout.write_all(c_format("#by IMOD\n\n", &[]).as_bytes());
-
-        let _ = fout.write_all(
-            c_format(
-                "#The Renderman (R) Interface Procedures and RIB Protocol are:\n",
-                &[],
-            )
-            .as_bytes(),
-        );
-        let _ = fout.write_all(c_format("#Copyright 1988,1989, Pixar.\n", &[]).as_bytes());
-        let _ = fout.write_all(c_format("#All rights reseved.\n", &[]).as_bytes());
-        let _ = fout.write_all(
-            c_format("#RenderMan (R) is a registered trademark of Pixar.\n", &[]).as_bytes(),
-        );
-        let _ = fout.write_all(c_format("#\n\n", &[]).as_bytes());
+        let _ = fout.write_all(b"#RenderMan RIB-Structure 1.0\n");
+        let _ = fout.write_all(b"#Created\n");
+        let _ = fout.write_all(b"#by IMOD\n\n");
+        let _ = fout.write_all(b"#The Renderman (R) Interface Procedures and RIB Protocol are:\n");
+        let _ = fout.write_all(b"#Copyright 1988,1989, Pixar.\n");
+        let _ = fout.write_all(b"#All rights reseved.\n");
+        let _ = fout.write_all(b"#RenderMan (R) is a registered trademark of Pixar.\n");
+        let _ = fout.write_all(b"#\n\n");
 
         if vw.fovy != 0. {
             let _ = fout.write_all(
@@ -893,9 +884,9 @@ pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
             )
             .as_bytes(),
         );
-        let _ = fout.write_all(c_format("\"to\" [0 0 0] \"intensity\" 1\n", &[]).as_bytes());
+        let _ = fout.write_all(b"\"to\" [0 0 0] \"intensity\" 1\n");
 
-        let _ = fout.write_all(c_format("\nWorldBegin\n", &[]).as_bytes());
+        let _ = fout.write_all(b"\nWorldBegin\n");
         let _ =
             fout.write_all(c_format("Translate 0 0 %g\n", &[CArg::Dbl(cdist as f64)]).as_bytes());
         let _ = fout.write_all(
@@ -953,12 +944,12 @@ pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
         }
         if iobj_off(obj.flags) != 0 {
             {
-                let _ = fout.write_all(c_format("#Turned off, no rendering.\n", &[]).as_bytes());
+                let _ = fout.write_all(b"#Turned off, no rendering.\n");
             }
             continue;
         }
         {
-            let _ = fout.write_all(c_format("AttributeBegin\n", &[]).as_bytes());
+            let _ = fout.write_all(b"AttributeBegin\n");
 
             let _ = fout.write_all(
                 c_format(
@@ -1016,11 +1007,11 @@ pub fn imod_to_rib(imod: &mut Imod, fout: &mut ImodFile) -> i32 {
         }
 
         {
-            let _ = fout.write_all(c_format("AttributeEnd\n", &[]).as_bytes());
+            let _ = fout.write_all(b"AttributeEnd\n");
         }
     }
     {
-        let _ = fout.write_all(c_format("WorldEnd\n", &[]).as_bytes());
+        let _ = fout.write_all(b"WorldEnd\n");
     }
     0
 }
@@ -1051,7 +1042,7 @@ pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
             /* IMOD_MESH_BGNPOLY */
             -21 => {
                 {
-                    let _ = fout.write_all(c_format("Polygon \"P\" [", &[]).as_bytes());
+                    let _ = fout.write_all(b"Polygon \"P\" [");
                 }
                 loop {
                     i += 1;
@@ -1074,7 +1065,7 @@ pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
                     }
                 }
                 {
-                    let _ = fout.write_all(c_format("]\n", &[]).as_bytes());
+                    let _ = fout.write_all(b"]\n");
                 }
             }
 
@@ -1102,7 +1093,7 @@ pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
                     }
 
                     {
-                        let _ = fout.write_all(c_format("Polygon \"P\" [", &[]).as_bytes());
+                        let _ = fout.write_all(b"Polygon \"P\" [");
                         for v in vert {
                             let _ = fout.write_all(
                                 c_format(
@@ -1116,7 +1107,7 @@ pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
                                 .as_bytes(),
                             );
                         }
-                        let _ = fout.write_all(c_format("] \"N\" [", &[]).as_bytes());
+                        let _ = fout.write_all(b"] \"N\" [");
                         for n in norm {
                             let _ = fout.write_all(
                                 c_format(
@@ -1130,7 +1121,7 @@ pub fn p_rib_mesh(fout: &mut ImodFile, mesh: &Imesh, zscale: f64) -> i32 {
                                 .as_bytes(),
                             );
                         }
-                        let _ = fout.write_all(c_format("]\n", &[]).as_bytes());
+                        let _ = fout.write_all(b"]\n");
                     }
                 }
             }
@@ -1176,7 +1167,7 @@ pub fn p_rib_scat(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
         }
         for pt in 0..cont.pts.len() {
             {
-                let _ = fout.write_all(c_format("TransformBegin\n", &[]).as_bytes());
+                let _ = fout.write_all(b"TransformBegin\n");
                 let _ = fout.write_all(
                     c_format(
                         "Translate %g %g %g\n",
@@ -1199,8 +1190,8 @@ pub fn p_rib_scat(fout: &mut ImodFile, obj: &Iobj, z: f64) -> i32 {
                     )
                     .as_bytes(),
                 );
-                let _ = fout.write_all(c_format("Sphere 1 -1 1 360\n", &[]).as_bytes());
-                let _ = fout.write_all(c_format("TransformEnd\n", &[]).as_bytes());
+                let _ = fout.write_all(b"Sphere 1 -1 1 360\n");
+                let _ = fout.write_all(b"TransformEnd\n");
             }
         }
     }
@@ -1257,7 +1248,7 @@ pub fn prib_tube(
         offset[1] = rotated;
 
         {
-            let _ = fout.write_all(c_format("Polygon \"P\" ", &[]).as_bytes());
+            let _ = fout.write_all(b"Polygon \"P\" ");
             let _ = fout.write_all(
                 c_format(
                     "[ %g %g %g  %g %g %g  %g %g %g  %g %g %g ]\n",

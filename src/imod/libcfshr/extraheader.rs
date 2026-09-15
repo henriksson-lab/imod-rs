@@ -1,7 +1,6 @@
 //! Translation of `IMOD/libcfshr/extraheader.c`.
-#![allow(dead_code, unsafe_op_in_unsafe_fn)]
+#![allow(dead_code)]
 
-use core::ptr;
 use std::sync::Mutex;
 
 use super::autodoc::{
@@ -9,7 +8,7 @@ use super::autodoc::{
     adoc_get_three_integers, adoc_get_two_floats, adoc_lookup_by_name_value, adoc_set_current,
 };
 use super::b3dutil::{
-    b3d_error, b3d_get_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
+    b3d_error, b3d_get_store_error, b3d_set_store_error, extra_is_nbytes_and_flags,
 };
 
 const MRC_EXT_TYPE_FEI: i32 = 3;
@@ -112,38 +111,6 @@ pub fn get_extra_header_tilts(
         num_tilts,
         iz_piece,
     )
-}
-
-/// C Fortran wrapper `get_extra_header_tilts` (`extraheader.c:83`).
-pub unsafe fn get_extra_header_tilts_fortran(
-    array: *mut u8,
-    num_extra_bytes: *mut i32,
-    nbytes: *mut i32,
-    iflags: *mut i32,
-    nz: *mut i32,
-    tilt: *mut f32,
-    num_tilts: *mut i32,
-    max_tilts: *mut i32,
-    iz_piece: *mut i32,
-) {
-    b3d_set_store_error(1);
-    let array = core::slice::from_raw_parts(array, (*num_extra_bytes).max(0) as usize);
-    let tilt = core::slice::from_raw_parts_mut(tilt, (*max_tilts).max(0) as usize);
-    let iz_piece = core::slice::from_raw_parts(iz_piece, (*nz).max(0) as usize);
-    if get_extra_header_tilts(
-        array,
-        *num_extra_bytes,
-        *nbytes,
-        *iflags,
-        *nz,
-        tilt,
-        &mut *num_tilts,
-        iz_piece,
-    ) != 0
-    {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
 }
 
 /// C `getExtraHeaderItems` (`extraheader.c:117`).
@@ -336,50 +303,6 @@ pub fn get_extra_header_items(
     0
 }
 
-/// C Fortran wrapper `get_extra_header_items` (`extraheader.c:236`).
-pub unsafe fn get_extra_header_items_fortran(
-    array: *mut u8,
-    num_extra_bytes: *mut i32,
-    nbytes: *mut i32,
-    iflags: *mut i32,
-    nz: *mut i32,
-    itype: *mut i32,
-    val1: *mut f32,
-    val2: *mut f32,
-    num_vals: *mut i32,
-    max_vals: *mut i32,
-    iz_piece: *mut i32,
-) {
-    b3d_set_store_error(1);
-    let array = core::slice::from_raw_parts(array, (*num_extra_bytes).max(0) as usize);
-    let values1 = core::slice::from_raw_parts_mut(val1, (*max_vals).max(0) as usize);
-    let iz_piece = core::slice::from_raw_parts(iz_piece, (*nz).max(0) as usize);
-    let values2 = if val1 == val2 {
-        None
-    } else {
-        Some(core::slice::from_raw_parts_mut(
-            val2,
-            (*max_vals).max(0) as usize,
-        ))
-    };
-    if get_extra_header_items(
-        array,
-        *num_extra_bytes,
-        *nbytes,
-        *iflags,
-        *nz,
-        *itype,
-        values1,
-        values2,
-        &mut *num_vals,
-        iz_piece,
-    ) != 0
-    {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
-}
-
 /// C `SEMshortsToFloat` (`extraheader.c:252`).
 pub fn semshorts_to_float(mut low: i16, mut ihigh: i16) -> f64 {
     let mut value_sign = 1;
@@ -440,74 +363,38 @@ pub fn get_metadata_items(
         return 1;
     }
     let mut val3 = 0.;
-    unsafe {
-        get_metadata_by_key(
-            ind_adoc,
-            adoc_type,
-            nz,
-            KEYS[(data_type - 1) as usize],
-            WHICH[(data_type - 1) as usize],
-            val1.as_mut_ptr(),
-            val2.as_mut_ptr(),
-            &mut val3,
-            None,
-            num_vals,
-            num_found,
-            nz,
-            iz_piece.as_ptr().cast_mut(),
-        )
-    }
-}
-
-/// C Fortran wrapper `get_metadata_items` (`extraheader.c:305`).
-pub unsafe fn get_metadata_items_fortran(
-    ind_adoc: *mut i32,
-    adoc_type: *mut i32,
-    nz: *mut i32,
-    data_type: *mut i32,
-    val1: *mut f32,
-    val2: *mut f32,
-    num_vals: *mut i32,
-    num_found: *mut i32,
-    max_vals: *mut i32,
-    iz_piece: *mut i32,
-) {
-    b3d_set_store_error(1);
-    let val1 = core::slice::from_raw_parts_mut(val1, *max_vals as usize);
-    let val2 = core::slice::from_raw_parts_mut(val2, *max_vals as usize);
-    let iz_piece = core::slice::from_raw_parts(iz_piece, *nz as usize);
-    if get_metadata_items(
-        *ind_adoc - 1,
-        *adoc_type,
-        *nz,
-        *data_type,
+    get_metadata_by_key(
+        ind_adoc,
+        adoc_type,
+        nz,
+        KEYS[(data_type - 1) as usize],
+        WHICH[(data_type - 1) as usize],
         val1,
         val2,
-        &mut *num_vals,
-        &mut *num_found,
+        core::slice::from_mut(&mut val3),
+        None,
+        num_vals,
+        num_found,
+        nz,
         iz_piece,
-    ) != 0
-    {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
+    )
 }
 
 /// C `getMetadataByKey` (`extraheader.c:345`).
-pub unsafe fn get_metadata_by_key(
+pub fn get_metadata_by_key(
     ind_adoc: i32,
     adoc_type: i32,
     nz: i32,
     key: &str,
     value_type: i32,
-    val1: *mut f32,
-    val2: *mut f32,
-    val3: *mut f32,
+    val1: &mut [f32],
+    val2: &mut [f32],
+    val3: &mut [f32],
     val_string: Option<&mut [Option<String>]>,
-    num_vals: *mut i32,
-    num_found: *mut i32,
+    num_vals: &mut i32,
+    num_found: &mut i32,
     max_vals: i32,
-    iz_piece: *mut i32,
+    iz_piece: &[i32],
 ) -> i32 {
     let names: [&[u8]; 3] = [ADOC_ZVALUE_NAME, b"Image", ADOC_ZVALUE_NAME];
     if adoc_set_current(ind_adoc) != 0 {
@@ -519,6 +406,38 @@ pub unsafe fn get_metadata_by_key(
     }
     *num_vals = 0;
     *num_found = 0;
+    let Ok(nz) = usize::try_from(nz) else {
+        return 1;
+    };
+    let Ok(max_vals) = usize::try_from(max_vals) else {
+        return 1;
+    };
+    if iz_piece.len() < nz || val1.len() < max_vals {
+        b3d_error(
+            None,
+            format_args!("getMetadataByKey - Array not big enough for data"),
+        );
+        return 1;
+    }
+    if value_type == 3 && val2.len() < max_vals
+        || value_type == 4 && (val2.len() < max_vals || val3.len() < max_vals)
+    {
+        b3d_error(
+            None,
+            format_args!("getMetadataByKey - Array not big enough for data"),
+        );
+        return 1;
+    }
+    let Some(name) = adoc_type
+        .checked_sub(1)
+        .and_then(|index| names.get(index as usize))
+    else {
+        b3d_error(
+            None,
+            format_args!("getMetadataByKey - Invalid autodoc type"),
+        );
+        return 1;
+    };
     let mut val_string = val_string;
     if value_type == 0 {
         if val_string.is_none() {
@@ -531,12 +450,19 @@ pub unsafe fn get_metadata_by_key(
             return 1;
         }
         let slots = val_string.as_deref_mut().unwrap();
-        for i in 0..max_vals {
-            slots[i as usize] = None;
+        if slots.len() < max_vals {
+            b3d_error(
+                None,
+                format_args!("getMetadataByKey - Array not big enough for data"),
+            );
+            return 1;
+        }
+        for slot in &mut slots[..max_vals] {
+            *slot = None;
         }
     }
     for i in 0..nz {
-        let output = *iz_piece.add(i as usize);
+        let output = iz_piece[i];
         if output < 0 {
             b3d_error(
                 None,
@@ -544,21 +470,20 @@ pub unsafe fn get_metadata_by_key(
             );
             return 1;
         }
-        if output >= max_vals {
+        if output as usize >= max_vals {
             b3d_error(
                 None,
                 format_args!("getMetadataByKey - Array not big enough for data"),
             );
             return 1;
         }
-        let mut section = i;
+        let mut section = i as i32;
         if adoc_type == 3 {
-            section = adoc_lookup_by_name_value(names[2], i);
+            section = adoc_lookup_by_name_value(names[2], i as i32);
             if section < 0 {
                 continue;
             }
         }
-        let name = names[(adoc_type - 1) as usize];
         let out = output as usize;
         match value_type {
             0 => {
@@ -566,19 +491,19 @@ pub unsafe fn get_metadata_by_key(
                 if adoc_get_string(name, section, key.as_bytes(), &mut bytes) == 0 {
                     val_string.as_deref_mut().unwrap()[out] =
                         Some(String::from_utf8_lossy(&bytes).into_owned());
-                    *val1.add(out) = 0.;
+                    val1[out] = 0.;
                     *num_found += 1;
                 }
             }
             1 => {
                 let mut value = 0;
                 if adoc_get_integer(name, section, key.as_bytes(), &mut value) == 0 {
-                    *val1.add(out) = value as f32;
+                    val1[out] = value as f32;
                     *num_found += 1;
                 }
             }
             2 => {
-                if adoc_get_float(name, section, key.as_bytes(), &mut *val1.add(out)) == 0 {
+                if adoc_get_float(name, section, key.as_bytes(), &mut val1[out]) == 0 {
                     *num_found += 1;
                 }
             }
@@ -587,8 +512,8 @@ pub unsafe fn get_metadata_by_key(
                     name,
                     section,
                     key.as_bytes(),
-                    &mut *val1.add(out),
-                    &mut *val2.add(out),
+                    &mut val1[out],
+                    &mut val2[out],
                 ) == 0
                 {
                     *num_found += 1;
@@ -599,9 +524,9 @@ pub unsafe fn get_metadata_by_key(
                     name,
                     section,
                     key.as_bytes(),
-                    &mut *val1.add(out),
-                    &mut *val2.add(out),
-                    &mut *val3.add(out),
+                    &mut val1[out],
+                    &mut val2[out],
+                    &mut val3[out],
                 ) == 0
                 {
                     *num_found += 1;
@@ -612,74 +537,6 @@ pub unsafe fn get_metadata_by_key(
         *num_vals = (*num_vals).max(output + 1);
     }
     0
-}
-
-/// C Fortran wrapper `get_metadata_by_key` (`extraheader.c:421`).  Character conversion is a Fortran ABI boundary.
-pub unsafe fn get_metadata_by_key_fortran(
-    ind_adoc: *mut i32,
-    adoc_type: *mut i32,
-    nz: *mut i32,
-    key: &[u8],
-    value_type: *mut i32,
-    val1: *mut f32,
-    val2: *mut f32,
-    val3: *mut f32,
-    val_string: &mut [u8],
-    num_vals: *mut i32,
-    num_found: *mut i32,
-    max_vals: *mut i32,
-    iz_piece: *mut i32,
-    key_size: usize,
-    val_size: usize,
-) {
-    b3d_set_store_error(1);
-    *num_vals = 0;
-    *num_found = 0;
-    let key_bytes = &key[..key_size];
-    let key_end = key_bytes
-        .iter()
-        .rposition(|byte| *byte != b' ')
-        .map_or(0, |index| index + 1);
-    let key_text = String::from_utf8_lossy(&key_bytes[..key_end]).into_owned();
-    let mut strings: Vec<Option<String>> = if *value_type == 0 {
-        vec![None; *max_vals as usize]
-    } else {
-        Vec::new()
-    };
-    if get_metadata_by_key(
-        *ind_adoc - 1,
-        *adoc_type,
-        *nz,
-        &key_text,
-        *value_type,
-        val1,
-        val2,
-        val3,
-        if *value_type == 0 {
-            Some(&mut strings[..])
-        } else {
-            None
-        },
-        num_vals,
-        num_found,
-        *max_vals,
-        iz_piece,
-    ) != 0
-    {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
-    if *value_type == 0 {
-        for ind in 0..*num_found {
-            let destination = &mut val_string[ind as usize * val_size..][..val_size];
-            destination.fill(b' ');
-            if let Some(source) = strings[ind as usize].as_deref() {
-                let source = source.as_bytes();
-                let n = source.len().min(val_size);
-                destination[..n].copy_from_slice(&source[..n]);
-            }
-        }
-    }
 }
 
 /// C `getExtraHeaderPieces` (`extraheader.c:472`).
@@ -734,42 +591,6 @@ pub fn get_extra_header_pieces(
         *num_pieces = i as i32 + 1;
     }
     0
-}
-
-/// C Fortran wrapper `get_extra_header_pieces` (`extraheader.c:510`).
-pub unsafe fn get_extra_header_pieces_fortran(
-    array: *mut u8,
-    num_extra_bytes: *mut i32,
-    nbytes: *mut i32,
-    iflags: *mut i32,
-    nz: *mut i32,
-    ix_piece: *mut i32,
-    iy_piece: *mut i32,
-    iz_piece: *mut i32,
-    num_pieces: *mut i32,
-    max_piece: *mut i32,
-) {
-    b3d_set_store_error(1);
-    let array = core::slice::from_raw_parts(array, (*num_extra_bytes).max(0) as usize);
-    let ix_piece = core::slice::from_raw_parts_mut(ix_piece, (*max_piece).max(0) as usize);
-    let iy_piece = core::slice::from_raw_parts_mut(iy_piece, (*max_piece).max(0) as usize);
-    let iz_piece = core::slice::from_raw_parts_mut(iz_piece, (*max_piece).max(0) as usize);
-    if get_extra_header_pieces(
-        array,
-        *num_extra_bytes,
-        *nbytes,
-        *iflags,
-        *nz,
-        ix_piece,
-        iy_piece,
-        iz_piece,
-        &mut *num_pieces,
-        *max_piece,
-    ) != 0
-    {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
 }
 
 /// C `getMetadataPieces` (`extraheader.c:537`).
@@ -829,37 +650,6 @@ pub fn get_metadata_pieces(
     0
 }
 
-/// C Fortran wrapper `get_metadata_pieces` (`extraheader.c:567`).
-pub unsafe fn get_metadata_pieces_fortran(
-    ind_adoc: *mut i32,
-    adoc_type: *mut i32,
-    nz: *mut i32,
-    ix_piece: *mut i32,
-    iy_piece: *mut i32,
-    iz_piece: *mut i32,
-    max_piece: *mut i32,
-    num_found: *mut i32,
-) {
-    b3d_set_store_error(1);
-    let ix_piece = core::slice::from_raw_parts_mut(ix_piece, (*max_piece).max(0) as usize);
-    let iy_piece = core::slice::from_raw_parts_mut(iy_piece, (*max_piece).max(0) as usize);
-    let iz_piece = core::slice::from_raw_parts_mut(iz_piece, (*max_piece).max(0) as usize);
-    if get_metadata_pieces(
-        *ind_adoc - 1,
-        *adoc_type,
-        *nz,
-        ix_piece,
-        iy_piece,
-        iz_piece,
-        *max_piece,
-        &mut *num_found,
-    ) != 0
-    {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
-}
-
 /// C `getMetadataWeightingDoses` (`extraheader.c:614`).
 pub fn get_metadata_weighting_doses(
     ind_adoc: i32,
@@ -890,23 +680,21 @@ pub fn get_metadata_weighting_doses(
     let mut dummy2 = 0.;
     let mut num_values = 0;
     let mut num_found = 0;
-    if unsafe {
-        get_metadata_by_key(
-            ind_adoc,
-            adoc_type,
-            nz,
-            "ExposureDose",
-            2,
-            sec_dose.as_mut_ptr(),
-            &mut dummy1,
-            &mut dummy2,
-            None,
-            &mut num_values,
-            &mut num_found,
-            nz,
-            iz_piece.as_ptr().cast_mut(),
-        )
-    } != 0
+    if get_metadata_by_key(
+        ind_adoc,
+        adoc_type,
+        nz,
+        "ExposureDose",
+        2,
+        sec_dose,
+        core::slice::from_mut(&mut dummy1),
+        core::slice::from_mut(&mut dummy2),
+        None,
+        &mut num_values,
+        &mut num_found,
+        nz,
+        iz_piece,
+    ) != 0
     {
         return 1;
     }
@@ -931,23 +719,21 @@ pub fn get_metadata_weighting_doses(
             return 2;
         }
     }
-    if unsafe {
-        get_metadata_by_key(
-            ind_adoc,
-            adoc_type,
-            nz,
-            "PriorRecordDose",
-            2,
-            prior_dose.as_mut_ptr(),
-            &mut dummy1,
-            &mut dummy2,
-            None,
-            &mut num_values,
-            &mut num_found,
-            nz,
-            iz_piece.as_ptr().cast_mut(),
-        )
-    } != 0
+    if get_metadata_by_key(
+        ind_adoc,
+        adoc_type,
+        nz,
+        "PriorRecordDose",
+        2,
+        prior_dose,
+        core::slice::from_mut(&mut dummy1),
+        core::slice::from_mut(&mut dummy2),
+        None,
+        &mut num_values,
+        &mut num_found,
+        nz,
+        iz_piece,
+    ) != 0
     {
         return 1;
     }
@@ -960,23 +746,21 @@ pub fn get_metadata_weighting_doses(
         b3d_set_store_error(1);
     }
     let mut strings: Vec<Option<String>> = vec![None; nz_usize];
-    let ret = unsafe {
-        get_metadata_by_key(
-            ind_adoc,
-            adoc_type,
-            nz,
-            "DateTime",
-            0,
-            prior_dose.as_mut_ptr(),
-            &mut dummy1,
-            &mut dummy2,
-            Some(&mut strings[..]),
-            &mut num_values,
-            &mut num_found,
-            nz,
-            iz_piece.as_ptr().cast_mut(),
-        )
-    };
+    let ret = get_metadata_by_key(
+        ind_adoc,
+        adoc_type,
+        nz,
+        "DateTime",
+        0,
+        prior_dose,
+        core::slice::from_mut(&mut dummy1),
+        core::slice::from_mut(&mut dummy2),
+        Some(&mut strings[..]),
+        &mut num_values,
+        &mut num_found,
+        nz,
+        iz_piece,
+    );
     if ret != 0 || num_found == 0 || num_found < nz {
         if bidir {
             prior_doses_from_image_doses(
@@ -1065,35 +849,6 @@ pub fn get_metadata_weighting_doses(
     0
 }
 
-/// C Fortran wrapper `getmetadataweightingdoses` (`extraheader.c:797`).
-pub unsafe fn get_metadata_weighting_doses_fortran(
-    ind_adoc: *mut i32,
-    adoc_type: *mut i32,
-    nz: *mut i32,
-    iz_piece: *mut i32,
-    bidir_num_invert: *mut i32,
-    prior_dose: *mut f32,
-    sec_dose: *mut f32,
-) -> i32 {
-    let iz_pieces = core::slice::from_raw_parts(iz_piece, *nz as usize);
-    let prior_doses = core::slice::from_raw_parts_mut(prior_dose, *nz as usize);
-    let section_doses = core::slice::from_raw_parts_mut(sec_dose, *nz as usize);
-    let error = get_metadata_weighting_doses(
-        *ind_adoc - 1,
-        *adoc_type,
-        *nz,
-        iz_pieces,
-        *bidir_num_invert,
-        prior_doses,
-        section_doses,
-    );
-    if error > 0 {
-        eprintln!("\nERROR: {}", b3d_get_error());
-        std::process::exit(1);
-    }
-    error
-}
-
 /// C `setZeroDoseThreshAndAccum` (`extraheader.c:815`).
 pub fn set_zero_dose_thresh_and_accum(thresh: f32, accum: f32) {
     *S_ZERO_DOSE.lock().unwrap() = ZeroDoseSettings {
@@ -1143,18 +898,6 @@ pub fn prior_doses_from_image_doses(
     }
 }
 
-/// C Fortran wrapper `priordosesfromimagedoses` (`extraheader.c:867`).
-pub unsafe fn prior_doses_from_image_doses_fortran(
-    sec_dose: *mut f32,
-    nz: *mut i32,
-    bidir_num_invert: *mut i32,
-    prior_dose: *mut f32,
-) {
-    let section_doses = unsafe { core::slice::from_raw_parts(sec_dose, *nz as usize) };
-    let prior_doses = unsafe { core::slice::from_raw_parts_mut(prior_dose, *nz as usize) };
-    prior_doses_from_image_doses(section_doses, *bidir_num_invert, prior_doses)
-}
-
 /// C `getExtraHeaderValue` (`extraheader.c:881`).
 pub fn get_extra_header_value(
     ext_head: &[u8],
@@ -1202,31 +945,6 @@ pub fn get_extra_header_value(
     0
 }
 
-/// C Fortran wrapper `getextraheadervalue` (`extraheader.c:908`).
-pub unsafe fn get_extra_header_value_fortran(
-    ext_head: *mut u8,
-    offset: *mut i32,
-    value_type: *mut i32,
-    bval: *mut u8,
-    sval: *mut i16,
-    ival: *mut i32,
-    fval: *mut f32,
-    dval: *mut f64,
-) -> i32 {
-    let data = unsafe { ext_head.add(*offset as usize) };
-    unsafe {
-        match *value_type {
-            0 => *bval = *data,
-            1 => *sval = ptr::read_unaligned(data.cast()),
-            2 => *fval = ptr::read_unaligned(data.cast()),
-            3 => *ival = ptr::read_unaligned(data.cast()),
-            4 => *dval = ptr::read_unaligned(data.cast()),
-            _ => return 1,
-        }
-    }
-    0
-}
-
 /// C `getExtraHeaderSecOffset` (`extraheader.c:967`).
 pub fn get_extra_header_sec_offset(
     ext_head: &[u8],
@@ -1247,28 +965,6 @@ pub fn get_extra_header_sec_offset(
         offset,
         size,
         &mut maximum,
-    )
-}
-
-/// C Fortran wrapper `getextraheadersecoffset` (`extraheader.c:976`).
-pub unsafe fn get_extra_header_sec_offset_fortran(
-    ext_head: *mut u8,
-    ext_size: *mut i32,
-    num_int: *mut i32,
-    num_real: *mut i32,
-    iz_sect: *mut i32,
-    offset: *mut i32,
-    size: *mut i32,
-) -> i32 {
-    let bytes = unsafe { core::slice::from_raw_parts(ext_head, (*ext_size).max(0) as usize) };
-    get_extra_header_sec_offset(
-        bytes,
-        *ext_size,
-        *num_int,
-        *num_real,
-        *iz_sect,
-        unsafe { &mut *offset },
-        unsafe { &mut *size },
     )
 }
 
@@ -1293,21 +989,6 @@ pub fn get_extra_header_max_sec_size(
         &mut size,
         max_size,
     )
-}
-
-/// C Fortran wrapper `getextraheadermaxsecsize` (`extraheader.c:997`).
-pub unsafe fn get_extra_header_max_sec_size_fortran(
-    ext_head: *mut u8,
-    ext_size: *mut i32,
-    num_int: *mut i32,
-    num_real: *mut i32,
-    num_sect: *mut i32,
-    max_size: *mut i32,
-) -> i32 {
-    let bytes = unsafe { core::slice::from_raw_parts(ext_head, (*ext_size).max(0) as usize) };
-    get_extra_header_max_sec_size(bytes, *ext_size, *num_int, *num_real, *num_sect, unsafe {
-        &mut *max_size
-    })
 }
 
 /// C `copyExtraHeaderSection` (`extraheader.c:1012`).
@@ -1343,24 +1024,6 @@ pub fn copy_extra_header_section(
         .copy_from_slice(&extra_in[offset as usize..offset as usize + size as usize]);
     *cumul_bytes_out += size;
     0
-}
-
-/// C Fortran wrapper `copyextraheadersection` (`extraheader.c:1026`).
-pub unsafe fn copy_extra_header_section_fortran(
-    extra_in: *mut u8,
-    size_in: *mut i32,
-    extra_out: *mut u8,
-    size_out: *mut i32,
-    num_int: *mut i32,
-    num_real: *mut i32,
-    iz_sect: *mut i32,
-    cumul_bytes_out: *mut i32,
-) -> i32 {
-    let input = unsafe { core::slice::from_raw_parts(extra_in, (*size_in).max(0) as usize) };
-    let output = unsafe { core::slice::from_raw_parts_mut(extra_out, (*size_out).max(0) as usize) };
-    copy_extra_header_section(input, output, *num_int, *num_real, *iz_sect, unsafe {
-        &mut *cumul_bytes_out
-    })
 }
 
 /// C `getFeiExtHeadAngleScale` (`extraheader.c:1037`).
@@ -1482,5 +1145,48 @@ mod tests {
 
         legacy[78] = b'X';
         assert_eq!(get_fei_ext_head_angle_scale(&legacy), 1.);
+    }
+
+    #[test]
+    fn metadata_key_reads_owned_typed_output_slices() {
+        let index = crate::imod::libcfshr::autodoc::adoc_new();
+        assert!(index >= 0);
+        assert_eq!(crate::imod::libcfshr::autodoc::adoc_set_current(index), 0);
+        let section = crate::imod::libcfshr::autodoc::adoc_add_section(ADOC_ZVALUE_NAME, b"0");
+        assert_eq!(section, 0);
+        assert_eq!(
+            crate::imod::libcfshr::autodoc::adoc_set_float(
+                ADOC_ZVALUE_NAME,
+                section,
+                b"ExposureDose",
+                2.5,
+            ),
+            0
+        );
+        let mut first = [0.; 1];
+        let mut second = [0.; 1];
+        let mut third = [0.; 1];
+        let mut num_vals = 0;
+        let mut num_found = 0;
+        assert_eq!(
+            get_metadata_by_key(
+                index,
+                1,
+                1,
+                "ExposureDose",
+                2,
+                &mut first,
+                &mut second,
+                &mut third,
+                None,
+                &mut num_vals,
+                &mut num_found,
+                1,
+                &[0],
+            ),
+            0
+        );
+        assert_eq!((first, num_vals, num_found), ([2.5], 1, 1));
+        crate::imod::libcfshr::autodoc::adoc_clear(index);
     }
 }

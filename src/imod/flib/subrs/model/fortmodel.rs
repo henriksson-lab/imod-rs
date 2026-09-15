@@ -62,8 +62,10 @@ pub struct FortModel {
     pub ndx_order: Vec<i32>,
     /// `p_coord(3, max_pt)` (`fortmodel.f90:70`) — column major.
     pub p_coord: Vec<[f32; 3]>,
-    /// `pt_label(max_pt)` (`fortmodel.f90:73`), `integer(c_char)`.
-    pub pt_label: Vec<i8>,
+    /// Per-point marker values.  The source uses `integer(c_char)` only as a
+    /// compact integer array; this is crate-owned marker data, not a C string
+    /// or an ABI buffer.
+    pub pt_label: Vec<u8>,
     /// `clabel(max_clabel)` (`fortmodel.f90:75`), `character*10`.
     pub clabel: Vec<[u8; 10]>,
     /// `label_list(max_clabel)` (`fortmodel.f90:76`).

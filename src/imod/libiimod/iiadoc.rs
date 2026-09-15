@@ -9,13 +9,13 @@ use crate::imod::libcfshr::autodoc::{
 use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::{b3d_error, b3d_get_store_error, b3d_set_store_error};
 use crate::imod::libiimod::iimage::{
-    IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_ADOC, IiSectionFunc, ImodImageFile,
-    ii_default_min_max_mean, ii_delete, ii_open, ii_read_section, ii_read_section_byte,
-    ii_read_section_float, ii_read_section_ushort, ii_simple_fill_mrc_header,
+    IIERR_BAD_CALL, IIERR_IO_ERROR, IIERR_NOT_FORMAT, IIFILE_ADOC, ImodImageFile, MRSA_BYTE,
+    MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT, ii_default_min_max_mean, ii_delete, ii_open,
+    ii_read_section_any, ii_simple_fill_mrc_header,
 };
 use crate::imod::libiimod::iimrc::ii_mrc_mode_to_format_type;
 use crate::imod::libiimod::mrcfiles::{
-    MRC_LABEL_SIZE, MrcHeader, fix_title_padding, mrc_set_scale,
+    MRC_LABEL_SIZE, MRC_MODE_HALF_FLOAT, MrcHeader, fix_title_padding, mrc_getdcsize, mrc_set_scale,
 };
 
 /// Matches C `IIADOC_IMAGE` (`iiadoc.c:14`).  `ADOC_GLOBAL_NAME` comes from
@@ -79,7 +79,7 @@ pub unsafe extern "C" fn ii_adoc_check(in_file: *mut ImodImageFile) -> i32 {
             return IIERR_NOT_FORMAT;
         }
         (*in_file).file = IIFILE_ADOC;
-        ii_mrc_mode_to_format_type(in_file, (*in_file).mode, 0);
+        ii_mrc_mode_to_format_type(&mut *in_file, (*in_file).mode, 0);
         (*in_file).has_piece_coords = montage;
 
         ii_default_min_max_mean(
@@ -173,7 +173,7 @@ unsafe extern "C" fn adoc_fill_mrc_header(
     hdata: *mut MrcHeader,
 ) -> i32 {
     unsafe {
-        ii_simple_fill_mrc_header(in_file, hdata);
+        ii_simple_fill_mrc_header(&*in_file, &mut *hdata);
         mrc_set_scale(
             &mut *hdata,
             (*in_file).xscale as f64,
@@ -202,86 +202,82 @@ unsafe extern "C" fn adoc_fill_mrc_header(
 }
 
 /// Matches C static `readSectionFile` (`iiadoc.c:151`).
-unsafe fn read_section_file(
-    in_file: *mut ImodImageFile,
-    buf: *mut u8,
+fn read_section_file(
+    in_file: &mut ImodImageFile,
+    buf: &mut [u8],
     section: i32,
-    func: IiSectionFunc,
+    convert_to: i32,
 ) -> i32 {
-    unsafe {
-        let mut filename = Vec::new();
-        if adoc_get_section_name(IIADOC_IMAGE, section, &mut filename) != 0 {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("ERROR: iiadoc - Getting filename for section {}", section),
-            );
-            return 1;
-        }
-        let own_name = (*in_file).filename.clone().unwrap_or_default();
-        // `iiadoc.c:161-167`: the last '/' and the last '\', whichever is later.
-        let mut slash_ind = -1_isize;
-        let mut bs_ind = -1_isize;
-        if let Some(pos) = own_name.bytes().rposition(|b| b == b'/') {
-            slash_ind = pos as isize;
-        }
-        if let Some(pos) = own_name.bytes().rposition(|b| b == b'\\') {
-            bs_ind = pos as isize;
-        }
-        slash_ind = slash_ind.max(bs_ind);
-        let use_name = if slash_ind >= 0 {
-            // `iiadoc.c:172-177`: the directory part of the idoc name, up to
-            // and including the separator, then the section's file name.
-            format!(
-                "{}{}",
-                &own_name[..slash_ind as usize + 1],
-                String::from_utf8_lossy(&filename)
-            )
-        } else {
-            String::from_utf8_lossy(&filename).into_owned()
-        };
-        let sect_file = ii_open(use_name.as_bytes(), "rb");
-        if sect_file.is_null() {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("ERROR: iiadoc - Cannot open file for section {}\n", section),
-            );
-            return 1;
-        }
-        if (*sect_file).nx != (*in_file).nx
-            || (*sect_file).ny != (*in_file).ny
-            || (*sect_file).mode != (*in_file).mode
-        {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!(
-                    "ERROR: iiadoc - File for section {} has wrong size or mode (section: {} x {} mode {}, file: {} x {} mode {})\n",
-                    section,
-                    (*sect_file).nx,
-                    (*sect_file).ny,
-                    (*sect_file).mode,
-                    (*in_file).nx,
-                    (*in_file).ny,
-                    (*in_file).mode,
-                ),
-            );
-            ii_delete(sect_file);
-            return 1;
-        }
-        (*sect_file).llx = (*in_file).llx;
-        (*sect_file).urx = (*in_file).urx;
-        (*sect_file).lly = (*in_file).lly;
-        (*sect_file).ury = (*in_file).ury;
-        (*sect_file).amin = (*in_file).amin;
-        (*sect_file).amax = (*in_file).amax;
-        (*sect_file).amean = (*in_file).amean;
-        (*sect_file).smin = (*in_file).smin;
-        (*sect_file).smax = (*in_file).smax;
-        (*sect_file).slope = (*in_file).slope;
-        (*sect_file).offset = (*in_file).offset;
-        let err = func.map_or(-1, |read| read(sect_file, buf, 0));
-        ii_delete(sect_file);
-        err
+    let mut filename = Vec::new();
+    if adoc_get_section_name(IIADOC_IMAGE, section, &mut filename) != 0 {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: iiadoc - Getting filename for section {}", section),
+        );
+        return 1;
     }
+    let own_name = in_file.filename.clone().unwrap_or_default();
+    // `iiadoc.c:161-167`: the last '/' and the last '\', whichever is later.
+    let mut slash_ind = -1_isize;
+    let mut bs_ind = -1_isize;
+    if let Some(pos) = own_name.bytes().rposition(|b| b == b'/') {
+        slash_ind = pos as isize;
+    }
+    if let Some(pos) = own_name.bytes().rposition(|b| b == b'\\') {
+        bs_ind = pos as isize;
+    }
+    slash_ind = slash_ind.max(bs_ind);
+    let use_name = if slash_ind >= 0 {
+        // `iiadoc.c:172-177`: the directory part of the idoc name, up to
+        // and including the separator, then the section's file name.
+        format!(
+            "{}{}",
+            &own_name[..slash_ind as usize + 1],
+            String::from_utf8_lossy(&filename)
+        )
+    } else {
+        String::from_utf8_lossy(&filename).into_owned()
+    };
+    let sect_file = unsafe { ii_open(use_name.as_bytes(), "rb") };
+    let Some(mut sect_file) = (!sect_file.is_null()).then(|| unsafe { Box::from_raw(sect_file) })
+    else {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("ERROR: iiadoc - Cannot open file for section {}\n", section),
+        );
+        return 1;
+    };
+    if sect_file.nx != in_file.nx || sect_file.ny != in_file.ny || sect_file.mode != in_file.mode {
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!(
+                "ERROR: iiadoc - File for section {} has wrong size or mode (section: {} x {} mode {}, file: {} x {} mode {})\n",
+                section,
+                sect_file.nx,
+                sect_file.ny,
+                sect_file.mode,
+                in_file.nx,
+                in_file.ny,
+                in_file.mode,
+            ),
+        );
+        unsafe { ii_delete(Box::into_raw(sect_file)) };
+        return 1;
+    }
+    sect_file.llx = in_file.llx;
+    sect_file.urx = in_file.urx;
+    sect_file.lly = in_file.lly;
+    sect_file.ury = in_file.ury;
+    sect_file.amin = in_file.amin;
+    sect_file.amax = in_file.amax;
+    sect_file.amean = in_file.amean;
+    sect_file.smin = in_file.smin;
+    sect_file.smax = in_file.smax;
+    sect_file.slope = in_file.slope;
+    sect_file.offset = in_file.offset;
+    let err = ii_read_section_any(&mut sect_file, buf, 0, convert_to);
+    unsafe { ii_delete(Box::into_raw(sect_file)) };
+    err
 }
 
 /// Matches C static `adocReadSectionByte` (`iiadoc.c:221`).
@@ -290,7 +286,28 @@ unsafe extern "C" fn adoc_read_section_byte(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section_byte)) }
+    unsafe {
+        let Some(in_file) = in_file.as_mut() else {
+            return IIERR_BAD_CALL;
+        };
+        let width =
+            (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+                .max(0) as usize;
+        let rows = (if in_file.axis == 2 {
+            in_file.urz - in_file.llz + 1
+        } else {
+            in_file.ury - in_file.lly + 1
+        })
+        .max(0) as usize;
+        let Some(length) = width.checked_mul(rows) else {
+            return IIERR_BAD_CALL;
+        };
+        let Some(buf) = (!buf.is_null()).then(|| core::slice::from_raw_parts_mut(buf, length))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        read_section_file(in_file, buf, in_section, MRSA_BYTE)
+    }
 }
 
 /// Matches C static `adocReadSectionUShort` (`iiadoc.c:226`).
@@ -299,7 +316,31 @@ unsafe extern "C" fn adoc_read_section_ushort(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section_ushort)) }
+    unsafe {
+        let Some(in_file) = in_file.as_mut() else {
+            return IIERR_BAD_CALL;
+        };
+        let width =
+            (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+                .max(0) as usize;
+        let rows = (if in_file.axis == 2 {
+            in_file.urz - in_file.llz + 1
+        } else {
+            in_file.ury - in_file.lly + 1
+        })
+        .max(0) as usize;
+        let Some(length) = width
+            .checked_mul(rows)
+            .and_then(|pixels| pixels.checked_mul(2))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        let Some(buf) = (!buf.is_null()).then(|| core::slice::from_raw_parts_mut(buf, length))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        read_section_file(in_file, buf, in_section, MRSA_USHORT)
+    }
 }
 
 /// Matches C static `adocReadSectionFloat` (`iiadoc.c:231`).
@@ -308,7 +349,31 @@ unsafe extern "C" fn adoc_read_section_float(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section_float)) }
+    unsafe {
+        let Some(in_file) = in_file.as_mut() else {
+            return IIERR_BAD_CALL;
+        };
+        let width =
+            (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+                .max(0) as usize;
+        let rows = (if in_file.axis == 2 {
+            in_file.urz - in_file.llz + 1
+        } else {
+            in_file.ury - in_file.lly + 1
+        })
+        .max(0) as usize;
+        let Some(length) = width
+            .checked_mul(rows)
+            .and_then(|pixels| pixels.checked_mul(4))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        let Some(buf) = (!buf.is_null()).then(|| core::slice::from_raw_parts_mut(buf, length))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        read_section_file(in_file, buf, in_section, MRSA_FLOAT)
+    }
 }
 
 /// Matches C static `adocReadSection` (`iiadoc.c:236`).
@@ -317,5 +382,39 @@ unsafe extern "C" fn adoc_read_section(
     buf: *mut u8,
     in_section: i32,
 ) -> i32 {
-    unsafe { read_section_file(in_file, buf, in_section, Some(ii_read_section)) }
+    unsafe {
+        let Some(in_file) = in_file.as_mut() else {
+            return IIERR_BAD_CALL;
+        };
+        let mut bytes = 0;
+        let mut channels = 0;
+        if mrc_getdcsize(in_file.mode, &mut bytes, &mut channels) != 0 {
+            return IIERR_BAD_CALL;
+        }
+        let width =
+            (in_file.urx - in_file.llx + 1 + in_file.pad_left.max(0) + in_file.pad_right.max(0))
+                .max(0) as usize;
+        let rows = (if in_file.axis == 2 {
+            in_file.urz - in_file.llz + 1
+        } else {
+            in_file.ury - in_file.lly + 1
+        })
+        .max(0) as usize;
+        let pixel_bytes = if in_file.mode == MRC_MODE_HALF_FLOAT || in_file.half_floats != 0 {
+            2
+        } else {
+            (bytes * channels) as usize
+        };
+        let Some(length) = width
+            .checked_mul(rows)
+            .and_then(|pixels| pixels.checked_mul(pixel_bytes))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        let Some(buf) = (!buf.is_null()).then(|| core::slice::from_raw_parts_mut(buf, length))
+        else {
+            return IIERR_BAD_CALL;
+        };
+        read_section_file(in_file, buf, in_section, MRSA_NOPROC)
+    }
 }

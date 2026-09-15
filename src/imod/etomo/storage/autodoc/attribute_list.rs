@@ -35,7 +35,9 @@ pub struct AttributeList {
     /// but the number of occurrences they contain can be reduced to 0.
     map: HashMap<String, *mut Attribute>,
     /// Java field `list`.
-    list: Vec<*mut Attribute>,
+    /// Owns each attribute.  `map` and name/value pairs retain only borrowed stable
+    /// addresses into these boxes.
+    list: Vec<Box<Attribute>>,
 }
 
 impl AttributeList {
@@ -55,7 +57,7 @@ impl AttributeList {
     /// # Safety
     /// `name` must point to a live `Token` link list.
     pub unsafe fn add_attribute(&mut self, name: *mut Token, line_num: i32) -> *mut Attribute {
-        let key = unsafe { attribute::get_key_of_token(name) };
+        let key = attribute::get_key_of_token(unsafe { name.as_ref() });
         let mut attribute: *mut Attribute = match &key {
             None => std::ptr::null_mut(),
             Some(key) => *self.map.get(key).unwrap_or(&std::ptr::null_mut()),
@@ -71,7 +73,10 @@ impl AttributeList {
                 },
                 attribute,
             );
-            self.list.push(attribute);
+            // `Attribute::new` is an old raw construction boundary.  Transfer the
+            // allocation into the list immediately; boxes keep pointee addresses
+            // stable while the map and parsed name/value pairs borrow them.
+            self.list.push(unsafe { Box::from_raw(attribute) });
         } else {
             // add another occurrence of this attribute
             unsafe { (*attribute).add() };
@@ -190,7 +195,7 @@ impl AttributeList {
     /// Every attribute in the list must be live.
     pub unsafe fn get_first_attribute(&self) -> *mut Attribute {
         for i in 0..self.list.len() {
-            let attribute = self.list[i];
+            let attribute = self.list[i].as_ref() as *const Attribute as *mut Attribute;
             if unsafe { (*attribute).exists() } {
                 return attribute;
             }
@@ -255,7 +260,7 @@ impl AttributeList {
 
 impl ReadOnlyAttributeList for AttributeList {
     /// Java `iterator()`.  Returns an iterator for the list of attributes.
-    fn iterator(&self) -> ReadOnlyAttributeIterator<'_, *mut Attribute> {
+    fn iterator(&self) -> ReadOnlyAttributeIterator<'_> {
         ReadOnlyAttributeIterator::new(&self.list)
     }
 }

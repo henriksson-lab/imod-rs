@@ -170,28 +170,22 @@ fn jvm_verified_autodoc_package() {
         out.push_str("== statics ==\n");
         out.push_str(&format!(
             "Section.getKey(Token,Token)={}\n",
-            s(section::get_key_of_tokens(tok("Field"), tok("Name")))
+            s(section::get_key_of_tokens(
+                tok("Field").as_ref(),
+                tok("Name").as_ref(),
+            ))
         ));
         out.push_str(&format!(
             "Section.getKey(Token,null)={}\n",
-            s(section::get_key_of_tokens(
-                tok("Field"),
-                std::ptr::null_mut()
-            ))
+            s(section::get_key_of_tokens(tok("Field").as_ref(), None))
         ));
         out.push_str(&format!(
             "Section.getKey(null,Token)={}\n",
-            s(section::get_key_of_tokens(
-                std::ptr::null_mut(),
-                tok("Name")
-            ))
+            s(section::get_key_of_tokens(None, tok("Name").as_ref()))
         ));
         out.push_str(&format!(
             "Section.getKey(null,null)={}\n",
-            s(section::get_key_of_tokens(
-                std::ptr::null_mut(),
-                std::ptr::null_mut()
-            ))
+            s(section::get_key_of_tokens(None, None))
         ));
         out.push_str(&format!(
             "Section.getKey(String,String)={}\n",
@@ -211,11 +205,11 @@ fn jvm_verified_autodoc_package() {
         ));
         out.push_str(&format!(
             "Attribute.getKey(Token)={}\n",
-            s(attribute::get_key_of_token(tok("AbC")))
+            s(attribute::get_key_of_token(tok("AbC").as_ref()))
         ));
         out.push_str(&format!(
             "Attribute.getKey((Token)null)={}\n",
-            s(attribute::get_key_of_token(std::ptr::null_mut()))
+            s(attribute::get_key_of_token(None))
         ));
         out.push_str(&format!(
             "Attribute.getKey(String)={}\n",

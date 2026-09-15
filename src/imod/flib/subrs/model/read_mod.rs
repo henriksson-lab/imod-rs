@@ -303,7 +303,7 @@ pub fn read_mod(unit20: &mut impl BufRead, fm: &mut FortModel) -> bool {
                             fm.p_coord[ipt as usize - 1][0] = p1;
                             fm.p_coord[ipt as usize - 1][1] = p2;
                             fm.p_coord[ipt as usize - 1][2] = p3;
-                            fm.pt_label[ipt as usize - 1] = imark as i8;
+                            fm.pt_label[ipt as usize - 1] = imark as u8;
                         }
                         // DNM: if label is on a real point, add to list
                         if label_c != [b' '; 10] {

@@ -4,12 +4,12 @@
 use super::attribute::Attribute;
 use super::read_only_attribute_iterator::ReadOnlyAttributeIterator;
 
-/// Source `ReadOnlyAttributeList` interface.  Java's `ReadOnlyAttributeIterator` walks
-/// a `List<Attribute>`; `AttributeList`'s list holds Java references, so the element
-/// type is `*mut Attribute` here.
+/// Source `ReadOnlyAttributeList` interface.  The Rust list owns stable boxed
+/// attributes, so its iterator borrows those boxes rather than exposing an owning raw
+/// pointer collection.
 pub trait ReadOnlyAttributeList {
     /// Java `iterator()`.
-    fn iterator(&self) -> ReadOnlyAttributeIterator<'_, *mut Attribute>;
+    fn iterator(&self) -> ReadOnlyAttributeIterator<'_>;
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 //! This module retains the operating-system shared-memory ABI.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, b3d_error, c_format_bytes};
+use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
 use crate::imod::libcfshr::islice::slice_mode_if_real;
 use crate::imod::libiimod::iimage::{
     ImodImageFile, LineProcData, MRSA_BYTE, MRSA_FLOAT, MRSA_NOPROC, MRSA_USHORT,
@@ -54,24 +54,31 @@ pub const IIFILE_SHR_MEM: i32 = 8;
 pub const SHR_MEM_NAME_TAG: &str = "/IMODShrMem_";
 pub const SHR_MEM_DATA_OFFSET: usize = 2048;
 
-pub unsafe fn ii_shr_mem_create(filename: &str, ii_file: *mut ImodImageFile) -> i32 {
+/// Set up a caller-owned image record as the creator of a shared-memory image.
+///
+/// The mapping itself remains an OS resource, but the image record is an
+/// ordinary mutable Rust borrow rather than a caller-managed C cursor.
+pub fn ii_shr_mem_create(filename: &str, ii_file: &mut ImodImageFile) -> i32 {
     unsafe {
         let mut map_file = 0;
         let address = open_and_get_address(filename, "iiShrMemCreate", &mut map_file);
         if address.is_null() {
             return 1;
         }
-        (*ii_file).shr_mem_file = map_file;
-        (*ii_file).user_data = address.cast();
-        (*ii_file).header = core::ptr::null_mut();
-        (*ii_file).filename = Some(filename.into());
-        (*ii_file).close = Some(shm_close);
-        (*ii_file).clean_up = Some(clean_up);
+        ii_file.shr_mem_file = map_file;
+        ii_file.user_data = address.cast();
+        ii_file.mrc_header = None;
+        ii_file.filename = Some(filename.into());
+        ii_file.close = Some(shm_close);
+        ii_file.clean_up = Some(clean_up);
         0
     }
 }
 
-pub unsafe fn ii_shr_mem_open(filename: &str, mode: &str) -> *mut ImodImageFile {
+/// Open a shared-memory image.  The returned cursor is retained only because
+/// the surrounding legacy image registry still uses callback-compatible raw
+/// cursors; creation and configuration here are fully owned Rust operations.
+pub fn ii_shr_mem_open(filename: &str, mode: &str) -> *mut ImodImageFile {
     unsafe {
         let ii_file = ii_new();
         if ii_file.is_null() {
@@ -82,13 +89,12 @@ pub unsafe fn ii_shr_mem_open(filename: &str, mode: &str) -> *mut ImodImageFile 
         (*ii_file).reopen = Some(reopen);
         (*ii_file).filename = Some(filename.into());
         (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
-        (*ii_file).shr_mem_mrc_header = Some(Box::default());
+        (*ii_file).mrc_header = Some(Box::default());
         let header = (*ii_file)
-            .shr_mem_mrc_header
+            .mrc_header
             .as_deref_mut()
             .expect("shared-memory header was just allocated")
             as *mut MrcHeader;
-        (*ii_file).header = header.cast();
         (*ii_file).user_data =
             open_and_get_address(filename, "iiShrMemOpen", &mut (*ii_file).shr_mem_file).cast();
         if (*ii_file).user_data.is_null() {
@@ -100,7 +106,7 @@ pub unsafe fn ii_shr_mem_open(filename: &str, mode: &str) -> *mut ImodImageFile 
         if !mode.contains('w') {
             // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
             *header = (*(*ii_file).user_data.cast::<MrcHeader>()).clone();
-            ii_sync_from_mrc_header(ii_file, header);
+            ii_sync_from_mrc_header(&mut *ii_file, &mut *header);
         } else {
             mrc_head_new(&mut *header, 1, 1, 1, 0);
             (*header).packed4bits = 0;
@@ -124,7 +130,7 @@ pub unsafe fn ii_shr_mem_open(filename: &str, mode: &str) -> *mut ImodImageFile 
     }
 }
 
-pub unsafe fn ii_shr_mem_check_size(filename: &str) -> usize {
+pub fn ii_shr_mem_check_size(filename: &str) -> usize {
     if !filename.starts_with(SHR_MEM_NAME_TAG) {
         return 0;
     }
@@ -158,7 +164,7 @@ pub unsafe fn ii_shr_mem_check_size(filename: &str) -> usize {
     (1024_i64.wrapping_mul(val)) as usize
 }
 
-unsafe fn open_and_get_address(filename: &str, caller: &str, map_file: *mut isize) -> *mut c_void {
+fn open_and_get_address(filename: &str, caller: &str, map_file: &mut isize) -> *mut c_void {
     unsafe {
         let mem_size = ii_shr_mem_check_size(filename);
         // `shm_open`/`shm_unlink` are POSIX entry points that take a `char *`
@@ -216,13 +222,10 @@ unsafe fn open_and_get_address(filename: &str, caller: &str, map_file: *mut isiz
             let create = caller.contains("Create");
             if create && libc::shm_unlink(cname.as_ptr()) == 0 {
                 use std::io::Write;
-                // `iishrmem.c:190`.  Still on the C stream: this program's
-                // other output goes through libc stdio, and a Rust write here
-                // would reorder a redirected capture.
-                let _ = ImodFile::Stdout.write_all(&c_format_bytes(
-                    "Shared memory file %s already exists, recreating it\n",
-                    &[CArg::Str(filename)],
-                ));
+                let _ = ImodFile::Stdout.write_all(
+                    format!("Shared memory file {filename} already exists, recreating it\n")
+                        .as_bytes(),
+                );
             }
             let fd = libc::shm_open(
                 cname.as_ptr(),
@@ -316,7 +319,7 @@ unsafe extern "C" fn shm_close(ii_file: *mut ImodImageFile) {
             if size == 0 {
                 return;
             }
-            if !(*ii_file).header.is_null() {
+            if (*ii_file).mrc_header.is_some() {
                 libc::munmap((*ii_file).user_data.cast(), size);
             } else {
                 if let Ok(cname) = std::ffi::CString::new(name) {
@@ -327,7 +330,7 @@ unsafe extern "C" fn shm_close(ii_file: *mut ImodImageFile) {
         (*ii_file).user_data = core::ptr::null_mut();
     }
 }
-pub unsafe fn ii_shr_mem_remove(filename: &str) -> i32 {
+pub fn ii_shr_mem_remove(filename: &str) -> i32 {
     unsafe {
         #[cfg(windows)]
         {
@@ -349,8 +352,7 @@ unsafe extern "C" fn clean_up(ii_file: *mut ImodImageFile) {
         // The C implementation frees `iiFile->header` here.  Its Rust storage
         // belongs to the image record, so dropping the owned slot also handles
         // the no-header path without reconstructing ownership from a raw alias.
-        (*ii_file).shr_mem_mrc_header = None;
-        (*ii_file).header = core::ptr::null_mut();
+        (*ii_file).mrc_header = None;
     }
 }
 unsafe extern "C" fn reopen(ii_file: *mut ImodImageFile) -> i32 {
@@ -366,21 +368,36 @@ unsafe extern "C" fn sync_from_mrc_header(
     hdata: *mut MrcHeader,
 ) -> i32 {
     unsafe {
-        if (*ii_file).header.cast::<MrcHeader>() != hdata {
-            // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
-            *(*ii_file).header.cast::<MrcHeader>() = (*hdata).clone();
+        if let Some(header) = (*ii_file).mrc_header.as_deref_mut() {
+            if !core::ptr::eq(header, hdata) {
+                // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
+                *header = (*hdata).clone();
+            }
         }
         0
     }
 }
 unsafe extern "C" fn write_header(ii_file: *mut ImodImageFile) -> i32 {
     unsafe {
-        if (*ii_file).user_data.is_null() || (*ii_file).header.is_null() {
+        let Some(ii_file) = ii_file.as_mut() else {
+            return 1;
+        };
+        ii_shr_mem_write_header(ii_file)
+    }
+}
+
+/// Copy the owned MRC header into the mapped shared-memory header slot.
+///
+/// The raw mapping is necessarily an OS ABI boundary; the caller-facing image
+/// operation itself uses a normal mutable borrow.
+pub fn ii_shr_mem_write_header(ii_file: &mut ImodImageFile) -> i32 {
+    unsafe {
+        if ii_file.user_data.is_null() || ii_file.mrc_header.is_none() {
             return 1;
         }
         core::ptr::copy_nonoverlapping(
-            (*ii_file).header.cast::<MrcHeader>(),
-            (*ii_file).user_data.cast(),
+            ii_file.mrc_header.as_deref().expect("header checked above"),
+            ii_file.user_data.cast(),
             1,
         );
         0
@@ -421,14 +438,16 @@ unsafe fn shm_read_section_any(
     typ: i32,
 ) -> i32 {
     unsafe {
-        let h = (*in_file).header.cast::<MrcHeader>();
-        if h.is_null() || (*in_file).user_data.is_null() {
+        let Some(h) = (*in_file).mrc_header.as_deref() else {
+            return 1;
+        };
+        if (*in_file).user_data.is_null() {
             return 1;
         }
         let mut pix_size_buf = [0, 1, 4, 2];
         let mut d = LineProcData::default();
         let mut li = LoadInfo::default();
-        ii_mrc_set_load_info(in_file, &mut li);
+        ii_mrc_set_load_info(&*in_file, &mut li);
         let pad_left = li.pad_left.max(0);
         let pad_right = li.pad_right.max(0);
         li.outmin = (*in_file).smin as i32;
@@ -461,9 +480,7 @@ unsafe fn shm_read_section_any(
                     * (*h).nx as usize
                     * ((*h).ny as usize * in_section as usize + d.y_start as usize),
         );
-        d.bufp = d
-            .bufp
-            .add(pix_size_buf[typ as usize] as usize * pad_left as usize);
+        d.bufp_offset += pix_size_buf[typ as usize] as isize * pad_left as isize;
         d.pix_index += pad_left as u32;
         let lines = y_end + 1 - d.y_start;
         if ((typ == MRSA_FLOAT && (*h).mode == MRC_MODE_FLOAT) || typ == MRSA_NOPROC)
@@ -487,14 +504,23 @@ unsafe fn shm_read_section_any(
                 || typ == MRSA_BYTE
             {
                 let output = match typ {
-                    MRSA_FLOAT => d.bufp.add(iy as usize * d.x_dimension as usize * 4),
-                    MRSA_USHORT => d.bufp.add(iy as usize * d.x_dimension as usize * 2),
-                    _ => d.bufp.add(iy as usize * d.x_dimension as usize),
+                    MRSA_FLOAT => d
+                        .buf
+                        .offset(d.bufp_offset + iy as isize * d.x_dimension as isize * 4),
+                    MRSA_USHORT => d
+                        .buf
+                        .offset(d.bufp_offset + iy as isize * d.x_dimension as isize * 2),
+                    _ => d
+                        .buf
+                        .offset(d.bufp_offset + iy as isize * d.x_dimension as isize),
                 };
                 ii_process_read_line(&*h, &li, &mut d, line, output);
             } else {
-                let output = d.bufp.add(
-                    iy as usize * d.x_dimension as usize * pix_size_buf[typ as usize] as usize,
+                let output = d.buf.offset(
+                    d.bufp_offset
+                        + iy as isize
+                            * d.x_dimension as isize
+                            * pix_size_buf[typ as usize] as isize,
                 );
                 core::ptr::copy_nonoverlapping(
                     line,
@@ -527,12 +553,14 @@ unsafe fn shm_write_section_any(
     from_float: i32,
 ) -> i32 {
     unsafe {
-        let h = (*in_file).header.cast::<MrcHeader>();
-        if h.is_null() || (*in_file).user_data.is_null() {
+        let Some(h) = (*in_file).mrc_header.as_deref() else {
+            return 1;
+        };
+        if (*in_file).user_data.is_null() {
             return 1;
         }
         let mut li = LoadInfo::default();
-        ii_mrc_set_load_info(in_file, &mut li);
+        ii_mrc_set_load_info(&*in_file, &mut li);
         let mut buf_mode = (*h).mode;
         let convert =
             from_float > 0 && !matches!((*h).mode, MRC_MODE_COMPLEX_FLOAT | MRC_MODE_FLOAT);
@@ -577,12 +605,17 @@ unsafe fn shm_write_section_any(
         let bytes_signed = ((*h).mode == 0 && (*h).bytes_signed != 0) as i32;
         for iy in 0..chunk_lines {
             ii_convert_line_of_floats(
-                buf.cast::<f32>().add(iy as usize * (*h).nx as usize),
-                dest.add(pix_size_out as usize * iy as usize * (*h).nx as usize),
-                (*h).nx,
+                core::slice::from_raw_parts(
+                    buf.cast::<f32>().add(iy as usize * (*h).nx as usize),
+                    (*h).nx as usize,
+                ),
+                core::slice::from_raw_parts_mut(
+                    dest.add(pix_size_out as usize * iy as usize * (*h).nx as usize),
+                    (pix_size_out * (*h).nx) as usize,
+                ),
                 (*h).mode,
-                bytes_signed,
-                0,
+                bytes_signed != 0,
+                false,
             );
         }
         0
@@ -599,19 +632,16 @@ mod tests {
             let name = format!("/IMODShrMem_1024_iishrmem_{}", std::process::id());
             let manager = ii_new();
             assert!(!manager.is_null());
-            assert_eq!(ii_shr_mem_create(&name, manager), 0);
+            assert_eq!(ii_shr_mem_create(&name, &mut *manager), 0);
             let writer = ii_shr_mem_open(&name, "wb+");
             assert!(!writer.is_null());
-            let header = (*writer).header.cast::<MrcHeader>();
-            let owned_header = (*writer)
-                .shr_mem_mrc_header
+            let header = (*writer)
+                .mrc_header
                 .as_deref_mut()
-                .expect("shared-memory writer has an owned header")
-                as *mut MrcHeader;
-            assert_eq!(header, owned_header);
-            mrc_head_new(&mut *header, 2, 2, 1, 0);
-            ii_sync_from_mrc_header(writer, header);
-            assert_eq!(((*writer).write_header.unwrap())(writer), 0);
+                .expect("shared-memory writer has an owned header");
+            mrc_head_new(header, 2, 2, 1, 0);
+            ii_sync_from_mrc_header(&mut *writer, header);
+            assert_eq!(ii_shr_mem_write_header(&mut *writer), 0);
             let input = [3_i8, 1, 4, 1];
             assert_eq!(
                 ((*writer).write_section.unwrap())(writer, input.as_ptr().cast_mut().cast(), 0),
@@ -637,12 +667,15 @@ mod tests {
         unsafe {
             let name = format!("/IMODShrMem_1024_iishrmem_convert_{}", std::process::id());
             let manager = ii_new();
-            assert_eq!(ii_shr_mem_create(&name, manager), 0);
+            assert_eq!(ii_shr_mem_create(&name, &mut *manager), 0);
             let writer = ii_shr_mem_open(&name, "wb+");
-            let header = (*writer).header.cast::<MrcHeader>();
-            mrc_head_new(&mut *header, 3, 2, 1, 1);
-            ii_sync_from_mrc_header(writer, header);
-            assert_eq!(((*writer).write_header.unwrap())(writer), 0);
+            let header = (*writer)
+                .mrc_header
+                .as_deref_mut()
+                .expect("shared-memory writer has an owned header");
+            mrc_head_new(header, 3, 2, 1, 1);
+            ii_sync_from_mrc_header(&mut *writer, header);
+            assert_eq!(ii_shr_mem_write_header(&mut *writer), 0);
             let input = [10_i16, 20, 30, 40, 50, 60];
             assert_eq!(
                 ((*writer).write_section.unwrap())(writer, input.as_ptr().cast_mut().cast(), 0),

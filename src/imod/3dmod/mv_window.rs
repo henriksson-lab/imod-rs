@@ -1394,12 +1394,7 @@ impl crate::imod::three_dmod::mv_gfx::ImodvGfxGl for ImodvNativeGl {
     }
     /// `a->vbManager->clearTempArrays()`.
     fn clear_temp_arrays(&mut self, app: &mut crate::imod::three_dmod::imodv::ImodvApp) {
-        // `ImodvApp::vb_manager` is declared in `imodv.rs` as the opaque
-        // ownership-boundary pointer the C++ `VertBufManager *` stands for, so
-        // it is cast back to the translated manager exactly as the source
-        // dereferences it.
-        let manager = app.vb_manager as *mut crate::imod::three_dmod::vertexbuffer::VertBufManager;
-        if let Some(manager) = unsafe { manager.as_mut() } {
+        if let Some(manager) = unsafe { app.vb_manager.as_mut() } {
             manager.clear_temp_arrays();
         }
     }

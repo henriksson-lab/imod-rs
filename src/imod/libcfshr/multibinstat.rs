@@ -361,10 +361,9 @@ pub fn make_standard_dev_map(
         let ix = select_zoom_filter(4, 1. / binning as f64, &mut iy);
         if ix != 0 {
             let _ = ImodFile::Stdout.write_all(
-                c_format(
-                    "WARNING: makeStandardDevMap - selectZoomFilter failed with error %d; \
+                format!(
+                    "WARNING: makeStandardDevMap - selectZoomFilter failed with error {ix}; \
                      using binning instead of reduction\n",
-                    &[CArg::Int(ix as i64)],
                 )
                 .as_bytes(),
             );
@@ -394,10 +393,9 @@ pub fn make_standard_dev_map(
             );
             if ix != 0 {
                 let _ = ImodFile::Stdout.write_all(
-                    c_format(
-                        "WARNING: makeStandardDevMap - zoomWithFilter failed with error %d; \
+                    format!(
+                        "WARNING: makeStandardDevMap - zoomWithFilter failed with error {ix}; \
                          using binning instead of reduction\n",
-                        &[CArg::Int(ix as i64)],
                     )
                     .as_bytes(),
                 );

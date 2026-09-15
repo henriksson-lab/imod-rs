@@ -9,7 +9,7 @@ use crate::imod::libcfshr::b3dutil::ImodFile;
 use crate::imod::libcfshr::b3dutil::b3d_error;
 use crate::imod::libiimod::iimage::{
     IIERR_BAD_CALL, IIERR_NO_SUPPORT, IIERR_NOT_FORMAT, IIFILE_QIMAGE, IIFORMAT_LUMINANCE,
-    IIFORMAT_RGB, IITYPE_UBYTE, ImodImageFile, ii_simple_fill_mrc_header,
+    IIFORMAT_RGB, IITYPE_UBYTE, ImodImageFile, ii_simple_fill_mrc_header_callback,
 };
 use crate::imod::libiimod::mrcfiles::{MRC_MODE_BYTE, MRC_MODE_RGB, get_byte_map};
 use core::ffi::{c_char, c_void};
@@ -128,17 +128,11 @@ pub unsafe extern "C" fn ii_q_image_check(in_file: *mut ImodImageFile) -> i32 {
             (*in_file).read_section_byte = Some(qimage_read_section_byte);
         }
         (*in_file).header_size = 8;
-        (*in_file).header = image.cast();
+        (*in_file).backend_handle = image;
         (*in_file).clean_up = Some(qimage_close);
         (*in_file).reopen = Some(qimage_reopen);
         (*in_file).close = Some(qimage_close);
-        (*in_file).fill_mrc_header = Some(core::mem::transmute::<
-            unsafe fn(*mut ImodImageFile, *mut crate::imod::libiimod::mrcfiles::MrcHeader) -> i32,
-            unsafe extern "C" fn(
-                *mut ImodImageFile,
-                *mut crate::imod::libiimod::mrcfiles::MrcHeader,
-            ) -> i32,
-        >(ii_simple_fill_mrc_header));
+        (*in_file).fill_mrc_header = Some(ii_simple_fill_mrc_header_callback);
     }
     0
 }
@@ -216,7 +210,7 @@ pub unsafe extern "C" fn qimage_reopen(in_file: *mut ImodImageFile) -> i32 {
     }
     unsafe {
         (*in_file).header_size = 8;
-        (*in_file).header = image.cast();
+        (*in_file).backend_handle = image;
         // `iiqimage.cpp:110`: the QImage pointer cast to `FILE *` as this
         // file's identity, never used for I/O.
         (*in_file).fp = Some(crate::imod::libcfshr::b3dutil::ImodFile::Token(
@@ -228,12 +222,12 @@ pub unsafe extern "C" fn qimage_reopen(in_file: *mut ImodImageFile) -> i32 {
 
 /// Matches C `qimageClose` (`iiqimage.cpp:123`).
 pub unsafe extern "C" fn qimage_close(in_file: *mut ImodImageFile) {
-    let image = unsafe { (*in_file).header.cast::<c_void>() };
+    let image = unsafe { (*in_file).backend_handle };
     if !image.is_null() {
         unsafe { iiqimage_delete(image) };
     }
     unsafe {
-        (*in_file).header = core::ptr::null_mut();
+        (*in_file).backend_handle = core::ptr::null_mut();
         (*in_file).fp = None;
     }
 }
@@ -244,10 +238,10 @@ fn read_section(in_file: &mut ImodImageFile, buf: &mut [u8], byte: i32) -> i32 {
     if in_file.axis == 2 || (byte > 1 && in_file.format != IIFORMAT_LUMINANCE) {
         return -1;
     }
-    if in_file.header.is_null() && unsafe { qimage_reopen(in_file) } != 0 {
+    if in_file.backend_handle.is_null() && unsafe { qimage_reopen(in_file) } != 0 {
         return -1;
     }
-    let image = in_file.header.cast::<c_void>();
+    let image = in_file.backend_handle;
     let depth = unsafe { iiqimage_depth(image) };
     let direct_bytes = byte == 0 && depth == 8 && unsafe { iiqimage_is_grayscale(image) } != 0;
     let color_count = unsafe { iiqimage_color_count(image) };
@@ -272,7 +266,7 @@ fn read_section(in_file: &mut ImodImageFile, buf: &mut [u8], byte: i32) -> i32 {
     if byte != 0 || direct_bytes {
         if byte != 0 {
             let source_map = get_byte_map(in_file.slope, in_file.offset, 0, 255, 0);
-            map2.copy_from_slice(unsafe { core::slice::from_raw_parts(source_map, 256) });
+            map2.copy_from_slice(&source_map);
         }
         let maxind = (colors.len() as i32 - 1).max(0) as usize;
         for index in 0..256_usize {
@@ -410,7 +404,7 @@ mod tests {
         for y in 0..file.ny {
             unsafe {
                 iiqimage_index_row(
-                    file.header.cast(),
+                    file.backend_handle,
                     file.ny - 1 - y,
                     expected.as_mut_ptr().add((y * file.nx) as usize),
                     file.nx,

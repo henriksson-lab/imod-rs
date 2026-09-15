@@ -68,7 +68,7 @@ pub fn imodv_select_model(a: &mut ImodvApp, ncm: i32) -> i32 {
     }
     let selected = ncm.clamp(0, a.num_mods - 1).min(a.mod_.len() as i32 - 1);
     a.cur_mod = selected;
-    a.imod = a.mod_[selected as usize];
+    a.imod = a.mod_[selected as usize].as_ptr();
     if let Some(model) = unsafe { a.imod.as_mut() } {
         if a.obj_num < 0 || a.obj_num as usize >= model.obj.len() {
             a.obj_num = 0;
@@ -109,7 +109,9 @@ pub fn imodv_modeled_same_scale(a: &mut ImodvApp) {
         .map(|v| v.rad);
     if let Some(rad) = rad {
         for model in &a.mod_ {
-            if let Some(view) = unsafe { model.as_mut() }.and_then(|m| m.view.first_mut()) {
+            if let Some(view) =
+                unsafe { model.as_ptr().as_mut() }.and_then(|model| model.view.first_mut())
+            {
                 view.rad = rad;
             }
         }
@@ -199,7 +201,10 @@ mod tests {
         let mut two = Box::new(Imod::default());
         two.obj.push(Iobj::default());
         let mut a = ImodvApp::default();
-        a.mod_ = vec![&mut *one, &mut *two];
+        a.mod_ = vec![
+            std::ptr::NonNull::from(&mut *one),
+            std::ptr::NonNull::from(&mut *two),
+        ];
         a.num_mods = 2;
         assert_eq!(imodv_select_model(&mut a, 99), 1);
         assert!(std::ptr::eq(a.imod, &mut *two));

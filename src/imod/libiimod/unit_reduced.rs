@@ -9,20 +9,20 @@
 )]
 use crate::imod::libcfshr::zoomdown::{select_zoom_filter, zoom_with_filter};
 pub const SLICE_MODE_FLOAT: i32 = 2 as i32;
-pub unsafe extern "C" fn iiu_read_binned(
-    mut imUnit: i32,
-    mut iz: i32,
-    mut array: *mut f32,
-    mut ixDim: i32,
-    mut iyDim: i32,
-    mut ixUBstart: i32,
-    mut iyUBstart: i32,
-    mut nbin: i32,
-    mut nxBin: i32,
-    mut nyBin: i32,
-    mut temp: *mut f32,
-    mut lenTemp: i32,
-    mut ierr: *mut i32,
+pub fn iiu_read_binned(
+    imUnit: i32,
+    iz: i32,
+    array: &mut [f32],
+    ixDim: i32,
+    iyDim: i32,
+    ixUBstart: i32,
+    iyUBstart: i32,
+    nbin: i32,
+    nxBin: i32,
+    nyBin: i32,
+    temp: &mut [f32],
+    lenTemp: i32,
+    ierr: &mut i32,
 ) {
     let mut ix0: i32 = 0;
     let mut ix1: i32 = 0;
@@ -61,12 +61,7 @@ pub unsafe extern "C" fn iiu_read_binned(
     let mut nsum: i32 = 0;
     let mut sum: f32 = 0.;
     let mut binsq: f32 = 0.;
-    crate::imod::libiimod::unit_header::iiu_ret_size(
-        imUnit,
-        &raw mut nxyz as *mut i32,
-        &raw mut mxyz as *mut i32,
-        &raw mut nxyzst as *mut i32,
-    );
+    crate::imod::libiimod::unit_header::iiu_ret_size(imUnit, &mut nxyz, &mut mxyz, &mut nxyzst);
     nx = nxyz[0 as i32 as usize];
     ny = nxyz[1 as i32 as usize];
     *ierr = 1 as i32;
@@ -101,19 +96,26 @@ pub unsafe extern "C" fn iiu_read_binned(
         iyUBstart
     };
     if nbin == 1 as i32 {
-        crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0 as i32);
+        unsafe { crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0) };
         if ixDim == nx && nxBin == nx && nyBin == ny {
-            *ierr = crate::imod::libiimod::unit_fileio::iiu_read_section(imUnit, array.cast());
+            *ierr = unsafe {
+                crate::imod::libiimod::unit_fileio::iiu_read_section(
+                    imUnit,
+                    array.as_mut_ptr().cast(),
+                )
+            };
         } else {
-            *ierr = crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
-                imUnit,
-                array.cast(),
-                ixDim,
-                ix0,
-                ix1,
-                iy0,
-                iy1,
-            );
+            *ierr = unsafe {
+                crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
+                    imUnit,
+                    array.as_mut_ptr().cast(),
+                    ixDim,
+                    ix0,
+                    ix1,
+                    iy0,
+                    iy1,
+                )
+            };
         }
         return;
     }
@@ -156,16 +158,18 @@ pub unsafe extern "C" fn iiu_read_binned(
                 nxLoad = ix1 + 1 as i32 - ixStart;
             }
             nBinCols = (nxLoad - loadXoffset + nbin - 1 as i32) / nbin;
-            crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0 as i32);
-            *ierr = crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
-                imUnit,
-                temp.cast(),
-                nxLoad,
-                ixStart,
-                ixStart + nxLoad - 1 as i32,
-                iyStart,
-                iyStart + nyLoad - 1 as i32,
-            );
+            unsafe { crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0) };
+            *ierr = unsafe {
+                crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
+                    imUnit,
+                    temp.as_mut_ptr().cast(),
+                    nxLoad,
+                    ixStart,
+                    ixStart + nxLoad - 1,
+                    iyStart,
+                    iyStart + nyLoad - 1,
+                )
+            };
             if *ierr != 0 as i32 {
                 return;
             }
@@ -195,14 +199,13 @@ pub unsafe extern "C" fn iiu_read_binned(
                     while iy < iyEnd {
                         ix = ixEnd - nbin;
                         while ix < ixEnd {
-                            sum += *temp.offset((ix + iy * nxLoad) as isize);
+                            sum += temp[(ix + iy * nxLoad) as usize];
                             ix += 1;
                         }
                         iy += 1;
                     }
-                    *array.offset(
-                        (ixDone + ixb - 1 as i32 + ixDim * (iyDone + iyb - 1 as i32)) as isize,
-                    ) = sum / binsq;
+                    array[(ixDone + ixb - 1 as i32 + ixDim * (iyDone + iyb - 1 as i32)) as usize] =
+                        sum / binsq;
                     ixb += 1;
                 }
                 iCheckStrt = 1 as i32;
@@ -220,16 +223,15 @@ pub unsafe extern "C" fn iiu_read_binned(
                             ix = ixEnd - nbin;
                             while ix < ixEnd {
                                 if ix >= 0 as i32 && ix < nxLoad && iy >= 0 as i32 && iy < nyLoad {
-                                    sum += *temp.offset((ix + iy * nxLoad) as isize);
+                                    sum += temp[(ix + iy * nxLoad) as usize];
                                     nsum += 1 as i32;
                                 }
                                 ix += 1;
                             }
                             iy += 1;
                         }
-                        *array.offset(
-                            (ixDone + ixb - 1 as i32 + ixDim * (iyDone + iyb - 1 as i32)) as isize,
-                        ) = sum / nsum as f32;
+                        array[(ixDone + ixb - 1 as i32 + ixDim * (iyDone + iyb - 1 as i32))
+                            as usize] = sum / nsum as f32;
                         ixb += 1;
                     }
                     iCheckStrt = iFastEnd + 1 as i32;
@@ -262,9 +264,31 @@ pub unsafe extern "C" fn iiureadbinned_(
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
+    let Some(array_len) = (*ixDim)
+        .checked_mul(*iyDim)
+        .and_then(|length| usize::try_from(length).ok())
+    else {
+        *ierr = 1;
+        return;
+    };
+    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
+        *ierr = 1;
+        return;
+    };
     iiu_read_binned(
-        *imUnit, *iz, array, *ixDim, *iyDim, *ixUBstart, *iyUBstart, *nbin, *nxBin, *nyBin, temp,
-        *lenTemp, ierr,
+        *imUnit,
+        *iz,
+        core::slice::from_raw_parts_mut(array, array_len),
+        *ixDim,
+        *iyDim,
+        *ixUBstart,
+        *iyUBstart,
+        *nbin,
+        *nxBin,
+        *nyBin,
+        core::slice::from_raw_parts_mut(temp, temp_len),
+        *lenTemp,
+        &mut *ierr,
     );
 }
 pub unsafe extern "C" fn irdbinned_(
@@ -282,25 +306,47 @@ pub unsafe extern "C" fn irdbinned_(
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
+    let Some(array_len) = (*ixDim)
+        .checked_mul(*iyDim)
+        .and_then(|length| usize::try_from(length).ok())
+    else {
+        *ierr = 1;
+        return;
+    };
+    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
+        *ierr = 1;
+        return;
+    };
     iiu_read_binned(
-        *imUnit, *iz, array, *ixDim, *iyDim, *ixUBstart, *iyUBstart, *nbin, *nxBin, *nyBin, temp,
-        *lenTemp, ierr,
+        *imUnit,
+        *iz,
+        core::slice::from_raw_parts_mut(array, array_len),
+        *ixDim,
+        *iyDim,
+        *ixUBstart,
+        *iyUBstart,
+        *nbin,
+        *nxBin,
+        *nyBin,
+        core::slice::from_raw_parts_mut(temp, temp_len),
+        *lenTemp,
+        &mut *ierr,
     );
 }
-pub unsafe extern "C" fn iiu_read_reduced(
-    mut imUnit: i32,
-    mut iz: i32,
-    mut array: *mut f32,
-    mut nxDim: i32,
-    mut xUBstart: f32,
-    mut yUBstart: f32,
-    mut redFac: f32,
-    mut nxRed: i32,
-    mut nyRed: i32,
-    mut ifiltType: i32,
-    mut temp: *mut f32,
-    mut lenTemp: i32,
-    mut ierr: *mut i32,
+pub fn iiu_read_reduced(
+    imUnit: i32,
+    iz: i32,
+    array: &mut [f32],
+    nxDim: i32,
+    xUBstart: f32,
+    yUBstart: f32,
+    redFac: f32,
+    nxRed: i32,
+    nyRed: i32,
+    ifiltType: i32,
+    temp: &mut [f32],
+    lenTemp: i32,
+    ierr: &mut i32,
 ) {
     let mut ix0: i32 = 0;
     let mut ix1: i32 = 0;
@@ -346,12 +392,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
     let mut ixEdgeOffset: i32 = 0;
     let mut fillXend: i32 = 0;
     let mut fillYend: i32 = 0;
-    crate::imod::libiimod::unit_header::iiu_ret_size(
-        imUnit,
-        &raw mut nxyz as *mut i32,
-        &raw mut mxyz as *mut i32,
-        &raw mut nxyzst as *mut i32,
-    );
+    crate::imod::libiimod::unit_header::iiu_ret_size(imUnit, &mut nxyz, &mut mxyz, &mut nxyzst);
     nx = nxyz[0 as i32 as usize];
     ny = nxyz[1 as i32 as usize];
     zoomFac = (1.0 / redFac as f64) as f32;
@@ -368,9 +409,9 @@ pub unsafe extern "C" fn iiu_read_reduced(
         &mut loadXoffset,
         &mut loadXextra,
         &mut ixEdgeOffset,
-        &mut *ierr,
+        ierr,
     );
-    if *ierr != 0 as i32 {
+    if *ierr != 0 {
         return;
     }
     ird_red_sizes_for_load(
@@ -386,14 +427,14 @@ pub unsafe extern "C" fn iiu_read_reduced(
         &mut loadYoffset,
         &mut loadYextra,
         &mut iyEdgeOffset,
-        &mut *ierr,
+        ierr,
     );
-    if *ierr != 0 as i32 {
+    if *ierr != 0 {
         return;
     }
     iyEdgeStart = 1 as i32;
     *ierr = select_zoom_filter(ifiltType, zoomFac as f64, &mut ifiltWidth);
-    if *ierr != 0 as i32 {
+    if *ierr != 0 {
         return;
     }
     ihalfWidth = (ifiltWidth + 3 as i32) / 2 as i32;
@@ -454,7 +495,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             numCopy = (lastY1 + 1 as i32 - iy0) * nxLoad;
             ix = 0 as i32;
             while ix < numCopy {
-                *temp.offset(ix as isize) = *temp.offset((ix + indStart) as isize);
+                temp[ix as usize] = temp[(ix + indStart) as usize];
                 ix += 1;
             }
             loadYstart = lastY1 + 1 as i32;
@@ -462,25 +503,27 @@ pub unsafe extern "C" fn iiu_read_reduced(
         }
         lastY0 = iy0;
         lastY1 = iy1;
-        crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0 as i32);
+        unsafe { crate::imod::libiimod::unit_fileio::iiu_set_position(imUnit, iz, 0) };
         *ierr = -(1 as i32);
-        ierr2 = crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
-            imUnit,
-            temp.offset((indStart - 1) as isize).cast(),
-            nxLoad,
-            ix0,
-            ix1,
-            loadYstart,
-            iy1,
-        );
+        ierr2 = unsafe {
+            crate::imod::libiimod::unit_fileio::iiu_read_sec_part(
+                imUnit,
+                temp[(indStart - 1) as usize..].as_mut_ptr().cast(),
+                nxLoad,
+                ix0,
+                ix1,
+                loadYstart,
+                iy1,
+            )
+        };
         if ierr2 != 0 as i32 {
             return;
         }
         chunkYstart = yUseStart + iyStart as f32 * redFac - iy0 as f32;
         // `zoomWithFilter` takes typed line and output slices now; the
         // `makeLinePointers` block above still runs for its error-5 path.
-        let linePtrVec: Vec<&[f32]> = (0..(iy1 + 1 - iy0) as usize)
-            .map(|i| ::core::slice::from_raw_parts(temp.add(i * nxLoad as usize), nxLoad as usize))
+        let linePtrVec: Vec<&[f32]> = temp[..(nxLoad * (iy1 + 1 - iy0)) as usize]
+            .chunks(nxLoad as usize)
             .collect();
         *ierr = zoom_with_filter(
             crate::imod::libcfshr::zoomdown::ZoomLines::Float(&linePtrVec),
@@ -494,15 +537,15 @@ pub unsafe extern "C" fn iiu_read_reduced(
             ibXoffset,
             SLICE_MODE_FLOAT,
             &mut crate::imod::libcfshr::zoomdown::ZoomOut::Float(
-                ::core::slice::from_raw_parts_mut(
-                    array.offset(((iyStart + ibYoffset) * nxDim) as isize),
-                    (((iyEnd - iyStart - 1) * nxDim) + ibXoffset + nxRedUse) as usize,
-                ),
+                &mut array[((iyStart + ibYoffset) * nxDim) as usize
+                    ..((iyStart + ibYoffset) * nxDim
+                        + ((iyEnd - iyStart - 1) * nxDim + ibXoffset + nxRedUse))
+                        as usize],
             ),
             None,
             None,
         );
-        if *ierr != 0 as i32 {
+        if *ierr != 0 {
             return;
         }
         if nbin > 0 as i32 {
@@ -520,7 +563,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if iyStart == 0 as i32 && loadYoffset > 0 as i32 {
                 ird_red_bin_edge(
-                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
+                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -529,7 +572,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     0 as i32,
                     nbin,
                     loadYoffset,
-                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
+                    &mut array[..(nxDim * nyRed) as usize],
                     nxDim,
                     1 as i32,
                     nxRed,
@@ -539,7 +582,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if loadXoffset > 0 as i32 {
                 ird_red_bin_edge(
-                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
+                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -548,7 +591,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     iyEdgeOffset,
                     loadXoffset,
                     nbin,
-                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
+                    &mut array[..(nxDim * nyRed) as usize],
                     nxDim,
                     1 as i32,
                     1 as i32,
@@ -558,7 +601,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if loadXextra > 0 as i32 {
                 ird_red_bin_edge(
-                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
+                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     nxLoad + 1 as i32 - loadXextra,
@@ -567,7 +610,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     iyEdgeOffset,
                     loadXoffset,
                     nbin,
-                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
+                    &mut array[..(nxDim * nyRed) as usize],
                     nxDim,
                     nxRed,
                     nxRed,
@@ -577,7 +620,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
             }
             if iyEnd >= nyRedUse && loadYextra > 0 as i32 {
                 ird_red_bin_edge(
-                    core::slice::from_raw_parts(temp, (nxLoad * (iy1 + 1 - iy0)) as usize),
+                    &temp[..(nxLoad * (iy1 + 1 - iy0)) as usize],
                     nxLoad,
                     iy1 + 1 as i32 - iy0,
                     1 as i32,
@@ -586,7 +629,7 @@ pub unsafe extern "C" fn iiu_read_reduced(
                     0 as i32,
                     nbin,
                     loadYextra,
-                    core::slice::from_raw_parts_mut(array, (nxDim * nyRed) as usize),
+                    &mut array[..(nxDim * nyRed) as usize],
                     nxDim,
                     1 as i32,
                     nxRed,
@@ -600,28 +643,25 @@ pub unsafe extern "C" fn iiu_read_reduced(
     }
     if nbin == 0 as i32 {
         if yUBstart < 0.0 {
-            core::ptr::copy_nonoverlapping(array.add(nxDim as usize), array, nxRed as usize);
+            array.copy_within(nxDim as usize..(nxDim + nxRed) as usize, 0);
         }
         if fillYend != 0 {
-            core::ptr::copy_nonoverlapping(
-                array.add((nxDim * (nyRed - 2)) as usize),
-                array.add((nxDim * (nyRed - 1)) as usize),
-                nxRed as usize,
+            array.copy_within(
+                (nxDim * (nyRed - 2)) as usize..(nxDim * (nyRed - 2) + nxRed) as usize,
+                (nxDim * (nyRed - 1)) as usize,
             );
         }
         if xUBstart < 0.0 {
             ix = 0 as i32;
             while ix < nyRed {
-                *array.offset((ix * nxDim) as isize) =
-                    *array.offset((ix * nxDim + 1 as i32) as isize);
+                array[(ix * nxDim) as usize] = array[(ix * nxDim + 1) as usize];
                 ix += 1;
             }
         }
         if fillXend != 0 {
             ix = 0 as i32;
             while ix < nyRed {
-                *array.offset((ix * nxDim + nxRed - 1 as i32) as isize) =
-                    *array.offset((ix * nxDim + nxRed - 2 as i32) as isize);
+                array[(ix * nxDim + nxRed - 1) as usize] = array[(ix * nxDim + nxRed - 2) as usize];
                 ix += 1;
             }
         }
@@ -643,9 +683,31 @@ pub unsafe extern "C" fn irdreduced_(
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
+    let Some(array_len) = (*nxDim)
+        .checked_mul(*nyRed)
+        .and_then(|length| usize::try_from(length).ok())
+    else {
+        *ierr = 1;
+        return;
+    };
+    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
+        *ierr = 1;
+        return;
+    };
     iiu_read_reduced(
-        *imUnit, *iz, array, *nxDim, *xUBstart, *yUBstart, *redFac, *nxRed, *nyRed, *ifiltType,
-        temp, *lenTemp, ierr,
+        *imUnit,
+        *iz,
+        core::slice::from_raw_parts_mut(array, array_len),
+        *nxDim,
+        *xUBstart,
+        *yUBstart,
+        *redFac,
+        *nxRed,
+        *nyRed,
+        *ifiltType,
+        core::slice::from_raw_parts_mut(temp, temp_len),
+        *lenTemp,
+        &mut *ierr,
     );
 }
 pub unsafe extern "C" fn iiureadreduced_(
@@ -663,9 +725,31 @@ pub unsafe extern "C" fn iiureadreduced_(
     mut lenTemp: *mut i32,
     mut ierr: *mut i32,
 ) {
+    let Some(array_len) = (*nxDim)
+        .checked_mul(*nyRed)
+        .and_then(|length| usize::try_from(length).ok())
+    else {
+        *ierr = 1;
+        return;
+    };
+    let Some(temp_len) = usize::try_from(*lenTemp).ok() else {
+        *ierr = 1;
+        return;
+    };
     iiu_read_reduced(
-        *imUnit, *iz, array, *nxDim, *xUBstart, *yUBstart, *redFac, *nxRed, *nyRed, *ifiltType,
-        temp, *lenTemp, ierr,
+        *imUnit,
+        *iz,
+        core::slice::from_raw_parts_mut(array, array_len),
+        *nxDim,
+        *xUBstart,
+        *yUBstart,
+        *redFac,
+        *nxRed,
+        *nyRed,
+        *ifiltType,
+        core::slice::from_raw_parts_mut(temp, temp_len),
+        *lenTemp,
+        &mut *ierr,
     );
 }
 fn ird_red_sizes_for_load(

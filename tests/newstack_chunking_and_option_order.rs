@@ -65,31 +65,24 @@ fn write_input(dir: &std::path::Path, extra: Option<&[u8]>) {
     let path_c = CString::new(path.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(path_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 64, 48, 5, 2), 0);
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 64, 48, 5, 2), 0);
         if let Some(extra) = extra {
-            (*header).nint = 0;
-            (*header).nreal = 1;
-            (*header).next = extra.len() as i32;
+            header.nint = 0;
+            header.nreal = 1;
+            header.next = extra.len() as i32;
             let mut bytes = extra.to_vec();
-            assert_eq!(
-                mrc_write_extra_header(header, bytes.as_mut_ptr(), extra.len() as i32),
-                0
-            );
+            assert_eq!(mrc_write_extra_header(&mut header, &bytes), 0);
         }
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         for section in 0..5 {
             let mut pixels = (0..64 * 48)
                 .map(|index| (section * 7 + index % 251) as f32)
                 .collect::<Vec<f32>>();
-            assert_eq!(
-                ii_write_section_float(file, pixels.as_mut_ptr().cast(), section),
-                0
-            );
+            assert_eq!(ii_write_section_float(image, &mut pixels, section), 0);
         }
         ii_close(file);
     }

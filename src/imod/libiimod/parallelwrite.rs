@@ -113,8 +113,8 @@ struct BoundaryWriteState {
     start_lines: [i32; 2],
     fp_bound: Option<ImodFile>,
 }
-pub unsafe fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
-    S_PARALLEL_WRITE.with(|state| unsafe {
+pub fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
+    S_PARALLEL_WRITE.with(|state| {
         let mut state = state.borrow_mut();
         if state.num_infos >= MAX_INFOS {
             return 5;
@@ -177,11 +177,11 @@ pub unsafe fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
                     .into_owned();
             let mut fields = text.split_ascii_whitespace();
             for target in [
-                &raw mut version,
-                &raw mut bi.every_sec,
-                &raw mut bi.nx,
-                &raw mut bi.num_bound_lines,
-                &raw mut bi.num_files,
+                &mut version,
+                &mut bi.every_sec,
+                &mut bi.nx,
+                &mut bi.num_bound_lines,
+                &mut bi.num_files,
             ] {
                 match fields.next().and_then(|f| f.parse::<i32>().ok()) {
                     Some(value) => *target = value,
@@ -214,16 +214,16 @@ pub unsafe fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
                     &line[..line.iter().position(|b| *b == 0).unwrap_or(0)],
                 )
                 .into_owned();
-                let mut fields = text.split_ascii_whitespace();
-                for target in [
-                    &raw mut region.section[0],
-                    &raw mut region.start_line[0],
-                    &raw mut region.section[1],
-                    &raw mut region.start_line[1],
-                ] {
-                    match fields.next().and_then(|f| f.parse::<i32>().ok()) {
-                        Some(value) => *target = value,
-                        None => break,
+                for (index, field) in text.split_ascii_whitespace().take(4).enumerate() {
+                    let Ok(value) = field.parse::<i32>() else {
+                        break;
+                    };
+                    match index {
+                        0 => region.section[0] = value,
+                        1 => region.start_line[0] = value,
+                        2 => region.section[1] = value,
+                        3 => region.start_line[1] = value,
+                        _ => unreachable!(),
                     }
                 }
             }
@@ -240,12 +240,8 @@ pub unsafe fn par_wrt_initialize(filename: &str, nxin: i32, nyin: i32) -> i32 {
         0
     })
 }
-pub unsafe extern "C" fn par_wrt_properties(
-    all_sec: *mut i32,
-    lines_bound: *mut i32,
-    nfiles: *mut i32,
-) -> i32 {
-    S_PARALLEL_WRITE.with(|state| unsafe {
+pub fn par_wrt_properties(all_sec: &mut i32, lines_bound: &mut i32, nfiles: &mut i32) -> i32 {
+    S_PARALLEL_WRITE.with(|state| {
         let state = state.borrow();
         if state.num_infos == 0 || state.cur_info < 0 {
             return 1;
@@ -274,9 +270,9 @@ pub unsafe extern "C" fn parwrtproperties_(
     mut linesBound: *mut i32,
     mut nfiles: *mut i32,
 ) -> i32 {
-    par_wrt_properties(allSec, linesBound, nfiles)
+    par_wrt_properties(&mut *allSec, &mut *linesBound, &mut *nfiles)
 }
-pub unsafe extern "C" fn par_wrt_set_current(index: i32) -> i32 {
+pub extern "C" fn par_wrt_set_current(index: i32) -> i32 {
     S_PARALLEL_WRITE.with(|state| {
         let mut state = state.borrow_mut();
         if index < 0 || index >= state.num_infos {
@@ -289,7 +285,7 @@ pub unsafe extern "C" fn par_wrt_set_current(index: i32) -> i32 {
 pub unsafe extern "C" fn parwrtsetcurrent_(mut index: *mut i32) -> i32 {
     par_wrt_set_current(*index - 1)
 }
-pub unsafe extern "C" fn par_wrt_close() {
+pub extern "C" fn par_wrt_close() {
     S_PARALLEL_WRITE.with(|state| {
         let state = state.borrow();
         for info in state.infos.iter().take(state.num_infos as usize) {
@@ -299,7 +295,7 @@ pub unsafe extern "C" fn par_wrt_close() {
         }
     })
 }
-pub unsafe extern "C" fn parwrtclose_() {
+pub extern "C" fn parwrtclose_() {
     par_wrt_close()
 }
 pub unsafe extern "C" fn parallel_write_slice(
@@ -400,8 +396,8 @@ unsafe fn parallel_write_slice_state(
             0,
             (*hdata).ny,
             &mut filename,
-            state.sections.as_mut_ptr(),
-            state.start_lines.as_mut_ptr(),
+            &mut state.sections,
+            &mut state.start_lines,
         );
         if err != 0 {
             crate::imod::libcfshr::b3dutil::b3d_error(
@@ -512,7 +508,11 @@ pub unsafe extern "C" fn par_wrt_to_hdf_chunk(
     if err >= 0 {
         return err;
     }
-    let err = crate::imod::libiimod::iimage::ii_write_section(ii_file, buf.cast(), section);
+    let err = crate::imod::libiimod::iimage::ii_write_section(
+        &mut *ii_file,
+        core::slice::from_raw_parts_mut(buf.cast(), num_bytes as usize),
+        section,
+    );
     if par_wrt_reclose_hdf(ii_file, hdata) != 0 {
         return 1;
     }
@@ -603,7 +603,7 @@ pub unsafe extern "C" fn par_wrt_flush_buffers(
     }
     0
 }
-pub unsafe fn iiu_par_wrt_initialize(
+pub fn iiu_par_wrt_initialize(
     filename: &str,
     iunit_bound: i32,
     nx_in: i32,
@@ -1046,15 +1046,15 @@ pub unsafe extern "C" fn iiu_par_wrt_flush_buffers(iunit: i32) -> i32 {
 pub unsafe extern "C" fn iiuparwrtflushbuffers_(iunit: *mut i32) -> i32 {
     iiu_par_wrt_flush_buffers(*iunit)
 }
-unsafe fn par_wrt_find_region(
+fn par_wrt_find_region(
     sec_num: i32,
     line_num: i32,
     nl_write: i32,
     filename: &mut String,
-    sections: *mut i32,
-    start_lines: *mut i32,
+    sections: &mut [i32; 2],
+    start_lines: &mut [i32; 2],
 ) -> i32 {
-    S_PARALLEL_WRITE.with(|state| unsafe {
+    S_PARALLEL_WRITE.with(|state| {
         let state = state.borrow();
         if state.num_infos == 0
             || state.cur_info < 0
@@ -1095,16 +1095,16 @@ unsafe fn par_wrt_find_region(
             if past_start && before_end {
                 // The caller takes ownership of the selected boundary-file name.
                 *filename = region.file.clone();
-                *sections = region.section[0];
-                *start_lines = region.start_line[0];
-                *sections.add(1) = region.section[1];
-                *start_lines.add(1) = region.start_line[1];
+                sections[0] = region.section[0];
+                start_lines[0] = region.start_line[0];
+                sections[1] = region.section[1];
+                start_lines[1] = region.start_line[1];
                 if bi.every_sec != 0 {
-                    if *start_lines < 0 {
-                        *start_lines -= bi.num_bound_lines;
+                    if start_lines[0] < 0 {
+                        start_lines[0] -= bi.num_bound_lines;
                     }
-                    if *start_lines.add(1) < 0 {
-                        *start_lines.add(1) = bi.ny + 1;
+                    if start_lines[1] < 0 {
+                        start_lines[1] = bi.ny + 1;
                     }
                 }
                 return 0;
@@ -1131,7 +1131,7 @@ unsafe extern "C" fn par_wrt_prepare_hdf(ii_file: *mut ImodImageFile) -> i32 {
         return 1;
     }
     (*ii_file).state = IISTATE_NOTINIT;
-    let err = crate::imod::libiimod::iimage::ii_reopen(ii_file);
+    let err = crate::imod::libiimod::iimage::ii_reopen(&mut *ii_file);
     if err != 0 {
         crate::imod::libcfshr::b3dutil::b3d_error(
             Some(&mut ImodFile::Stdout),
@@ -1274,8 +1274,8 @@ unsafe extern "C" fn write_segments(
                     )
                 } else {
                     crate::imod::libiimod::iimage::ii_write_section(
-                        ii_file,
-                        segment_buffer,
+                        &mut *ii_file,
+                        core::slice::from_raw_parts_mut(segment_buffer, seg.num_bytes as usize),
                         seg.section,
                     )
                 };
@@ -1309,8 +1309,8 @@ unsafe extern "C" fn write_segments(
                 (*ii_file).pad_left = seg.ix_start;
                 (*ii_file).pad_right = seg.nxdim_pad_right;
                 if crate::imod::libiimod::iimage::ii_write_section(
-                    ii_file,
-                    segment_buffer,
+                    &mut *ii_file,
+                    core::slice::from_raw_parts_mut(segment_buffer, seg.num_bytes as usize),
                     seg.section,
                 ) != 0
                 {
@@ -1369,10 +1369,7 @@ unsafe extern "C" fn pw_open_if_needed(
 ) {
     let mut nxyz = [0; 3];
     let mut filename = String::new();
-    // `iiuWriteHeaderStr` and `iiuOpen` are the Fortran-bridge unit layer and
-    // still take `const char *` (NATIVE.md 7), so the two names below keep a
-    // terminator at exactly those two calls.
-    let title = c"parallel_write: boundary lines";
+    let title = "parallel_write: boundary lines";
     let mut cell = [0.0, 0.0, 0.0, 90.0, 90.0, 90.0];
     *ierr = 0;
     let Some((info_index, nx_full, lines_bound, nz_full, if_all_sec, iunit_bound)) =
@@ -1404,8 +1401,8 @@ unsafe extern "C" fn pw_open_if_needed(
         iy_line,
         nlines_write,
         &mut filename,
-        iz_bound.as_mut_ptr(),
-        iy_bound.as_mut_ptr(),
+        &mut iz_bound,
+        &mut iy_bound,
     );
     if *ierr != 0 {
         return;
@@ -1427,10 +1424,11 @@ unsafe extern "C" fn pw_open_if_needed(
     }
     crate::imod::libiimod::unit_header::iiu_create_header(
         iunit_bound,
-        nxyz.as_mut_ptr(),
-        nxyz.as_mut_ptr(),
+        &nxyz,
+        &nxyz,
         2,
-        nxyz.as_mut_ptr(),
+        &[[0; crate::imod::libiimod::mrcfiles::MRC_LABEL_SIZE];
+            crate::imod::libiimod::mrcfiles::MRC_NLABELS],
         0,
     );
     cell[0] = nxyz[0] as f32;
@@ -1439,7 +1437,7 @@ unsafe extern "C" fn pw_open_if_needed(
     crate::imod::libiimod::unit_header::iiu_alt_cell(iunit_bound, &cell);
     *ierr = crate::imod::libiimod::unit_header::iiu_write_header_str(
         iunit_bound,
-        title.as_ptr(),
+        title,
         0,
         -32000.0,
         32000.0f32,

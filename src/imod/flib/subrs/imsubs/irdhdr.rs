@@ -1,7 +1,7 @@
 //! Translation of `IMOD/flib/subrs/imsubs/irdhdr.f90`.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libiimod::unit_fileio::{iiu_file_info, iiuretbrief_, iiuretprint_};
+use crate::imod::libiimod::unit_fileio::{iiu_file_info, iiu_ret_brief, iiu_ret_print};
 use crate::imod::libiimod::unit_header::{
     iiu_ret_axis_map, iiu_ret_basic_head, iiu_ret_cell, iiu_ret_data_type, iiu_ret_delta,
     iiu_ret_imod_flags, iiu_ret_labels, iiu_ret_mrc_version, iiu_ret_num_extended, iiu_ret_origin,
@@ -19,8 +19,8 @@ pub unsafe fn irdhdr(
     dmean: *mut f32,
 ) {
     unsafe {
-        let if_brief = iiuretbrief_();
-        let do_print = iiuretprint_() > 0;
+        let if_brief = iiu_ret_brief();
+        let do_print = iiu_ret_print() > 0;
         let do_extra = if_brief == 0 && do_print;
         iiu_ret_basic_head(iunit, nxyz, mxyz, imode, dmin, dmax, dmean);
         let mut imod_flags = 0;
@@ -60,7 +60,12 @@ pub unsafe fn irdhdr(
             println!("\n         This MRC file is apparently inverted in Y");
         }
         let mut nxyzst = [0_i32; 3];
-        iiu_ret_size(iunit, nxyz, mxyz, nxyzst.as_mut_ptr());
+        iiu_ret_size(
+            iunit,
+            &mut *nxyz.cast::<[i32; 3]>(),
+            &mut *mxyz.cast::<[i32; 3]>(),
+            &mut nxyzst,
+        );
         let mut idtype = 0;
         let mut lensnum = 0;
         let mut nd1 = 0;
@@ -125,15 +130,15 @@ pub unsafe fn irdhdr(
             &mut vd1,
             &mut vd2,
         );
-        iiu_ret_delta(iunit, delta.as_mut_ptr());
+        iiu_ret_delta(iunit, &mut delta);
         iiu_ret_cell(iunit, &mut cell);
         iiu_ret_axis_map(iunit, &mut mapcrs);
         let mut origin = [0.; 3];
         iiu_ret_origin(iunit, &mut origin);
         (xorig, yorig, zorig) = (origin[0], origin[1], origin[2]);
-        iiu_ret_labels(iunit, labels.as_mut_ptr().cast(), &mut num_labels);
-        iiu_ret_tilt(iunit, tilt.as_mut_ptr());
-        iiu_ret_tilt_orig(iunit, tilt_orig.as_mut_ptr());
+        iiu_ret_labels(iunit, &mut labels, &mut num_labels);
+        iiu_ret_tilt(iunit, &mut tilt);
+        iiu_ret_tilt_orig(iunit, &mut tilt_orig);
         iiu_ret_num_extended(iunit, &mut num_extra);
         iiu_ret_rms(iunit, &mut rms);
         if ispg == 401 && *nxyz.add(2) / *mxyz.add(2) > 1 {

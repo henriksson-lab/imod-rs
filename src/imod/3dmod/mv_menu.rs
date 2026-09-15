@@ -147,7 +147,7 @@ pub fn imodv_load_model(a: &mut ImodvApp, path: Option<&Path>) -> i32 {
         .last_mut()
         .expect("model was just pushed")
         .as_mut() as *mut _;
-    a.mod_.push(raw);
+    a.mod_.push(std::ptr::NonNull::from(unsafe { &mut *raw }));
     a.num_mods += 1;
     imodv_select_model(a, a.num_mods - 1);
     0

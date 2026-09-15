@@ -1,8 +1,8 @@
 mod common;
 
 use imod_rs::imod::libiimod::iimage::{
-    IIFILE_DEFAULT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new, ii_read_section_float,
-    ii_sync_from_mrc_header, ii_write_section_float,
+    IIFILE_DEFAULT, MRSA_FLOAT, ii_close, ii_fill_mrc_header, ii_open, ii_open_new,
+    ii_read_section_any, ii_sync_from_mrc_header, ii_write_section_float,
 };
 use imod_rs::imod::libiimod::mrcfiles::{MrcHeader, mrc_head_new, mrc_head_write};
 use std::ffi::CString;
@@ -45,18 +45,14 @@ fn trimvol_rejects_mode_with_contrast_on_real_mrc_before_creating_output() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, 2), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         let mut section = [1.0_f32, 2., 3., 4.];
-        assert_eq!(
-            ii_write_section_float(file, section.as_mut_ptr().cast(), 0),
-            0
-        );
+        assert_eq!(ii_write_section_float(image, &mut section, 0), 0);
         ii_close(file);
     }
     let result = common::imod_cmd("trimvol")
@@ -92,13 +88,12 @@ fn trimvol_reports_source_specific_coordinate_size_conflicts_before_file_access(
     unsafe {
         let name = CString::new(input.to_string_lossy().as_bytes()).unwrap();
         let file = ii_open_new(name.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 1, 1, 1, 2), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 1, 1, 1, 2), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         ii_close(file);
     }
     for (limits, size, expected) in [
@@ -152,13 +147,12 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 2, 3, 4, 2), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 2, 3, 4, 2), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         for z in 0..4 {
             let mut section = [
                 (z * 10) as f32,
@@ -168,10 +162,7 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
                 (z * 10 + 4) as f32,
                 (z * 10 + 5) as f32,
             ];
-            assert_eq!(
-                ii_write_section_float(file, section.as_mut_ptr().cast(), z),
-                0
-            );
+            assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
         ii_close(file);
     }
@@ -197,16 +188,22 @@ fn trimvol_old_flipped_coordinates_use_source_yz_limit_exchange() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
-        let mut section = [0.0_f32; 4];
+        let mut section_bytes = [0_u8; 16];
         assert_eq!(
-            ii_read_section_float(file, section.as_mut_ptr().cast(), 0),
+            ii_read_section_any(&mut *file, &mut section_bytes, 0, MRSA_FLOAT),
             0
         );
+        let section: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(section, [10., 11., 12., 13.]);
         assert_eq!(
-            ii_read_section_float(file, section.as_mut_ptr().cast(), 1),
+            ii_read_section_any(&mut *file, &mut section_bytes, 1, MRSA_FLOAT),
             0
         );
+        let section: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(section, [20., 21., 22., 23.]);
         ii_close(file);
     }
@@ -225,13 +222,12 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 2, 3, 4, 2), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 2, 3, 4, 2), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         for z in 0..4 {
             let mut section = [
                 (z * 10) as f32,
@@ -241,10 +237,7 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
                 (z * 10 + 4) as f32,
                 (z * 10 + 5) as f32,
             ];
-            assert_eq!(
-                ii_write_section_float(file, section.as_mut_ptr().cast(), z),
-                0
-            );
+            assert_eq!(ii_write_section_float(image, &mut section, z), 0);
         }
         ii_close(file);
     }
@@ -270,16 +263,22 @@ fn trimvol_even_old_flipped_coordinates_reverse_swapped_y_limits() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 2, 2));
-        let mut section = [0.0_f32; 4];
+        let mut section_bytes = [0_u8; 16];
         assert_eq!(
-            ii_read_section_float(file, section.as_mut_ptr().cast(), 0),
+            ii_read_section_any(&mut *file, &mut section_bytes, 0, MRSA_FLOAT),
             0
         );
+        let section: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(section, [12., 13., 14., 15.]);
         assert_eq!(
-            ii_read_section_float(file, section.as_mut_ptr().cast(), 1),
+            ii_read_section_any(&mut *file, &mut section_bytes, 1, MRSA_FLOAT),
             0
         );
+        let section: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(section, [22., 23., 24., 25.]);
         ii_close(file);
     }
@@ -295,18 +294,14 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 2, 2, 1, 2), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, 2), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         let mut section = [10.0_f32, 20., 30., 40.];
-        assert_eq!(
-            ii_write_section_float(file, section.as_mut_ptr().cast(), 0),
-            0
-        );
+        assert_eq!(ii_write_section_float(image, &mut section, 0), 0);
         ii_close(file);
     }
     let result = common::imod_cmd("trimvol")
@@ -326,11 +321,14 @@ fn trimvol_integer_min_max_maps_observed_real_mrc_range_to_requested_range() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!(header.mode, 1);
-        let mut section = [0.0_f32; 4];
+        let mut section_bytes = [0_u8; 16];
         assert_eq!(
-            ii_read_section_float(file, section.as_mut_ptr().cast(), 0),
+            ii_read_section_any(&mut *file, &mut section_bytes, 0, MRSA_FLOAT),
             0
         );
+        let section: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(section_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         ii_close(file);
         for (actual, expected) in section.into_iter().zip([100., 133., 167., 200.]) {
             assert!((actual - expected).abs() <= 1., "{actual} != {expected}");
@@ -348,25 +346,18 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 3, 3, 2, 2), 0);
-        (*header).nlabl = 1;
-        (&mut (*header).labels[0])[..22].copy_from_slice(b"acquisition title line");
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 3, 3, 2, 2), 0);
+        header.nlabl = 1;
+        header.labels[0][..22].copy_from_slice(b"acquisition title line");
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         let mut first = [1.0_f32, 2., 3., 4., 5., 6., 7., 8., 9.];
         let mut second = [11.0_f32, 12., 13., 14., 15., 16., 17., 18., 19.];
-        assert_eq!(
-            ii_write_section_float(file, first.as_mut_ptr().cast(), 0),
-            0
-        );
-        assert_eq!(
-            ii_write_section_float(file, second.as_mut_ptr().cast(), 1),
-            0
-        );
+        assert_eq!(ii_write_section_float(image, &mut first, 0), 0);
+        assert_eq!(ii_write_section_float(image, &mut second, 1), 0);
         ii_close(file);
     }
     let result = common::imod_cmd("trimvol")
@@ -394,16 +385,22 @@ fn trimvol_crops_real_mrc_volume_with_one_based_coordinates() {
         assert_eq!(header.nlabl, 2);
         assert_eq!(&header.labels[0][..22], b"acquisition title line");
         assert_eq!(&header.labels[1][..23], b"NEWSTACK: Images copied");
-        let mut pixels = [0.0_f32; 4];
+        let mut pixel_bytes = [0_u8; 16];
         assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            ii_read_section_any(&mut *file, &mut pixel_bytes, 0, MRSA_FLOAT),
             0
         );
+        let pixels: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(pixels, [2., 3., 5., 6.]);
         assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 1),
+            ii_read_section_any(&mut *file, &mut pixel_bytes, 1, MRSA_FLOAT),
             0
         );
+        let pixels: [f32; 4] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(pixels, [12., 13., 15., 16.]);
         ii_close(file);
     }
@@ -425,13 +422,12 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 2, 2, 3, 2), 0);
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 3, 2), 0);
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         for (z, mut section) in [
             [1.0_f32, 2., 3., 4.],
             [11.0_f32, 12., 13., 14.],
@@ -440,10 +436,7 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
         .into_iter()
         .enumerate()
         {
-            assert_eq!(
-                ii_write_section_float(file, section.as_mut_ptr().cast(), z as i32),
-                0
-            );
+            assert_eq!(ii_write_section_float(image, &mut section, z as i32), 0);
         }
         ii_close(file);
     }
@@ -461,16 +454,22 @@ fn trimvol_flip_yz_preserves_clip_plane_order() {
         let mut header = MrcHeader::default();
         assert_eq!(ii_fill_mrc_header(file, &mut header), 0);
         assert_eq!((header.nx, header.ny, header.nz), (2, 3, 2));
-        let mut pixels = [0.0_f32; 6];
+        let mut pixel_bytes = [0_u8; 24];
         assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            ii_read_section_any(&mut *file, &mut pixel_bytes, 0, MRSA_FLOAT),
             0
         );
+        let pixels: [f32; 6] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(pixels, [1., 2., 11., 12., 21., 22.]);
         assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 1),
+            ii_read_section_any(&mut *file, &mut pixel_bytes, 1, MRSA_FLOAT),
             0
         );
+        let pixels: [f32; 6] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(pixels, [3., 4., 13., 14., 23., 24.]);
         ii_close(file);
     }
@@ -495,34 +494,27 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
     let input_c = CString::new(input.to_string_lossy().as_bytes()).unwrap();
     unsafe {
         let file = ii_open_new(input_c.to_bytes(), "wb", IIFILE_DEFAULT);
-        let header = (*file).header.cast::<MrcHeader>();
-        assert_eq!(mrc_head_new(&mut *header, 4, 4, 2, 1), 0);
-        (*header).xlen = 8.0;
-        (*header).ylen = 12.0;
-        (*header).zlen = 20.0;
-        (*header).xorg = 1.0;
-        (*header).yorg = 3.0;
-        (*header).zorg = -5.0;
-        (*header).tiltangles = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        ii_sync_from_mrc_header(file, header);
-        assert_eq!(
-            mrc_head_write((&mut (*file).fp).as_mut().unwrap(), &mut *header),
-            0
-        );
+        let image = &mut *file;
+        let mut header = image.mrc_header.take().expect("new MRC image header");
+        assert_eq!(mrc_head_new(&mut header, 4, 4, 2, 1), 0);
+        header.xlen = 8.0;
+        header.ylen = 12.0;
+        header.zlen = 20.0;
+        header.xorg = 1.0;
+        header.yorg = 3.0;
+        header.zorg = -5.0;
+        header.tiltangles = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        ii_sync_from_mrc_header(image, &mut header);
+        assert_eq!(mrc_head_write(image.fp.as_mut().unwrap(), &mut header), 0);
+        image.mrc_header = Some(header);
         let mut first = [
             1.0_f32, 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
         ];
         let mut second = [
             17.0_f32, 18., 19., 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30., 31., 32.,
         ];
-        assert_eq!(
-            ii_write_section_float(file, first.as_mut_ptr().cast(), 0),
-            0
-        );
-        assert_eq!(
-            ii_write_section_float(file, second.as_mut_ptr().cast(), 1),
-            0
-        );
+        assert_eq!(ii_write_section_float(image, &mut first, 0), 0);
+        assert_eq!(ii_write_section_float(image, &mut second, 1), 0);
         ii_close(file);
     }
     assert!(
@@ -541,16 +533,22 @@ fn trimvol_rotate_x_uses_source_clip_rotx_minus_ninety_plane_order() {
         assert_eq!((header.nx, header.ny, header.nz), (4, 2, 4));
         assert_eq!((header.xorg, header.yorg, header.zorg), (1.0, -5.0, 9.0));
         assert_eq!(header.tiltangles, [4.0, 5.0, 6.0, -86.0, 5.0, 6.0]);
-        let mut pixels = [0.0_f32; 8];
+        let mut pixel_bytes = [0_u8; 32];
         assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 0),
+            ii_read_section_any(&mut *file, &mut pixel_bytes, 0, MRSA_FLOAT),
             0
         );
+        let pixels: [f32; 8] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(pixels, [13., 14., 15., 16., 29., 30., 31., 32.]);
         assert_eq!(
-            ii_read_section_float(file, pixels.as_mut_ptr().cast(), 3),
+            ii_read_section_any(&mut *file, &mut pixel_bytes, 3, MRSA_FLOAT),
             0
         );
+        let pixels: [f32; 8] = core::array::from_fn(|index| {
+            f32::from_ne_bytes(pixel_bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        });
         assert_eq!(pixels, [1., 2., 3., 4., 17., 18., 19., 20.]);
         ii_close(file);
     }

@@ -5,7 +5,7 @@
 //! original identifier named in each doc comment.
 #![allow(non_snake_case, dead_code, unused_variables, unused_assignments)]
 
-use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
+use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use std::io::Write;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
@@ -1420,7 +1420,9 @@ pub fn montxcorredge(
             // NUL-delimited C string starting at `curDebug`.
             let line = &debugStr[curDebug..];
             let line = &line[..line.iter().position(|&b| b == 0).unwrap_or(line.len())];
-            let _ = ImodFile::Stdout.write_all(&c_format_bytes("%s\n", &[CArg::Bytes(line)]));
+            let _ = ImodFile::Stdout
+                .write_all(line)
+                .and_then(|()| ImodFile::Stdout.write_all(b"\n"));
             curDebug = lineEnd + 1;
         }
         let _ = ImodFile::Stdout.flush();

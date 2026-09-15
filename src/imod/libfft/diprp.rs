@@ -1,19 +1,7 @@
 //! Translation of `IMOD/libfft/diprp.c`.
-#![allow(non_snake_case, unused_mut, unsafe_op_in_unsafe_fn)]
+#![allow(non_snake_case, unused_mut)]
 
-pub unsafe extern "C" fn diprp(
-    pts: i32,
-    sym: *mut i32,
-    psym: i32,
-    unsym: *mut i32,
-    dim: *mut i32,
-    x: *mut f32,
-    y: *mut f32,
-) {
-    let sym = core::slice::from_raw_parts(sym, 15);
-    let unsym = core::slice::from_raw_parts(unsym, 15);
-    let dim = core::slice::from_raw_parts(dim, 6);
-    let mut t = 0.;
+pub fn diprp(pts: i32, sym: &[i32], psym: i32, unsym: &[i32], dim: &[i32; 6], data: &mut [f32]) {
     let mut onemod = 0;
     let mut modulo = [0; 15];
     let mut dk = 0;
@@ -116,24 +104,14 @@ pub unsafe extern "C" fn diprp(
                                                                         p = p0 - 1;
                                                                         while p < p3 {
                                                                             p5 = p + delta;
-                                                                            t = *x
-                                                                                .offset(p as isize);
-                                                                            *x.offset(p as isize) =
-                                                                                *x.offset(
-                                                                                    p5 as isize,
-                                                                                );
-                                                                            *x.offset(
-                                                                                p5 as isize,
-                                                                            ) = t;
-                                                                            t = *y
-                                                                                .offset(p as isize);
-                                                                            *y.offset(p as isize) =
-                                                                                *y.offset(
-                                                                                    p5 as isize,
-                                                                                );
-                                                                            *y.offset(
-                                                                                p5 as isize,
-                                                                            ) = t;
+                                                                            data.swap(
+                                                                                p as usize,
+                                                                                p5 as usize,
+                                                                            );
+                                                                            data.swap(
+                                                                                p as usize + 1,
+                                                                                p5 as usize + 1,
+                                                                            );
                                                                             p += p4;
                                                                         }
                                                                         p0 += p2;
@@ -233,12 +211,8 @@ pub unsafe extern "C" fn diprp(
                         jj = p0 - 1;
                         while jj < p3 {
                             kk = jj + delta;
-                            t = *x.offset(jj as isize);
-                            *x.offset(jj as isize) = *x.offset(kk as isize);
-                            *x.offset(kk as isize) = t;
-                            t = *y.offset(jj as isize);
-                            *y.offset(jj as isize) = *y.offset(kk as isize);
-                            *y.offset(kk as isize) = t;
+                            data.swap(jj as usize, kk as usize);
+                            data.swap(jj as usize + 1, kk as usize + 1);
                             jj += p4;
                         }
                         p0 += p2;
