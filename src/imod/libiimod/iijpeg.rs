@@ -79,7 +79,8 @@ pub fn ii_jpeg_check(f: &mut ImodImageFile) -> i32 {
     f.read_section_float = Some(read_float_callback);
     0
 }
-fn read_any(f: &ImodImageFile, out: &mut [u8], z: i32, kind: i32) -> i32 {
+/// C `jpegReadSectionAny`.
+fn jpeg_read_section_any(f: &ImodImageFile, out: &mut [u8], z: i32, kind: i32) -> i32 {
     if z != 0 {
         return IIERR_BAD_CALL;
     }
@@ -121,6 +122,26 @@ fn read_any(f: &ImodImageFile, out: &mut [u8], z: i32, kind: i32) -> i32 {
     }
     0
 }
+
+/// C `jpegReadSection`.
+fn jpeg_read_section(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
+    jpeg_read_section_any(f, out, z, NOPROC)
+}
+
+/// C `jpegReadSectionByte`.
+fn jpeg_read_section_byte(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
+    jpeg_read_section_any(f, out, z, BYTE)
+}
+
+/// C `jpegReadSectionUShort`.
+fn jpeg_read_section_ushort(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
+    jpeg_read_section_any(f, out, z, USHORT)
+}
+
+/// C `jpegReadSectionFloat`.
+fn jpeg_read_section_float(f: &ImodImageFile, out: &mut [u8], z: i32) -> i32 {
+    jpeg_read_section_any(f, out, z, FLOAT)
+}
 /// C `jpegOpenNew`.
 pub fn jpeg_open_new(f: &mut ImodImageFile) -> i32 {
     let Some(name) = f.filename.as_deref() else {
@@ -144,7 +165,8 @@ pub(crate) unsafe fn jpeg_open_new_callback(p: *mut ImodImageFile) -> i32 {
     };
     jpeg_open_new(file)
 }
-fn write_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats: bool) -> i32 {
+/// C `iiJpegWriteSectionAny`.
+fn ii_jpeg_write_section_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats: bool) -> i32 {
     if z != 0 || f.mode != MRC_MODE_BYTE && f.mode != MRC_MODE_RGB {
         return IIERR_BAD_CALL;
     }
@@ -196,6 +218,16 @@ fn write_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats: bool) -> i32 {
     f.last_written_z = 0;
     0
 }
+
+/// C `iiJpegWriteSection`.
+fn ii_jpeg_write_section(f: &mut ImodImageFile, input: &[u8], z: i32) -> i32 {
+    ii_jpeg_write_section_any(f, input, z, false)
+}
+
+/// C `iiJpegWriteSectionFloat`.
+fn ii_jpeg_write_section_float(f: &mut ImodImageFile, input: &[u8], z: i32) -> i32 {
+    ii_jpeg_write_section_any(f, input, z, true)
+}
 unsafe fn file(p: *mut ImodImageFile) -> Option<&'static mut ImodImageFile> {
     unsafe { p.as_mut() }
 }
@@ -237,19 +269,56 @@ unsafe fn read_cb(p: *mut ImodImageFile, b: *mut u8, z: i32, k: i32) -> i32 {
     let Some(o) = (unsafe { slice(b, n * c * sz) }) else {
         return IIERR_BAD_CALL;
     };
-    read_any(f, o, z, k)
+    jpeg_read_section_any(f, o, z, k)
 }
 unsafe fn read_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    unsafe { read_cb(p, b, z, NOPROC) }
+    let Some(f) = (unsafe { file(p) }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let channels = if f.native_image_rgb { 3 } else { 1 };
+    let Some(out) = (unsafe { slice(b, n * channels) }) else {
+        return IIERR_BAD_CALL;
+    };
+    jpeg_read_section(f, out, z)
 }
 unsafe fn read_byte_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    unsafe { read_cb(p, b, z, BYTE) }
+    let Some(f) = (unsafe { file(p) }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(out) = (unsafe { slice(b, n) }) else {
+        return IIERR_BAD_CALL;
+    };
+    jpeg_read_section_byte(f, out, z)
 }
 unsafe fn read_ushort_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    unsafe { read_cb(p, b, z, USHORT) }
+    let Some(f) = (unsafe { file(p) }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(out) = (unsafe { slice(b, n * 2) }) else {
+        return IIERR_BAD_CALL;
+    };
+    jpeg_read_section_ushort(f, out, z)
 }
 unsafe fn read_float_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    unsafe { read_cb(p, b, z, FLOAT) }
+    let Some(f) = (unsafe { file(p) }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(out) = (unsafe { slice(b, n * 4) }) else {
+        return IIERR_BAD_CALL;
+    };
+    jpeg_read_section_float(f, out, z)
 }
 unsafe fn write_cb(p: *mut ImodImageFile, b: *mut u8, z: i32, fl: bool) -> i32 {
     let Some(f) = (unsafe { file(p) }) else {
@@ -262,13 +331,33 @@ unsafe fn write_cb(p: *mut ImodImageFile, b: *mut u8, z: i32, fl: bool) -> i32 {
     let Some(i) = (unsafe { slice(b, n * c * if fl { 4 } else { 1 }) }) else {
         return IIERR_BAD_CALL;
     };
-    write_any(f, i, z, fl)
+    ii_jpeg_write_section_any(f, i, z, fl)
 }
 unsafe fn write_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    unsafe { write_cb(p, b, z, false) }
+    let Some(f) = (unsafe { file(p) }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let channels = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
+    let Some(input) = (unsafe { slice(b, n * channels) }) else {
+        return IIERR_BAD_CALL;
+    };
+    ii_jpeg_write_section(f, input, z)
 }
 unsafe fn write_float_callback(p: *mut ImodImageFile, b: *mut u8, z: i32) -> i32 {
-    unsafe { write_cb(p, b, z, true) }
+    let Some(f) = (unsafe { file(p) }) else {
+        return IIERR_BAD_CALL;
+    };
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let channels = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
+    let Some(input) = (unsafe { slice(b, n * channels * 4) }) else {
+        return IIERR_BAD_CALL;
+    };
+    ii_jpeg_write_section_float(f, input, z)
 }
 
 #[cfg(test)]
@@ -286,7 +375,7 @@ mod tests {
         writer.mode = MRC_MODE_BYTE;
         // IMOD order is bottom row then top row.
         let pixels = [0_u8, 0, 255, 255];
-        assert_eq!(write_any(&mut writer, &pixels, 0, false), 0);
+        assert_eq!(ii_jpeg_write_section(&mut writer, &pixels, 0), 0);
 
         let mut reader = ImodImageFile::default();
         reader.fp = Some(file);
@@ -296,7 +385,7 @@ mod tests {
             (2, 2, 1, MRC_MODE_BYTE)
         );
         let mut restored = [0_u8; 4];
-        assert_eq!(read_any(&reader, &mut restored, 0, NOPROC), 0);
+        assert_eq!(jpeg_read_section(&reader, &mut restored, 0), 0);
         assert!(restored[..2].iter().all(|pixel| *pixel < 20));
         assert!(restored[2..].iter().all(|pixel| *pixel > 235));
     }
@@ -309,8 +398,8 @@ mod tests {
         image.native_image_pixels = Some(vec![128]);
         let mut ushort = [0_u8; 2];
         let mut float = [0_u8; 4];
-        assert_eq!(read_any(&image, &mut ushort, 0, USHORT), 0);
-        assert_eq!(read_any(&image, &mut float, 0, FLOAT), 0);
+        assert_eq!(jpeg_read_section_ushort(&image, &mut ushort, 0), 0);
+        assert_eq!(jpeg_read_section_float(&image, &mut float, 0), 0);
         assert_eq!(u16::from_ne_bytes(ushort), 32_896);
         assert_eq!(f32::from_ne_bytes(float), 128.);
     }

@@ -42,6 +42,14 @@ pub fn thrdfft(array: &mut [f32], brray: &mut [f32], nx: i32, ny: i32, nz: i32, 
     }
 }
 
+/// C `thrdfftc`.
+///
+/// The C entry point receives dimensions by value, unlike the Fortran-facing
+/// `thrdfft` form.  Rust values already have that calling convention.
+pub fn thrdfftc(array: &mut [f32], brray: &mut [f32], nx: i32, ny: i32, nz: i32, idir: i32) {
+    thrdfft(array, brray, nx, ny, nz, idir);
+}
+
 #[cfg(test)]
 mod tests {
     use super::thrdfft;

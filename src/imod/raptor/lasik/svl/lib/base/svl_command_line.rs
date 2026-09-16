@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn application_options_keep_source_atoi_and_atof_fallbacks() {
-        let argv = vec!["app", "nope", "bad"]
+        let argv = vec!["app", "nope", "bad", "bad"]
             .into_iter()
             .map(str::to_string)
             .collect::<Vec<_>>();

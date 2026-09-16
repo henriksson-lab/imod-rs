@@ -69,22 +69,22 @@ impl EmpiricalDistribution {
     }
 
     /// C++ `EmpiricalDistribution::GetSampleSumOfSquares`.
-    pub fn sample_sum_of_squares(&self) -> f32 {
+    pub fn get_sample_sum_of_squares(&self) -> f32 {
         self.sum_of_squared_samples as f32
     }
 
     /// C++ `EmpiricalDistribution::GetNumberOfSamples`.
-    pub fn number_of_samples(&self) -> f32 {
+    pub fn get_number_of_samples(&self) -> f32 {
         self.number_of_samples as f32
     }
 
     /// C++ `EmpiricalDistribution::GetSampleSum`.
-    pub fn sample_sum(&self) -> f32 {
+    pub fn get_sample_sum(&self) -> f32 {
         self.sum_of_samples as f32
     }
 
     /// C++ `EmpiricalDistribution::GetSampleMean`.
-    pub fn sample_mean(&self) -> f32 {
+    pub fn get_sample_mean(&self) -> f32 {
         if self.number_of_samples > 0 {
             (self.sum_of_samples / self.number_of_samples as f64) as f32
         } else {
@@ -93,7 +93,7 @@ impl EmpiricalDistribution {
     }
 
     /// C++ `EmpiricalDistribution::GetSampleVariance`.
-    pub fn sample_variance(&self) -> f32 {
+    pub fn get_sample_variance(&self) -> f32 {
         if self.number_of_samples > 0 {
             (self.sum_of_squared_samples / self.number_of_samples as f64
                 - (self.sum_of_samples / self.number_of_samples as f64).powi(2)) as f32
@@ -103,9 +103,9 @@ impl EmpiricalDistribution {
     }
 
     /// C++ `EmpiricalDistribution::GetUnbiasedEstimateOfPopulationVariance`.
-    pub fn unbiased_estimate_of_population_variance(&self) -> f32 {
+    pub fn get_unbiased_estimate_of_population_variance(&self) -> f32 {
         if self.number_of_samples > 0 {
-            self.sample_variance() * self.number_of_samples as f32
+            self.get_sample_variance() * self.number_of_samples as f32
                 / (self.number_of_samples - 1) as f32
         } else {
             0.0
@@ -113,12 +113,12 @@ impl EmpiricalDistribution {
     }
 
     /// C++ inline `EmpiricalDistribution::GetMinimum`.
-    pub fn minimum(&self) -> f32 {
+    pub fn get_minimum(&self) -> f32 {
         self.minimum
     }
 
     /// C++ inline `EmpiricalDistribution::GetMaximum`.
-    pub fn maximum(&self) -> f32 {
+    pub fn get_maximum(&self) -> f32 {
         self.maximum
     }
 }
@@ -131,24 +131,27 @@ mod tests {
     fn tracks_source_statistics_and_reset_state() {
         let mut distribution = EmpiricalDistribution::new();
         assert!(distribution.is_constant());
-        assert_eq!(distribution.minimum(), f32::MAX);
-        assert_eq!(distribution.maximum(), -f32::MAX);
+        assert_eq!(distribution.get_minimum(), f32::MAX);
+        assert_eq!(distribution.get_maximum(), -f32::MAX);
 
         distribution.add_sample_value(2.0);
         distribution.add_sample_value(4.0);
         distribution.add_sample_value(6.0);
-        assert_eq!(distribution.number_of_samples(), 3.0);
-        assert_eq!(distribution.sample_sum(), 12.0);
-        assert_eq!(distribution.sample_sum_of_squares(), 56.0);
-        assert_eq!(distribution.sample_mean(), 4.0);
-        assert_eq!(distribution.sample_variance(), 8.0 / 3.0);
-        assert_eq!(distribution.unbiased_estimate_of_population_variance(), 4.0);
-        assert_eq!(distribution.minimum(), 2.0);
-        assert_eq!(distribution.maximum(), 6.0);
+        assert_eq!(distribution.get_number_of_samples(), 3.0);
+        assert_eq!(distribution.get_sample_sum(), 12.0);
+        assert_eq!(distribution.get_sample_sum_of_squares(), 56.0);
+        assert_eq!(distribution.get_sample_mean(), 4.0);
+        assert_eq!(distribution.get_sample_variance(), 8.0 / 3.0);
+        assert_eq!(
+            distribution.get_unbiased_estimate_of_population_variance(),
+            4.0
+        );
+        assert_eq!(distribution.get_minimum(), 2.0);
+        assert_eq!(distribution.get_maximum(), 6.0);
         assert!(!distribution.is_constant());
 
         distribution.reset();
-        assert_eq!(distribution.number_of_samples(), 0.0);
+        assert_eq!(distribution.get_number_of_samples(), 0.0);
         assert!(distribution.is_constant());
     }
 }

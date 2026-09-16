@@ -6,16 +6,24 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libimod::imodel::{
-    IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, Imod, Iobj, Ipoint,
+    imod_get_bounding_box, Imod, Iobj, Ipoint, IMOD_OBJFLAG_OFF, IMOD_OBJFLAG_OPEN,
+    IMOD_OBJFLAG_SCAT,
 };
 use crate::imod::libimod::iobj::{
-    IMOD_OBJFLAG_ANTI_ALIAS, IMOD_OBJFLAG_FCOLOR_PNT, IMOD_OBJFLAG_FILL, IMOD_OBJFLAG_MESH,
-    IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_PLANAR, IMOD_OBJFLAG_SCALE_WDTH, IMOD_OBJFLAG_THICK_CONT,
-    IMOD_OBJFLAG_TWO_SIDE, iobj_close, iobj_open, iobj_scat,
+    imod_object_get_bbox, iobj_close, iobj_open, iobj_scat, IMOD_OBJFLAG_ANTI_ALIAS,
+    IMOD_OBJFLAG_FCOLOR_PNT, IMOD_OBJFLAG_FILL, IMOD_OBJFLAG_MESH, IMOD_OBJFLAG_NOLINE,
+    IMOD_OBJFLAG_MCOLOR, IMOD_OBJFLAG_PLANAR, IMOD_OBJFLAG_SCALE_WDTH, IMOD_OBJFLAG_SCALAR,
+    IMOD_OBJFLAG_THICK_CONT, IMOD_OBJFLAG_TWO_SIDE, IMOD_OBJFLAG_USE_VALUE, MATFLAGS2_CONSTANT,
+    MATFLAGS2_SKIP_HIGH, MATFLAGS2_SKIP_LOW,
+};
+use crate::imod::libimod::istore::{istore_get_min_max, GEN_STORE_MINMAX1};
+use crate::imod::libimod::imesh::{
+    DEFAULT_VALUE, IMESH_CAP_ALL, IMESH_CAP_OFF, IMESH_MK_CAP_DOME, IMESH_MK_CAP_TUBE,
+    IMESH_MK_SKIP, IMESH_MK_SURF, IMESH_MK_TUBE,
 };
 use crate::imod::three_dmod::imodv::{
-    ImodvApp, imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg,
-    imodv_register_object_chg,
+    imodv_draw, imodv_finish_chg_unit, imodv_new_model_angles, imodv_register_model_chg,
+    imodv_register_object_chg, ImodvApp,
 };
 
 pub const STYLE_POINTS: i32 = 0;
@@ -28,6 +36,43 @@ const OBJTYPE_OPEN: i32 = 2;
 const OBJTYPE_SCAT: i32 = 4;
 const WORLD_QUALITY_SHIFT: u32 = 8;
 const WORLD_QUALITY_BITS: u32 = 7 << WORLD_QUALITY_SHIFT;
+
+fn mesh_object_synchronously(object: &mut Iobj, scale: &Ipoint, low_resolution: bool) -> i32 {
+    let params = object.mesh_param.clone().unwrap_or_default();
+    crate::imod::libmesh::imesh_set_min_max(
+        Ipoint { x: params.xmin, y: params.ymin, z: -1.0e30 },
+        Ipoint { x: params.xmax, y: params.ymax, z: 1.0e30 },
+    );
+    let flags = params.flags;
+    let tube_diameter = params.tube_diameter as f64;
+    let result = if object.flags & IMOD_OBJFLAG_OPEN != 0 {
+        if flags & IMESH_MK_TUBE != 0 {
+            crate::imod::libmesh::mesh_open_tube_object(object, scale, flags, tube_diameter)
+        } else {
+            crate::imod::libmesh::mesh_open_object_in_range(
+                object, scale, (if low_resolution { params.incz_low_res } else { params.incz_high_res }).max(1), flags, params.passes.max(1),
+                params.minz, params.maxz,
+            )
+        }
+    } else {
+        crate::imod::libmesh::imesh_set_skin_flags(
+            flags as i32,
+            if flags & crate::imod::libimod::imesh::IMESH_MK_FAST != 0 { 0 } else { 1 },
+        );
+        let cap_skip = params.cap_skip_zlist.as_deref().map(|list| {
+            &list[..(params.cap_skip_nz.max(0) as usize).min(list.len())]
+        });
+        crate::imod::libmesh::skin_unconnected_contour_stack_in_range_with_caps_and_skip(
+            object, scale, flags, params.minz, params.maxz, params.cap, cap_skip,
+        )
+    };
+    if result == 0 && low_resolution {
+        for mesh in &mut object.mesh {
+            mesh.flag |= 1 << crate::imod::libimod::imesh::IMESH_FLAG_RES_SHIFT;
+        }
+    }
+    result
+}
 
 /// Original `ObjectEditField`; widget callbacks are the paired Qt form boundary.
 pub struct ObjectEditField {
@@ -83,7 +128,7 @@ pub const OBJECT_EDIT_FIELD_DATA: &[ObjectEditField] = &[
 ];
 
 /// Original `ImodvObjed`, minus QObject/QTimer ownership which belongs to Qt.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ImodvObjed {
     pub timer_id: i32,
     pub current_panel_frame: i32,
@@ -94,6 +139,34 @@ pub struct ImodvObjed {
     pub dialog_open: bool,
     pub meshing_object: i32,
     pub mesh_busy: bool,
+    pub make_low_res: bool,
+    /// `meshMin` / `meshMax` and `meshRmin` / `meshRmax` from the Values
+    /// panel.  They are control state, not part of the model.
+    pub mesh_min: i32,
+    pub mesh_max: i32,
+    pub mesh_rmin: f32,
+    pub mesh_rmax: f32,
+}
+
+impl Default for ImodvObjed {
+    fn default() -> Self {
+        Self {
+            timer_id: 0,
+            current_panel_frame: 0,
+            edit_all: 0,
+            collect_changes: false,
+            ctrl_pressed: false,
+            multiple_color_ok: false,
+            dialog_open: false,
+            meshing_object: 0,
+            mesh_busy: false,
+            make_low_res: false,
+            mesh_min: 0,
+            mesh_max: 255,
+            mesh_rmin: 0.,
+            mesh_rmax: 255.,
+        }
+    }
 }
 /// Original `MeshColorBar`; rendering is delegated to the active GL/Qt painter.
 #[derive(Clone, Debug, Default)]
@@ -169,6 +242,29 @@ pub fn set_obj_flag(
     }
     if registered {
         imodv_register_object_chg(a.obj_num);
+    }
+}
+/// Original static `setBitInMatFlags2`.
+pub fn set_bit_in_mat_flags_2(a: &mut ImodvApp, flag: u32, state: i32) {
+    if a.imod.is_null() || objed_object(a).is_none() {
+        return;
+    }
+    let (mut first, mut last) = (0, 0);
+    set_start_end_model(a, true, &mut first, &mut last);
+    for model in first..=last {
+        let count = num_editable_objects(a, model);
+        for object in 0..count {
+            if change_model_object(a, model, object, true) {
+                if let Some(obj) = editable_object(a, model, object) {
+                    imodv_register_object_chg(object);
+                    if state != 0 {
+                        obj.matflags2 |= flag as u8;
+                    } else {
+                        obj.matflags2 &= !(flag as u8);
+                    }
+                }
+            }
+        }
     }
 }
 /// Original static `optionSetFlags`.
@@ -393,6 +489,15 @@ pub fn finish_change_and_draw(a: &mut ImodvApp, do_objset: bool, draw_images: bo
     unsafe { imodv_draw() };
 }
 
+/// Source `setOrClearFlags` macro applied to a `MeshParams::flags` word.
+fn set_or_clear_mesh_flag(
+    params: &mut crate::imod::libimod::imesh::MeshParams,
+    flag: u32,
+    state: bool,
+) {
+    if state { params.flags |= flag; } else { params.flags &= !flag; }
+}
+
 impl ImodvObjed {
     /// Original `ImodvObjed::lineColorSlot`.
     pub fn line_color_slot(&mut self, a: &mut ImodvApp, color: i32, value: i32, dragging: bool) {
@@ -445,6 +550,8 @@ impl ImodvObjed {
                 1 => o.diffuse = value as u8,
                 2 => o.specular = value as u8,
                 3 => o.shininess = value as u8,
+                4 => o.valblack = value as u8,
+                5 => o.valwhite = value as u8,
                 _ => {}
             }
         }
@@ -551,70 +658,474 @@ impl ImodvObjed {
     }
     /// Original `ImodvObjed::meshShowSlot`.
     pub fn mesh_show_slot(&mut self, a: &mut ImodvApp, value: i32) {
-        if let Some(o) = objed_object(a) {
-            o.drawmode = value;
-        }
-        finish_change_and_draw(a, false, true);
+        set_obj_flag(a, IMOD_OBJFLAG_SCALAR, (value == 2) as i32, 0, false, false);
+        set_obj_flag(a, IMOD_OBJFLAG_USE_VALUE, (value == 1) as i32, 0, false, false);
+        finish_change_and_draw(a, true, true);
     }
     /// Original `ImodvObjed::meshFalseSlot`.
-    pub fn mesh_false_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn mesh_false_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_obj_flag(a, IMOD_OBJFLAG_MCOLOR, state as i32, 0, false, false);
+        finish_change_and_draw(a, true, true);
+    }
     /// Original `ImodvObjed::meshConstantSlot`.
-    pub fn mesh_constant_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn mesh_constant_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_bit_in_mat_flags_2(a, MATFLAGS2_CONSTANT, state as i32);
+        finish_change_and_draw(a, true, true);
+    }
     /// Original `ImodvObjed::meshLevelSlot`.
     pub fn mesh_level_slot(
         &mut self,
-        _a: &mut ImodvApp,
-        _which: i32,
-        _value: i32,
-        _dragging: bool,
+        a: &mut ImodvApp,
+        which: i32,
+        value: i32,
+        dragging: bool,
     ) {
+        let span = self.mesh_max - self.mesh_min;
+        if span <= 0 {
+            return;
+        }
+        let scaled = (255. * (value - self.mesh_min) as f32 / span as f32 + 0.5).floor() as i32;
+        self.material_slot(a, which + 4, scaled, dragging);
+    }
+
+    /// Original static `setScalar_cb`: refreshes the scalar control range for
+    /// the current object.  Widget enablement/color-bar painting stay at the
+    /// Rust GUI boundary, while this preserves the source range conversion.
+    pub fn set_scalar(&mut self, a: &ImodvApp) {
+        let Some(model) = (unsafe { a.imod.as_ref() }) else {
+            return;
+        };
+        let Some(object) = model.obj.get(a.obj_num.max(0) as usize) else {
+            return;
+        };
+        self.mesh_rmin = 0.;
+        self.mesh_rmax = 255.;
+        if object.flags & IMOD_OBJFLAG_USE_VALUE != 0 {
+            istore_get_min_max(
+                &object.store,
+                object.cont.len() as i32,
+                GEN_STORE_MINMAX1,
+                &mut self.mesh_rmin,
+                &mut self.mesh_rmax,
+            );
+        }
+        let mut decimals = if self.mesh_rmax > self.mesh_rmin {
+            -(((self.mesh_rmax - self.mesh_rmin) as f64 / 1500.).log10()) as i32
+        } else {
+            0
+        };
+        decimals = decimals.clamp(0, 6);
+        let scale = 10_f32.powi(decimals);
+        self.mesh_min = (self.mesh_rmin * scale + 0.5).floor() as i32;
+        self.mesh_max = (self.mesh_rmax * scale + 0.5).floor() as i32;
+        if self.mesh_min >= self.mesh_max {
+            self.mesh_max = self.mesh_min + 1;
+        }
     }
     /// Original `ImodvObjed::meshSkipLoSlot`.
-    pub fn mesh_skip_lo_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn mesh_skip_lo_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_bit_in_mat_flags_2(a, MATFLAGS2_SKIP_LOW, state as i32);
+        finish_change_and_draw(a, true, true);
+    }
     /// Original `ImodvObjed::meshSkipHiSlot`.
-    pub fn mesh_skip_hi_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn mesh_skip_hi_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        set_bit_in_mat_flags_2(a, MATFLAGS2_SKIP_HIGH, state as i32);
+        finish_change_and_draw(a, true, true);
+    }
     /// Original `ImodvObjed::clipShowSlot`.
     pub fn clip_show_slot(&mut self, a: &mut ImodvApp, state: bool) {
         a.draw_clip = state as i32;
         unsafe { imodv_draw() };
     }
     /// Original `ImodvObjed::clipGlobalSlot`.
-    pub fn clip_global_slot(&mut self, _a: &mut ImodvApp, _value: i32) {}
+    pub fn clip_global_slot(&mut self, a: &mut ImodvApp, value: i32) {
+        if let Some(model) = unsafe { a.imod.as_mut() } {
+            model.edit_global_clip = value;
+        }
+    }
     /// Original `ImodvObjed::clipSkipSlot`.
-    pub fn clip_skip_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn clip_skip_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        let object_number = a.obj_num;
+        if let Some(object) = objed_object(a) {
+            imodv_register_object_chg(object_number);
+            if state {
+                object.clips.flags |= 1 << 7;
+            } else {
+                object.clips.flags &= !(1 << 7);
+            }
+            finish_change_and_draw(a, false, false);
+        }
+    }
     /// Original `ImodvObjed::clipPlaneSlot`.
-    pub fn clip_plane_slot(&mut self, _a: &mut ImodvApp, _value: i32) {}
+    pub fn clip_plane_slot(&mut self, a: &mut ImodvApp, value: i32) {
+        if let Some(model) = unsafe { a.imod.as_mut() } {
+            if model.edit_global_clip != 0 {
+                imodv_register_model_chg();
+                model.view[0].clips.plane = (value - 1) as u8;
+            } else if let Some(object) = model.obj.get_mut(a.obj_num.max(0) as usize) {
+                imodv_register_object_chg(a.obj_num);
+                object.clips.plane = (value - 1) as u8;
+            }
+        }
+        if a.draw_clip != 0 {
+            unsafe { imodv_draw() };
+        }
+    }
     /// Original `ImodvObjed::clipResetSlot`.
-    pub fn clip_reset_slot(&mut self, _a: &mut ImodvApp, _which: i32) {}
+    pub fn clip_reset_slot(&mut self, a: &mut ImodvApp, which: i32) {
+        self.clip_reset_plane_to_axis(a, which, -1, -1);
+    }
+    /// Original `ImodvObjed::clipResetPlaneToAxis`.
+    pub fn clip_reset_plane_to_axis(
+        &mut self,
+        a: &mut ImodvApp,
+        which: i32,
+        do_global: i32,
+        plane_num: i32,
+    ) {
+        let object_number = a.obj_num;
+        let Some(model) = (unsafe { a.imod.as_mut() }) else {
+            return;
+        };
+        let do_global = if do_global < 0 {
+            model.edit_global_clip != 0
+        } else {
+            do_global != 0
+        };
+        let (mut min, mut max) = (Ipoint::default(), Ipoint::default());
+        let clips = if do_global {
+            imod_get_bounding_box(model, &mut min, &mut max);
+            imodv_register_model_chg();
+            &mut model.view[0].clips
+        } else {
+            let Some(object) = model.obj.get_mut(object_number.max(0) as usize) else {
+                return;
+            };
+            imod_object_get_bbox(object, &mut min, &mut max);
+            imodv_register_object_chg(object_number);
+            &mut object.clips
+        };
+        let plane = if plane_num < 0 {
+            clips.plane as usize
+        } else {
+            plane_num as usize
+        };
+        if plane >= clips.normal.len() {
+            return;
+        }
+        clips.point[plane] = Ipoint {
+            x: -(max.x + min.x) * 0.5,
+            y: -(max.y + min.y) * 0.5,
+            z: -(max.z + min.z) * 0.5,
+        };
+        clips.normal[plane] = Ipoint::default();
+        if which == 2 {
+            clips.normal[plane].z = -1.;
+        } else if which == 1 {
+            clips.normal[plane].y = -1.;
+        } else {
+            clips.normal[plane].x = -1.;
+        }
+        finish_change_and_draw(a, false, false);
+    }
     /// Original `ImodvObjed::clipInvertSlot`.
-    pub fn clip_invert_slot(&mut self, _a: &mut ImodvApp) {}
+    pub fn clip_invert_slot(&mut self, a: &mut ImodvApp) {
+        const WORLD_MOVE_ALL_CLIP: u32 = 1 << 12;
+        let object_number = a.obj_num;
+        let Some(model) = (unsafe { a.imod.as_mut() }) else {
+            return;
+        };
+        let move_all = model.view[0].world & WORLD_MOVE_ALL_CLIP != 0;
+        let clips = if model.edit_global_clip != 0 {
+            imodv_register_model_chg();
+            &mut model.view[0].clips
+        } else {
+            let Some(object) = model.obj.get_mut(object_number.max(0) as usize) else {
+                return;
+            };
+            imodv_register_object_chg(object_number);
+            &mut object.clips
+        };
+        let (first, last) = if move_all && clips.count == 0 {
+            (1, 0)
+        } else if move_all {
+            (0, clips.count as usize - 1)
+        } else {
+            let plane = clips.plane as usize;
+            (plane, plane)
+        };
+        for index in first..=last.min(clips.normal.len() - 1) {
+            if clips.flags & (1 << index) != 0 || first == last {
+                clips.normal[index].x = -clips.normal[index].x;
+                clips.normal[index].y = -clips.normal[index].y;
+                clips.normal[index].z = -clips.normal[index].z;
+            }
+        }
+        finish_change_and_draw(a, false, false);
+    }
     /// Original `ImodvObjed::clipToggleSlot`.
-    pub fn clip_toggle_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn clip_toggle_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        self.toggle_clip_plane(a, state, -1, -1);
+    }
+    /// Original `ImodvObjed::toggleClipPlane`.
+    pub fn toggle_clip_plane(
+        &mut self,
+        a: &mut ImodvApp,
+        state: bool,
+        do_global: i32,
+        plane_num: i32,
+    ) {
+        const WORLD_MOVE_ALL_CLIP: u32 = 1 << 12;
+        let object_number = a.obj_num;
+        let Some(model) = (unsafe { a.imod.as_mut() }) else {
+            return;
+        };
+        let do_global = if do_global < 0 {
+            model.edit_global_clip != 0
+        } else {
+            do_global != 0
+        };
+        let move_all = plane_num < 0 && model.view[0].world & WORLD_MOVE_ALL_CLIP != 0;
+        let clips = if do_global {
+            imodv_register_model_chg();
+            &mut model.view[0].clips
+        } else {
+            let Some(object) = model.obj.get_mut(a.obj_num.max(0) as usize) else {
+                return;
+            };
+            imodv_register_object_chg(object_number);
+            &mut object.clips
+        };
+        let index = if plane_num < 0 {
+            clips.plane as usize
+        } else {
+            plane_num as usize
+        };
+        if index >= clips.normal.len() || index >= u8::BITS as usize {
+            return;
+        }
+        let (first, last) = if move_all {
+            (0, (clips.count as usize).saturating_sub(1).max(index))
+        } else {
+            (index, index)
+        };
+        let mut reset_plane = None;
+        for index in first..=last.min(clips.normal.len() - 1) {
+            let mask = 1u8 << index;
+            if state {
+                clips.flags |= mask;
+                if index == clips.count as usize {
+                    clips.count += 1;
+                }
+                if clips.point[index] == Ipoint::default()
+                    && clips.normal[index]
+                        == (Ipoint {
+                            x: 0.,
+                            y: 0.,
+                            z: -1.,
+                        })
+                {
+                    reset_plane = Some(index);
+                    break;
+                }
+            } else {
+                clips.flags &= !mask;
+            }
+        }
+        if let Some(index) = reset_plane {
+            self.clip_reset_plane_to_axis(a, 2, do_global as i32, index as i32);
+            return;
+        }
+        finish_change_and_draw(a, true, false);
+    }
     /// Original `ImodvObjed::clipMoveAllSlot`.
-    pub fn clip_move_all_slot(&mut self, _a: &mut ImodvApp, _state: bool) {}
+    pub fn clip_move_all_slot(&mut self, a: &mut ImodvApp, state: bool) {
+        const WORLD_MOVE_ALL_CLIP: u32 = 1 << 12;
+        imodv_register_model_chg();
+        let (mut first, mut last) = (0, 0);
+        set_start_end_model(a, true, &mut first, &mut last);
+        for index in first..=last {
+            if let Some(model) = unsafe {
+                a.mod_
+                    .get(index as usize)
+                    .and_then(|model| model.as_ptr().as_mut())
+            } {
+                if state {
+                    model.view[0].world |= WORLD_MOVE_ALL_CLIP;
+                } else {
+                    model.view[0].world &= !WORLD_MOVE_ALL_CLIP;
+                }
+            }
+        }
+        imodv_finish_chg_unit();
+    }
     /// Original `ImodvObjed::moveCenterSlot`.
-    pub fn move_center_slot(&mut self, _a: &mut ImodvApp) {}
+    pub fn move_center_slot(&mut self, a: &mut ImodvApp) {
+        let Some(model) = (unsafe { a.imod.as_mut() }) else {
+            return;
+        };
+        let Some(object) = model.obj.get(a.obj_num.max(0) as usize) else {
+            return;
+        };
+        let (mut min, mut max) = (Ipoint::default(), Ipoint::default());
+        if imod_object_get_bbox(object, &mut min, &mut max) < 0 {
+            return;
+        }
+        let view = &mut model.view[0];
+        view.trans.x = -((max.x + min.x) * 0.5);
+        view.trans.y = -((max.y + min.y) * 0.5);
+        view.trans.z = -((max.z + min.z) * 0.5);
+        unsafe { imodv_draw() };
+    }
     /// Original `ImodvObjed::moveAxisSlot`.
-    pub fn move_axis_slot(&mut self, _a: &mut ImodvApp, _which: i32) {}
+    pub fn move_axis_slot(&mut self, a: &mut ImodvApp, which: i32) {
+        imodv_objed_move_to_axis(a, which);
+    }
     /// Original `ImodvObjed::subsetSlot`.
     pub fn subset_slot(&mut self, a: &mut ImodvApp, which: i32) {
         a.current_subset = which;
         unsafe { imodv_draw() };
     }
-    /// Original meshing slots: these preserve busy sequencing pending the paired mesh unit.
-    pub fn make_pass_slot(&mut self, _value: i32) {}
-    pub fn make_diam_slot(&mut self, _value: f64) {}
-    pub fn make_tol_slot(&mut self, _value: f64) {}
-    pub fn make_zinc_slot(&mut self, _value: i32) {}
-    pub fn make_flat_slot(&mut self, _value: f64) {}
-    pub fn make_spin_changed(&mut self, _which: i32, _value: f64) {}
-    pub fn make_state_slot(&mut self, _which: i32) {}
-    pub fn make_zedit_slot(&mut self) {}
+    /// Original `ImodvObjed::makePassSlot` through `makeSpinChanged`.
+    pub fn make_pass_slot(&mut self, a: &mut ImodvApp, value: i32) { self.make_spin_changed(a, 0, value as f64); }
+    pub fn make_diam_slot(&mut self, a: &mut ImodvApp, value: f64) { self.make_spin_changed(a, 1, value); }
+    pub fn make_tol_slot(&mut self, a: &mut ImodvApp, value: f64) { self.make_spin_changed(a, 2, value); }
+    pub fn make_zinc_slot(&mut self, a: &mut ImodvApp, value: i32) { self.make_spin_changed(a, 3, value as f64); }
+    pub fn make_flat_slot(&mut self, a: &mut ImodvApp, value: f64) { self.make_spin_changed(a, 4, value); }
+    /// Original `ImodvObjed::makeSpinChanged`.
+    pub fn make_spin_changed(&mut self, a: &mut ImodvApp, which: i32, value: f64) {
+        if a.imod.is_null() || objed_object(a).is_none() { return; }
+        let (mut first, mut last) = (0, 0);
+        set_start_end_model(a, true, &mut first, &mut last);
+        let mut any = false;
+        for model in first..=last {
+            let count = num_editable_objects(a, model);
+            for object in 0..count {
+                if !change_model_object(a, model, object, true) { continue; }
+                let Some(obj) = editable_object(a, model, object) else { continue; };
+                if iobj_scat(obj.flags) != 0 { continue; }
+                let param = obj.mesh_param.get_or_insert_with(Default::default);
+                match which {
+                    0 => param.passes = value.round() as i32,
+                    1 => param.tube_diameter = value as f32,
+                    2 if self.make_low_res => param.tol_low_res = value as f32,
+                    2 => param.tol_high_res = value as f32,
+                    3 if self.make_low_res => param.incz_low_res = value.round() as i32,
+                    3 => param.incz_high_res = value.round() as i32,
+                    4 => param.flat_crit = value as f32,
+                    _ => continue,
+                }
+                any = true;
+            }
+        }
+        if any { imodv_finish_chg_unit(); }
+    }
+    /// Original `ImodvObjed::makeStateSlot`; `state` is supplied by the Rust
+    /// UI event instead of fetched from the former Qt checkbox.
+    pub fn make_state_slot(&mut self, a: &mut ImodvApp, which: i32, state: bool) {
+        // MAKE_MESH_LOW
+        if which == 0 { self.make_low_res = state; return; }
+        if a.imod.is_null() || objed_object(a).is_none() { return; }
+        let (mut first, mut last) = (0, 0);
+        set_start_end_model(a, true, &mut first, &mut last);
+        let mut any = false;
+        for model in first..=last {
+            for object in 0..num_editable_objects(a, model) {
+                if !change_model_object(a, model, object, true) { continue; }
+                let Some(obj) = editable_object(a, model, object) else { continue; };
+                if iobj_scat(obj.flags) != 0 { continue; }
+                let open = iobj_open(obj.flags) != 0;
+                let param = obj.mesh_param.get_or_insert_with(Default::default);
+                let tube = param.flags & IMESH_MK_TUBE != 0 && open;
+                match which {
+                    1 if !tube => set_or_clear_mesh_flag(param, IMESH_MK_SKIP, state),
+                    2 if !tube => set_or_clear_mesh_flag(param, IMESH_MK_SURF, state),
+                    3 if open => set_or_clear_mesh_flag(param, IMESH_MK_TUBE, state),
+                    4 if tube => set_or_clear_mesh_flag(param, IMESH_MK_CAP_TUBE, state),
+                    4 => param.cap = if state { IMESH_CAP_ALL } else { IMESH_CAP_OFF },
+                    5 if tube => set_or_clear_mesh_flag(param, IMESH_MK_CAP_DOME, state),
+                    _ => continue,
+                }
+                any = true;
+            }
+        }
+        if any { imodv_finish_chg_unit(); }
+    }
+    /// Original `ImodvObjed::makeZeditSlot`; the Rust UI supplies the text.
+    pub fn make_zedit_slot(&mut self, a: &mut ImodvApp, text: &str) {
+        if a.imod.is_null() || objed_object(a).is_none() { return; }
+        let numbers: Vec<i32> = text
+            .split(',')
+            .filter_map(|part| part.trim().parse::<i32>().ok())
+            .collect();
+        let (mut first, mut last) = (0, 0);
+        set_start_end_model(a, true, &mut first, &mut last);
+        let mut any = false;
+        for model in first..=last {
+            for object in 0..num_editable_objects(a, model) {
+                if !change_model_object(a, model, object, true) { continue; }
+                let Some(obj) = editable_object(a, model, object) else { continue; };
+                if iobj_scat(obj.flags) != 0 { continue; }
+                let param = obj.mesh_param.get_or_insert_with(Default::default);
+                param.minz = DEFAULT_VALUE;
+                param.maxz = DEFAULT_VALUE;
+                if let Some(&min) = numbers.first() {
+                    let min = min - 1;
+                    if numbers.len() == 1 {
+                        param.minz = min;
+                        param.maxz = min + 1;
+                    } else {
+                        let max = numbers[1] - 1;
+                        param.minz = min.min(max);
+                        param.maxz = (min.max(max)).max(param.minz + 1);
+                    }
+                }
+                any = true;
+            }
+        }
+        if any { imodv_finish_chg_unit(); }
+    }
     pub fn make_doit_slot(&mut self) {
         self.mesh_busy = true;
     }
+    /// Runs the currently translated meshing branch for the selected object.
+    /// A `-2` result means a closed-object Z section needs the remaining
+    /// nesting dispatcher.
+    pub fn make_doit_for_app(&mut self, a: &mut ImodvApp) -> i32 {
+        let Some(model) = (unsafe { a.imod.as_mut() }) else { return -1; };
+        let scale = Ipoint {
+            x: if model.xscale == 0. { 1. } else { model.xscale },
+            y: if model.yscale == 0. { 1. } else { model.yscale },
+            z: if model.zscale == 0. { 1. } else { model.zscale },
+        };
+        let Some(object) = model.obj.get_mut(a.obj_num.max(0) as usize) else { return -1; };
+        self.mesh_busy = true;
+        let result = mesh_object_synchronously(object, &scale, self.make_low_res);
+        self.mesh_busy = false;
+        if result == 0 { imodv_register_object_chg(a.obj_num); }
+        result
+    }
     pub fn make_do_all_slot(&mut self) {
         self.mesh_busy = true;
+    }
+    /// Synchronous Rust-native equivalent of `makeDoAllSlot`.
+    pub fn make_do_all_for_app(&mut self, a: &mut ImodvApp) -> i32 {
+        let Some(model) = (unsafe { a.imod.as_mut() }) else { return -1; };
+        let scale = Ipoint {
+            x: if model.xscale == 0. { 1. } else { model.xscale },
+            y: if model.yscale == 0. { 1. } else { model.yscale },
+            z: if model.zscale == 0. { 1. } else { model.zscale },
+        };
+        self.mesh_busy = true;
+        let mut result = 0;
+        for (index, object) in model.obj.iter_mut().enumerate() {
+            if object.cont.is_empty() || object.flags & IMOD_OBJFLAG_SCAT != 0 { continue; }
+            let status = mesh_object_synchronously(object, &scale, self.make_low_res);
+            if status != 0 { result = status; break; }
+            imodv_register_object_chg(index as i32);
+        }
+        self.mesh_busy = false;
+        result
     }
     pub fn make_do_up_slot(&mut self) {
         self.mesh_busy = true;
@@ -622,12 +1133,30 @@ impl ImodvObjed {
     pub fn make_do_down_slot(&mut self) {
         self.mesh_busy = true;
     }
+    /// Synchronous Rust-native equivalent of `stepZandMeshOne`.
+    pub fn step_zand_mesh_one_for_app(&mut self, a: &mut ImodvApp, direction: i32) -> i32 {
+        let zmax = unsafe { a.imod.as_ref() }.map_or(-1, |model| model.zmax);
+        if let Some(object) = objed_object(a) {
+            if let Some(params) = object.mesh_param.as_mut() {
+                if params.minz + direction >= 0 && params.maxz + direction <= zmax {
+                    params.minz += direction;
+                    params.maxz += direction;
+                }
+            }
+        } else { return -1; }
+        self.make_doit_for_app(a)
+    }
     pub fn start_meshing_next(&mut self) -> i32 {
         (!self.mesh_busy) as i32
     }
-    pub fn mesh_one_object(&mut self, _obj: &mut Iobj) -> i32 {
+    /// Source-compatible synchronous fallback for callers that own only an
+    /// object.  The app-aware entry points use model scale; this boundary uses
+    /// unit scale, as the original method's `Iobj *` signature has no model.
+    pub fn mesh_one_object(&mut self, obj: &mut Iobj) -> i32 {
         self.mesh_busy = true;
-        0
+        let result = mesh_object_synchronously(obj, &Ipoint { x: 1., y: 1., z: 1. }, self.make_low_res);
+        self.mesh_busy = false;
+        result
     }
     pub fn update_meshing(&mut self, _ob: i32) {}
     pub fn step_zand_mesh_one(&mut self, _dir: i32) {}
@@ -638,14 +1167,73 @@ pub fn imodv_objed_draw_clip_plane(a: &mut ImodvApp, state: bool) {
     unsafe { imodv_draw() };
 }
 /// Original `imodvObjedToggleClip`.
-pub fn imodv_objed_toggle_clip(_a: &mut ImodvApp, _global: i32, _plane: i32) {}
+pub fn imodv_objed_toggle_clip(a: &mut ImodvApp, global: i32, plane: i32) {
+    let Some(model) = (unsafe { a.imod.as_ref() }) else {
+        return;
+    };
+    let do_global = if global < 0 {
+        model.edit_global_clip != 0
+    } else {
+        global != 0
+    };
+    let Some(clips) = (if do_global {
+        Some(&model.view[0].clips)
+    } else {
+        model.obj.get(a.obj_num.max(0) as usize).map(|object| &object.clips)
+    }) else {
+        return;
+    };
+    let index = if plane < 0 { clips.plane as usize } else { plane as usize };
+    if index >= clips.normal.len() || index >= u8::BITS as usize {
+        return;
+    }
+    let state = clips.flags & (1u8 << index) == 0;
+    let mut editor = ImodvObjed::default();
+    editor.toggle_clip_plane(a, state, do_global as i32, plane);
+}
 /// Original `imodvObjedMoveToAxis`.
-pub fn imodv_objed_move_to_axis(_a: &mut ImodvApp, _which: i32) {}
+pub fn imodv_objed_move_to_axis(a: &mut ImodvApp, which: i32) {
+    const MOVE_QUARTERS: [i32; 12] = [0, -1, 2, 1, 0, 1, 2, -1, 2, -1, 0, 1];
+    let Some(&quarter) = MOVE_QUARTERS.get(which as usize) else {
+        return;
+    };
+    let mut rot = Ipoint::default();
+    match which / 4 {
+        0 => rot.x = quarter as f32 * 90.,
+        1 => rot.y = quarter as f32 * 90.,
+        2 => {
+            rot.x = 90.;
+            rot.y = 180.;
+            rot.z = quarter as f32 * 90.;
+        }
+        _ => return,
+    }
+    if let Some(model) = unsafe { a.imod.as_mut() } {
+        model.view[0].rot = rot;
+    } else {
+        return;
+    }
+    imodv_new_model_angles(&rot);
+    if a.moveall != 0 {
+        for model in &a.mod_ {
+            if let Some(view) =
+                unsafe { model.as_ptr().as_mut() }.and_then(|model| model.view.first_mut())
+            {
+                view.rot = rot;
+            }
+        }
+    }
+    unsafe { imodv_draw() };
+}
 /// Original `imodvObjedFreeingExtraObj`.
 pub fn imodv_objed_freeing_extra_obj(_a: &mut ImodvApp, _obj: *mut Iobj) {}
 /// Original `imodvObjedMeshObject`.
 pub fn imodv_objed_mesh_object(editor: &mut ImodvObjed) {
     editor.mesh_busy = true;
+}
+/// Rust-native app-aware counterpart of `imodvObjedMeshObject`.
+pub fn imodv_objed_mesh_object_for_app(editor: &mut ImodvObjed, a: &mut ImodvApp) -> i32 {
+    editor.make_doit_for_app(a)
 }
 /// Original `meshingBusy`.
 pub fn meshing_busy(editor: &ImodvObjed) -> bool {
@@ -713,6 +1301,28 @@ mod tests {
         assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_OPEN, 0);
         assert_ne!(m.obj[1].flags & IMOD_OBJFLAG_OPEN, 0);
         assert_eq!(m.obj[2].flags & IMOD_OBJFLAG_OPEN, 0);
+
+        editor.mesh_show_slot(&mut a, 1);
+        assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_USE_VALUE, 0);
+        assert_eq!(m.obj[0].flags & IMOD_OBJFLAG_SCALAR, 0);
+        editor.mesh_show_slot(&mut a, 2);
+        assert_eq!(m.obj[0].flags & IMOD_OBJFLAG_USE_VALUE, 0);
+        assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_SCALAR, 0);
+        editor.mesh_false_slot(&mut a, true);
+        editor.mesh_constant_slot(&mut a, true);
+        editor.mesh_skip_lo_slot(&mut a, true);
+        editor.mesh_skip_hi_slot(&mut a, true);
+        assert_ne!(m.obj[0].flags & IMOD_OBJFLAG_MCOLOR, 0);
+        assert_eq!(
+            m.obj[0].matflags2,
+            (MATFLAGS2_CONSTANT | MATFLAGS2_SKIP_LOW | MATFLAGS2_SKIP_HIGH) as u8
+        );
+        editor.material_slot(&mut a, 4, 17, false);
+        editor.material_slot(&mut a, 5, 233, false);
+        assert_eq!((m.obj[0].valblack, m.obj[0].valwhite), (17, 233));
+        editor.set_scalar(&a);
+        editor.mesh_level_slot(&mut a, 0, 128, false);
+        assert_eq!(m.obj[0].valblack, 128);
     }
 
     #[test]
@@ -735,5 +1345,281 @@ mod tests {
 
         assert_eq!(current.view[0].world, (1 << 2) | (3 << WORLD_QUALITY_SHIFT));
         assert_eq!(other.view[0].world, (1 << 3) | (3 << WORLD_QUALITY_SHIFT));
+    }
+
+    #[test]
+    fn move_controls_center_current_object_and_share_axis_rotation() {
+        let mut one = Box::new(Imod::default());
+        let mut object = Iobj::default();
+        object.cont.push(crate::imod::libimod::imodel::Icont {
+            pts: vec![
+                Ipoint {
+                    x: 2.,
+                    y: 4.,
+                    z: 6.,
+                },
+                Ipoint {
+                    x: 6.,
+                    y: 10.,
+                    z: 14.,
+                },
+            ],
+            ..Default::default()
+        });
+        one.obj.push(object);
+        let mut two = Box::new(Imod::default());
+        let mut a = ImodvApp {
+            imod: &mut *one,
+            mod_: vec![
+                std::ptr::NonNull::from(&mut *one),
+                std::ptr::NonNull::from(&mut *two),
+            ],
+            num_mods: 2,
+            moveall: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        editor.move_center_slot(&mut a);
+        assert_eq!(one.view[0].trans.x, -4.);
+        assert_eq!(one.view[0].trans.y, -7.);
+        assert_eq!(one.view[0].trans.z, -10.);
+        editor.move_axis_slot(&mut a, 5);
+        assert_eq!(one.view[0].rot.y, 90.);
+        assert_eq!(two.view[0].rot.y, 90.);
+    }
+
+    #[test]
+    fn enabling_a_new_clip_plane_centers_it_on_the_object() {
+        let mut model = Box::new(Imod::default());
+        let mut object = Iobj::default();
+        object.cont.push(crate::imod::libimod::imodel::Icont {
+            pts: vec![
+                Ipoint {
+                    x: 2.,
+                    y: 4.,
+                    z: 6.,
+                },
+                Ipoint {
+                    x: 6.,
+                    y: 10.,
+                    z: 14.,
+                },
+            ],
+            ..Default::default()
+        });
+        model.obj.push(object);
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        editor.clip_toggle_slot(&mut a, true);
+
+        let clips = &model.obj[0].clips;
+        assert_eq!(clips.count, 1);
+        assert_eq!(clips.flags, 1);
+        assert_eq!(clips.point[0], Ipoint { x: -4., y: -7., z: -10. });
+        assert_eq!(clips.normal[0], Ipoint { x: 0., y: 0., z: -1. });
+    }
+
+    #[test]
+    fn meshing_value_slots_create_and_update_object_parameters() {
+        let mut model = Box::new(Imod::default());
+        model.obj.push(Iobj::default());
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        editor.make_pass_slot(&mut a, 4);
+        editor.make_diam_slot(&mut a, 7.5);
+        editor.make_tol_slot(&mut a, 0.25);
+        editor.make_zinc_slot(&mut a, 3);
+        editor.make_flat_slot(&mut a, 0.75);
+        editor.make_low_res = true;
+        editor.make_tol_slot(&mut a, 1.5);
+        editor.make_zinc_slot(&mut a, 5);
+
+        let params = model.obj[0].mesh_param.as_ref().unwrap();
+        assert_eq!(params.passes, 4);
+        assert_eq!(params.tube_diameter, 7.5);
+        assert_eq!(params.tol_high_res, 0.25);
+        assert_eq!(params.incz_high_res, 3);
+        assert_eq!(params.flat_crit, 0.75);
+        assert_eq!(params.tol_low_res, 1.5);
+        assert_eq!(params.incz_low_res, 5);
+    }
+
+    #[test]
+    fn meshing_option_slots_apply_native_open_object_rules() {
+        let mut model = Box::new(Imod::default());
+        let mut open = Iobj::default();
+        open.flags |= IMOD_OBJFLAG_OPEN;
+        model.obj.push(open);
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        editor.make_state_slot(&mut a, 3, true); // tube
+        editor.make_state_slot(&mut a, 4, true); // tube caps
+        editor.make_state_slot(&mut a, 5, true); // tube domes
+        editor.make_state_slot(&mut a, 1, true); // ignored for tube
+
+        let params = model.obj[0].mesh_param.as_ref().unwrap();
+        assert_ne!(params.flags & IMESH_MK_TUBE, 0);
+        assert_ne!(params.flags & IMESH_MK_CAP_TUBE, 0);
+        assert_ne!(params.flags & IMESH_MK_CAP_DOME, 0);
+        assert_eq!(params.flags & IMESH_MK_SKIP, 0);
+    }
+
+    #[test]
+    fn meshing_z_range_uses_native_one_based_input() {
+        let mut model = Box::new(Imod::default());
+        model.obj.push(Iobj::default());
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        editor.make_zedit_slot(&mut a, "8,3");
+        let params = model.obj[0].mesh_param.as_ref().unwrap();
+        assert_eq!((params.minz, params.maxz), (2, 7));
+        editor.make_zedit_slot(&mut a, "5");
+        let params = model.obj[0].mesh_param.as_ref().unwrap();
+        assert_eq!((params.minz, params.maxz), (4, 5));
+    }
+
+    #[test]
+    fn make_doit_runs_selected_simple_contour_stack() {
+        let mut model = Box::new(Imod::default());
+        let mut object = Iobj::default();
+        for z in [0., 1., 2.] {
+            let mut contour = crate::imod::libimod::imodel::Icont::default();
+            contour.pts = vec![
+                Ipoint { x: 0., y: 0., z }, Ipoint { x: 1., y: 0., z },
+                Ipoint { x: 0., y: 1., z },
+            ];
+            object.cont.push(contour);
+        }
+        model.obj.push(object);
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed { make_low_res: true, ..Default::default() };
+
+        assert_eq!(editor.make_doit_for_app(&mut a), 0);
+        assert_eq!(model.obj[0].mesh.len(), 1);
+        assert_eq!(model.obj[0].mesh[0].list[0], crate::imod::libimod::imesh::IMOD_MESH_BGNPOLYNORM2);
+        assert_eq!(crate::imod::libimod::imesh::imesh_resol(model.obj[0].mesh[0].flag), 1);
+        assert!(!editor.mesh_busy);
+    }
+
+    #[test]
+    fn mesh_one_object_runs_synchronous_fallback() {
+        let contour = |z| crate::imod::libimod::imodel::Icont {
+            pts: vec![Ipoint { x: 0., y: 0., z }, Ipoint { x: 1., y: 0., z }, Ipoint { x: 0., y: 1., z }],
+            ..Default::default()
+        };
+        let mut object = Iobj::default();
+        object.cont = vec![contour(0.), contour(1.)];
+        let mut editor = ImodvObjed::default();
+        assert_eq!(editor.mesh_one_object(&mut object), 0);
+        assert!(!object.mesh.is_empty());
+        assert!(!editor.mesh_busy);
+    }
+
+    #[test]
+    fn mesh_parameters_limit_triangles_to_configured_xy_bounds() {
+        let contour = |z| crate::imod::libimod::imodel::Icont {
+            pts: vec![Ipoint { x: 0., y: 0., z }, Ipoint { x: 1., y: 0., z }, Ipoint { x: 0., y: 1., z }],
+            ..Default::default()
+        };
+        let mut object = Iobj::default();
+        object.cont = vec![contour(0.), contour(1.)];
+        let mut params = crate::imod::libimod::imesh::MeshParams::default();
+        params.xmin = 10.; params.xmax = 20.; params.ymin = 10.; params.ymax = 20.;
+        object.mesh_param = Some(params);
+        let mut editor = ImodvObjed::default();
+        assert_eq!(editor.mesh_one_object(&mut object), 0);
+        assert!(object.mesh.iter().all(|mesh| mesh.list.iter().all(|&index| index < 0)));
+        crate::imod::libmesh::imesh_set_min_max(
+            Ipoint { x: -1.0e30, y: -1.0e30, z: -1.0e30 },
+            Ipoint { x: 1.0e30, y: 1.0e30, z: 1.0e30 },
+        );
+    }
+
+    #[test]
+    fn make_do_all_meshes_non_scattered_objects_only() {
+        let contour = |z| crate::imod::libimod::imodel::Icont {
+            pts: vec![Ipoint { x: 0., y: 0., z }, Ipoint { x: 1., y: 0., z }, Ipoint { x: 0., y: 1., z }],
+            ..Default::default()
+        };
+        let mut model = Box::new(Imod::default());
+        let mut meshable = Iobj::default();
+        meshable.cont = vec![contour(0.), contour(1.)];
+        let mut scattered = Iobj::default();
+        scattered.flags |= IMOD_OBJFLAG_SCAT;
+        scattered.cont = vec![contour(0.), contour(1.)];
+        model.obj = vec![meshable, scattered];
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        assert_eq!(editor.make_do_all_for_app(&mut a), 0);
+        assert_eq!(model.obj[0].mesh.len(), 1);
+        assert!(model.obj[1].mesh.is_empty());
+        assert!(!editor.mesh_busy);
+    }
+
+    #[test]
+    fn step_z_and_mesh_updates_persisted_range_within_model_bounds() {
+        let mut model = Box::new(Imod::default());
+        model.zmax = 5;
+        let mut object = Iobj::default();
+        object.cont = vec![
+            crate::imod::libimod::imodel::Icont { pts: vec![Ipoint { x: 0., y: 0., z: 2. }, Ipoint { x: 1., y: 0., z: 2. }, Ipoint { x: 0., y: 1., z: 2. }], ..Default::default() },
+            crate::imod::libimod::imodel::Icont { pts: vec![Ipoint { x: 0., y: 0., z: 3. }, Ipoint { x: 1., y: 0., z: 3. }, Ipoint { x: 0., y: 1., z: 3. }], ..Default::default() },
+        ];
+        let mut params = crate::imod::libimod::imesh::MeshParams::default();
+        params.minz = 1;
+        params.maxz = 3;
+        object.mesh_param = Some(params);
+        model.obj.push(object);
+        let mut a = ImodvApp {
+            imod: &mut *model,
+            mod_: vec![std::ptr::NonNull::from(&mut *model)],
+            num_mods: 1,
+            ..Default::default()
+        };
+        let mut editor = ImodvObjed::default();
+
+        assert_eq!(editor.step_zand_mesh_one_for_app(&mut a, 1), 0);
+        let params = model.obj[0].mesh_param.as_ref().unwrap();
+        assert_eq!((params.minz, params.maxz), (2, 4));
+        assert_eq!(model.obj[0].mesh.len(), 1);
+        assert_eq!(editor.step_zand_mesh_one_for_app(&mut a, 2), 0);
+        let params = model.obj[0].mesh_param.as_ref().unwrap();
+        assert_eq!((params.minz, params.maxz), (2, 4));
     }
 }

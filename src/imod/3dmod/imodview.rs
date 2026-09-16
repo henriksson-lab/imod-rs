@@ -141,6 +141,12 @@ pub struct ImodShowsliceStruct {
 pub struct ImodView {
     /// `ViewInfo::idata`.
     pub idata: *mut *mut u8,
+    /// Rust ownership for the source `idata` section allocation.  C keeps a
+    /// separately allocated `unsigned char **` plus section buffers; these
+    /// two vectors preserve those address-stable cursors while the normal
+    /// Rust-native image host owns the view.
+    pub idata_storage: Vec<Vec<u8>>,
+    pub idata_ptrs: Vec<*mut u8>,
     pub xsize: i32,
     pub ysize: i32,
     pub zsize: i32,
@@ -289,6 +295,8 @@ impl Default for ImodView {
     fn default() -> Self {
         let mut view = Self {
             idata: ptr::null_mut(),
+            idata_storage: Vec::new(),
+            idata_ptrs: Vec::new(),
             xsize: 0,
             ysize: 0,
             zsize: 0,
@@ -821,8 +829,10 @@ pub trait ImodviewNativeBoundary {
     }
     /// `imod_io_image_load(vi)` (`imod_io.cpp:535`).
     fn imod_io_image_load(&mut self, vi: *mut ImodView) -> *mut *mut u8 {
-        report_once("imod_io_image_load", "the image reader host of imod_io.cpp");
-        ptr::null_mut()
+        // The paired `imod_io.cpp` source unit owns the normal non-cached
+        // read path.  Its Rust storage lives in `ImodView`, so no Qt/window
+        // host is needed merely to load pixels.
+        unsafe { crate::imod::three_dmod::imod_io::imod_io_image_load(vi) }
     }
     /// The `Model` global (`imodP.h:151`).
     fn model_global(&mut self) -> *mut Imod {

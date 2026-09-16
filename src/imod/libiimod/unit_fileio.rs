@@ -311,9 +311,7 @@ pub unsafe fn iiu_close(mut iunit: i32) {
     let mut unit: i32 = iunit - 1 as i32;
     UNIT_TABLE.with(|unit_table| {
         let mut table = unit_table.borrow_mut();
-        table
-            .no_convert_units
-            .retain(|&listed_unit| listed_unit as i32 != iunit);
+        remove_unit_from_list(&mut table.no_convert_units, iunit);
         if let Some(index) = table.map.get(unit as usize).copied().flatten() {
             u = table.units[index].as_mut();
             if (*u).being_used {
@@ -1080,11 +1078,9 @@ pub extern "C" fn iiuretprint_() -> i32 {
 pub unsafe fn iiu_alt_convert(mut iunit: i32, mut val: i32) {
     UNIT_TABLE.with(|unit_table| {
         let mut table = unit_table.borrow_mut();
-        table
-            .no_convert_units
-            .retain(|&listed_unit| listed_unit as i32 != iunit);
+        remove_unit_from_list(&mut table.no_convert_units, iunit);
         if val == 0 as i32 {
-            table.no_convert_units.push(iunit);
+            add_unit_to_list(&mut table.no_convert_units, iunit);
         }
     });
 }
@@ -1186,13 +1182,7 @@ pub unsafe extern "C" fn move_(
     mut b: *mut ::core::ffi::c_char,
     mut n: *mut i32,
 ) {
-    let mut remaining = *n;
-    while remaining != 0 {
-        *a = *b;
-        a = a.add(1);
-        b = b.add(1);
-        remaining -= 1;
-    }
+    mybcopy(a, b, *n);
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zero_(mut a: *mut ::core::ffi::c_char, mut n: *mut i32) {
@@ -1282,7 +1272,7 @@ unsafe fn lookup_unit(unit: i32, function: &str, mut doExit: i32, mut checkRW: i
     let found = UNIT_TABLE.with(|unit_table| {
         let mut table = unit_table.borrow_mut();
         if let Some(index) = table.map.get(unit as usize - 1).copied().flatten() {
-            let no_convert = table.no_convert_units.contains(&unit);
+            let no_convert = is_unit_on_list(&table.no_convert_units, unit) != 0;
             u = table.units[index].as_mut();
             (*u).no_convert = no_convert;
             true
@@ -1358,11 +1348,43 @@ unsafe fn exit_or_null(do_exit: i32) -> *mut Unit {
     }
     core::ptr::null_mut()
 }
+
+/// C `mybcopy` (`unit_fileio.c`): copy exactly `n` bytes in ascending
+/// address order.  The legacy `move_` ABI uses this rather than a general
+/// overlapping-memory move, so retain that observable contract.
+unsafe fn mybcopy(
+    mut destination: *mut core::ffi::c_char,
+    mut source: *const core::ffi::c_char,
+    n: i32,
+) {
+    for _ in 0..n.max(0) {
+        *destination = *source;
+        destination = destination.add(1);
+        source = source.add(1);
+    }
+}
+
+/// C `addUnitToList`, with the translated table owning its compact unit list.
+fn add_unit_to_list(list: &mut Vec<i32>, unit: i32) {
+    list.push(unit);
+}
+
+/// C `removeUnitFromList`: remove only the first matching entry.
+fn remove_unit_from_list(list: &mut Vec<i32>, unit: i32) {
+    if let Some(index) = list.iter().position(|&listed_unit| listed_unit == unit) {
+        list.remove(index);
+    }
+}
+
+/// C `isUnitOnList`.
+fn is_unit_on_list(list: &[i32], unit: i32) -> i32 {
+    i32::from(list.contains(&unit))
+}
 #[cfg(test)]
 mod tests {
     use super::{
-        iiu_alt_brief, iiu_alt_print, iiu_exit_on_error, iiu_get_exit_on_error, iiu_ret_brief,
-        iiu_ret_print, move_, zero_,
+        add_unit_to_list, iiu_alt_brief, iiu_alt_print, iiu_exit_on_error, iiu_get_exit_on_error,
+        iiu_ret_brief, iiu_ret_print, is_unit_on_list, move_, remove_unit_from_list, zero_,
     };
 
     #[test]
@@ -1399,5 +1421,15 @@ mod tests {
             assert_eq!(&destination[..4], &[0; 4]);
             assert_eq!(destination[4], 0);
         }
+    }
+
+    #[test]
+    fn unit_list_helpers_preserve_the_source_first_match_semantics() {
+        let mut units = vec![4, 7, 4];
+        add_unit_to_list(&mut units, 9);
+        assert_eq!(is_unit_on_list(&units, 7), 1);
+        assert_eq!(is_unit_on_list(&units, 8), 0);
+        remove_unit_from_list(&mut units, 4);
+        assert_eq!(units, vec![7, 4, 9]);
     }
 }

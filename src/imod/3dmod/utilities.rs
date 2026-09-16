@@ -160,6 +160,21 @@ pub fn util_close_key(key: i32) -> bool {
     key == 0x0100_0000
 }
 
+/// `utilRaiseIfNeeded`.  The source body is compiled only for the legacy
+/// macOS Qt path; the Linux winit host has no corresponding raise action.
+pub fn util_raise_if_needed() {}
+
+/// `utilNeedToSetCursor`.  This is true only for the legacy macOS Qt path.
+pub fn util_need_to_set_cursor() -> bool {
+    false
+}
+
+/// `utilIgnoreClosing`.  Its warning and ignored close event exist only for
+/// the bounded macOS Qt 5.12--5.14 build configuration.
+pub fn util_ignore_closing(_closing: bool) -> bool {
+    false
+}
+
 /// `utilClearWindow`.
 pub fn util_clear_window(boundary: &mut dyn UtilitiesBoundary, index: i32) {
     boundary.clear_window(index)
@@ -345,13 +360,18 @@ pub fn util_analyze_band_edge(
     *dragging = [0; 4];
     let mut best = 100;
     let mut edge = (-1, -1);
-    for (xedge, xe) in [(x0, 0), (x1, 1)] {
-        for (yedge, ye) in [(y0, 2), (y1, 3)] {
-            let d = (ix - xedge).pow(2) + (iy - yedge).pow(2);
-            if d < best {
-                best = d;
-                edge = (xe, ye)
-            }
+    // Preserve the four source tests' order.  These are `<`, not `<=`, so
+    // a cursor exactly equidistant from two corners retains the earlier one.
+    for (xedge, yedge, xe, ye) in [
+        (x0, y0, 0, 2),
+        (x1, y0, 1, 2),
+        (x0, y1, 0, 3),
+        (x1, y1, 1, 3),
+    ] {
+        let d = (ix - xedge).pow(2) + (iy - yedge).pow(2);
+        if d < best {
+            best = d;
+            edge = (xe, ye)
         }
     }
     if edge.0 >= 0 {
@@ -442,6 +462,19 @@ pub fn util_unit_zoom_for_device_scaling(dev_pix_ratio: f32) -> f32 {
     } else {
         1.
     }
+}
+
+/// `utilInitializeScreenChange`.  The source uses `App->DevicePixelRatio`
+/// unless its Qt-only `WATCH_DPI_CHANGE` build path is selected; callers with
+/// a winit window install the screen callback at their native host instead.
+pub fn util_initialize_screen_change(app_device_pixel_ratio: f32) -> f32 {
+    app_device_pixel_ratio
+}
+
+/// `utilGetNewDevPixRatio`.  `WATCH_DPI_CHANGE` is not enabled for this
+/// platform; source therefore returns zero and leaves the current ratio alone.
+pub fn util_get_new_dev_pix_ratio() -> f32 {
+    0.
 }
 
 /// `utilSetZoomOnScreenChange`, with elapsed timer values supplied by the caller.
@@ -597,5 +630,24 @@ mod tests {
             util_get_longest_time_string(3, &["".into(), "1".into(), "long".into()]),
             " (999)long"
         );
+    }
+
+    #[test]
+    fn platform_conditional_cursor_and_dpi_utilities_use_the_linux_source_path() {
+        assert!(!util_need_to_set_cursor());
+        assert!(!util_ignore_closing(false));
+        assert_eq!(util_initialize_screen_change(1.5), 1.5);
+        assert_eq!(util_get_new_dev_pix_ratio(), 0.);
+    }
+
+    #[test]
+    fn band_corner_tie_keeps_the_source_first_corner() {
+        let mut drag_band = 0;
+        let mut dragging = [0; 4];
+        // Equidistant from lower-left and lower-right.  C checks lower-left
+        // first and strict comparison retains it.
+        util_analyze_band_edge(5, 0, [0, 10, 0, 10], &mut drag_band, &mut dragging);
+        assert_eq!(drag_band, 1);
+        assert_eq!(dragging, [1, 0, 1, 0]);
     }
 }

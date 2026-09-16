@@ -778,9 +778,8 @@ pub fn imod_cont_edit_surf_show(
         } else {
             -2
         },
-        // `Imod::tmax` has not yet been materialized by `imodel.rs`; this
-        // preserves the viewer half of `B3DMAX(imod->tmax, numTimes)`.
-        time_max: num_times,
+        // `cont_edit.cpp:1761-1763`.
+        time_max: imod.tmax.max(num_times),
         point_size,
         point_size_default,
     })

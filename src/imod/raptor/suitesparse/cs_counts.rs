@@ -2,6 +2,52 @@
 
 use super::{Cs, cs_leaf::cs_leaf, cs_transpose::cs_transpose};
 
+/// C static `init_ata`.
+///
+/// `transpose` is the source `AT = A'`; `head` and `next` are the linked
+/// lists laid out in C's workspace after the other four `n`-element regions.
+fn init_ata(
+    transpose: &Cs,
+    post: &[usize],
+    head: &mut [Option<usize>],
+    next: &mut [Option<usize>],
+) -> Option<()> {
+    let rows = transpose.columns;
+    let nodes = transpose.rows;
+    if post.len() != nodes
+        || head.len() < nodes + 1
+        || next.len() < rows
+        || transpose.column_pointers.len() < rows + 1
+    {
+        return None;
+    }
+    let mut inverse_post = vec![0; nodes];
+    for (position, &node) in post.iter().enumerate() {
+        if node >= nodes {
+            return None;
+        }
+        inverse_post[node] = position;
+    }
+    for row in 0..rows {
+        let mut minimum = nodes;
+        let start = transpose.column_pointers[row];
+        let end = transpose.column_pointers[row + 1];
+        if start > end || end > transpose.row_indices.len() {
+            return None;
+        }
+        for entry in start..end {
+            let column = transpose.row_indices[entry];
+            if column >= nodes {
+                return None;
+            }
+            minimum = minimum.min(inverse_post[column]);
+        }
+        next[row] = head[minimum];
+        head[minimum] = Some(row);
+    }
+    Some(())
+}
+
 /// C `cs_counts`: computes column counts for `LL' = A` or `LL' = A' A`.
 ///
 /// Parent links use `None` for C's `-1`.  The input ordering is the
@@ -74,21 +120,7 @@ pub fn cs_counts(
         None
     };
     if ata {
-        let mut inverse_post = vec![0; node_count];
-        for (position, &node) in post.iter().enumerate() {
-            inverse_post[node] = position;
-        }
-        for row in 0..matrix.rows {
-            let mut minimum = node_count;
-            for entry in transpose.column_pointers[row]..transpose.column_pointers[row + 1] {
-                let column = transpose.row_indices[entry];
-                minimum = minimum.min(inverse_post[column]);
-            }
-            let heads = head.as_mut()?;
-            let links = next.as_mut()?;
-            links[row] = heads[minimum];
-            heads[minimum] = Some(row);
-        }
+        init_ata(&transpose, post, head.as_mut()?, next.as_mut()?)?;
     }
 
     for (position, &node) in post.iter().enumerate() {

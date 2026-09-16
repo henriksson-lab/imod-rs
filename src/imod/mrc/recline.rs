@@ -4,6 +4,10 @@
 //! This translation keeps coefficients as an owned value and owns its temporary
 //! lines; the numerical recurrences and their boundary conditions are unchanged.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static RECLINE_VERBOSE: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecursiveFilterType {
     Unknown,
@@ -63,6 +67,43 @@ impl Default for RecursiveFilterCoefficients {
     }
 }
 
+/// C `printRecursiveCoefficients`.
+pub fn print_recursive_coefficients(coefficients: &RecursiveFilterCoefficients) {
+    println!("denominator:");
+    println!(
+        "{} {} {} {}",
+        coefficients.sd1, coefficients.sd2, coefficients.sd3, coefficients.sd4
+    );
+    println!("positive numerator:");
+    println!(
+        "{} {} {} {}",
+        coefficients.sp0, coefficients.sp1, coefficients.sp2, coefficients.sp3
+    );
+    println!("negative numerator:");
+    println!(
+        "{} {} {} {} {}\n",
+        coefficients.sn0, coefficients.sn1, coefficients.sn2, coefficients.sn3, coefficients.sn4
+    );
+}
+
+/// C `Recline_verbose`.
+pub fn recline_verbose() {
+    RECLINE_VERBOSE.store(true, Ordering::Relaxed);
+}
+
+/// C `Recline_noverbose`.
+pub fn recline_noverbose() {
+    RECLINE_VERBOSE.store(false, Ordering::Relaxed);
+}
+
+fn recline_error(message: impl Into<String>) -> String {
+    let message = message.into();
+    if RECLINE_VERBOSE.load(Ordering::Relaxed) {
+        eprintln!("InitRecursiveCoefficients: {message}");
+    }
+    message
+}
+
 /// Equivalent to `InitRecursiveCoefficients`.  Alpha-Deriche coefficients are
 /// exact translations; fourth-order Gaussian coefficient construction follows
 /// the same recurrence parameterization.
@@ -75,13 +116,15 @@ pub fn init_recursive_coefficients(
         filter_type = RecursiveFilterType::AlphaDeriche;
     }
     if !(x.is_finite()) {
-        return Err("recursive filter coefficient must be finite".into());
+        return Err(recline_error("recursive filter coefficient must be finite"));
     }
     let mut out = RecursiveFilterCoefficients::default();
     match filter_type {
         RecursiveFilterType::AlphaDeriche => {
             if !(0.1..=1.9).contains(&x) {
-                return Err("alpha Deriche coefficient must be in [0.1, 1.9]".into());
+                return Err(recline_error(
+                    "alpha Deriche coefficient must be in [0.1, 1.9]",
+                ));
             }
             if derivative == DerivativeOrder::None {
                 derivative = DerivativeOrder::Zero;
@@ -128,7 +171,7 @@ pub fn init_recursive_coefficients(
         }
         RecursiveFilterType::GaussianFidrich => {
             if x < 0.1 {
-                return Err("Gaussian coefficient must be at least 0.1".into());
+                return Err(recline_error("Gaussian coefficient must be at least 0.1"));
             }
             let (a0, a1, c0, c1, b0, b1, omega0, omega1) = match derivative {
                 DerivativeOrder::Zero => (
@@ -172,7 +215,9 @@ pub fn init_recursive_coefficients(
                     2.337607006 / x,
                 ),
                 DerivativeOrder::None => {
-                    return Err("Gaussian Fidrich derivative must be specified".into());
+                    return Err(recline_error(
+                        "Gaussian Fidrich derivative must be specified",
+                    ));
                 }
             };
             let (sin0, cos0) = omega0.sin_cos();
@@ -209,7 +254,7 @@ pub fn init_recursive_coefficients(
         }
         RecursiveFilterType::GaussianDeriche => {
             if x < 0.1 {
-                return Err("Gaussian coefficient must be at least 0.1".into());
+                return Err(recline_error("Gaussian coefficient must be at least 0.1"));
             }
             if matches!(derivative, DerivativeOrder::None | DerivativeOrder::Three) {
                 derivative = DerivativeOrder::Zero;
@@ -523,6 +568,16 @@ pub fn recursive_filter_1d(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_verbose_switches_control_recursive_diagnostics() {
+        recline_noverbose();
+        assert!(!RECLINE_VERBOSE.load(Ordering::Relaxed));
+        recline_verbose();
+        assert!(RECLINE_VERBOSE.load(Ordering::Relaxed));
+        recline_noverbose();
+    }
+
     #[test]
     fn alpha_smoothing_coefficients_match_c_formula() {
         let c = init_recursive_coefficients(

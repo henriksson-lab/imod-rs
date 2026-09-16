@@ -1336,8 +1336,10 @@ mod tests {
             ali.analyze_for_partial_frames(&stack, 0, 2).unwrap(),
             PartialFrameSelection {
                 start: 1,
-                end: 1,
-                dropped: vec![0, 2]
+                // `analyzeForPartialFrames` retains two frames after dropping
+                // the first endpoint: its native guard is `end - start > 1`.
+                end: 2,
+                dropped: vec![0]
             }
         );
     }
@@ -1380,11 +1382,12 @@ mod tests {
             selection,
             PartialFrameSelection {
                 start: 1,
-                end: 1,
-                dropped: vec![0, 2]
+                end: 2,
+                dropped: vec![0]
             }
         );
-        assert_eq!(result.weighted_sum, vec![10.; 16]);
+        // The source keeps sections 1 and 2, so the aligned sum is their mean.
+        assert_eq!(result.weighted_sum, vec![5.5; 16]);
         assert_eq!(OwnedImageStack::open_mrc(&output).unwrap().frame_count(), 1);
         AliFrame::default()
             .align_mrc_file_with_unweighted_to(&input, &weighted, &unweighted, 1, 1, 1)

@@ -326,6 +326,7 @@ pub trait ImodvWindowSink {
     fn dialogs_hide(&mut self);
     fn dialogs_show(&mut self);
     fn dialogs_master_changed(&mut self);
+    fn dialogs_master_changed_screen(&mut self, old_ratio: f32, new_ratio: f32);
     fn dialogs_activated(&mut self);
     fn app_lost_focus(&mut self);
 }
@@ -365,6 +366,7 @@ impl ImodvWindowSink for NullImodvWindowSink {
     fn dialogs_hide(&mut self) {}
     fn dialogs_show(&mut self) {}
     fn dialogs_master_changed(&mut self) {}
+    fn dialogs_master_changed_screen(&mut self, _: f32, _: f32) {}
     fn dialogs_activated(&mut self) {}
     fn app_lost_focus(&mut self) {}
 }
@@ -716,6 +718,34 @@ impl ImodvWindow {
     pub fn fake_resize(&mut self, width: i32, height: i32, sink: &mut dyn ImodvWindowSink) {
         sink.imodv_resize_gl(width, height);
     }
+    /// `ImodvWindow::screenChanged` (`WATCH_DPI_CHANGE`).
+    ///
+    /// winit supplies the replacement device-pixel ratio directly, whereas
+    /// Qt obtains it through `utilGetNewDevPixRatio(this)`.  The observable
+    /// source behavior is the same: notify model-view dialogs once per real
+    /// DPR transition, then use the existing size to refresh macOS surfaces.
+    pub fn screen_changed(&mut self, new_ratio: f32, sink: &mut dyn ImodvWindowSink) {
+        if !new_ratio.is_finite()
+            || new_ratio <= 0.
+            || (new_ratio - self.device_pixel_ratio).abs() < f32::EPSILON
+        {
+            return;
+        }
+        let old_ratio = self.device_pixel_ratio;
+        self.device_pixel_ratio = new_ratio;
+        sink.dialogs_master_changed_screen(old_ratio, new_ratio);
+        #[cfg(target_os = "macos")]
+        {
+            let (width, height) = {
+                let app = self.app();
+                (
+                    (app.winx as f32 / old_ratio.max(1.)).round() as i32,
+                    (app.winy as f32 / old_ratio.max(1.)).round() as i32,
+                )
+            };
+            self.fake_resize(width, height, sink);
+        }
+    }
     pub fn app_focus_changed(&mut self, focused: bool, sink: &mut dyn ImodvWindowSink) {
         if !focused {
             sink.app_lost_focus();
@@ -853,6 +883,8 @@ pub struct MvGlCompatEntries {
     pub gl_end: unsafe extern "C" fn(),
     pub gl_vertex2f: unsafe extern "C" fn(f32, f32),
     pub gl_vertex2i: unsafe extern "C" fn(i32, i32),
+    /// `mv_image.cpp` texture-plane coordinates.
+    pub gl_tex_coord2f: unsafe extern "C" fn(f32, f32),
     pub gl_color3ub: unsafe extern "C" fn(u8, u8, u8),
     pub gl_color4ub: unsafe extern "C" fn(u8, u8, u8, u8),
     pub gl_indexi: unsafe extern "C" fn(i32),
@@ -863,6 +895,20 @@ pub struct MvGlCompatEntries {
     pub gl_raster_pos2f: unsafe extern "C" fn(f32, f32),
     pub gl_pixel_zoom: unsafe extern "C" fn(f32, f32),
     pub gl_draw_pixels: unsafe extern "C" fn(i32, i32, u32, u32, *const std::ffi::c_void),
+    /// The compatibility texture calls used by `mv_image.cpp`.  They are kept
+    /// as direct entries because the source relies on `GL_PROXY_TEXTURE_2D`
+    /// and `GL_TEXTURE_ENV`, which the core-oriented `glow` facade does not
+    /// expose as a source-level operation.
+    pub gl_tex_image_2d:
+        unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const std::ffi::c_void),
+    pub gl_tex_sub_image_2d:
+        unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const std::ffi::c_void),
+    pub gl_get_tex_level_parameteriv: unsafe extern "C" fn(u32, i32, u32, *mut i32),
+    pub gl_gen_textures: unsafe extern "C" fn(i32, *mut u32),
+    pub gl_delete_textures: unsafe extern "C" fn(i32, *const u32),
+    pub gl_bind_texture: unsafe extern "C" fn(u32, u32),
+    pub gl_tex_parameterf: unsafe extern "C" fn(u32, u32, f32),
+    pub gl_tex_envf: unsafe extern "C" fn(u32, u32, f32),
     pub gl_get_floatv: unsafe extern "C" fn(u32, *mut f32),
     /// `glGetDoublev`, which `imodvUnprojectPickedPoint` reads the model-view
     /// and projection matrices with; `glow` has no double-precision getter.
@@ -920,6 +966,7 @@ mod gl_enum {
     pub const FOG_START: u32 = 0x0B63;
     pub const FOG_END: u32 = 0x0B64;
     pub const LINEAR: i32 = 0x2601;
+    pub const NEAREST: i32 = 0x2600;
     pub const SELECT: u32 = 0x1C02;
     pub const RENDER: u32 = 0x1C00;
     pub const PROJECTION: u32 = 0x1701;
@@ -928,10 +975,23 @@ mod gl_enum {
     pub const DEPTH_BUFFER_BIT: u32 = 0x0000_0100;
     pub const RGB: u32 = 0x1907;
     pub const RGBA: u32 = 0x1908;
+    pub const BGRA: u32 = 0x80E1;
     pub const UNSIGNED_BYTE: u32 = 0x1401;
     pub const UNPACK_ALIGNMENT: u32 = 0x0CF5;
+    pub const TEXTURE_2D: u32 = 0x0DE1;
+    pub const PROXY_TEXTURE_2D: u32 = 0x8063;
+    pub const TEXTURE_WIDTH: u32 = 0x1000;
+    pub const TEXTURE_WRAP_S: u32 = 0x2802;
+    pub const TEXTURE_WRAP_T: u32 = 0x2803;
+    pub const TEXTURE_MAG_FILTER: u32 = 0x2800;
+    pub const TEXTURE_MIN_FILTER: u32 = 0x2801;
+    pub const TEXTURE_ENV: u32 = 0x2300;
+    pub const TEXTURE_ENV_MODE: u32 = 0x2200;
+    pub const DECAL: i32 = 0x2101;
+    pub const CLAMP: i32 = 0x2900;
     pub const VERSION: u32 = 0x1F02;
     pub const LINES: u32 = 0x0001;
+    pub const QUADS: u32 = 0x0007;
     pub const LINE_STRIP: u32 = 0x0003;
     pub const FRONT_AND_BACK: u32 = 0x0408;
     pub const LINE: u32 = 0x1B01;
@@ -1033,6 +1093,10 @@ pub struct ImodvNativeGl {
     /// struct explicitly, so the boundary that calls `imodvDraw_models` holds
     /// it for the same lifetime the statics have.
     pub state: crate::imod::three_dmod::mv_ogl::MvOglState,
+    /// `mv_image.cpp`'s file-static image-plane state.  It shares this native
+    /// compatibility context with model drawing, exactly as the source's
+    /// `ImodvGL` widget does.
+    pub image_state: crate::imod::three_dmod::mv_image::MvImageState,
     /// Everything `libGLU` covers: `gluSphere` and the tessellator.
     pub glu: MvGluEntries,
     /// The file-static `qobj` of `imodvDraw_spheres`.
@@ -1123,6 +1187,7 @@ impl ImodvNativeGl {
             gl_end: entry!("glEnd", unsafe extern "C" fn()),
             gl_vertex2f: entry!("glVertex2f", unsafe extern "C" fn(f32, f32)),
             gl_vertex2i: entry!("glVertex2i", unsafe extern "C" fn(i32, i32)),
+            gl_tex_coord2f: entry!("glTexCoord2f", unsafe extern "C" fn(f32, f32)),
             gl_color3ub: entry!("glColor3ub", unsafe extern "C" fn(u8, u8, u8)),
             gl_color4ub: entry!("glColor4ub", unsafe extern "C" fn(u8, u8, u8, u8)),
             gl_indexi: entry!("glIndexi", unsafe extern "C" fn(i32)),
@@ -1136,6 +1201,43 @@ impl ImodvNativeGl {
                 "glDrawPixels",
                 unsafe extern "C" fn(i32, i32, u32, u32, *const std::ffi::c_void)
             ),
+            gl_tex_image_2d: entry!(
+                "glTexImage2D",
+                unsafe extern "C" fn(
+                    u32,
+                    i32,
+                    i32,
+                    i32,
+                    i32,
+                    i32,
+                    u32,
+                    u32,
+                    *const std::ffi::c_void,
+                )
+            ),
+            gl_tex_sub_image_2d: entry!(
+                "glTexSubImage2D",
+                unsafe extern "C" fn(
+                    u32,
+                    i32,
+                    i32,
+                    i32,
+                    i32,
+                    i32,
+                    u32,
+                    u32,
+                    *const std::ffi::c_void,
+                )
+            ),
+            gl_get_tex_level_parameteriv: entry!(
+                "glGetTexLevelParameteriv",
+                unsafe extern "C" fn(u32, i32, u32, *mut i32)
+            ),
+            gl_gen_textures: entry!("glGenTextures", unsafe extern "C" fn(i32, *mut u32)),
+            gl_delete_textures: entry!("glDeleteTextures", unsafe extern "C" fn(i32, *const u32)),
+            gl_bind_texture: entry!("glBindTexture", unsafe extern "C" fn(u32, u32)),
+            gl_tex_parameterf: entry!("glTexParameterf", unsafe extern "C" fn(u32, u32, f32)),
+            gl_tex_envf: entry!("glTexEnvf", unsafe extern "C" fn(u32, u32, f32)),
             gl_get_floatv: entry!("glGetFloatv", unsafe extern "C" fn(u32, *mut f32)),
             gl_get_doublev: entry!("glGetDoublev", unsafe extern "C" fn(u32, *mut f64)),
             gl_get_integerv: entry!("glGetIntegerv", unsafe extern "C" fn(u32, *mut i32)),
@@ -1267,6 +1369,7 @@ impl ImodvNativeGl {
             surface,
             context,
             state: crate::imod::three_dmod::mv_ogl::MvOglState::default(),
+            image_state: crate::imod::three_dmod::mv_image::MvImageState::default(),
             glu,
             quadric: std::ptr::null_mut(),
             filled_tessel: std::ptr::null_mut(),
@@ -1563,6 +1666,17 @@ impl crate::imod::three_dmod::mv_light::LightGl for ImodvNativeGl {
             (self.compat.gl_lightf)(name, gl_enum::CONSTANT_ATTENUATION, constant);
             (self.compat.gl_lightf)(name, gl_enum::LINEAR_ATTENUATION, linear);
             (self.compat.gl_lightf)(name, gl_enum::QUADRATIC_ATTENUATION, quadratic);
+        }
+    }
+    /// One `glLightf(GL_LIGHT0, GL_*_ATTENUATION, value)` from `light_setparam`.
+    fn light_attenuation_component(&mut self, light: i32, parameter: i32, value: f32) {
+        unsafe {
+            let pname = match parameter {
+                0 => gl_enum::CONSTANT_ATTENUATION,
+                1 => gl_enum::LINEAR_ATTENUATION,
+                _ => gl_enum::QUADRATIC_ATTENUATION,
+            };
+            (self.compat.gl_lightf)(gl_enum::LIGHT0 + light.max(0) as u32, pname, value);
         }
     }
     /// `glLightfv(GL_LIGHT0 + light, GL_AMBIENT, ambient)`.
@@ -2027,17 +2141,12 @@ impl crate::imod::three_dmod::mv_ogl::MvOglBoundary for ImodvNativeGl {
         unsafe { glow::HasContext::disable(&self.gl, gl_enum::CLIP_PLANE0 + index.max(0) as u32) }
     }
     /// `mvImageAnyClipping()` (`mv_image.cpp:328`).
-    ///
-    /// The translated call needs `MvImageState`, which the model-view image
-    /// host owns and which does not exist yet; false is the source's answer
-    /// whenever no image is loaded, which is the 3dmodv case.
     fn image_any_clipping(&mut self) -> bool {
-        false
+        crate::imod::three_dmod::mv_image::mv_image_any_clipping(&self.image_state)
     }
-    /// `mvImageGetClipPlanes()` (`mv_image.cpp:342`).  Reachable only when
-    /// `image_any_clipping` is true, which it is not here.
+    /// `mvImageGetClipPlanes()` (`mv_image.cpp:342`).
     fn image_clip_planes(&mut self) -> Option<crate::imod::libimod::imodel::Iclip_planes> {
-        None
+        Some(self.image_state.clip_planes.clone())
     }
     /// `imodvSetLight(imod->view)` (`mv_light.cpp:52`).
     fn set_light(&mut self, view: &mut crate::imod::libimod::imodel::Iview) {
@@ -2090,23 +2199,43 @@ impl crate::imod::three_dmod::mv_ogl::MvOglBoundary for ImodvNativeGl {
         1
     }
     /// Static `drawImageForCurrentModel`.
-    ///
-    /// The source does nothing at all when `a->standalone`, which is the
-    /// 3dmodv case; the image path needs `MvImageState` plus an
-    /// `MvImageSource`/`MvImageGl` pair fed by the image cache, which is the
-    /// normal 3dmod display host of handover step 5.
     fn draw_image(
         &mut self,
         app: &mut crate::imod::three_dmod::imodv::ImodvApp,
-        _transparent: bool,
+        transparent: bool,
     ) {
-        if app.standalone != 0 {
+        if app.standalone != 0 || app.imod.is_null() || app.vi.is_null() {
             return;
         }
-        static WARNED: std::sync::Once = std::sync::Once::new();
-        WARNED.call_once(|| {
-            eprintln!("3dmod: no model-view image drawn: mv_image.cpp needs an MvImageSource host")
+        // `drawImageForCurrentModel`: reset the source view/model matrices
+        // before the image planes, then install their clip planes only if the
+        // model requests image clipping.  The app's raw cursors are stable for
+        // the native event-loop lifetime, as established by `initstruct`.
+        let (model, view) = unsafe { (&*app.imod, &mut *app.vi) };
+        let mut ogl_state = std::mem::take(&mut self.state);
+        crate::imod::three_dmod::mv_ogl::imodv_set_viewby_model(&mut ogl_state, app, model, self);
+        crate::imod::three_dmod::mv_ogl::imodv_set_model_trans(&ogl_state, app, model, self);
+        crate::imod::three_dmod::mv_ogl::set_stereo_projection(app, 0, self);
+        let clip_image = model.view.first().is_some_and(|view| {
+            view.world & crate::imod::libimod::iview::VIEW_WORLD_CLIP_IMAGE != 0
         });
+        if clip_image {
+            crate::imod::three_dmod::mv_ogl::clip_obj(model, None, 1, self);
+        }
+        let mut image_state = std::mem::take(&mut self.image_state);
+        let mut source = crate::imod::three_dmod::mv_image::ImodViewImageSource::new(view);
+        crate::imod::three_dmod::mv_image::imodv_draw_image(
+            &mut image_state,
+            app,
+            &mut source,
+            transparent as i32,
+            self,
+        );
+        self.image_state = image_state;
+        if clip_image {
+            crate::imod::three_dmod::mv_ogl::clip_obj(model, None, 0, self);
+        }
+        self.state = ogl_state;
     }
     /// `imodvDrawLabels(imod, obj, mat, a->winy, dpr, fontHeight, GLw)`.
     fn draw_labels(
@@ -2166,6 +2295,152 @@ impl crate::imod::three_dmod::mv_ogl::MvOglBoundary for ImodvNativeGl {
                 objz,
             );
         }
+    }
+}
+
+/// The compatibility-profile texture boundary used by `mv_image.cpp`.
+///
+/// This is intentionally fixed-function OpenGL: image planes are positioned
+/// by the same current model-view matrix and texture environment as the
+/// translated `mv_ogl` renderer, rather than being a separate Rust scene.
+#[cfg(feature = "three-dmod-gl")]
+impl crate::imod::three_dmod::mv_image::MvImageGl for ImodvNativeGl {
+    fn texture_capacity(&mut self, requested: i32) -> i32 {
+        let mut width = 0;
+        unsafe {
+            (self.compat.gl_tex_image_2d)(
+                gl_enum::PROXY_TEXTURE_2D,
+                0,
+                4,
+                requested,
+                requested,
+                0,
+                gl_enum::BGRA,
+                gl_enum::UNSIGNED_BYTE,
+                std::ptr::null(),
+            );
+            (self.compat.gl_get_tex_level_parameteriv)(
+                gl_enum::PROXY_TEXTURE_2D,
+                0,
+                gl_enum::TEXTURE_WIDTH,
+                &mut width,
+            );
+        }
+        width
+    }
+
+    fn create_texture_bgra(&mut self, width: i32, height: i32, data: &[u8]) -> u32 {
+        let mut texture = 0;
+        unsafe {
+            (self.compat.gl_gen_textures)(1, &mut texture);
+            (self.compat.gl_bind_texture)(gl_enum::TEXTURE_2D, texture);
+            (self.compat.gl_tex_image_2d)(
+                gl_enum::TEXTURE_2D,
+                0,
+                4,
+                width,
+                height,
+                0,
+                gl_enum::BGRA,
+                gl_enum::UNSIGNED_BYTE,
+                data.as_ptr().cast(),
+            );
+        }
+        texture
+    }
+
+    fn delete_texture(&mut self, texture: u32) {
+        unsafe { (self.compat.gl_delete_textures)(1, &texture) }
+    }
+
+    fn upload_bgra(&mut self, width: i32, height: i32, data: &[u8]) {
+        unsafe {
+            (self.compat.gl_tex_sub_image_2d)(
+                gl_enum::TEXTURE_2D,
+                0,
+                0,
+                0,
+                width,
+                height,
+                gl_enum::BGRA,
+                gl_enum::UNSIGNED_BYTE,
+                data.as_ptr().cast(),
+            )
+        }
+    }
+
+    fn texture_parameters(&mut self) {
+        unsafe {
+            (self.compat.gl_tex_parameterf)(
+                gl_enum::TEXTURE_2D,
+                gl_enum::TEXTURE_WRAP_S,
+                gl_enum::CLAMP as f32,
+            );
+            (self.compat.gl_tex_parameterf)(
+                gl_enum::TEXTURE_2D,
+                gl_enum::TEXTURE_WRAP_T,
+                gl_enum::CLAMP as f32,
+            );
+            (self.compat.gl_tex_parameterf)(
+                gl_enum::TEXTURE_2D,
+                gl_enum::TEXTURE_MAG_FILTER,
+                gl_enum::LINEAR as f32,
+            );
+            (self.compat.gl_tex_parameterf)(
+                gl_enum::TEXTURE_2D,
+                gl_enum::TEXTURE_MIN_FILTER,
+                gl_enum::NEAREST as f32,
+            );
+            (self.compat.gl_tex_envf)(
+                gl_enum::TEXTURE_ENV,
+                gl_enum::TEXTURE_ENV_MODE,
+                gl_enum::DECAL as f32,
+            );
+        }
+    }
+
+    fn enable_texture(&mut self, enabled: bool) {
+        unsafe {
+            if enabled {
+                glow::HasContext::enable(&self.gl, gl_enum::TEXTURE_2D)
+            } else {
+                glow::HasContext::disable(&self.gl, gl_enum::TEXTURE_2D)
+            }
+        }
+    }
+
+    fn set_alpha_blend(&mut self, alpha: f32, enabled: bool) {
+        unsafe {
+            (self.compat.gl_color4f)(alpha, alpha, alpha, alpha);
+            if enabled {
+                glow::HasContext::enable(&self.gl, gl_enum::BLEND);
+                glow::HasContext::blend_func(&self.gl, glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            }
+        }
+    }
+
+    fn draw_textured_quad(
+        &mut self,
+        points: [crate::imod::libimod::imodel::Ipoint; 4],
+        clamp: (f32, f32),
+        texel: f32,
+    ) {
+        unsafe {
+            (self.compat.gl_begin)(gl_enum::QUADS);
+            (self.compat.gl_tex_coord2f)(texel, texel);
+            (self.compat.gl_vertex3f)(points[0].x, points[0].y, points[0].z);
+            (self.compat.gl_tex_coord2f)(clamp.0, texel);
+            (self.compat.gl_vertex3f)(points[1].x, points[1].y, points[1].z);
+            (self.compat.gl_tex_coord2f)(clamp.0, clamp.1);
+            (self.compat.gl_vertex3f)(points[2].x, points[2].y, points[2].z);
+            (self.compat.gl_tex_coord2f)(texel, clamp.1);
+            (self.compat.gl_vertex3f)(points[3].x, points[3].y, points[3].z);
+            (self.compat.gl_end)();
+        }
+    }
+
+    fn flush(&mut self) {
+        unsafe { glow::HasContext::flush(&self.gl) }
     }
 }
 
@@ -2530,7 +2805,7 @@ pub fn run_native_opengl(
                     }
                 }
                 WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                    model_window.device_pixel_ratio = scale_factor as f32;
+                    model_window.screen_changed(scale_factor as f32, &mut *sink);
                     backend.borrow_mut().device_pixel_ratio = scale_factor as f32;
                 }
                 WinitWindowEvent::Focused(focused) => {
@@ -3181,6 +3456,13 @@ impl ImodvWindowSink for ImodvNativeSink {
             )
         });
     }
+    /// `imodvDialogManager.masterChangedScreen(oldDPR, newDPR)`.
+    fn dialogs_master_changed_screen(&mut self, old_ratio: f32, new_ratio: f32) {
+        eprintln!(
+            "3dmodv: DPI changed from {old_ratio} to {new_ratio}; model-view dialog windows are \
+             not registered with the DialogManager of control.cpp yet"
+        );
+    }
     /// `imodvDialogManager.windowActivated()`.
     fn dialogs_activated(&mut self) {
         static REPORTED: std::sync::Once = std::sync::Once::new();
@@ -3501,14 +3783,7 @@ pub struct ImodvNativeHost;
 impl crate::imod::three_dmod::imodv::ImodvNativeBoundary for ImodvNativeHost {
     /// `App->cvi`.
     fn current_model_view(&mut self) -> *mut crate::imod::three_dmod::imodview::ImodView {
-        static REPORTED: std::sync::Once = std::sync::Once::new();
-        REPORTED.call_once(|| {
-            eprintln!(
-                "3dmod: imodv_open has no current image view: App->cvi is owned by the normal \
-                 3dmod display host (imod.cpp/imodview.cpp), which is not built yet"
-            )
-        });
-        std::ptr::null_mut()
+        crate::imod::three_dmod::imod::normal_current_view()
     }
     /// `new QPixmap(QPixmap::fromImage(QImage(b3dicon)))`.
     fn model_view_icon(&mut self) -> *mut crate::imod::three_dmod::imodv::QPixmap {
@@ -4054,6 +4329,9 @@ mod tests {
         fn dialogs_master_changed(&mut self) {
             self.calls.push("dialogs_master_changed")
         }
+        fn dialogs_master_changed_screen(&mut self, _: f32, _: f32) {
+            self.calls.push("dialogs_master_changed_screen")
+        }
         fn dialogs_activated(&mut self) {
             self.calls.push("dialogs_activated")
         }
@@ -4110,6 +4388,24 @@ mod tests {
             ]
         );
         assert_eq!(sink.events[0], press);
+    }
+
+    #[test]
+    fn dpi_screen_change_notifies_dialogs_only_for_a_new_ratio() {
+        let mut app = ImodvApp::default();
+        let mut window = ImodvWindow::new(&mut app);
+        let mut sink = RecordingImodvWindowSink::default();
+        window.screen_changed(1.5, &mut sink);
+        window.screen_changed(1.5, &mut sink);
+        window.screen_changed(2.0, &mut sink);
+        assert_eq!(window.device_pixel_ratio, 2.0);
+        assert_eq!(
+            sink.calls,
+            [
+                "dialogs_master_changed_screen",
+                "dialogs_master_changed_screen"
+            ]
+        );
     }
 
     /// `ImodvGL`'s own handlers: the press/move gate, the wheel payload, and

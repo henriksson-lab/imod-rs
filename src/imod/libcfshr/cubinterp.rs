@@ -377,6 +377,33 @@ pub fn cubinterp(
     }
 }
 
+/// `cubinterpfwrap` (`cubinterp.c:312`).
+///
+/// Fortran passes the 2-by-2 transform as a flat, column-major argument.
+/// The wrapper reconstructs the C `cmat` in the exact four assignments made
+/// by the source before entering `cubinterp`.
+pub fn cubinterpfwrap(
+    array: &[f32],
+    bray: &mut [f32],
+    nxa: i32,
+    nya: i32,
+    nxb: i32,
+    nyb: i32,
+    amat: &[f32; 4],
+    xc: f32,
+    yc: f32,
+    xt: f32,
+    yt: f32,
+    scale: f32,
+    dmean: f32,
+    linear: i32,
+) {
+    let cmat = [[amat[0], amat[1]], [amat[2], amat[3]]];
+    cubinterp(
+        array, bray, nxa, nya, nxb, nyb, &cmat, xc, yc, xt, yt, scale, dmean, linear,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-//! Safe owned replacement for `IMOD/mrc/nrutil.{c,h}`.
+//! Translation of `IMOD/mrc/nrutil.{c,h}`.
 //!
 //! Numerical Recipes' shifted pointer allocations become zero-based `Vec`
 //! storage; callers retain the original lower bounds as metadata when needed.
@@ -7,6 +7,18 @@
 pub struct NrVector<T> {
     pub lower: isize,
     pub values: Vec<T>,
+}
+/// `nrerror`.
+///
+/// Allocation failures in the source are terminal.  The normal Rust allocators
+/// abort before any of the safe constructors below can return a null value, but
+/// callers retaining the source error path get its observable diagnostic and
+/// exit status here.
+pub fn nrerror(error_text: &str) -> ! {
+    eprintln!("Numerical Recipes run-time error...");
+    eprintln!("{error_text}");
+    eprintln!("...now exiting to system...");
+    std::process::exit(1)
 }
 impl<T: Default + Clone> NrVector<T> {
     pub fn new(lower: isize, upper: isize) -> Self {
@@ -40,6 +52,16 @@ pub fn lvector(nl: isize, nh: isize) -> NrVector<u64> {
 pub fn dvector(nl: isize, nh: isize) -> NrVector<f64> {
     NrVector::new(nl, nh)
 }
+/// `free_vector`; dropping the owned value releases the source allocation.
+pub fn free_vector(_v: NrVector<f32>, _nl: isize, _nh: isize) {}
+/// `free_ivector`; dropping the owned value releases the source allocation.
+pub fn free_ivector(_v: NrVector<i32>, _nl: isize, _nh: isize) {}
+/// `free_cvector`; dropping the owned value releases the source allocation.
+pub fn free_cvector(_v: NrVector<u8>, _nl: isize, _nh: isize) {}
+/// `free_lvector`; dropping the owned value releases the source allocation.
+pub fn free_lvector(_v: NrVector<u64>, _nl: isize, _nh: isize) {}
+/// `free_dvector`; dropping the owned value releases the source allocation.
+pub fn free_dvector(_v: NrVector<f64>, _nl: isize, _nh: isize) {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct NrMatrix<T> {
     pub row_lower: isize,
@@ -82,6 +104,12 @@ pub fn dmatrix(a: isize, b: isize, c: isize, d: isize) -> NrMatrix<f64> {
 pub fn imatrix(a: isize, b: isize, c: isize, d: isize) -> NrMatrix<i32> {
     NrMatrix::new(a, b, c, d)
 }
+/// `free_matrix`; dropping the owned value releases the source allocation.
+pub fn free_matrix(_m: NrMatrix<f32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
+/// `free_dmatrix`; dropping the owned value releases the source allocation.
+pub fn free_dmatrix(_m: NrMatrix<f64>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
+/// `free_imatrix`; dropping the owned value releases the source allocation.
+pub fn free_imatrix(_m: NrMatrix<i32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
 pub fn submatrix(
     a: &NrMatrix<f32>,
     oldrl: isize,
@@ -105,6 +133,10 @@ pub fn convert_matrix(a: &[f32], nrl: isize, nrh: isize, ncl: isize, nch: isize)
     out.values.copy_from_slice(a);
     out
 }
+/// `free_submatrix`; `submatrix` owns its copied row layout in Rust.
+pub fn free_submatrix(_m: NrMatrix<f32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
+/// `free_convert_matrix`; only the Rust row metadata is owned by the wrapper.
+pub fn free_convert_matrix(_m: NrMatrix<f32>, _nrl: isize, _nrh: isize, _ncl: isize, _nch: isize) {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct NrTensor3 {
     pub row_lower: isize,
@@ -145,6 +177,17 @@ pub fn f3tensor(
         depths,
         values: vec![0.; rows * columns * depths],
     }
+}
+/// `free_f3tensor`; dropping the owned value releases every source allocation.
+pub fn free_f3tensor(
+    _t: NrTensor3,
+    _nrl: isize,
+    _nrh: isize,
+    _ncl: isize,
+    _nch: isize,
+    _ndl: isize,
+    _ndh: isize,
+) {
 }
 pub fn sqr(value: f32) -> f32 {
     value * value

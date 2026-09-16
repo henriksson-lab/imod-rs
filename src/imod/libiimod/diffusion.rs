@@ -27,6 +27,10 @@ pub fn update_matrix(
     if k == 0. {
         return Err("diffusion k must not be zero".into());
     }
+    // The padded source matrix remains the no-flux boundary.  Native callers
+    // carry that border forward between iterations; initialize it explicitly
+    // before replacing only the source loop's interior pixels.
+    image.copy_from_slice(image_old);
     let ksq = k * k;
     for i in 1..=m {
         let north = if i == 1 { 1 } else { i - 1 };

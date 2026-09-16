@@ -75,6 +75,17 @@ pub const WORLD_QUALITY_BITS: u32 = 7 << WORLD_QUALITY_SHIFT;
 /// `RADIANS_PER_DEGREE` (`b3dutil.h:68`).
 pub const RADIANS_PER_DEGREE: f64 = 0.01745329252;
 
+/// `myTransformPoint` (`mv_ogl.cpp:1447`): multiply a homogeneous point by
+/// OpenGL's column-major matrix layout.
+pub fn my_transform_point(out: &mut [f64; 4], matrix: &[f64; 16], input: &[f64; 4]) {
+    for row in 0..4 {
+        out[row] = matrix[row] * input[0]
+            + matrix[4 + row] * input[1]
+            + matrix[8 + row] * input[2]
+            + matrix[12 + row] * input[3];
+    }
+}
+
 /// The `GL/gl.h` primitive-mode enumerants this unit names.  They are written
 /// out because the boundary carries the source's own `glBegin` argument.
 pub const GL_POINTS: u32 = 0x0000;
@@ -290,6 +301,7 @@ pub trait MvOglBoundary: FinegrainRenderBoundary {
         winy: &mut i32,
         zoom: &mut f32,
     ) -> i32;
+    /// drawImageForCurrentModel()
     fn draw_image(&mut self, app: &mut ImodvApp, transparent: bool);
     /// The source passes the model it is drawing to `imodvDrawLabels`, and the
     /// window size and font metrics come from the window the boundary owns.
@@ -642,11 +654,9 @@ pub unsafe fn imodv_draw_model(
         imodv_set_viewby_model(state, app, &*imod, gl);
         imodv_set_model_trans(state, app, &*imod, gl);
         set_stereo_projection(app, 0, gl);
-        // `Imod::ctime` (`imodel.h:457`) is not carried by the translated
-        // `Imod` in `libimod`, so `sCTime = imod->ctime` cannot be read here.
-        // -1 is the file-static initial value, which makes the time checks
-        // behave as they do for an untimed model.
-        state.ctime = -1;
+        // `mv_ogl.cpp:516`: copy the model's current time before testing
+        // time-tagged contours and meshes.
+        state.ctime = (*imod).ctime;
         if let Some(view) = (&mut (*imod).view).get_mut(0) {
             gl.set_light(view);
         }
@@ -3062,8 +3072,8 @@ pub unsafe fn imodv_select_visible_conts(
         let obj: *mut Iobj = &mut (&mut (*imod).obj)[ob as usize];
         let mut check_time = iobj_time((*obj).flags) as i32;
 
-        // `Imod::ctime` (`imodel.h:457`) is not carried by the translated `Imod`
-        // in `libimod`, so `sCTime = imod->ctime` cannot be assigned here.
+        // `mv_ogl.cpp:2986`: selection uses the model's current time too.
+        state.ctime = (*imod).ctime;
         if state.ctime == 0 {
             check_time = 0;
         }
@@ -4113,6 +4123,19 @@ mod tests {
             ..Default::default()
         });
         o
+    }
+
+    #[test]
+    fn source_column_major_transform_multiplies_homogeneous_point() {
+        let matrix = [
+            2., 3., 5., 7., // column 0
+            11., 13., 17., 19., // column 1
+            23., 29., 31., 37., // column 2
+            41., 43., 47., 53., // column 3
+        ];
+        let mut out = [0.; 4];
+        my_transform_point(&mut out, &matrix, &[2., 3., 5., 7.]);
+        assert_eq!(out, [439., 491., 545., 627.]);
     }
 
     #[test]

@@ -953,8 +953,8 @@ pub fn find_rotational_alignment_between_two_stacks_of_images(
                 }
             }
         }
-        let correlation = numerator.sample_sum()
-            / (reference_denominator.sample_sum() * self_denominator.sample_sum()).sqrt();
+        let correlation = numerator.get_sample_sum()
+            / (reference_denominator.get_sample_sum() * self_denominator.get_sample_sum()).sqrt();
         if correlation > best_correlation {
             best_correlation = correlation;
             best_rotation = rotation;

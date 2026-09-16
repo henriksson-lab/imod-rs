@@ -167,7 +167,9 @@ pub struct SvlMarkerCorrespondenceLbModel {
     marker_candidates: GglMatrix,
     singleton_scores: GglMatrix,
     pub config: MarkerCorrespondenceConfig,
-    pub allowed_values: Vec<Vec<usize>>,
+    /// Native `_allowVals` begins with its historical `-1` sentinel; model
+    /// states start at index one and include the final garbage-can candidate.
+    pub allowed_values: Vec<Vec<isize>>,
     pub pair_to_clique: Vec<Vec<isize>>,
     pub pair_distances: Vec<Vec<f64>>,
     pub graph: SvlClusterGraph,
@@ -232,7 +234,7 @@ impl SvlMarkerCorrespondenceLbModel {
         }
         Ok(())
     }
-    pub fn allowed_vals(&self, marker: usize) -> Option<&[usize]> {
+    pub fn allowed_vals(&self, marker: usize) -> Option<&[isize]> {
         self.allowed_values.get(marker).map(Vec::as_slice)
     }
     pub fn clear(&mut self) {
@@ -278,33 +280,27 @@ impl SvlMarkerCorrespondenceLbModel {
         let wanted = self.config.minimum_candidates.min(candidates);
         self.allowed_values = (0..self.config.marker_count)
             .map(|marker| {
-                let mut by_distance: Vec<_> = (0..candidates)
-                    .map(|candidate| {
-                        (
-                            Self::dist_l2(
-                                self.marker_locations.get(0, marker),
-                                self.marker_locations.get(1, marker),
-                                self.marker_candidates.get(0, candidate),
-                                self.marker_candidates.get(1, candidate),
-                            ),
-                            candidate,
-                        )
-                    })
-                    .collect();
-                by_distance.sort_by(|left, right| left.0.total_cmp(&right.0));
-                let mut values: Vec<_> = by_distance
-                    .into_iter()
-                    .filter(|(distance, _)| *distance < self.config.proximity_threshold)
-                    .map(|(_, candidate)| candidate)
-                    .collect();
-                if values.len() < wanted {
-                    let remaining: Vec<_> = (0..candidates)
-                        .filter(|candidate| !values.contains(candidate))
-                        .take(wanted - values.len())
-                        .collect();
-                    values.extend(remaining);
+                let mut assigned = vec![false; candidates];
+                let mut values = vec![-1];
+                let mut threshold = self.config.proximity_threshold;
+                // `AllowValuesByInitialProximity` repeatedly scans candidates
+                // in input order, expanding the threshold by 1.5.
+                while values.len() < wanted {
+                    for candidate in 0..candidates {
+                        let distance = Self::dist_l2(
+                            self.marker_locations.get(0, marker),
+                            self.marker_locations.get(1, marker),
+                            self.marker_candidates.get(0, candidate),
+                            self.marker_candidates.get(1, candidate),
+                        );
+                        if !assigned[candidate] && distance < threshold {
+                            assigned[candidate] = true;
+                            values.push(candidate as isize);
+                        }
+                    }
+                    threshold *= 1.5;
                 }
-                values.push(candidates);
+                values.push(candidates as isize);
                 values
             })
             .collect();
@@ -334,6 +330,7 @@ impl SvlMarkerCorrespondenceLbModel {
         for marker in 0..self.config.marker_count {
             let mut factor = SvlFactor::with_variable(marker as i32, self.cards[marker])?;
             for (state, &candidate) in self.allowed_values[marker].iter().skip(1).enumerate() {
+                let candidate = candidate as usize;
                 let value = if let Some(locked) = self.locked_values[marker] {
                     if locked == candidate { 1.0 } else { MIN_VALUE }
                 } else {
@@ -455,8 +452,8 @@ impl SvlMarkerCorrespondenceLbModel {
                 )?;
                 for first_state in 0..self.cards[first] {
                     for second_state in 0..self.cards[second] {
-                        let first_candidate = self.allowed_values[first][first_state + 1];
-                        let second_candidate = self.allowed_values[second][second_state + 1];
+                        let first_candidate = self.allowed_values[first][first_state + 1] as usize;
+                        let second_candidate = self.allowed_values[second][second_state + 1] as usize;
                         let value =
                             self.pairwise_value(first, first_candidate, second, second_candidate);
                         let index = factor
@@ -613,7 +610,7 @@ impl SvlMarkerCorrespondenceLbModel {
                 .find(|factor| factor.variables == vec![marker as i32])
                 .ok_or("missing singleton belief")?;
             for (state, &candidate) in self.allowed_values[marker].iter().skip(1).enumerate() {
-                result.set(marker, candidate, belief.data[state].ln());
+                result.set(marker, candidate as usize, belief.data[state].ln());
             }
         }
         Ok(result)
@@ -630,7 +627,7 @@ impl SvlMarkerCorrespondenceLbModel {
     pub fn is_valid_param(value: (i32, i32)) -> bool {
         value.0 != -1 && value.1 != -1
     }
-    pub fn allowed_value_set(&self, marker: usize) -> Option<BTreeSet<usize>> {
+    pub fn allowed_value_set(&self, marker: usize) -> Option<BTreeSet<isize>> {
         self.allowed_values
             .get(marker)
             .map(|values| values.iter().copied().collect())
@@ -641,7 +638,7 @@ impl SvlMarkerCorrespondenceLbModel {
 mod tests {
     use super::*;
     fn config() -> MarkerCorrespondenceConfig {
-        MarkerCorrespondenceConfig::parse("2 3 5 10 100 0.01 1 1 10 1 0 100 0 100").unwrap()
+        MarkerCorrespondenceConfig::parse("2 3 5 10 100 0.01 1 1 10 2 0 100 0 100").unwrap()
     }
     fn model() -> SvlMarkerCorrespondenceLbModel {
         SvlMarkerCorrespondenceLbModel::new(
@@ -658,7 +655,7 @@ mod tests {
         let mut model = model();
         model.read_lock_pots("0 1").unwrap();
         model.compute_allowed_values();
-        assert_eq!(model.allowed_vals(0).unwrap(), &[0, 1, 2]);
+        assert_eq!(model.allowed_vals(0).unwrap(), &[-1, 0, 2]);
         model.build_model().unwrap();
         assert_eq!(model.graph.num_cliques(), 3);
     }

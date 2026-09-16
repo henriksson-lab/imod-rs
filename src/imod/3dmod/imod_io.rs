@@ -10,6 +10,8 @@
 use std::fs::{File, OpenOptions, remove_file, rename};
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libiimod::iimage::IIFILE_MRC;
+use crate::imod::libiimod::mrcfiles::mrc_read_byte;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,6 +20,9 @@ use crate::imod::libimod::imodel::{
     IMOD_MMOVIE, IMOD_UNIT_NM, IMODF_NEW_TO_3DMOD, Imod, imod_checksum, imod_new, imod_new_object,
 };
 use crate::imod::libimod::imodel_files::{imod_read_file, imod_write, imod_write_skip_mesh};
+use crate::imod::three_dmod::imodview::{
+    ImodView, ivw_get_pixel_bytes, ivw_read_binned_section, ivw_reopen,
+};
 
 pub const IMOD_IO_SUCCESS: i32 = 0;
 pub const IMOD_IO_SAVE_ERROR: i32 = 1;
@@ -521,12 +526,74 @@ pub fn set_model_scales_from_image(
     }
 }
 
-/// `imod_io_image_load`; all image-format and cache details remain in the paired image-reader boundary.
-pub fn imod_io_image_load(
-    view: &mut ImodIoViewState,
-    native: &mut dyn ImodIoBoundary,
-) -> Option<Vec<Vec<u8>>> {
-    native.image_load(view)
+/// `imod_io_image_load`; load a non-cached image into the Rust-owned version
+/// of the source `idata` allocation and return its legacy section-pointer
+/// table.  `ImodView::idata_storage` keeps both the pixels and table alive
+/// for the image windows that consume this result.
+pub unsafe fn imod_io_image_load(vi: *mut ImodView) -> *mut *mut u8 {
+    unsafe {
+        let Some(view) = vi.as_mut() else {
+            return std::ptr::null_mut();
+        };
+        let Some(image) = view.image.as_mut() else {
+            return std::ptr::null_mut();
+        };
+        let Some(li) = view.li.as_mut() else {
+            return std::ptr::null_mut();
+        };
+        if image.fp.is_none() && ivw_reopen(image) != 0 {
+            return std::ptr::null_mut();
+        }
+        if image.fp.is_none() {
+            return std::ptr::null_mut();
+        }
+
+        view.idata_storage.clear();
+        view.idata_ptrs.clear();
+        if image.file == IIFILE_MRC
+            && view.raw_image_store == 0
+            && view.xybin * view.zbin == 1
+            && li.mirror_fft <= 0
+        {
+            let Some(header) = image.mrc_header.as_mut() else {
+                return std::ptr::null_mut();
+            };
+            let Some(data) = mrc_read_byte(
+                image.fp.as_mut().expect("checked above"),
+                header,
+                Some(li),
+                None,
+            ) else {
+                return std::ptr::null_mut();
+            };
+            view.idata_storage = data;
+        } else {
+            let Some(plane_bytes) = (view.xsize as usize)
+                .checked_mul(view.ysize as usize)
+                .and_then(|size| {
+                    size.checked_mul(ivw_get_pixel_bytes(view.raw_image_store as i32) as usize)
+                })
+            else {
+                return std::ptr::null_mut();
+            };
+            let Some(num_sections) = usize::try_from(view.zsize).ok() else {
+                return std::ptr::null_mut();
+            };
+            if view.idata_storage.try_reserve_exact(num_sections).is_err() {
+                return std::ptr::null_mut();
+            }
+            for section in 0..view.zsize {
+                let mut data = vec![0; plane_bytes];
+                if ivw_read_binned_section(vi, data.as_mut_ptr(), section + li.zmin) != 0 {
+                    return std::ptr::null_mut();
+                }
+                view.idata_storage.push(data);
+            }
+        }
+        view.idata_ptrs = view.idata_storage.iter_mut().map(Vec::as_mut_ptr).collect();
+        view.idata = view.idata_ptrs.as_mut_ptr();
+        view.idata
+    }
 }
 
 /// `setImod_filename`.
@@ -647,6 +714,62 @@ mod tests {
             0
         );
         assert!(load_model_file(&mut state, Some(&path), &mut n).is_some());
+        let _ = remove_file(path);
+    }
+
+    #[test]
+    fn noncached_mrc_load_keeps_the_source_section_table_alive_on_the_view() {
+        use crate::imod::libiimod::iimage::{ii_delete, ii_open};
+        use crate::imod::libiimod::mrcfiles::{
+            LoadInfo, MRC_MODE_BYTE, MrcHeader, mrc_head_new, mrc_head_write, mrc_init_li,
+            mrc_write_slice,
+        };
+        let path = std::env::temp_dir().join(format!(
+            "imod-io-image-{}-{}.mrc",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
+        header.amin = 1.;
+        header.amax = 4.;
+        header.amean = 2.5;
+        let mut output = ImodFile::open(&path, "wb").unwrap();
+        assert_eq!(mrc_head_write(&mut output, &mut header), 0);
+        assert_eq!(
+            mrc_write_slice(&[1, 2, 3, 4], &mut output, &mut header, 0, b'Z'),
+            0
+        );
+        drop(output);
+
+        let image = unsafe { ii_open(path.as_os_str().as_encoded_bytes(), "rb") };
+        assert!(!image.is_null());
+        let mut li = LoadInfo::default();
+        assert_eq!(
+            mrc_init_li(Some(&mut li), unsafe { (*image).mrc_header.as_ref() }),
+            0
+        );
+        let mut view = ImodView {
+            image,
+            li: &mut li,
+            xsize: 2,
+            ysize: 2,
+            zsize: 1,
+            xysize: 4,
+            ..Default::default()
+        };
+        let table = unsafe { imod_io_image_load(&mut view) };
+        assert!(!table.is_null());
+        assert_eq!(view.idata, table);
+        assert_eq!(view.idata_storage, vec![vec![0, 85, 170, 255]]);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(*table, 4) },
+            [0, 85, 170, 255]
+        );
+        unsafe { ii_delete(image) };
         let _ = remove_file(path);
     }
 }

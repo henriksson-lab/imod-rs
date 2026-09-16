@@ -939,7 +939,11 @@ mod tests {
                 .inference(SvlMessagePassingAlgorithm::SumProd, 8)
                 .unwrap()
         );
-        assert_eq!(inference.clique_potential(1).unwrap().data, vec![0.4, 0.6]);
+        // `svlFactor` stores its first variable with stride one, so
+        // marginalizing variable 0 gives [1 + 2, 3 + 4].
+        let marginal = &inference.clique_potential(1).unwrap().data;
+        assert!((marginal[0] - 0.3).abs() < 1.0e-12);
+        assert!((marginal[1] - 0.7).abs() < 1.0e-12);
     }
 
     #[test]
@@ -960,7 +964,7 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(inference.last_dual_objective, 4.5);
-        assert_eq!(inference.clique_potential(1).unwrap().data, vec![2.5, 4.5]);
+        assert_eq!(inference.clique_potential(1).unwrap().data, vec![1.5, 4.5]);
     }
 
     #[test]

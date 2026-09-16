@@ -19,6 +19,7 @@ use crate::imod::libimod::iobj::{
     IMOD_OBJFLAG_WILD, imod_object_checksum, imod_object_clean_surf, imod_objects_delete,
 };
 use crate::imod::libimod::iplane::{imod_clips_initialize, imod_clips_trans};
+use crate::imod::libimod::imesh::MeshParams;
 use crate::imod::libimod::ipoint::imod_point_normalize;
 use crate::imod::libimod::istore::{istore_checksum, istore_delete_cont_surf};
 use crate::imod::libimod::objgroup::{obj_group_list_checksum, obj_group_list_delete};
@@ -83,7 +84,15 @@ impl Default for Iclip_planes {
             flags: 0,
             trans: 0,
             plane: 0,
-            normal: [Ipoint::default(); IMOD_CLIPSIZE],
+            // `imodClipsInitialize` gives every unused plane its native
+            // default -Z normal.  In particular, the 3dmod clipping editor
+            // uses this sentinel to recognize a plane being enabled for the
+            // first time and place it at the model/object midpoint.
+            normal: [Ipoint {
+                x: 0.,
+                y: 0.,
+                z: -1.,
+            }; IMOD_CLIPSIZE],
             point: [Ipoint::default(); IMOD_CLIPSIZE],
         }
     }
@@ -254,6 +263,9 @@ pub struct Imesh {
 pub struct Iobj {
     pub cont: Vec<Icont>,
     pub mesh: Vec<Imesh>,
+    /// `Iobj::meshParam` (`imodel.h:443`), optional per-object meshing
+    /// parameters persisted in MEPA/SKLI chunks.
+    pub mesh_param: Option<MeshParams>,
     pub store: Vec<super::istore::Istore>,
     /// `imodel.h:442` declares `Ilabel *label` on the object.
     pub label: Option<super::ilabel::Ilabel>,
@@ -304,6 +316,7 @@ impl Default for Iobj {
         Self {
             cont: Vec::new(),
             mesh: Vec::new(),
+            mesh_param: None,
             store: Vec::new(),
             label: None,
             name: [0; IOBJ_STRSIZE],
@@ -377,6 +390,9 @@ pub struct Imod {
     pub pixsize: f32,
     pub units: i32,
     pub csum: i32,
+    /// `Mod_Model::tmax` (`imodel.h:480`), the largest model time index.
+    /// This is runtime state and is not serialized by the model-file paths.
+    pub tmax: i32,
     pub alpha: f32,
     pub beta: f32,
     pub gamma: f32,
@@ -387,11 +403,15 @@ pub struct Imod {
     /// never emits it -- and `imodDefault` leaves it 0.  Read by
     /// `mv_objed.cpp:1555-1760`, `mv_ogl.cpp:3069` and `mv_input.cpp:167-1032`.
     ///
-    /// `Mod_Model::tmax` (`imodel.h:480`) sits two fields above it in the
-    /// source and is deliberately **not** carried: nothing in the vendored tree
-    /// reads or writes it.
     pub edit_global_clip: i32,
+    /// `Mod_Model::curObjGroup` (`imodel.h:489`), current object-group index.
+    pub cur_obj_group: i32,
     pub ref_image: Option<Iref_image>,
+    /// `Mod_Model::fileName` (`imodel.h:492`), owned filename or native NULL.
+    pub file_name: Option<String>,
+    /// `Mod_Model::xybin` / `zbin` (`imodel.h:493-494`), runtime image binning.
+    pub xybin: i32,
+    pub zbin: i32,
     pub slicer_ang: Vec<Slicer_angles>,
     pub group_list: Vec<Iobj_group>,
     pub cur_mesh_surf: i32,
@@ -428,13 +448,18 @@ impl Default for Imod {
             pixsize: 0.,
             units: 0,
             csum: 0,
+            tmax: 0,
             alpha: 0.,
             beta: 0.,
             gamma: 0.,
             cview: 0,
             view: vec![Iview::default()],
             edit_global_clip: 0,
+            cur_obj_group: -1,
             ref_image: None,
+            file_name: None,
+            xybin: 1,
+            zbin: 1,
             slicer_ang: Vec::new(),
             group_list: Vec::new(),
             cur_mesh_surf: -1,
@@ -836,6 +861,7 @@ pub fn imod_new_object(mod_: &mut Imod) -> i32 {
         extra: [0; 16],
         cont: Vec::new(),
         mesh: Vec::new(),
+        mesh_param: None,
         store: Vec::new(),
         label: None,
         name: [0; IOBJ_STRSIZE],
@@ -1413,9 +1439,8 @@ pub fn imod_new() -> Option<Imod> {
 /// Initializes model structure `model` to default values and allocates an
 /// initial view.  Returns 0 (there are no errors).
 ///
-/// Deviation note: `Imod` here has no `tmax`, `ctime`, `editGlobalClip`,
-/// `curObjGroup`, `xybin`, `zbin`, `file` or `fileName` member, so the source
-/// lines that set those have nothing to act on.
+/// Deviation note: `Imod` has no `FILE *file` member: Rust callers own the
+/// `ImodFile` borrow explicitly instead of storing an alias in the model.
 pub fn imod_default(model: &mut Imod) -> i32 {
     let newmodname = b"IMOD-NewModel";
 
@@ -1450,6 +1475,7 @@ pub fn imod_default(model: &mut Imod) -> i32 {
     model.units = 0; /* if unit is 0, pixsize is undefined */
 
     model.csum = 0;
+    model.tmax = 0;
     model.xmax = 1;
     model.ymax = 1;
     model.zmax = 1;
@@ -1464,6 +1490,10 @@ pub fn imod_default(model: &mut Imod) -> i32 {
     crate::imod::libimod::iview::imod_view_model_new(model);
 
     model.ref_image = None;
+    model.cur_obj_group = -1;
+    model.file_name = None;
+    model.xybin = 1;
+    model.zbin = 1;
     model.cur_mesh_surf = -1;
     model.store.clear();
     model.slicer_ang.clear();
@@ -1483,6 +1513,7 @@ pub fn imod_delete(imod: &mut Imod) {
     imod.view.clear();
     imod_objects_delete(&mut imod.obj);
     imod.ref_image = None;
+    imod.file_name = None;
     imod.store.clear();
     obj_group_list_delete(&mut imod.group_list);
 }

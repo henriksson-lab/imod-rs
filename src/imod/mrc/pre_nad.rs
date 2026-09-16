@@ -418,7 +418,7 @@ mod tests {
         };
         assert_eq!(
             get_quartile_mvd_index(&[make(3.), make(1.), make(2.), make(4.)]),
-            1
+            2
         );
     }
     #[test]

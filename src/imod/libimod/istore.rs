@@ -6,6 +6,44 @@ use crate::imod::libimod::imodel_files::{
     imod_get_float, imod_get_int, imod_get_short, imod_put_float, imod_put_int, imod_put_short,
 };
 use std::io::{Read, Seek, SeekFrom, Write};
+
+/// Original `GEN_STORE_*` scalar encodings (`include/istore.h:23-26`).
+pub const GEN_STORE_INT: u16 = 0;
+pub const GEN_STORE_FLOAT: u16 = 1;
+pub const GEN_STORE_SHORT: u16 = 2;
+pub const GEN_STORE_BYTE: u16 = 3;
+/// Original `GEN_STORE_NOINDEX` (`include/istore.h:29`).
+pub const GEN_STORE_NOINDEX: u16 = 1 << 4;
+/// Original `GEN_STORE_REVERT` (`include/istore.h:30`).
+pub const GEN_STORE_REVERT: u16 = 1 << 5;
+/// Original `GEN_STORE_SURFACE` (`include/istore.h:31`).
+pub const GEN_STORE_SURFACE: u16 = 1 << 6;
+/// Original `GEN_STORE_ONEPOINT` (`include/istore.h:32`).
+pub const GEN_STORE_ONEPOINT: u16 = 1 << 7;
+/// Original `GEN_STORE_GAP` / `GEN_STORE_CONNECT` (`include/istore.h:41-42`).
+pub const GEN_STORE_GAP: i16 = 4;
+pub const GEN_STORE_CONNECT: i16 = 5;
+/// Original general-storage change types (`include/istore.h:38-61`).
+pub const GEN_STORE_COLOR: i16 = 1;
+pub const GEN_STORE_FCOLOR: i16 = 2;
+pub const GEN_STORE_TRANS: i16 = 3;
+pub const GEN_STORE_3DWIDTH: i16 = 6;
+pub const GEN_STORE_2DWIDTH: i16 = 7;
+pub const GEN_STORE_SYMTYPE: i16 = 8;
+pub const GEN_STORE_SYMSIZE: i16 = 9;
+pub const GEN_STORE_VALUE1: i16 = 10;
+pub const GEN_STORE_MINMAX1: i16 = 11;
+pub const GEN_STORE_VALUE2: i16 = 12;
+pub const GEN_STORE_MINMAX2: i16 = 13;
+pub const GEN_STORE_VALUE3: i16 = 14;
+pub const GEN_STORE_MINMAX3: i16 = 15;
+pub const GEN_STORE_VALUE4: i16 = 16;
+pub const GEN_STORE_MINMAX4: i16 = 17;
+pub const GEN_STORE_VALUE5: i16 = 18;
+pub const GEN_STORE_MINMAX5: i16 = 19;
+pub const GEN_STORE_VALUE6: i16 = 20;
+pub const GEN_STORE_MINMAX6: i16 = 21;
+pub const GEN_STORE_NO_CAP: i16 = 24;
 /// Original: `StoreUnion` / `union store_type` (`istore.h:90`).
 ///
 /// A genuine C type-punning union: `istore.c` writes one member and reads
@@ -597,7 +635,7 @@ pub fn istore_point_is_gap(list: &[Istore], index: i32) -> i32 {
         return 0;
     };
     for store in &list[lookup..after] {
-        if store.type_ == 4 {
+        if store.type_ == GEN_STORE_GAP {
             return 1;
         }
     }
@@ -610,7 +648,7 @@ pub fn istore_connect_number(list: &[Istore], index: i32) -> i32 {
         return -1;
     };
     for store in &list[lookup..after] {
-        if store.type_ == 5 {
+        if store.type_ == GEN_STORE_CONNECT {
             return (store.value.i());
         }
     }

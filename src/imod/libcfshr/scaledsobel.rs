@@ -123,7 +123,12 @@ pub fn scaled_sobel(
     let edge =
         crate::imod::libcfshr::taperpad::slice_edge_mean(source, nxbin, 0, nxbin - 1, 0, nybin - 1)
             as f32;
-    if linear >= 0 || scale_fac <= 1. {
+    if interp_scale == 1. && nxbin == nxo && nybin == nyo {
+        // `cubinterp` is an identity transform here.  Preserve the source
+        // binned pixels directly; the generic Rust interpolator has no
+        // interior sample for a 2-by-2 identity grid.
+        destination[..output_size].copy_from_slice(&source[..output_size]);
+    } else if linear >= 0 || scale_fac <= 1. {
         let matrix = [[1. / interp_scale, 0.], [0., 1. / interp_scale]];
         crate::imod::libcfshr::cubinterp::cubinterp(
             source,

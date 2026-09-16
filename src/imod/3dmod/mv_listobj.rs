@@ -69,6 +69,7 @@ pub fn imodv_object_list_dialog(model: &Imod, state: i32, list: &mut ImodvOlist)
     list.object_labels.resize(n, String::new());
     list.num_per_col = n.min(MAX_LIST_IN_COL).max(1);
     list.grouping = false;
+    list.current_group = model.cur_obj_group;
     imodv_olist_update_on_offs(model, list);
 }
 pub fn imodv_olist_set_checked(model: &Imod, list: &mut ImodvOlist, ob: i32, state: bool) {
@@ -151,7 +152,7 @@ impl ImodvOlist {
     }
     /// Original `ImodvOlist::toggleGroupSlot`.
     pub fn toggle_group_slot(&mut self, model: &mut Imod, ob: i32, state: bool) {
-        let Some(group) = model.group_list.get_mut(self.current_group.max(0) as usize) else {
+        let Some(group) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) else {
             return;
         };
         let (mut start, mut end) = (ob, ob);
@@ -241,36 +242,36 @@ impl ImodvOlist {
             OBJGRP_NEW => {
                 imodv_register_model_chg();
                 let mut group = Iobj_group::default();
-                if let Some(old) = model.group_list.get(self.current_group.max(0) as usize) {
+                if let Some(old) = model.group_list.get(model.cur_obj_group.max(0) as usize) {
                     group.obj_list = old.obj_list.clone();
                 }
                 model.group_list.push(group);
-                self.current_group = model.group_list.len() as i32 - 1;
+                model.cur_obj_group = model.group_list.len() as i32 - 1;
             }
             OBJGRP_DELETE => {
-                if self.current_group >= 0 && (self.current_group as usize) < model.group_list.len()
+                if model.cur_obj_group >= 0 && (model.cur_obj_group as usize) < model.group_list.len()
                 {
                     imodv_register_model_chg();
-                    model.group_list.remove(self.current_group as usize);
-                    self.current_group = (self.current_group - 1)
+                    model.group_list.remove(model.cur_obj_group as usize);
+                    model.cur_obj_group = (model.cur_obj_group - 1)
                         .max(0)
                         .min(model.group_list.len() as i32 - 1);
                 }
             }
             OBJGRP_CLEAR => {
-                if let Some(g) = model.group_list.get_mut(self.current_group.max(0) as usize) {
+                if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
                     imodv_register_model_chg();
                     g.obj_list.clear();
                 }
             }
             OBJGRP_ADDALL => {
-                if let Some(g) = model.group_list.get_mut(self.current_group.max(0) as usize) {
+                if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
                     imodv_register_model_chg();
                     g.obj_list = (0..model.obj.len() as i32).collect();
                 }
             }
             OBJGRP_SWAP => {
-                if let Some(g) = model.group_list.get_mut(self.current_group.max(0) as usize) {
+                if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
                     imodv_register_model_chg();
                     let old = g.obj_list.clone();
                     g.obj_list = (0..model.obj.len() as i32)
@@ -281,7 +282,7 @@ impl ImodvOlist {
             OBJGRP_TURNON | OBJGRP_TURNOFF | OBJGRP_OTHERSON | OBJGRP_OTHERSOFF => {
                 let members = model
                     .group_list
-                    .get(self.current_group.max(0) as usize)
+                    .get(model.cur_obj_group.max(0) as usize)
                     .map(|g| g.obj_list.clone())
                     .unwrap_or_default();
                 for (ob, obj) in model.obj.iter_mut().enumerate() {
@@ -308,7 +309,7 @@ impl ImodvOlist {
     /// Original `ImodvOlist::nameChanged`.
     pub fn name_changed(&mut self, model: &mut Imod, name: &str) {
         self.group_name = name.to_string();
-        if let Some(g) = model.group_list.get_mut(self.current_group.max(0) as usize) {
+        if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
             g.name = [0; 32];
             for (dst, src) in g.name.iter_mut().zip(name.bytes().take(31)) {
                 *dst = src;
@@ -317,12 +318,12 @@ impl ImodvOlist {
     }
     pub fn cur_group_changed(
         &mut self,
-        model: &Imod,
+        model: &mut Imod,
         value: i32,
         native: &mut dyn ImodvOlistNativeBoundary,
     ) {
         native.set_focus();
-        self.current_group = value - 1;
+        model.cur_obj_group = value - 1;
         self.update_groups(model);
         self.last_but_toggled = -1;
     }
@@ -331,13 +332,14 @@ impl ImodvOlist {
     }
     /// Original `ImodvOlist::updateGroups`.
     pub fn update_groups(&mut self, model: &Imod) {
-        if self.current_group < 0 || self.current_group as usize >= model.group_list.len() {
+        self.current_group = model.cur_obj_group;
+        if model.cur_obj_group < 0 || model.cur_obj_group as usize >= model.group_list.len() {
             self.grouping = false;
             self.group_checked.fill(false);
             return;
         }
         self.grouping = true;
-        let g = &model.group_list[self.current_group as usize];
+        let g = &model.group_list[model.cur_obj_group as usize];
         self.group_name = g
             .name
             .iter()
@@ -450,10 +452,25 @@ mod tests {
         let mut l = ImodvOlist::default();
         imodv_object_list_dialog(&m, 1, &mut l);
         l.action_button_clicked(&mut m, OBJGRP_NEW);
+        assert_eq!(m.cur_obj_group, 0);
         l.action_button_clicked(&mut m, OBJGRP_ADDALL);
         assert_eq!(m.group_list[0].obj_list, vec![0, 1]);
         l.action_button_clicked(&mut m, OBJGRP_TURNOFF);
         assert!(m.obj.iter().all(|o| o.flags & IMOD_OBJFLAG_OFF != 0));
+    }
+
+    #[test]
+    fn group_combo_selects_the_model_owned_current_group() {
+        let mut model = Imod {
+            group_list: vec![Iobj_group::default(), Iobj_group::default()],
+            ..Imod::default()
+        };
+        let mut list = ImodvOlist::default();
+        let mut native = Native::default();
+        list.cur_group_changed(&mut model, 2, &mut native);
+        assert_eq!(model.cur_obj_group, 1);
+        assert_eq!(list.current_group, 1);
+        assert_eq!(native.focus, 1);
     }
 
     #[test]

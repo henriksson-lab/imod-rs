@@ -707,6 +707,33 @@ impl SetupCombinePanel {
     }
 }
 
+/// `actionPerformed` (`SetupCombineActionListener`), expressed as a Slint event
+/// adapter instead of a Swing `ActionListener` object.
+pub fn setup_combine_action_performed<
+    M: SetupCombineApplicationManager,
+    T: SetupCombinePanelParent,
+>(
+    panel: &mut SetupCombinePanel,
+    manager: &mut M,
+    parent: &mut T,
+    command: &str,
+) {
+    panel.action(manager, parent, command);
+}
+
+/// `actionPerformed` (`RBMatchToListener`).
+pub fn rb_match_to_action_performed<T: SetupCombinePanelParent>(
+    panel: &mut SetupCombinePanel,
+    parent: &mut T,
+) {
+    panel.rb_match_to_action(parent);
+}
+
+/// `actionPerformed` (`CBPatchListener`).
+pub fn cb_patch_region_action_performed(panel: &mut SetupCombinePanel) {
+    panel.cb_patch_region_action();
+}
+
 impl FinalCombineFields for SetupCombinePanel {
     fn set_use_patch_region_model(&mut self, use_patch_region_model: bool) {
         SetupCombinePanel::set_use_patch_region_model(self, use_patch_region_model);

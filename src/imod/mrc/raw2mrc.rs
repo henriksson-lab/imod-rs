@@ -66,6 +66,29 @@ impl RawDataType {
     }
 }
 
+/// `setintype` (`raw2mrc.c:461`).
+///
+/// The source returns both a conversion type and its initial MRC output mode.
+/// `RawDataType::Rgb` retains the source's otherwise separate RGB output-mode
+/// state, while all other entries retain the corresponding input conversion.
+pub fn setintype(stype: &str) -> Option<(RawDataType, usize, i32)> {
+    let data_type = RawDataType::parse(stype)?;
+    let output_mode = match data_type {
+        RawDataType::Rgb => MRC_MODE_RGB,
+        RawDataType::Short
+        | RawDataType::LongToShort
+        | RawDataType::UnsignedLongToShort
+        | RawDataType::DoubleToShort => MRC_MODE_SHORT,
+        RawDataType::UnsignedShort => MRC_MODE_SHORT,
+        RawDataType::Long
+        | RawDataType::UnsignedLong
+        | RawDataType::Float
+        | RawDataType::Double => MRC_MODE_FLOAT,
+        RawDataType::Byte | RawDataType::SignedByte => MRC_MODE_BYTE,
+    };
+    Some((data_type, data_type.bytes(), output_mode))
+}
+
 #[derive(Clone, Debug)]
 pub struct Raw2MrcOptions {
     pub inputs: Vec<PathBuf>,
@@ -366,8 +389,9 @@ pub fn raw2mrc(arguments: &[String]) -> Result<(f32, f32, f32), String> {
                     .map_err(|_| "invalid section count")?
             }
             "-t" | "--type" => {
-                options.data_type =
-                    RawDataType::parse(value(&mut index)?).ok_or("invalid data type")?
+                options.data_type = setintype(value(&mut index)?)
+                    .map(|(data_type, _, _)| data_type)
+                    .ok_or("invalid data type")?
             }
             "-s" | "--swap" => options.swap_bytes = true,
             "-o" | "--offset" => {
@@ -423,6 +447,31 @@ mod tests {
         let mut data = vec![1, 2, 3, 4, 5, 6, 7, 8];
         rawswap(&mut data, 4);
         assert_eq!(data, vec![4, 3, 2, 1, 8, 7, 6, 5]);
+    }
+    #[test]
+    fn input_type_table_matches_the_source_conversion_and_initial_mode() {
+        assert_eq!(
+            setintype("byte"),
+            Some((RawDataType::Byte, 1, MRC_MODE_BYTE))
+        );
+        assert_eq!(
+            setintype("sbyte"),
+            Some((RawDataType::SignedByte, 1, MRC_MODE_BYTE))
+        );
+        assert_eq!(setintype("rgb"), Some((RawDataType::Rgb, 3, MRC_MODE_RGB)));
+        assert_eq!(
+            setintype("ushort"),
+            Some((RawDataType::UnsignedShort, 2, MRC_MODE_SHORT))
+        );
+        assert_eq!(
+            setintype("long"),
+            Some((RawDataType::Long, 4, MRC_MODE_FLOAT))
+        );
+        assert_eq!(
+            setintype("double2short"),
+            Some((RawDataType::DoubleToShort, 8, MRC_MODE_SHORT))
+        );
+        assert_eq!(setintype("unknown"), None);
     }
     #[test]
     fn converts_real_raw_fixture_to_mrc() {

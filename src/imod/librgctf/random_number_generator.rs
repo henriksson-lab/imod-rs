@@ -13,6 +13,8 @@ pub struct RandomNumberGenerator {
 }
 
 impl RandomNumberGenerator {
+    /// RandomNumberGenerator()
+    ///
     /// C++ `RandomNumberGenerator::RandomNumberGenerator(bool)`.
     pub fn new(use_internal: bool) -> Self {
         let mut generator = Self {
@@ -55,6 +57,8 @@ impl RandomNumberGenerator {
         }
     }
 
+    /// GetUniformRandom()
+    ///
     /// C++ `RandomNumberGenerator::GetUniformRandom`.
     pub fn uniform_random(&mut self) -> f32 {
         let (random, half_maximum) = if self.use_internal {
@@ -65,6 +69,8 @@ impl RandomNumberGenerator {
         (random - half_maximum) / half_maximum
     }
 
+    /// GetNormalRandom()
+    ///
     /// C++ `RandomNumberGenerator::GetNormalRandom`.
     pub fn normal_random(&mut self) -> f32 {
         let (mut x1, mut x2, mut radius_squared);

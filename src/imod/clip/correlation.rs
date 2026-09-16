@@ -1037,30 +1037,30 @@ mod tests {
     fn padding_updates_an_owned_slice_in_place() {
         let mut slice = slice_create(2, 2, MRC_MODE_FLOAT).unwrap();
         slice.mean = -3.5;
-        slice_put_val(slice, 0, 0, [1., 0., 0., 0.]);
-        slice_put_val(slice, 1, 0, [2., 0., 0., 0.]);
-        slice_put_val(slice, 0, 1, [3., 0., 0., 0.]);
-        slice_put_val(slice, 1, 1, [4., 0., 0., 0.]);
-        clip_padcorr(slice, 1);
+        slice_put_val(&mut slice, 0, 0, [1., 0., 0., 0.]);
+        slice_put_val(&mut slice, 1, 0, [2., 0., 0., 0.]);
+        slice_put_val(&mut slice, 0, 1, [3., 0., 0., 0.]);
+        slice_put_val(&mut slice, 1, 1, [4., 0., 0., 0.]);
+        clip_padcorr(&mut slice, 1);
         // correlation.cpp boxes [-x/2, x+x/2+2) by [-y/2, y+y/2), hence a
         // 2 by 2 image becomes 6 by 4.  The original pixels are offset by
         // one in both directions and out-of-bounds pixels get the slice mean.
         assert_eq!((slice.xsize, slice.ysize), (6, 4));
         assert_eq!(slice.data.len(), 6 * 4 * size_of::<f32>());
         let mut value = [0.; 4];
-        slice_get_val(slice, 0, 0, &mut value);
+        slice_get_val(&slice, 0, 0, &mut value);
         assert_eq!(value[0], -3.5);
-        slice_get_val(slice, 1, 1, &mut value);
+        slice_get_val(&slice, 1, 1, &mut value);
         assert_eq!(value[0], 1.);
-        slice_get_val(slice, 2, 2, &mut value);
+        slice_get_val(&slice, 2, 2, &mut value);
         assert_eq!(value[0], 4.);
     }
 
     #[test]
     fn volume_scaling_decodes_owned_float_bytes() {
         let mut slice = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
-        slice_put_val(slice, 0, 0, [2., 0., 0., 0.]);
-        slice_put_val(slice, 1, 0, [4., 0., 0., 0.]);
+        slice_put_val(&mut slice, 0, 0, [2., 0., 0., 0.]);
+        slice_put_val(&mut slice, 1, 0, [4., 0., 0., 0.]);
         let mut volume = Istack {
             slices: vec![slice],
         };
@@ -1077,6 +1077,6 @@ mod tests {
         let mut slice = slice_create(1, 1, MRC_MODE_COMPLEX_FLOAT).unwrap();
         slice.data.pop();
 
-        assert!(clip_slice_corr(slice, None).is_none());
+        assert!(clip_slice_corr(&mut slice, None).is_none());
     }
 }

@@ -18,7 +18,7 @@ use crate::imod::libimod::imodel::{
     Iindex, Imod, Iobj, Ipoint, imod_get_index, imod_object_get, imod_point_get,
     imod_set_cur_mesh_surf, imod_set_index,
 };
-use crate::imod::libimod::iobj::{iobj_mesh, iobj_scat};
+use crate::imod::libimod::iobj::{iobj_mesh, iobj_scat, iobj_time};
 use crate::imod::libimod::ipoint::{
     imod_point_dot, imod_point_get_size, imod_point_normalize, imod_point_set_size,
 };
@@ -2779,18 +2779,28 @@ pub fn imodv_step_time(a: &mut ImodvApp, tstep: i32, n: &mut dyn MvInputNativeBo
         return 0;
     }
 
-    // The standalone arm steps `a->imod->ctime` against `a->imod->tmax` and
-    // the per-contour `time`.  The translated `Imod` carries neither `ctime`
-    // nor `tmax` (`imodel.rs` deviation note above `imod_default`), so there
-    // is no time index to advance and the loop cannot be entered.
-    static REPORTED: std::sync::Once = std::sync::Once::new();
-    REPORTED.call_once(|| {
-        eprintln!(
-            "3dmodv: model time stepping needs Imod::ctime and Imod::tmax, which the translated \
-             Imod of libimod/imodel.rs does not carry"
-        )
-    });
-    0
+    // `mv_input.cpp:1673-1688`: advance until a time represented by an
+    // explicitly timed contour, or the source's inclusive endpoint, is found.
+    let imod = unsafe { &mut *a.imod };
+    loop {
+        imod.ctime += tstep;
+        if imod.ctime < 0 {
+            imod.ctime = 0;
+            return 0;
+        }
+        if imod.ctime > imod.tmax {
+            imod.ctime = imod.tmax;
+            return imod.tmax;
+        }
+        for obj in &imod.obj {
+            if iobj_time(obj.flags) == 0 {
+                continue;
+            }
+            if obj.cont.iter().any(|cont| cont.time == imod.ctime) {
+                return imod.ctime;
+            }
+        }
+    }
 }
 
 /// Original: `imodv_sys_time` (`mv_input.cpp:1690`).
@@ -2881,7 +2891,8 @@ pub fn imodv_movie_timeout(a: &mut ImodvApp, n: &mut dyn MvInputNativeBoundary) 
 mod tests {
     use super::*;
     use crate::imod::libimod::imat::imod_mat_new;
-    use crate::imod::libimod::imodel::{Imod, Iview};
+    use crate::imod::libimod::imodel::{Icont, Imod, Iobj, Iview};
+    use crate::imod::libimod::iobj::IMOD_OBJFLAG_TIME;
 
     #[derive(Default)]
     struct Recorder {
@@ -2941,6 +2952,30 @@ mod tests {
         let mut m = imod_mat_new(3).unwrap();
         imodv_resolve_rotation(&mut m, 1., 2., 3.);
         assert_ne!(m.data[0], 1.);
+    }
+
+    #[test]
+    fn standalone_time_step_skips_unrepresented_times_and_clamps_at_endpoints() {
+        let (mut a, mut model) = one_model_app();
+        model.tmax = 4;
+        model.ctime = 0;
+        model.obj.push(Iobj {
+            flags: IMOD_OBJFLAG_TIME,
+            cont: vec![
+                Icont { time: 2, ..Icont::default() },
+                Icont { time: 4, ..Icont::default() },
+            ],
+            ..Iobj::default()
+        });
+        a.standalone = 1;
+        a.imod = &mut *model;
+        let mut n = Recorder::default();
+        assert_eq!(imodv_step_time(&mut a, 1, &mut n), 2);
+        assert_eq!(model.ctime, 2);
+        assert_eq!(imodv_step_time(&mut a, 1, &mut n), 4);
+        assert_eq!(imodv_step_time(&mut a, 1, &mut n), 4);
+        assert_eq!(imodv_step_time(&mut a, -1, &mut n), 2);
+        assert_eq!(imodv_step_time(&mut a, -1, &mut n), 0);
     }
 
     #[test]

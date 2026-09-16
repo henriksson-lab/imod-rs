@@ -1317,6 +1317,18 @@ pub fn mrc_get_data_memory(
     Some(idata)
 }
 
+/// `mrcFreeDataMemory` (`mrcfiles.c:1613`).
+///
+/// `mrc_get_data_memory` returns owned section vectors, so consuming this
+/// value performs the same allocation release as the source loop and final
+/// `free(idata)`.  `contig` and `zsize` remain part of the entry point because
+/// callers retain the C allocation contract; nested Rust storage has no
+/// separate contiguous backing allocation to special-case.
+pub fn mrc_free_data_memory(idata: Vec<Vec<u8>>, contig: i32, zsize: i32) {
+    let _source_sections = if contig != 0 { 1 } else { zsize.max(0) };
+    drop(idata);
+}
+
 /// Matches C `mrcCopyValidExtendedType(MrcHeader *, MrcHeader *)` (`mrcfiles.c:676`).
 pub fn mrc_copy_valid_extended_type(hin: &MrcHeader, hout: &mut MrcHeader) {
     let mut version = 0;
@@ -2670,6 +2682,8 @@ mod tests {
             assert_eq!(contiguous.contig, 0);
             assert_eq!(contiguous_data.len(), 3);
             assert!(contiguous_data.iter().all(|plane| plane.len() == 10));
+            mrc_free_data_memory(separate_data, 0, 3);
+            mrc_free_data_memory(contiguous_data, 1, 3);
         }
     }
 

@@ -32,6 +32,8 @@ impl Default for LightState {
 }
 pub trait LightGl {
     fn light_attenuation(&mut self, light: i32, constant: f32, linear: f32, quadratic: f32);
+    /// One source `glLightf` attenuation call, used by `light_setparam`.
+    fn light_attenuation_component(&mut self, light: i32, parameter: i32, value: f32);
     fn light_ambient(&mut self, light: i32, ambient: [f32; 4]);
     fn light_position(&mut self, light: i32, position: [f32; 4], local_viewer: bool);
     fn light_model(&mut self, ambient: [f32; 4], local_viewer: bool);
@@ -67,7 +69,9 @@ pub fn light_setparam(state: &mut LightState, param: i32, value: f64, gl: &mut d
         1..=3 => state.position[(param - 1) as usize] = value as f32,
         4..=6 => {
             state.att[(param - 4) as usize] = value as f32;
-            gl.light_attenuation(0, state.att[0], state.att[1], state.att[2]);
+            // `mv_light.cpp:59-72` updates only the selected GL attenuation
+            // parameter here; `light_update` is intentionally not called.
+            gl.light_attenuation_component(0, param - 4, value as f32);
             return;
         }
         7 => state.dist = value as f32,
@@ -204,6 +208,10 @@ mod tests {
                 "attenuation:{light}:{constant}:{linear}:{quadratic}"
             ));
         }
+        fn light_attenuation_component(&mut self, light: i32, parameter: i32, value: f32) {
+            self.calls
+                .push(format!("attenuation-component:{light}:{parameter}:{value}"));
+        }
         fn light_ambient(&mut self, _: i32, _: [f32; 4]) {
             self.calls.push("light-ambient".into());
         }
@@ -248,7 +256,7 @@ mod tests {
             gl.calls,
             [
                 "light-ambient",
-                "attenuation:0:1:0.25:0",
+                "attenuation-component:0:1:0.25",
                 "lighting:false",
                 "color-material:false"
             ]

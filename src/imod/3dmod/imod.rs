@@ -10,6 +10,15 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use crate::imod::libiimod::iimage::ii_add_check_function;
+use crate::imod::libiimod::mrcfiles::{LoadInfo, mrc_init_li};
+use crate::imod::libimod::imodel::{Imod, imod_new};
+use crate::imod::libimod::imodel_files::imod_read;
+use crate::imod::three_dmod::imod_io::{ImodIoImageScale, ImodIoViewState, init_new_model};
+use crate::imod::three_dmod::imodview::{
+    IMODVIEW_NATIVE_BOUNDARY, ImodView, ImodviewNativeBoundary, ivw_init, ivw_load_image,
+    ivw_multiple_files,
+};
+use crate::imod::three_dmod::slicer::{SlicerRegistry, SlicerView, slicer_open};
 
 /// Direct calls from `imod.cpp` into translated viewer subsystems that retain
 /// Qt/OpenGL-owned view state at the native host boundary.
@@ -25,6 +34,14 @@ thread_local! {
     /// The Rust Qt/OpenGL host supplies the same UI-thread ownership boundary.
     pub static IMOD_NATIVE_BOUNDARY: RefCell<Option<Box<dyn ImodNativeBoundary>>> =
         RefCell::new(None);
+    /// `App->cvi`, owned by the normal Rust image-display host.  This stays
+    /// UI-thread-local just like the source `QApplication`/viewer objects.
+    static NORMAL_CURRENT_VIEW: std::cell::Cell<*mut ImodView> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+/// The normal host's `App->cvi` cursor for sibling native viewer hosts.
+pub fn normal_current_view() -> *mut ImodView {
+    NORMAL_CURRENT_VIEW.with(std::cell::Cell::get)
 }
 
 pub const IMOD_DRAW_IMAGE: i32 = 1;
@@ -583,11 +600,67 @@ pub fn imod_show_help_page(page: &str) -> Result<(), String> {
 pub struct ImodNativeHost {
     /// `ImodAssistant *ImodHelp` (`imod.cpp:72`), created at `imod.cpp:343`.
     help: Option<crate::imod::three_dmod::imod_assistant::ImodAssistant>,
+    /// The normal image-viewer ownership graph.  The source keeps these on
+    /// `imod.cpp`'s stack for the lifetime of its event loop; the Rust native
+    /// host owns them so image buffers and legacy pointers remain valid when
+    /// the forthcoming winit Zap/Slicer/XYZ windows are created.
+    view: Option<Box<ImodView>>,
+    load_info: Option<Box<LoadInfo>>,
+    model: Option<Box<Imod>>,
+    slicers: SlicerRegistry,
 }
 
 impl Default for ImodNativeHost {
     fn default() -> Self {
-        Self { help: None }
+        Self {
+            help: None,
+            view: None,
+            load_info: None,
+            model: None,
+            slicers: SlicerRegistry::default(),
+        }
+    }
+}
+
+impl Drop for ImodNativeHost {
+    fn drop(&mut self) {
+        let view = self
+            .view
+            .as_deref_mut()
+            .map_or(std::ptr::null_mut(), |view| view as *mut ImodView);
+        NORMAL_CURRENT_VIEW.with(|current| {
+            if current.get() == view {
+                current.set(std::ptr::null_mut());
+            }
+        });
+    }
+}
+
+/// The calls `initializeFlipAndModel` makes back to the normal `imod.cpp`
+/// owner while its source-owned image-loading phase is active.
+struct NormalInitializationBoundary {
+    view: *mut ImodView,
+    model: *mut Imod,
+    filename: String,
+}
+
+impl ImodviewNativeBoundary for NormalInitializationBoundary {
+    fn app_cvi(&mut self) -> *mut ImodView {
+        self.view
+    }
+    fn model_global(&mut self) -> *mut Imod {
+        self.model
+    }
+    fn imod_filename(&mut self) -> String {
+        self.filename.clone()
+    }
+    fn init_read_in_model_data(&mut self, _model: *mut Imod, _keep_bw: bool) {
+        // `initReadInModelData` has already been given the host-owned model;
+        // publish the same source pointers before the window-specific model
+        // notifications, which remain native-host work.
+        unsafe {
+            (*self.view).imod = self.model;
+        }
     }
 }
 
@@ -596,10 +669,148 @@ impl ImodNativeBoundary for ImodNativeHost {
     /// image files, build the `ImodView`, put up the info window and the
     /// requested Zap/Slicer/XYZ windows, and enter the event loop.
     fn start_viewer(&mut self, launch: &ImodLaunch) -> Result<i32, String> {
+        let mut load_info = Box::<LoadInfo>::default();
+        mrc_init_li(Some(&mut load_info), None);
+        if let Some((min, max)) = launch.x_range {
+            load_info.xmin = min;
+            load_info.xmax = max;
+        }
+        if let Some((min, max)) = launch.y_range {
+            load_info.ymin = min;
+            load_info.ymax = max;
+        }
+        if let Some((min, max)) = launch.z_range {
+            load_info.zmin = min;
+            load_info.zmax = max;
+        }
+        if let Some((min, max)) = launch.scale {
+            load_info.smin = min;
+            load_info.smax = max;
+        }
+        load_info.mirror_fft = -i32::from(launch.mirror_fft);
+
+        let mut view = Box::<ImodView>::default();
+        ivw_init(&mut view, false);
+        view.li = &mut *load_info;
+        view.xybin = launch.xy_bin.unwrap_or(1);
+        view.zbin = launch.z_bin.unwrap_or(1);
+        view.vm_size = launch.cache_size.unwrap_or(0);
+        view.strip_or_tile_cache = i32::from(launch.tile_cache);
+        view.image_pyramid = i32::from(launch.pyramid);
+        view.raw_image_store = launch.raw_image_store.unwrap_or(0) as i16;
+        view.int_opt_entered = i32::from(launch.integer_option_entered);
+        view.scale_scan_type = launch.scale_scan_type.unwrap_or(0);
+        view.store_scan_in_mrc = i32::from(launch.store_scan_in_mrc);
+        view.multi_file_z = i32::from(launch.multi_file_z);
+        view.eer_super_res = launch.eer_super_resolution.unwrap_or(1);
+        view.eer_zbinning = launch.eer_z_binning.unwrap_or(10);
+
+        let creating_model = launch.model_file.is_none();
+        let mut model = match launch.model_file.as_deref() {
+            Some(path) => imod_read(path)
+                .map(Box::new)
+                .map_err(|error| format!("3dmod: error {error} reading model {path}"))?,
+            None => Box::new(
+                imod_new().ok_or_else(|| "3dmod: out of memory creating model".to_owned())?,
+            ),
+        };
+        let view_ptr = &mut *view as *mut ImodView;
+        let model_ptr = Box::as_ref(&model) as *const Imod as *mut Imod;
+        let filename = launch.model_file.clone().unwrap_or_default();
+        IMODVIEW_NATIVE_BOUNDARY.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(NormalInitializationBoundary {
+                view: view_ptr,
+                model: model_ptr,
+                filename,
+            }));
+        });
+        let mut any_have_piece_list = false;
+        if launch.image_files.is_empty() {
+            view.fake_image = 1;
+        } else {
+            let files = launch
+                .image_files
+                .iter()
+                .map(|file| file.as_bytes().to_vec())
+                .collect::<Vec<_>>();
+            unsafe {
+                ivw_multiple_files(
+                    view_ptr,
+                    &files,
+                    0,
+                    files.len() as i32 - 1,
+                    &mut any_have_piece_list,
+                );
+            }
+        }
+        let load_status = unsafe { ivw_load_image(view_ptr) };
+        IMODVIEW_NATIVE_BOUNDARY.with(|slot| *slot.borrow_mut() = None);
+        if load_status != 0 {
+            return Err(format!(
+                "3dmod: Fatal Error -- while reading image data ({load_status})"
+            ));
+        }
+        if creating_model {
+            let image = unsafe { (*view_ptr).image.as_ref() };
+            init_new_model(
+                &mut model,
+                &ImodIoViewState {
+                    xsize: view.xsize,
+                    ysize: view.ysize,
+                    zsize: view.zsize,
+                    x_unbin_size: view.x_unbin_size,
+                    y_unbin_size: view.y_unbin_size,
+                    z_unbin_size: view.z_unbin_size,
+                    xybin: view.xybin,
+                    zbin: view.zbin,
+                    cur_time: view.cur_time,
+                    num_times: view.num_times,
+                    fake_image: view.fake_image != 0,
+                    ..Default::default()
+                },
+                ImodIoImageScale {
+                    xscale: image.map_or(0., |image| image.xscale),
+                    zscale: image.map_or(0., |image| image.zscale),
+                },
+            );
+        }
+        if launch.slicer_open {
+            if slicer_open(
+                &mut self.slicers,
+                SlicerView {
+                    xsize: view.xsize,
+                    ysize: view.ysize,
+                    zsize: view.zsize,
+                    xybin: view.xybin,
+                    zbin: view.zbin,
+                    xmouse: view.xmouse,
+                    ymouse: view.ymouse,
+                    zmouse: view.zmouse,
+                    cur_time: view.cur_time,
+                    num_times: view.num_times,
+                    track_mouse_for_plugs: view.track_mouse_for_plugs,
+                    ..Default::default()
+                },
+                0,
+            ) != 0
+            {
+                return Err("3dmod: Error opening slicer window.".to_owned());
+            }
+        }
+        self.view = Some(view);
+        self.load_info = Some(load_info);
+        self.model = Some(model);
+        NORMAL_CURRENT_VIEW.with(|current| {
+            current.set(
+                self.view
+                    .as_deref_mut()
+                    .map_or(std::ptr::null_mut(), |view| view as *mut ImodView),
+            );
+        });
         Err(format!(
-            "3dmod: the image display host is not built yet: opening {:?} (model {:?}) needs the \
-             native windows of imodview.cpp, info_setup.cpp, xzap.cpp, slicer.cpp and xyz.cpp. \
-             The model view alone is available as `3dmodv` or `3dmod -V`.",
+            "3dmod: image data for {:?} (model {:?}) was loaded, but the native winit image-display \
+             host still needs the Zap/Slicer/XYZ and info-window lifecycles of xzap.cpp, slicer.cpp, \
+             xyz.cpp and info_setup.cpp.",
             launch.image_files, launch.model_file
         ))
     }
@@ -729,5 +940,56 @@ mod tests {
                 .starts_with("3dmod viewer boundary")
         );
         assert!(window_keys_has('Z'));
+    }
+
+    #[test]
+    fn normal_host_loads_an_mrc_before_the_image_window_boundary() {
+        use crate::imod::libcfshr::b3dutil::ImodFile;
+        use crate::imod::libiimod::mrcfiles::{
+            MRC_MODE_BYTE, MrcHeader, mrc_head_new, mrc_head_write, mrc_write_slice,
+        };
+        let path = std::env::temp_dir().join(format!(
+            "imod-normal-host-{}-{}.mrc",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_new(&mut header, 2, 2, 1, MRC_MODE_BYTE), 0);
+        header.amin = 1.;
+        header.amax = 4.;
+        let mut output = ImodFile::open(&path, "wb").unwrap();
+        assert_eq!(mrc_head_write(&mut output, &mut header), 0);
+        assert_eq!(
+            mrc_write_slice(&[1, 2, 3, 4], &mut output, &mut header, 0, b'Z'),
+            0
+        );
+        drop(output);
+
+        let mut host = ImodNativeHost::default();
+        let launch = ImodLaunch {
+            image_files: vec![path.to_string_lossy().into_owned()],
+            slicer_open: true,
+            ..Default::default()
+        };
+        assert!(
+            host.start_viewer(&launch)
+                .unwrap_err()
+                .contains("was loaded")
+        );
+        assert_eq!(
+            host.view.as_ref().unwrap().idata_storage,
+            vec![vec![0, 85, 170, 255]]
+        );
+        assert!(!host.view.as_ref().unwrap().idata.is_null());
+        assert_eq!(host.model.as_ref().unwrap().obj.len(), 1);
+        assert_eq!(host.slicers.slicers.len(), 1);
+        assert_eq!(
+            normal_current_view(),
+            host.view.as_deref().unwrap() as *const ImodView as *mut ImodView
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -674,7 +674,9 @@ mod tests {
         let mut image = PreNidImage::new(6, 6);
         image.set(2, 2, 7.);
         filling_padding(&mut image, 2, 2, 2);
-        assert_eq!(image.get(0, 2), 7.);
+        // `preNID.cpp` does not fill when nx/ny are not greater than
+        // padding + 1, so this deliberately undersized fixture stays zero.
+        assert_eq!(image.get(0, 2), 0.);
     }
     #[test]
     fn diffusion_is_owned_and_masks_only_selected_pixels() {

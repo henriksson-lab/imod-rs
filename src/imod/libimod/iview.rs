@@ -21,6 +21,8 @@ pub const VIEW_STRSIZE: usize = 32;
 
 /// Original: `VIEW_WORLD_LIGHT` (`imodel.h:203`).
 pub const VIEW_WORLD_LIGHT: u32 = 1 << 1;
+/// Original: `VIEW_WORLD_CLIP_IMAGE` (`imodel.h:220`).
+pub const VIEW_WORLD_CLIP_IMAGE: u32 = 1 << 14;
 
 /// Original: `ID_VIEW` (`imodel.h:68`).
 pub const ID_VIEW: u32 = u32::from_be_bytes(*b"VIEW");
@@ -748,10 +750,7 @@ pub fn imod_imnx_read(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
 /// Original: `imodViewModelWrite` (`iview.c:230`).
 ///
 /// Each view is written by `imodViewWrite` (`iview.c:149`), translated in
-/// `iview.rs`.  The `scale` the source passes is
-/// `(mod->xybin, mod->xybin, mod->zbin)`; only `3dmod` ever moves those off 1
-/// and `Imod` here carries no such member (see the deviation note on
-/// `imodDefault`), so the identity is passed.
+/// `iview.rs`. The source passes `(mod->xybin, mod->xybin, mod->zbin)`.
 pub fn imod_view_model_write(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
     if imod.view.len() < 2 {
         return Ok(());
@@ -761,9 +760,9 @@ pub fn imod_view_model_write(imod: &Imod, file: &mut ImodFile) -> Result<(), i32
     imod_put_int(file, imod.cview).map_err(|_| IMOD_ERROR_WRITE)?;
 
     let scale = Ipoint {
-        x: 1.,
-        y: 1.,
-        z: 1.,
+        x: imod.xybin as f32,
+        y: imod.xybin as f32,
+        z: imod.zbin as f32,
     };
     for i in 1..imod.view.len() {
         crate::imod::libimod::iview::imod_view_write(&imod.view[i], file, &scale);

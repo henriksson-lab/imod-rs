@@ -71,7 +71,10 @@ pub struct B3dGfxState {
     pub snap_captions: Vec<String>,
     pub wrap_last_caption: bool,
     pub movie_snapping: bool,
+    /// `b3dAutoSnapshot`'s file-static `fileno`.
     pub snapshot_file_number: i32,
+    /// `b3dNamedSnapshot` has its own source file-static `fileno`.
+    pub named_snapshot_file_number: i32,
     /// `App->glInitialized`, kept distinct from an extension mask of zero.
     pub gl_initialized: bool,
 }
@@ -92,6 +95,7 @@ impl Default for B3dGfxState {
             wrap_last_caption: false,
             movie_snapping: false,
             snapshot_file_number: 0,
+            named_snapshot_file_number: 0,
             gl_initialized: false,
         }
     }
@@ -1003,6 +1007,20 @@ pub trait SnapshotEncodeBoundary {
         jpeg_quality: i32,
     ) -> Result<(), String>;
 }
+
+/// The `ImodPrefs` and `wprint`/`imodPrintStderr` calls surrounding a snapshot.
+/// Image-window hosts own these UI/process globals; capture and encoding remain
+/// in this source unit.
+pub trait SnapshotUiBoundary {
+    /// `ImodPrefs->set2ndSnapFormat()`.
+    fn set_second_snapshot_format(&mut self);
+    /// `ImodPrefs->restoreSnapFormat()`.
+    fn restore_snapshot_format(&mut self);
+    /// `wprint` (`b3dAutoSnapshot` and ordinary named snapshots).
+    fn wprint(&mut self, message: &str);
+    /// `imodPrintStderr` (model-view named snapshots).
+    fn print_stderr(&mut self, message: &str);
+}
 /// Static `snapshotCommon`, without Qt caption painting.  Captions are kept in
 /// `B3dGfxState` for the native UI text-layout boundary; GL readback follows
 /// the source's RGBA capture coordinates exactly.
@@ -1155,6 +1173,196 @@ pub fn b3d_snapshot(
     }
 }
 
+/// `b3dAutoSnapshot` (`b3dgfx.cpp:1835`).
+///
+/// `non_tiff_format` is the already-resolved native preference (`PNG`/`JPEG`)
+/// and the encoder is the Rust-native file-output boundary.  Keeping those
+/// UI-owned choices explicit preserves the source's capture and numbering
+/// behavior without reintroducing its Qt preferences singleton.
+pub fn b3d_auto_snapshot(
+    state: &mut B3dGfxState,
+    gl: &mut dyn B3dGfxGl,
+    encoder: &mut dyn SnapshotEncodeBoundary,
+    ui: &mut dyn SnapshotUiBoundary,
+    name: &str,
+    format_type: i32,
+    limits: Option<[i32; 4]>,
+    check_convert: bool,
+    non_tiff_format: &str,
+    dpi: i32,
+    compression: i32,
+    jpeg_quality: i32,
+) -> Result<PathBuf, String> {
+    if !state.movie_snapping {
+        state.snapshot_file_number = 0;
+    }
+    let mut file_number = state.snapshot_file_number;
+    let file = b3d_get_snapshot_name(
+        state,
+        name,
+        format_type,
+        3,
+        &mut file_number,
+        non_tiff_format,
+    );
+    state.snapshot_file_number = file_number;
+    let short_name = b3d_short_snap_name(&file);
+    ui.wprint(&format!("{name}: Saving image to {short_name}\n"));
+    let result = match format_type {
+        SNAPSHOT_RGB => b3d_snapshot_non_tif(
+            state,
+            gl,
+            encoder,
+            &file,
+            4,
+            limits,
+            None,
+            non_tiff_format,
+            dpi,
+            false,
+        ),
+        SNAPSHOT_TIF => b3d_snapshot_tif(
+            state,
+            gl,
+            encoder,
+            &file,
+            4,
+            limits,
+            None,
+            check_convert,
+            dpi,
+            compression,
+            jpeg_quality,
+        ),
+        _ => b3d_snapshot(
+            state,
+            gl,
+            encoder,
+            &file,
+            4,
+            non_tiff_format,
+            dpi,
+            compression,
+            jpeg_quality,
+        ),
+    };
+    if result.is_ok() {
+        ui.wprint("DONE!\n");
+    } else {
+        ui.wprint("Error!\n");
+    }
+    result.map(|()| file)
+}
+
+/// `b3dKeySnapshot` (`b3dgfx.cpp:1879`).  The host resolves the Ctrl-selected
+/// second non-TIFF preference before passing `non_tiff_format`; source key
+/// selection itself is exactly RGB for Shift and TIFF otherwise.
+pub fn b3d_key_snapshot(
+    state: &mut B3dGfxState,
+    gl: &mut dyn B3dGfxGl,
+    encoder: &mut dyn SnapshotEncodeBoundary,
+    ui: &mut dyn SnapshotUiBoundary,
+    name: &str,
+    shifted: bool,
+    ctrl: bool,
+    limits: Option<[i32; 4]>,
+    check_convert: bool,
+    non_tiff_format: &str,
+    dpi: i32,
+    compression: i32,
+    jpeg_quality: i32,
+) -> Result<PathBuf, String> {
+    if shifted && ctrl {
+        ui.set_second_snapshot_format();
+    }
+    let result = b3d_auto_snapshot(
+        state,
+        gl,
+        encoder,
+        ui,
+        name,
+        if shifted { SNAPSHOT_RGB } else { SNAPSHOT_TIF },
+        limits,
+        check_convert,
+        non_tiff_format,
+        dpi,
+        compression,
+        jpeg_quality,
+    );
+    if shifted && ctrl {
+        ui.restore_snapshot_format();
+    }
+    result
+}
+
+/// `b3dNamedSnapshot` (`b3dgfx.cpp:1897`).  An empty `file` receives the
+/// source-generated name; an explicitly supplied filename is left intact.
+pub fn b3d_named_snapshot(
+    state: &mut B3dGfxState,
+    gl: &mut dyn B3dGfxGl,
+    encoder: &mut dyn SnapshotEncodeBoundary,
+    ui: &mut dyn SnapshotUiBoundary,
+    file: &mut PathBuf,
+    prefix: &str,
+    format_type: i32,
+    limits: Option<[i32; 4]>,
+    check_convert: bool,
+    non_tiff_format: &str,
+    dpi: i32,
+    compression: i32,
+    jpeg_quality: i32,
+) -> Result<(), String> {
+    if file.as_os_str().is_empty() {
+        let mut file_number = state.named_snapshot_file_number;
+        *file = b3d_get_snapshot_name(
+            state,
+            prefix,
+            format_type,
+            if prefix == "modv" { 4 } else { 3 },
+            &mut file_number,
+            non_tiff_format,
+        );
+        state.named_snapshot_file_number = file_number;
+    }
+    let is_modv = prefix == "modv";
+    let short_name = b3d_short_snap_name(file);
+    let result = match format_type {
+        SNAPSHOT_RGB => b3d_snapshot_non_tif(
+            state,
+            gl,
+            encoder,
+            file,
+            4,
+            limits,
+            None,
+            non_tiff_format,
+            dpi,
+            false,
+        ),
+        SNAPSHOT_TIF => b3d_snapshot_tif(
+            state,
+            gl,
+            encoder,
+            file,
+            4,
+            limits,
+            None,
+            check_convert,
+            dpi,
+            compression,
+            jpeg_quality,
+        ),
+        _ => return Err("snapshot format must be RGB or TIFF".to_owned()),
+    };
+    match (&result, is_modv) {
+        (Ok(()), true) => ui.print_stderr(&format!("Saved image to {short_name}\n")),
+        (Ok(()), false) => ui.wprint(&format!("Saved image to {short_name}\n")),
+        (Err(_), true) => ui.print_stderr("Error saving snapshot!\n"),
+        (Err(_), false) => ui.wprint("\x07Error saving snapshot!\n"),
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1199,6 +1407,57 @@ mod tests {
         fn read_pixels_rgba(&mut self, _: i32, _: i32, _: i32, _: i32, _: &mut [u8]) {}
         fn flush(&mut self) {}
     }
+    #[derive(Default)]
+    struct Encoder {
+        files: Vec<PathBuf>,
+    }
+    impl SnapshotEncodeBoundary for Encoder {
+        fn write_non_tiff(
+            &mut self,
+            file: &Path,
+            _: &str,
+            _: bool,
+            _: i32,
+            _: i32,
+            _: &[u8],
+            _: i32,
+        ) -> Result<(), String> {
+            self.files.push(file.to_owned());
+            Ok(())
+        }
+        fn write_tiff(
+            &mut self,
+            file: &Path,
+            _: bool,
+            _: i32,
+            _: i32,
+            _: &[u8],
+            _: i32,
+            _: i32,
+            _: i32,
+        ) -> Result<(), String> {
+            self.files.push(file.to_owned());
+            Ok(())
+        }
+    }
+    #[derive(Default)]
+    struct SnapshotUi {
+        calls: Vec<String>,
+    }
+    impl SnapshotUiBoundary for SnapshotUi {
+        fn set_second_snapshot_format(&mut self) {
+            self.calls.push("set-second".to_owned());
+        }
+        fn restore_snapshot_format(&mut self) {
+            self.calls.push("restore".to_owned());
+        }
+        fn wprint(&mut self, message: &str) {
+            self.calls.push(format!("out:{message}"));
+        }
+        fn print_stderr(&mut self, message: &str) {
+            self.calls.push(format!("err:{message}"));
+        }
+    }
     #[test]
     fn initialize_and_offset_follow_source() {
         let mut state = B3dGfxState::default();
@@ -1216,5 +1475,112 @@ mod tests {
         assert!(b3d_image_match(&mut image, 0, 0, 2, 2, 1., 1., 0, 0).is_none());
         let _ = b3d_image_set(&mut image, 0, 0, 2, 2, 1., 1., 0, 0);
         assert!(b3d_image_match(&mut image, 0, 0, 2, 2, 1., 1., 0, 0).is_some())
+    }
+
+    #[test]
+    fn automatic_key_and_named_snapshots_route_to_the_source_formats() {
+        let directory =
+            std::env::temp_dir().join(format!("imod-rs-b3dgfx-snapshot-{}", std::process::id()));
+        let mut state = B3dGfxState {
+            snap_directory: directory.clone(),
+            ..Default::default()
+        };
+        let mut gl = Gl::default();
+        let mut encoder = Encoder::default();
+        let mut ui = SnapshotUi::default();
+        let auto = b3d_auto_snapshot(
+            &mut state,
+            &mut gl,
+            &mut encoder,
+            &mut ui,
+            "auto",
+            SNAPSHOT_RGB,
+            None,
+            false,
+            "PNG",
+            72,
+            0,
+            90,
+        )
+        .unwrap();
+        assert_eq!(auto, directory.join("auto000.PNG"));
+        let key = b3d_key_snapshot(
+            &mut state,
+            &mut gl,
+            &mut encoder,
+            &mut ui,
+            "key",
+            false,
+            false,
+            None,
+            true,
+            "PNG",
+            72,
+            0,
+            90,
+        )
+        .unwrap();
+        assert_eq!(key, directory.join("key000.tif"));
+        let mut named = PathBuf::new();
+        b3d_named_snapshot(
+            &mut state,
+            &mut gl,
+            &mut encoder,
+            &mut ui,
+            &mut named,
+            "modv",
+            SNAPSHOT_RGB,
+            None,
+            false,
+            "PNG",
+            72,
+            0,
+            90,
+        )
+        .unwrap();
+        assert_eq!(named, directory.join("modv0000.PNG"));
+        assert_eq!(encoder.files, vec![auto, key, named]);
+        assert_eq!(
+            ui.calls,
+            [
+                "out:auto: Saving image to ".to_owned()
+                    + &b3d_short_snap_name(&directory.join("auto000.PNG"))
+                    + "\n",
+                "out:DONE!\n".to_owned(),
+                "out:key: Saving image to ".to_owned()
+                    + &b3d_short_snap_name(&directory.join("key000.tif"))
+                    + "\n",
+                "out:DONE!\n".to_owned(),
+                "err:Saved image to ".to_owned()
+                    + &b3d_short_snap_name(&directory.join("modv0000.PNG"))
+                    + "\n",
+            ]
+        );
+    }
+
+    #[test]
+    fn control_key_temporarily_selects_the_second_snapshot_format() {
+        let mut state = B3dGfxState::default();
+        let mut gl = Gl::default();
+        let mut encoder = Encoder::default();
+        let mut ui = SnapshotUi::default();
+        let _ = b3d_key_snapshot(
+            &mut state,
+            &mut gl,
+            &mut encoder,
+            &mut ui,
+            "key",
+            true,
+            true,
+            None,
+            true,
+            "PNG",
+            72,
+            0,
+            90,
+        );
+        assert_eq!(ui.calls[0], "set-second");
+        assert!(ui.calls.iter().any(|call| call == "restore"));
+        assert_eq!(ui.calls.last(), Some(&"restore".to_owned()));
     }
 }

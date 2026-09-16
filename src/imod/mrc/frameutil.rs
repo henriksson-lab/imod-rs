@@ -7,12 +7,13 @@ use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_FLOAT, MrcHeader, mrc_head_new, mrc_head_write, mrc_write_slice,
 };
 use std::sync::{
-    LazyLock, Mutex,
+    LazyLock, Mutex, OnceLock,
     atomic::{AtomicUsize, Ordering},
 };
 
 static DUMP_INDEX: AtomicUsize = AtomicUsize::new(0);
 static PRINT_FUNCTION: LazyLock<Mutex<Option<fn(&str)>>> = LazyLock::new(|| Mutex::new(None));
+static DUMP_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
 
 /// C `utilCoordsForWrap`.
 pub fn util_coords_for_wrap(
@@ -87,9 +88,17 @@ pub fn util_roll_saved_frames<T>(saved: &mut [T], num_frames: usize) {
 }
 
 fn dump_path(prefix: &str) -> std::path::PathBuf {
-    let dir = std::env::var_os("FRAMEALIGN_DUMPDIR").unwrap_or_else(|| ".".into());
     let index = DUMP_INDEX.fetch_add(1, Ordering::Relaxed);
-    std::path::PathBuf::from(dir).join(format!("{prefix}-{index}.mrc"))
+    check_dump_dir().join(format!("{prefix}-{index}.mrc"))
+}
+
+/// C `checkDumpDir`: capture `FRAMEALIGN_DUMPDIR` once for all image dumps.
+fn check_dump_dir() -> &'static std::path::PathBuf {
+    DUMP_DIR.get_or_init(|| {
+        std::env::var_os("FRAMEALIGN_DUMPDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    })
 }
 
 /// C `utilDumpImage`, with the source's raw pixel storage represented by a

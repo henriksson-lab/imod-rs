@@ -6,27 +6,29 @@
 //! synthetic replacement UI is introduced.
 #![allow(dead_code, unused_variables)]
 
-use std::fs::{File, remove_file, rename};
+use std::fs::{remove_file, rename};
 
 use crate::imod::libcfshr::b3dutil::ImodFile;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
 use crate::imod::libimod::icont::{imod_contour_clear_points, imod_contour_new, imod_contours_new};
-use crate::imod::libimod::imodel::{IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, Imod, Ipoint};
+use crate::imod::libimod::imodel::{
+    imod_flip_yz, imod_rot90x, Imod, Ipoint, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT,
+};
 use crate::imod::libimod::imodel_files::{imod_read, imod_write};
 use crate::imod::libimod::iobj::{
-    IMOD_OBJFLAG_ANTI_ALIAS, IMOD_OBJFLAG_EXTRA_EDIT, IMOD_OBJFLAG_EXTRA_MODV, IMOD_OBJFLAG_FILL,
-    IMOD_OBJFLAG_MESH, IMOD_OBJFLAG_MODV_ONLY, IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_WILD,
-    imod_object_add_contour, imod_object_default, imod_object_get_bbox,
+    imod_object_add_contour, imod_object_default, imod_object_get_bbox, IMOD_OBJFLAG_ANTI_ALIAS,
+    IMOD_OBJFLAG_EXTRA_EDIT, IMOD_OBJFLAG_EXTRA_MODV, IMOD_OBJFLAG_FILL, IMOD_OBJFLAG_MESH,
+    IMOD_OBJFLAG_MODV_ONLY, IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_WILD,
 };
 use crate::imod::libimod::ipoint::{imod_point_append_xyz, imod_point_set_size};
 use crate::imod::libimod::iview::VIEW_WORLD_LIGHT;
 use crate::imod::three_dmod::imodv::{
-    ImodvApp, imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg,
+    imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg, ImodvApp,
 };
 use crate::imod::three_dmod::imodview::{
-    ImodView, ivw_free_extra_object, ivw_get_an_extra_object, ivw_get_free_extra_object_number,
+    ivw_free_extra_object, ivw_get_an_extra_object, ivw_get_free_extra_object_number, ImodView,
 };
 use crate::imod::three_dmod::mv_modeled::imodv_select_model;
 use crate::imod::three_dmod::mv_objed::{imodv_objed_freeing_extra_obj, imodv_objed_new_view};
@@ -34,6 +36,32 @@ use crate::imod::three_dmod::mv_views::{
     VIEW_WORLD_INVERT_Z, VIEW_WORLD_LABELS, VIEW_WORLD_LOWRES, VIEW_WORLD_WIREFRAME,
 };
 use crate::imod::three_dmod::mv_window::*;
+use crate::imod::three_dmod::utilities::{
+    util_exchange_flip_rotation, UtilitiesBoundary, FLIP_TO_ROTATION, ROTATION_TO_FLIP,
+};
+
+/// The model-coordinate portion of `UtilitiesBoundary` used by
+/// `writeOpenedModelFile`.  Native `utilExchangeFlipRotation` delegates to
+/// these two `libimod` operations; the other trait operations are unrelated
+/// drawing services and cannot occur in this source path.
+struct ModelTransformBoundary;
+
+impl UtilitiesBoundary for ModelTransformBoundary {
+    fn draw_symbol(&mut self, _: i32, _: i32, _: i32, _: i32, _: bool) {}
+    fn set_stipple(&mut self, _: bool) {}
+    fn clear_window(&mut self, _: i32) {}
+    fn redraw_model(&mut self) {}
+    fn change_point_size(&mut self) {}
+    fn finish_undo_unit(&mut self) {}
+    fn message(&mut self, _: &str) {}
+    fn flip_yz(&mut self, imod: &mut Imod) {
+        imod_flip_yz(imod);
+    }
+    fn rotate_90_x(&mut self, imod: &mut Imod, inverse: bool) {
+        imod_rot90x(imod, inverse as i32);
+    }
+    fn draw_filled_polygon(&mut self, _: &[Ipoint]) {}
+}
 
 /// The Qt `ColorSelector` state owned by `ImodvBkgColor`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -141,6 +169,18 @@ pub fn imodv_load_model(a: &mut ImodvApp, path: Option<&Path>) -> i32 {
         return -1;
     };
     model.cview = if model.cview != 0 { model.cview } else { 1 };
+    // `mv_menu.cpp:166-171`: this is deliberately independent of the object
+    // time flag.  Old model files can have contour times before their object
+    // flags are normalised by later editing operations.
+    model.tmax = model
+        .obj
+        .iter()
+        .flat_map(|object| object.cont.iter())
+        .map(|contour| contour.time)
+        .max()
+        .unwrap_or(0)
+        .max(0);
+    model.ctime = if model.tmax != 0 { 1 } else { 0 };
     a.owned_models.push(Box::new(model));
     let raw = a
         .owned_models
@@ -155,13 +195,46 @@ pub fn imodv_load_model(a: &mut ImodvApp, path: Option<&Path>) -> i32 {
 
 /// `writeOpenedModelFile`, after the source's `fopen` has produced `file`.
 pub fn write_opened_model_file(a: &mut ImodvApp, file: &mut ImodFile) -> i32 {
-    let Some(model) = (unsafe { a.imod.as_ref() }) else {
+    let Some(model) = (unsafe { a.imod.as_mut() }) else {
         return 1;
     };
-    imod_write(model, file).err().map_or(0, |_| 1)
+    let mut transform = ModelTransformBoundary;
+    util_exchange_flip_rotation(&mut transform, model, ROTATION_TO_FLIP);
+    let error = imod_write(model, file).err().map_or(0, |_| 1);
+    util_exchange_flip_rotation(&mut transform, model, FLIP_TO_ROTATION);
+    error
 }
-/// `imodvFileSave`, after resolving the current source filename at the Qt/path boundary.
-pub fn imodv_file_save(a: &mut ImodvApp, filename: &Path) -> i32 {
+/// `imodvFileSave`.
+pub fn imodv_file_save(a: &mut ImodvApp) -> i32 {
+    let Some(filename) = (unsafe { a.imod.as_ref() })
+        .and_then(|model| model.file_name.as_deref())
+        .map(PathBuf::from)
+    else {
+        return 1;
+    };
+    let backup = filename.with_file_name(format!(
+        "{}~",
+        filename.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    if filename.exists() {
+        let _ = remove_file(&backup);
+        if rename(&filename, &backup).is_err() {
+            return 1;
+        }
+    }
+    let error =
+        ImodFile::open(&filename, "wb").map_or(1, |mut f| write_opened_model_file(a, &mut f));
+    if error != 0 {
+        let _ = remove_file(&filename);
+        let _ = rename(&backup, &filename);
+    }
+    error
+}
+/// `imodvSaveModelAs`, after the source's `imodPlugGetSaveName` Qt boundary.
+pub fn imodv_save_model_as(a: &mut ImodvApp, filename: Option<&Path>) -> i32 {
+    let Some(filename) = filename else {
+        return 0;
+    };
     let backup = filename.with_file_name(format!(
         "{}~",
         filename.file_name().unwrap_or_default().to_string_lossy()
@@ -172,19 +245,28 @@ pub fn imodv_file_save(a: &mut ImodvApp, filename: &Path) -> i32 {
             return 1;
         }
     }
-    let error = ImodFile::open(filename, "w").map_or(1, |mut f| write_opened_model_file(a, &mut f));
+    let error =
+        ImodFile::open(filename, "wb").map_or(1, |mut f| write_opened_model_file(a, &mut f));
     if error != 0 {
         let _ = remove_file(filename);
         let _ = rename(&backup, filename);
+        return error;
     }
-    error
-}
-/// `imodvSaveModelAs`, after the source's `imodPlugGetSaveName` Qt boundary.
-pub fn imodv_save_model_as(a: &mut ImodvApp, filename: Option<&Path>) -> i32 {
-    let Some(filename) = filename else {
-        return 0;
-    };
-    imodv_file_save(a, filename)
+
+    // `mv_menu.cpp:278-287`: replacing the saved-as path also updates the
+    // short internal model name when the fixed native buffer can hold it.
+    if let Some(model) = unsafe { a.imod.as_mut() } {
+        let saved_name = filename.to_string_lossy();
+        model.file_name = Some(saved_name.into_owned());
+        let bytes = model.file_name.as_deref().unwrap().as_bytes();
+        if bytes.len() + 1 < model.name.len() {
+            model.name[..bytes.len()].copy_from_slice(bytes);
+            model.name[bytes.len()] = 0;
+        } else {
+            model.name[0] = 0;
+        }
+    }
+    0
 }
 
 /// `imodvFileMenu`.  File picker, snapshot encoding, directory chooser, movie
@@ -593,7 +675,21 @@ pub fn imodv_open_selected_windows(keys: Option<&str>, standalone: i32) -> Vec<&
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libimod::imodel::Imod;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::imod::libimod::imodel::{Icont, Imod, Iobj, IMODF_FLIPYZ, IMODF_ROT90X};
+    use crate::imod::libimod::imodel_files::imod_file_write;
+
+    static FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+    fn test_model_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "imod-rs-mv-menu-{label}-{}-{}.mod",
+            std::process::id(),
+            FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
     #[test]
     fn bounding_box_has_source_six_contours() {
         let mut model = Imod::default();
@@ -636,5 +732,89 @@ mod tests {
             imodv_open_selected_windows(Some("eI"), 1),
             vec!["scale_bar_open"]
         );
+    }
+
+    #[test]
+    fn loading_model_sets_source_time_range_from_all_contours() {
+        let path = test_model_path("time-range");
+        let mut model = Imod::default();
+        let mut object = Iobj::default();
+        object.cont = vec![
+            Icont {
+                time: 2,
+                ..Default::default()
+            },
+            Icont {
+                time: 7,
+                ..Default::default()
+            },
+        ];
+        model.obj.push(object);
+        assert_eq!(imod_file_write(&model, &path), Ok(()));
+
+        let mut app = ImodvApp {
+            standalone: 1,
+            ..Default::default()
+        };
+        assert_eq!(imodv_load_model(&mut app, Some(&path)), 0);
+        let loaded = unsafe { app.imod.as_ref() }.unwrap();
+        assert_eq!((loaded.tmax, loaded.ctime), (7, 1));
+        let _ = remove_file(path);
+    }
+
+    #[test]
+    fn save_uses_model_filename_and_save_as_replaces_it() {
+        let original = test_model_path("save-original");
+        let replacement = test_model_path("save-as");
+        let mut model = Imod::default();
+        model.file_name = Some(original.to_string_lossy().into_owned());
+        let mut app = ImodvApp {
+            imod: &mut model,
+            ..Default::default()
+        };
+
+        assert_eq!(imodv_file_save(&mut app), 0);
+        assert!(original.exists());
+        assert_eq!(imodv_save_model_as(&mut app, Some(&replacement)), 0);
+        assert!(replacement.exists());
+        assert_eq!(model.file_name.as_deref(), replacement.to_str());
+        let internal_name = model.name.split(|byte| *byte == 0).next().unwrap();
+        assert_eq!(internal_name, replacement.to_string_lossy().as_bytes());
+        let _ = remove_file(original);
+        let _ = remove_file(replacement);
+    }
+
+    #[test]
+    fn saving_rotation_form_model_writes_flip_form_and_restores_memory() {
+        let path = test_model_path("rotation-save");
+        let mut model = Imod::default();
+        model.flags = IMODF_ROT90X;
+        model.ymax = 11;
+        model.zmax = 29;
+        model.file_name = Some(path.to_string_lossy().into_owned());
+        let mut object = Iobj::default();
+        object.cont.push(Icont {
+            pts: vec![Ipoint {
+                x: 1.,
+                y: 2.,
+                z: 3.,
+            }],
+            ..Default::default()
+        });
+        model.obj.push(object);
+        let mut app = ImodvApp {
+            imod: &mut model,
+            ..Default::default()
+        };
+
+        assert_eq!(imodv_file_save(&mut app), 0);
+        assert_eq!(model.flags, IMODF_ROT90X);
+        assert_eq!((model.ymax, model.zmax), (11, 29));
+        assert_eq!(model.obj[0].cont[0].pts[0].y, 2.);
+        assert_eq!(model.obj[0].cont[0].pts[0].z, 3.);
+        let written = imod_read(&path).unwrap();
+        assert_eq!(written.flags & IMODF_FLIPYZ, IMODF_FLIPYZ);
+        assert_eq!(written.flags & IMODF_ROT90X, 0);
+        let _ = remove_file(path);
     }
 }

@@ -293,6 +293,19 @@ pub fn cor_def_correct_defects(
             for (destination, value) in array[..pixels].iter_mut().zip(typed) {
                 *destination = value.round().clamp(0., 255.) as u8;
             }
+            // Preserve the source's byte-specific `CorrectPixel` edge path;
+            // the float kernel above cannot represent its integer edge sum.
+            correct_pixels_3_ways(
+                defects,
+                &mut PixelData::Byte(&mut array[..pixels]),
+                width as i32,
+                height as i32,
+                binning.max(1),
+                top,
+                left,
+                0,
+                0.,
+            );
         }
         1 => {
             for (destination, value) in array[..pixels * 2].chunks_exact_mut(2).zip(typed) {

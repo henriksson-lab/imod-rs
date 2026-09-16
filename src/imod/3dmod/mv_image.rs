@@ -13,6 +13,10 @@ use crate::imod::libimod::imat::{
 };
 use crate::imod::libimod::imodel::{Iclip_planes, Ipoint};
 use crate::imod::three_dmod::imodv::ImodvApp;
+use crate::imod::three_dmod::imodview::{
+    ImodView, ivw_get_location, ivw_get_z_section, ivw_set_location,
+    ivw_ushort_in_range_to_byte_map,
+};
 
 pub const IMODV_DRAW_CZ: i32 = 1;
 pub const IMODV_DRAW_CY: i32 = 1 << 1;
@@ -85,7 +89,7 @@ pub trait MvImageGl {
     fn texture_parameters(&mut self);
     fn enable_texture(&mut self, enabled: bool);
     fn set_alpha_blend(&mut self, alpha: f32, enabled: bool);
-    fn draw_textured_quad(&mut self, points: [Ipoint; 4], clamp: (f32, f32));
+    fn draw_textured_quad(&mut self, points: [Ipoint; 4], clamp: (f32, f32), texel: f32);
     fn flush(&mut self);
 }
 /// Pixel/cache access supplied by `iview`, `pyramidcache`, and `cachefill`.
@@ -130,6 +134,94 @@ pub trait MvImageSource {
     ) -> (f32, f32, f32, i32) {
         let _ = (x, y, z);
         (0., 0., 0., 1)
+    }
+}
+
+/// `imodvDrawImage`'s direct `ViewInfo` image/cache source.
+///
+/// The C++ unit obtains line pointers with `ivwGetZSection` for the Z plane
+/// and with `ivwSetupFastAccess` for the X/Y planes.  The Rust `ImodView`
+/// keeps both representations behind `ivw_get_z_section`; this adapter makes
+/// that one source route available to all three plane loops without copying a
+/// volume or introducing a second image cache.  `ushort_map` owns the result
+/// of the source's `ivwUShortInRangeToByteMap` allocation for as long as the
+/// texture operation uses it.
+pub struct ImodViewImageSource<'a> {
+    view: &'a mut ImodView,
+    ushort_map: Option<Vec<u8>>,
+}
+
+impl<'a> ImodViewImageSource<'a> {
+    pub fn new(view: &'a mut ImodView) -> Self {
+        let ushort_map = (view.ushort_store != 0).then(|| ivw_ushort_in_range_to_byte_map(view));
+        Self { view, ushort_map }
+    }
+}
+
+impl MvImageSource for ImodViewImageSource<'_> {
+    fn dimensions(&self) -> (i32, i32, i32) {
+        (self.view.xsize, self.view.ysize, self.view.zsize)
+    }
+
+    fn location(&self) -> (i32, i32, i32) {
+        let mut x = 0;
+        let mut y = 0;
+        let mut z = 0;
+        ivw_get_location(self.view, &mut x, &mut y, &mut z);
+        (x, y, z)
+    }
+
+    fn set_location(&mut self, x: i32, y: i32, z: i32) {
+        ivw_set_location(self.view, x, y, z)
+    }
+
+    // `imodv_draw_image` overrides `pixel`, so a contiguous section is never
+    // required here: `ivw_get_z_section` deliberately returns source line
+    // pointers so that cached, flipped, and tiled image storage remains valid.
+    fn z_section(&mut self, _z: i32) -> Option<&[u8]> {
+        None
+    }
+
+    fn rgb_store(&self) -> bool {
+        self.view.rgb_store != 0
+    }
+
+    fn ushort_store(&self) -> bool {
+        self.view.ushort_store != 0
+    }
+
+    fn ushort_to_byte_map(&self) -> Option<&[u8]> {
+        self.ushort_map.as_deref()
+    }
+
+    fn pixel(&mut self, x: i32, y: i32, z: i32) -> Option<ImagePixel> {
+        let (xs, ys, zs) = self.dimensions();
+        if x < 0 || y < 0 || z < 0 || x >= xs || y >= ys || z >= zs {
+            return None;
+        }
+        let lines = ivw_get_z_section(self.view, z);
+        if lines.is_null() {
+            return None;
+        }
+        // `ivwGetZSection` has checked and built the `ysize` row table above.
+        let line = unsafe { *lines.add(y as usize) };
+        if line.is_null() {
+            return None;
+        }
+        unsafe {
+            if self.view.rgb_store != 0 {
+                let pixel = line.add(3 * x as usize);
+                return Some(ImagePixel::Rgb([*pixel, *pixel.add(1), *pixel.add(2)]));
+            }
+            if self.view.ushort_store != 0 {
+                let pixel = line.add(2 * x as usize);
+                return Some(ImagePixel::UShort(u16::from_ne_bytes([
+                    *pixel,
+                    *pixel.add(1),
+                ])));
+            }
+            Some(ImagePixel::Byte(*line.add(x as usize)))
+        }
     }
 }
 
@@ -591,7 +683,7 @@ pub fn imodv_draw_timage(
         }
     }
     gl.upload_bgra(upload_width, upload_height, &upload);
-    gl.draw_textured_quad(points, upload_clamp);
+    gl.draw_textured_quad(points, upload_clamp, 1. / state.tex_image_size as f32);
     gl.flush()
 }
 /// `initTexMapping`.
@@ -1173,6 +1265,10 @@ impl ImodvImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::imod::libcfshr::b3dutil::ImodFile;
+    use crate::imod::libcfshr::islice::slice_create;
+    use crate::imod::libiimod::mrcfiles::{LoadInfo, MRC_MODE_BYTE, MRC_MODE_RGB, MRC_MODE_USHORT};
+    use crate::imod::three_dmod::imodview::IvwSlice;
     struct Src {
         data: Vec<u8>,
     }
@@ -1190,6 +1286,7 @@ mod tests {
     }
     struct Gl {
         quads: usize,
+        texel: f32,
     }
     impl MvImageGl for Gl {
         fn texture_capacity(&mut self, n: i32) -> i32 {
@@ -1203,10 +1300,65 @@ mod tests {
         fn texture_parameters(&mut self) {}
         fn enable_texture(&mut self, _: bool) {}
         fn set_alpha_blend(&mut self, _: f32, _: bool) {}
-        fn draw_textured_quad(&mut self, _: [Ipoint; 4], _: (f32, f32)) {
+        fn draw_textured_quad(&mut self, _: [Ipoint; 4], _: (f32, f32), texel: f32) {
             self.quads += 1;
+            self.texel = texel;
         }
         fn flush(&mut self) {}
+    }
+
+    fn cached_view(mode: i32, bytes: Vec<u8>) -> (ImodView, Box<LoadInfo>) {
+        let mut load_info = Box::new(LoadInfo {
+            axis: 3,
+            ..Default::default()
+        });
+        let mut section = slice_create(2, 1, mode).expect("test section");
+        section.data = bytes;
+        let view = ImodView {
+            fp: Some(ImodFile::Token(1)),
+            li: &mut *load_info,
+            xsize: 2,
+            ysize: 1,
+            zsize: 1,
+            vm_size: 1,
+            vm_tdim: 1,
+            cache_index: vec![0],
+            vm_cache: vec![IvwSlice {
+                cz: 0,
+                ct: 0,
+                used: 0,
+                sec: section,
+            }],
+            ..Default::default()
+        };
+        (view, load_info)
+    }
+
+    #[test]
+    fn imod_view_source_reads_byte_ushort_and_bgr_cache_pixels() {
+        let (mut bytes, _byte_load) = cached_view(MRC_MODE_BYTE, vec![7, 9]);
+        let mut source = ImodViewImageSource::new(&mut bytes);
+        assert_eq!(source.pixel(0, 0, 0), Some(ImagePixel::Byte(7)));
+        assert_eq!(source.pixel(1, 0, 0), Some(ImagePixel::Byte(9)));
+        assert_eq!(source.pixel(2, 0, 0), None);
+
+        let (mut ushorts, _ushort_load) = cached_view(
+            MRC_MODE_USHORT,
+            [500u16.to_ne_bytes(), 1000u16.to_ne_bytes()].concat(),
+        );
+        ushorts.ushort_store = 1;
+        ushorts.range_low = 0;
+        ushorts.range_high = 65535;
+        let mut source = ImodViewImageSource::new(&mut ushorts);
+        assert_eq!(source.pixel(0, 0, 0), Some(ImagePixel::UShort(500)));
+        assert_eq!(source.pixel(1, 0, 0), Some(ImagePixel::UShort(1000)));
+        assert_eq!(source.ushort_to_byte_map().unwrap()[500], 2);
+
+        let (mut rgb, _rgb_load) = cached_view(MRC_MODE_RGB, vec![3, 2, 1, 6, 5, 4]);
+        rgb.rgb_store = 1;
+        let mut source = ImodViewImageSource::new(&mut rgb);
+        assert_eq!(source.pixel(0, 0, 0), Some(ImagePixel::Rgb([3, 2, 1])));
+        assert_eq!(source.pixel(1, 0, 0), Some(ImagePixel::Rgb([6, 5, 4])));
     }
     #[derive(Default)]
     struct EventBoundary {
@@ -1250,9 +1402,13 @@ mod tests {
         let mut src = Src {
             data: (0..64).collect(),
         };
-        let mut gl = Gl { quads: 0 };
+        let mut gl = Gl {
+            quads: 0,
+            texel: 0.,
+        };
         imodv_draw_image(&mut s, &mut a, &mut src, 0, &mut gl);
-        assert_ne!(s.tex_name, 0)
+        assert_ne!(s.tex_name, 0);
+        assert_eq!(gl.texel, 1. / s.tex_image_size as f32);
     }
     #[test]
     fn all_orthogonal_planes_issue_real_texture_quads() {
@@ -1263,7 +1419,10 @@ mod tests {
         let mut src = Src {
             data: (0..64).collect(),
         };
-        let mut gl = Gl { quads: 0 };
+        let mut gl = Gl {
+            quads: 0,
+            texel: 0.,
+        };
         imodv_draw_image(&mut s, &mut a, &mut src, 0, &mut gl);
         assert!(gl.quads >= 3, "drawn quads: {}", gl.quads);
     }

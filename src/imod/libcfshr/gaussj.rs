@@ -31,6 +31,12 @@ pub fn gaussj_det(
     mp: i32,
     determ: &mut f32,
 ) -> i32 {
+    // The source checks the fixed work-array limit before it dereferences any
+    // matrix dimensions; callers rely on this returning -1 even with dummy
+    // buffers (the Fortran-facing contract).
+    if n > MSIZ {
+        return -1;
+    }
     if n < 0
         || np < n
         || m < 0
@@ -49,9 +55,6 @@ pub fn gaussj_det(
     let mut icolum: i32 = 0;
 
     *determ = 1.;
-    if n > MSIZ {
-        return -1;
-    }
     for j in 0..n {
         ipivot[j as usize] = 0;
     }

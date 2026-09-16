@@ -1373,6 +1373,58 @@ pub unsafe fn c2f_string(
     }
     0
 }
+
+/// `imodgetenv` (`b3dutil.c:333`), the fixed-width Fortran environment bridge.
+///
+/// The source receives blank-padded character arrays and writes a blank-padded
+/// result.  Its status values are retained: `1` for an undefined variable,
+/// `0` for success, and `-1` when the value does not fit in the output field.
+///
+/// # Safety
+/// `var` and `value` must address `var_size` and `value_size` bytes,
+/// respectively, just as the Fortran-callable C entry point requires.
+pub unsafe fn imod_getenv(
+    var: *const c_char,
+    value: *mut c_char,
+    var_size: i32,
+    value_size: i32,
+) -> i32 {
+    if value.is_null() || value_size < 0 {
+        return -1;
+    }
+    let variable = unsafe { fortran_string(var, var_size) };
+    let Ok(found) = std::env::var(variable) else {
+        return 1;
+    };
+    let c_value = std::ffi::CString::new(found).expect("environment values cannot contain NUL");
+    unsafe { c2f_string(c_value.as_ptr(), value, value_size) }
+}
+
+/// `makeLinePointers` (`b3dutil.c:1269`).
+///
+/// The C helper allocates only a table of row pointers; it never owns the
+/// image.  A vector of disjoint mutable row borrows is the direct Rust
+/// equivalent and prevents the pointer table from outliving `array`.
+pub fn make_line_pointers(
+    array: &mut [u8],
+    xsize: i32,
+    ysize: i32,
+    dsize: i32,
+) -> Option<Vec<&mut [u8]>> {
+    let row_bytes = usize::try_from(xsize)
+        .ok()?
+        .checked_mul(usize::try_from(dsize).ok()?)?;
+    let rows = usize::try_from(ysize).ok()?;
+    if row_bytes == 0 && rows != 0 || array.len() < row_bytes.checked_mul(rows)? {
+        return None;
+    }
+    let mut chunks = array.chunks_exact_mut(row_bytes);
+    let mut pointers = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        pointers.push(chunks.next()?);
+    }
+    Some(pointers)
+}
 /// Matches C `b3dFseek` (`b3dutil.c:899`).
 ///
 /// The Unix arm of the source is `fseek(fp, offset, flag)` after the explicit
@@ -2702,6 +2754,33 @@ mod tests {
         assert_eq!((start, end), (4, 6));
         assert_eq!(total_cuda_cores(3, 5, 2), 384);
         assert_eq!(angle_within_limits(-10., 0., 360.), 350.);
+    }
+
+    #[test]
+    fn fortran_environment_and_line_pointer_helpers_preserve_source_layout() {
+        let mut value = vec![0 as c_char; 4096];
+        let variable = b"PATH   ";
+        assert_eq!(
+            unsafe {
+                imod_getenv(
+                    variable.as_ptr().cast(),
+                    value.as_mut_ptr(),
+                    variable.len() as i32,
+                    value.len() as i32,
+                )
+            },
+            0
+        );
+        assert_ne!(value[0], 0);
+        assert_eq!(value.last().copied(), Some(b' ' as c_char));
+
+        let mut pixels = [0u8; 12];
+        let mut rows = make_line_pointers(&mut pixels, 2, 3, 2).unwrap();
+        rows[0].copy_from_slice(&[1, 2, 3, 4]);
+        rows[2].copy_from_slice(&[9, 10, 11, 12]);
+        drop(rows);
+        assert_eq!(pixels, [1, 2, 3, 4, 0, 0, 0, 0, 9, 10, 11, 12]);
+        assert!(make_line_pointers(&mut pixels, 2, 4, 2).is_none());
     }
 
     #[test]

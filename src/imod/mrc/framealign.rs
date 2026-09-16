@@ -760,7 +760,9 @@ impl FrameAlign {
         if x_shifts.len() != y_shifts.len() {
             return Err("X and Y shift counts differ".into());
         }
-        if x_shifts.len() < 3 {
+        // `gcvspl` requires n >= 2 * m; this call uses m = 2, so a
+        // three-frame sequence cannot enter the native spline solver.
+        if x_shifts.len() < 4 {
             return Ok((x_shifts.to_vec(), y_shifts.to_vec()));
         }
         let abscissae: Vec<f64> = (0..x_shifts.len()).map(|index| index as f64).collect();

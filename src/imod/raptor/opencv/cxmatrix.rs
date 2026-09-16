@@ -384,7 +384,8 @@ mod tests {
         let b = CvMatrix::new(2, 1, vec![1., 0.]).unwrap();
         let mut x = CvMatrix::new(2, 1, vec![0.; 2]).unwrap();
         cv_solve(&a, &b, &mut x).unwrap();
-        assert_eq!(x.data, vec![0.6, -0.2]);
+        assert!((x.data[0] - 0.6).abs() < 1.0e-12);
+        assert!((x.data[1] + 0.2).abs() < 1.0e-12);
         assert_eq!(cv_cross_product([1., 0., 0.], [0., 1., 0.]), [0., 0., 1.]);
     }
     #[test]

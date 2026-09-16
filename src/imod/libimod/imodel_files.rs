@@ -1292,25 +1292,41 @@ pub fn imodel_read_clip(object: &mut Iobj, file: &mut ImodFile, flags: u32) -> i
 
 /// Original: `imodel_read_meshparm` (`imodel_files.c:1126`).
 ///
-/// The translated `Iobj` has no `meshParam` member (`MeshParams`, `imodel.h:335`,
-/// belongs to the untranslated `imesh.c` unit), so the nine integers and ten
-/// floats of the chunk are read and discarded.  `capSkipNz` is returned because
-/// `imodel_read_meshskip` validates its chunk size against it.
-pub fn imodel_read_meshparm(_obj: &mut Iobj, fin: &mut ImodFile) -> Result<i32, i32> {
+pub fn imodel_read_meshparm(obj: &mut Iobj, fin: &mut ImodFile) -> Result<i32, i32> {
     let _ = imod_get_int(fin).map_err(|_| IMOD_ERROR_READ)?;
     let mut ints = [0i32; 9];
     imod_get_ints(fin, &mut ints, 9).map_err(|_| IMOD_ERROR_READ)?;
     let mut floats = [0f32; 10];
     imod_get_floats(fin, &mut floats, 10).map_err(|_| IMOD_ERROR_READ)?;
+    obj.mesh_param = Some(crate::imod::libimod::imesh::MeshParams {
+        flags: ints[0] as u32,
+        cap: ints[1],
+        passes: ints[2],
+        cap_skip_nz: ints[3],
+        incz_low_res: ints[4],
+        incz_high_res: ints[5],
+        minz: ints[6],
+        maxz: ints[7],
+        spare_int: ints[8],
+        overlap: floats[0],
+        tube_diameter: floats[1],
+        xmin: floats[2],
+        xmax: floats[3],
+        ymin: floats[4],
+        ymax: floats[5],
+        tol_low_res: floats[6],
+        tol_high_res: floats[7],
+        flat_crit: floats[8],
+        spare_float: floats[9],
+        cap_skip_zlist: None,
+    });
     Ok(ints[3])
 }
 
 /// Original: `imodel_read_meshskip` (`imodel_files.c:1140`).
 ///
-/// `capSkipNz` comes from the caller for the reason given on
-/// `imodel_read_meshparm`; the Z list itself is read and discarded.
 pub fn imodel_read_meshskip(
-    _obj: &mut Iobj,
+    obj: &mut Iobj,
     fin: &mut ImodFile,
     cap_skip_nz: Option<i32>,
 ) -> Result<(), i32> {
@@ -1320,6 +1336,9 @@ pub fn imodel_read_meshskip(
     }
     let mut list = vec![0i32; size.max(0) as usize];
     imod_get_ints(fin, &mut list, size).map_err(|_| IMOD_ERROR_READ)?;
+    if let Some(params) = obj.mesh_param.as_mut() {
+        params.cap_skip_zlist = Some(list);
+    }
     Ok(())
 }
 
@@ -1677,9 +1696,9 @@ pub fn imod_read_file(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
 /// reports how many converted; the `parse` closures below do the same, and
 /// `atoi`/`atof` return 0 for text they cannot read, as the C library does.
 ///
-/// The translated `Imod` has no `objsize`, `slicerAng` or `fileName` member;
-/// the object count read from the header sizes `imod.obj` directly, and
-/// `slicerAngle` records append to `imod.slicer_ang`.
+/// The translated `Imod` has no redundant `objsize` member; the object count
+/// read from the header sizes `imod.obj` directly, and `slicerAngle` records
+/// append to `imod.slicer_ang`.
 pub fn imod_read_ascii(imod: &mut Imod, file: &mut ImodFile) -> Result<(), i32> {
     let mut line = [0u8; MAXLINE as usize];
     let mut ob: i32 = -1;
@@ -2498,6 +2517,7 @@ pub fn imod_read(path: impl AsRef<Path>) -> Result<Imod, i32> {
     let mut file =
         ImodFile::open(path.as_ref().to_str().unwrap_or(""), "rb").ok_or(IMOD_ERROR_READ)?;
     imod_read_file(&mut imod, &mut file)?;
+    imod.file_name = Some(path.as_ref().to_string_lossy().into_owned());
     Ok(imod)
 }
 
@@ -2556,7 +2576,12 @@ pub fn imodel_write_mesh(mesh: &Imesh, file: &mut ImodFile) -> Result<(), i32> {
 }
 
 /// Original: `imodel_write_object` (`imodel_files.c:345`).
-pub fn imodel_write_object(object: &Iobj, file: &mut ImodFile, skip_mesh: i32) -> Result<(), i32> {
+pub fn imodel_write_object(
+    object: &Iobj,
+    file: &mut ImodFile,
+    skip_mesh: i32,
+    scale: &Ipoint,
+) -> Result<(), i32> {
     // `imodel_files.c:352` writes the number of meshes that have no thickness
     // in their flag word, not the size of the mesh array.
     let mut num_real = 0;
@@ -2620,23 +2645,17 @@ pub fn imodel_write_object(object: &Iobj, file: &mut ImodFile, skip_mesh: i32) -
         .map_err(|_| IMOD_ERROR_WRITE)?;
         // `imodel_files.c:406-408` makes two `imodPutScaledPoints` calls, so
         // all `count` normals precede all `count` points; they are not
-        // interleaved.  The scale is `(mod->xybin, mod->xybin, mod->zbin)`,
-        // which only `3dmod` ever moves off 1, and `Imod` here has no such
-        // member (see the deviation note on `imodDefault`), so the normals'
-        // `1/scale` and the points' `scale` are both the identity.
+        // interleaved. Normals use the inverse of the model binning scale.
         let count = (object.clips.count as usize).min(object.clips.normal.len());
-        for index in 0..count {
-            let point = object.clips.normal[index];
-            imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
-            imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
-            imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
-        for index in 0..count {
-            let point = object.clips.point[index];
-            imod_put_float(file, point.x).map_err(|_| IMOD_ERROR_WRITE)?;
-            imod_put_float(file, point.y).map_err(|_| IMOD_ERROR_WRITE)?;
-            imod_put_float(file, point.z).map_err(|_| IMOD_ERROR_WRITE)?;
-        }
+        let norm_scale = Ipoint {
+            x: 1. / scale.x,
+            y: 1. / scale.y,
+            z: 1. / scale.z,
+        };
+        imod_put_scaled_points(file, &object.clips.normal, count as i32, &norm_scale)
+            .map_err(|_| IMOD_ERROR_WRITE)?;
+        imod_put_scaled_points(file, &object.clips.point, count as i32, scale)
+            .map_err(|_| IMOD_ERROR_WRITE)?;
     }
     imod_put_int(file, ID_IMAT as i32).map_err(|_| IMOD_ERROR_WRITE)?;
     imod_put_int(file, 16).map_err(|_| IMOD_ERROR_WRITE)?;
@@ -2662,6 +2681,48 @@ pub fn imodel_write_object(object: &Iobj, file: &mut ImodFile, skip_mesh: i32) -
         object.mesh_thickness,
     ])
     .map_err(|_| IMOD_ERROR_WRITE)?;
+    if let Some(params) = object.mesh_param.as_ref() {
+        // `imodel_files.c:423-438`: MEPA is the contiguous nine-int,
+        // ten-float `MeshParams` prefix, followed by SKLI when caps skip Z.
+        imod_put_int(file, ID_MEPA as i32).map_err(|_| IMOD_ERROR_WRITE)?;
+        imod_put_int(file, 76).map_err(|_| IMOD_ERROR_WRITE)?;
+        let ints = [
+            params.flags as i32,
+            params.cap,
+            params.passes,
+            params.cap_skip_nz,
+            params.incz_low_res,
+            params.incz_high_res,
+            params.minz,
+            params.maxz,
+            params.spare_int,
+        ];
+        imod_put_ints(file, &ints, 9).map_err(|_| IMOD_ERROR_WRITE)?;
+        let floats = [
+            params.overlap,
+            params.tube_diameter,
+            params.xmin,
+            params.xmax,
+            params.ymin,
+            params.ymax,
+            params.tol_low_res,
+            params.tol_high_res,
+            params.flat_crit,
+            params.spare_float,
+        ];
+        imod_put_floats(file, &floats, 10).map_err(|_| IMOD_ERROR_WRITE)?;
+        if params.cap_skip_nz != 0 {
+            let Some(list) = params.cap_skip_zlist.as_ref() else {
+                return Err(IMOD_ERROR_WRITE);
+            };
+            if list.len() != params.cap_skip_nz as usize {
+                return Err(IMOD_ERROR_WRITE);
+            }
+            imod_put_int(file, ID_SKLI as i32).map_err(|_| IMOD_ERROR_WRITE)?;
+            imod_put_int(file, params.cap_skip_nz * 4).map_err(|_| IMOD_ERROR_WRITE)?;
+            imod_put_ints(file, list, params.cap_skip_nz).map_err(|_| IMOD_ERROR_WRITE)?;
+        }
+    }
     if imod_write_store(&object.store, ID_OBST as i32, file) != 0 {
         return Err(IMOD_ERROR_WRITE);
     }
@@ -2719,8 +2780,13 @@ pub fn imodel_write(imod: &Imod, file: &mut ImodFile, skip_mesh: i32) -> Result<
     for value in [imod.alpha, imod.beta, imod.gamma] {
         imod_put_float(file, value).map_err(|_| IMOD_ERROR_WRITE)?;
     }
+    let scale = Ipoint {
+        x: imod.xybin as f32,
+        y: imod.xybin as f32,
+        z: imod.zbin as f32,
+    };
     for object in &imod.obj {
-        imodel_write_object(object, file, skip_mesh)?;
+        imodel_write_object(object, file, skip_mesh, &scale)?;
     }
     super::iview::imod_view_model_write(imod, file)?;
     super::iview::imod_imnx_write(imod, file)?;
@@ -2739,8 +2805,8 @@ pub fn imod_write(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
 
 /// Original: `imodWriteSkipMesh` (`imodel_files.c:259`).
 ///
-/// The source saves and restores `imod->file` around the write; the translated
-/// `Imod` carries no `file` member, so there is nothing to save.
+/// The source saves and restores `imod->file` around the write; Rust callers
+/// own that borrow explicitly, so there is no aliased file member to restore.
 pub fn imod_write_skip_mesh(imod: &Imod, fout: &mut ImodFile, which_skip: i32) -> Result<(), i32> {
     if imodel_write(imod, fout, which_skip).is_err() {
         return Err(-1);
@@ -2750,8 +2816,8 @@ pub fn imod_write_skip_mesh(imod: &Imod, fout: &mut ImodFile, which_skip: i32) -
 
 /// Original: `imodWriteFile` (`imodel_files.c:236`).
 ///
-/// The source writes to the `FILE *` stored in `imod->file`; that member has no
-/// counterpart here, so the destination is passed explicitly.
+/// The source writes to the `FILE *` stored in `imod->file`; Rust passes the
+/// destination explicitly instead of storing an aliased handle in the model.
 pub fn imod_write_file(imod: &Imod, file: &mut ImodFile) -> Result<(), i32> {
     imodel_write(imod, file, 0)
 }
@@ -2771,12 +2837,13 @@ pub fn imod_file_read(filename: impl AsRef<Path>) -> Result<Imod, i32> {
 /// Original: `imodOpenFile` (`imodel_files.c:93`).
 ///
 /// The source stores the opened `FILE *` in `imod->file` and a copy of the path
-/// in `imod->fileName`; the translated `Imod` (`imodel.rs`) carries neither
-/// member, so the opened handle is returned to the caller and `imod` is left
-/// alone.  `mode` is the `fopen` mode string: the first character selects read,
+/// in `imod->fileName`; Rust returns the handle to its caller, while retaining
+/// the source filename in `imod.file_name`. `mode` is the `fopen` mode string: the first character selects read,
 /// write or append and a `+` adds the other direction.
-pub fn imod_open_file(filename: &str, mode: &str, _imod: &mut Imod) -> Result<ImodFile, i32> {
-    ImodFile::open(filename, mode).ok_or(-1)
+pub fn imod_open_file(filename: &str, mode: &str, imod: &mut Imod) -> Result<ImodFile, i32> {
+    let file = ImodFile::open(filename, mode).ok_or(-1)?;
+    imod.file_name = Some(filename.to_owned());
+    Ok(file)
 }
 
 /// Original: `imodCloseFile` (`imodel_files.c:115`).
@@ -2852,6 +2919,36 @@ mod tests {
         imod_file_write(&model, &path).unwrap();
         let decoded = imod_read(&path).unwrap();
         assert_eq!(decoded.group_list, model.group_list);
+        assert_eq!(decoded.file_name.as_deref(), path.to_str());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn binary_clip_chunk_uses_source_model_binning_scales() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-binned-clip-{}.mod",
+            std::process::id()
+        ));
+        let mut model = Imod {
+            xybin: 2,
+            zbin: 3,
+            obj: vec![Iobj::default()],
+            ..Imod::default()
+        };
+        let clips = &mut model.obj[0].clips;
+        clips.count = 1;
+        clips.normal[0] = Ipoint { x: 2., y: 4., z: 6. };
+        clips.point[0] = Ipoint { x: 1., y: 2., z: 3. };
+        imod_file_write(&model, &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let clip = bytes.windows(4).position(|window| window == b"CLIP").unwrap();
+        // chunk ID + size + four clip bytes, then all normals followed by points
+        let floats = &bytes[clip + 12..clip + 36];
+        let decoded = floats
+            .chunks_exact(4)
+            .map(|value| f32::from_be_bytes(value.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(decoded, vec![1., 2., 2., 2., 4., 9.]);
         let _ = std::fs::remove_file(path);
     }
 
@@ -3007,6 +3104,14 @@ mod tests {
             obj: vec![Iobj {
                 mat2: 11,
                 mesh_thickness: 15,
+                mesh_param: Some(crate::imod::libimod::imesh::MeshParams {
+                    flags: 0x1234,
+                    passes: 3,
+                    cap_skip_nz: 2,
+                    tube_diameter: 7.5,
+                    cap_skip_zlist: Some(vec![4, 9]),
+                    ..Default::default()
+                }),
                 ..Iobj::default()
             }],
             ..Imod::default()
@@ -3016,6 +3121,11 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert_eq!(output.obj[0].mat2, 11);
         assert_eq!(output.obj[0].mesh_thickness, 15);
+        let params = output.obj[0].mesh_param.as_ref().unwrap();
+        assert_eq!(params.flags, 0x1234);
+        assert_eq!(params.passes, 3);
+        assert_eq!(params.tube_diameter, 7.5);
+        assert_eq!(params.cap_skip_zlist.as_deref(), Some(&[4, 9][..]));
         assert_eq!(output.cview, 1);
         assert_eq!(output.view.len(), 2);
         assert_eq!(

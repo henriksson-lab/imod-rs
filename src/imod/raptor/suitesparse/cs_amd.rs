@@ -9,7 +9,8 @@ fn flip(value: i64) -> i64 {
     -value - 2
 }
 
-fn wclear(mark: i64, lemax: i64, workspace: &mut [i64], count: usize) -> i64 {
+/// C `cs_wclear`: clear AMD element marks before the mark counter wraps.
+fn cs_wclear(mark: i64, lemax: i64, workspace: &mut [i64], count: usize) -> i64 {
     if mark < 2 || mark.checked_add(lemax).is_none_or(|value| value < 0) {
         for value in &mut workspace[..count] {
             if *value != 0 {
@@ -20,6 +21,11 @@ fn wclear(mark: i64, lemax: i64, workspace: &mut [i64], count: usize) -> i64 {
     } else {
         mark
     }
+}
+
+/// C `cs_diag`: retain an entry only when it is off the diagonal.
+fn cs_diag(row: usize, column: usize, _value: f64) -> bool {
+    row != column
 }
 
 /// C `cs_amd`: approximate minimum-degree ordering.
@@ -71,7 +77,7 @@ pub fn cs_amd(order: i32, matrix: &Cs) -> Option<Vec<usize>> {
         let end = graph.column_pointers[column + 1];
         graph.column_pointers[column] = retained;
         for entry in start..end {
-            if graph.row_indices[entry] != column {
+            if cs_diag(graph.row_indices[entry], column, graph.values[entry]) {
                 graph.row_indices[retained] = graph.row_indices[entry];
                 retained += 1;
             }
@@ -108,7 +114,7 @@ pub fn cs_amd(order: i32, matrix: &Cs) -> Option<Vec<usize>> {
     let mut current_nz = cnz;
     let mut lemax = 0_i64;
     let mut nel = 0_i64;
-    let mut mark = wclear(0, 0, w, n);
+    let mut mark = cs_wclear(0, 0, w, n);
     for node in 0..=n {
         head[node] = -1;
         next[node] = -1;
@@ -235,7 +241,7 @@ pub fn cs_amd(order: i32, matrix: &Cs) -> Option<Vec<usize>> {
         cp[k] = pk1 as i64;
         len[k] = (pk2 - pk1) as i64;
         elen[k] = -2;
-        mark = wclear(mark, lemax, w, n);
+        mark = cs_wclear(mark, lemax, w, n);
         for pk in pk1..pk2 {
             let node = ci[pk] as usize;
             let element_length = elen[node];
@@ -312,7 +318,7 @@ pub fn cs_amd(order: i32, matrix: &Cs) -> Option<Vec<usize>> {
         }
         degree[k] = dk;
         lemax = lemax.max(dk);
-        mark = wclear(mark.checked_add(lemax)?, lemax, w, n);
+        mark = cs_wclear(mark.checked_add(lemax)?, lemax, w, n);
         for pk in pk1..pk2 {
             let mut node = ci[pk] as usize;
             if nv[node] >= 0 {
@@ -425,7 +431,7 @@ pub fn cs_amd(order: i32, matrix: &Cs) -> Option<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::cs_amd;
+    use super::{cs_amd, cs_diag, cs_wclear};
     use crate::imod::raptor::suitesparse::Cs;
 
     #[test]
@@ -445,5 +451,15 @@ mod tests {
             assert_eq!(permutation, vec![0, 1, 2]);
         }
         assert_eq!(cs_amd(0, &matrix), None);
+    }
+
+    #[test]
+    fn amd_mark_clear_and_diagonal_filter_follow_c_helpers() {
+        let mut marks = [0, 5, -4];
+        assert_eq!(cs_wclear(0, 0, &mut marks, 3), 2);
+        assert_eq!(marks, [0, 1, 1]);
+        assert_eq!(cs_wclear(5, 3, &mut marks, 3), 5);
+        assert!(cs_diag(0, 1, 4.0));
+        assert!(!cs_diag(1, 1, 4.0));
     }
 }

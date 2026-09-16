@@ -30,6 +30,20 @@ pub trait MatchvolParameters {
     fn set_output_size_y(&mut self, value: String);
 }
 
+/// `actionPerformed` (`ButtonActionListener`), represented as a Slint event
+/// adapter rather than a Swing listener allocation.
+pub fn initial_combine_action_performed<
+    M: InitialCombinePanelApplicationManager,
+    P: InitialCombinePanelParent,
+>(
+    panel: &mut InitialCombinePanel,
+    manager: &mut M,
+    parent: &mut P,
+    command: &str,
+) {
+    panel.action(manager, parent, command, None, None);
+}
+
 /// The two MRC-header reads in Java `setMatchMode`.
 pub trait InitialCombineMrcHeaders {
     fn tilt_output_n_rows(&mut self, axis: AxisID) -> Result<Option<i32>, String>;
@@ -254,6 +268,7 @@ impl InitialCombinePanel {
             Err(_) => false,
         }
     }
+    /// Source `setParameters` for `MatchvolParam`.
     pub fn set_matchvol_parameters<P: MatchvolParameters>(&mut self, param: &P) {
         self.ltf_output_size_y.set_text(&param.output_size_y());
     }
@@ -294,6 +309,7 @@ impl InitialCombinePanel {
         self.pnl_solvematch.get_screen_state(state);
         state.set_matchvol1_restart_button_state(self.btn_matchvol_restart.get_button_state());
     }
+    /// Source `setParameters` for `ReconScreenState`.
     pub fn set_screen_state<S: InitialCombinePanelScreenState>(&mut self, state: &S) {
         self.pnl_solvematch.set_screen_state(state);
         self.btn_matchvol_restart

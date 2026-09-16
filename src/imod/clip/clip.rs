@@ -157,6 +157,80 @@ pub struct ClipOptions {
     pub scale_defects: i32,
 }
 
+/// Rust construction boundary for C's stack-allocated `Grap_options` followed
+/// by `defaultOptions`.  The source routine remains the authority for every
+/// observable default; zero/empty values only provide owned storage before it
+/// writes the fields it owns.
+impl Default for ClipOptions {
+    fn default() -> Self {
+        let mut options = Self {
+            pname: String::new(),
+            command: String::new(),
+            process: 0,
+            x: 0,
+            y: 0,
+            z: 0,
+            x2: 0,
+            y2: 0,
+            z2: 0,
+            ix: 0,
+            iy: 0,
+            iz: 0,
+            iz2: 0,
+            ox: 0,
+            oy: 0,
+            oz: 0,
+            chunk_x: 0,
+            chunk_y: 0,
+            chunk_z: 0,
+            cx: 0.,
+            cy: 0.,
+            cz: 0.,
+            high: 0.,
+            low: 0.,
+            red: 0.,
+            green: 0.,
+            blue: 0.,
+            thresh: 0.,
+            weight: 0.,
+            pctl_frac: 0.,
+            falloff_frac: 0.,
+            min_size: 0,
+            pad: 0.,
+            mode: 0,
+            dim: 0,
+            infiles: 0,
+            fnames: Vec::new(),
+            sano: 0,
+            add2file: 0,
+            isec: 0,
+            val: 0.,
+            nofsecs: 0,
+            secs: Vec::new(),
+            out_before: 0,
+            out_after: 0,
+            ocanresize: 0,
+            ocanchmode: 0,
+            from_one: 0,
+            ofname: None,
+            plname: None,
+            super_gain_name: None,
+            point_out_name: None,
+            new_xoverlap: 0,
+            new_yoverlap: 0,
+            rotation_flip: 0,
+            read_defects: 0,
+            defects: CameraDefects::default(),
+            cam_size_x: 0,
+            cam_size_y: 0,
+            binning: 0.,
+            scale_defects: 0,
+        };
+        default_options(&mut options);
+        options
+    }
+}
+
 /// `include/CorrectDefects.h` layout, re-exported from its merged source module.
 pub use crate::imod::clip::correct_defects::CameraDefects;
 

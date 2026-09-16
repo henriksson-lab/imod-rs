@@ -15,6 +15,13 @@ fn d2norm(a: f64, b: f64) -> f64 {
     }
 }
 
+/// Original `dload` (`lsqr.c:51`).
+fn dload(n: usize, alpha: f64, x: &mut [f64]) {
+    for value in x.iter_mut().take(n) {
+        *value = alpha;
+    }
+}
+
 /// Original `lsqr` (`lsqr.c:63`).
 ///
 /// `aprod` must add `A * x` to `y` for mode 1, and `A.transpose() * y` to
@@ -81,10 +88,10 @@ pub fn lsqr<F>(
         );
     }
 
-    v.fill(0.);
-    x.fill(0.);
+    dload(n, 0., v);
+    dload(n, 0., x);
     if let Some(se) = se.as_deref_mut() {
-        se.fill(0.);
+        dload(n, 0., se);
     }
     let mut alpha = 0.;
     let mut beta = cblas_dnrm2(m as i32, u, 1);

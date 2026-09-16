@@ -6,6 +6,48 @@
 //! callback writer: source defaults, box sizing, section validation, and the
 //! precise result reports.
 
+use crate::imod::libcfshr::islice::{Islice, slice_init};
+use crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT;
+use crate::imod::libiimod::mrcslice::slice_write_mrcfile;
+
+/// `writeSlice` (`testctffind.cpp:7`).
+///
+/// `sliceInit` borrows the C caller's float pointer.  The Rust `Islice` owns
+/// its bytes, so this is the same float layout copied into the temporary slice
+/// before `sliceWriteMRCfile` writes its one-section MRC file.
+pub fn write_slice(filename: &str, data: &[f32], xsize: i32, ysize: i32) -> i32 {
+    let Some(pixels) = usize::try_from(xsize)
+        .ok()
+        .and_then(|x| usize::try_from(ysize).ok().and_then(|y| x.checked_mul(y)))
+    else {
+        return -1;
+    };
+    if data.len() != pixels {
+        return -1;
+    }
+    let mut bytes = Vec::with_capacity(pixels * std::mem::size_of::<f32>());
+    for value in data {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+    let mut slice = Islice {
+        data: Vec::new(),
+        xsize: 0,
+        ysize: 0,
+        mode: 0,
+        csize: 0,
+        dsize: 0,
+        min: 0.,
+        max: 0.,
+        mean: 0.,
+        index: 0,
+        cval: [0.; 4],
+    };
+    if slice_init(&mut slice, xsize, ysize, MRC_MODE_FLOAT, bytes) != 0 {
+        return -1;
+    }
+    slice_write_mrcfile(filename, &mut slice)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TestCtffindParameters {
     pub acceleration_voltage: f32,
@@ -129,5 +171,23 @@ mod tests {
             format_ctffind_results([10_000., 9_000., 45., 0.5, 0.8, 4., 0.], false, true, true),
             "Defocus 1 10000.0  2 9000.0  (astig. 1000.0) angle 45.00    Phase shift 0.5000 rad (28.65 deg)\nScore 0.8000\nThon rings well fit to 4.0\n"
         );
+    }
+
+    #[test]
+    fn write_slice_emits_a_one_section_float_mrc_file() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-rs-testctffind-write-slice-{}-{}.mrc",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("unnamed")
+        ));
+        assert_eq!(
+            write_slice(path.to_str().unwrap(), &[1., 2., 3., 4.], 2, 2),
+            0
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), 1024 + 4 * std::mem::size_of::<f32>());
+        assert_eq!(&bytes[1024..1028], &1_f32.to_ne_bytes());
+        assert_eq!(&bytes[1036..1040], &4_f32.to_ne_bytes());
+        let _ = std::fs::remove_file(path);
     }
 }

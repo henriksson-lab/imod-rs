@@ -236,9 +236,8 @@ pub fn mxml_index_new(
      */
 
     if ind.nodes.len() > 1 {
-        let attr = ind.attr.clone();
-        ind.nodes
-            .sort_by(|first, second| index_compare(arena, attr.as_deref(), *first, *second));
+        let last = ind.nodes.len() - 1;
+        index_sort(arena, &mut ind, 0, last);
     }
 
     /*
@@ -246,6 +245,43 @@ pub fn mxml_index_new(
      */
 
     Some(ind)
+}
+
+/// C static `index_sort` (`mxml-index.c:583`).
+///
+/// This preserves the source quicksort's pivot and equal-element handling;
+/// using Rust's library sort would be ordered correctly but could choose a
+/// different order for otherwise equal XML index entries.
+pub fn index_sort(arena: &MxmlArena, ind: &mut MxmlIndex, mut left: usize, mut right: usize) {
+    let attr = ind.attr.clone();
+    while left < right {
+        let pivot = ind.nodes[left];
+        let mut templ = left;
+        let mut tempr = right;
+        while templ < tempr {
+            while templ < right
+                && !index_compare(arena, attr.as_deref(), ind.nodes[templ], pivot).is_gt()
+            {
+                templ += 1;
+            }
+            while tempr > left
+                && index_compare(arena, attr.as_deref(), ind.nodes[tempr], pivot).is_gt()
+            {
+                tempr -= 1;
+            }
+            if templ < tempr {
+                ind.nodes.swap(templ, tempr);
+            }
+        }
+        if index_compare(arena, attr.as_deref(), pivot, ind.nodes[tempr]).is_gt() {
+            ind.nodes[left] = ind.nodes[tempr];
+            ind.nodes[tempr] = pivot;
+        }
+        if tempr > left + 1 {
+            index_sort(arena, ind, left, tempr - 1);
+        }
+        left = tempr + 1;
+    }
 }
 
 /// Matches C `mxmlIndexReset` (`mxml-index.c:404`).

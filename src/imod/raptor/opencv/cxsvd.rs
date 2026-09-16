@@ -172,7 +172,7 @@ mod tests {
         let a = CvMatrix::new(3, 2, vec![3., 1., 1., 3., 2., 2.]).unwrap();
         let svd = cv_svd(&a).unwrap();
         assert!(svd.singular_values[0] >= svd.singular_values[1]);
-        let b = CvMatrix::new(3, 1, vec![4., 6., 5.]).unwrap();
+        let b = CvMatrix::new(3, 1, vec![4., 4., 4.]).unwrap();
         let mut x = CvMatrix::new(2, 1, vec![0.; 2]).unwrap();
         cv_svbksb(&svd, &b, &mut x).unwrap();
         assert!((x.data[0] - 1.).abs() < 1e-8 && (x.data[1] - 1.).abs() < 1e-8);

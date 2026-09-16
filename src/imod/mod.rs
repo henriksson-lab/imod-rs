@@ -7,6 +7,7 @@ pub mod libcfshr;
 pub mod libfft;
 pub mod libiimod;
 pub mod libimod;
+pub mod libmesh;
 pub mod librgctf;
 pub mod libwarp;
 pub mod libxml;

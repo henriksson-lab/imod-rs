@@ -1,5 +1,6 @@
 //! Translation of `IMOD/mrc/manageshrmem.cpp`.
 
+use crate::imod::libcfshr::b3dutil::{b3d_addressable_memory, b3d_physical_memory};
 use crate::imod::libcfshr::parse_params::{
     pip_done, pip_get_boolean, pip_get_integer, pip_get_integer_array, pip_get_string,
     pip_number_of_entries, pip_read_or_parse_options,
@@ -56,6 +57,36 @@ pub fn shared_memory_schedule(
         maximum = maximum.max(now)
     }
     Ok((early, late, maximum))
+}
+
+fn test_available_memory_with_limits(
+    cumulative_kib: f64,
+    physical_bytes: f64,
+    addressable_bytes: f64,
+) -> Result<(), String> {
+    let needed_bytes = cumulative_kib * 1024.;
+    if physical_bytes > 0. && needed_bytes > physical_bytes - 1.0e9 {
+        return Err(format!(
+            "The maximum memory needed, {:.1} MB, is too big for the memory available",
+            cumulative_kib / 1024.
+        ));
+    }
+    if addressable_bytes > 0. && needed_bytes > addressable_bytes - 1.0e8 {
+        return Err(format!(
+            "The maximum memory needed, {:.1} MB, is too big for the addressable memory available",
+            cumulative_kib / 1024.
+        ));
+    }
+    Ok(())
+}
+
+/// C `ManageShrMem::testAvailableMemory`.
+pub fn test_available_memory(cumulative_kib: f64) -> Result<(), String> {
+    test_available_memory_with_limits(
+        cumulative_kib,
+        b3d_physical_memory(),
+        b3d_addressable_memory(),
+    )
 }
 /// Run a minimal long-option form of the source command: repeated `--file`,
 /// repeated `--command`, repeated comma-separated `--need`, and `--keep`.
@@ -152,6 +183,13 @@ pub fn manageshrmem(arguments: &[String]) -> i32 {
     ) == 0;
     pip_done();
     if have_test_sizes {
+        let cumulative_kib = test_sizes[..test_count as usize]
+            .iter()
+            .map(|&size| size as f64)
+            .sum();
+        if test_available_memory(cumulative_kib).is_err() {
+            return 1;
+        }
         let mut handles = Vec::with_capacity(test_count as usize);
         for file in 0..test_count as usize {
             if test_sizes[file] <= 0 {
@@ -180,7 +218,10 @@ pub fn manageshrmem(arguments: &[String]) -> i32 {
                 ii_delete(raw);
             }
         }
-        println!("All {test_count} shared memory files could be created");
+        println!(
+            "All {test_count} shared memory files totalling {:.1} MB could be created",
+            cumulative_kib / 1024.
+        );
         return 0;
     }
     if count <= 0 {
@@ -220,6 +261,9 @@ pub fn manageshrmem(arguments: &[String]) -> i32 {
     let Ok((early, late, maximum)) = shared_memory_schedule(&sizes, &needed, &keep) else {
         return 1;
     };
+    if test_available_memory(maximum as f64).is_err() {
+        return 1;
+    }
     if try_sizes != 0 {
         let mut current = 0_usize;
         let mut peak_process = 0_usize;
@@ -321,6 +365,13 @@ mod tests {
     #[test]
     fn rejects_unreferenced_file() {
         assert!(shared_memory_schedule(&[1], &[vec![]], &[]).is_err())
+    }
+
+    #[test]
+    fn rejects_memory_that_would_cross_source_safety_margins() {
+        assert!(test_available_memory_with_limits(900_000., 1.5e9, 3.0e9).is_err());
+        assert!(test_available_memory_with_limits(200_000., 3.0e9, 2.5e8).is_err());
+        assert!(test_available_memory_with_limits(100., 3.0e9, 3.0e9).is_ok());
     }
 
     #[cfg(not(windows))]
