@@ -104,3 +104,15 @@ pub fn clip_bandpass_filter(
     }
     crate::imod::clip::file_io::set_mrc_coords(input, output, options)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn source_nonfunctional_3d_entry_is_a_successful_no_op() {
+        let mut input = MrcHeader::default();
+        let mut output = MrcHeader::default();
+        let mut options = ClipOptions::default();
+        assert_eq!(clip_3dfilter(&mut input, &mut output, &mut options), 0);
+    }
+}

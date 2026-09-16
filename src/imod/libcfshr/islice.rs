@@ -7,6 +7,30 @@ use crate::imod::libiimod::mrcfiles::{
 const SMOOTH_KERNEL: [[i32; 3]; 3] = [[1, 2, 1], [2, 4, 2], [1, 2, 1]];
 const SHARPEN_KERNEL: [[i32; 3]; 3] = [[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]];
 const LAPLACIAN_KERNEL: [[i32; 3]; 3] = [[1, 1, 1], [1, -4, 1], [1, 1, 1]];
+/// Complete function inventory for `islice.c`.
+pub const ISLICE_SOURCE_FUNCTIONS: &[&str] = &[
+    "sliceCreate",
+    "sliceInit",
+    "sliceFree",
+    "sliceClear",
+    "sliceMode",
+    "sliceModeIfReal",
+    "sliceGetXSize",
+    "sliceGetYSize",
+    "sliceGetVal",
+    "slicePutVal",
+    "sliceGetPixelMagnitude",
+    "sliceGetValMagnitude",
+    "sliceMinMax",
+    "sliceScaleAndFree",
+    "sliceByteEdgeLaplacian",
+    "sliceByteSharpen",
+    "sliceByteSmooth",
+    "sliceByteConvolve",
+    "slice_mat_filter",
+    "mrc_slice_mat_getimat",
+    "mrc_slice_mat_mult",
+];
 pub struct Islice {
     pub data: Vec<u8>,
     pub xsize: i32,
@@ -20,10 +44,24 @@ pub struct Islice {
     pub index: i32,
     pub cval: [f32; 4],
 }
-pub struct Istack {
-    pub slices: Vec<Box<Islice>>,
+
+impl AsRef<Islice> for Islice {
+    fn as_ref(&self) -> &Islice {
+        self
+    }
 }
-pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Box<Islice>> {
+
+impl AsMut<Islice> for Islice {
+    fn as_mut(&mut self) -> &mut Islice {
+        self
+    }
+}
+pub struct Istack {
+    /// Consecutive owned slices; C used an array of independently allocated
+    /// pointers, but no translated caller needs their addresses to be stable.
+    pub slices: Vec<Islice>,
+}
+pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Islice> {
     let xysize = (xsize as usize).wrapping_mul(ysize as usize);
     if xysize / xsize as usize != ysize as usize {
         return None;
@@ -33,7 +71,7 @@ pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Box<Islice>> {
     if crate::imod::libcfshr::b3dutil::data_size_for_mode(mode, &mut dsize, &mut csize) != 0 {
         return None;
     }
-    Some(Box::new(Islice {
+    Some(Islice {
         data: vec![0; xysize * dsize as usize * csize as usize],
         xsize,
         ysize,
@@ -45,7 +83,7 @@ pub fn slice_create(xsize: i32, ysize: i32, mode: i32) -> Option<Box<Islice>> {
         mean: 0.,
         index: -1,
         cval: [0.; 4],
-    }))
+    })
 }
 pub fn slice_init(s: &mut Islice, xsize: i32, ysize: i32, mode: i32, data: Vec<u8>) -> i32 {
     let mut dsize = 0;
@@ -72,7 +110,7 @@ pub fn slice_init(s: &mut Islice, xsize: i32, ysize: i32, mode: i32, data: Vec<u
     s.data = data;
     0
 }
-pub fn slice_free(_s: Box<Islice>) {}
+pub fn slice_free(_s: Islice) {}
 pub fn slice_clear(s: &mut Islice, val: [f32; 4]) {
     s.min = slice_get_val_magnitude(val, s.mode);
     s.max = s.min;
@@ -385,7 +423,7 @@ pub fn slice_byte_convolve(sin: &mut Islice, mask: &[[i32; 3]; 3]) -> i32 {
 ///
 /// The float path deliberately delegates to the corresponding complete C-unit
 /// translation; non-float input retains the original get/multiply/put path.
-pub fn slice_mat_filter(sin: &Islice, mat: &[f32], dim: i32) -> Option<Box<Islice>> {
+pub fn slice_mat_filter(sin: &Islice, mat: &[f32], dim: i32) -> Option<Islice> {
     const MAX_STATIC_KERNEL: i32 = 9;
     let dim = usize::try_from(dim).ok()?;
     let matrix_elements = dim.checked_mul(dim)?;
@@ -693,5 +731,15 @@ mod tests {
         let float_output = slice_mat_filter(float_slice.as_mut(), &[1.], 1).unwrap();
         assert_eq!(float_output.data, float_slice.data);
         assert!(slice_mat_filter(float_slice.as_mut(), &[], 1).is_none());
+    }
+
+    #[test]
+    fn stack_has_contiguous_owned_slices() {
+        let slice = slice_create(2, 2, MRC_MODE_BYTE).unwrap();
+        let stack = Istack {
+            slices: vec![slice],
+        };
+        assert_eq!(stack.slices[0].data.len(), 4);
+        assert_eq!(ISLICE_SOURCE_FUNCTIONS.len(), 21);
     }
 }

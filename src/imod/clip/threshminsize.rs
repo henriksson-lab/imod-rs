@@ -71,9 +71,9 @@ pub fn threshold_with_min_size(
     let mut sets: Vec<ZConnectedSets> = Vec::new();
     let offset = if opt.dim == 3 { 1 } else { 0 };
     let mut kout = 0;
-    let mut next: Option<Box<Islice>> = None;
-    let mut last: Option<Box<Islice>> = None;
-    let mut input: Option<Box<Islice>> = None;
+    let mut next: Option<Islice> = None;
+    let mut last: Option<Islice> = None;
+    let mut input: Option<Islice> = None;
     for kin in -offset..opt.nofsecs {
         if kin + offset < opt.nofsecs {
             let z = opt.secs[(kin + offset) as usize];
@@ -87,7 +87,7 @@ pub fn threshold_with_min_size(
                 opt.cy as i32,
             );
             if next
-                .as_deref_mut()
+                .as_mut()
                 .is_none_or(|slice| crate::imod::libiimod::mrcslice::slice_float(slice) < 0)
             {
                 // `threshminsize.cpp:143`: the first `%s` is chosen by
@@ -330,8 +330,8 @@ mod tests {
 
     #[test]
     fn threshold_rejects_zero_minimum_size_before_slice_io() {
-        let mut hin = unsafe { MrcHeader::default() };
-        let mut hout = unsafe { MrcHeader::default() };
+        let mut hin = MrcHeader::default();
+        let mut hout = MrcHeader::default();
         mrc_head_new(&mut hin, 2, 2, 1, 2);
         mrc_head_new(&mut hout, 2, 2, 1, 2);
         let defects = CameraDefects {

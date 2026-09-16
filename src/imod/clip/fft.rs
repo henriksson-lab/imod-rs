@@ -110,8 +110,8 @@ pub fn clip_fft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut Cli
             crate::imod::clip::clip::show_error("fft: Error reading slice.");
             return -1;
         };
-        slice_fft(slice.as_mut());
-        if clip_write_slice(slice.as_mut(), output, options, k, &mut z, 1) != 0 {
+        slice_fft(&mut slice);
+        if clip_write_slice(&mut slice, output, options, k, &mut z, 1) != 0 {
             return -1;
         }
     }
@@ -223,14 +223,14 @@ pub fn clip_3dfft(input: &mut MrcHeader, output: &mut MrcHeader, options: &mut C
     if input.mode != MRC_MODE_COMPLEX_FLOAT {
         for slice in &mut volume.slices {
             if input.mode == MRC_MODE_COMPLEX_SHORT {
-                slice_complex_float(slice.as_mut());
+                slice_complex_float(slice);
             } else {
-                slice_float(slice.as_mut());
+                slice_float(slice);
             }
         }
     }
     crate::imod::clip::clip::show_status("Doing 3d fast fourier transform in core...\n");
-    unsafe { clip_fftvol(&mut volume) };
+    clip_fftvol(&mut volume);
     let Some(first) = volume.slices.first() else {
         return -1;
     };
@@ -289,12 +289,12 @@ pub fn clip_fftvol(volume: &mut Istack) -> i32 {
             slice.xsize *= 2;
             let xsize = slice.xsize;
             let ysize = slice.ysize;
-            slice_box_in(slice.as_mut(), 0, 0, xsize - 2, ysize);
+            slice_box_in(slice, 0, 0, xsize - 2, ysize);
         }
     } else {
         let nx2 = first.xsize + 2;
         for slice in &mut volume.slices {
-            slice_float(slice.as_mut());
+            slice_float(slice);
             let buffer_len = (nx2 * slice.ysize) as usize;
             let mut buffer = Vec::new();
             if buffer.try_reserve_exact(buffer_len).is_err() {

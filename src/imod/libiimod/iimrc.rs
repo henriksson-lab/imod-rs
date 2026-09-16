@@ -34,8 +34,9 @@ pub unsafe fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
     let Some(mut fp) = image.fp.clone() else {
         return IIERR_BAD_CALL;
     };
-    // Keep the allocation in the image record.
-    let mut hdr = Box::new(MrcHeader::default());
+    // Move the fully owned header directly into the image record after
+    // validation; no interim heap allocation is needed.
+    let mut hdr = MrcHeader::default();
     let err = mrc_head_read(&mut fp, &mut hdr);
     if err != 0 {
         return if err < 0 {
@@ -50,7 +51,7 @@ pub unsafe fn ii_mrc_check(iif: *mut ImodImageFile) -> i32 {
     image.mrc_header = Some(hdr);
     image.smin = image.amin;
     image.smax = image.amax;
-    image.has_piece_coords = image.mrc_header.as_deref().map_or(0, ii_mrc_check_pcoord);
+    image.has_piece_coords = image.mrc_header.as_ref().map_or(0, ii_mrc_check_pcoord);
     ii_mrc_set_io_funcs(iif, 0);
     0
 }
@@ -145,11 +146,8 @@ pub unsafe fn ii_mrc_open_new(in_file: *mut ImodImageFile, mode: &str) -> i32 {
         );
         return 1;
     }
-    image.mrc_header = Some(Box::new(MrcHeader::default()));
-    let header = image
-        .mrc_header
-        .as_deref_mut()
-        .expect("header just installed");
+    image.mrc_header = Some(MrcHeader::default());
+    let header = image.mrc_header.as_mut().expect("header just installed");
     mrc_head_new(header, 1, 1, 1, 0);
     header.fp = image.fp.clone();
     image.file = IIFILE_MRC;
@@ -162,7 +160,7 @@ pub unsafe fn ii_mrc_fill_header(in_file: *mut ImodImageFile, hdata: *mut MrcHea
     else {
         return 1;
     };
-    let Some(source) = image.mrc_header.as_deref() else {
+    let Some(source) = image.mrc_header.as_ref() else {
         return 1;
     };
     if !core::ptr::eq(source, destination) {
@@ -223,7 +221,7 @@ unsafe fn ii_mrc_read_section(in_file: *mut ImodImageFile, buf: *mut u8, in_sect
     .ok() else {
         return IIERR_BAD_CALL;
     };
-    let Some(header) = image.mrc_header.as_deref() else {
+    let Some(header) = image.mrc_header.as_ref() else {
         return IIERR_BAD_CALL;
     };
     let mut bytes = 0;
@@ -295,7 +293,7 @@ fn read_section_unscaled(
     li.black = 0;
     li.white = 255;
     li.mirror_fft = 0;
-    let Some(header) = image.mrc_header.as_deref_mut() else {
+    let Some(header) = image.mrc_header.as_mut() else {
         return IIERR_BAD_CALL;
     };
     header.fp = image.fp.clone();
@@ -448,7 +446,7 @@ fn read_section_scaled(
     li.outmin = 0;
     li.outmax = outmax;
     li.mirror_fft = image.mirror_fft;
-    let Some(header) = image.mrc_header.as_deref_mut() else {
+    let Some(header) = image.mrc_header.as_mut() else {
         return IIERR_BAD_CALL;
     };
     header.fp = image.fp.clone();
@@ -533,7 +531,7 @@ unsafe fn write_section(
         );
         return 1;
     }
-    let Some(header) = image.mrc_header.as_deref_mut() else {
+    let Some(header) = image.mrc_header.as_mut() else {
         return IIERR_BAD_CALL;
     };
     header.fp = image.fp.clone();
@@ -601,7 +599,7 @@ pub fn ii_mrc_load_pcoord(
 ) -> i32 {
     let mut offset = 1024;
     let mut nread = nz;
-    let Some(header) = image.mrc_header.as_deref() else {
+    let Some(header) = image.mrc_header.as_ref() else {
         return IIERR_BAD_CALL;
     };
     let iflag = header.nreal as i32;
@@ -738,7 +736,7 @@ mod tests {
             let mut source = MrcHeader::default();
             source.nx = 12;
             source.labels[0][0] = b'X';
-            (*image).mrc_header = Some(Box::new(source.clone()));
+            (*image).mrc_header = Some(source.clone());
             let mut copied = MrcHeader::default();
             assert_eq!(ii_mrc_fill_header(image, &mut copied), 0);
             assert_eq!((copied.nx, copied.labels[0][0]), (12, b'X'));
@@ -771,7 +769,7 @@ mod tests {
         header.nreal = 2;
         let image = ImodImageFile {
             fp: Some(file),
-            mrc_header: Some(Box::new(header)),
+            mrc_header: Some(header),
             ..ImodImageFile::default()
         };
         let mut load = LoadInfo::default();
@@ -823,7 +821,7 @@ mod tests {
             let mut image_owner = ii_new_box();
             let image = image_owner.as_mut() as *mut ImodImageFile;
             ii_mrc_delete(image);
-            (*image).mrc_header = Some(Box::new(MrcHeader::default()));
+            (*image).mrc_header = Some(MrcHeader::default());
             assert!((*image).mrc_header.is_some());
             ii_mrc_delete(image);
             assert!((*image).mrc_header.is_none());
@@ -860,7 +858,7 @@ mod tests {
             assert_eq!(ii_mrc_open_new(image, "wb+"), 0);
             let header = (*image)
                 .mrc_header
-                .as_deref_mut()
+                .as_mut()
                 .expect("new MRC image has an owned header");
             assert_eq!(
                 ((*image).file, header.nx, header.ny, header.nz),

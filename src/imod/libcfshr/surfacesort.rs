@@ -9,6 +9,14 @@ use std::io::Write;
 use super::robuststat::{rs_mad_median_outliers, rs_median, rs_sort_indexed_floats};
 use super::simplestat::{ls_fit2, ls_fit3, sums_to_avg_sd};
 
+/// Complete function inventory for `surfacesort.c`.
+pub const SURFACE_SORT_SOURCE_FUNCTIONS: &[&str] = &[
+    "setSurfSortParam",
+    "setsurfsortparam",
+    "surfaceSort",
+    "surfacesort",
+];
+
 /// Original `DTOR` (`surfacesort.c:21`).
 pub const DTOR: f64 = 0.017453293;
 
@@ -138,6 +146,24 @@ pub fn surface_sort(xyz: &[f32], num_pts: i32, markers_in_group: i32, group: &mu
 
     let (mut afit, mut bfit, mut cfit) = (0.0f32, 0.0f32, 0.0f32);
 
+    if num_pts < 0 {
+        return 1;
+    }
+    if num_pts == 0 {
+        return 0;
+    }
+    let Some(coordinate_count) = num_pts.checked_mul(3) else {
+        return 1;
+    };
+    if xyz.len() < coordinate_count as usize
+        || group.len() < num_pts as usize
+        || !s_grid_spacing.is_finite()
+        || s_grid_spacing <= 0.0
+        || s_max_angle_neigh <= 0
+        || s_max_num_fit <= 0
+    {
+        return 1;
+    }
     if num_pts < 3 {
         group[0] = 1;
         if num_pts > 1 {
@@ -950,5 +976,14 @@ mod tests {
         let index = 1;
         let value = 50.;
         setsurfsortparam(&index, &value);
+    }
+
+    #[test]
+    fn rejects_invalid_owned_input_without_indexing() {
+        let mut empty = [];
+        assert_eq!(surface_sort(&[], 0, 0, &mut empty), 0);
+        assert_eq!(surface_sort(&[], 1, 0, &mut empty), 1);
+        assert_eq!(surface_sort(&[0.0; 3], -1, 0, &mut [0]), 1);
+        assert_eq!(SURFACE_SORT_SOURCE_FUNCTIONS.len(), 4);
     }
 }

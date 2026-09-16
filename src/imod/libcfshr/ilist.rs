@@ -7,6 +7,26 @@
 #![allow(dead_code)]
 
 pub const LIST_QUANTUM: usize = 1;
+pub const ILIST_SOURCE_FUNCTIONS: &[&str] = &[
+    "ilistNew",
+    "ilistTruncate",
+    "ilistQuantum",
+    "ilistDup",
+    "ilistDelete",
+    "ilistFirst",
+    "ilistNext",
+    "ilistLast",
+    "ilistItem",
+    "ilistSize",
+    "ilistAppend",
+    "ilistRemove",
+    "ilistSwap",
+    "ilistPush",
+    "ilistPop",
+    "ilistFloat",
+    "ilistInsert",
+    "ilistShift",
+];
 
 /// A growable list with the cursor operations provided by the original API.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +68,9 @@ pub fn ilist_quantum<T>(list: &mut Ilist<T>, size: usize) {
 pub fn ilist_dup<T: Clone>(list: &Ilist<T>) -> Ilist<T> {
     list.clone()
 }
+
+/// C `ilistDelete`: dropping the owned Rust list releases its storage.
+pub fn ilist_delete<T>(_list: Ilist<T>) {}
 
 /// Returns the first item and positions the cursor there.
 pub fn ilist_first<T>(list: &mut Ilist<T>) -> Option<&mut T> {
@@ -162,6 +185,31 @@ pub fn ilist_insert<T>(list: &mut Ilist<T>, item: T, element: usize) -> Result<(
     Ok(())
 }
 
+/// C `ilistShift`.  The C operation moves the initialized suffix in-place;
+/// this safe form has the same result and requires `Clone` only because Rust
+/// cannot duplicate an arbitrary owned element by byte-copying it.
+pub fn ilist_shift<T: Clone>(list: &mut Ilist<T>, start: usize, amount: isize) {
+    if start >= list.data.len() || amount == 0 {
+        return;
+    }
+    if amount > 0 {
+        let count = amount as usize;
+        let end = list.data.len();
+        for _ in 0..count {
+            list.data.insert(start, list.data[start].clone());
+        }
+        list.data.truncate(end + count);
+    } else {
+        let count = (-amount) as usize;
+        if start >= count {
+            for index in start..list.data.len() {
+                list.data[index - count] = list.data[index].clone();
+            }
+            list.data.truncate(list.data.len() - count);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +244,13 @@ mod tests {
         assert!(!ilist_swap(&mut list, 0, 1));
         assert!(!ilist_float(&mut list, 0));
         assert_eq!(ilist_pop(&mut list), None);
+    }
+    #[test]
+    fn source_shift_and_owned_delete_have_safe_forms() {
+        let mut list = ilist_new(0);
+        list.data = vec![1, 2, 3];
+        ilist_shift(&mut list, 1, -1);
+        assert_eq!(list.data, vec![2, 3]);
+        ilist_delete(list);
     }
 }

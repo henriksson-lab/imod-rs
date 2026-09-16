@@ -89,10 +89,10 @@ pub fn ii_shr_mem_open(filename: &str, mode: &str) -> *mut ImodImageFile {
         (*ii_file).reopen = Some(reopen);
         (*ii_file).filename = Some(filename.into());
         (*ii_file).fill_mrc_header = Some(ii_mrc_fill_header);
-        (*ii_file).mrc_header = Some(Box::default());
+        (*ii_file).mrc_header = Some(MrcHeader::default());
         let header = (*ii_file)
             .mrc_header
-            .as_deref_mut()
+            .as_mut()
             .expect("shared-memory header was just allocated")
             as *mut MrcHeader;
         (*ii_file).user_data =
@@ -365,7 +365,7 @@ unsafe fn reopen(ii_file: *mut ImodImageFile) -> i32 {
 }
 unsafe fn sync_from_mrc_header(ii_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     unsafe {
-        if let Some(header) = (*ii_file).mrc_header.as_deref_mut() {
+        if let Some(header) = (*ii_file).mrc_header.as_mut() {
             if !core::ptr::eq(header, hdata) {
                 // A `clone`, not a bitwise copy: see `mrcsec::mrc_write_z`.
                 *header = (*hdata).clone();
@@ -393,7 +393,7 @@ pub fn ii_shr_mem_write_header(ii_file: &mut ImodImageFile) -> i32 {
             return 1;
         }
         core::ptr::copy_nonoverlapping(
-            ii_file.mrc_header.as_deref().expect("header checked above"),
+            ii_file.mrc_header.as_ref().expect("header checked above"),
             ii_file.user_data.cast(),
             1,
         );
@@ -419,7 +419,7 @@ unsafe fn shm_read_section_any(
     typ: i32,
 ) -> i32 {
     unsafe {
-        let Some(h) = (*in_file).mrc_header.as_deref() else {
+        let Some(h) = (*in_file).mrc_header.as_ref() else {
             return 1;
         };
         if (*in_file).user_data.is_null() {
@@ -526,7 +526,7 @@ unsafe fn shm_write_section_any(
     from_float: i32,
 ) -> i32 {
     unsafe {
-        let Some(h) = (*in_file).mrc_header.as_deref() else {
+        let Some(h) = (*in_file).mrc_header.as_ref() else {
             return 1;
         };
         if (*in_file).user_data.is_null() {
@@ -610,7 +610,7 @@ mod tests {
             assert!(!writer.is_null());
             let header = (*writer)
                 .mrc_header
-                .as_deref_mut()
+                .as_mut()
                 .expect("shared-memory writer has an owned header");
             mrc_head_new(header, 2, 2, 1, 0);
             ii_sync_from_mrc_header(&mut *writer, header);
@@ -644,7 +644,7 @@ mod tests {
             let writer = ii_shr_mem_open(&name, "wb+");
             let header = (*writer)
                 .mrc_header
-                .as_deref_mut()
+                .as_mut()
                 .expect("shared-memory writer has an owned header");
             mrc_head_new(header, 3, 2, 1, 1);
             ii_sync_from_mrc_header(&mut *writer, header);

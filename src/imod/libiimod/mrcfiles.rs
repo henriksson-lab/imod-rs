@@ -153,7 +153,7 @@ pub struct MrcHeader {
     /// the source's NULL.
     pub fp: Option<ImodFile>,
     pub pos: i32,
-    pub li: Option<Box<LoadInfo>>,
+    pub li: Option<LoadInfo>,
     pub header_size: i32,
     pub section_skip: i32,
     pub swapped: i32,

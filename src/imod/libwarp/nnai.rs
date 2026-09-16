@@ -27,7 +27,7 @@ pub struct NnWeights {
 
 /// C `struct nnai` (`nnai.c:43`).
 pub struct Nnai {
-    pub d: Box<Delaunay>,
+    pub d: Delaunay,
     pub wmin: f64,
     /// number of output points — the source really does declare this `double`
     pub n: f64,
@@ -52,7 +52,7 @@ pub struct Nnai {
 /// * `nn->wmin` is never assigned by the source, so it is `malloc` garbage
 ///   until `nnai_setwmin` runs — every caller in this tree calls that first
 ///   (`warpfiles.c:1137`). It starts at `nnpi_create`'s own default here.
-pub fn nnai_build(d: Box<Delaunay>, n: i32, x: &[f64], y: &[f64]) -> Option<Box<Nnai>> {
+pub fn nnai_build(d: Delaunay, n: i32, x: &[f64], y: &[f64]) -> Option<Nnai> {
     let mut point_interpolator = nnpi_create(d);
     let mut i;
 
@@ -103,14 +103,14 @@ pub fn nnai_build(d: Box<Delaunay>, n: i32, x: &[f64], y: &[f64]) -> Option<Box<
 
     let d = nnpi_destroy(point_interpolator);
 
-    Some(Box::new(Nnai {
+    Some(Nnai {
         d,
         wmin: -f64::MAX,
         n: n as f64,
         x: nn_x,
         y: nn_y,
         weights: nn_weights,
-    }))
+    })
 }
 
 /// Original `nnai_destroy` (`nnai.c:107`).
@@ -118,7 +118,7 @@ pub fn nnai_build(d: Box<Delaunay>, n: i32, x: &[f64], y: &[f64]) -> Option<Box<
 /// Every `free` in the source is a drop here; the triangulation `nn->d` is
 /// dropped with the interpolator, where the source leaves it to the caller —
 /// `warpfiles.c` keeps `sDelau` and `sNninterp` as two statics and frees both.
-pub fn nnai_destroy(nn: Option<Box<Nnai>>) {
+pub fn nnai_destroy(nn: Option<Nnai>) {
     drop(nn);
 }
 

@@ -108,7 +108,7 @@ pub unsafe fn hdf_read_section_any(
     }
     let mut li = LoadInfo::default();
     ii_mrc_set_load_info(&*in_file, &mut li);
-    let Some(hdata) = (*in_file).mrc_header.as_deref_mut() else {
+    let Some(hdata) = (*in_file).mrc_header.as_mut() else {
         return 1;
     };
     let mut d = LineProcData::default();
@@ -363,7 +363,7 @@ pub unsafe fn hdf_write_section_any(
     if in_file.is_null() {
         return 1;
     }
-    let Some(h) = (*in_file).mrc_header.as_deref_mut() else {
+    let Some(h) = (*in_file).mrc_header.as_mut() else {
         return 1;
     };
     let mut li = LoadInfo::default();
@@ -770,7 +770,7 @@ unsafe fn create_group_and_dataset(
     if H5Tget_precision(typ) > 8
         && in_file
             .mrc_header
-            .as_deref()
+            .as_ref()
             .is_some_and(|header| header.swapped != 0)
     {
         if H5Tget_order(native) == H5T_ORDER_LE {
@@ -942,7 +942,7 @@ mod tests {
             header.ny = 2;
             header.nz = 1;
             header.mode = MRC_MODE_FLOAT;
-            image.mrc_header = Some(Box::new(header));
+            image.mrc_header = Some(header);
             image.num_volumes = 2;
             let volumes = vec![
                 Some(NonNull::from(&mut image)),
@@ -1066,7 +1066,7 @@ mod tests {
             header.nz = 4;
             header.mode = MRC_MODE_FLOAT;
             let mut image = ImodImageFile::default();
-            image.mrc_header = Some(Box::new(header));
+            image.mrc_header = Some(header);
             image.nx = 2;
             image.ny = 2;
             image.nz = 4;

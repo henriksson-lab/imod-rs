@@ -249,7 +249,7 @@ pub unsafe fn iiu_open(iunit: i32, name: &str, attribute: &str) -> i32 {
     } else {
         let header = (*(*u).ii_file)
             .mrc_header
-            .as_deref()
+            .as_ref()
             .cloned()
             .unwrap_or_default();
         (*u).header = UnitHeader::Header(header);
@@ -400,7 +400,7 @@ pub unsafe fn iiu_volume_open(mut newUnit: i32, mut mainUnit: i32, mut volIndex:
         .as_ptr();
     let header = (*(*unew).ii_file)
         .mrc_header
-        .as_deref()
+        .as_ref()
         .cloned()
         .unwrap_or_default();
     (*unew).header = UnitHeader::Header(header);
@@ -1123,7 +1123,7 @@ pub unsafe fn iiu_sync_with_mrc_header(mut iunit: i32) {
     };
     let image = &mut *(*u).ii_file;
     iiSyncFromMrcHeader(image, &mut *header);
-    if let Some(image_header) = image.mrc_header.as_deref_mut() {
+    if let Some(image_header) = image.mrc_header.as_mut() {
         *image_header = (*header).clone();
     }
 }
@@ -1142,7 +1142,7 @@ pub unsafe fn iiu_reassign_header_ptr(mut iunit: i32) {
     }
     let header = (*(*u).ii_file)
         .mrc_header
-        .as_deref()
+        .as_ref()
         .cloned()
         .unwrap_or_default();
     (*u).header = UnitHeader::Header(header);

@@ -28,6 +28,8 @@ const COMMANDS: &[&str] = &[
     "clip",
     "convertmod",
     "dm3props",
+    "fakevolume",
+    "echo2",
     "etomo",
     #[cfg(feature = "gui")]
     "etomo-gui",
@@ -37,8 +39,12 @@ const COMMANDS: &[&str] = &[
     "imodqtassist",
     "imodsendevent",
     "midas",
+    "manageshrmem",
     "mrc2tif",
+    "mrcbyte",
     "mrcinfo",
+    "modifymdoc",
+    "mrclog",
     "mrctaper",
     "mrctilt",
     "newstack",
@@ -47,6 +53,7 @@ const COMMANDS: &[&str] = &[
     "subm",
     "submfg",
     "tif2mrc",
+    "tifinfo",
     "trimvol",
     "wmod2imod",
 ];
@@ -94,6 +101,12 @@ fn dispatch(name: &str) -> bool {
         "dm3props" => std::process::exit(imod_rs::imod::mrc::dm3props::dm3props(
             &std::env::args().collect::<Vec<_>>(),
         )),
+        "fakevolume" => std::process::exit(imod_rs::imod::mrc::fakevolume::fakevolume(
+            &std::env::args().collect::<Vec<_>>(),
+        )),
+        "echo2" => std::process::exit(imod_rs::imod::imodutil::echo2::echo2(
+            &std::env::args().collect::<Vec<_>>(),
+        )),
         "etomo" => std::process::exit(imod_rs::imod::pysrc::etomo::etomo(
             &std::env::args_os().collect::<Vec<_>>(),
         )),
@@ -131,10 +144,25 @@ fn dispatch(name: &str) -> bool {
                 }
             }
         }
+        "manageshrmem" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::manageshrmem::manageshrmem(&arguments))
+        }
         "mrc2tif" => imod_rs::imod::qttools::mrc2tif::mrc2tif::mrc2tif(),
+        "mrcbyte" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::mrcbyte::mrcbyte(&arguments))
+        }
         "mrcinfo" => {
             let arguments = std::env::args().collect::<Vec<_>>();
             std::process::exit(imod_rs::imod::mrc::mrcinfo::mrcinfo(&arguments))
+        }
+        "modifymdoc" => std::process::exit(imod_rs::imod::mrc::modifymdoc::modifymdoc(
+            &std::env::args().collect::<Vec<_>>(),
+        )),
+        "mrclog" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::mrclog::mrclog(&arguments))
         }
         "mrctaper" => {
             let arguments = std::env::args().collect::<Vec<_>>();
@@ -166,6 +194,10 @@ fn dispatch(name: &str) -> bool {
         "tif2mrc" => {
             let arguments = std::env::args().collect::<Vec<_>>();
             std::process::exit(imod_rs::imod::mrc::tif2mrc::tif2mrc(&arguments))
+        }
+        "tifinfo" => {
+            let arguments = std::env::args().collect::<Vec<_>>();
+            std::process::exit(imod_rs::imod::mrc::tifinfo::tifinfo(&arguments))
         }
         "trimvol" => std::process::exit(imod_rs::imod::flib::image::trimvol::trimvol()),
         "wmod2imod" => imod_rs::imod::imodutil::wmod2imod::wmod2imod(),

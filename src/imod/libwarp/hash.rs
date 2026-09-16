@@ -71,12 +71,12 @@ pub fn ht_create<K, T>(
     cp: HtKeycp<K>,
     eq: HtKeyeq<K>,
     hash: HtKey2hash<K>,
-) -> Option<Box<Hashtable<K, T>>> {
+) -> Option<Hashtable<K, T>> {
     if size <= 0 {
         return None;
     }
 
-    let mut table = Box::new(Hashtable {
+    let mut table = Hashtable {
         size,
         n: 0,
         naccum: 0,
@@ -85,7 +85,7 @@ pub fn ht_create<K, T>(
         eq,
         hash,
         table: Vec::with_capacity(size as usize),
-    });
+    };
 
     for _ in 0..size {
         table.table.push(Vec::new());
@@ -98,7 +98,7 @@ pub fn ht_create<K, T>(
 ///
 /// (Take care of deallocating data by `ht_process()` prior to destroying the
 /// table if necessary.)
-pub fn ht_destroy<K, T>(table: Option<Box<Hashtable<K, T>>>) {
+pub fn ht_destroy<K, T>(table: Option<Hashtable<K, T>>) {
     if table.is_none() {
         return;
     }
@@ -391,7 +391,7 @@ pub fn i2eq(key1: &[i32; 2], key2: &[i32; 2]) -> i32 {
 }
 
 /// Original `ht_create_d1` (`hash.c:446`).
-pub fn ht_create_d1<T>(size: i32) -> Option<Box<Hashtable<f64, T>>> {
+pub fn ht_create_d1<T>(size: i32) -> Option<Hashtable<f64, T>> {
     assert_eq!(
         core::mem::size_of::<f64>(),
         INT_PER_DOUBLE * core::mem::size_of::<i32>()
@@ -400,7 +400,7 @@ pub fn ht_create_d1<T>(size: i32) -> Option<Box<Hashtable<f64, T>>> {
 }
 
 /// Original `ht_create_d2` (`hash.c:452`).
-pub fn ht_create_d2<T>(size: i32) -> Option<Box<Hashtable<[f64; 2], T>>> {
+pub fn ht_create_d2<T>(size: i32) -> Option<Hashtable<[f64; 2], T>> {
     assert_eq!(
         core::mem::size_of::<f64>(),
         INT_PER_DOUBLE * core::mem::size_of::<i32>()
@@ -409,17 +409,17 @@ pub fn ht_create_d2<T>(size: i32) -> Option<Box<Hashtable<[f64; 2], T>>> {
 }
 
 /// Original `ht_create_str` (`hash.c:458`).
-pub fn ht_create_str<T>(size: i32) -> Option<Box<Hashtable<String, T>>> {
+pub fn ht_create_str<T>(size: i32) -> Option<Hashtable<String, T>> {
     ht_create(size, strcp, streq, strhash)
 }
 
 /// Original `ht_create_i1` (`hash.c:463`).
-pub fn ht_create_i1<T>(size: i32) -> Option<Box<Hashtable<i32, T>>> {
+pub fn ht_create_i1<T>(size: i32) -> Option<Hashtable<i32, T>> {
     ht_create(size, i1cp, i1eq, i1hash)
 }
 
 /// Original `ht_create_i2` (`hash.c:468`).
-pub fn ht_create_i2<T>(size: i32) -> Option<Box<Hashtable<[i32; 2], T>>> {
+pub fn ht_create_i2<T>(size: i32) -> Option<Hashtable<[i32; 2], T>> {
     assert_eq!(core::mem::size_of::<i32>(), BYTE_PER_INT);
     ht_create(size, i2cp, i2eq, i2hash)
 }

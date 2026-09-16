@@ -3,8 +3,15 @@
 
 use std::io::BufRead;
 
-use crate::imod::libcfshr::b3dutil::ImodFile;
-use crate::imod::libcfshr::b3dutil::b3d_error;
+use crate::imod::libcfshr::b3dutil::{ImodFile, b3d_error};
+
+/// Complete function inventory for `colormap.c`.
+pub const COLORMAP_SOURCE_FUNCTIONS: &[&str] = &[
+    "cmapStandardRamp",
+    "cmapInvertedRamp",
+    "cmapConvertRamp",
+    "cmapReadConvert",
+];
 
 static STANDARD_RAMP_DATA: [i32; 57] = [
     14, 100, 75, 200, -530, 60, 96, 255, -469, 0, 175, 177, -400, 0, 191, 143, -383, 0, 207, 78,
@@ -29,14 +36,21 @@ pub fn cmap_inverted_ramp() -> &'static [i32; 57] {
 
 /// Original `cmapConvertRamp` (`colormap.c:77`).
 pub fn cmap_convert_ramp(ramp_data: &[i32], table: &mut [[u8; 256]; 3]) -> i32 {
-    let nline = ramp_data[0] as usize;
-    let mut inramp = Vec::new();
-    if inramp.try_reserve_exact(nline * 4).is_err() {
+    let Some(&line_count) = ramp_data.first() else {
+        return 1;
+    };
+    let Ok(nline) = usize::try_from(line_count) else {
+        return 1;
+    };
+    let Some(value_count) = nline.checked_mul(4) else {
+        return 1;
+    };
+    if nline < 2 || ramp_data.len() < value_count + 1 {
         return 1;
     }
-    for i in 0..nline * 4 {
-        inramp.push(ramp_data[i + 1]);
-    }
+    // C copies this input to scratch storage but never changes it.
+    // Borrowing it directly preserves the interpolation without a second owner.
+    let inramp = &ramp_data[1..=value_count];
     let tabscl = (inramp[nline * 4 - 1] - inramp[3]) as f32 / 255.0;
     let mut indtab = 0_usize;
     for i in 0..256 {
@@ -64,12 +78,10 @@ pub fn cmap_read_convert(filename: &str, table: &mut [[u8; 256]; 3]) -> i32 {
     let file = match std::fs::File::open(filename) {
         Ok(file) => file,
         Err(_) => {
-            unsafe {
-                b3d_error(
-                    Some(&mut ImodFile::Stderr),
-                    format_args!("cmapReadConvert: error opening file {}\n", filename),
-                );
-            }
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!("cmapReadConvert: error opening file {}\n", filename),
+            );
             return 1;
         }
     };
@@ -83,15 +95,13 @@ pub fn cmap_read_convert(filename: &str, table: &mut [[u8; 256]; 3]) -> i32 {
     } else {
         nlines = line.trim().parse::<i32>().unwrap_or(0).max(0) as usize;
         if nlines == 0 || nlines > 256 {
-            unsafe {
-                b3d_error(
-                    Some(&mut ImodFile::Stderr),
-                    format_args!(
-                        "cmapReadConvert: invalid number of lines ({}) in {}\n",
-                        nlines, filename
-                    ),
-                );
-            }
+            b3d_error(
+                Some(&mut ImodFile::Stderr),
+                format_args!(
+                    "cmapReadConvert: invalid number of lines ({}) in {}\n",
+                    nlines, filename
+                ),
+            );
             error = 3;
         }
     }
@@ -152,19 +162,15 @@ pub fn cmap_read_convert(filename: &str, table: &mut [[u8; 256]; 3]) -> i32 {
         }
     }
     if error == 2 {
-        unsafe {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("cmapReadConvert: error reading file {}\n", filename),
-            );
-        }
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("cmapReadConvert: error reading file {}\n", filename),
+        );
     } else if error == 4 {
-        unsafe {
-            b3d_error(
-                Some(&mut ImodFile::Stderr),
-                format_args!("cmapReadConvert: memory allocation error"),
-            )
-        }
+        b3d_error(
+            Some(&mut ImodFile::Stderr),
+            format_args!("cmapReadConvert: memory allocation error"),
+        )
     }
     error
 }
@@ -199,5 +205,13 @@ mod tests {
         assert_eq!(table[1][17], 238);
         assert_eq!(table[2][17], 8);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn malformed_owned_ramp_is_reported_not_indexed() {
+        let mut table = [[0; 256]; 3];
+        assert_eq!(cmap_convert_ramp(&[], &mut table), 1);
+        assert_eq!(cmap_convert_ramp(&[1, 1, 2, 3, 4], &mut table), 1);
+        assert_eq!(COLORMAP_SOURCE_FUNCTIONS.len(), 4);
     }
 }

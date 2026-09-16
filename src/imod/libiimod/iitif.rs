@@ -1579,6 +1579,17 @@ pub fn tiff_set_eer_read_properties(super_res: i32, autogroup: i32, flags: i32) 
 pub fn tiff_gain_reference_for_eer(reference: *mut f32) {
     S_GAIN_REFERENCE.store(reference, Ordering::SeqCst);
 }
+
+/// Register the float-valued gain-reference storage used while EER frames are
+/// decoded.  The TIFF reader consumes it synchronously before the caller can
+/// resize or drop the backing slice.
+pub fn tiff_gain_reference_for_eer_bytes(reference: &mut [u8]) -> bool {
+    if reference.len() % core::mem::size_of::<f32>() != 0 {
+        return false;
+    }
+    S_GAIN_REFERENCE.store(reference.as_mut_ptr().cast::<f32>(), Ordering::SeqCst);
+    true
+}
 /// C `tiffGetMaxEERsuperRes` (`iitif.c:928`).
 pub fn tiff_get_max_eer_super_res() -> i32 {
     S_MAX_EER_SUPER_RESOLUTION.load(Ordering::SeqCst)

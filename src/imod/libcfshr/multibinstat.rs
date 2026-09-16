@@ -12,6 +12,15 @@ use std::io::Write;
 
 pub const MAX_MBS_SCALES: usize = 20;
 
+/// Complete function inventory for `multibinstat.c`.
+pub const MULTI_BIN_STAT_SOURCE_FUNCTIONS: &[&str] = &[
+    "multiBinSetup",
+    "multibinsetup",
+    "multiBinStats",
+    "multibinstats",
+    "makeStandardDevMap",
+];
+
 /// Original `multiBinSetup` (`multibinstat.c:50`).
 #[allow(clippy::too_many_arguments)]
 pub fn multi_bin_setup(
@@ -26,27 +35,48 @@ pub fn multi_bin_setup(
     buffer_start_inds: &mut [i32],
     stat_start_inds: &mut [i32],
 ) -> i32 {
+    if num_scales < 0 || num_scales as usize > MAX_MBS_SCALES {
+        return 2;
+    }
+    let scale_count = num_scales as usize;
+    if start_coord.len() < 3
+        || end_coord.len() < 3
+        || binning.len() < scale_count
+        || box_size.len() < scale_count
+        || box_spacing.len() < scale_count
+        || box_start.len() < scale_count
+        || num_boxes.len() < scale_count
+        || buffer_start_inds.len() < scale_count + 1
+        || stat_start_inds.len() < scale_count + 1
+    {
+        return 1;
+    }
     let mut num_ub_pixels = [0i32; 3];
     let mut num_binned_pix = [0i32; 3];
 
     /* Get the number of unbinned pixels and check ranges */
     for dim in 0..3 {
-        num_ub_pixels[dim] = end_coord[dim] + 1 - start_coord[dim];
+        let Some(span) = end_coord[dim]
+            .checked_sub(start_coord[dim])
+            .and_then(|value| value.checked_add(1))
+        else {
+            return 1;
+        };
+        num_ub_pixels[dim] = span;
         if num_ub_pixels[dim] < 4 {
             return 1;
         }
     }
-    if num_scales as usize > MAX_MBS_SCALES {
-        return 2;
-    }
-
     /* Go through the scales, figure out how many binned pixels, and the number and
      * starting coordinates of the boxes in each dimension.
      * Allow space in bottom of buffer for an array of flags for each slice */
     buffer_start_inds[0] = num_ub_pixels[0] * num_ub_pixels[1] + num_ub_pixels[2] / 4 + 1;
     stat_start_inds[0] = 0;
-    for ind in 0..num_scales as usize {
+    for ind in 0..scale_count {
         for dim in 0..3 {
+            if binning[ind][dim] <= 0 {
+                return 3;
+            }
             num_binned_pix[dim] = num_ub_pixels[dim] / binning[ind][dim];
             if num_binned_pix[dim] < box_size[ind][dim] {
                 return 3;
@@ -123,6 +153,28 @@ pub fn multi_bin_stats(
     func_data: &mut [i32],
     get_slice_func: fn(&mut i32, &mut [i32], &mut [f32]) -> i32,
 ) -> i32 {
+    if num_scales < 0 || num_scales as usize > MAX_MBS_SCALES {
+        return 1;
+    }
+    let scale_count = num_scales as usize;
+    if start_coord.len() < 3
+        || end_coord.len() < 3
+        || binning.len() < scale_count
+        || box_size.len() < scale_count
+        || box_spacing.len() < scale_count
+        || box_start.len() < scale_count
+        || num_boxes.len() < scale_count
+        || buffer_start_inds.len() < scale_count + 1
+        || stat_start_inds.len() < scale_count + 1
+        || buffer_start_inds[0] < 0
+        || buffer_start_inds[scale_count] < buffer_start_inds[0]
+        || stat_start_inds[scale_count] < 0
+        || buffer.len() < buffer_start_inds[scale_count] as usize
+        || means.len() < stat_start_inds[scale_count] as usize
+        || sds.len() < stat_start_inds[scale_count] as usize
+    {
+        return 1;
+    }
     let mut num_ub_pixels = [0i32; 3];
     let mut num_box_pix = [0i32; MAX_MBS_SCALES];
     let mut slices_added = [0i32; MAX_MBS_SCALES];
@@ -131,13 +183,42 @@ pub fn multi_bin_stats(
 
     /* Initialize: set up the binned sizes etc. */
     for dim in 0..3 {
-        num_ub_pixels[dim] = end_coord[dim] + 1 - start_coord[dim];
+        let Some(span) = end_coord[dim]
+            .checked_sub(start_coord[dim])
+            .and_then(|value| value.checked_add(1))
+        else {
+            return 1;
+        };
+        if span < 4 {
+            return 1;
+        }
+        num_ub_pixels[dim] = span;
+    }
+    let flag_floats = num_ub_pixels[2] / 4 + 1;
+    if buffer_start_inds[0] < flag_floats {
+        return 1;
+    }
+    for scale in 0..scale_count {
+        if buffer_start_inds[scale] < buffer_start_inds[0]
+            || buffer_start_inds[scale + 1] < buffer_start_inds[scale]
+            || stat_start_inds[scale] < 0
+            || stat_start_inds[scale + 1] < stat_start_inds[scale]
+        {
+            return 1;
+        }
     }
     for ind in 0..stat_start_inds[num_scales as usize] as usize {
         sds[ind] = 0.;
         means[ind] = 0.;
     }
-    for scl in 0..num_scales as usize {
+    for scl in 0..scale_count {
+        if binning[scl].iter().any(|&value| value <= 0)
+            || box_size[scl].iter().any(|&value| value <= 0)
+            || box_spacing[scl].iter().any(|&value| value <= 0)
+            || num_boxes[scl].iter().any(|&value| value <= 0)
+        {
+            return 1;
+        }
         nx_bin[scl] = num_ub_pixels[0] / binning[scl][0];
         ny_bin[scl] = num_ub_pixels[1] / binning[scl][1];
         num_box_pix[scl] = box_size[scl][0] * box_size[scl][1] * box_size[scl][2];
@@ -687,5 +768,29 @@ mod tests {
         assert_eq!(means[0], 0.5);
         assert!((sds[0] - (2_f32 / 7.).sqrt()).abs() < 1.0e-6);
         assert_eq!(means[18], 2.5);
+    }
+
+    #[test]
+    fn setup_rejects_invalid_owned_dimensions_before_division() {
+        let mut starts = [[0; 3]];
+        let mut counts = [[0; 3]];
+        let mut buffer_starts = [0; 2];
+        let mut stat_starts = [0; 2];
+        assert_eq!(
+            multi_bin_setup(
+                &[[0, 1, 1]],
+                &[[2, 2, 2]],
+                &[[1, 1, 1]],
+                1,
+                &[0, 0, 0],
+                &[3, 3, 3],
+                &mut starts,
+                &mut counts,
+                &mut buffer_starts,
+                &mut stat_starts,
+            ),
+            3
+        );
+        assert_eq!(MULTI_BIN_STAT_SOURCE_FUNCTIONS.len(), 5);
     }
 }

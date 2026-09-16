@@ -373,9 +373,7 @@ pub fn mrc_read_section_any(
             chunk_lines = chunk_lines.min(target_lines).max(1);
         }
     }
-    let mut temporary_data = Vec::new();
-    let mut temporary: *mut u8 = core::ptr::null_mut();
-    if d.need_data != 0 {
+    let mut temporary_data = if d.need_data != 0 {
         let bytes = d.pix_size as usize
             * if chunk_lines > 1 {
                 (nx_seek * chunk_lines) as usize
@@ -384,12 +382,15 @@ pub fn mrc_read_section_any(
             } else {
                 d.xsize as usize
             };
-        if temporary_data.try_reserve_exact(bytes).is_err() {
+        let mut data = Vec::new();
+        if data.try_reserve_exact(bytes).is_err() {
             return 2;
         }
-        temporary_data.resize(bytes, 0);
-        temporary = temporary_data.as_mut_ptr();
-    }
+        data.resize(bytes, 0);
+        Some(data)
+    } else {
+        None
+    };
     let seek_line = if d.packed4bits != 0 {
         d.x_start / 2
     } else {
@@ -442,11 +443,10 @@ pub fn mrc_read_section_any(
         if chunk_lines > 1 {
             let line_end = y_end.min(d.line + chunk_lines - 1);
             let lines = line_end + 1 - d.line;
-            let chunk_start = if temporary.is_null() {
-                unsafe { d.buf.offset(d.bufp_offset) }
-            } else {
-                temporary
-            };
+            let chunk_start = temporary_data.as_deref_mut().map_or_else(
+                || unsafe { d.buf.offset(d.bufp_offset) },
+                |data| data.as_mut_ptr(),
+            );
             if b3d_fread(
                 unsafe {
                     core::slice::from_raw_parts_mut(
@@ -488,11 +488,10 @@ pub fn mrc_read_section_any(
         if seek_line != 0 && b3d_fseek(&mut fin, seek_line, SEEK_CUR) != 0 {
             break;
         }
-        let bdata = if temporary.is_null() {
-            unsafe { d.buf.offset(d.bufp_offset) }
-        } else {
-            temporary
-        };
+        let bdata = temporary_data.as_deref_mut().map_or_else(
+            || unsafe { d.buf.offset(d.bufp_offset) },
+            |data| data.as_mut_ptr(),
+        );
         let count = if d.packed4bits != 0 {
             ((d.x_end + 2) / 2 - d.x_start / 2) as usize
         } else {
@@ -1141,7 +1140,7 @@ pub fn mrc_write_z(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &[u8], z: i32)
         unsafe {
             ii_sync_from_mrc_header(&mut *file, hdata);
             if (*file).file == IIFILE_MRC {
-                if let Some(header) = (*file).mrc_header.as_deref_mut() {
+                if let Some(header) = (*file).mrc_header.as_mut() {
                     if !core::ptr::eq(header, hdata) {
                         *header = hdata.clone();
                     }
@@ -1167,7 +1166,7 @@ pub fn mrc_write_z_float(hdata: &mut MrcHeader, li: &mut LoadInfo, buf: &mut [f3
         unsafe {
             ii_sync_from_mrc_header(&mut *file, hdata);
             if (*file).file == IIFILE_MRC {
-                if let Some(header) = (*file).mrc_header.as_deref_mut() {
+                if let Some(header) = (*file).mrc_header.as_mut() {
                     if !core::ptr::eq(header, hdata) {
                         *header = hdata.clone();
                     }

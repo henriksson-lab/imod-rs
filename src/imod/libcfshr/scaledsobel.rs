@@ -1,6 +1,9 @@
 //! Translation of `IMOD/libcfshr/scaledsobel.c`.
 #![allow(dead_code)]
 
+/// Complete function inventory for `scaledsobel.c`.
+pub const SCALED_SOBEL_SOURCE_FUNCTIONS: &[&str] = &["scaledSobel", "scaledsobel"];
+
 /// `scaledSobel` (`scaledsobel.c:49`).
 pub fn scaled_sobel(
     in_image: Option<&[f32]>,
@@ -16,6 +19,9 @@ pub fn scaled_sobel(
     x_offset: &mut f32,
     y_offset: &mut f32,
 ) -> i32 {
+    if nxin <= 0 || nyin <= 0 || !scale_fac.is_finite() || scale_fac <= 0.0 {
+        return 1;
+    }
     let mut interp_scale = scale_fac;
     let mut binning = 1;
     if linear < 0 && scale_fac < 1.1 {
@@ -47,7 +53,24 @@ pub fn scaled_sobel(
     if center < 0. {
         return 0;
     }
-    let out_image = out_image.expect("scaled Sobel output is required when processing an image");
+    let Some(out_image) = out_image else {
+        return 1;
+    };
+    let Some(input_pixels) = nxin.checked_mul(nyin) else {
+        return 1;
+    };
+    let Some(output_pixels) = nxo.checked_mul(nyo) else {
+        return 1;
+    };
+    let Ok(input_size) = usize::try_from(input_pixels) else {
+        return 1;
+    };
+    let Ok(output_size) = usize::try_from(output_pixels) else {
+        return 1;
+    };
+    if in_image.len() < input_size || out_image.len() < output_size || nxo < 2 || nyo < 2 {
+        return 1;
+    }
     if linear < 0 {
         let mut width = 0;
         let error = crate::imod::libcfshr::zoomdown::select_zoom_filter(
@@ -59,12 +82,14 @@ pub fn scaled_sobel(
             return error;
         }
     }
-    let size = if binning > 1 {
-        nxbin * nybin
+    let Some(temporary_pixels) = (if binning > 1 {
+        nxbin.checked_mul(nybin)
     } else {
-        nxo * nyo
+        nxo.checked_mul(nyo)
+    }) else {
+        return 1;
     };
-    let Ok(size) = usize::try_from(size) else {
+    let Ok(size) = usize::try_from(temporary_pixels) else {
         return 1;
     };
     let mut temporary = Vec::new();
@@ -73,31 +98,23 @@ pub fn scaled_sobel(
     }
     temporary.resize(size, 0.);
     let (source, destination) = if binning > 1 {
-        let input_bytes = unsafe {
-            core::slice::from_raw_parts(
-                in_image.as_ptr().cast::<u8>(),
-                std::mem::size_of_val(in_image),
-            )
-        };
-        let temporary_bytes = unsafe {
-            core::slice::from_raw_parts_mut(
-                temporary.as_mut_ptr().cast::<u8>(),
-                std::mem::size_of_val(temporary.as_slice()),
-            )
-        };
-        let error = crate::imod::libcfshr::reduce_by_binning::reduce_by_binning(
-            input_bytes,
-            crate::imod::libcfshr::reduce_by_binning::SLICE_MODE_FLOAT,
-            nxin,
-            nyin,
-            binning,
-            temporary_bytes,
-            0,
-            &mut nxbin,
-            &mut nybin,
-        );
-        if error != 0 {
-            return error;
+        // `reduceByBinning(..., SLICE_MODE_FLOAT, ...)` in the source.  Keeping
+        // this f32 path here avoids turning two owned slices into byte slices.
+        let x_start = (nxin % binning / 2) as usize;
+        let y_start = (nyin % binning / 2) as usize;
+        for y in 0..nybin as usize {
+            for x in 0..nxbin as usize {
+                let mut sum = 0.0_f32;
+                for by in 0..binning as usize {
+                    for bx in 0..binning as usize {
+                        sum += in_image[(y_start + y * binning as usize + by) * nxin as usize
+                            + x_start
+                            + x * binning as usize
+                            + bx];
+                    }
+                }
+                temporary[y * nxbin as usize + x] = sum / (binning * binning) as f32;
+            }
         }
         (temporary.as_slice(), &mut *out_image)
     } else {
@@ -143,10 +160,10 @@ pub fn scaled_sobel(
         }
     }
     if binning > 1 {
-        temporary[..(nxo * nyo) as usize].copy_from_slice(&out_image[..(nxo * nyo) as usize]);
+        temporary[..output_size].copy_from_slice(&out_image[..output_size]);
     }
     if center == 0. {
-        out_image[..(nxo * nyo) as usize].copy_from_slice(&temporary[..(nxo * nyo) as usize]);
+        out_image[..output_size].copy_from_slice(&temporary[..output_size]);
         return 0;
     }
     for y in 1..nyo - 1 {
@@ -267,5 +284,57 @@ mod tests {
             &mut yo,
         );
         assert!(output.iter().all(|value| *value == 7.));
+    }
+
+    #[test]
+    fn typed_binning_keeps_source_centering_and_f32_accumulation_order() {
+        let image = [
+            0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0,
+            15.0,
+        ];
+        let mut output = [0.0; 4];
+        let (mut nxout, mut nyout, mut xo, mut yo) = (0, 0, 0.0, 0.0);
+        assert_eq!(
+            scaled_sobel(
+                Some(&image),
+                4,
+                4,
+                2.0,
+                1.0,
+                1,
+                0.0,
+                Some(&mut output),
+                &mut nxout,
+                &mut nyout,
+                &mut xo,
+                &mut yo,
+            ),
+            0
+        );
+        assert_eq!((nxout, nyout), (2, 2));
+        assert_eq!(output, [2.5, 4.5, 10.5, 12.5]);
+    }
+
+    #[test]
+    fn invalid_owned_slice_contract_returns_source_error_code_instead_of_panicking() {
+        let (mut nxout, mut nyout, mut xo, mut yo) = (0, 0, 0.0, 0.0);
+        assert_eq!(
+            scaled_sobel(
+                Some(&[1.0; 4]),
+                2,
+                2,
+                1.0,
+                1.0,
+                1,
+                2.0,
+                Some(&mut [0.0; 3]),
+                &mut nxout,
+                &mut nyout,
+                &mut xo,
+                &mut yo,
+            ),
+            1
+        );
+        assert_eq!(SCALED_SOBEL_SOURCE_FUNCTIONS.len(), 2);
     }
 }

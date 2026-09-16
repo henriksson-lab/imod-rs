@@ -9,7 +9,7 @@ use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format, c_format_bytes};
 use crate::imod::libcfshr::islice::{Islice, Istack, slice_create, slice_free, slice_put_val};
 use crate::imod::libcfshr::parse_params::exit_error;
 use crate::imod::libiimod::iimage::{
-    ii_fclose, ii_fopen, ii_limited_tile_size, ii_lookup_file_from_fp, ii_set_chunk_sizes,
+    ii_fclose, ii_fopen, ii_limited_tile_size, ii_lookup_file_from_fp, ii_set_chunk_sizes_for_fp,
 };
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_FLOAT, MRC_MODE_RGB,
@@ -290,10 +290,10 @@ pub fn set_chunk_output(
     if num_tiles[0] * num_tiles[1] * num_tiles[2] == 1 {
         return 0;
     }
-    let Some(ii_file) = ii_lookup_file_from_fp(&output.fp.clone().unwrap()) else {
+    if ii_lookup_file_from_fp(&output.fp.clone().unwrap()).is_none() {
         let _ = ImodFile::Stderr.write_all(b"iiLookupFileFromFP cannot find iiFile from fp\n");
         return -1;
-    };
+    }
     let mut dsize = 0;
     let mut csize = 0;
     mrc_getdcsize(output.mode, &mut dsize, &mut csize);
@@ -335,8 +335,12 @@ pub fn set_chunk_output(
     } else if options.chunk_z == IP_DEFAULT {
         tile_sizes[2] = out_sizes[2];
     }
-    if unsafe { ii_set_chunk_sizes(&mut *ii_file, tile_sizes[0], tile_sizes[1], tile_sizes[2]) }
-        != 0
+    if ii_set_chunk_sizes_for_fp(
+        &output.fp.clone().unwrap(),
+        tile_sizes[0],
+        tile_sizes[1],
+        tile_sizes[2],
+    ) != 0
     {
         return -1;
     }
@@ -369,7 +373,7 @@ pub fn clip_write_slice(
     }
     let mut blank_before = 0;
     let mut blank_after = 0;
-    let mut blank: Option<Box<Islice>> = None;
+    let mut blank: Option<Islice> = None;
     if options.oz > options.nofsecs && options.out_before != -1 {
         if ksec == 0 {
             blank_before = if options.out_before == IP_DEFAULT {
@@ -558,13 +562,8 @@ pub fn grap_volume_read(input: &mut MrcHeader, options: &mut ClipOptions) -> Opt
                     continue;
                 }
                 let mut value = [0.; 4];
-                crate::imod::libcfshr::islice::slice_get_val(
-                    source.as_mut(),
-                    from_x,
-                    from_y,
-                    &mut value,
-                );
-                slice_put_val(volume.slices[z as usize].as_mut(), x, y, value);
+                crate::imod::libcfshr::islice::slice_get_val(&source, from_x, from_y, &mut value);
+                slice_put_val(&mut volume.slices[z as usize], x, y, value);
             }
         }
     }
@@ -593,11 +592,11 @@ pub fn grap_volume_write(
     }
     if first.mode != options.mode {
         for slice in &mut volume.slices {
-            slice_new_mode(slice.as_mut(), options.mode);
+            slice_new_mode(slice, options.mode);
         }
     }
     for slice in &mut volume.slices {
-        slice_mmm(slice.as_mut());
+        slice_mmm(slice);
     }
     let mut min = volume.slices[0].min;
     let mut max = volume.slices[0].max;
@@ -665,7 +664,7 @@ pub fn grap_volume_write(
         return -1;
     }
     let zs = (volume.slices.len() as i32 - options.oz) / 2;
-    let mut blank: Option<Box<Islice>> = None;
+    let mut blank: Option<Islice> = None;
     for (out_z, source_z) in (ks..output.nz).zip(zs..) {
         if source_z < 0 || source_z >= volume.slices.len() as i32 {
             if blank.is_none() {
@@ -685,14 +684,14 @@ pub fn grap_volume_write(
                 return -1;
             }
         } else {
-            let source = volume.slices[source_z as usize].as_mut();
+            let source = &mut volume.slices[source_z as usize];
             let resized = if options.ox != source.xsize || options.oy != source.ysize {
                 source.mean = options.pad;
                 mrc_slice_resize(source, options.ox, options.oy)
             } else {
                 None
             };
-            let write_slice = resized.as_deref().unwrap_or(source);
+            let write_slice = resized.as_ref().unwrap_or(source);
             if mrc_write_slice(
                 &write_slice.data,
                 &mut output.fp.clone().unwrap(),
@@ -708,14 +707,14 @@ pub fn grap_volume_write(
     0
 }
 /// C++ static `clipBlankSlice` (`file_io.cpp:626`).
-pub fn clip_blank_slice(output: &mut MrcHeader, options: &mut ClipOptions) -> Option<Box<Islice>> {
+pub fn clip_blank_slice(output: &mut MrcHeader, options: &mut ClipOptions) -> Option<Islice> {
     let Some(mut slice) = slice_create(output.nx, output.ny, output.mode) else {
         let _ = ImodFile::Stderr.write_all(b"clipBlankSlice:  error getting slice\n");
         return None;
     };
     for y in 0..output.ny {
         for x in 0..output.nx {
-            slice_put_val(slice.as_mut(), x, y, [options.pad; 4]);
+            slice_put_val(&mut slice, x, y, [options.pad; 4]);
         }
     }
     Some(slice)

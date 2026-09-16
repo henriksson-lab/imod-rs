@@ -125,10 +125,7 @@ pub fn ii_delete_raw_check_list() {
 /// after another.  Returns IIERR codes for errors.  `b3dError` is called with a
 /// message for all errors that occur during checking, except for
 /// `IIERR_NOT_FORMAT`.
-pub unsafe fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
-    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
-        return IIERR_BAD_CALL;
-    };
+pub fn ii_like_mrc_check(in_file: &mut ImodImageFile) -> i32 {
     let mut info = RawImageInfo::default();
     // `fp = inFile->fp` copies the handle by value, as the C does.
     let Some(mut fp) = in_file.fp.clone() else {
@@ -182,6 +179,16 @@ pub unsafe fn ii_like_mrc_check(in_file: *mut ImodImageFile) -> i32 {
     IIERR_NOT_FORMAT
 }
 
+/// `iimage` still stores C-shaped raw check callbacks.  Keep its one pointer
+/// conversion at the registry boundary; all format recognition above uses the
+/// owned [`ImodImageFile`] API.
+pub(crate) unsafe fn ii_like_mrc_check_callback(in_file: *mut ImodImageFile) -> i32 {
+    let Some(in_file) = (unsafe { in_file.as_mut() }) else {
+        return IIERR_BAD_CALL;
+    };
+    ii_like_mrc_check(in_file)
+}
+
 /// Original `iiSetupRawHeaders` (`iilikemrc.c:148`).
 ///
 /// Creates an MRC header and fills it and the items in `inFile` from the
@@ -201,13 +208,10 @@ pub fn ii_setup_raw_headers(in_file: &mut ImodImageFile, info: &RawImageInfo) ->
     /* Get an MRC header; set sizes into that header and the iifile header */
     // The crate owns the header slot; the erased `header` field remains only
     // the callback ABI alias for this MRC-compatible backend.
-    in_file.mrc_header = Some(Box::new(MrcHeader::default()));
+    in_file.mrc_header = Some(MrcHeader::default());
     let file_handle = in_file.fp.clone();
     let (mode, bytes_signed) = {
-        let hdr = in_file
-            .mrc_header
-            .as_deref_mut()
-            .expect("header just installed");
+        let hdr = in_file.mrc_header.as_mut().expect("header just installed");
         mrc_head_new(
             hdr,
             info.nx,
@@ -250,14 +254,19 @@ pub fn ii_setup_raw_headers(in_file: &mut ImodImageFile, info: &RawImageInfo) ->
 
     /* Set the access routines; just use the MRC routines */
     unsafe { ii_mrc_set_io_funcs(in_file, 1) };
-    in_file.clean_up = Some(ii_like_mrc_delete);
+    in_file.clean_up = Some(ii_like_mrc_delete_callback);
     0
 }
 
 /// Original `iiLikeMRCDelete` (`iilikemrc.c:188`).
-pub unsafe fn ii_like_mrc_delete(in_file: *mut ImodImageFile) {
-    unsafe {
-        (*in_file).mrc_header = None;
+pub fn ii_like_mrc_delete(in_file: &mut ImodImageFile) {
+    in_file.mrc_header = None;
+}
+
+/// Callback adapter for the legacy `clean_up` slot in [`ImodImageFile`].
+pub(crate) unsafe fn ii_like_mrc_delete_callback(in_file: *mut ImodImageFile) {
+    if let Some(in_file) = unsafe { in_file.as_mut() } {
+        ii_like_mrc_delete(in_file);
     }
 }
 
@@ -1542,7 +1551,7 @@ mod tests {
         };
 
         assert_eq!(ii_setup_raw_headers(&mut image, &info), 0);
-        let header = image.mrc_header.as_deref().expect("installed header");
+        let header = image.mrc_header.as_ref().expect("installed header");
         assert_eq!(
             (image.file, image.nx, image.ny, image.nz),
             (IIFILE_RAW, 8, 6, 2)
@@ -1561,36 +1570,33 @@ mod tests {
 
     #[test]
     fn fei_raw_dispatch_constructs_native_mrc_access_state() {
-        unsafe {
-            ii_delete_raw_check_list();
-            let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
-            let mut bytes = b"FEI RawImage\0".to_vec();
-            for value in [0_i32, 4, 3, 0, 16, 1, 100, 0, 0] {
-                bytes.extend_from_slice(&value.to_ne_bytes());
-            }
-            assert_eq!(
-                crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
-                bytes.len()
-            );
-            crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
-
-            let mut image_owner = ii_new_box();
-            let image = image_owner.as_mut() as *mut ImodImageFile;
-            (*image).fp = Some(fp.clone());
-            (*image).filename = Some("synthetic-fei.raw".into());
-            assert_eq!(ii_like_mrc_check(image.cast()), 0);
-            let header = (*image)
-                .mrc_header
-                .as_deref_mut()
-                .expect("raw image has an owned header");
-            assert_eq!(((*image).file, (*image).type_), (IIFILE_RAW, IITYPE_SHORT));
-            assert_eq!((header.nx, header.ny, header.nz), (4, 3, 1));
-            assert_eq!((header.header_size, header.y_inverted), (149, 1));
-            ii_like_mrc_delete(image.cast());
-            assert!((*image).mrc_header.is_none());
-            drop(fp);
-            ii_delete_raw_check_list();
+        ii_delete_raw_check_list();
+        let mut fp = crate::imod::libcfshr::b3dutil::ImodFile::tmpfile().unwrap();
+        let mut bytes = b"FEI RawImage\0".to_vec();
+        for value in [0_i32, 4, 3, 0, 16, 1, 100, 0, 0] {
+            bytes.extend_from_slice(&value.to_ne_bytes());
         }
+        assert_eq!(
+            crate::imod::libcfshr::b3dutil::b3d_fwrite(&bytes, 1, bytes.len(), &mut fp),
+            bytes.len()
+        );
+        crate::imod::libcfshr::b3dutil::b3d_rewind(&mut fp);
+
+        let mut image = ii_new_box();
+        image.fp = Some(fp.clone());
+        image.filename = Some("synthetic-fei.raw".into());
+        assert_eq!(ii_like_mrc_check(&mut image), 0);
+        assert_eq!((image.file, image.type_), (IIFILE_RAW, IITYPE_SHORT));
+        let header = image
+            .mrc_header
+            .as_mut()
+            .expect("raw image has an owned header");
+        assert_eq!((header.nx, header.ny, header.nz), (4, 3, 1));
+        assert_eq!((header.header_size, header.y_inverted), (149, 1));
+        ii_like_mrc_delete(&mut image);
+        assert!(image.mrc_header.is_none());
+        drop(fp);
+        ii_delete_raw_check_list();
     }
 
     #[test]

@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use super::parse_params::strtol;
+pub const PARSELIST_SOURCE_FUNCTIONS: &[&str] = &["parselist", "parselistfw"];
 
 /// Parsing failures from [`parselist`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,9 +124,36 @@ pub fn parselist(line: &str) -> Result<Vec<i32>, ParseListError> {
     Ok(list)
 }
 
+/// C/Fortran `parselistfw`, without the source's allocated temporary Fortran
+/// string. `line` is already an owned Rust string, while `list` is the caller's
+/// fixed output array. A leading slash deliberately leaves both output values
+/// unchanged, as the source does.
+pub fn parselistfw(line: &str, list: &mut [i32], nlist: &mut i32, limlist: &mut i32) -> i32 {
+    match parselist(line) {
+        Err(ParseListError::LeadingSlash) => 0,
+        Err(ParseListError::InvalidCharacter) => 2,
+        Ok(values) => {
+            let total = values.len();
+            let limit = if *limlist > 0 {
+                (*limlist as usize).min(list.len())
+            } else {
+                list.len()
+            };
+            let copied = total.min(limit);
+            *nlist = copied as i32;
+            list[..copied].copy_from_slice(&values[..copied]);
+            if *limlist > 0 && total > *limlist as usize {
+                -1
+            } else {
+                0
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ParseListError, parselist};
+    use super::{PARSELIST_SOURCE_FUNCTIONS, ParseListError, parselist, parselistfw};
 
     #[test]
     fn source_ranges_errors_and_fortran_copy_limit() {
@@ -135,5 +163,18 @@ mod tests {
         assert_eq!(parselist("/"), Err(ParseListError::LeadingSlash));
         assert_eq!(parselist("1x"), Err(ParseListError::InvalidCharacter));
         assert_eq!(parselist("-3--1, 2-4"), Ok(vec![-3, -2, -1, 2, 3, 4]));
+    }
+    #[test]
+    fn fortran_wrapper_preserves_source_statuses_and_bounded_copy() {
+        let mut values = [0; 2];
+        let (mut count, mut limit) = (0, 2);
+        assert_eq!(parselistfw("1-3", &mut values, &mut count, &mut limit), -1);
+        assert_eq!(count, 2);
+        assert_eq!(values, [1, 2]);
+        let before = count;
+        assert_eq!(parselistfw("/", &mut values, &mut count, &mut limit), 0);
+        assert_eq!(count, before);
+        assert_eq!(parselistfw("1x", &mut values, &mut count, &mut limit), 2);
+        assert_eq!(PARSELIST_SOURCE_FUNCTIONS.len(), 2);
     }
 }

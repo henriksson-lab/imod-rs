@@ -1,6 +1,22 @@
 //! Translation of `IMOD/libcfshr/solvecubiceqn.c`.
 #![allow(dead_code)]
 
+/// Complete non-demo function inventory for `solvecubiceqn.c`.
+///
+/// The C test `main` is inside a comment and is deliberately not a library API.
+pub const SOLVE_CUBIC_EQN_SOURCE_FUNCTIONS: &[&str] = &[
+    "solveCubicEqn",
+    "cmplxSum",
+    "cmplxDiff",
+    "cmplxProduct",
+    "cmplxSquare",
+    "cmplxCube",
+    "cmplxToPolar",
+    "cmplxFromPolar",
+    "cmplxSqrt",
+    "cmplxCubeRoot",
+];
+
 /// Original `solveCubicEqn` (`solvecubiceqn.c:63`).
 pub fn solve_cubic_eqn(
     aa: f64,
@@ -190,5 +206,30 @@ mod tests {
                 && (real[2] - 3.0).abs() < 1.0e-6
         );
         assert!(roots.iter().all(|root| root[1].abs() < 1.0e-6));
+    }
+
+    #[test]
+    fn preserves_complex_root_and_complex_arithmetic_paths() {
+        let mut roots = [[0.0; 2]; 3];
+        let mut ratio = 0.0;
+        solve_cubic_eqn(1.0, 0.0, 0.0, -1.0, &mut roots, &mut ratio);
+        assert!(roots.iter().any(|root| (root[0] - 1.0).abs() < 1.0e-6));
+
+        let value = [3.0, 4.0];
+        let mut cube = [0.0; 2];
+        cmplx_cube(&value, &mut cube);
+        assert_eq!(cube, [-117.0, 44.0]);
+        let mut radius = 0.0;
+        let mut angle = 0.0;
+        cmplx_to_polar(&value, &mut radius, &mut angle);
+        let mut round_trip = [0.0; 2];
+        cmplx_from_polar(radius, angle, &mut round_trip);
+        assert!((round_trip[0] - value[0]).abs() < 1.0e-12);
+        assert!((round_trip[1] - value[1]).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn inventory_matches_the_complete_source_unit() {
+        assert_eq!(SOLVE_CUBIC_EQN_SOURCE_FUNCTIONS.len(), 10);
     }
 }

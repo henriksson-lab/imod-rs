@@ -94,7 +94,7 @@ thread_local! {
     static S_DPOINTS: RefCell<Vec<Point>> = const { RefCell::new(Vec::new()) };
     /// C `sDelau` (`warpfiles.c:57`) and `sNninterp` (`warpfiles.c:58`) in one:
     /// the triangulation is owned by the interpolator now.
-    static S_NNINTERP: RefCell<Option<Box<Nnai>>> = const { RefCell::new(None) };
+    static S_NNINTERP: RefCell<Option<Nnai>> = const { RefCell::new(None) };
     /// C `sLastNumCont` (`warpfiles.c:59`).
     static S_LAST_NUM_CONT: Cell<i32> = const { Cell::new(0) };
     /// C `sLastNxGrid` (`warpfiles.c:60`).

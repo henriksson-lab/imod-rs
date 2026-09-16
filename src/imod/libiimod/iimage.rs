@@ -20,8 +20,8 @@ use crate::imod::libiimod::iihdf::{
     hdf_write_global_adoc as native_hdf_write_global_adoc, ii_hdf_check as native_ii_hdf_check,
     ii_hdf_open_new, ii_reorder_hdf_stack, ii_test_if_hdf as native_ii_test_if_hdf,
 };
-use crate::imod::libiimod::iijpeg::{ii_jpeg_check, jpeg_open_new};
-use crate::imod::libiimod::iilikemrc::ii_like_mrc_check;
+use crate::imod::libiimod::iijpeg::{ii_jpeg_check_callback, jpeg_open_new_callback};
+use crate::imod::libiimod::iilikemrc::ii_like_mrc_check_callback;
 use crate::imod::libiimod::iimrc::{
     ii_mrc_check, ii_mrc_load_pcoord, ii_mrc_mode_to_format_type, ii_mrc_open_new,
 };
@@ -35,12 +35,107 @@ use crate::imod::libiimod::iitif::{
 use crate::imod::libiimod::mrcfiles::{
     MRC_MODE_BYTE, MRC_MODE_COMPLEX_FLOAT, MRC_MODE_COMPLEX_SHORT, MRC_MODE_HALF_FLOAT,
     MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_complex_smin_smax, mrc_getdcsize, mrc_head_new,
+    mrc_head_read, mrc_read_slice,
 };
 use core::ffi::c_char;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicI32, Ordering};
 use std::cell::RefCell;
 use std::sync::{LazyLock, Mutex};
+
+/// A fully owned real-valued MRC image stack.
+///
+/// This is the direct Rust replacement for the common `iiOpen` / `iiReadSection`
+/// / `iiDelete` ownership sequence used by non-GUI callers such as
+/// `alignframes`.  The legacy [`ImodImageFile`] remains for formats that still
+/// cross an external backend boundary, but an MRC stack does not need a raw
+/// image handle or caller-managed pixel buffer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnedImageStack {
+    pub nx: usize,
+    pub ny: usize,
+    pub mode: i32,
+    pub frames: Vec<Vec<u8>>,
+}
+
+impl OwnedImageStack {
+    /// Construct a stack from already-owned, complete MRC sections.
+    pub fn from_raw_frames(
+        nx: usize,
+        ny: usize,
+        mode: i32,
+        frames: Vec<Vec<u8>>,
+    ) -> Result<Self, String> {
+        if nx == 0 || ny == 0 {
+            return Err("image dimensions must be nonzero".into());
+        }
+        let mut datum_bytes = 0;
+        let mut components = 0;
+        if mrc_getdcsize(mode, &mut datum_bytes, &mut components) != 0 {
+            return Err(format!("unsupported MRC mode {mode}"));
+        }
+        let section_bytes = nx
+            .checked_mul(ny)
+            .and_then(|pixels| pixels.checked_mul(datum_bytes as usize))
+            .and_then(|bytes| bytes.checked_mul(components as usize))
+            .ok_or_else(|| "MRC section size overflows usize".to_owned())?;
+        if frames.iter().any(|frame| frame.len() != section_bytes) {
+            return Err("MRC section does not match dimensions and mode".into());
+        }
+        Ok(Self {
+            nx,
+            ny,
+            mode,
+            frames,
+        })
+    }
+
+    /// Read all Z sections through the source MRC header and section readers.
+    ///
+    /// The resulting buffer owns the file data; dropping it closes the input
+    /// naturally and cannot leave the global `iiOpen` file registry populated.
+    pub fn open_mrc(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        let mut file = ImodFile::open(path.as_ref(), "rb")
+            .ok_or_else(|| format!("cannot open MRC file {}", path.as_ref().display()))?;
+        let mut header = MrcHeader::default();
+        if mrc_head_read(&mut file, &mut header) != 0 {
+            return Err(format!(
+                "cannot read MRC header from {}",
+                path.as_ref().display()
+            ));
+        }
+        let nx = usize::try_from(header.nx).map_err(|_| "invalid MRC width".to_owned())?;
+        let ny = usize::try_from(header.ny).map_err(|_| "invalid MRC height".to_owned())?;
+        let nz = usize::try_from(header.nz).map_err(|_| "invalid MRC section count".to_owned())?;
+        let mut datum_bytes = 0;
+        let mut components = 0;
+        if mrc_getdcsize(header.mode, &mut datum_bytes, &mut components) != 0 {
+            return Err(format!("unsupported MRC mode {}", header.mode));
+        }
+        let section_bytes = nx
+            .checked_mul(ny)
+            .and_then(|pixels| pixels.checked_mul(datum_bytes as usize))
+            .and_then(|bytes| bytes.checked_mul(components as usize))
+            .ok_or_else(|| "MRC section size overflows usize".to_owned())?;
+        let mut frames = Vec::with_capacity(nz);
+        for section in 0..nz {
+            let mut frame = vec![0; section_bytes];
+            if mrc_read_slice(&mut frame, &mut file, &mut header, section as i32, b'z') != 0 {
+                return Err(format!("cannot read MRC section {section}"));
+            }
+            frames.push(frame);
+        }
+        Self::from_raw_frames(nx, ny, header.mode, frames)
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub fn frame(&self, index: usize) -> Option<&[u8]> {
+        self.frames.get(index).map(Vec::as_slice)
+    }
+}
 
 /// C `IISectionFunc` (`iimage.h`): `int (*)(ImodImageFile *, char *buf, int)`.
 ///
@@ -272,7 +367,7 @@ pub struct ImodImageFile {
     pub write_header: Option<unsafe fn(*mut ImodImageFile) -> i32>,
     /// Rust-owned MRC header storage used by the native MRC and like-MRC
     /// backends.
-    pub mrc_header: Option<Box<MrcHeader>>,
+    pub mrc_header: Option<MrcHeader>,
 }
 
 impl Default for ImodImageFile {
@@ -462,9 +557,9 @@ pub fn init_check_list() -> i32 {
     let initial_checks: [IiFileCheckFunction; 6] = [
         Some(ii_tiff_check),
         Some(ii_mrc_check),
-        Some(ii_like_mrc_check),
+        Some(ii_like_mrc_check_callback),
         Some(hdf_check_callback),
-        Some(ii_jpeg_check),
+        Some(ii_jpeg_check_callback),
         Some(ii_adoc_check),
     ];
     checks.extend(initial_checks);
@@ -783,7 +878,7 @@ pub unsafe fn ii_open_new(filename: &[u8], mode: &str, mut file_kind: i32) -> *m
             IIFILE_MRC => ii_mrc_open_new(file, mode),
             IIFILE_HDF => ii_hdf_open_new(&mut *file, mode),
             IIFILE_TIFF => tiff_open_new(file),
-            IIFILE_JPEG => jpeg_open_new(file),
+            IIFILE_JPEG => jpeg_open_new_callback(file),
             IIFILE_SHR_MEM => 0,
             _ => 1,
         };
@@ -1201,7 +1296,7 @@ pub unsafe fn ii_file_change_address(old_file: *mut ImodImageFile, new_file: *mu
         unsafe {
             (*new_file).fp = Some(ImodFile::Token(new_file as usize));
             if (*new_file).file == IIFILE_HDF {
-                if let Some(header) = (*new_file).mrc_header.as_deref_mut() {
+                if let Some(header) = (*new_file).mrc_header.as_mut() {
                     header.fp = (*new_file).fp.clone();
                 }
             }
@@ -1366,6 +1461,64 @@ pub fn ii_set_chunk_sizes(
     in_file.tile_size_y = y_size;
     in_file.z_chunk_size = z_size;
     0
+}
+
+/// Owned/file-handle boundary for callers that only possess an IMOD stream.
+/// The registry still stores stable image-file allocations internally, but the
+/// raw address never escapes this API into image-processing code.
+pub fn ii_set_chunk_sizes_for_fp(fp: &ImodFile, x_size: i32, y_size: i32, z_size: i32) -> i32 {
+    let Some(file) = ii_lookup_file_from_fp(fp) else {
+        return 1;
+    };
+    // `ii_lookup_file_from_fp` returns a registry-owned allocation whose
+    // lifetime exceeds this immediate mutation.
+    let Some(file) = (unsafe { file.as_mut() }) else {
+        return 1;
+    };
+    ii_set_chunk_sizes(file, x_size, y_size, z_size)
+}
+
+pub fn ii_file_type_from_fp(fp: &ImodFile) -> Option<i32> {
+    let file = ii_lookup_file_from_fp(fp)?;
+    // Registry-owned image-file storage remains valid for this read.
+    Some(unsafe { file.as_ref()? }.file)
+}
+
+/// EER settings read from the registry-owned image descriptor.
+///
+/// Image processing only needs these values, not the registry's raw image
+/// pointer.  Keeping the pointer dereference here prevents it from leaking
+/// into command implementations.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IiEerInfo {
+    pub is_eer: bool,
+    pub antialias_filter: i32,
+    pub read_as_super_res: i32,
+    pub kernel_scale: f32,
+}
+
+pub fn ii_eer_info_from_fp(fp: &ImodFile) -> Option<IiEerInfo> {
+    let file = ii_lookup_file_from_fp(fp)?;
+    // The descriptor is owned by the open-file registry and remains live for
+    // this immediate snapshot.
+    let file = unsafe { file.as_ref()? };
+    let is_eer = file.file == IIFILE_TIFF && file.num_frames_in_eerfile > 0;
+    Some(IiEerInfo {
+        is_eer,
+        antialias_filter: file.antialias_eerfilter,
+        read_as_super_res: file.read_eer_as_super_res,
+        kernel_scale: file.eerkernel_scale as f32,
+    })
+}
+
+pub fn ii_tiff_has_tag(fp: &ImodFile, tag: i32) -> bool {
+    let Some(file) = ii_lookup_file_from_fp(fp) else {
+        return false;
+    };
+    let Some(file) = (unsafe { file.as_mut() }) else {
+        return false;
+    };
+    file.file == IIFILE_TIFF && crate::imod::libiimod::iitif::tiff_get_array(file, tag).is_ok()
 }
 pub fn ii_get_adoc_index(in_file: &mut ImodImageFile, global: i32, open_mdoc_or_new: i32) -> i32 {
     if in_file.file == IIFILE_HDF {
@@ -2306,6 +2459,53 @@ pub unsafe fn init_new_hdffile(in_file: *mut ImodImageFile) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_image_stack_reads_real_mrc_sections_without_an_image_handle() {
+        let path = std::env::temp_dir().join(format!(
+            "imod-owned-stack-{}-{}.mrc",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        {
+            let mut file = ImodFile::open(&path, "wb").unwrap();
+            let mut header = MrcHeader::default();
+            assert_eq!(mrc_head_new(&mut header, 2, 2, 2, MRC_MODE_BYTE), 0);
+            header.bytes_signed = 0;
+            assert_eq!(
+                crate::imod::libiimod::mrcfiles::mrc_head_write(&mut file, &mut header),
+                0
+            );
+            assert_eq!(
+                crate::imod::libiimod::mrcfiles::mrc_write_slice(
+                    &[1, 2, 3, 4],
+                    &mut file,
+                    &mut header,
+                    0,
+                    b'z'
+                ),
+                0
+            );
+            assert_eq!(
+                crate::imod::libiimod::mrcfiles::mrc_write_slice(
+                    &[5, 6, 7, 8],
+                    &mut file,
+                    &mut header,
+                    1,
+                    b'z'
+                ),
+                0
+            );
+        }
+        let stack = OwnedImageStack::open_mrc(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert_eq!(
+            (stack.nx, stack.ny, stack.mode, stack.frame_count()),
+            (2, 2, 0, 2)
+        );
+        assert_eq!(stack.frame(0), Some(&[1, 2, 3, 4][..]));
+        assert_eq!(stack.frame(1), Some(&[5, 6, 7, 8][..]));
+    }
 
     #[test]
     fn default_min_max_mean_retains_all_supported_type_ranges() {

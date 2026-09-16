@@ -1,5 +1,5 @@
 //! Translation of `IMOD/libiimod/sliceproc.c` and `include/sliceproc.h`.
-#![allow(dead_code, unused_variables, static_mut_refs)]
+#![allow(dead_code, unused_variables)]
 
 use crate::imod::libcfshr::islice::{Islice, slice_create, slice_put_val, slice_scale_and_free};
 use crate::imod::libcfshr::percentile::{percentile_float, percentile_int};
@@ -284,7 +284,7 @@ fn opt_med9(p: &mut [f32]) -> f32 {
     p[4]
 }
 
-pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Box<Islice>], size: i32) -> i32 {
+pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Islice], size: i32) -> i32 {
     let Some(sl_in) = stack.first() else {
         return -1;
     };
@@ -364,17 +364,19 @@ pub fn slice_median_filter(sl_out: &mut Islice, stack: &[Box<Islice>], size: i32
                     low
                 }
             };
-            unsafe {
-                slice_put_val(sl_out, ox, oy, [value, 0., 0., 0.]);
-            }
+            slice_put_val(sl_out, ox, oy, [value, 0., 0., 0.]);
         }
     }
     0
 }
 
 struct AnisoState {
-    image: Vec<Vec<f32>>,
-    image2: Vec<Vec<f32>>,
+    // `sliceproc.c:646`'s `allocate2D_float` exists solely to manufacture a
+    // row-pointer view over one malloc allocation.  These contiguous owned
+    // vectors retain the same `(m + 2) * (n + 2)` layout without exposing row
+    // pointers or a separate allocation/release API.
+    image: Vec<f32>,
+    image2: Vec<f32>,
     iter_done: i32,
 }
 
@@ -408,12 +410,13 @@ pub fn slice_aniso_diff(
     let n = sl.xsize;
     let m = sl.ysize;
     if state.iter_done == 0 {
-        state.image = vec![vec![0.0; (n + 2) as usize]; (m + 2) as usize];
-        state.image2 = vec![vec![0.0; (n + 2) as usize]; (m + 2) as usize];
+        let stride = (n + 2) as usize;
+        state.image = vec![0.0; (m + 2) as usize * stride];
+        state.image2 = vec![0.0; (m + 2) as usize * stride];
         for j in 0..m {
             for i in 0..n {
                 let offset = (i + j * sl.xsize) as usize * 4;
-                state.image[(j + 1) as usize][(i + 1) as usize] =
+                state.image[(j + 1) as usize * stride + (i + 1) as usize] =
                     f32::from_ne_bytes(sl.data[offset..offset + 4].try_into().unwrap());
             }
         }
@@ -421,19 +424,19 @@ pub fn slice_aniso_diff(
     for _ in 0..iterations {
         if state.iter_done % 2 == 0 {
             let AnisoState { image, image2, .. } = &mut *state;
-            update_matrix(image2, image, m, n, cc, k, lambda);
+            let _ = update_matrix(image2, image, m as usize, n as usize, cc, k, lambda);
         } else {
             let AnisoState { image, image2, .. } = &mut *state;
-            update_matrix(image, image2, m, n, cc, k, lambda);
+            let _ = update_matrix(image, image2, m as usize, n as usize, cc, k, lambda);
         }
         state.iter_done += 1;
     }
     for j in 0..m {
         for i in 0..n {
             let value = if state.iter_done % 2 == 0 {
-                state.image[(j + 1) as usize][(i + 1) as usize]
+                state.image[(j + 1) as usize * (n + 2) as usize + (i + 1) as usize]
             } else {
-                state.image2[(j + 1) as usize][(i + 1) as usize]
+                state.image2[(j + 1) as usize * (n + 2) as usize + (i + 1) as usize]
             };
             let offset = (i + j * sl.xsize) as usize * 4;
             sl.data[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
@@ -452,8 +455,8 @@ pub fn slice_aniso_diff(
 
 pub fn slice_byte_aniso_diff(
     sl: &mut Islice,
-    image: &mut [Vec<f32>],
-    image2: &mut [Vec<f32>],
+    image: &mut [f32],
+    image2: &mut [f32],
     cc: i32,
     k: f64,
     lambda: f64,
@@ -462,10 +465,14 @@ pub fn slice_byte_aniso_diff(
 ) {
     let n = sl.xsize;
     let m = sl.ysize;
+    let stride = (n + 2) as usize;
+    if image.len() != (m + 2) as usize * stride || image2.len() != image.len() {
+        return;
+    }
     if *iter_done == 0 {
         for j in 0..m {
             for i in 0..n {
-                image[(j + 1) as usize][(i + 1) as usize] =
+                image[(j + 1) as usize * stride + (i + 1) as usize] =
                     sl.data[(i + j * sl.xsize) as usize] as f32;
             }
         }
@@ -473,10 +480,10 @@ pub fn slice_byte_aniso_diff(
     let mut use_image2 = false;
     for _ in 0..iterations {
         if *iter_done % 2 == 0 {
-            update_matrix(image2, image, m, n, cc, k, lambda);
+            let _ = update_matrix(image2, image, m as usize, n as usize, cc, k, lambda);
             use_image2 = true;
         } else {
-            update_matrix(image, image2, m, n, cc, k, lambda);
+            let _ = update_matrix(image, image2, m as usize, n as usize, cc, k, lambda);
             use_image2 = false;
         }
         *iter_done += 1;
@@ -484,9 +491,9 @@ pub fn slice_byte_aniso_diff(
     for j in 0..m {
         for i in 0..n {
             let v = if use_image2 {
-                image2[(j + 1) as usize][(i + 1) as usize]
+                image2[(j + 1) as usize * stride + (i + 1) as usize]
             } else {
-                image[(j + 1) as usize][(i + 1) as usize]
+                image[(j + 1) as usize * stride + (i + 1) as usize]
             } as i32;
             sl.data[(i + j * sl.xsize) as usize] = v.clamp(0, 255) as u8;
         }
@@ -556,8 +563,8 @@ mod tests {
         assert_eq!(slice_byte_threshold(&mut slice, 5), 0);
         assert_eq!(slice.data, [9, 9, 1, 1]);
 
-        let mut image = vec![vec![0.; 4]; 4];
-        let mut image2 = vec![vec![0.; 4]; 4];
+        let mut image = vec![0.; 16];
+        let mut image2 = vec![0.; 16];
         let mut iter_done = 0;
         slice_byte_aniso_diff(
             &mut slice,
@@ -570,7 +577,17 @@ mod tests {
             &mut iter_done,
         );
         assert_eq!(slice.data, [9, 9, 1, 1]);
-        assert_eq!(image[1][1], 9.);
-        assert_eq!(image[2][2], 1.);
+        assert_eq!(image[1 * 4 + 1], 9.);
+        assert_eq!(image[2 * 4 + 2], 1.);
+    }
+
+    #[test]
+    fn byte_add_has_the_source_saturating_range() {
+        let mut slice = slice_create(3, 1, SLICE_MODE_BYTE).unwrap();
+        slice.data.copy_from_slice(&[0, 20, 250]);
+        assert_eq!(slice_byte_add(&mut slice, 10), 0);
+        assert_eq!(slice.data, [10, 30, 255]);
+        assert_eq!(slice_byte_add(&mut slice, -40), 0);
+        assert_eq!(slice.data, [0, 0, 215]);
     }
 }

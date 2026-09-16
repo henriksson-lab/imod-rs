@@ -3,12 +3,6 @@
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format};
 use std::io::Write as _;
-unsafe extern "C" {
-    /// The reference build narrows `processing.cpp:291`'s `log10()` call to the
-    /// single-precision routine, and Rust's `f32::log10` instead evaluates the
-    /// double routine and rounds, which differs by one ulp on 3% of pixels.
-    fn log10f(value: f32) -> f32;
-}
 
 use crate::imod::clip::clip::ClipOptions;
 use crate::imod::libcfshr::islice::{
@@ -280,7 +274,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             };
             if (opt.process == IP_LOGARITHM || opt.process == IP_SQROOT)
                 && hout.mode == 2
-                && crate::imod::libiimod::mrcslice::slice_float(slice.as_mut()) < 0
+                && crate::imod::libiimod::mrcslice::slice_float(&mut slice) < 0
             {
                 crate::imod::clip::clip::show_error(
                     "clip: Error getting memory to convert slice to float.",
@@ -288,7 +282,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 return -1;
             };
             if opt.process == IP_BOXSD {
-                if crate::imod::libiimod::mrcslice::slice_float(slice.as_mut()) < 0 {
+                if crate::imod::libiimod::mrcslice::slice_float(&mut slice) < 0 {
                     crate::imod::clip::clip::show_error(
                         "clip: Error getting memory to convert slice to float.",
                     );
@@ -337,7 +331,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
             if (opt.dim == 2 && opt.process != IP_RESIZE)
                 || (opt.process == IP_TRUNCATE && trunc_mean)
             {
-                crate::imod::libiimod::mrcslice::slice_mmm(slice.as_mut());
+                crate::imod::libiimod::mrcslice::slice_mmm(&mut slice);
                 min = match opt.process {
                     IP_BRIGHTNESS => slice.min as f64,
                     IP_SHADOW => slice.max as f64,
@@ -360,7 +354,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 for j in 0..slice.ysize {
                     for i in 0..slice.xsize {
                         let mut value = [0.; 4];
-                        slice_get_val(slice.as_mut(), i, j, &mut value);
+                        slice_get_val(&slice, i, j, &mut value);
                         if matches!(slice.mode, MRC_MODE_COMPLEX_SHORT | MRC_MODE_COMPLEX_FLOAT) {
                             value[0] = (value[0] * value[0] + value[1] * value[1]).sqrt();
                         } else if slice.mode == MRC_MODE_RGB {
@@ -374,7 +368,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                 for j in 0..opt.iy {
                     for i in 0..opt.ix {
                         let mut val = [0_f32; 4];
-                        slice_get_val(slice.as_mut(), i, j, &mut val);
+                        slice_get_val(&slice, i, j, &mut val);
                         match opt.process {
                             IP_THRESHOLD => {
                                 for (l, item) in
@@ -425,11 +419,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                             }
                             IP_LOGARITHM => {
                                 for item in val.iter_mut().take(slice.csize as usize) {
-                                    // `processing.cpp:291` calls log10() on a
-                                    // float and stores a float; the reference
-                                    // build narrows that to log10f, which is
-                                    // what matches its output byte for byte.
-                                    *item = unsafe { log10f(min_for_log.max(*item + base)) };
+                                    *item = min_for_log.max(*item + base).log10();
                                 }
                             }
                             IP_SQROOT => {
@@ -475,7 +465,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                             IP_RESIZE | IP_BOXSD => {}
                             _ => {}
                         }
-                        slice_put_val(slice.as_mut(), i, j, val);
+                        slice_put_val(&mut slice, i, j, val);
                     }
                 }
             }
@@ -490,20 +480,15 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
                     | IP_BOXSD
                     | IP_RESIZE
             ) {
-                crate::imod::libiimod::mrcslice::mrc_slice_lie(slice.as_mut(), min, alpha);
+                crate::imod::libiimod::mrcslice::mrc_slice_lie(&mut slice, min, alpha);
             }
             if opt.read_defects != 0
-                && correct_defects(
-                    slice.as_mut(),
-                    input_nx,
-                    input_ny,
-                    opt,
-                    &mut first_defect_setup,
-                ) != 0
+                && correct_defects(&mut slice, input_nx, input_ny, opt, &mut first_defect_setup)
+                    != 0
             {
                 return -1;
             }
-            if crate::imod::clip::file_io::clip_write_slice(slice.as_mut(), hout, opt, k, &mut z, 1)
+            if crate::imod::clip::file_io::clip_write_slice(&mut slice, hout, opt, k, &mut z, 1)
                 != 0
             {
                 if f != 0 {
@@ -521,7 +506,7 @@ pub fn clip_scaling(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
         // it the same way.
         point_fp = None;
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 /// Matches C++ `clipEdge`.
 pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
@@ -572,14 +557,13 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
             return -1;
         };
         let mut out = if opt.process == IP_GRADIENT {
-            let Some(result) = crate::imod::libiimod::mrcslice::slice_gradient(source.as_mut())
-            else {
+            let Some(result) = crate::imod::libiimod::mrcslice::slice_gradient(&mut source) else {
                 return -1;
             };
             result
         } else {
             if source.mode != 0 {
-                crate::imod::libcfshr::islice::slice_min_max(source.as_mut());
+                crate::imod::libcfshr::islice::slice_min_max(&mut source);
                 let mut scale = 1.;
                 if source.max > source.min {
                     scale = 255. / (source.max - source.min) as f64;
@@ -588,27 +572,25 @@ pub fn clip_edge(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
                     scale = 0.95;
                 }
                 let fixed = source.min as f64 * scale / (scale - 1.);
-                crate::imod::libiimod::mrcslice::mrc_slice_lie(source.as_mut(), fixed, scale);
-                crate::imod::libiimod::mrcslice::slice_new_mode(source.as_mut(), 0);
+                crate::imod::libiimod::mrcslice::mrc_slice_lie(&mut source, fixed, scale);
+                crate::imod::libiimod::mrcslice::slice_new_mode(&mut source, 0);
             }
-            crate::imod::libcfshr::islice::slice_min_max(source.as_mut());
+            crate::imod::libcfshr::islice::slice_min_max(&mut source);
             if opt.process == IP_GRAHAM {
-                crate::imod::libiimod::sliceproc::slice_byte_graham(source.as_mut());
+                crate::imod::libiimod::sliceproc::slice_byte_graham(&mut source);
             } else if opt.process == IP_SOBEL {
-                crate::imod::libiimod::sliceproc::slice_byte_edge_sobel(source.as_mut());
+                crate::imod::libiimod::sliceproc::slice_byte_edge_sobel(&mut source);
             } else {
-                crate::imod::libiimod::sliceproc::slice_byte_edge_prewitt(source.as_mut());
+                crate::imod::libiimod::sliceproc::slice_byte_edge_prewitt(&mut source);
             }
             source
         };
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 1)
-        } != 0
+        if crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 1) != 0
         {
             return -1;
         };
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 /// Matches C++ `clip_convolve`.
 pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
@@ -634,7 +616,7 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             crate::imod::libiimod::mrcfiles::MRC_MODE_FLOAT
         };
     }
-    let mut z = unsafe { crate::imod::clip::file_io::set_options(opt, hin, hout) };
+    let mut z = crate::imod::clip::file_io::set_options(opt, hin, hout);
     if z < 0 {
         return z;
     }
@@ -750,14 +732,11 @@ pub fn clip_convolve(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
             };
             s = slice;
         }
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(s.as_mut(), hout, opt, k, &mut z, 1)
-        } != 0
-        {
+        if crate::imod::clip::file_io::clip_write_slice(s.as_mut(), hout, opt, k, &mut z, 1) != 0 {
             return -1;
         }
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 /// Matches C++ `clipMedian`.
 pub fn clip_median(
@@ -778,7 +757,7 @@ pub fn clip_median(
             );
             return -1;
         }
-        z = unsafe { crate::imod::clip::file_io::set_options(opt, hin, hout) };
+        z = crate::imod::clip::file_io::set_options(opt, hin, hout);
         if z < 0 {
             return z;
         }
@@ -816,7 +795,7 @@ pub fn clip_median(
     };
     let mut first = 0_i32;
     let mut last = -1_i32;
-    let mut output: Option<Box<Islice>> = None;
+    let mut output: Option<Islice> = None;
     for k in 0..opt.nofsecs {
         if k == 0 || !kernel.is_empty() {
             output = crate::imod::libcfshr::islice::slice_create(
@@ -910,32 +889,30 @@ pub fn clip_median(
                 }
             }
         } else if crate::imod::libiimod::sliceproc::slice_median_filter(
-            output.as_deref_mut().unwrap(),
+            output.as_mut().unwrap(),
             &stack.slices,
             size,
         ) != 0
         {
             return -1;
         }
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(
-                output.as_deref_mut().unwrap(),
-                hout,
-                opt,
-                k,
-                &mut z,
-                if kernel.is_empty() { 0 } else { 1 },
-            )
-        } != 0
+        if crate::imod::clip::file_io::clip_write_slice(
+            output.as_mut().unwrap(),
+            hout,
+            opt,
+            k,
+            &mut z,
+            if kernel.is_empty() { 0 } else { 1 },
+        ) != 0
         {
             return -1;
         }
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 /// Matches C++ `clipBlankFile`.
 pub fn clip_blank_file(hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
-    let setup_z = unsafe { crate::imod::clip::file_io::set_output_options(opt, hout) };
+    let setup_z = crate::imod::clip::file_io::set_output_options(opt, hout);
     if setup_z < 0 {
         return setup_z;
     }
@@ -953,16 +930,13 @@ pub fn clip_blank_file(hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
     let val = [opt.pad, opt.pad, opt.pad, 0.];
     for iy in 0..opt.oy {
         for ix in 0..opt.ox {
-            slice_put_val(slice.as_mut(), ix, iy, val);
+            slice_put_val(&mut slice, ix, iy, val);
         }
     }
     let mut z = 0;
     opt.nofsecs = opt.oz;
     for iz in 0..opt.oz {
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(slice.as_mut(), hout, opt, iz, &mut z, 0)
-        } != 0
-        {
+        if crate::imod::clip::file_io::clip_write_slice(&mut slice, hout, opt, iz, &mut z, 0) != 0 {
             return -1;
         }
     }
@@ -985,7 +959,7 @@ pub fn clip_diffusion(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
         );
         return -1;
     }
-    let mut z = unsafe { crate::imod::clip::file_io::set_options(opt, hin, hout) };
+    let mut z = crate::imod::clip::file_io::set_options(opt, hin, hout);
     if z < 0 {
         return z;
     }
@@ -1027,7 +1001,7 @@ pub fn clip_diffusion(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
             return -1;
         };
         if crate::imod::libiimod::sliceproc::slice_aniso_diff(
-            slice.as_mut(),
+            &mut slice,
             opt.mode,
             cc,
             kk,
@@ -1038,14 +1012,11 @@ pub fn clip_diffusion(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
         {
             return -1;
         }
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(slice.as_mut(), hout, opt, k, &mut z, 1)
-        } != 0
-        {
+        if crate::imod::clip::file_io::clip_write_slice(&mut slice, hout, opt, k, &mut z, 1) != 0 {
             return -1;
         }
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 /// Matches C++ `clip_flip`.
 pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
@@ -1238,7 +1209,7 @@ pub fn clip_flip(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOption
             for y in 0..hin.ny {
                 for z in 0..hin.nz {
                     let mut v = [0.; 4];
-                    slice_get_val(source.as_mut(), y, z, &mut v);
+                    slice_get_val(&source, y, z, &mut v);
                     slice_put_val(transposed.as_mut(), z, y, v);
                 }
             }
@@ -1615,7 +1586,7 @@ pub fn clip_quadrant(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOp
     0
 }
 /// Matches C++ `quadrantSample`.
-pub fn quadrant_sample(
+fn quadrant_sample(
     slice: &mut Islice,
     llx: i32,
     lly: i32,
@@ -1632,7 +1603,7 @@ pub fn quadrant_sample(
     0
 }
 /// Matches C++ `correctQuadrant`.
-pub fn correct_quadrant(
+fn correct_quadrant(
     slice: &mut Islice,
     llx: i32,
     lly: i32,
@@ -1679,7 +1650,7 @@ pub fn fill_drift_corrected_edges(
         );
         return -1;
     }
-    let mut z = unsafe { crate::imod::clip::file_io::set_options(opt, hin, hout) };
+    let mut z = crate::imod::clip::file_io::set_options(opt, hin, hout);
     if z < 0 {
         return z;
     }
@@ -1763,14 +1734,11 @@ pub fn fill_drift_corrected_edges(
             hin.ny,
             hin.nx,
         );
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(slice.as_mut(), hout, opt, k, &mut z, 1)
-        } != 0
-        {
+        if crate::imod::clip::file_io::clip_write_slice(&mut slice, hout, opt, k, &mut z, 1) != 0 {
             return -1;
         }
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin, hout, opt)
 }
 /// Matches C++ `clipSpectrum`.
 pub fn clip_spectrum(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
@@ -2015,7 +1983,7 @@ pub fn clip_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptio
     0
 }
 /// Matches C++ `writeBytePixel`.
-pub fn write_byte_pixel(mut pixel: f32, hout: &mut MrcHeader) {
+fn write_byte_pixel(mut pixel: f32, hout: &mut MrcHeader) {
     if pixel > 255. {
         pixel = 255.;
     }
@@ -2038,7 +2006,7 @@ pub fn clip2d_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
         crate::imod::clip::clip::show_warning("clip - color output mode must be rgb.");
     }
     opt.mode = 16;
-    let mut z = unsafe { crate::imod::clip::file_io::set_options(opt, hin, hout) };
+    let mut z = crate::imod::clip::file_io::set_options(opt, hin, hout);
     if z < 0 {
         return z;
     }
@@ -2064,7 +2032,7 @@ pub fn clip2d_color(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOpt
         for j in 0..opt.iy {
             for i in 0..opt.ix {
                 let mut value = [0.; 4];
-                slice_get_val(source.as_mut(), i, j, &mut value);
+                slice_get_val(&source, i, j, &mut value);
                 let pixel = value[0];
                 value[0] = (pixel * opt.red + 0.5).clamp(0., 255.);
                 value[1] = (pixel * opt.green + 0.5).clamp(0., 255.);
@@ -2410,7 +2378,7 @@ pub fn clip_average(
         });
         return -1;
     }
-    let mut z = unsafe { crate::imod::clip::file_io::set_options(opt, h1, hout) };
+    let mut z = crate::imod::clip::file_io::set_options(opt, h1, hout);
     if z < 0 {
         return z;
     }
@@ -2526,7 +2494,7 @@ pub fn clip_average(
             for i in 0..opt.ix {
                 slice_put_val(out.as_mut(), i, j, val);
                 if variance != 0 {
-                    slice_put_val(sq.as_deref_mut().unwrap(), i, j, val);
+                    slice_put_val(sq.as_mut().unwrap(), i, j, val);
                 }
             }
         }
@@ -2553,11 +2521,11 @@ pub fn clip_average(
                     a[2] += factor * v[2];
                     slice_put_val(out.as_mut(), x, y, a);
                     if variance != 0 {
-                        slice_get_val(sq.as_deref_mut().unwrap(), x, y, &mut a);
+                        slice_get_val(sq.as_mut().unwrap(), x, y, &mut a);
                         a[0] += v[0] * v[0];
                         a[1] += v[1] * v[1];
                         a[1] += v[2] * v[2];
-                        slice_put_val(sq.as_deref_mut().unwrap(), x, y, a);
+                        slice_put_val(sq.as_mut().unwrap(), x, y, a);
                     }
                 }
             }
@@ -2574,7 +2542,7 @@ pub fn clip_average(
             for y in 0..opt.iy {
                 for x in 0..opt.ix {
                     let (mut a, mut v) = ([0.; 4], [0.; 4]);
-                    slice_get_val(sq.as_deref_mut().unwrap(), x, y, &mut v);
+                    slice_get_val(sq.as_mut().unwrap(), x, y, &mut v);
                     slice_get_val(out.as_mut(), x, y, &mut a);
                     for n in 0..3 {
                         // `processing.cpp:2168`: val[l] * varscale is double,
@@ -2594,9 +2562,7 @@ pub fn clip_average(
                 }
             }
         }
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 1)
-        } != 0
+        if crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 1) != 0
         {
             return -1;
         }
@@ -2606,7 +2572,7 @@ pub fn clip_average(
     if crate::imod::libiimod::mrcfiles::mrc_head_write(&mut hout.fp.clone().unwrap(), hout) != 0 {
         return -1;
     }
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(h1, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(h1, hout, opt)
 }
 /// Matches C++ `clip2d_average`.
 pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipOptions) -> i32 {
@@ -2663,7 +2629,7 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
         for i in 0..avgs.xsize {
             slice_put_val(avgs.as_mut(), i, j, aval);
             if variance != 0 {
-                slice_put_val(squares.as_deref_mut().unwrap(), i, j, aval);
+                slice_put_val(squares.as_mut().unwrap(), i, j, aval);
             }
         }
     }
@@ -2696,11 +2662,11 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
                 }
                 slice_put_val(avgs.as_mut(), x, y, a);
                 if variance != 0 {
-                    slice_get_val(squares.as_deref_mut().unwrap(), x, y, &mut a);
+                    slice_get_val(squares.as_mut().unwrap(), x, y, &mut a);
                     for n in 0..3 {
                         a[n] += v[n] * v[n];
                     }
-                    slice_put_val(squares.as_deref_mut().unwrap(), x, y, a);
+                    slice_put_val(squares.as_mut().unwrap(), x, y, a);
                 }
                 counts[ind] += 1.;
             }
@@ -2723,7 +2689,7 @@ pub fn clip2d_average(hin: &mut MrcHeader, hout: &mut MrcHeader, opt: &mut ClipO
                 if variance != 0 {
                     if count > 1. {
                         let mut ss = [0.; 4];
-                        slice_get_val(squares.as_deref_mut().unwrap(), x, y, &mut ss);
+                        slice_get_val(squares.as_mut().unwrap(), x, y, &mut ss);
                         for n in 0..3 {
                             a[n] = ((ss[n] * scale * scale - count * a[n] * a[n]) / (count - 1.))
                                 .max(0.);
@@ -2840,7 +2806,7 @@ pub fn clip_multdiv(
         && hout.mode != MRC_MODE_FLOAT
         && (h1.mode == MRC_MODE_FLOAT || h2.mode == MRC_MODE_FLOAT || opt.process == IP_DIVIDE);
     let mut read_once = if h2.nz == 1 && h1.nz > 1 { 1 } else { 0 };
-    let mut s: Option<Box<Islice>> = None;
+    let mut s: Option<Islice> = None;
     let mut div_by_zero = 0;
     let mut first_defect_setup = true;
     for k in 0..opt.nofsecs {
@@ -2895,7 +2861,7 @@ pub fn clip_multdiv(
             read_once = -read_once;
             if csize2 > 1
                 && hout.mode == MRC_MODE_FLOAT
-                && crate::imod::libiimod::mrcslice::slice_float(s.as_deref_mut().unwrap()) != 0
+                && crate::imod::libiimod::mrcslice::slice_float(s.as_mut().unwrap()) != 0
             {
                 let _ =
                     ImodFile::Stdout.write_all(b"ERROR: CLIP - getting memory for slice array\n");
@@ -2906,7 +2872,7 @@ pub fn clip_multdiv(
             for x in 0..opt.ix {
                 let (mut a, mut b) = ([0.; 4], [0.; 4]);
                 slice_get_val(out.as_mut(), x, y, &mut a);
-                slice_get_val(s.as_deref_mut().unwrap(), x, y, &mut b);
+                slice_get_val(s.as_mut().unwrap(), x, y, &mut b);
                 if do_round {
                     // `processing.cpp:2454`: B3DNINT is (int)floor(x + 0.5).
                     if opt.process == IP_MULTIPLY {
@@ -3469,28 +3435,18 @@ pub fn clip_unpack(
         );
         return -1;
     }
-    let mut z = unsafe { crate::imod::clip::file_io::set_options(opt, hin1, hout) };
+    let mut z = crate::imod::clip::file_io::set_options(opt, hin1, hout);
     if z < 0 {
         return z;
     }
-    let image_file =
-        crate::imod::libiimod::iimage::ii_lookup_file_from_fp(&hin1.fp.clone().unwrap())
-            .unwrap_or(core::ptr::null_mut());
-    let (is_eer, antialias_eer, read_eer_as_super_res, eerkernel_scale) = unsafe {
-        if image_file.is_null() {
-            (false, false, 0, 1.)
-        } else {
-            let image = &*image_file;
-            let is_eer = image.file == crate::imod::libiimod::iimage::IIFILE_TIFF
-                && image.num_frames_in_eerfile > 0;
-            (
-                is_eer,
-                is_eer && image.antialias_eerfilter > 0,
-                image.read_eer_as_super_res,
-                image.eerkernel_scale as f32,
-            )
-        }
-    };
+    let eer_info = hin1
+        .fp
+        .as_ref()
+        .and_then(crate::imod::libiimod::iimage::ii_eer_info_from_fp);
+    let is_eer = eer_info.is_some_and(|info| info.is_eer);
+    let antialias_eer = eer_info.is_some_and(|info| info.is_eer && info.antialias_filter > 0);
+    let read_eer_as_super_res = eer_info.map_or(0, |info| info.read_as_super_res);
+    let eerkernel_scale = eer_info.map_or(1., |info| info.kernel_scale);
     let red_factor = if antialias_eer {
         1_i32 << (2 - read_eer_as_super_res).max(0)
     } else {
@@ -3503,7 +3459,7 @@ pub fn clip_unpack(
     if opt.val != IP_DEFAULT as f32 {
         scale = opt.val;
     }
-    let mut reference: Option<Box<Islice>> = None;
+    let mut reference: Option<Islice> = None;
     if do_ref {
         reference = crate::imod::libiimod::mrcslice::slice_read_mrc(hin2, 0, b'z');
         if reference.is_none() {
@@ -3541,7 +3497,7 @@ pub fn clip_unpack(
         }
         if opt.rotation_flip > 0
             && rotate_flip_gain_reference(
-                &mut reference.as_deref_mut().unwrap().data,
+                &mut reference.as_mut().unwrap().data,
                 &mut nx,
                 &mut ny,
                 opt.rotation_flip,
@@ -3552,8 +3508,8 @@ pub fn clip_unpack(
             );
             return -1;
         }
-        reference.as_deref_mut().unwrap().xsize = nx;
-        reference.as_deref_mut().unwrap().ysize = ny;
+        reference.as_mut().unwrap().xsize = nx;
+        reference.as_mut().unwrap().ysize = ny;
         // `processing.cpp:2881`: superFac comes from the reference file's
         // own width, not from the possibly rotated slice width.
         let super_fac = hin1.nx / hin2.nx;
@@ -3566,14 +3522,10 @@ pub fn clip_unpack(
         {
             if super_fac > 1 || antialias_eer {
                 // `processing.cpp:2885-2889`.
-                let ii_file2 = crate::imod::libiimod::iimage::ii_lookup_file_from_fp(
-                    &hin2.fp.clone().unwrap(),
-                )
-                .unwrap_or(core::ptr::null_mut());
-                let is_tiff_gain = unsafe {
-                    !ii_file2.is_null()
-                        && (*ii_file2).file == crate::imod::libiimod::iimage::IIFILE_TIFF
-                };
+                let is_tiff_gain = hin2.fp.as_ref().is_some_and(|fp| {
+                    crate::imod::libiimod::iimage::ii_file_type_from_fp(fp)
+                        == Some(crate::imod::libiimod::iimage::IIFILE_TIFF)
+                });
                 if !is_eer && !is_tiff_gain {
                     let _ = ImodFile::Stdout.write_all(c_format("WARNING: clip - Expanding gain reference because image is exactly %d times as big as reference\n", &[CArg::Int((super_fac) as i64)]).as_bytes());
                 }
@@ -3591,7 +3543,7 @@ pub fn clip_unpack(
                 // dimensions are expanded, and nxGain/nyGain are multiplied
                 // by useFac rather than reset from the input file size.
                 let reference_values = reference
-                    .as_deref()
+                    .as_ref()
                     .unwrap()
                     .data
                     .chunks_exact(core::mem::size_of::<f32>())
@@ -3616,8 +3568,8 @@ pub fn clip_unpack(
                 reference = Some(expanded);
                 nx *= use_fac;
                 ny *= use_fac;
-                reference.as_deref_mut().unwrap().xsize = nx;
-                reference.as_deref_mut().unwrap().ysize = ny;
+                reference.as_mut().unwrap().xsize = nx;
+                reference.as_mut().unwrap().ysize = ny;
                 if let Some(super_gain_name) = opt.super_gain_name.clone() {
                     let mut biases = Vec::new();
                     let (mut num_in_x, mut x_start, mut x_interval) = (0, 0, 0);
@@ -3642,18 +3594,15 @@ pub fn clip_unpack(
                             .as_bytes(),
                         );
                     }
+                    let mut reference_values = reference
+                        .as_ref()
+                        .unwrap()
+                        .data
+                        .chunks_exact(core::mem::size_of::<f32>())
+                        .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
+                        .collect::<Vec<_>>();
                     crate::imod::clip::correct_defects::cor_def_refine_super_res_ref(
-                        unsafe {
-                            core::slice::from_raw_parts_mut(
-                                reference
-                                    .as_deref_mut()
-                                    .unwrap()
-                                    .data
-                                    .as_mut_ptr()
-                                    .cast::<f32>(),
-                                (nx * ny) as usize,
-                            )
-                        },
+                        &mut reference_values,
                         nx,
                         ny,
                         use_fac,
@@ -3665,6 +3614,15 @@ pub fn clip_unpack(
                         y_start,
                         y_interval,
                     );
+                    for (bytes, value) in reference
+                        .as_mut()
+                        .unwrap()
+                        .data
+                        .chunks_exact_mut(core::mem::size_of::<f32>())
+                        .zip(reference_values)
+                    {
+                        bytes.copy_from_slice(&value.to_ne_bytes());
+                    }
                 }
             }
         }
@@ -3687,7 +3645,7 @@ pub fn clip_unpack(
             }
             if (llx > 0 || lly > 0 || urx < nx || ury < ny)
                 && crate::imod::libiimod::mrcslice::slice_box_in(
-                    reference.as_deref_mut().unwrap(),
+                    reference.as_mut().unwrap(),
                     llx,
                     lly,
                     urx,
@@ -3700,7 +3658,7 @@ pub fn clip_unpack(
                 return -1;
             }
             for ind in 0..opt.ix * opt.iy {
-                let data = &mut reference.as_deref_mut().unwrap().data;
+                let data = &mut reference.as_mut().unwrap().data;
                 let mut value = f32::from_ne_bytes(
                     data[ind as usize * 4..ind as usize * 4 + 4]
                         .try_into()
@@ -3737,16 +3695,11 @@ pub fn clip_unpack(
     }
     if antialias_eer {
         if do_ref {
-            unsafe {
-                crate::imod::libiimod::iitif::tiff_gain_reference_for_eer(
-                    reference
-                        .as_deref_mut()
-                        .unwrap()
-                        .data
-                        .as_mut_ptr()
-                        .cast::<f32>(),
-                )
-            };
+            if !crate::imod::libiimod::iitif::tiff_gain_reference_for_eer_bytes(
+                &mut reference.as_mut().unwrap().data,
+            ) {
+                return -1;
+            }
         }
         do_ref = false;
         scale /= eerkernel_scale;
@@ -3781,7 +3734,7 @@ pub fn clip_unpack(
                 slice_get_val(input.as_mut(), x, y, &mut v);
                 let gain = if do_ref {
                     f32::from_ne_bytes(
-                        reference.as_deref().unwrap().data
+                        reference.as_ref().unwrap().data
                             [(x + y * opt.ix) as usize * 4..(x + y * opt.ix) as usize * 4 + 4]
                             .try_into()
                             .unwrap(),
@@ -3810,24 +3763,20 @@ pub fn clip_unpack(
             }
         }
         if opt.read_defects != 0
-            && unsafe {
-                correct_defects(out.as_mut(), hin1.nx, hin1.ny, opt, &mut first_defect_setup)
-            } != 0
+            && correct_defects(out.as_mut(), hin1.nx, hin1.ny, opt, &mut first_defect_setup) != 0
         {
             return -1;
         }
-        if unsafe {
-            crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 0)
-        } != 0
+        if crate::imod::clip::file_io::clip_write_slice(out.as_mut(), hout, opt, k, &mut z, 0) != 0
         {
             return -1;
         }
     }
     let _ = ImodFile::Stdout.write_all(b"\n");
-    unsafe { crate::imod::clip::file_io::set_mrc_coords(hin1, hout, opt) }
+    crate::imod::clip::file_io::set_mrc_coords(hin1, hout, opt)
 }
 /// Matches C++ `rotateFlipGainReference`.
-pub fn rotate_flip_gain_reference(
+fn rotate_flip_gain_reference(
     reference: &mut [u8],
     nx_gain: &mut i32,
     ny_gain: &mut i32,
@@ -4050,14 +3999,9 @@ pub fn clip_super_gain(h1: &mut MrcHeader, out_fp: &mut ImodFile, opt: &mut Clip
             }
             return -1;
         }
-        let image_file =
-            crate::imod::libiimod::iimage::ii_lookup_file_from_fp(&header.fp.clone().unwrap())
-                .unwrap_or(core::ptr::null_mut());
-        let is_eer = unsafe {
-            !image_file.is_null()
-                && (*image_file).file == crate::imod::libiimod::iimage::IIFILE_TIFF
-                && (*image_file).num_frames_in_eerfile != 0
-        };
+        let is_eer = header.fp.as_ref().is_some_and(|fp| {
+            crate::imod::libiimod::iimage::ii_eer_info_from_fp(fp).is_some_and(|info| info.is_eer)
+        });
         if !is_eer {
             crate::imod::clip::clip::show_error(
                 "clip supergain: all input files must be EER files.",
@@ -4188,7 +4132,7 @@ pub fn clip_super_gain(h1: &mut MrcHeader, out_fp: &mut ImodFile, opt: &mut Clip
     0
 }
 /// Matches C++ `combineAreaSums`.
-pub fn combine_area_sums(area_sum: &mut [f64]) -> f32 {
+fn combine_area_sums(area_sum: &mut [f64]) -> f32 {
     {
         area_sum[0] = area_sum[0] + area_sum[1] + area_sum[4] + area_sum[5];
         area_sum[1] = area_sum[2] + area_sum[3] + area_sum[6] + area_sum[7];
@@ -4213,7 +4157,7 @@ pub fn clip_parxyz(
     ry: &mut f32,
     rz: &mut f32,
 ) -> i32 {
-    let sl = v.slices[zmax as usize].as_ref();
+    let sl = &v.slices[zmax as usize];
     let (xsize, ysize) = (v.slices[0].xsize, v.slices[0].ysize);
     let x1 = if xmax == 0 { xsize - 1 } else { xmax - 1 };
     let x3 = if xmax + 1 >= xsize { 0 } else { xmax + 1 };
@@ -4249,17 +4193,17 @@ pub fn clip_parxyz(
     } else {
         zmax + 1
     };
-    let a = slice_get_pixel_magnitude(v.slices[z1 as usize].as_ref(), xmax, ymax) * -1.
+    let a = slice_get_pixel_magnitude(&v.slices[z1 as usize], xmax, ymax) * -1.
         + slice_get_pixel_magnitude(sl, xmax, ymax) * 2.
-        + slice_get_pixel_magnitude(v.slices[z3 as usize].as_ref(), xmax, ymax) * -1.;
+        + slice_get_pixel_magnitude(&v.slices[z3 as usize], xmax, ymax) * -1.;
     let b = ((zmax - 1) * (zmax - 1)) as f32
         * (slice_get_pixel_magnitude(sl, xmax, ymax)
-            - slice_get_pixel_magnitude(v.slices[z3 as usize].as_ref(), xmax, ymax))
+            - slice_get_pixel_magnitude(&v.slices[z3 as usize], xmax, ymax))
         + (zmax * zmax) as f32
-            * (slice_get_pixel_magnitude(v.slices[z3 as usize].as_ref(), xmax, ymax)
-                - slice_get_pixel_magnitude(v.slices[z1 as usize].as_ref(), xmax, ymax))
+            * (slice_get_pixel_magnitude(&v.slices[z3 as usize], xmax, ymax)
+                - slice_get_pixel_magnitude(&v.slices[z1 as usize], xmax, ymax))
         + ((zmax + 1) * (zmax + 1)) as f32
-            * (slice_get_pixel_magnitude(v.slices[z1 as usize].as_ref(), xmax, ymax)
+            * (slice_get_pixel_magnitude(&v.slices[z1 as usize], xmax, ymax)
                 - slice_get_pixel_magnitude(sl, xmax, ymax));
     *rz = if a != 0. { -b / (2. * a) } else { zmax as f32 };
     0
@@ -4328,7 +4272,7 @@ pub fn clip_get_stat3d(
     for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
-                let value = slice_get_pixel_magnitude(v.slices[k as usize].as_mut(), i, j);
+                let value = slice_get_pixel_magnitude(&mut v.slices[k as usize], i, j);
                 if value > max {
                     max = value;
                     xmax = i;
@@ -5518,7 +5462,7 @@ pub fn correct_defects(
     0
 }
 /// Matches C++ `write_vol`.
-pub fn write_vol(vol: &mut [Box<Islice>], hout: &mut MrcHeader) -> i32 {
+pub fn write_vol(vol: &mut [Islice], hout: &mut MrcHeader) -> i32 {
     for k in 0..hout.nz {
         let slice = vol[k as usize].as_mut();
         if crate::imod::libiimod::mrcfiles::mrc_write_slice(
@@ -5550,7 +5494,7 @@ pub fn write_vol(vol: &mut [Box<Islice>], hout: &mut MrcHeader) -> i32 {
     crate::imod::libiimod::mrcfiles::mrc_head_write(&mut hout.fp.clone().unwrap(), hout)
 }
 /// Matches C++ `free_vol`.
-pub fn free_vol(vol: &mut Vec<Box<Islice>>, z: i32) -> i32 {
+pub fn free_vol(vol: &mut Vec<Islice>, z: i32) -> i32 {
     vol.truncate(z.max(0) as usize);
     // `processing.cpp:4309` frees the pointer array itself; the `Vec` owns
     // it here, so clearing it is the same release.
@@ -5596,73 +5540,82 @@ mod tests {
     }
 
     #[test]
+    fn write_byte_pixel_matches_source_rounding_clamping_and_signed_offset() {
+        use std::io::Seek as _;
+
+        let mut file = ImodFile::tmpfile().unwrap();
+        let mut header = MrcHeader::default();
+        header.fp = Some(file.clone());
+        write_byte_pixel(12.5, &mut header);
+        write_byte_pixel(300., &mut header);
+        header.bytes_signed = 1;
+        write_byte_pixel(128., &mut header);
+
+        file.rewind().unwrap();
+        let mut bytes = [0_u8; 3];
+        assert_eq!(
+            crate::imod::libcfshr::b3dutil::b3d_fread(&mut bytes, 1, 3, &mut file),
+            3
+        );
+        assert_eq!(bytes, [13, 255, 0]);
+    }
+
+    #[test]
     fn volume_statistics_follow_slice_magnitudes() {
-        unsafe {
-            let mut first = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
-            let mut second = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
-            slice_put_val(first.as_mut(), 0, 0, [1., 0., 0., 0.]);
-            slice_put_val(first.as_mut(), 1, 0, [4., 0., 0., 0.]);
-            slice_put_val(second.as_mut(), 0, 0, [2., 0., 0., 0.]);
-            slice_put_val(second.as_mut(), 1, 0, [3., 0., 0., 0.]);
-            let mut volume = Istack {
-                slices: vec![first, second],
-            };
-            let (mut min, mut max, mut mean) = (0., 0., 0.);
-            let (mut x, mut y, mut z) = (0, 0, 0);
-            assert_eq!(
-                clip_get_stat3d(
-                    &mut volume,
-                    &mut min,
-                    &mut max,
-                    &mut mean,
-                    &mut x,
-                    &mut y,
-                    &mut z
-                ),
-                0
-            );
-            assert_eq!((min, max, mean), (1., 4., 2.5));
-            assert_eq!((x, y, z), (1, 0, 0));
-        }
+        let mut first = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
+        let mut second = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
+        slice_put_val(first.as_mut(), 0, 0, [1., 0., 0., 0.]);
+        slice_put_val(first.as_mut(), 1, 0, [4., 0., 0., 0.]);
+        slice_put_val(second.as_mut(), 0, 0, [2., 0., 0., 0.]);
+        slice_put_val(second.as_mut(), 1, 0, [3., 0., 0., 0.]);
+        let mut volume = Istack {
+            slices: vec![first, second],
+        };
+        let (mut min, mut max, mut mean) = (0., 0., 0.);
+        let (mut x, mut y, mut z) = (0, 0, 0);
+        assert_eq!(
+            clip_get_stat3d(
+                &mut volume,
+                &mut min,
+                &mut max,
+                &mut mean,
+                &mut x,
+                &mut y,
+                &mut z
+            ),
+            0
+        );
+        assert_eq!((min, max, mean), (1., 4., 2.5));
+        assert_eq!((x, y, z), (1, 0, 0));
     }
 
     #[test]
     fn write_vol_writes_real_mrc_slices_and_source_header_statistics() {
-        unsafe {
-            let mut first = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
-            let mut second = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
-            slice_put_val(first.as_mut(), 0, 0, [1., 0., 0., 0.]);
-            slice_put_val(first.as_mut(), 1, 0, [5., 0., 0., 0.]);
-            slice_put_val(second.as_mut(), 0, 0, [3., 0., 0., 0.]);
-            slice_put_val(second.as_mut(), 1, 0, [7., 0., 0., 0.]);
-            let mut vol = vec![first, second];
-            let mut fp = ImodFile::tmpfile().unwrap();
-            let mut header = MrcHeader::default();
-            assert_eq!(mrc_head_new(&mut header, 2, 1, 2, MRC_MODE_FLOAT), 0);
-            header.fp = Some(fp.clone());
-            assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
-            assert_eq!(write_vol(&mut vol, &mut header), 0);
-            assert_eq!((header.amin, header.amax, header.amean), (1., 7., 4.));
-            use std::io::Seek as _;
-            let _ = fp.rewind();
-            let mut read = MrcHeader::default();
-            assert_eq!(mrc_head_read(&mut fp, &mut read), 0);
-            let mut pixels = [0_f32; 2];
-            assert_eq!(
-                mrc_read_slice(
-                    core::slice::from_raw_parts_mut(
-                        pixels.as_mut_ptr().cast(),
-                        core::mem::size_of_val(&pixels),
-                    ),
-                    &mut fp,
-                    &mut read,
-                    1,
-                    b'z',
-                ),
-                0
-            );
-            assert_eq!(pixels, [3., 7.]);
-            assert_eq!(free_vol(&mut vol, 2), 0);
-        }
+        let mut first = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
+        let mut second = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
+        slice_put_val(first.as_mut(), 0, 0, [1., 0., 0., 0.]);
+        slice_put_val(first.as_mut(), 1, 0, [5., 0., 0., 0.]);
+        slice_put_val(second.as_mut(), 0, 0, [3., 0., 0., 0.]);
+        slice_put_val(second.as_mut(), 1, 0, [7., 0., 0., 0.]);
+        let mut vol = vec![first, second];
+        let mut fp = ImodFile::tmpfile().unwrap();
+        let mut header = MrcHeader::default();
+        assert_eq!(mrc_head_new(&mut header, 2, 1, 2, MRC_MODE_FLOAT), 0);
+        header.fp = Some(fp.clone());
+        assert_eq!(mrc_head_write(&mut fp, &mut header), 0);
+        assert_eq!(write_vol(&mut vol, &mut header), 0);
+        assert_eq!((header.amin, header.amax, header.amean), (1., 7., 4.));
+        use std::io::Seek as _;
+        let _ = fp.rewind();
+        let mut read = MrcHeader::default();
+        assert_eq!(mrc_head_read(&mut fp, &mut read), 0);
+        let mut bytes = [0_u8; core::mem::size_of::<f32>() * 2];
+        assert_eq!(mrc_read_slice(&mut bytes, &mut fp, &mut read, 1, b'z',), 0);
+        let pixels = bytes
+            .chunks_exact(core::mem::size_of::<f32>())
+            .map(|value| f32::from_ne_bytes(value.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(pixels, [3., 7.]);
+        assert_eq!(free_vol(&mut vol, 2), 0);
     }
 }

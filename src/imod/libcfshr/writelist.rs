@@ -3,6 +3,14 @@
 
 use std::io::Write;
 
+pub const WRITELIST_SOURCE_FUNCTIONS: &[&str] = &[
+    "writeList",
+    "writelist",
+    "wrlist",
+    "listToString",
+    "addRangeToLine",
+];
+
 /// Original `writeList` (`writelist.c:23`).
 pub fn write_list(list: &[i32], number_of_values: i32, line_length: i32) -> i32 {
     let Some(line_string) = list_to_string(list, number_of_values) else {
@@ -47,6 +55,9 @@ pub fn wrlist(list: &[i32], number_of_values: &i32) {
 /// memory error; the `String` owns itself and the `None` arm keeps the caller's
 /// error path.
 pub fn list_to_string(list: &[i32], number_of_values: i32) -> Option<String> {
+    if number_of_values <= 0 || number_of_values as usize > list.len() {
+        return None;
+    }
     let mut returned_string: Option<String> = None;
     let mut range_start = list[0];
     for index in 1..number_of_values {
@@ -95,5 +106,11 @@ mod tests {
         let values = [1_i32, 2, 3, 8, 10, 11, 4];
         let text = list_to_string(&values, values.len() as i32);
         assert_eq!(text.as_deref(), Some("1-3,8,10-11,4"));
+    }
+    #[test]
+    fn empty_or_out_of_bounds_owned_inputs_do_not_index_like_c() {
+        assert_eq!(list_to_string(&[], 0), None);
+        assert_eq!(list_to_string(&[1], 2), None);
+        assert_eq!(WRITELIST_SOURCE_FUNCTIONS.len(), 5);
     }
 }

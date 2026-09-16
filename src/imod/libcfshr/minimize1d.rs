@@ -1,5 +1,6 @@
 //! Translation of `IMOD/libcfshr/minimize1D.c`.
 #![allow(dead_code)]
+pub const MINIMIZE1D_SOURCE_FUNCTIONS: &[&str] = &["minimize1D", "minimize1d"];
 
 /// Original `minimize1D` (`minimize1D.c:53`).
 pub fn minimize1d(
@@ -11,6 +12,9 @@ pub fn minimize1d(
     brackets: &mut [f32],
     next_position: &mut f32,
 ) -> i32 {
+    if brackets.len() < 14 {
+        return 1;
+    }
     /* `float *positions = brackets; float *values = brackets + 7;` — the two
     C pointers are disjoint halves of the caller's 14-element array. */
     let (positions, values) = brackets.split_at_mut(7);
@@ -153,5 +157,15 @@ mod tests {
         }
         assert!(cuts > 0);
         assert!((brackets[1] - 1.0).abs() <= 0.25);
+    }
+    #[test]
+    fn source_bracket_precondition_is_safe_in_rust() {
+        let mut cuts = -1;
+        let mut next = 0.;
+        assert_eq!(
+            minimize1d(0., 0., 1., 0, &mut cuts, &mut [0.; 13], &mut next),
+            1
+        );
+        assert_eq!(MINIMIZE1D_SOURCE_FUNCTIONS.len(), 2);
     }
 }

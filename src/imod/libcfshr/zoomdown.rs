@@ -4,7 +4,7 @@
 //! The source passes every image buffer as `unsigned char **slines` /
 //! `void *outData` and casts it to the pixel type named by the run-time
 //! `dtype` argument.  Rust cannot reinterpret a slice's element type without
-//! `unsafe`, so the cast the C defers into the callee is made by the caller
+//! a raw reinterpretation, so the cast the C defers into the callee is made by the caller
 //! here: [`ZoomLines`] and [`ZoomOut`] name the pixel type, and the routines
 //! select the arm that `dtype` calls for.  The same treatment is applied to
 //! the three internal buffers the source addresses through a union or a
@@ -17,11 +17,34 @@
 use crate::imod::libcfshr::b3dutil::{b3d_omp_thread_num, num_omp_threads};
 use core::cell::Cell;
 
-pub type B3dInt16 = i16;
-pub type B3dUInt16 = u16;
-pub type B3dInt32 = i32;
-pub type B3dUInt32 = u32;
-pub type B3dFloat = f32;
+/// Complete non-preprocessor function inventory for `zoomdown.c`.
+pub const ZOOMDOWN_SOURCE_FUNCTIONS: &[&str] = &[
+    "selectZoomFilter",
+    "setFilterStatics",
+    "selectzoomfilter",
+    "selectZoomFilterXY",
+    "selectzoomfilterXY",
+    "setZoomValueScaling",
+    "zoomWithFilter",
+    "zoomwithfilter",
+    "zoomFiltInterp",
+    "zoomfiltinterp",
+    "zoomFiltValue",
+    "zoomfiltvalue",
+    "zoomRawFiltValue",
+    "interpLimits",
+    "scanline_accum",
+    "scanline_filter",
+    "scanline_remap",
+    "make_weighttab",
+    "filt_binning",
+    "mitchell_init",
+    "filt_mitchell",
+    "filt_blackman",
+    "filt_triangle",
+    "filt_lanczos2",
+    "filt_lanczos3",
+];
 
 /// Original `fn_proc` (`zoomdown.c:70`).
 pub type FnProc = fn(f64) -> f64;
@@ -618,6 +641,31 @@ pub fn zoomwithfilter(
     b_xoff: &i32,
     out_data: &mut [f32],
 ) -> i32 {
+    let Some(last_column) = b_xoff.checked_add(*b_xsize) else {
+        return 4;
+    };
+    if *a_xsize <= 0
+        || *a_ysize <= 0
+        || *b_xsize <= 0
+        || *b_ysize <= 0
+        || *b_xdim <= 0
+        || *b_xoff < 0
+        || last_column > *b_xdim
+    {
+        return 4;
+    }
+    let Some(input_len) = a_xsize.checked_mul(*a_ysize) else {
+        return 4;
+    };
+    let Some(output_len) = b_xdim
+        .checked_mul(*b_ysize - 1)
+        .and_then(|last_row| last_row.checked_add(last_column))
+    else {
+        return 4;
+    };
+    if array.len() < input_len as usize || out_data.len() < output_len as usize {
+        return 4;
+    }
     // `makeLinePointers(array, *aXsize, *aYsize, 4)` (`b3dutil.c:1269`) hands
     // back raw line pointers; a vector of line slices is the same thing and
     // cannot fail, so the source's `if (!linePtrs) return 5` is unreachable.
@@ -1509,5 +1557,17 @@ mod tests {
             0
         );
         assert_eq!(output, [3.5, 5.5, 11.5, 13.5]);
+    }
+
+    #[test]
+    fn owned_wrapper_rejects_short_or_inconsistent_storage() {
+        let mut width = 0;
+        assert_eq!(select_zoom_filter(0, 0.5, &mut width), 0);
+        let mut output = [0.0_f32; 3];
+        assert_eq!(
+            zoomwithfilter(&[1.0; 4], &2, &2, &0.0, &0.0, &2, &2, &2, &0, &mut output),
+            4
+        );
+        assert_eq!(ZOOMDOWN_SOURCE_FUNCTIONS.len(), 25);
     }
 }

@@ -21,16 +21,16 @@ pub struct Lweights {
 /// Rust cannot hold that alias, so the `Box` moves in here and
 /// [`lpi_destroy`] hands it back.
 pub struct Lpi {
-    pub d: Box<Delaunay>,
+    pub d: Delaunay,
     pub weights: Vec<Lweights>,
 }
 
 /// Original `lpi_build` (`lpi.c:51`).
-pub fn lpi_build(d: Box<Delaunay>) -> Box<Lpi> {
-    let mut l = Box::new(Lpi {
+pub fn lpi_build(d: Delaunay) -> Lpi {
+    let mut l = Lpi {
         d,
         weights: Vec::new(),
-    });
+    };
 
     l.weights = vec![Lweights::default(); l.d.ntriangles as usize];
 
@@ -75,7 +75,7 @@ pub fn lpi_build(d: Box<Delaunay>) -> Box<Lpi> {
 ///
 /// `free(l->weights); free(l);` — and the triangulation the C left alone comes
 /// back out, because ownership of it had to move in.
-pub fn lpi_destroy(l: Box<Lpi>) -> Box<Delaunay> {
+pub fn lpi_destroy(l: Lpi) -> Delaunay {
     l.d
 }
 

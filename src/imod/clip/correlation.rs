@@ -23,19 +23,19 @@ pub fn corr_getmax(islice: &mut Islice, sa: i32, xm: i32, ym: i32, x: &mut f32, 
     let Some(mut slice) = slice_box(islice, xm - sa, ym - sa, xm + sa + 1, ym + sa + 1) else {
         return;
     };
-    slice_mmm(slice.as_mut());
+    slice_mmm(&mut slice);
     let min = slice.min;
-    slice_add_const(slice.as_mut(), [-min, 0., 0., 0.]);
-    slice_mmm(slice.as_mut());
+    slice_add_const(&mut slice, [-min, 0., 0., 0.]);
+    slice_mmm(&mut slice);
     let max = slice.max;
-    slice_add_const(slice.as_mut(), [-max + max * 0.025, 0., 0., 0.]);
+    slice_add_const(&mut slice, [-max + max * 0.025, 0., 0., 0.]);
     *x = xm as f32;
     *y = ym as f32;
     let mut row = 0.;
     let mut weight = 0.;
     for ix in 0..slice.xsize {
         for iy in 0..slice.ysize {
-            let value = slice_get_pixel_magnitude(slice.as_mut(), ix, iy);
+            let value = slice_get_pixel_magnitude(&slice, ix, iy);
             if value > 0. {
                 row += (ix + 1) as f32 * value;
                 weight += value;
@@ -49,7 +49,7 @@ pub fn corr_getmax(islice: &mut Islice, sa: i32, xm: i32, ym: i32, x: &mut f32, 
     weight = 0.;
     for ix in 0..slice.xsize {
         for iy in 0..slice.ysize {
-            let value = slice_get_pixel_magnitude(slice.as_mut(), ix, iy);
+            let value = slice_get_pixel_magnitude(&slice, ix, iy);
             if value > 0. {
                 row += (iy + 1) as f32 * value;
                 weight += value;
@@ -77,7 +77,7 @@ pub fn clip_padcorr(slice: &mut Islice, pad: i32) {
     );
 }
 /// Matches C++ `clip_slice_corr`.
-pub fn clip_slice_corr(slice1: &mut Islice, slice2: Option<&mut Islice>) -> Option<Box<Islice>> {
+pub fn clip_slice_corr(slice1: &mut Islice, slice2: Option<&mut Islice>) -> Option<Islice> {
     if slice1.mode != MRC_MODE_COMPLEX_FLOAT {
         if slice_float(slice1) < 0 {
             return None;
@@ -238,9 +238,7 @@ pub fn clip_corr3d(
     // original; nothing below writes through either copy's vectors, so a
     // clone is the same thing with Rust's ownership.
     let mut second_options = options.clone();
-    let Some(mut first) =
-        (unsafe { crate::imod::clip::file_io::grap_volume_read(input1, options) })
-    else {
+    let Some(mut first) = crate::imod::clip::file_io::grap_volume_read(input1, options) else {
         return -1;
     };
     let (mut min, mut max, mut mean) = (0_f32, 0_f32, 0_f32);
@@ -284,8 +282,7 @@ pub fn clip_corr3d(
         None
     } else {
         let _ = ImodFile::Stdout.write_all(b"Cross-Correlation\n");
-        let Some(mut v) =
-            (unsafe { crate::imod::clip::file_io::grap_volume_read(input2, &mut second_options) })
+        let Some(mut v) = crate::imod::clip::file_io::grap_volume_read(input2, &mut second_options)
         else {
             return -1;
         };
@@ -459,7 +456,7 @@ pub fn clip_corr3d(
     );
     output.fp = fp.clone();
     mrc_head_label(&mut *output, b"Clip: 3D Correlation");
-    unsafe { crate::imod::clip::file_io::grap_volume_write(&mut first, output, options) }
+    crate::imod::clip::file_io::grap_volume_write(&mut first, output, options)
 }
 /// C++ `grap_3dcorr` (`correlation.cpp:319`).
 pub fn grap_3dcorr(
@@ -919,7 +916,7 @@ pub fn padfloat_volume(volume: &mut Istack, pad: f32) -> i32 {
     }
     for slice in &mut volume.slices {
         slice.mean = pad;
-        if slice_resize_in(slice.as_mut(), xsize, ysize) != 0 || slice_float(slice.as_mut()) != 0 {
+        if slice_resize_in(slice, xsize, ysize) != 0 || slice_float(slice) != 0 {
             return -1;
         }
     }
@@ -1040,38 +1037,38 @@ mod tests {
     fn padding_updates_an_owned_slice_in_place() {
         let mut slice = slice_create(2, 2, MRC_MODE_FLOAT).unwrap();
         slice.mean = -3.5;
-        slice_put_val(slice.as_mut(), 0, 0, [1., 0., 0., 0.]);
-        slice_put_val(slice.as_mut(), 1, 0, [2., 0., 0., 0.]);
-        slice_put_val(slice.as_mut(), 0, 1, [3., 0., 0., 0.]);
-        slice_put_val(slice.as_mut(), 1, 1, [4., 0., 0., 0.]);
-        clip_padcorr(slice.as_mut(), 1);
+        slice_put_val(slice, 0, 0, [1., 0., 0., 0.]);
+        slice_put_val(slice, 1, 0, [2., 0., 0., 0.]);
+        slice_put_val(slice, 0, 1, [3., 0., 0., 0.]);
+        slice_put_val(slice, 1, 1, [4., 0., 0., 0.]);
+        clip_padcorr(slice, 1);
         // correlation.cpp boxes [-x/2, x+x/2+2) by [-y/2, y+y/2), hence a
         // 2 by 2 image becomes 6 by 4.  The original pixels are offset by
         // one in both directions and out-of-bounds pixels get the slice mean.
         assert_eq!((slice.xsize, slice.ysize), (6, 4));
         assert_eq!(slice.data.len(), 6 * 4 * size_of::<f32>());
         let mut value = [0.; 4];
-        slice_get_val(slice.as_mut(), 0, 0, &mut value);
+        slice_get_val(slice, 0, 0, &mut value);
         assert_eq!(value[0], -3.5);
-        slice_get_val(slice.as_mut(), 1, 1, &mut value);
+        slice_get_val(slice, 1, 1, &mut value);
         assert_eq!(value[0], 1.);
-        slice_get_val(slice.as_mut(), 2, 2, &mut value);
+        slice_get_val(slice, 2, 2, &mut value);
         assert_eq!(value[0], 4.);
     }
 
     #[test]
     fn volume_scaling_decodes_owned_float_bytes() {
         let mut slice = slice_create(2, 1, MRC_MODE_FLOAT).unwrap();
-        slice_put_val(slice.as_mut(), 0, 0, [2., 0., 0., 0.]);
-        slice_put_val(slice.as_mut(), 1, 0, [4., 0., 0., 0.]);
+        slice_put_val(slice, 0, 0, [2., 0., 0., 0.]);
+        slice_put_val(slice, 1, 0, [4., 0., 0., 0.]);
         let mut volume = Istack {
             slices: vec![slice],
         };
         assert_eq!(clip_cor_scalevol(&mut volume), 0);
         let mut value = [0.; 4];
-        slice_get_val(volume.slices[0].as_mut(), 0, 0, &mut value);
+        slice_get_val(&mut volume.slices[0], 0, 0, &mut value);
         assert_eq!(value[0], 1.);
-        slice_get_val(volume.slices[0].as_mut(), 1, 0, &mut value);
+        slice_get_val(&mut volume.slices[0], 1, 0, &mut value);
         assert_eq!(value[0], 2.);
     }
 
@@ -1080,6 +1077,6 @@ mod tests {
         let mut slice = slice_create(1, 1, MRC_MODE_COMPLEX_FLOAT).unwrap();
         slice.data.pop();
 
-        assert!(clip_slice_corr(slice.as_mut(), None).is_none());
+        assert!(clip_slice_corr(slice, None).is_none());
     }
 }

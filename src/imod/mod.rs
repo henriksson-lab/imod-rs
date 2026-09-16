@@ -14,5 +14,6 @@ pub mod midas;
 pub mod mrc;
 pub mod pysrc;
 pub mod qttools;
+pub mod raptor;
 #[path = "3dmod/mod.rs"]
 pub mod three_dmod;

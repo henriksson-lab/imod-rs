@@ -3,6 +3,7 @@
 
 /// C `MSIZ` (`gaussj.c:26`).
 const MSIZ: i32 = 2000;
+pub const GAUSSJ_SOURCE_FUNCTIONS: &[&str] = &["gaussj", "gaussjDet", "gaussjfw", "gaussjdet"];
 
 /// Original `gaussj` (`gaussj.c:40`).
 ///
@@ -30,6 +31,15 @@ pub fn gaussj_det(
     mp: i32,
     determ: &mut f32,
 ) -> i32 {
+    if n < 0
+        || np < n
+        || m < 0
+        || mp < m
+        || a.len() < n as usize * np as usize
+        || b.len() < n as usize * mp as usize
+    {
+        return 1;
+    }
     let mut index = [[0i16; 2]; MSIZ as usize];
     let mut pivot = [0f32; MSIZ as usize];
     let mut ipivot = [0i16; MSIZ as usize];
@@ -165,5 +175,7 @@ mod tests {
         assert!((right_hand[1] + 29.0 / 9.0).abs() < 1.0e-5);
         assert_eq!(determinant, 9.0);
         assert_eq!(gaussj(&mut [], 2001, 0, &mut [], 0, 0), -1);
+        assert_eq!(gaussj(&mut [], 2, 2, &mut [], 1, 1), 1);
+        assert_eq!(GAUSSJ_SOURCE_FUNCTIONS.len(), 4);
     }
 }

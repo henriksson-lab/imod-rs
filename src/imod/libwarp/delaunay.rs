@@ -99,8 +99,8 @@ pub struct Delaunay {
 }
 
 /// Original static `delaunay_create` (`delaunay.c:127`).
-fn delaunay_create() -> Box<Delaunay> {
-    let d = Box::new(Delaunay {
+fn delaunay_create() -> Delaunay {
+    let d = Delaunay {
         npoints: 0,
         points: Vec::new(),
         xmin: f64::MAX,
@@ -122,7 +122,7 @@ fn delaunay_create() -> Box<Delaunay> {
         nflags: 0,
         nflagsallocated: 0,
         flagids: Vec::new(),
-    });
+    };
 
     d
 }
@@ -281,7 +281,7 @@ pub fn delaunay_build(
     _segments: Option<&[i32]>,
     nh: i32,
     holes: Option<&[f64]>,
-) -> Option<Box<Delaunay>> {
+) -> Option<Delaunay> {
     let mut d = delaunay_create();
     let mut tio_in = HullIo {
         pointlist: Vec::new(),
@@ -344,7 +344,7 @@ pub fn delaunay_build(
 }
 
 /// Original `delaunay_destroy` (`delaunay.c:372`).
-pub fn delaunay_destroy(d: Option<Box<Delaunay>>) {
+pub fn delaunay_destroy(d: Option<Delaunay>) {
     if d.is_none() {
         return;
     }
@@ -455,8 +455,8 @@ pub fn delaunay_circles_find(d: &mut Delaunay, p: &Point, n: &mut i32, out: &mut
     let mut i: i32;
 
     if d.t_in.is_none() {
-        d.t_in = Some(*istack_create());
-        d.t_out = Some(*istack_create());
+        d.t_in = Some(istack_create());
+        d.t_out = Some(istack_create());
     }
 
     /*

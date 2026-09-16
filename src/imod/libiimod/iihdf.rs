@@ -460,7 +460,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
                 }
             }
             if retval == 0 {
-                (*volume).mrc_header = Some(Box::default());
+                (*volume).mrc_header = Some(MrcHeader::default());
             }
             if retval != 0 || (*volume).mrc_header.is_none() {
                 cleanup_from_open(&mut state, file_id, 1, (*in_file).num_volumes, in_file);
@@ -790,7 +790,7 @@ pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
             (*volume).mode = mode;
             let hdata = (*volume)
                 .mrc_header
-                .as_deref_mut()
+                .as_mut()
                 .expect("HDF header is present");
             mrc_head_new(hdata, (*volume).nx, (*volume).ny, (*volume).nz, mode);
             hdata.bytes_signed = if (*volume).type_ == IITYPE_BYTE { 1 } else { 0 };
@@ -1363,7 +1363,7 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
             let volume_ptr = volume_ptr.as_ptr();
             (*volume_ptr).adoc_index = adoc_new();
             (*volume_ptr).global_adoc_index = (*in_file).global_adoc_index;
-            (*volume_ptr).mrc_header = Some(Box::default());
+            (*volume_ptr).mrc_header = Some(MrcHeader::default());
             (*volume_ptr).fmode = (*in_file).fmode.clone();
             if (*volume_ptr).mrc_header.is_none() || (*volume_ptr).adoc_index < 0 {
                 return 1;
@@ -1371,7 +1371,7 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
             set_io_funcs_plus(volume_ptr, IIHDF_IMOD, 1, (*in_file).hdf_file_id);
             let header = (*in_file)
                 .mrc_header
-                .as_deref_mut()
+                .as_mut()
                 .expect("HDF header is present");
             mrc_head_new(header, 1, 1, 1, 0);
             header.packed4bits = 0;
@@ -1380,7 +1380,7 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
             return 0;
         }
         (*in_file).adoc_index = adoc_new();
-        (*in_file).mrc_header = Some(Box::default());
+        (*in_file).mrc_header = Some(MrcHeader::default());
         (*in_file).ii_volumes = vec![Some(NonNull::new_unchecked(in_file))];
         let mut error = (*in_file).mrc_header.is_none() || (*in_file).adoc_index < 0;
         let mut file_id = -1;
@@ -1422,7 +1422,7 @@ pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
         set_io_funcs_plus(in_file, IIHDF_IMOD, 1, file_id);
         let header = (*in_file)
             .mrc_header
-            .as_deref_mut()
+            .as_mut()
             .expect("HDF header is present");
         mrc_head_new(header, 1, 1, 1, 0);
         header.packed4bits = 0;
@@ -1564,7 +1564,7 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
     {
         return 1;
     }
-    let Some(hdata) = (*in_file).mrc_header.as_deref_mut() else {
+    let Some(hdata) = (*in_file).mrc_header.as_mut() else {
         return 1;
     };
     if hdf_sync_from_mrc_header(in_file, hdata) != 0 {
@@ -1798,7 +1798,7 @@ pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
 /// C `hdfSyncFromMrcHeader` (`iihdf.c:1484`).
 unsafe fn hdf_sync_from_mrc_header(in_file: *mut ImodImageFile, hdata: *mut MrcHeader) -> i32 {
     if !in_file.is_null() && !hdata.is_null() {
-        if let Some(header) = (*in_file).mrc_header.as_deref_mut() {
+        if let Some(header) = (*in_file).mrc_header.as_mut() {
             if !core::ptr::eq(header, hdata) {
                 *header = (*hdata).clone();
             }
@@ -1989,7 +1989,7 @@ unsafe fn set_io_funcs_plus(
     f.hdf_file_id = file_id;
     f.file = IIFILE_HDF;
     f.fp = Some(ImodFile::Token(in_file as usize));
-    if let Some(header) = f.mrc_header.as_deref_mut() {
+    if let Some(header) = f.mrc_header.as_mut() {
         header.fp = f.fp.clone();
     }
     f.read_section = Some(hdf_read_section);

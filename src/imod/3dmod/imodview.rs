@@ -99,7 +99,7 @@ pub struct IvwSlice {
     pub cz: i32,
     pub ct: i32,
     pub used: i32,
-    pub sec: Box<Islice>,
+    pub sec: Islice,
 }
 
 /// C `struct imod_showslice_struct` (`imodP.h:106`).
@@ -5215,7 +5215,7 @@ unsafe fn ivw_process_image_list(vi: *mut ImodView) -> i32 {
                 // with at least 2 volumes
                 let header = (*image)
                     .mrc_header
-                    .as_deref()
+                    .as_ref()
                     .expect("MRC image has an owned header");
                 if header.ispg == 401 && header.nz / header.mz > 1 {
                     zsize = header.mz;
@@ -5401,7 +5401,7 @@ unsafe fn get_valid_scale(
 
         // The RMS is valid if it is positive or if 0 is supposed to be valid due to flags
         if (*image).file == IIFILE_MRC && (*image).rms == 0. {
-            if let Some(hdata) = (*image).mrc_header.as_deref() {
+            if let Some(hdata) = (*image).mrc_header.as_ref() {
                 rms_valid = mrc_get_standard_version(Some(hdata)) > 0
                     || (hdata.imod_stamp == IMOD_MRC_STAMP
                         && (hdata.imod_flags | MRC_FLAGS_BAD_RMS_NEG) != 0);
@@ -7746,7 +7746,7 @@ mod tests {
         image.amax = 199.971176;
         image.amean = 100.451;
         image.rms = 0.;
-        image.mrc_header = Some(Box::new(MrcHeader::default()));
+        image.mrc_header = Some(MrcHeader::default());
         let mut min = 0.0f32;
         let mut max = 0.0f32;
         let ret = unsafe { get_valid_scale(&mut image, Some(&mut min), Some(&mut max)) };
@@ -7774,7 +7774,7 @@ mod tests {
         image.amax = 10.;
         image.amean = 5.;
         image.rms = 0.;
-        image.mrc_header = Some(Box::new(header));
+        image.mrc_header = Some(header);
         // With a valid min/max the preference decides; the default preference
         // is min/max, so the return is still 1, but mean/SD is now available.
         assert_eq!(unsafe { get_valid_scale(&mut image, None, None) }, 1);

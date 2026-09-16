@@ -19,12 +19,12 @@ pub struct Istack {
 }
 
 /// Original `istack_create` (`istack.c:28`).
-pub fn istack_create() -> Box<Istack> {
-    let mut s = Box::new(Istack {
+pub fn istack_create() -> Istack {
+    let mut s = Istack {
         n: 0,
         nallocated: 0,
         v: Vec::new(),
-    });
+    };
 
     s.n = 0;
     s.nallocated = STACK_NSTART;
@@ -35,9 +35,10 @@ pub fn istack_create() -> Box<Istack> {
 }
 
 /// Original `istack_destroy` (`istack.c:38`).
-pub fn istack_destroy(s: Option<Box<Istack>>) {
+pub fn istack_destroy(s: Option<Istack>) {
     if s.is_some() {
-        // `free(s->v)` then `free(s)`.
+        // Dropping the owned vector is the source's `free(s->v)` then
+        // `free(s)`.
         drop(s);
     }
 }

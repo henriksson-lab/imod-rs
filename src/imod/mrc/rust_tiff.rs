@@ -347,7 +347,7 @@ mod implementation {
         let Some((width, height, bits, type_, rgb)) = first else {
             return 1;
         };
-        let mut iifile = Box::new(ImodImageFile::default());
+        let mut iifile = ImodImageFile::default();
         iifile.xscale = 1.0;
         iifile.yscale = 1.0;
         iifile.zscale = 1.0;

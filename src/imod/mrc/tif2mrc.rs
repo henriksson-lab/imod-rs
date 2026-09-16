@@ -99,7 +99,7 @@ fn manage_mode(
             || (force_signed == 0
                 && tiff
                     .iifile
-                    .as_deref()
+                    .as_ref()
                     .is_some_and(|file| file.type_ == IITYPE_USHORT)))
     {
         *mode = MRC_MODE_USHORT;
@@ -636,7 +636,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         }
 
         tiffp = tiff.fp.clone().unwrap();
-        if let Some(iifile) = tiff.iifile.as_deref() {
+        if let Some(iifile) = tiff.iifile.as_ref() {
             tiff_pages = iifile.nz;
         } else {
             tiff_pages = tiff_ifd_number(&mut tiffp);
@@ -727,7 +727,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 };
 
                 if tiff.photometric_interpretation == 3 {
-                    expand_index_to_rgb(&mut tifdata, tiff.iifile.as_deref(), in_section);
+                    expand_index_to_rgb(&mut tifdata, tiff.iifile.as_ref(), in_section);
                 }
 
                 /* convert RGB to gray scale */
@@ -736,7 +736,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 }
 
                 /* Convert long ints to floats */
-                convert_long_to_float(&mut tifdata, tiff.iifile.as_deref());
+                convert_long_to_float(&mut tifdata, tiff.iifile.as_ref());
 
                 mean += minmaxmean(
                     &mut tifdata,
@@ -770,7 +770,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 );
             }
             /* write more info to mrc header. 1/17/04 eliminate unneeded rewind */
-            if let Some(iifile) = tiff.iifile.as_deref().filter(|_| pixel_entered == 0) {
+            if let Some(iifile) = tiff.iifile.as_ref().filter(|_| pixel_entered == 0) {
                 pixel_size = iifile.xscale;
                 y_pixel_size = iifile.yscale;
             }
@@ -916,7 +916,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         tiffp = tiff.fp.clone().unwrap();
         k = manage_tvipsdata(
             &mut tvips_metadata,
-            tiff.iifile.as_deref(),
+            tiff.iifile.as_ref(),
             &mut label,
             &mut tilt_angle,
         );
@@ -935,7 +935,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
         num_chunks = 1;
         lines_per_chunk = 0;
         lines_done = 0;
-        if let Some(iifile) = tiff.iifile.as_deref().filter(|_| bg == 0) {
+        if let Some(iifile) = tiff.iifile.as_ref().filter(|_| bg == 0) {
             xsize = iifile.nx;
             ysize = iifile.ny;
             k = if tiff.photometric_interpretation == 2 {
@@ -969,7 +969,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 } else {
                     ysize - lines_done
                 };
-                let iifile = tiff.iifile.as_deref_mut().unwrap();
+                let iifile = tiff.iifile.as_mut().unwrap();
                 iifile.lly = lines_done;
                 iifile.ury = lines_done + nlines - 1;
                 lines_done += nlines;
@@ -1005,7 +1005,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
                 );
 
                 /* Collect the pixel size the first time */
-                if let Some(iifile) = tiff.iifile.as_deref().filter(|_| pixel_entered == 0) {
+                if let Some(iifile) = tiff.iifile.as_ref().filter(|_| pixel_entered == 0) {
                     pixel_size = iifile.xscale;
                     y_pixel_size = iifile.yscale;
                 }
@@ -1024,7 +1024,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             }
 
             if tiff.photometric_interpretation == 3 {
-                expand_index_to_rgb(&mut tifdata, tiff.iifile.as_deref(), 0);
+                expand_index_to_rgb(&mut tifdata, tiff.iifile.as_ref(), 0);
             }
 
             /* convert RGB to gray scale */
@@ -1033,7 +1033,7 @@ pub fn tif2mrc(arguments: &[String]) -> i32 {
             }
 
             /* Convert long ints to floats */
-            convert_long_to_float(&mut tifdata, tiff.iifile.as_deref());
+            convert_long_to_float(&mut tifdata, tiff.iifile.as_ref());
 
             /* Correct for bg */
             if bg != 0 {
@@ -1302,7 +1302,7 @@ mod tests {
         image.type_ = IITYPE_USHORT;
         let mut tiff = TfInfo::default();
         tiff.bits_per_sample = 16;
-        tiff.iifile = Some(Box::new(image));
+        tiff.iifile = Some(image);
         let mut pixel_size = 0;
         let mut mode = 0;
         manage_mode(&tiff, 0, 0, 0, &mut pixel_size, &mut mode);

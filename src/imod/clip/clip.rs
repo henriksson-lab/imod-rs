@@ -1323,12 +1323,8 @@ WARNING: This file is not a readable MRC file.\n\
         && options.infiles == 2
         && options.read_defects == 0
     {
-        let ii_file = second.fp.as_ref().and_then(iimage::ii_lookup_file_from_fp);
-        if let Some(ii_file) = ii_file
-            && unsafe { (*ii_file).file } == iimage::IIFILE_TIFF
-            && unsafe { crate::imod::libiimod::iitif::tiff_get_array(&mut *ii_file, 65_100) }
-                .is_ok()
-        {
+        let second_fp = second.fp.as_ref().unwrap();
+        if iimage::ii_tiff_has_tag(second_fp, 65_100) {
             let super_fac;
             if input.nx >= second.nx {
                 super_fac = input.nx / second.nx;
@@ -1376,9 +1372,8 @@ WARNING: This file is not a readable MRC file.\n\
             // `clip.cpp:781` hands `viewcmd` to CorDefProcessFeiDefects as the
             // 1024-byte message buffer, with a 1000-byte usable length.
             let mut message = String::new();
-            let ii_file = unsafe { ii_file.as_mut().unwrap() };
-            if crate::imod::clip::correct_defects::cor_def_process_fei_defects(
-                ii_file,
+            if crate::imod::clip::correct_defects::cor_def_process_fei_defects_from_fp(
+                second_fp,
                 &mut options.defects,
                 second.nx,
                 second.ny,
@@ -1467,64 +1462,56 @@ WARNING: This file is not a readable MRC file.\n\
     if matches!(process, IP_LOGARITHM | IP_FLATFIELD) && options.mode == IP_DEFAULT {
         options.mode = mrcfiles::MRC_MODE_FLOAT;
     }
-    // Every process routine is still an `unsafe fn`: they hand `Islice` and
-    // `Istack` pointers to `libcfshr::islice`, which has not converted yet.
-    let retval = unsafe {
-        match process {
-            IP_ADD | IP_AVERAGE | IP_VARIANCE | IP_STANDEV | IP_SUBTRACT => {
-                processing::clip_average(&mut input, &mut second, &mut output, &mut options)
-            }
-            IP_MULTIPLY | IP_DIVIDE => {
-                processing::clip_multdiv(&mut input, &mut second, &mut output, &mut options)
-            }
-            IP_UNPACK | IP_NORMALIZE => {
-                processing::clip_unpack(&mut input, &mut second, &mut output, &mut options)
-            }
-            IP_DEFECTMAP => processing::clip_defect_map(&mut input, &mut output, &mut options),
-            IP_SUPERGAIN => {
-                // `clip.cpp:880` passes `hout.fp` by value; the `Rc` clone shares
-                // the same open file, as the C's copied `FILE *` does.
-                let mut fp = output.fp.clone().unwrap();
-                processing::clip_super_gain(&mut input, &mut fp, &mut options)
-            }
-            IP_BLANKFILE => processing::clip_blank_file(&mut output, &mut options),
-            IP_BRIGHTNESS | IP_CONTRAST | IP_SHADOW | IP_RESIZE | IP_THRESHOLD | IP_TRUNCATE
-            | IP_UNWRAP | IP_LOGARITHM | IP_SQROOT | IP_INTEGRAL | IP_BOXSD => {
-                processing::clip_scaling(&mut input, &mut output, &mut options)
-            }
-            IP_COLOR => processing::clip_color(&mut input, &mut output, &mut options),
-            IP_QUADRANT => processing::clip_quadrant(&mut input, &mut output, &mut options),
-            IP_PLANARFIT | IP_FLATFIELD => {
-                processing::clip_planar_fit(&mut input, &mut output, &mut options)
-            }
-            IP_SPECTRUM => processing::clip_spectrum(&mut input, &mut output, &mut options),
-            IP_FILLEDGE => {
-                processing::fill_drift_corrected_edges(&mut input, &mut output, &mut options)
-            }
-            IP_CORRELATE => {
-                correlation::grap_corr(&mut input, &mut second, &mut output, &mut options)
-            }
-            IP_DIFFUSION => processing::clip_diffusion(&mut input, &mut output, &mut options),
-            IP_GRADIENT | IP_GRAHAM | IP_PREWITT | IP_SOBEL => {
-                processing::clip_edge(&mut input, &mut output, &mut options)
-            }
-            IP_INFO => crate::imod::clip::file_io::mrc_head_print(&input),
-            IP_FFT => fft::clip_fft(&mut input, &mut output, &mut options),
-            IP_FILTER => filter::clip_bandpass_filter(&mut input, &mut output, &mut options),
-            IP_FLIP => processing::clip_flip(&mut input, &mut output, &mut options),
-            IP_HISTOGRAM => processing::clip_histogram(&mut input, &mut options),
-            IP_JOINRGB => {
-                processing::clip_joinrgb(&mut input, &mut second, &mut output, &mut options)
-            }
-            IP_LAPLACIAN | IP_SMOOTH | IP_SHARPEN => {
-                processing::clip_convolve(&mut input, &mut output, &mut options)
-            }
-            IP_MEDIAN => processing::clip_median(&mut input, &mut output, &mut options, &[], 0, 0),
-            IP_SPLITRGB => processing::clip_splitrgb(&mut input, &mut options),
-            IP_STAT => processing::clip_stat(&mut input, &mut options),
-            _ => {
-                exit_error(b"No process selected.");
-            }
+    let retval = match process {
+        IP_ADD | IP_AVERAGE | IP_VARIANCE | IP_STANDEV | IP_SUBTRACT => {
+            processing::clip_average(&mut input, &mut second, &mut output, &mut options)
+        }
+        IP_MULTIPLY | IP_DIVIDE => {
+            processing::clip_multdiv(&mut input, &mut second, &mut output, &mut options)
+        }
+        IP_UNPACK | IP_NORMALIZE => {
+            processing::clip_unpack(&mut input, &mut second, &mut output, &mut options)
+        }
+        IP_DEFECTMAP => processing::clip_defect_map(&mut input, &mut output, &mut options),
+        IP_SUPERGAIN => {
+            // `clip.cpp:880` passes `hout.fp` by value; the `Rc` clone shares
+            // the same open file, as the C's copied `FILE *` does.
+            let mut fp = output.fp.clone().unwrap();
+            processing::clip_super_gain(&mut input, &mut fp, &mut options)
+        }
+        IP_BLANKFILE => processing::clip_blank_file(&mut output, &mut options),
+        IP_BRIGHTNESS | IP_CONTRAST | IP_SHADOW | IP_RESIZE | IP_THRESHOLD | IP_TRUNCATE
+        | IP_UNWRAP | IP_LOGARITHM | IP_SQROOT | IP_INTEGRAL | IP_BOXSD => {
+            processing::clip_scaling(&mut input, &mut output, &mut options)
+        }
+        IP_COLOR => processing::clip_color(&mut input, &mut output, &mut options),
+        IP_QUADRANT => processing::clip_quadrant(&mut input, &mut output, &mut options),
+        IP_PLANARFIT | IP_FLATFIELD => {
+            processing::clip_planar_fit(&mut input, &mut output, &mut options)
+        }
+        IP_SPECTRUM => processing::clip_spectrum(&mut input, &mut output, &mut options),
+        IP_FILLEDGE => {
+            processing::fill_drift_corrected_edges(&mut input, &mut output, &mut options)
+        }
+        IP_CORRELATE => correlation::grap_corr(&mut input, &mut second, &mut output, &mut options),
+        IP_DIFFUSION => processing::clip_diffusion(&mut input, &mut output, &mut options),
+        IP_GRADIENT | IP_GRAHAM | IP_PREWITT | IP_SOBEL => {
+            processing::clip_edge(&mut input, &mut output, &mut options)
+        }
+        IP_INFO => crate::imod::clip::file_io::mrc_head_print(&input),
+        IP_FFT => fft::clip_fft(&mut input, &mut output, &mut options),
+        IP_FILTER => filter::clip_bandpass_filter(&mut input, &mut output, &mut options),
+        IP_FLIP => processing::clip_flip(&mut input, &mut output, &mut options),
+        IP_HISTOGRAM => processing::clip_histogram(&mut input, &mut options),
+        IP_JOINRGB => processing::clip_joinrgb(&mut input, &mut second, &mut output, &mut options),
+        IP_LAPLACIAN | IP_SMOOTH | IP_SHARPEN => {
+            processing::clip_convolve(&mut input, &mut output, &mut options)
+        }
+        IP_MEDIAN => processing::clip_median(&mut input, &mut output, &mut options, &[], 0, 0),
+        IP_SPLITRGB => processing::clip_splitrgb(&mut input, &mut options),
+        IP_STAT => processing::clip_stat(&mut input, &mut options),
+        _ => {
+            exit_error(b"No process selected.");
         }
     };
     if retval != 0 {

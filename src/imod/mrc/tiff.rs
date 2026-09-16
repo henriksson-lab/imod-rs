@@ -81,10 +81,10 @@ pub struct TfInfo {
     pub directory: [TfEntry; 7],
     pub next_ifd: i32,
     pub imageinfo: ImInfo,
-    /// The optional libtiff-backed reader for this legacy decoder.  This is
-    /// crate-owned state, so retain its `Box` rather than leaking it through
-    /// `ii_new` and later reconstructing ownership from a raw pointer.
-    pub iifile: Option<Box<crate::imod::libiimod::iimage::ImodImageFile>>,
+    /// The optional libtiff-backed reader for this legacy decoder.  It is
+    /// wholly owned by this reader state and does not require a second heap
+    /// allocation.
+    pub iifile: Option<crate::imod::libiimod::iimage::ImodImageFile>,
     pub fp: Option<ImodFile>,
     /// Eagerly decoded pages for the opt-in Rust TIFF reader.  Keeping them
     /// with the reader state makes their lifetime explicit; the legacy reader
@@ -462,8 +462,7 @@ pub fn tiff_read_section(fp: &mut ImodFile, tif: &mut TfInfo, section: i32) -> O
     if let Some(iifile) = tif.iifile.as_mut() {
         // `tiff.c` delegates library-backed data to iiReadSection or
         // tiffReadSection; the native iimage dispatch owns that choice.
-        if crate::imod::libiimod::iimage::ii_read_section(iifile.as_mut(), &mut data, section) != 0
-        {
+        if crate::imod::libiimod::iimage::ii_read_section(iifile, &mut data, section) != 0 {
             return None;
         }
         return Some(data);
@@ -607,9 +606,7 @@ pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pix
     if tif.fp.is_none() {
         return 1;
     }
-    tif.iifile = Some(Box::new(
-        crate::imod::libiimod::iimage::ImodImageFile::default(),
-    ));
+    tif.iifile = Some(crate::imod::libiimod::iimage::ImodImageFile::default());
     if let Some(iifile) = tif.iifile.as_mut() {
         iifile.xscale = 1.0;
         iifile.yscale = 1.0;
@@ -637,7 +634,7 @@ pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pix
         iifile.fp = crate::imod::libcfshr::b3dutil::ImodFile::open(&path, mode);
         iifile.filename = Some(String::from_utf8_lossy(filename).into_owned());
         iifile.fmode = mode.chars().take(3).collect();
-        if unsafe { crate::imod::libiimod::iitif::ii_tiff_check(iifile.as_mut()) } != 0 {
+        if unsafe { crate::imod::libiimod::iitif::ii_tiff_check(iifile) } != 0 {
             if iifile.fp.is_none() {
                 tif.fp = ImodFile::open(&path, mode);
             }
@@ -678,9 +675,9 @@ pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pix
             tif.fp = ImodFile::open(&path, mode);
             if tif.fp.is_none() {
                 let mut iifile = tif.iifile.take().unwrap();
-                unsafe { crate::imod::libiimod::iimage::ii_close(iifile.as_mut()) };
+                unsafe { crate::imod::libiimod::iimage::ii_close(&mut iifile) };
                 if let Some(clean_up) = iifile.clean_up {
-                    unsafe { clean_up(iifile.as_mut()) };
+                    unsafe { clean_up(&mut iifile) };
                 }
                 return 1;
             }
@@ -693,9 +690,9 @@ pub fn tiff_open_file(filename: &[u8], mode: &str, tif: &mut TfInfo, any_tif_pix
 pub fn tiff_close_file(tif: &mut TfInfo) {
     let _ = crate::imod::mrc::rust_tiff::close_file(tif);
     if let Some(mut iifile) = tif.iifile.take() {
-        unsafe { crate::imod::libiimod::iimage::ii_close(iifile.as_mut()) };
+        unsafe { crate::imod::libiimod::iimage::ii_close(&mut iifile) };
         if let Some(clean_up) = iifile.clean_up {
-            unsafe { clean_up(iifile.as_mut()) };
+            unsafe { clean_up(&mut iifile) };
         }
     }
     tif.fp = None;
@@ -1199,7 +1196,7 @@ mod tests {
             let mut tif = TfInfo::default();
             assert_eq!(tiff_open_file(name.as_bytes(), "rb", &mut tif, 0), 0);
             assert!(tif.iifile.is_some());
-            assert_eq!(tif.iifile.as_deref().unwrap().nz, 2);
+            assert_eq!(tif.iifile.as_ref().unwrap().nz, 2);
             tiff_close_file(&mut tif);
             std::fs::remove_file(path).unwrap();
         }

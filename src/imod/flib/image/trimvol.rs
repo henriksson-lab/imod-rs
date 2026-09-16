@@ -308,7 +308,7 @@ pub fn trimvol() -> i32 {
             ii_close(input);
             return 1;
         }
-        let Some(out_header) = (*output).mrc_header.as_deref_mut() else {
+        let Some(out_header) = (*output).mrc_header.as_mut() else {
             ii_close(output);
             ii_close(input);
             return 1;

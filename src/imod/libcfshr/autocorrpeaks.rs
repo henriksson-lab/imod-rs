@@ -8,6 +8,15 @@ pub const FIND_ACPK_BOTH_GEOMS: i32 = 0x2;
 pub const FIND_ACPK_HEX_GRID: i32 = 0x4;
 pub const FIND_ACPK_TILT_IN_VEC: i32 = 0x8;
 
+/// Complete function inventory for `autocorrpeaks.c`.
+pub const AUTOCORR_PEAK_SOURCE_FUNCTIONS: &[&str] = &[
+    "findAutoCorrPeaks",
+    "findPeakSeries",
+    "closestRightSidePeak",
+    "perpendicularLineMedian",
+    "adjustVectorForTilt",
+];
+
 /// Matches C \`findAutoCorrPeaks\` (\`autocorrpeaks.c:68\`).
 pub fn find_auto_corr_peaks(
     array: &[f32],
@@ -31,14 +40,6 @@ pub fn find_auto_corr_peaks(
     mess_buf: &mut String,
     buf_size: i32,
 ) -> i32 {
-    assert!(array.len() >= ((nx_pad + 2) * ny_pad) as usize);
-    // The original unconditionally samples the first nine detected peaks.
-    assert!(num_peaks >= 9);
-    assert!(x_peaks.len() >= num_peaks);
-    assert!(y_peaks.len() >= num_peaks);
-    assert!(peak.len() >= num_peaks);
-    assert!(vectors.len() >= 6);
-    assert!(num.len() >= 3);
     let no_perp_median = catal_fac != 1. || flags & FIND_ACPK_NO_WAFFLE != 0;
     let num_facs = if flags & (FIND_ACPK_BOTH_GEOMS | FIND_ACPK_HEX_GRID) != 0 {
         3
@@ -46,6 +47,27 @@ pub fn find_auto_corr_peaks(
         1
     };
     let adjust_for_tilt = flags & FIND_ACPK_TILT_IN_VEC != 0;
+    let required_vectors = if num_facs > 1 { 6 } else { 4 };
+    let required_counts = if num_facs > 1 { 3 } else { 2 };
+    let array_len = nx_pad
+        .checked_add(2)
+        .and_then(|width| width.checked_mul(ny_pad))
+        .and_then(|pixels| usize::try_from(pixels).ok());
+    if nx_pad <= 0
+        || ny_pad <= 0
+        // The source unconditionally samples the first nine detected peaks.
+        || num_peaks < 9
+        || array_len.is_none_or(|length| array.len() < length)
+        || x_peaks.len() < num_peaks
+        || y_peaks.len() < num_peaks
+        || peak.len() < num_peaks
+        || vectors.len() < required_vectors
+        || num.len() < required_counts
+    {
+        *mess_buf = "Invalid autocorrelation peak input dimensions".into();
+        mess_buf.truncate((buf_size.max(1) as usize - 1).min(mess_buf.len()));
+        return 1;
+    }
     let (mut fac_start, mut both_geom, mut crit_add) = (0, false, 0.02_f32);
     let mut sin60 = 0.;
     if num_facs > 1 {
@@ -58,7 +80,7 @@ pub fn find_auto_corr_peaks(
         }
     }
     let mut num_found = num_peaks as i32;
-    let array_len = ((nx_pad + 2) * ny_pad) as usize;
+    let array_len = array_len.expect("validated above");
     if crate::imod::libcfshr::filtxcorr::find_many_xcorr_peaks(
         &array[..array_len],
         nx_pad + 2,
@@ -608,7 +630,8 @@ fn adjust_vector_for_tilt(
 #[cfg(test)]
 mod tests {
     use super::{
-        adjust_vector_for_tilt, closest_right_side_peak, find_auto_corr_peaks, find_peak_series,
+        AUTOCORR_PEAK_SOURCE_FUNCTIONS, adjust_vector_for_tilt, closest_right_side_peak,
+        find_auto_corr_peaks, find_peak_series,
     };
 
     #[test]
@@ -689,5 +712,67 @@ mod tests {
             message,
             "Did not find a peak away from the center of the autocorrelation"
         );
+    }
+
+    #[test]
+    fn rectangular_mode_accepts_its_source_sized_outputs_and_rejects_short_inputs() {
+        let mut x = [0_f32; 9];
+        let mut y = [0_f32; 9];
+        let mut peaks = [0_f32; 9];
+        let (mut distance1, mut distance2, mut angle, mut near) = (0., 0., 0., 0);
+        let mut vectors = [0_f32; 4];
+        let mut counts = [0_i32; 2];
+        let mut message = String::new();
+        assert_eq!(
+            find_auto_corr_peaks(
+                &[0.0; 100],
+                8,
+                10,
+                &mut x,
+                &mut y,
+                &mut peaks,
+                9,
+                8,
+                1.0,
+                0,
+                0.0,
+                0.0,
+                &mut distance1,
+                &mut distance2,
+                &mut angle,
+                &mut vectors,
+                &mut counts,
+                &mut near,
+                &mut message,
+                200,
+            ),
+            -1
+        );
+        assert_eq!(
+            find_auto_corr_peaks(
+                &[],
+                8,
+                10,
+                &mut x,
+                &mut y,
+                &mut peaks,
+                9,
+                8,
+                1.0,
+                0,
+                0.0,
+                0.0,
+                &mut distance1,
+                &mut distance2,
+                &mut angle,
+                &mut vectors,
+                &mut counts,
+                &mut near,
+                &mut message,
+                20,
+            ),
+            1
+        );
+        assert_eq!(AUTOCORR_PEAK_SOURCE_FUNCTIONS.len(), 5);
     }
 }

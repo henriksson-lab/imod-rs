@@ -7,6 +7,15 @@ use std::sync::Mutex;
 
 const MAX_TAPER: i32 = 256;
 const MAX_AVG_OUT: usize = 16;
+pub const TAPERATFILL_SOURCE_FUNCTIONS: &[&str] = &[
+    "sliceTaperAtFill",
+    "taperAtFill",
+    "taperatfill",
+    "getLastTaperFillValue",
+    "getlasttaperfillvalue",
+    "sliceFindFillValue",
+    "sliceReplaceFill",
+];
 
 /// Most recently detected fill value, shared by the taper operation and its
 /// legacy query entry point.
@@ -293,6 +302,10 @@ pub fn taper_at_fill(array: &mut [f32], nx: i32, ny: i32, ntaper: i32, inside: b
     }
     result
 }
+/// Source Fortran wrapper `taperatfill`.
+pub fn taperatfill(array: &mut [f32], nx: &i32, ny: &i32, ntaper: &i32, inside: &i32) -> i32 {
+    taper_at_fill(array, *nx, *ny, *ntaper, *inside != 0)
+}
 /// Return the fill value found by the most recent taper operation.
 pub fn get_last_taper_fill_value(value: &mut f32) -> bool {
     let state = TAPER_FILL_STATE
@@ -300,6 +313,10 @@ pub fn get_last_taper_fill_value(value: &mut f32) -> bool {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *value = state.last_fill_value;
     state.found_fill
+}
+/// Source Fortran wrapper `getlasttaperfillvalue`.
+pub fn getlasttaperfillvalue(value: &mut f32) -> bool {
+    get_last_taper_fill_value(value)
 }
 /// Find the longest run on a slice edge and return its value and location.
 pub fn slice_find_fill_value(sl: &Islice) -> (f32, i32, i32, i32, i32) {
@@ -572,5 +589,15 @@ mod tests {
         for bytes in sl.data.chunks_exact(size_of::<f32>()) {
             assert_eq!(f32::from_ne_bytes(bytes.try_into().unwrap()), 10.);
         }
+    }
+    #[test]
+    fn fortran_fill_value_wrapper_matches_owned_entry() {
+        let mut first = 0.;
+        let mut second = 0.;
+        assert_eq!(
+            getlasttaperfillvalue(&mut first),
+            get_last_taper_fill_value(&mut second)
+        );
+        assert_eq!(TAPERATFILL_SOURCE_FUNCTIONS.len(), 7);
     }
 }

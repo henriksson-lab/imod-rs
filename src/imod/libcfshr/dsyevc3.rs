@@ -1,6 +1,9 @@
 //! Translation of `IMOD/libcfshr/dsyevc3.c`.
 #![allow(dead_code)]
 
+/// Complete function inventory for `dsyevc3.c`.
+pub const DSYEVC3_SOURCE_FUNCTIONS: &[&str] = &["dsyevc3"];
+
 /// Original `dsyevc3` (`dsyevc3.c:35`).
 pub fn dsyevc3(matrix: &[[f64; 3]; 3], eigenvalues: &mut [f64; 3]) -> i32 {
     let diagonal_product = matrix[0][1] * matrix[1][2];
@@ -44,5 +47,18 @@ mod tests {
         assert!((values[0] - 5.0).abs() < 1.0e-12);
         assert!((values[1] - 2.0).abs() < 1.0e-12);
         assert!((values[2] - 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn preserves_trace_and_determinant_for_a_dense_symmetric_matrix() {
+        let matrix = [[4.0, 1.0, 2.0], [1.0, 3.0, -1.0], [2.0, -1.0, 5.0]];
+        let mut values = [0.0; 3];
+        assert_eq!(dsyevc3(&matrix, &mut values), 0);
+        assert!((values.iter().sum::<f64>() - 12.0).abs() < 1.0e-12);
+        let determinant = matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2].powi(2))
+            - matrix[0][1] * (matrix[0][1] * matrix[2][2] - matrix[1][2] * matrix[0][2])
+            + matrix[0][2] * (matrix[0][1] * matrix[1][2] - matrix[1][1] * matrix[0][2]);
+        assert!((values.iter().product::<f64>() - determinant).abs() < 1.0e-10);
+        assert_eq!(DSYEVC3_SOURCE_FUNCTIONS, ["dsyevc3"]);
     }
 }

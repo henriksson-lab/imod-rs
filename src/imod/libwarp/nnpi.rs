@@ -7,7 +7,7 @@
 //!
 //! * `nnpi->d` is a borrowed `delaunay*` in C — `nnai_build` hands the same
 //!   triangulation to `nnpi_create`, destroys the point interpolator and then
-//!   keeps using it.  Here `Nnpi` owns the `Box<Delaunay>` and
+//!   keeps using it.  Here `Nnpi` owns the `Delaunay` and
 //!   [`nnpi_destroy`] hands it back, which is what `free(nn)` without
 //!   `free(nn->d)` means once ownership is explicit.
 //! * `nnhpi`'s `ht_data` maps a point to `&d->points[i]`, a *mutable alias
@@ -45,7 +45,7 @@ const NAN: f64 = f64::NAN;
 
 /// C `struct nnpi` (`nnpi.c:84`).
 pub struct Nnpi {
-    pub d: Box<Delaunay>,
+    pub d: Delaunay,
     pub wmin: f64,
     /// number of points processed
     pub n: i32,
@@ -107,8 +107,8 @@ thread_local! {
 /// The source's `nnpi* nn = malloc(...)` borrows `d`; here the interpolator
 /// owns it and [`nnpi_destroy`] returns it, because `nnai_build` uses the same
 /// triangulation after destroying the point interpolator.
-pub fn nnpi_create(d: Box<Delaunay>) -> Box<Nnpi> {
-    let mut nn = Box::new(Nnpi {
+pub fn nnpi_create(d: Delaunay) -> Nnpi {
+    let mut nn = Nnpi {
         d,
         wmin: 0.,
         n: 0,
@@ -122,7 +122,7 @@ pub fn nnpi_create(d: Box<Delaunay>) -> Box<Nnpi> {
         dx: 0.,
         dy: 0.,
         bad: None,
-    });
+    };
 
     nn.wmin = -f64::MAX;
     nn.n = 0;
@@ -141,8 +141,7 @@ pub fn nnpi_create(d: Box<Delaunay>) -> Box<Nnpi> {
 /// `free(nn->weights); free(nn->vertices); free(nn);` — dropping the box does
 /// all three.  The source does **not** free `nn->d`, so the triangulation is
 /// handed back rather than dropped here.
-pub fn nnpi_destroy(nn: Box<Nnpi>) -> Box<Delaunay> {
-    let nn = *nn;
+pub fn nnpi_destroy(nn: Nnpi) -> Delaunay {
     nn.d
 }
 
@@ -300,7 +299,7 @@ fn nnpi_triangle_process(nn: &mut Nnpi, p: &Point, i: i32) {
             key[0] = t.vids[j as usize];
 
             if nn.bad.is_none() {
-                nn.bad = ht_create_i2(HT_SIZE).map(|table| *table);
+                nn.bad = ht_create_i2(HT_SIZE);
             }
 
             key[1] = if j1bad != 0 {
@@ -1052,19 +1051,19 @@ pub struct NnWeights {
 ///
 /// As with [`nnpi_create`], the triangulation is owned here and handed back by
 /// [`nnhpi_destroy`], because the source's `nnhpi_destroy` does not free it.
-pub fn nnhpi_create(d: Box<Delaunay>, size: i32) -> Box<Nnhpi> {
+pub fn nnhpi_create(d: Delaunay, size: i32) -> Nnhpi {
     let npoints = d.npoints;
-    let mut nn = Box::new(Nnhpi {
-        nnpi: *nnpi_create(d),
+    let mut nn = Nnhpi {
+        nnpi: nnpi_create(d),
         ht_data: None,
         ht_weights: None,
         weights_store: Vec::new(),
         n: 0,
-    });
+    };
     let mut i;
 
-    nn.ht_data = ht_create_d2(npoints).map(|table| *table);
-    nn.ht_weights = ht_create_d2(size).map(|table| *table);
+    nn.ht_data = ht_create_d2(npoints);
+    nn.ht_weights = ht_create_d2(size);
     nn.n = 0;
 
     i = 0;
@@ -1078,8 +1077,7 @@ pub fn nnhpi_create(d: Box<Delaunay>, size: i32) -> Box<Nnhpi> {
 }
 
 /// Original `nnhpi_destroy` (`nnpi.c:833`).
-pub fn nnhpi_destroy(nn: Box<Nnhpi>) -> Box<Delaunay> {
-    let nn = *nn;
+pub fn nnhpi_destroy(nn: Nnhpi) -> Delaunay {
     // The two tables and their keys, plus `weights_store`, are direct owned
     // fields. They drop with `nn`; only the triangulation is intentionally
     // returned to the caller.

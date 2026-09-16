@@ -153,7 +153,7 @@ mod tests {
             assert!(!file.is_null());
             let header = (*file)
                 .mrc_header
-                .as_deref_mut()
+                .as_mut()
                 .expect("new MRC image has an owned header");
             assert_eq!(mrc_head_new(header, 2, 2, 2, 2), 0);
             ii_sync_from_mrc_header(&mut *file, header);

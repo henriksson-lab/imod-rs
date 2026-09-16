@@ -205,7 +205,7 @@ pub unsafe fn ii_raw_check(in_file: *mut ImodImageFile) -> i32 {
 
 /// C `iiRawScan`.
 pub fn ii_raw_scan(in_file: &mut ImodImageFile) -> i32 {
-    let hdr = in_file.mrc_header.as_deref_mut();
+    let hdr = in_file.mrc_header.as_mut();
     if in_file.fp.is_none() || hdr.is_none() {
         return 1;
     }

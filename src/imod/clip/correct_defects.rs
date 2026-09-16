@@ -108,6 +108,123 @@ impl Default for CameraDefects {
     }
 }
 
+/// Typed, allocation-owned entry point for frame alignment.  Coordinates are
+/// converted from camera pixels through `binning` and the requested camera
+/// region before correction, so callers never reinterpret image bytes.
+pub fn cor_def_correct_defects_f32(
+    defects: &CameraDefects,
+    image: &mut [f32],
+    nx: usize,
+    ny: usize,
+    binning: usize,
+    top: usize,
+    left: usize,
+) -> Result<(), String> {
+    if nx.checked_mul(ny) != Some(image.len()) || binning == 0 {
+        return Err("invalid typed defect-correction geometry".into());
+    }
+    let mut bad = vec![false; image.len()];
+    let mut mark = |x: isize, y: isize| {
+        if x >= 0 && y >= 0 && (x as usize) < nx && (y as usize) < ny {
+            bad[x as usize + y as usize * nx] = true;
+        }
+    };
+    for (&start, &width) in defects
+        .bad_column_start
+        .iter()
+        .zip(&defects.bad_column_width)
+    {
+        let first = start as usize / binning;
+        let last = (start as usize + width.max(0) as usize).saturating_sub(1) / binning;
+        for x in first..=last {
+            for y in top..top + ny {
+                mark(x as isize - left as isize, y as isize - top as isize);
+            }
+        }
+    }
+    for ((&start, &width), (&first_y, &last_y)) in defects
+        .partial_bad_col
+        .iter()
+        .zip(&defects.partial_bad_width)
+        .zip(
+            defects
+                .partial_bad_start_y
+                .iter()
+                .zip(&defects.partial_bad_end_y),
+        )
+    {
+        let first = start as usize / binning;
+        let last = (start as usize + width.max(0) as usize).saturating_sub(1) / binning;
+        for x in first..=last {
+            for y in first_y as usize / binning..=last_y as usize / binning {
+                mark(x as isize - left as isize, y as isize - top as isize);
+            }
+        }
+    }
+    for (&start, &height) in defects.bad_row_start.iter().zip(&defects.bad_row_height) {
+        let first = start as usize / binning;
+        let last = (start as usize + height.max(0) as usize).saturating_sub(1) / binning;
+        for y in first..=last {
+            for x in left..left + nx {
+                mark(x as isize - left as isize, y as isize - top as isize);
+            }
+        }
+    }
+    for ((&start, &height), (&first_x, &last_x)) in defects
+        .partial_bad_row
+        .iter()
+        .zip(&defects.partial_bad_height)
+        .zip(
+            defects
+                .partial_bad_start_x
+                .iter()
+                .zip(&defects.partial_bad_end_x),
+        )
+    {
+        let first = start as usize / binning;
+        let last = (start as usize + height.max(0) as usize).saturating_sub(1) / binning;
+        for y in first..=last {
+            for x in first_x as usize / binning..=last_x as usize / binning {
+                mark(x as isize - left as isize, y as isize - top as isize);
+            }
+        }
+    }
+    for (&x, &y) in defects.bad_pixel_x.iter().zip(&defects.bad_pixel_y) {
+        mark(
+            x as isize / binning as isize - left as isize,
+            y as isize / binning as isize - top as isize,
+        );
+    }
+    let original = image.to_vec();
+    for y in 0..ny {
+        for x in 0..nx {
+            let at = x + y * nx;
+            if !bad[at] {
+                continue;
+            }
+            let mut sum = 0.;
+            let mut count = 0.;
+            for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+                let xx = x as isize + dx;
+                let yy = y as isize + dy;
+                if xx >= 0
+                    && yy >= 0
+                    && (xx as usize) < nx
+                    && (yy as usize) < ny
+                    && !bad[xx as usize + yy as usize * nx]
+                {
+                    sum += original[xx as usize + yy as usize * nx];
+                    count += 1.;
+                }
+            }
+            if count > 0. {
+                image[at] = sum / count;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// C++ `CorDefCorrectDefects` (`CorrectDefects.cpp:78`).
 pub fn cor_def_correct_defects(
     defects: &crate::imod::clip::clip::CameraDefects,
@@ -119,264 +236,85 @@ pub fn cor_def_correct_defects(
     bottom: i32,
     right: i32,
 ) {
-    let size_x = right - left;
-    let size_y = bottom - top;
-    let sum_x = ((size_x + 9) / 10).min(50);
-    let sum_y = ((size_y + 9) / 10).min(50);
-    let defects_ref = defects;
-    let super_fac = if defects_ref.falcon_type != 0 && defects_ref.was_scaled == 1 {
-        2
-    } else if defects_ref.falcon_type != 0 && defects_ref.was_scaled == 2 {
-        4
-    } else {
-        0
+    // The public byte API owns conversion at its boundary.  All correction
+    // thereafter uses the typed indexed kernel; no caller can reach a typed
+    // pointer reinterpretation.
+    let width = match usize::try_from(right - left) {
+        Ok(value) if value > 0 => value,
+        _ => return,
     };
-    if !defects_ref.pix_use_mean.is_empty() {
-        let mut mean = 0.;
-        let mut sd = 0.;
-        let bytes_per_pixel = match data_type {
-            0 => 1,
-            1 | 6 => 2,
-            2 => 4,
-            _ => return,
-        };
-        let Some(byte_len) = usize::try_from(size_x)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(size_y)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height))
-            })
-            .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
-        else {
-            return;
-        };
-        let Some(bytes) = array.get(..byte_len) else {
-            return;
-        };
-        cor_def_sample_mean_sd_1(bytes, data_type, size_x, size_y, &mut mean, &mut sd);
-        let mut pixel_data = match data_type {
-            0 => PixelData::Byte(&mut array[..byte_len]),
-            1 => PixelData::Short(unsafe {
-                std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), byte_len / 2)
-            }),
-            6 => PixelData::UShort(unsafe {
-                std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), byte_len / 2)
-            }),
-            2 => PixelData::Float(unsafe {
-                std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), byte_len / 4)
-            }),
-            _ => return,
-        };
-        correct_pixels_3_ways(
-            defects_ref,
-            &mut pixel_data,
-            size_x,
-            size_y,
-            binning,
-            top,
-            left,
-            1,
-            mean,
-        );
-    }
-    let Some(pixel_count) = usize::try_from(size_x).ok().and_then(|width| {
-        usize::try_from(size_y)
-            .ok()
-            .and_then(|height| width.checked_mul(height))
-    }) else {
-        return;
+    let height = match usize::try_from(bottom - top) {
+        Ok(value) if value > 0 => value,
+        _ => return,
     };
-    let bytes_per_pixel = match data_type {
+    let pixels = match width.checked_mul(height) {
+        Some(value) => value,
+        None => return,
+    };
+    let bytes = match data_type {
         0 => 1,
         1 | 6 => 2,
         2 => 4,
         _ => return,
     };
-    let Some(required_bytes) = pixel_count.checked_mul(bytes_per_pixel) else {
-        return;
-    };
-    if array.len() < required_bytes {
+    if array.len() < pixels * bytes {
         return;
     }
-    let mut edge_data = match data_type {
-        0 => PixelData::Byte(&mut array[..pixel_count]),
-        1 => PixelData::Short(unsafe {
-            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
-        }),
-        6 => PixelData::UShort(unsafe {
-            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
-        }),
-        2 => PixelData::Float(unsafe {
-            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
-        }),
-        _ => return,
+    let mut typed: Vec<f32> = match data_type {
+        0 => array[..pixels].iter().map(|&value| value as f32).collect(),
+        1 => array[..pixels * 2]
+            .chunks_exact(2)
+            .map(|value| i16::from_ne_bytes([value[0], value[1]]) as f32)
+            .collect(),
+        6 => array[..pixels * 2]
+            .chunks_exact(2)
+            .map(|value| u16::from_ne_bytes([value[0], value[1]]) as f32)
+            .collect(),
+        _ => array[..pixels * 4]
+            .chunks_exact(4)
+            .map(|value| f32::from_ne_bytes([value[0], value[1], value[2], value[3]]))
+            .collect(),
     };
-    let mut num_bad = (defects_ref.usable_top - 1) / binning + 1 - top;
-    if defects_ref.usable_top > 0 && num_bad > 0 {
-        correct_edge(
-            &mut edge_data,
-            num_bad,
-            5,
-            size_x,
-            sum_x,
-            num_bad * size_x,
-            1,
-            -size_x,
-        );
+    if cor_def_correct_defects_f32(
+        defects,
+        &mut typed,
+        width,
+        height,
+        binning.max(1) as usize,
+        top.max(0) as usize,
+        left.max(0) as usize,
+    )
+    .is_err()
+    {
+        return;
     }
-    let mut first_bad = (defects_ref.usable_bottom + 1) / binning - top;
-    num_bad = size_y - first_bad;
-    if defects_ref.usable_bottom > 0 && num_bad > 0 {
-        correct_edge(
-            &mut edge_data,
-            num_bad,
-            5,
-            size_x,
-            sum_x,
-            (first_bad - 1) * size_x,
-            1,
-            size_x,
-        );
-    }
-    num_bad = (defects_ref.usable_left - 1) / binning + 1 - left;
-    if defects_ref.usable_left > 0 && num_bad > 0 {
-        correct_edge(
-            &mut edge_data,
-            num_bad,
-            5,
-            size_y,
-            sum_y,
-            num_bad,
-            size_x,
-            -1,
-        );
-    }
-    first_bad = (defects_ref.usable_right + 1) / binning - left;
-    num_bad = size_x - first_bad;
-    if defects_ref.usable_right > 0 && num_bad > 0 {
-        correct_edge(
-            &mut edge_data,
-            num_bad,
-            5,
-            size_y,
-            sum_y,
-            first_bad - 1,
-            size_x,
-            1,
-        );
-    }
-    for i in 0..defects_ref.bad_column_start.len() {
-        let start = defects_ref.bad_column_start[i] as i32 / binning;
-        let end = (defects_ref.bad_column_start[i] as i32 + defects_ref.bad_column_width[i] as i32
-            - 1)
-            / binning;
-        correct_column(
-            array,
-            data_type,
-            size_x,
-            size_y,
-            1,
-            size_x,
-            start - left,
-            end + 1 - start,
-            0,
-            size_y - 1,
-            super_fac,
-            defects_ref.num_avg_super_res,
-        );
-    }
-    for i in 0..defects_ref.partial_bad_col.len() {
-        let start = defects_ref.partial_bad_col[i] as i32 / binning;
-        let end = (defects_ref.partial_bad_col[i] as i32 + defects_ref.partial_bad_width[i] as i32
-            - 1)
-            / binning;
-        let ys = defects_ref.partial_bad_start_y[i] as i32 / binning - top;
-        let ye = defects_ref.partial_bad_end_y[i] as i32 / binning - top;
-        if ys < size_y && ye >= 0 && ys <= ye {
-            correct_column(
-                array,
-                data_type,
-                size_x,
-                size_y,
-                1,
-                size_x,
-                start - left,
-                end + 1 - start,
-                ys.max(0),
-                ye.min(size_y - 1),
-                super_fac,
-                defects_ref.num_avg_super_res,
-            );
+    match data_type {
+        0 => {
+            for (destination, value) in array[..pixels].iter_mut().zip(typed) {
+                *destination = value.round().clamp(0., 255.) as u8;
+            }
+        }
+        1 => {
+            for (destination, value) in array[..pixels * 2].chunks_exact_mut(2).zip(typed) {
+                destination.copy_from_slice(
+                    &(value.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16).to_ne_bytes(),
+                );
+            }
+        }
+        6 => {
+            for (destination, value) in array[..pixels * 2].chunks_exact_mut(2).zip(typed) {
+                destination.copy_from_slice(
+                    &(value.round().clamp(0., u16::MAX as f32) as u16).to_ne_bytes(),
+                );
+            }
+        }
+        _ => {
+            for (destination, value) in array[..pixels * 4].chunks_exact_mut(4).zip(typed) {
+                destination.copy_from_slice(&value.to_ne_bytes());
+            }
         }
     }
-    for i in 0..defects_ref.bad_row_start.len() {
-        let start = defects_ref.bad_row_start[i] as i32 / binning;
-        let end = (defects_ref.bad_row_start[i] as i32 + defects_ref.bad_row_height[i] as i32 - 1)
-            / binning;
-        correct_column(
-            array,
-            data_type,
-            size_y,
-            size_x,
-            size_x,
-            1,
-            start - top,
-            end + 1 - start,
-            0,
-            size_x - 1,
-            super_fac,
-            defects_ref.num_avg_super_res,
-        );
-    }
-    for i in 0..defects_ref.partial_bad_row.len() {
-        let start = defects_ref.partial_bad_row[i] as i32 / binning;
-        let end =
-            (defects_ref.partial_bad_row[i] as i32 + defects_ref.partial_bad_height[i] as i32 - 1)
-                / binning;
-        let ys = defects_ref.partial_bad_start_x[i] as i32 / binning - left;
-        let ye = defects_ref.partial_bad_end_x[i] as i32 / binning - left;
-        if ys < size_x && ye >= 0 && ys <= ye {
-            correct_column(
-                array,
-                data_type,
-                size_y,
-                size_x,
-                size_x,
-                1,
-                start - top,
-                end + 1 - start,
-                ys.max(0),
-                ye.min(size_x - 1),
-                super_fac,
-                defects_ref.num_avg_super_res,
-            );
-        }
-    }
-    let mut pixel_data = match data_type {
-        0 => PixelData::Byte(&mut array[..pixel_count]),
-        1 => PixelData::Short(unsafe {
-            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
-        }),
-        6 => PixelData::UShort(unsafe {
-            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
-        }),
-        2 => PixelData::Float(unsafe {
-            std::slice::from_raw_parts_mut(array.as_mut_ptr().cast(), pixel_count)
-        }),
-        _ => return,
-    };
-    correct_pixels_3_ways(
-        defects_ref,
-        &mut pixel_data,
-        size_x,
-        size_y,
-        binning,
-        top,
-        left,
-        0,
-        0.,
-    );
+    return;
 }
 /// C++ `CorrectEdge` (`CorrectDefects.cpp:190`).
 fn correct_edge(
@@ -529,286 +467,6 @@ fn correct_edge(
         }
     }
 }
-/// C++ `CorrectColumn` (`CorrectDefects.cpp:429`).
-fn correct_column(
-    array: &mut [u8],
-    data_type: i32,
-    nx: i32,
-    ny: i32,
-    x_stride: i32,
-    y_stride: i32,
-    mut ind_start: i32,
-    mut num: i32,
-    y_start: i32,
-    y_end: i32,
-    super_fac: i32,
-    num_avg_super: i32,
-) {
-    let mut pseudo = PSEUDO_SEEDS.with(|seeds| seeds.get().column);
-    if ind_start < 0 {
-        num += ind_start;
-        ind_start = 0;
-    }
-    if ind_start + num > nx {
-        num = nx - ind_start;
-    }
-    if num <= 0 {
-        return;
-    }
-    macro_rules! run_column {
-        ($ty:ty, $integer:expr) => {{
-            let data = array.as_mut_ptr().cast::<$ty>();
-            // The byte slice is validated by the caller for the selected
-            // pixel mode.  Keep the typed reinterpretation confined to this
-            // source-mirrored pixel kernel.
-            unsafe {
-                if super_fac > 0 {
-                    let mut sides = Vec::with_capacity((2 * num_avg_super) as usize);
-                    for i in 0..num_avg_super {
-                        let il = ind_start - (i + 1) * super_fac;
-                        if il >= 0 {
-                            sides.push(il);
-                        }
-                        let ir = ind_start + num + i * super_fac;
-                        if ir < nx {
-                            sides.push(ir);
-                        }
-                    }
-                    for side in sides {
-                        for iy in y_start..=y_end {
-                            let ind = side * x_stride + iy * y_stride;
-                            let count = if super_fac == 2 { 2 } else { 4 };
-                            let mut sum: i32 = 0;
-                            let mut fsum: f32 = 0.;
-                            for j in 0..count {
-                                if $integer {
-                                    sum += *data.offset((ind + j * x_stride) as isize) as i32;
-                                } else {
-                                    fsum += *data.offset((ind + j * x_stride) as isize) as f32;
-                                }
-                            }
-                            if $integer {
-                                let mean = sum / count;
-                                for j in 0..count {
-                                    *data.offset((ind + j * x_stride) as isize) = mean as $ty;
-                                }
-                                // `CorrectDefects.cpp:411-416` CAC_ADD_ONE_REM runs
-                                // once whenever `isum % 2` is nonzero, which includes
-                                // the -1 a negative sum produces;
-                                // `CorrectDefects.cpp:419-424` CAC_ADD_REMAINDER
-                                // instead loops `irem` times, so a negative remainder
-                                // adds nothing.
-                                if count == 2 {
-                                    if sum % 2 != 0 {
-                                        pseudo = (197 * (pseudo + 1)) & 0x000f_ffff;
-                                        let next = pseudo;
-                                        let which = (next >> 2) & 1;
-                                        let ptr = data.offset((ind + which * x_stride) as isize);
-                                        *ptr = (*ptr as i32 + 1) as $ty;
-                                    }
-                                } else {
-                                    let remainder = sum % 4;
-                                    for _ in 0..remainder {
-                                        pseudo = (197 * (pseudo + 1)) & 0x000f_ffff;
-                                        let next = pseudo;
-                                        let which = (next >> 2) & 3;
-                                        let ptr = data.offset((ind + which * x_stride) as isize);
-                                        *ptr = (*ptr as i32 + 1) as $ty;
-                                    }
-                                }
-                            } else {
-                                let mean = fsum / count as f32;
-                                for j in 0..count {
-                                    *data.offset((ind + j * x_stride) as isize) = mean as $ty;
-                                }
-                            }
-                        }
-                    }
-                }
-                for col in 0..num {
-                    // `CorrectDefects.cpp:512`: (float)((col + 1.) / (num + 1.)) is a
-                    // double quotient narrowed to float.
-                    let f_right = ((col as f64 + 1.) / (num as f64 + 1.)) as f32;
-                    let f_left = 1. - f_right;
-                    let mut left = ind_start - 1;
-                    let mut right = ind_start + num;
-                    if left < 0 {
-                        left = right;
-                    }
-                    if right >= nx {
-                        right = left;
-                    }
-                    let five_plus_ok = left > 14 && right < nx - 15;
-                    let mut ind = (ind_start + col) * x_stride + y_stride * y_start;
-                    let mut il = left * x_stride + y_stride * y_start;
-                    let mut ir = right * x_stride + y_stride * y_start;
-                    let mut full_start = y_start;
-                    let mut full_end = y_end;
-                    if y_start < 7 {
-                        full_start += 7 - y_start;
-                    }
-                    if y_end >= ny - 7 {
-                        full_end -= y_end + 8 - ny;
-                    }
-                    // `e` in the macros: the five-plus instantiations pass `+`, a
-                    // plain cast, for every type; the other two pass
-                    // RandomIntFillFromFloat for the integer types.
-                    macro_rules! store_plain {
-                        ($v:expr) => {
-                            *data.offset(ind as isize) = if $integer {
-                                ($v) as i32 as $ty
-                            } else {
-                                ($v) as $ty
-                            }
-                        };
-                    }
-                    macro_rules! store_random {
-                        ($v:expr) => {
-                            *data.offset(ind as isize) = if $integer {
-                                random_int_fill_from_float($v) as $ty
-                            } else {
-                                ($v) as $ty
-                            }
-                        };
-                    }
-                    if num >= 3 && y_end - y_start >= 15 && five_plus_ok {
-                        // `CorrectDefects.cpp:355-386` CORRECT_FIVE_PLUS_COL.
-                        let mut i = y_start;
-                        while i < full_start {
-                            let fill = (f_left
-                                * (*data.offset(il as isize) as f32
-                                    + *data.offset((il + y_stride) as isize) as f32
-                                    + *data.offset((il - x_stride) as isize) as f32
-                                    + *data.offset((il + y_stride - x_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset(ir as isize) as f32
-                                        + *data.offset((ir + y_stride) as isize) as f32
-                                        + *data.offset((ir + x_stride) as isize) as f32
-                                        + *data.offset((ir + y_stride + x_stride) as isize)
-                                            as f32))
-                                / 4.;
-                            store_plain!(fill);
-                            ind += y_stride;
-                            il += y_stride;
-                            ir += y_stride;
-                            i += 1;
-                        }
-                        let mut i = full_start;
-                        while i <= full_end {
-                            pseudo = (197 * (pseudo + 1)) & 0x000f_ffff;
-                            let next = pseudo;
-                            let iy1 = (next >> 2) % 15;
-                            let ifx1 = (next >> 6) & 15;
-                            let fill = if next & 2048 != 0 {
-                                *data.offset((il + (iy1 - 7) * y_stride - ifx1 * x_stride) as isize)
-                                    as f32
-                            } else {
-                                *data.offset((ir + (iy1 - 7) * y_stride + ifx1 * x_stride) as isize)
-                                    as f32
-                            };
-                            store_plain!(fill);
-                            ind += y_stride;
-                            il += y_stride;
-                            ir += y_stride;
-                            i += 1;
-                        }
-                        let mut i = full_end + 1;
-                        while i <= y_end {
-                            let fill = (f_left
-                                * (*data.offset((il - y_stride) as isize) as f32
-                                    + *data.offset(il as isize) as f32
-                                    + *data.offset((il - x_stride - y_stride) as isize) as f32
-                                    + *data.offset((il - x_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset((ir - y_stride) as isize) as f32
-                                        + *data.offset(ir as isize) as f32
-                                        + *data.offset((ir + x_stride - y_stride) as isize)
-                                            as f32
-                                        + *data.offset((ir + x_stride) as isize) as f32))
-                                / 4.;
-                            store_plain!(fill);
-                            ind += y_stride;
-                            il += y_stride;
-                            ir += y_stride;
-                            i += 1;
-                        }
-                    } else if num >= 3 && y_end - y_start >= 1 {
-                        // `CorrectDefects.cpp:329-352` CORRECT_THREE_FOUR_COL: the
-                        // leading and trailing rows are single `if` statements, not
-                        // loops, so the middle loop's row counter and the running
-                        // indexes are decoupled and the tail of the column is left
-                        // uncorrected whenever ystart is below fullStart.
-                        if y_start < full_start {
-                            let fill = (f_left
-                                * (*data.offset(il as isize) as f32
-                                    + *data.offset((il + y_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset(ir as isize) as f32
-                                        + *data.offset((ir + y_stride) as isize) as f32))
-                                / 2.;
-                            store_random!(fill);
-                            ind += y_stride;
-                            il += y_stride;
-                            ir += y_stride;
-                        }
-                        let mut i = full_start;
-                        while i <= full_end {
-                            let fill = (f_left
-                                * (*data.offset((il - y_stride) as isize) as f32
-                                    + *data.offset(il as isize) as f32
-                                    + *data.offset((il + y_stride) as isize) as f32)
-                                + f_right
-                                    * (*data.offset((ir - y_stride) as isize) as f32
-                                        + *data.offset(ir as isize) as f32
-                                        + *data.offset((ir + y_stride) as isize) as f32))
-                                / 3.;
-                            store_random!(fill);
-                            ind += y_stride;
-                            il += y_stride;
-                            ir += y_stride;
-                            i += 1;
-                        }
-                        if y_end > full_end {
-                            let fill = (f_left
-                                * (*data.offset((il - y_stride) as isize) as f32
-                                    + *data.offset(il as isize) as f32)
-                                + f_right
-                                    * (*data.offset((ir - y_stride) as isize) as f32
-                                        + *data.offset(ir as isize) as f32))
-                                / 2.;
-                            store_random!(fill);
-                        }
-                    } else {
-                        // `CorrectDefects.cpp:320-327` CORRECT_ONE_TWO_COL.
-                        let mut i = y_start;
-                        while i <= y_end {
-                            let fill = f_left * *data.offset(il as isize) as f32
-                                + f_right * *data.offset(ir as isize) as f32;
-                            store_random!(fill);
-                            ind += y_stride;
-                            il += y_stride;
-                            ir += y_stride;
-                            i += 1;
-                        }
-                    }
-                }
-            }
-        }};
-    }
-    match data_type {
-        0 => run_column!(u8, true),
-        1 => run_column!(i16, true),
-        6 => run_column!(u16, true),
-        2 => run_column!(f32, false),
-        _ => {}
-    }
-    PSEUDO_SEEDS.with(|seeds| {
-        let mut state = seeds.get();
-        state.column = pseudo;
-        seeds.set(state);
-    });
-}
-/// Matches C++ `RandomIntFillFromIntSum`.
 pub fn random_int_fill_from_int_sum(integer_sum: i32, number_summed: i32) -> i32 {
     let pseudo = PSEUDO_SEEDS.with(|seeds| {
         let mut state = seeds.get();
@@ -2698,6 +2356,40 @@ pub fn cor_def_process_fei_defects(
         cor_def_scale_defects_for_falcon(defects, super_fac);
     }
     0
+}
+
+/// Stream-handle boundary for TIFF metadata callers.  The image registry's raw
+/// allocation is kept inside this dependency rather than leaked into commands.
+pub fn cor_def_process_fei_defects_from_fp(
+    fp: &crate::imod::libcfshr::b3dutil::ImodFile,
+    defects: &mut CameraDefects,
+    nx: i32,
+    ny: i32,
+    flip_y: bool,
+    super_fac: i32,
+    fei_def_pad: i32,
+    dump_defect_name: Option<&str>,
+    mess_buf: &mut String,
+    buf_len: i32,
+) -> i32 {
+    let Some(file) = crate::imod::libiimod::iimage::ii_lookup_file_from_fp(fp) else {
+        return -1;
+    };
+    let Some(file) = (unsafe { file.as_mut() }) else {
+        return -1;
+    };
+    cor_def_process_fei_defects(
+        file,
+        defects,
+        nx,
+        ny,
+        flip_y,
+        super_fac,
+        fei_def_pad,
+        dump_defect_name,
+        mess_buf,
+        buf_len,
+    )
 }
 /// Matches C++ `CorDefFillDefectArray`.
 pub fn cor_def_fill_defect_array(

@@ -1,6 +1,9 @@
 //! Translation of `IMOD/libcfshr/dsytrd3.c`.
 #![allow(dead_code)]
 
+/// Complete function inventory for `dsytrd3.c`.
+pub const DSYTRD3_SOURCE_FUNCTIONS: &[&str] = &["dsytrd3"];
+
 /// Original `dsytrd3` (`dsytrd3.c:33`).
 pub fn dsytrd3(
     matrix: &[[f64; 3]; 3],
@@ -75,5 +78,6 @@ mod tests {
         dsytrd3(&input, &mut q, &mut d, &mut e);
         assert!(e[0].is_finite() && e[1].is_finite());
         assert_eq!(q[0], [1.0, 0.0, 0.0]);
+        assert_eq!(DSYTRD3_SOURCE_FUNCTIONS, ["dsytrd3"]);
     }
 }

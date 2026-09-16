@@ -1,9 +1,10 @@
 //! Translation of `IMOD/libcfshr/gettiltangles.c` and its `cfsemshare.h` APIs.
 
-use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::BufReader;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
+use std::path::{Path, PathBuf};
 
 use super::parse_params::{
     exit_error, pip_get_float, pip_get_float_array, pip_get_string, pip_number_of_entries,
@@ -11,6 +12,9 @@ use super::parse_params::{
 use super::readlinevalues::{
     RLFV_SEPARATE_LINES, ReadValueArray, exit_from_value_read_error, read_lines_for_values,
 };
+
+/// Complete function inventory for `gettiltangles.c`.
+pub const GET_TILT_ANGLES_SOURCE_FUNCTIONS: &[&str] = &["getTiltAngles", "readTiltFile"];
 
 /// Original `getTiltAngles` (`gettiltangles.c:27`).
 pub fn get_tilt_angles(num_views: &mut i32, tilt: &mut [f32]) {
@@ -22,8 +26,8 @@ pub fn get_tilt_angles(num_views: &mut i32, tilt: &mut [f32]) {
     let mut ierr = pip_get_float(b"FirstTiltAngle", &mut tilt_start);
     let ierr2 = pip_get_float(b"TiltIncrement", &mut tilt_inc);
     let start_inc_ok = ierr == 0 && ierr2 == 0;
-    let mut filename: Vec<u8> = Vec::new();
-    ierr = pip_get_string(b"TiltFile", &mut filename);
+    let mut filename_bytes = Vec::new();
+    ierr = pip_get_string(b"TiltFile", &mut filename_bytes);
     let mut num_lines = 0;
     pip_number_of_entries(b"TiltAngles", &mut num_lines);
 
@@ -70,16 +74,18 @@ pub fn get_tilt_angles(num_views: &mut i32, tilt: &mut [f32]) {
         }
         return;
     }
+    // `pip_get_string` preserves argv bytes.  `OsString` preserves those same
+    // bytes in a Rust path without pretending that file names are C strings.
+    let filename = PathBuf::from(OsString::from_vec(filename_bytes));
     read_tilt_file(num_views, &filename, tilt);
 }
 
 /// Original `readTiltFile` (`gettiltangles.c:90`).
-pub fn read_tilt_file(num_views: &mut i32, filename: &[u8], tilt: &mut [f32]) {
+pub fn read_tilt_file(num_views: &mut i32, filename: &Path, tilt: &mut [f32]) {
     if *num_views > tilt.len() as i32 {
         exit_error(b"Array for tilt angles is not big enough for the number of views");
     }
-    let path = OsStr::from_bytes(filename);
-    let file = match File::open(path) {
+    let file = match File::open(filename) {
         Ok(file) => file,
         Err(error) => {
             let message = format!("Error opening tilt angle file: {error}");
@@ -123,10 +129,9 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(file, "-60.0\n-1.5\n45.25").unwrap();
         drop(file);
-        let filename = path.as_os_str().as_bytes().to_vec();
         let mut num_views = 0;
         let mut tilt = [0.; 4];
-        read_tilt_file(&mut num_views, &filename, &mut tilt);
+        read_tilt_file(&mut num_views, &path, &mut tilt);
         assert_eq!(num_views, 3);
         assert_eq!(&tilt[..3], &[-60., -1.5, 45.25]);
         std::fs::remove_file(path).unwrap();
@@ -139,11 +144,15 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(file, "1\n2\n3").unwrap();
         drop(file);
-        let filename = path.as_os_str().as_bytes().to_vec();
         let mut num_views = 2;
         let mut tilt = [0.; 3];
-        read_tilt_file(&mut num_views, &filename, &mut tilt);
+        read_tilt_file(&mut num_views, &path, &mut tilt);
         assert_eq!(&tilt[..2], &[1., 2.]);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn inventory_covers_the_complete_source_unit() {
+        assert_eq!(GET_TILT_ANGLES_SOURCE_FUNCTIONS.len(), 2);
     }
 }
