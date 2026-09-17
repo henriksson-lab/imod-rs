@@ -396,6 +396,12 @@ impl CheckTextField {
     pub fn action(&mut self) {
         self.update_display();
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed(&mut self) {
+        self.action();
+    }
 }
 
 #[cfg(test)]

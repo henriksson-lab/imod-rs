@@ -1159,6 +1159,7 @@ pub fn fill_image_pixel(
     }
 }
 impl ImodvImage {
+    /// `ImodvImage()` source constructor.
     pub fn new() -> Self {
         Self::default()
     }

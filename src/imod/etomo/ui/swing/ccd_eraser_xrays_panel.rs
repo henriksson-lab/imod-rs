@@ -475,6 +475,16 @@ impl CcdEraserXRaysPanel {
             _ => {}
         }
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: CcdEraserXRaysApplicationManager>(
+        &mut self,
+        manager: &mut M,
+        command: &str,
+    ) {
+        self.action(manager, command, None, None);
+    }
     /// Java `popUpContextMenu`.
     pub fn pop_up_context_menu(&mut self) {
         self.layout.last_context_menu = Some(format!(

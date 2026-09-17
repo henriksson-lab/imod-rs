@@ -144,6 +144,45 @@ pub fn icv_randn_0_1_32f_c1r(output: &mut [f32], rng: &mut CvRng) {
     // already left `rng.state` at that exact state.
 }
 
+/// `icvRand_64f_C1R` (`cxrand.cpp:211`).  `parameters` is the source's
+/// 24-element table: twelve repeated offsets followed by twelve scales.  The
+/// explicit width/height/stride form retains its row-padding behavior while
+/// replacing raw pointers with checked slices.
+pub fn icv_rand_64f_c1r(
+    output: &mut [f64],
+    row_stride: usize,
+    width: usize,
+    height: usize,
+    rng: &mut CvRng,
+    parameters: &[f64],
+) -> Result<(), CvRandError> {
+    if parameters.len() < 24
+        || row_stride < width
+        || (height > 0 && output.len() < (height - 1) * row_stride + width)
+    {
+        return Err(CvRandError::BadArgument);
+    }
+    for row in 0..height {
+        let mut parameter_base = 0;
+        let mut groups_left = 3;
+        for column in 0..width {
+            let slot = column % 4;
+            output[row * row_stride + column] = <f64 as CvRandValue>::uniform_unit(rng)
+                * parameters[parameter_base + slot + 12]
+                + parameters[parameter_base + slot];
+            if slot == 3 {
+                parameter_base += 4;
+                groups_left -= 1;
+                if groups_left == 0 {
+                    parameter_base = 0;
+                    groups_left = 3;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Owned generic `cvRandArr`.
 pub fn cv_rand_arr<T: CvRandValue>(
     rng: &mut CvRng,
@@ -163,31 +202,60 @@ pub fn cv_rand_arr<T: CvRandValue>(
     }
     match distribution {
         CvRandDistribution::Uniform => {
-            for index in 0..elements {
-                let channel = index % matrix.channels;
+            let mut integer_minima = [0.0; 4];
+            let mut integer_masks = [0_u32; 4];
+            let mut fast_mode = T::INTEGER;
+            for channel in 0..matrix.channels {
                 let lower = parameter1.values[channel];
-                let upper = parameter2.values[channel];
-                let fast_range = upper.floor() - lower.ceil();
-                let fast_mode =
-                    T::INTEGER && fast_range > 0.0 && fast_range <= i32::MAX as f64 && {
-                        let range = fast_range as u64;
-                        range != 0 && (range & (range - 1)) == 0
-                    };
-                let value = if T::INTEGER {
-                    let minimum = lower.ceil();
-                    if fast_mode {
-                        minimum + (rng.rand_int() & (fast_range as u32 - 1)) as f64
+                let range = parameter2.values[channel].floor() - lower.ceil();
+                let range_is_power_of_two =
+                    range > 0.0 && range <= i32::MAX as f64 && (range as u32).is_power_of_two();
+                fast_mode &= range_is_power_of_two;
+                integer_minima[channel] = lower.ceil();
+                integer_masks[channel] = range as u32 - 1;
+            }
+
+            // `icvRandBits_*`: when every mask fits in a byte, native OpenCV
+            // uses the four byte lanes of one RNG word for four consecutive
+            // output scalars.  This affects both the samples and `CvRNG`'s
+            // observable final state.
+            if fast_mode {
+                let small_masks = integer_masks[..matrix.channels]
+                    .iter()
+                    .all(|&mask| mask <= 255);
+                let mut index = 0;
+                while index < elements {
+                    let random = rng.rand_int();
+                    let group = if small_masks && elements - index >= 4 {
+                        4
                     } else {
-                        lower + T::uniform_unit(rng) * (upper - lower)
+                        1
+                    };
+                    for lane in 0..group {
+                        if index == elements {
+                            break;
+                        }
+                        let channel = index % matrix.channels;
+                        let bits = if small_masks {
+                            random >> (lane * 8)
+                        } else {
+                            random
+                        };
+                        matrix.data[index] = T::from_rand(
+                            integer_minima[channel] + (bits & integer_masks[channel]) as f64,
+                        );
+                        index += 1;
                     }
-                } else {
-                    lower + T::uniform_unit(rng) * (upper - lower)
-                };
-                matrix.data[index] = T::from_rand(if T::INTEGER && !fast_mode {
-                    value.floor()
-                } else {
-                    value
-                });
+                }
+            } else {
+                for index in 0..elements {
+                    let channel = index % matrix.channels;
+                    let lower = parameter1.values[channel];
+                    let upper = parameter2.values[channel];
+                    let value = lower + T::uniform_unit(rng) * (upper - lower);
+                    matrix.data[index] =
+                        T::from_rand(if T::INTEGER { value.floor() } else { value });
+                }
             }
         }
         CvRandDistribution::Normal => {
@@ -222,6 +290,11 @@ mod tests {
     #[test]
     fn uniform_integer_fast_path_stays_in_the_half_open_interval() {
         let mut rng = CvRng::new(7);
+        let mut expected_rng = rng;
+        let expected_word = expected_rng.rand_int();
+        for _ in 1..8 {
+            expected_rng.rand_int();
+        }
         let mut matrix = CvMeanMatrix {
             size: CvSize {
                 width: 32,
@@ -239,6 +312,16 @@ mod tests {
         )
         .unwrap();
         assert!(matrix.data.iter().all(|&value| (10..18).contains(&value)));
+        assert_eq!(rng.state, expected_rng.state);
+        assert_eq!(
+            matrix.data[..4],
+            [
+                10 + (expected_word & 7) as u8,
+                10 + ((expected_word >> 8) & 7) as u8,
+                10 + ((expected_word >> 16) & 7) as u8,
+                10 + ((expected_word >> 24) & 7) as u8,
+            ]
+        );
     }
 
     #[test]
@@ -278,5 +361,16 @@ mod tests {
         .unwrap();
         assert_eq!(first.data, second.data);
         assert_eq!(first.data, [2.0, -3.0, 2.0, -3.0, 2.0, -3.0]);
+    }
+
+    #[test]
+    fn native_f64_random_fill_preserves_row_padding() {
+        let mut rng = CvRng::new(13);
+        let mut output = [-1.0; 8];
+        let mut parameters = [0.0; 24];
+        parameters[..12].fill(2.0);
+        parameters[12..].fill(0.0);
+        icv_rand_64f_c1r(&mut output, 4, 3, 2, &mut rng, &parameters).unwrap();
+        assert_eq!(output, [2.0, 2.0, 2.0, -1.0, 2.0, 2.0, 2.0, -1.0]);
     }
 }

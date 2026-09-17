@@ -299,6 +299,17 @@ impl FilterFullVolumePanel {
         }
     }
 
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: FilterFullVolumePanelManager, P: FilterFullVolumeParent>(
+        &self,
+        command: &str,
+        manager: &mut M,
+        parent: &mut P,
+    ) {
+        self.action(command, None, None, manager, parent);
+    }
+
     /// Java private `setTooltips`.
     pub fn set_tooltips<M: FilterFullVolumePanelManager>(&mut self, manager: &M) {
         self.btn_run_filter_full_volume

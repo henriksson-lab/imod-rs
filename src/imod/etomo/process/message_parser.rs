@@ -159,7 +159,7 @@ impl Tag {
 }
 
 /// Java package-private `MessageParser`.
-pub(crate) struct MessageParser {
+pub struct MessageParser {
     tags: Vec<Tag>,
     multiline: VecDeque<Message>,
     multiline_tag: Option<usize>,
@@ -168,7 +168,7 @@ pub(crate) struct MessageParser {
     debug: bool,
 }
 impl MessageParser {
-    pub(crate) fn get_instance(
+    pub fn get_instance(
         process_messages: &ProcessMessages,
         error_tag: Option<&str>,
         error_tag_always_multiline: bool,
@@ -362,7 +362,7 @@ impl MessageParser {
         self.finished = true;
         self.parse(pm, None);
     }
-    pub(crate) fn set_prepend(&mut self, prepend: Option<&str>) {
+    pub fn set_prepend(&mut self, prepend: Option<&str>) {
         self.tags
             .retain(|tag| !matches!(tag.kind, TagKind::Prepend));
         if let Some(text) = prepend {

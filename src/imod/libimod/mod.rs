@@ -1,5 +1,6 @@
 //! Rust source units corresponding to `IMOD/libimod`.
 
+pub mod autocont;
 pub mod icont;
 pub mod ilabel;
 pub mod imat;

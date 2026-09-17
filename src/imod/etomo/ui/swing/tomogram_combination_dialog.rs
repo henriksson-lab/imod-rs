@@ -470,6 +470,14 @@ impl TomogramCombinationDialog {
         self.idx_last_tab = self.selected_tab_index;
         manager.set_processing_method(self.get_processing_method());
     }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `TabChangeListener::stateChanged`.
+    pub fn stateChanged<M: TomogramCombinationDialogApplicationManager>(
+        &mut self,
+        manager: &mut M,
+    ) {
+        self.tab_state_change(manager);
+    }
     pub fn set_visible<M: TomogramCombinationDialogApplicationManager>(
         &mut self,
         manager: &mut M,

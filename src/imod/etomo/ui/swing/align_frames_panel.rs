@@ -267,6 +267,46 @@ impl AlignFramesPanel {
     pub fn create_panel(&mut self) {
         self.change_tab(0);
     }
+    /// The following Java subpanel accessors resolve to this native panel's
+    /// unified state; toolkit-specific widgets are built by its renderer.
+    #[allow(non_snake_case)]
+    pub fn getPnlInputFileSpecification(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getPnlOtherSourceOfMetadata(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getPnlGainReference(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getPnlPathToFramesInMdoc(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getPnlCameraDefectFile(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn expand(&mut self, expanded: bool) {
+        self.advanced = expanded;
+        self.update_display();
+    }
+    #[allow(non_snake_case)]
+    pub fn toString(&self) -> String {
+        format!(
+            "AlignFramesPanel[axis={:?},tab={:?}]",
+            self.axis_id, self.current_tab
+        )
+    }
+    #[allow(non_snake_case)]
+    pub fn equals(&self, other: &Self) -> bool {
+        self.axis_id == other.axis_id
+            && self.current_tab == other.current_tab
+            && self.advanced == other.advanced
+    }
     /// Java `fillComboBox`; the native combo box receives these fixed title
     /// translations at the renderer boundary.
     pub fn fill_combo_box(&mut self, combo_box: &str, string_list: &[&str]) {

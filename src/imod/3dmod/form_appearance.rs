@@ -68,6 +68,8 @@ impl Default for ImodPrefStruct {
 
 /// Native Qt operations and direct `ImodPreferences` service calls.
 pub trait AppearanceNativeBoundary {
+    /// Source `setupUi(this)`: implemented by the native GUI frontend.
+    fn setup_ui(&mut self) {}
     fn connect_appearance_signals(&mut self);
     fn max_cursor_steps(&self) -> i32;
     fn set_zoom_index_maximum(&mut self, maximum: i32);
@@ -116,8 +118,9 @@ pub struct AppearanceForm {
     pub m_zoom_index: usize,
 }
 impl AppearanceForm {
-    /// `AppearanceForm::AppearanceForm`.
+    /// `AppearanceForm()` source constructor.
     pub fn new(prefs: ImodPrefStruct, native: &mut dyn AppearanceNativeBoundary) -> Self {
+        native.setup_ui();
         let mut form = Self {
             m_zoom_val_changed: false,
             m_prefs: prefs,

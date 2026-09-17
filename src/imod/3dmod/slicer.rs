@@ -103,6 +103,8 @@ pub trait SlicerNativeBoundary {
     fn draw_slicer_plane(&mut self) {}
     fn update_gl(&mut self) {}
     fn cube_draw(&mut self) {}
+    /// `b3dResizeViewportXY` from `SlicerFuncs::cubeResize`.
+    fn cube_resize_viewport(&mut self, _width: i32, _height: i32) {}
     fn set_angles(&mut self, _angles: [f32; 3]) {}
     fn set_zoom_text(&mut self, _zoom: f32) {}
     fn set_toggle_state(&mut self, _index: usize, _state: i32) {}
@@ -124,6 +126,8 @@ pub trait SlicerNativeBoundary {
     fn cube_paint(&mut self) {}
     /// `SlicerGL::setMouseTracking`.
     fn set_mouse_tracking(&mut self, _enabled: bool) {}
+    /// `SlicerWindow::releaseKeyboard` from `SlicerFuncs::keyRelease`.
+    fn release_keyboard(&mut self) {}
     /// `SlicerFuncs::changeCenterIfLinked`, whose model-view transform is
     /// owned by the linked native model-view host.
     fn change_center_if_linked(&mut self, _slicer: &mut SlicerFuncs) {}
@@ -543,6 +547,9 @@ pub struct SlicerRegistry {
     pub view_axis_index: usize,
     pub scale_thick: i32,
     pub link_was_limited: bool,
+    /// `sHotControlPressed` and `sShiftPressed` from `slicer.cpp`.
+    pub hot_control_pressed: bool,
+    pub shift_pressed: bool,
 }
 
 impl Default for SlicerRegistry {
@@ -556,6 +563,8 @@ impl Default for SlicerRegistry {
             // `sScaleThick = 1` (`slicer.cpp:74`).
             scale_thick: 1,
             link_was_limited: false,
+            hot_control_pressed: false,
+            shift_pressed: false,
         }
     }
 }
@@ -2076,7 +2085,9 @@ impl SlicerFuncs {
         }
     }
     /// `SlicerFuncs::cubeResize`.
-    pub fn cube_resize(&mut self, _winx: i32, _winy: i32) {}
+    pub fn cube_resize(&mut self, winx: i32, winy: i32, n: &mut dyn SlicerNativeBoundary) {
+        n.cube_resize_viewport(winx, winy);
+    }
     /// `SlicerFuncs::addCubeToFrame`.  Qt's `SlicerCube` construction and
     /// `QVBoxLayout` margins map to the established winit toolbar host; there
     /// is no source-local geometry or model state beyond this lifecycle call.
@@ -2326,6 +2337,27 @@ pub fn slicer_key_cb(
         slicer.key_release(event);
     } else {
         slicer.key_input(event, native);
+    }
+}
+
+/// `SlicerFuncs::keyRelease`'s hot-slider/Shift portion.  Both keys share the
+/// keyboard grab; releasing either one must leave the grab held while the other
+/// remains down (`slicer.cpp`, `SlicerFuncs::keyRelease`).
+pub fn slicer_key_release(
+    registry: &mut SlicerRegistry,
+    event: SlicerEvent,
+    hot_slider_key: i32,
+    shift_key: i32,
+    native: &mut dyn SlicerNativeBoundary,
+) {
+    if event.key == hot_slider_key {
+        registry.hot_control_pressed = false;
+    }
+    if event.key == shift_key {
+        registry.shift_pressed = false;
+    }
+    if !registry.hot_control_pressed && !registry.shift_pressed {
+        native.release_keyboard();
     }
 }
 
@@ -3286,6 +3318,46 @@ mod tests {
         assert_eq!(native.zooms, vec![1.25]);
         slicer_close_cb(&mut native);
         assert_eq!(native.closes, 1);
+    }
+    #[test]
+    fn hot_slider_and_shift_release_share_the_source_keyboard_lifetime() {
+        #[derive(Default)]
+        struct Keys(usize);
+        impl SlicerNativeBoundary for Keys {
+            fn release_keyboard(&mut self) {
+                self.0 += 1;
+            }
+        }
+        let mut registry = SlicerRegistry {
+            hot_control_pressed: true,
+            shift_pressed: true,
+            ..Default::default()
+        };
+        let mut native = Keys::default();
+        slicer_key_release(
+            &mut registry,
+            SlicerEvent {
+                key: 7,
+                ..Default::default()
+            },
+            7,
+            8,
+            &mut native,
+        );
+        assert!(!registry.hot_control_pressed);
+        assert_eq!(native.0, 0);
+        slicer_key_release(
+            &mut registry,
+            SlicerEvent {
+                key: 8,
+                ..Default::default()
+            },
+            7,
+            8,
+            &mut native,
+        );
+        assert!(!registry.shift_pressed);
+        assert_eq!(native.0, 1);
     }
     #[test]
     fn contour_plane_fit_updates_angles_and_center_before_redraw() {

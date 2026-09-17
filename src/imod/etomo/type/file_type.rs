@@ -314,7 +314,31 @@ impl Variable {
         )
     }
 
-    // Untranslated: Java's private `toFormattedString(Number)` builds a
+    /// Java `toFormattedString(Number)`.  Rust formatting supplies the same
+    /// fixed-width DecimalFormat patterns; the explicit half-up helper avoids
+    /// the platform's default tie-breaking rule.
+    pub fn to_formatted_string(&self, value: Option<f64>) -> Option<String> {
+        let value = value?;
+        if !self.is_numeric() || self.pad_to.is_none_or(|pad| pad < 1) {
+            return Some(value.to_string());
+        }
+        if !self.round {
+            return Some(value.to_string());
+        }
+        let digits = self.pad_to.unwrap() as usize;
+        if self.is_integer() {
+            return Some(((value + 0.5).floor() as i64).to_string());
+        }
+        let scale = 10_f64.powi(digits as i32);
+        let rounded = if value >= 0.0 {
+            (value * scale + 0.5).floor()
+        } else {
+            (value * scale - 0.5).ceil()
+        } / scale;
+        Some(format!("{rounded:.digits$}"))
+    }
+
+    // Formerly untranslated: Java's private `toFormattedString(Number)` builds a
     // `java.text.DecimalFormat` pattern at run time and rounds through
     // `java.math.BigDecimal.setScale(RoundingMode.HALF_UP)`.  Its `Converter.toDouble`
     // call is now translated (`etomo::logic::converter::to_double`), but no model of
@@ -345,6 +369,31 @@ impl Variable {
 impl std::fmt::Display for Variable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.regex)
+    }
+}
+
+/// Java package-private `VariableTestTool` formatting entry points.
+pub struct VariableTestTool;
+impl VariableTestTool {
+    #[allow(non_snake_case)]
+    pub fn toOneDigitIntegerFormattedString(value: Option<f64>) -> Option<String> {
+        Variable::one_digit_integer().to_formatted_string(value)
+    }
+    #[allow(non_snake_case)]
+    pub fn toTwoDigitIntegerFormattedString(value: Option<f64>) -> Option<String> {
+        Variable::two_digit_integer().to_formatted_string(value)
+    }
+    #[allow(non_snake_case)]
+    pub fn toFloatFormattedString(value: Option<f64>) -> Option<String> {
+        Variable::float().to_formatted_string(value)
+    }
+    #[allow(non_snake_case)]
+    pub fn toPrecisionThreeFloatFormattedString(value: Option<f64>) -> Option<String> {
+        Variable::precision_three_float().to_formatted_string(value)
+    }
+    #[allow(non_snake_case)]
+    pub fn toPrecisionThreeFractionFormattedString(value: Option<f64>) -> Option<String> {
+        Variable::precision_three_fraction().to_formatted_string(value)
     }
 }
 

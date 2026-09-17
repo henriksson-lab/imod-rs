@@ -61,7 +61,7 @@ pub struct ScaleBarForm {
     pub m_timer_id: i32,
 }
 impl ScaleBarForm {
-    /// `ScaleBarForm::ScaleBarForm`.
+    /// `ScaleBarForm()` source constructor.
     pub fn new(params: ScaleBar, native: &mut dyn ScaleBarNativeBoundary) -> Self {
         native.setup_ui();
         let mut f = Self {

@@ -66,7 +66,7 @@ pub struct ObjectEditForm {
 }
 
 impl ObjectEditForm {
-    /// `objectEditForm::objectEditForm`.
+    /// `objectEditForm()` source constructor.
     pub fn new(edit: &ObjectEdit, native: &mut dyn ObjectEditFormNativeBoundary) -> Self {
         native.setup_ui();
         native.set_delete_on_close();

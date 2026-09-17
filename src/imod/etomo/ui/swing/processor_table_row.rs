@@ -817,6 +817,20 @@ impl ProcessorTableRow {
             param.insert("secondaryQueue".into(), self.get_computer().to_owned());
         }
     }
+    #[allow(non_snake_case)]
+    pub fn getSecondaryParameters(&self, param: &mut BTreeMap<String, String>) {
+        self.get_parameters(param, true);
+    }
+}
+
+/// Native callback adapter for the Java row action listeners.
+pub struct ProcessorTableRowActionListener;
+impl ProcessorTableRowActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(row: &mut ProcessorTableRow) {
+        row.selection_changed = true;
+        row.update_display();
+    }
 }
 
 #[cfg(test)]

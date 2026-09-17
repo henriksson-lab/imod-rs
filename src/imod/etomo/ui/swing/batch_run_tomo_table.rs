@@ -7,7 +7,9 @@
 
 use std::path::PathBuf;
 
+use super::batch_run_tomo_row::RunType;
 pub use super::header_cell::HeaderCell;
+use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;
 
 pub const STACK_TITLE: &str = "Stack";
 pub const STATUS_LABEL: &str = "Status";
@@ -123,6 +125,42 @@ pub struct BatchRunTomoRow {
     pub ending_step: Option<usize>,
     pub changed: bool,
     pub valid: bool,
+    /// The first valid value is Java `RowList.getImageFilenameStyle()`'s result.
+    pub image_filename_style: Option<ImageFilenameStyle>,
+}
+
+/// Native serialized form of the `BatchRunTomoRowMetaData` fields that this table loads.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BatchRunTomoTableRowMetaData {
+    pub stack_id: String,
+    pub stack: PathBuf,
+    pub original_location: String,
+    pub root_name: String,
+    pub dual: bool,
+    pub montage: bool,
+    pub run: bool,
+    pub ending_step: Option<usize>,
+    pub image_filename_style: Option<ImageFilenameStyle>,
+}
+
+/// Native serialized form of Java `BatchRunTomoMetaData.getOrderedRows()`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BatchRunTomoTableMetaData {
+    pub rows: Vec<BatchRunTomoTableRowMetaData>,
+}
+
+/// One Java `RunList.add(stackID, runStatus, dual)` entry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchRunTomoRunEntry {
+    pub stack_id: String,
+    pub dual: bool,
+    pub run_type: RunType,
+}
+
+/// Native `RunList` representation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BatchRunTomoRunList {
+    pub entries: Vec<BatchRunTomoRunEntry>,
 }
 impl BatchRunTomoRow {
     pub fn select_highlight_button(&mut self) {
@@ -153,6 +191,8 @@ pub struct RowList {
     pub table_listener_set: bool,
     pub row_listener_count: usize,
     pub changer_count: usize,
+    pub status_listener_count: usize,
+    pub image_filename_style: Option<ImageFilenameStyle>,
 }
 impl RowList {
     pub fn add_new(&mut self, stacks: Vec<(PathBuf, bool, bool)>) -> Vec<PathBuf> {
@@ -305,6 +345,52 @@ impl RowList {
     pub fn validate(&self) -> bool {
         self.list.iter().all(|row| row.valid)
     }
+    pub fn get_image_filename_style(&self) -> Option<ImageFilenameStyle> {
+        self.image_filename_style.clone().or_else(|| {
+            self.list
+                .iter()
+                .find_map(|row| row.image_filename_style.clone())
+        })
+    }
+    pub fn load(&mut self, meta_data: &BatchRunTomoTableMetaData, expanded: bool) {
+        for row_meta_data in &meta_data.rows {
+            let number = self.list.len() + 1;
+            self.list.push(BatchRunTomoRow {
+                number,
+                stack_id: row_meta_data.stack_id.clone(),
+                stack: row_meta_data.stack.clone(),
+                original_location: row_meta_data.original_location.clone(),
+                root_name: row_meta_data.root_name.clone(),
+                dual: row_meta_data.dual,
+                montage: row_meta_data.montage,
+                run: row_meta_data.run,
+                ending_step: row_meta_data.ending_step,
+                image_filename_style: row_meta_data.image_filename_style.clone(),
+                stack_expanded: expanded,
+                valid: true,
+                ..Default::default()
+            });
+        }
+    }
+    pub fn create_run_list(&self, run_type: RunType) -> BatchRunTomoRunList {
+        BatchRunTomoRunList {
+            entries: self
+                .list
+                .iter()
+                .filter(|row| row.run)
+                .map(|row| BatchRunTomoRunEntry {
+                    stack_id: row.stack_id.clone(),
+                    dual: row.dual,
+                    run_type,
+                })
+                .collect(),
+        }
+    }
+    pub fn expand_stack(&mut self, expanded: bool) {
+        for row in &mut self.list {
+            row.stack_expanded = expanded;
+        }
+    }
     pub fn backup_if_changed(&mut self, stack_id: Option<&str>) -> bool {
         self.list
             .iter_mut()
@@ -342,6 +428,12 @@ pub struct BatchRunTomoTable {
     pub status_events: Vec<(bool, &'static str)>,
     pub duplicate_warnings: Vec<PathBuf>,
     pub table_reference: String,
+    pub table_listener_set: bool,
+    pub status_listener_count: usize,
+    pub row_status_listener_count: usize,
+    pub values_applied: bool,
+    pub autodocs_saved: usize,
+    pub autodocs_loaded: usize,
 }
 impl BatchRunTomoTable {
     /// Java `getInstance(...)`, `createPanel`, `setTooltips`, and `addListeners`.
@@ -369,6 +461,12 @@ impl BatchRunTomoTable {
             status_events: vec![],
             duplicate_warnings: vec![],
             table_reference: table_reference.into(),
+            table_listener_set: false,
+            status_listener_count: 0,
+            row_status_listener_count: 0,
+            values_applied: false,
+            autodocs_saved: 0,
+            autodocs_loaded: 0,
         };
         table.create_panel();
         table.set_tooltips();
@@ -383,6 +481,14 @@ impl BatchRunTomoTable {
     }
     pub fn has_dual(&self) -> bool {
         self.row_list.has_dual()
+    }
+    /// Native focus-parent identities corresponding to Java `getFocusableParents()`.
+    pub fn get_focusable_parents(&self) -> [&'static str; 4] {
+        ["viewport", "table", "stack-buttons", "root"]
+    }
+    /// Java `getImageFilenameStyle()`.
+    pub fn get_image_filename_style(&self) -> Option<ImageFilenameStyle> {
+        self.row_list.get_image_filename_style()
     }
     pub fn create_panel(&mut self) {
         self.viewport.init_paging();
@@ -449,7 +555,54 @@ impl BatchRunTomoTable {
         self.row_list.display(&self.viewport);
         self.stack_buttons_visible = self.cur_tab == BatchRunTomoTab::Stacks;
     }
+    /// Java `addStandardHeaders(int)`, represented by the common table header cells.
+    pub fn add_standard_headers(&mut self, index: usize) {
+        let number = HeaderCell::new("#");
+        let stack = HeaderCell::new(STACK_TITLE);
+        if self.headers.len() <= index {
+            self.headers.resize_with(index + 1, Vec::new);
+        }
+        self.headers[index].extend([number, stack]);
+    }
     pub fn add_listeners(&mut self) {}
+    /// Java `addStatusChangeListener(StatusChangeListener)`.
+    pub fn add_status_change_listener(&mut self, present: bool) {
+        if present {
+            self.status_listener_count += 1;
+        }
+    }
+    /// Java `msgStatusChangerStarted(StatusChanger)`.
+    pub fn msg_status_changer_started(&mut self, present: bool) {
+        if present {
+            self.row_list.changer_count += 1;
+        }
+    }
+    /// Java `addStatusChangeListenerToRowList(StatusChangeListener)`.
+    pub fn add_status_change_listener_to_row_list(&mut self, present: bool) {
+        if present {
+            self.row_list.status_listener_count += 1;
+        }
+    }
+    /// Java `addStatusChangeListenerToRows(StatusChangeListener)`.
+    pub fn add_status_change_listener_to_rows(&mut self, present: bool) {
+        if present {
+            self.row_status_listener_count += 1;
+            self.row_list.row_listener_count += 1;
+        }
+    }
+    /// Java `getUIComponent()`; native frontends use the retained table state itself.
+    pub fn get_ui_component(&self) -> &Self {
+        self
+    }
+    /// Java `getComponent()`; returns the native root component identity.
+    pub fn get_component(&self) -> &'static str {
+        "batch-run-tomo-table-root"
+    }
+    /// Java `setTableListener(TableListener)`.
+    pub fn set_table_listener(&mut self, present: bool) {
+        self.table_listener_set = present;
+        self.row_list.table_listener_set = present;
+    }
     pub fn validate(&self) -> bool {
         self.row_list.validate()
     }
@@ -618,10 +771,116 @@ impl BatchRunTomoTable {
     }
     pub fn expand(&mut self, expanded: bool) {
         self.stack_expanded = expanded;
-        for row in &mut self.row_list.list {
-            row.stack_expanded = expanded;
-        }
+        self.row_list.expand_stack(expanded);
         self.packed = true;
+    }
+    /// Java `expandStack(boolean)`.
+    pub fn expand_stack(&mut self, expanded: bool) {
+        self.expand(expanded);
+    }
+    /// Java `load(BatchRunTomoMetaData)`.
+    pub fn load(&mut self, meta_data: &BatchRunTomoTableMetaData) {
+        let first_index = self.row_list.size();
+        self.row_list.load(meta_data, self.stack_expanded);
+        if self.row_list.size() != first_index {
+            self.viewport.adjust_viewport(first_index as isize);
+            self.row_list.display(&self.viewport);
+            self.update_display();
+            self.packed = true;
+        }
+    }
+    /// Java `setParameters(BatchRunTomoMetaData, String, boolean, boolean)`.
+    /// A selected stack updates only that row; otherwise the serialized table is loaded.
+    pub fn set_parameters(
+        &mut self,
+        meta_data: &BatchRunTomoTableMetaData,
+        only_stack_id: Option<&str>,
+        _init: bool,
+    ) {
+        if let Some(stack_id) = only_stack_id {
+            if let (Some(row), Some(values)) = (
+                self.row_list.get_row_mut(stack_id),
+                meta_data.rows.iter().find(|row| row.stack_id == stack_id),
+            ) {
+                row.dual = values.dual;
+                row.montage = values.montage;
+                row.run = values.run;
+                row.ending_step = values.ending_step;
+                row.image_filename_style = values.image_filename_style.clone();
+            }
+        } else {
+            self.row_list.list.clear();
+            self.load(meta_data);
+        }
+    }
+    /// Java series-watcher `setParameters` path: create a blank row when needed.
+    pub fn add_blank_row(&mut self, stack_id: &str) -> bool {
+        if stack_id.is_empty() || self.row_list.row_exists(stack_id) {
+            return false;
+        }
+        let number = self.row_list.size() + 1;
+        self.row_list.list.push(BatchRunTomoRow {
+            number,
+            stack_id: stack_id.to_string(),
+            stack_expanded: self.stack_expanded,
+            valid: true,
+            ..Default::default()
+        });
+        self.viewport.adjust_viewport((number - 1) as isize);
+        self.row_list.display(&self.viewport);
+        self.update_display();
+        true
+    }
+    /// Java `getParameters(BatchRunTomoMetaData)`.
+    pub fn get_parameters(&self) -> BatchRunTomoTableMetaData {
+        BatchRunTomoTableMetaData {
+            rows: self
+                .row_list
+                .list
+                .iter()
+                .map(|row| BatchRunTomoTableRowMetaData {
+                    stack_id: row.stack_id.clone(),
+                    stack: row.stack.clone(),
+                    original_location: row.original_location.clone(),
+                    root_name: row.root_name.clone(),
+                    dual: row.dual,
+                    montage: row.montage,
+                    run: row.run,
+                    ending_step: row.ending_step,
+                    image_filename_style: row.image_filename_style.clone(),
+                })
+                .collect(),
+        }
+    }
+    /// Native form of Java row `applyValues`; directives are resolved by the frontend.
+    pub fn apply_values(
+        &mut self,
+        _init: bool,
+        _retain_user_values: bool,
+        only_stack_id: Option<&str>,
+    ) {
+        self.values_applied = true;
+        if only_stack_id.is_none() {
+            self.set_frame(false);
+        }
+    }
+    /// Native form of Java `saveAutodocs`; callers own the actual filesystem writer.
+    pub fn save_autodocs(&mut self, only_stack_id: Option<&str>) -> bool {
+        let count = only_stack_id
+            .and_then(|id| self.row_list.row_exists(id).then_some(1))
+            .unwrap_or(self.row_list.size());
+        self.autodocs_saved += count;
+        true
+    }
+    /// Native form of Java `loadAutodocs`; callers supply decoded values separately.
+    pub fn load_autodocs(&mut self, only_stack_id: Option<&str>, _only_advanced: bool) {
+        self.autodocs_loaded += only_stack_id
+            .and_then(|id| self.row_list.row_exists(id).then_some(1))
+            .unwrap_or(self.row_list.size());
+    }
+    /// Java `createRunList(RunType)`.
+    pub fn create_run_list(&self, run_type: RunType) -> BatchRunTomoRunList {
+        self.row_list.create_run_list(run_type)
     }
     pub fn size(&self) -> usize {
         self.row_list.size()

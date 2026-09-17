@@ -886,6 +886,31 @@ impl BaseProcessManager {
     }
 }
 
+pub struct ComScriptMonitorRunnable;
+impl ComScriptMonitorRunnable {
+    #[allow(non_snake_case)]
+    pub fn run(
+        manager: &BaseProcessManager,
+        process: Option<Infallible>,
+        monitor: Option<Infallible>,
+        axis_id: AxisID,
+    ) {
+        let _ = manager.start_com_script_monitor(process, monitor, axis_id);
+    }
+}
+pub struct BackgroundProcessMonitorRunnable;
+impl BackgroundProcessMonitorRunnable {
+    #[allow(non_snake_case)]
+    pub fn run(
+        manager: &BaseProcessManager,
+        process: Option<Infallible>,
+        monitor: Option<Infallible>,
+        axis_id: AxisID,
+    ) {
+        manager.start_background_process_monitor(process, monitor, axis_id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::BaseProcessManager;

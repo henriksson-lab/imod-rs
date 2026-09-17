@@ -1047,6 +1047,15 @@ pub struct NnWeights {
     pub weights: Vec<f64>,
 }
 
+/// `free_nn_weights` (`nnpi.c:820`).  Individual native allocations become
+/// two owned vectors, so clearing them is the explicit equivalent of freeing
+/// the vertex array, weight array, and enclosing record.
+pub fn free_nn_weights(weights: &mut NnWeights) {
+    weights.vertices.clear();
+    weights.weights.clear();
+    weights.nvertices = 0;
+}
+
 /// Original `nnhpi_create` (`nnpi.c:803`).
 ///
 /// As with [`nnpi_create`], the triangulation is owned here and handed back by
@@ -1077,10 +1086,17 @@ pub fn nnhpi_create(d: Delaunay, size: i32) -> Nnhpi {
 }
 
 /// Original `nnhpi_destroy` (`nnpi.c:833`).
-pub fn nnhpi_destroy(nn: Nnhpi) -> Delaunay {
+pub fn nnhpi_destroy(mut nn: Nnhpi) -> Delaunay {
     // The two tables and their keys, plus `weights_store`, are direct owned
-    // fields. They drop with `nn`; only the triangulation is intentionally
-    // returned to the caller.
+    // fields.  Process every weight record just as C `ht_process` invokes
+    // `free_nn_weights`, then release the tables before returning the
+    // triangulation that source ownership intentionally retains.
+    for weights in &mut nn.weights_store {
+        free_nn_weights(weights);
+    }
+    nn.weights_store.clear();
+    nn.ht_data.take();
+    nn.ht_weights.take();
     nn.nnpi.d
 }
 

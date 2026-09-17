@@ -43,6 +43,31 @@ pub struct SvlFactorTemplate {
     entry_mapping: Vec<Vec<(isize, isize)>>,
 }
 
+/// `svlFactorTemplate::svlFactorTemplate()` (`svlFactorTemplate.cpp:54`).
+pub fn svl_factor_template() -> SvlFactorTemplate {
+    SvlFactorTemplate::new()
+}
+
+/// `svlFactorTemplate(int dim, int repeats)` (`svlFactorTemplate.cpp:59`).
+pub fn svl_factor_template_repeated(
+    dim: usize,
+    repeats: usize,
+) -> Result<SvlFactorTemplate, String> {
+    SvlFactorTemplate::with_repeated_dimension(dim, repeats)
+}
+
+/// `svlFactorTemplate(const vector<int>&)` (`svlFactorTemplate.cpp:65`).
+pub fn svl_factor_template_with_dimensions(
+    dimensions: &[usize],
+) -> Result<SvlFactorTemplate, String> {
+    SvlFactorTemplate::with_dimensions(dimensions)
+}
+
+/// `svlFactorTemplate(XMLNode&)` (`svlFactorTemplate.cpp:70`).
+pub fn svl_factor_template_from_xml(xml: &str) -> Result<SvlFactorTemplate, String> {
+    SvlFactorTemplate::from_xml(xml)
+}
+
 impl SvlFactorTemplate {
     pub fn new() -> Self {
         Self {
@@ -497,6 +522,11 @@ impl SvlFactorTemplate {
     }
 }
 
+/// `svlFactorTemplate::getWeightIndices` (`svlFactorTemplate.cpp:144`).
+pub fn get_weight_indices(template: &SvlFactorTemplate) -> BTreeSet<isize> {
+    template.weight_indices()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,5 +543,16 @@ mod tests {
             .create_reduced_factor(&[4, 8], &[2.0], &[3.0], &[-1, 0])
             .unwrap();
         assert_eq!(reduced.values, vec![1.0, (-4.0f64).exp()]);
+    }
+    #[test]
+    fn source_template_factories_construct_owned_dimension_tables() {
+        assert!(svl_factor_template().empty());
+        assert_eq!(svl_factor_template_repeated(2, 3).unwrap().size(), 8);
+        assert_eq!(
+            svl_factor_template_with_dimensions(&[2, 3]).unwrap().size(),
+            6
+        );
+        let xml = "<FactorTemplate><Cards>2</Cards><Entry>-1 -1</Entry><Entry>-1 -1</Entry></FactorTemplate>";
+        assert_eq!(svl_factor_template_from_xml(xml).unwrap().size(), 2);
     }
 }

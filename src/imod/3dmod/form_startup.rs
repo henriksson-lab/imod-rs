@@ -214,7 +214,7 @@ pub struct StartupForm {
 }
 
 impl StartupForm {
-    /// `StartupForm::StartupForm`.
+    /// `StartupForm()` source constructor.
     pub fn new(modal: bool, native: &mut dyn StartupNativeBoundary) -> Self {
         native.setup_ui();
         native.set_modal(modal);

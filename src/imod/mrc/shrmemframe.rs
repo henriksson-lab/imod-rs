@@ -139,6 +139,11 @@ pub struct ShrMemFrame<B> {
     pub messages: String,
     pub running: bool,
 }
+/// `ShrMemFrame::ShrMemFrame` (`shrmemframe.cpp:79`), exposed as a free
+/// factory for code translated from the source constructor call site.
+pub fn shr_mem_frame<B: FrameAlignBackend>(id_value: i32, backend: B) -> ShrMemFrame<B> {
+    ShrMemFrame::new(id_value, backend)
+}
 impl<B: FrameAlignBackend> ShrMemFrame<B> {
     pub fn new(id_value: i32, backend: B) -> Self {
         Self {
@@ -157,9 +162,38 @@ impl<B: FrameAlignBackend> ShrMemFrame<B> {
             self.messages.push_str(message)
         }
     }
+    /// `framePrintFunc` (`shrmemframe.cpp:55`), routed through the owned
+    /// service instead of the source's process-global message buffer.
+    pub fn frame_print_func(&mut self, message: &str) {
+        self.frame_print(message);
+    }
+
+    /// `finishSum` (`shrmemframe.cpp:371`), including the source's fresh
+    /// message-buffer lifetime for the backend operation.
+    pub fn finish_sum(&mut self, params: &mut FinishParams) {
+        self.messages.clear();
+        self.backend.finish_align_and_sum(params);
+        params.messages.clone_from(&self.messages);
+    }
+
+    /// `sendReply` (`shrmemframe.cpp:421`).  Sending a Windows event becomes
+    /// returning an owned reply to the caller of this portable transport.
+    pub fn send_reply(&self, request: ShrMemFrameRequest) -> ShrMemFrameReply {
+        ShrMemFrameReply {
+            id: self.id_value,
+            action: ShrMemFrameAction::Done,
+            request,
+        }
+    }
+
+    /// `closeAndExit` (`shrmemframe.cpp:435`).  Resource release is owned by
+    /// Rust; marking the service stopped is the remaining observable state.
+    pub fn close_and_exit(&mut self, _exit_code: i32) {
+        self.running = false;
+    }
     pub fn handle(&mut self, id: i32, mut request: ShrMemFrameRequest) -> Option<ShrMemFrameReply> {
         if id != self.id_value {
-            self.running = false;
+            self.close_and_exit(0);
             return None;
         }
         match &mut request {
@@ -180,11 +214,7 @@ impl<B: FrameAlignBackend> ShrMemFrame<B> {
                 p.messages.clone_from(&self.messages);
                 self.num_frames += 1
             }
-            ShrMemFrameRequest::Finish(p) => {
-                self.messages.clear();
-                self.backend.finish_align_and_sum(p);
-                p.messages.clone_from(&self.messages)
-            }
+            ShrMemFrameRequest::Finish(p) => self.finish_sum(p),
             ShrMemFrameRequest::FrcCross(p) => self.backend.analyze_frc_crossings(p),
             ShrMemFrameRequest::GpuAvail(p) => {
                 self.messages.clear();
@@ -202,14 +232,10 @@ impl<B: FrameAlignBackend> ShrMemFrame<B> {
                     request: ShrMemFrameRequest::Version,
                 });
             }
-            ShrMemFrameRequest::Exit => self.running = false,
+            ShrMemFrameRequest::Exit => self.close_and_exit(0),
             ShrMemFrameRequest::Done => {}
         }
-        Some(ShrMemFrameReply {
-            id: self.id_value,
-            action: ShrMemFrameAction::Done,
-            request,
-        })
+        Some(self.send_reply(request))
     }
 }
 #[cfg(test)]
@@ -230,5 +256,16 @@ mod tests {
         let mut s = ShrMemFrame::new(3, Backend);
         assert!(s.handle(4, ShrMemFrameRequest::Done).is_none());
         assert!(!s.running)
+    }
+    #[test]
+    fn source_lifecycle_methods_use_owned_messages_and_replies() {
+        let mut service = ShrMemFrame::new(7, Backend);
+        service.frame_print_func("frame aligned");
+        assert_eq!(service.messages, "frame aligned");
+        let reply = service.send_reply(ShrMemFrameRequest::Done);
+        assert_eq!(reply.id, 7);
+        assert_eq!(reply.action, ShrMemFrameAction::Done);
+        service.close_and_exit(0);
+        assert!(!service.running);
     }
 }

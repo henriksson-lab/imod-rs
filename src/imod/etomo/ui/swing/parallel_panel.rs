@@ -74,6 +74,7 @@ pub struct ParallelPanel {
     pub nice: i32,
     pub version: String,
     pub queue_events: Vec<QueueTableEvent>,
+    pub queue_listener_count: usize,
 }
 impl ParallelPanel {
     /// `getInstance(...)` plus private constructor and `addListeners`.
@@ -137,6 +138,7 @@ impl ParallelPanel {
             nice: 0,
             version: String::new(),
             queue_events: vec![],
+            queue_listener_count: 0,
         };
         if has_queues {
             panel.send_queue_table_event(panel.get_queue_table_displayed_event());
@@ -144,6 +146,29 @@ impl ParallelPanel {
         panel
     }
     pub fn add_listeners(&mut self) {}
+    #[allow(non_snake_case)]
+    pub fn addQueueListener(&mut self) {
+        self.queue_listener_count += 1;
+    }
+    #[allow(non_snake_case)]
+    pub fn addQueueTableListener(&mut self) {
+        self.queue_listener_count += 1;
+    }
+    #[allow(non_snake_case)]
+    pub fn removeQueueTableListener(&mut self) {
+        self.queue_listener_count = self.queue_listener_count.saturating_sub(1);
+    }
+    /// Native frontend table construction is represented by the visibility map.
+    #[allow(non_snake_case)]
+    pub fn buildTablePanel(&mut self, method: ProcessingMethod) {
+        self.table_visible
+            .entry(Self::table_key(method).into())
+            .or_insert(false);
+    }
+    #[allow(non_snake_case)]
+    pub fn getParallelProgressDisplay(&self) -> &Self {
+        self
+    }
     pub fn is_runnable(&self) -> bool {
         self.runnable
     }
@@ -358,6 +383,35 @@ impl ParallelPanel {
     pub fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
         self.secondary_table
     }
+    #[allow(non_snake_case)]
+    pub fn getSecondaryTable(&self) -> Option<ProcessingMethod> {
+        self.secondary_table
+    }
+    #[allow(non_snake_case)]
+    pub fn getResumeParameters(&self, do_validation: bool) -> Result<String, String> {
+        self.get_cpus_selected(do_validation)
+    }
+    #[allow(non_snake_case)]
+    pub fn getNumberOfProcessors(&self, do_validation: bool) -> Result<String, String> {
+        self.get_cpus_selected(do_validation)
+    }
+    #[allow(non_snake_case)]
+    pub fn getParameters(&self, do_validation: bool) -> Result<String, String> {
+        self.get_cpus_selected(do_validation)
+    }
+    #[allow(non_snake_case)]
+    pub fn resetParameters(&mut self) {
+        self.cpus_selected.clear();
+        self.secondary_cpus_selected.clear();
+    }
+    #[allow(non_snake_case)]
+    pub fn setParameters(&mut self, processors: impl Into<String>) {
+        self.cpus_selected = processors.into();
+    }
+    /// Tooltip rendering belongs to the native frontend; this preserves the
+    /// source setup boundary without retaining Swing widgets.
+    #[allow(non_snake_case)]
+    pub fn setToolTipText(&mut self) {}
     pub fn msg_ending_process(&mut self) {
         self.processing_running = false;
         self.update_processing_method_lock();

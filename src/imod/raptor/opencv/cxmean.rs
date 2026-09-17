@@ -235,6 +235,9 @@ pub fn cv_avg<T: CvMeanValue>(
         }
         Ok(result)
     } else {
+        if matrix.channels > 4 {
+            return Err(CvMeanError::OutOfRange);
+        }
         let mut result = CvScalar { values: [0.0; 4] };
         for pixel in 0..pixels {
             for channel in 0..matrix.channels.min(4) {
@@ -333,5 +336,18 @@ mod tests {
             cv_avg(&matrix, Some(&[1]), None),
             Err(CvMeanError::UnsupportedFormat)
         );
+    }
+
+    #[test]
+    fn unmasked_more_than_four_channels_is_not_silently_truncated() {
+        let matrix = CvMeanMatrix {
+            size: CvSize {
+                width: 1,
+                height: 1,
+            },
+            channels: 5,
+            data: vec![1_u8; 5],
+        };
+        assert_eq!(cv_avg(&matrix, None, None), Err(CvMeanError::OutOfRange));
     }
 }

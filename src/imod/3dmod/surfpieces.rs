@@ -17,6 +17,11 @@ pub struct SurfacePiece {
     pub t_list: Vec<i32>,
 }
 
+/// `Surface_Piece()`: take ownership of the source vertex and triangle lists.
+pub fn surface_piece(v_list: Vec<i32>, t_list: Vec<i32>) -> SurfacePiece {
+    SurfacePiece::new(v_list, t_list)
+}
+
 impl SurfacePiece {
     /// `Surface_Piece::Surface_Piece`.
     pub fn new(v_list: Vec<i32>, t_list: Vec<i32>) -> Self {
@@ -32,6 +37,17 @@ impl SurfacePiece {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SurfacePieces {
     pub pieces: Vec<SurfacePiece>,
+}
+
+/// `Surface_Pieces()`: partition the triangle array into owned connected
+/// components and write the reordered triangle list to the caller buffer.
+pub fn surface_pieces(
+    vertex_xyz: &[Ipoint],
+    tarray: &[i32],
+    tc: i32,
+    sorted_triangle: &mut [i32],
+) -> SurfacePieces {
+    SurfacePieces::new(vertex_xyz, tarray, tc, sorted_triangle)
 }
 
 /// `maximum_triangle_vertex_index`.
@@ -211,6 +227,13 @@ mod tests {
         let mut sorted = [];
         let pieces = SurfacePieces::new(&[], &[], 0, &mut sorted);
         assert!(pieces.pieces.is_empty());
+    }
+
+    #[test]
+    fn source_constructor_facades_own_their_lists() {
+        assert_eq!(surface_piece(vec![1], vec![2]).v_list, vec![1]);
+        let mut sorted = [];
+        assert!(surface_pieces(&[], &[], 0, &mut sorted).pieces.is_empty());
     }
 
     #[test]

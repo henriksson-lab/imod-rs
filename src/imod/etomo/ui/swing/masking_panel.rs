@@ -427,6 +427,12 @@ impl MaskingPanel {
             parent.update_display(false);
         }
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<P: MaskingParent>(&mut self, parent: &mut P, action_command: &str) {
+        self.action(parent, action_command);
+    }
     pub fn set_tooltips(&mut self) {
         self.ltf_z_rotation
             .set_tool_tip_text(Some("Cylinder orientation from mask model points."));

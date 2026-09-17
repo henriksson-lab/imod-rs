@@ -152,7 +152,10 @@ impl ImodvOlist {
     }
     /// Original `ImodvOlist::toggleGroupSlot`.
     pub fn toggle_group_slot(&mut self, model: &mut Imod, ob: i32, state: bool) {
-        let Some(group) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) else {
+        let Some(group) = model
+            .group_list
+            .get_mut(model.cur_obj_group.max(0) as usize)
+        else {
             return;
         };
         let (mut start, mut end) = (ob, ob);
@@ -249,7 +252,8 @@ impl ImodvOlist {
                 model.cur_obj_group = model.group_list.len() as i32 - 1;
             }
             OBJGRP_DELETE => {
-                if model.cur_obj_group >= 0 && (model.cur_obj_group as usize) < model.group_list.len()
+                if model.cur_obj_group >= 0
+                    && (model.cur_obj_group as usize) < model.group_list.len()
                 {
                     imodv_register_model_chg();
                     model.group_list.remove(model.cur_obj_group as usize);
@@ -259,19 +263,28 @@ impl ImodvOlist {
                 }
             }
             OBJGRP_CLEAR => {
-                if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
+                if let Some(g) = model
+                    .group_list
+                    .get_mut(model.cur_obj_group.max(0) as usize)
+                {
                     imodv_register_model_chg();
                     g.obj_list.clear();
                 }
             }
             OBJGRP_ADDALL => {
-                if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
+                if let Some(g) = model
+                    .group_list
+                    .get_mut(model.cur_obj_group.max(0) as usize)
+                {
                     imodv_register_model_chg();
                     g.obj_list = (0..model.obj.len() as i32).collect();
                 }
             }
             OBJGRP_SWAP => {
-                if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
+                if let Some(g) = model
+                    .group_list
+                    .get_mut(model.cur_obj_group.max(0) as usize)
+                {
                     imodv_register_model_chg();
                     let old = g.obj_list.clone();
                     g.obj_list = (0..model.obj.len() as i32)
@@ -309,7 +322,10 @@ impl ImodvOlist {
     /// Original `ImodvOlist::nameChanged`.
     pub fn name_changed(&mut self, model: &mut Imod, name: &str) {
         self.group_name = name.to_string();
-        if let Some(g) = model.group_list.get_mut(model.cur_obj_group.max(0) as usize) {
+        if let Some(g) = model
+            .group_list
+            .get_mut(model.cur_obj_group.max(0) as usize)
+        {
             g.name = [0; 32];
             for (dst, src) in g.name.iter_mut().zip(name.bytes().take(31)) {
                 *dst = src;

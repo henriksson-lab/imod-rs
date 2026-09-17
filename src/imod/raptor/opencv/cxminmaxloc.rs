@@ -50,6 +50,10 @@ impl<T> CvMatrix<T> {
 /// C's 8-bit single-channel mask, with its independent element stride.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CvMask {
+    /// Logical mask dimensions, retained so consumers can enforce C's
+    /// `CV_ARE_SIZES_EQ` contract rather than merely checking backing storage.
+    pub rows: usize,
+    pub columns: usize,
     pub row_stride: usize,
     pub values: Vec<u8>,
 }
@@ -71,7 +75,12 @@ impl CvMask {
         if values.len() < required {
             return Err(CvStatus::sts_bad_mask);
         }
-        Ok(Self { row_stride, values })
+        Ok(Self {
+            rows,
+            columns,
+            row_stride,
+            values,
+        })
     }
 }
 
@@ -89,6 +98,19 @@ pub trait CvMinMaxElement: Copy {
     fn as_f64(self) -> f64;
     fn less_than(self, other: Self) -> bool;
     fn greater_than(self, other: Self) -> bool;
+}
+
+/// `minmax_to_float` (`cxminmaxloc.cpp:131`): reverse the signed sortable
+/// representation used by the source's floating-point reduction kernels.
+pub fn minmax_to_float(value: i32) -> f32 {
+    let bits = value as u32;
+    f32::from_bits(bits ^ if value < 0 { 0x7fff_ffff } else { 0 })
+}
+
+/// `minmax_to_double` (`cxminmaxloc.cpp:138`), the f64 counterpart.
+pub fn minmax_to_double(value: i64) -> f64 {
+    let bits = value as u64;
+    f64::from_bits(bits ^ if value < 0 { 0x7fff_ffff_ffff_ffff } else { 0 })
 }
 
 macro_rules! impl_min_max_element {
@@ -110,10 +132,10 @@ impl CvMinMaxElement for f32 {
         self as f64
     }
     fn less_than(self, other: Self) -> bool {
-        self.total_cmp(&other).is_lt()
+        self < other
     }
     fn greater_than(self, other: Self) -> bool {
-        self.total_cmp(&other).is_gt()
+        self > other
     }
 }
 
@@ -122,10 +144,10 @@ impl CvMinMaxElement for f64 {
         self
     }
     fn less_than(self, other: Self) -> bool {
-        self.total_cmp(&other).is_lt()
+        self < other
     }
     fn greater_than(self, other: Self) -> bool {
-        self.total_cmp(&other).is_gt()
+        self > other
     }
 }
 
@@ -204,7 +226,7 @@ pub fn cv_min_max_loc<T: CvMinMaxElement>(
 
 #[cfg(test)]
 mod tests {
-    use super::{CvMask, CvMatrix, cv_min_max_loc};
+    use super::{CvMask, CvMatrix, cv_min_max_loc, minmax_to_double, minmax_to_float};
     use crate::imod::raptor::opencv::cvutils::CvPoint;
     use crate::imod::raptor::opencv::cxerror::CvStatus;
 
@@ -260,5 +282,27 @@ mod tests {
             Err(CvStatus::sts_bad_arg)
         );
         assert!(CvMask::new(1, 2, 1, vec![1, 1]).is_err());
+    }
+
+    #[test]
+    fn native_float_reduction_conversion_reverses_sortable_bits() {
+        for value in [-3.5_f32, -0.0, 0.0, 2.25] {
+            let bits = value.to_bits() as i32;
+            let toggled = bits ^ if bits < 0 { 0x7fff_ffff } else { 0 };
+            assert_eq!(minmax_to_float(toggled), value);
+        }
+        for value in [-7.0_f64, -0.0, 0.0, 9.5] {
+            let bits = value.to_bits() as i64;
+            let toggled = bits ^ if bits < 0 { 0x7fff_ffff_ffff_ffff } else { 0 };
+            assert_eq!(minmax_to_double(toggled), value);
+        }
+    }
+
+    #[test]
+    fn later_nan_does_not_replace_c_style_float_extrema() {
+        let matrix = CvMatrix::new(1, 3, 1, 3, vec![2_f64, f64::NAN, 5.]).unwrap();
+        let result = cv_min_max_loc(&matrix, None, None).unwrap();
+        assert_eq!(result.min_value, 2.0);
+        assert_eq!(result.max_value, 5.0);
     }
 }

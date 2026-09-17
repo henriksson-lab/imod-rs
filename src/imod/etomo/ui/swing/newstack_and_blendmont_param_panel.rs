@@ -285,6 +285,20 @@ impl NewstackAndBlendmontParamPanel {
         }
     }
 
+    /// Native callback endpoint for Java
+    /// `NewstackAndBlendmontParamPanelActionListener.actionPerformed`.
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(&mut self, command: &str) {
+        self.action(command);
+    }
+
+    /// Native callback endpoint for Java
+    /// `NewstackAndBlendmontBinningChangeListener.stateChanged`.
+    #[allow(non_snake_case)]
+    pub fn stateChanged(&mut self) {
+        self.update_enabled();
+    }
+
     /// Java private `setToolTipText` with autodoc I/O retained as a direct boundary.
     pub fn set_tool_tip_text<A: NewstackAndBlendmontParamPanelAutodoc>(&mut self, autodoc: &A) {
         self.ltf_size_to_output_in_x_and_y.set_tool_tip_text(
@@ -355,9 +369,16 @@ mod tests {
             DialogType::FinalAlignedStack,
             ViewType::SingleView,
         );
-        panel.set_binning(2);
+        panel.spin_binning.set_value_int(2);
+        panel.stateChanged();
         panel.cb_use_linear_interpolation.set_selected(true);
-        panel.set_fiducialess_alignment(true);
+        panel.cb_fiducialess.set_selected(true);
+        let command = panel
+            .cb_fiducialess
+            .get_action_command()
+            .unwrap()
+            .to_owned();
+        panel.actionPerformed(&command);
         panel.ltf_size_to_output_in_x_and_y.set_text("100,200");
         let mut newst = NewstParam::default();
         assert!(panel.get_newst_parameters(&mut newst, true));

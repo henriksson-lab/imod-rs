@@ -28,6 +28,13 @@ pub struct FinishAlignment {
     pub max_raw_max: Vec<f32>,
 }
 
+/// `TickInterval()`: elapsed milliseconds between Win32 `GetTickCount`
+/// readings.  `wrapping_sub` retains the native 32-bit tick-counter rollover
+/// behavior without requiring a platform clock in protocol tests.
+pub fn tick_interval(start_tick: u32, current_tick: u32) -> f64 {
+    current_tick.wrapping_sub(start_tick) as f64
+}
+
 pub struct ShrMemClient<B> {
     server: ShrMemFrame<B>,
     num_frames: usize,
@@ -36,6 +43,20 @@ pub struct ShrMemClient<B> {
     server_id: i32,
     messages: Vec<String>,
     frame_buffer: Vec<u8>,
+}
+
+/// `ShrMemClient()`: construct the client around its owned Rust service.
+/// The original no-argument constructor subsequently launched a Windows
+/// process; requiring that service here makes the replacement transport
+/// explicit and keeps the client usable on every platform.
+pub fn shr_mem_client<B: FrameAlignBackend>(server: ShrMemFrame<B>) -> ShrMemClient<B> {
+    ShrMemClient::new(server)
+}
+
+/// `~ShrMemClient()`: first send the native exit action, then release the
+/// owned service and protocol buffers.
+pub fn free_shr_mem_client<B: FrameAlignBackend>(mut client: ShrMemClient<B>) {
+    client.disconnect(50);
 }
 
 impl<B: FrameAlignBackend> ShrMemClient<B> {
@@ -249,5 +270,12 @@ mod tests {
         let mut client = ShrMemClient::new(ShrMemFrame::new(19, Backend));
         client.disconnect(0);
         assert!(client.connect_if_needed().is_err());
+    }
+
+    #[test]
+    fn tick_interval_and_constructor_handle_tick_counter_rollover() {
+        assert_eq!(tick_interval(u32::MAX - 4, 3), 8.0);
+        let client = shr_mem_client(ShrMemFrame::new(20, Backend));
+        free_shr_mem_client(client);
     }
 }

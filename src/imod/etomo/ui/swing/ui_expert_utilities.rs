@@ -1,5 +1,14 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/UIExpertUtilities.java`.
 #![allow(dead_code)]
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use std::path::{Path, PathBuf};
+
+/// Storage identity created by Java `new FidXyz(propertyUserDir, dataset +
+/// axisID.getExtension() + "fid.xyz")`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FidXyzFile {
+    pub path: PathBuf,
+}
 pub trait MrcHeaderBoundary {
     fn read(&mut self) -> Result<bool, ()>;
     fn x_pixel_spacing(&self) -> f64;
@@ -23,11 +32,30 @@ pub trait FiducialessManager {
     fn roll_align_com_angles(&mut self);
     fn roll_tilt_com_angles(&mut self);
 }
+pub trait OldComUpgrade {
+    fn is_old_version(&self) -> bool;
+    fn upgrade_old_version(&mut self, correction_binning: i32, current_binning: i32) -> bool;
+}
 /// Java singleton `UIExpertUtilities.INSTANCE`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UiExpertUtilities;
 impl UiExpertUtilities {
     pub const INSTANCE: Self = Self;
+    #[allow(non_snake_case)]
+    pub fn getFidXyz(
+        &self,
+        property_user_dir: &Path,
+        dataset_name: &str,
+        axis_id: AxisID,
+    ) -> FidXyzFile {
+        FidXyzFile {
+            path: property_user_dir.join(format!(
+                "{}{}fid.xyz",
+                dataset_name,
+                axis_id.get_extension()
+            )),
+        }
+    }
     pub fn get_stack_binning<H: MrcHeaderBoundary>(
         &self,
         raw: &mut H,
@@ -86,6 +114,25 @@ impl UiExpertUtilities {
             rads.cos()
         ))
     }
+    /// Java private `updateRotationXF`, separated here from metadata updates.
+    #[allow(non_snake_case)]
+    pub fn updateRotationXF<M: FiducialessManager>(
+        &self,
+        manager: &mut M,
+        angle: &str,
+    ) -> Result<(), String> {
+        let angle: f64 = angle
+            .parse()
+            .map_err(|_| "Tilt axis rotation format error".to_owned())?;
+        let rads = -angle * std::f64::consts::PI / 180.0;
+        manager.write_rotation_xf(format!(
+            "{}   {}   {}   {}   0   0\n",
+            rads.cos(),
+            (-rads).sin(),
+            rads.sin(),
+            rads.cos()
+        ))
+    }
     pub fn are_scripts_created<M: FiducialessManager>(&self, manager: &M) -> bool {
         manager.com_scripts_created()
     }
@@ -130,6 +177,38 @@ impl UiExpertUtilities {
     }
     pub fn roll_tilt_com_angles<M: FiducialessManager>(&self, manager: &mut M) {
         manager.roll_tilt_com_angles()
+    }
+    #[allow(non_snake_case)]
+    pub fn upgradeOldAlignCom<P: OldComUpgrade, M: FiducialessManager>(
+        &self,
+        manager: &mut M,
+        param: &mut P,
+        correction_binning: i32,
+        current_binning: i32,
+    ) -> bool {
+        if !param.is_old_version()
+            || !param.upgrade_old_version(correction_binning, current_binning)
+        {
+            return false;
+        }
+        self.roll_align_com_angles(manager);
+        true
+    }
+    #[allow(non_snake_case)]
+    pub fn upgradeOldTiltCom<P: OldComUpgrade, M: FiducialessManager>(
+        &self,
+        manager: &mut M,
+        param: &mut P,
+        correction_binning: i32,
+        current_binning: i32,
+    ) -> bool {
+        if !param.is_old_version()
+            || !param.upgrade_old_version(correction_binning, current_binning)
+        {
+            return false;
+        }
+        self.roll_tilt_com_angles(manager);
+        true
     }
 }
 #[cfg(test)]

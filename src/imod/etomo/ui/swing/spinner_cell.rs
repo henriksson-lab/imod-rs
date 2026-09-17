@@ -148,6 +148,11 @@ impl SpinnerCell {
     pub fn get_component(&self) -> &SpinnerCellBoundary {
         &self.spinner
     }
+    #[allow(non_snake_case)]
+    /// Rust GUI-boundary equivalent of Java's `DefaultEditor.getTextField()`.
+    pub fn getTextField(&self) -> &SpinnerCellBoundary {
+        &self.spinner
+    }
     /// Java `setValue(int)`.
     pub fn set_value(&mut self, value: i32) {
         self.saved_value = Some(value);

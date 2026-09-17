@@ -185,8 +185,14 @@ pub fn icv_lut_transform8u_8s_c1r(
 ) -> Result<(), LutError> {
     if lut.len() < 256
         || src_step < size.width
-        || dst_step < size.width
+        || dst_step % core::mem::size_of::<i8>() != 0
         || src.len() < size.height.saturating_sub(1).saturating_mul(src_step) + size.width
+        || dst.len() < size.height.saturating_sub(1).saturating_mul(dst_step) + size.width
+    {
+        return Err(LutError::BadArgument);
+    }
+    let dst_step = dst_step / core::mem::size_of::<i8>();
+    if dst_step < size.width
         || dst.len() < size.height.saturating_sub(1).saturating_mul(dst_step) + size.width
     {
         return Err(LutError::BadArgument);
@@ -210,8 +216,14 @@ pub fn icv_lut_transform8u_16s_c1r(
 ) -> Result<(), LutError> {
     if lut.len() < 256
         || src_step < size.width
-        || dst_step < size.width
+        || dst_step % core::mem::size_of::<i16>() != 0
         || src.len() < size.height.saturating_sub(1).saturating_mul(src_step) + size.width
+        || dst.len() < size.height.saturating_sub(1).saturating_mul(dst_step) + size.width
+    {
+        return Err(LutError::BadArgument);
+    }
+    let dst_step = dst_step / core::mem::size_of::<i16>();
+    if dst_step < size.width
         || dst.len() < size.height.saturating_sub(1).saturating_mul(dst_step) + size.width
     {
         return Err(LutError::BadArgument);
@@ -235,8 +247,14 @@ pub fn icv_lut_transform8u_32f_c1r(
 ) -> Result<(), LutError> {
     if lut.len() < 256
         || src_step < size.width
-        || dst_step < size.width
+        || dst_step % core::mem::size_of::<f32>() != 0
         || src.len() < size.height.saturating_sub(1).saturating_mul(src_step) + size.width
+        || dst.len() < size.height.saturating_sub(1).saturating_mul(dst_step) + size.width
+    {
+        return Err(LutError::BadArgument);
+    }
+    let dst_step = dst_step / core::mem::size_of::<f32>();
+    if dst_step < size.width
         || dst.len() < size.height.saturating_sub(1).saturating_mul(dst_step) + size.width
     {
         return Err(LutError::BadArgument);
@@ -299,24 +317,24 @@ pub fn cv_lut<T: Copy>(
         .checked_mul(destination.columns)
         .and_then(|count| count.checked_mul(destination.channels))
         != Some(destination.data.len())
-        || table
-            .rows
-            .checked_mul(table.columns)
-            .and_then(|count| count.checked_mul(table.channels))
-            != Some(table.data.len())
-        || destination.rows != rows
-        || destination.columns != columns
     {
-        return Err(LutError::UnmatchedSizes);
-    }
-    if destination.channels != channels {
-        return Err(LutError::UnmatchedFormats);
+        return Err(LutError::BadArgument);
     }
     if table
         .rows
         .checked_mul(table.columns)
         .and_then(|count| count.checked_mul(table.channels))
-        != Some(256 * table.channels)
+        != Some(table.data.len())
+    {
+        return Err(LutError::BadArgument);
+    }
+    if destination.rows != rows || destination.columns != columns {
+        return Err(LutError::UnmatchedSizes);
+    }
+    if destination.channels != channels {
+        return Err(LutError::UnmatchedFormats);
+    }
+    if table.rows.checked_mul(table.columns) != Some(256)
         || (table.channels != 1 && table.channels != channels)
     {
         return Err(LutError::BadArgument);
@@ -400,5 +418,31 @@ mod tests {
         };
         cv_lut(&source, &mut destination, &table).unwrap();
         assert_eq!(destination.data, [0, 128, 255]);
+    }
+
+    #[test]
+    fn malformed_owned_table_is_an_argument_error_not_a_size_mismatch() {
+        let source = LutSource::Unsigned(LutMatrix {
+            rows: 1,
+            columns: 1,
+            channels: 1,
+            data: vec![0],
+        });
+        let mut destination = LutMatrix {
+            rows: 1,
+            columns: 1,
+            channels: 1,
+            data: vec![0_u16],
+        };
+        let table = LutMatrix {
+            rows: 1,
+            columns: 256,
+            channels: 1,
+            data: vec![0_u16; 255],
+        };
+        assert_eq!(
+            cv_lut(&source, &mut destination, &table),
+            Err(LutError::BadArgument)
+        );
     }
 }

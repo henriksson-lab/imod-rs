@@ -90,6 +90,7 @@ pub struct MovieSequenceForm {
     pub max_view: i32,
 }
 impl MovieSequenceForm {
+    /// `MovieSequenceForm()` source constructor.
     pub fn new(
         segments: Vec<MovieSegment>,
         max_view: i32,

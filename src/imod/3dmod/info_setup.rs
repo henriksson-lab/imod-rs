@@ -175,6 +175,15 @@ pub trait InfoSetupNative: InfoNativeBoundary {
     fn control_key(&mut self, _: bool, _: i32, _: bool) {}
     fn quit(&mut self) {}
     fn dialog_master_changed(&mut self) {}
+    /// Source `DialogManager::masterChangedScreen(oldDpr, newDpr)`.
+    /// Existing backends that only need a generic relayout notification can
+    /// keep implementing `dialog_master_changed`.
+    fn dialog_master_changed_screen(&mut self, _old_dpr: f32, _new_dpr: f32) {
+        self.dialog_master_changed();
+    }
+    fn font_line_spacing(&self) -> i32 {
+        16
+    }
     fn dialog_activated(&mut self) {}
     fn dialog_hide(&mut self) {}
     fn dialog_show(&mut self) {}
@@ -252,7 +261,7 @@ pub struct InfoWindow {
 }
 
 impl InfoWindow {
-    /// `InfoWindow::InfoWindow`.
+    /// `InfoWindow()` source constructor.
     pub fn new(native: &mut dyn InfoSetupNative) -> Self {
         let mut out = Self {
             actions: std::array::from_fn(|_| InfoAction {
@@ -499,6 +508,27 @@ impl InfoWindow {
         native.info_input();
         let (widget_height, hint_height) = (native.control_size().1, native.control_size_hint().1);
         self.resize_to_height(self.height + hint_height - widget_height, 4, native);
+    }
+    /// `InfoWindow::screenChanged`.
+    ///
+    /// The Qt source returns without side effects when the platform cannot
+    /// determine a new device-pixel ratio.  For an actual transition it first
+    /// tells the dialog manager, then refreshes the delayed resize path only
+    /// when the ratio changed materially.
+    pub fn screen_changed(&mut self, new_dpr: f32, native: &mut dyn InfoSetupNative) {
+        if new_dpr == 0. {
+            return;
+        }
+        native.dialog_master_changed_screen(self.device_pixel_ratio, new_dpr);
+        if (new_dpr - self.device_pixel_ratio).abs() > 0.01 {
+            self.old_font_height = native.font_line_spacing();
+            if self.info_timer_id != 0 {
+                self.extend_info_timer(native);
+            } else {
+                self.set_initial_heights(true, native);
+            }
+        }
+        self.device_pixel_ratio = new_dpr;
     }
     /// `InfoWindow::pluginSlot`.
     pub fn plugin_slot(&mut self, item: i32, native: &mut dyn InfoSetupNative) {
@@ -1013,5 +1043,18 @@ mod tests {
     #[test]
     fn truncation_has_source_length() {
         assert_eq!(truncate_name("abcdefghijklmnopqrstuvwxyz", 5), "abcd...");
+    }
+
+    #[test]
+    fn screen_change_relayouts_only_for_a_real_dpr_transition() {
+        let mut n = Native::default();
+        let mut w = InfoWindow::new(&mut n);
+        w.device_pixel_ratio = 1.;
+        w.screen_changed(2., &mut n);
+        assert_eq!(w.device_pixel_ratio, 2.);
+        assert_ne!(w.info_timer_id, 0);
+        let timer = w.info_timer_id;
+        w.screen_changed(0., &mut n);
+        assert_eq!(w.info_timer_id, timer);
     }
 }

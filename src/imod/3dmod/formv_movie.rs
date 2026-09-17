@@ -78,6 +78,7 @@ impl Default for ImodvMovieForm {
     }
 }
 impl ImodvMovieForm {
+    /// `imodvMovieForm()` source constructor.
     pub fn new(n: &mut dyn ImodvMovieNativeBoundary) -> Self {
         let mut f = Self::default();
         f.m_top_win = true;

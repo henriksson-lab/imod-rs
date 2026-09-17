@@ -5,7 +5,7 @@
 //! and material state are source-identical and not a substitute shading model.
 #![allow(dead_code)]
 
-use crate::imod::libimod::imodel::{Iobj, Iview};
+use crate::imod::libimod::imodel::{Iobj, Ipoint, Iview};
 use crate::imod::libimod::iobj::IMOD_OBJFLAG_FCOLOR;
 use crate::imod::libimod::iview::VIEW_WORLD_LIGHT;
 
@@ -195,6 +195,62 @@ pub fn light_off(gl: &mut dyn LightGl) {
     gl.lighting(false);
     gl.color_material(false);
 }
+
+/// `imod_light_normal`: calculate the source triangle normal after applying
+/// the caller's Z scaling.  A degenerate triangle retains the native default
+/// normal pointing toward negative Z.
+pub fn imod_light_normal(p1: Ipoint, p2: Ipoint, p3: Ipoint, z_scale: f64) -> Ipoint {
+    let v1 = [
+        (p3.x - p2.x) as f64,
+        (p3.y - p2.y) as f64,
+        (p3.z as f64 - p2.z as f64) * z_scale,
+    ];
+    let v2 = [
+        (p1.x - p2.x) as f64,
+        (p1.y - p2.y) as f64,
+        (p1.z as f64 - p2.z as f64) * z_scale,
+    ];
+    let mut normal = [
+        v1[2] * v2[1] - v1[1] * v2[2],
+        v1[0] * v2[2] - v1[2] * v2[0],
+        v1[1] * v2[0] - v1[0] * v2[1],
+    ];
+    let distance = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if distance == 0. {
+        normal = [0., 0., -1.];
+    } else {
+        for value in &mut normal {
+            *value /= distance;
+        }
+    }
+    Ipoint {
+        x: normal[0] as f32,
+        y: normal[1] as f32,
+        z: normal[2] as f32,
+    }
+}
+
+/// `test_normal()`, returning the normal the native diagnostic printed.
+pub fn test_normal() -> Ipoint {
+    imod_light_normal(
+        Ipoint {
+            x: 4.,
+            y: -3.,
+            z: 1.,
+        },
+        Ipoint {
+            x: 6.,
+            y: -4.,
+            z: 7.,
+        },
+        Ipoint {
+            x: 1.,
+            y: 2.,
+            z: 2.,
+        },
+        1.,
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +317,39 @@ mod tests {
                 "color-material:false"
             ]
         );
+    }
+    #[test]
+    fn normal_math_scales_z_and_handles_degenerate_planes() {
+        let normal = imod_light_normal(
+            Ipoint::default(),
+            Ipoint {
+                x: 1.,
+                y: 0.,
+                z: 0.,
+            },
+            Ipoint {
+                x: 0.,
+                y: 1.,
+                z: 0.,
+            },
+            1.,
+        );
+        assert_eq!(
+            normal,
+            Ipoint {
+                x: 0.,
+                y: 0.,
+                z: -1.
+            }
+        );
+        assert_eq!(
+            imod_light_normal(Ipoint::default(), Ipoint::default(), Ipoint::default(), 1.),
+            Ipoint {
+                x: 0.,
+                y: 0.,
+                z: -1.
+            }
+        );
+        assert!(test_normal().z.is_finite());
     }
 }

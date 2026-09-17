@@ -4,11 +4,13 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::log_interface::{
     FileReaderRef, FileWriterRef, LogInterface, Loggable, LoggableException,
 };
+use crate::imod::etomo::process::emergency_monitor::EmergencyMonitor;
 use crate::imod::etomo::storage::log_file::LogFile;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::util::utilities;
@@ -262,6 +264,15 @@ impl EtomoLogger {
                 true,
                 reader,
             ));
+    }
+
+    /// Java private `getEmergencyMonitor`.  The logger has no manager of its
+    /// own; it obtains the monitor associated with its primary log's axis.
+    pub fn get_emergency_monitor(&self) -> Option<Arc<EmergencyMonitor>> {
+        let primary_log = self.primary_log.borrow();
+        primary_log
+            .get_manager()
+            .map(|manager| manager.get_emergency_monitor(primary_log.get_axis_id()))
     }
 }
 

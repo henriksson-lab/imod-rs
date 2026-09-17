@@ -49,6 +49,30 @@ pub trait HighlightableTable {
     fn highlight_down_action(&mut self) {
         self.highlight_down_action_performed();
     }
+
+    #[allow(non_snake_case)]
+    fn addAction(&mut self) {
+        self.init_highlight_hotkeys();
+    }
+    #[allow(non_snake_case)]
+    fn addListeners(&mut self) {
+        self.init_highlight_hotkeys();
+    }
+}
+
+pub struct HighlightUpAction;
+impl HighlightUpAction {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<T: HighlightableTable>(table: &mut T) {
+        table.highlight_up_action_performed();
+    }
+}
+pub struct HighlightDownAction;
+impl HighlightDownAction {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<T: HighlightableTable>(table: &mut T) {
+        table.highlight_down_action_performed();
+    }
 }
 
 #[cfg(test)]

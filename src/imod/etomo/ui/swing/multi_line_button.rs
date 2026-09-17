@@ -158,6 +158,21 @@ pub struct MultiLineButton {
 }
 
 impl MultiLineButton {
+    #[allow(non_snake_case)]
+    /// Java diagnostic `dumpState`, returned for the Rust frontend/log sink.
+    pub fn dumpState(&self) -> String {
+        format!(
+            "[toggleButton:{},stateKey:{:?},\nmanualName:{},buttonForeground:{:?},\nbuttonHighlightForeground:{:?},debug:{},\nunformattedLabel:{:?}]",
+            self.toggle_button,
+            self.state_key,
+            self.manual_name,
+            self.button_foreground,
+            self.button_highlight_foreground,
+            self.debug,
+            self.unformatted_label,
+        )
+    }
+
     /// Java package-private `MultiLineButton()`.
     pub fn new() -> Self {
         Self::new_full(None, false, None, false, false, false, None)

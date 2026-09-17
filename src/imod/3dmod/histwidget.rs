@@ -21,6 +21,12 @@ pub struct HistWidget {
     pub max: i32,
 }
 
+/// `HistWidget()`: create the owned histogram state; parent-widget ownership
+/// remains at the painting boundary.
+pub fn hist_widget() -> HistWidget {
+    HistWidget::new()
+}
+
 impl Default for HistWidget {
     fn default() -> Self {
         Self {
@@ -164,6 +170,11 @@ mod tests {
         widget.set_hist_min_max();
         assert_eq!(widget.min_hist, 0.0);
         assert_eq!(widget.max_hist, 44.0);
+    }
+
+    #[test]
+    fn source_constructor_facade_initializes_empty_histogram() {
+        assert_eq!(hist_widget(), HistWidget::default());
     }
 
     #[test]

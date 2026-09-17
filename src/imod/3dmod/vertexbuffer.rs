@@ -253,7 +253,7 @@ pub fn vb_cleanup_sphere_vbd(
 }
 
 impl VertBufManager {
-    /// Original `VertBufManager::VertBufManager`.
+    /// `VertBufManager()` source constructor.
     pub fn new() -> Self {
         Self::default()
     }
@@ -379,6 +379,14 @@ impl VertBufManager {
             }
         }
         0
+    }
+    /// Original `VertBufManager::allocateVBDIfNeeded`.
+    ///
+    /// The C version creates a `VertBufData` only when its owning pointer is
+    /// null.  An `Option` is the direct Rust representation of that ownership
+    /// slot; this returns the existing data unchanged when it is already set.
+    pub fn allocate_vbd_if_needed(slot: &mut Option<VertBufData>) -> &mut VertBufData {
+        slot.get_or_insert_with(vb_data_new)
     }
     /// Original `VertBufManager::genAndBindBuffers`.
     pub fn gen_and_bind_buffers(
@@ -729,5 +737,14 @@ mod tests {
         );
         assert_eq!(iv, 45);
         assert!(!i.is_empty());
+    }
+    #[test]
+    fn lazy_vbd_allocation_matches_source_pointer_semantics() {
+        let mut slot = None;
+        VertBufManager::allocate_vbd_if_needed(&mut slot).vbo_size = 17;
+        assert_eq!(
+            VertBufManager::allocate_vbd_if_needed(&mut slot).vbo_size,
+            17
+        );
     }
 }

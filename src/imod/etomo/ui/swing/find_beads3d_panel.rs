@@ -24,6 +24,42 @@ pub const BEAD_SIZE_LABEL: &str = "Bead diameter";
 pub const SOME_BELOW_STORAGE_THRESHOLD: i32 = 0;
 pub const ONLY_ABOVE_STORAGE_THRESHOLD: i32 = -1;
 
+/// The two special storage-threshold values represented by Java's private
+/// `StorageThresholdEnum`.  A manually entered threshold remains distinct.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageThresholdEnum {
+    SomeBelow,
+    OnlyAbove,
+}
+
+impl StorageThresholdEnum {
+    #[allow(non_snake_case)]
+    pub fn getValue(self) -> i32 {
+        match self {
+            Self::SomeBelow => SOME_BELOW_STORAGE_THRESHOLD,
+            Self::OnlyAbove => ONLY_ABOVE_STORAGE_THRESHOLD,
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn isDefault(self) -> bool {
+        self == Self::SomeBelow
+    }
+
+    #[allow(non_snake_case)]
+    pub fn getLabel(self) -> Option<String> {
+        None
+    }
+
+    pub fn from_value(value: i32) -> Option<Self> {
+        match value {
+            SOME_BELOW_STORAGE_THRESHOLD => Some(Self::SomeBelow),
+            ONLY_ABOVE_STORAGE_THRESHOLD => Some(Self::OnlyAbove),
+            _ => None,
+        }
+    }
+}
+
 /// Java `ConstFindBeads3dParam` reads.
 pub trait ConstFindBeads3dParam {
     fn value(&self, field: FindBeads3dField) -> Option<String>;
@@ -401,6 +437,16 @@ impl FindBeads3dPanel {
         }
     }
 
+    #[allow(non_snake_case)]
+    pub fn setParameters<P: ConstFindBeads3dParam, M: FindBeads3dPanelApplicationManager>(
+        &mut self,
+        manager: &M,
+        param: &P,
+        initialize: bool,
+    ) {
+        self.set_parameters(manager, param, initialize);
+    }
+
     /// Java `getParameters(FindBeads3dParam, boolean)`.
     pub fn get_parameters<P: FindBeads3dParam, M: FindBeads3dPanelApplicationManager>(
         &self,
@@ -473,6 +519,16 @@ impl FindBeads3dPanel {
     }
 
     /// Java `isFiducialess`.
+    #[allow(non_snake_case)]
+    pub fn getParameters<P: FindBeads3dParam, M: FindBeads3dPanelApplicationManager>(
+        &self,
+        manager: &M,
+        param: &mut P,
+        do_validation: bool,
+    ) -> bool {
+        self.get_parameters(manager, param, do_validation)
+    }
+
     pub fn is_fiducialess<P: NewstackOrBlendmont3dFindParent>(&self, parent: &P) -> bool {
         parent.is_fiducialess()
     }
@@ -522,6 +578,32 @@ impl FindBeads3dPanel {
             Some("Run findbeads3d to find gold particles in the tomogram.".into());
         self.btn_3dmod_find_beads3d.tooltip = Some("View model of gold particles.".into());
         self.pnl_root.tooltip_initialized = true;
+    }
+}
+
+/// Rust type-level representation of Java's `ReconScreenState` overloads.
+pub struct FindBeads3dScreenStateParameters;
+impl FindBeads3dScreenStateParameters {
+    #[allow(non_snake_case)]
+    pub fn setParameters<S: FindBeads3dScreenState>(panel: &mut FindBeads3dPanel, state: &mut S) {
+        panel.set_parameters_screen_state(state);
+    }
+    #[allow(non_snake_case)]
+    pub fn getParameters<S: FindBeads3dScreenState>(panel: &FindBeads3dPanel, state: &mut S) {
+        panel.get_parameters_screen_state(state);
+    }
+}
+
+/// Native event adapter for Java `FindBeads3dPanelActionListener`.
+pub struct FindBeads3dPanelActionListener;
+impl FindBeads3dPanelActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: FindBeads3dPanelApplicationManager>(
+        panel: &FindBeads3dPanel,
+        manager: &mut M,
+        command: &str,
+    ) {
+        panel.action(manager, command, None, None);
     }
 }
 

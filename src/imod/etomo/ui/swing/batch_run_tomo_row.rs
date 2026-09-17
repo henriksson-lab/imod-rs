@@ -334,6 +334,27 @@ impl BatchRunTomoRow {
         }
         self.update_display(None, None);
     }
+    #[allow(non_snake_case)]
+    pub fn setupField(cell: &mut BatchRunTomoRowCell, value: impl Into<String>, editable: bool) {
+        cell.value = value.into();
+        cell.editable = editable;
+    }
+    #[allow(non_snake_case)]
+    pub fn getAxisType(&self) -> AxisType {
+        if self.is_dual() {
+            AxisType::DualAxis
+        } else {
+            AxisType::SingleAxis
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn statusChangedOldVersion(&mut self, state: BatchRunTomoDatasetState) {
+        self.status_changed(BatchRunTomoRowEvent::DatasetState(state), false);
+    }
+    #[allow(non_snake_case)]
+    pub fn sendStatusChange(&mut self, status: BatchRunTomoRowStatus) {
+        self.actions.status_notifications.push(status);
+    }
     pub fn validate(
         &self,
         dataset_dialog_valid: Option<bool>,
@@ -870,6 +891,15 @@ impl BatchRunTomoRow {
         self.cbc_dual.tooltip = "Dual axis dataset".into();
         self.cbc_montage.tooltip = "Montage".into();
         self.cbc_run.tooltip = "This dataset will be included in the batchruntomo run".into();
+    }
+}
+
+/// Native event adapter for Java `BatchRunTomoRowActionListener`.
+pub struct BatchRunTomoRowActionListener;
+impl BatchRunTomoRowActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(row: &mut BatchRunTomoRow, command: &str) {
+        row.action(command);
     }
 }
 

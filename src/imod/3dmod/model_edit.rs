@@ -48,7 +48,7 @@ pub struct ModelHeaderWindow {
 }
 
 impl ModelHeaderWindow {
-    /// `ModelHeaderWindow::ModelHeaderWindow`.
+    /// `ModelHeaderWindow()` source constructor.
     pub fn new(fake_image: bool, zscale: f32, xscale: f32, model: &Imod) -> Self {
         let mut m_pix_ratio = 1.;
         if !fake_image && zscale != 0. && xscale != 0. {
@@ -345,7 +345,7 @@ pub fn imod_trans_xyz(
 }
 
 impl ModelOffsetWindow {
-    /// `ModelOffsetWindow::ModelOffsetWindow`.
+    /// `ModelOffsetWindow()` source constructor.
     pub fn new(state: &ModelOffsetData) -> Self {
         let mut window = Self::default();
         window.update_labels(state);

@@ -1,4 +1,5 @@
 //! Owned translation of `svlOptions.{h,cpp}`.
+use super::svl_config_manager::SvlConfigNode;
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SvlOptions {
@@ -40,6 +41,21 @@ impl SvlOptions {
     pub fn set_options_from_string(&mut self, options: &str) -> Result<(), String> {
         for item in options.split(',').filter(|s| !s.is_empty()) {
             let (name, value) = item.split_once('=').ok_or("bad option string")?;
+            self.set_option(name, value)?;
+        }
+        Ok(())
+    }
+    /// `svlOptions::setOptionsFromXML` (`svlOptions.cpp:92`).
+    pub fn set_options_from_xml(&mut self, root: &SvlConfigNode, tag: &str) -> Result<(), String> {
+        for node in root.children.iter().filter(|node| node.name == tag) {
+            let name = node
+                .attributes
+                .get("name")
+                .ok_or("XML option has no name")?;
+            let value = node
+                .attributes
+                .get("value")
+                .ok_or("XML option has no value")?;
             self.set_option(name, value)?;
         }
         Ok(())

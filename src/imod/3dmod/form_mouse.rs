@@ -61,7 +61,7 @@ pub struct MouseForm {
     pub mouse_group: usize,
 }
 impl MouseForm {
-    /// `MouseForm::MouseForm`.
+    /// `MouseForm()` source constructor.
     pub fn new(prefs: ImodPrefStruct, native: &mut dyn MouseNativeBoundary) -> Self {
         let mut form = Self {
             m_prefs: prefs,

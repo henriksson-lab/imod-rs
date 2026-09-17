@@ -59,6 +59,7 @@ pub trait RawImageNativeBoundary {
 pub struct RawImageForm;
 
 impl RawImageForm {
+    /// `RawImageForm()` source constructor.
     pub fn new(modal: bool, native: &mut dyn RawImageNativeBoundary) -> Self {
         native.setup_ui();
         native.set_modal(modal);

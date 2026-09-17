@@ -9,8 +9,12 @@ use crate::imod::libimod::icont::{
     imod_contour_area, imod_contour_break, imod_contour_join, imod_contour_splice,
     imodel_contour_check_wild, imodel_unused_surface,
 };
-use crate::imod::libimod::ilabel::{imod_label_item_add, imod_label_name, imod_label_new};
-use crate::imod::libimod::imodel::{ICONT_OPEN, Icont, Iindex, Imod, Iobj, Ipoint};
+use crate::imod::libimod::ilabel::{
+    imod_label_item_add, imod_label_item_get, imod_label_name, imod_label_name_get, imod_label_new,
+};
+use crate::imod::libimod::imodel::{
+    ICONT_OPEN, Icont, Iindex, Imesh, Imod, Iobj, Ipoint, imod_get_cur_mesh_surf,
+};
 use crate::imod::libimod::iobj::{
     IMOD_OBJFLAG_TIME, imod_object_add_contour, imod_object_clean_surf, imod_object_remove_contour,
     iobj_open, iobj_scat,
@@ -138,6 +142,12 @@ pub trait ContourEditInputBoundary: ContourEditNativeBoundary {
 pub struct ContourSurfacePointDisplay {
     pub surface: i32,
     pub surface_max: i32,
+    /// Object-label item for the displayed surface, if any.
+    pub surface_label: Option<String>,
+    /// Contour-label name, if the current contour has one.
+    pub contour_label: Option<String>,
+    /// Contour-label item for the current point, if any.
+    pub point_label: Option<String>,
     pub ghost_distance: i32,
     pub ghost_mode: i32,
     pub contour_open: bool,
@@ -174,6 +184,7 @@ pub fn imod_cont_edit_break_open(state: &mut ContourEditState, current: Iindex) 
     state.break_i2 = NULL_INDEX;
 }
 
+/// `set1Pressed()` source method.
 /// `ContourBreak::set1Pressed`.
 pub fn contour_break_set_1(state: &mut ContourEditState, current: Iindex) {
     state.break_i1 = current;
@@ -184,6 +195,7 @@ pub fn contour_break_set_1(state: &mut ContourEditState, current: Iindex) {
         state.break_i2 = NULL_INDEX;
     }
 }
+/// `set2Pressed()` source method.
 /// `ContourBreak::set2Pressed`.
 pub fn contour_break_set_2(state: &mut ContourEditState, current: Iindex) {
     state.break_i2 = current;
@@ -201,6 +213,53 @@ pub fn contour_break_unset(state: &mut ContourEditState) {
 /// `ContourBreak::currentToggled`.
 pub fn contour_break_current_toggled(state: &mut ContourEditState, value: bool) {
     state.use_current = value;
+}
+
+/// Values painted by `ContourBreak::setLabels`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContourBreakLabels {
+    pub set_1: String,
+    pub set_2: String,
+    pub object_contour: String,
+    pub set_1_enabled: bool,
+}
+
+/// `setLabels()` source method.
+pub fn contour_break_set_labels(state: &ContourEditState) -> ContourBreakLabels {
+    let first = if index_good(state.break_i1) && !state.use_current {
+        format!("Point {}", state.break_i1.point + 1)
+    } else {
+        "Pt None ".into()
+    };
+    let second = if index_good(state.break_i2) {
+        format!("Point {}", state.break_i2.point + 1)
+    } else {
+        "Pt None ".into()
+    };
+    let index = if index_good(state.break_i2) {
+        state.break_i2
+    } else if index_good(state.break_i1) && !state.use_current {
+        state.break_i1
+    } else {
+        NULL_INDEX
+    };
+    let object_contour = if index.object < 0 || index.contour < 0 {
+        "Obj None, Cont None".into()
+    } else {
+        format!("Object {}, Contour {}", index.object + 1, index.contour + 1)
+    };
+    ContourBreakLabels {
+        set_1: first,
+        set_2: second,
+        object_contour,
+        set_1_enabled: !state.use_current,
+    }
+}
+
+/// `joinError()` source helper.  Rust ownership releases the index vector
+/// automatically; callers retain the native diagnostic text.
+pub fn contour_join_error(message: &str) -> String {
+    format!("Contour Join Error:  {message}")
 }
 
 /// `ContourBreak::breakCont` and `imodContEditBreak`.
@@ -276,13 +335,149 @@ pub fn contour_join_set_2(state: &mut ContourEditState, current: Iindex) {
         state.join_i1 = NULL_INDEX;
     }
 }
+/// `openTypeSelected()` source method.
 /// `ContourJoin::openTypeSelected`.
 pub fn contour_join_open_type_selected(state: &mut ContourEditState, which: i32) {
     state.open_type = which;
 }
+/// `closedTypeSelected()` source method.
 /// `ContourJoin::closedTypeSelected`.
 pub fn contour_join_closed_type_selected(state: &mut ContourEditState, which: i32) {
     state.closed_type = which;
+}
+/// `surfToggled()` source method.
+pub fn contour_move_surf_toggled(state: &mut ContourEditState, value: bool) {
+    state.whole_surf = i32::from(value);
+}
+/// `toSurfToggled()` source method.
+pub fn contour_move_to_surf_toggled(state: &mut ContourEditState, value: bool) {
+    state.move_to_surf = i32::from(value);
+}
+/// `replaceToggled()` source method.
+pub fn contour_move_replace_toggled(state: &mut ContourEditState, value: bool) {
+    state.replace = i32::from(value);
+}
+/// `expandToggled()` source method.
+pub fn contour_move_expand_toggled(state: &mut ContourEditState, value: bool) {
+    state.expand = i32::from(value);
+}
+/// `convertAllToggled()` source method.
+pub fn contour_move_convert_all_toggled(state: &mut ContourEditState, value: bool) {
+    state.convert_all_pt = i32::from(value);
+}
+/// `keepSizeToggled()` source method.
+pub fn contour_move_keep_size_toggled(state: &mut ContourEditState, value: bool) {
+    state.keep_size = i32::from(value);
+}
+
+/// Widget sensitivity computed by `ContourMove::manageCheckBoxes`.  The Rust
+/// GUI applies these values to its own controls instead of retaining Qt widgets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ContourMoveCheckBoxes {
+    pub replace_enabled: bool,
+    pub expand_enabled: bool,
+    pub convert_all_enabled: bool,
+    pub move_all_enabled: bool,
+    pub to_surface_enabled: bool,
+    pub move_up_down_enabled: bool,
+    pub keep_size_enabled: bool,
+}
+
+/// `manageCheckBoxes()` source method.
+pub fn contour_move_manage_check_boxes(
+    state: &ContourEditState,
+    current_scattered: bool,
+    destination_scattered: bool,
+) -> ContourMoveCheckBoxes {
+    let replaceable = destination_scattered
+        && state.move_to_surf == 0
+        && !current_scattered
+        && state.move_up_down == 0;
+    let replace_on = state.replace != 0 && replaceable;
+    let expandable = !destination_scattered
+        && state.move_to_surf == 0
+        && current_scattered
+        && state.move_up_down == 0;
+    let expand_on = state.expand != 0 && expandable;
+    let up_down_able = !replace_on && !expand_on && state.move_to_surf == 0;
+    ContourMoveCheckBoxes {
+        replace_enabled: replaceable,
+        expand_enabled: expandable,
+        convert_all_enabled: expand_on,
+        move_all_enabled: !replace_on && !expand_on,
+        to_surface_enabled: !replace_on && !expand_on && state.move_up_down == 0,
+        move_up_down_enabled: up_down_able,
+        keep_size_enabled: current_scattered
+            && state.move_to_surf == 0
+            && state.move_up_down == 0
+            && !expand_on,
+    }
+}
+
+/// `objSelected()` source method.  Returns whether the object-destination
+/// controls need their checkbox sensitivity refreshed.
+pub fn contour_move_obj_selected(
+    state: &mut ContourEditState,
+    obj_move_to: &mut i32,
+    value: i32,
+) -> bool {
+    if state.move_to_surf != 0 {
+        state.surf_move_to = value;
+        false
+    } else {
+        *obj_move_to = value;
+        true
+    }
+}
+
+/// `moveUpDownToggled()` source method.
+pub fn contour_move_up_down_toggled(state: &mut ContourEditState, value: bool) {
+    state.move_up_down = i32::from(value);
+}
+
+/// `upDownSelected()` source method.
+pub fn contour_move_up_down_selected(state: &mut ContourEditState, which: i32) {
+    state.up_or_down = which;
+}
+
+/// `shiftContClicked()` source method.  The caller dispatches this request to
+/// the active Rust Zap view when one exists.
+pub fn contour_move_shift_cont_clicked(has_top_zap: bool) -> bool {
+    has_top_zap
+}
+
+/// `buttonPressed()` source slot: whether an Apply action was selected.
+pub fn contour_button_pressed(which: i32) -> bool {
+    which == 0
+}
+
+/// `topChangeEvent()` source slot.  Native font and mac-menu handling is a
+/// Rust GUI concern; this tells it whether a font-dependent remeasure is due.
+pub fn contour_top_change_event(font_changed: bool) -> bool {
+    font_changed
+}
+
+/// `setFontDependentWidths()` source method.  The destination button takes
+/// the measured width of the source Set-1 button, as in Qt.
+pub fn contour_set_font_dependent_widths(set_1_width: i32) -> i32 {
+    set_1_width
+}
+
+/// `topCloseEvent()` source slot for the break dialog.
+pub fn contour_break_top_close_event(state: &mut ContourEditState) {
+    state.break_dialog_open = false;
+}
+
+/// `topCloseEvent()` source slot for the join dialog.
+pub fn contour_join_top_close_event(state: &mut ContourEditState) {
+    state.join_dialog_open = false;
+    state.join_i1 = NULL_INDEX;
+    state.join_i2 = NULL_INDEX;
+}
+
+/// `topCloseEvent()` source slot for the move dialog.
+pub fn contour_move_top_close_event(state: &mut ContourEditState) {
+    state.move_dialog_open = false;
 }
 
 /// `imodContEditJoin`, including pair-wise selection-list joining.  The
@@ -749,6 +944,8 @@ pub fn imod_cont_edit_surf_show(
 ) -> Option<ContourSurfacePointDisplay> {
     let obj = imod.obj.get(current.object as usize)?;
     let cont = obj.cont.get(current.contour as usize);
+    let label_text =
+        |bytes: Option<&[u8]>| bytes.map(|text| String::from_utf8_lossy(text).into_owned());
     let (point_size, point_size_default) = match cont {
         Some(cont) if current.point >= 0 && (current.point as usize) < cont.pts.len() => (
             imod_point_get_size(obj, cont, current.point),
@@ -767,8 +964,21 @@ pub fn imod_cont_edit_surf_show(
         _ => (0., -1),
     };
     Some(ContourSurfacePointDisplay {
-        surface: cont.map_or(-1, |c| c.surf),
+        // With no current contour, the native dialog displays the selected
+        // mesh surface (`imodGetCurMeshSurf`), not an unconditional -1.
+        surface: cont.map_or_else(|| imod_get_cur_mesh_surf(imod), |c| c.surf),
         surface_max: obj.surfsize,
+        // `cont_edit.cpp:1738-1741, 1780-1795`: labels are associated with
+        // the selected surface, contour name, and selected point respectively.
+        surface_label: cont
+            .and_then(|c| label_text(imod_label_item_get(obj.label.as_ref(), c.surf))),
+        contour_label: cont.and_then(|c| label_text(imod_label_name_get(c.label.as_ref()))),
+        point_label: cont.and_then(|c| {
+            (current.point >= 0)
+                .then(|| imod_label_item_get(c.label.as_ref(), current.point))
+                .flatten()
+                .and_then(|text| label_text(Some(text)))
+        }),
         ghost_distance,
         ghost_mode,
         contour_open: cont.is_some_and(|c| c.flags & ICONT_OPEN != 0),
@@ -961,6 +1171,40 @@ pub fn ice_closing(state: &mut ContourEditState) {
 pub struct ContourFrame {
     pub top_window_open: bool,
 }
+
+/// Routing decision from `ContourFrame` keyboard handlers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContourFrameKeyAction {
+    Close,
+    Forward { released: bool },
+}
+
+/// `ContourFrame::keyPressEvent`.  `is_close_key` is supplied by the Rust
+/// windowing backend's platform-neutral close-key predicate.
+pub fn contour_frame_key_press_event(is_close_key: bool) -> ContourFrameKeyAction {
+    if is_close_key {
+        ContourFrameKeyAction::Close
+    } else {
+        ContourFrameKeyAction::Forward { released: false }
+    }
+}
+
+#[allow(non_snake_case)]
+/// Native-name adapter for `ContourFrame::keyPressEvent`.
+pub fn keyPressEvent(is_close_key: bool) -> ContourFrameKeyAction {
+    contour_frame_key_press_event(is_close_key)
+}
+
+/// `ContourFrame::keyReleaseEvent`.
+pub fn contour_frame_key_release_event() -> ContourFrameKeyAction {
+    ContourFrameKeyAction::Forward { released: true }
+}
+
+#[allow(non_snake_case)]
+/// Native-name adapter for `ContourFrame::keyReleaseEvent`.
+pub fn keyReleaseEvent() -> ContourFrameKeyAction {
+    contour_frame_key_release_event()
+}
 #[derive(Clone, Debug, Default)]
 pub struct ContourMove {
     pub frame: ContourFrame,
@@ -1064,5 +1308,41 @@ mod tests {
         let (mut mode, mut last) = (0, 0);
         ice_ghost_toggled(&mut mode, &mut last, 1, 1, &mut n);
         assert_eq!(last, 1);
+    }
+    #[test]
+    fn surface_dialog_display_includes_all_label_targets() {
+        let mut m = model();
+        let mut n = N::default();
+        let i = Iindex {
+            object: 0,
+            contour: 0,
+            point: 1,
+        };
+        ice_label_changed(&mut m, i, "surface", 2, &mut n);
+        ice_label_changed(&mut m, i, "contour", 0, &mut n);
+        ice_label_changed(&mut m, i, "point", 1, &mut n);
+
+        let display = imod_cont_edit_surf_show(&m, i, 1, 3, 0).unwrap();
+        assert_eq!(display.surface_label.as_deref(), Some("surface"));
+        assert_eq!(display.contour_label.as_deref(), Some("contour"));
+        assert_eq!(display.point_label.as_deref(), Some("point"));
+    }
+    #[test]
+    fn surface_dialog_uses_current_mesh_surface_without_contour() {
+        let mut m = Imod::default();
+        let mut obj = Iobj::default();
+        obj.surfsize = 4;
+        obj.mesh.push(Imesh::default());
+        m.obj.push(obj);
+        m.cindex = Iindex {
+            object: 0,
+            contour: -1,
+            point: -1,
+        };
+        m.cur_mesh_surf = 3;
+
+        let display = imod_cont_edit_surf_show(&m, m.cindex, 0, 0, 0).unwrap();
+        assert_eq!(display.surface, 3);
+        assert_eq!(display.surface_label, None);
     }
 }

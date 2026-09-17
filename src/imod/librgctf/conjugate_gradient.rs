@@ -24,6 +24,12 @@ pub struct ConjugateGradient<'a> {
     target_function: Option<Box<dyn FnMut(&[f32]) -> f32 + 'a>>,
 }
 
+/// `ConjugateGradient::ConjugateGradient` (`conjugate_gradient.cpp:3`),
+/// exposed as an owned factory for translated construction call sites.
+pub fn conjugate_gradient<'a>() -> ConjugateGradient<'a> {
+    ConjugateGradient::new()
+}
+
 impl<'a> Default for ConjugateGradient<'a> {
     fn default() -> Self {
         Self {
@@ -122,7 +128,7 @@ mod tests {
 
     #[test]
     fn init_owns_input_vectors_and_evaluates_the_initial_score() {
-        let mut minimizer = ConjugateGradient::new();
+        let mut minimizer = conjugate_gradient();
         let start = [3.0, -2.0];
         assert_eq!(
             minimizer.init(|values| values[0] + values[1], &start, &[0.5, 0.25]),

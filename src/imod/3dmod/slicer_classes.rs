@@ -196,6 +196,8 @@ pub struct SlicerEvent {
 
 /// Direct paired `SlicerFuncs`/`sslice.cpp` calls.
 pub trait SlicerCore {
+    /// Paired `SlicerFuncs::screenChanged` controller callback.
+    fn screen_changed(&mut self, _: f32) {}
     fn help(&mut self);
     fn step_zoom(&mut self, dir: i32);
     fn step_time(&mut self, dir: i32);
@@ -293,6 +295,7 @@ pub struct SlicerWindow {
     pub s_max_angles: [f32; 3],
 }
 impl SlicerWindow {
+    /// `SlicerWindow()` source constructor.
     /// `SlicerWindow::SlicerWindow`.
     pub fn new(
         core: &dyn SlicerCore,
@@ -596,6 +599,10 @@ impl SlicerWindow {
         n.accept_close();
         n.delete_slicer_funcs()
     }
+    /// `SlicerWindow::screenChanged`.
+    pub fn screen_changed(&mut self, device_pixel_ratio: f32, core: &mut dyn SlicerCore) {
+        core.screen_changed(device_pixel_ratio)
+    }
     /// `SlicerWindow::toolbarMenuEvent`.
     pub fn toolbar_menu_event(
         &mut self,
@@ -647,6 +654,7 @@ impl Default for SlicerGl {
     }
 }
 impl SlicerGl {
+    /// `SlicerGL()` source constructor.
     /// `SlicerGL::SlicerGL`.
     pub fn new() -> Self {
         Self::default()
@@ -798,6 +806,7 @@ impl SlicerGl {
 #[derive(Clone, Debug, Default)]
 pub struct SlicerCube;
 impl SlicerCube {
+    /// `SlicerCube()` source constructor.
     pub fn new() -> Self {
         Self
     }
@@ -848,6 +857,9 @@ mod tests {
         auto: i32,
     }
     impl SlicerCore for C {
+        fn screen_changed(&mut self, ratio: f32) {
+            self.calls.push(format!("dpi:{ratio}"))
+        }
         fn help(&mut self) {}
         fn step_zoom(&mut self, d: i32) {
             self.calls.push(format!("z{d}"))
@@ -993,5 +1005,13 @@ mod tests {
         gl.timer_event(&mut c, &mut n);
         assert!(c.calls.contains(&"paint".into()));
         assert!(c.calls.contains(&"cube".into()));
+    }
+    #[test]
+    fn screen_change_forwards_device_pixel_ratio() {
+        let mut c = C::default();
+        let mut n = N::default();
+        let mut w = SlicerWindow::new(&c, [90.; 3], "", false, false, false, &mut n);
+        w.screen_changed(1.75, &mut c);
+        assert_eq!(c.calls, ["dpi:1.75"]);
     }
 }

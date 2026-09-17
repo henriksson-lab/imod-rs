@@ -313,6 +313,12 @@ impl<P: SmoothingAssessmentParent> SmoothingAssessmentPanel<P> {
         }
     }
 
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: SmoothingAssessmentManager>(&self, command: &str, manager: &mut M) {
+        self.action(command, None, None, manager);
+    }
+
     /// Java `setTooltips`.  Autodoc retrieval is external; if its source string
     /// is supplied through the retained boundary field, preserve Java's concatenation.
     pub fn set_tooltips(&mut self) {

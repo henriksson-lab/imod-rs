@@ -675,6 +675,16 @@ impl FlattenVolumePanel {
             panic!("Unknown command {command}");
         }
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: FlattenVolumePanelManager>(
+        &mut self,
+        command: &str,
+        manager: &mut M,
+    ) {
+        self.action(command, None, None, manager);
+    }
     /// Java private `inputFileAction`; chooser selection arrives at the native presentation boundary.
     pub fn input_file_action<M: FlattenVolumePanelManager>(
         &mut self,

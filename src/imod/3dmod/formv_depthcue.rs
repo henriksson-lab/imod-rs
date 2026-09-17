@@ -67,7 +67,7 @@ pub struct ImodvDepthcueForm {
 }
 
 impl ImodvDepthcueForm {
-    /// `imodvDepthcueForm::imodvDepthcueForm`.
+    /// `imodvDepthcueForm()` source constructor.
     pub fn new(native: &mut dyn DepthcueNativeBoundary) -> Self {
         native.setup_ui();
         let mut form = Self {

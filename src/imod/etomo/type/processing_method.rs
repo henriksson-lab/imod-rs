@@ -1,5 +1,7 @@
 //! `IMOD/Etomo/src/etomo/type/ProcessingMethod.java`.
 #![allow(dead_code)]
+
+use std::collections::HashMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProcessingMethod {
     LocalCpu,
@@ -30,6 +32,34 @@ impl ProcessingMethod {
             format!("{}.ProcessingMethod", prepend.unwrap())
         }
     }
+
+    /// Java `remove(Properties, String)`.
+    pub fn remove(properties: Option<&mut HashMap<String, String>>, prepend: Option<&str>) {
+        if let Some(properties) = properties {
+            properties.remove(&Self::create_key(prepend));
+        }
+    }
+
+    /// Java `store(Properties, String)`.
+    pub fn store(self, properties: Option<&mut HashMap<String, String>>, prepend: Option<&str>) {
+        if let Some(properties) = properties {
+            properties.insert(Self::create_key(prepend), self.to_string());
+        }
+    }
+
+    /// Java `load(Properties, String)`.
+    pub fn load(
+        properties: Option<&HashMap<String, String>>,
+        prepend: Option<&str>,
+    ) -> Option<Self> {
+        properties.and_then(|properties| {
+            Self::get_instance(
+                properties
+                    .get(&Self::create_key(prepend))
+                    .map(String::as_str),
+            )
+        })
+    }
 }
 impl std::fmt::Display for ProcessingMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,5 +70,29 @@ impl std::fmt::Display for ProcessingMethod {
             Self::PpGpu => "PP_GPU",
             Self::Queue => "QUEUE",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProcessingMethod;
+    use std::collections::HashMap;
+
+    #[test]
+    fn properties_round_trip_with_java_key_and_null_boundary() {
+        let mut properties = HashMap::new();
+        ProcessingMethod::PpGpu.store(Some(&mut properties), Some("axisA"));
+        assert_eq!(
+            ProcessingMethod::load(Some(&properties), Some("axisA")),
+            Some(ProcessingMethod::PpGpu)
+        );
+        ProcessingMethod::remove(Some(&mut properties), Some("axisA"));
+        assert_eq!(
+            ProcessingMethod::load(Some(&properties), Some("axisA")),
+            None
+        );
+        ProcessingMethod::LocalCpu.store(None, None);
+        ProcessingMethod::remove(None, None);
+        assert_eq!(ProcessingMethod::load(None, None), None);
     }
 }

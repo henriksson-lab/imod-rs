@@ -442,6 +442,15 @@ impl EraseGoldPanel {
             self.update_display(manager);
         }
     }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: EraseGoldPanelApplicationManager>(
+        &mut self,
+        manager: &mut M,
+        command: &str,
+    ) {
+        self.action(manager, command, None, None);
+    }
     /// Java `setToolTipText`.
     pub fn set_tool_tip_text(&mut self) {
         self.rb_model_use_fid

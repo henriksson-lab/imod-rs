@@ -114,8 +114,21 @@ pub struct ImodIproc {
     pub median_vol: Vec<Vec<u8>>,
 }
 
+/// Display state produced by native `finishProcess` after an FFT operation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum IprocFftResult {
+    MemoryError,
+    Scale {
+        scale: f32,
+        xrange: f32,
+        yrange: f32,
+    },
+}
+
 /// Image/Qt/viewer calls made by this source unit.
 pub trait IprocBoundary {
+    /// Build the selected source filter's controls in the replacement Rust UI.
+    fn build_filter_controls(&mut self, _filter: i32, _param: &IprocParam) {}
     fn dimensions(&self) -> (usize, usize, usize);
     fn current_section_time(&self) -> (i32, i32);
     fn image_mode(&self) -> i32;
@@ -416,9 +429,19 @@ pub fn cannot_do_fft_str(proc: &ImodIproc, command: &mut String, operation: &str
 }
 
 impl IprocWindow {
+    /// `IProcWindow()` source constructor.
     /// `IProcWindow::IProcWindow`.
     pub fn new() -> Self {
         Self::default()
+    }
+    /// Build the seven source-specific filter panels through the native UI
+    /// boundary, in the `procTable` order used by `IProcWindow::IProcWindow`.
+    /// `mkFFT_cb()`, `mkFourFilt_cb()`, `mkSmooth_cb()`, `mkMedian_cb()`,
+    /// `mkAnisoDiff_cb()`, `mkedge_cb()`, and `mkthresh_cb()` source methods.
+    pub fn build_filter_controls(&self, param: &IprocParam, boundary: &mut dyn IprocBoundary) {
+        for filter in [0, 1, 2, 3, 4, 5, 7] {
+            boundary.build_filter_controls(filter, param);
+        }
     }
     /// `autoApplyToggled` / `autoSaveToggled` / `applyThreshToggled`.
     pub fn auto_apply_toggled(&mut self, proc: &mut ImodIproc, state: bool) {
@@ -429,6 +452,11 @@ impl IprocWindow {
     }
     pub fn apply_thresh_toggled(&mut self, proc: &mut ImodIproc, state: bool) {
         proc.apply_thresh_change = state;
+    }
+    /// Scheduling condition from `newThreshSetting`; the caller recalculates
+    /// `file_threshold` and invokes `apply` only when this is true.
+    pub fn threshold_change_needs_apply(&self, proc: &ImodIproc) -> bool {
+        proc.apply_thresh_change && !self.running_proc && self.use_stack_ind < 0
     }
     pub fn thresh_changed(&mut self, param: &mut IprocParam, value: i32) {
         param.threshold = value;
@@ -487,6 +515,63 @@ impl IprocWindow {
     }
     pub fn subset_changed(&mut self, param: &mut IprocParam, state: bool) {
         param.fft_subset = state;
+    }
+    /// Pure calculation behind `reportFreqClicked`; the Rust GUI supplies its
+    /// current model point or marker position and displays the returned text.
+    pub fn report_frequency(
+        &self,
+        proc: &ImodIproc,
+        pixsize: f64,
+        xybin: i32,
+        unit: &str,
+        model_point: Option<(f64, f64)>,
+        marker: (f64, f64),
+        model_mode: bool,
+    ) -> Option<String> {
+        if proc.fft_scale <= 0. || pixsize <= 0. || xybin <= 0 {
+            return None;
+        }
+        let (x, y) = if model_mode {
+            model_point
+                .map(|(x, y)| (x - 0.5, y - 0.5))
+                .unwrap_or(marker)
+        } else {
+            marker
+        };
+        let distance = proc.fft_scale as f64
+            * ((x - proc.fft_xcen as f64).powi(2) + (y - proc.fft_ycen as f64).powi(2)).sqrt()
+            / (pixsize * xybin as f64);
+        fn four_sig(value: f64) -> String {
+            let decimals = (3 - value.abs().log10().floor() as i32).max(0) as usize;
+            let mut text = format!("{value:.decimals$}");
+            if text.contains('.') {
+                text = text.trim_end_matches('0').trim_end_matches('.').into();
+            }
+            text
+        }
+        Some(if distance == 0. {
+            format!("Freq: 0/{unit}")
+        } else {
+            format!(
+                "Freq: {}/{unit}  ({} {unit})",
+                four_sig(distance),
+                four_sig(1. / distance)
+            )
+        })
+    }
+    /// FFT portion of native `finishProcess`, separated from Qt label updates.
+    pub fn fft_result(&self, proc: &ImodIproc, nx: usize, ny: usize) -> Option<IprocFftResult> {
+        if proc.fft_scale < 0. {
+            return Some(IprocFftResult::MemoryError);
+        }
+        if proc.fft_scale == 0. {
+            return None;
+        }
+        Some(IprocFftResult::Scale {
+            scale: proc.fft_scale,
+            xrange: (0.5 * proc.fft_scale * nx as f32).min(0.5),
+            yrange: (0.5 * proc.fft_scale * ny as f32).min(0.5),
+        })
     }
     pub fn grow_changed(&mut self, param: &mut IprocParam, state: bool) {
         param.thresh_grow = state;
@@ -627,6 +712,9 @@ impl IprocWindow {
         boundary: &mut dyn IprocBoundary,
     ) {
         proc.modified = true;
+        if proc.save_proc_num >= 0 {
+            param.proc_num = proc.save_proc_num;
+        }
         copy_and_display(proc, boundary);
         self.data_modes.push(proc.output_mode);
         self.running_proc = false;
@@ -722,9 +810,9 @@ impl IprocWindow {
         param: &mut IprocParam,
         boundary: &mut dyn IprocBoundary,
     ) {
-        if key == 'A' {
+        if key == 'A' && !self.running_proc {
             self.apply(proc, param, boundary, false);
-        } else if key == 'B' {
+        } else if key == 'B' && !self.running_proc {
             self.button_clicked(MORE_BUT, proc, param, boundary);
         }
     }
@@ -1032,6 +1120,9 @@ mod tests {
         rounded: bool,
     }
     impl IprocBoundary for LifecycleBoundary {
+        fn build_filter_controls(&mut self, filter: i32, _: &IprocParam) {
+            self.calls.push(format!("factory:{filter}"));
+        }
         fn dimensions(&self) -> (usize, usize, usize) {
             (1, 1, 1)
         }
@@ -1096,6 +1187,92 @@ mod tests {
         assert_eq!(w.sigma1_scale, 1000.);
     }
     #[test]
+    fn frequency_report_uses_model_point_and_marker_fallback() {
+        let window = IprocWindow::new();
+        let proc = ImodIproc {
+            fft_scale: 0.5,
+            fft_xcen: 0,
+            fft_ycen: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            window.report_frequency(&proc, 1., 1, "nm", Some((2.5, 0.5)), (9., 9.), true),
+            Some("Freq: 1/nm  (1 nm)".into())
+        );
+        assert_eq!(
+            window.report_frequency(&proc, 1., 1, "nm", None, (0., 0.), false),
+            Some("Freq: 0/nm".into())
+        );
+    }
+    #[test]
+    fn threshold_change_does_not_apply_while_processing_or_stacking() {
+        let mut window = IprocWindow::new();
+        let proc = ImodIproc {
+            apply_thresh_change: true,
+            ..Default::default()
+        };
+        assert!(window.threshold_change_needs_apply(&proc));
+        window.running_proc = true;
+        assert!(!window.threshold_change_needs_apply(&proc));
+        window.running_proc = false;
+        window.use_stack_ind = 0;
+        assert!(!window.threshold_change_needs_apply(&proc));
+    }
+    #[test]
+    fn processing_window_ignores_apply_and_more_hotkeys() {
+        let mut window = IprocWindow::new();
+        window.running_proc = true;
+        let mut proc = ImodIproc::default();
+        let mut param = IprocParam::default();
+        let mut native = LifecycleBoundary::default();
+        window.key_press_event('A', &mut proc, &mut param, &mut native);
+        window.key_press_event('B', &mut proc, &mut param, &mut native);
+        assert!(native.calls.is_empty());
+        assert!(window.command_list.is_empty());
+    }
+    #[test]
+    fn finishing_restores_saved_processor_selection() {
+        let mut window = IprocWindow::new();
+        let mut proc = ImodIproc {
+            save_proc_num: 5,
+            ..Default::default()
+        };
+        let mut param = IprocParam {
+            proc_num: 0,
+            ..Default::default()
+        };
+        let mut native = LifecycleBoundary::default();
+        window.finish_process(&mut proc, &mut param, &mut native);
+        assert_eq!(param.proc_num, 5);
+    }
+    #[test]
+    fn fft_finish_result_clamps_frequency_ranges_and_reports_errors() {
+        let window = IprocWindow::new();
+        let proc = ImodIproc {
+            fft_scale: 0.1,
+            ..Default::default()
+        };
+        assert_eq!(
+            window.fft_result(&proc, 20, 4),
+            Some(IprocFftResult::Scale {
+                scale: 0.1,
+                xrange: 0.5,
+                yrange: 0.2,
+            })
+        );
+        assert_eq!(
+            window.fft_result(
+                &ImodIproc {
+                    fft_scale: -1.,
+                    ..Default::default()
+                },
+                1,
+                1
+            ),
+            Some(IprocFftResult::MemoryError)
+        );
+    }
+    #[test]
     fn change_and_key_release_route_native_lifecycle_calls() {
         let mut window = IprocWindow::default();
         let mut native = LifecycleBoundary {
@@ -1106,5 +1283,23 @@ mod tests {
         window.key_release_event(&mut native);
         assert!(window.rounded_style);
         assert_eq!(native.calls, ["change", "menu", "sizes", "key:true"]);
+    }
+    #[test]
+    fn filter_factories_follow_source_proc_table_order() {
+        let window = IprocWindow::new();
+        let mut native = LifecycleBoundary::default();
+        window.build_filter_controls(&IprocParam::default(), &mut native);
+        assert_eq!(
+            native.calls,
+            [
+                "factory:0",
+                "factory:1",
+                "factory:2",
+                "factory:3",
+                "factory:4",
+                "factory:5",
+                "factory:7",
+            ]
+        );
     }
 }

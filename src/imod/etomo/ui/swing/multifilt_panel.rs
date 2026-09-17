@@ -49,6 +49,18 @@ impl MultifiltFilterType {
     pub const fn is_default(self) -> bool {
         matches!(self, Self::FakeSirtIterations)
     }
+    #[allow(non_snake_case)]
+    pub fn getLabel(self) -> &'static str {
+        self.label()
+    }
+    #[allow(non_snake_case)]
+    pub fn isDefault(self) -> bool {
+        self.is_default()
+    }
+    #[allow(non_snake_case)]
+    pub fn getValue(self) -> &'static str {
+        self.label()
+    }
     pub const fn is_radial_filter(self) -> bool {
         matches!(self, Self::FakeSirtIterations | Self::ExactObjectSizes)
     }
@@ -240,6 +252,18 @@ impl MultifiltPanel {
         result.set_tooltips();
         result.add_listeners();
         result
+    }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn isEnabled(&self) -> bool {
+        self.layout.root_visible
+    }
+    #[allow(non_snake_case)]
+    pub fn isEditable(&self) -> bool {
+        self.layout.root_visible
     }
     /// Java `createPanel`; physical Swing composition is retained in `component_order`.
     fn create_panel(&mut self) {

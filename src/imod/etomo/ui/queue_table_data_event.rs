@@ -31,6 +31,48 @@ impl QueueTableDataEvent {
     pub fn get_only_queue_type_instance(queue_type: QueueType) -> QueueTableEvent {
         QueueTableEvent::OnlyQueueType(queue_type)
     }
+
+    #[allow(non_snake_case)]
+    pub fn toString(event: &QueueTableEvent) -> String {
+        format!("{event:?}")
+    }
+    #[allow(non_snake_case)]
+    pub fn getType(event: &QueueTableEvent) -> &'static str {
+        match event {
+            QueueTableEvent::QueueSelected { .. } => "QUEUE_SELECTED",
+            QueueTableEvent::NumberJobsChanged(_) => "NUMBER_JOBS_CHANGED",
+            QueueTableEvent::OnlyQueueType(_) => "ONLY_QUEUE_TYPE",
+            _ => "OTHER",
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn getQueueMode(event: &QueueTableEvent) -> Option<QueueMode> {
+        match event {
+            QueueTableEvent::QueueSelected { queue_mode, .. } => Some(*queue_mode),
+            _ => None,
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn getQueueType(event: &QueueTableEvent) -> Option<QueueType> {
+        match event {
+            QueueTableEvent::OnlyQueueType(queue_type) => Some(*queue_type),
+            _ => None,
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn getMaximum(event: &QueueTableEvent) -> Option<&str> {
+        match event {
+            QueueTableEvent::QueueSelected { maximum, .. } => maximum.as_deref(),
+            _ => None,
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn getJobs(event: &QueueTableEvent) -> Option<&str> {
+        match event {
+            QueueTableEvent::NumberJobsChanged(jobs) => Some(jobs),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

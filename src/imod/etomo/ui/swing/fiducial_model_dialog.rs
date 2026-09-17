@@ -1041,6 +1041,62 @@ impl<'a> FiducialModelDialog<'a> {
     }
 }
 
+/// Source-shaped parameter adapter.  The full typed overloads remain on the
+/// dialog; this mirrors Java's `getParameters`/`setParameters` UI boundary.
+pub struct FiducialModelDialogParameters;
+impl FiducialModelDialogParameters {
+    #[allow(non_snake_case)]
+    pub fn getParameters(dialog: &FiducialModelDialog<'_>, near_zero: bool) -> AutofidseedFields {
+        dialog.get_autofidseed_parameters(near_zero)
+    }
+    #[allow(non_snake_case)]
+    pub fn setParameters(
+        dialog: &mut FiducialModelDialog<'_>,
+        fields: &AutofidseedFields,
+        for_transfer_fid: bool,
+    ) {
+        dialog.set_autofidseed_parameters(fields, for_transfer_fid);
+    }
+}
+
+/// Native replacement for the Java action listener.
+pub struct FiducialModelDialogActionListener;
+impl FiducialModelDialogActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: FiducialModelDialogApplicationManager>(
+        dialog: &mut FiducialModelDialog<'_>,
+        command: &str,
+        manager: &mut M,
+    ) {
+        dialog.action(command, None, manager);
+    }
+}
+
+/// Native replacement for the Java tab/change listener.
+pub struct FiducialModelDialogChangeListener;
+impl FiducialModelDialogChangeListener {
+    #[allow(non_snake_case)]
+    pub fn stateChanged(dialog: &mut FiducialModelDialog<'_>) {
+        dialog.update_display_without_manager();
+    }
+}
+
+impl FiducialModelDialog<'_> {
+    #[allow(non_snake_case)]
+    pub fn toString(&self) -> String {
+        format!(
+            "FiducialModelDialog[axis={:?}, method={:?}]",
+            self.process_dialog.axis_id, self.cur_method
+        )
+    }
+    #[allow(non_snake_case)]
+    pub fn equals(&self, other: &Self) -> bool {
+        self.process_dialog.axis_id == other.process_dialog.axis_id
+            && self.cur_method == other.cur_method
+            && self.cur_seed_model == other.cur_seed_model
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

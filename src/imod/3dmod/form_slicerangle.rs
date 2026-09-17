@@ -78,7 +78,7 @@ pub struct SlicerAngleForm {
     pub last_dragging: i32,
 }
 impl SlicerAngleForm {
-    /// `SlicerAngleForm::SlicerAngleForm`.
+    /// `SlicerAngleForm()` source constructor.
     pub fn new(
         slicer_ang: Vec<SlicerAngles>,
         max_image_time: i32,

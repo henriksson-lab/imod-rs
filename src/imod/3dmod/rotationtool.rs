@@ -68,6 +68,18 @@ pub struct RotationTool {
     pub key_press_signal: bool,
     pub key_release_signal: bool,
 }
+
+/// `RotationTool()`: construct the source button-grid state without a Qt widget.
+pub fn rotation_tool(
+    center_icon: bool,
+    center_tip: Option<&str>,
+    size: i32,
+    auto_raise: bool,
+    step_size: f32,
+) -> RotationTool {
+    RotationTool::new(center_icon, center_tip, size, auto_raise, step_size)
+}
+
 impl RotationTool {
     pub fn new(
         center_icon: bool,
@@ -189,5 +201,11 @@ mod tests {
         x.set_center_state(true);
         x.center_toggled(true);
         assert_eq!(x.center_signal, Some(true));
+    }
+    #[test]
+    fn source_constructor_facade_builds_button_grid() {
+        let tool = rotation_tool(true, Some("center"), 20, false, 1.5);
+        assert_eq!(tool.buttons.len(), 9);
+        assert_eq!(tool.center_tooltip.as_deref(), Some("center"));
     }
 }

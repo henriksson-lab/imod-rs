@@ -133,6 +133,20 @@ impl Run3dmodButton {
     pub fn add_action_listener(&mut self) {
         self.multi_line_button.add_action_listener();
     }
+    /// Java private `addListeners`: the native button retains its generic
+    /// mouse adapter as a concrete listener count.
+    #[allow(non_snake_case)]
+    pub fn addListeners(&mut self) {
+        if self.multi_line_button.button.mouse_listener_count == 0 {
+            self.multi_line_button.add_mouse_listener();
+        }
+    }
+    /// Java `getDeferred3dmodButton` availability boundary.  The borrowed
+    /// deferred endpoint is represented by the owning Rust action path.
+    #[allow(non_snake_case)]
+    pub fn getDeferred3dmodButton(&self) -> bool {
+        self.deferred_3dmod_button_attached
+    }
     pub fn get_action_command(&self) -> Option<&str> {
         self.multi_line_button.get_action_command()
     }

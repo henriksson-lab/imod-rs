@@ -45,6 +45,17 @@ pub fn icv_inv_sqrt_32f(source: &[f32], destination: &mut [f32]) -> Result<(), (
     Ok(())
 }
 
+/// `icvInvSqrt_64f`.
+pub fn icv_inv_sqrt_64f(source: &[f64], destination: &mut [f64]) -> Result<(), ()> {
+    if source.len() != destination.len() {
+        return Err(());
+    }
+    for index in 0..source.len() {
+        destination[index] = 1.0 / source[index].sqrt();
+    }
+    Ok(())
+}
+
 /// `icvSqrt_32f`.
 pub fn icv_sqrt_32f(source: &[f32], destination: &mut [f32]) -> Result<(), ()> {
     if source.len() != destination.len() {
@@ -130,6 +141,31 @@ pub fn cv_polar_to_cart(
     Ok(())
 }
 
+/// `icvSinCos_32f` (`cxmathfuncs.cpp:476`).  The C implementation uses a
+/// 64-sample interpolated table; `f32::sin_cos` supplies the same API with
+/// higher accuracy while preserving its degree/radian and slice contracts.
+pub fn icv_sin_cos_32f(
+    angles: &[f32],
+    sin_values: &mut [f32],
+    cos_values: &mut [f32],
+    angle_in_degrees: bool,
+) -> Result<(), ()> {
+    if angles.len() != sin_values.len() || angles.len() != cos_values.len() {
+        return Err(());
+    }
+    for index in 0..angles.len() {
+        let radians = if angle_in_degrees {
+            angles[index].to_radians()
+        } else {
+            angles[index]
+        };
+        let (sine, cosine) = radians.sin_cos();
+        sin_values[index] = sine;
+        cos_values[index] = cosine;
+    }
+    Ok(())
+}
+
 /// `cvExp` for the numeric data path; Rust's correctly-rounded primitive
 /// replaces the source's range-reduced approximation table.
 pub fn cv_exp(source: &[f64], destination: &mut [f64]) -> Result<(), ()> {
@@ -204,5 +240,20 @@ mod tests {
         assert_eq!(squared, [4., 9.]);
         assert!(cv_check_arr(&[0., 0.5], CV_CHECK_RANGE, 0., 1.));
         assert!(!cv_check_arr(&[f64::NAN], 0, 0., 1.));
+    }
+    #[test]
+    fn native_sine_cosine_batch_handles_degrees_and_radians() {
+        let mut sine = [0_f32; 2];
+        let mut cosine = [0_f32; 2];
+        icv_sin_cos_32f(&[0., 90.], &mut sine, &mut cosine, true).unwrap();
+        assert!(sine[0].abs() < 1e-6 && (cosine[0] - 1.).abs() < 1e-6);
+        assert!((sine[1] - 1.).abs() < 1e-6 && cosine[1].abs() < 1e-6);
+    }
+
+    #[test]
+    fn inverse_square_root_64_bit_keeps_precision() {
+        let mut destination = [0_f64; 2];
+        icv_inv_sqrt_64f(&[4., 9.], &mut destination).unwrap();
+        assert_eq!(destination, [0.5, 1. / 3.]);
     }
 }

@@ -306,6 +306,32 @@ impl Popup {
     }
 }
 
+/// Native queue callback for the first Java `SwingUtilities.invokeLater`
+/// runnable in `Popup.open`.
+pub struct FieldDisplayRunnable;
+
+impl FieldDisplayRunnable {
+    #[allow(non_snake_case)]
+    pub fn run(popup: &mut Popup) {
+        if let Some(displayer) = &mut popup.field_displayer1 {
+            displayer.display();
+        }
+        if let Some(displayer) = &mut popup.field_displayer2 {
+            displayer.display();
+        }
+    }
+}
+
+/// Native queue callback for the non-question popup display runnable.
+pub struct DisplayRunnable;
+
+impl DisplayRunnable {
+    #[allow(non_snake_case)]
+    pub fn run(popup: &mut Popup) {
+        popup.display();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

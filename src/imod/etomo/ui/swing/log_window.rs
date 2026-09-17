@@ -409,6 +409,18 @@ impl LogWindow {
     }
 }
 
+/// Native adapter for Java `LogWindowKeyListener`; press/release deliberately
+/// have no source side effect, while typing is handled by `key_typed`.
+pub struct LogWindowKeyListener;
+
+impl LogWindowKeyListener {
+    #[allow(non_snake_case)]
+    pub fn keyPressed() {}
+
+    #[allow(non_snake_case)]
+    pub fn keyReleased() {}
+}
+
 impl LogProperties for LogWindow {
     /// Java `store(Properties, String)`.
     fn store(&self, props: &mut BTreeMap<String, String>, prepend: Option<&str>) {

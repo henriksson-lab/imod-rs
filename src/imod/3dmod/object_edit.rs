@@ -40,6 +40,16 @@ pub struct ImodObjColor {
     pub top_ind: i32,
     pub hot_sliding: bool,
 }
+
+/// `ImodObjColor()`: create an owned selector state for one model object.
+pub fn imod_obj_color(obj_num: i32, top_ind: i32) -> ImodObjColor {
+    ImodObjColor {
+        selector_open: true,
+        obj_num,
+        top_ind,
+        hot_sliding: false,
+    }
+}
 /// Original static `getObjectOrClose`.
 pub fn get_object_or_close<'a>(model: &'a mut Imod, edit: &mut ObjectEdit) -> Option<&'a mut Iobj> {
     let object = edit.current_object;
@@ -295,6 +305,13 @@ impl ImodObjColor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_color_selector_constructor_keeps_object_identity() {
+        let selector = imod_obj_color(4, 2);
+        assert_eq!((selector.obj_num, selector.top_ind), (4, 2));
+        assert!(selector.selector_open);
+    }
     #[derive(Default)]
     struct Native(Vec<(bool, i32)>);
     impl ObjectEditNativeBoundary for Native {

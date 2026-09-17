@@ -260,6 +260,11 @@ impl<M: PrenewstApplicationManager, P: PrenewstParent> PrenewstPanel<M, P> {
             .set_selected(input.float_densities == FLOAT_DENSITIES_MEAN);
         self.update_enabled();
     }
+    /// Java `setParameters(ConstNewstParam)` overload boundary.
+    #[allow(non_snake_case)]
+    pub fn setParameters(&mut self, input: &PrenewstParam) {
+        self.set_newst_parameters(input);
+    }
     /// Java `setParameters(BaseScreenState)`.
     pub fn set_screen_state_parameters<S: PrenewstScreenState>(&mut self, input: &S) {
         let state = input.get_header_state();
@@ -309,6 +314,11 @@ impl<M: PrenewstApplicationManager, P: PrenewstParent> PrenewstPanel<M, P> {
             FLOAT_DENSITIES_DEFAULT
         };
         true
+    }
+    /// Java `getParameters(NewstParam, boolean)` overload boundary.
+    #[allow(non_snake_case)]
+    pub fn getParameters(&self, output: &mut PrenewstParam, do_validation: bool) -> bool {
+        self.get_newst_parameters(output, do_validation)
     }
     /// Java `getProcessName` result.
     pub fn get_process_name(&self) -> &'static str {

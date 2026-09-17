@@ -48,6 +48,23 @@ impl Default for PatchSizeArray {
 static PATCH_SIZE_ARRAY: OnceLock<Mutex<PatchSizeArray>> = OnceLock::new();
 
 impl CombinePatchSize {
+    /// Java private `getFixedInstance(String)`: resolve only one of the four
+    /// process-supplied fixed sizes, never the `Custom` sentinel.
+    pub fn get_fixed_instance(input: Option<&str>) -> Option<Self> {
+        let input = input?.trim();
+        if input.eq_ignore_ascii_case("S") || input.eq_ignore_ascii_case("Small") {
+            Some(Self::Small)
+        } else if input.eq_ignore_ascii_case("M") || input.eq_ignore_ascii_case("Medium") {
+            Some(Self::Medium)
+        } else if input.eq_ignore_ascii_case("L") || input.eq_ignore_ascii_case("Large") {
+            Some(Self::Large)
+        } else if input.eq_ignore_ascii_case("E") || input.eq_ignore_ascii_case("Extra large") {
+            Some(Self::ExtraLarge)
+        } else {
+            None
+        }
+    }
+
     /// Java `getInstance(String)` after `SetupCombine.getInfoOnPatchSizes` has
     /// populated the process boundary table.
     pub fn get_instance(input: Option<&str>) -> Option<Self> {
@@ -55,17 +72,8 @@ impl CombinePatchSize {
         if input.is_empty() {
             return None;
         }
-        if input.eq_ignore_ascii_case("S") || input.eq_ignore_ascii_case("Small") {
-            return Some(Self::Small);
-        }
-        if input.eq_ignore_ascii_case("M") || input.eq_ignore_ascii_case("Medium") {
-            return Some(Self::Medium);
-        }
-        if input.eq_ignore_ascii_case("L") || input.eq_ignore_ascii_case("Large") {
-            return Some(Self::Large);
-        }
-        if input.eq_ignore_ascii_case("E") || input.eq_ignore_ascii_case("Extra large") {
-            return Some(Self::ExtraLarge);
+        if let Some(fixed) = Self::get_fixed_instance(Some(input)) {
+            return Some(fixed);
         }
         if input.eq_ignore_ascii_case("Custom") || !input.contains(',') {
             return Some(Self::Custom);
@@ -246,5 +254,10 @@ mod tests {
             CombinePatchSize::get_instance(Some("88, 88, 44")),
             Some(CombinePatchSize::Custom)
         );
+        assert_eq!(
+            CombinePatchSize::get_fixed_instance(Some("e")),
+            Some(CombinePatchSize::ExtraLarge)
+        );
+        assert_eq!(CombinePatchSize::get_fixed_instance(Some("Custom")), None);
     }
 }

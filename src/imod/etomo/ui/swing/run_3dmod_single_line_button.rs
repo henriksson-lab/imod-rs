@@ -53,6 +53,17 @@ impl Run3dmodSingleLineButton {
     pub fn get_deferred_3dmod_instance(label: &str, container_attached: bool) -> Self {
         Self::new(label, container_attached, false, None, true, None)
     }
+    /// Rust form of the Java frontend listener hookup.
+    pub fn add_listeners(&mut self) {
+        self.single_line_button
+            .multi_line_button
+            .add_mouse_listener();
+    }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for Java `addListeners`.
+    pub fn addListeners(&mut self) {
+        self.add_listeners();
+    }
     pub fn menu_action(&mut self, options: Run3dmodMenuOptions) {
         self.action(options);
         if self.single_line_button.multi_line_button.toggle_button {

@@ -59,12 +59,25 @@ impl<T> CvChannelMatrix<T> {
     }
 }
 
+fn is_valid_channel_matrix<T>(matrix: &CvChannelMatrix<T>) -> bool {
+    matrix.channels != 0
+        && matrix
+            .rows
+            .checked_mul(matrix.cols)
+            .and_then(|pixels| pixels.checked_mul(matrix.channels))
+            == Some(matrix.data.len())
+}
+
 /// C `cvSplit`; destinations are source null pointers represented as `None`.
 pub fn cv_split<T: Copy>(
     source: &CvChannelMatrix<T>,
     destinations: &mut [Option<CvChannelMatrix<T>>],
 ) -> Result<(), CvUtilsError> {
-    if source.channels < 2 || source.channels > 4 || destinations.len() != 4 {
+    if !is_valid_channel_matrix(source)
+        || source.channels < 2
+        || source.channels > 4
+        || destinations.len() != 4
+    {
         return Err(CvUtilsError::BadArgument);
     }
     let indices: Vec<_> = destinations
@@ -77,6 +90,9 @@ pub fn cv_split<T: Copy>(
     }
     for &c in &indices {
         let d = destinations[c].as_ref().unwrap();
+        if !is_valid_channel_matrix(d) {
+            return Err(CvUtilsError::BadArgument);
+        }
         if d.channels != 1 {
             return Err(CvUtilsError::UnsupportedFormat);
         }
@@ -97,7 +113,11 @@ pub fn cv_merge<T: Copy>(
     sources: &[Option<CvChannelMatrix<T>>],
     destination: &mut CvChannelMatrix<T>,
 ) -> Result<(), CvUtilsError> {
-    if destination.channels < 2 || destination.channels > 4 || sources.len() != 4 {
+    if !is_valid_channel_matrix(destination)
+        || destination.channels < 2
+        || destination.channels > 4
+        || sources.len() != 4
+    {
         return Err(CvUtilsError::BadArgument);
     }
     let indices: Vec<_> = sources
@@ -110,6 +130,9 @@ pub fn cv_merge<T: Copy>(
     }
     for &c in &indices {
         let s = sources[c].as_ref().unwrap();
+        if !is_valid_channel_matrix(s) {
+            return Err(CvUtilsError::BadArgument);
+        }
         if s.channels != 1 {
             return Err(CvUtilsError::UnsupportedFormat);
         }
@@ -133,6 +156,13 @@ pub fn cv_mix_channels<T: Copy + Default>(
 ) -> Result<(), CvUtilsError> {
     if destinations.is_empty() || from_to.is_empty() {
         return Err(CvUtilsError::OutOfRange);
+    }
+    if sources
+        .iter()
+        .chain(destinations.iter())
+        .any(|matrix| !is_valid_channel_matrix(matrix))
+    {
+        return Err(CvUtilsError::BadArgument);
     }
     let reference = sources
         .first()
@@ -258,5 +288,20 @@ mod tests {
         let mut b = [0u8; 3];
         cv_convert_scale(&[-1i16, 100, 1000], &mut b, 0.5, 1.).unwrap();
         assert_eq!(b, [1, 51, 255]);
+    }
+
+    #[test]
+    fn malformed_public_channel_matrix_returns_an_error_before_indexing() {
+        let source = CvChannelMatrix {
+            rows: 1,
+            cols: 2,
+            channels: 2,
+            data: vec![1_u8; 3],
+        };
+        let mut destinations = [None, None, None, None];
+        assert_eq!(
+            cv_split(&source, &mut destinations),
+            Err(CvUtilsError::BadArgument)
+        );
     }
 }

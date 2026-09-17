@@ -168,6 +168,7 @@ impl Default for FineGrainForm {
     }
 }
 impl FineGrainForm {
+    /// `FineGrainForm()` source constructor.
     pub fn new(n: &mut dyn FineGrainNativeBoundary) -> Self {
         let mut s = Self::default();
         s.m_top_win = true;

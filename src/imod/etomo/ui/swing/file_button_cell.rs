@@ -279,6 +279,13 @@ impl FileButtonCell {
         chooser
     }
 
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `FileButtonActionListener::actionPerformed`.
+    /// The Rust frontend supplies the optional file selected by its chooser.
+    pub fn actionPerformed(&mut self, selected_file: Option<&Path>) -> FileChooser {
+        self.action(selected_file)
+    }
+
     /// Java overridden `setToolTipText(String)`; formatter rendering remains
     /// the native presentation boundary.
     pub fn set_tool_tip_text(&mut self, text: Option<&str>) {

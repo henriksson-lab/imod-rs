@@ -66,7 +66,7 @@ pub struct SlicerThreadState<'a> {
 }
 
 impl<'a> SlicerThreadState<'a> {
-    /// `SlicerThread::SlicerThread`.
+    /// `SlicerThread()`, the C++ `SlicerThread::SlicerThread` constructor.
     pub fn new(voxels: &'a dyn SlicerVoxelSource, xsize: i32, ysize: i32, zsize: i32) -> Self {
         Self {
             xsx: 1.,

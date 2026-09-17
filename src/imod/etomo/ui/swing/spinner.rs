@@ -130,6 +130,12 @@ impl Spinner {
     pub fn get_int_value(&self) -> i32 {
         self.model.value
     }
+    /// Java private `getTextField()`.  The concrete formatted-text control is
+    /// owned by the Rust GUI backend; its source-visible editor value is this
+    /// spinner model formatted for binding.
+    pub fn get_text_field(&self) -> String {
+        self.model.value.to_string()
+    }
     pub fn add_change_listener(&mut self) {
         self.change_listener_count += 1;
         self.spinner_change_listening = true;
@@ -151,5 +157,6 @@ mod tests {
         spinner.set_value(3);
         spinner.reset();
         assert_eq!(spinner.get_value(), 8);
+        assert_eq!(spinner.get_text_field(), "8");
     }
 }

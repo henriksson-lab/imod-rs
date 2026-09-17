@@ -124,7 +124,7 @@ pub struct DockingDialog {
 }
 
 impl DockingDialog {
-    /// `DockingDialog::DockingDialog`.
+    /// `DockingDialog()` source constructor.
     pub fn new(
         widget: usize,
         inner_title: &str,

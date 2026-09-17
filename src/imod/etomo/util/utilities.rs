@@ -46,11 +46,22 @@ use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
 use crate::imod::etomo::r#type::extension;
 use crate::imod::etomo::r#type::file_type::FileType;
 use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::ui::swing::ui_utilities::{Container, UiUtilities};
 use crate::imod::etomo::util::environment_variable;
+use crate::imod::etomo::util::mrc_header::MRCHeader;
 
 // ---------------------------------------------------------------------------
 // JDK members the source uses.
 // ---------------------------------------------------------------------------
+
+/// Native UI-boundary form of Java `printComponents(StringBuilder, Container)`.
+///
+/// The native component tree owns its diagnostic representation; this facade keeps
+/// callers of `Utilities` on that one implementation instead of recreating Swing's
+/// `Container` traversal.
+pub fn print_components(container: &Container) {
+    UiUtilities::print_components(container);
+}
 
 /// `java.io.File`'s `UnixFileSystem.normalize(String)`: collapse runs of `/` into one
 /// and drop a trailing `/` unless the whole path is `/`.  Every `new File(String)` in
@@ -653,6 +664,21 @@ pub fn is_java7() -> bool {
         *java7 = Some(false);
     }
     java7.unwrap()
+}
+
+/// Java `isPython3`: IMOD configuration may override this through the usual
+/// `PYTHON_VERSION` environment value; absent configuration uses Python 3.
+#[allow(non_snake_case)]
+pub fn isPython3() -> bool {
+    std::env::var("PYTHON_VERSION")
+        .map(|value| value.trim_start().starts_with('3'))
+        .unwrap_or(true)
+}
+
+/// Java `getClassString(Object)`, represented by Rust's concrete type name.
+#[allow(non_snake_case)]
+pub fn getClassString<T: ?Sized>(_value: &T) -> &'static str {
+    std::any::type_name::<T>()
 }
 
 /// Java `convertWindowsAbsFilePathToCygdrivePath`.  Converts an absolute Windows file
@@ -1624,11 +1650,14 @@ pub fn get_file(property_user_dir: &str, filename: Option<&str>) -> std::path::P
     std::path::PathBuf::from(java_io_file_new(property_user_dir, filename))
 }
 
-// TODO(unit): needs etomo/BaseManager.java and etomo/process/SystemProgram.java - Java
-// `isValidStack(File, BaseManager, AxisID)` reads the stack through
-// `MRCHeader.getInstance(manager.getPropertyUserDir(), file.getName(), axisID)` and then
-// `MRCHeader.read(manager)`.  `etomo/util/mrc_header.rs` now carries the class, but that
-// `getInstance` overload and `read` are blocked on those two units.
+/// Native process-boundary form of Java `isValidStack(File, BaseManager, AxisID)`.
+///
+/// The Rust frontend supplies the output of IMOD's `header` command for `file`; the
+/// translated `MRCHeader` parser makes the same validity decision as Java's
+/// `header.read(manager)` without coupling this utility to a GUI process manager.
+pub fn is_valid_stack(header: &mut MRCHeader, stdout: &[String], stderr: &[String]) -> bool {
+    header.read(stdout, stderr).is_ok()
+}
 
 /// Java `backupFile(File)`.
 pub fn backup_file(source: Option<&std::path::Path>) -> Result<(), LogFileError> {
@@ -2194,10 +2223,31 @@ pub fn debug_print_to_out(string: &str, to_out: bool) {
     }
 }
 
-// TODO(unit): needs etomo/BaseManager.java, etomo/ui/swing/UIHarness.java and
-// etomo/process/SystemProgram.java - `deleteFileType(BaseManager, AxisID, FileType)` and
-// both `deleteFileOrDirectory` overloads pop up a message dialog and run `b3dremove`
-// through a SystemProgram.
+/// Native filesystem form of Java `deleteFileOrDirectory`.
+///
+/// Missing paths are successful, as in `File.delete`/the Java implementation.  A native
+/// UI can turn the returned error into the corresponding message dialog.
+pub fn delete_file_or_directory(file: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(file) {
+        Ok(metadata) if metadata.file_type().is_dir() => std::fs::remove_dir_all(file),
+        Ok(_) => std::fs::remove_file(file),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Native form of Java `deleteFileType(BaseManager, AxisID, FileType)`.
+pub fn delete_file_type(
+    manager: &'static dyn BaseManager,
+    axis_id: Option<AxisID>,
+    file_type: &FileType,
+) -> std::io::Result<()> {
+    let directory = manager.get_property_user_dir().unwrap_or_default();
+    let file_name = file_type
+        .get_file_name(Some(manager), axis_id)
+        .unwrap_or_default();
+    delete_file_or_directory(&get_file(&directory, Some(&file_name)))
+}
 
 /// Java `getStrippedFileName(File)`.  Returns the name of file, stripped of its
 /// extension; a bad file causes null to be returned.
@@ -2710,9 +2760,26 @@ fn java_lang_system_get_property_os_name() -> &'static str {
     }
 }
 
-// TODO(unit): needs etomo/ui/swing/UIHarness.java and etomo/BaseManager.java - Java
-// `findMessageAndOpenDialog(BaseManager, AxisID, String[], String, String)` opens an
-// info dialog through `UIHarness.INSTANCE`.
+/// Native UI-boundary form of Java `findMessageAndOpenDialog`.
+///
+/// Every line beginning with `starts_with` is handed to `open_dialog`, preserving the
+/// source's behavior of opening a dialog for every match rather than stopping at one.
+pub fn find_message_and_open_dialog<F>(
+    search_lines: Option<&[String]>,
+    starts_with: &str,
+    title: &str,
+    mut open_dialog: F,
+) where
+    F: FnMut(&str, &str),
+{
+    if let Some(search_lines) = search_lines {
+        for line in search_lines {
+            if line.starts_with(starts_with) {
+                open_dialog(line, title);
+            }
+        }
+    }
+}
 
 /// Java `getExistingDir(BaseManager, String, AxisID, String)`.
 pub fn get_existing_dir_message(
@@ -3115,11 +3182,23 @@ pub fn convert_path_to_universal_windows(path: &str) -> String {
     "\"".to_string() + &new_path + "\""
 }
 
-// TODO(unit): needs etomo/BaseManager.java, etomo/process/SystemProgram.java and the
-// untranslated instance half of etomo/type/FileType.java - both
-// `getStackBinning(BaseManager, AxisID, FileType[, boolean])` overloads read the pixel
-// spacing of `stackFileType` and `FileType.RAW_STACK` through `MRCHeader.read`, which is
-// blocked on those units.
+/// Native parsed-header form of Java `getStackBinning`.
+///
+/// Header execution/parsing belongs at the process boundary; this pure calculation is
+/// the Java method's result after both `MRCHeader.read` calls succeeded.
+pub fn get_stack_binning(raw_stack_header: &MRCHeader, stack_header: &MRCHeader) -> i32 {
+    let raw_spacing = raw_stack_header.get_x_pixel_spacing();
+    let binning = if raw_spacing > 0.0 {
+        (stack_header.get_x_pixel_spacing() / raw_spacing).round() as i32
+    } else {
+        1
+    };
+    if binning != 1 && binning < 1 {
+        1
+    } else {
+        binning
+    }
+}
 
 /// Java `setAlignFramesRootname`.
 pub fn set_align_frames_rootname(file: Option<&str>) -> String {
@@ -3214,6 +3293,69 @@ fn get_rootname_for_selected_files(files: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parsed_header(x_spacing: f64) -> std::rc::Rc<std::cell::RefCell<MRCHeader>> {
+        let path = format!(
+            "/tmp/imod-rs-utilities-header-{}-{x_spacing}",
+            java_lang_system_current_time_millis()
+        );
+        let header = MRCHeader::get_instance(Some(&path), None).unwrap();
+        let stdout = vec![format!(
+            " Pixel spacing units value {x_spacing} {x_spacing} {x_spacing}"
+        )];
+        assert!(header.borrow_mut().read(&stdout, &[]).unwrap());
+        header
+    }
+
+    #[test]
+    fn stack_helpers_preserve_header_validation_and_binning() {
+        let valid = parsed_header(1.0);
+        assert!(is_valid_stack(
+            &mut valid.borrow_mut(),
+            &[" Pixel spacing units value 1 1 1".to_string()],
+            &[]
+        ));
+        assert!(!is_valid_stack(&mut valid.borrow_mut(), &[], &[]));
+        let raw = parsed_header(1.0);
+        let twice_binned = parsed_header(2.0);
+        let sub_binned = parsed_header(0.5);
+        assert_eq!(get_stack_binning(&raw.borrow(), &twice_binned.borrow()), 2);
+        assert_eq!(get_stack_binning(&raw.borrow(), &sub_binned.borrow()), 1);
+    }
+
+    #[test]
+    fn delete_file_or_directory_handles_missing_files_and_trees() {
+        let root = std::env::temp_dir().join(format!(
+            "imod-rs-utilities-delete-{}",
+            java_lang_system_current_time_millis()
+        ));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("value"), b"value").unwrap();
+        delete_file_or_directory(&root).unwrap();
+        assert!(!root.exists());
+        delete_file_or_directory(&root).unwrap();
+    }
+
+    #[test]
+    fn find_message_opens_every_matching_line() {
+        let lines = vec![
+            "keep this".to_string(),
+            "open one".to_string(),
+            "open two".to_string(),
+        ];
+        let mut opened = Vec::new();
+        find_message_and_open_dialog(Some(&lines), "open", "Messages", |message, title| {
+            opened.push((message.to_string(), title.to_string()));
+        });
+        assert_eq!(
+            opened,
+            vec![
+                ("open one".to_string(), "Messages".to_string()),
+                ("open two".to_string(), "Messages".to_string())
+            ]
+        );
+    }
 
     #[test]
     fn java_date_to_string_formats_the_epoch_in_the_local_timezone() {

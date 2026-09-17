@@ -7,6 +7,31 @@
 use super::cxerror::CvStatus;
 use super::cxminmaxloc::{CvMask, CvMatrix};
 
+/// `icvSet_8u_C1R` (`cxcopy.cpp:69`).  The C helper repeats a raw pixel
+/// scalar across the first row then copies that row into strided successors.
+/// This checked form accepts the unexpanded pixel pattern directly.
+pub fn icv_set_8u_c1r(
+    destination: &mut [u8],
+    row_stride: usize,
+    width: usize,
+    height: usize,
+    scalar: &[u8],
+) -> Result<(), CvStatus> {
+    if scalar.is_empty()
+        || row_stride < width
+        || (height > 0 && destination.len() < (height - 1) * row_stride + width)
+    {
+        return Err(CvStatus::sts_bad_size);
+    }
+    for row in 0..height {
+        let start = row * row_stride;
+        for column in 0..width {
+            destination[start + column] = scalar[column % scalar.len()];
+        }
+    }
+    Ok(())
+}
+
 /// C `cvCopy`, including the source's masked row/stride behavior.
 pub fn cv_copy<T: Copy>(
     source: &CvMatrix<T>,
@@ -20,6 +45,9 @@ pub fn cv_copy<T: Copy>(
         return Err(CvStatus::sts_unmatched_formats);
     }
     if let Some(mask) = mask {
+        if mask.rows != source.rows || mask.columns != source.columns {
+            return Err(CvStatus::sts_unmatched_sizes);
+        }
         if mask.row_stride < source.columns
             || mask.values.len() < (source.rows - 1) * mask.row_stride + source.columns
         {
@@ -100,6 +128,9 @@ pub fn cv_set<T: Copy>(
         return Err(CvStatus::sts_bad_arg);
     }
     if let Some(mask) = mask {
+        if mask.rows != matrix.rows || mask.columns != matrix.columns {
+            return Err(CvStatus::sts_unmatched_sizes);
+        }
         if mask.row_stride < matrix.columns
             || mask.values.len() < (matrix.rows - 1) * mask.row_stride + matrix.columns
         {
@@ -215,7 +246,10 @@ pub fn cv_repeat<T: Copy>(
 
 #[cfg(test)]
 mod tests {
-    use super::{cv_copy, cv_copy_coi, cv_flip, cv_flip_in_place, cv_repeat, cv_set, cv_set_zero};
+    use super::{
+        cv_copy, cv_copy_coi, cv_flip, cv_flip_in_place, cv_repeat, cv_set, cv_set_zero,
+        icv_set_8u_c1r,
+    };
     use crate::imod::raptor::opencv::cxerror::CvStatus;
     use crate::imod::raptor::opencv::cxminmaxloc::{CvMask, CvMatrix};
 
@@ -279,6 +313,27 @@ mod tests {
         assert_eq!(
             cv_copy(&source, &mut mismatched, None),
             Err(CvStatus::sts_unmatched_formats)
+        );
+    }
+    #[test]
+    fn native_byte_set_repeats_pixel_and_preserves_stride_padding() {
+        let mut bytes = [99_u8; 12];
+        icv_set_8u_c1r(&mut bytes, 6, 4, 2, &[3, 7]).unwrap();
+        assert_eq!(bytes, [3, 7, 3, 7, 99, 99, 3, 7, 3, 7, 99, 99]);
+    }
+
+    #[test]
+    fn copy_and_set_require_an_exactly_sized_mask() {
+        let source = CvMatrix::new(2, 2, 1, 2, vec![1_u8, 2, 3, 4]).unwrap();
+        let mismatched_mask = CvMask::new(1, 4, 4, vec![1, 1, 1, 1]).unwrap();
+        let mut destination = CvMatrix::new(2, 2, 1, 2, vec![0_u8; 4]).unwrap();
+        assert_eq!(
+            cv_copy(&source, &mut destination, Some(&mismatched_mask)),
+            Err(CvStatus::sts_unmatched_sizes)
+        );
+        assert_eq!(
+            cv_set(&mut destination, &[9], Some(&mismatched_mask)),
+            Err(CvStatus::sts_unmatched_sizes)
         );
     }
 }

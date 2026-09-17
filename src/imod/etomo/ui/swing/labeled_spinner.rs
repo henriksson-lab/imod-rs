@@ -560,6 +560,17 @@ impl LabeledSpinner {
     pub fn add_change_listener(&mut self) {
         self.change_listener_count += 1;
     }
+
+    /// Java `focusGained`; it intentionally has no source side effect.
+    #[allow(non_snake_case)]
+    pub fn focusGained(&mut self) {}
+
+    /// Java private `getTextField`.  The native spinner owns its editable text
+    /// state directly, so this is its read boundary rather than a Swing editor.
+    #[allow(non_snake_case)]
+    pub fn getTextField(&self) -> &Self {
+        self
+    }
 }
 
 #[cfg(test)]

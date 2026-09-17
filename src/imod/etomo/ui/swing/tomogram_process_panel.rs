@@ -163,6 +163,16 @@ impl TomogramProcessPanel {
         }
     }
 
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `AxisButtonActionListener::actionPerformed`.
+    pub fn actionPerformed<U: TomogramProcessPanelUiHarness>(
+        &mut self,
+        command: &str,
+        ui_harness: &mut U,
+    ) {
+        self.button_axis_action(command, ui_harness);
+    }
+
     /// `buttonProcessAction(ActionEvent)`.
     pub fn button_process_action<
         M: TomogramProcessPanelApplicationManager,

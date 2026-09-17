@@ -605,6 +605,16 @@ impl AutoAlignmentPanel {
             controller.imod_boundary_model(options)
         }
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<C: AutoAlignmentController>(
+        &mut self,
+        command: &str,
+        controller: &mut C,
+    ) {
+        self.action(command, controller, None);
+    }
     pub fn update_display(&mut self) {
         let search = self.transform == AlignTransform::Search;
         self.sigma_low_frequency.set_enabled(search);

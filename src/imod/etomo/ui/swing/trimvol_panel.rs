@@ -662,6 +662,30 @@ impl TrimvolPanel {
     }
 }
 
+/// Native callback adapter for Java `ScalingListener`.
+pub struct ScalingListener;
+
+impl ScalingListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(panel: &mut TrimvolPanel) {
+        panel.scale_action();
+    }
+}
+
+/// Native callback adapter for Java `ButtonListener`.
+pub struct ButtonListener;
+
+impl ButtonListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: TrimvolPanelApplicationManager>(
+        panel: &mut TrimvolPanel,
+        manager: &mut M,
+        command: &str,
+    ) {
+        panel.action(manager, command, false, Run3dmodMenuOptions::default());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

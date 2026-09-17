@@ -134,6 +134,22 @@ impl FileTextField2 {
     pub fn get_name(&self) -> &str {
         &self.label
     }
+    #[allow(non_snake_case)]
+    pub fn toString(&self) -> String {
+        format!("FileTextField2[label={},value={}]", self.label, self.text)
+    }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getRootPanel(&self) -> &Self {
+        self
+    }
     pub fn create_panel(&mut self) {
         self.component_order.clear();
         if self.labeled {

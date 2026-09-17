@@ -19,6 +19,13 @@ pub struct CvRect {
     pub height: i32,
 }
 
+/// Owned IPL ROI metadata from `icvCreateROI`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CvImageRoi {
+    pub coi: usize,
+    pub rect: CvRect,
+}
+
 /// C `CvTermCriteria`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CvTermCriteria {
@@ -379,14 +386,14 @@ impl<T> CvArrayNd<T> {
     }
 }
 
-/// C `cvInitNArrayIterator`/`cvNextNArraySlice`, represented by contiguous
-/// first-dimension slices of an owned N-D array.
+/// C `cvInitNArrayIterator`/`cvNextNArraySlice`.  Owned N-D arrays have no
+/// independent stride metadata, hence their full logical extent is the
+/// largest contiguous part and native OpenCV yields one slice.
 pub fn cv_n_array_slices<T>(array: &CvArrayNd<T>) -> Vec<&[T]> {
-    let width = array.dimensions.last().copied().unwrap_or(0) * array.channels;
-    if width == 0 {
+    if array.data.is_empty() {
         return Vec::new();
     }
-    array.data.chunks(width).collect()
+    vec![array.data.as_slice()]
 }
 
 /// Owned state for C `CvNArrayIterator`.  Each yielded item contains the
@@ -404,21 +411,30 @@ pub fn cv_init_n_array_iterator<'a, T>(
     arrays: Vec<&'a CvArrayNd<T>>,
 ) -> Result<CvNArrayIterator<'a, T>, CvStatus> {
     let first = arrays.first().ok_or(CvStatus::sts_out_of_range)?;
+    let valid = |array: &CvArrayNd<T>| {
+        !array.dimensions.is_empty()
+            && array.channels != 0
+            && array.dimensions.iter().all(|&dimension| dimension != 0)
+            && array
+                .dimensions
+                .iter()
+                .try_fold(array.channels, |count, &dimension| {
+                    count.checked_mul(dimension)
+                })
+                == Some(array.data.len())
+    };
+    if arrays.iter().any(|array| !valid(array)) {
+        return Err(CvStatus::sts_bad_size);
+    }
     if arrays
         .iter()
         .any(|array| array.dimensions != first.dimensions || array.channels != first.channels)
     {
         return Err(CvStatus::sts_unmatched_sizes);
     }
-    let slice_len = first
-        .dimensions
-        .last()
-        .copied()
-        .ok_or(CvStatus::sts_bad_size)?
-        .checked_mul(first.channels)
-        .ok_or(CvStatus::sts_bad_size)?;
+    let slice_len = first.data.len();
     Ok(CvNArrayIterator {
-        slice_count: first.data.len() / slice_len,
+        slice_count: 1,
         arrays,
         next_slice: 0,
         slice_len,
@@ -567,6 +583,63 @@ impl<T> CvSparseArray<T> {
     }
 }
 
+/// Safe iterator equivalent of `CvSparseMatIterator`; BTreeMap ordering
+/// replaces traversal of the native hash chains.
+pub struct CvSparseMatIterator<'a, T> {
+    entries: Vec<(&'a [usize], &'a [T])>,
+    next: usize,
+}
+pub fn cv_init_sparse_mat_iterator<'a, T>(
+    array: &'a CvSparseArray<T>,
+) -> CvSparseMatIterator<'a, T> {
+    CvSparseMatIterator {
+        entries: array
+            .values
+            .iter()
+            .map(|(index, value)| (index.as_slice(), value.as_slice()))
+            .collect(),
+        next: 0,
+    }
+}
+pub fn cv_get_next_sparse_node<'a, T>(
+    iterator: &mut CvSparseMatIterator<'a, T>,
+) -> Option<(&'a [usize], &'a [T])> {
+    let node = iterator.entries.get(iterator.next).copied();
+    iterator.next += usize::from(node.is_some());
+    node
+}
+
+/// `icvGetNodePtr`/`icvDeleteNode`: checked index lookups and BTreeMap entry
+/// ownership replace hash calculation and raw sparse-node pointers.
+pub fn icv_get_node_ptr<'a, T: Default + Clone>(
+    array: &'a mut CvSparseArray<T>,
+    index: &[usize],
+    create: bool,
+) -> Result<Option<&'a mut [T]>, CvStatus> {
+    if index.len() != array.dimensions.len()
+        || index.iter().zip(&array.dimensions).any(|(&i, &d)| i >= d)
+    {
+        return Err(CvStatus::sts_out_of_range);
+    }
+    if create && !array.values.contains_key(index) {
+        array
+            .values
+            .insert(index.to_vec(), vec![T::default(); array.channels]);
+    }
+    Ok(array.values.get_mut(index).map(Vec::as_mut_slice))
+}
+pub fn icv_delete_node<T>(
+    array: &mut CvSparseArray<T>,
+    index: &[usize],
+) -> Result<Option<Vec<T>>, CvStatus> {
+    if index.len() != array.dimensions.len()
+        || index.iter().zip(&array.dimensions).any(|(&i, &d)| i >= d)
+    {
+        return Err(CvStatus::sts_out_of_range);
+    }
+    Ok(array.values.remove(index))
+}
+
 /// Owned C `IplImage` with ROI and channel-of-interest metadata.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CvImage<T> {
@@ -703,6 +776,11 @@ pub fn cv_init_mat_nd_header<T>(
     cv_create_mat_nd_header(dimensions, channels, data)
 }
 pub fn cv_clone_mat_nd<T: Clone>(array: &CvArrayNd<T>) -> CvArrayNd<T> {
+    array.clone_mat_nd()
+}
+/// `cvGetMatND`: owned N-D headers do not need a C temporary-header out
+/// parameter, so a clone is the safe equivalent returned to the caller.
+pub fn cv_get_mat_nd<T: Clone>(array: &CvArrayNd<T>) -> CvArrayNd<T> {
     array.clone_mat_nd()
 }
 pub fn cv_release_mat_nd<T>(array: CvArrayNd<T>) {
@@ -1078,6 +1156,70 @@ pub fn cv_raw_to_scalar<T: Copy>(values: &[T], convert: impl Fn(T) -> f64) -> Cv
     scalar
 }
 
+/// Source-named `cvScalarToRawData` and `cvRawDataToScalar` adapters.  The
+/// typed conversion closure replaces the legacy depth tag and byte cast.
+pub fn cv_scalar_to_raw_data<T: Copy>(
+    scalar: CvScalar,
+    convert: impl Fn(f64) -> T,
+    channels: usize,
+) -> Vec<T> {
+    cv_scalar_to_raw(scalar, convert, channels)
+}
+pub fn cv_raw_data_to_scalar<T: Copy>(values: &[T], convert: impl Fn(T) -> f64) -> CvScalar {
+    cv_raw_to_scalar(values, convert)
+}
+
+/// Typed forms of `icvGetReal`/`icvSetReal`; the source dispatches by a depth
+/// tag, while Rust's value type supplies that information statically.
+pub fn icv_get_real<T: CvArrayValue>(value: T) -> f64 {
+    value.to_f64()
+}
+pub fn icv_set_real<T: CvArrayValue>(value: f64) -> T {
+    T::from_f64(value)
+}
+
+pub fn icv_create_roi(
+    coi: usize,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<CvImageRoi, CvStatus> {
+    if width <= 0 || height <= 0 {
+        return Err(CvStatus::sts_bad_size);
+    }
+    Ok(CvImageRoi {
+        coi,
+        rect: CvRect {
+            x,
+            y,
+            width,
+            height,
+        },
+    })
+}
+
+/// `icvGetColorModel` (`cxarray.cpp:3257`).
+pub fn icv_get_color_model(channels: usize) -> (&'static str, &'static str) {
+    match channels {
+        1 => ("GRAY", "GRAY"),
+        3 => ("RGB", "BGR"),
+        4 => ("RGB", "BGRA"),
+        _ => ("", ""),
+    }
+}
+
+/// `icvCheckHuge` (`cxarray.cpp:116`).  OpenCV records an internal flag when
+/// a byte-stride image exceeds `INT_MAX`; owned Rust arrays reject that legacy
+/// addressable-size boundary explicitly before any index arithmetic relies on
+/// it.
+pub fn icv_check_huge(row_stride: usize, rows: usize) -> Result<(), CvStatus> {
+    if row_stride.checked_mul(rows).ok_or(CvStatus::sts_bad_size)? > i32::MAX as usize {
+        return Err(CvStatus::sts_bad_size);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1116,7 +1258,9 @@ mod tests {
         assert_eq!(cv_get_real_nd(&array, &[1, 0, 2]), Some(42.0));
         let copy = cv_clone_mat_nd(&array);
         let mut iterator = cv_init_n_array_iterator(vec![&array, &copy]).unwrap();
-        assert_eq!(cv_next_n_array_slice(&mut iterator).unwrap()[0].len(), 3);
+        assert_eq!(cv_next_n_array_slice(&mut iterator).unwrap()[0].len(), 12);
+        assert!(cv_next_n_array_slice(&mut iterator).is_none());
+        assert_eq!(cv_n_array_slices(&array), vec![array.data.as_slice()]);
         assert_eq!(cv_get_dim_size(&array, 2), Some(3));
     }
 

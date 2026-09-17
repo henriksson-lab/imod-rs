@@ -19,6 +19,12 @@ pub struct BruteForceSearch {
     print_progress_bar: bool,
 }
 
+/// `BruteForceSearch::BruteForceSearch` (`brute_force_search.cpp:3`), as an
+/// owned factory for direct translations of source construction sites.
+pub fn brute_force_search() -> BruteForceSearch {
+    BruteForceSearch::new()
+}
+
 impl Default for BruteForceSearch {
     fn default() -> Self {
         Self::new()
@@ -218,11 +224,11 @@ impl BruteForceSearch {
 
 #[cfg(test)]
 mod tests {
-    use super::BruteForceSearch;
+    use super::{BruteForceSearch, brute_force_search};
 
     #[test]
     fn exhaustive_search_visits_the_source_grid_order() {
-        let mut search = BruteForceSearch::new();
+        let mut search = brute_force_search();
         search.init(
             |value| (value[0] + 1.0).powi(2) + (value[1] + 1.0).powi(2),
             &[0.0, 0.0],

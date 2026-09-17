@@ -294,6 +294,14 @@ impl SolvematchPanel {
                 .set_selected(params.initial_volume_matching());
         }
     }
+
+    /// Rust spelling retained for Java `setParameters(ConstCombineParams,
+    /// boolean)`.  The parameter type selects the source overload at compile
+    /// time, rather than through Swing's runtime dispatch.
+    #[allow(non_snake_case)]
+    pub fn setParameters<P: CombineParameters>(&mut self, params: &P, init: bool) {
+        self.set_combine_parameters(params, init);
+    }
     pub fn set_dualvolmatch_parameters<P: DualvolmatchParameters>(&mut self, params: &P) {
         if let Some(field) = &mut self.ltf_dualvolmatch_maximum_residual {
             field.set_text(&params.maximum_residual());
@@ -571,6 +579,19 @@ impl SolvematchPanel {
         } else if Some(command) == self.btn_imod_match_models.get_action_command() {
             manager.imod_matching_model(self.cb_bin_by_2.is_selected(), options);
         }
+    }
+
+    /// Native callback endpoint for Java `ActionListener.actionPerformed`.
+    /// The frontend provides the action command directly; the optional
+    /// deferred button and menu options are absent for this listener path.
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: SolvematchPanelApplicationManager, T: SolvematchPanelParent>(
+        &mut self,
+        manager: &mut M,
+        parent: &mut T,
+        command: &str,
+    ) {
+        self.action(manager, parent, command, None, None);
     }
     pub fn rb_fiducial_action(&mut self) {
         self.update_display();

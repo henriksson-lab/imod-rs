@@ -777,6 +777,12 @@ impl<S: TomogramStateBoundary, E: TomogramPositioningExpert> TomogramPositioning
             self.update_display();
         }
     }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`, whose
+    /// deferred-button argument is null.
+    pub fn actionPerformed(&mut self, command: &str) {
+        self.action(command, false);
+    }
     pub fn done(&mut self) {
         self.expert.done_dialog();
         self.btn_sample.listener_count = self.btn_sample.listener_count.saturating_sub(1);

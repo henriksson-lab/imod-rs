@@ -795,6 +795,53 @@ impl FinalAlignedStackDialog {
     }
     pub fn set_use_queue_check_box(&mut self) {}
     pub fn update_gpu(&mut self, _: bool) {}
+    #[allow(non_snake_case)]
+    pub fn setToolTipText(&mut self) {
+        self.valid_autodoc = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn toString(&self) -> String {
+        format!(
+            "FinalAlignedStackDialog[axis={:?},tab={}]",
+            self.axis_id,
+            self.cur_tab.as_str()
+        )
+    }
+}
+
+/// Native equivalents of the Java Swing listeners.
+pub struct FinalAlignedStackDialogActionListener;
+impl FinalAlignedStackDialogActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<
+        E: FinalAlignedStackDialogExpert,
+        A: FinalAlignedStackDialogApplication,
+    >(
+        dialog: &mut FinalAlignedStackDialog,
+        command: &str,
+        expert: &mut E,
+        app: &mut A,
+    ) {
+        dialog.action(command, false, expert, app);
+    }
+}
+pub struct FinalAlignedStackDialogKeyListener;
+impl FinalAlignedStackDialogKeyListener {
+    #[allow(non_snake_case)]
+    pub fn keyReleased(dialog: &mut FinalAlignedStackDialog) {
+        dialog.update_display();
+    }
+    #[allow(non_snake_case)]
+    pub fn keyPressed(_dialog: &mut FinalAlignedStackDialog) {}
+    #[allow(non_snake_case)]
+    pub fn keyTyped(_dialog: &mut FinalAlignedStackDialog) {}
+}
+pub struct FinalAlignedStackDialogChangeListener;
+impl FinalAlignedStackDialogChangeListener {
+    #[allow(non_snake_case)]
+    pub fn stateChanged(dialog: &mut FinalAlignedStackDialog) {
+        dialog.update_display();
+    }
 }
 
 #[cfg(test)]

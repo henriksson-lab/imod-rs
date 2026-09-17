@@ -347,6 +347,15 @@ impl<P: CoarseAlignPrenewstPanel> CoarseAlignDialog<P> {
             );
         }
     }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: CoarseAlignDialogApplicationManager>(
+        &mut self,
+        manager: &mut M,
+        command: &str,
+    ) {
+        self.action(manager, command, None, None);
+    }
     /// Java `done`.
     pub fn done<M: CoarseAlignDialogApplicationManager>(&mut self, manager: &mut M) {
         manager.done_coarse_align_dialog(self.axis_id);

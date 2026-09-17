@@ -90,6 +90,7 @@ pub struct BehaviorForm {
 }
 
 impl BehaviorForm {
+    /// `BehaviorForm()` source constructor.
     pub fn new(prefs: ImodPrefStruct, native: &mut dyn BehaviorNativeBoundary) -> Self {
         native.setup_ui();
         let mut form = Self {

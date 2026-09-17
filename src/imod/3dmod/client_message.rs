@@ -127,6 +127,16 @@ pub struct ImodClipboard {
     last_response: i32,
 }
 
+/// `ImodClipboard()`: initialize clipboard or stdin protocol state through
+/// the caller-provided Qt/viewer boundary.
+pub fn imod_clipboard(
+    use_stdin: bool,
+    will_load_images: bool,
+    boundary: &mut dyn ClientMessageBoundary,
+) -> ImodClipboard {
+    ImodClipboard::new(use_stdin, will_load_images, boundary)
+}
+
 impl ImodClipboard {
     /// `ImodClipboard::ImodClipboard`.
     pub fn new(use_stdin: bool, will_load_images: bool, b: &mut dyn ClientMessageBoundary) -> Self {
@@ -629,6 +639,14 @@ mod tests {
         assert!(b.calls.is_empty());
         c.done_with_load(&mut b);
         assert_eq!(b.calls[0].0, "inputRaiseWindows");
+    }
+
+    #[test]
+    fn source_constructor_facade_reads_the_owned_clipboard_boundary() {
+        let mut b = normal();
+        b.clipboard = "saved clipboard".into();
+        let clipboard = imod_clipboard(false, false, &mut b);
+        assert_eq!(clipboard.m_saved_clipboard, "saved clipboard");
     }
 
     #[test]

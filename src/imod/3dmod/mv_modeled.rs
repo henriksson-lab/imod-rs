@@ -5,9 +5,9 @@
 //! paired form/window translation.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libimod::imodel::{imod_units, Imod, IMOD_STRSIZE};
+use crate::imod::libimod::imodel::{IMOD_STRSIZE, Imod, imod_units};
 use crate::imod::three_dmod::imodv::{
-    imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg, ImodvApp,
+    ImodvApp, imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg,
 };
 use crate::imod::three_dmod::model_edit::set_pixsize_and_units;
 use crate::imod::three_dmod::utilities::imodw_given_name;
@@ -192,7 +192,7 @@ pub fn imodv_model_draw_range(a: &ImodvApp, mstart: &mut i32, mend: &mut i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imod::libimod::imodel::{Iindex, Iobj, IMOD_UNIT_NM};
+    use crate::imod::libimod::imodel::{IMOD_UNIT_NM, Iindex, Iobj};
     use crate::imod::three_dmod::imodview::ImodView;
     use crate::imod::three_dmod::undoredo::{UndoRedo, UndoState, UndoUnit};
     #[test]

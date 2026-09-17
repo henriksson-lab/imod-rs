@@ -101,7 +101,7 @@ pub struct LocatorWindow {
 }
 
 impl LocatorWindow {
-    /// `LocatorWindow::LocatorWindow`; Qt layout/widget allocation is a boundary.
+    /// `LocatorWindow()` source constructor; Qt layout/widget allocation is a boundary.
     pub fn new(device_pixel_ratio: f32) -> Self {
         Self {
             m_device_pixel_ratio: device_pixel_ratio,
@@ -118,6 +118,26 @@ impl LocatorWindow {
         n.check_and_set_mac_menu();
         if font_change {
             self.set_font_dependent_widths(n)
+        }
+    }
+    /// `LocatorWindow::screenChanged`.
+    ///
+    /// The upstream DPR-change macro recreates the GL image/viewport by
+    /// running `fakeResize` with its current dimensions.  The native backend
+    /// supplies the new ratio; zero means it could not determine one.
+    pub fn screen_changed(
+        &mut self,
+        state: &mut LocatorState,
+        new_dpr: f32,
+        n: &mut dyn LocatorNativeBoundary,
+    ) {
+        if new_dpr == 0. {
+            return;
+        }
+        self.m_device_pixel_ratio = new_dpr;
+        let window = self.clone();
+        if let Some(gl) = state.gl.as_mut() {
+            gl.fake_resize(gl.m_winx, gl.m_winy, &window, n);
         }
     }
     /// `LocatorWindow::closeEvent`.
@@ -225,7 +245,7 @@ impl Default for LocatorGl {
     }
 }
 impl LocatorGl {
-    /// `LocatorGL::LocatorGL`.
+    /// `LocatorGL()` source constructor.
     pub fn new(device_pixel_ratio: f32) -> Self {
         Self {
             m_device_pixel_ratio: device_pixel_ratio,

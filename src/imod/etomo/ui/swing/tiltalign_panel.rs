@@ -23,6 +23,16 @@ pub const SINGLE_OPTION: i32 = 1;
 pub const FIXED_OPTION: i32 = 0;
 pub const BEAM_SEARCH_OPTION: i32 = 1;
 
+/// Native retained description of Java's radio-box and variable-panel builders.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TiltalignLayout {
+    pub radio_boxes: Vec<Vec<String>>,
+    pub variable_panels: Vec<String>,
+    pub general_tab_created: bool,
+    pub global_tab_created: bool,
+    pub local_tab_created: bool,
+}
+
 /// Java `Tab`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tab {
@@ -45,6 +55,10 @@ impl Tab {
             Self::LocalVariables => 2,
         }
     }
+    /// Java private `Tab.getIndex()`.
+    pub fn get_index(self) -> usize {
+        self.index()
+    }
 }
 
 /// Java `LocalAlignValidation`.
@@ -57,15 +71,15 @@ pub enum LocalAlignValidation {
 impl LocalAlignValidation {
     pub fn value(self) -> i32 {
         match self {
-            Self::AreaRequirements => 0,
+            Self::AreaRequirements => 2,
             Self::Variables => 1,
-            Self::Both => 2,
+            Self::Both => 3,
         }
     }
     pub fn get_instance(value: i32) -> Self {
         match value {
             1 => Self::Variables,
-            2 => Self::Both,
+            3 => Self::Both,
             _ => Self::AreaRequirements,
         }
     }
@@ -75,6 +89,22 @@ impl LocalAlignValidation {
             Self::Variables => "variables",
             Self::Both => "both",
         }
+    }
+    /// Java `EnumeratedType.isDefault()`.
+    pub fn is_default(self) -> bool {
+        self == Self::AreaRequirements
+    }
+    /// Java `EnumeratedType.getValue()`.
+    pub fn get_value(self) -> i32 {
+        self.value()
+    }
+    /// Java `toString()`.
+    pub fn to_string_java(self) -> &'static str {
+        self.label()
+    }
+    /// Java `EnumeratedType.getLabel()`.
+    pub fn get_label(self) -> &'static str {
+        self.label()
     }
 }
 
@@ -141,6 +171,7 @@ pub struct TiltalignPanel {
     pub listener_count: usize,
     pub tooltip_initialized: bool,
     pub last_validation_message: Option<String>,
+    pub layout: TiltalignLayout,
 
     pub ltf_residual_threshold: LabeledTextField,
     pub rb_resid_all_views: RadioButton,
@@ -233,6 +264,7 @@ impl TiltalignPanel {
             listener_count: 0,
             tooltip_initialized: false,
             last_validation_message: None,
+            layout: TiltalignLayout::default(),
             ltf_residual_threshold: LabeledTextField::new(
                 FieldType::FloatingPoint,
                 "Threshold for residual report: ",
@@ -411,10 +443,70 @@ impl TiltalignPanel {
     pub fn add_listeners(&mut self) {
         self.listener_count = 25;
     }
+    /// Native action-command form of Java's panel and nested listener `actionPerformed`.
+    pub fn action_performed<M: TiltalignPanelApplicationManager>(
+        &mut self,
+        action_command: Option<&str>,
+        manager: &mut M,
+    ) {
+        let Some(action_command) = action_command else {
+            return;
+        };
+        match action_command {
+            "restrictalign" => self.action_restrictalign(manager),
+            "target-patch-size" | "local-patches" => self.set_min_local_patch_size_label(),
+            "no-beam-tilt" | "fixed-beam-tilt" | "solve-beam-tilt" | "robust-fitting" => {
+                self.update_display()
+            }
+            _ => {}
+        }
+    }
+    /// Java `getUIComponent()`; the retained state is the native component.
+    pub fn get_ui_component(&self) -> &Self {
+        self
+    }
+    /// Java `getComponent()` native root component identity.
+    pub fn get_component(&self) -> &'static str {
+        "tiltalign-panel-root"
+    }
+    /// Java overloaded `createRadioBox` helpers, represented as ordered labels.
+    pub fn create_radio_box<I, S>(&mut self, items: I) -> usize
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.layout
+            .radio_boxes
+            .push(items.into_iter().map(Into::into).collect());
+        self.layout.radio_boxes.len() - 1
+    }
+    /// Java `createGeneralTab()` native retained layout.
+    pub fn create_general_tab(&mut self) {
+        self.layout.general_tab_created = true;
+        self.general_body_visible = self.current_tab == Tab::General;
+    }
+    /// Java `createGlobalSolutionTab()` native retained layout.
+    pub fn create_global_solution_tab(&mut self) {
+        self.layout.global_tab_created = true;
+        self.global_body_visible = self.current_tab == Tab::GlobalVariables;
+    }
+    /// Java `createLocalSolutionTab()` native retained layout.
+    pub fn create_local_solution_tab(&mut self) {
+        self.layout.local_tab_created = true;
+        self.local_body_visible = self.current_tab == Tab::LocalVariables;
+    }
+    /// Java overloaded `createVariablePanel` helpers, represented by their stable title.
+    pub fn create_variable_panel(&mut self, title: impl Into<String>) {
+        self.layout.variable_panels.push(title.into());
+    }
     pub fn change_tab(&mut self, index: usize) {
         self.update_tab(false);
         self.current_tab = Tab::get_instance(index);
         self.update_tab(true);
+    }
+    /// Java `TabChangeListener.stateChanged(ChangeEvent)`.
+    pub fn state_changed(&mut self, selected_index: usize) {
+        self.change_tab(selected_index);
     }
     pub fn update_tab(&mut self, visible: bool) {
         match self.current_tab {

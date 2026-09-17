@@ -5,8 +5,22 @@
 //! is also what the rest of MIDAS passes to the display code.
 
 use super::midas::{MIDAS_DEBUG, MidasTransform, MidasView};
+use crate::imod::libcfshr::find_piece_shifts::find_piece_shifts;
 use crate::imod::libcfshr::linearxforms::{xf_invert, xf_mult};
+use std::path::Path;
 use std::sync::atomic::Ordering;
+
+/// `new_view` (`transforms.cpp:33`), relocated to the owning MIDAS state
+/// module and re-exported here for source-compatible call sites.
+pub fn new_view() -> MidasView {
+    super::midas::new_view()
+}
+
+/// `load_view` (`transforms.cpp:143`), delegated to the owned MRC loading
+/// boundary in `file_io` rather than retaining C FILE/Qt string handling.
+pub fn load_view(view: &mut MidasView, filename: &Path) -> Result<i32, String> {
+    super::file_io::load_image(view, filename)
+}
 
 /// C `Islice` subset consumed by `midas_transform`.
 #[derive(Clone, Debug, PartialEq)]
@@ -226,6 +240,30 @@ pub fn midas_transform(
     0
 }
 
+/// C `getXformSlice`: transform an owned cached source section using the
+/// section's active affine matrix.  Cache eviction and image-file reading stay
+/// with the caller's owned cache boundary.
+pub fn get_xform_slice(
+    view: &MidasView,
+    input: &MidasSlice,
+    zval: usize,
+    _shift_ok: bool,
+) -> Result<(MidasSlice, bool), String> {
+    let transform = view
+        .tr
+        .get(zval)
+        .ok_or_else(|| format!("no transform for MIDAS section {zval}"))?;
+    let identity = transform.mat == [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+    if identity {
+        return Ok((input.clone(), false));
+    }
+    let mut output = input.clone();
+    if midas_transform(view, zval as i32, input, &mut output, &transform.mat, -1) != 0 {
+        return Err(format!("cannot transform MIDAS section {zval}"));
+    }
+    Ok((output, true))
+}
+
 /// C `flush_xformed` (`transforms.cpp:696`).
 pub fn flush_xformed(view: &mut MidasView) {
     for cache in &mut view.cache {
@@ -315,6 +353,262 @@ pub fn cross_correlate(_view: &mut MidasView) -> Result<(), String> {
     Err("MIDAS correlation uses the source FFT/display cache closure".into())
 }
 
+/// `xcorrRange` (`transforms.cpp:2271`).  Returns the inclusive portion of a
+/// correlation box that remains valid after a rounded image translation.
+pub fn xcorr_range(
+    size: i32,
+    shift: f32,
+    center: i32,
+    border: i32,
+    box_size: i32,
+) -> Option<(i32, i32)> {
+    if size <= 0 || border < 0 || box_size <= 0 {
+        return None;
+    }
+    let rounded_shift = shift.round() as i32;
+    let box_low = center - box_size / 2;
+    let box_high = box_low + box_size - 1;
+    let first = (border + rounded_shift.max(0)).max(box_low);
+    let last = (size - 1 - border - rounded_shift.min(0)).min(box_high);
+    (first <= last).then_some((first, last))
+}
+
+/// Result of `checklist` (`transforms.cpp:1651`), which determines whether a
+/// set of montage coordinates forms a regular one-dimensional grid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidasPieceChecklist {
+    pub minimum_piece: i32,
+    /// `-1` retains the source marker for an irregular grid or a pitch larger
+    /// than the source frame.
+    pub pieces: i32,
+    pub overlap: i32,
+}
+
+/// One montage adjacency relation used by `piecesNotConnected`.  The source
+/// stores horizontal/vertical links in parallel arrays; an owned edge record
+/// makes the same connectivity relation explicit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidasMontageEdge {
+    pub lower_piece: usize,
+    pub upper_piece: usize,
+    pub skipped: bool,
+}
+
+/// `lowerEdgeIfIncluded` (`transforms.cpp:1850`), with `None` replacing the
+/// source's negative edge sentinel.
+pub fn lower_edge_if_included(
+    edge: Option<usize>,
+    skipped: bool,
+    exclude_skipped: bool,
+) -> Option<usize> {
+    (!exclude_skipped || !skipped).then_some(edge).flatten()
+}
+
+/// `upperEdgeIfIncluded` (`transforms.cpp:1858`), identical policy applied
+/// to the upper adjacency table in the native representation.
+pub fn upper_edge_if_included(
+    edge: Option<usize>,
+    skipped: bool,
+    exclude_skipped: bool,
+) -> Option<usize> {
+    (!exclude_skipped || !skipped).then_some(edge).flatten()
+}
+
+/// `checkPathList` (`transforms.cpp:1868`).  `labels` replaces `leaveType`
+/// and `pending` replaces the C `pathList`; true means this edge joined the
+/// two endpoint searches, so an alternate path exists.
+pub fn check_path_list(
+    labels: &mut [u8],
+    pending: &mut Vec<usize>,
+    old_piece: usize,
+    new_piece: usize,
+) -> Result<bool, ()> {
+    let label = *labels.get(old_piece).ok_or(())?;
+    if label == 0 {
+        return Err(());
+    }
+    let target = labels.get_mut(new_piece).ok_or(())?;
+    if *target != 0 {
+        return Ok(*target != label);
+    }
+    *target = label;
+    pending.push(new_piece);
+    Ok(false)
+}
+
+/// `piecesNotConnected` (`transforms.cpp:1886`).  Returns true when omitting
+/// `leave_edge` disconnects its endpoints, respecting the source option that
+/// omits skipped edges from the path search.
+pub fn pieces_not_connected(
+    piece_count: usize,
+    edges: &[MidasMontageEdge],
+    leave_edge: usize,
+    exclude_skipped: bool,
+) -> Result<bool, ()> {
+    let leaving = edges.get(leave_edge).ok_or(())?;
+    if leaving.lower_piece >= piece_count || leaving.upper_piece >= piece_count {
+        return Err(());
+    }
+    let mut seen = vec![false; piece_count];
+    let mut queue = std::collections::VecDeque::from([leaving.lower_piece]);
+    seen[leaving.lower_piece] = true;
+    while let Some(piece) = queue.pop_front() {
+        for (index, edge) in edges.iter().enumerate() {
+            if index == leave_edge || (exclude_skipped && edge.skipped) {
+                continue;
+            }
+            if edge.lower_piece >= piece_count || edge.upper_piece >= piece_count {
+                return Err(());
+            }
+            let neighbor = if edge.lower_piece == piece {
+                Some(edge.upper_piece)
+            } else if edge.upper_piece == piece {
+                Some(edge.lower_piece)
+            } else {
+                None
+            };
+            if let Some(neighbor) = neighbor {
+                if neighbor == leaving.upper_piece {
+                    return Ok(false);
+                }
+                if !seen[neighbor] {
+                    seen[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// Borrowed montage-edge data consumed by `solveForShifts`.  These are the
+/// typed equivalents of the parallel arrays on C's `MidasView`.
+pub struct MidasShiftSolveRequest<'a> {
+    pub variable_pieces: &'a [i32],
+    pub variable_for_piece: &'a [i32],
+    pub x_piece_coordinates: &'a [i32],
+    pub y_piece_coordinates: &'a [i32],
+    pub edge_dx: &'a [f32],
+    pub edge_dy: &'a [f32],
+    pub piece_lower: &'a [i32],
+    pub piece_upper: &'a [i32],
+    pub skipped_edges: &'a [i32],
+    pub edge_lower: &'a [i32],
+    pub edge_upper: &'a [i32],
+    pub leave_index: i32,
+    pub exclude_skipped: bool,
+    pub robust_criterion: f32,
+}
+
+/// Result from `solveForShifts`, including the source solver's per-variable
+/// X/Y shifts, convergence counters, and returned mean edge weights.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MidasShiftSolveResult {
+    pub shifts: Vec<f32>,
+    pub edge_weights: Vec<f32>,
+    pub iterations: i32,
+    pub weighted_error_mean: f32,
+    pub weighted_error_max: f32,
+}
+
+/// `solve_for_shifts` (`transforms.cpp:2244`).  MIDAS uses the shared
+/// `findPieceShifts` implementation with a fixed direction/layout and these
+/// source-local convergence parameters.
+pub fn solve_for_shifts(request: MidasShiftSolveRequest<'_>) -> Result<MidasShiftSolveResult, ()> {
+    let count = i32::try_from(request.variable_pieces.len()).map_err(|_| ())?;
+    if count < 2
+        || request.variable_for_piece.len() != request.x_piece_coordinates.len()
+        || request.x_piece_coordinates.len() != request.y_piece_coordinates.len()
+    {
+        return Err(());
+    }
+    let mut shifts = vec![0.0; request.variable_pieces.len() * 2];
+    let mut weights = vec![0.0; request.variable_pieces.len() * 2];
+    let mut iterations = 0;
+    let mut weighted_error_mean = 0.0;
+    let mut weighted_error_max = 0.0;
+    let status = find_piece_shifts(
+        request.variable_pieces,
+        count,
+        request.variable_for_piece,
+        request.x_piece_coordinates,
+        request.y_piece_coordinates,
+        request.edge_dx,
+        request.edge_dy,
+        -1,
+        request.piece_lower,
+        request.piece_upper,
+        request.skipped_edges,
+        1,
+        &mut shifts,
+        1,
+        request.edge_lower,
+        request.edge_upper,
+        1,
+        &mut weights,
+        0,
+        request.leave_index,
+        if request.exclude_skipped { 1 } else { 3 },
+        request.robust_criterion,
+        5.0e-4,
+        5.0e-6,
+        20 + count,
+        7,
+        50,
+        &mut iterations,
+        &mut weighted_error_mean,
+        &mut weighted_error_max,
+    );
+    if status != 0 {
+        return Err(());
+    }
+    Ok(MidasShiftSolveResult {
+        shifts,
+        edge_weights: weights,
+        iterations,
+        weighted_error_mean,
+        weighted_error_max,
+    })
+}
+
+/// `checklist` (`transforms.cpp:1651`).
+pub fn checklist(piece_coordinates: &[i32], frame_size: i32) -> Option<MidasPieceChecklist> {
+    let &minimum_piece = piece_coordinates.iter().min()?;
+    let pitch = piece_coordinates
+        .iter()
+        .map(|&piece| piece - minimum_piece)
+        .filter(|&difference| difference > 0)
+        .min();
+    let Some(pitch) = pitch else {
+        return Some(MidasPieceChecklist {
+            minimum_piece,
+            pieces: 1,
+            overlap: 0,
+        });
+    };
+    if frame_size < pitch
+        || piece_coordinates
+            .iter()
+            .any(|&piece| (piece - minimum_piece) % pitch != 0)
+    {
+        return Some(MidasPieceChecklist {
+            minimum_piece,
+            pieces: -1,
+            overlap: 0,
+        });
+    }
+    let pieces = piece_coordinates
+        .iter()
+        .map(|&piece| (piece - minimum_piece) / pitch + 1)
+        .max()
+        .unwrap_or(1);
+    Some(MidasPieceChecklist {
+        minimum_piece,
+        pieces,
+        overlap: frame_size - pitch,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +621,11 @@ mod tests {
         assert_eq!(inverse[6..8], [-2., 3.]);
     }
     #[test]
+    fn source_view_constructor_delegates_to_owned_midas_state() {
+        let view = new_view();
+        assert_eq!((view.xsize, view.ysize, view.zsize), (0, 0, 0));
+    }
+    #[test]
     fn translation_fills_mean() {
         let mut slice = MidasSlice {
             xsize: 2,
@@ -336,5 +635,121 @@ mod tests {
         };
         assert_eq!(translate_slice(&mut slice, 1, 0), 0);
         assert_eq!(slice.data, vec![7, 1, 7, 3]);
+    }
+    #[test]
+    fn xform_slice_preserves_identity_and_marks_affine_output() {
+        let mut view = new_view();
+        view.xsize = 2;
+        view.ysize = 2;
+        view.tr = vec![MidasTransform {
+            mat: tramat_create(),
+            ..Default::default()
+        }];
+        let input = MidasSlice {
+            xsize: 2,
+            ysize: 2,
+            mean: 9.,
+            data: vec![1, 2, 3, 4],
+        };
+        assert_eq!(
+            get_xform_slice(&view, &input, 0, false).unwrap(),
+            (input.clone(), false)
+        );
+        view.tr[0].mat[6] = 1.;
+        let (output, transformed) = get_xform_slice(&view, &input, 0, false).unwrap();
+        assert!(transformed);
+        assert_eq!(output.data, vec![1, 1, 3, 3]);
+    }
+    #[test]
+    fn correlation_range_intersects_shift_border_and_box() {
+        assert_eq!(xcorr_range(100, 4.6, 50, 3, 100), Some((8, 96)));
+        assert_eq!(xcorr_range(100, -4.6, 50, 3, 100), Some((3, 99)));
+        assert_eq!(xcorr_range(10, 0., 5, 6, 4), None);
+    }
+    #[test]
+    fn montage_checklist_reports_regular_spacing_and_irregular_sentinel() {
+        assert_eq!(
+            checklist(&[100, 0, 50, 50], 80),
+            Some(MidasPieceChecklist {
+                minimum_piece: 0,
+                pieces: 3,
+                overlap: 30
+            })
+        );
+        assert_eq!(
+            checklist(&[0, 30, 50], 80),
+            Some(MidasPieceChecklist {
+                minimum_piece: 0,
+                pieces: -1,
+                overlap: 0
+            })
+        );
+        assert_eq!(
+            checklist(&[7, 7], 80),
+            Some(MidasPieceChecklist {
+                minimum_piece: 7,
+                pieces: 1,
+                overlap: 0
+            })
+        );
+    }
+    #[test]
+    fn omitted_montage_edge_reports_alternate_paths_and_disconnections() {
+        let edges = [
+            MidasMontageEdge {
+                lower_piece: 0,
+                upper_piece: 1,
+                skipped: false,
+            },
+            MidasMontageEdge {
+                lower_piece: 1,
+                upper_piece: 2,
+                skipped: false,
+            },
+            MidasMontageEdge {
+                lower_piece: 0,
+                upper_piece: 2,
+                skipped: false,
+            },
+        ];
+        assert_eq!(pieces_not_connected(3, &edges, 0, false), Ok(false));
+        assert_eq!(pieces_not_connected(3, &edges[..2], 0, false), Ok(true));
+        let skipped = [
+            edges[0],
+            MidasMontageEdge {
+                skipped: true,
+                ..edges[2]
+            },
+        ];
+        assert_eq!(pieces_not_connected(3, &skipped, 0, true), Ok(true));
+        assert_eq!(lower_edge_if_included(Some(4), true, true), None);
+        assert_eq!(upper_edge_if_included(Some(4), true, false), Some(4));
+        let mut labels = [1, 0, 2];
+        let mut pending = vec![0, 2];
+        assert_eq!(check_path_list(&mut labels, &mut pending, 0, 1), Ok(false));
+        assert_eq!(pending, [0, 2, 1]);
+        assert_eq!(check_path_list(&mut labels, &mut pending, 1, 2), Ok(true));
+    }
+    #[test]
+    fn midas_shift_adapter_invokes_shared_piece_solver() {
+        let result = solve_for_shifts(MidasShiftSolveRequest {
+            variable_pieces: &[0, 1],
+            variable_for_piece: &[0, 1],
+            x_piece_coordinates: &[0, 1],
+            y_piece_coordinates: &[0, 0],
+            edge_dx: &[4., 0.],
+            edge_dy: &[0., 0.],
+            piece_lower: &[0, 1],
+            piece_upper: &[1, 0],
+            skipped_edges: &[0, 0],
+            edge_lower: &[-1, -1, 0, -1],
+            edge_upper: &[0, -1, -1, -1],
+            leave_index: -1,
+            exclude_skipped: false,
+            robust_criterion: 0.,
+        })
+        .unwrap();
+        assert!(result.iterations > 0);
+        assert!(result.shifts.iter().all(|value| value.is_finite()));
     }
 }

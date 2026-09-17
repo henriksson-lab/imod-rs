@@ -438,6 +438,14 @@ impl BatchRunTomoDatasetDialog {
             self.pnl_root.frame_visible = visible;
         }
     }
+
+    /// Java overridden `processWindowEvent`.  A closing native window hides
+    /// this reusable dialog instead of disposing its state.
+    pub fn process_window_event(&mut self, window_closing: bool) {
+        if window_closing {
+            self.set_visible(false);
+        }
+    }
     fn add_listeners(&mut self) {
         self.pnl_root.listener_count = 23;
     }

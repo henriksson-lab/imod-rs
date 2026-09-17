@@ -157,6 +157,11 @@ impl RadioTextField {
     pub fn get_field(&self) -> &Self {
         self
     }
+    #[allow(non_snake_case)]
+    /// Rust GUI-boundary equivalent of Java `getContainer()`.
+    pub fn getContainer(&self) -> &RadioTextFieldPanelBoundary {
+        &self.root_panel
+    }
     pub fn is_text(&self) -> bool {
         true
     }

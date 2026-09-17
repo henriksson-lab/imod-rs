@@ -194,6 +194,13 @@ impl ParallelDialog {
         instance
     }
 
+    #[allow(non_snake_case)]
+    /// Rust GUI-boundary equivalent of Java `pnlRoot.getContainer()`.
+    /// This type retains the complete source-visible root-panel state.
+    pub fn getContainer(&self) -> &Self {
+        self
+    }
+
     /// Java `getProcessingMethod`.
     pub fn get_processing_method(&self) -> ProcessingMethod {
         if self.use_gpus {

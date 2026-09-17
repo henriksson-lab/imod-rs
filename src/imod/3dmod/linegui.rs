@@ -20,6 +20,11 @@ pub const IMOD_PLUG_KEYS: i32 = 2;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LineTrackModule;
 
+/// `LineTrackModule()`: create the source plugin dispatch marker.
+pub fn line_track_module() -> LineTrackModule {
+    LineTrackModule::new()
+}
+
 impl LineTrackModule {
     /// `LineTrackModule::LineTrackModule`.
     pub fn new() -> Self {
@@ -798,6 +803,11 @@ impl LineTrack {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_module_constructor_creates_dispatch_marker() {
+        assert_eq!(line_track_module(), LineTrackModule::new());
+    }
     #[test]
     fn defaults_and_value_ranges_match_linegui() {
         let mut plug = PlugData::default();

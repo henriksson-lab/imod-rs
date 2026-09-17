@@ -2,6 +2,13 @@
 
 use std::fmt::Write as _;
 
+/// `swap` (`tifinfo.c:37`).  The source reverses the largest even prefix and
+/// leaves a trailing odd byte untouched.
+pub fn swap(bytes: &mut [u8]) {
+    let even_length = bytes.len() & !1;
+    bytes[..even_length].reverse();
+}
+
 /// C `tiff_print_info`, operating on owned file bytes instead of a C stream.
 pub fn tiff_print_info(data: &[u8], verbose: bool) -> String {
     if data.len() < 8 {
@@ -134,7 +141,7 @@ pub fn tifinfo(arguments: &[String]) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{tiff_print_info, tifinfo};
+    use super::{swap, tiff_print_info, tifinfo};
     #[test]
     fn reports_a_real_little_endian_tiff_ifd() {
         let bytes = [
@@ -148,5 +155,11 @@ mod tests {
     #[test]
     fn returns_failure_for_missing_file() {
         assert_eq!(tifinfo(&["tifinfo".into(), "missing.tif".into()]), 1);
+    }
+    #[test]
+    fn source_swap_reverses_only_the_even_prefix() {
+        let mut bytes = [1, 2, 3, 4, 5];
+        swap(&mut bytes);
+        assert_eq!(bytes, [4, 3, 2, 1, 5]);
     }
 }

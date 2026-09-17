@@ -104,7 +104,7 @@ pub struct ImodvObjedForm {
 }
 
 impl ImodvObjedForm {
-    /// `imodvObjedForm::imodvObjedForm`.
+    /// `imodvObjedForm()` source constructor.
     pub fn new(app: &ImodvApp, native: &mut dyn ImodvObjedFormNativeBoundary) -> ImodvObjedForm {
         native.setup_ui();
         let mut form = ImodvObjedForm::default();

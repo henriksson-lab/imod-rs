@@ -83,7 +83,7 @@ pub struct ImodvControlForm {
     pub standalone: i32,
 }
 impl ImodvControlForm {
-    /// `imodvControlForm::imodvControlForm`.
+    /// `imodvControlForm()` source constructor.
     pub fn new(
         standalone: i32,
         link: i32,

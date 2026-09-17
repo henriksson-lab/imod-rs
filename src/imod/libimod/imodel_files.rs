@@ -2925,10 +2925,8 @@ mod tests {
 
     #[test]
     fn binary_clip_chunk_uses_source_model_binning_scales() {
-        let path = std::env::temp_dir().join(format!(
-            "imod-rs-binned-clip-{}.mod",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("imod-rs-binned-clip-{}.mod", std::process::id()));
         let mut model = Imod {
             xybin: 2,
             zbin: 3,
@@ -2937,11 +2935,22 @@ mod tests {
         };
         let clips = &mut model.obj[0].clips;
         clips.count = 1;
-        clips.normal[0] = Ipoint { x: 2., y: 4., z: 6. };
-        clips.point[0] = Ipoint { x: 1., y: 2., z: 3. };
+        clips.normal[0] = Ipoint {
+            x: 2.,
+            y: 4.,
+            z: 6.,
+        };
+        clips.point[0] = Ipoint {
+            x: 1.,
+            y: 2.,
+            z: 3.,
+        };
         imod_file_write(&model, &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
-        let clip = bytes.windows(4).position(|window| window == b"CLIP").unwrap();
+        let clip = bytes
+            .windows(4)
+            .position(|window| window == b"CLIP")
+            .unwrap();
         // chunk ID + size + four clip bytes, then all normals followed by points
         let floats = &bytes[clip + 12..clip + 36];
         let decoded = floats

@@ -268,6 +268,16 @@ impl TransferfidPanel {
         }
     }
 
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<P: TransferfidParam, M: TransferfidPanelApplicationManager<P>>(
+        &self,
+        manager: &mut M,
+        command: &str,
+    ) {
+        self.action(manager, command, None, None);
+    }
+
     /// Java `expand(GlobalExpandButton)`.
     pub fn expand_global(&mut self) {}
 

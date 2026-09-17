@@ -107,8 +107,12 @@ impl SubFrame {
         }
     }
     pub fn msg_busy_status_changed(&mut self, axis: AxisID, busy: bool) {
+        self.run(axis, busy);
+    }
+    /// Rust UI-dispatch form of `SetBusyStatus::run`.
+    pub fn run(&mut self, axis: AxisID, enabled: bool) {
         if axis == AxisID::Second {
-            self.busy_status_b = busy;
+            self.busy_status_b = enabled;
         }
     }
     pub fn set_main_panel(

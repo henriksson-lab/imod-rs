@@ -453,7 +453,8 @@ impl SvlMarkerCorrespondenceLbModel {
                 for first_state in 0..self.cards[first] {
                     for second_state in 0..self.cards[second] {
                         let first_candidate = self.allowed_values[first][first_state + 1] as usize;
-                        let second_candidate = self.allowed_values[second][second_state + 1] as usize;
+                        let second_candidate =
+                            self.allowed_values[second][second_state + 1] as usize;
                         let value =
                             self.pairwise_value(first, first_candidate, second, second_candidate);
                         let index = factor

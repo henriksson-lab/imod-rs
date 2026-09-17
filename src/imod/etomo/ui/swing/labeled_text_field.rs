@@ -10,6 +10,8 @@
 use std::path::Path;
 
 use crate::imod::etomo::etomo_director::ARGUMENTS;
+use crate::imod::etomo::logic::field_validator::FieldValidator;
+use crate::imod::etomo::logic::validation_set::ValidationSet as LogicValidationSet;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
 use crate::imod::etomo::ui::field_type::FieldType;
 use crate::imod::etomo::util::utilities;
@@ -292,6 +294,11 @@ impl LabeledTextField {
     /// `setDirectiveDef`; the `DirectiveDef` identity itself is an untranslated storage boundary.
     pub fn set_directive_default_value(&mut self, value: Option<String>) {
         self.directive_default_value = value;
+    }
+    #[allow(non_snake_case)]
+    /// Rust storage-boundary equivalent of Java `getDirectiveDef()`.
+    pub fn getDirectiveDef(&self) -> Option<&str> {
+        self.directive_default_value.as_deref()
     }
     pub fn use_default_value(&mut self) {
         if self.directive_default_value.is_none() {
@@ -690,89 +697,33 @@ impl LabeledTextField {
             Err(_) => text.to_owned(),
         }
     }
-    /// Source `FieldValidator.validateText` branch made local until `FieldValidator.java` lands.
+    /// Java `FieldValidator.validateText`, adapted from this widget's historical
+    /// storage-only validation set into the source-owned logic unit.
     fn validate_text(&self) -> Result<(), FieldValidationFailedException> {
-        let text = self.text.trim();
-        if self.required && text.is_empty() {
-            return Err(FieldValidationFailedException(format!(
-                "{} is required",
-                self.get_description()
-            )));
-        }
-        if text.is_empty() {
-            return Ok(());
-        }
-        let numeric = matches!(
-            self.field_type,
-            FieldType::Integer
-                | FieldType::FloatingPoint
-                | FieldType::IntegerPair
-                | FieldType::FloatingPointPair
-                | FieldType::IntegerTriple
-                | FieldType::FloatingPointArray
-                | FieldType::IntegerArray
-                | FieldType::IntegerList
-                | FieldType::MatlabIntegerArray
-        );
-        if !numeric {
-            return Ok(());
-        }
-        let values: Vec<&str> = text
-            .split(|c: char| {
-                c == ','
-                    || c.is_ascii_whitespace()
-                    || (matches!(self.field_type, FieldType::IntegerList) && c == '-')
-                    || (matches!(self.field_type, FieldType::MatlabIntegerArray) && c == ':')
-            })
-            .filter(|value| !value.is_empty())
-            .collect();
-        if self.field_type.has_required_size()
-            && values.len() != self.field_type.required_size() as usize
-        {
-            return Err(FieldValidationFailedException(format!(
-                "{} requires {} values",
-                self.get_description(),
-                self.field_type.required_size()
-            )));
-        }
-        if self.max_array_size.is_some_and(|max| values.len() > max) {
-            return Err(FieldValidationFailedException(format!(
-                "{} has too many values",
-                self.get_description()
-            )));
-        }
-        for value in values {
-            let number: Result<f64, FieldValidationFailedException> = if matches!(
-                self.field_type,
-                FieldType::Integer
-                    | FieldType::IntegerPair
-                    | FieldType::IntegerTriple
-                    | FieldType::IntegerArray
-                    | FieldType::IntegerList
-                    | FieldType::MatlabIntegerArray
-            ) {
-                value.parse::<i64>().map(|v| v as f64).map_err(|_| {
-                    FieldValidationFailedException(format!("{} is invalid", self.get_description()))
-                })
-            } else {
-                value.parse::<f64>().map_err(|_| {
-                    FieldValidationFailedException(format!("{} is invalid", self.get_description()))
-                })
-            };
-            let number = number?;
-            if let Some(set) = &self.validation_set {
-                if set.number_must_be_positive && number <= 0.0
-                    || set.minimum.is_some_and(|minimum| number < minimum)
-                    || set.maximum.is_some_and(|maximum| number > maximum)
-                {
-                    return Err(FieldValidationFailedException(format!(
-                        "{} is invalid",
-                        self.get_description()
-                    )));
-                }
+        let logic_set = self.validation_set.as_ref().map(|set| {
+            let mut logic = LogicValidationSet::new(Some(self.field_type), None);
+            logic.set_number_must_be_positive(set.number_must_be_positive);
+            if let Some(value) = set.minimum {
+                logic.set_minimum(value);
             }
-        }
-        Ok(())
+            if let Some(value) = set.maximum {
+                logic.set_maximum(value);
+            }
+            logic.set_parsable_string(set.parsable_string);
+            logic
+        });
+        FieldValidator::validate_text(
+            Some(&self.text),
+            Some(self.field_type),
+            self.max_array_size,
+            self.required,
+            false,
+            false,
+            logic_set.as_ref(),
+            false,
+        )
+        .map(|_| ())
+        .map_err(FieldValidationFailedException)
     }
 }
 
@@ -800,8 +751,11 @@ mod tests {
     }
     #[test]
     fn source_validation_obeys_required_array_and_range_state() {
+        // Java `FieldValidator` tests `!gtNElements(maxArraySize)`, where
+        // `gtNElements` means strictly less-than; a limit of 3 therefore
+        // admits at most two entries.
         let mut field =
-            LabeledTextField::new_with_max_array_size(FieldType::IntegerArray, 2, "Values:");
+            LabeledTextField::new_with_max_array_size(FieldType::IntegerArray, 3, "Values:");
         field.set_required(true);
         assert!(field.get_text_validated(true).is_err());
         field.set_text("1, 2, 3");

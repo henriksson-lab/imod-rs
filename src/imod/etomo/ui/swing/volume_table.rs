@@ -345,6 +345,12 @@ impl VolumeTable {
         table.add_listeners();
         table
     }
+    #[allow(non_snake_case)]
+    pub fn getFocusableParents(&self) -> &[VolumeTableControls] {
+        // The native renderer owns focusable widgets; table state has no
+        // Swing component identities to retain here.
+        std::slice::from_ref(&self.controls_enabled)
+    }
     pub fn highlight_down_action_performed(&mut self) {
         let adjust = self
             .viewport
@@ -470,6 +476,19 @@ impl VolumeTable {
                 .list
                 .iter()
                 .any(|row| row.is_incorrect_paths(&self.root_directory))
+    }
+    #[allow(non_snake_case)]
+    pub fn convertCopiedPaths(&mut self, orig_dataset_dir: &std::path::Path) {
+        for row in &mut self.row_list.list {
+            row.convert_copied_paths(orig_dataset_dir, &self.root_directory);
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn fixIncorrectPaths(&mut self, choose_path_every_row: bool) -> bool {
+        self.row_list
+            .list
+            .iter_mut()
+            .all(|row| row.fix_incorrect_paths(&self.root_directory, choose_path_every_row))
     }
     pub fn set_parameters_pending_metadata(&mut self) {
         self.row_list.meta_data_pending = true;
@@ -702,6 +721,14 @@ impl VolumeTable {
     }
     fn set_tool_tip_text(&mut self) {}
     fn add_listeners(&mut self) {}
+}
+
+pub struct VolumeTableActionListener;
+impl VolumeTableActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(panel: &mut VolumeTable, action: VolumeTableAction) {
+        panel.action(action, None);
+    }
 }
 
 #[cfg(test)]

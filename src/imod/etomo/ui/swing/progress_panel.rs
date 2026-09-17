@@ -236,6 +236,40 @@ impl ProgressPanel {
     pub fn get_value(&self) -> i32 {
         self.value
     }
+    #[allow(non_snake_case)]
+    pub fn getStartTime(&self) -> Option<std::time::Instant> {
+        self.start_time
+    }
+    /// Native replacement for Java `getProgressBar`; state is rendered by the
+    /// selected Rust GUI toolkit rather than exposing a Swing component.
+    #[allow(non_snake_case)]
+    pub fn getProgressBar(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn setProgressBarCounter(&mut self) {
+        self.value = self.counter;
+    }
+    #[allow(non_snake_case)]
+    pub fn setProgressBarValue(&mut self) {
+        self.value = self.value;
+    }
+    #[allow(non_snake_case)]
+    pub fn incrementCounter(&mut self) {
+        self.counter += 1;
+    }
+    #[allow(non_snake_case)]
+    pub fn setProgressBarMaximum(&mut self) {
+        self.maximum = self.maximum;
+    }
+    #[allow(non_snake_case)]
+    pub fn setProgressBarMinimum(&mut self) {
+        self.minimum = self.minimum;
+    }
+    #[allow(non_snake_case)]
+    pub fn setProgressBarString(&mut self, standard: Option<StandardBarString>, bar: Option<&str>) {
+        self.set_progress_bar_string(standard, bar);
+    }
     fn set_task_label(&mut self) {
         self.cur_standard_bar_string = None;
         self.task_label = self.label.clone().unwrap_or_default();
@@ -272,6 +306,16 @@ impl ProgressPanel {
 pub struct ProgressTimerActionListener;
 impl ProgressTimerActionListener {
     pub fn action_performed(panel: &mut ProgressPanel) {
+        panel.increment();
+    }
+}
+
+/// GUI-loop callback used for each Java `Runnable` in `ProgressPanel`.
+/// The caller selects the source transition; each operates synchronously at
+/// the native UI boundary, exactly as the panel's public methods do.
+pub struct ProgressPanelRunnable;
+impl ProgressPanelRunnable {
+    pub fn run(panel: &mut ProgressPanel) {
         panel.increment();
     }
 }

@@ -577,6 +577,42 @@ impl<P: DirectivePanel, B: DirectiveEditorBuilder> DirectiveDisplaySettings
     }
 }
 
+pub struct DirectiveListener;
+impl DirectiveListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<P: DirectivePanel, B: DirectiveEditorBuilder>(
+        dialog: &mut DirectiveEditorDialog<P, B>,
+        command: &str,
+        ui: &mut dyn DirectiveEditorUiHarness,
+    ) {
+        dialog.action(command, ui);
+    }
+}
+
+pub struct IncludeListener;
+impl IncludeListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<P: DirectivePanel, B: DirectiveEditorBuilder>(
+        dialog: &mut DirectiveEditorDialog<P, B>,
+        command: &str,
+        ui: &mut dyn DirectiveEditorUiHarness,
+    ) {
+        dialog.include_action(command, ui);
+    }
+}
+
+pub struct ExcludeListener;
+impl ExcludeListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<P: DirectivePanel, B: DirectiveEditorBuilder>(
+        dialog: &mut DirectiveEditorDialog<P, B>,
+        command: &str,
+        ui: &mut dyn DirectiveEditorUiHarness,
+    ) {
+        dialog.exclude_action(command, ui);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

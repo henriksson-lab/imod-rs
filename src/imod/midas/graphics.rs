@@ -32,7 +32,7 @@ pub struct MouseEvent {
 }
 
 impl MidasGl {
-    /// `MidasGL::MidasGL`.
+    /// `MidasGL()` source constructor.
     pub fn new() -> Self {
         Self::default()
     }

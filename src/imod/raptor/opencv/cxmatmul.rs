@@ -234,41 +234,72 @@ pub fn cv_mahalanobis(
     Ok(value.sqrt())
 }
 
-/// Owned `cvCalcCovarMatrix` for observations stored as matrix rows.
+/// Owned `cvCalcCovarMatrix`.  `CV_COVAR_ROWS` stores observations in rows;
+/// `CV_COVAR_COLS` stores them in columns.  With `CV_COVAR_NORMAL` the result
+/// is feature-by-feature; without it this is OpenCV's scrambled
+/// sample-by-sample covariance.
 pub fn cv_calc_covar_matrix(
     samples: &CvMatrix<f64>,
     covariance: &mut CvMatrix<f64>,
     average: &mut [f64],
     flags: i32,
 ) -> Result<(), CvMatMulError> {
-    if samples.rows == 0
-        || samples.cols == 0
-        || average.len() != samples.cols
-        || covariance.rows != samples.cols
-        || covariance.cols != samples.cols
+    if samples.rows == 0 || samples.cols == 0 || flags & (CV_COVAR_ROWS | CV_COVAR_COLS) == 0 {
+        return Err(CvMatMulError::UnmatchedSizes);
+    }
+    let rows_are_samples = flags & CV_COVAR_COLS == 0;
+    let sample_count = if rows_are_samples {
+        samples.rows
+    } else {
+        samples.cols
+    };
+    let feature_count = if rows_are_samples {
+        samples.cols
+    } else {
+        samples.rows
+    };
+    let normal = flags & CV_COVAR_NORMAL != 0;
+    let covariance_size = if normal { feature_count } else { sample_count };
+    if average.len() != feature_count
+        || covariance.rows != covariance_size
+        || covariance.cols != covariance_size
     {
         return Err(CvMatMulError::UnmatchedSizes);
     }
+    let sample_value = |sample: usize, feature: usize| {
+        if rows_are_samples {
+            samples.data[sample * samples.cols + feature]
+        } else {
+            samples.data[feature * samples.cols + sample]
+        }
+    };
     if flags & CV_COVAR_USE_AVG == 0 {
         average.fill(0.0);
-        for row in 0..samples.rows {
-            for column in 0..samples.cols {
-                average[column] += samples.data[row * samples.cols + column];
+        for sample in 0..sample_count {
+            for feature in 0..feature_count {
+                average[feature] += sample_value(sample, feature);
             }
         }
         for value in average.iter_mut() {
-            *value /= samples.rows as f64;
+            *value /= sample_count as f64;
         }
     }
-    for row in 0..samples.cols {
-        for column in 0..samples.cols {
+    for row in 0..covariance_size {
+        for column in 0..covariance_size {
             let mut value = 0.0;
-            for sample in 0..samples.rows {
-                value += (samples.data[sample * samples.cols + row] - average[row])
-                    * (samples.data[sample * samples.cols + column] - average[column]);
+            if normal {
+                for sample in 0..sample_count {
+                    value += (sample_value(sample, row) - average[row])
+                        * (sample_value(sample, column) - average[column]);
+                }
+            } else {
+                for feature in 0..feature_count {
+                    value += (sample_value(row, feature) - average[feature])
+                        * (sample_value(column, feature) - average[feature]);
+                }
             }
             covariance.data[row * covariance.cols + column] = if flags & CV_COVAR_SCALE != 0 {
-                value / samples.rows as f64
+                value / sample_count as f64
             } else {
                 value
             };
@@ -306,5 +337,38 @@ mod tests {
             .abs()
                 < 1e-12
         );
+    }
+
+    #[test]
+    fn covariance_honors_column_and_scrambled_layouts() {
+        // Two observations of two features, first represented as rows and
+        // then as columns.  Both normal covariance results must agree.
+        let rows = CvMatrix::new(2, 2, vec![1., 3., 2., 4.]).unwrap();
+        let columns = CvMatrix::new(2, 2, vec![1., 2., 3., 4.]).unwrap();
+        let mut row_covar = CvMatrix::new(2, 2, vec![0.; 4]).unwrap();
+        let mut col_covar = CvMatrix::new(2, 2, vec![0.; 4]).unwrap();
+        let mut row_average = vec![0.; 2];
+        let mut col_average = vec![0.; 2];
+        cv_calc_covar_matrix(
+            &rows,
+            &mut row_covar,
+            &mut row_average,
+            CV_COVAR_ROWS | CV_COVAR_NORMAL | CV_COVAR_SCALE,
+        )
+        .unwrap();
+        cv_calc_covar_matrix(
+            &columns,
+            &mut col_covar,
+            &mut col_average,
+            CV_COVAR_COLS | CV_COVAR_NORMAL | CV_COVAR_SCALE,
+        )
+        .unwrap();
+        assert_eq!(row_average, col_average);
+        assert_eq!(row_covar.data, col_covar.data);
+        assert_eq!(row_covar.data, vec![0.25, 0.25, 0.25, 0.25]);
+
+        let mut scrambled = CvMatrix::new(2, 2, vec![0.; 4]).unwrap();
+        cv_calc_covar_matrix(&rows, &mut scrambled, &mut row_average, CV_COVAR_ROWS).unwrap();
+        assert_eq!(scrambled.data, vec![0.5, -0.5, -0.5, 0.5]);
     }
 }

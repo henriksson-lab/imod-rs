@@ -736,6 +736,16 @@ impl TiltxcorrPanel {
             _ => self.update_panel(),
         }
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: TiltxcorrPanelApplicationManager>(
+        &mut self,
+        manager: &mut M,
+        action_command: &str,
+    ) {
+        self.action(manager, action_command, None);
+    }
     fn set_tool_tip_text(&mut self) {
         self.layout.tooltip_initialized = true;
     }

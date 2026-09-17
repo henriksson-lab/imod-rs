@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use super::svl_logger::{SvlLogLevel, log_message};
 
@@ -151,10 +152,52 @@ pub trait SvlConfigurableModule: Send {
     }
 }
 
+/// Concrete owned form of the abstract C `svlConfigurableModule` base.  A
+/// callback supplies the derived class's `setConfiguration` implementation.
+pub struct SvlConfigurableModuleEntry {
+    name: String,
+    setter: Box<dyn FnMut(&str, &str) -> Result<(), String> + Send>,
+}
+
+/// `svlConfigurableModule::svlConfigurableModule`
+/// (`svlConfigManager.cpp:46`).
+pub fn svl_configurable_module<F>(name: impl Into<String>, setter: F) -> SvlConfigurableModuleEntry
+where
+    F: FnMut(&str, &str) -> Result<(), String> + Send + 'static,
+{
+    SvlConfigurableModuleEntry {
+        name: name.into(),
+        setter: Box::new(setter),
+    }
+}
+
+impl SvlConfigurableModule for SvlConfigurableModuleEntry {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn set_configuration(&mut self, name: &str, value: &str) -> Result<(), String> {
+        (self.setter)(name, value)
+    }
+}
+
 /// Owned configuration registry, replacing SVL's singleton of raw pointers.
 #[derive(Default)]
 pub struct SvlConfigurationManager {
     registry: BTreeMap<String, Box<dyn SvlConfigurableModule>>,
+}
+
+/// `svlConfigurationManager::svlConfigurationManager`
+/// (`svlConfigManager.cpp:105`), exposed for source-style construction.
+pub fn svl_configuration_manager() -> SvlConfigurationManager {
+    SvlConfigurationManager::new()
+}
+
+static CONFIGURATION_MANAGER: OnceLock<Mutex<SvlConfigurationManager>> = OnceLock::new();
+
+/// `svlConfigurationManager::get` (`svlConfigManager.cpp:115`).  The C
+/// process singleton becomes a mutex-protected owned registry in Rust.
+pub fn get() -> &'static Mutex<SvlConfigurationManager> {
+    CONFIGURATION_MANAGER.get_or_init(|| Mutex::new(SvlConfigurationManager::new()))
 }
 
 impl SvlConfigurationManager {
@@ -272,11 +315,28 @@ mod tests {
             "<config><unit answer=\"one\"><option name=\"answer\" value=\"two\"/></unit></config>",
         )
         .unwrap();
-        let mut manager = SvlConfigurationManager::new();
+        let mut manager = svl_configuration_manager();
         manager.register_module(Box::<Module>::default());
         manager.configure_node(&root).unwrap();
         assert!(manager.show_registry().contains("  * unit\n    answer"));
         let module = manager.unregister_module("unit").unwrap();
         assert_eq!(module.name(), "unit");
+        assert!(get().lock().unwrap().show_registry().contains("registry"));
+    }
+
+    #[test]
+    fn callback_backed_base_module_registers_like_the_source_base_class() {
+        let seen = std::sync::Arc::new(Mutex::new(String::new()));
+        let saved = seen.clone();
+        let mut manager = svl_configuration_manager();
+        manager.register_module(Box::new(svl_configurable_module(
+            "callback",
+            move |name, value| {
+                *saved.lock().unwrap() = format!("{name}={value}");
+                Ok(())
+            },
+        )));
+        manager.configure("callback", "answer", "42").unwrap();
+        assert_eq!(&*seen.lock().unwrap(), "answer=42");
     }
 }

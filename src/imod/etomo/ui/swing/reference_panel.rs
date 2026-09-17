@@ -144,6 +144,14 @@ impl ReferencePanel {
     pub fn add_listeners(&mut self) {
         self.listener_count = 3;
     }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getComponent(&self) -> &Self {
+        self
+    }
     pub fn create_panel(&mut self) {
         self.cmb_multiparticle.items.clear();
         for index in 0..MultiparticleReference::get_num_entries() {
@@ -282,6 +290,10 @@ impl ReferencePanel {
         {
             parent.update_display(false);
         }
+    }
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<P: ReferenceParent>(&mut self, parent: &mut P, command: &str) {
+        self.action(parent, command);
     }
     pub fn validate_run(&self) -> Option<String> {
         if self.rtf_particle.is_selected() && self.rtf_particle.is_empty() {

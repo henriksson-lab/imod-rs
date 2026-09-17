@@ -34,6 +34,7 @@ pub struct LayoutForm {
     pub initialized: bool,
 }
 impl LayoutForm {
+    /// `LayoutForm()` source constructor.
     pub fn new(prefs: &ImodPrefStruct) -> LayoutForm {
         let mut f = LayoutForm {
             prefs: prefs.clone(),

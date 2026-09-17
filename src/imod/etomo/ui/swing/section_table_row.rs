@@ -209,6 +209,59 @@ impl SectionTableRow {
             };
         }
     }
+    #[allow(non_snake_case)]
+    pub fn setCellHighlight(&mut self, highlight: bool, cell: &mut FieldCell) {
+        if !highlight && self.is_highlighted() {
+            return;
+        }
+        cell.text_field.foreground = if highlight {
+            HIGHLIGHT_BACKGROUND
+        } else {
+            FOREGROUND
+        };
+    }
+    #[allow(non_snake_case)]
+    pub fn getPrevSampleEnd(previous: Option<&SectionTableRow>) -> i32 {
+        previous.map_or(0, |row| row.slices_in_sample.get_end_value())
+    }
+    #[allow(non_snake_case)]
+    pub fn getBottomSampleSlices(&self, previous: Option<&SectionTableRow>) -> i32 {
+        previous.map_or(0, |_| {
+            self.total_in_range(self.data.sample_bottom_start, self.data.sample_bottom_end)
+        })
+    }
+    #[allow(non_snake_case)]
+    pub fn getTopSampleSlices(&self, total_rows: usize) -> i32 {
+        if self.data.row_index + 1 == total_rows {
+            0
+        } else {
+            self.total_in_range(self.data.sample_top_start, self.data.sample_top_end)
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn getPrevTopSampleSlices(previous: Option<&SectionTableRow>) -> i32 {
+        previous.map_or(0, |row| {
+            row.total_in_range(row.data.sample_top_start, row.data.sample_top_end)
+        })
+    }
+    #[allow(non_snake_case)]
+    pub fn addSetup(&mut self) {
+        self.displayed_tab = Some(Tab::Setup);
+    }
+    #[allow(non_snake_case)]
+    pub fn addAlign(&mut self) {
+        self.displayed_tab = Some(Tab::Align);
+    }
+    #[allow(non_snake_case)]
+    pub fn addJoin(&mut self) {
+        self.displayed_tab = Some(Tab::Join);
+    }
+    #[allow(non_snake_case)]
+    pub fn addRejoin(&mut self) {
+        self.displayed_tab = Some(Tab::Rejoin);
+        self.join_final_start.set_editable(false);
+        self.join_final_end.set_editable(false);
+    }
 
     pub fn set_mode(&mut self, mode: i32) {
         self.mode = mode;

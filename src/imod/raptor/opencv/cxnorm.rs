@@ -79,6 +79,9 @@ pub fn cv_norm<T: CvNormValue>(
         return Err(CvStatus::sts_bad_arg);
     }
     if let Some(mask) = mask {
+        if mask.rows != first.rows || mask.columns != first.columns {
+            return Err(CvStatus::sts_unmatched_sizes);
+        }
         if mask.row_stride < first.columns
             || mask.values.len() < (first.rows - 1) * mask.row_stride + first.columns
         {
@@ -150,9 +153,23 @@ pub fn cv_norm<T: CvNormValue>(
     }
 }
 
+/// C-signature convenience boundary for `cvNorm`: decode `CV_C`, `CV_L1`,
+/// `CV_L2`, `CV_DIFF_*`, and `CV_RELATIVE_*` flags before executing the
+/// owned, bounds-checked implementation.
+pub fn cv_norm_with_flags<T: CvNormValue>(
+    first: &CvMatrix<T>,
+    second: Option<&CvMatrix<T>>,
+    flags: i32,
+    mask: Option<&CvMask>,
+    coi: Option<usize>,
+) -> Result<f64, CvStatus> {
+    let (kind, relative) = CvNormKind::from_c_flags(flags)?;
+    cv_norm(first, second, kind, relative, mask, coi)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CvNormKind, cv_norm};
+    use super::{CvNormKind, cv_norm, cv_norm_with_flags};
     use crate::imod::raptor::opencv::cxerror::CvStatus;
     use crate::imod::raptor::opencv::cxminmaxloc::{CvMask, CvMatrix};
 
@@ -199,12 +216,31 @@ mod tests {
     #[test]
     fn c_flags_and_shape_errors_follow_source_validation() {
         assert_eq!(CvNormKind::from_c_flags(4 | 8), Ok((CvNormKind::L2, true)));
+        assert_eq!(
+            CvNormKind::from_c_flags(16 | 2),
+            Ok((CvNormKind::L1, false))
+        );
         assert_eq!(CvNormKind::from_c_flags(0), Err(CvStatus::sts_bad_flag));
         let first = CvMatrix::new(1, 1, 1, 1, vec![1_i32]).unwrap();
         let second = CvMatrix::new(1, 2, 1, 2, vec![1_i32, 2]).unwrap();
         assert_eq!(
             cv_norm(&first, Some(&second), CvNormKind::C, false, None, None),
             Err(CvStatus::sts_unmatched_sizes)
+        );
+        let mask = CvMask::new(1, 2, 2, vec![1, 1]).unwrap();
+        assert_eq!(
+            cv_norm(&first, None, CvNormKind::C, false, Some(&mask), None),
+            Err(CvStatus::sts_unmatched_sizes)
+        );
+    }
+
+    #[test]
+    fn flag_boundary_accepts_c_diff_aliases() {
+        let first = CvMatrix::new(1, 1, 1, 1, vec![5_f64]).unwrap();
+        let second = CvMatrix::new(1, 1, 1, 1, vec![2_f64]).unwrap();
+        assert_eq!(
+            cv_norm_with_flags(&first, Some(&second), 16 | 1, None, None).unwrap(),
+            3.0
         );
     }
 }

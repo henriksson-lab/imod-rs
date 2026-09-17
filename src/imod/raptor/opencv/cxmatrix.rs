@@ -1,6 +1,11 @@
 //! Safe numerical core for `IMOD/raptor/opencv/cxmatrix.cpp`.
 use super::cxutils::{CvMatrix, CvUtilsError};
 
+/// C `cvSolve`/`cvInvert` method selectors.
+pub const CV_LU: i32 = 0;
+pub const CV_SVD: i32 = 1;
+pub const CV_SVD_SYM: i32 = 2;
+
 /// C `cvSetIdentity` for an owned scalar matrix.
 pub fn cv_set_identity(matrix: &mut CvMatrix<f64>, value: f64) {
     matrix.data.fill(0.);
@@ -116,6 +121,45 @@ pub fn cv_solve(
     }
     Ok(())
 }
+
+/// SVD/pseudoinverse route of C `cvSolve`, including rectangular systems.
+pub fn cv_solve_svd(
+    a: &CvMatrix<f64>,
+    b: &CvMatrix<f64>,
+    x: &mut CvMatrix<f64>,
+) -> Result<(), CvUtilsError> {
+    if b.rows != a.rows || x.rows != a.cols || x.cols != b.cols {
+        return Err(CvUtilsError::UnmatchedSizes);
+    }
+    let mut inverse = CvMatrix::new(a.cols, a.rows, vec![0.; a.cols * a.rows])?;
+    cv_invert_svd(a, &mut inverse)?;
+    for row in 0..x.rows {
+        for column in 0..x.cols {
+            x.data[row * x.cols + column] = (0..a.rows)
+                .map(|inner| {
+                    inverse.data[row * inverse.cols + inner] * b.data[inner * b.cols + column]
+                })
+                .sum();
+        }
+    }
+    Ok(())
+}
+
+/// Public C `cvSolve` method selector.
+pub fn cv_solve_with_method(
+    a: &CvMatrix<f64>,
+    b: &CvMatrix<f64>,
+    x: &mut CvMatrix<f64>,
+    method: i32,
+) -> Result<(), CvUtilsError> {
+    match method {
+        CV_LU => cv_solve(a, b, x),
+        CV_SVD => cv_solve_svd(a, b, x),
+        CV_SVD_SYM if a.rows == a.cols => cv_solve_svd(a, b, x),
+        CV_SVD_SYM => Err(CvUtilsError::BadSize),
+        _ => Err(CvUtilsError::BadArgument),
+    }
+}
 /// C `cvInvert` LU route.
 pub fn cv_invert(
     source: &CvMatrix<f64>,
@@ -176,21 +220,42 @@ pub fn cv_invert_svd(
     for value in &mut values {
         *value = if *value > threshold { 1. / *value } else { 0. };
     }
-    for y in 0..destination.rows {
-        for x in 0..destination.cols {
+    // A⁺ = V · diag(1 / eigenvalues(AᵀA)) · Vᵀ · Aᵀ.  `destination`
+    // is n-by-m for an m-by-n source, so its column indexes source rows,
+    // never eigenvector rows.
+    for row in 0..destination.rows {
+        for column in 0..destination.cols {
             let mut result = 0.;
-            for i in 0..source.cols {
-                for j in 0..source.cols {
-                    result += vectors.data[i * vectors.cols + j]
-                        * values[j]
-                        * vectors.data[x * vectors.cols + j]
-                        * source.data[y * source.cols + i];
-                }
+            for eigen in 0..source.cols {
+                let projected: f64 = (0..source.cols)
+                    .map(|feature| {
+                        vectors.data[feature * vectors.cols + eigen]
+                            * source.data[column * source.cols + feature]
+                    })
+                    .sum();
+                result += vectors.data[row * vectors.cols + eigen] * values[eigen] * projected;
             }
-            destination.data[y * destination.cols + x] = result;
+            destination.data[row * destination.cols + column] = result;
         }
     }
     Ok(threshold)
+}
+
+/// Public C `cvInvert` method selector.  Its return value is the LU
+/// determinant or SVD threshold, just as the source API returns a method-
+/// specific scalar diagnostic.
+pub fn cv_invert_with_method(
+    source: &CvMatrix<f64>,
+    destination: &mut CvMatrix<f64>,
+    method: i32,
+) -> Result<f64, CvUtilsError> {
+    match method {
+        CV_LU => cv_invert(source, destination),
+        CV_SVD => cv_invert_svd(source, destination),
+        CV_SVD_SYM if source.rows == source.cols => cv_invert_svd(source, destination),
+        CV_SVD_SYM => Err(CvUtilsError::BadSize),
+        _ => Err(CvUtilsError::BadArgument),
+    }
 }
 /// C PCA flags.
 pub const CV_PCA_DATA_AS_ROW: i32 = 0;
@@ -400,5 +465,18 @@ mod tests {
         for (i, v) in data.data.iter().enumerate() {
             assert!((restored.data[i] - v).abs() < 1e-8);
         }
+    }
+
+    #[test]
+    fn method_dispatch_supports_rectangular_svd_solves() {
+        let a = CvMatrix::new(2, 1, vec![1., 2.]).unwrap();
+        let b = CvMatrix::new(2, 1, vec![3., 6.]).unwrap();
+        let mut x = CvMatrix::new(1, 1, vec![0.]).unwrap();
+        cv_solve_with_method(&a, &b, &mut x, CV_SVD).unwrap();
+        assert!((x.data[0] - 3.).abs() < 1e-12);
+        assert_eq!(
+            cv_solve_with_method(&a, &b, &mut x, CV_SVD_SYM),
+            Err(CvUtilsError::BadSize)
+        );
     }
 }

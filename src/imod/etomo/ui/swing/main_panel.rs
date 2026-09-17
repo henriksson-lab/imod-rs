@@ -5,7 +5,9 @@
 //! explicit source-unit boundaries rather than invented replacement widgets.
 #![allow(dead_code)]
 
+use super::axis_process_panel::AxisProcessPanel;
 use super::axis_progress_panel::AxisProgressPanel;
+use super::parallel_panel::ParallelPanel;
 use super::scroll_panel::ScrollPanel;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -231,6 +233,9 @@ pub struct MainPanel {
     pub manager: &'static dyn BaseManager,
     pub axis_progress_panel_a: Option<AxisProgressPanel>,
     pub axis_progress_panel_b: Option<AxisProgressPanel>,
+    /// Concrete process widgets are supplied by the native frontend for each axis.
+    pub axis_process_panel_a: Option<AxisProcessPanel>,
+    pub axis_process_panel_b: Option<AxisProcessPanel>,
     pub showing_both_axis: bool,
     pub showing_axis_a: bool,
     pub showing_setup: bool,
@@ -259,6 +264,8 @@ impl MainPanel {
             manager,
             axis_progress_panel_a: None,
             axis_progress_panel_b: None,
+            axis_process_panel_a: None,
+            axis_process_panel_b: None,
             showing_both_axis: false,
             showing_axis_a: true,
             showing_setup: false,
@@ -353,6 +360,62 @@ impl MainPanel {
         }
         self.axis_progress_panel_a.as_mut().unwrap()
     }
+    /// Attach a native axis-process panel to its source axis.
+    pub fn set_axis_process_panel(&mut self, axis: AxisID, panel: AxisProcessPanel) {
+        if axis == AxisID::Second {
+            self.axis_process_panel_b = Some(panel);
+        } else {
+            self.axis_process_panel_a = Some(panel);
+        }
+    }
+    fn axis_process_panel(&self, axis: AxisID) -> Option<&AxisProcessPanel> {
+        if axis == AxisID::Second {
+            self.axis_process_panel_b.as_ref()
+        } else {
+            self.axis_process_panel_a.as_ref()
+        }
+    }
+    fn axis_process_panel_mut(&mut self, axis: AxisID) -> Option<&mut AxisProcessPanel> {
+        if axis == AxisID::Second {
+            self.axis_process_panel_b.as_mut()
+        } else {
+            self.axis_process_panel_a.as_mut()
+        }
+    }
+    /// Java `getParallelPanel(AxisID)`.
+    pub fn get_parallel_panel(&self, axis: AxisID) -> Option<&ParallelPanel> {
+        self.axis_process_panel(axis)
+            .and_then(AxisProcessPanel::get_parallel_panel)
+    }
+    /// Native availability form of Java `getParallelPauseButton(AxisID)`.
+    pub fn get_parallel_pause_button(&self, axis: AxisID) -> Option<bool> {
+        self.get_parallel_panel(axis)
+            .map(ParallelPanel::get_parallel_pause_button)
+    }
+    /// Native availability form of Java `getParallelResumeButton(AxisID)`.
+    pub fn get_parallel_resume_button(&mut self, axis: AxisID) -> Option<bool> {
+        self.axis_process_panel_mut(axis)
+            .and_then(|panel| panel.parallel_panel.as_mut())
+            .map(ParallelPanel::get_parallel_resume_button)
+    }
+    /// Native visibility form of Java `getParallelStatusPanel(AxisID)`.
+    pub fn get_parallel_status_panel(&self, axis: AxisID) -> Option<bool> {
+        self.axis_process_panel(axis)
+            .map(AxisProcessPanel::get_parallel_status_panel)
+    }
+    /// Java `done()`: notify both instantiated process panels.
+    pub fn done(&mut self) {
+        if let Some(panel) = self.axis_process_panel_a.as_mut() {
+            panel.done();
+        }
+        if let Some(panel) = self.axis_process_panel_b.as_mut() {
+            panel.done();
+        }
+    }
+    /// Native scheduling form of Java `SetBusyStatus.run()`.
+    pub fn run(&mut self, axis: AxisID, enabled: bool) {
+        self.msg_busy_status_changed(axis, enabled);
+    }
     pub fn set_divider_location(&mut self, _value: f64) {}
     pub fn map_progress_panel_state(&mut self, axis: AxisID) -> &mut ProgressPanelState {
         if axis == AxisID::Second {
@@ -442,6 +505,43 @@ impl MainPanel {
             status,
         );
     }
+    /// Java `isProgressBarStopped(AxisID)`.
+    pub fn is_progress_bar_stopped(&mut self, axis: AxisID) -> bool {
+        self.get_progress_panel(axis).is_progress_bar_stopped(axis)
+    }
+
+    /// Native state form of Java `showProcessingPanel(AxisType)`.
+    /// Concrete axis-process widgets are frontend-owned; MainPanel retains the source
+    /// axis, scrolling, and selected-pane transitions.
+    pub fn show_processing_panel(&mut self, axis_type: AxisType) {
+        self.axis_type = axis_type;
+        self.panel_center.clear();
+        self.showing_both_axis = false;
+        let first_axis = if axis_type == AxisType::SingleAxis {
+            AxisID::Only
+        } else {
+            AxisID::First
+        };
+        self.axis_progress_panel_a = Some(AxisProgressPanel::get_instance(
+            Some(first_axis),
+            self.manager,
+        ));
+        self.scroll_a = Some(ScrollPanel::new());
+        self.scroll_pane_a = Some(0);
+        if axis_type == AxisType::SingleAxis {
+            self.axis_progress_panel_b = None;
+            self.scroll_b = None;
+            self.scroll_pane_b = None;
+        } else {
+            self.axis_progress_panel_b = Some(AxisProgressPanel::get_instance(
+                Some(AxisID::Second),
+                self.manager,
+            ));
+            self.scroll_b = Some(ScrollPanel::new());
+            self.scroll_pane_b = Some(0);
+        }
+        self.set_axis_a();
+    }
     pub fn get_vertical_scroll_bar_value(&self, axis: AxisID) -> Option<i32> {
         if axis == AxisID::Second {
             self.vertical_scroll_b
@@ -483,6 +583,10 @@ impl MainPanel {
     }
     pub fn show_axis_a(&mut self) {
         self.panel_center.clear();
+        self.set_axis_a();
+    }
+    /// Java private `setAxisA()`.
+    pub fn set_axis_a(&mut self) {
         self.showing_both_axis = false;
         self.showing_axis_a = true;
         if self.manager.is_valid() && self.scroll_pane_a.is_some() {
@@ -504,7 +608,12 @@ impl MainPanel {
         self.vertical_scroll_always = always;
     }
     pub fn repaint_window(&mut self) {
-        self.repaint_count += 2;
+        self.repaint_container();
+        self.repaint();
+    }
+    /// Native retained-tree equivalent of Java recursive `repaintContainer(Container)`.
+    pub fn repaint_container(&mut self) {
+        self.repaint_count += self.scroll_a.is_some() as u64 + self.scroll_b.is_some() as u64;
     }
     pub fn get_axis_type(&self) -> AxisType {
         self.axis_type

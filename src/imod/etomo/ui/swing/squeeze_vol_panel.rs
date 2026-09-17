@@ -502,6 +502,15 @@ impl SqueezeVolPanel {
         let flipped = self.is_input_file_flipped(manager);
         self.update_display(flipped)
     }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<M: SqueezeVolPanelApplicationManager>(
+        &mut self,
+        command: &str,
+        manager: &mut M,
+    ) {
+        self.action(command, None, manager);
+    }
     pub fn get_parameters_makecomfile<M: SqueezeVolPanelApplicationManager>(
         &self,
         param: &mut MakecomfileParamBoundary,

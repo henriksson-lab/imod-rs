@@ -86,6 +86,12 @@ pub trait FinalCombinePanelParent {
     fn synchronize_final(&mut self);
     fn final_tab_enabled(&self) -> bool;
 }
+pub trait FinalCombineScreenState {
+    fn set_patchcorr_kernel_sigma(&mut self, value: String);
+}
+pub trait ProcessingMethodSink {
+    fn set_processing_method_parallel(&mut self, parallel: bool);
+}
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FinalCombinePanelLayout {
     pub root_visible: bool,
@@ -164,6 +170,23 @@ pub struct FinalCombinePanel {
 }
 
 impl FinalCombinePanel {
+    #[allow(non_snake_case)]
+    pub fn getParameters<S: FinalCombineScreenState>(&self, state: &mut S) {
+        state.set_patchcorr_kernel_sigma(self.tf_kernel_sigma.get_text());
+    }
+    #[allow(non_snake_case)]
+    pub fn sendProcessingMethodMessage<S: ProcessingMethodSink>(&self, sink: &mut S) {
+        sink.set_processing_method_parallel(self.is_parallel());
+    }
+    #[allow(non_snake_case)]
+    pub fn toString(&self) -> String {
+        format!(
+            "FinalCombinePanel[processingMethod={},parallel={},runVolcombine={}]",
+            self.get_processing_method(),
+            self.is_parallel(),
+            self.is_run_volcombine()
+        )
+    }
     /// Java constructor `FinalCombinePanel(...)`; ProcessResultDisplayFactory is an explicit caller boundary.
     pub fn new(dialog_type: DialogType, parallel_process_check_box_text: &str) -> Self {
         let mut panel = Self {
@@ -925,6 +948,19 @@ impl FinalCombineFields for FinalCombinePanel {
     }
     fn is_enabled(&self) -> bool {
         self.pnl_root.final_tab_enabled
+    }
+}
+
+pub struct FinalCombinePanelActionListener;
+impl FinalCombinePanelActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<A: FinalCombinePanelApplicationManager, T: FinalCombinePanelParent>(
+        panel: &mut FinalCombinePanel,
+        manager: &mut A,
+        parent: &mut T,
+        command: &str,
+    ) {
+        panel.action(command, manager, parent, None);
     }
 }
 

@@ -6,6 +6,11 @@ pub struct SvlFactorStorage {
     pub shared: bool,
     pub data: Vec<f64>,
 }
+
+/// `svlFactorStorage::svlFactorStorage` (`svlFactor.cpp:1004`).
+pub fn svl_factor_storage(size: usize, shared: bool) -> SvlFactorStorage {
+    SvlFactorStorage::new(size, shared)
+}
 impl SvlFactorStorage {
     pub fn new(size: usize, shared: bool) -> Self {
         Self {
@@ -36,6 +41,30 @@ pub struct SvlFactor {
     pub cards: Vec<usize>,
     pub stride: Vec<usize>,
     pub data: Vec<f64>,
+}
+
+/// `svlFactor::svlFactor()` (`svlFactor.cpp:77`).
+pub fn svl_factor() -> SvlFactor {
+    SvlFactor::new()
+}
+
+/// `svlFactor::svlFactor(int v, int d)` (`svlFactor.cpp:84`).
+pub fn svl_factor_with_variable(variable: i32, cardinality: usize) -> Result<SvlFactor, String> {
+    SvlFactor::with_variable(variable, cardinality)
+}
+
+/// `svlFactor::svlFactor(const vector<int>&, const vector<int>&)`
+/// (`svlFactor.cpp:92`).
+pub fn svl_factor_with_variables(
+    variables: Vec<i32>,
+    cards: Vec<usize>,
+) -> Result<SvlFactor, String> {
+    SvlFactor::with_variables(variables, cards)
+}
+
+/// `svlFactor::svlFactor(const svlFactor&)` (`svlFactor.cpp:101`).
+pub fn svl_factor_copy(factor: &SvlFactor) -> SvlFactor {
+    factor.clone()
 }
 impl SvlFactor {
     pub fn new() -> Self {
@@ -433,5 +462,22 @@ mod tests {
         assert_eq!(f.index_of(&[1, 2]), Some(5));
         f.reduce(2, 1).unwrap();
         assert_eq!(f.data, vec![2., 3.]);
+    }
+    #[test]
+    fn source_factor_factories_construct_and_copy_owned_tables() {
+        assert!(svl_factor().empty());
+        let factor = svl_factor_with_variable(7, 3).unwrap();
+        assert_eq!(factor.data, [1., 1., 1.]);
+        let copied = svl_factor_copy(&factor);
+        assert_eq!(copied, factor);
+        assert_eq!(
+            svl_factor_with_variables(vec![1, 2], vec![2, 3])
+                .unwrap()
+                .size(),
+            6
+        );
+        let mut storage = svl_factor_storage(2, true);
+        storage.fill(4., None);
+        assert_eq!(storage.data, [4., 4.]);
     }
 }

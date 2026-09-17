@@ -200,6 +200,15 @@ impl Contour {
     }
 }
 
+/// Source-named `contour2trajectory` (`contour.cpp:177`).
+pub fn contour2trajectory<T, P>(
+    contour_x: &Contour,
+    contour_y: &Contour,
+    frames: &[Frame<T, P>],
+) -> Option<Vec<Vec<Point2d>>> {
+    Contour::contour_to_trajectories(contour_x, contour_y, frames)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

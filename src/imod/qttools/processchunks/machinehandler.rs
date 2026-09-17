@@ -62,6 +62,8 @@ pub struct MachineHandler {
 }
 
 impl MachineHandler {
+    /// `MachineHandler()` source constructor.  Its paired C++ destructor is
+    /// represented by Rust ownership of `process_handler_array` and `kill_process`.
     /// C++ `MachineHandler::MachineHandler`.
     pub fn new() -> MachineHandler {
         MachineHandler {

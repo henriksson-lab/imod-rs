@@ -217,6 +217,10 @@ pub struct PreferencesSettings {
     pub values: BTreeMap<String, String>,
 }
 impl PreferencesSettings {
+    /// `ImodPreferences::getSettingsObject()`.
+    pub fn get_settings_object() -> Self {
+        Self::default()
+    }
     pub fn contains(&self, key: &str) -> bool {
         self.values.contains_key(key)
     }
@@ -303,7 +307,7 @@ pub struct ImodPreferences {
     pub style_status: [i32; MAX_STYLES],
 }
 impl ImodPreferences {
-    /// `ImodPreferences::ImodPreferences`; QSettings reads are represented by `settings`.
+    /// `ImodPreferences::ImodPreferences()`; QSettings reads are represented by `settings`.
     pub fn new(
         cmd_line_style: Option<&str>,
         settings: &PreferencesSettings,
@@ -1336,6 +1340,7 @@ pub struct PrefsDialog {
     pub visible: bool,
 }
 impl PrefsDialog {
+    /// `PrefsDialog::PrefsDialog()`.
     pub fn new() -> Self {
         Self::default()
     }

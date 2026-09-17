@@ -727,6 +727,26 @@ impl DirectivePanel {
     }
 }
 
+/// Native callback adapter for Java `DirectiveListener`.
+pub struct DirectiveListener;
+
+impl DirectiveListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(panel: &mut DirectivePanel) {
+        panel.action();
+    }
+}
+
+/// Native callback adapter for Java `DirectiveFileValueListener`.
+pub struct DirectiveFileValueListener;
+
+impl DirectiveFileValueListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(panel: &mut DirectivePanel) {
+        panel.file_value_action();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

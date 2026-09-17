@@ -836,6 +836,12 @@ impl AbstractTiltPanel {
     pub fn tilt_action_listener_action_performed(&mut self, command: &str) {
         self.action(command);
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `TiltActionListener::actionPerformed`.
+    pub fn actionPerformed(&mut self, command: &str) {
+        self.tilt_action_listener_action_performed(command);
+    }
 }
 
 #[cfg(test)]

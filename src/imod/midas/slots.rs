@@ -44,13 +44,24 @@ pub struct MidasSlots {
     pub section_text: [String; 4],
 }
 
+/// `MidasSlots()`: create the non-Qt controller state owned by MIDAS.
+pub fn midas_slots() -> MidasSlots {
+    MidasSlots::new()
+}
+
+/// `~MidasSlots()`: clear host-runtime handles before dropping controller
+/// state.  The native destructor itself is empty because Qt owns its children.
+pub fn free_midas_slots(mut slots: MidasSlots) {
+    slots.destroy();
+}
+
 impl MidasSlots {
     /// `MidasSlots::MidasSlots`.
     pub fn new() -> Self {
         Self {
             black_displayed: -1,
             white_displayed: -1,
-            resize_bump: 2,
+            resize_bump: 1,
             ..Default::default()
         }
     }
@@ -706,6 +717,12 @@ mod tests {
         s.translate(&mut v, 2., -3.);
         assert_eq!(v.tr[0].mat[6], 2.);
         assert_eq!(v.tr[0].mat[7], -3.);
+    }
+    #[test]
+    fn source_constructor_uses_native_resize_bump_and_owned_cleanup() {
+        let slots = midas_slots();
+        assert_eq!(slots.resize_bump, 1);
+        free_midas_slots(slots);
     }
     #[test]
     fn contrast_rejects_crossed_limits() {

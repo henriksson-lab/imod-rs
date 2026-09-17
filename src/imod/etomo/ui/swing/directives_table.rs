@@ -182,6 +182,22 @@ impl<P: DirectivesTableParent> DirectivesTable<P> {
     ) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
         self.directive_map.get(directive_def).cloned()
     }
+    #[allow(non_snake_case)]
+    pub fn getDirective(
+        &self,
+        directive_def: &DirectiveDef,
+    ) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
+        self.get_row(directive_def)
+    }
+    /// Pair-key conversion is supplied by the directive-definition boundary;
+    /// callers pass the paired definition after applying that source rule.
+    #[allow(non_snake_case)]
+    pub fn getDirectiveFromPair(
+        &self,
+        directive_def: &DirectiveDef,
+    ) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
+        self.get_row(directive_def)
+    }
 
     /// The complete Java `RowList.createPanel()` loop after the storage unit
     /// has parsed description elements and constructed canonical rows.  The
@@ -431,6 +447,42 @@ impl<P: DirectivesTableParent> DirectivesTable<P> {
         for row in &self.list {
             row.display(&mut panel, &mut self.layout, &mut self.constraints);
         }
+    }
+}
+
+/// Java `DirectiveIterator`, retaining its look-ahead behavior while skipping
+/// section rows in the table's real mixed row list.
+pub struct DirectiveIterator {
+    rows: Vec<Rc<RefCell<DirectivesDirectiveRow>>>,
+    cursor: usize,
+}
+impl DirectiveIterator {
+    pub fn new<P: DirectivesTableParent>(table: &DirectivesTable<P>) -> Self {
+        Self {
+            rows: table
+                .list
+                .iter()
+                .filter_map(|row| match row {
+                    DirectivesTableRow::Directive(row) => Some(row.clone()),
+                    DirectivesTableRow::Section(_) => None,
+                })
+                .collect(),
+            cursor: 0,
+        }
+    }
+    #[allow(non_snake_case)]
+    pub fn hasNext(&self) -> bool {
+        self.cursor < self.rows.len()
+    }
+    #[allow(non_snake_case)]
+    pub fn next(&mut self) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
+        let value = self.rows.get(self.cursor).cloned();
+        self.cursor += usize::from(value.is_some());
+        value
+    }
+    #[allow(non_snake_case)]
+    pub fn getNext(&mut self) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
+        self.next()
     }
 }
 

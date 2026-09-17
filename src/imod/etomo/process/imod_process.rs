@@ -301,6 +301,11 @@ pub struct ImodProcess {
 }
 
 impl ImodProcess {
+    /// Native file-path form of Java's four `constructFirstFile` overloads.
+    /// The Java method selects the first non-null candidate to attach a log handle to.
+    pub fn construct_first_file(files: Option<&[Option<PathBuf>]>) -> Option<PathBuf> {
+        files?.iter().flatten().next().cloned()
+    }
     fn base(manager: Option<&'static dyn BaseManager>, axis_id: Option<AxisID>) -> Self {
         let mut stderr = Stderr::default();
         let message_sender_reg_id = stderr.register();
@@ -588,6 +593,39 @@ impl ImodProcess {
     pub fn is_running(&self) -> bool {
         self.running
     }
+    /// Native lifecycle hook for Java private `Stderr.setImod`.
+    /// The real `InteractiveSystemProgram` is supplied by the process frontend; after it
+    /// is attached, this source object may accept its stderr stream and send commands.
+    pub fn set_imod(&mut self, running: bool) {
+        self.running = running;
+    }
+    /// Native stream form of Java private `Stderr.readStderr()`.
+    pub fn read_stderr<I, S>(&mut self, lines: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for line in lines {
+            self.accept_stderr(line);
+        }
+    }
+    /// Native form of Java `ContinuousListener.startThread`.
+    pub fn start_thread(&mut self, target: Option<Arc<dyn ContinuousListenerTarget>>) {
+        self.continuous_listener_target = target;
+    }
+    /// Java `ContinuousListener.isAlive()` at the native event-loop boundary.
+    pub fn is_alive(&self) -> bool {
+        self.running && self.continuous_listener_target.is_some()
+    }
+    /// One native event-loop iteration of Java `ContinuousListener.run()` and
+    /// `MessageSender.run()`: deliver a queued continuous message and handle requests.
+    pub fn run(&mut self) {
+        let message = self.stderr.lock().unwrap().get_continuous_message();
+        if let (Some(message), Some(target)) = (message, self.continuous_listener_target.as_ref()) {
+            target.get_continuous_message(&message, self.axis_id);
+        }
+        self.process_request();
+    }
     pub fn set_open_model_message(&mut self, model: impl Into<String>) {
         let model = model.into();
         self.model_name = model.clone();
@@ -817,6 +855,17 @@ impl ImodProcess {
             false
         }
     }
+    /// Java `MessageSender.parseUserMessages`.
+    pub fn parse_user_messages(line: &str, user_messages: &mut String) -> bool {
+        let mut parsed = Vec::new();
+        if Self::parse_error(line, &mut parsed) {
+            user_messages.push_str(line);
+            user_messages.push('\n');
+            true
+        } else {
+            false
+        }
+    }
     fn imod_send_event(&mut self, args: &[&str]) -> Result<Vec<String>, ImodProcessError> {
         if self.window_id.is_empty() {
             return Err(ImodProcessError::NoWindowId);
@@ -913,6 +962,10 @@ impl ImodProcess {
             self.output_window_id,
             self.binning
         )
+    }
+    /// Java `toString()`.
+    pub fn to_string_java(&self) -> String {
+        self.to_string()
     }
     pub fn add_window_open_option(&mut self, option: WindowOpenOption) {
         self.window_open_option_list

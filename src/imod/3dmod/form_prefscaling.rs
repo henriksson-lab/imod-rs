@@ -90,6 +90,7 @@ pub struct PrefScalingForm {
 }
 
 impl PrefScalingForm {
+    /// `PrefScalingForm()` source constructor.
     pub fn new(
         prefs: ImodPrefStruct,
         cvi: CurrentImageInfo,

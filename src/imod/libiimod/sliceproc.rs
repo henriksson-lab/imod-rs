@@ -380,6 +380,46 @@ struct AnisoState {
     iter_done: i32,
 }
 
+/// Owned equivalent of the row-pointer-plus-contiguous-block allocation made
+/// by `allocate2D_float`.  `row` exposes the same logical `a[row][column]`
+/// layout without returning pointers whose lifetime can outlive the storage.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FloatMatrix2D {
+    rows: usize,
+    columns: usize,
+    data: Vec<f32>,
+}
+
+impl FloatMatrix2D {
+    pub fn row(&self, row: usize) -> Option<&[f32]> {
+        let start = row.checked_mul(self.columns)?;
+        self.data.get(start..start.checked_add(self.columns)?)
+    }
+    pub fn row_mut(&mut self, row: usize) -> Option<&mut [f32]> {
+        let start = row.checked_mul(self.columns)?;
+        self.data.get_mut(start..start.checked_add(self.columns)?)
+    }
+    pub fn into_data(self) -> Vec<f32> {
+        self.data
+    }
+}
+
+/// `allocate2D_float` (`sliceproc.c:646`).  C returns a row-pointer table
+/// backed by one contiguous allocation; this returns the checked, owned form
+/// of exactly that representation.  `None` is the source allocation failure.
+pub fn allocate_2d_float(rows: i32, columns: i32) -> Option<FloatMatrix2D> {
+    let (rows, columns) = (usize::try_from(rows).ok()?, usize::try_from(columns).ok()?);
+    let length = rows.checked_mul(columns)?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(length).ok()?;
+    data.resize(length, 0.);
+    Some(FloatMatrix2D {
+        rows,
+        columns,
+        data,
+    })
+}
+
 static ANISO_STATE: Mutex<AnisoState> = Mutex::new(AnisoState {
     image: Vec::new(),
     image2: Vec::new(),
@@ -411,8 +451,14 @@ pub fn slice_aniso_diff(
     let m = sl.ysize;
     if state.iter_done == 0 {
         let stride = (n + 2) as usize;
-        state.image = vec![0.0; (m + 2) as usize * stride];
-        state.image2 = vec![0.0; (m + 2) as usize * stride];
+        let Some(image) = allocate_2d_float(m + 2, n + 2) else {
+            return -1;
+        };
+        let Some(image2) = allocate_2d_float(m + 2, n + 2) else {
+            return -1;
+        };
+        state.image = image.into_data();
+        state.image2 = image2.into_data();
         for j in 0..m {
             for i in 0..n {
                 let offset = (i + j * sl.xsize) as usize * 4;
@@ -589,5 +635,17 @@ mod tests {
         assert_eq!(slice.data, [10, 30, 255]);
         assert_eq!(slice_byte_add(&mut slice, -40), 0);
         assert_eq!(slice.data, [0, 0, 215]);
+    }
+
+    #[test]
+    fn float_matrix_keeps_contiguous_source_row_layout() {
+        let mut matrix = allocate_2d_float(3, 4).unwrap();
+        matrix.row_mut(1).unwrap()[2] = 9.;
+        assert_eq!(matrix.row(1).unwrap(), [0., 0., 9., 0.]);
+        assert_eq!(
+            matrix.into_data(),
+            [0., 0., 0., 0., 0., 0., 9., 0., 0., 0., 0., 0.]
+        );
+        assert!(allocate_2d_float(-1, 2).is_none());
     }
 }

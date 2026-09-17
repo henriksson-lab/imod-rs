@@ -16,6 +16,35 @@ pub struct Trajectory {
     pub parent: Option<usize>,
     pub children: Vec<usize>,
 }
+
+/// C++ `trajectory::trajectory()`: an unlinked, empty trajectory.
+///
+/// The native class stored non-owning pointers for `parent`, `p`, and `child`.
+/// This port represents those relationships by arena indexes, so the empty
+/// constructor has no aliases to clean up.
+pub fn trajectory() -> Trajectory {
+    Trajectory::default()
+}
+
+/// C++ `trajectory::trajectory(trajectory *parent)`.
+pub fn trajectory_with_parent(parent: usize) -> Trajectory {
+    Trajectory {
+        parent: Some(parent),
+        ..Trajectory::default()
+    }
+}
+
+/// C++ `trajectory::trajectory(const trajectory &)`.  Index relationships are
+/// deliberately copied, as were the native non-owning pointer vectors.
+pub fn trajectory_copy(source: &Trajectory) -> Trajectory {
+    source.clone()
+}
+
+/// C++ `trajectory::~trajectory()`, which intentionally did not delete its
+/// non-owning points or children.  Rust's owned vectors are released here.
+pub fn free_trajectory(trajectory: Trajectory) {
+    drop(trajectory);
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrajectoryCorrespondence {
     pub target: usize,
@@ -34,6 +63,29 @@ pub fn find_marker(
         .filter(|e| !points[e.target].used && points[e.target].frame_id == frame)
         .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
         .map(|e| e.target)
+}
+
+/// `findMarkerInPrevFrame` / `findMarkerInNextFrame`.  Correspondence targets
+/// are owned point indices; selecting the highest-score unused point retains
+/// the native search behavior without frame-owned pointer traversal.
+pub fn find_marker_in_prev_frame(
+    points: &[TrajectoryPoint],
+    edges: &[Vec<TrajectoryCorrespondence>],
+    current: usize,
+    jump: i32,
+) -> Option<usize> {
+    find_marker(points, edges, current, jump, false)
+}
+pub fn find_marker_in_next_frame(
+    points: &[TrajectoryPoint],
+    edges: &[Vec<TrajectoryCorrespondence>],
+    current: usize,
+    jump: i32,
+    num_frames: i32,
+) -> Option<usize> {
+    (points.get(current)?.frame_id + jump < num_frames)
+        .then(|| find_marker(points, edges, current, jump, true))
+        .flatten()
 }
 pub fn build_trajectory_forward(
     points: &mut [TrajectoryPoint],
@@ -301,6 +353,15 @@ pub fn free_trajectory_vector(trajectories: Vec<Trajectory>, points: Vec<Traject
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn constructors_keep_index_relationships_non_owning() {
+        let mut original = trajectory_with_parent(7);
+        original.points.push(3);
+        original.children.push(9);
+        assert_eq!(trajectory(), Trajectory::default());
+        assert_eq!(trajectory_copy(&original), original);
+        free_trajectory(original);
+    }
     #[test]
     fn model_roundtrip_and_marker_type() {
         let p = vec![TrajectoryPoint {

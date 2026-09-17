@@ -284,6 +284,20 @@ impl SerialSectionsDialog {
     pub fn set_auto_alignment_controller(&mut self) {
         self.auto_alignment_controller_set = true;
     }
+    #[allow(non_snake_case)]
+    pub fn getAutoAlignmentParameters(&self) -> (bool, bool) {
+        (
+            self.auto_alignment_controller_set,
+            self.auto_alignment_process_changed,
+        )
+    }
+    #[allow(non_snake_case)]
+    pub fn toString(&self) -> String {
+        format!(
+            "SerialSectionsDialog[axis={:?},tab={:?}]",
+            self.axis_id, self.cur_tab
+        )
+    }
     /// Java `createPanel`; actual layout is the GUI boundary.
     pub fn create_panel(&mut self) {
         self.pnl_root_created = true;
@@ -542,6 +556,19 @@ impl SerialSectionsDialog {
         run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
     ) {
         manager.serial_sections_operation(operation, self.axis_id, run_3dmod_menu_options);
+        self.update_display();
+    }
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: SerialSectionsDialogApplicationManager>(
+        &mut self,
+        manager: &mut M,
+        operation: SerialSectionsManagerOperation,
+    ) {
+        self.action(manager, operation, None);
+    }
+    #[allow(non_snake_case)]
+    pub fn stateChanged(&mut self) {
+        self.change_tab_current();
         self.update_display();
     }
     /// Java `updateDisplay`.

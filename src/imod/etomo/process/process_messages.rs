@@ -204,7 +204,14 @@ pub struct ProcessMessages {
     chunk_error_list: Option<RatedList>,
     chunk_warning_list: Option<RatedList>,
     logged_messages: Vec<String>,
+    /// Optional secondary project-log stream.  The GUI/application layer owns
+    /// persistence; keeping this separate mirrors Java's `FileWriter` routing.
+    secondary_log: Option<Vec<String>>,
     input: VecDeque<String>,
+    /// Java used a worker thread and blocking queue here.  The Rust port keeps the
+    /// queue explicitly and drains it at `stop_string_feed`; this preserves ordered
+    /// delivery without making this model object depend on a UI/runtime executor.
+    string_feed: bool,
     parser: Option<MessageParser>,
 }
 
@@ -290,7 +297,9 @@ impl ProcessMessages {
             chunk_error_list: None,
             chunk_warning_list: None,
             logged_messages: vec![],
+            secondary_log: None,
             input: VecDeque::new(),
+            string_feed: false,
             parser: None,
         };
         result.parser = Some(MessageParser::get_instance(
@@ -350,6 +359,33 @@ impl ProcessMessages {
             always_multiline,
             allow_multi_line_log,
             true,
+            false,
+        )
+    }
+    /// Java `getBatchruntomoTestInstance`: identical setup except information is
+    /// deliberately not written to the project log.
+    #[allow(clippy::too_many_arguments)]
+    pub fn get_batchruntomo_test_instance(
+        multi_line_messages: bool,
+        log_all_messages: bool,
+        error_override_log_tag: Option<String>,
+        error_tag: Option<String>,
+        always_multiline: bool,
+        allow_multi_line_log: bool,
+    ) -> Self {
+        Self::new(
+            multi_line_messages,
+            false,
+            None,
+            None,
+            false,
+            false,
+            log_all_messages,
+            error_override_log_tag,
+            error_tag,
+            always_multiline,
+            allow_multi_line_log,
+            false,
             false,
         )
     }
@@ -430,11 +466,29 @@ impl ProcessMessages {
     pub fn end_parse(&mut self) {
         self.with_parser(|parser, this| parser.end_parse(this));
     }
+    /// Begins a buffered equivalent of Java's asynchronous string feed.
+    pub fn start_string_feed(&mut self) {
+        if !self.hibernate {
+            self.string_feed = true;
+        }
+    }
+    /// Drains all queued feed strings before returning, matching Java's `join`.
+    pub fn stop_string_feed(&mut self) {
+        if !self.string_feed {
+            return;
+        }
+        self.string_feed = false;
+        self.with_parser(|parser, this| parser.parse(this, None));
+        self.with_parser(|parser, this| parser.end_parse(this));
+    }
     pub fn add_process_output(&mut self, process_output: impl AsRef<str>) {
         if self.hibernate {
             return;
         }
         self.input.push_back(process_output.as_ref().to_owned());
+        if self.string_feed {
+            return;
+        }
         self.with_parser(|parser, this| parser.parse(this, None));
     }
     pub fn add_process_output_lines(
@@ -446,6 +500,9 @@ impl ProcessMessages {
             return;
         }
         self.input.extend(lines);
+        if self.string_feed {
+            return;
+        }
         self.with_parser(|parser, this| parser.parse(this, header));
     }
     pub fn add_process_output_file(&mut self, file: &Path) -> std::io::Result<()> {
@@ -461,7 +518,7 @@ impl ProcessMessages {
         function(&mut parser, self);
         self.parser = Some(parser);
     }
-    pub(crate) fn get_next_line(&mut self) -> Option<String> {
+    pub fn get_next_line(&mut self) -> Option<String> {
         self.input.pop_front()
     }
     pub fn feed_string(&mut self, string: impl AsRef<str>) {
@@ -489,7 +546,7 @@ impl ProcessMessages {
         self.success
     }
     pub fn is_string_feed(&self) -> bool {
-        false
+        self.string_feed
     }
     pub fn size(&self, ty: MessageType) -> usize {
         self.list(ty.list_type()).map_or(0, RatedList::size)
@@ -519,6 +576,72 @@ impl ProcessMessages {
     pub fn logged_messages(&self) -> &[String] {
         &self.logged_messages
     }
+    /// Java `setSecondaryLog`; the app can take these records and persist them.
+    pub fn set_secondary_log(&mut self) {
+        self.secondary_log = Some(vec![]);
+    }
+    pub fn get_secondary_log(&self) -> Option<&[String]> {
+        self.secondary_log.as_deref()
+    }
+    pub fn reset_secondary_log(&mut self) {
+        if let Some(log) = &mut self.secondary_log {
+            log.clear();
+        }
+    }
+    pub fn close_secondary_log(&mut self) {
+        self.secondary_log = None;
+    }
+    pub fn is_secondary_log_open(&self) -> bool {
+        self.secondary_log.is_some()
+    }
+    /// Merges typed lists from another process output, equivalent to Java `add`.
+    pub fn add_process_messages(&mut self, source: &ProcessMessages) {
+        for ty in [
+            ListType::Error,
+            ListType::Warning,
+            ListType::Info,
+            ListType::ChunkError,
+            ListType::ChunkWarning,
+        ] {
+            if let Some(messages) = source.iterator(ty) {
+                for message in messages {
+                    let ty = match ty {
+                        ListType::Error => MessageType::Error,
+                        ListType::Warning => MessageType::Warning,
+                        ListType::Info => MessageType::Info,
+                        ListType::ChunkError => MessageType::ChunkError,
+                        ListType::ChunkWarning => MessageType::ChunkWarning,
+                        ListType::Logged | ListType::Flag => continue,
+                    };
+                    self.store_typed_message(
+                        ty,
+                        None,
+                        message.clone(),
+                        ty.list_type().is_some_and(ListType::is_chunk),
+                    );
+                }
+            }
+        }
+    }
+    /// Destructively stores queued parser messages, matching Java's queue overload.
+    pub(crate) fn store_messages(
+        &mut self,
+        header: Option<&str>,
+        messages: &mut VecDeque<Message>,
+        chunk_message: bool,
+    ) {
+        while let Some(mut message) = messages.pop_front() {
+            let text = message.get_message_string();
+            self.store(
+                message.get_message_type(),
+                message.get_list_type(),
+                header,
+                text,
+                chunk_message,
+                false,
+            );
+        }
+    }
     pub(crate) fn store_message(
         &mut self,
         header: Option<&str>,
@@ -546,6 +669,57 @@ impl ProcessMessages {
         if let Some(text) = text {
             self.store(ty, list_type, header, text, chunk_message, false);
         }
+    }
+    /// Rust replacement for Java's `storeMessageOLD(Message, boolean)` overload.
+    /// Parser-internal messages retain their captured tag metadata, so this goes
+    /// through exactly the same rating, chunk and logging policy as parsed output.
+    pub(crate) fn store_message_old(&mut self, message: &mut Message, chunk_message: bool) {
+        self.store_message(None, message, chunk_message);
+    }
+    /// Stores a typed one-line message at the public parser boundary.
+    pub fn store_typed_message(
+        &mut self,
+        ty: MessageType,
+        header: Option<&str>,
+        text: impl Into<String>,
+        chunk_message: bool,
+    ) {
+        self.store(
+            ty,
+            ty.list_type(),
+            header,
+            text.into(),
+            chunk_message,
+            false,
+        );
+    }
+    /// Debug representation of the parser model, replacing Java's stderr-only
+    /// `dumpState` so Rust callers can route it through their own diagnostics.
+    pub fn dump_state(&self) -> String {
+        format!(
+            "[chunks:{},queued:{},stringFeed:{},info:{},warning:{},error:{},chunkError:{},chunkWarning:{},success:{}]",
+            self.chunks,
+            self.input.len(),
+            self.string_feed,
+            self.info_list.as_ref().map_or(0, RatedList::size),
+            self.warning_list.as_ref().map_or(0, RatedList::size),
+            self.error_list.as_ref().map_or(0, RatedList::size),
+            self.chunk_error_list.as_ref().map_or(0, RatedList::size),
+            self.chunk_warning_list.as_ref().map_or(0, RatedList::size),
+            self.success,
+        )
+    }
+    /// Java `print(MessageType)`, expressed as a diagnostic string rather than
+    /// writing to stderr from this state object.  It reports whether anything exists.
+    pub fn print(&self, ty: MessageType) -> Option<String> {
+        self.list(ty.list_type())
+            .filter(|list| !list.is_empty())
+            .map(|list| list.iter().cloned().collect::<Vec<_>>().join("\n"))
+    }
+    pub fn print_list(&self, ty: ListType) -> Option<String> {
+        self.list(Some(ty))
+            .filter(|list| !list.is_empty())
+            .map(|list| list.iter().cloned().collect::<Vec<_>>().join("\n"))
     }
     fn store(
         &mut self,
@@ -582,13 +756,17 @@ impl ProcessMessages {
                 .as_ref()
                 .is_some_and(|tag| text.contains(tag));
         if should_log && !overridden {
+            let target = self
+                .secondary_log
+                .as_mut()
+                .unwrap_or(&mut self.logged_messages);
             if let Some(header) = header {
-                self.logged_messages.push(header.to_owned());
+                target.push(header.to_owned());
             }
             if ty == MessageType::LogFile {
-                self.log_file(&text);
+                self.log_file_into(&text);
             } else {
-                self.logged_messages.push(text);
+                target.push(text);
             }
             return;
         }
@@ -601,11 +779,17 @@ impl ProcessMessages {
         }
         let _ = list.add_rated(header, text, rating);
     }
-    fn log_file(&mut self, name: &str) {
+    fn log_file_into(&mut self, name: &str) {
         match fs::read_to_string(name) {
-            Ok(text) => self.logged_messages.extend(text.lines().map(str::to_owned)),
+            Ok(text) => self
+                .secondary_log
+                .as_mut()
+                .unwrap_or(&mut self.logged_messages)
+                .extend(text.lines().map(str::to_owned)),
             Err(_) if self.debug => self
-                .logged_messages
+                .secondary_log
+                .as_mut()
+                .unwrap_or(&mut self.logged_messages)
                 .push(format!("Warning: unable to log from file:{name}")),
             Err(_) => {}
         }
@@ -757,5 +941,34 @@ mod tests {
             messages.get(MessageType::Warning, 0),
             Some("context: section 4\nWARNING: missing input")
         );
+    }
+
+    #[test]
+    fn string_feed_drains_in_order_when_stopped() {
+        let mut messages = ProcessMessages::get_instance();
+        messages.start_string_feed();
+        messages.feed_string("WARNING: queued warning");
+        assert!(messages.is_string_feed());
+        assert!(messages.is_empty(MessageType::Warning));
+        messages.stop_string_feed();
+        assert!(!messages.is_string_feed());
+        assert_eq!(
+            messages.get(MessageType::Warning, 0),
+            Some("WARNING: queued warning")
+        );
+    }
+
+    #[test]
+    fn secondary_log_isolated_from_default_log() {
+        let mut messages = ProcessMessages::get_instance();
+        messages.set_secondary_log();
+        messages.store_typed_message(MessageType::Log, Some("header"), "record", false);
+        assert!(messages.logged_messages().is_empty());
+        assert_eq!(
+            messages.get_secondary_log(),
+            Some(["header".to_owned(), "record".to_owned()].as_slice())
+        );
+        messages.close_secondary_log();
+        assert!(!messages.is_secondary_log_open());
     }
 }

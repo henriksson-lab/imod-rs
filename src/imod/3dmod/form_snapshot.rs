@@ -72,6 +72,7 @@ pub struct SnapshotForm {
 }
 
 impl SnapshotForm {
+    /// `SnapshotForm()` source constructor.
     pub fn new(prefs: ImodPrefStruct, native: &mut dyn SnapshotNativeBoundary) -> Self {
         native.setup_ui();
         let mut form = Self {

@@ -12,6 +12,100 @@
 use std::thread::{self, JoinHandle};
 
 use crate::imod::libimod::imodel::Ipoint;
+use crate::imod::three_dmod::isosurface::{IsoColor, IsoPaintPoint};
+
+/// `mcubescpp.h::smooth_vertex_positions`.  Marching-cubes vertices are
+/// interleaved `[coordinate, normal]`; triangle entries name the even slot of
+/// each vertex, as in native `Contour_Surface::geometry`.
+pub fn smooth_vertex_positions(
+    vertices: &mut [Ipoint],
+    triangles: &[i32],
+    smoothing_factor: f32,
+    iterations: i32,
+) {
+    let vertex_count = vertices.len() / 2;
+    if vertex_count == 0 || triangles.len() % 3 != 0 {
+        return;
+    }
+    let triangle_vertices: Option<Vec<[usize; 3]>> = triangles
+        .chunks_exact(3)
+        .map(|triangle| {
+            let indices = [triangle[0], triangle[1], triangle[2]];
+            let mut output = [0; 3];
+            for (slot, index) in indices.into_iter().enumerate() {
+                if index < 0 || index % 2 != 0 || index as usize / 2 >= vertex_count {
+                    return None;
+                }
+                output[slot] = index as usize / 2;
+            }
+            Some(output)
+        })
+        .collect();
+    let Some(triangle_vertices) = triangle_vertices else {
+        return;
+    };
+    let mut counts = vec![0_u32; vertex_count];
+    for triangle in &triangle_vertices {
+        for &vertex in triangle {
+            counts[vertex] += 2;
+        }
+    }
+    let fixed = 1. - smoothing_factor;
+    for _ in 0..iterations.max(0) {
+        let mut sums = vec![Ipoint::default(); vertex_count];
+        for &[first, second, third] in &triangle_vertices {
+            let a = vertices[2 * first];
+            let b = vertices[2 * second];
+            let c = vertices[2 * third];
+            sums[first].x += b.x + c.x;
+            sums[first].y += b.y + c.y;
+            sums[first].z += b.z + c.z;
+            sums[second].x += a.x + c.x;
+            sums[second].y += a.y + c.y;
+            sums[second].z += a.z + c.z;
+            sums[third].x += a.x + b.x;
+            sums[third].y += a.y + b.y;
+            sums[third].z += a.z + b.z;
+        }
+        for vertex in 0..vertex_count {
+            if counts[vertex] == 0 {
+                continue;
+            }
+            let average = &sums[vertex];
+            let coordinate = &mut vertices[2 * vertex];
+            coordinate.x =
+                fixed * coordinate.x + smoothing_factor * average.x / counts[vertex] as f32;
+            coordinate.y =
+                fixed * coordinate.y + smoothing_factor * average.y / counts[vertex] as f32;
+            coordinate.z =
+                fixed * coordinate.z + smoothing_factor * average.z / counts[vertex] as f32;
+        }
+    }
+    for vertex in 0..vertex_count {
+        vertices[2 * vertex + 1] = Ipoint::default();
+    }
+    for &[first, second, third] in &triangle_vertices {
+        let a = vertices[2 * first];
+        let b = vertices[2 * second];
+        let c = vertices[2 * third];
+        let ux = b.x - a.x;
+        let uy = b.y - a.y;
+        let uz = b.z - a.z;
+        let vx = c.x - a.x;
+        let vy = c.y - a.y;
+        let vz = c.z - a.z;
+        let normal = Ipoint {
+            x: uy * vz - uz * vy,
+            y: uz * vx - ux * vz,
+            z: ux * vy - uy * vx,
+        };
+        for vertex in [first, second, third] {
+            vertices[2 * vertex + 1].x += normal.x;
+            vertices[2 * vertex + 1].y += normal.y;
+            vertices[2 * vertex + 1].z += normal.z;
+        }
+    }
+}
 
 /// `MAX_THREADS` from `isosurface.h`.
 pub const MAX_THREADS: usize = 16;
@@ -54,6 +148,10 @@ pub struct ImodvIsosurface {
     pub m_volume: Vec<u8>,
     pub m_true_bin_vol: Vec<u8>,
     pub m_paint_vol: Vec<u8>,
+    /// Native `mColorList` and `mPaintPoints`, retained by `fillPaintVol` to
+    /// detect whether the rasterized mask is still current.
+    pub m_color_list: Vec<IsoColor>,
+    pub m_paint_points: Vec<IsoPaintPoint>,
     pub m_box_size: [i32; 3],
     pub m_bin_box_ends: [i32; 3],
     pub m_paint_size: [i32; 3],
@@ -71,6 +169,9 @@ pub struct ImodvIsosurface {
     pub m_top_window_open: bool,
     pub m_extra_obj_num: i32,
     pub m_box_obj_num: i32,
+    /// `ImodvIsosurface::mMadeFiltered`: whether `mFilteredMesh` is a
+    /// separately allocated filtered mesh rather than `mOrigMesh`.
+    pub m_made_filtered: bool,
 }
 
 impl Default for ImodvIsosurface {
@@ -102,6 +203,8 @@ impl Default for ImodvIsosurface {
             m_volume: Vec::new(),
             m_true_bin_vol: Vec::new(),
             m_paint_vol: Vec::new(),
+            m_color_list: Vec::new(),
+            m_paint_points: Vec::new(),
             m_box_size: [0; 3],
             m_bin_box_ends: [0; 3],
             m_paint_size: [0; 3],
@@ -117,14 +220,8 @@ impl Default for ImodvIsosurface {
             m_top_window_open: true,
             m_extra_obj_num: -1,
             m_box_obj_num: -1,
+            m_made_filtered: false,
         }
-    }
-}
-
-impl ImodvIsosurface {
-    /// `ImodvIsosurface::getBinning`.
-    pub fn get_binning(&self) -> i32 {
-        self.binning
     }
 }
 
@@ -178,7 +275,7 @@ pub struct IsoThread<B: McubesBoundary> {
 }
 
 impl<B: McubesBoundary> IsoThread<B> {
-    /// `IsoThread::IsoThread`.
+    /// `IsoThread()`, the C++ `IsoThread::IsoThread` constructor.
     pub fn new(subslice_index: i32, iso: &ImodvIsosurface, mcubes: B) -> Self {
         Self {
             m_which_subslice: subslice_index,
@@ -306,8 +403,44 @@ impl<B: McubesBoundary> Drop for IsoThread<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContourSurface, ImodvIsosurface, IsoThread, McubesBoundary};
+    use super::{
+        ContourSurface, ImodvIsosurface, IsoThread, McubesBoundary, smooth_vertex_positions,
+    };
     use crate::imod::libimod::imodel::Ipoint;
+
+    #[test]
+    fn smoothing_uses_even_marching_cubes_indices_and_recomputes_normals() {
+        let mut vertices = vec![
+            Ipoint {
+                x: 0.,
+                y: 0.,
+                z: 0.,
+            },
+            Ipoint::default(),
+            Ipoint {
+                x: 1.,
+                y: 0.,
+                z: 0.,
+            },
+            Ipoint::default(),
+            Ipoint {
+                x: 0.,
+                y: 1.,
+                z: 0.,
+            },
+            Ipoint::default(),
+        ];
+        smooth_vertex_positions(&mut vertices, &[0, 2, 4], 0.3, 1);
+        assert_eq!(
+            vertices[0],
+            Ipoint {
+                x: 0.15,
+                y: 0.15,
+                z: 0.
+            }
+        );
+        assert!((vertices[1].z - 0.3025).abs() < 1.0e-5);
+    }
 
     #[derive(Clone, Debug)]
     struct MockSurface {

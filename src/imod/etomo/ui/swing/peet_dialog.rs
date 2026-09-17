@@ -210,6 +210,18 @@ impl<P: PeetPanels, M: PeetManager> PeetDialog<P, M> {
     pub fn get_focus_component(&self) -> Tab {
         Tab::Setup
     }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn popUpContextMenu(&self) -> (&'static str, Tab) {
+        ("PEET", self.selected_tab)
+    }
     pub fn get_setup_jcomponent(&self) -> Tab {
         Tab::Setup
     }
@@ -367,6 +379,14 @@ impl<P: PeetPanels, M: PeetManager> PeetDialog<P, M> {
         } else {
             self.update_display(false)
         }
+    }
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(&mut self, command: &str) {
+        self.action(command);
+    }
+    #[allow(non_snake_case)]
+    pub fn stateChanged(&mut self) {
+        self.update_display(false);
     }
     pub fn validate_run(&self) -> bool {
         if self.ltf_directory.is_empty()

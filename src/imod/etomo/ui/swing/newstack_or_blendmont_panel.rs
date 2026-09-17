@@ -340,3 +340,17 @@ impl NewstackOrBlendmontPanel {
         (action_command, None, None)
     }
 }
+
+/// Source-shaped overload adapter; concrete parameter variants remain the
+/// panel's typed `*_parameters` methods above.
+pub struct NewstackOrBlendmontPanelParameters;
+impl NewstackOrBlendmontPanelParameters {
+    #[allow(non_snake_case)]
+    pub fn setParameters(panel: &mut NewstackOrBlendmontPanel, state: &ReconScreenState) {
+        panel.set_recon_screen_state(state);
+    }
+    #[allow(non_snake_case)]
+    pub fn getParameters(panel: &NewstackOrBlendmontPanel, state: &mut ReconScreenState) {
+        panel.get_recon_screen_state(state);
+    }
+}

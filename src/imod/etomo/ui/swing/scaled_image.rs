@@ -73,12 +73,18 @@ pub struct ScaledImage {
 }
 
 impl ScaledImage {
+    /// Java private `loadImage()`; native toolkit decoding is represented by
+    /// the optional status supplied by the GUI boundary.
+    pub fn load_image(image_load_status: Option<i32>) -> i32 {
+        image_load_status.unwrap_or(COMPLETE)
+    }
+
     /// Java private `ScaledImage(String)`.
     pub fn new(name: ScaledImageName, resource_present: bool, load_status: Option<i32>) -> Self {
         Self {
             file_name: name.file_name(),
             orig_image_present: resource_present,
-            orig_image_load_status: resource_present.then_some(load_status.unwrap_or(COMPLETE)),
+            orig_image_load_status: resource_present.then_some(Self::load_image(load_status)),
             image_present: false,
             scale: None,
             ratio_milli: None,

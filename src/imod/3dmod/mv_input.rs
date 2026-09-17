@@ -2962,8 +2962,14 @@ mod tests {
         model.obj.push(Iobj {
             flags: IMOD_OBJFLAG_TIME,
             cont: vec![
-                Icont { time: 2, ..Icont::default() },
-                Icont { time: 4, ..Icont::default() },
+                Icont {
+                    time: 2,
+                    ..Icont::default()
+                },
+                Icont {
+                    time: 4,
+                    ..Icont::default()
+                },
             ],
             ..Iobj::default()
         });

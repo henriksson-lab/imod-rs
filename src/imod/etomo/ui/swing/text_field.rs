@@ -272,6 +272,30 @@ impl TextField {
                 .unwrap_or_default()
         )
     }
+    #[allow(non_snake_case)]
+    pub fn validatePairedArrays(
+        &self,
+        other: Option<&Self>,
+    ) -> Result<(), FieldValidationFailedException> {
+        let Some(other) = other else {
+            return Ok(());
+        };
+        if !self.is_enabled() || !other.is_enabled() {
+            return Ok(());
+        }
+        let count = |text: String| {
+            text.split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|part| !part.is_empty())
+                .count()
+        };
+        if count(self.get_text()) == count(other.get_text()) {
+            Ok(())
+        } else {
+            Err(FieldValidationFailedException(
+                "Paired arrays have different lengths".into(),
+            ))
+        }
+    }
     pub fn set_value_text_field(&mut self, input: Option<&Self>) {
         if let Some(input) = input {
             self.set_text(Some(&input.get_text()));
@@ -291,6 +315,10 @@ impl TextField {
     }
     pub fn get_quoted_label(&self) -> String {
         self.text_field.get_quoted_label()
+    }
+    #[allow(non_snake_case)]
+    pub fn getQuotedReference(&self) -> String {
+        self.get_quoted_label()
     }
     pub fn get_maximum_size(&self) -> Dimension {
         self.fixed_size

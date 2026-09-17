@@ -375,6 +375,12 @@ impl<M: RubberbandPanelManager, C: RubberbandContainer> RubberbandPanel<M, C> {
             .imod_get_rubberband_coordinates(&self.imod_key, AxisID::Only);
         self.set_min_and_max(v)
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `RubberbandActionListener::actionPerformed`.
+    pub fn actionPerformed(&mut self, command: Option<&str>) {
+        self.button_action(command);
+    }
     pub fn set_min_and_max(&mut self, input: Option<Vec<String>>) {
         let Some(v) = input else { return };
         let mut i = 0;

@@ -1,6 +1,21 @@
 use crate::imod::libcfshr::b3dutil::{c2f_string, fortran_string};
 use crate::imod::libcfshr::parse_params::*;
 pub type fortStrLen_t = i32;
+
+/// `pipf2cstr` (`pip_fwrap.c:435`).  `f2cString` allocated a temporary C
+/// string which every wrapper freed after its PIP call; an owned `String`
+/// expresses the same temporary lifetime.  A null/negative input is the
+/// Rust-visible counterpart of C allocation/conversion failure.
+unsafe fn pipf2cstr(
+    string: *const ::core::ffi::c_char,
+    string_size: fortStrLen_t,
+) -> Option<String> {
+    if string.is_null() || string_size < 0 {
+        pip_set_error(b"Memory error converting string from Fortran to C");
+        return None;
+    }
+    Some(unsafe { fortran_string(string, string_size) })
+}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pipinitialize_(mut numOptions: *mut i32) -> i32 {
     return pip_initialize(*numOptions);
@@ -59,7 +74,9 @@ pub unsafe extern "C" fn pipreadprogdefaults_(
     mut option: *mut ::core::ffi::c_char,
     mut optionSize: fortStrLen_t,
 ) {
-    let option = fortran_string(option, optionSize);
+    let Some(option) = (unsafe { pipf2cstr(option, optionSize) }) else {
+        return;
+    };
     pip_read_prog_defaults(option.as_bytes());
 }
 #[unsafe(no_mangle)]
@@ -297,4 +314,17 @@ pub unsafe extern "C" fn pipnumberofentries_(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pipdone_() {
     pip_done();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pip_fortran_converter_trims_fortran_padding() {
+        let bytes = b"option   ";
+        let converted = unsafe { pipf2cstr(bytes.as_ptr().cast(), bytes.len() as i32) };
+        assert_eq!(converted.as_deref(), Some("option"));
+        assert!(unsafe { pipf2cstr(core::ptr::null(), 4) }.is_none());
+    }
 }

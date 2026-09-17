@@ -6,7 +6,7 @@
 //! rules in source order.
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
 
@@ -555,6 +555,14 @@ impl BatchRunTomoDialog {
     }
     pub fn validate_batch_run_tomo_param(&self) -> bool {
         !self.rb_deliver_to_directory.is_selected() || self.deliver_to_directory.is_some()
+    }
+
+    #[allow(non_snake_case)]
+    /// Rust directive-storage boundary for Java `getDirectiveFileCollection`.
+    /// The translated dialog currently retains the collection's selected input
+    /// file, while collection parsing remains with the directive source unit.
+    pub fn getDirectiveFileCollection(&self) -> Option<&Path> {
+        self.input_directive_file.as_deref()
     }
     pub fn validate(&self) -> bool {
         self.validate_batch_run_tomo_param()

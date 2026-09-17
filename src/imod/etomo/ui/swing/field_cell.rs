@@ -590,6 +590,11 @@ impl FieldCell {
     pub fn get_value(&self) -> &str {
         &self.text_field.text
     }
+    #[allow(non_snake_case)]
+    /// Rust GUI-boundary equivalent of Java `getComponent()`.
+    pub fn getComponent(&self) -> &FieldCellTextField {
+        &self.text_field
+    }
     pub fn is_required(&self) -> bool {
         false
     }

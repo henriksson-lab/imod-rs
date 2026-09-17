@@ -41,6 +41,33 @@ pub struct ImodAssistant {
     pub error: Option<fn(&str)>,
 }
 
+/// `ImodAssistant()`: construct an owned help-process controller.
+#[allow(clippy::too_many_arguments)]
+pub fn imod_assistant(
+    path: &str,
+    qhc_file: Option<&str>,
+    message_title: Option<&str>,
+    absolute: bool,
+    keep_side_bar: bool,
+    prefix: Option<&str>,
+    pref_absolute: bool,
+) -> ImodAssistant {
+    ImodAssistant::new(
+        path,
+        qhc_file,
+        message_title,
+        absolute,
+        keep_side_bar,
+        prefix,
+        pref_absolute,
+    )
+}
+
+/// `~ImodAssistant()`: terminate an active helper and release its pipes.
+pub fn free_imod_assistant(mut assistant: ImodAssistant) {
+    assistant.close();
+}
+
 impl ImodAssistant {
     /// `ImodAssistant::ImodAssistant`.
     pub fn new(
@@ -324,5 +351,12 @@ mod tests {
         };
         assistant.assistant_exited(0, AssistantExitStatus::NormalExit);
         assert!(assistant.m_assistant.is_none());
+    }
+
+    #[test]
+    fn lifecycle_facades_own_the_unstarted_helper() {
+        let assistant = imod_assistant("/does-not-exist", None, None, true, false, None, false);
+        assert!(assistant.m_assistant.is_none());
+        free_imod_assistant(assistant);
     }
 }

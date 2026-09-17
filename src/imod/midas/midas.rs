@@ -422,6 +422,7 @@ pub struct MidasWindow {
 }
 
 impl MidasWindow {
+    /// `MidasWindow()` source constructor.
     pub fn new(double_buffer: bool, view: &mut MidasView) -> Self {
         let mut window = Self {
             double_buffer,

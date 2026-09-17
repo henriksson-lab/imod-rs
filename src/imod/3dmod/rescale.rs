@@ -123,6 +123,15 @@ pub struct ImageScaleWindow {
     pub rounded_style: bool,
 }
 
+/// `ImageScaleWindow()`: initialize rescale state through the native image
+/// and dialog boundary retained by this translation.
+pub fn image_scale_window(
+    data: &mut ImageScaleData,
+    native: &mut dyn ImageScaleNativeBoundary,
+) -> ImageScaleWindow {
+    ImageScaleWindow::new(data, native)
+}
+
 /// `imodImageScaleDialog`.
 pub fn imod_image_scale_dialog(
     data: &mut ImageScaleData,
@@ -462,6 +471,27 @@ mod tests {
             self.draws += 1
         }
         fn fatal_error(&mut self, _: &str) {}
+    }
+    #[test]
+    fn source_window_constructor_initializes_limits() {
+        let mut data = ImageScaleData {
+            vi: ImageScaleView {
+                image: ImageScaleImage {
+                    smin: 2.,
+                    smax: 8.,
+                    ..Default::default()
+                },
+                black: 0,
+                white: 255,
+                ..Default::default()
+            },
+            black_new: 0,
+            white_new: 255,
+            ..Default::default()
+        };
+        let mut native = Native::default();
+        let _window = image_scale_window(&mut data, &mut native);
+        assert_eq!(native.texts, [String::from("2"), String::from("8")]);
     }
     #[test]
     fn computes_and_applies_source_limits() {

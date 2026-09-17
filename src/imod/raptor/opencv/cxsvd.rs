@@ -16,11 +16,138 @@ pub struct CvSvd {
     pub vt: CvMatrix<f64>,
 }
 
+/// Single-precision counterpart of [`CvSvd`], used by the source's `_32f`
+/// entry points without exposing pointer-based storage.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CvSvd32 {
+    pub singular_values: Vec<f32>,
+    pub u: CvMatrix<f32>,
+    pub vt: CvMatrix<f32>,
+}
+
 /// SVD failures that map to the source's size/format checks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CvSvdError {
     BadArgument,
     UnmatchedSizes,
+}
+
+/// `pythag` (`cxsvd.cpp:208`): avoid intermediate overflow/underflow while
+/// computing a Euclidean norm.
+pub fn pythag(a: f64, b: f64) -> f64 {
+    let (large, small) = if a.abs() > b.abs() {
+        (a.abs(), b.abs())
+    } else {
+        (b.abs(), a.abs())
+    };
+    if large == 0. {
+        0.
+    } else {
+        large * (1. + (small / large).powi(2)).sqrt()
+    }
+}
+
+/// `icvMatrAXPY_64f` / `icvMatrAXPY_32f`: `y[i] += a[row] * x[i]`
+/// over strided rows.  The slice API makes the native pointer increments
+/// checked and explicit.
+pub fn icv_matr_axpy_64f(
+    m: usize,
+    n: usize,
+    x: &[f64],
+    x_stride: usize,
+    a: &[f64],
+    y: &mut [f64],
+    y_stride: usize,
+) -> Result<(), CvSvdError> {
+    if a.len() < m
+        || (m > 0 && (x.len() < (m - 1) * x_stride + n || y.len() < (m - 1) * y_stride + n))
+    {
+        return Err(CvSvdError::BadArgument);
+    }
+    for row in 0..m {
+        for column in 0..n {
+            y[row * y_stride + column] += a[row] * x[row * x_stride + column];
+        }
+    }
+    Ok(())
+}
+pub fn icv_matr_axpy_32f(
+    m: usize,
+    n: usize,
+    x: &[f32],
+    x_stride: usize,
+    a: &[f32],
+    y: &mut [f32],
+    y_stride: usize,
+) -> Result<(), CvSvdError> {
+    if a.len() < m
+        || (m > 0 && (x.len() < (m - 1) * x_stride + n || y.len() < (m - 1) * y_stride + n))
+    {
+        return Err(CvSvdError::BadArgument);
+    }
+    for row in 0..m {
+        for column in 0..n {
+            y[row * y_stride + column] = (y[row * y_stride + column] as f64
+                + a[row] as f64 * x[row * x_stride + column] as f64)
+                as f32;
+        }
+    }
+    Ok(())
+}
+
+/// `icvMatrAXPY3_64f` / `icvMatrAXPY3_32f`.  `householder[0]` is the C
+/// function's otherwise out-of-bounds `x[-1]`, followed by its `n` active
+/// vector elements; rows after the first receive the rank-one update.
+pub fn icv_matr_axpy3_64f(
+    m: usize,
+    n: usize,
+    householder: &[f64],
+    row_stride: usize,
+    y: &mut [f64],
+    h: f64,
+) -> Result<(), CvSvdError> {
+    if householder.len() < n + 1 || row_stride < n || (m > 1 && y.len() < (m - 1) * row_stride + n)
+    {
+        return Err(CvSvdError::BadArgument);
+    }
+    for row in 1..m {
+        let base = row * row_stride;
+        let scale = h
+            * (0..n)
+                .map(|column| householder[column + 1] * y[base + column])
+                .sum::<f64>();
+        y[base - 1] = scale * householder[0];
+        for column in 0..n {
+            y[base + column] += scale * householder[column + 1];
+        }
+    }
+    Ok(())
+}
+pub fn icv_matr_axpy3_32f(
+    m: usize,
+    n: usize,
+    householder: &[f32],
+    row_stride: usize,
+    y: &mut [f32],
+    h: f64,
+) -> Result<(), CvSvdError> {
+    if householder.len() < n + 1 || row_stride < n || (m > 1 && y.len() < (m - 1) * row_stride + n)
+    {
+        return Err(CvSvdError::BadArgument);
+    }
+    for row in 1..m {
+        let base = row * row_stride;
+        let scale = h
+            * (0..n)
+                .map(|column| householder[column + 1] as f64 * y[base + column] as f64)
+                .sum::<f64>();
+        y[base - 1] = (scale * householder[0] as f64) as f32;
+        for column in 0..n {
+            y[base + column] =
+                (y[base + column] as f64 + scale * householder[column + 1] as f64) as f32;
+        }
+    }
+    Ok(())
 }
 
 /// Owned `cvSVD`, using deterministic Jacobi rotations of `AᵀA`.
@@ -128,6 +255,45 @@ pub fn cv_svd(a: &CvMatrix<f64>) -> Result<CvSvd, CvSvdError> {
     })
 }
 
+/// Checked, owned replacement for `icvSVD_64f` (`cxsvd.cpp:232`).
+/// Row strides and the scratch workspace of the C implementation are absorbed
+/// by [`CvMatrix`] and the returned factorization.
+pub fn icv_svd_64f(a: &CvMatrix<f64>) -> Result<CvSvd, CvSvdError> {
+    cv_svd(a)
+}
+
+/// Checked single-precision replacement for `icvSVD_32f` (`cxsvd.cpp:627`).
+/// Calculating rotations in f64 matches the source's double-precision
+/// intermediates; results are converted back at the f32 API boundary.
+pub fn icv_svd_32f(a: &CvMatrix<f32>) -> Result<CvSvd32, CvSvdError> {
+    let wide = CvMatrix::new(
+        a.rows,
+        a.cols,
+        a.data.iter().map(|&value| value as f64).collect(),
+    )
+    .map_err(|_| CvSvdError::BadArgument)?;
+    let svd = cv_svd(&wide)?;
+    Ok(CvSvd32 {
+        singular_values: svd
+            .singular_values
+            .into_iter()
+            .map(|value| value as f32)
+            .collect(),
+        u: CvMatrix::new(
+            svd.u.rows,
+            svd.u.cols,
+            svd.u.data.into_iter().map(|value| value as f32).collect(),
+        )
+        .map_err(|_| CvSvdError::BadArgument)?,
+        vt: CvMatrix::new(
+            svd.vt.rows,
+            svd.vt.cols,
+            svd.vt.data.into_iter().map(|value| value as f32).collect(),
+        )
+        .map_err(|_| CvSvdError::BadArgument)?,
+    })
+}
+
 /// Owned `cvSVBkSb`: solve `A x = b` from a decomposition returned by [`cv_svd`].
 pub fn cv_svbksb(svd: &CvSvd, b: &CvMatrix<f64>, x: &mut CvMatrix<f64>) -> Result<(), CvSvdError> {
     let m = svd.u.rows;
@@ -141,6 +307,9 @@ pub fn cv_svbksb(svd: &CvSvd, b: &CvMatrix<f64>, x: &mut CvMatrix<f64>) -> Resul
     {
         return Err(CvSvdError::UnmatchedSizes);
     }
+    // Native `cvSVBkSb` writes each output coefficient; it does not treat the
+    // caller's destination as an accumulator.
+    x.data.fill(0.0);
     let threshold =
         svd.singular_values.first().copied().unwrap_or(0.0) * f64::EPSILON * m.max(n) as f64;
     for right_hand_side in 0..b.cols {
@@ -164,6 +333,56 @@ pub fn cv_svbksb(svd: &CvSvd, b: &CvMatrix<f64>, x: &mut CvMatrix<f64>) -> Resul
     Ok(())
 }
 
+/// Checked, owned replacement for `icvSVBkSb_64f` (`cxsvd.cpp:1023`).
+pub fn icv_svbksb_64f(
+    svd: &CvSvd,
+    b: &CvMatrix<f64>,
+    x: &mut CvMatrix<f64>,
+) -> Result<(), CvSvdError> {
+    cv_svbksb(svd, b, x)
+}
+
+/// Checked single-precision replacement for `icvSVBkSb_32f` (`cxsvd.cpp:1117`).
+pub fn icv_svbksb_32f(
+    svd: &CvSvd32,
+    b: &CvMatrix<f32>,
+    x: &mut CvMatrix<f32>,
+) -> Result<(), CvSvdError> {
+    let wide_svd = CvSvd {
+        singular_values: svd
+            .singular_values
+            .iter()
+            .map(|&value| value as f64)
+            .collect(),
+        u: CvMatrix::new(
+            svd.u.rows,
+            svd.u.cols,
+            svd.u.data.iter().map(|&value| value as f64).collect(),
+        )
+        .map_err(|_| CvSvdError::BadArgument)?,
+        vt: CvMatrix::new(
+            svd.vt.rows,
+            svd.vt.cols,
+            svd.vt.data.iter().map(|&value| value as f64).collect(),
+        )
+        .map_err(|_| CvSvdError::BadArgument)?,
+    };
+    let wide_b = CvMatrix::new(
+        b.rows,
+        b.cols,
+        b.data.iter().map(|&value| value as f64).collect(),
+    )
+    .map_err(|_| CvSvdError::BadArgument)?;
+    let mut wide_x = CvMatrix::new(x.rows, x.cols, vec![0.0; x.data.len()])
+        .map_err(|_| CvSvdError::BadArgument)?;
+    icv_svbksb_64f(&wide_svd, &wide_b, &mut wide_x)?;
+    x.data
+        .iter_mut()
+        .zip(wide_x.data)
+        .for_each(|(output, value)| *output = value as f32);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,8 +392,26 @@ mod tests {
         let svd = cv_svd(&a).unwrap();
         assert!(svd.singular_values[0] >= svd.singular_values[1]);
         let b = CvMatrix::new(3, 1, vec![4., 4., 4.]).unwrap();
-        let mut x = CvMatrix::new(2, 1, vec![0.; 2]).unwrap();
+        let mut x = CvMatrix::new(2, 1, vec![99.; 2]).unwrap();
         cv_svbksb(&svd, &b, &mut x).unwrap();
         assert!((x.data[0] - 1.).abs() < 1e-8 && (x.data[1] - 1.).abs() < 1e-8);
+    }
+
+    #[test]
+    fn native_helpers_honor_strides_and_precision() {
+        let mut y = [0., 0., 7., 2., 3.];
+        icv_matr_axpy3_64f(2, 2, &[0.5, 1., 2.], 3, &mut y, 1.).unwrap();
+        assert_eq!(y, [0., 0., 4., 10., 19.]);
+
+        let mut add = [0_f32; 6];
+        icv_matr_axpy_32f(2, 2, &[1., 2., 0., 3., 4., 0.], 3, &[2., 3.], &mut add, 3).unwrap();
+        assert_eq!(add, [2., 4., 0., 9., 12., 0.]);
+
+        let a = CvMatrix::new(2, 2, vec![3_f32, 1., 1., 3.]).unwrap();
+        let svd = icv_svd_32f(&a).unwrap();
+        let b = CvMatrix::new(2, 1, vec![4_f32, 4.]).unwrap();
+        let mut x = CvMatrix::new(2, 1, vec![99_f32; 2]).unwrap();
+        icv_svbksb_32f(&svd, &b, &mut x).unwrap();
+        assert!((x.data[0] - 1.).abs() < 1e-5 && (x.data[1] - 1.).abs() < 1e-5);
     }
 }

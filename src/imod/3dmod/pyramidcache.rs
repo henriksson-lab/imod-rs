@@ -151,6 +151,16 @@ pub struct PyramidCache {
     pub location: (i32, i32, i32),
 }
 
+/// `PyramidCache()`: build the native cache state from descriptors already
+/// opened and validated by the caller's image-loading boundary.
+pub fn pyramid_cache(
+    view: PyramidCacheView,
+    tile_caches: Vec<TileCache>,
+    vm_pixels: f64,
+) -> Result<PyramidCache, i32> {
+    PyramidCache::new(view, tile_caches, vm_pixels)
+}
+
 impl PyramidCache {
     /// `PyramidCache::PyramidCache`; image descriptors have already been checked/opened by `imodview`.
     pub fn new(
@@ -1241,6 +1251,22 @@ impl MvImageSource for PyramidCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_constructor_facade_owns_validated_tile_descriptors() {
+        let cache = pyramid_cache(
+            PyramidCacheView::default(),
+            vec![TileCache {
+                full_x_size: 2,
+                full_y_size: 2,
+                full_z_size: 1,
+                ..Default::default()
+            }],
+            100.,
+        )
+        .unwrap();
+        assert_eq!(cache.base_index, 0);
+    }
     struct Reader;
     impl PyramidCacheBoundary for Reader {
         fn read_binned_tile(

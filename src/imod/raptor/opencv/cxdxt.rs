@@ -308,16 +308,23 @@ pub fn cv_dft_real_ccs_2d(
         || columns == 0
         || source.len() != rows.checked_mul(columns).ok_or(CvDxtError::BadArgument)?
         || destination.len() != source.len()
-        || nonzero_rows > rows
     {
         return Err(CvDxtError::BadArgument);
     }
+    let active_rows = if nonzero_rows == 0 || nonzero_rows > rows {
+        rows
+    } else {
+        nonzero_rows
+    };
     if flags & CV_DXT_ROWS != 0 {
-        for row in 0..rows {
+        for row in 0..active_rows {
             icv_real_dft_ccs(
                 &source[row * columns..(row + 1) * columns],
                 &mut destination[row * columns..(row + 1) * columns],
             )?;
+        }
+        for row in active_rows..rows {
+            destination[row * columns..(row + 1) * columns].fill(0.0);
         }
         return Ok(());
     }
@@ -326,8 +333,8 @@ pub fn cv_dft_real_ccs_2d(
         .copied()
         .map(|value| Complex64::new(value, 0.0))
         .collect();
-    if nonzero_rows != 0 {
-        for row in nonzero_rows..rows {
+    if active_rows != rows {
+        for row in active_rows..rows {
             spectrum[row * columns..(row + 1) * columns].fill(Complex64::default());
         }
     }
@@ -479,17 +486,21 @@ pub fn cv_dft_real_to_complex_2d(
             != rows
                 .checked_mul(compact_columns)
                 .ok_or(CvDxtError::BadArgument)?
-        || nonzero_rows > rows
     {
         return Err(CvDxtError::BadArgument);
     }
+    let active_rows = if nonzero_rows == 0 || nonzero_rows > rows {
+        rows
+    } else {
+        nonzero_rows
+    };
     let mut full: Vec<Complex64> = source
         .iter()
         .copied()
         .map(|value| Complex64::new(value, 0.0))
         .collect();
-    if nonzero_rows != 0 {
-        for row in nonzero_rows..rows {
+    if active_rows != rows {
+        for row in active_rows..rows {
             full[row * columns..(row + 1) * columns].fill(Complex64::default());
         }
     }
@@ -691,12 +702,11 @@ pub fn cv_dft(
     if rows == 0
         || columns == 0
         || data.len() != rows.checked_mul(columns).ok_or(CvDxtError::BadArgument)?
-        || nonzero_rows > rows
     {
         return Err(CvDxtError::BadArgument);
     }
     let inverse = flags & CV_DXT_INVERSE != 0;
-    let active_rows = if nonzero_rows == 0 {
+    let active_rows = if nonzero_rows == 0 || nonzero_rows > rows {
         rows
     } else {
         nonzero_rows
@@ -704,7 +714,7 @@ pub fn cv_dft(
     for row in 0..active_rows {
         icv_dft_64fc(&mut data[row * columns..(row + 1) * columns], inverse, 1.0)?;
     }
-    if !inverse && nonzero_rows != 0 {
+    if active_rows != rows {
         for row in active_rows..rows {
             data[row * columns..(row + 1) * columns].fill(Complex64::default());
         }
@@ -1186,6 +1196,26 @@ mod tests {
         let mut row = [0.0; 4];
         icv_real_dft_ccs(&original[..4], &mut row).unwrap();
         assert_eq!(&ccs[..4], &row);
+    }
+
+    #[test]
+    fn nonzero_rows_zeros_rows_only_outputs_and_values_above_height_mean_all_rows() {
+        let source = [1., 2., 3., 4., 5., 6.];
+        let mut ccs = [99.0; 6];
+        cv_dft_real_ccs_2d(&source, &mut ccs, 2, 3, CV_DXT_ROWS, 1).unwrap();
+        assert_eq!(&ccs[3..], &[0.0; 3]);
+
+        let mut complex = source.map(|value| Complex64::new(value, 0.0));
+        cv_dft(&mut complex, 2, 3, CV_DXT_ROWS, 1).unwrap();
+        assert!(
+            complex[3..]
+                .iter()
+                .all(|value| *value == Complex64::default())
+        );
+
+        let mut all_rows = [0.0; 6];
+        cv_dft_real_ccs_2d(&source, &mut all_rows, 2, 3, CV_DXT_ROWS, 3).unwrap();
+        assert!(all_rows[3..].iter().any(|&value| value != 0.0));
     }
 
     #[test]

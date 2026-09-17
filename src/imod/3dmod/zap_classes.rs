@@ -221,7 +221,7 @@ impl Default for ZapWindow {
     }
 }
 impl ZapWindow {
-    /// `ZapWindow::ZapWindow` (Qt construction itself is the boundary).
+    /// `ZapWindow()` source constructor; Qt construction is the boundary.
     pub fn new(time_label: &str, panels: bool, n: &mut dyn ZapNativeBoundary) -> Self {
         let mut s = Self {
             m_panels: panels,
@@ -454,6 +454,7 @@ pub struct ZapGl {
     pub m_scheduled_bump: i32,
 }
 impl ZapGl {
+    /// `ZapGL()` source constructor.
     pub fn new() -> Self {
         Self {
             m_init_width: 0,

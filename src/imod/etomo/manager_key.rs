@@ -60,8 +60,8 @@ impl ManagerKey {
         self.unique_key = key;
     }
 
-    /// Java `getKey`.
-    pub(crate) fn get_key(&self) -> Option<&UniqueKey> {
+    /// Java `getKey()`.
+    pub fn get_key(&self) -> Option<&UniqueKey> {
         self.unique_key.as_ref()
     }
 }

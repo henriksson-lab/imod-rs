@@ -384,6 +384,29 @@ impl BoundaryRow {
     }
 }
 
+/// Native callback adapter for Java `AdjustedEndChangeListener`.
+///
+/// The Rust UI supplies the value transition directly, without allocating a
+/// Swing `ChangeEvent`.
+pub struct AdjustedEndChangeListener;
+
+impl AdjustedEndChangeListener {
+    #[allow(non_snake_case)]
+    pub fn stateChanged(row: &mut BoundaryRow) {
+        row.adjusted_end_state_changed();
+    }
+}
+
+/// Native callback adapter for Java `AdjustedStartChangeListener`.
+pub struct AdjustedStartChangeListener;
+
+impl AdjustedStartChangeListener {
+    #[allow(non_snake_case)]
+    pub fn stateChanged(row: &mut BoundaryRow) {
+        row.adjusted_start_state_changed();
+    }
+}
+
 /// Java private static final inner `Gap`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Gap {
@@ -578,8 +601,15 @@ mod tests {
     fn edited_left_boundary_preserves_gap_by_moving_right() {
         let mut row = row(4.0);
         row.adjusted_end.set_value(8);
-        row.adjusted_end_state_changed();
+        AdjustedEndChangeListener::stateChanged(&mut row);
         assert_eq!(row.adjusted_start.get_int_value(), 3);
+    }
+    #[test]
+    fn start_listener_preserves_gap_by_moving_end() {
+        let mut row = row(4.0);
+        row.adjusted_start.set_value(1);
+        AdjustedStartChangeListener::stateChanged(&mut row);
+        assert_eq!(row.adjusted_end.get_int_value(), 6);
     }
     #[test]
     fn metadata_and_screen_state_round_trip() {

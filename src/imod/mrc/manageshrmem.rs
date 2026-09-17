@@ -88,6 +88,30 @@ pub fn test_available_memory(cumulative_kib: f64) -> Result<(), String> {
         b3d_addressable_memory(),
     )
 }
+
+/// `ManageShrMem::cleanupIIFiles` (`manageshrmem.cpp:306`).  The C owner
+/// holds nullable image-file pointers; an `Option` plus a destruction callback
+/// retains its conditional cleanup/keep-list policy without exposing them.
+pub fn cleanup_ii_files<T, F>(files: &mut [Option<T>], keep: &[usize], mut destroy: F)
+where
+    F: FnMut(T),
+{
+    for (index, file) in files.iter_mut().enumerate() {
+        if !keep.contains(&(index + 1)) {
+            if let Some(file) = file.take() {
+                destroy(file);
+            }
+        }
+    }
+}
+
+/// `ManageShrMem::memoryError` (`manageshrmem.cpp:320`), expressed as a
+/// recoverable Rust allocation error instead of terminating the process.
+pub fn memory_error(all_non_null: bool, description: &str) -> Result<(), String> {
+    all_non_null
+        .then_some(())
+        .ok_or_else(|| format!("Allocating {description}"))
+}
 /// Run a minimal long-option form of the source command: repeated `--file`,
 /// repeated `--command`, repeated comma-separated `--need`, and `--keep`.
 pub fn manageshrmem(arguments: &[String]) -> i32 {
@@ -372,6 +396,20 @@ mod tests {
         assert!(test_available_memory_with_limits(900_000., 1.5e9, 3.0e9).is_err());
         assert!(test_available_memory_with_limits(200_000., 3.0e9, 2.5e8).is_err());
         assert!(test_available_memory_with_limits(100., 3.0e9, 3.0e9).is_ok());
+    }
+
+    #[test]
+    fn cleanup_skips_kept_handles_and_memory_error_is_recoverable() {
+        let mut handles = [Some(1), Some(2), Some(3)];
+        let mut destroyed = Vec::new();
+        cleanup_ii_files(&mut handles, &[2], |handle| destroyed.push(handle));
+        assert_eq!(destroyed, [1, 3]);
+        assert_eq!(handles, [None, Some(2), None]);
+        assert_eq!(
+            memory_error(false, "image files"),
+            Err("Allocating image files".into())
+        );
+        assert_eq!(memory_error(true, "image files"), Ok(()));
     }
 
     #[cfg(not(windows))]

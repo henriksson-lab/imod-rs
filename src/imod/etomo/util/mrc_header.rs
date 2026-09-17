@@ -333,6 +333,98 @@ impl MRCHeader {
 
     // other functions
 
+    /// Parse one pixel-spacing field as Java `parsePixelSpacing` does after
+    /// the process/UI boundary has supplied header output.  Callers decide how
+    /// to present the returned invalid-value error in the native frontend.
+    #[allow(non_snake_case)]
+    pub fn parsePixelSpacing(
+        &self,
+        pixel_spacing: &mut EtomoNumber,
+        value: &str,
+    ) -> Result<(), String> {
+        pixel_spacing.set_string(Some(value));
+        let parsed = pixel_spacing.get_double();
+        if !pixel_spacing.is_valid() || parsed == -1.0 || parsed == 0.0 {
+            return Err(format!("Invalid pixel spacing: {value}"));
+        }
+        Ok(())
+    }
+
+    /// Native process boundary for Java `read(BaseManager)`.  The caller runs
+    /// IMOD's `header` command and supplies its stdout/stderr; this method owns
+    /// all source header parsing and state updates.
+    #[allow(non_snake_case)]
+    pub fn read(&mut self, stdout: &[String], stderr: &[String]) -> Result<bool, String> {
+        if !stderr.is_empty() {
+            return Err(format!("header returned an error:\n{}", stderr.join("\n")));
+        }
+        if stdout.is_empty() {
+            return Err("header returned no data".to_owned());
+        }
+        let mut pixels_parsed = false;
+        for line in stdout {
+            if line.contains("This is an HDF file") {
+                self.image_output_format = ImageOutputFormat::Hdf;
+                continue;
+            }
+            let trimmed = line.trim();
+            if trimmed.starts_with(SIZE_HEADER) {
+                let tokens: Vec<_> = trimmed.split_whitespace().collect();
+                if tokens.len() <= N_SECTIONS_INDEX as usize {
+                    return Err("Header returned less than three parameters for image size".into());
+                }
+                self.n_columns = tokens[N_COLUMNS_INDEX as usize]
+                    .parse()
+                    .map_err(|_| "nColumns not set".to_owned())?;
+                self.n_rows = tokens[N_ROWS_INDEX as usize].parse().map_err(|_| {
+                    format!("nRows not set, token is {}", tokens[N_ROWS_INDEX as usize])
+                })?;
+                self.n_sections = tokens[N_SECTIONS_INDEX as usize].parse().map_err(|_| {
+                    format!(
+                        "nSections not set, token is {}",
+                        tokens[N_SECTIONS_INDEX as usize]
+                    )
+                })?;
+            }
+            if line.starts_with(" Map mode") {
+                let tokens: Vec<_> = line.split_whitespace().collect();
+                if tokens.len() < 5 {
+                    return Err("Header returned less than one parameter for the mode".into());
+                }
+                self.mode = tokens[4].parse().map_err(|_| "mode not set".to_owned())?;
+            }
+            if line.starts_with(" Pixel spacing") {
+                let tokens: Vec<_> = line.split_whitespace().collect();
+                if tokens.len() < 7 {
+                    return Err("Header returned less than three parameters for pixel size".into());
+                }
+                Self::parse_pixel_spacing_into(&mut self.x_pixel_size, tokens[4])?;
+                Self::parse_pixel_spacing_into(&mut self.y_pixel_size, tokens[5])?;
+                Self::parse_pixel_spacing_into(&mut self.z_pixel_size, tokens[6])?;
+                pixels_parsed = true;
+                self.x_pixel_spacing = self.x_pixel_size.get_double();
+                self.y_pixel_spacing = self.y_pixel_size.get_double();
+                self.z_pixel_spacing = self.z_pixel_size.get_double();
+            }
+            self.parse_comment_data(line);
+        }
+        let _ = pixels_parsed;
+        Ok(true)
+    }
+
+    fn parse_pixel_spacing_into(
+        pixel_spacing: &mut EtomoNumber,
+        value: &str,
+    ) -> Result<(), String> {
+        pixel_spacing.set_string(Some(value));
+        let parsed = pixel_spacing.get_double();
+        if !pixel_spacing.is_valid() || parsed == -1.0 || parsed == 0.0 {
+            Err(format!("Invalid pixel spacing: {value}"))
+        } else {
+            Ok(())
+        }
+    }
+
     // TODO(unit): needs etomo/process/SystemProgram.java, etomo/process/ProcessMessages.java,
     // etomo/ApplicationManager.java, etomo/BaseManager.java and
     // etomo/ui/swing/UIHarness.java - Java `synchronized read(BaseManager)` runs

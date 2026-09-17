@@ -15,6 +15,17 @@ pub struct EmpiricalDistribution {
     last_added_value: f32,
 }
 
+/// `EmpiricalDistribution()`: initialize an empty running distribution.
+pub fn empirical_distribution() -> EmpiricalDistribution {
+    EmpiricalDistribution::new()
+}
+
+/// `~EmpiricalDistribution()`: the Rust value owns no separate sample heap,
+/// so dropping it is the complete native cleanup operation.
+pub fn free_empirical_distribution(distribution: EmpiricalDistribution) {
+    drop(distribution);
+}
+
 impl Default for EmpiricalDistribution {
     fn default() -> Self {
         Self::new()
@@ -125,7 +136,14 @@ impl EmpiricalDistribution {
 
 #[cfg(test)]
 mod tests {
-    use super::EmpiricalDistribution;
+    use super::{EmpiricalDistribution, empirical_distribution, free_empirical_distribution};
+
+    #[test]
+    fn constructor_and_destructor_facades_manage_empty_distribution() {
+        let distribution = empirical_distribution();
+        assert!(distribution.is_constant());
+        free_empirical_distribution(distribution);
+    }
 
     #[test]
     fn tracks_source_statistics_and_reset_state() {

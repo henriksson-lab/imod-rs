@@ -259,6 +259,18 @@ impl DirectivesDirectiveRow {
     pub fn get_directive_def(&self) -> &DirectiveDef {
         &self.directive_def
     }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn isEnabled(&self) -> bool {
+        self.field().is_none_or(|field| field.enabled)
+    }
+    #[allow(non_snake_case)]
+    pub fn isEditable(&self) -> bool {
+        self.field().is_none_or(|field| field.editable)
+    }
 
     /// Java private `createPanel(DirectiveDescrChoiceList)`.
     pub fn create_panel(&mut self, _choice_list_present: bool) {

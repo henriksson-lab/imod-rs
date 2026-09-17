@@ -18,6 +18,20 @@ pub struct ComFileJobs {
     com_extension: String,
 }
 
+/// `ComFileJobs()`: construct owned job records from command-file names.
+pub fn com_file_jobs(
+    com_file_array: Vec<String>,
+    single_file: bool,
+    com_extension: String,
+) -> ComFileJobs {
+    ComFileJobs::new(com_file_array, single_file, com_extension)
+}
+
+/// `~ComFileJobs()`: strings and the job array are owned Rust allocations.
+pub fn free_com_file_jobs(jobs: ComFileJobs) {
+    drop(jobs);
+}
+
 impl ComFileJobs {
     /// C++ `ComFileJobs::ComFileJobs`.
     pub fn new(com_file_array: Vec<String>, single_file: bool, com_extension: String) -> Self {
@@ -155,5 +169,12 @@ mod tests {
         assert_eq!(jobs.get_num_chunk_err(0), 1);
         jobs.set_flag_not_done(0, false);
         assert_eq!(jobs.get_flag(0), CHUNK_NOT_DONE);
+    }
+
+    #[test]
+    fn lifecycle_facades_own_job_records() {
+        let jobs = com_file_jobs(vec!["one.com".into()], false, ".com".into());
+        assert_eq!(jobs.get_root(0), "one");
+        free_com_file_jobs(jobs);
     }
 }

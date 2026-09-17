@@ -22,6 +22,32 @@ pub const MEASUREDRIFT_SOURCE_FUNCTIONS: &[&str] = &[
 ];
 
 pub const MAX_RINGS: usize = 200;
+
+/// `cleanupDrift` (`measuredrift.cpp:446`).  All work arrays are owned vectors
+/// here; clearing the source's inclusive set of initialized wedge buffers
+/// releases their contents immediately while retaining safely reusable outer
+/// allocations.
+pub fn cleanup_drift(
+    work: &mut Vec<f32>,
+    spectra: &mut [Vec<f32>],
+    sub_spectra: &mut [Vec<f32>],
+    frequency_counts: &mut [Vec<i32>],
+    max_index: usize,
+) {
+    work.clear();
+    let count = spectra
+        .len()
+        .min(sub_spectra.len())
+        .min(frequency_counts.len());
+    if count == 0 {
+        return;
+    }
+    for index in 0..=max_index.min(count - 1) {
+        spectra[index].clear();
+        sub_spectra[index].clear();
+        frequency_counts[index].clear();
+    }
+}
 #[derive(Clone, Debug)]
 pub struct DriftResult {
     pub slice: i32,

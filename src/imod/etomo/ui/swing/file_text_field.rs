@@ -100,6 +100,13 @@ impl FileTextField {
             self.set_file(Some(file));
         }
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    /// The Rust frontend supplies its optional chooser selection.
+    pub fn actionPerformed(&mut self, selected_file: Option<&Path>) {
+        self.action(selected_file);
+    }
     pub fn set_use_prev_chooser_dir(&mut self, use_prev_chooser_dir: bool) {
         self.use_prev_chooser_dir = use_prev_chooser_dir;
     }

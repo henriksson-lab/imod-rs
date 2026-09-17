@@ -12,6 +12,45 @@ pub struct SvlClusterGraph {
     pub separators: Vec<SvlClique>,
     pub initial_potentials: Vec<SvlFactor>,
 }
+
+/// `svlClusterGraph::svlClusterGraph()` (`svlClusterGraph.cpp:56`).
+pub fn svl_cluster_graph() -> SvlClusterGraph {
+    SvlClusterGraph::new()
+}
+
+/// `svlClusterGraph(int nVars, int varCards)` (`svlClusterGraph.cpp:62`).
+pub fn svl_cluster_graph_with_uniform_cards(
+    nvars: usize,
+    cards: usize,
+) -> Result<SvlClusterGraph, String> {
+    SvlClusterGraph::with_uniform_cards(nvars, cards)
+}
+
+/// `svlClusterGraph(int nVars, const vector<int>& varCards)`
+/// (`svlClusterGraph.cpp:71`).
+pub fn svl_cluster_graph_with_cards(cards: Vec<usize>) -> Result<SvlClusterGraph, String> {
+    SvlClusterGraph::with_cards(cards)
+}
+
+/// `svlClusterGraph(int nVars, const vector<int>&, const vector<svlClique>&)`
+/// (`svlClusterGraph.cpp:79`).
+pub fn svl_cluster_graph_with_cliques(
+    cards: Vec<usize>,
+    cliques: Vec<SvlClique>,
+) -> Result<SvlClusterGraph, String> {
+    let mut graph = SvlClusterGraph::with_cards(cards)?;
+    if cliques.iter().any(|clique| {
+        clique
+            .iter()
+            .any(|&variable| variable < 0 || variable as usize >= graph.num_variables())
+    }) {
+        return Err("clique variable out of range".into());
+    }
+    for clique in cliques {
+        graph.add_clique(clique);
+    }
+    Ok(graph)
+}
 impl SvlClusterGraph {
     pub fn new() -> Self {
         Self::default()
@@ -318,6 +357,29 @@ impl SvlClusterGraph {
             .collect()
     }
 }
+
+/// Source-named read accessors from `svlClusterGraph.cpp`.  Rust returns
+/// `Option` for the C assertion/error boundary rather than exposing invalid
+/// clique indices.
+pub fn get_clique(graph: &SvlClusterGraph, index: usize) -> Option<&SvlClique> {
+    graph.clique(index)
+}
+pub fn get_sep_set(graph: &SvlClusterGraph, index: usize) -> Option<&SvlClique> {
+    graph.separator(index)
+}
+pub fn get_clique_potential(graph: &SvlClusterGraph, index: usize) -> Option<&SvlFactor> {
+    graph.clique_potential(index)
+}
+pub fn get_potential(graph: &SvlClusterGraph, clique: &SvlClique) -> SvlFactor {
+    graph.potential_for_clique(clique)
+}
+pub fn get_energy(
+    graph: &SvlClusterGraph,
+    assignment: &[usize],
+    log_potentials: bool,
+) -> Option<f64> {
+    graph.energy(assignment, log_potentials)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +396,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(g.decode_map(None)[0], Some(1));
+    }
+    #[test]
+    fn source_graph_factories_preserve_cardinality_and_clique_construction() {
+        assert_eq!(svl_cluster_graph().num_variables(), 0);
+        assert_eq!(
+            svl_cluster_graph_with_uniform_cards(2, 3)
+                .unwrap()
+                .variable_cards,
+            [3, 3]
+        );
+        let graph =
+            svl_cluster_graph_with_cliques(vec![2, 3], vec![BTreeSet::from([0, 1])]).unwrap();
+        assert_eq!(graph.cliques, [BTreeSet::from([0, 1])]);
+        assert!(svl_cluster_graph_with_cards(vec![1]).is_err());
     }
     #[test]
     fn bethe_needs_singletons() {

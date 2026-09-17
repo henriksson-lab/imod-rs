@@ -146,7 +146,7 @@ impl Default for InfoControls {
     }
 }
 impl InfoControls {
-    /// `InfoControls::InfoControls`.
+    /// `InfoControls()` source constructor.
     pub fn new(native: &mut dyn InfoNativeBoundary) -> Self {
         native.setup_ui();
         let mut out = Self::default();

@@ -21,12 +21,69 @@ pub trait OptimizerObjective {
     fn monitor(&self, _iteration: usize, _objective: f64) {}
 }
 
+/// External-LBFGS `fdf` callback from `svlOptimizer.cpp`.  The C callback
+/// copies an external one-based array into optimizer storage, evaluates both
+/// objective and gradient, then copies the gradient back; owned slices make
+/// each transfer explicit.
+pub fn fdf<O: OptimizerObjective>(
+    optimizer: &mut SvlOptimizer,
+    objective: &O,
+    iterate: &[f64],
+) -> Result<(f64, Vec<f64>), SvlLbfgsResult> {
+    if iterate.len() != optimizer.x.len() {
+        return Err(SvlLbfgsResult::Error);
+    }
+    optimizer.x.copy_from_slice(iterate);
+    let value = objective.objective_and_gradient(&optimizer.x, &mut optimizer.df);
+    Ok((value, optimizer.df.clone()))
+}
+
+/// External-LBFGS `newiter` callback: retain the source's observable state
+/// update and monitoring hook without a raw backend parameter pointer.
+pub fn newiter<O: OptimizerObjective>(
+    optimizer: &mut SvlOptimizer,
+    objective: &O,
+    iteration: usize,
+    iterate: &[f64],
+    objective_value: f64,
+) -> Result<(), SvlLbfgsResult> {
+    if iterate.len() != optimizer.x.len() {
+        return Err(SvlLbfgsResult::Error);
+    }
+    optimizer.x.copy_from_slice(iterate);
+    objective.monitor(iteration, objective_value);
+    Ok(())
+}
+
 /// C++ `svlOptimizer`, with owned vectors replacing `double *` allocation.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SvlOptimizer {
     pub x: Vec<f64>,
     pub df: Vec<f64>,
 }
+
+/// `svlOptimizer()`, the native empty optimizer constructor.
+pub fn svl_optimizer() -> SvlOptimizer {
+    SvlOptimizer::new()
+}
+
+/// `svlOptimizer(unsigned n)`, with zeroed parameter values and gradient
+/// workspace just as the source constructor allocates.
+pub fn svl_optimizer_with_size(size: usize) -> SvlOptimizer {
+    SvlOptimizer::with_size(size)
+}
+
+/// `svlOptimizer(const svlOptimizer &)`, retaining both parameter and
+/// gradient state rather than aliasing the source's heap arrays.
+pub fn svl_optimizer_copy(source: &SvlOptimizer) -> SvlOptimizer {
+    source.clone()
+}
+
+/// `~svlOptimizer()`: owned vectors are released together.
+pub fn free_svl_optimizer(optimizer: SvlOptimizer) {
+    drop(optimizer);
+}
+
 impl SvlOptimizer {
     pub fn new() -> Self {
         Self::default()
@@ -341,6 +398,17 @@ pub fn lbfgs_step(state: &mut LbfgsStepState, fp: f64, dp: f64, stmin: f64, stma
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constructor_facades_preserve_owned_optimizer_state() {
+        assert_eq!(svl_optimizer(), SvlOptimizer::default());
+        let mut sized = svl_optimizer_with_size(2);
+        sized.x[1] = 4.0;
+        sized.df[0] = -3.0;
+        assert_eq!(svl_optimizer_copy(&sized), sized);
+        free_svl_optimizer(sized);
+    }
+
     struct Quadratic;
     impl OptimizerObjective for Quadratic {
         fn objective(&self, x: &[f64]) -> f64 {

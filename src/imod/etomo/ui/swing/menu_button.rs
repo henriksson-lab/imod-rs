@@ -147,6 +147,12 @@ impl MenuButton {
         self.action(command);
     }
 
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `MenuActionListener::actionPerformed`.
+    pub fn actionPerformed(&mut self, command: &str) {
+        self.menu_action_listener_action_performed(command);
+    }
+
     /// Explicit native container invocation after Java's listener crosses the
     /// ownership boundary.
     pub fn dispatch_container_action(&mut self, container: &mut dyn MenuButtonContainer) {

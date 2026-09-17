@@ -565,6 +565,35 @@ impl SirtPanel {
     }
 }
 
+pub struct SirtDocumentListener;
+impl SirtDocumentListener {
+    #[allow(non_snake_case)]
+    pub fn changedUpdate(panel: &mut SirtPanel) {
+        panel.document_action();
+    }
+    #[allow(non_snake_case)]
+    pub fn insertUpdate(panel: &mut SirtPanel) {
+        panel.document_action();
+    }
+    #[allow(non_snake_case)]
+    pub fn removeUpdate(panel: &mut SirtPanel) {
+        panel.document_action();
+    }
+}
+
+pub struct SirtActionListener;
+impl SirtActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<F: SirtPanelFileChooser, M: SirtPanelApplicationManager>(
+        panel: &mut SirtPanel,
+        chooser: &mut F,
+        manager: &mut M,
+        command: &str,
+    ) {
+        panel.action(command, chooser, manager);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,6 +8,12 @@ pub struct RotationMatrix {
     pub m: [[f32; 3]; 3],
 }
 
+/// `RotationMatrix::RotationMatrix` (`matrix.cpp:41`), retained for source
+/// call sites that construct an explicitly zeroed matrix.
+pub fn rotation_matrix() -> RotationMatrix {
+    RotationMatrix::new()
+}
+
 impl Default for RotationMatrix {
     fn default() -> Self {
         Self::new()
@@ -29,6 +35,12 @@ impl RotationMatrix {
                 [self.m[0][2], self.m[1][2], self.m[2][2]],
             ],
         }
+    }
+
+    /// Source-shaped spelling of [`Self::transposed`] for
+    /// `RotationMatrix::ReturnTransposed` (`matrix.cpp:178`).
+    pub fn return_transposed(self) -> Self {
+        self.transposed()
     }
 
     /// C++ `RotationMatrix::SetToIdentity`.
@@ -216,15 +228,15 @@ impl MulAssign for RotationMatrix {
 
 #[cfg(test)]
 mod tests {
-    use super::RotationMatrix;
+    use super::{RotationMatrix, rotation_matrix};
 
     #[test]
     fn source_matrix_operations_preserve_coordinate_order() {
-        let mut matrix = RotationMatrix::new();
+        let mut matrix = rotation_matrix();
         matrix.set_to_values(1.0, 4.0, 7.0, 2.0, 5.0, 8.0, 3.0, 6.0, 9.0);
         assert_eq!(matrix.rotate_coords(1.0, 2.0, 3.0), (14.0, 32.0, 50.0));
         assert_eq!(
-            matrix.transposed().m,
+            matrix.return_transposed().m,
             [[1.0, 4.0, 7.0], [2.0, 5.0, 8.0], [3.0, 6.0, 9.0]]
         );
 

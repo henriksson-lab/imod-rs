@@ -83,6 +83,16 @@ pub struct ImodWorkproc {
     pub movie_con: MovieConState,
 }
 
+/// `ImodWorkproc()`: create the timer owner for one borrowed viewer identity.
+pub fn imod_workproc(view: &ImodView) -> ImodWorkproc {
+    ImodWorkproc::new(view)
+}
+
+/// `~ImodWorkproc()`: timer records and movie state are ordinary owned data.
+pub fn free_imod_workproc(workproc: ImodWorkproc) {
+    drop(workproc);
+}
+
 impl ImodWorkproc {
     /// `ImodWorkproc::ImodWorkproc`.
     pub fn new(vw: &ImodView) -> Self {
@@ -373,6 +383,14 @@ pub fn imod_movie_xyzt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_constructor_facade_owns_timer_records() {
+        let view = ImodView::default();
+        let work = imod_workproc(&view);
+        assert!(!work.m_movie_timer.active);
+        free_imod_workproc(work);
+    }
     #[derive(Default)]
     struct Native {
         draws: Vec<i32>,

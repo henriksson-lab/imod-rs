@@ -732,6 +732,16 @@ impl BeadtrackPanel {
         }
         Ok(())
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed<P: BeadtrackParam, M: BeadtrackPanelApplicationManager<P>>(
+        &mut self,
+        manager: &mut M,
+        command: &str,
+    ) -> Result<(), String> {
+        self.action(manager, command, None)
+    }
 }
 
 #[cfg(test)]

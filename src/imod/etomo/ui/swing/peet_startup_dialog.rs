@@ -146,6 +146,40 @@ impl<M: PeetStartupManager> PeetStartupDialog<M> {
         self.dialog_packed = true;
         self.dialog_visible = true;
     }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &str {
+        &self.pnl_root_name
+    }
+    #[allow(non_snake_case)]
+    pub fn getComponent(&self) -> &str {
+        &self.pnl_root_name
+    }
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(&mut self, command: &str) {
+        self.action(command);
+    }
+    #[allow(non_snake_case)]
+    pub fn windowActivated(&mut self) {
+        self.dialog_visible = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowClosed(&mut self) {
+        self.dialog_visible = false;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowDeactivated(&mut self) {}
+    #[allow(non_snake_case)]
+    pub fn windowDeiconified(&mut self) {
+        self.dialog_visible = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowIconified(&mut self) {
+        self.dialog_visible = false;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowOpened(&mut self) {
+        self.dialog_visible = true;
+    }
     pub fn dispose(&mut self) {
         self.dialog_visible = false;
         self.dialog_disposed = true;

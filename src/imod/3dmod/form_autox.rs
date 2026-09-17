@@ -84,7 +84,7 @@ pub struct AutoxWindow {
 }
 
 impl AutoxWindow {
-    /// `AutoxWindow::AutoxWindow`.
+    /// `AutoxWindow()` source constructor.
     pub fn new(m_top_win: usize, native: &mut dyn AutoxNativeBoundary) -> Self {
         native.setup_ui();
         let mut window = Self {

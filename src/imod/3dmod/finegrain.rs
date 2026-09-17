@@ -1158,6 +1158,19 @@ mod tests {
         assert_eq!(ifg_selected_line_width(4, 0), 4);
     }
     #[test]
+    fn next_change_starts_after_equal_indices_and_stops_at_noindex_item() {
+        let item = |index, flags| Istore {
+            index: StoreUnion::from_i(index),
+            flags,
+            ..Default::default()
+        };
+        let changes = vec![item(2, 0), item(2, 0), item(4, 0)];
+        assert_eq!(find_next_change(&changes, 2, 0, false), 4);
+        assert_eq!(find_next_change(&changes, 4, 0, true), 2);
+        let terminated = vec![item(2, 0), item(3, GEN_STORE_NOINDEX), item(4, 0)];
+        assert_eq!(find_next_change(&terminated, 2, 0, false), -1);
+    }
+    #[test]
     fn value_setup_rejects_disabled_object() {
         let o = Iobj::default();
         let mut s = FinegrainValueState::default();

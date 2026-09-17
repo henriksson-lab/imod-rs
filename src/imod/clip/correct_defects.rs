@@ -68,6 +68,137 @@ pub enum PixelData<'a> {
     Float(&'a mut [f32]),
 }
 
+/// `CorrectColumn` (`CorrectDefects.cpp:429`) for the primary correction
+/// path.  Defect columns are filled by the source's left/right fractional
+/// interpolation, respecting callers' transposed row correction strides.
+/// The super-resolution pre-averaging and wider contextual filters are kept
+/// in the higher-level correction route; this routine is the reusable
+/// stride-aware column primitive.
+pub fn correct_column(
+    array: &mut PixelData<'_>,
+    nx: i32,
+    ny: i32,
+    x_stride: i32,
+    y_stride: i32,
+    mut index_start: i32,
+    mut count: i32,
+    y_start: i32,
+    y_end: i32,
+) -> Result<(), String> {
+    if nx <= 0
+        || ny <= 0
+        || x_stride <= 0
+        || y_stride <= 0
+        || y_start < 0
+        || y_end >= ny
+        || y_start > y_end
+    {
+        return Err("invalid column correction geometry".into());
+    }
+    if index_start < 0 {
+        count += index_start;
+        index_start = 0;
+    }
+    if index_start + count > nx {
+        count = nx - index_start;
+    }
+    if count <= 0 {
+        return Ok(());
+    }
+    fn interpolate(
+        data: &mut [f32],
+        nx: i32,
+        x_stride: i32,
+        y_stride: i32,
+        start: i32,
+        count: i32,
+        ys: i32,
+        ye: i32,
+    ) {
+        for column in 0..count {
+            let mut left = start - 1;
+            let mut right = start + count;
+            if left < 0 {
+                left = right;
+            }
+            if right >= nx {
+                right = left;
+            }
+            let left_base = left * x_stride;
+            let right_base = right * x_stride;
+            let destination_base = (start + column) * x_stride;
+            let right_fraction = (column + 1) as f32 / (count + 1) as f32;
+            for y in ys..=ye {
+                let destination = (destination_base + y * y_stride) as usize;
+                data[destination] = (1. - right_fraction)
+                    * data[(left_base + y * y_stride) as usize]
+                    + right_fraction * data[(right_base + y * y_stride) as usize];
+            }
+        }
+    }
+    match array {
+        PixelData::Float(data) => interpolate(
+            data,
+            nx,
+            x_stride,
+            y_stride,
+            index_start,
+            count,
+            y_start,
+            y_end,
+        ),
+        PixelData::Byte(data) => {
+            let mut work: Vec<f32> = data.iter().map(|&value| value as f32).collect();
+            interpolate(
+                &mut work,
+                nx,
+                x_stride,
+                y_stride,
+                index_start,
+                count,
+                y_start,
+                y_end,
+            );
+            for (target, value) in data.iter_mut().zip(work) {
+                *target = value.round().clamp(0., 255.) as u8;
+            }
+        }
+        PixelData::Short(data) => {
+            let mut work: Vec<f32> = data.iter().map(|&value| value as f32).collect();
+            interpolate(
+                &mut work,
+                nx,
+                x_stride,
+                y_stride,
+                index_start,
+                count,
+                y_start,
+                y_end,
+            );
+            for (target, value) in data.iter_mut().zip(work) {
+                *target = value.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            }
+        }
+        PixelData::UShort(data) => {
+            let mut work: Vec<f32> = data.iter().map(|&value| value as f32).collect();
+            interpolate(
+                &mut work,
+                nx,
+                x_stride,
+                y_stride,
+                index_start,
+                count,
+                y_start,
+                y_end,
+            );
+            for (target, value) in data.iter_mut().zip(work) {
+                *target = value.round().clamp(0., u16::MAX as f32) as u16;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl CameraDefects {
     /// The state a default-constructed C++ `CameraDefects` has: every
     /// `std::vector` empty and every `int` member zero, which is what

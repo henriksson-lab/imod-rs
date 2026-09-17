@@ -80,6 +80,18 @@ pub struct UndoRedo {
     pub undo_index: isize,
     pub num_freed_in_pool: usize,
 }
+
+/// `UndoRedo()`: create an owned undo pool.  The native `ImodView *` is an
+/// explicit model argument to mutation methods in this Rust translation.
+pub fn undo_redo() -> UndoRedo {
+    UndoRedo::new()
+}
+
+/// `~UndoRedo()`: discard recorded units and their owned backup payloads.
+pub fn free_undo_redo(mut undo: UndoRedo) {
+    undo.drop_units();
+}
+
 impl Default for UndoRedo {
     fn default() -> Self {
         Self::new()
@@ -922,6 +934,14 @@ pub fn undo_flush_unit(u: &mut UndoRedo) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constructor_facades_create_and_release_empty_pool() {
+        let undo = undo_redo();
+        assert_eq!(undo.max_units, 1000);
+        assert_eq!(undo.max_bytes, 5_000_000);
+        free_undo_redo(undo);
+    }
     fn model() -> Imod {
         let mut m = Imod::default();
         m.obj.push(Iobj {

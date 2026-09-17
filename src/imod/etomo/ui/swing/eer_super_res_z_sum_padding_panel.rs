@@ -75,6 +75,10 @@ pub enum EerZSum {
 
 impl EerZSum {
     pub const DEFAULT: Self = Self::Frames;
+    /// Java `isDefault()`.
+    pub fn is_default(self) -> bool {
+        self == Self::DEFAULT
+    }
     pub fn radio_enum_value_name(self) -> &'static str {
         match self {
             Self::Frames => "framesradio",
@@ -92,6 +96,13 @@ impl EerZSum {
             Self::Frames => "Sum frames to make",
             Self::Sets => "Sum successive sets of",
         }
+    }
+}
+
+/// Java `toString()`.
+impl std::fmt::Display for EerZSum {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.radio_enum_value_name())
     }
 }
 
@@ -465,6 +476,9 @@ mod tests {
     fn source_default_and_z_sum_choice_drive_dependent_controls() {
         let mut panel =
             EerSuperResZSumPaddingPanel::get_instance(AxisID::Only, DialogType::Tools, 7, false);
+        assert!(EerZSum::Frames.is_default());
+        assert!(!EerZSum::Sets.is_default());
+        assert_eq!(EerZSum::Sets.to_string(), "setsradio");
         assert!(panel.rb_super_res_2x.is_selected());
         assert!(panel.sp_z_sum_frames.is_enabled());
         panel.rb_z_sum_sets.set_selected(true);

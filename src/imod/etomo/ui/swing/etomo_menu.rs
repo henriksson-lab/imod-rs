@@ -453,6 +453,22 @@ impl EtomoMenu {
         }
     }
 }
+
+/// Native replacement for the Java menu action-listener inner classes.
+pub struct EtomoMenuActionListener;
+impl EtomoMenuActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(menu: &EtomoMenu, command: &str) -> MenuTarget {
+        if let Ok(target) = menu.menu_file_action(command) {
+            return target;
+        }
+        let tools = menu.menu_tools_action(command);
+        if !matches!(tools, MenuTarget::UnportedTarget(_)) {
+            return tools;
+        }
+        menu.menu_help_action(command)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

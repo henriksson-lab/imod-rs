@@ -535,6 +535,11 @@ where
             self.method_changed();
         }
     }
+    #[allow(non_snake_case)]
+    /// Native-name adapter for the Java listener's `actionPerformed`.
+    pub fn actionPerformed(&mut self, action_command: &str) {
+        self.action(action_command);
+    }
 }
 impl<T, M, S, C, P, E, H> TomogramGenerationParent for TomogramGenerationDialog<T, M, S, C, P, E, H>
 where

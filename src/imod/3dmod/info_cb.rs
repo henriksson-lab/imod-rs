@@ -6,10 +6,10 @@
 //! the original source rather than being delegated to a replacement UI.
 #![allow(dead_code, unused_variables)]
 
-use crate::imod::libimod::imodel::Imod;
+use crate::imod::libimod::imodel::{Iindex, Imod, imod_set_index};
 use crate::imod::three_dmod::imodview::{
-    IMOD_DRAW_ALL, IMOD_DRAW_MOD, IMOD_DRAW_XYZ, IMOD_MM_TOGGLE, IMOD_MMODEL, IMOD_MMOVIE,
-    ImodView, ivw_bind_mouse,
+    IMOD_DRAW_ALL, IMOD_DRAW_MOD, IMOD_DRAW_NOSYNC, IMOD_DRAW_XYZ, IMOD_MM_TOGGLE, IMOD_MMODEL,
+    IMOD_MMOVIE, ImodView, ivw_bind_mouse,
 };
 
 /// `MeanSDData` in the source.
@@ -46,6 +46,16 @@ pub struct Cramp {
     pub whitelevel: i32,
     pub reverse: i32,
     pub falsecolor: i32,
+}
+
+/// Lock state snapshot of one Zap, Slicer, or XYZ window consumed by
+/// `makeListOfTimesToFloat`.  The rewritten GUI host supplies these in its
+/// dialog-manager order; `is_top_window` corresponds to `objList.at(0)`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TimeLockedImageWindow {
+    pub section_locked: bool,
+    pub time_lock: i32,
+    pub is_top_window: bool,
 }
 
 /// The static variables of `info_cb.cpp`, held by the owning viewer instead of C globals.
@@ -134,6 +144,12 @@ pub trait InfoCbBoundary {
     fn draw(&mut self, _: i32) {}
     fn process_events(&mut self) {}
     fn object_changed(&mut self) {}
+    /// `inputKeepContourAtSameTime` after an object selection.
+    fn keep_contour_at_same_time(&mut self) {}
+    /// `inputRestorePointIndex` after a contour selection.
+    fn restore_point_index(&mut self, _: Iindex) {}
+    /// `ivwControlActive(vi, 0); imod_setxyzmouse()`.
+    fn sync_model_index_to_mouse(&mut self) {}
     fn xyz_changed(&mut self) {}
     fn message(&mut self, _: &str) {}
     fn mean_sd(
@@ -175,20 +191,51 @@ pub fn info_level_to_slider(vi: &ImodView, level: i32) -> i32 {
     }
 }
 
-/// `imodInfoNewOCP`; model/index work and cross-dialog effects stay at the viewer boundary.
+/// `imodInfoNewOCP`.  The C source obtains `Imod` from `App->cvi`; Rust
+/// receives the owner explicitly so object/contour/point selection is real
+/// state mutation instead of an opaque UI notification.
 pub fn imod_info_new_ocp(
     state: &mut InfoCbState,
+    model: &mut Imod,
     which: i32,
     value: i32,
     no_show: i32,
     b: &mut dyn InfoCbBoundary,
 ) {
     b.set_focus();
-    if value <= 0 {
+    let value = value - 1;
+    if value < 0 {
+        imod_info_setocp(state, model, b);
         return;
     }
-    let _ = (state, which, no_show);
-    b.object_changed();
+    let old = model.cindex;
+    match which {
+        // Object: with Show disabled detach contour and point; otherwise the
+        // shared input controller preserves same-time contour attachment.
+        0 if no_show != 0 => {
+            model.cindex.object = value;
+            model.cindex.contour = -1;
+            model.cindex.point = -1;
+        }
+        0 => {
+            imod_set_index(model, value, old.contour, old.point);
+            b.keep_contour_at_same_time();
+        }
+        1 => {
+            imod_set_index(model, old.object, value, old.point);
+            b.restore_point_index(old);
+        }
+        2 => imod_set_index(model, old.object, old.contour, value),
+        _ => return,
+    }
+    if no_show != 0 && model.cindex.point > 0 {
+        // `IMOD_DRAW_NOSYNC` suppresses the controller sync that the normal
+        // branch performs below; the boundary's draw flag is the direct host
+        // equivalent for the rewritten GUI.
+        b.draw(IMOD_DRAW_ALL | IMOD_DRAW_NOSYNC);
+        return;
+    }
+    b.sync_model_index_to_mouse();
 }
 /// `imodInfoNewXYZ`.
 pub fn imod_info_new_xyz(vi: &mut ImodView, values: [i32; 3], b: &mut dyn InfoCbBoundary) {
@@ -654,11 +701,31 @@ pub fn imod_info_get_low_high_range(state: &InfoCbState, vi: &ImodView, time: i3
 }
 /// `makeListOfTimesToFloat`; window enumeration remains at the Zap/Slicer/Xyz boundary.
 pub fn make_list_of_times_to_float(
-    _state: &InfoCbState,
-    _vi: &ImodView,
-    _section: i32,
+    state: &InfoCbState,
+    vi: &ImodView,
+    section: i32,
+    windows: &[TimeLockedImageWindow],
 ) -> Vec<i32> {
-    Vec::new()
+    let mut times = Vec::new();
+    for window in windows {
+        if window.section_locked || window.time_lock == 0 || window.time_lock == vi.cur_time {
+            continue;
+        }
+        let Some(time_data) = state.t_ramp_data.get(window.time_lock as usize) else {
+            continue;
+        };
+        // `info_cb.cpp:1244-1247`: a saved floating time is reconsidered on
+        // a new section; otherwise global float initializes only the current
+        // top image window for an unvisited time.
+        let should_float = (time_data.float_on != 0
+            && time_data.last_section >= 0
+            && section != state.last_section)
+            || (state.float_on != 0 && time_data.last_section < 0 && window.is_top_window);
+        if should_float && !times.contains(&window.time_lock) {
+            times.push(window.time_lock);
+        }
+    }
+    times
 }
 /// `imodInfoCurrentMeanSD`.
 pub fn imod_info_current_mean_sd(
@@ -830,10 +897,22 @@ mod tests {
     struct B {
         draws: Vec<i32>,
         means: Option<(f32, f32)>,
+        keep_same_time: usize,
+        restored: Vec<Iindex>,
+        synced: usize,
     }
     impl InfoCbBoundary for B {
         fn draw(&mut self, x: i32) {
             self.draws.push(x)
+        }
+        fn keep_contour_at_same_time(&mut self) {
+            self.keep_same_time += 1;
+        }
+        fn restore_point_index(&mut self, old: Iindex) {
+            self.restored.push(old);
+        }
+        fn sync_model_index_to_mouse(&mut self) {
+            self.synced += 1;
         }
         fn mean_sd(
             &mut self,
@@ -870,5 +949,107 @@ mod tests {
         assert!(v.white > v.black);
         s.float_on = 1;
         assert_eq!(imod_info_bwfloat(&mut s, &mut v, 0, 0, &mut b), 0);
+    }
+    #[test]
+    fn ocp_selection_mutates_model_and_uses_native_sync_routes() {
+        let contour = || crate::imod::libimod::imodel::Icont {
+            pts: vec![Default::default(), Default::default()],
+            ..Default::default()
+        };
+        let mut model = Imod::default();
+        model.obj = vec![
+            crate::imod::libimod::imodel::Iobj {
+                cont: vec![contour(), contour()],
+                ..Default::default()
+            },
+            crate::imod::libimod::imodel::Iobj {
+                cont: vec![contour()],
+                ..Default::default()
+            },
+        ];
+        model.cindex = Iindex {
+            object: 0,
+            contour: 0,
+            point: 0,
+        };
+        let mut state = InfoCbState::default();
+        let mut boundary = B::default();
+
+        imod_info_new_ocp(&mut state, &mut model, 0, 2, 1, &mut boundary);
+        assert_eq!(
+            model.cindex,
+            Iindex {
+                object: 1,
+                contour: -1,
+                point: -1
+            }
+        );
+        assert_eq!(boundary.synced, 1);
+
+        model.cindex = Iindex {
+            object: 0,
+            contour: 0,
+            point: 1,
+        };
+        imod_info_new_ocp(&mut state, &mut model, 1, 2, 0, &mut boundary);
+        assert_eq!(model.cindex.contour, 1);
+        assert_eq!(
+            boundary.restored,
+            vec![Iindex {
+                object: 0,
+                contour: 0,
+                point: 1
+            }]
+        );
+
+        imod_info_new_ocp(&mut state, &mut model, 2, 2, 1, &mut boundary);
+        assert_eq!(model.cindex.point, 1);
+        assert_eq!(boundary.draws, vec![IMOD_DRAW_ALL | IMOD_DRAW_NOSYNC]);
+    }
+    #[test]
+    fn time_float_list_follows_window_locks_and_top_window_rule() {
+        let mut state = InfoCbState {
+            last_section: 2,
+            float_on: 1,
+            t_ramp_data: vec![TimeRampData::default(); 5],
+            ..Default::default()
+        };
+        state.t_ramp_data[2] = TimeRampData {
+            float_on: 1,
+            last_section: 1,
+            ..Default::default()
+        };
+        let vi = ImodView {
+            cur_time: 1,
+            ..Default::default()
+        };
+        let times = make_list_of_times_to_float(
+            &state,
+            &vi,
+            3,
+            &[
+                TimeLockedImageWindow {
+                    time_lock: 2,
+                    ..Default::default()
+                },
+                TimeLockedImageWindow {
+                    time_lock: 3,
+                    is_top_window: true,
+                    ..Default::default()
+                },
+                // Duplicate time and a section-locked window do not add a
+                // second entry.
+                TimeLockedImageWindow {
+                    time_lock: 2,
+                    ..Default::default()
+                },
+                TimeLockedImageWindow {
+                    time_lock: 4,
+                    section_locked: true,
+                    is_top_window: true,
+                },
+            ],
+        );
+        assert_eq!(times, vec![2, 3]);
     }
 }

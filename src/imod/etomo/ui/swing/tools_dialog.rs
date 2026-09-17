@@ -11,6 +11,7 @@ use std::path::Path;
 
 use super::abstract_frame::ComponentState;
 use super::etomo_menu::ToolType;
+use super::log_interface::FileReaderRef;
 use super::panel::Panel;
 use super::tool_panel::ToolPanel;
 use crate::imod::etomo::base_manager::BaseManager;
@@ -249,6 +250,22 @@ impl ToolsDialog {
     /// Java `logMessage(File, boolean, FileWriter)` at the file-reader boundary.
     pub fn log_message_file_with_newline(&mut self, file: &Path, _newline: bool) {
         self.log_message_file(file);
+    }
+
+    /// Java `logMessagePrimaryLog(FileReader)`.  The Java implementation
+    /// delegates to `EtomoLogger`; this Rust log surface consumes the same
+    /// reader boundary directly.
+    pub fn log_message_primary_log(&mut self, reader: Option<FileReaderRef>) {
+        let Some(reader) = reader else { return };
+        while reader.borrow().is_readable() {
+            let Some(line) = reader.borrow_mut().read_line() else {
+                break;
+            };
+            self.append(&line);
+            if !line.ends_with('\n') {
+                self.append("\n");
+            }
+        }
     }
 
     /// Java `save()`.

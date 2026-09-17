@@ -11,6 +11,30 @@ pub enum SvlLogLevel {
     Verbose = 4,
     Debug = 5,
 }
+/// `svlLogger`, a lightweight facade over the source's process-global logger
+/// state.  Constructing it does not reset configuration, matching the C++
+/// constructor's no-op behavior.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SvlLogger;
+
+/// `svlLogger::svlLogger` (`svlLogger.cpp:58`).
+pub fn svl_logger() -> SvlLogger {
+    SvlLogger
+}
+
+impl SvlLogger {
+    pub fn initialize(
+        self,
+        filename: Option<&str>,
+        overwrite: bool,
+        level: Option<SvlLogLevel>,
+    ) -> std::io::Result<()> {
+        initialize(filename, overwrite, level)
+    }
+    pub fn log_message(self, level: SvlLogLevel, message: &str) -> Result<(), String> {
+        log_message(level, message)
+    }
+}
 struct Logger {
     level: SvlLogLevel,
     path: Option<String>,
@@ -103,5 +127,10 @@ mod tests {
         assert!(log_message(SvlLogLevel::Debug, "x").is_ok());
         assert!(set_configuration("logLevel", "debug").is_ok());
         assert_eq!(get_log_level(), SvlLogLevel::Debug);
+        assert!(
+            svl_logger()
+                .log_message(SvlLogLevel::Message, "facade")
+                .is_ok()
+        );
     }
 }

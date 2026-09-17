@@ -22,6 +22,16 @@ pub enum CvReduceOp {
     Minimum,
 }
 
+/// Source depths installed in `cvSum`'s dispatch tables.  In particular,
+/// OpenCV 1.x leaves the `CV_8S` table entries null.
+pub trait CvSumValue: CvMeanValue {}
+impl CvSumValue for u8 {}
+impl CvSumValue for u16 {}
+impl CvSumValue for i16 {}
+impl CvSumValue for i32 {}
+impl CvSumValue for f32 {}
+impl CvSumValue for f64 {}
+
 /// Values with the same non-zero test used by `cvCountNonZero`.
 pub trait CvNonZero: Copy {
     fn is_cv_non_zero(self) -> bool;
@@ -46,7 +56,7 @@ impl_non_zero!(f32);
 impl_non_zero!(f64);
 
 /// Owned generic translation of `cvSum`.
-pub fn cv_sum<T: CvMeanValue>(
+pub fn cv_sum<T: CvSumValue>(
     matrix: &CvMeanMatrix<T>,
     coi: Option<usize>,
 ) -> Result<CvScalar, CvSumError> {
@@ -123,7 +133,7 @@ pub fn cv_count_non_zero<T: CvNonZero>(
 /// each row into one column.  As in the C implementation, channels are kept
 /// separate.  The output is `f64`, covering every C source/destination depth
 /// combination without pointer casts or temporary `CvMat` allocations.
-pub fn cv_reduce<T: CvMeanValue>(
+pub fn cv_reduce<T: CvSumValue>(
     source: &CvMeanMatrix<T>,
     dimension: usize,
     operation: CvReduceOp,
@@ -134,6 +144,8 @@ pub fn cv_reduce<T: CvMeanValue>(
         .checked_mul(source.size.height)
         .ok_or(CvSumError::BadArgument)?;
     if dimension > 1
+        || source.size.width == 0
+        || source.size.height == 0
         || source.channels == 0
         || source.data.len()
             != pixels
@@ -273,6 +285,22 @@ mod tests {
         assert_eq!(
             cv_reduce(&matrix, 1, CvReduceOp::Maximum).unwrap().data,
             [5., 6.]
+        );
+    }
+
+    #[test]
+    fn reduce_rejects_empty_input_instead_of_indexing_a_seed_value() {
+        let empty: CvMeanMatrix<f64> = CvMeanMatrix {
+            size: CvSize {
+                width: 0,
+                height: 1,
+            },
+            channels: 1,
+            data: vec![],
+        };
+        assert_eq!(
+            cv_reduce(&empty, 0, CvReduceOp::Sum),
+            Err(CvSumError::BadArgument)
         );
     }
 }

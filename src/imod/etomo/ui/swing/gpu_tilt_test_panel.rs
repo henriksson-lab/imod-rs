@@ -212,6 +212,12 @@ impl GpuTiltTestPanel {
     ) {
         self.action(manager);
     }
+
+    #[allow(non_snake_case)]
+    /// Native-name adapter for `GpuTiltTestActionListener::actionPerformed`.
+    pub fn actionPerformed<M: GpuTiltTestPanelManager>(&self, manager: &mut M) {
+        self.gpu_tilt_test_action_listener_action_performed(manager);
+    }
 }
 
 impl ToolPanel for GpuTiltTestPanel {

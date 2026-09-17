@@ -96,6 +96,17 @@ pub fn decode_message_passing_algorithm(name: &str) -> SvlMessagePassingAlgorith
     }
 }
 
+/// `toString(svlMessagePassingAlgorithms&)` (`svlMessagePassing.cpp:60`).
+pub fn svl_message_passing_algorithm_to_string(algorithm: SvlMessagePassingAlgorithm) -> String {
+    algorithm.to_string()
+}
+
+/// Source-spelled `toString(svlMessagePassingAlgorithms&)`
+/// (`svlMessagePassing.cpp:60`).
+pub fn to_string(algorithm: SvlMessagePassingAlgorithm) -> String {
+    svl_message_passing_algorithm_to_string(algorithm)
+}
+
 /// Source `svlMessagePassingInference`, with owned messages and beliefs.
 #[derive(Clone, Debug)]
 pub struct SvlMessagePassingInference {
@@ -116,6 +127,11 @@ pub struct SvlMessagePassingInference {
     pub lp_separator_edges: Vec<Vec<usize>>,
     pub lp_separators: Vec<std::collections::BTreeSet<i32>>,
     pub lp_edges: Vec<(usize, usize)>,
+}
+/// `svlMessagePassingInference::svlMessagePassingInference`
+/// (`svlMessagePassing.cpp:156`), as an owned Rust factory.
+pub fn svl_message_passing_inference(graph: SvlClusterGraph) -> SvlMessagePassingInference {
+    SvlMessagePassingInference::new(graph)
 }
 impl SvlMessagePassingInference {
     pub fn new(graph: SvlClusterGraph) -> Self {
@@ -915,6 +931,10 @@ mod tests {
         );
         assert_eq!(
             SvlMessagePassingAlgorithm::LogMaxProd.to_string(),
+            "LOGMAXPROD"
+        );
+        assert_eq!(
+            to_string(SvlMessagePassingAlgorithm::LogMaxProd),
             "LOGMAXPROD"
         );
         assert!(SvlMessagePassingAlgorithm::Gemplp.is_log_space());

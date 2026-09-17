@@ -10,7 +10,13 @@ use std::sync::{Arc, Mutex};
 
 use super::arguments::Arguments;
 use super::base_manager::BaseManager;
+use super::batch_run_tomo_manager::BatchRunTomoManager;
+use super::join_manager::JoinManager;
 use super::manager_key::ManagerKey;
+use super::parallel_manager::ParallelManager;
+use super::serial_sections_manager::SerialSectionsManager;
+use super::r#type::axis_id::AxisID;
+use super::r#type::dialog_type::DialogType;
 use super::util::unique_hashed_array::UniqueHashedArray;
 use super::util::unique_key::UniqueKey;
 
@@ -51,6 +57,13 @@ pub const FILE_INFO_CLEAN_PRINT_LABEL: &str = "File Info";
 pub struct EtomoDirector {
     pub home_directory: String,
     pub original_user_dir: Option<String>,
+    /// Native boundary for Java's singleton `UserConfiguration`: its concrete
+    /// typed settings model is translated at the settings/storage layer, while
+    /// the director owns lifecycle, location and the widely-used appearance bits.
+    user_preference_loaded: bool,
+    user_font_size: i32,
+    user_configuration_path: Option<PathBuf>,
+    maintain_etomo: bool,
     pub test_failed: bool,
     pub java_memory_limit: i64,
     pub imod_brief_header: bool,
@@ -78,6 +91,7 @@ impl EtomoDirector {
     pub fn new() -> Self {
         Self {
             home_directory: std::env::var("HOME").unwrap_or_default(),
+            user_font_size: 12,
             ..Self::default()
         }
     }
@@ -154,6 +168,54 @@ impl EtomoDirector {
     pub fn is_test(&self) -> bool {
         self.test
     }
+    /// Java static `isUserPreferenceLoaded()`.
+    pub fn is_user_preference_loaded(&self) -> bool {
+        self.user_preference_loaded
+    }
+    /// Java static `getUserFontSize()`.
+    pub fn get_user_font_size(&self) -> i32 {
+        self.user_font_size
+    }
+    /// Native replacement for Java's `loadUserConfiguration` lifecycle entry.
+    /// `ParameterStore` remains responsible for decoding the typed settings;
+    /// this establishes the same user-owned file and records a successful load.
+    pub fn load_user_configuration(&mut self) -> Result<&Path, String> {
+        if self.home_directory.is_empty() {
+            return Err("Can not find home directory! Unable to load user preferences".into());
+        }
+        let path = PathBuf::from(&self.home_directory).join(USER_CONFIG_FILE_EXT);
+        if !path.exists() {
+            std::fs::File::create(&path).map_err(|error| error.to_string())?;
+        }
+        self.user_configuration_path = Some(path);
+        self.user_preference_loaded = true;
+        Ok(self.user_configuration_path.as_deref().unwrap())
+    }
+    pub fn get_user_configuration_path(&self) -> Option<&Path> {
+        self.user_configuration_path.as_deref()
+    }
+    /// Java `setMaintainEtomo(UITester)` at the director state boundary.
+    pub fn set_maintain_etomo(&mut self, maintain: bool) {
+        self.maintain_etomo = maintain;
+    }
+    pub fn stop_maintain_etomo(&mut self) {
+        self.maintain_etomo = false;
+    }
+    pub fn is_maintaining_etomo(&self) -> bool {
+        self.maintain_etomo
+    }
+    /// Java private `setAdvanced(boolean)`, made an explicit native state update.
+    pub fn set_advanced(&mut self, state: bool) {
+        self.is_advanced = state;
+    }
+    /// Rust's diagnostic equivalent of Java `printProperties`; it never exposes
+    /// environment values because those can hold credentials.
+    pub fn print_properties(&self) -> String {
+        format!(
+            "EtomoDirector{{home:{}, headless:{}, advanced:{}, preferencesLoaded:{}}}",
+            self.home_directory, self.headless, self.is_advanced, self.user_preference_loaded
+        )
+    }
 
     /// Matches Java `setup()` (`EtomoDirector.java:254`) excluding JVM property/Swing output.
     pub fn setup(&mut self) -> Result<(), String> {
@@ -179,6 +241,7 @@ impl EtomoDirector {
                 }
             }
         }
+        self.load_user_configuration()?;
         self.initialize()?;
         self.do_automation();
         Ok(())
@@ -270,9 +333,29 @@ impl EtomoDirector {
     }
     /// Matches Java `getIMODBinPath()` (`EtomoDirector.java:1427`).
     pub fn get_imod_bin_path(&self) -> Option<String> {
-        self.imod_directory
-            .as_ref()
-            .map(|directory| directory.join("bin").to_string_lossy().into_owned())
+        self.imod_directory.as_ref().map(|directory| {
+            let mut path = directory.join("bin").to_string_lossy().into_owned();
+            if !path.ends_with(std::path::MAIN_SEPARATOR) {
+                path.push(std::path::MAIN_SEPARATOR);
+            }
+            path
+        })
+    }
+    /// Java `getPythonScriptPath()`.  Cygwin conversion is intentionally owned
+    /// by the platform process runner; the director caches the canonical IMOD
+    /// bin path that all native runners consume.
+    pub fn get_python_script_path(&mut self) -> Option<&str> {
+        if self.python_script_path.is_none() {
+            self.python_script_path = self.get_imod_bin_path();
+        }
+        self.python_script_path.as_deref()
+    }
+    /// Java overload `getPythonScriptPath(String)`.
+    pub fn get_python_script_path_for(&self, imod_bin_path: impl Into<String>) -> String {
+        imod_bin_path.into()
+    }
+    pub fn get_number_of_processors_windows(&self) -> Option<i64> {
+        self.number_of_processors_windows
     }
     /// Matches Java `getIMODCalibDirectory()` (`EtomoDirector.java:1476`).
     pub fn get_imod_calib_directory(&self) -> Option<&Path> {
@@ -284,7 +367,23 @@ impl EtomoDirector {
     }
     /// Matches Java `getAvailableMemory()` (`EtomoDirector.java:1559`).
     pub fn get_available_memory(&self) -> i64 {
-        0
+        #[cfg(unix)]
+        {
+            // `sysconf` is the direct native analogue of the JVM runtime's
+            // available-memory query.  Saturate rather than wrapping on a
+            // large-memory host.
+            let pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
+            let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+            if pages <= 0 || page_size <= 0 {
+                0
+            } else {
+                pages.saturating_mul(page_size)
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            0
+        }
     }
     /// Matches Java `isImodBriefHeader()` (`EtomoDirector.java:1567`).
     pub fn is_imod_brief_header(&self) -> bool {
@@ -298,6 +397,25 @@ impl EtomoDirector {
     /// Matches Java `getHomeDirectory()` (`EtomoDirector.java:1620`).
     pub fn get_home_directory(&self) -> &str {
         &self.home_directory
+    }
+    /// Java test-only `setCurrentPropertyUserDir`; manager-specific properties
+    /// are an application-manager boundary, so without one this updates the
+    /// director's original working directory state.
+    pub fn set_current_property_user_dir(&mut self, directory: impl Into<String>) -> String {
+        let previous = self.original_user_dir.clone().unwrap_or_default();
+        self.original_user_dir = Some(directory.into());
+        previous
+    }
+    /// Java `makeOriginalDirLocal`, represented as an explicit process cwd change.
+    pub fn make_original_dir_local(&self) -> Result<(), String> {
+        let directory = self
+            .original_user_dir
+            .as_deref()
+            .ok_or("original user directory has not been initialized")?;
+        std::env::set_current_dir(directory).map_err(|error| error.to_string())
+    }
+    pub fn get_original_user_dir(&self) -> Option<&str> {
+        self.original_user_dir.as_deref()
     }
 
     /// Java `getManager(UniqueKey)` (`EtomoDirector.java:650`).
@@ -354,6 +472,84 @@ impl EtomoDirector {
         Ok(manager_key)
     }
 
+    /// Java `openJoin`, using the existing native manager constructor.
+    pub fn open_join(
+        &mut self,
+        param_file_name: Option<&str>,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(
+            JoinManager::new(param_file_name, Some(axis_id)),
+            make_current,
+        )
+    }
+    /// Java `openParallel` for a saved parallel project or a generic one.
+    pub fn open_parallel(
+        &mut self,
+        param_file_name: Option<&str>,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        let manager = match param_file_name {
+            Some(name) => ParallelManager::new_with_param_file(Some(name)),
+            None => ParallelManager::new(),
+        };
+        self.set_manager(manager, make_current)
+    }
+    /// Java `openGenericParallel`.
+    pub fn open_generic_parallel(
+        &mut self,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(
+            ParallelManager::new_with_dialog_type(DialogType::Parallel),
+            make_current,
+        )
+    }
+    /// Java `openAnisotropicDiffusion`.
+    pub fn open_anisotropic_diffusion(
+        &mut self,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(
+            ParallelManager::new_with_dialog_type(DialogType::AnisotropicDiffusion),
+            make_current,
+        )
+    }
+    /// Java `openBatchRunTomo`.
+    pub fn open_batch_run_tomo(
+        &mut self,
+        param_file_name: Option<&str>,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(
+            BatchRunTomoManager::new_with_param_file_name(param_file_name),
+            make_current,
+        )
+    }
+    /// Java `openSerialSections`.
+    pub fn open_serial_sections(
+        &mut self,
+        param_file_name: Option<&str>,
+        make_current: bool,
+        axis_id: AxisID,
+    ) -> Result<Arc<Mutex<ManagerKey>>, String> {
+        self.close_default_window(Some(axis_id));
+        self.set_manager(
+            SerialSectionsManager::get_instance_with_param_file_name(param_file_name),
+            make_current,
+        )
+    }
+
     /// Java `setCurrentManager(ManagerKey, boolean, boolean)`
     /// (`EtomoDirector.java:719`).
     pub(crate) fn set_current_manager_manager_key(
@@ -407,6 +603,61 @@ impl EtomoDirector {
                 let _ = self.close_current_manager(None, false);
             }
         }
+    }
+
+    /// Java `closeDefaultWindow`.  Concrete front-page creation belongs to the
+    /// native UI factory; when it marks its sole window as default, opening a
+    /// real manager closes it through this director-owned lifecycle.
+    pub(crate) fn set_default_window(&mut self, value: bool) {
+        self.default_window = value;
+    }
+    pub(crate) fn close_default_window(
+        &mut self,
+        axis_id: Option<super::r#type::axis_id::AxisID>,
+    ) -> bool {
+        if !self.default_window
+            || self
+                .manager_list
+                .as_ref()
+                .map_or(0, UniqueHashedArray::size)
+                != 1
+        {
+            return true;
+        }
+        self.default_window = false;
+        self.close_current_manager(axis_id, false)
+    }
+
+    /// Java private `saveLogs`: asks each open manager to persist its log.
+    pub fn save_logs(&self) {
+        if let Some(managers) = &self.manager_list {
+            for index in 0..managers.size() {
+                if let Some(manager) = managers.get_at(index) {
+                    manager.save_log();
+                }
+            }
+        }
+    }
+
+    /// Java `exitProgram(AxisID)`, excluding process-global JVM shutdown.
+    /// Each manager can veto closure; successful close releases it from the
+    /// director list before the next manager is selected.
+    pub fn exit_program(&mut self, axis_id: Option<super::r#type::axis_id::AxisID>) -> bool {
+        self.save_logs();
+        loop {
+            let next_key = self
+                .manager_list
+                .as_ref()
+                .and_then(|managers| managers.get_key(0).cloned());
+            let Some(next_key) = next_key else { break };
+            if !self.set_current_manager_unique_key(Some(&next_key), false)
+                || !self.close_current_manager(axis_id, true)
+            {
+                return false;
+            }
+        }
+        self.stop_maintain_etomo();
+        true
     }
 
     /// Java `closeManager(AxisID, UniqueKey)` (`EtomoDirector.java:1151`).

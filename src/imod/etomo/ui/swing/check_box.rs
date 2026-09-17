@@ -613,6 +613,12 @@ impl CheckBox {
     pub fn get_tooltip(&self) -> Option<&str> {
         self.check_box.tooltip.as_deref()
     }
+    #[allow(non_snake_case)]
+    /// Java diagnostic `printInfo`.  Parent traversal belongs to the native
+    /// GUI tree; the retained source-owned diagnostic is this checkbox name.
+    pub fn printInfo(&self) -> Option<&str> {
+        self.check_box.name.as_deref()
+    }
     pub fn enable_warning(&mut self, value: bool) {
         if self.default_background.is_none() {
             self.default_background = Some(self.check_box.background.unwrap_or(GRAY));

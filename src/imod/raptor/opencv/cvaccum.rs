@@ -1,6 +1,6 @@
 //! Accumulation operations from `IMOD/raptor/opencv/cvaccum.cpp`.
 
-use super::cxmean::{CvMeanMatrix, CvMeanValue};
+use super::cxmean::CvMeanMatrix;
 
 /// Failures represented by the `cvAcc` family C error paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11,8 +11,23 @@ pub enum CvAccumError {
     UnmatchedSizes,
 }
 
+/// Source depths accepted by every native `cvAcc` dispatch table.
+pub trait CvAccumSource: Copy {
+    fn to_accum_f64(self) -> f64;
+}
+impl CvAccumSource for u8 {
+    fn to_accum_f64(self) -> f64 {
+        self as f64
+    }
+}
+impl CvAccumSource for f32 {
+    fn to_accum_f64(self) -> f64 {
+        self as f64
+    }
+}
+
 /// `cvAcc`: add source samples into an `f32` accumulator.
-pub fn cv_acc<T: CvMeanValue>(
+pub fn cv_acc<T: CvAccumSource>(
     source: &CvMeanMatrix<T>,
     accumulator: &mut CvMeanMatrix<f32>,
     mask: Option<&[u8]>,
@@ -44,8 +59,8 @@ pub fn cv_acc<T: CvMeanValue>(
     for pixel in 0..pixels {
         if mask.map_or(true, |selected| selected[pixel] != 0) {
             for channel in 0..source.channels {
-                accumulator.data[pixel * source.channels + channel] +=
-                    source.data[pixel * source.channels + channel].to_mean_f64() as f32;
+                let index = pixel * source.channels + channel;
+                accumulator.data[index] += source.data[index].to_accum_f64() as f32;
             }
         }
     }
@@ -53,7 +68,7 @@ pub fn cv_acc<T: CvMeanValue>(
 }
 
 /// `cvSquareAcc`: add squared source samples into an `f32` accumulator.
-pub fn cv_square_acc<T: CvMeanValue>(
+pub fn cv_square_acc<T: CvAccumSource>(
     source: &CvMeanMatrix<T>,
     accumulator: &mut CvMeanMatrix<f32>,
     mask: Option<&[u8]>,
@@ -85,8 +100,9 @@ pub fn cv_square_acc<T: CvMeanValue>(
     for pixel in 0..pixels {
         if mask.map_or(true, |selected| selected[pixel] != 0) {
             for channel in 0..source.channels {
-                let value = source.data[pixel * source.channels + channel].to_mean_f64() as f32;
-                accumulator.data[pixel * source.channels + channel] += value * value;
+                let index = pixel * source.channels + channel;
+                let value = source.data[index].to_accum_f64() as f32;
+                accumulator.data[index] += value * value;
             }
         }
     }
@@ -94,7 +110,7 @@ pub fn cv_square_acc<T: CvMeanValue>(
 }
 
 /// `cvMultiplyAcc`: add products of two source matrices into an `f32` accumulator.
-pub fn cv_multiply_acc<T: CvMeanValue>(
+pub fn cv_multiply_acc<T: CvAccumSource>(
     first: &CvMeanMatrix<T>,
     second: &CvMeanMatrix<T>,
     accumulator: &mut CvMeanMatrix<f32>,
@@ -128,8 +144,8 @@ pub fn cv_multiply_acc<T: CvMeanValue>(
         if mask.map_or(true, |selected| selected[pixel] != 0) {
             for channel in 0..first.channels {
                 let index = pixel * first.channels + channel;
-                accumulator.data[index] += first.data[index].to_mean_f64() as f32
-                    * second.data[index].to_mean_f64() as f32;
+                accumulator.data[index] += first.data[index].to_accum_f64() as f32
+                    * second.data[index].to_accum_f64() as f32;
             }
         }
     }
@@ -137,7 +153,7 @@ pub fn cv_multiply_acc<T: CvMeanValue>(
 }
 
 /// `cvRunningAvg`: update an `f32` accumulator with `alpha * source + (1-alpha) * accumulator`.
-pub fn cv_running_avg<T: CvMeanValue>(
+pub fn cv_running_avg<T: CvAccumSource>(
     source: &CvMeanMatrix<T>,
     accumulator: &mut CvMeanMatrix<f32>,
     alpha: f64,
@@ -167,13 +183,13 @@ pub fn cv_running_avg<T: CvMeanValue>(
             return Err(CvAccumError::BadMask);
         }
     }
-    let alpha = alpha as f32;
     for pixel in 0..pixels {
         if mask.map_or(true, |selected| selected[pixel] != 0) {
             for channel in 0..source.channels {
                 let index = pixel * source.channels + channel;
+                let alpha = alpha as f32;
                 accumulator.data[index] = accumulator.data[index] * (1.0 - alpha)
-                    + source.data[index].to_mean_f64() as f32 * alpha;
+                    + source.data[index].to_accum_f64() as f32 * alpha;
             }
         }
     }

@@ -123,7 +123,7 @@ impl Default for GraphWindow {
     }
 }
 impl GraphWindow {
-    /// `GraphWindow::GraphWindow`; layout/icon construction is native Qt boundary.
+    /// `GraphWindow()` source constructor; layout/icon construction is native Qt boundary.
     pub fn new(dpr: f32) -> Self {
         Self {
             m_width: 320,
@@ -254,6 +254,18 @@ impl GraphWindow {
     pub fn change_event(&mut self, _font_change: bool, n: &mut dyn XGraphNativeBoundary) {
         n.main_window_change_event();
         n.check_and_set_mac_menu();
+    }
+    /// `GraphWindow::screenChanged`.
+    pub fn screen_changed(&mut self, new_dpr: f32) {
+        if new_dpr == 0. {
+            return;
+        }
+        let old_dpr = self.m_device_pixel_ratio;
+        let scaling = if old_dpr != 0. { new_dpr / old_dpr } else { 1. };
+        self.m_device_pixel_ratio = new_dpr;
+        if (scaling - 1.).abs() > 0.05 {
+            self.m_zoom *= scaling;
+        }
     }
     /// `GraphWindow::draw`.
     pub fn draw(&self, n: &mut dyn XGraphNativeBoundary) {
@@ -726,6 +738,10 @@ pub struct GraphGl {
     pub m_drawing: bool,
 }
 impl GraphGl {
+    /// `GraphGL()` source constructor.
+    pub fn new() -> Self {
+        Self::default()
+    }
     /// `GraphGL::paintGL`.
     pub fn paint_gl(
         &mut self,
@@ -957,5 +973,15 @@ mod tests {
         g.change_event(false, &mut n);
         g.change_event(true, &mut n);
         assert_eq!(n.change_calls, ["base", "menu", "base", "menu"]);
+    }
+    #[test]
+    fn screen_change_rescales_zoom_only_past_source_threshold() {
+        let mut graph = GraphWindow::new(1.);
+        graph.screen_changed(2.);
+        assert_eq!(graph.m_zoom, 2.);
+        graph.screen_changed(2.05);
+        assert_eq!(graph.m_zoom, 2.);
+        graph.screen_changed(0.);
+        assert_eq!(graph.m_device_pixel_ratio, 2.05);
     }
 }

@@ -209,6 +209,42 @@ impl Ctf3dPanel {
         result.set_tooltips();
         result
     }
+    #[allow(non_snake_case)]
+    pub fn createPanel(&mut self) {
+        self.layout.root_visible = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn addListeners(&mut self) {
+        self.layout.listener_count += 1;
+    }
+    #[allow(non_snake_case)]
+    pub fn focusGained<P: Ctf3dPanelParent>(&mut self, parent: &P, pixel_size: Option<f64>) {
+        self.focus_lost(parent, pixel_size);
+    }
+    #[allow(non_snake_case)]
+    pub fn getUIComponent(&self) -> &Self {
+        self
+    }
+    #[allow(non_snake_case)]
+    pub fn getCtfCorrectionUIComponent(&self) -> &CheckBox {
+        &self.cb_run_slabs_in_parallel
+    }
+    #[allow(non_snake_case)]
+    pub fn getEraseFiducialsUIComponent(&self) -> &CheckBox {
+        &self.cb_erase_fiducials
+    }
+    #[allow(non_snake_case)]
+    pub fn getFilterIn2DUIComponent(&self) -> &CheckBox {
+        &self.cb_filter_in_2d
+    }
+    #[allow(non_snake_case)]
+    pub fn getUseUnalignedImagesUIComponent(&self) -> &CheckBox {
+        &self.cb_use_unaligned_images
+    }
+    #[allow(non_snake_case)]
+    pub fn getComponent(&self) -> &Self {
+        self
+    }
 
     /// Java `focusLost`; caller supplies the read from `MetaData.getPixelSize`.
     pub fn focus_lost<P: Ctf3dPanelParent>(&mut self, parent: &P, pixel_size: Option<f64>) {
@@ -427,6 +463,20 @@ impl Ctf3dPanel {
         self.cb_filter_in_2d.set_tooltip(Some("FilterIn2D"));
         self.cb_use_unaligned_images
             .set_tooltip(Some("UseUnalignedImages"));
+    }
+}
+
+/// Native event adapter for Java `Ctf3dPanelActionListener`.
+pub struct Ctf3dPanelActionListener;
+impl Ctf3dPanelActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: Ctf3dPanelApplicationManager, P: Ctf3dPanelParent>(
+        panel: &mut Ctf3dPanel,
+        manager: &mut M,
+        parent: &P,
+        command: Option<&str>,
+    ) {
+        panel.action(manager, parent, command, None);
     }
 }
 

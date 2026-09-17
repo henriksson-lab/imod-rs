@@ -58,6 +58,8 @@ pub struct ProcessHandler {
 }
 
 impl ProcessHandler {
+    /// `ProcessHandler()` source constructor.  The paired C++ destructor's
+    /// explicit resource releases are represented by Rust `Option` ownership.
     /// C++ `ProcessHandler::ProcessHandler`.
     pub fn new() -> Self {
         let now = Instant::now();

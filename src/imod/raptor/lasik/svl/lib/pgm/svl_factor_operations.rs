@@ -34,6 +34,111 @@ impl SvlFactorIndexCache {
     }
 }
 
+/// Safe replacement for C++ `svlFactorOperation`'s static mapping state.
+/// A caller owns this planner, which avoids the original global mutable cache.
+#[derive(Clone, Debug, Default)]
+pub struct SvlFactorOperation {
+    pub config: SvlFactorOperationsConfig,
+    index_cache: SvlFactorIndexCache,
+}
+impl SvlFactorOperation {
+    pub fn new(config: SvlFactorOperationsConfig) -> Self {
+        Self {
+            config,
+            index_cache: SvlFactorIndexCache::new(),
+        }
+    }
+    pub fn clear_index_cache(&mut self) {
+        self.index_cache.clear();
+    }
+    pub fn index_ref(&mut self, mapping: &[usize]) -> Vec<usize> {
+        self.index_cache
+            .find(mapping, self.config.use_shared_index_cache)
+    }
+}
+
+/// C++ `svlFactorBinaryOp` initialization expressed without retained pointers.
+#[derive(Clone, Debug)]
+pub struct SvlFactorBinaryOp {
+    pub first: SvlFactor,
+    pub second: SvlFactor,
+    pub first_mapping: Vec<usize>,
+    pub second_mapping: Vec<usize>,
+}
+impl SvlFactorBinaryOp {
+    pub fn new(
+        target: &mut SvlFactor,
+        first: SvlFactor,
+        second: SvlFactor,
+        operation: &mut SvlFactorOperation,
+    ) -> Result<Self, String> {
+        initialize_target(target, &[&first, &second])?;
+        let first_mapping = operation.index_ref(
+            &target
+                .map_from(&first)
+                .ok_or("unable to map first factor onto target")?,
+        );
+        let second_mapping = operation.index_ref(
+            &target
+                .map_from(&second)
+                .ok_or("unable to map second factor onto target")?,
+        );
+        Ok(Self {
+            first,
+            second,
+            first_mapping,
+            second_mapping,
+        })
+    }
+    pub fn check_target(&self, target: &SvlFactor) -> bool {
+        [&self.first, &self.second].iter().all(|factor| {
+            factor
+                .variables
+                .iter()
+                .enumerate()
+                .all(|(i, variable)| target.var_cardinality(*variable) == Some(factor.cards[i]))
+        })
+    }
+}
+
+/// C++ `svlFactorNAryOp` initialization and cached mappings.
+#[derive(Clone, Debug)]
+pub struct SvlFactorNAryOp {
+    pub factors: Vec<SvlFactor>,
+    pub mappings: Vec<Vec<usize>>,
+}
+impl SvlFactorNAryOp {
+    pub fn new(
+        target: &mut SvlFactor,
+        factors: Vec<SvlFactor>,
+        operation: &mut SvlFactorOperation,
+    ) -> Result<Self, String> {
+        if factors.is_empty() {
+            return Err("n-ary operation requires a factor".into());
+        }
+        initialize_target(target, &factors.iter().collect::<Vec<_>>())?;
+        let mappings = factors
+            .iter()
+            .map(|factor| {
+                target
+                    .map_from(factor)
+                    .ok_or_else(|| "unable to map factor onto target".to_owned())
+                    .map(|mapping| operation.index_ref(&mapping))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { factors, mappings })
+    }
+    pub fn check_target(&self, target: &SvlFactor) -> bool {
+        self.factors.iter().all(|factor| {
+            factor
+                .variables
+                .iter()
+                .enumerate()
+                .all(|(i, variable)| target.var_cardinality(*variable) == Some(factor.cards[i]))
+        })
+    }
+}
+
 /// Configuration retained from `svlFactorOperation` and its config module.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SvlFactorOperationsConfig {

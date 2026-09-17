@@ -156,6 +156,9 @@ pub fn jpeg_open_new(f: &mut ImodImageFile) -> i32 {
     f.fill_mrc_header = Some(ii_simple_fill_mrc_header_callback);
     f.write_section = Some(write_callback);
     f.write_section_float = Some(write_float_callback);
+    // C treats any nonzero `lastWrittenZ` as the not-yet-written sentinel;
+    // `-1` is the normal iimage new-file value.
+    f.last_written_z = -1;
     0
 }
 
@@ -165,9 +168,81 @@ pub(crate) unsafe fn jpeg_open_new_callback(p: *mut ImodImageFile) -> i32 {
     };
     jpeg_open_new(file)
 }
+/// `jpegWriteSection` (`iijpeg.c:435`).  This is the direct one-section
+/// writer used after iimage has converted float data and selected quality.
+/// The `image` encoder used by the Rust backend does not expose JFIF density
+/// fields, so `resolution` is validated at this layer but the host encoder
+/// cannot currently emit it.
+pub fn jpeg_write_section(
+    f: &mut ImodImageFile,
+    input: &[u8],
+    inverted: bool,
+    resolution: i32,
+    quality: i32,
+) -> i32 {
+    if f.write_section.is_none()
+        || f.last_written_z == 0
+        || !matches!(f.mode, MRC_MODE_BYTE | MRC_MODE_RGB)
+    {
+        return IIERR_BAD_CALL;
+    }
+    let Some(n) = count(f) else {
+        return IIERR_BAD_CALL;
+    };
+    let channels = if f.mode == MRC_MODE_RGB { 3 } else { 1 };
+    if input.len() != n * channels {
+        return IIERR_BAD_CALL;
+    }
+    // Native accepts 0 for no JFIF density and otherwise writes a u16 value.
+    let _resolution = resolution.clamp(0, u16::MAX as i32);
+    let row = f.nx as usize * channels;
+    let mut top_down = vec![0; input.len()];
+    for output_y in 0..f.ny as usize {
+        let source_y = if inverted {
+            output_y
+        } else {
+            f.ny as usize - 1 - output_y
+        };
+        top_down[output_y * row..(output_y + 1) * row]
+            .copy_from_slice(&input[source_y * row..(source_y + 1) * row]);
+    }
+    let Some(fp) = f.fp.as_mut() else {
+        return IIERR_BAD_CALL;
+    };
+    if fp.seek(SeekFrom::Start(0)).is_err() {
+        return IIERR_IO_ERROR;
+    }
+    let quality = if quality > 0 {
+        quality.clamp(1, 100)
+    } else {
+        75
+    } as u8;
+    let color = if channels == 1 {
+        ColorType::L8
+    } else {
+        ColorType::Rgb8
+    };
+    if JpegEncoder::new_with_quality(fp, quality)
+        .encode(&top_down, f.nx as u32, f.ny as u32, color.into())
+        .is_err()
+    {
+        return IIERR_IO_ERROR;
+    }
+    f.last_written_z = 0;
+    0
+}
 /// C `iiJpegWriteSectionAny`.
 fn ii_jpeg_write_section_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats: bool) -> i32 {
-    if z != 0 || f.mode != MRC_MODE_BYTE && f.mode != MRC_MODE_RGB {
+    if z != 0
+        || f.pad_left != 0
+        || f.pad_right != 0
+        || !((f.format == IIFORMAT_LUMINANCE && f.mode == MRC_MODE_BYTE)
+            || (f.format == IIFORMAT_RGB && !floats))
+        || f.llx != 0
+        || f.lly != 0
+        || (f.urx != -1 && f.urx != f.nx - 1)
+        || (f.ury != -1 && f.ury != f.ny - 1)
+    {
         return IIERR_BAD_CALL;
     }
     let Some(n) = count(f) else {
@@ -187,36 +262,12 @@ fn ii_jpeg_write_section_any(f: &mut ImodImageFile, input: &[u8], z: i32, floats
     } else {
         data.copy_from_slice(input)
     }
-    let row = f.nx as usize * c;
-    let mut top = vec![0; data.len()];
-    for y in 0..f.ny as usize {
-        let sy = f.ny as usize - 1 - y;
-        top[y * row..(y + 1) * row].copy_from_slice(&data[sy * row..(sy + 1) * row])
-    }
-    let Some(fp) = f.fp.as_mut() else {
-        return IIERR_BAD_CALL;
-    };
-    if fp.seek(SeekFrom::Start(0)).is_err() {
-        return IIERR_IO_ERROR;
-    }
     let q = std::env::var("IMOD_JPEG_QUALITY")
         .ok()
         .and_then(|x| x.parse().ok())
         .unwrap_or(75)
         .clamp(1, 100) as u8;
-    let color = if c == 1 {
-        ColorType::L8
-    } else {
-        ColorType::Rgb8
-    };
-    if JpegEncoder::new_with_quality(fp, q)
-        .encode(&top, f.nx as u32, f.ny as u32, color.into())
-        .is_err()
-    {
-        return IIERR_IO_ERROR;
-    }
-    f.last_written_z = 0;
-    0
+    jpeg_write_section(f, &data, false, 0, q as i32)
 }
 
 /// C `iiJpegWriteSection`.
@@ -373,6 +424,11 @@ mod tests {
         writer.ny = 2;
         writer.nz = 1;
         writer.mode = MRC_MODE_BYTE;
+        writer.format = IIFORMAT_LUMINANCE;
+        writer.write_section = Some(write_callback);
+        writer.last_written_z = -1;
+        writer.urx = -1;
+        writer.ury = -1;
         // IMOD order is bottom row then top row.
         let pixels = [0_u8, 0, 255, 255];
         assert_eq!(ii_jpeg_write_section(&mut writer, &pixels, 0), 0);
@@ -388,6 +444,31 @@ mod tests {
         assert_eq!(jpeg_read_section(&reader, &mut restored, 0), 0);
         assert!(restored[..2].iter().all(|pixel| *pixel < 20));
         assert!(restored[2..].iter().all(|pixel| *pixel > 235));
+    }
+
+    #[test]
+    fn direct_jpeg_writer_rejects_second_section_and_obeys_row_inversion() {
+        let file = ImodFile::tmpfile().unwrap();
+        let mut writer = ImodImageFile::default();
+        writer.fp = Some(file.clone());
+        writer.nx = 1;
+        writer.ny = 2;
+        writer.mode = MRC_MODE_BYTE;
+        writer.write_section = Some(write_callback);
+        writer.last_written_z = -1;
+        writer.urx = -1;
+        writer.ury = -1;
+        assert_eq!(jpeg_write_section(&mut writer, &[0, 255], false, 0, 100), 0);
+        assert_eq!(
+            jpeg_write_section(&mut writer, &[0, 255], false, 0, 100),
+            IIERR_BAD_CALL
+        );
+        let mut reader = ImodImageFile::default();
+        reader.fp = Some(file);
+        assert_eq!(ii_jpeg_check(&mut reader), 0);
+        let mut pixels = [0; 2];
+        assert_eq!(jpeg_read_section(&reader, &mut pixels, 0), 0);
+        assert!(pixels[0] < 5 && pixels[1] > 250);
     }
 
     #[test]

@@ -46,6 +46,9 @@ pub fn cv_avg_sdv<T: CvMeanSdvValue>(
         None => None,
     };
     if let Some(mask) = mask {
+        if mask.rows != matrix.rows || mask.columns != matrix.columns {
+            return Err(CvStatus::sts_unmatched_sizes);
+        }
         if mask.row_stride < matrix.columns
             || mask.values.len() < (matrix.rows - 1) * mask.row_stride + matrix.columns
         {
@@ -129,6 +132,16 @@ mod tests {
         assert_eq!(
             cv_avg_sdv(&matrix, None, Some(2)),
             Err(CvStatus::sts_bad_arg)
+        );
+    }
+
+    #[test]
+    fn mask_dimensions_must_match_the_input_matrix() {
+        let matrix = CvMatrix::new(2, 2, 1, 2, vec![1_i16, 2, 3, 4]).unwrap();
+        let mask = CvMask::new(1, 4, 4, vec![1, 1, 1, 1]).unwrap();
+        assert_eq!(
+            cv_avg_sdv(&matrix, Some(&mask), None),
+            Err(CvStatus::sts_unmatched_sizes)
         );
     }
 

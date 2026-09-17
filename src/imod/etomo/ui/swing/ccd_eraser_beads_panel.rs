@@ -74,6 +74,18 @@ impl PolynomialOrder {
     pub const fn is_default(self) -> bool {
         matches!(self, Self::UseMean)
     }
+    #[allow(non_snake_case)]
+    pub fn getValue(self) -> i32 {
+        self.get_value()
+    }
+    #[allow(non_snake_case)]
+    pub fn getLabel(self) -> Option<String> {
+        None
+    }
+    #[allow(non_snake_case)]
+    pub fn isDefault(self) -> bool {
+        self.is_default()
+    }
 }
 impl std::fmt::Display for PolynomialOrder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -458,6 +470,25 @@ impl CcdEraserBeadsPanel {
             "Replace the full aligned stack (.ali) with the erased stack (_erase.ali).",
         ));
         self.pnl_root.tooltips_set = true;
+    }
+}
+
+/// Native callback adapters for the Java focus runnable and action listener.
+pub struct CcdEraserBeadsPanelRunnable;
+impl CcdEraserBeadsPanelRunnable {
+    pub fn run(panel: &mut CcdEraserBeadsPanel) {
+        panel.focus_lost();
+    }
+}
+pub struct CcdEraserBeadsPanelActionListener;
+impl CcdEraserBeadsPanelActionListener {
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: CcdEraserBeadsApplicationManager>(
+        panel: &mut CcdEraserBeadsPanel,
+        manager: &mut M,
+        command: &str,
+    ) {
+        panel.action(manager, command, None, None);
     }
 }
 

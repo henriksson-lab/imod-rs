@@ -5,11 +5,14 @@
 //! only source methods whose inputs are already owned Rust values.
 
 use super::framealign::FrameAlign;
+use crate::imod::libcfshr::autodoc::adoc_open_image_metadata;
 use crate::imod::libcfshr::b3dutil::ImodFile;
+use crate::imod::libcfshr::rotateflip::{RotateFlipData, rotate_flip_image};
 use crate::imod::libcfshr::samplemeansd::{sample_mean_only, type_for_sample_mean};
 use crate::imod::libiimod::iimage::OwnedImageStack;
 use crate::imod::libiimod::mrcfiles::{
-    mrc_head_new, mrc_head_read, mrc_head_write, mrc_write_slice, MrcHeader, MRC_MODE_FLOAT,
+    MRC_MODE_FLOAT, MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_head_new, mrc_head_read,
+    mrc_head_write, mrc_write_slice,
 };
 use std::io::Write;
 
@@ -37,6 +40,153 @@ pub struct AliFrame {
     pub num_out_files: i32,
     pub initial_dose: f32,
     pub dose_scaling: f32,
+}
+
+/// Owned non-metadata result of `processDoseWeightingOptions`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DoseWeightingOptions {
+    pub dose_scaling: f32,
+    pub reweight_ones: Option<Vec<f32>>,
+    pub fixed_frame_doses: Option<String>,
+    pub total_doses: Vec<f32>,
+    pub prior_doses: Vec<f32>,
+    pub frame_dose_lines: Vec<String>,
+}
+
+/// Parsed fields consumed by `AliFrame::getAnglesAndTitlesFromMdoc`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MdocTiltTitleInput {
+    pub tilt_angles: Vec<f32>,
+    pub frame_ts_start_end: Vec<Option<(i32, i32)>>,
+    pub pixel_spacing: Option<f32>,
+    pub image_size: Option<(i32, i32)>,
+    pub titles: Vec<String>,
+    pub global_title: Option<String>,
+    pub first_rotation_angle: Option<f32>,
+    pub frame_set_rotation_angle: Option<f32>,
+}
+
+/// Owned result of `getAnglesAndTitlesFromMdoc` after metadata I/O.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MdocTiltTitleResult {
+    pub tilt_records: TiltAngleRecords,
+    pub pixel_spacing: Option<f32>,
+    pub image_size: Option<(i32, i32)>,
+    pub titles: Vec<String>,
+    pub axis_angle: Option<f32>,
+    pub are_fei_frames: bool,
+}
+
+/// Parsed dose values returned by the metadata subsystem for each Mdoc section.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MdocDoseResult {
+    pub dose_from_mdoc: Vec<f32>,
+    pub prior_from_mdoc: Vec<f32>,
+    pub iz_piece: Vec<i32>,
+    pub frame_dose_lines: Vec<String>,
+}
+
+/// File names discovered by `checkTitlesForRefNames`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReferenceNamesFromTitles {
+    pub gain_name: Option<std::path::PathBuf>,
+    pub defect_name: Option<std::path::PathBuf>,
+}
+
+/// Result retained by `AliFrame::openMdocFile` for subsequent autodoc access.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OpenMdocFile {
+    pub autodoc_index: i32,
+    pub montage: i32,
+    pub number_of_sections: i32,
+    pub autodoc_type: i32,
+}
+
+/// Inputs to the source's post-parse dose reconciliation.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UnifiedDoseInput {
+    pub number_of_files: usize,
+    pub dose_file_type: i32,
+    pub fixed_frame_doses: Option<String>,
+    pub fixed_total_dose: Option<f32>,
+    pub frame_dose_lines: Vec<String>,
+    pub mdoc_doses: Option<MdocDoseResult>,
+    pub dose_accumulates: i32,
+    pub maximum_frames: usize,
+}
+
+/// `unifyDoseInformation` output used by each downstream alignment set.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UnifiedDoseInformation {
+    pub dose_file_type: i32,
+    pub total_doses: Vec<f32>,
+    pub prior_doses: Vec<f32>,
+    pub frame_dose_lines: Vec<String>,
+}
+
+/// Owned image references consumed by `getGainDarkDefects` after their file
+/// readers have completed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GainDarkDefectsInput {
+    pub image_dimensions: (usize, usize),
+    pub gain: Option<OwnedImageStack>,
+    pub dark: Option<OwnedImageStack>,
+    pub frames_are_eer: bool,
+    pub gain_is_tiff: bool,
+}
+
+/// Validated gain/dark images for the FrameAlign boundary.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GainDarkDefects {
+    pub gain: Option<Vec<u8>>,
+    pub gain_dimensions: Option<(usize, usize)>,
+    pub dark: Option<Vec<u8>>,
+    pub super_resolution_factor: usize,
+}
+
+/// Backend-reported inputs to `assessGpuNeeds` after GPU discovery and
+/// FrameAlign allocation estimation.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GpuNeedsInput {
+    pub gpu_requested: bool,
+    pub gpu_available_memory: f32,
+    pub gpu_memory_limit: f32,
+    pub sum_memory_need: f32,
+    pub alignment_memory_need: f32,
+    pub sum_pad_size: f32,
+    pub multiple_outputs: bool,
+    pub test_mode: bool,
+    pub getting_frc: bool,
+}
+
+/// Source GPU flags and whether FRC even/odd output remains feasible.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GpuNeeds {
+    pub flags: u32,
+    pub usable_memory: f32,
+    pub getting_frc: bool,
+}
+
+/// `AliFrame()`: construct the native command state with its source defaults.
+pub fn ali_frame() -> AliFrame {
+    AliFrame::default()
+}
+
+/// Typed replacement for the input/output pointer pairs in
+/// `AliFrame::addToSumBuffer`.
+#[derive(Debug, PartialEq)]
+pub enum AliFrameSumBuffer {
+    Short(Vec<i16>),
+    UShort(Vec<u16>),
+    Float(Vec<f32>),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AliFrameInputPixels<'a> {
+    Byte(&'a [u8]),
+    Short(&'a [i16]),
+    UShort(&'a [u16]),
+    Float(&'a [f32]),
 }
 impl Default for AliFrame {
     fn default() -> Self {
@@ -67,6 +217,647 @@ impl Default for AliFrame {
     }
 }
 impl AliFrame {
+    /// `AliFrame::assessGpuNeeds`: select GPU summing/alignment based on
+    /// translated FrameAlign byte estimates and backend-reported capacity.
+    pub fn assess_gpu_needs(input: GpuNeedsInput) -> GpuNeeds {
+        use super::framealign::{GPU_FOR_ALIGNING, GPU_FOR_SUMMING};
+        const GPU_DO_EVEN_ODD: u32 = 1 << 1;
+        if !input.gpu_requested || input.gpu_available_memory <= 0. {
+            return GpuNeeds::default();
+        }
+        let usable = if input.gpu_memory_limit > 0. {
+            input.gpu_memory_limit * 1024. * 1024. * 1024.
+        } else if input.gpu_memory_limit < 0. {
+            -input.gpu_available_memory * input.gpu_memory_limit
+        } else {
+            input.gpu_available_memory * 0.85
+        };
+        let mut result = GpuNeeds {
+            usable_memory: usable,
+            getting_frc: input.getting_frc,
+            ..Default::default()
+        };
+        let mut used = 0.;
+        if !input.test_mode && input.sum_memory_need <= usable {
+            result.flags |= GPU_FOR_SUMMING;
+            used = input.sum_memory_need
+                + if input.multiple_outputs {
+                    input.sum_pad_size
+                } else {
+                    0.
+                };
+        }
+        if input.alignment_memory_need + used <= usable {
+            result.flags |= GPU_FOR_ALIGNING;
+        }
+        if result.flags & GPU_FOR_SUMMING != 0 && result.getting_frc {
+            if used + input.sum_pad_size <= usable {
+                result.flags |= GPU_DO_EVEN_ODD;
+            } else {
+                result.getting_frc = false;
+            }
+        }
+        result
+    }
+
+    /// `AliFrame::getGainDarkDefects`: validate and extract the first owned
+    /// gain/dark reference sections after MRC/TIFF reading and defect parsing.
+    pub fn get_gain_dark_defects(input: GainDarkDefectsInput) -> Result<GainDarkDefects, String> {
+        let (nx, ny) = input.image_dimensions;
+        let mut result = GainDarkDefects::default();
+        if let Some(gain) = input.gain {
+            if gain.mode != MRC_MODE_FLOAT {
+                return Err("gain reference must be floating point".into());
+            }
+            let x_factor = nx
+                .checked_div(gain.nx)
+                .ok_or("gain reference width is zero")?;
+            let y_factor = ny
+                .checked_div(gain.ny)
+                .ok_or("gain reference height is zero")?;
+            let exact =
+                x_factor == y_factor && gain.nx * x_factor == nx && gain.ny * y_factor == ny;
+            if (input.frames_are_eer || input.gain_is_tiff)
+                && (!exact || !matches!(x_factor, 1 | 2 | 4))
+            {
+                return Err(
+                    "image size must match the gain reference or be 2x/4x super-resolution".into(),
+                );
+            }
+            if (gain.nx < nx || gain.ny < ny) && !(input.frames_are_eer || input.gain_is_tiff) {
+                return Err("gain reference is smaller than input image".into());
+            }
+            result.super_resolution_factor = x_factor;
+            result.gain_dimensions = Some((gain.nx, gain.ny));
+            result.gain = Some(
+                gain.frames
+                    .into_iter()
+                    .next()
+                    .ok_or("gain reference has no sections")?,
+            );
+        }
+        if let Some(dark) = input.dark {
+            if !matches!(dark.mode, MRC_MODE_SHORT | MRC_MODE_USHORT) {
+                return Err("dark reference must be signed or unsigned short".into());
+            }
+            if (dark.nx, dark.ny) != (nx, ny) {
+                return Err("dark reference is not the same size as the image".into());
+            }
+            result.dark = Some(
+                dark.frames
+                    .into_iter()
+                    .next()
+                    .ok_or("dark reference has no sections")?,
+            );
+        }
+        Ok(result)
+    }
+
+    /// `AliFrame::unifyDoseInformation`, reconciled after file/Mdoc parsing.
+    pub fn unify_dose_information(
+        input: &UnifiedDoseInput,
+    ) -> Result<UnifiedDoseInformation, String> {
+        let mut result = UnifiedDoseInformation {
+            dose_file_type: input.dose_file_type,
+            ..Default::default()
+        };
+        if let Some(total) = input.fixed_total_dose.filter(|total| *total > 0.) {
+            result.total_doses = vec![total; input.number_of_files];
+            result.prior_doses = vec![0.; input.number_of_files];
+        } else if let Some(line) = &input.fixed_frame_doses {
+            let (_, total) = Self::expand_frame_doses_numbers(line, input.maximum_frames)?;
+            result.dose_file_type = 5;
+            result.frame_dose_lines = vec![line.clone(); input.number_of_files];
+            result.total_doses = vec![total; input.number_of_files];
+            result.prior_doses = vec![0.; input.number_of_files];
+        } else if input.dose_file_type == 4 {
+            let mdoc = input
+                .mdoc_doses
+                .as_ref()
+                .ok_or("mdoc dose file requires parsed metadata doses")?;
+            if mdoc.dose_from_mdoc.len() < input.number_of_files {
+                return Err("mdoc has fewer dose entries than aligned files".into());
+            }
+            result.total_doses = mdoc.dose_from_mdoc[..input.number_of_files].to_vec();
+            result.prior_doses = if input.dose_accumulates > 0 {
+                mdoc.prior_from_mdoc[..input.number_of_files].to_vec()
+            } else {
+                vec![0.; input.number_of_files]
+            };
+            result.frame_dose_lines = mdoc.frame_dose_lines.clone();
+        } else if input.dose_file_type > 0 {
+            if input.frame_dose_lines.len() < input.number_of_files {
+                return Err("dose file has fewer lines than aligned files".into());
+            }
+            result.frame_dose_lines = input.frame_dose_lines[..input.number_of_files].to_vec();
+            for line in &result.frame_dose_lines {
+                if input.dose_file_type > 4 {
+                    let (_, total) = Self::expand_frame_doses_numbers(line, input.maximum_frames)?;
+                    result.total_doses.push(total);
+                    result.prior_doses.push(0.);
+                }
+            }
+        }
+        if result.total_doses.len() == input.number_of_files
+            && input.dose_accumulates > 0
+            && result.prior_doses.iter().all(|dose| *dose == 0.)
+        {
+            let mut prior = 0.;
+            for (index, dose) in result.total_doses.iter().enumerate() {
+                result.prior_doses[index] = prior;
+                prior += dose;
+            }
+        }
+        Ok(result)
+    }
+
+    /// `AliFrame::openMdocFile`, using the translated image-metadata autodoc
+    /// reader and retaining its index and image-stack description.
+    pub fn open_mdoc_file(path: impl AsRef<std::path::Path>) -> Result<OpenMdocFile, String> {
+        let path = path.as_ref();
+        let mut montage = 0;
+        let mut number_of_sections = 0;
+        let mut autodoc_type = 0;
+        let index = adoc_open_image_metadata(
+            path.to_string_lossy().as_bytes(),
+            0,
+            &mut montage,
+            &mut number_of_sections,
+            &mut autodoc_type,
+        );
+        match index {
+            -2 => Err(format!("metadata file {} does not exist", path.display())),
+            -3 => Err(format!(
+                "metadata file {} has no image-stack information",
+                path.display()
+            )),
+            value if value < 0 => Err(format!("cannot open or read mdoc file {}", path.display())),
+            autodoc_index => Ok(OpenMdocFile {
+                autodoc_index,
+                montage,
+                number_of_sections,
+                autodoc_type,
+            }),
+        }
+    }
+
+    /// `AliFrame::readOneFrame`: return the requested complete section after
+    /// its MRC/TIFF reader boundary has produced an owned image stack.
+    pub fn read_one_frame(stack: &OwnedImageStack, section: usize) -> Result<Vec<u8>, String> {
+        stack
+            .frames
+            .get(section)
+            .cloned()
+            .ok_or_else(|| format!("frame section {section} is out of range"))
+    }
+
+    /// `AliFrame::checkTitlesForRefNames`: locate gain and defect references
+    /// declared in frame labels, after the image reader supplies EER metadata.
+    pub fn check_titles_for_ref_names(
+        frame_file: impl AsRef<std::path::Path>,
+        titles: &[String],
+        eer_gain_reference: Option<&str>,
+    ) -> Result<ReferenceNamesFromTitles, String> {
+        let frame_file = frame_file.as_ref();
+        if let Some(gain) = eer_gain_reference {
+            let name = gain
+                .rsplit(['/', '\\'])
+                .next()
+                .filter(|name| !name.is_empty())
+                .ok_or("EER metadata gain reference has no file name")?;
+            return Ok(ReferenceNamesFromTitles {
+                gain_name: Some(std::path::PathBuf::from(name)),
+                ..Default::default()
+            });
+        }
+        let directory = frame_file
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""));
+        let mut result = ReferenceNamesFromTitles::default();
+        for title in titles {
+            let title = title.trim();
+            let lower = title.to_ascii_lowercase();
+            let gain = (lower.contains("ref"))
+                && [".mrc", ".dm4", ".tif"]
+                    .iter()
+                    .any(|extension| lower.ends_with(extension));
+            let defect = lower.contains("defect") && lower.ends_with(".txt");
+            if (gain && result.gain_name.is_none()) || (defect && result.defect_name.is_none()) {
+                let candidate = directory.join(title);
+                if candidate.is_file() {
+                    if gain {
+                        result.gain_name = Some(candidate);
+                    } else {
+                        result.defect_name = Some(candidate);
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// `AliFrame::getDosesFromMdoc`: allocate the source result vectors and
+    /// receive already-parsed metadata doses from the autodoc boundary.
+    pub fn get_doses_from_mdoc(
+        number_of_sections: usize,
+        number_of_input_files: usize,
+        doses: &[f32],
+        priors: &[f32],
+        iz_piece: &[i32],
+        frame_dose_lines: &[String],
+    ) -> Result<MdocDoseResult, String> {
+        if doses.len() != number_of_sections
+            || priors.len() != number_of_sections
+            || iz_piece.len() != number_of_sections
+        {
+            return Err("mdoc dose metadata does not match its section count".into());
+        }
+        if frame_dose_lines.len() > number_of_input_files {
+            return Err("mdoc frame-dose lines exceed input files".into());
+        }
+        Ok(MdocDoseResult {
+            dose_from_mdoc: doses.to_vec(),
+            prior_from_mdoc: priors.to_vec(),
+            iz_piece: iz_piece.to_vec(),
+            frame_dose_lines: frame_dose_lines.to_vec(),
+        })
+    }
+
+    /// `AliFrame::getAnglesAndTitlesFromMdoc`, with autodoc lookup replaced by
+    /// the parsed fields supplied in `MdocTiltTitleInput`.
+    pub fn get_angles_and_titles_from_mdoc(
+        input: &MdocTiltTitleInput,
+        read_angles: bool,
+        doing_frame_ts: bool,
+        axis_angle: Option<f32>,
+        angles_only: bool,
+    ) -> Result<MdocTiltTitleResult, String> {
+        let mut result = MdocTiltTitleResult {
+            pixel_spacing: input.pixel_spacing,
+            image_size: input.image_size,
+            ..Default::default()
+        };
+        if read_angles {
+            if doing_frame_ts && input.frame_ts_start_end.len() > input.tilt_angles.len() {
+                return Err("mdoc saved-frame fields exceed tilt-angle sections".into());
+            }
+            result.tilt_records.angles = input.tilt_angles.clone();
+            if doing_frame_ts {
+                for item in input.tilt_angles.iter().enumerate() {
+                    let pair = input.frame_ts_start_end.get(item.0).copied().flatten();
+                    result
+                        .tilt_records
+                        .relative_starts
+                        .push(pair.map_or(-1, |v| v.0));
+                    result
+                        .tilt_records
+                        .relative_ends
+                        .push(pair.map_or(-1, |v| v.1));
+                    result.tilt_records.relative_frame_starts_found |= pair.is_some();
+                }
+            }
+        }
+        if angles_only {
+            return Ok(result);
+        }
+        let mut axis = axis_angle;
+        let mut got_axis = false;
+        let titles = if input.titles.is_empty() {
+            input.global_title.iter().cloned().collect()
+        } else {
+            input.titles.clone()
+        };
+        for mut title in titles {
+            if title.contains("TiltAxisAngle") {
+                result.are_fei_frames = true;
+                if axis.is_none() {
+                    let title_angle = title.split_once('=').and_then(|(_, value)| {
+                        let value = value.trim_start();
+                        value.split([' ', ',']).next()?.parse::<f32>().ok()
+                    });
+                    if let (Some(title_angle), Some(rotation)) =
+                        (title_angle, input.first_rotation_angle)
+                    {
+                        let corrected = if (-(rotation + 90.) - title_angle).abs() < 0.11 {
+                            Some(rotation)
+                        } else if ((rotation - 90.) - title_angle).abs() < 0.11 {
+                            Some(title_angle)
+                        } else if (-(rotation - 90.) - title_angle).abs() < 0.11 {
+                            Some(-title_angle)
+                        } else {
+                            None
+                        };
+                        if let Some(value) = corrected {
+                            axis = Some(value);
+                            got_axis = true;
+                            let suffix = title
+                                .split_once('=')
+                                .map(|(_, value)| {
+                                    value.trim_start().trim_start_matches(|c: char| {
+                                        c.is_ascii_digit()
+                                            || matches!(c, '.' | '-' | '+' | 'e' | 'E')
+                                    })
+                                })
+                                .unwrap_or("");
+                            title = format!("  Tilt axis angle = {value:.2}{suffix}");
+                        }
+                    }
+                }
+            } else if title.contains("Tilt axis angle") && !title.starts_with(' ') && axis.is_none()
+            {
+                got_axis = true;
+                title = format!("    {title}");
+            }
+            result.titles.push(title);
+        }
+        if !got_axis && axis.is_none() {
+            axis = input.frame_set_rotation_angle.map(|value| value - 90.);
+        }
+        result.axis_angle = axis;
+        Ok(result)
+    }
+
+    /// `processDoseWeightingOptions`: process command values and non-mdoc dose
+    /// files.  Mdoc lookup remains a separate owned metadata boundary.
+    pub fn process_dose_weighting_options(
+        fixed_frame_doses: Option<&str>,
+        voltage: i32,
+        dose_scaling: f32,
+        normalize: bool,
+        dose_file_type: i32,
+        dose_file_text: Option<&str>,
+    ) -> Result<DoseWeightingOptions, String> {
+        let mut options = DoseWeightingOptions {
+            dose_scaling,
+            reweight_ones: normalize.then(|| vec![1.; 9000]),
+            fixed_frame_doses: fixed_frame_doses.map(ToOwned::to_owned),
+            ..Default::default()
+        };
+        match voltage {
+            300 => {}
+            200 => options.dose_scaling *= 0.8,
+            _ => return Err("voltage must be either 200 or 300".into()),
+        }
+        if dose_file_type <= 0 {
+            return Ok(options);
+        }
+        if dose_file_type == 4 {
+            return Err("mdoc dose metadata requires the metadata boundary".into());
+        }
+        let text = dose_file_text.ok_or("a dose weighting file is required")?;
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            if dose_file_type == 1 {
+                options
+                    .total_doses
+                    .push(line.trim().parse().map_err(|_| "invalid total dose")?);
+                options.prior_doses.push(0.);
+            } else if dose_file_type > 4 {
+                options.frame_dose_lines.push(line.to_owned());
+            } else {
+                let values = line
+                    .split_whitespace()
+                    .map(str::parse::<f32>)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| "invalid prior and dose values")?;
+                if values.len() < 2 {
+                    return Err("dose line needs prior and dose values".into());
+                }
+                options.prior_doses.push(values[0]);
+                options.total_doses.push(if dose_file_type == 3 {
+                    values[1] - values[0]
+                } else {
+                    values[1]
+                });
+            }
+        }
+        Ok(options)
+    }
+
+    /// `AliFrame::analyzeExtraHeader`, operating on the already-read float
+    /// extended header instead of a borrowed C `FILE *` and scratch buffer.
+    pub fn analyze_extra_header(
+        header: &MrcHeader,
+        extended: &[f32],
+        frame_range: Option<(usize, usize)>,
+        axis_pix_only: bool,
+    ) -> Result<ExtendedHeaderAnalysis, String> {
+        let fields = usize::try_from(header.nint.max(0)).unwrap_or(0)
+            + usize::try_from(header.nreal.max(0)).unwrap_or(0);
+        let sections = usize::try_from(header.nz.max(0)).unwrap_or(0);
+        if fields == 0 || sections == 0 {
+            return Ok(ExtendedHeaderAnalysis::default());
+        }
+        if extended.len() < fields.saturating_mul(sections) {
+            return Err("extended header is shorter than its MRC dimensions".into());
+        }
+        let mut result = ExtendedHeaderAnalysis {
+            axis_angle: -999.,
+            ..Default::default()
+        };
+        if header.nreal >= 12 {
+            let base = header.nint.max(0) as usize;
+            let mut pixel = extended[base + 11];
+            if !(0.05..100_000.).contains(&pixel) {
+                pixel *= 1.0e10;
+            }
+            if (0.05..100_000.).contains(&pixel) {
+                let mut axis = extended[base + 10];
+                if (-360. ..=360.).contains(&axis) {
+                    if axis < -180. {
+                        axis += 360.;
+                    }
+                    if axis > 180. {
+                        axis -= 360.;
+                    }
+                    result.pixel_size = pixel;
+                    result.axis_angle = axis;
+                    result.source_status = 1;
+                }
+            }
+        }
+        if axis_pix_only {
+            return Ok(result);
+        }
+        let (start, end) = frame_range.unwrap_or((0, sections - 1));
+        if start > end || end >= sections {
+            return Err("extended-header frame range is invalid".into());
+        }
+        let tilt_at = |section: usize| extended[header.nint.max(0) as usize + section * fields];
+        let mut last_size = 0_usize;
+        let mut equal_sizes = 0_usize;
+        let mut inserted_double = false;
+        for section in start..=end {
+            let tilt = tilt_at(section);
+            if !(-180. ..=180.).contains(&tilt) {
+                return Ok(result);
+            }
+            if result
+                .tilts
+                .last()
+                .is_none_or(|last| (tilt - *last).abs() > 0.01)
+            {
+                if let Some(&previous_start) = result.set_starts.last() {
+                    let mut size = section - previous_start;
+                    if equal_sizes > 5 && size == 2 * last_size && !inserted_double {
+                        result.set_starts.push(section - last_size);
+                        result.tilts.push(tilt);
+                        size = last_size;
+                        inserted_double = true;
+                    }
+                    if size == last_size {
+                        equal_sizes += 1;
+                    } else {
+                        equal_sizes = 1;
+                        last_size = size;
+                    }
+                }
+                result.set_starts.push(section);
+                result.tilts.push(tilt);
+            }
+        }
+        result.set_starts.push(end + 1);
+        result.set_sizes = result
+            .set_starts
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .collect();
+        result.min_set_size = result.set_sizes.iter().copied().min().unwrap_or(0);
+        result.max_set_size = result.set_sizes.iter().copied().max().unwrap_or(0);
+        result.source_status += 2;
+        Ok(result)
+    }
+
+    /// `rotateFlipGainReference()`: apply the source rotation/flip convention
+    /// to an owned floating-point gain image and return its resulting shape.
+    pub fn rotate_flip_gain_reference(
+        reference: &mut Vec<f32>,
+        nx: &mut usize,
+        ny: &mut usize,
+        rotation_flip: i32,
+    ) -> Result<(), String> {
+        if *nx == 0 || *ny == 0 || reference.len() != nx.saturating_mul(*ny) {
+            return Err("gain reference dimensions do not match its pixels".into());
+        }
+        let input_nx = i32::try_from(*nx).map_err(|_| "gain reference width is too large")?;
+        let input_ny = i32::try_from(*ny).map_err(|_| "gain reference height is too large")?;
+        let mut output = vec![0.0; reference.len()];
+        let (mut output_nx, mut output_ny) = (0, 0);
+        if rotate_flip_image(
+            RotateFlipData::Float {
+                array: reference,
+                brray: &mut output,
+            },
+            input_nx,
+            input_ny,
+            rotation_flip,
+            0,
+            0,
+            0,
+            &mut output_nx,
+            &mut output_ny,
+            0,
+        ) != 0
+        {
+            return Err(format!("inappropriate rotation/flip value {rotation_flip}"));
+        }
+        *nx = output_nx as usize;
+        *ny = output_ny as usize;
+        *reference = output;
+        Ok(())
+    }
+
+    /// `AliFrame::defectFileToString`: read nonempty defect-file records into
+    /// the newline-delimited protocol form consumed by the alignment backend.
+    pub fn defect_file_to_string(path: impl AsRef<std::path::Path>) -> Result<String, String> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(path)
+            .map_err(|error| format!("failed to open defect file {}: {error}", path.display()))?;
+        let mut output = String::new();
+        for line in contents.lines() {
+            if !line.is_empty() {
+                output.push_str(line);
+                output.push('\n');
+            }
+        }
+        Ok(output)
+    }
+
+    /// `AliFrame::addToSumBuffer` (`alignframes.cpp:2886`).  Source selects
+    /// the accumulator type from the MRC input mode; matching enum variants
+    /// make invalid raw casts impossible and retain the native wrapping
+    /// integer addition behavior.
+    pub fn add_to_sum_buffer(
+        input: AliFrameInputPixels<'_>,
+        sum: &mut AliFrameSumBuffer,
+    ) -> Result<(), String> {
+        match (input, sum) {
+            (AliFrameInputPixels::Byte(input), AliFrameSumBuffer::Short(sum)) => {
+                if input.len() != sum.len() {
+                    return Err("input and sum sizes differ".into());
+                }
+                for (source, target) in input.iter().zip(sum) {
+                    *target = target.wrapping_add(*source as i16);
+                }
+            }
+            (AliFrameInputPixels::Short(input), AliFrameSumBuffer::Short(sum)) => {
+                if input.len() != sum.len() {
+                    return Err("input and sum sizes differ".into());
+                }
+                for (source, target) in input.iter().zip(sum) {
+                    *target = target.wrapping_add(*source);
+                }
+            }
+            (AliFrameInputPixels::UShort(input), AliFrameSumBuffer::UShort(sum)) => {
+                if input.len() != sum.len() {
+                    return Err("input and sum sizes differ".into());
+                }
+                for (source, target) in input.iter().zip(sum) {
+                    *target = target.wrapping_add(*source);
+                }
+            }
+            (AliFrameInputPixels::Float(input), AliFrameSumBuffer::Float(sum)) => {
+                if input.len() != sum.len() {
+                    return Err("input and sum sizes differ".into());
+                }
+                for (source, target) in input.iter().zip(sum) {
+                    *target += *source;
+                }
+            }
+            _ => return Err("input mode does not match sum buffer mode".into()),
+        }
+        Ok(())
+    }
+
+    /// Owned translation of `AliFrame::openAndReadHeader`: unlike the C
+    /// `FILE *` route, the returned handle and header remain coupled in Rust
+    /// ownership and close automatically when the handle is dropped.
+    pub fn open_and_read_header(
+        filename: impl AsRef<std::path::Path>,
+        description: &str,
+        test_mode: bool,
+    ) -> Result<(ImodFile, MrcHeader), String> {
+        let path = filename.as_ref();
+        let mut file = ImodFile::open(path, "rb").ok_or_else(|| {
+            format!(
+                "cannot open {description} file {}{}",
+                path.display(),
+                if test_mode {
+                    "; do not specify an output file when not making sums"
+                } else {
+                    ""
+                }
+            )
+        })?;
+        let mut header = MrcHeader::default();
+        if mrc_head_read(&mut file, &mut header) != 0 {
+            return Err(format!(
+                "cannot read header of {description} file {}",
+                path.display()
+            ));
+        }
+        Ok((file, header))
+    }
+
     /// Owned-file equivalent of source `AliFrame::getNextFilename` for the
     /// command forms already supported by the MRC route: repeated input
     /// options, positional input names, or a list file.  Mdoc-derived frame
@@ -1190,6 +1981,19 @@ pub struct AliFrameResult {
     pub y_shifts: Vec<f32>,
 }
 
+/// Owned result of `analyzeExtraHeader`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ExtendedHeaderAnalysis {
+    pub source_status: i32,
+    pub axis_angle: f32,
+    pub pixel_size: f32,
+    pub tilts: Vec<f32>,
+    pub set_starts: Vec<usize>,
+    pub set_sizes: Vec<usize>,
+    pub min_set_size: usize,
+    pub max_set_size: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedFrameSets {
     pub saved_frames: Vec<i32>,
@@ -1197,7 +2001,7 @@ pub struct SavedFrameSets {
     pub counts: Vec<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TiltAngleRecords {
     pub angles: Vec<f32>,
     pub relative_starts: Vec<i32>,
@@ -1215,6 +2019,204 @@ pub struct PartialFrameSelection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mdoc_tilts_saved_frames_and_fei_axis_title_are_transferred() {
+        let result = AliFrame::get_angles_and_titles_from_mdoc(
+            &MdocTiltTitleInput {
+                tilt_angles: vec![-30., 30.],
+                frame_ts_start_end: vec![Some((2, 7)), None],
+                pixel_spacing: Some(1.25),
+                image_size: Some((4096, 4096)),
+                titles: vec!["TiltAxisAngle = -100.00 deg".into()],
+                first_rotation_angle: Some(10.),
+                ..Default::default()
+            },
+            true,
+            true,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(result.tilt_records.angles, vec![-30., 30.]);
+        assert_eq!(result.tilt_records.relative_starts, vec![2, -1]);
+        assert_eq!(result.axis_angle, Some(10.));
+        assert_eq!(result.titles, vec!["  Tilt axis angle = 10.00 deg"]);
+        assert!(result.are_fei_frames);
+    }
+
+    #[test]
+    fn mdoc_doses_keep_section_order_and_reject_bad_metadata_sizes() {
+        let lines = vec!["1.5 3".to_owned()];
+        let result =
+            AliFrame::get_doses_from_mdoc(2, 2, &[1.5, 2.], &[0., 1.5], &[4, 9], &lines).unwrap();
+        assert_eq!(result.dose_from_mdoc, vec![1.5, 2.]);
+        assert_eq!(result.prior_from_mdoc, vec![0., 1.5]);
+        assert_eq!(result.iz_piece, vec![4, 9]);
+        assert!(AliFrame::get_doses_from_mdoc(2, 1, &[1.], &[0.], &[0], &[]).is_err());
+    }
+
+    #[test]
+    fn title_reference_discovery_keeps_existing_files_and_eer_basename() {
+        let directory =
+            std::env::temp_dir().join(format!("imod-title-refs-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("gainRef.mrc"), []).unwrap();
+        std::fs::write(directory.join("camera-defect.txt"), []).unwrap();
+        let references = AliFrame::check_titles_for_ref_names(
+            directory.join("frames.mrc"),
+            &[" gainRef.mrc ".into(), "camera-defect.txt".into()],
+            None,
+        )
+        .unwrap();
+        assert_eq!(references.gain_name, Some(directory.join("gainRef.mrc")));
+        assert_eq!(
+            references.defect_name,
+            Some(directory.join("camera-defect.txt"))
+        );
+        assert_eq!(
+            AliFrame::check_titles_for_ref_names("frames.eer", &[], Some("C:\\refs\\eer.tif"))
+                .unwrap()
+                .gain_name,
+            Some(std::path::PathBuf::from("eer.tif"))
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn owned_frame_reader_selects_one_section_and_checks_bounds() {
+        let stack =
+            OwnedImageStack::from_raw_frames(2, 1, 0, vec![vec![1, 2], vec![3, 4]]).unwrap();
+        assert_eq!(AliFrame::read_one_frame(&stack, 1).unwrap(), vec![3, 4]);
+        assert!(AliFrame::read_one_frame(&stack, 2).is_err());
+    }
+
+    #[test]
+    fn mdoc_open_reports_the_source_missing_file_category() {
+        let path = std::env::temp_dir().join(format!("imod-no-mdoc-{}", std::process::id()));
+        assert!(
+            AliFrame::open_mdoc_file(path)
+                .unwrap_err()
+                .contains("does not exist")
+        );
+    }
+
+    #[test]
+    fn unified_doses_expand_fixed_frames_and_accumulate_priors() {
+        let result = AliFrame::unify_dose_information(&UnifiedDoseInput {
+            number_of_files: 3,
+            fixed_frame_doses: Some("1.5 2 3 1".into()),
+            dose_accumulates: 1,
+            maximum_frames: 8,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(result.dose_file_type, 5);
+        assert_eq!(result.total_doses, vec![6., 6., 6.]);
+        assert_eq!(result.prior_doses, vec![0., 6., 12.]);
+        assert_eq!(result.frame_dose_lines.len(), 3);
+    }
+
+    #[test]
+    fn gain_dark_validation_preserves_source_modes_sizes_and_super_resolution() {
+        let gain =
+            OwnedImageStack::from_raw_frames(2, 2, MRC_MODE_FLOAT, vec![vec![0; 16]]).unwrap();
+        let dark =
+            OwnedImageStack::from_raw_frames(4, 4, MRC_MODE_USHORT, vec![vec![0; 32]]).unwrap();
+        let result = AliFrame::get_gain_dark_defects(GainDarkDefectsInput {
+            image_dimensions: (4, 4),
+            gain: Some(gain),
+            dark: Some(dark),
+            frames_are_eer: true,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(result.super_resolution_factor, 2);
+        assert_eq!(result.gain_dimensions, Some((2, 2)));
+        assert!(result.dark.is_some());
+        let bad =
+            OwnedImageStack::from_raw_frames(3, 2, MRC_MODE_FLOAT, vec![vec![0; 24]]).unwrap();
+        assert!(
+            AliFrame::get_gain_dark_defects(GainDarkDefectsInput {
+                image_dimensions: (4, 4),
+                gain: Some(bad),
+                frames_are_eer: true,
+                ..Default::default()
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn gpu_planner_keeps_sum_alignment_and_drops_only_unaffordable_frc() {
+        let result = AliFrame::assess_gpu_needs(GpuNeedsInput {
+            gpu_requested: true,
+            gpu_available_memory: 1_000.,
+            sum_memory_need: 600.,
+            alignment_memory_need: 200.,
+            sum_pad_size: 300.,
+            getting_frc: true,
+            ..Default::default()
+        });
+        assert_eq!(result.flags & 1, 1);
+        assert_eq!(result.flags & (1 << 2), 1 << 2);
+        assert!(!result.getting_frc);
+    }
+
+    #[test]
+    fn source_constructor_and_defect_protocol_are_owned() {
+        assert_eq!(ali_frame().memory_limit, 12.);
+        let path = std::env::temp_dir().join(format!("imod-defects-{}", std::process::id()));
+        std::fs::write(&path, "# header\n\n1 2 3\n").unwrap();
+        assert_eq!(
+            AliFrame::defect_file_to_string(&path).unwrap(),
+            "# header\n1 2 3\n"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn dose_option_processing_preserves_voltage_and_text_file_rules() {
+        let options =
+            AliFrame::process_dose_weighting_options(None, 200, 2., true, 3, Some("1 4\n2 6\n"))
+                .unwrap();
+        assert_eq!(options.dose_scaling, 1.6);
+        assert_eq!(options.total_doses, vec![3., 4.]);
+        assert_eq!(options.prior_doses, vec![1., 2.]);
+        assert_eq!(options.reweight_ones.as_ref().unwrap().len(), 9000);
+    }
+
+    #[test]
+    fn gain_reference_rotation_uses_source_float_transform() {
+        let (mut nx, mut ny) = (2, 3);
+        let mut gain = vec![1., 2., 3., 4., 5., 6.];
+        AliFrame::rotate_flip_gain_reference(&mut gain, &mut nx, &mut ny, 0).unwrap();
+        assert_eq!((nx, ny), (2, 3));
+        assert_eq!(gain, vec![1., 2., 3., 4., 5., 6.]);
+    }
+
+    #[test]
+    fn extended_header_analysis_normalizes_axis_and_groups_tilts() {
+        let header = MrcHeader {
+            nz: 3,
+            nint: 1,
+            nreal: 12,
+            ..Default::default()
+        };
+        let mut extended = vec![0.; 39];
+        for (section, tilt) in [10., 10., 20.].into_iter().enumerate() {
+            extended[section * 13 + 1] = tilt;
+        }
+        extended[11] = -190.;
+        extended[12] = 2.5;
+        let result = AliFrame::analyze_extra_header(&header, &extended, None, false).unwrap();
+        assert_eq!(result.source_status, 3);
+        assert_eq!(result.axis_angle, 170.);
+        assert_eq!(result.pixel_size, 2.5);
+        assert_eq!(result.tilts, vec![10., 20.]);
+        assert_eq!(result.set_sizes, vec![2, 1]);
+    }
+
     #[test]
     fn source_filename_title_and_dose_helpers() {
         assert_eq!(AliFrame::extract_file_tail("a\\b/c.mrc"), "c.mrc");
@@ -1226,6 +2228,17 @@ mod tests {
             AliFrame::expand_frame_doses_numbers("1.5 2 3 1", 4).unwrap(),
             (vec![1.5, 1.5, 3.], 6.)
         );
+    }
+
+    #[test]
+    fn source_sum_buffer_accumulates_each_real_input_mode() {
+        let mut short = AliFrameSumBuffer::Short(vec![1, 2]);
+        AliFrame::add_to_sum_buffer(AliFrameInputPixels::Byte(&[3, 4]), &mut short).unwrap();
+        AliFrame::add_to_sum_buffer(AliFrameInputPixels::Short(&[-1, 2]), &mut short).unwrap();
+        assert_eq!(short, AliFrameSumBuffer::Short(vec![3, 8]));
+        let mut float = AliFrameSumBuffer::Float(vec![1., 2.]);
+        AliFrame::add_to_sum_buffer(AliFrameInputPixels::Float(&[0.5, -1.]), &mut float).unwrap();
+        assert_eq!(float, AliFrameSumBuffer::Float(vec![1.5, 1.]));
     }
 
     #[test]
@@ -1251,6 +2264,18 @@ mod tests {
             .unwrap(),
             Some("positional.mrc".into())
         );
+    }
+
+    #[test]
+    fn source_header_open_reports_the_test_mode_context() {
+        let missing =
+            std::env::temp_dir().join(format!("imod-alignframes-missing-{}", std::process::id()));
+        let error = match AliFrame::open_and_read_header(&missing, "input", true) {
+            Ok(_) => panic!("opening a missing header unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        assert!(error.contains("cannot open input file"));
+        assert!(error.contains("do not specify an output file"));
     }
 
     #[test]
@@ -1462,9 +2487,11 @@ mod tests {
 
     #[test]
     fn mrc_entry_reports_a_read_error_without_a_legacy_image_handle() {
-        assert!(AliFrame::default()
-            .align_mrc_file("does-not-exist.mrc", 1, 1, 1, None, None, None, 0.)
-            .is_err());
+        assert!(
+            AliFrame::default()
+                .align_mrc_file("does-not-exist.mrc", 1, 1, 1, None, None, None, 0.)
+                .is_err()
+        );
     }
 
     #[test]

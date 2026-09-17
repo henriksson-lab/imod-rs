@@ -118,6 +118,36 @@ impl SerialSectionsStartupDialog {
         self.displayed = true;
         self.disposed = false;
     }
+    #[allow(non_snake_case)]
+    pub fn windowActivated(&mut self) {
+        self.displayed = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowClosed(&mut self) {
+        self.displayed = false;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowDeactivated(&mut self) {}
+    #[allow(non_snake_case)]
+    pub fn windowDeiconified(&mut self) {
+        self.displayed = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowIconified(&mut self) {
+        self.displayed = false;
+    }
+    #[allow(non_snake_case)]
+    pub fn windowOpened(&mut self) {
+        self.displayed = true;
+    }
+    #[allow(non_snake_case)]
+    pub fn actionPerformed<M: SerialSectionsStartupDialogApplicationManager>(
+        &mut self,
+        manager: &mut M,
+        command: &str,
+    ) {
+        self.action(manager, command);
+    }
     /// Java `validate` direct `DatasetTool` calls.
     pub fn validate<M: SerialSectionsStartupDialogApplicationManager>(
         &self,

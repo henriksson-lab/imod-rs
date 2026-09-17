@@ -14,21 +14,21 @@ use std::path::{Path, PathBuf};
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
 use crate::imod::libimod::icont::{imod_contour_clear_points, imod_contour_new, imod_contours_new};
 use crate::imod::libimod::imodel::{
-    imod_flip_yz, imod_rot90x, Imod, Ipoint, IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT,
+    IMOD_OBJFLAG_OPEN, IMOD_OBJFLAG_SCAT, Imod, Ipoint, imod_flip_yz, imod_rot90x,
 };
 use crate::imod::libimod::imodel_files::{imod_read, imod_write};
 use crate::imod::libimod::iobj::{
-    imod_object_add_contour, imod_object_default, imod_object_get_bbox, IMOD_OBJFLAG_ANTI_ALIAS,
-    IMOD_OBJFLAG_EXTRA_EDIT, IMOD_OBJFLAG_EXTRA_MODV, IMOD_OBJFLAG_FILL, IMOD_OBJFLAG_MESH,
-    IMOD_OBJFLAG_MODV_ONLY, IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_WILD,
+    IMOD_OBJFLAG_ANTI_ALIAS, IMOD_OBJFLAG_EXTRA_EDIT, IMOD_OBJFLAG_EXTRA_MODV, IMOD_OBJFLAG_FILL,
+    IMOD_OBJFLAG_MESH, IMOD_OBJFLAG_MODV_ONLY, IMOD_OBJFLAG_NOLINE, IMOD_OBJFLAG_WILD,
+    imod_object_add_contour, imod_object_default, imod_object_get_bbox,
 };
 use crate::imod::libimod::ipoint::{imod_point_append_xyz, imod_point_set_size};
 use crate::imod::libimod::iview::VIEW_WORLD_LIGHT;
 use crate::imod::three_dmod::imodv::{
-    imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg, ImodvApp,
+    ImodvApp, imodv_draw, imodv_finish_chg_unit, imodv_register_model_chg,
 };
 use crate::imod::three_dmod::imodview::{
-    ivw_free_extra_object, ivw_get_an_extra_object, ivw_get_free_extra_object_number, ImodView,
+    ImodView, ivw_free_extra_object, ivw_get_an_extra_object, ivw_get_free_extra_object_number,
 };
 use crate::imod::three_dmod::mv_modeled::imodv_select_model;
 use crate::imod::three_dmod::mv_objed::{imodv_objed_freeing_extra_obj, imodv_objed_new_view};
@@ -37,7 +37,7 @@ use crate::imod::three_dmod::mv_views::{
 };
 use crate::imod::three_dmod::mv_window::*;
 use crate::imod::three_dmod::utilities::{
-    util_exchange_flip_rotation, UtilitiesBoundary, FLIP_TO_ROTATION, ROTATION_TO_FLIP,
+    FLIP_TO_ROTATION, ROTATION_TO_FLIP, UtilitiesBoundary, util_exchange_flip_rotation,
 };
 
 /// The model-coordinate portion of `UtilitiesBoundary` used by
@@ -72,6 +72,7 @@ pub struct ImodvBkgColor {
     pub blue: i32,
 }
 
+/// `openDialog()` source method.
 /// `ImodvBkgColor::openDialog`.
 pub fn imodv_bkg_color_open_dialog(color: &mut ImodvBkgColor, rgb: [i32; 3]) {
     color.selector_open = true;
@@ -83,6 +84,7 @@ pub fn imodv_bkg_color_open_dialog(color: &mut ImodvBkgColor, rgb: [i32; 3]) {
 pub fn imodv_bkg_color_new() -> ImodvBkgColor {
     ImodvBkgColor::default()
 }
+/// `newColorSlot()` source method.
 /// `ImodvBkgColor::newColorSlot`.
 pub fn imodv_bkg_color_new_color_slot(color: &mut ImodvBkgColor, red: i32, green: i32, blue: i32) {
     color.red = red;
@@ -90,20 +92,24 @@ pub fn imodv_bkg_color_new_color_slot(color: &mut ImodvBkgColor, red: i32, green
     color.blue = blue;
     unsafe { imodv_draw() };
 }
+/// `doneSlot()` source method.
 /// `ImodvBkgColor::doneSlot`.
 pub fn imodv_bkg_color_done_slot(color: &mut ImodvBkgColor) {
     if color.selector_open {
         color.selector_open = false;
     }
 }
+/// `closingSlot()` source method.
 /// `ImodvBkgColor::closingSlot`.
 pub fn imodv_bkg_color_closing_slot(color: &mut ImodvBkgColor) {
     color.selector_open = false;
 }
+/// `keyPressSlot()` source method.
 /// `ImodvBkgColor::keyPressSlot`; the paired `mv_input` key dispatch is the caller boundary.
 pub fn imodv_bkg_color_key_press_slot(_color: &mut ImodvBkgColor, event: KeyEvent) -> KeyEvent {
     event
 }
+/// `keyReleaseSlot()` source method.
 /// `ImodvBkgColor::keyReleaseSlot`; the paired `mv_input` key dispatch is the caller boundary.
 pub fn imodv_bkg_color_key_release_slot(_color: &mut ImodvBkgColor, event: KeyEvent) -> KeyEvent {
     event
@@ -677,7 +683,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::imod::libimod::imodel::{Icont, Imod, Iobj, IMODF_FLIPYZ, IMODF_ROT90X};
+    use crate::imod::libimod::imodel::{IMODF_FLIPYZ, IMODF_ROT90X, Icont, Imod, Iobj};
     use crate::imod::libimod::imodel_files::imod_file_write;
 
     static FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);

@@ -22,6 +22,18 @@ pub struct ResizeTool {
     pub key_press_signal: bool,
     pub key_release_signal: bool,
 }
+
+/// `ResizeTool()`: construct the size controller through the native window
+/// sizing and DPI boundary.
+pub fn resize_tool(
+    boundary: &dyn ResizeToolBoundary,
+    x_size: i32,
+    y_size: i32,
+    step: i32,
+) -> ResizeTool {
+    ResizeTool::new(boundary, x_size, y_size, step)
+}
+
 impl ResizeTool {
     pub fn new(boundary: &dyn ResizeToolBoundary, x_size: i32, y_size: i32, step: i32) -> Self {
         let (w, h) = boundary.maximum_window_size();
@@ -99,5 +111,10 @@ mod tests {
         assert_eq!(x.resize_signal, Some((40, 30)));
         x.y_size_changed(50);
         assert_eq!(x.resize_signal, Some((40, 50)));
+    }
+    #[test]
+    fn source_constructor_facade_uses_device_size_boundary() {
+        let tool = resize_tool(&B, 10, 12, 2);
+        assert_eq!((tool.x_spin_box, tool.y_spin_box, tool.step), (10, 12, 2));
     }
 }

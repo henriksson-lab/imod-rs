@@ -102,6 +102,7 @@ pub struct ContSurfPoint {
 }
 
 impl ContSurfPoint {
+    /// `ContSurfPoint()` source constructor.
     pub fn new(native: &mut dyn ContSurfPointNativeBoundary) -> Self {
         let mut form = Self::default();
         form.m_top_win = true;

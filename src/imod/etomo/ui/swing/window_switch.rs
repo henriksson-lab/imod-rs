@@ -573,6 +573,16 @@ impl<P: WindowMainPanel> WindowSwitch<P> {
         }
     }
 
+    /// Rust callback endpoint for Java `MenuActionListener.actionPerformed`.
+    ///
+    /// The native menu frontend passes the selected item's action command;
+    /// keeping this adapter preserves the Java listener boundary while the
+    /// actual transition remains in `menu_action`.
+    #[allow(non_snake_case)]
+    pub fn actionPerformed(&mut self, action_command: &str) {
+        self.menu_action(action_command);
+    }
+
     /// Java `tabChanged(ChangeEvent)`.
     pub fn tab_changed(&mut self, new_index: Option<usize>) {
         let Some(new_index) = new_index else {
@@ -590,6 +600,15 @@ impl<P: WindowMainPanel> WindowSwitch<P> {
         if let Some(listener) = &mut self.set_current_manager {
             listener(manager_key);
         }
+    }
+
+    /// Rust callback endpoint for Java `TabChangeListener.stateChanged`.
+    ///
+    /// Slint supplies the currently selected tab index directly instead of a
+    /// Swing `ChangeEvent`.
+    #[allow(non_snake_case)]
+    pub fn stateChanged(&mut self, new_index: Option<usize>) {
+        self.tab_changed(new_index);
     }
 }
 

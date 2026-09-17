@@ -43,6 +43,17 @@ pub struct FrameAlign {
     pub reweight_filter: Vec<f32>,
     pub dose_weight_delta: f32,
 }
+
+/// `FrameAlign()`: create an empty owned alignment engine.
+pub fn frame_align() -> FrameAlign {
+    FrameAlign::default()
+}
+
+/// `~FrameAlign()`: release accumulated frames, shifts, and gain data.
+pub fn free_frame_align(mut align: FrameAlign) {
+    align.cleanup();
+}
+
 impl Default for FrameAlign {
     fn default() -> Self {
         Self {
@@ -1884,6 +1895,14 @@ pub fn gpu_memory_needs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constructor_facades_own_and_release_alignment_workspace() {
+        let mut align = frame_align();
+        align.initialize(1, 1, 0., 0., 1, 1, 1).unwrap();
+        align.frames.push(vec![3.]);
+        free_frame_align(align);
+    }
     #[test]
     fn source_utilities_preserve_wrap_and_lcm() {
         assert_eq!(least_common_multiple(6, 8), 24);

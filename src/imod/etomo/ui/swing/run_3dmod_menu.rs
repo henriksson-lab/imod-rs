@@ -18,6 +18,8 @@ pub struct Run3dmodMenu {
     pub process_button: bool,
     pub file_to_open_known: bool,
     pub popup_events: Vec<MouseEvent>,
+    pub menu_order: Vec<String>,
+    pub listeners_attached: bool,
 }
 impl Run3dmodMenu {
     fn new(open_string: &str, process_button: bool) -> Self {
@@ -37,21 +39,44 @@ impl Run3dmodMenu {
             process_button,
             file_to_open_known: true,
             popup_events: Vec::new(),
+            menu_order: Vec::new(),
+            listeners_attached: false,
         }
     }
     pub fn get_3dmod_button_instance(description: Option<&str>) -> Self {
-        Self::new(
+        let mut value = Self::new(
             &description
                 .map(|v| format!("Open {v}"))
                 .unwrap_or_else(|| "Open".into()),
             false,
-        )
+        );
+        value.createMenu();
+        value.addListeners();
+        value
     }
     pub fn get_process_button_instance(description: Option<&str>) -> Self {
-        Self::new(
+        let mut value = Self::new(
             &format!("And open {}", description.unwrap_or(DEFAULT_DESCR)),
             true,
-        )
+        );
+        value.createMenu();
+        value.addListeners();
+        value
+    }
+    #[allow(non_snake_case)]
+    /// Java private `createMenu`, represented by native popup item order.
+    pub fn createMenu(&mut self) {
+        self.menu_order.clear();
+        if let Some(item) = &self.run_3dmod {
+            self.menu_order.push(item.text.clone());
+        }
+        self.menu_order.push(self.startup_window.text.clone());
+        self.menu_order.push(self.bin_by_2.text.clone());
+    }
+    #[allow(non_snake_case)]
+    /// Java private `addListeners` at the Rust popup-event boundary.
+    pub fn addListeners(&mut self) {
+        self.listeners_attached = true;
     }
     pub fn set_file_to_open_known(&mut self, file_to_open_known: bool) {
         self.file_to_open_known = file_to_open_known;
