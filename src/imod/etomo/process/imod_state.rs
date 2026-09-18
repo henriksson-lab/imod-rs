@@ -7,6 +7,7 @@
 //! was launched.
 #![allow(dead_code)]
 
+use crate::imod::etomo::process::imod_process::{ImodProcess, Run3dmodMenuOptions};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
@@ -47,8 +48,10 @@ pub struct ImodState {
     initial_model_name: String,
     initial_mode: i32,
     initial_swap_yz: bool,
-    /// Java final `process`, untranslated `ImodProcess` / 3dmod boundary.
-    process: Option<Infallible>,
+    /// Java final `process`.  Child/window transport remains the explicit
+    /// boundary of `ImodProcess`, but configuration now reaches that Rust
+    /// implementation instead of being discarded in this state owner.
+    process: ImodProcess,
     file_name_array: Option<Vec<String>>,
     file_list: Option<Vec<PathBuf>>,
     warned_stale_file: bool,
@@ -103,7 +106,7 @@ impl ImodState {
             initial_model_name: String::new(),
             initial_mode: MOVIE_MODE,
             initial_swap_yz: false,
-            process: None,
+            process: ImodProcess::new(None, Some(axis_id)),
             file_name_array: None,
             file_list: None,
             warned_stale_file: false,
@@ -324,16 +327,28 @@ impl ImodState {
     }
     /// Java `toString`.
     pub fn to_source_string(&self) -> String {
-        format!("[process:{:?}]", self.process)
+        format!("[process:{}]", self.process)
     }
     /// Java `processRequest`; ImodProcess boundary.
-    pub fn process_request(&self) -> Result<(), String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn process_request(&mut self) -> Result<(), String> {
+        self.process.process_request();
+        Ok(())
     }
     /// Java `open(Run3dmodMenuOptions)`.
     pub fn open(&mut self, menu_options: Option<Infallible>) -> Result<(), String> {
         let _ = menu_options;
-        Err("ImodProcess.java/3dmod launch is not translated".into())
+        self.process.set_model_view(self.model_view);
+        self.process.set_use_modv(self.use_modv);
+        self.process.set_swap_yz(self.swap_yz);
+        self.process.set_frames(self.frames);
+        self.process.set_binning(self.binning);
+        self.process.set_binning_xy(self.binning_xy);
+        if let Some(model) = &self.model_name {
+            self.process.set_model_name(model);
+        }
+        self.process
+            .open(Run3dmodMenuOptions::default())
+            .map_err(|error| error.to_string())
     }
     /// Java `setOpenSurfContPoint`.
     pub fn set_open_surf_cont_point(&mut self, input: bool) {
@@ -345,8 +360,8 @@ impl ImodState {
         model: Option<Infallible>,
         menu: Option<Infallible>,
     ) -> Result<(), String> {
-        let _ = (model, menu);
-        Err("ImodProcess.java/3dmod launch is not translated".into())
+        let _ = model;
+        self.open(menu)
     }
     /// Java `open(String,...)`.
     pub fn open_model_name(
@@ -378,37 +393,48 @@ impl ImodState {
         self.open(menu)
     }
     /// Java `getRubberbandCoordinates`.
-    pub fn get_rubberband_coordinates(&self) -> Result<Option<Infallible>, String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn get_rubberband_coordinates(&mut self) -> Result<Vec<String>, String> {
+        self.process
+            .get_rubberband_coordinates()
+            .map_err(|error| error.to_string())
     }
     /// Java `getSlicerAngles`.
-    pub fn get_slicer_angles(&self) -> Result<Option<Infallible>, String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn get_slicer_angles(&mut self) -> Result<Vec<String>, String> {
+        self.process
+            .get_slicer_angles()
+            .map_err(|error| error.to_string())
     }
     /// Java `quit`.
-    pub fn quit(&self) -> Result<(), String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn quit(&mut self) -> Result<(), String> {
+        self.process.quit().map_err(|error| error.to_string())
     }
     /// Java `disconnect`.
-    pub fn disconnect(&self) -> Result<(), String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn disconnect(&mut self) -> Result<(), String> {
+        self.process.disconnect().map_err(|error| error.to_string())
     }
     /// Java `setModelViewType`.
     pub fn set_model_view_type(&mut self, t: i32) {
         self.model_view = t == MODEL_VIEW;
         self.use_modv = t == MODV;
+        self.process.set_model_view(self.model_view);
+        self.process.set_use_modv(self.use_modv);
     }
     /// Java `setOpenZap`.
     pub fn set_open_zap(&mut self) {
         self.open_zap = true;
+        self.process.set_open_zap();
     }
     /// Java `setTiltFile`.
     pub fn set_tilt_file(&mut self, file: Option<&str>) {
         self.file_name = file.map(str::to_owned);
+        if let Some(file) = file {
+            self.process.set_tilt_file(file);
+        }
     }
     /// Java `resetTiltFile`.
     pub fn reset_tilt_file(&mut self) {
         self.file_name = None;
+        self.process.reset_tilt_file();
     }
     /// Java `addWindowOpenOption`.
     pub fn add_window_open_option(&mut self, option: Option<Infallible>) {
@@ -423,6 +449,8 @@ impl ImodState {
         self.open_bead_fixer = DEFAULT_OPEN_BEAD_FIXER;
         self.open_contours = DEFAULT_OPEN_CONTOURS;
         self.binning = DEFAULT_BINNING;
+        self.process.set_open_with_model(!self.preserve_contrast);
+        self.process.set_binning(DEFAULT_BINNING);
         self.frames = DEFAULT_FRAMES;
         self.piece_list_file_name = None;
         self.manage_new_contours = false;
@@ -440,6 +468,7 @@ impl ImodState {
     /// Java `setDebug`.
     pub fn set_debug(&mut self, input: bool) {
         self.debug = input;
+        self.process.set_debug(input);
     }
     /// Java `equalsSubdirName`.
     pub fn equals_subdir_name(&self, input: Option<&str>) -> bool {
@@ -468,18 +497,24 @@ impl ImodState {
     /// Java private `setModelName`.
     pub fn set_model_name(&mut self, model: Option<&str>) {
         self.model_name = model.map(str::to_owned);
+        if let Some(model) = model {
+            self.process.set_model_name(model);
+        }
     }
     /// Java private `setModelNameList`.
     pub fn set_model_name_list(&mut self, models: Option<Vec<String>>) {
-        self.model_name_list = models;
+        self.model_name_list = models.clone();
+        self.process.set_model_name_list(models);
     }
     /// Java `setLoadAsIntegers`.
     pub fn set_load_as_integers(&mut self) {
         self.load_as_integers = true;
+        self.process.set_load_as_integers();
     }
     /// Java `setSuppressSaveQuery`.
     pub fn set_suppress_save_query(&mut self) {
         self.suppress_save_query = true;
+        self.process.set_suppress_save_query();
     }
     /// Java `isUsingMode`.
     pub fn is_using_mode(&self) -> bool {
@@ -534,6 +569,7 @@ impl ImodState {
     /// Java `setSwapYZ`.
     pub fn set_swap_yz(&mut self, input: bool) {
         self.swap_yz = input;
+        self.process.set_swap_yz(input);
     }
     /// Java `isPreserveContrast`.
     pub fn is_preserve_contrast(&self) -> bool {
@@ -546,14 +582,19 @@ impl ImodState {
     /// Java `setFrames`.
     pub fn set_frames(&mut self, input: bool) {
         self.frames = input;
+        self.process.set_frames(input);
     }
     /// Java `setPieceListFileName`.
     pub fn set_piece_list_file_name(&mut self, input: Option<&str>) {
         self.piece_list_file_name = input.map(str::to_owned);
+        if let Some(input) = input {
+            self.process.set_piece_list_file_name(input);
+        }
     }
     /// Java `setMontageSeparation`.
     pub fn set_montage_separation(&mut self) {
         self.montage_separation = true;
+        self.process.set_montage_separation();
     }
     /// Java `setInterpolation`.
     pub fn set_interpolation(&mut self, input: bool) {
@@ -647,7 +688,7 @@ impl ImodState {
     }
     /// Java `isOpen`; untranslated process cannot report a fabricated running state.
     pub fn is_open(&self) -> bool {
-        false
+        self.process.is_running()
     }
     /// Java final `setAllowMenuBinningInZ`.
     pub fn set_allow_menu_binning_in_z(&mut self, input: bool) {
@@ -658,29 +699,38 @@ impl ImodState {
         self.no_menu_options = input;
     }
     /// Java `reopenLog`.
-    pub fn reopen_log(&self) -> Result<(), String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn reopen_log(&mut self) -> Result<(), String> {
+        self.process.reopen_log().map_err(|error| error.to_string())
     }
     /// Java `openModel`.
-    pub fn open_model(&self, model: Option<&str>, model_mode: bool) -> Result<(), String> {
-        let _ = (model, model_mode);
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn open_model(&mut self, model: Option<&str>, model_mode: bool) -> Result<(), String> {
+        let Some(model) = model else {
+            return Ok(());
+        };
+        self.process
+            .open_model(model, model_mode)
+            .map_err(|error| error.to_string())
     }
     /// Java `setBinning`.
     pub fn set_binning(&mut self, input: i32) {
         self.binning = input;
+        self.process.set_binning(input);
     }
     /// Java `setBinningXY`.
     pub fn set_binning_xy(&mut self, input: i32) {
         self.binning_xy = input;
+        self.process.set_binning_xy(input);
     }
     /// Java `setWorkingDirectory`.
     pub fn set_working_directory(&mut self, input: Option<&Path>) {
         self.working_directory = input.map(Path::to_owned);
+        self.process
+            .set_working_directory(self.working_directory.clone());
     }
     /// Java `setOpenModelView`.
-    pub fn set_open_model_view(&self) -> Result<(), String> {
-        Err("ImodProcess.java/3dmod transport is not translated".into())
+    pub fn set_open_model_view(&mut self) -> Result<(), String> {
+        self.process.set_open_model_view();
+        Ok(())
     }
     /// Java `setContinuousListenerTarget`.
     pub fn set_continuous_listener_target(&self, input: Option<Infallible>) {
@@ -697,7 +747,7 @@ impl ImodState {
     /// Java `paramString`.
     pub fn param_string(&self) -> String {
         format!(
-            "[modelView={}, useModv={}, modelName={:?}, usingMode={}, mode={}, swapYZ={}, preserveContrast={}, openBeadFixer={}, initialModelName={}, initialMode={}, initialSwapYZ={}, defaultOpenWithModel={}, defaultPreserveContrast={}, process={:?}, warnedStaleFile={}, openContours={}]",
+            "[modelView={}, useModv={}, modelName={:?}, usingMode={}, mode={}, swapYZ={}, preserveContrast={}, openBeadFixer={}, initialModelName={}, initialMode={}, initialSwapYZ={}, defaultOpenWithModel={}, defaultPreserveContrast={}, process={}, warnedStaleFile={}, openContours={}]",
             self.model_view,
             self.use_modv,
             self.model_name,
@@ -759,5 +809,21 @@ mod tests {
         assert!(state.is_swap_yz());
         assert!(!state.is_preserve_contrast());
         assert!(!state.is_open_contours());
+    }
+
+    #[test]
+    fn open_delegates_configured_state_to_imod_process_command() {
+        let mut state = ImodState::new(None, AxisID::First);
+        state.set_model_name(Some("model.mod"));
+        state.set_model_view_type(MODV);
+        state.set_swap_yz(true);
+        state.set_frames(true);
+        state.set_binning(2);
+        let error = state.open(None).unwrap_err();
+        assert!(error.contains("-view"));
+        assert!(error.contains("-Y"));
+        assert!(error.contains("-f"));
+        assert!(error.contains("-B 2"));
+        assert!(error.ends_with("model.mod"));
     }
 }

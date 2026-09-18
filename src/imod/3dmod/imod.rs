@@ -807,6 +807,26 @@ impl ImodNativeBoundary for ImodNativeHost {
                     .map_or(std::ptr::null_mut(), |view| view as *mut ImodView),
             );
         });
+        #[cfg(feature = "three-dmod-gl")]
+        {
+            let view = self.view.take().expect("normal viewer view was installed");
+            let model = self
+                .model
+                .take()
+                .expect("normal viewer model was installed");
+            let load_info = self
+                .load_info
+                .take()
+                .expect("normal viewer load info was installed");
+            let result = crate::imod::three_dmod::imod_window::run_native_image_host(
+                crate::imod::three_dmod::imod_window::ImodImageHost::new(
+                    view, model, load_info, "3dmod",
+                ),
+            );
+            NORMAL_CURRENT_VIEW.with(|current| current.set(std::ptr::null_mut()));
+            return result.map(|()| 0);
+        }
+        #[cfg(not(feature = "three-dmod-gl"))]
         Err(format!(
             "3dmod: image data for {:?} (model {:?}) was loaded, but the native winit image-display \
              host still needs the Zap/Slicer/XYZ and info-window lifecycles of xzap.cpp, slicer.cpp, \

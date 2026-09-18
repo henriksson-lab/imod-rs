@@ -270,7 +270,7 @@ impl ElementList {
     }
     /// Java `getNElements`.
     pub fn get_n_elements(&self) -> usize {
-        element_count(
+        count_elements(
             &self.field_text,
             &self.list.iter().map(String::as_str).collect::<Vec<_>>(),
         )
@@ -326,7 +326,7 @@ fn split(field_type: FieldType, value: &str) -> Vec<&str> {
 
 /// Java `ElementList.countElements`: `String.split` discards trailing empty
 /// elements, then the source adds one for every additional trailing comma.
-fn element_count(original: &str, elements: &[&str]) -> usize {
+fn count_elements(original: &str, elements: &[&str]) -> usize {
     let compact: String = original
         .chars()
         .filter(|c| !c.is_ascii_whitespace())

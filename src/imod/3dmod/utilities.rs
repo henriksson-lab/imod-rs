@@ -7,6 +7,7 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::imod::libimod::icont::ICONT_STIPPLED;
+use crate::imod::libimod::imesh::{imod_mesh_make_pairs, imod_mesh_remove_pairs};
 use crate::imod::libimod::imodel::{IMODF_FLIPYZ, IMODF_ROT90X, Icont, Imod, Iobj};
 use crate::imod::libimod::iobj::{
     IOBJ_SYM_CIRCLE, IOBJ_SYM_NONE, IOBJ_SYM_SQUARE, IOBJ_SYM_STAR, IOBJ_SYM_TRIANGLE,
@@ -523,12 +524,22 @@ where
     }
 }
 
-/// Native backend boundary for `utilManagePairedMeshes`.
-/// The renderer owns pair generation/removal, while this preserves the source decision:
-/// a positive object thickness requires paired meshes, zero removes them.  `true` is an
-/// allocation/render failure, matching the C return convention.
-pub fn util_manage_paired_meshes(obj: &Iobj, mut manage_pairs: impl FnMut(bool) -> bool) -> i32 {
-    manage_pairs(obj.mesh_thickness != 0) as i32
+/// `utilManagePairedMeshes` (`utilities.cpp:1255`).
+///
+/// Vertex-buffer cleanup remains the responsibility of the renderer which
+/// owns those buffers; `Iobj::mesh` itself is ordinary owned Rust data, so the
+/// source's mesh replacement happens directly here.  A nonzero return means
+/// pair allocation failed and the object has lost its mesh, exactly as in C.
+pub fn util_manage_paired_meshes(obj: &mut Iobj) -> i32 {
+    if obj.mesh_thickness != 0 {
+        if !imod_mesh_make_pairs(&mut obj.mesh, obj.mesh_thickness as i32, None) {
+            obj.mesh.clear();
+            return 1;
+        }
+    } else {
+        imod_mesh_remove_pairs(&mut obj.mesh, 0, None);
+    }
+    0
 }
 
 /// The non-Rust services called by this source unit.
@@ -1284,5 +1295,18 @@ mod tests {
         );
         assert!(util_restore_snap_changes(Some(&mut view), changes));
         assert_eq!(view.drawcursor, 1);
+    }
+
+    #[test]
+    fn paired_mesh_management_removes_pairs_or_reports_missing_mesh() {
+        let mut empty = Iobj::default();
+        empty.mesh_thickness = 4;
+        assert_eq!(util_manage_paired_meshes(&mut empty), 1);
+        assert!(empty.mesh.is_empty());
+
+        // The zero-thickness branch is the source's `imodMeshRemovePairs`
+        // path and succeeds even when there is no mesh to remove.
+        empty.mesh_thickness = 0;
+        assert_eq!(util_manage_paired_meshes(&mut empty), 0);
     }
 }

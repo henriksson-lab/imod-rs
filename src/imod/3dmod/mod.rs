@@ -83,6 +83,8 @@ pub mod imod_edit;
 pub mod imod_input;
 /// Translation of `IMOD/3dmod/imod_io.cpp` and `imod_io.h`.
 pub mod imod_io;
+/// Native winit/glutin ownership for the normal image-display route.
+pub mod imod_window;
 /// Translation of `IMOD/3dmod/imodplug.cpp`, `imodplug.h`, and `imodplugP.h`.
 pub mod imodplug;
 pub mod imodv;

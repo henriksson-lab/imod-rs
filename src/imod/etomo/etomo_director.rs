@@ -247,8 +247,12 @@ impl EtomoDirector {
         Ok(())
     }
 
-    /// Matches Java `doAutomation()` (`EtomoDirector.java:389`); manager automation is JVM boundary.
-    pub fn do_automation(&self) {}
+    /// Matches Java `doAutomation()` (`EtomoDirector.java:389`).
+    pub fn do_automation(&self) {
+        if let Some(manager) = self.get_current_manager() {
+            manager.do_automation(None);
+        }
+    }
 
     /// Matches Java `initialize()` (`EtomoDirector.java:424`) before manager/UI opening.
     pub fn initialize(&mut self) -> Result<(), String> {
@@ -402,8 +406,14 @@ impl EtomoDirector {
     /// are an application-manager boundary, so without one this updates the
     /// director's original working directory state.
     pub fn set_current_property_user_dir(&mut self, directory: impl Into<String>) -> String {
+        let directory = directory.into();
+        if let Some(manager) = self.get_current_manager() {
+            return manager
+                .set_property_user_dir(Some(&directory))
+                .unwrap_or_default();
+        }
         let previous = self.original_user_dir.clone().unwrap_or_default();
-        self.original_user_dir = Some(directory.into());
+        self.original_user_dir = Some(directory);
         previous
     }
     /// Java `makeOriginalDirLocal`, represented as an explicit process cwd change.
@@ -878,5 +888,13 @@ mod tests {
             director.borrow().get_current_manager().unwrap(),
             first_manager as &'static dyn BaseManager,
         ));
+    }
+
+    #[test]
+    fn property_user_dir_falls_back_to_director_without_current_manager() {
+        let mut director = EtomoDirector::new();
+        director.original_user_dir = Some("before".into());
+        assert_eq!(director.set_current_property_user_dir("after"), "before");
+        assert_eq!(director.get_original_user_dir(), Some("after"));
     }
 }

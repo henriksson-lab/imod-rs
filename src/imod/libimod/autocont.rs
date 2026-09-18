@@ -6,6 +6,11 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::imod::libcfshr::filtxcorr::scaled_gaussian_kernel;
+use crate::imod::libcfshr::islice::{
+    slice_byte_smooth, slice_create, slice_mat_filter, slice_scale_and_free,
+};
+use crate::imod::libiimod::mrcfiles::MRC_MODE_BYTE;
 use crate::imod::libimod::icont::{
     imod_contour_area, imod_contour_default, imod_contour_reduce, imod_contour_shave,
     imod_contour_strip,
@@ -14,11 +19,24 @@ use crate::imod::libimod::imodel::{Icont, Iobj, Ipoint};
 use crate::imod::libimod::ipoint::imod_point_inside_cont;
 
 /// Native boundary pre-mask used by `imodAutoContoursFromSlice`.
-pub fn pixels_inside_boundaries(boundaries: &[Icont], xsize: usize, ysize: usize, z: f32) -> Vec<bool> {
-    (0..xsize.saturating_mul(ysize)).map(|index| {
-        let point = Ipoint { x: (index % xsize) as f32 + 0.5, y: (index / xsize) as f32 + 0.5, z };
-        boundaries.iter().any(|contour| imod_point_inside_cont(contour, &point) != 0)
-    }).collect()
+pub fn pixels_inside_boundaries(
+    boundaries: &[Icont],
+    xsize: usize,
+    ysize: usize,
+    z: f32,
+) -> Vec<bool> {
+    (0..xsize.saturating_mul(ysize))
+        .map(|index| {
+            let point = Ipoint {
+                x: (index % xsize) as f32 + 0.5,
+                y: (index / xsize) as f32 + 0.5,
+                z,
+            };
+            boundaries
+                .iter()
+                .any(|contour| imod_point_inside_cont(contour, &point) != 0)
+        })
+        .collect()
 }
 
 // C's `sStopProcessing`; the full slice-to-contour operation resets this at
@@ -54,6 +72,9 @@ fn reset_auto_contour_stop() {
 /// Source parameters for the unfiltered core of `imodAutoContoursFromSlice`.
 #[derive(Clone, Copy, Debug)]
 pub struct AutoContourOptions {
+    /// Native `ksigma`: `None` leaves the slice unchanged, zero selects the
+    /// native 3x3 byte smoother, and positive values apply a Gaussian.
+    pub gaussian_sigma: Option<f32>,
     pub high_threshold: f64,
     pub low_threshold: f64,
     pub exact: Option<u8>,
@@ -71,6 +92,7 @@ pub struct AutoContourOptions {
 impl Default for AutoContourOptions {
     fn default() -> Self {
         Self {
+            gaussian_sigma: None,
             high_threshold: 256.,
             low_threshold: 0.,
             exact: None,
@@ -97,6 +119,64 @@ pub fn imod_auto_contours_from_slice(
     ysize: usize,
     z: f32,
     options: AutoContourOptions,
+) -> Vec<Icont> {
+    let filtered = filter_auto_contour_slice(image, xsize, ysize, options.gaussian_sigma);
+    auto_contours_from_slice_internal(&filtered, xsize, ysize, z, options, None)
+}
+
+/// `imodAutoContoursFromSlice` with the native boundary-contour pre-mask.
+pub fn imod_auto_contours_from_slice_with_boundaries(
+    image: &[u8],
+    xsize: usize,
+    ysize: usize,
+    z: f32,
+    options: AutoContourOptions,
+    boundaries: &[Icont],
+) -> Vec<Icont> {
+    let mask = pixels_inside_boundaries(boundaries, xsize, ysize, z);
+    let filtered = filter_auto_contour_slice(image, xsize, ysize, options.gaussian_sigma);
+    auto_contours_from_slice_internal(&filtered, xsize, ysize, z, options, Some(&mask))
+}
+
+fn filter_auto_contour_slice(
+    image: &[u8],
+    xsize: usize,
+    ysize: usize,
+    sigma: Option<f32>,
+) -> Vec<u8> {
+    let Some(sigma) = sigma else {
+        return image.to_vec();
+    };
+    let Ok(xsize_i32) = i32::try_from(xsize) else {
+        return image.to_vec();
+    };
+    let Ok(ysize_i32) = i32::try_from(ysize) else {
+        return image.to_vec();
+    };
+    let Some(mut slice) = slice_create(xsize_i32, ysize_i32, MRC_MODE_BYTE) else {
+        return image.to_vec();
+    };
+    slice.data = image[..image.len().min(xsize.saturating_mul(ysize))].to_vec();
+    if sigma <= 0. {
+        let _ = slice_byte_smooth(&mut slice);
+        return slice.data;
+    }
+    let mut kernel = [0.; 49];
+    let mut dimension = 7;
+    scaled_gaussian_kernel(&mut kernel, &mut dimension, 7, sigma);
+    if let Some(mut output) = slice_mat_filter(&slice, &kernel, dimension) {
+        slice_scale_and_free(&mut output, &mut slice);
+    }
+    slice.data
+}
+
+fn auto_contours_from_slice_internal(
+    image: &[u8],
+    xsize: usize,
+    ysize: usize,
+    z: f32,
+    options: AutoContourOptions,
+    boundary_mask: Option<&[bool]>,
 ) -> Vec<Icont> {
     if xsize == 0 || ysize == 0 || image.len() < xsize.saturating_mul(ysize) {
         return Vec::new();
@@ -129,9 +209,10 @@ pub fn imod_auto_contours_from_slice(
     }
     let mut labels = vec![0i32; nxy];
     for index in 0..nxy {
-        if image[index] as i32 > low
-            && (image[index] as i32) < high
-            && options.exact.is_none_or(|value| image[index] != value)
+        if boundary_mask.is_some_and(|mask| !mask.get(index).copied().unwrap_or(false))
+            || (image[index] as i32 > low
+                && (image[index] as i32) < high
+                && options.exact.is_none_or(|value| image[index] != value))
         {
             labels[index] = -1;
         }
@@ -894,5 +975,52 @@ mod tests {
         );
         assert_eq!(contours.len(), 1);
         assert_eq!(contours[0].pts.len(), 4);
+    }
+
+    #[test]
+    fn slice_orchestrator_excludes_pixels_outside_boundaries() {
+        let boundary = Icont {
+            pts: vec![
+                Ipoint {
+                    x: 0.,
+                    y: 0.,
+                    z: 0.,
+                },
+                Ipoint {
+                    x: 1.,
+                    y: 0.,
+                    z: 0.,
+                },
+                Ipoint {
+                    x: 1.,
+                    y: 1.,
+                    z: 0.,
+                },
+                Ipoint {
+                    x: 0.,
+                    y: 1.,
+                    z: 0.,
+                },
+            ],
+            ..Icont::default()
+        };
+        let options = AutoContourOptions {
+            low_threshold: 0.,
+            high_threshold: 5.,
+            min_size: 0,
+            ..AutoContourOptions::default()
+        };
+        assert_eq!(
+            imod_auto_contours_from_slice_with_boundaries(
+                &[10, 10],
+                2,
+                1,
+                0.,
+                options,
+                &[boundary]
+            )
+            .len(),
+            1
+        );
     }
 }

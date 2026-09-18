@@ -149,6 +149,11 @@ pub fn allocate_fort_model(fm: &mut FortModel) {
     fm.clabel = vec![[b' '; 10]; MAX_CLABEL];
     fm.label_list = vec![0; MAX_CLABEL];
     fm.fm_initialized = true;
-    // `imodArrayLimits(max_pt, max_obj_num)` informs libimod of these limits;
-    // the translated `libimod` model reader carries no such global limit.
+    // `imodArrayLimits(max_pt, max_obj_num)` informs the C/Fortran model
+    // bridge about the caller's actual array limits.  This is also called by
+    // `IMOD/libimod/fortmodel.c:allocateFortModel`; keeping it here makes the
+    // shared Rust state the single implementation of both native entry paths.
+    unsafe {
+        crate::imod::libimod::imodel_fwrap::imodarraylimits(fm.max_pt, fm.max_obj_num);
+    }
 }
